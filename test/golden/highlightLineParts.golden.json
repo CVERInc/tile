@@ -1,0 +1,478 @@
+[
+  {
+    "line": "",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<br>"
+    }
+  },
+  {
+    "line": "plain text",
+    "result": {
+      "cls": "tg-line",
+      "inner": "plain text"
+    }
+  },
+  {
+    "line": "no markers here at all",
+    "result": {
+      "cls": "tg-line",
+      "inner": "no markers here at all"
+    }
+  },
+  {
+    "line": "**bold**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "a **bold** word",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> word"
+    }
+  },
+  {
+    "line": "**bold at start** then text",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold at start<span class=\"tg-mk\">**</span></span> then text"
+    }
+  },
+  {
+    "line": "text then **bold at end**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "text then <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold at end<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "**multiple** **bolds** here",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>multiple<span class=\"tg-mk\">**</span></span> <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bolds<span class=\"tg-mk\">**</span></span> here"
+    }
+  },
+  {
+    "line": "**a****b**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>a<span class=\"tg-mk\">**</span></span><span class=\"tg-b\"><span class=\"tg-mk\">**</span>b<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "**bold with spaces inside**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold with spaces inside<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "*italic*",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "an *italic* word",
+    "result": {
+      "cls": "tg-line",
+      "inner": "an <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span> word"
+    }
+  },
+  {
+    "line": "*a* *b*",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-i\"><span class=\"tg-mk\">*</span>a<span class=\"tg-mk\">*</span></span> <span class=\"tg-i\"><span class=\"tg-mk\">*</span>b<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "*italic at start*",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic at start<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "a * b",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a * b"
+    }
+  },
+  {
+    "line": "just * one star",
+    "result": {
+      "cls": "tg-line",
+      "inner": "just * one star"
+    }
+  },
+  {
+    "line": "star * with * spaces",
+    "result": {
+      "cls": "tg-line",
+      "inner": "star * with * spaces"
+    }
+  },
+  {
+    "line": "a * b * c",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a * b * c"
+    }
+  },
+  {
+    "line": "**bold** and *italic*",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> and <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "*italic* and **bold**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span> and <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "***triple***",
+    "result": {
+      "cls": "tg-line",
+      "inner": "*<span class=\"tg-b\"><span class=\"tg-mk\">**</span>triple<span class=\"tg-mk\">**</span></span>*"
+    }
+  },
+  {
+    "line": "`code`",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span>"
+    }
+  },
+  {
+    "line": "inline `code` span",
+    "result": {
+      "cls": "tg-line",
+      "inner": "inline <span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span> span"
+    }
+  },
+  {
+    "line": "`a``b`",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>a<span class=\"tg-mk\">`</span></span><span class=\"tg-code\"><span class=\"tg-mk\">`</span>b<span class=\"tg-mk\">`</span></span>"
+    }
+  },
+  {
+    "line": "`code at start`",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>code at start<span class=\"tg-mk\">`</span></span>"
+    }
+  },
+  {
+    "line": "**a `c` b**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>a <span class=\"tg-code\"><span class=\"tg-mk\">`</span>c<span class=\"tg-mk\">`</span></span> b<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "`a *b* c`",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>a <span class=\"tg-i\"><span class=\"tg-mk\">*</span>b<span class=\"tg-mk\">*</span></span> c<span class=\"tg-mk\">`</span></span>"
+    }
+  },
+  {
+    "line": "**bold** `code` *italic*",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> <span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span> <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "~~strike~~",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-strike\"><span class=\"tg-mk\">~~</span>strike<span class=\"tg-mk\">~~</span></span>"
+    }
+  },
+  {
+    "line": "a ~~struck~~ word",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a <span class=\"tg-strike\"><span class=\"tg-mk\">~~</span>struck<span class=\"tg-mk\">~~</span></span> word"
+    }
+  },
+  {
+    "line": "~~strike~~ and **bold**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-strike\"><span class=\"tg-mk\">~~</span>strike<span class=\"tg-mk\">~~</span></span> and <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "# H1",
+    "result": {
+      "cls": "tg-line tg-h tg-h1",
+      "inner": "<span class=\"tg-mk\"># </span>H1"
+    }
+  },
+  {
+    "line": "## H2 with **bold**",
+    "result": {
+      "cls": "tg-line tg-h tg-h2",
+      "inner": "<span class=\"tg-mk\">## </span>H2 with <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "### H3 with `code` and *italic*",
+    "result": {
+      "cls": "tg-line tg-h tg-h3",
+      "inner": "<span class=\"tg-mk\">### </span>H3 with <span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span> and <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": "#### H4",
+    "result": {
+      "cls": "tg-line tg-h tg-h4",
+      "inner": "<span class=\"tg-mk\">#### </span>H4"
+    }
+  },
+  {
+    "line": "##### H5",
+    "result": {
+      "cls": "tg-line tg-h tg-h5",
+      "inner": "<span class=\"tg-mk\">##### </span>H5"
+    }
+  },
+  {
+    "line": "###### H6",
+    "result": {
+      "cls": "tg-line tg-h tg-h6",
+      "inner": "<span class=\"tg-mk\">###### </span>H6"
+    }
+  },
+  {
+    "line": "   ## indented heading",
+    "result": {
+      "cls": "tg-line tg-h tg-h2",
+      "inner": "   <span class=\"tg-mk\">## </span>indented heading"
+    }
+  },
+  {
+    "line": "- ### heading in list item",
+    "result": {
+      "cls": "tg-line tg-h tg-h3 tg-li",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-mk\">### </span>heading in list item"
+    }
+  },
+  {
+    "line": "- [ ] ### heading in task",
+    "result": {
+      "cls": "tg-line tg-h tg-h3 tg-li tg-task",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-check\"><span class=\"tg-mk\">[ ]</span></span> <span class=\"tg-mk\">### </span>heading in task"
+    }
+  },
+  {
+    "line": "- bullet",
+    "result": {
+      "cls": "tg-line tg-li",
+      "inner": "<span class=\"tg-mk\">- </span>bullet"
+    }
+  },
+  {
+    "line": "* star bullet",
+    "result": {
+      "cls": "tg-line tg-li",
+      "inner": "<span class=\"tg-mk\">* </span>star bullet"
+    }
+  },
+  {
+    "line": "- bullet with **bold**",
+    "result": {
+      "cls": "tg-line tg-li",
+      "inner": "<span class=\"tg-mk\">- </span>bullet with <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "- [ ] unchecked task",
+    "result": {
+      "cls": "tg-line tg-li tg-task",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-check\"><span class=\"tg-mk\">[ ]</span></span> unchecked task"
+    }
+  },
+  {
+    "line": "- [x] checked task",
+    "result": {
+      "cls": "tg-line tg-li tg-task tg-task-done",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-check tg-check-done\"><span class=\"tg-mk\">[x]</span></span> checked task"
+    }
+  },
+  {
+    "line": "- [X] checked caps",
+    "result": {
+      "cls": "tg-line tg-li tg-task tg-task-done",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-check tg-check-done\"><span class=\"tg-mk\">[X]</span></span> checked caps"
+    }
+  },
+  {
+    "line": "  - nested bullet",
+    "result": {
+      "cls": "tg-line tg-li",
+      "inner": "<span class=\"tg-mk\">  - </span>nested bullet"
+    }
+  },
+  {
+    "line": "> quote",
+    "result": {
+      "cls": "tg-line tg-quote",
+      "inner": "<span class=\"tg-mk\">&gt; </span>quote"
+    }
+  },
+  {
+    "line": "> quote with *italic*",
+    "result": {
+      "cls": "tg-line tg-quote",
+      "inner": "<span class=\"tg-mk\">&gt; </span>quote with <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span>"
+    }
+  },
+  {
+    "line": ">no space quote",
+    "result": {
+      "cls": "tg-line tg-quote",
+      "inner": "<span class=\"tg-mk\">&gt;</span>no space quote"
+    }
+  },
+  {
+    "line": "[[wikilink]]",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-link\"><span class=\"tg-mk\">[[</span>wikilink<span class=\"tg-mk\">]]</span></span>"
+    }
+  },
+  {
+    "line": "see [[the link]] here",
+    "result": {
+      "cls": "tg-line",
+      "inner": "see <span class=\"tg-link\"><span class=\"tg-mk\">[[</span>the link<span class=\"tg-mk\">]]</span></span> here"
+    }
+  },
+  {
+    "line": "[[link]] and **bold**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-link\"><span class=\"tg-mk\">[[</span>link<span class=\"tg-mk\">]]</span></span> and <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "#tag",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-tag\">#tag</span>"
+    }
+  },
+  {
+    "line": "a #tag in text",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a <span class=\"tg-tag\">#tag</span> in text"
+    }
+  },
+  {
+    "line": "text #one #two tags",
+    "result": {
+      "cls": "tg-line",
+      "inner": "text <span class=\"tg-tag\">#one</span> <span class=\"tg-tag\">#two</span> tags"
+    }
+  },
+  {
+    "line": "@{2026-01-01}",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-date\"><span class=\"tg-mk\">@{</span>2026-01-01<span class=\"tg-mk\">}</span></span>"
+    }
+  },
+  {
+    "line": "@@{time}",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-date\"><span class=\"tg-mk\">@@{</span>time<span class=\"tg-mk\">}</span></span>"
+    }
+  },
+  {
+    "line": "due @{2026-06-24} today",
+    "result": {
+      "cls": "tg-line",
+      "inner": "due <span class=\"tg-date\"><span class=\"tg-mk\">@{</span>2026-06-24<span class=\"tg-mk\">}</span></span> today"
+    }
+  },
+  {
+    "line": "\ttabbed line",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-tab\">\t</span>tabbed line"
+    }
+  },
+  {
+    "line": "mid\ttab\tline",
+    "result": {
+      "cls": "tg-line",
+      "inner": "mid<span class=\"tg-tab\">\t</span>tab<span class=\"tg-tab\">\t</span>line"
+    }
+  },
+  {
+    "line": "<script>alert(1)</script>",
+    "result": {
+      "cls": "tg-line",
+      "inner": "&lt;script&gt;alert(1)&lt;/script&gt;"
+    }
+  },
+  {
+    "line": "a & b < c > d",
+    "result": {
+      "cls": "tg-line",
+      "inner": "a &amp; b &lt; c &gt; d"
+    }
+  },
+  {
+    "line": "**<b>x</b>**",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>&lt;b&gt;x&lt;/b&gt;<span class=\"tg-mk\">**</span></span>"
+    }
+  },
+  {
+    "line": "`<code>`",
+    "result": {
+      "cls": "tg-line",
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>&lt;code&gt;<span class=\"tg-mk\">`</span></span>"
+    }
+  },
+  {
+    "line": "- [ ] **bold** task with `code` and *italic* and #tag and @{date}",
+    "result": {
+      "cls": "tg-line tg-li tg-task",
+      "inner": "<span class=\"tg-mk\">- </span><span class=\"tg-check\"><span class=\"tg-mk\">[ ]</span></span> <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> task with <span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span> and <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span> and <span class=\"tg-tag\">#tag</span> and <span class=\"tg-date\"><span class=\"tg-mk\">@{</span>date<span class=\"tg-mk\">}</span></span>"
+    }
+  },
+  {
+    "line": "## **bold** heading with [[link]] and ~~strike~~",
+    "result": {
+      "cls": "tg-line tg-h tg-h2",
+      "inner": "<span class=\"tg-mk\">## </span><span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> heading with <span class=\"tg-link\"><span class=\"tg-mk\">[[</span>link<span class=\"tg-mk\">]]</span></span> and <span class=\"tg-strike\"><span class=\"tg-mk\">~~</span>strike<span class=\"tg-mk\">~~</span></span>"
+    }
+  },
+  {
+    "line": "> quote with **bold** `code` *italic* ~~strike~~ #tag",
+    "result": {
+      "cls": "tg-line tg-quote",
+      "inner": "<span class=\"tg-mk\">&gt; </span>quote with <span class=\"tg-b\"><span class=\"tg-mk\">**</span>bold<span class=\"tg-mk\">**</span></span> <span class=\"tg-code\"><span class=\"tg-mk\">`</span>code<span class=\"tg-mk\">`</span></span> <span class=\"tg-i\"><span class=\"tg-mk\">*</span>italic<span class=\"tg-mk\">*</span></span> <span class=\"tg-strike\"><span class=\"tg-mk\">~~</span>strike<span class=\"tg-mk\">~~</span></span> <span class=\"tg-tag\">#tag</span>"
+    }
+  }
+]

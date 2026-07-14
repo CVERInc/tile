@@ -1,0 +1,13 @@
+# build scratch
+out/
+.DS_Store
+*.bak
+__pycache__/
+
+# node
+node_modules/
+
+# transient publish payloads (scripts/publish*.sh assemble into a dest dir you pass in;
+# never commit those staged payloads back into this repo)
+/pub-*/
+/tmp-*/

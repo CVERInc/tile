@@ -1,0 +1,20 @@
+name: CI
+
+# Auto-guard: runs the full check (build both plugins + the whole test suite) on every push
+# and PR. A red ✗ on a commit means a regression landed — the same scripts/test.sh the local
+# pre-push hook runs, so local and CI can never disagree.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # build.sh inlines SortableJS + i18n via python3 (preinstalled on ubuntu-latest)
+      - name: Build + test
+        run: bash scripts/test.sh

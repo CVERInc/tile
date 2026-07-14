@@ -1,0 +1,8 @@
+{
+  "name": "@tile/cssmd",
+  "version": "0.0.0",
+  "description": "tile-cssmd — render inline Markdown (**bold**/*italic*/`code`) with raw markers hidden via CSS. Zero-dep, render-only primitive.",
+  "type": "module",
+  "main": "cssmd.js",
+  "license": "MIT"
+}
