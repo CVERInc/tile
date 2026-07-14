@@ -54,22 +54,48 @@ first.
 Localized in **en-US, ja-JP, ko-KR, zh-TW** — locale strings live in `i18n/*.json` and
 are injected at build time.
 
+## Use the engine
+
+The engine is framework-agnostic — drop it into any page with a small host shim. A
+runnable demo lives at [`tile-core/example.html`](tile-core/example.html); the shape:
+
+```html
+<div id="app"></div>
+<script type="module">
+  import '../packages/core/obsidian-shim.js';  // browser equivalents of the DOM-sugar the engine calls
+  import { mountEditor } from './tile-core.js'; // the engine
+  import { makeWebHost } from './host.js';      // a tiny host — see tile-core/host.js
+
+  mountEditor(document.getElementById('app'), {
+    text: '## Hello\n\n- edit me',
+    onChange() { console.log('changed'); },
+  }, makeWebHost());
+</script>
+```
+
+`obsidian-shim.js` supplies plain-browser equivalents (Lucide icons as inline SVG, a
+no-op `Modal`, `HTMLElement.prototype` sugar) so the core runs byte-identical in a bare
+page — no `if (isObsidian)` branches. The shim's name just reflects where that API shape
+came from.
+
 ## Repos & artifacts
 
-This monorepo is the **source**. Public artifacts are assembled from it by the scripts
-in `scripts/` and published to their own repos (Obsidian requires one repo = one
-plugin, so each plugin ships as a thin publish mirror — nobody hand-edits those):
+This monorepo is the **source**. The two Obsidian plugins ship as thin publish mirrors
+(Obsidian requires one repo = one plugin, so nobody hand-edits those):
 
 | Artifact | Published as | What it is |
 |---|---|---|
 | tugtile plugin | `CVERInc/tugtile` (MIT) | Obsidian community plugin |
 | marktile plugin | `CVERInc/marktile` (MIT) | Obsidian community plugin |
-| `tile-core.js` | `CVERInc/tilecore` (MIT) | the engine as a platform-agnostic ES module for web hosts |
 
 `scripts/publish.sh` assembles a plugin payload (`main.js` + `manifest.json` +
-`styles.css` + `versions.json` + `LICENSE`); `scripts/publish-tilecore.sh` assembles the
-tilecore payload. Both build fresh from this repo — the public repos can never drift
-into their own development line.
+`styles.css` + `versions.json` + `LICENSE`) and builds fresh from this repo — the
+publish mirrors can never drift into their own development line.
+
+The **editor engine** needs no separate repo: it lives here as
+`packages/core/editor-core.js` (source), emitted to `tile-core/tile-core.js` (a
+platform-agnostic ES module). Drop it into any page with the small host shim — see
+**Use the engine** below.
 
 ## Development
 

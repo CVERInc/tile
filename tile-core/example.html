@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>tilecore quickstart</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  :root {
+    --background-primary: #ffffff; --background-secondary: #f6f7f9;
+    --background-modifier-border: #e4e6e9; --background-modifier-border-hover: #cfd4d8;
+    --background-modifier-form-field: #ffffff; --background-modifier-hover: rgba(0,0,0,.06);
+    --text-normal: #1f2328; --text-muted: #6b7280; --text-faint: #9aa0a6;
+    --text-accent: #3a7afe; --text-error: #e2725b; --text-on-accent: #ffffff; --text-success: #2e9e5b;
+    --interactive-accent: #3a7afe; --font-text: system-ui, sans-serif; --font-text-size: 16px;
+    --font-monospace: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-medium: 600; --font-normal: 400; --radius-s: 6px; --radius-m: 8px;
+    --shadow-l: 0 8px 24px rgba(10,22,40,.18);
+  }
+  body { margin: 0; }
+</style>
+<div id="app" style="max-width:680px;margin:2rem auto"></div>
+<script type="module">
+  import "../packages/core/obsidian-shim.js";
+  import { mountEditor } from './tile-core.js';
+  import { makeWebHost } from './host.js';
+
+  window.__errors = [];
+  window.onerror = (msg) => window.__errors.push(String(msg));
+
+  window.__ctrl = mountEditor(document.getElementById('app'), {
+    text: '## Hello\n\n- edit me\n- drag my table of contents',
+    onChange() { window.__changed = true; },
+  }, makeWebHost());
+  window.__mounted = true;
+</script>
