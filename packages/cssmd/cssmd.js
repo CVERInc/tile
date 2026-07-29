@@ -49,13 +49,20 @@ function mk(prefix, marker) {
 // CONTRACT: input is already HTML-escaped (run escHtml first). They do NOT escape — splicing them
 // mid-chain must not double-encode. Pure, DOM-free.
 
-// **bold** | *italic* over escaped text. Bold wins the alternation order; the italic branch needs
-// a non-space, non-* char right after the opening * so "a * b" stays literal.
+// **bold** / *italic* (asterisks, which work intraword) and __bold__ / _italic_ (underscores) over
+// escaped text. Bold wins the alternation; the single-delimiter italic branch needs a non-space
+// right after the opener so "a * b" / "a _ b" stay literal.
+//
+// 🔴 Underscores follow CommonMark's INTRAWORD rule — an opening or closing `_` may not touch an
+// alphanumeric — so `snake_case`, `file_name` and `a_b_c` stay literal and only asterisks emphasise
+// mid-word. Without that rule a page rendering ordinary prose grew bare underscores wherever an
+// identifier appeared, which is the bug this arrived from.
 function markBoldItalic(escaped, prefix) {
   const p = prefix || 'tg';
-  return String(escaped).replace(/(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*?\*)/g, (m) => {
-    const marker = m.startsWith('**') ? '**' : '*';
-    const cls = marker === '**' ? p + '-b' : p + '-i';
+  const RE = /(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*?\*|(?<![A-Za-z0-9])__[^_\n]+__(?![A-Za-z0-9])|(?<![A-Za-z0-9])_[^_\s][^_\n]*?_(?![A-Za-z0-9]))/g;
+  return String(escaped).replace(RE, (m) => {
+    const marker = m.startsWith('**') ? '**' : m.startsWith('__') ? '__' : m[0] === '*' ? '*' : '_';
+    const cls = (marker === '**' || marker === '__') ? p + '-b' : p + '-i';
     const inner = m.slice(marker.length, m.length - marker.length);
     return '<span class="' + cls + '">' + mk(p, marker) + inner + mk(p, marker) + '</span>';
   });

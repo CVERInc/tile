@@ -165,6 +165,40 @@ eq(renderInlineMd(42), '42', 'number coerced to string');
   has(css, '.gd-answer .gd-mk{display:none}', 'scoped CSS — matches another host .gd-answer .gd-mk rule');
 }
 
+
+// ── underscores: __bold__ / _italic_, and CommonMark's intraword rule ──────────────────────────
+// 🔴 The rule is the point. Asterisks emphasise mid-word; underscores must NOT, or ordinary prose
+// containing identifiers grows stray emphasis wherever one appears. Each pair below is a case that
+// was seen rendering wrongly on a page before the rule existed.
+{
+  const r = (t) => renderInlineMd(t);
+
+  eq(r('__bold__'), '<span class="tg-b"><span class="tg-mk">__</span>bold<span class="tg-mk">__</span></span>',
+     '__bold__ renders as bold with hidden markers');
+  eq(r('_italic_'), '<span class="tg-i"><span class="tg-mk">_</span>italic<span class="tg-mk">_</span></span>',
+     '_italic_ renders as italic with hidden markers');
+
+  // 🔴 The intraword guards. Note what they do and do not prove: with NO underscore support these
+  // also pass, because an unsupported delimiter is literal anyway. They exist to stop a future
+  // naive implementation — a plain /_[^_]+_/ — from shipping, which is the shape that produced the
+  // bug on a live page. The two assertions above are the ones that fail without this change.
+  for (const literal of ['snake_case', 'file_name_here', 'a_b_c', 'MY_CONST', 'x_1_2']) {
+    eq(r(literal), literal, 'intraword underscore stays literal: ' + literal);
+  }
+  eq(r('a _ b'), 'a _ b', 'a lone underscore between spaces stays literal');
+  eq(r('__'), '__', 'a bare pair with nothing inside stays literal');
+
+  // asterisks are unaffected — they DO work mid-word, which is the asymmetry CommonMark specifies
+  eq(r('intra*word*emphasis'),
+     'intra<span class="tg-i"><span class="tg-mk">*</span>word<span class="tg-mk">*</span></span>emphasis',
+     'asterisks still emphasise intraword');
+
+  // and the round trip, which is what this whole module exists for
+  for (const t of ['__bold__', '_italic_', 'snake_case', 'a __b__ c_d']) {
+    eq(textContent(r(t)), t, 'textContent round-trips exactly: ' + t);
+  }
+}
+
 // ── summary ────────────────────────────────────────────────────────────────────────────────────
 console.log((fail ? '✗' : '✓') + ' tile-cssmd: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
