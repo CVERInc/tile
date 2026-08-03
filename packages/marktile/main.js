@@ -1249,6 +1249,39 @@ const EDITOR_MODES = [
   { key: 'rendered', cls: 'tugtile-preview', icon: 'square-pen', name: 'mtModeRendered' },
   { key: 'plain', cls: 'tugtile-plain', icon: 'square-code', name: 'mtModePlain' },
 ];
+// Rendered mode hides the literal `[ ]` / `[x]` and puts a box glyph in its place (styles.css,
+// .tg-check::before). A box you can see but can't press is a half-finished affordance — so this wires
+// the gesture everyone will try. Click the box, the SOURCE toggles; the glyph follows because it was
+// only ever a view of the text.
+// This lives in the core, not in a host: it is a capability, and the toolbar/behaviour surface is the
+// core's single source. Every surface that renders the box gets the same click, and none of them grow
+// their own version of it.
+// Only active where the box is a glyph. In Seasoned/Plain the `[x]` is literal text the person edits
+// directly, and stealing that click would fight normal caret placement.
+function wireTaskToggle(mount, ctrl) {
+  const onClick = (e) => {
+    if (!mount.classList.contains('tugtile-preview')) return;
+    const el = (e.target && e.target.nodeType === 1) ? e.target : (e.target && e.target.parentElement);
+    const box = (el && el.closest) ? el.closest('.tg-check') : null;
+    if (!box) return;
+    const lineEl = box.closest('.tg-line');
+    if (!lineEl) return;
+    // .tg-line divs map 1:1 onto source lines, in order — the same mapping wireToc/moveSection rely on.
+    const lines = Array.prototype.slice.call(mount.querySelectorAll('.tg-line'));
+    const ix = lines.indexOf(lineEl);
+    const src = ctrl.rawValue().split('\n');
+    if (ix < 0 || ix >= src.length) return;
+    const next = src[ix].replace(/^(\s*[-*]\s)\[([ xX])\]/, (m, pre, mark) => pre + (mark === ' ' ? '[x]' : '[ ]'));
+    if (next === src[ix]) return;   // not a task line after all — let the click through untouched
+    e.preventDefault();
+    e.stopPropagation();
+    src[ix] = next;
+    ctrl.setText(src.join('\n'));   // whole-document replace: undoable + fires onChange, the same path TOC reorder uses
+  };
+  mount.addEventListener('click', onClick, true);
+  return { destroy() { try { mount.removeEventListener('click', onClick, true); } catch (e) {} } };
+}
+
 function equipEditor(opts) {
   const { mount, ctrl, enabledModes, resolveSrc, toc, saveImage } = opts;
   const onModes = () => { const md = enabledModes || {}; const on = EDITOR_MODES.filter((m) => md[m.key] !== false); return on.length ? on : EDITOR_MODES; };
@@ -1265,6 +1298,7 @@ function equipEditor(opts) {
   const imgObs = resolveSrc ? decorateImages(mount, resolveSrc) : null;
   const tocCtl = toc ? wireToc(Object.assign({ mount, ctrl }, toc)) : null;
   const paste = saveImage ? wireImagePaste(mount, ctrl, saveImage) : null;
+  const taskCtl = wireTaskToggle(mount, ctrl);   // Rendered-mode checkbox click → source toggle
   mount.classList.toggle('marktile-palette-color', !!opts.seasonedColor);   // Seasoned palette: accent (default) vs per-token colour; host passes the setting
   applyMode();
   return {
@@ -1272,7 +1306,7 @@ function equipEditor(opts) {
     applyMode,
     cycleMode() { ix = (ix + 1) % onModes().length; applyMode(); },
     toc: tocCtl,
-    destroy() { try { tableObs.disconnect(); } catch (e) {} if (imgObs) { try { imgObs.disconnect(); } catch (e) {} } if (tocCtl) tocCtl.destroy(); if (paste) paste.destroy(); },
+    destroy() { try { tableObs.disconnect(); } catch (e) {} if (imgObs) { try { imgObs.disconnect(); } catch (e) {} } if (tocCtl) tocCtl.destroy(); if (paste) paste.destroy(); if (taskCtl) taskCtl.destroy(); },
   };
 }
 
