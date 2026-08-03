@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>marktile</title>
+<link rel="stylesheet" href="../Engine/styles.css" />
+<style>
+  /*
+    The shared stylesheet is written against the theme variables the engine grew up with. This
+    file is the only place the Mac host translates them — into macOS's own palette, in both
+    appearances. WKWebView follows the app's effective appearance, so prefers-color-scheme is the
+    system toggle; nothing needs to be pushed in from Swift.
+  */
+  :root {
+    color-scheme: light dark;
+
+    --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --font-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --font-text-size: 15px;
+    --font-medium: 600;
+    --font-normal: 400;
+    --radius-s: 5px;
+    --radius-m: 8px;
+
+    /* Light */
+    --background-primary: #ffffff;
+    --background-secondary: #f5f5f7;
+    --background-modifier-border: #e0e0e3;
+    --background-modifier-border-hover: #c9c9ce;
+    --background-modifier-form-field: #ffffff;
+    --background-modifier-hover: rgba(0, 0, 0, 0.055);
+    --text-normal: #1d1d1f;
+    --text-muted: #6e6e73;
+    --text-faint: #a1a1a6;
+    --text-accent: #0068d6;
+    --text-error: #d13438;
+    --text-success: #248a3d;
+    --text-on-accent: #ffffff;
+    --interactive-accent: #0068d6;
+    --shadow-l: 0 8px 24px rgba(0, 0, 0, 0.14);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background-primary: #1e1e1e;
+      --background-secondary: #262628;
+      --background-modifier-border: #3a3a3c;
+      --background-modifier-border-hover: #4c4c4e;
+      --background-modifier-form-field: #2c2c2e;
+      --background-modifier-hover: rgba(255, 255, 255, 0.075);
+      --text-normal: #f2f2f7;
+      --text-muted: #9b9ba0;
+      --text-faint: #6a6a6e;
+      --text-accent: #4ea0ff;
+      --text-error: #ff6961;
+      --text-success: #32d74b;
+      --text-on-accent: #ffffff;
+      --interactive-accent: #0a84ff;
+      --shadow-l: 0 8px 24px rgba(0, 0, 0, 0.55);
+    }
+  }
+
+  /* Host-only layout for the head strip: it lives at the right end of the toolbar row, so it must not
+     shrink when the tools wrap. Kept here rather than in the shared stylesheet — this is THIS surface's
+     placement decision, and the other three should not inherit it. */
+  .tugtile-ed-bar > .tugtile-headerctl { flex: 0 0 auto; margin-left: 8px; }
+
+  html, body { height: 100%; margin: 0; background: var(--background-primary); }
+  body {
+    font-family: var(--font-text);
+    color: var(--text-normal);
+    /* No top inset: the window uses a real title bar, so AppKit owns that strip and the page starts
+       exactly at the content edge — with or without a tab bar above it. */
+    box-sizing: border-box;
+  }
+  #app { height: 100%; }
+
+  /* No scrollbar styling on purpose. macOS scrollbars are overlay by default — they appear while you
+     scroll and fade away — and that is the behaviour every other Mac app has. Styling them forces a
+     permanent gutter that is both un-Mac-like and, as it turned out, a spotlight on any layout that is
+     a few pixels taller than its container. */
+</style>
+</head>
+<body>
+  <div id="app"></div>
+  <!-- SortableJS is a plain global, the way the plugin build inlines it; the TOC drag-reorder wants it. -->
+  <script src="../Engine/Sortable.min.js"></script>
+  <script type="module" src="./bridge.js"></script>
+</body>
+</html>
