@@ -501,8 +501,13 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
 .tugtile-prompt-ok, .tugtile-prompt-ok:hover { color: var(--text-success, var(--interactive-accent)); }
 .tugtile-ed-tools {
   flex: 1; min-width: 0;
-  display: flex; flex-wrap: nowrap; gap: 4px; align-items: center;
-  justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned + scrollable when it overflows */
+  /* wrap, not nowrap: `twoRow = Platform.isPhone` decides the second row from the DEVICE, but what
+     actually runs out is WIDTH. A desktop pane dragged narrow — an Obsidian sidebar, a macOS window —
+     used to push the last tools off the right edge into a horizontal scroll nobody looks for. Wrapping
+     turns "buttons are missing" into "the toolbar is two rows", which is what the phone layout already
+     decided is the right answer when space is short. */
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned when it overflows */
   overflow-x: auto;
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
@@ -552,6 +557,11 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
    which is what lets a heading line render bigger while the literal '## ' markers stay in place. */
 .tugtile-ed-rich {
   min-height: 100%;
+  /* border-box or the padding lands OUTSIDE the 100%: 508px of container + 14px top + 14px bottom = 536px of
+     content, so the editor is permanently 28px taller than its scroller and a one-line file still shows a
+     scrollbar. Overlay scrollbars hid this for years — it only becomes visible the moment a host styles the
+     scrollbar to stay on screen. */
+  box-sizing: border-box;
   margin: 0; border: 0; outline: none;
   padding: 14px 16px;
   font-family: var(--font-text); font-size: 16px; line-height: 1.7;
@@ -929,6 +939,45 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
    the whole view reads as output (the third point of raw → coexist → output). Still fully editable; markup never
    leaves the text. Dormant in tugtile (no .tugtile-preview). */
 .tugtile-preview .tg-mk { display: none; }
+
+/* …but a list has to still LOOK like a list once its markers are gone. Hiding `- ` and `[x] ` with nothing
+   in their place turned every checklist and bullet list into bare indented text: markers gone AND the shape
+   gone with them, which is a mode that renders less than the source, not more.
+   These are pseudo-elements on purpose — ::before content is invisible to textContent, so the editor's
+   text<->DOM round-trip stays byte-exact (the same reason .tg-mk hides rather than removes).
+   The engine already emits the hooks: .tg-li on a bullet line, and a .tg-check/.tg-check-done span sitting
+   exactly where the `[x]` box was. Nothing here is new markup — the seam was always there, unused. */
+.tugtile-preview .tg-li::before {
+  content: "•";
+  display: inline-block;
+  width: 1.25em;
+  color: var(--text-muted, #6b7280);
+}
+/* A task line is also a .tg-li; it gets the box instead of the dot, not both. */
+.tugtile-preview .tg-li.tg-task::before { content: none; }
+/* The box is pressable (wireTaskToggle in the core), so it is sized and cursored like a control, not
+   like punctuation: a bigger glyph, a fixed centred box so ☐ and ☑ never shift the text beside them,
+   and a hit area that a fingertip or a quick click can actually land on. */
+.tugtile-preview .tg-check::before {
+  content: "☐";
+  display: inline-block;
+  width: 1.4em;
+  font-size: 1.35em;
+  line-height: 1;
+  text-align: center;
+  vertical-align: -0.12em;
+  color: var(--text-muted, #6b7280);
+}
+.tugtile-preview .tg-check-done::before {
+  content: "☑";
+  color: var(--interactive-accent, #3a7afe);
+}
+.tugtile-preview .tg-check {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tugtile-preview .tg-check:hover::before { color: var(--interactive-accent, #3a7afe); }
 
 /* table right-click menu (desktop: insert/delete row/column) */
 .ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
