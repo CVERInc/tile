@@ -18,7 +18,7 @@ with `getText()` and you get exactly what a plain editor would. That "structure 
 top of an unmodified text substrate" is the whole design, and it is why the same
 engine can drive very different hosts.
 
-Two Obsidian plugins ship from here today:
+Three hosts ship from here today — two Obsidian plugins and a macOS app:
 
 - **tugtile** — a card table (kanban) for your Markdown notes: tug tiles to reorder,
   lanes with WIP limits, and it reads your existing kanban-style boards. CJK-friendly.
@@ -26,6 +26,11 @@ Two Obsidian plugins ship from here today:
   `##` stays put. Opens any `.md` file, not just boards. Pairs with tugtile. CJK-friendly.
 
 Both are in the official Obsidian community-plugins directory.
+
+- **marktile for macOS** ([`hosts/mac`](hosts/mac)) — the same editor as a document app:
+  double-click a `.md` in Finder, no vault involved. An `NSDocument` + `WKWebView` shell
+  around the same engine, built without Xcode. Not yet signed; see its README for what
+  has and has not been verified.
 
 ## How it works
 
@@ -44,6 +49,9 @@ per host.
   parses/serializes a `.md` board.
 - **`packages/marktile`** — the editor host: wires the same engine to a minimal file
   view.
+- **`hosts/mac`** — the macOS host: an `NSDocument` + `WKWebView` shell. The engine is
+  copied in at build time (`scripts/sync-engine.sh`) rather than vendored, so there is
+  no second copy that could drift.
 
 Each plugin builds to a single `main.js` by inlining the engine, cssmd, the shared
 `i18n/*.json` strings, and SortableJS (drag-and-drop) — so what a user installs is one
