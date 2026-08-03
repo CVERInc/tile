@@ -75,6 +75,14 @@ func makeMainMenu() -> NSMenu {
     viewMenu.addItem(withTitle: "Table of Contents",
                      action: #selector(EditorViewController.toggleToc(_:)), keyEquivalent: "t")
     viewMenu.addItem(.separator())
+    // ⌥⌘T is macOS's own Show/Hide Toolbar shortcut — the title flips in validateMenuItem.
+    // Safe to hide here in a way it would not be elsewhere: in a markdown editor the syntax is the
+    // input method, so the toolbar is a convenience over `**bold**`, not the only way to reach it.
+    let toolbarItem = viewMenu.addItem(title: "Hide Toolbar",
+                                       action: #selector(EditorViewController.toggleToolbar(_:)),
+                                       keyEquivalent: "t")
+    toolbarItem.keyEquivalentModifierMask = [.command, .option]
+    viewMenu.addItem(.separator())
     // The other half of the head layer. Read-only is a real capability in this family, not a nicety:
     // it is what lets you scroll a document without a stray keystroke editing it.
     viewMenu.addItem(withTitle: "Lock Editor (Read-Only)",

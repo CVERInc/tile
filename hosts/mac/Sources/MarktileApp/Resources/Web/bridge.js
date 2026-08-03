@@ -19,6 +19,42 @@ const send = (kind, payload) => {
   }
 };
 
+// ── System accent ────────────────────────────────────────────────────────────────────────────────
+// The host hands us macOS's accent colour. It goes straight onto --interactive-accent, which is used
+// for controls (the checked task box, focus) where an accent colour belongs.
+//
+// --text-accent is NOT the same job: the stylesheet uses it for heading TEXT, links and inline code,
+// and several of macOS's accents are chosen to sit on a control, not to be read as small text. Yellow
+// on white is about 1.7:1. So the text variant is the accent walked toward the background's opposite
+// until it clears 4.5:1, which keeps the hue the person picked and keeps the words legible.
+const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const lum = ([r, g, b]) => {
+  const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const hex = ([r, g, b]) => "#" + [r, g, b].map((c) => Math.round(c).toString(16).padStart(2, "0")).join("");
+
+function readable(accentHex, bgHex, target) {
+  const bg = rgb(bgHex);
+  let c = rgb(accentHex);
+  if (ratio(c, bg) >= target) return hex(c);
+  const toward = lum(bg) > 0.5 ? [0, 0, 0] : [255, 255, 255];   // light page → darken, dark page → lighten
+  for (let step = 1; step <= 50; step++) {
+    const mixed = c.map((v, i) => v + (toward[i] - v) * (step / 50));
+    if (ratio(mixed, bg) >= target) return hex(mixed);
+  }
+  return hex(toward);
+}
+
+function setAccent(accentHex) {
+  if (!/^#[0-9a-f]{6}$/i.test(accentHex)) return;
+  const root = document.documentElement;
+  const bg = getComputedStyle(root).getPropertyValue("--background-primary").trim() || "#ffffff";
+  root.style.setProperty("--interactive-accent", accentHex);
+  root.style.setProperty("--text-accent", /^#[0-9a-f]{6}$/i.test(bg) ? readable(accentHex, bg, 4.5) : accentHex);
+}
+
 const app = document.getElementById("app");
 let ctrl = null;
 let rig = null;
@@ -32,6 +68,15 @@ function applyLock() {
   const ed = app.querySelector(".tugtile-ed-rich");
   if (ed) ed.setAttribute("contenteditable", String(!locked));
   app.classList.toggle("tugtile--locked", locked);
+  send("lock", { locked: locked });   // the menu's checkmark can't read the page synchronously
+}
+
+// Hiding the toolbar is legitimate here in a way it would not be in a rich-text editor: the syntax IS
+// the input method. `**bold**` is two asterisks whether or not a B button is on screen, so the toolbar
+// is a convenience over markdown, not the only door to it.
+let toolbarHidden = false;
+function applyToolbar() {
+  app.classList.toggle("mt-no-toolbar", toolbarHidden);
 }
 
 function teardown() {
@@ -90,6 +135,7 @@ function open(text) {
     lockLabel: t("mtLockToggle"),
   });
   applyLock();
+  applyToolbar();
   if (!locked) ctrl.focus();
 }
 
@@ -102,6 +148,8 @@ window.__mt = {
   toggleToc: (force) => { if (rig && rig.toc) rig.toc.toggle(force); },
   toggleLock: () => { locked = !locked; applyLock(); if (ctl) ctl.refresh(); },
   isLocked: () => locked,
+  setAccent: setAccent,
+  setToolbar: (visible) => { toolbarHidden = !visible; applyToolbar(); },
 };
 
 send("ready");

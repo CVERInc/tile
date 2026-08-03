@@ -3,7 +3,7 @@ import WebKit
 
 // The host side of the seam. Everything the person actually looks at is the shared engine running
 // inside this web view; this class only carries text across and routes menu keys in.
-final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
+final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate, NSMenuItemValidation {
 
     /// Fired whenever the editor's text changes. Carries the full document (files are small, and a
     /// full copy keeps the document's mirror trivially correct).
@@ -62,8 +62,48 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         view = container
     }
 
+    // MARK: - System accent
+
+    private var accentObservers: [Any] = []
+
+    /// Mirrors the person's macOS accent colour into the page.
+    ///
+    /// No preference, no colour picker: they already chose one in System Settings, and an editor that
+    /// asks again is an editor that can disagree with the rest of their Mac. `controlAccentColor` is
+    /// resolved against the window's current appearance, so it is the light or dark variant as needed.
+    private func pushAccent() {
+        let appearance = view.effectiveAppearance
+        var hex = "#007aff"
+        appearance.performAsCurrentDrawingAppearance {
+            if let srgb = NSColor.controlAccentColor.usingColorSpace(.sRGB) {
+                hex = String(format: "#%02x%02x%02x",
+                             Int((srgb.redComponent * 255).rounded()),
+                             Int((srgb.greenComponent * 255).rounded()),
+                             Int((srgb.blueComponent * 255).rounded()))
+            }
+        }
+        webView.evaluateJavaScript("window.__mt && window.__mt.setAccent(\"\(hex)\")", completionHandler: nil)
+    }
+
+    private func observeAccent() {
+        // Changing the accent in System Settings is a distributed notification, not an app-local one.
+        accentObservers.append(
+            DistributedNotificationCenter.default().addObserver(
+                forName: NSNotification.Name("AppleColorPreferencesChangedNotification"),
+                object: nil, queue: .main
+            ) { [weak self] _ in self?.pushAccent() }
+        )
+        // Light/dark also changes which variant of the accent is correct.
+        accentObservers.append(
+            NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.pushAccent() }
+            }
+        )
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        observeAccent()
         guard schemeHandler != nil else { return }
         let index = BundleSchemeHandler.baseURL.appendingPathComponent("Web/index.html")
         webView.load(URLRequest(url: index))
@@ -99,13 +139,55 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.toggleLock()", completionHandler: nil)
     }
 
+    // Toolbar visibility is a preference, not per-document state: hiding it and having it return on the
+    // next file would read as the app forgetting. Swift owns the value so every window agrees.
+    private static let toolbarHiddenKey = "toolbarHidden"
+    static var isToolbarHidden: Bool {
+        get { UserDefaults.standard.bool(forKey: toolbarHiddenKey) }
+        set { UserDefaults.standard.set(newValue, forKey: toolbarHiddenKey) }
+    }
+
+    @objc func toggleToolbar(_ sender: Any?) {
+        Self.isToolbarHidden.toggle()
+        for window in NSApp.windows {
+            (window.contentViewController as? EditorViewController)?.pushToolbarVisibility()
+        }
+    }
+
+    private func pushToolbarVisibility() {
+        webView.evaluateJavaScript(
+            "window.__mt && window.__mt.setToolbar(\(Self.isToolbarHidden ? "false" : "true"))",
+            completionHandler: nil
+        )
+    }
+
+    // NSMenuItemValidation, not an override — NSViewController doesn't declare it; the responder chain
+    // finds it through the protocol.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleToolbar(_:)) {
+            item.title = Self.isToolbarHidden ? "Show Toolbar" : "Hide Toolbar"
+        }
+        if item.action == #selector(toggleLock(_:)) {
+            item.state = isLockedCache ? .on : .off
+        }
+        return true
+    }
+
+    /// Menu validation is synchronous and reading the web view is not, so the lock state is mirrored
+    /// here as the page reports it rather than guessed at validation time.
+    private var isLockedCache = false
+
     // MARK: - Bridge
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
         switch kind {
+        case "lock":
+            isLockedCache = (body["locked"] as? Bool) ?? false
         case "ready":
             isReady = true
+            pushAccent()
+            pushToolbarVisibility()
             if let pending = pendingText {
                 pendingText = nil
                 load(text: pending)

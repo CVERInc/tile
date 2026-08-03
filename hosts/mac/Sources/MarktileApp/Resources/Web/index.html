@@ -65,6 +65,10 @@
      placement decision, and the other three should not inherit it. */
   .tugtile-ed-bar > .tugtile-headerctl { flex: 0 0 auto; margin-left: 8px; }
 
+  /* View > Hide Toolbar. The mode strip rides in that row, so it goes too — both stay reachable from
+     the View menu (⌘E, ⌘L), and the markdown itself never needed either of them. */
+  #app.mt-no-toolbar .tugtile-ed-bar { display: none; }
+
   html, body { height: 100%; margin: 0; background: var(--background-primary); }
   body {
     font-family: var(--font-text);
