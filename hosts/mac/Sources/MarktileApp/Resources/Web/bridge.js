@@ -129,6 +129,9 @@ function open(text) {
     currentMode: () => (rig ? rig.currentMode() : { icon: "square-m", name: "mtModeSeasoned" }),
     toggleLock: () => { locked = !locked; applyLock(); },
     isLocked: () => locked,
+    // This surface puts the strip in a flex row beside a centred toolbar, so its width has to hold
+    // still — otherwise every mode switch nudges all 17 buttons. The other three surfaces don't ask.
+    stableWidth: true,
     brand: t("mtBrand"),
     brandLocked: t("mtBrandLocked"),
     modeLabel: t("mtModeToggle"),

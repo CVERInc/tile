@@ -1339,9 +1339,42 @@ function buildEditorCtl(parent, ctl) {
   lk.setAttribute('role', 'button'); lk.setAttribute('aria-label', ctl.lockLabel || '');
   lk.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ctl.toggleLock(); refresh(); };
   if (ctl.onSave) iconBtn('check', ctl.saveLabel, ctl.onSave);   // ✓ on the right (modal only)
+  // ctl.stableWidth — opt-in, because whether this matters is a question about PLACEMENT, and placement
+  // belongs to the surface. Both labels change width in use (the mode name cycles, the brand swaps to its
+  // locked form), which only hurts where the strip shares a flex row with something centred: the macOS
+  // host, where every mode switch nudged the whole toolbar. In Obsidian's header it costs nothing, so it
+  // is not imposed there.
+  //
+  // The reservation goes on the WRAPPER — which has no background — with the contents pinned right. Put
+  // it on the label instead and the mode pill itself stretches, leaving the text marooned in a wide box.
+  // This way the pill hugs its word, the separator/brand/lock never move, and only the pill's left edge
+  // travels through empty space.
+  //
+  // Measured, never hard-coded: 'Seasoned', 'アジツケ' and '調味' are three different widths, and a px that
+  // fits one clips or pads the others.
+  let reserved = false;
+  function reserveWidth(nameEl, brandEl) {
+    if (reserved || !ctl.stableWidth || !wrap.isConnected) return;   // detached at build time → the first connected refresh sizes it
+    const name0 = nameEl.textContent, brand0 = brandEl.textContent;
+    let max = 0;
+    EDITOR_MODES.forEach((m) => {          // every name × both brand forms: the widest COMBINATION, not the
+      nameEl.textContent = t(m.name);      // widest of each measured apart
+      [ctl.brand || '', ctl.brandLocked || ''].forEach((bd) => {
+        brandEl.textContent = bd;
+        max = Math.max(max, wrap.offsetWidth);
+      });
+    });
+    nameEl.textContent = name0; brandEl.textContent = brand0;
+    if (max > 0) { wrap.style.minWidth = max + 'px'; wrap.style.justifyContent = 'flex-end'; reserved = true; }
+  }
+
   function refresh() {   // populate unconditionally — the strip is built detached (before prepend), so an isConnected gate would skip the first paint
-    vc.empty(); const m = ctl.currentMode(); setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), m.icon); vc.createSpan({ cls: 'tugtile-viewcycle-name', text: t(m.name) });
-    lk.empty(); const locked = ctl.isLocked && ctl.isLocked(); lk.createSpan({ cls: 'tugtile-brand-text', text: locked ? (ctl.brandLocked || '') : (ctl.brand || '') }); setIcon(lk.createSpan({ cls: 'tugtile-lock-icon' }), locked ? 'lock' : 'lock-open');
+    vc.empty(); const m = ctl.currentMode(); setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), m.icon);
+    const nameEl = vc.createSpan({ cls: 'tugtile-viewcycle-name', text: t(m.name) });
+    lk.empty(); const locked = ctl.isLocked && ctl.isLocked();
+    const brandEl = lk.createSpan({ cls: 'tugtile-brand-text', text: locked ? (ctl.brandLocked || '') : (ctl.brand || '') });
+    setIcon(lk.createSpan({ cls: 'tugtile-lock-icon' }), locked ? 'lock' : 'lock-open');
+    reserveWidth(nameEl, brandEl);
   }
   refresh();
   return { el: wrap, refresh };
