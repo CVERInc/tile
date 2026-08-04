@@ -282,9 +282,31 @@ function markCode(escaped, prefix) {
 // text it was protecting, which is the bug with an extra step.
 //
 // Only the characters CommonMark says are escapable, so `C:\path` and `\n` in prose are left alone.
+// 🔴 NOT inside a code span. CommonMark does not run backslash escapes there — a code span's content
+// is literal — so `` `/^- \[(.)\]/` `` must keep its backslashes VISIBLE. This pass runs last and
+// over the whole string, so without the skip it reached inside the span markCode had just built and
+// hid characters that are part of the code. Found by rendering 168 of the owner's own documents with
+// the old module and the new one and diffing: 270 lines moved, and this was the only one of them
+// that moved the wrong way.
+//
+// markCode runs BEFORE this, so the span already exists and skipping it is a split, not a parse.
+// Known and not fixed: an <autolink>'s URL is literal in the same way, but that span is built in
+// editor-core and shares its class with ordinary links, whose text IS prose and must keep escaping.
+// A backslash inside an autolink URL is rare enough to name rather than chase.
 function markEscapes(escaped, prefix) {
   const p = prefix || 'tg';
-  return String(escaped).replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, (m, ch) => mk(p, '\\') + ch);
+  const s = String(escaped);
+  const open = '<span class="' + p + '-code">';
+  const sub = (t) => t.replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, (m, ch) => mk(p, '\\') + ch);
+  let out = '', i = 0;
+  for (;;) {
+    const j = s.indexOf(open, i);
+    if (j < 0) return out + sub(s.slice(i));
+    const end = skipElement(s, j);        // balanced: the span holds two nested marker spans
+    const stop = end > j ? end : j + open.length;
+    out += sub(s.slice(i, j)) + s.slice(j, stop);
+    i = stop;
+  }
 }
 
 function renderInlineMd(text, opts) {

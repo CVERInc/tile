@@ -129,6 +129,11 @@ eq('**這句話變得*更強*，不是更弱**', '<B>這句話變得<I>更強>�
 // only works because `markCode` runs BEFORE `markEmphasis` and the tokeniser treats the finished
 // span as opaque — the reorder IS the mechanism, so these cases guard the order, not just the output.
 eq('*a `*` b*', '<I>a <?>*> b>', 'an asterisk inside a code span is not a delimiter');
+// Escapes are literal in there too — CommonMark does not run them inside a code span. The shape to
+// watch is that `shape()` DROPS marker spans, so a hidden backslash vanishes from the expectation
+// while a literal one stays: that asymmetry is exactly what these two lines measure.
+eq('`/^- \\[(.)\\]/`', '<?>/^- \\[(.)\\]/>', 'backslashes inside a code span stay visible');
+eq('a \\[b\\] c', 'a [b] c', 'control — outside a code span the backslash still hides');
 eq('`**a**`', '<?>**a**>', 'a code span holds the syntax it documents, unrendered');
 eq('*a `b` c*', '<I>a <?>b> c>', 'emphasis still spans ACROSS a code span');
 
