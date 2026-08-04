@@ -519,7 +519,11 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
   overflow-y: auto;
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
-/* Group divider in the editor toolbar */
+/* Group divider in the editor toolbar. Kept as a 1px rule between tightly-packed buttons rather than
+   promoted into a nowrap group box: measured, unbreakable groups leave the tail of each row empty and cost
+   the DEFAULT 760px window a whole third row (101px → 145px of chrome), which is a worse trade than the
+   thing it fixes. The one artifact wrapping does produce — a divider that lands at a row edge, dividing it
+   from nothing — is handled where it can actually be seen, in tidySeps(). */
 .tugtile-ed-sep { flex: 0 0 auto; width: 1px; height: 20px; margin: 0 4px; background: var(--background-modifier-border); }
 /* Phone: second toolbar row (format/insert tools), below the bar's essentials. Centered, scrolls if it overflows. */
 .tugtile-ed-tools2 {
@@ -548,10 +552,17 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
 }
+/* find | replace, each with the buttons that act on it. Neither group breaks apart when the row wraps. */
+.tugtile-ed-find-grp { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.tugtile-ed-find-grp + .tugtile-ed-find-grp { margin-left: 10px; }   /* find-and-its-arrows, then replace-and-its-buttons */
 .tugtile-ed-find-i {
-  flex: 1; min-width: 80px;
+  /* Grows with the row, but stops: left at flex:1 the two fields split the whole window between them, so a
+     1200px window bought two 500px boxes to hold the word "hello". Every Mac find bar keeps its field the
+     size of a search term. */
+  flex: 1 1 140px; min-width: 80px; max-width: 240px;
   font-size: 16px; padding: 5px 8px; border-radius: var(--radius-s);   /* 16px avoids iOS focus-zoom */
 }
+.tugtile-ed-find > .tugtile-ed-find-b { margin-left: auto; }   /* the lone direct child is ✕ → far edge */
 .tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-muted); font-size: 0.85em; min-width: 1.6em; text-align: center; }
 /* .tugtile-ed-find-b inherits everything from .tugtile-iconbtn */
 /* Settings: compact checkbox grid for choosing which editor toolbar buttons show */

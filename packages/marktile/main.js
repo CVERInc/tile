@@ -479,9 +479,14 @@ function mountEditor(contentEl, opts, host) {
     const findbar = contentEl.createDiv({ cls: 'tugtile-ed-find' });
     contentEl.insertBefore(findbar, scroll);   // Between the toolbar and the editor body
     findbar.style.display = 'none';
-    const findInp = findbar.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('findPlaceholder') } });
-    const findN = findbar.createSpan({ cls: 'tugtile-ed-find-n' });
-    const replInp = findbar.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('replacePlaceholder') } });
+    // Two groups, not one flat row. ▲▼ step through FIND matches, so they belong beside the find field;
+    // flat, they landed on the far side of the replace box, with the whole replace field wedged between a
+    // search term and the arrows that move through it. Grouping also gives the row somewhere sane to wrap.
+    const findGrp = findbar.createSpan({ cls: 'tugtile-ed-find-grp' });
+    const replGrp = findbar.createSpan({ cls: 'tugtile-ed-find-grp' });
+    const findInp = findGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('findPlaceholder') } });
+    const findN = findGrp.createSpan({ cls: 'tugtile-ed-find-n' });
+    const replInp = replGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('replacePlaceholder') } });
     const lc = (s) => (s || '').toLowerCase();
     const updateN = () => { const term = findInp.value; findN.textContent = term ? String(lc(ta.value).split(lc(term)).length - 1) : ''; };
     const findNext = (back) => {
@@ -509,12 +514,12 @@ function mountEditor(contentEl, opts, host) {
       findbar.style.display = on ? '' : 'none';
       if (on) { updateN(); setTimeout(() => findInp.focus(), 0); } else { ta.focus(); }
     };
-    const mkFb = (icon, aria, fn) => { const b = findbar.createEl('button', { cls: 'tugtile-iconbtn tugtile-ed-find-b' }); setIcon(b.createSpan(), icon); b.setAttribute('aria-label', aria); b.addEventListener('mousedown', (e) => e.preventDefault()); b.addEventListener('click', fn); b.addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false }); };
-    mkFb('chevron-up', t('findPrev'), () => findNext(true));
-    mkFb('chevron-down', t('findNext'), () => findNext(false));
-    mkFb('replace', t('replaceOne'), doReplace);
-    mkFb('replace-all', t('replaceAll'), doReplaceAll);
-    mkFb('x', t('cancel'), () => toggleFind(false));
+    const mkFb = (icon, aria, fn, target) => { const b = (target || findbar).createEl('button', { cls: 'tugtile-iconbtn tugtile-ed-find-b' }); setIcon(b.createSpan(), icon); b.setAttribute('aria-label', aria); b.addEventListener('mousedown', (e) => e.preventDefault()); b.addEventListener('click', fn); b.addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false }); };
+    mkFb('chevron-up', t('findPrev'), () => findNext(true), findGrp);
+    mkFb('chevron-down', t('findNext'), () => findNext(false), findGrp);
+    mkFb('replace', t('replaceOne'), doReplace, replGrp);
+    mkFb('replace-all', t('replaceAll'), doReplaceAll, replGrp);
+    mkFb('x', t('cancel'), () => toggleFind(false));   // stays a direct child — CSS pushes it to the far edge
     findInp.addEventListener('input', updateN);
     findInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); findNext(!!e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); toggleFind(false); } });
 
@@ -611,6 +616,30 @@ function mountEditor(contentEl, opts, host) {
         tbtn(tk.g, runs[tk.key], tk.icon, target, tk.tip);
       }
     });
+    // A wrapped toolbar puts its dividers wherever the text would break: a `|` can end up first on a row,
+    // separating the edge of the row from nothing, which is the small ugliness that makes a wrapped bar read
+    // as debris rather than as a toolbar. CSS has no way to ask "is this element first on its line", so it is
+    // measured. Rows are found by vertical CENTRE, not offsetTop — a 20px divider and a 40px button on the
+    // same row have different tops by design. Hidden with `visibility`, never `display`, so the element keeps
+    // its width and the fix cannot change the layout it just measured (and oscillate).
+    const seps = () => [...(tools ? tools.children : [])].filter((e) => e.classList.contains('tugtile-ed-sep'));
+    const tidySeps = () => {
+      const kids = [...(tools ? tools.children : [])];
+      const mid = (e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); };
+      kids.forEach((el, i) => {
+        if (!el.classList.contains('tugtile-ed-sep')) return;
+        const prev = kids[i - 1], next = kids[i + 1];
+        const alone = !prev || !next || mid(el) !== mid(prev) || mid(el) !== mid(next);
+        el.style.visibility = alone ? 'hidden' : '';
+      });
+    };
+    let sepRO = null;
+    if (tools && seps().length && typeof ResizeObserver === 'function') {
+      sepRO = new ResizeObserver(() => tidySeps());
+      sepRO.observe(tools);
+      tidySeps();
+    }
+
     // Pure-source mode: if every tool is disabled and there's no ✕/✓ (marktile), drop the whole toolbar.
     if (!opts.onCancel && !opts.onSave && !tools.childElementCount && (!tools2 || !tools2.childElementCount)) { bar.remove(); if (tools2) tools2.remove(); }
 
@@ -679,8 +708,14 @@ function mountEditor(contentEl, opts, host) {
     setText: (text) => { if (ed.getAttribute('contenteditable') === 'false') return; render(text); pushHist(); },   // programmatic whole-document replace (TOC drag-reorder); pushHist → undoable + fires onChange (autosave). read-only guard like applyEdit.
     isDirty: () => getText().replace(/\s+$/, '') !== orig.replace(/\s+$/, ''),
     insertText: (text) => insertTok(text),   // insert at the caret (used by image paste/drop); applyEdit's read-only guard applies
+    // Every toolbar button, by key, for hosts that have a SECOND door to the same capability — a macOS menu
+    // bar and its ⌘-equivalents. It is deliberately the same `runs` map the buttons are bound to: a menu that
+    // reimplemented "bold" would be a second definition of what bold means, and the two would drift on the
+    // first change. Returns false for an unknown key so a host can't silently ship a dead menu item.
+    runTool: (key) => { const fn = runs[key]; if (!fn) return false; fn(); ed.focus(); return true; },
+    toggleFind: (show) => toggleFind(show),   // ⌘F — the same bar the magnifier opens
     focus: () => ta.focus(),
-    destroy: () => { clearTimeout(syncT); if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } },
+    destroy: () => { clearTimeout(syncT); if (sepRO) { sepRO.disconnect(); sepRO = null; } if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } },
   };
 }
 
