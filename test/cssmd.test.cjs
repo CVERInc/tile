@@ -74,10 +74,18 @@ eq(renderInlineMd('say **hi** and `go`', { prefix: 'gd' }),
    'gd parity — mixed bold + code in a sentence');
 
 // ── adjacent markers ───────────────────────────────────────────────────────────────────────────
+// 🩸 This expected TWO bold spans until 2026-08-04, because that is what the old regex produced:
+// it matched `**a**`, then started again and matched `**b**`. CommonMark says otherwise — the run of
+// four in the middle is refused by the "rule of 3", so the outer pair matches each other and the
+// four asterisks are literal content. Verified against the reference `commonmark` package rather
+// than against my own reading of the spec, because the expectation being replaced here WAS the
+// implementation's behaviour, and a golden updated to match the code it is meant to judge proves
+// nothing at all.
 {
   const h = renderInlineMd('**a****b**');
   eq(textContent(h), '**a****b**', 'adjacent bolds round-trip');
-  eq((h.match(/class="tg-b"/g) || []).length, 2, 'two adjacent bold spans');
+  eq((h.match(/class="tg-b"/g) || []).length, 1, 'one bold span — the middle run of four is literal');
+  has(h, '>a****b<', 'the four asterisks stay in the content');
 }
 {
   const h = renderInlineMd('`a``b`');   // two adjacent code spans

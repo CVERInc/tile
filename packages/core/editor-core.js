@@ -80,11 +80,13 @@ function highlightLineParts(line, block) {
     .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
     // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
     .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
-  // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markBoldItalic), the single
-  // source for this mark. Runs over the already-escaped, block-marked text; byte-identical to the former
-  // inline `.replace()`. tg-* prefix keeps the plugins' existing class names. (`code` follows strike, below.)
+  // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markEmphasis), the single
+  // source for this mark. Runs over the already-escaped, block-marked text; the tokeniser treats an
+  // already-injected span as OPAQUE, so an asterisk bullet's own `*` can never pair with real
+  // emphasis further along the line. tg-* prefix keeps the plugins' existing class names.
+  // (`code` follows strike, below.)
   const h = markCode(
-    markBoldItalic(blocks, 'tg')
+    markEmphasis(blocks, 'tg')
     .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>'),
     'tg')   // inline `code` — also DELEGATED to cssmd (markCode); kept AFTER strike to preserve the original pass order
     .replace(/(\[\[[^\]\n]+\]\])/g, (m) => '<span class="tg-link"><span class="tg-mk">[[</span>' + m.slice(2, -2) + '<span class="tg-mk">]]</span></span>')

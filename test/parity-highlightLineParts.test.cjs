@@ -12,6 +12,15 @@
  * If any byte differs → this fails → STOP, the refactor is NOT safe to ship. Regenerate the golden
  * ONLY when a deliberate, reviewed behaviour change to the renderer is intended.
  *
+ * 🩸 Regenerated once, 2026-08-04, when markBoldItalic's regex was replaced by the CommonMark
+ * delimiter-run tokeniser (markEmphasis). TWO of the 68 entries moved and 66 stayed byte-identical,
+ * which is the evidence that the swap was a drop-in:
+ *   • `**a****b**`   two adjacent bolds → ONE bold whose content is `a****b`
+ *   • `***triple***` a stranded `*`, bold, a stranded `*` → em wrapping strong
+ * Both new values were checked against the reference `commonmark` package before the golden was
+ * touched. That order matters: regenerating first and reading the diff afterwards would have made
+ * this file agree with whatever the renderer now does, which is not a test.
+ *
  * Run: node test/parity-highlightLineParts.test.cjs
  */
 'use strict';

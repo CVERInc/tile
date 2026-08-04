@@ -7,6 +7,11 @@ __pycache__/
 # node
 node_modules/
 
+# @tile/cssmd has no dependencies, so its lockfile records nothing — it is a by-product of running
+# npm in that directory. Ignored by path rather than by pattern: a package that grows a real
+# dependency should still commit a real lockfile.
+/packages/cssmd/package-lock.json
+
 # scripts/commonmark-score.mjs downloads the spec here. Not committed: the spec is CC-BY-SA and this
 # repo is MIT, and vendoring it is the owner's call, not a side effect of running a score.
 .cache/
