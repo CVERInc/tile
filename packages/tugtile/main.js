@@ -208,6 +208,10 @@ function highlightLineParts(line, block) {
   if (hm) cls += ' tg-h tg-h' + hm[2].length;
   if (/^>\s?/.test(line)) cls += ' tg-quote';
   else if (/^\s*[-*]\s/.test(line)) cls += ' tg-li';
+  else if (/^\s*\d+[.)]\s/.test(line)) cls += ' tg-ol';   // ordered list — 43635 occurrences in his corpus, the most common construct in it, and until now the only list kind with a toolbar button and no rendering
+  // A thematic break is the whole line. Frontmatter never reaches here (blockScan labels it first), so a
+  // `---` that gets this far is the horizontal rule it looks like.
+  if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) cls += ' tg-hr';
   // Each syntax marker (## , &gt; , - , [ ], **, *, ~~, `, [[ ]], @{}) is wrapped in its own <span class="tg-mk">
   // so a host can hide JUST the markers via CSS (.tugtile-preview .tg-mk{display:none}) while the styling stays —
   // the basis for a marker-free preview look. tg-mk is transparent to the text round-trip (getText reads
@@ -220,7 +224,13 @@ function highlightLineParts(line, block) {
     .replace(/^(\s*(?:[-*]\s(?:\[[ xX]\]\s)?)?)(#{1,6}\s)/, (m, pre, hashes) => pre + '<span class="tg-mk">' + hashes + '</span>')   // heading marker — wraps only the # run, leaving any indent/bullet/checkbox prefix for the rules below to wrap
     .replace(/^(&gt;\s?)/, '<span class="tg-mk">$1</span>')   // blockquote marker
     .replace(/^(\s*[-*]\s)(\[[ xX]\])/, (m, p, box) => '<span class="tg-mk">' + p + '</span><span class="tg-check' + (/[xX]/.test(box) ? ' tg-check-done' : '') + '"><span class="tg-mk">' + box + '</span></span>')
-    .replace(/^(\s*[-*]\s)/, '<span class="tg-mk">$1</span>');   // plain bullet (heading/quote/checkbox lines already start with a <span>, so this won't match them)
+    .replace(/^(\s*[-*]\s)/, '<span class="tg-mk">$1</span>')   // plain bullet (heading/quote/checkbox lines already start with a <span>, so this won't match them)
+    // The ordered marker is tg-num, NOT tg-mk: `1. ` is not punctuation the reader can spare — the number
+    // is the content. A bullet's `- ` can be swapped for a • because the dot carries the same meaning;
+    // hiding "7." and drawing a dot would delete the seventh-ness.
+    .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
+    // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
+    .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
   // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markBoldItalic), the single
   // source for this mark. Runs over the already-escaped, block-marked text; byte-identical to the former
   // inline `.replace()`. tg-* prefix keeps the plugins' existing class names. (`code` follows strike, below.)
@@ -229,6 +239,16 @@ function highlightLineParts(line, block) {
     .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>'),
     'tg')   // inline `code` — also DELEGATED to cssmd (markCode); kept AFTER strike to preserve the original pass order
     .replace(/(\[\[[^\]\n]+\]\])/g, (m) => '<span class="tg-link"><span class="tg-mk">[[</span>' + m.slice(2, -2) + '<span class="tg-mk">]]</span></span>')
+    // CommonMark's own link and image. The engine grew up inside Obsidian and learned the dialect
+    // ([[wikilink]]) before the language — `[text](url)` appears in 32.7% of his documents and rendered
+    // as raw punctuation in every one of them. Images run FIRST so the leading `!` joins the marker
+    // rather than being left stranded outside the span.
+    // Both are a marker–text–marker sandwich exactly like the wikilink above, so Rendered's existing
+    // "hide .tg-mk" rule shows the label alone with no new CSS. The URL travels inside a marker: it is
+    // addressing, not prose. Runs AFTER [[ ]] so a wikilink is never half-eaten.
+    .replace(/(!?)\[([^\]\n]*)\]\(([^)\n]*)\)/g, (m, bang, text, url) =>
+      '<span class="tg-' + (bang ? 'img' : 'link') + '"><span class="tg-mk">' + bang + '[</span>' +
+      text + '<span class="tg-mk">](' + url + ')</span></span>')
     .replace(/(@@?\{)([^}\n]*)(\})/g, (m, op, inner, cl) => '<span class="tg-date"><span class="tg-mk">' + op + '</span>' + inner + '<span class="tg-mk">' + cl + '</span></span>')
     .replace(/(^|[^&\w])(#[^\s#<&]+)/g, '$1<span class="tg-tag">$2</span>')
     .replace(/\t/g, '<span class="tg-tab">\t</span>');   // wrap each literal tab LAST (after the line-start regexes) so CSS can mark tab-vs-space; span is transparent to the text round-trip

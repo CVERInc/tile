@@ -66,6 +66,15 @@ const cases = [
   '---\nname: x\ntype: memory\n---\n\nbody **bold**',
   '```\nunclosed to the end',
   '~~~\n| a | b |\n~~~',              // a table line inside a fence stays text
+  // The line-local constructs added alongside the block scan.
+  '1. one\n2. two\n10) ten',
+  'a [link](https://x.com/a?b=1&c=2) here',
+  '![alt text](pic.png) and ![](bare.png)',
+  '[](empty text) and [text]() and [a](b)',
+  'mixed [a](b) with [[wiki]] and **bold**',
+  '---\n***\n___',                    // thematic breaks (no leading --- ⇒ not frontmatter here… line 1 IS ---)
+  'text\n---\nmore',
+  '- [x] done [link](u) **b**',
 ];
 let fail = 0;
 for (const t of cases) {
