@@ -16,7 +16,7 @@ Two things follow, and they explain most of the design:
 
 ## Where it stands
 
-`node scripts/commonmark-score.mjs` — **420/652 (64%)** of CommonMark 0.31.2, scored as *construct
+`node scripts/commonmark-score.mjs` — **465/652 (71%)** of CommonMark 0.31.2, scored as *construct
 recognition*, not conformance (this is not a renderer; there is no HTML to diff). `--misses` lists
 what it got wrong.
 
@@ -25,74 +25,76 @@ asserted to STILL be missing, so implementing one turns the suite red with "remo
 add a claim()". The score can only move on purpose. It has already caught four of its own gaps
 closing.
 
-## The one real defect left: emphasis does not nest
+## Emphasis: nesting works, precedence does not
 
-This is the next piece of work and the only remaining category of *wrong* rather than *missing*.
+Emphasis used to be the one construct that rendered *wrong* rather than *missing*:
+`**bold with *it* inside**` came out entirely italic with the bold lost, on every surface including
+the two published Obsidian plugins. `markBoldItalic` was a single regex alternation whose bold
+branch was `\*\*[^*\n]+\*\*`, and `[^*\n]+` is the whole problem — the content of a bold span could
+not contain an asterisk, so a nested italic terminated the match early. No amount of regex fixes
+that: emphasis nesting is not a regular language.
 
-| input | today | should be |
+It is now `markEmphasis` in `packages/cssmd/cssmd.js`, CommonMark's delimiter-run stack (§6.2,
+"process emphasis") in three passes — scan runs and decide flanking, match closers to openers, then
+serialize. `markBoldItalic` remains as an alias for consumers outside this repo.
+
+**Where it stands.** `node scripts/emphasis-conformance.mjs` runs the spec's own 132 Emphasis
+examples and compares real output against the spec's real HTML — actual conformance, possible here
+and nowhere else in this file, because `<em>`/`<strong>` are exactly what these spans map onto. It
+scores the working tree against `HEAD`, so any future change reports its own delta.
+
+| | passing |
+|---|---|
+| the old regex | 50/132 (37.9%) |
+| the tokeniser | **108/132 (81.8%)**, +58 / −0, round trip exact on all 132 |
+
+**The 24 that still fail, in full — 15 of them are not defects:**
+
+| | n | what it is |
 |---|---|---|
-| `**bold with *it* inside**` | whole thing italic, **bold lost** | bold, with italic inside |
-| `*it with **bold** inside*` | two separate italics | italic, with bold inside |
-| `***both***` | bold only | bold + italic |
-| `*a**b**c*` | three italics | italic containing bold |
+| `"` not encoded as `&quot;` | 6 | the harness. `escHtml` deliberately leaves quotes alone (content never lands in an attribute position); the emphasis in all six is correct |
+| emphasis spanning a line break | 5 | architectural. One line is one `<div>`; a construct cannot cross that and stay a single-layer editor |
+| a link inside the emphasis | 4 | the harness. That script runs the cssmd passes only, so `[bar](/url)` stays literal; the emphasis around it is correct |
+| **precedence** | **9** | **a real defect — below** |
 
-Frequency, measured over 4564 of the owner's own documents with a hand-verified detector: **237
-lines in 121 documents (2.7%)**. Not common — but where it happens it is in the most deliberate
-prose (`**The trust sentence got *stronger*, not weaker**` renders entirely italic today), and the
-current output is actively wrong rather than merely plain.
+**The real one that is left: precedence.** A delimiter inside a construct that binds *tighter* than
+emphasis is still treated as a delimiter. ``*a `*`* `` should be an italic containing a code span
+holding a literal asterisk; instead the backtick's asterisk pairs with the outer one. Same shape in
+an autolink (`**a<https://x/?q=**>`), a raw HTML attribute, and a link destination.
 
-⚠️ The first attempt to measure this said **39.6%**, because the regex counted `**a** and **b**` —
-two separate bolds on one line — as nesting. The corrected detector scans delimiter *runs* and was
-validated against twelve known-answer cases before being pointed at the corpus. If you re-measure,
-validate the ruler first; the shape of the characters and the order of the characters are different
-questions and a regex only sees one of them.
+The fix is already half-built and costs no new algorithm. `markEmphasis` treats an already-injected
+element as **opaque** — its characters are not delimiters — which is why an asterisk bullet
+(`<span class="tg-mk">* </span>…`) cannot pair with real emphasis further along the line. Those nine
+would fall out if the code / autolink / link passes ran *before* emphasis instead of after. What
+makes it a separate piece of work rather than a one-line move is the last constraint below: pass
+order inside `highlightLineParts` is load-bearing, and reordering it needs its own measurement.
 
-### Why it needs a tokeniser
+### Constraints any change here has to keep
 
-`markBoldItalic` in `packages/cssmd/cssmd.js` is one regex alternation:
-
-```js
-/((?<!\\)\*\*[^*\n]+\*\*|(?<!\\)\*[^*\s][^*\n]*?\*|…)/g
-```
-
-`[^*\n]+` is the whole problem: the content of a bold span may not contain an asterisk, so a nested
-italic terminates the match early. No amount of regex fixes this — emphasis nesting is not a regular
-language. CommonMark specifies it as a **delimiter-run stack**:
-
-1. Scan the line into runs of `*` and `_` plus the text between them.
-2. For each run decide whether it can open, can close, or both, from the characters on either side
-   (left-flanking / right-flanking, plus the intraword rule for `_`).
-3. Walk the stack matching closers to the nearest compatible opener, longest first, so `***x***`
-   resolves as `**` around `*`.
-
-Spec: <https://spec.commonmark.org/0.31.2/#emphasis-and-strong-emphasis> — the "process emphasis"
-algorithm. Section score today: **77/132**.
-
-### Constraints any implementation has to keep
-
-- **Byte-exact round trip.** `test/edit-roundtrip.cjs`, 40 cases. Every delimiter stays in the text
-  inside a `.tg-mk` span; the DOM's `textContent` must still join back to the source exactly.
-- **Escapes still decline.** `\*not italic\*` must not emphasise, and the backslash hides via
-  `markEscapes`, which runs LAST — every earlier pass has to still see the backslash in order to
-  refuse.
+- **Byte-exact round trip.** `test/edit-roundtrip.cjs`, 40 cases, plus a per-case round-trip
+  assertion in `test/emphasis.test.cjs` and a round-trip line in the conformance script. Every
+  delimiter either sits inside a `.tg-mk` span or stays in the text as the literal it turned out to
+  be; the DOM's `textContent` must still join back to the source exactly.
+- **Escapes still decline.** `\*not italic\*` must not emphasise. The scanner consumes `\x` as one
+  unit, so it counts backslashes rather than peering behind one — which is why `\\*a*` (escaped
+  backslash, then real emphasis) now works, a case the old regex documented as a known limit.
 - **The intraword `_` rule survives.** `snake_case_name` must stay literal. This was a real bug once;
   a page rendering ordinary prose grew bare underscores wherever an identifier appeared.
-- **cssmd is shared.** `packages/cssmd` is `@tile/cssmd`, and feelreef's `renderInlineMd` is built on
-  the same primitive with a `gd`/`gp` prefix — a change here changes already-published pages. See the
-  open task about that handoff. `test/cssmd.test.cjs` (60 assertions) is the local gate.
+- **cssmd is shared.** `packages/cssmd` is `@tile/cssmd`; feelreef vendors it (tile-lab →
+  `reef-mcp/vendor/cssmd`) with a `gd`/`gp` prefix, behind two manual refresh scripts and a
+  byte-exact freshness test. Nothing propagates on its own. `test/cssmd.test.cjs` (61 assertions) is
+  the local gate.
 - **Ordering inside `highlightLineParts`.** Block markers are wrapped before inline ones, and the
-  strike pass runs BETWEEN bold and code. The cssmd passes are spliced into that chain rather than
-  called as one wrapper, precisely so the order stays byte-identical.
+  strike pass runs BETWEEN emphasis and code. The cssmd passes are spliced into that chain rather
+  than called as one wrapper, precisely so the order stays byte-identical.
+  `test/parity-highlightLineParts.test.cjs` holds 68 golden outputs against exactly this.
 
-### Suggested order
-
-1. Write the delimiter-run tokeniser as a pure function beside `markBoldItalic`, exported but unused.
-2. Test it against the spec's Emphasis section directly — 132 examples, a far better ruler than
-   anything hand-written.
-3. Swap `markBoldItalic` to call it. Watch `test/cssmd.test.cjs`, `test/edit-roundtrip.cjs` and
-   `test/commonmark.test.cjs` — if any goes red, the tokeniser is wrong, not the test.
-4. Re-run the score. The Emphasis section is 132 of 652 examples, so this is the largest single
-   movement available.
+⚠️ On measuring frequency, kept because the mistake is the useful part: the first attempt said
+nested emphasis appeared on **39.6%** of the owner's lines. It was **2.7%** (237 lines in 121 of
+4564 documents) — the detector had counted `**a** and **b**`, two separate bolds on one line, as
+nesting. The corrected one scans delimiter *runs* and was validated against twelve known-answer
+cases before being pointed at the corpus. Validate the ruler first; the shape of the characters and
+the order of the characters are different questions and a regex only sees one of them.
 
 ## The two declared gaps, and why
 

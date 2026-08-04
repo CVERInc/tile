@@ -59,7 +59,7 @@
     "line": "**a****b**",
     "result": {
       "cls": "tg-line",
-      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>a<span class=\"tg-mk\">**</span></span><span class=\"tg-b\"><span class=\"tg-mk\">**</span>b<span class=\"tg-mk\">**</span></span>"
+      "inner": "<span class=\"tg-b\"><span class=\"tg-mk\">**</span>a****b<span class=\"tg-mk\">**</span></span>"
     }
   },
   {
@@ -143,7 +143,7 @@
     "line": "***triple***",
     "result": {
       "cls": "tg-line",
-      "inner": "*<span class=\"tg-b\"><span class=\"tg-mk\">**</span>triple<span class=\"tg-mk\">**</span></span>*"
+      "inner": "<span class=\"tg-i\"><span class=\"tg-mk\">*</span><span class=\"tg-b\"><span class=\"tg-mk\">**</span>triple<span class=\"tg-mk\">**</span></span><span class=\"tg-mk\">*</span></span>"
     }
   },
   {

@@ -79,33 +79,159 @@ function mk(prefix, marker) {
 // CONTRACT: input is already HTML-escaped (run escHtml first). They do NOT escape — splicing them
 // mid-chain must not double-encode. Pure, DOM-free.
 
-// **bold** / *italic* (asterisks, which work intraword) and __bold__ / _italic_ (underscores) over
-// escaped text. Bold wins the alternation; the single-delimiter italic branch needs a non-space
-// right after the opener so "a * b" / "a _ b" stay literal.
+// ── the emphasis tokeniser ──────────────────────────────────────────────────────────────────────
+// Emphasis nesting is not a regular language, and `markBoldItalic` above is a regex, so it cannot
+// do it: its bold branch is `\*\*[^*\n]+\*\*`, whose content may not contain an asterisk, so a
+// nested `*italic*` terminates the match early and the bold is LOST. `**bold with *it* inside**`
+// came out entirely italic. CommonMark specifies emphasis as a delimiter-run stack (§6.2, "process
+// emphasis"); what follows is that algorithm, restricted to one line and to `*` / `_`.
 //
-// 🔴 Underscores follow CommonMark's INTRAWORD rule — an opening or closing `_` may not touch an
-// alphanumeric — so `snake_case`, `file_name` and `a_b_c` stay literal and only asterisks emphasise
-// mid-word. Without that rule a page rendering ordinary prose grew bare underscores wherever an
-// identifier appeared, which is the bug this arrived from.
-function markBoldItalic(escaped, prefix) {
-  const p = prefix || 'tg';
-  // 🔴 A backslash before the opener means the author asked for a literal — `\*not italic\*` is the
-  // spec's own example, and every renderer built on this primitive emphasised it anyway. The
-  // lookbehind is on the OPENING delimiter only: refusing to start is enough, and it is the change
-  // with the smallest reach into text that already renders correctly today.
-  //
-  // Known limit, stated rather than papered over: `\\*a*` (an escaped BACKSLASH, then real emphasis)
-  // also declines, because the lookbehind cannot tell the two apart without a real tokeniser. It
-  // fails toward the literal, which is the safe direction — the characters the author typed are what
-  // appears — and the construct is vanishingly rare in prose.
-  const RE = /((?<!\\)\*\*[^*\n]+\*\*|(?<!\\)\*[^*\s][^*\n]*?\*|(?<![A-Za-z0-9\\])__[^_\n]+__(?![A-Za-z0-9])|(?<![A-Za-z0-9\\])_[^_\s][^_\n]*?_(?![A-Za-z0-9]))/g;
-  return String(escaped).replace(RE, (m) => {
-    const marker = m.startsWith('**') ? '**' : m.startsWith('__') ? '__' : m[0] === '*' ? '*' : '_';
-    const cls = (marker === '**' || marker === '__') ? p + '-b' : p + '-i';
-    const inner = m.slice(marker.length, m.length - marker.length);
-    return '<span class="' + cls + '">' + mk(p, marker) + inner + mk(p, marker) + '</span>';
-  });
+// It produces the same marker–content–marker sandwich as every other mark here, so the round trip
+// is unchanged: every delimiter character either lands inside a `<prefix>-mk` span or stays in the
+// text as the literal it turned out to be. Nothing is dropped and nothing is invented.
+
+// CommonMark's "Unicode punctuation character" is categories P and S. An edge (undefined) counts as
+// whitespace, which is what the spec says about the start and end of a line.
+function isMdPunct(c) { return c !== undefined && /[\p{P}\p{S}]/u.test(c); }
+function isMdSpace(c) { return c === undefined || /\s/u.test(c); }
+
+const EL_RE = /<(\/?)([a-zA-Z][\w-]*)[^>]*>/y;
+
+// A `<` reaching this pass can only be markup the CALLER injected — escHtml turned every authored
+// `<` into `&lt;` — so an element is OPAQUE: the characters inside it are not delimiters. This
+// matters immediately: editor-core.js wraps block markers before the inline ones, so an asterisk
+// bullet arrives here as `<span class="tg-mk">* </span>rest`, and without this the bullet's own `*`
+// would be a candidate opener and could pair with real emphasis further along — emitting a span
+// that opens inside the marker and closes outside it, which is not valid nesting.
+// Returns the index just past the element, or `i` if this is not a tag at all.
+function skipElement(s, i) {
+  EL_RE.lastIndex = i;
+  const m = EL_RE.exec(s);
+  if (!m) return i;
+  const openEnd = EL_RE.lastIndex;
+  if (m[1]) return openEnd;                       // a stray closing tag — skip it and nothing else
+  const tag = m[2].toLowerCase();
+  let depth = 1, k = openEnd;
+  while (depth > 0) {
+    const c = s.indexOf('<', k);
+    if (c < 0) return openEnd;                    // unbalanced — only the open tag is opaque
+    EL_RE.lastIndex = c;
+    const t = EL_RE.exec(s);
+    if (!t) { k = c + 1; continue; }
+    if (t[2].toLowerCase() === tag) depth += t[1] ? -1 : 1;
+    k = EL_RE.lastIndex;
+  }
+  return k;
 }
+
+// Pass 1 — split the text into runs of `*` / `_` and the text between them, deciding for each run
+// whether it can open, can close, or both. That verdict comes from the characters on either side
+// (the spec's left-flanking / right-flanking), which is why this cannot be done one delimiter at a
+// time by a regex: `*` in `a * b` and `*` in `a *b*` are the same character in different company.
+function scanRuns(s) {
+  const nodes = [];
+  let buf = '';
+  const flush = () => { if (buf) { nodes.push({ t: 't', v: buf }); buf = ''; } };
+  let i = 0, prev;                                // prev === undefined ⇒ an edge, i.e. whitespace
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '\\') {                             // an escaped character is never a delimiter, and
+      buf += s.slice(i, i + 2);                   // the backslash must survive for markEscapes
+      prev = s[i + 1]; i += 2; continue;
+    }
+    if (c === '<') {
+      const end = skipElement(s, i);
+      if (end > i) { buf += s.slice(i, end); prev = undefined; i = end; continue; }
+      buf += c; prev = c; i++; continue;
+    }
+    if (c !== '*' && c !== '_') { buf += c; prev = c; i++; continue; }
+    let j = i;
+    while (s[j] === c) j++;
+    let next = s[j];
+    if (next === '<' && skipElement(s, j) > j) next = undefined;
+    const beforeSpace = isMdSpace(prev), afterSpace = isMdSpace(next);
+    const beforePunct = isMdPunct(prev), afterPunct = isMdPunct(next);
+    const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct);
+    const right = !beforeSpace && (!beforePunct || afterSpace || afterPunct);
+    flush();
+    nodes.push({
+      t: 'd', ch: c, n: j - i, orig: j - i,
+      // Asterisks work intraword; underscores do not. That asymmetry is one extra clause here, and
+      // it is what keeps `snake_case_name` literal — the rule a live page once lost, growing bare
+      // underscores wherever an identifier appeared.
+      canOpen: c === '*' ? left : left && (!right || beforePunct),
+      canClose: c === '*' ? right : right && (!left || afterPunct),
+    });
+    prev = c; i = j;
+  }
+  flush();
+  return nodes;
+}
+
+// Pass 2 — the spec's "process emphasis". Walk closers left to right; for each, find the nearest
+// compatible opener to its left and fold everything between them into one node. Inner pairs are
+// reached first, so `**a *b* c**` resolves the italic before the bold gets to it — the whole point.
+// Delimiters that end up between a matched pair are never rewound: they are literal text, which is
+// also what the spec says.
+function processEmphasis(nodes) {
+  let ci = 0;
+  while (ci < nodes.length) {
+    const closer = nodes[ci];
+    if (closer.t !== 'd' || !closer.canClose || closer.n === 0) { ci++; continue; }
+    let oi = -1;
+    for (let k = ci - 1; k >= 0; k--) {
+      const o = nodes[k];
+      if (o.t !== 'd' || o.n === 0 || o.ch !== closer.ch || !o.canOpen) continue;
+      // The spec's "rule of 3": when either side of the pair could play both parts, a match whose
+      // combined ORIGINAL run lengths is a multiple of 3 is refused — unless both lengths are. It
+      // reads like numerology and is not: it is what makes `*a**b**c*` an italic containing a bold
+      // rather than the other way round.
+      if ((closer.canOpen || o.canClose) && (closer.orig + o.orig) % 3 === 0 &&
+          !(closer.orig % 3 === 0 && o.orig % 3 === 0)) continue;
+      oi = k; break;
+    }
+    if (oi < 0) { ci++; continue; }
+    const opener = nodes[oi];
+    const use = (closer.n >= 2 && opener.n >= 2) ? 2 : 1;   // two delimiters is strong, one is em
+    const kids = nodes.slice(oi + 1, ci);
+    opener.n -= use; closer.n -= use;
+    nodes.splice(oi + 1, ci - oi - 1, { t: 'e', use: use, mark: closer.ch.repeat(use), kids: kids });
+    ci = oi + 2;                                  // the closer moved here; it may still have length
+  }
+}
+
+// Pass 3 — serialize. A delimiter that never matched prints the characters it is made of, so the
+// text comes back byte-for-byte: every character is either inside a marker span or still itself.
+function renderNodes(nodes, p) {
+  let out = '';
+  for (const n of nodes) {
+    if (n.t === 't') out += n.v;
+    else if (n.t === 'd') out += n.n ? n.ch.repeat(n.n) : '';
+    else out += '<span class="' + p + (n.use === 2 ? '-b' : '-i') + '">' +
+                mk(p, n.mark) + renderNodes(n.kids, p) + mk(p, n.mark) + '</span>';
+  }
+  return out;
+}
+
+// **bold** / *italic* / __bold__ / _italic_ over escaped text, nesting correctly.
+//
+// Asterisks work intraword; underscores follow CommonMark's intraword rule (an opening or closing
+// `_` may not sit between two alphanumerics), so `snake_case`, `file_name` and `a_b_c` stay literal.
+// A backslash-escaped delimiter is not a delimiter at all — the scanner consumes `\*` as one unit —
+// which also settles a case the old regex had to guess at: `\\*a*` is an escaped BACKSLASH followed
+// by real emphasis, and it now emphasises, because the scanner counts backslashes instead of
+// peering behind one.
+function markEmphasis(escaped, prefix) {
+  const s = String(escaped);
+  if (s.indexOf('*') < 0 && s.indexOf('_') < 0) return s;   // most lines; skip the whole machine
+  const nodes = scanRuns(s);
+  processEmphasis(nodes);
+  return renderNodes(nodes, prefix || 'tg');
+}
+
+// The name this primitive shipped under, kept because consumers outside this repo import it. New
+// callers should use markEmphasis; this is the same function, not an older one.
+function markBoldItalic(escaped, prefix) { return markEmphasis(escaped, prefix); }
 
 // `code` over escaped text — single backticks, no newline inside.
 function markCode(escaped, prefix) {
@@ -149,7 +275,7 @@ function renderInlineMd(text, opts) {
   const prefix = (opts && opts.prefix) || 'tg';
   // Escape FIRST (whole string), then run the marker passes over escaped text — same order as
   // editor-core.js (escHtml(line).replace(...)). The markers **, *, ` are unaffected by escaping.
-  return markEscapes(markCode(markBoldItalic(escHtml(text), prefix), prefix), prefix);
+  return markEscapes(markCode(markEmphasis(escHtml(text), prefix), prefix), prefix);
 }
 
 // The CSS contract. Returns the stylesheet text a host must include for the technique to work:
@@ -229,11 +355,13 @@ function highlightLineParts(line, block) {
     .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
     // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
     .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
-  // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markBoldItalic), the single
-  // source for this mark. Runs over the already-escaped, block-marked text; byte-identical to the former
-  // inline `.replace()`. tg-* prefix keeps the plugins' existing class names. (`code` follows strike, below.)
+  // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markEmphasis), the single
+  // source for this mark. Runs over the already-escaped, block-marked text; the tokeniser treats an
+  // already-injected span as OPAQUE, so an asterisk bullet's own `*` can never pair with real
+  // emphasis further along the line. tg-* prefix keeps the plugins' existing class names.
+  // (`code` follows strike, below.)
   const h = markCode(
-    markBoldItalic(blocks, 'tg')
+    markEmphasis(blocks, 'tg')
     .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>'),
     'tg')   // inline `code` — also DELEGATED to cssmd (markCode); kept AFTER strike to preserve the original pass order
     .replace(/(\[\[[^\]\n]+\]\])/g, (m) => '<span class="tg-link"><span class="tg-mk">[[</span>' + m.slice(2, -2) + '<span class="tg-mk">]]</span></span>')

@@ -42,7 +42,7 @@ app injects them; outside Obsidian a small shim supplies them. The core is never
 per host.
 
 - **`packages/core`** — the editor engine (SSOT). What it knows about markdown, where it stands
-  against CommonMark, and the one construct still rendering wrongly: [`MARKDOWN.md`](packages/core/MARKDOWN.md).
+  against CommonMark, and what it still gets wrong: [`MARKDOWN.md`](packages/core/MARKDOWN.md).
 - **`packages/cssmd`** — the shared inline-mark primitive (`**bold**` / `*italic*` /
   `` `code` `` rendered with the raw markers hidden via one CSS rule). The engine
   delegates to it so there is one implementation, not a copy per consumer.
