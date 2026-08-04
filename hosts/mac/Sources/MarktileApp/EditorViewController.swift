@@ -139,6 +139,20 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.toggleLock()", completionHandler: nil)
     }
 
+    /// Every Format menu item, carrying the engine's own tool key in `representedObject`. One action
+    /// for eleven items, because the menu has nothing to say about what "bold" means — it only has to
+    /// name which button the person would otherwise have hunted for.
+    @objc func runTool(_ sender: Any?) {
+        guard let key = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        webView.evaluateJavaScript("window.__mt.tool(\(jsString(key)))", completionHandler: nil)
+    }
+
+    /// ⌘F. Opens the engine's own find bar rather than a native one: the search has to run over the
+    /// text model the editor is holding, and a second search UI would be a second idea of what a match is.
+    @objc func showFind(_ sender: Any?) {
+        webView.evaluateJavaScript("window.__mt.find()", completionHandler: nil)
+    }
+
     // Toolbar visibility is a preference, not per-document state: hiding it and having it return on the
     // next file would read as the app forgetting. Swift owns the value so every window agrees.
     private static let toolbarHiddenKey = "toolbarHidden"
@@ -169,6 +183,11 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         }
         if item.action == #selector(toggleLock(_:)) {
             item.state = isLockedCache ? .on : .off
+        }
+        // Locked means read-only, and the engine already refuses these edits. Greying them out is the
+        // difference between a menu that is honest about it and one that looks live and does nothing.
+        if item.action == #selector(runTool(_:)) {
+            return !isLockedCache
         }
         return true
     }

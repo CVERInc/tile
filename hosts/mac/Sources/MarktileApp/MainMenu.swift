@@ -62,6 +62,52 @@ func makeMainMenu() -> NSMenu {
     )
     pastePlain.keyEquivalentModifierMask = [.command, .option, .shift]
     editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    editMenu.addItem(.separator())
+    // ⌘F is a reflex, and until now it landed on nothing — the find bar had exactly one door, the
+    // magnifier at the far left of the toolbar.
+    editMenu.addItem(withTitle: "Find…", action: #selector(EditorViewController.showFind(_:)), keyEquivalent: "f")
+
+    // ── Format ─────────────────────────────────────────────────────────────────
+    // Eleven of this editor's sixteen buttons had no keyboard route and no menu entry at all: the
+    // toolbar was their only door, which is why it could not afford to shed a single button when the
+    // window got narrow. A menu is not the "invisible room" an overflow popover would be — it is
+    // always in the same place, it can be browsed, and Help's ⌘⇧/ search finds any item in it by name.
+    //
+    // The shortcuts follow what a Mac person already has in their fingers from Notes, Pages and every
+    // word processor since: ⌘B/⌘I, ⇧⌘X for strikethrough, ⇧⌘7/⇧⌘8 for the two lists, ⇧⌘L for a
+    // checklist, ⌘K for a link. Nothing invented where a convention exists.
+    let formatItem = NSMenuItem()
+    main.addItem(formatItem)
+    let formatMenu = NSMenu(title: "Format")
+    formatItem.submenu = formatMenu
+    // (title, engine tool key, key equivalent, extra modifiers) — the key is the engine's own, so a
+    // renamed tool breaks loudly at the bridge instead of quietly doing nothing.
+    let tools: [(String, String, String, NSEvent.ModifierFlags)] = [
+        ("Heading 1", "h1", "1", []),
+        ("Heading 2", "h2", "2", []),
+        ("Heading 3", "h3", "3", []),
+        ("", "", "", []),
+        ("Bold", "bold", "b", []),
+        ("Italic", "italic", "i", []),
+        ("Strikethrough", "strike", "X", [.command, .shift]),
+        ("", "", "", []),
+        ("Bulleted List", "bullet", "8", [.command, .shift]),
+        ("Numbered List", "number", "7", [.command, .shift]),
+        ("Checklist", "check", "L", [.command, .shift]),
+        ("Block Quote", "quote", "'", []),
+        ("", "", "", []),
+        ("Table", "table", "", []),
+        ("Inline Code", "code", "C", [.command, .shift]),
+        ("Wikilink", "link", "k", []),
+    ]
+    for (title, key, equiv, mods) in tools {
+        if title.isEmpty { formatMenu.addItem(.separator()); continue }
+        let item = formatMenu.addItem(title: title,
+                                      action: #selector(EditorViewController.runTool(_:)),
+                                      keyEquivalent: equiv)
+        if !mods.isEmpty { item.keyEquivalentModifierMask = mods }
+        item.representedObject = key
+    }
 
     // ── View ───────────────────────────────────────────────────────────────────
     // The three modes are the product. They live on a toolbar button inside the editor; these are

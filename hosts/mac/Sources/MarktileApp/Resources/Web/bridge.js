@@ -153,6 +153,11 @@ window.__mt = {
   isLocked: () => locked,
   setAccent: setAccent,
   setToolbar: (visible) => { toolbarHidden = !visible; applyToolbar(); },
+  // The Format menu and its ⌘-equivalents. Same `runs` map the toolbar buttons are bound to — the menu
+  // is a second DOOR to each capability, never a second definition of it. Returns false for a key the
+  // engine doesn't have, which is how the Swift side can refuse to ship a menu item that does nothing.
+  tool: (key) => !!(ctrl && ctrl.runTool(key)),
+  find: () => { if (ctrl) ctrl.toggleFind(true); },
 };
 
 send("ready");
