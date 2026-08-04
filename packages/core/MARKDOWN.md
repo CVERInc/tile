@@ -71,18 +71,37 @@ working tree and `HEAD`.
 | `"` not encoded as `&quot;` | 6 | the harness. `escHtml` deliberately leaves quotes alone (content never lands in an attribute position); the emphasis in all six is correct |
 | emphasis spanning a line break | 5 | architectural. One line is one `<div>`; a construct cannot cross that and stay a single-layer editor |
 | a link inside the emphasis | 4 | the harness. It maps `<em>`, `<strong>`, `<code>` and autolinks, but not links proper — their spec form needs a destination it does not resolve |
-| U+00A0 after a list marker | 1 | a REAL bug, and not in emphasis — see below |
 | link brackets (`*[bar*](/url)`) | 2 | the deliberate trade above |
 | raw HTML attributes | 3 | inside a declared gap; there is no HTML parser here to make `title="*"` opaque |
 
-**A bug this ruler found by accident.** Example 353 looks like `* a *` and reads as an emphasis
-miss. It is not: the spec's example uses U+00A0 on both sides, so CommonMark sees no list item —
-a list marker must be followed by U+0020 or U+0009. `editor-core.js` matches `/^\s*[-*]\s/`, and JS
-`\s` **includes U+00A0**, so it marks a bullet that is not there and Rendered then hides the
-character the author typed. `markEmphasis` is already right about NBSP (`isMdSpace` uses `/\s/u`,
-and treating it as whitespace is exactly what the flanking rules want); only the block-marker
-regexes are wrong. Tracked separately, because it touches list parsing and deserves its own
-measurement.
+*(Twenty of the original 21: example 353 was fixed — see the next section, which this ruler found.)*
+
+## Structural whitespace is `[ \t]`, never `\s`
+
+CommonMark defines every block marker in terms of **spaces and tabs**. JS `\s` is far wider, and the
+member that matters is **U+00A0 NO-BREAK SPACE** — plus, for a CJK keyboard, **U+3000**. With `\s`,
+this engine read `-<NBSP>item` and `-　項目` as bullets, wrapped the marker in a `tg-mk` span, and
+Rendered then **hid a character the author had actually typed** — while Obsidian, GitHub and every
+other renderer showed those lines as paragraphs. An editor that quietly disagrees with the file is
+worse than one that renders plainly.
+
+Every structural regex in `editor-core.js` now uses `[ \t]`: bullets, ordered markers, headings,
+thematic breaks, reference definitions, tasks, fences, frontmatter, setext underlines, table lines,
+and the editing paths (list continuation, renumbering, the heading and checkbox toggles). Two more in
+`packages/tugtile/plugin.src.js`. The board parser needed nothing — it matches a literal `'- ['`.
+
+Two things are deliberately NOT `[ \t]`: `>` keeps taking any following character as content,
+because the `>` **is** the marker and the space after it is optional (the reference agrees:
+`><NBSP>quote` is a blockquote); and `getValue`/`isDirty` still trim with `\s+$`, because there the
+job really is "ignore trailing blank lines" and `\n` must be in the class.
+
+`markEmphasis` was already right and did not change: `isMdSpace` uses `/\s/u`, and treating NBSP as
+whitespace is exactly what the flanking rules want. The block layer was the only wrong one.
+
+🩸 When this landed, the whole suite stayed green and not one of the 68 parity goldens moved —
+because the corpus contained **no NBSP at all**. Green meant "never exercised", not "correct".
+`test/whitespace.test.cjs` is the missing exercise; every expectation in it came from the reference
+`commonmark` package rather than from this engine's output.
 
 ### Constraints any change here has to keep
 

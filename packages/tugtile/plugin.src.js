@@ -91,7 +91,7 @@ function tileRenderText(tileLines) {
 // For table view: strip markdown formatting (headings, bold, italics, strikethrough, inline code, and links) to get plain text. Table styling is completely managed by us to ensure uniform font sizes.
 function tilePlainText(s) {
   return String(s)
-    .replace(/^#{1,6}\s+/, '')                                              // Heading hashes
+    .replace(/^#{1,6}[ \t]+/, '')                                           // Heading hashes ([ \t], not \s — see the structural-whitespace note in editor-core.js)
     .replace(/(\*\*|__)(.+?)\1/g, '$2')                                     // Bold
     .replace(/(\*|_)(.+?)\1/g, '$2')                                        // Italic
     .replace(/~~(.+?)~~/g, '$1')                                            // Strikethrough
@@ -149,7 +149,7 @@ function parseFile(text) {
   if (lines[0] === '---') { const c = lines.indexOf('---', 1); if (c !== -1) fmEnd = c + 1; }
 
   const isFence = (l) => /^(```|~~~)/.test(l);                // Top-level code fence (indented card contents are not affected)
-  const isHr = (l) => /^\*\*\*+\s*$/.test(l);                 // Archive separator: only matches *** (kanban's archiveString, to avoid misidentifying lead ---/___ horizontal lines as archive markers and swallowing lanes)
+  const isHr = (l) => /^\*\*\*+[ \t]*$/.test(l);              // Archive separator: only matches *** (kanban's archiveString, to avoid misidentifying lead ---/___ horizontal lines as archive markers and swallowing lanes). [ \t], not \s — see the structural-whitespace note in editor-core.js
   const isHeading = (l) => l.indexOf('## ') === 0;
 
   // Archive section start: a horizontal rule within the board area, not inside a fence, and followed by a `## ` heading (after skipping blank lines) counts as the separator.

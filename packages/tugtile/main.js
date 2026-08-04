@@ -380,20 +380,29 @@ function highlightLineParts(line, block) {
   // …but the heading TEXT is ordinary prose that happens to be a heading, so it keeps every inline
   // mark and merely gains the level class the # form would have given it.
   if (block === 'sh1' || block === 'sh2') cls += ' tg-h tg-h' + block.slice(2);
+  // 🔴 STRUCTURAL WHITESPACE IS `[ \t]`, NEVER `\s`. CommonMark's block markers are defined in terms
+  // of spaces and tabs; JS `\s` is far wider, and the one that matters is U+00A0 NO-BREAK SPACE,
+  // which arrives constantly in text pasted from the web, Word or Pages. With `\s` this engine read
+  // `-<NBSP>item` as a bullet, wrapped the marker in a tg-mk span, and Rendered then HID a character
+  // the author had actually typed — while every other tool renders that line as a paragraph.
+  // Verified against the reference `commonmark` package: NBSP after `-`, `1.`, `#`, or before the
+  // end of a `---` all mean "not that construct". `>` is the exception below, because the `>` IS the
+  // marker and the space after it is optional.
+  //
   // CommonMark: a heading counts at line start, after ≤3 leading spaces, OR inside a list item. hm[1] swallows the
   // optional indent + bullet/checkbox prefix so `- ### x` / `- [ ] ### x` / `  ### x` all size+colour as headings;
   // hm[2] is the # run (→ level). It's ADDITIVE with tg-li/tg-task — a heading can also be a list/task line.
-  const hm = /^(\s*(?:[-*]\s(?:\[[ xX]\]\s)?)?)(#{1,6})\s/.exec(line);
+  const hm = /^([ \t]*(?:[-*][ \t](?:\[[ xX]\][ \t])?)?)(#{1,6})[ \t]/.exec(line);
   if (hm) cls += ' tg-h tg-h' + hm[2].length;
-  if (/^>\s?/.test(line)) cls += ' tg-quote';
-  else if (/^\s*[-*]\s/.test(line)) cls += ' tg-li';
-  else if (/^\s*\d+[.)]\s/.test(line)) cls += ' tg-ol';   // ordered list — 43635 occurrences in his corpus, the most common construct in it, and until now the only list kind with a toolbar button and no rendering
+  if (/^>[ \t]?/.test(line)) cls += ' tg-quote';
+  else if (/^[ \t]*[-*][ \t]/.test(line)) cls += ' tg-li';
+  else if (/^[ \t]*\d+[.)][ \t]/.test(line)) cls += ' tg-ol';   // ordered list — 43635 occurrences in his corpus, the most common construct in it, and until now the only list kind with a toolbar button and no rendering
   // A thematic break is the whole line. Frontmatter never reaches here (blockScan labels it first), so a
   // `---` that gets this far is the horizontal rule it looks like.
-  if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) cls += ' tg-hr';
+  if (/^(-{3,}|\*{3,}|_{3,})[ \t]*$/.test(line)) cls += ' tg-hr';
   // A link reference or footnote definition — `[ref]: https://…`. It is a line that produces no visible
   // output in a rendered document, so Rendered dims it rather than pretending it is a paragraph.
-  if (/^\s{0,3}\[[^\]\n]+\]:\s*\S/.test(line)) cls += ' tg-refdef';
+  if (/^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*\S/.test(line)) cls += ' tg-refdef';
   // Two trailing spaces before a newline is a hard break — invisible syntax, which is exactly the kind
   // a person deletes by accident. Marked so Rendered can show it as the line break it is.
   if (/\S {2,}$/.test(line)) cls += ' tg-brk';
@@ -406,16 +415,19 @@ function highlightLineParts(line, block) {
   // Block-level markers first (headings / quote / checkbox / bullet — these STAY in the core;
   // they're line-anchored and outside cssmd's inline-only scope).
   const blocks = escHtml(line)
-    .replace(/^(\s*(?:[-*]\s(?:\[[ xX]\]\s)?)?)(#{1,6}\s)/, (m, pre, hashes) => pre + '<span class="tg-mk">' + hashes + '</span>')   // heading marker — wraps only the # run, leaving any indent/bullet/checkbox prefix for the rules below to wrap
-    .replace(/^(&gt;\s?)/, '<span class="tg-mk">$1</span>')   // blockquote marker
-    .replace(/^(\s*[-*]\s)(\[[ xX]\])/, (m, p, box) => '<span class="tg-mk">' + p + '</span><span class="tg-check' + (/[xX]/.test(box) ? ' tg-check-done' : '') + '"><span class="tg-mk">' + box + '</span></span>')
-    .replace(/^(\s*[-*]\s)/, '<span class="tg-mk">$1</span>')   // plain bullet (heading/quote/checkbox lines already start with a <span>, so this won't match them)
+    .replace(/^([ \t]*(?:[-*][ \t](?:\[[ xX]\][ \t])?)?)(#{1,6}[ \t])/, (m, pre, hashes) => pre + '<span class="tg-mk">' + hashes + '</span>')   // heading marker — wraps only the # run, leaving any indent/bullet/checkbox prefix for the rules below to wrap
+    .replace(/^(&gt;[ \t]?)/, '<span class="tg-mk">$1</span>')   // blockquote marker
+    // The checkbox needs whitespace (or the line end) AFTER it too — GFM asks for at least one
+    // whitespace character, so `- [ ]<NBSP>task` is an ordinary bullet whose text happens to begin
+    // with `[ ]`, not a task. Same reason as every other marker here.
+    .replace(/^([ \t]*[-*][ \t])(\[[ xX]\])(?=[ \t]|$)/, (m, p, box) => '<span class="tg-mk">' + p + '</span><span class="tg-check' + (/[xX]/.test(box) ? ' tg-check-done' : '') + '"><span class="tg-mk">' + box + '</span></span>')
+    .replace(/^([ \t]*[-*][ \t])/, '<span class="tg-mk">$1</span>')   // plain bullet (heading/quote/checkbox lines already start with a <span>, so this won't match them)
     // The ordered marker is tg-num, NOT tg-mk: `1. ` is not punctuation the reader can spare — the number
     // is the content. A bullet's `- ` can be swapped for a • because the dot carries the same meaning;
     // hiding "7." and drawing a dot would delete the seventh-ness.
-    .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
+    .replace(/^([ \t]*\d+[.)][ \t])/, '<span class="tg-num">$1</span>')
     // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
-    .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
+    .replace(/^((?:-{3,}|\*{3,}|_{3,})[ \t]*)$/, '<span class="tg-mk">$1</span>');
   // PRECEDENCE. Two constructs bind tighter than emphasis and go first, because their content is
   // addressing or literal text rather than prose: an inline `code` span and an <autolink>. Both are
   // DELEGATED-or-local marker sandwiches, and markEmphasis treats a finished span as OPAQUE, so
@@ -463,7 +475,7 @@ function highlightLineParts(line, block) {
     .replace(/\t/g, '<span class="tg-tab">\t</span>');   // wrap each literal tab LAST (after the line-start regexes) so CSS can mark tab-vs-space; span is transparent to the text round-trip
   // Escapes hide LAST of all — every pass above has to still see the backslash in order to decline.
   const esc = markEscapes(h, 'tg');
-  if (/^\s*[-*]\s\[[ xX]\]/.test(line)) cls += ' tg-task' + (/^\s*[-*]\s\[[xX]\]/.test(line) ? ' tg-task-done' : '');
+  if (/^[ \t]*[-*][ \t]\[[ xX]\](?=[ \t]|$)/.test(line)) cls += ' tg-task' + (/^[ \t]*[-*][ \t]\[[xX]\](?=[ \t]|$)/.test(line) ? ' tg-task-done' : '');
   return { cls: cls, inner: (esc || '<br>') };
 }
 // Which lines are inside a block that is not markdown. Pure (text in, one label per line out) so it is
@@ -474,13 +486,13 @@ function highlightLineParts(line, block) {
 //
 // Frontmatter is only frontmatter at the very top of the file — a `---` anywhere else is a thematic
 // break, and treating one as the other would swallow the rest of the document.
-const FENCE = /^(\s{0,3})(`{3,}|~{3,})(.*)$/;
+const FENCE = /^([ \t]{0,3})(`{3,}|~{3,})(.*)$/;
 function blockScan(lines) {
   const kind = new Array(lines.length).fill(null);
   let i = 0;
-  if (lines.length > 1 && /^---\s*$/.test(lines[0])) {
+  if (lines.length > 1 && /^---[ \t]*$/.test(lines[0])) {
     for (let j = 1; j < lines.length; j++) {
-      if (/^(---|\.\.\.)\s*$/.test(lines[j])) {
+      if (/^(---|\.\.\.)[ \t]*$/.test(lines[j])) {
         kind[0] = kind[j] = 'fmfence';
         for (let k = 1; k < j; k++) kind[k] = 'fm';
         i = j + 1;
@@ -529,8 +541,8 @@ function blockScan(lines) {
   // The heading is the WHOLE preceding paragraph, not just the last line, which is why this walks
   // back. A `-` underline loses to nothing: with a paragraph above it, CommonMark says heading, and
   // the thematic break it would otherwise have been never happens.
-  const UNDER = /^\s{0,3}(=+|-+)\s*$/;
-  const OPENER = /^\s{0,3}(?:[-*+>]\s|#{1,6}\s|\d{1,9}[.)]\s|\|)/;
+  const UNDER = /^[ \t]{0,3}(=+|-+)[ \t]*$/;
+  const OPENER = /^[ \t]{0,3}(?:[-*+>][ \t]|#{1,6}[ \t]|\d{1,9}[.)][ \t]|\|)/;
   for (let j = 1; j < lines.length; j++) {
     if (kind[j] !== null) continue;
     const u = UNDER.exec(lines[j]);
@@ -563,9 +575,9 @@ function listContinuation(v, s) {
   let le = v.indexOf('\n', s); if (le < 0) le = v.length;
   const line = v.slice(ls, le);
   let prefix = null, contentStart = 0;
-  const mu = /^(\s*)([-*])\s+(\[[ xX]\]\s+)?/.exec(line);
+  const mu = /^([ \t]*)([-*])[ \t]+(\[[ xX]\][ \t]+)?/.exec(line);
   if (mu) { contentStart = mu[0].length; prefix = mu[1] + mu[2] + ' ' + (mu[3] ? '[ ] ' : ''); }
-  else { const mo = /^(\s*)(\d+)([.)])\s+/.exec(line); if (mo) { contentStart = mo[0].length; prefix = mo[1] + (parseInt(mo[2], 10) + 1) + mo[3] + ' '; } }
+  else { const mo = /^([ \t]*)(\d+)([.)])[ \t]+/.exec(line); if (mo) { contentStart = mo[0].length; prefix = mo[1] + (parseInt(mo[2], 10) + 1) + mo[3] + ' '; } }
   if (prefix === null) return null;
   if (line.slice(contentStart).trim() === '') return { text: v.slice(0, ls) + v.slice(le), caret: ls };   // empty item → exit the list
   return { text: v.slice(0, s) + '\n' + prefix + v.slice(s), caret: s + 1 + prefix.length };               // continue the list
@@ -580,7 +592,7 @@ function renumberLists(v) {
   const lines = v.split('\n');
   let n = 0, changed = false;
   for (let i = 0; i < lines.length; i++) {
-    const m = /^(\d+)([.)])(\s)/.exec(lines[i]);
+    const m = /^(\d+)([.)])([ \t])/.exec(lines[i]);
     if (m) { n++; const want = n + m[2] + m[3]; if (m[0] !== want) { lines[i] = want + lines[i].slice(m[0].length); changed = true; } }
     else if (/^[ \t]+\S/.test(lines[i])) continue;   // indented continuation / nested list → part of the current item, leave the top-level counter alone
     else n = 0;   // blank / non-indented non-ordered line breaks the block → next ordered run restarts at 1
@@ -607,9 +619,9 @@ function tocHeadings(text) {
   const out = [];
   let fence = false;
   for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }   // a fence line toggles in/out of code (its own # are not headings)
+    if (/^[ \t]*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }   // a fence line toggles in/out of code (its own # are not headings)
     if (fence) continue;
-    const m = /^(#{1,3})\s+(.*)$/.exec(lines[i]);
+    const m = /^(#{1,3})[ \t]+(.*)$/.exec(lines[i]);
     if (m) out.push({ level: m[1].length, text: m[2].trim(), line: i });
   }
   return out;
@@ -781,7 +793,7 @@ function mountEditor(contentEl, opts, host) {
                 : lineEl.classList.contains('tg-fm') ? 'fm'
                 : lineEl.classList.contains('tg-cfence') ? 'cfence'
                 : lineEl.classList.contains('tg-fmfence') ? 'fmfence' : null;
-      const isFenceNow = FENCE.test(text) || /^(---|\.\.\.)\s*$/.test(text);
+      const isFenceNow = FENCE.test(text) || /^(---|\.\.\.)[ \t]*$/.test(text);
       if (isFenceNow !== (was === 'cfence' || was === 'fmfence')) return false;
       const within = charsBeforeInLine(lineEl, r.startContainer, r.startOffset);
       const p = highlightLineParts(text, was);
@@ -874,7 +886,7 @@ function mountEditor(contentEl, opts, host) {
     // left alone. Toggles OFF only when every non-blank line already has it.
     const togglePre = (pre, ordered) => {
       const v = getText(), s = sel().start, e = sel().end;
-      const re = ordered ? /^\d+\.\s/ : null;
+      const re = ordered ? /^\d+\.[ \t]/ : null;
       const has = (ln) => (re ? re.test(ln) : ln.startsWith(pre));
       const strip = (ln) => (re ? ln.replace(re, '') : ln.slice(pre.length));
       if (s === e) {   // no selection → just the caret's line, caret preserved (original behaviour)
@@ -898,7 +910,7 @@ function mountEditor(contentEl, opts, host) {
       }).join('\n');
       applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);   // keep the block selected
     };
-    const setHeading = (hashes) => { const v = getText(), s = sel().start, ls = lineStartOf(v, s); const rest = v.slice(ls); const m = /^#{1,6}\s/.exec(rest); const cur = m ? m[0].length : 0; const repl = (m && m[0] === hashes) ? '' : hashes; const nv = v.slice(0, ls) + repl + rest.slice(cur); const np = Math.max(ls, s + (repl.length - cur)); applyEdit(nv, np); };
+    const setHeading = (hashes) => { const v = getText(), s = sel().start, ls = lineStartOf(v, s); const rest = v.slice(ls); const m = /^#{1,6}[ \t]/.exec(rest); const cur = m ? m[0].length : 0; const repl = (m && m[0] === hashes) ? '' : hashes; const nv = v.slice(0, ls) + repl + rest.slice(cur); const np = Math.max(ls, s + (repl.length - cur)); applyEdit(nv, np); };
     // Bind a toolbar button so a TAP fires the action (keeping editor focus) but a SWIPE scrolls the row instead.
     // The old approach fired on touchstart+preventDefault, which was hair-trigger and blocked horizontal scrolling.
     const bindTap = (b, run) => {
@@ -1197,7 +1209,7 @@ const WIDE = [
 function charWidth(cp) { for (const [a, b] of WIDE) if (cp >= a && cp <= b) return 2; return 1; }
 function dispWidth(s) { let w = 0; for (const ch of String(s)) w += charWidth(ch.codePointAt(0)); return w; }
 
-const isTableLine = (l) => /^\s*\|.*\|\s*$/.test(l);
+const isTableLine = (l) => /^[ \t]*\|.*\|[ \t]*$/.test(l);
 const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 const isSepRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c.trim()));
 
@@ -1651,7 +1663,7 @@ function wireTaskToggle(mount, ctrl) {
     const ix = lines.indexOf(lineEl);
     const src = ctrl.rawValue().split('\n');
     if (ix < 0 || ix >= src.length) return;
-    const next = src[ix].replace(/^(\s*[-*]\s)\[([ xX])\]/, (m, pre, mark) => pre + (mark === ' ' ? '[x]' : '[ ]'));
+    const next = src[ix].replace(/^([ \t]*[-*][ \t])\[([ xX])\]/, (m, pre, mark) => pre + (mark === ' ' ? '[x]' : '[ ]'));
     if (next === src[ix]) return;   // not a task line after all — let the click through untouched
     e.preventDefault();
     e.stopPropagation();
@@ -1869,7 +1881,7 @@ function tileRenderText(tileLines) {
 // For table view: strip markdown formatting (headings, bold, italics, strikethrough, inline code, and links) to get plain text. Table styling is completely managed by us to ensure uniform font sizes.
 function tilePlainText(s) {
   return String(s)
-    .replace(/^#{1,6}\s+/, '')                                              // Heading hashes
+    .replace(/^#{1,6}[ \t]+/, '')                                           // Heading hashes ([ \t], not \s — see the structural-whitespace note in editor-core.js)
     .replace(/(\*\*|__)(.+?)\1/g, '$2')                                     // Bold
     .replace(/(\*|_)(.+?)\1/g, '$2')                                        // Italic
     .replace(/~~(.+?)~~/g, '$1')                                            // Strikethrough
@@ -1927,7 +1939,7 @@ function parseFile(text) {
   if (lines[0] === '---') { const c = lines.indexOf('---', 1); if (c !== -1) fmEnd = c + 1; }
 
   const isFence = (l) => /^(```|~~~)/.test(l);                // Top-level code fence (indented card contents are not affected)
-  const isHr = (l) => /^\*\*\*+\s*$/.test(l);                 // Archive separator: only matches *** (kanban's archiveString, to avoid misidentifying lead ---/___ horizontal lines as archive markers and swallowing lanes)
+  const isHr = (l) => /^\*\*\*+[ \t]*$/.test(l);              // Archive separator: only matches *** (kanban's archiveString, to avoid misidentifying lead ---/___ horizontal lines as archive markers and swallowing lanes). [ \t], not \s — see the structural-whitespace note in editor-core.js
   const isHeading = (l) => l.indexOf('## ') === 0;
 
   // Archive section start: a horizontal rule within the board area, not inside a fence, and followed by a `## ` heading (after skipping blank lines) counts as the separator.
