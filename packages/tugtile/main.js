@@ -162,6 +162,14 @@ function skipElement(s, i) {
   return k;
 }
 
+// The text a reader would see inside a stretch of markup — tags dropped, entities left alone. The
+// flanking rules ask what character sits next to a delimiter, and next to an opaque element the
+// honest answer is that element's own last (or first) rendered character: a code span ends in a
+// backtick, an autolink ends in `>`, a bullet marker ends in a space. Calling every element
+// "whitespace" instead was wrong in a way that hid itself — it made `` *a `*`* `` unclosable,
+// because a closer preceded by whitespace cannot close, and the emphasis simply never appeared.
+function elemText(s, from, to) { return s.slice(from, to).replace(/<[^>]*>/g, ''); }
+
 // Pass 1 — split the text into runs of `*` / `_` and the text between them, deciding for each run
 // whether it can open, can close, or both. That verdict comes from the characters on either side
 // (the spec's left-flanking / right-flanking), which is why this cannot be done one delimiter at a
@@ -179,14 +187,22 @@ function scanRuns(s) {
     }
     if (c === '<') {
       const end = skipElement(s, i);
-      if (end > i) { buf += s.slice(i, end); prev = undefined; i = end; continue; }
+      if (end > i) {
+        buf += s.slice(i, end);
+        const inner = elemText(s, i, end);
+        prev = inner ? inner[inner.length - 1] : undefined;
+        i = end; continue;
+      }
       buf += c; prev = c; i++; continue;
     }
     if (c !== '*' && c !== '_') { buf += c; prev = c; i++; continue; }
     let j = i;
     while (s[j] === c) j++;
     let next = s[j];
-    if (next === '<' && skipElement(s, j) > j) next = undefined;
+    if (next === '<') {
+      const end = skipElement(s, j);
+      if (end > j) { const inner = elemText(s, j, end); next = inner ? inner[0] : undefined; }
+    }
     const beforeSpace = isMdSpace(prev), afterSpace = isMdSpace(next);
     const beforePunct = isMdPunct(prev), afterPunct = isMdPunct(next);
     const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct);
@@ -313,7 +329,14 @@ function renderInlineMd(text, opts) {
   const prefix = (opts && opts.prefix) || 'tg';
   // Escape FIRST (whole string), then run the marker passes over escaped text — same order as
   // editor-core.js (escHtml(line).replace(...)). The markers **, *, ` are unaffected by escaping.
-  return markEscapes(markCode(markEmphasis(escHtml(text), prefix), prefix), prefix);
+  //
+  // CODE BEFORE EMPHASIS, which is the spec's precedence and was the other way round until
+  // 2026-08-04: a code span's content is literal by definition, so `` `*` `` is an asterisk and not
+  // a delimiter. Running emphasis first made ``*a `*`*`` pair the backtick's asterisk with the outer
+  // one, and made `` `**a**` `` — documenting the syntax, which this repo does constantly — render
+  // as bold inside the code span. markEmphasis treats the finished code span as opaque, so the
+  // reorder is all the fix needs.
+  return markEscapes(markEmphasis(markCode(escHtml(text), prefix), prefix), prefix);
 }
 
 // The CSS contract. Returns the stylesheet text a host must include for the technique to work:
@@ -393,15 +416,29 @@ function highlightLineParts(line, block) {
     .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
     // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
     .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
+  // PRECEDENCE. Two constructs bind tighter than emphasis and go first, because their content is
+  // addressing or literal text rather than prose: an inline `code` span and an <autolink>. Both are
+  // DELEGATED-or-local marker sandwiches, and markEmphasis treats a finished span as OPAQUE, so
+  // running them first is the whole mechanism — `` `*` `` stops being a delimiter, and the `**` in
+  // `**a<https://x/?q=**>` stops finding a partner. This was the other way round until 2026-08-04,
+  // which is why `` `**a**` `` used to render bold inside the code span.
+  const tight = markCode(blocks, 'tg')
+    // <https://…> and <a@b.c> — a bare URL in angle brackets, which is the one HTML-looking thing in
+    // markdown that is not HTML. escHtml has already turned the brackets into entities.
+    .replace(/&lt;((?:[a-z][a-z0-9+.-]*:|mailto:)[^\s&]*|[^\s&@]+@[^\s&@]+\.[^\s&@]+)&gt;/gi, (m, url) =>
+      '<span class="tg-link"><span class="tg-mk">&lt;</span>' + url + '<span class="tg-mk">&gt;</span></span>');
   // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markEmphasis), the single
-  // source for this mark. Runs over the already-escaped, block-marked text; the tokeniser treats an
-  // already-injected span as OPAQUE, so an asterisk bullet's own `*` can never pair with real
-  // emphasis further along the line. tg-* prefix keeps the plugins' existing class names.
-  // (`code` follows strike, below.)
-  const h = markCode(
-    markEmphasis(blocks, 'tg')
-    .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>'),
-    'tg')   // inline `code` — also DELEGATED to cssmd (markCode); kept AFTER strike to preserve the original pass order
+  // source for this mark. Runs over the already-escaped, block-marked, code-marked text; the
+  // tokeniser treats an already-injected span as OPAQUE, so an asterisk bullet's own `*` can never
+  // pair with real emphasis further along the line. tg-* prefix keeps the plugins' class names.
+  //
+  // The LINK passes stay AFTER this, deliberately, even though the spec binds link brackets tighter
+  // than emphasis too: a link's TEXT is prose and routinely contains emphasis (`[*bar*](/url)`), and
+  // an opaque link span would lose it. The price is the spec's own edge case `*[bar*](/url)`, where
+  // the brackets should stop a pair from forming — rare enough to be worth the trade, and named here
+  // rather than left as a surprise.
+  const h = markEmphasis(tight, 'tg')
+    .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>')
     .replace(/(\[\[[^\]\n]+\]\])/g, (m) => '<span class="tg-link"><span class="tg-mk">[[</span>' + m.slice(2, -2) + '<span class="tg-mk">]]</span></span>')
     // CommonMark's own link and image. The engine grew up inside Obsidian and learned the dialect
     // ([[wikilink]]) before the language — `[text](url)` appears in 32.7% of his documents and rendered
@@ -420,10 +457,7 @@ function highlightLineParts(line, block) {
     .replace(/(\[)(\^[^\]\n]+)(\])/g, (m, o, ref, c) => '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + ref + '<span class="tg-mk">' + c + '</span></span>')
     .replace(/(\[)([^\]\n]*)(\]\[)([^\]\n]*)(\])/g, (m, o, text, mid, ref, c) =>
       '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + text + '<span class="tg-mk">' + mid + ref + c + '</span></span>')
-    // <https://…> and <a@b.c> — a bare URL in angle brackets, which is the one HTML-looking thing in
-    // markdown that is not HTML. escHtml has already turned the brackets into entities.
-    .replace(/&lt;((?:[a-z][a-z0-9+.-]*:|mailto:)[^\s&]*|[^\s&@]+@[^\s&@]+\.[^\s&@]+)&gt;/gi, (m, url) =>
-      '<span class="tg-link"><span class="tg-mk">&lt;</span>' + url + '<span class="tg-mk">&gt;</span></span>')
+    // (the <autolink> pass moved ABOVE markEmphasis — see the precedence note there)
     .replace(/(@@?\{)([^}\n]*)(\})/g, (m, op, inner, cl) => '<span class="tg-date"><span class="tg-mk">' + op + '</span>' + inner + '<span class="tg-mk">' + cl + '</span></span>')
     .replace(/(^|[^&\w])(#[^\s#<&]+)/g, '$1<span class="tg-tag">$2</span>')
     .replace(/\t/g, '<span class="tg-tab">\t</span>');   // wrap each literal tab LAST (after the line-start regexes) so CSS can mark tab-vs-space; span is transparent to the text round-trip

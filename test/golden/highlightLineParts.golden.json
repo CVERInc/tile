@@ -185,7 +185,7 @@
     "line": "`a *b* c`",
     "result": {
       "cls": "tg-line",
-      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>a <span class=\"tg-i\"><span class=\"tg-mk\">*</span>b<span class=\"tg-mk\">*</span></span> c<span class=\"tg-mk\">`</span></span>"
+      "inner": "<span class=\"tg-code\"><span class=\"tg-mk\">`</span>a *b* c<span class=\"tg-mk\">`</span></span>"
     }
   },
   {

@@ -21,6 +21,11 @@
  * touched. That order matters: regenerating first and reading the diff afterwards would have made
  * this file agree with whatever the renderer now does, which is not a test.
  *
+ * 🩸 Regenerated a second time, same day, when the inline `code` and <autolink> passes moved AHEAD
+ * of emphasis (the spec's precedence). ONE entry moved:
+ *   • `` `a *b* c` ``  an italic inside the code span → the asterisks are literal, as `<code>` means
+ * Reference-checked first, again.
+ *
  * Run: node test/parity-highlightLineParts.test.cjs
  */
 'use strict';

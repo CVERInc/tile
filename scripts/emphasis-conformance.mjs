@@ -35,21 +35,38 @@ async function spec() {
   return json;
 }
 
-// Lift cssmd the way the tests do — no module resolution, no build step in the loop. TWO copies: the
-// working tree and the last commit, so the comparison is always "what I just changed" against "what
-// shipped". Carrying a frozen copy of the old implementation in the source would have been the other
-// way to A/B, and it would have rotted into dead code the first time nobody updated it.
+// Lift the REAL renderer — highlightLineParts with cssmd inlined, exactly as the builds assemble it.
+// An earlier version of this script ran the cssmd passes alone, which made it blind to the passes
+// that live in the core (autolink, links, tags): a change to their ORDER moved nothing here while
+// moving plenty in the product. A ruler that cannot see the change you are making is not a ruler.
+//
+// TWO copies — the working tree and the last commit — so the comparison is always "what I just
+// changed" against "what shipped". Carrying a frozen copy of the old implementation in the source
+// would have been the other way to A/B, and it would have rotted into dead code the first time
+// nobody updated it.
+const CORE = 'packages/core/editor-core.js';
 const CSSMD = 'packages/cssmd/cssmd.js';
-const lift = (source) => new Function(
-  source.replace(/export\s*\{[\s\S]*?\};?\s*$/, '') +
-  '\nreturn { escHtml, markEmphasis: typeof markEmphasis === "function" ? markEmphasis : markBoldItalic, markCode, markEscapes };')();
 
-const now = lift(fs.readFileSync(path.join(ROOT, CSSMD), 'utf8'));
+function lift(coreSrc, cssmdSrc) {
+  const inlined = cssmdSrc
+    .replace(/export\s*\{[\s\S]*?\};?\s*$/, '')                     // drop the ESM export footer
+    .replace(/^function escHtml\(s\)[\s\S]*?\n\}\n/m, '');          // the core has its own escHtml
+  const L = coreSrc.split('\n');
+  const esc = L.find((l) => l.startsWith('function escHtml'));
+  const s = L.findIndex((l) => l.startsWith('function highlightLineParts'));
+  let e = s;
+  for (let i = s + 1; i < L.length; i++) if (L[i] === '}') { e = i; break; }
+  return new Function(esc + '\n' + inlined + '\n' + L.slice(s, e + 1).join('\n') +
+    '\nreturn highlightLineParts;')();
+}
+
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const atHead = (rel) => execFileSync('git', ['-C', ROOT, 'show', `HEAD:${rel}`], { encoding: 'utf8', maxBuffer: 8 << 20 });
+
+const now = lift(read(CORE), read(CSSMD));
 let before = null;
-try {
-  before = lift(execFileSync('git', ['-C', ROOT, 'show', `HEAD:${CSSMD}`], { encoding: 'utf8', maxBuffer: 8 << 20 }));
-} catch {
-  process.stderr.write(`⚠️  cannot read HEAD:${CSSMD} — reporting the working tree alone, with no baseline\n`);
+try { before = lift(atHead(CORE), atHead(CSSMD)); } catch {
+  process.stderr.write('⚠️  cannot read HEAD — reporting the working tree alone, with no baseline\n');
 }
 
 // The renderer's spans, turned back into the spec's tags. `-mk` spans hold the raw delimiters, which
@@ -60,6 +77,13 @@ function toSpecHtml(html) {
   const MAP = { 'tg-b': 'strong', 'tg-i': 'em', 'tg-code': 'code' };
   const stack = [];
   return html
+    // An autolink is the one construct here whose spec form is recoverable exactly — `<url>` becomes
+    // `<a href="url">url</a>` with no lookup and no ambiguity — so it is mapped rather than dropped.
+    // Without this, examples 480/481 read as emphasis failures when what actually happens is that
+    // the emphasis is correctly refused and the harness cannot draw the link. Links proper are still
+    // dropped to their text: their spec form needs a destination this pass does not resolve.
+    .replace(/<span class="tg-link"><span class="tg-mk">&lt;<\/span>(.*?)<span class="tg-mk">&gt;<\/span><\/span>/g,
+      (m, url) => `<a href="${url}">${url}</a>`)
     .replace(/<span class="tg-mk">.*?<\/span>/g, '')
     .replace(/<span class="([^"]*)">|<\/span>/g, (m, cls) => {
       if (cls === undefined) { const t = stack.pop(); return t ? '</' + t + '>' : ''; }
@@ -69,8 +93,10 @@ function toSpecHtml(html) {
     });
 }
 
-const pipeline = (m) => (md) => md.split('\n').map((line) =>
-  m.markEscapes(m.markCode(m.markEmphasis(m.escHtml(line), 'tg'), 'tg'), 'tg')).join('\n');
+// One markdown line is one call, because one line is one <div> in this editor. `block` is left
+// undefined: every Emphasis example is ordinary paragraph text, and blockScan's verdicts are a
+// different construct's question.
+const pipeline = (hlp) => (md) => md.split('\n').map((line) => hlp(line).inner).join('\n');
 
 const NEW = pipeline(now);
 const OLD = before ? pipeline(before) : null;
