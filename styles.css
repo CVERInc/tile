@@ -676,7 +676,14 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-ed-rich .tg-task-done { color: var(--text-muted); }   /* whole completed task line dims */
 .tugtile-ed-rich .tg-code { font-family: var(--font-monospace); color: var(--text-accent); }
 .tugtile-ed-rich .tg-tag,
+.tugtile-ed-rich .tg-img,
 .tugtile-ed-rich .tg-link { color: var(--text-accent); }
+/* An ordered list's number is content, not syntax, so it never hides — it just stops shouting. The
+   inline-block width is what lines "1." up with the • a bullet line gets from its ::before. */
+.tugtile-ed-rich .tg-num { color: var(--text-muted); }
+.tugtile-preview .tg-num { display: inline-block; min-width: 1.25em; }
+/* A thematic break: the dashes hide with every other marker and the line itself becomes the rule. */
+.tugtile-preview .tg-hr { border-top: 1px solid var(--background-modifier-border); }
 .tugtile-ed-rich .tg-date { color: var(--color-yellow); }
 /* ── Fenced code + frontmatter ────────────────────────────────────────────────────────────────────
    Whole LINES, not spans: what marks them is their position between two fences, which is a fact about
