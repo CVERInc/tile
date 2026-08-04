@@ -80,6 +80,9 @@ const cases = [
   '\\\\*a*',                            // escaped backslash then emphasis: fails toward the literal
   '<https://x.com> and <a@b.com>',
   'ref [a][r] and note[^1]\n\n[r]: https://x.com\n[^1]: the note',
+  'Title\n=====\n\nbody',
+  'Sub **bold** title\n---\n\nbody',
+  'two\nline title\n===',
 ];
 let fail = 0;
 for (const t of cases) {

@@ -184,8 +184,15 @@ function highlightLineParts(line, block) {
   // the only thing that can know — a fence's extent is a fact about the SEQUENCE of lines, and this
   // function sees one. Without it `**not bold**` inside a ```js fence came out bold and
   // `[[not a link]]` came out as a link, on every surface including the shipped Obsidian plugin.
-  if (block) return { cls: 'tg-line tg-' + block, inner: (escHtml(line) || '<br>') };
+  if (block === 'cblock' || block === 'cfence' || block === 'fm' || block === 'fmfence') {
+    return { cls: 'tg-line tg-' + block, inner: (escHtml(line) || '<br>') };
+  }
+  // A setext underline is pure syntax, like a thematic break: the whole line is the marker.
+  if (block === 'srule') return { cls: 'tg-line tg-srule', inner: '<span class="tg-mk">' + escHtml(line) + '</span>' };
   let cls = 'tg-line';
+  // …but the heading TEXT is ordinary prose that happens to be a heading, so it keeps every inline
+  // mark and merely gains the level class the # form would have given it.
+  if (block === 'sh1' || block === 'sh2') cls += ' tg-h tg-h' + block.slice(2);
   // CommonMark: a heading counts at line start, after ≤3 leading spaces, OR inside a list item. hm[1] swallows the
   // optional indent + bullet/checkbox prefix so `- ### x` / `- [ ] ### x` / `  ### x` all size+colour as headings;
   // hm[2] is the # run (→ level). It's ADDITIVE with tg-li/tg-task — a heading can also be a list/task line.
@@ -312,6 +319,30 @@ function blockScan(lines) {
     const floor = (listIndent >= 0 ? listIndent : 0) + 4;
     if (blank && indent >= floor) kind[i] = 'cblock';   // only after a blank line: never interrupts a paragraph
     else blank = false;
+  }
+  // Setext headings, last, because they are the one construct that reads BACKWARDS: the underline
+  // says what the line above it was. This is also why `---` is genuinely ambiguous in markdown and
+  // not by accident — the language absorbed two heading syntaxes, and the underline character of one
+  // collides with the thematic break of the other. A line-at-a-time highlighter cannot resolve that;
+  // here the whole sequence is in hand, so it can.
+  //
+  // The heading is the WHOLE preceding paragraph, not just the last line, which is why this walks
+  // back. A `-` underline loses to nothing: with a paragraph above it, CommonMark says heading, and
+  // the thematic break it would otherwise have been never happens.
+  const UNDER = /^\s{0,3}(=+|-+)\s*$/;
+  const OPENER = /^\s{0,3}(?:[-*+>]\s|#{1,6}\s|\d{1,9}[.)]\s|\|)/;
+  for (let j = 1; j < lines.length; j++) {
+    if (kind[j] !== null) continue;
+    const u = UNDER.exec(lines[j]);
+    if (!u) continue;
+    let k = j - 1;
+    if (k < 0 || kind[k] !== null || !lines[k].trim() || OPENER.test(lines[k])) continue;
+    const level = u[1][0] === '=' ? 'sh1' : 'sh2';
+    while (k >= 0 && kind[k] === null && lines[k].trim() && !OPENER.test(lines[k]) && !UNDER.test(lines[k])) {
+      kind[k] = level;
+      k--;
+    }
+    kind[j] = 'srule';
   }
   return kind;   // an unclosed fence runs to the end of the document, as CommonMark says it does
 }
