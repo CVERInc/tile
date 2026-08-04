@@ -59,7 +59,16 @@ function mk(prefix, marker) {
 // identifier appeared, which is the bug this arrived from.
 function markBoldItalic(escaped, prefix) {
   const p = prefix || 'tg';
-  const RE = /(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*?\*|(?<![A-Za-z0-9])__[^_\n]+__(?![A-Za-z0-9])|(?<![A-Za-z0-9])_[^_\s][^_\n]*?_(?![A-Za-z0-9]))/g;
+  // 🔴 A backslash before the opener means the author asked for a literal — `\*not italic\*` is the
+  // spec's own example, and every renderer built on this primitive emphasised it anyway. The
+  // lookbehind is on the OPENING delimiter only: refusing to start is enough, and it is the change
+  // with the smallest reach into text that already renders correctly today.
+  //
+  // Known limit, stated rather than papered over: `\\*a*` (an escaped BACKSLASH, then real emphasis)
+  // also declines, because the lookbehind cannot tell the two apart without a real tokeniser. It
+  // fails toward the literal, which is the safe direction — the characters the author typed are what
+  // appears — and the construct is vanishingly rare in prose.
+  const RE = /((?<!\\)\*\*[^*\n]+\*\*|(?<!\\)\*[^*\s][^*\n]*?\*|(?<![A-Za-z0-9\\])__[^_\n]+__(?![A-Za-z0-9])|(?<![A-Za-z0-9\\])_[^_\s][^_\n]*?_(?![A-Za-z0-9]))/g;
   return String(escaped).replace(RE, (m) => {
     const marker = m.startsWith('**') ? '**' : m.startsWith('__') ? '__' : m[0] === '*' ? '*' : '_';
     const cls = (marker === '**' || marker === '__') ? p + '-b' : p + '-i';
@@ -71,7 +80,8 @@ function markBoldItalic(escaped, prefix) {
 // `code` over escaped text — single backticks, no newline inside.
 function markCode(escaped, prefix) {
   const p = prefix || 'tg';
-  return String(escaped).replace(/(`[^`\n]+`)/g, (m) => {
+  // Same escape rule as the emphasis pass: `\`` is a literal backtick, not the start of a code span.
+  return String(escaped).replace(/((?<!\\)`[^`\n]+`)/g, (m) => {
     const inner = m.slice(1, -1);
     return '<span class="' + p + '-code">' + mk(p, '`') + inner + mk(p, '`') + '</span>';
   });
@@ -92,11 +102,24 @@ function markCode(escaped, prefix) {
 //   `code`     → <span class="<p>-code">…`…code…`…</span>
 //   **bold** wins the alternation over *italic*; `code` is a separate pass. Content INSIDE the
 //   marks is plain text (escaped) — no nested re-parsing, matching the source renderers exactly.
+// The backslash of an escape is syntax, so it hides like every other marker — `\*` shows as `*`
+// while the text still round-trips with the backslash in it.
+//
+// Runs LAST, after the emphasis and code passes, for a reason: those passes must still see the
+// backslash in order to decline. Reversing the order would hide the backslash and then emphasise the
+// text it was protecting, which is the bug with an extra step.
+//
+// Only the characters CommonMark says are escapable, so `C:\path` and `\n` in prose are left alone.
+function markEscapes(escaped, prefix) {
+  const p = prefix || 'tg';
+  return String(escaped).replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, (m, ch) => mk(p, '\\') + ch);
+}
+
 function renderInlineMd(text, opts) {
   const prefix = (opts && opts.prefix) || 'tg';
   // Escape FIRST (whole string), then run the marker passes over escaped text — same order as
   // editor-core.js (escHtml(line).replace(...)). The markers **, *, ` are unaffected by escaping.
-  return markCode(markBoldItalic(escHtml(text), prefix), prefix);
+  return markEscapes(markCode(markBoldItalic(escHtml(text), prefix), prefix), prefix);
 }
 
 // The CSS contract. Returns the stylesheet text a host must include for the technique to work:
@@ -118,4 +141,4 @@ function cssContract(opts) {
   );
 }
 
-export { renderInlineMd, markBoldItalic, markCode, cssContract, escHtml };
+export { renderInlineMd, markBoldItalic, markCode, markEscapes, cssContract, escHtml };

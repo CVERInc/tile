@@ -48,6 +48,12 @@ function highlightLineParts(line, block) {
   // A thematic break is the whole line. Frontmatter never reaches here (blockScan labels it first), so a
   // `---` that gets this far is the horizontal rule it looks like.
   if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) cls += ' tg-hr';
+  // A link reference or footnote definition — `[ref]: https://…`. It is a line that produces no visible
+  // output in a rendered document, so Rendered dims it rather than pretending it is a paragraph.
+  if (/^\s{0,3}\[[^\]\n]+\]:\s*\S/.test(line)) cls += ' tg-refdef';
+  // Two trailing spaces before a newline is a hard break — invisible syntax, which is exactly the kind
+  // a person deletes by accident. Marked so Rendered can show it as the line break it is.
+  if (/\S {2,}$/.test(line)) cls += ' tg-brk';
   // Each syntax marker (## , &gt; , - , [ ], **, *, ~~, `, [[ ]], @{}) is wrapped in its own <span class="tg-mk">
   // so a host can hide JUST the markers via CSS (.tugtile-preview .tg-mk{display:none}) while the styling stays —
   // the basis for a marker-free preview look. tg-mk is transparent to the text round-trip (getText reads
@@ -85,11 +91,24 @@ function highlightLineParts(line, block) {
     .replace(/(!?)\[([^\]\n]*)\]\(([^)\n]*)\)/g, (m, bang, text, url) =>
       '<span class="tg-' + (bang ? 'img' : 'link') + '"><span class="tg-mk">' + bang + '[</span>' +
       text + '<span class="tg-mk">](' + url + ')</span></span>')
+    // Reference links and footnotes: [text][ref], the bare [ref] form, [^1], and the definition lines
+    // that give them their targets. All four are marker-and-label like every other link here; what this
+    // does NOT do is resolve one to the other, which needs a document-wide map and is a different job.
+    // The label is still styled, which is the part a reader is looking for.
+    .replace(/(\[)(\^[^\]\n]+)(\])/g, (m, o, ref, c) => '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + ref + '<span class="tg-mk">' + c + '</span></span>')
+    .replace(/(\[)([^\]\n]*)(\]\[)([^\]\n]*)(\])/g, (m, o, text, mid, ref, c) =>
+      '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + text + '<span class="tg-mk">' + mid + ref + c + '</span></span>')
+    // <https://…> and <a@b.c> — a bare URL in angle brackets, which is the one HTML-looking thing in
+    // markdown that is not HTML. escHtml has already turned the brackets into entities.
+    .replace(/&lt;((?:[a-z][a-z0-9+.-]*:|mailto:)[^\s&]*|[^\s&@]+@[^\s&@]+\.[^\s&@]+)&gt;/gi, (m, url) =>
+      '<span class="tg-link"><span class="tg-mk">&lt;</span>' + url + '<span class="tg-mk">&gt;</span></span>')
     .replace(/(@@?\{)([^}\n]*)(\})/g, (m, op, inner, cl) => '<span class="tg-date"><span class="tg-mk">' + op + '</span>' + inner + '<span class="tg-mk">' + cl + '</span></span>')
     .replace(/(^|[^&\w])(#[^\s#<&]+)/g, '$1<span class="tg-tag">$2</span>')
     .replace(/\t/g, '<span class="tg-tab">\t</span>');   // wrap each literal tab LAST (after the line-start regexes) so CSS can mark tab-vs-space; span is transparent to the text round-trip
+  // Escapes hide LAST of all — every pass above has to still see the backslash in order to decline.
+  const esc = markEscapes(h, 'tg');
   if (/^\s*[-*]\s\[[ xX]\]/.test(line)) cls += ' tg-task' + (/^\s*[-*]\s\[[xX]\]/.test(line) ? ' tg-task-done' : '');
-  return { cls: cls, inner: (h || '<br>') };
+  return { cls: cls, inner: (esc || '<br>') };
 }
 // Which lines are inside a block that is not markdown. Pure (text in, one label per line out) so it is
 // unit-testable without a DOM, and so the single-line re-highlight can ask the same question the full
@@ -114,15 +133,36 @@ function blockScan(lines) {
     }
   }
   let open = null;   // the character the open fence used; CommonMark closes only with the same one
+  // Indented code needs two more facts, and both are about what came BEFORE:
+  //   · it cannot interrupt a paragraph — four spaces under a line of prose is a wrapped sentence,
+  //     which is how people actually type, not a code block;
+  //   · inside a list, four spaces is the list's own continuation indent, not code. `listIndent` is
+  //     how deep the open item's content sits, so code there starts at listIndent + 4.
+  // Getting the second one wrong would paint real notes grey, so it is tracked rather than guessed.
+  const width = (s) => { let n = 0; for (const c of s) n += c === '\t' ? 4 - (n % 4) : 1; return n; };
+  let blank = true, listIndent = -1;
   for (; i < lines.length; i++) {
-    const m = FENCE.exec(lines[i]);
-    if (open === null) {
-      if (m) { open = { ch: m[2][0], len: m[2].length }; kind[i] = 'cfence'; }
-    } else if (m && m[2][0] === open.ch && m[2].length >= open.len && !m[3].trim()) {
-      kind[i] = 'cfence'; open = null;   // a closing fence carries no info string
-    } else {
-      kind[i] = 'cblock';
+    const line = lines[i];
+    const m = FENCE.exec(line);
+    if (open !== null) {
+      if (m && m[2][0] === open.ch && m[2].length >= open.len && !m[3].trim()) { kind[i] = 'cfence'; open = null; }
+      else kind[i] = 'cblock';
+      continue;
     }
+    if (m) { kind[i] = 'cfence'; open = { ch: m[2][0], len: m[2].length }; blank = false; continue; }
+
+    const indent = width(line.match(/^[ \t]*/)[0]);
+    const empty = !line.trim();
+    const item = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/.exec(line);
+    if (empty) { blank = true; continue; }              // a blank line does not close a list
+    if (item) {
+      listIndent = width(item[0]);                      // content of the item starts here
+    } else if (listIndent >= 0 && indent < listIndent && indent < 4) {
+      listIndent = -1;                                  // dedented back out of the list
+    }
+    const floor = (listIndent >= 0 ? listIndent : 0) + 4;
+    if (blank && indent >= floor) kind[i] = 'cblock';   // only after a blank line: never interrupts a paragraph
+    else blank = false;
   }
   return kind;   // an unclosed fence runs to the end of the document, as CommonMark says it does
 }

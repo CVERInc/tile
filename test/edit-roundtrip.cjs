@@ -75,6 +75,11 @@ const cases = [
   '---\n***\n___',                    // thematic breaks (no leading --- ⇒ not frontmatter here… line 1 IS ---)
   'text\n---\nmore',
   '- [x] done [link](u) **b**',
+  '\\*not italic\\* but **this is**',   // the backslash is hidden, never removed — it must come back
+  'C:\\path\\to and \\n stay literal',   // not escapable chars → no marker, no change
+  '\\\\*a*',                            // escaped backslash then emphasis: fails toward the literal
+  '<https://x.com> and <a@b.com>',
+  'ref [a][r] and note[^1]\n\n[r]: https://x.com\n[^1]: the note',
 ];
 let fail = 0;
 for (const t of cases) {
