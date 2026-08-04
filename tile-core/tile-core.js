@@ -155,7 +155,13 @@ function cssContract(opts) {
 // (literal '## ' stays visible); heading lines just carry a level class so CSS can size them up. An empty
 // line uses <br> (textContent '') so the text<->DOM round-trip stays exact. Shared by the full render and
 // the in-place single-line re-highlight (so both produce byte-identical DOM).
-function highlightLineParts(line) {
+function highlightLineParts(line, block) {
+  // Inside a fenced code block or the frontmatter, the line is NOT markdown, and the only honest
+  // rendering of it is the characters themselves. `block` is the verdict from blockScan(), which is
+  // the only thing that can know — a fence's extent is a fact about the SEQUENCE of lines, and this
+  // function sees one. Without it `**not bold**` inside a ```js fence came out bold and
+  // `[[not a link]]` came out as a link, on every surface including the shipped Obsidian plugin.
+  if (block) return { cls: 'tg-line tg-' + block, inner: (escHtml(line) || '<br>') };
   let cls = 'tg-line';
   // CommonMark: a heading counts at line start, after ≤3 leading spaces, OR inside a list item. hm[1] swallows the
   // optional indent + bullet/checkbox prefix so `- ### x` / `- [ ] ### x` / `  ### x` all size+colour as headings;
@@ -191,10 +197,47 @@ function highlightLineParts(line) {
   if (/^\s*[-*]\s\[[ xX]\]/.test(line)) cls += ' tg-task' + (/^\s*[-*]\s\[[xX]\]/.test(line) ? ' tg-task-done' : '');
   return { cls: cls, inner: (h || '<br>') };
 }
+// Which lines are inside a block that is not markdown. Pure (text in, one label per line out) so it is
+// unit-testable without a DOM, and so the single-line re-highlight can ask the same question the full
+// render asks. Labels: 'cfence'/'cblock' for ``` blocks, 'fmfence'/'fm' for YAML frontmatter, null
+// otherwise. NOT 'code' — .tg-code is already the INLINE `code` span, and one class meaning two things is
+// how a stylesheet starts lying.
+//
+// Frontmatter is only frontmatter at the very top of the file — a `---` anywhere else is a thematic
+// break, and treating one as the other would swallow the rest of the document.
+const FENCE = /^(\s{0,3})(`{3,}|~{3,})(.*)$/;
+function blockScan(lines) {
+  const kind = new Array(lines.length).fill(null);
+  let i = 0;
+  if (lines.length > 1 && /^---\s*$/.test(lines[0])) {
+    for (let j = 1; j < lines.length; j++) {
+      if (/^(---|\.\.\.)\s*$/.test(lines[j])) {
+        kind[0] = kind[j] = 'fmfence';
+        for (let k = 1; k < j; k++) kind[k] = 'fm';
+        i = j + 1;
+        break;
+      }
+    }
+  }
+  let open = null;   // the character the open fence used; CommonMark closes only with the same one
+  for (; i < lines.length; i++) {
+    const m = FENCE.exec(lines[i]);
+    if (open === null) {
+      if (m) { open = { ch: m[2][0], len: m[2].length }; kind[i] = 'cfence'; }
+    } else if (m && m[2][0] === open.ch && m[2].length >= open.len && !m[3].trim()) {
+      kind[i] = 'cfence'; open = null;   // a closing fence carries no info string
+    } else {
+      kind[i] = 'cblock';
+    }
+  }
+  return kind;   // an unclosed fence runs to the end of the document, as CommonMark says it does
+}
+
 // Renders the whole markdown source into per-line <div> blocks for the contenteditable editor.
 function highlightMarkdown(text) {
   const lines = (text === '' ? [''] : text.split('\n'));
-  return lines.map((line) => { const p = highlightLineParts(line); return '<div class="' + p.cls + '">' + p.inner + '</div>'; }).join('');
+  const kind = blockScan(lines);
+  return lines.map((line, i) => { const p = highlightLineParts(line, kind[i]); return '<div class="' + p.cls + '">' + p.inner + '</div>'; }).join('');
 }
 
 // Smart-Enter list continuation (pure, so it's unit-testable without a DOM). Given the full text and a caret
@@ -415,8 +458,19 @@ function mountEditor(contentEl, opts, host) {
       if (!lineEl || lineEl.parentNode !== ed) return false;
       const text = lineEl.textContent;
       if (text.indexOf('\n') >= 0) return false;
+      // Block state is a property of the whole document, and this path only has one line. The line
+      // KNOWS what it was — the class the last full render gave it — which is enough to keep typing
+      // inside a code block from being re-styled as markdown. But a line that becomes (or stops
+      // being) a fence changes the meaning of every line after it, so that one hands back to the
+      // full render rather than guessing.
+      const was = lineEl.classList.contains('tg-cblock') ? 'cblock'
+                : lineEl.classList.contains('tg-fm') ? 'fm'
+                : lineEl.classList.contains('tg-cfence') ? 'cfence'
+                : lineEl.classList.contains('tg-fmfence') ? 'fmfence' : null;
+      const isFenceNow = FENCE.test(text) || /^(---|\.\.\.)\s*$/.test(text);
+      if (isFenceNow !== (was === 'cfence' || was === 'fmfence')) return false;
       const within = charsBeforeInLine(lineEl, r.startContainer, r.startOffset);
-      const p = highlightLineParts(text);
+      const p = highlightLineParts(text, was);
       lineEl.className = p.cls; lineEl.innerHTML = p.inner;
       const loc = locateInLine(lineEl, within);
       const nr = document.createRange(); nr.setStart(loc.node, loc.off); nr.collapse(true);
@@ -988,7 +1042,10 @@ function decorateTables(root, ctrl, gateClass) {
     try {
       const cl = caretLineEl(); const clOff = cl ? caretOffset(cl) : null; let touchedCaret = false;
       const lock = inPreview();
-      const lines = [...root.querySelectorAll('.tg-line')];
+      // Lines the block scan marked as code or frontmatter are excluded: a `| a | b |` inside a ```
+      // fence is a string in someone's shell script, and gridding it would rewrite what they typed.
+      const isPlain = (l) => !/\btg-(cblock|cfence|fm|fmfence)\b/.test(l.className);
+      const lines = [...root.querySelectorAll('.tg-line')].filter(isPlain);
       let i = 0;
       while (i < lines.length) {
         if (isTableLine(lines[i].textContent)) {

@@ -678,6 +678,30 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-ed-rich .tg-tag,
 .tugtile-ed-rich .tg-link { color: var(--text-accent); }
 .tugtile-ed-rich .tg-date { color: var(--color-yellow); }
+/* ── Fenced code + frontmatter ────────────────────────────────────────────────────────────────────
+   Whole LINES, not spans: what marks them is their position between two fences, which is a fact about
+   the sequence (blockScan) and not about the line. Their contents carry no inline markup at all —
+   inside a fence `**this**` is two asterisks and a word, and rendering it bold was a lie the editor
+   used to tell on every surface.
+   Each line keeps its own <div>, so the background lands as a continuous band without a wrapper
+   element — which is what keeps the round-trip exact (getText still just joins the children). */
+.tugtile-ed-rich .tg-cblock,
+.tugtile-ed-rich .tg-cfence {
+  font-family: var(--font-monospace);
+  background: var(--background-secondary);
+  padding-left: 10px; padding-right: 10px;
+}
+.tugtile-ed-rich .tg-cfence { color: var(--text-faint); }
+.tugtile-ed-rich .tg-fm { color: var(--text-muted); font-family: var(--font-monospace); }
+.tugtile-ed-rich .tg-fmfence { color: var(--text-faint); font-family: var(--font-monospace); }
+/* Rendered: the fences are pure syntax, so they go — the same call .tugtile-preview already makes for
+   the |---| row of a table. The band stays, which is what tells you the block is still there. */
+.tugtile-preview .tg-cfence,
+.tugtile-preview .tg-fmfence { display: none; }
+.tugtile-preview .tg-cblock { padding-top: 1px; padding-bottom: 1px; }
+/* With its --- gone, the frontmatter needs some other reason not to read as the first paragraph. */
+.tugtile-preview .tg-fm { border-left: 2px solid var(--background-modifier-border); padding-left: 10px; font-size: 0.9em; }
+
 /* Seasoned "彩色" palette — opt-in via settings (seasonedColor → .marktile-palette-color on the editor mount).
    Each syntax token gets its own hue instead of the single accent tint. Obsidian theme color vars (hex fallbacks
    for the web host) so it tracks light/dark + custom themes. quote/strike/date/check keep their base styling. */
