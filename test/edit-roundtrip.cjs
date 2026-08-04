@@ -18,6 +18,10 @@ const cssmdSrc = fs.readFileSync(require('path').join(__dirname, '..', 'packages
   .replace(/export\s*\{[\s\S]*?\};?\s*$/, '')
   .replace(/^function escHtml\(s\)[\s\S]*?\n\}\n/m, '');
 eval(cssmdSrc);
+// `var`, not `const`: a const declared inside eval() is scoped to that eval and blockScan (eval'd
+// separately) would not see it.
+eval(/const FENCE = \/.*?\/;/s.exec(src)[0].replace('const ', 'var '));
+eval(grab('blockScan'));                        // highlightMarkdown asks it which lines are not markdown
 eval(grab('highlightLineParts'));
 eval(grab('highlightMarkdown'));
 
@@ -55,6 +59,13 @@ const cases = [
   '\tindented once',                  // leading tab → wrapped in a tg-tab span, must round-trip to a bare \t
   '\t\tnested twice\nno tab here',
   '- [ ]\ttab after marker',          // tab mid-line alongside a check box
+  // Block-scanned lines take a different path through highlightLineParts (raw escaping, no inline
+  // marks), so they need their own round-trip evidence — the old cases would never have entered it.
+  '```js\nconst a = **not bold**;\n```',
+  '```\n<div>&amp; "quoted"\n```',    // HTML + entities inside a fence, where nothing is re-escaped twice
+  '---\nname: x\ntype: memory\n---\n\nbody **bold**',
+  '```\nunclosed to the end',
+  '~~~\n| a | b |\n~~~',              // a table line inside a fence stays text
 ];
 let fail = 0;
 for (const t of cases) {
