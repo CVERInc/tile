@@ -94,6 +94,14 @@ function skipElement(s, i) {
   return k;
 }
 
+// The text a reader would see inside a stretch of markup — tags dropped, entities left alone. The
+// flanking rules ask what character sits next to a delimiter, and next to an opaque element the
+// honest answer is that element's own last (or first) rendered character: a code span ends in a
+// backtick, an autolink ends in `>`, a bullet marker ends in a space. Calling every element
+// "whitespace" instead was wrong in a way that hid itself — it made `` *a `*`* `` unclosable,
+// because a closer preceded by whitespace cannot close, and the emphasis simply never appeared.
+function elemText(s, from, to) { return s.slice(from, to).replace(/<[^>]*>/g, ''); }
+
 // Pass 1 — split the text into runs of `*` / `_` and the text between them, deciding for each run
 // whether it can open, can close, or both. That verdict comes from the characters on either side
 // (the spec's left-flanking / right-flanking), which is why this cannot be done one delimiter at a
@@ -111,14 +119,22 @@ function scanRuns(s) {
     }
     if (c === '<') {
       const end = skipElement(s, i);
-      if (end > i) { buf += s.slice(i, end); prev = undefined; i = end; continue; }
+      if (end > i) {
+        buf += s.slice(i, end);
+        const inner = elemText(s, i, end);
+        prev = inner ? inner[inner.length - 1] : undefined;
+        i = end; continue;
+      }
       buf += c; prev = c; i++; continue;
     }
     if (c !== '*' && c !== '_') { buf += c; prev = c; i++; continue; }
     let j = i;
     while (s[j] === c) j++;
     let next = s[j];
-    if (next === '<' && skipElement(s, j) > j) next = undefined;
+    if (next === '<') {
+      const end = skipElement(s, j);
+      if (end > j) { const inner = elemText(s, j, end); next = inner ? inner[0] : undefined; }
+    }
     const beforeSpace = isMdSpace(prev), afterSpace = isMdSpace(next);
     const beforePunct = isMdPunct(prev), afterPunct = isMdPunct(next);
     const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct);
@@ -245,7 +261,14 @@ function renderInlineMd(text, opts) {
   const prefix = (opts && opts.prefix) || 'tg';
   // Escape FIRST (whole string), then run the marker passes over escaped text — same order as
   // editor-core.js (escHtml(line).replace(...)). The markers **, *, ` are unaffected by escaping.
-  return markEscapes(markCode(markEmphasis(escHtml(text), prefix), prefix), prefix);
+  //
+  // CODE BEFORE EMPHASIS, which is the spec's precedence and was the other way round until
+  // 2026-08-04: a code span's content is literal by definition, so `` `*` `` is an asterisk and not
+  // a delimiter. Running emphasis first made ``*a `*`*`` pair the backtick's asterisk with the outer
+  // one, and made `` `**a**` `` — documenting the syntax, which this repo does constantly — render
+  // as bold inside the code span. markEmphasis treats the finished code span as opaque, so the
+  // reorder is all the fix needs.
+  return markEscapes(markEmphasis(markCode(escHtml(text), prefix), prefix), prefix);
 }
 
 // The CSS contract. Returns the stylesheet text a host must include for the technique to work:

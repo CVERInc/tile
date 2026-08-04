@@ -124,5 +124,34 @@ eq('**這句話變得*更強*，不是更弱**', '<B>這句話變得<I>更強>�
   } catch (e) { fail++; console.error('FAIL ' + e.message); }
 }
 
+// ── precedence: constructs that bind tighter than emphasis ──────────────────────────────────────
+// A code span's content is literal by definition, so a delimiter inside one is a character. This
+// only works because `markCode` runs BEFORE `markEmphasis` and the tokeniser treats the finished
+// span as opaque — the reorder IS the mechanism, so these cases guard the order, not just the output.
+eq('*a `*` b*', '<I>a <?>*> b>', 'an asterisk inside a code span is not a delimiter');
+eq('`**a**`', '<?>**a**>', 'a code span holds the syntax it documents, unrendered');
+eq('*a `b` c*', '<I>a <?>b> c>', 'emphasis still spans ACROSS a code span');
+
+// The autolink pass lives in editor-core, not cssmd, so this one case is asserted against the real
+// highlightLineParts. Without it the `**` in a URL query string would find a partner and the line
+// would render bold from the `**` to the end.
+{
+  const coreSrc = fs.readFileSync(path.join(__dirname, '..', 'packages', 'core', 'editor-core.js'), 'utf8');
+  const inlined = fs.readFileSync(path.join(__dirname, '..', 'packages', 'cssmd', 'cssmd.js'), 'utf8')
+    .replace(/export\s*\{[\s\S]*?\};?\s*$/, '').replace(/^function escHtml\(s\)[\s\S]*?\n\}\n/m, '');
+  const L = coreSrc.split('\n');
+  const s0 = L.findIndex((l) => l.startsWith('function highlightLineParts'));
+  let e0 = s0; for (let i = s0 + 1; i < L.length; i++) if (L[i] === '}') { e0 = i; break; }
+  const hlp = new Function(L.find((l) => l.startsWith('function escHtml')) + '\n' + inlined + '\n' +
+    L.slice(s0, e0 + 1).join('\n') + '\nreturn highlightLineParts;')();
+  const why = 'a `**` inside an <autolink> URL finds no partner';
+  const html = hlp('**a<https://foo.bar/?q=**>').inner;
+  try {
+    assert.ok(!/class="tg-b"/.test(html), why + '\n  got  ' + html);
+    assert.strictEqual(textOf(html), '**a<https://foo.bar/?q=**>', why + ' — ROUND TRIP BROKEN\n  out ' + textOf(html));
+    console.log('PASS ' + why); pass++;
+  } catch (e) { fail++; console.error('FAIL ' + e.message); }
+}
+
 console.log(fail ? `\n✗ emphasis: ${pass} passed, ${fail} failed` : `\n✅ emphasis all pass (${pass})`);
 process.exit(fail ? 1 : 0);

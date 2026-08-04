@@ -39,35 +39,50 @@ It is now `markEmphasis` in `packages/cssmd/cssmd.js`, CommonMark's delimiter-ru
 serialize. `markBoldItalic` remains as an alias for consumers outside this repo.
 
 **Where it stands.** `node scripts/emphasis-conformance.mjs` runs the spec's own 132 Emphasis
-examples and compares real output against the spec's real HTML — actual conformance, possible here
-and nowhere else in this file, because `<em>`/`<strong>` are exactly what these spans map onto. It
-scores the working tree against `HEAD`, so any future change reports its own delta.
+examples through the real `highlightLineParts` and compares its output against the spec's real HTML
+— actual conformance, possible here and nowhere else in this file, because `<em>`/`<strong>` are
+exactly what these spans map onto. It scores the working tree against `HEAD`, so any future change
+reports its own delta.
 
 | | passing |
 |---|---|
-| the old regex | 50/132 (37.9%) |
-| the tokeniser | **108/132 (81.8%)**, +58 / −0, round trip exact on all 132 |
+| the old regex | 50/132 |
+| the tokeniser | 107/132 |
+| …plus code and `<autolink>` moved ahead of emphasis | **111/132 (84.1%)**, round trip exact on all 132 |
 
-**The 24 that still fail, in full — 15 of them are not defects:**
+**PRECEDENCE.** A code span's content is literal and an autolink's content is an address, so both
+bind tighter than emphasis and now run first. `markEmphasis` treats a finished span as **opaque**, so
+the reorder *is* the mechanism — no new code. That is also what stops an asterisk bullet
+(`<span class="tg-mk">* </span>…`) pairing with real emphasis later on the line.
+
+The link passes deliberately stay *after* emphasis even though the spec binds link brackets tighter
+too: a link's TEXT is prose and routinely contains emphasis (`[*bar*](/url)`), and an opaque link
+span would lose it. The price is the spec's own edge case `*[bar*](/url)`. Named, not hidden.
+
+⚠️ When the code/autolink reorder landed, the score did not move — because this script used to run
+the cssmd passes alone and could not see the core's passes at all. **A ruler that cannot see the
+change you are making is not a ruler**; it now lifts the real `highlightLineParts` from both the
+working tree and `HEAD`.
+
+**The 21 that still fail, in full — 16 of them are not emphasis defects:**
 
 | | n | what it is |
 |---|---|---|
 | `"` not encoded as `&quot;` | 6 | the harness. `escHtml` deliberately leaves quotes alone (content never lands in an attribute position); the emphasis in all six is correct |
 | emphasis spanning a line break | 5 | architectural. One line is one `<div>`; a construct cannot cross that and stay a single-layer editor |
-| a link inside the emphasis | 4 | the harness. That script runs the cssmd passes only, so `[bar](/url)` stays literal; the emphasis around it is correct |
-| **precedence** | **9** | **a real defect — below** |
+| a link inside the emphasis | 4 | the harness. It maps `<em>`, `<strong>`, `<code>` and autolinks, but not links proper — their spec form needs a destination it does not resolve |
+| U+00A0 after a list marker | 1 | a REAL bug, and not in emphasis — see below |
+| link brackets (`*[bar*](/url)`) | 2 | the deliberate trade above |
+| raw HTML attributes | 3 | inside a declared gap; there is no HTML parser here to make `title="*"` opaque |
 
-**The real one that is left: precedence.** A delimiter inside a construct that binds *tighter* than
-emphasis is still treated as a delimiter. ``*a `*`* `` should be an italic containing a code span
-holding a literal asterisk; instead the backtick's asterisk pairs with the outer one. Same shape in
-an autolink (`**a<https://x/?q=**>`), a raw HTML attribute, and a link destination.
-
-The fix is already half-built and costs no new algorithm. `markEmphasis` treats an already-injected
-element as **opaque** — its characters are not delimiters — which is why an asterisk bullet
-(`<span class="tg-mk">* </span>…`) cannot pair with real emphasis further along the line. Those nine
-would fall out if the code / autolink / link passes ran *before* emphasis instead of after. What
-makes it a separate piece of work rather than a one-line move is the last constraint below: pass
-order inside `highlightLineParts` is load-bearing, and reordering it needs its own measurement.
+**A bug this ruler found by accident.** Example 353 looks like `* a *` and reads as an emphasis
+miss. It is not: the spec's example uses U+00A0 on both sides, so CommonMark sees no list item —
+a list marker must be followed by U+0020 or U+0009. `editor-core.js` matches `/^\s*[-*]\s/`, and JS
+`\s` **includes U+00A0**, so it marks a bullet that is not there and Rendered then hides the
+character the author typed. `markEmphasis` is already right about NBSP (`isMdSpace` uses `/\s/u`,
+and treating it as whitespace is exactly what the flanking rules want); only the block-marker
+regexes are wrong. Tracked separately, because it touches list parsing and deserves its own
+measurement.
 
 ### Constraints any change here has to keep
 
@@ -84,10 +99,11 @@ order inside `highlightLineParts` is load-bearing, and reordering it needs its o
   `reef-mcp/vendor/cssmd`) with a `gd`/`gp` prefix, behind two manual refresh scripts and a
   byte-exact freshness test. Nothing propagates on its own. `test/cssmd.test.cjs` (61 assertions) is
   the local gate.
-- **Ordering inside `highlightLineParts`.** Block markers are wrapped before inline ones, and the
-  strike pass runs BETWEEN emphasis and code. The cssmd passes are spliced into that chain rather
-  than called as one wrapper, precisely so the order stays byte-identical.
-  `test/parity-highlightLineParts.test.cjs` holds 68 golden outputs against exactly this.
+- **Ordering inside `highlightLineParts`.** Block markers first, then the constructs that bind
+  tighter than emphasis (`code`, `<autolink>`), then emphasis, then everything else. The cssmd passes
+  are spliced into that chain rather than called as one wrapper, precisely so the order stays
+  byte-identical. `test/parity-highlightLineParts.test.cjs` holds 68 golden outputs against exactly
+  this, and `test/emphasis.test.cjs` asserts three cases that only pass while the order holds.
 
 ⚠️ On measuring frequency, kept because the mistake is the useful part: the first attempt said
 nested emphasis appeared on **39.6%** of the owner's lines. It was **2.7%** (237 lines in 121 of

@@ -80,15 +80,29 @@ function highlightLineParts(line, block) {
     .replace(/^(\s*\d+[.)]\s)/, '<span class="tg-num">$1</span>')
     // A thematic break IS its marker, so the whole line hides in Rendered and CSS draws the rule.
     .replace(/^((?:-{3,}|\*{3,}|_{3,})\s*)$/, '<span class="tg-mk">$1</span>');
+  // PRECEDENCE. Two constructs bind tighter than emphasis and go first, because their content is
+  // addressing or literal text rather than prose: an inline `code` span and an <autolink>. Both are
+  // DELEGATED-or-local marker sandwiches, and markEmphasis treats a finished span as OPAQUE, so
+  // running them first is the whole mechanism — `` `*` `` stops being a delimiter, and the `**` in
+  // `**a<https://x/?q=**>` stops finding a partner. This was the other way round until 2026-08-04,
+  // which is why `` `**a**` `` used to render bold inside the code span.
+  const tight = markCode(blocks, 'tg')
+    // <https://…> and <a@b.c> — a bare URL in angle brackets, which is the one HTML-looking thing in
+    // markdown that is not HTML. escHtml has already turned the brackets into entities.
+    .replace(/&lt;((?:[a-z][a-z0-9+.-]*:|mailto:)[^\s&]*|[^\s&@]+@[^\s&@]+\.[^\s&@]+)&gt;/gi, (m, url) =>
+      '<span class="tg-link"><span class="tg-mk">&lt;</span>' + url + '<span class="tg-mk">&gt;</span></span>');
   // Inline **bold** / *italic* — DELEGATED to the shared cssmd primitive (markEmphasis), the single
-  // source for this mark. Runs over the already-escaped, block-marked text; the tokeniser treats an
-  // already-injected span as OPAQUE, so an asterisk bullet's own `*` can never pair with real
-  // emphasis further along the line. tg-* prefix keeps the plugins' existing class names.
-  // (`code` follows strike, below.)
-  const h = markCode(
-    markEmphasis(blocks, 'tg')
-    .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>'),
-    'tg')   // inline `code` — also DELEGATED to cssmd (markCode); kept AFTER strike to preserve the original pass order
+  // source for this mark. Runs over the already-escaped, block-marked, code-marked text; the
+  // tokeniser treats an already-injected span as OPAQUE, so an asterisk bullet's own `*` can never
+  // pair with real emphasis further along the line. tg-* prefix keeps the plugins' class names.
+  //
+  // The LINK passes stay AFTER this, deliberately, even though the spec binds link brackets tighter
+  // than emphasis too: a link's TEXT is prose and routinely contains emphasis (`[*bar*](/url)`), and
+  // an opaque link span would lose it. The price is the spec's own edge case `*[bar*](/url)`, where
+  // the brackets should stop a pair from forming — rare enough to be worth the trade, and named here
+  // rather than left as a surprise.
+  const h = markEmphasis(tight, 'tg')
+    .replace(/(~~[^~\n]+~~)/g, (m) => '<span class="tg-strike"><span class="tg-mk">~~</span>' + m.slice(2, -2) + '<span class="tg-mk">~~</span></span>')
     .replace(/(\[\[[^\]\n]+\]\])/g, (m) => '<span class="tg-link"><span class="tg-mk">[[</span>' + m.slice(2, -2) + '<span class="tg-mk">]]</span></span>')
     // CommonMark's own link and image. The engine grew up inside Obsidian and learned the dialect
     // ([[wikilink]]) before the language — `[text](url)` appears in 32.7% of his documents and rendered
@@ -107,10 +121,7 @@ function highlightLineParts(line, block) {
     .replace(/(\[)(\^[^\]\n]+)(\])/g, (m, o, ref, c) => '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + ref + '<span class="tg-mk">' + c + '</span></span>')
     .replace(/(\[)([^\]\n]*)(\]\[)([^\]\n]*)(\])/g, (m, o, text, mid, ref, c) =>
       '<span class="tg-ref"><span class="tg-mk">' + o + '</span>' + text + '<span class="tg-mk">' + mid + ref + c + '</span></span>')
-    // <https://…> and <a@b.c> — a bare URL in angle brackets, which is the one HTML-looking thing in
-    // markdown that is not HTML. escHtml has already turned the brackets into entities.
-    .replace(/&lt;((?:[a-z][a-z0-9+.-]*:|mailto:)[^\s&]*|[^\s&@]+@[^\s&@]+\.[^\s&@]+)&gt;/gi, (m, url) =>
-      '<span class="tg-link"><span class="tg-mk">&lt;</span>' + url + '<span class="tg-mk">&gt;</span></span>')
+    // (the <autolink> pass moved ABOVE markEmphasis — see the precedence note there)
     .replace(/(@@?\{)([^}\n]*)(\})/g, (m, op, inner, cl) => '<span class="tg-date"><span class="tg-mk">' + op + '</span>' + inner + '<span class="tg-mk">' + cl + '</span></span>')
     .replace(/(^|[^&\w])(#[^\s#<&]+)/g, '$1<span class="tg-tag">$2</span>')
     .replace(/\t/g, '<span class="tg-tab">\t</span>');   // wrap each literal tab LAST (after the line-start regexes) so CSS can mark tab-vs-space; span is transparent to the text round-trip
