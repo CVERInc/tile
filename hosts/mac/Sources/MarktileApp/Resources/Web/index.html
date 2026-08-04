@@ -65,6 +65,24 @@
      placement decision, and the other three should not inherit it. */
   .tugtile-ed-bar > .tugtile-headerctl { flex: 0 0 auto; margin-left: 8px; }
 
+  /* Narrow window: the chrome yields before the buttons do.
+     Measured on this surface — the 16 tools + 4 dividers need 720px to sit in one row, and they wrap to
+     two whenever they are given 360px. The strip is 265px, and it never gave any of it back: at the 420px
+     minimum window size that left the tools 127px, which is a SIX-row column that swallows the editor.
+     These two breakpoints are where the strip has to drop a word to keep "two rows" true, and they are
+     derived from those numbers, not chosen by eye. Nothing clickable ever goes away — the mode pill and
+     the lock both survive as icons, and both also have menu items.
+     The inline min-width comes from buildEditorCtl's stableWidth reservation, which exists to stop the
+     toolbar jittering on a mode switch when there is width to spare. When there isn't, room wins. */
+  @media (max-width: 660px) {
+    .tugtile-ed-bar > .tugtile-headerctl { min-width: 0 !important; }
+    .tugtile-ed-bar .tugtile-brand-text,
+    .tugtile-ed-bar .tugtile-sep { display: none; }
+  }
+  @media (max-width: 540px) {
+    .tugtile-ed-bar .tugtile-viewcycle-name { display: none; }
+  }
+
   /* View > Hide Toolbar. The mode strip rides in that row, so it goes too — both stay reachable from
      the View menu (⌘E, ⌘L), and the markdown itself never needed either of them. */
   #app.mt-no-toolbar .tugtile-ed-bar { display: none; }

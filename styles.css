@@ -509,6 +509,14 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
   display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
   justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned when it overflows */
   overflow-x: auto;
+  /* Wrapping fixed "buttons fall off the right edge", and then had no floor of its own: keep narrowing an
+     Obsidian sidebar or a macOS window and the rows keep multiplying — measured at 20 rows, 813px of
+     toolbar above a 640px window, i.e. a bar that has eaten the document it was decorating. Three rows is
+     the bound. It is a backstop, not a layout: every surface is supposed to shed its own chrome before
+     reaching it (macOS does, in Web/index.html), and where it does engage the row scrolls rather than
+     hides, because a button that is merely below the fold is still findable. 3×40 + 2×4 gap. */
+  max-height: 128px;
+  overflow-y: auto;
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
 /* Group divider in the editor toolbar */
