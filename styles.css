@@ -677,7 +677,11 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-ed-rich .tg-code { font-family: var(--font-monospace); color: var(--text-accent); }
 .tugtile-ed-rich .tg-tag,
 .tugtile-ed-rich .tg-img,
+.tugtile-ed-rich .tg-ref,
 .tugtile-ed-rich .tg-link { color: var(--text-accent); }
+/* A link-reference or footnote DEFINITION produces nothing in a rendered document — it is the
+   addressing behind a link, so it recedes rather than reading as a paragraph of its own. */
+.tugtile-preview .tg-refdef { color: var(--text-faint); font-size: 0.9em; }
 /* An ordered list's number is content, not syntax, so it never hides — it just stops shouting. The
    inline-block width is what lines "1." up with the • a bullet line gets from its ::before. */
 .tugtile-ed-rich .tg-num { color: var(--text-muted); }

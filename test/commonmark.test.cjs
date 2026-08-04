@@ -83,6 +83,22 @@ claim('thematic break *',          '***\n\nx', ['tg-hr']);
 claim('thematic break _',          '___\n\nx', ['tg-hr']);
 claim('two dashes are not a rule', '--\n\nx', [], ['tg-hr']);
 claim('fenced code',               '```\na\n```', ['tg-cfence', 'tg-cblock']);
+claim('indented code',             'x\n\n    code', ['tg-cblock']);
+claim('indent under prose is not code', 'a wrapped\n    sentence', [], ['tg-cblock']);
+claim('list continuation is not code',  '- item\n\n    more of it', [], ['tg-cblock']);
+claim('code inside a list needs 4 MORE', '- item\n\n        code', ['tg-cblock']);
+claim('autolink',                  '<https://x.com>', ['tg-link']);
+claim('email autolink',            '<a@b.com>', ['tg-link']);
+claim('a bare tag is not a link',  '<div>', [], ['tg-link']);
+claim('footnote reference',        'a[^1]', ['tg-ref']);
+claim('reference link',            '[a][r]', ['tg-ref']);
+claim('reference definition',      '[r]: https://x.com', ['tg-refdef']);
+claim('hard line break',           'a  \nb', ['tg-brk']);
+claim('one trailing space is not a break', 'a \nb', [], ['tg-brk']);
+claim('backslash escape is not emphasis', '\\*a\\*', [], ['tg-i']);
+claim('escaped backtick is not code',     '\\`a\\`', [], ['tg-code']);
+claim('a real emphasis still emphasises', '\\*lit\\* and *real*', ['tg-i']);
+claim('C:\\path is left alone',            'C:\\path\\to', [], ['tg-mk']);
 claim('tilde fence',               '~~~\na\n~~~', ['tg-cfence', 'tg-cblock']);
 claim('frontmatter',               '---\na: b\n---\nx', ['tg-fmfence', 'tg-fm'], ['tg-hr']);
 
@@ -98,29 +114,18 @@ claim('no markdown in frontmatter', '---\na: **b**\n---\nx', ['tg-fm'], ['tg-b']
 // ── GAPS: not implemented, asserted to stay that way until someone means to change it ───────────
 const GAPS = [
   ['setext heading',       'a\n===',            'tg-h1'],
-  ['indented code block',  '    code',          'tg-cblock'],
-  ['reference link',       '[a][r]\n\n[r]: u',  'tg-link'],
-  ['autolink',             '<https://x.com>',   'tg-link'],
-  ['footnote reference',   'a[^1]',             'tg-link'],
   ['html block',           '<div>x</div>',      'tg-html'],
-  ['hard line break',      'a  \nb',            'tg-break'],
-  // The one that is wrong rather than merely missing: the spec says this is NOT emphasis, and the
-  // engine emphasises it anyway. Recorded here so the number is honest — see the skipped task.
-  ['backslash escape (WRONG: renders italic)', '\\*a\\*', null],
+  // Recognised but never RESOLVED: the label is styled, nothing looks up what [r] or [^1] points at.
+  // That needs a document-wide map, which is a different job from highlighting a line.
+  ['reference link resolution', '[a][r]\n\n[r]: u', 'tg-link'],
 ];
 console.log('\n— known gaps (asserted still missing) —');
 for (const [name, md, cls] of GAPS) {
   const got = classesIn(md);
-  if (name.startsWith('backslash')) {
-    // asserted to be BROKEN: it emits tg-i where CommonMark says plain text
-    if (got.has('tg-i')) { console.log(`GAP  ${name}`); pass++; }
-    else { console.log(`FAIL ${name} — it appears to be FIXED. Remove it from GAPS and add a claim().`); fail++; }
-    continue;
-  }
   if (!got.has(cls)) { console.log(`GAP  ${name}`); pass++; }
   else { console.log(`FAIL ${name} — now emits ${cls}. Remove it from GAPS and add a claim().`); fail++; }
 }
 
-const claims = 34, gaps = GAPS.length;
+const claims = 51, gaps = GAPS.length;
 console.log(`\n${fail ? '✗' : '✅'} commonmark: ${claims} claims kept, ${gaps} gaps declared, ${fail} broken`);
 if (fail) process.exit(1);
