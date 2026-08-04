@@ -7,6 +7,10 @@ __pycache__/
 # node
 node_modules/
 
+# scripts/commonmark-score.mjs downloads the spec here. Not committed: the spec is CC-BY-SA and this
+# repo is MIT, and vendoring it is the owner's call, not a side effect of running a score.
+.cache/
+
 # transient publish payloads (scripts/publish*.sh assemble into a dest dir you pass in;
 # never commit those staged payloads back into this repo)
 /pub-*/
