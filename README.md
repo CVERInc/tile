@@ -41,7 +41,8 @@ image paste. It has no hard Obsidian import: it calls a handful of DOM-sugar hel
 app injects them; outside Obsidian a small shim supplies them. The core is never forked
 per host.
 
-- **`packages/core`** — the editor engine (SSOT).
+- **`packages/core`** — the editor engine (SSOT). What it knows about markdown, where it stands
+  against CommonMark, and the one construct still rendering wrongly: [`MARKDOWN.md`](packages/core/MARKDOWN.md).
 - **`packages/cssmd`** — the shared inline-mark primitive (`**bold**` / `*italic*` /
   `` `code` `` rendered with the raw markers hidden via one CSS rule). The engine
   delegates to it so there is one implementation, not a copy per consumer.

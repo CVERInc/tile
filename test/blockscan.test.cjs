@@ -60,11 +60,13 @@ eq('... closes frontmatter, as YAML allows',
    '---\nname: x\n...\nbody',
    ['fmfence', 'fm', 'fmfence', null]);
 
-// The one that matters: a --- further down is a thematic break, and mistaking it for frontmatter
-// would swallow every line after it.
+// The one that matters: a --- further down is never frontmatter, and mistaking it for frontmatter
+// would swallow every line after it. It is a setext underline here (a paragraph sits above it), which
+// is what CommonMark says and what makes `---` genuinely two-faced — but it is emphatically not
+// frontmatter, and the lines below it stay ordinary markdown.
 eq('a --- below the first line is NOT frontmatter',
    'intro\n---\nname: x\n---\nbody',
-   [null, null, null, null, null]);
+   ['sh2', 'srule', 'sh2', 'srule', null]);
 
 eq('an unterminated leading --- is a thematic break, not frontmatter',
    '---\njust text\nmore',
@@ -79,5 +81,15 @@ eq('indented fences (up to 3 spaces) still open a block',
    ['cfence', 'cblock', 'cfence']);
 
 eq('a single line document', 'hello', [null]);
+
+// ── setext: the construct that reads backwards ──────────────────────────────────────────────────
+eq('= underline makes the line above an h1', 'Title\n===\nbody', ['sh1', 'srule', null]);
+eq('- underline makes it an h2, beating the thematic break', 'Title\n---\nbody', ['sh2', 'srule', null]);
+eq('the heading is the whole paragraph, not the last line', 'two\nline title\n===', ['sh1', 'sh1', 'srule']);
+eq('a rule after a blank line is still a rule', 'a\n\n---\n\nb', [null, null, null, null, null]);
+eq('a list item is not setext heading text', '- item\n---', [null, null]);
+eq('an ATX heading is not setext heading text', '# already\n---', [null, null]);
+eq('an underline inside a fence is just text', '```\ncode\n===\n```', ['cfence', 'cblock', 'cblock', 'cfence']);
+eq('frontmatter still wins at the top of the file', '---\nname: x\n---\nbody', ['fmfence', 'fm', 'fmfence', null]);
 
 console.log(`\n✅ blockscan all pass (${pass})`);

@@ -101,6 +101,12 @@ claim('a real emphasis still emphasises', '\\*lit\\* and *real*', ['tg-i']);
 claim('C:\\path is left alone',            'C:\\path\\to', [], ['tg-mk']);
 claim('tilde fence',               '~~~\na\n~~~', ['tg-cfence', 'tg-cblock']);
 claim('frontmatter',               '---\na: b\n---\nx', ['tg-fmfence', 'tg-fm'], ['tg-hr']);
+claim('setext h1',                 'Title\n===', ['tg-h1', 'tg-srule']);
+claim('setext h2 beats the rule',  'Title\n---', ['tg-h2', 'tg-srule'], ['tg-hr']);
+claim('setext spans the paragraph','two\nline title\n===', ['tg-h1']);
+claim('a rule after a blank stays a rule', 'a\n\n---\n\nb', ['tg-hr'], ['tg-srule']);
+claim('a list is not setext text', '- item\n---', [], ['tg-srule']);
+claim('setext keeps its inline marks', 'a **b** title\n===', ['tg-h1', 'tg-b']);
 
 // ── The negatives: inside a code fence, nothing is markdown ─────────────────────────────────────
 claim('no strong inside a fence',   '```\n**a**\n```', ['tg-cblock'], ['tg-b']);
@@ -113,7 +119,6 @@ claim('no markdown in frontmatter', '---\na: **b**\n---\nx', ['tg-fm'], ['tg-b']
 
 // ── GAPS: not implemented, asserted to stay that way until someone means to change it ───────────
 const GAPS = [
-  ['setext heading',       'a\n===',            'tg-h1'],
   ['html block',           '<div>x</div>',      'tg-html'],
   // Recognised but never RESOLVED: the label is styled, nothing looks up what [r] or [^1] points at.
   // That needs a document-wide map, which is a different job from highlighting a line.
@@ -126,6 +131,6 @@ for (const [name, md, cls] of GAPS) {
   else { console.log(`FAIL ${name} — now emits ${cls}. Remove it from GAPS and add a claim().`); fail++; }
 }
 
-const claims = 51, gaps = GAPS.length;
+const claims = 57, gaps = GAPS.length;
 console.log(`\n${fail ? '✗' : '✅'} commonmark: ${claims} claims kept, ${gaps} gaps declared, ${fail} broken`);
 if (fail) process.exit(1);
