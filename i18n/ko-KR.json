@@ -271,5 +271,12 @@
   "familyGet": "플러그인 보기",
   "familyHave": "이미 tile 패밀리를 모두 갖추셨습니다.",
   "keyboardHintName": "키보드",
-  "keyboardHint": "팁: 카드를 포커스(Tab 또는 클릭)하고 화살표 키로 이동: 위/아래는 같은 레인, 좌/우는 레인 간."
+  "keyboardHint": "팁: 카드를 포커스(Tab 또는 클릭)하고 화살표 키로 이동: 위/아래는 같은 레인, 좌/우는 레인 간.",
+  "searchAll": "모든 문서 검색",
+  "searchAllPlaceholder": "모든 문서 검색",
+  "searchAllHint": "이 Mac의 모든 Markdown 파일. 기억나는 단어를 입력하세요.",
+  "searchAllNone": "없습니다. 한 단어만 쓰거나 다른 단어로 시도해 보세요.",
+  "searchAllStat": "파일 {0}개 · {1}개 표시",
+  "searchAllOffline": "클라우드에 내려받지 않은 파일 {0}개 더",
+  "searchAllCapped": "최신순으로 {1}개 중 {0}개를 읽음"
 }

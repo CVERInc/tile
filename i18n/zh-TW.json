@@ -271,5 +271,12 @@
   "familyGet": "查看外掛",
   "familyHave": "你已經擁有完整的 tile 家族了。",
   "keyboardHintName": "鍵盤",
-  "keyboardHint": "小技巧：聚焦一張卡片（Tab 或點一下），用方向鍵搬動它：上下在同一牌列、左右跨牌列。"
+  "keyboardHint": "小技巧：聚焦一張卡片（Tab 或點一下），用方向鍵搬動它：上下在同一牌列、左右跨牌列。",
+  "searchAll": "搜尋所有文件",
+  "searchAllPlaceholder": "搜尋所有文件",
+  "searchAllHint": "這台 Mac 上的每一個 Markdown 檔案。輸入你記得的字。",
+  "searchAllNone": "找不到。試試只用一個詞，或換一個猜法。",
+  "searchAllStat": "{0} 個檔案・顯示 {1} 個",
+  "searchAllOffline": "雲端上還有 {0} 個尚未下載",
+  "searchAllCapped": "由新到舊讀了 {1} 個中的 {0} 個"
 }

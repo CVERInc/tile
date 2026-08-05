@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Assemble a thin Obsidian publish-repo payload for ONE plugin from the monorepo build.
-# The tile monorepo stays private; this produces the public distribution mirror that Obsidian
-# requires (one repo = one plugin: manifest.json at root + main.js/styles.css + a Release).
+#
+# 🩸 This said "the tile monorepo stays private" until 2026-08-05. It was true when written and
+# stopped being true when the MIT packages graduated to the PUBLIC CVERInc/tile — so the one line
+# here describing the topology was telling every later reader the opposite of the truth. The mirrors
+# exist because Obsidian requires one repo = one plugin (manifest.json at the root, main.js +
+# styles.css beside it, and a Release), not because the source is hidden.
 #
 # Usage:  scripts/publish.sh <tugtile|marktile> <dest-dir>
 # Produces in <dest-dir>: main.js · manifest.json · styles.css · versions.json · LICENSE
