@@ -139,6 +139,42 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.toggleLock()", completionHandler: nil)
     }
 
+    // MARK: - Text size
+
+    /// A LADDER, not a multiplier. A text editor's sizes are a short list a person recognises — 16
+    /// is the one they know as "normal" — and stepping by a factor lands on 17.6 and 19.36, which
+    /// nobody asked for and which look like a rounding bug in a monospace canvas.
+    private static let textSizes = [11, 12, 13, 14, 16, 18, 20, 24, 28, 32]
+    private static let defaultTextSize = 16
+    private static let textSizeKey = "MarktileTextSize"
+
+    /// App-wide, not per document: this is how big the person's eyes need the text, which does not
+    /// change when they open a different file.
+    static var textSize: Int {
+        get {
+            let v = UserDefaults.standard.integer(forKey: textSizeKey)
+            return textSizes.contains(v) ? v : defaultTextSize
+        }
+        set { UserDefaults.standard.set(newValue, forKey: textSizeKey) }
+    }
+
+    private func stepTextSize(by delta: Int) {
+        let sizes = Self.textSizes
+        let i = sizes.firstIndex(of: Self.textSize) ?? sizes.firstIndex(of: Self.defaultTextSize)!
+        Self.textSize = sizes[min(max(i + delta, 0), sizes.count - 1)]
+        applyTextSize()
+    }
+
+    /// Push the size into the page. Also called after a load, so a new window opens at the size the
+    /// person last chose rather than snapping back to 16 and making them set it again.
+    func applyTextSize() {
+        webView.evaluateJavaScript("window.__mt.setTextSize(\(Self.textSize))", completionHandler: nil)
+    }
+
+    @objc func textSizeUp(_ sender: Any?) { stepTextSize(by: 1) }
+    @objc func textSizeDown(_ sender: Any?) { stepTextSize(by: -1) }
+    @objc func textSizeReset(_ sender: Any?) { Self.textSize = Self.defaultTextSize; applyTextSize() }
+
     /// Every Format menu item, carrying the engine's own tool key in `representedObject`. One action
     /// for eleven items, because the menu has nothing to say about what "bold" means — it only has to
     /// name which button the person would otherwise have hunted for.
@@ -189,6 +225,11 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         if item.action == #selector(runTool(_:)) {
             return !isLockedCache
         }
+        // At the ends of the ladder the item does nothing, so it says so. A ⌘+ that silently
+        // no-ops reads as a bug in the shortcut rather than as "this is as big as it goes".
+        if item.action == #selector(textSizeUp(_:)) { return Self.textSize != Self.textSizes.last }
+        if item.action == #selector(textSizeDown(_:)) { return Self.textSize != Self.textSizes.first }
+        if item.action == #selector(textSizeReset(_:)) { return Self.textSize != Self.defaultTextSize }
         return true
     }
 
@@ -207,6 +248,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
             isReady = true
             pushAccent()
             pushToolbarVisibility()
+            applyTextSize()
             if let pending = pendingText {
                 pendingText = nil
                 load(text: pending)

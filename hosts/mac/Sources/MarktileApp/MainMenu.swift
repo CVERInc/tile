@@ -129,6 +129,23 @@ func makeMainMenu() -> NSMenu {
                                        keyEquivalent: "t")
     toolbarItem.keyEquivalentModifierMask = [.command, .option]
     viewMenu.addItem(.separator())
+    // Text size. This scales the TEXT, not the view: a WKWebView page zoom would take the toolbar
+    // and the chrome with it, and the toolbar already has to fold at narrow widths — magnifying it
+    // would stage that problem again on a wide window. A text editor's ⌘+ makes the text bigger.
+    viewMenu.addItem(withTitle: "Bigger Text",
+                     action: #selector(EditorViewController.textSizeUp(_:)), keyEquivalent: "+")
+    // ⌘= as well, unmarked: `+` is a shifted key on most layouts, so the shortcut a person actually
+    // presses is ⌘= about as often as ⌘⇧=. Every Mac text app accepts both; only one is advertised.
+    let zoomInAlt = viewMenu.addItem(title: "Bigger Text",
+                                     action: #selector(EditorViewController.textSizeUp(_:)),
+                                     keyEquivalent: "=")
+    zoomInAlt.isAlternate = false
+    zoomInAlt.isHidden = true
+    viewMenu.addItem(withTitle: "Smaller Text",
+                     action: #selector(EditorViewController.textSizeDown(_:)), keyEquivalent: "-")
+    viewMenu.addItem(withTitle: "Actual Size",
+                     action: #selector(EditorViewController.textSizeReset(_:)), keyEquivalent: "0")
+    viewMenu.addItem(.separator())
     // The other half of the head layer. Read-only is a real capability in this family, not a nicety:
     // it is what lets you scroll a document without a stray keystroke editing it.
     viewMenu.addItem(withTitle: "Lock Editor (Read-Only)",
