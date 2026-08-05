@@ -209,22 +209,40 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         DispatchQueue.global(qos: .userInitiated).async {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: tool)
-            p.arguments = ["--json"] + terms
+            // --stream: one JSON object per line. The indexed half arrives in well under a second;
+            // the half nothing has indexed takes ~4s, because covering it means opening 11,500
+            // files. Waiting for both before showing anything is what would make this feel broken.
+            p.arguments = ["--json", "--stream"] + terms
             let out = Pipe()
             p.standardOutput = out
             p.standardError = Pipe()      // its diagnostics are not this window's business
-            var json = "null"
+            var sawAny = false
             do {
                 try p.run()
-                let data = out.fileHandleForReading.readDataToEndOfFile()
+                // Read by LINE rather than to EOF: readDataToEndOfFile would hold the first answer
+                // hostage until the last one was ready, which is the whole thing being avoided.
+                var buffer = Data()
+                while true {
+                    let chunk = out.fileHandleForReading.availableData
+                    if chunk.isEmpty { break }
+                    buffer.append(chunk)
+                    while let nl = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                        let line = buffer[buffer.startIndex..<nl]
+                        buffer.removeSubrange(buffer.startIndex...nl)
+                        guard let s = String(data: Data(line), encoding: .utf8), !s.isEmpty else { continue }
+                        sawAny = true
+                        DispatchQueue.main.async { self.replySearch(id: id, json: s) }
+                    }
+                }
                 p.waitUntilExit()
-                if p.terminationStatus == 0, let s = String(data: data, encoding: .utf8), !s.isEmpty { json = s }
             } catch {
                 // Never the error itself: a subprocess failure can carry a path or an argument, and
-                // this string is about to be evaluated inside the page. Type only.
+                // this string is about to cross into the page. Type only.
                 NSLog("marktile: search failed (\(type(of: error)))")
             }
-            DispatchQueue.main.async { self.replySearch(id: id, json: json) }
+            // A run that printed nothing still has to end the wait, or the panel spins until its
+            // own timeout for a search that already failed.
+            if !sawAny { DispatchQueue.main.async { self.replySearch(id: id, json: "null") } }
         }
     }
 

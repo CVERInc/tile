@@ -1003,23 +1003,40 @@ function mountEditor(contentEl, opts, host) {
     };
 
     let searchSeq = 0;
+    // 🔴 THE ANSWER ARRIVES IN MORE THAN ONE PIECE, and the reason is a real measurement rather than
+    // a taste for streaming. Covering what the index refuses to look at means READING those files —
+    // about 11,500 of them, ~0.6s to walk and ~1.3s to read. That is a fair price on a command line
+    // and a bad one under a panel that searches while you type: every keystroke would buy a
+    // multi-second stare at nothing.
+    //
+    // So `host.searchAll(query, onPartial)` may call `onPartial` as many times as it likes before
+    // resolving. The indexed half lands almost immediately and is shown; the unindexed half is
+    // merged in when it arrives. What this preserves is the property the whole blind-spot fix was
+    // for — "nothing found" here means nothing exists, not "nothing was looked at" — while refusing
+    // to charge the reader for it up front. A host that ignores onPartial and resolves once still
+    // works exactly as before.
+    const applyResult = (res, seq, done) => {
+      if (seq !== searchSeq) return;      // a slower earlier query must never overwrite a newer answer
+      if (done) panel.classList.remove('is-busy');
+      const next = res && res.hits ? res : { hits: [], offline: [], files: 0, skipped: 0 };
+      // The SELECTION is kept across a merge, by identity rather than by index: a result arriving
+      // late must never move what the arrow keys are pointing at, or a list that grows under you
+      // steals the Enter you were about to press.
+      const chosen = panelState.res && panelState.res.hits[panelState.sel];
+      panelState.res = next;
+      const at = chosen ? next.hits.findIndex((h) => h.path === chosen.path && h.line === chosen.line) : -1;
+      panelState.sel = at >= 0 ? at : 0;
+      drawResults();
+    };
+
     const runSearch = (q) => {
       panelState.q = q;
       if (!q.trim()) { panelState.res = null; panelState.sel = 0; drawResults(); return; }
       const mine = ++searchSeq;
       panel.classList.add('is-busy');
-      Promise.resolve(host.searchAll(q)).then((res) => {
-        if (mine !== searchSeq) return;   // a slower earlier query must never overwrite a newer answer
-        panel.classList.remove('is-busy');
-        panelState.res = res && res.hits ? res : { hits: [], offline: [], files: 0, skipped: 0 };
-        panelState.sel = 0;
-        drawResults();
-      }).catch(() => {
-        if (mine !== searchSeq) return;
-        panel.classList.remove('is-busy');
-        panelState.res = { hits: [], offline: [], files: 0, skipped: 0 };
-        drawResults();
-      });
+      Promise.resolve(host.searchAll(q, (partial) => applyResult(partial, mine, false)))
+        .then((res) => applyResult(res, mine, true))
+        .catch(() => applyResult(null, mine, true));
     };
 
     const buildPanel = () => {
