@@ -271,5 +271,12 @@
   "familyGet": "View plugin",
   "familyHave": "You already have the full tile family.",
   "keyboardHintName": "Keyboard",
-  "keyboardHint": "Tip: focus a card (Tab or click), then use the arrow keys to move it — up/down within a lane, left/right across lanes."
+  "keyboardHint": "Tip: focus a card (Tab or click), then use the arrow keys to move it — up/down within a lane, left/right across lanes.",
+  "searchAll": "Search every document",
+  "searchAllPlaceholder": "Search every document",
+  "searchAllHint": "Every Markdown file on this Mac. Type a word you remember.",
+  "searchAllNone": "Nothing. Try one word, or a different guess.",
+  "searchAllStat": "{0} files · {1} shown",
+  "searchAllOffline": "{0} more in the cloud, not downloaded",
+  "searchAllCapped": "read the {0} newest of {1}"
 }

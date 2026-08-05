@@ -561,7 +561,13 @@ function mountEditor(contentEl, opts, host) {
     // A magnifier inside the pill, so the field says what it is without spending a placeholder on it.
     // It is also where the scope control will live — "search everything" is a property of THIS field,
     // not a separate button somewhere else on the bar.
-    setIcon(findGrp.createSpan({ cls: 'tugtile-ed-find-lead' }), 'search');
+    // The magnifier is the scope control when the host can widen the search — one click from "this
+    // file" to "every document". It is a plain glyph otherwise, so a host without searchAll never
+    // shows a door that leads nowhere. Deliberately NOT a double-click on the toolbar's 🔍: telling
+    // one click from two means delaying the single-click response by the double-click interval,
+    // which makes the ordinary case feel broken to buy the rare one.
+    const findLead = findGrp.createSpan({ cls: 'tugtile-ed-find-lead' });
+    setIcon(findLead, 'search');
     const findInp = findGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('findPlaceholder') } });
     const findN = findGrp.createSpan({ cls: 'tugtile-ed-find-n' });
     const replInp = replGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('replacePlaceholder') } });
@@ -592,6 +598,110 @@ function mountEditor(contentEl, opts, host) {
       findbar.style.display = on ? '' : 'none';
       if (on) { updateN(); setTimeout(() => findInp.focus(), 0); } else { ta.focus(); }
     };
+
+    // ── Search every document ──────────────────────────────────────────────────────────────────
+    // A CENTRED OVERLAY, not a side panel, and the reason is what happens when you pick a result:
+    // the table of contents is about THIS document and stays with you, while this is about other
+    // documents and choosing one ends the panel's job. That is the shape of Spotlight, of Open
+    // Quickly, of ⌘P — and of Obsidian's own quick switcher, which is a modal even though its
+    // sidebar search is not. Results also need the width: the context line is what tells you it is
+    // the right file, and a 240px rail truncates exactly that.
+    //
+    // The engine owns none of the searching. `host.searchAll(query)` returns
+    // { hits:[{path,name,line,text,before,after,age}], offline:[path], files, skipped } — the shape
+    // ffcore.passages already produces — and a host that does not provide it gets no scope control
+    // at all, so nothing here can advertise a capability that is not there.
+    const canSearchAll = typeof host.searchAll === 'function';
+    let panel = null, panelState = { q: '', res: null, sel: 0 };
+
+    const openResult = (hit) => {
+      if (typeof host.openLink === 'function') host.openLink({ kind: 'file', target: hit.path, line: hit.line, label: hit.name });
+      toggleSearchAll(false);
+    };
+
+    const drawResults = () => {
+      const list = panel.querySelector('.tugtile-sa-list');
+      const stat = panel.querySelector('.tugtile-sa-stat');
+      list.empty(); stat.textContent = '';
+      const r = panelState.res;
+      if (!r) { list.createDiv({ cls: 'tugtile-sa-hint', text: t('searchAllHint') }); return; }
+      const bits = [t('searchAllStat', r.files, r.hits.length)];
+      if (r.skipped) bits.push(t('searchAllCapped', r.files - r.skipped, r.files));
+      if (r.offline && r.offline.length) bits.push(t('searchAllOffline', r.offline.length));
+      stat.textContent = bits.join(' · ');
+      if (!r.hits.length) { list.createDiv({ cls: 'tugtile-sa-hint', text: t('searchAllNone') }); return; }
+      r.hits.forEach((h, i) => {
+        const row = list.createDiv({ cls: 'tugtile-sa-row' + (i === panelState.sel ? ' is-sel' : '') });
+        const head = row.createDiv({ cls: 'tugtile-sa-head' });
+        head.createSpan({ cls: 'tugtile-sa-name', text: h.name + ':' + h.line });
+        if (h.age != null) head.createSpan({ cls: 'tugtile-sa-age', text: Math.round(h.age) + 'd' });
+        if (h.before) row.createDiv({ cls: 'tugtile-sa-ctx', text: h.before });
+        row.createDiv({ cls: 'tugtile-sa-hit', text: h.text });
+        if (h.after) row.createDiv({ cls: 'tugtile-sa-ctx', text: h.after });
+        row.addEventListener('mousedown', (e) => { e.preventDefault(); openResult(h); });
+      });
+      const sel = list.querySelector('.is-sel');
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+    };
+
+    let searchSeq = 0;
+    const runSearch = (q) => {
+      panelState.q = q;
+      if (!q.trim()) { panelState.res = null; panelState.sel = 0; drawResults(); return; }
+      const mine = ++searchSeq;
+      panel.classList.add('is-busy');
+      Promise.resolve(host.searchAll(q)).then((res) => {
+        if (mine !== searchSeq) return;   // a slower earlier query must never overwrite a newer answer
+        panel.classList.remove('is-busy');
+        panelState.res = res && res.hits ? res : { hits: [], offline: [], files: 0, skipped: 0 };
+        panelState.sel = 0;
+        drawResults();
+      }).catch(() => {
+        if (mine !== searchSeq) return;
+        panel.classList.remove('is-busy');
+        panelState.res = { hits: [], offline: [], files: 0, skipped: 0 };
+        drawResults();
+      });
+    };
+
+    const buildPanel = () => {
+      const wrap = contentEl.createDiv({ cls: 'tugtile-sa' });
+      wrap.createDiv({ cls: 'tugtile-sa-scrim' }).addEventListener('mousedown', () => toggleSearchAll(false));
+      const box = wrap.createDiv({ cls: 'tugtile-sa-box' });
+      const top = box.createDiv({ cls: 'tugtile-sa-top' });
+      setIcon(top.createSpan({ cls: 'tugtile-ed-find-lead' }), 'search');
+      const inp = top.createEl('input', { cls: 'tugtile-sa-i', type: 'text', attr: { placeholder: t('searchAllPlaceholder') } });
+      top.createSpan({ cls: 'tugtile-sa-stat' });
+      box.createDiv({ cls: 'tugtile-sa-list' });
+      let debounce;
+      inp.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(() => runSearch(inp.value), 220); });
+      inp.addEventListener('keydown', (e) => {
+        const hits = (panelState.res && panelState.res.hits) || [];
+        if (e.key === 'Escape') { e.preventDefault(); toggleSearchAll(false); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); panelState.sel = Math.min(panelState.sel + 1, hits.length - 1); drawResults(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); panelState.sel = Math.max(panelState.sel - 1, 0); drawResults(); }
+        else if (e.key === 'Enter') { e.preventDefault(); clearTimeout(debounce); if (hits[panelState.sel]) openResult(hits[panelState.sel]); else runSearch(inp.value); }
+      });
+      return wrap;
+    };
+
+    // Reopening restores the last query AND its results, the way Spotlight does. That is what makes
+    // "read three of these in turn" work without keeping a panel on screen — the state persists, the
+    // pixels do not. The find bar already behaves this way; this follows its sibling rather than
+    // inventing a second convention.
+    const toggleSearchAll = (show) => {
+      if (!canSearchAll) return false;
+      if (!panel) panel = buildPanel();
+      const on = (show === undefined) ? !panel.classList.contains('is-open') : show;
+      panel.classList.toggle('is-open', on);
+      if (on) {
+        const inp = panel.querySelector('.tugtile-sa-i');
+        inp.value = panelState.q;
+        drawResults();
+        setTimeout(() => { inp.focus(); inp.select(); }, 0);
+      } else { ed.focus(); }
+      return true;
+    };
     const mkFb = (icon, aria, fn, target) => { const b = (target || findbar).createEl('button', { cls: 'tugtile-iconbtn tugtile-ed-find-b' }); setIcon(b.createSpan(), icon); b.setAttribute('aria-label', aria); b.addEventListener('mousedown', (e) => e.preventDefault()); b.addEventListener('click', fn); b.addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false }); };
     mkFb('chevron-up', t('findPrev'), () => findNext(true), findGrp);
     mkFb('chevron-down', t('findNext'), () => findNext(false), findGrp);
@@ -600,6 +710,23 @@ function mountEditor(contentEl, opts, host) {
     mkFb('x', t('cancel'), () => toggleFind(false));   // stays a direct child — CSS pushes it to the far edge
     findInp.addEventListener('input', updateN);
     findInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); findNext(!!e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); toggleFind(false); } });
+    if (canSearchAll) {
+      findLead.classList.add('is-scope');
+      findLead.setAttribute('role', 'button');
+      findLead.setAttribute('tabindex', '0');
+      findLead.setAttribute('aria-label', t('searchAll'));   // the tooltip mirror picks this up too
+      // The query you already typed travels with you — escalating is widening the SAME search, not
+      // starting a new one, and retyping it would be the tool forgetting what you just said.
+      const widen = () => { panelState.q = findInp.value || panelState.q; toggleFind(false); toggleSearchAll(true); if (panelState.q) runSearch(panelState.q); };
+      findLead.addEventListener('mousedown', (e) => { e.preventDefault(); widen(); });
+      findLead.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); widen(); } });
+      // ⌘F⌘F. The second press lands while the find field has focus, so "press it again" is the
+      // whole gesture — no new shortcut to learn, and it reads as widening rather than as a
+      // different feature.
+      findInp.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); widen(); }
+      });
+    }
 
     // Editor shortcuts: edit the text model directly, then applyEdit re-highlights + snapshots undo; mousedown preventDefault retains the caret
     const wrap = (pre, post) => { const v = getText(), s = sel().start, e = sel().end; applyEdit(v.slice(0, s) + pre + v.slice(s, e) + post + v.slice(e), s + pre.length, e + pre.length); };
@@ -792,6 +919,10 @@ function mountEditor(contentEl, opts, host) {
     // first change. Returns false for an unknown key so a host can't silently ship a dead menu item.
     runTool: (key) => { const fn = runs[key]; if (!fn) return false; fn(); ed.focus(); return true; },
     toggleFind: (show) => toggleFind(show),   // ⌘F — the same bar the magnifier opens
+    // ⌘F⌘F from the host's menu. Returns false when the host provides no searchAll, so the caller
+    // can decline to offer the menu item rather than shipping one that does nothing.
+    toggleSearchAll: (show) => toggleSearchAll(show),
+    canSearchAll: () => canSearchAll,
     focus: () => ta.focus(),
     destroy: () => { clearTimeout(syncT); if (sepRO) { sepRO.disconnect(); sepRO = null; } if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } },
   };

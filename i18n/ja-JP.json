@@ -271,5 +271,12 @@
   "familyGet": "プラグインを見る",
   "familyHave": "tile ファミリーをすべて揃えています。",
   "keyboardHintName": "キーボード",
-  "keyboardHint": "ヒント：カードをフォーカス（Tab かクリック）して矢印キーで移動：上下は同じレーン、左右はレーン間。"
+  "keyboardHint": "ヒント：カードをフォーカス（Tab かクリック）して矢印キーで移動：上下は同じレーン、左右はレーン間。",
+  "searchAll": "すべての書類を検索",
+  "searchAllPlaceholder": "すべての書類を検索",
+  "searchAllHint": "この Mac のすべての Markdown ファイル。覚えている言葉を入力してください。",
+  "searchAllNone": "見つかりません。一語だけにするか、別の言葉で試してください。",
+  "searchAllStat": "{0} 件のファイル・{1} 件を表示",
+  "searchAllOffline": "クラウドに未ダウンロードのファイルがあと {0} 件",
+  "searchAllCapped": "新しい順に {1} 件中 {0} 件を読み込み"
 }
