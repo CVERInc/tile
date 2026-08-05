@@ -831,6 +831,62 @@ function mountEditor(contentEl, opts, host) {
     ed.addEventListener('compositionend', () => { composing = false; scheduleSync(); });
     ed.addEventListener('input', () => { if (!composing) scheduleSync(); });
 
+    // ── Links are doors, on ⌘-click ────────────────────────────────────────────────────────────
+    // Until now every link in this editor was decoration: `[text](url)`, `<autolink>` and
+    // `[[wikilink]]` were all styled and all inert, on every surface. A plain click still has to
+    // place the caret — this is a source editor and the text under the pointer is text — so the
+    // door is ⌘-click, the same gesture every Mac editor uses for exactly this.
+    //
+    // WHICH KIND OF LINK IT IS, IS WRITTEN IN THE MARKERS. All three render as `.tg-link` and the
+    // temptation is to tell them apart with a data- attribute; but the opening marker already says
+    // `[[` or `<` or `[`, it is right there in the DOM, and it round-trips because it is the text.
+    // Reading it costs nothing and adds no second source of truth to keep in sync.
+    const linkAt = (node) => {
+      let el = node && node.nodeType === 3 ? node.parentElement : node;
+      while (el && el !== ed && !(el.classList && /\btg-(link|img|ref)\b/.test(el.className))) el = el.parentElement;
+      if (!el || el === ed) return null;
+      const marks = Array.from(el.children).filter((c) => c.classList && c.classList.contains('tg-mk'));
+      if (marks.length < 2) return null;
+      const open = marks[0].textContent, close = marks[marks.length - 1].textContent;
+      // The label is everything that is not a marker — for a wikilink that IS the target.
+      const label = Array.from(el.childNodes)
+        .filter((n) => !(n.nodeType === 1 && n.classList && n.classList.contains('tg-mk')))
+        .map((n) => n.textContent).join('');
+      if (open === '[[') return { kind: 'wiki', target: label.split('|')[0].split('#')[0].trim(), label: label };
+      if (open === '<') return { kind: 'url', target: label.trim(), label: label };
+      const md = /^\]\(([^)]*)\)$/.exec(close);
+      if (md) return { kind: open === '![' ? 'image' : 'url', target: md[1].trim(), label: label };
+      // A reference link or footnote — the label is styled but nothing here resolves what it points
+      // at, which is a document-wide question this editor deliberately does not answer.
+      return { kind: 'ref', target: label.trim(), label: label };
+    };
+    const openLinkAt = (node) => {
+      const link = linkAt(node);
+      if (!link || !link.target) return false;
+      if (typeof host.openLink !== 'function') return false;   // a host that has no opener has no door
+      host.openLink(link);
+      return true;
+    };
+    // WHO OWNS THE PLAIN CLICK. The caret does — but only while the syntax is on screen. Two states
+    // hand it over, and both for the same reason rather than as two special cases:
+    //   • LOCKED — the editor refuses edits, so there is no caret competing for the click at all.
+    //   • RENDERED — `.tg-mk` is hidden, which means the URL inside `](…)` is not on screen. Placing
+    //     a caret inside a link you cannot see the address of buys nothing; and a document that has
+    //     dropped its markers to look like a document should behave like one when you click a link.
+    // In Seasoned and Plain the markers are visible, you are plainly in source, and ⌘ is the price.
+    const readerMode = () => ed.getAttribute('contenteditable') === 'false' || !!ed.closest('.tugtile-preview');
+    ed.addEventListener('click', (e) => {
+      if (!(e.metaKey || e.ctrlKey) && !readerMode()) return;   // source + unlocked: caret wins
+      if (openLinkAt(e.target)) { e.preventDefault(); e.stopPropagation(); }
+    });
+    // The pointer is the whole affordance. In reader mode it is always on, because there the link is
+    // simply clickable; in source it appears only while ⌘ is held, since the gesture is otherwise
+    // undiscoverable — there is no underline to hint at it the rest of the time.
+    const armed = (e) => ed.classList.toggle('tugtile-ed-linkable', !!(e && (e.metaKey || e.ctrlKey)) || readerMode());
+    ['keydown', 'keyup'].forEach((ev) => document.addEventListener(ev, armed));
+    ed.addEventListener('mouseenter', armed);
+    ed.addEventListener('mouseleave', () => ed.classList.toggle('tugtile-ed-linkable', readerMode()));
+
     render(orig); pushHist();
     const scrollCaretIntoView = () => { let el = locate(sel().start).node; if (el.nodeType === 3) el = el.parentElement; if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); };
     // Programmatic edit (toolbar / find-replace): replace whole text, set caret, snapshot for undo

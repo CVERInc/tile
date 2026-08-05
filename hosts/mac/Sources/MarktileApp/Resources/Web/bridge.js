@@ -101,7 +101,17 @@ function open(text) {
       },
       onToc: () => { if (rig && rig.toc) rig.toc.toggle(); },
     },
-    makeWebHost()
+    // A URL goes to the system browser through AppKit, not `window.open` — inside a WKWebView that
+    // would try to navigate the app's own view, and this app has exactly one document in it.
+    //
+    // `[[wikilink]]` deliberately does NOT open yet. Resolving one means asking which file on this
+    // machine is called that, which is the retrieval side's job and its own piece of work; a link
+    // that silently does nothing is better than one that guesses at a file and opens the wrong note.
+    makeWebHost({
+      openLink: (link) => {
+        if (link.kind === 'url' || link.kind === 'image') send('openurl', { url: link.target });
+      },
+    })
   );
 
   app.classList.add("marktile-ed");   // marktile IS a markdown editor → monospace, not board cards
