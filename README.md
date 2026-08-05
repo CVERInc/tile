@@ -94,8 +94,8 @@ This monorepo is the **source**. The two Obsidian plugins ship as thin publish m
 
 | Artifact | Published as | What it is |
 |---|---|---|
-| tugtile plugin | `CVERInc/tugtile` (MIT) | Obsidian community plugin |
-| marktile plugin | `CVERInc/marktile` (MIT) | Obsidian community plugin |
+| tugtile plugin | `CVERInc/obsidian-tugtile` (MIT) | Obsidian community plugin |
+| marktile plugin | `CVERInc/obsidian-marktile` (MIT) | Obsidian community plugin |
 
 `scripts/publish.sh` assembles a plugin payload (`main.js` + `manifest.json` +
 `styles.css` + `versions.json` + `LICENSE`) and builds fresh from this repo — the
