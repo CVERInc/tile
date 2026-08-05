@@ -114,6 +114,12 @@
   }
   #app { height: 100%; }
 
+  /* ⌘+ / ⌘- / ⌘0 scale the TEXT. Only the editable surface reads this — the toolbar, the find bar
+     and the table of contents keep their sizes, so making the prose bigger never squeezes the strip
+     into folding. The 16px fallback is the shared stylesheet's own value, so with no preference set
+     (and in every other host, which never defines the property) nothing changes at all. */
+  #app .tugtile-ed-rich { font-size: var(--mt-ed-size, 16px); }
+
   /* No scrollbar styling on purpose. macOS scrollbars are overlay by default — they appear while you
      scroll and fade away — and that is the behaviour every other Mac app has. Styling them forces a
      permanent gutter that is both un-Mac-like and, as it turned out, a spotlight on any layout that is

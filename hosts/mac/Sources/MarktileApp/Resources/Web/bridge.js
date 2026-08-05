@@ -158,6 +158,36 @@ window.__mt = {
   // engine doesn't have, which is how the Swift side can refuse to ship a menu item that does nothing.
   tool: (key) => !!(ctrl && ctrl.runTool(key)),
   find: () => { if (ctrl) ctrl.toggleFind(true); },
+  // ⌘+ / ⌘- / ⌘0. One custom property on the root, read by the one rule in index.html that sizes the
+  // editable surface — so the TEXT scales and the toolbar, the find bar and the window chrome do not.
+  // Swift owns the ladder and the persistence; this end only paints.
+  setTextSize: (px) => { document.documentElement.style.setProperty('--mt-ed-size', px + 'px'); },
 };
+
+// Hover tooltips for every icon. The engine labels its icon buttons with `aria-label` — one string,
+// already translated, already the accessible name — so the tooltip is that same string mirrored into
+// `title` rather than a second list to keep in sync.
+//
+// It lives HERE, in the host, and not in the engine: inside Obsidian `aria-label` is already what
+// draws a tooltip, so adding `title` upstream would give the plugins two tooltips for one button.
+// A MutationObserver rather than a one-time pass, because the strip rebuilds its buttons (mode
+// cycling, the find bar opening) and a pass at load would only ever label the first generation.
+(function mirrorLabelsToTooltips() {
+  const mirror = (root) => {
+    if (!root || root.nodeType !== 1) return;
+    const els = root.matches('[aria-label]') ? [root] : [];
+    for (const el of els.concat(Array.from(root.querySelectorAll('[aria-label]')))) {
+      const label = el.getAttribute('aria-label');
+      if (label && el.getAttribute('title') !== label) el.setAttribute('title', label);
+    }
+  };
+  mirror(document.body);
+  new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === 'attributes') { mirror(r.target); continue; }
+      for (const n of r.addedNodes) mirror(n);
+    }
+  }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
+})();
 
 send("ready");
