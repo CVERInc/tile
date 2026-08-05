@@ -546,25 +546,48 @@ body.is-phone .tugtile-ed-sep { display: none; }   /* no group separators in the
 body.is-phone .tugtile-edit-modal-full { padding-top: 4px; }
 body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
 /* Find / replace bar (below the toolbar) */
+/* The find bar is SUBORDINATE to the toolbar, not a second one. It used to carry the same filled
+   background and a full-weight border, so the two read as competing stripes; now it is the same
+   surface with a hairline under it and the controls do the talking. */
 .tugtile-ed-find {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  padding: 6px 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
 }
-/* find | replace, each with the buttons that act on it. Neither group breaks apart when the row wraps. */
-.tugtile-ed-find-grp { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
-.tugtile-ed-find-grp + .tugtile-ed-find-grp { margin-left: 10px; }   /* find-and-its-arrows, then replace-and-its-buttons */
+/* 🔴 GROUPING IS DRAWN, NOT SPACED. The arrows belong to the find field and the replace buttons
+   belong to the replace field, and that was previously said only with 6px-vs-10px gaps — which
+   reads as one evenly-spaced row of loose parts. Each group is now ONE control with a border around
+   it, so "these act on this field" is visible instead of inferred. */
+.tugtile-ed-find-grp {
+  display: inline-flex; align-items: center; gap: 1px; min-width: 0; flex: 0 1 auto;
+  padding: 0 3px 0 6px; border-radius: 7px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field, var(--background-primary));
+}
+/* Focus lands on the GROUP, not the bare input: the pill is the control now, so it is what lights up. */
+.tugtile-ed-find-grp:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+.tugtile-ed-find-lead { display: inline-flex; align-items: center; color: var(--text-muted); margin-right: 4px; }
+.tugtile-ed-find-lead svg { width: 15px; height: 15px; }
 .tugtile-ed-find-i {
   /* Grows with the row, but stops: left at flex:1 the two fields split the whole window between them, so a
      1200px window bought two 500px boxes to hold the word "hello". Every Mac find bar keeps its field the
      size of a search term. */
-  flex: 1 1 140px; min-width: 80px; max-width: 240px;
-  font-size: 16px; padding: 5px 8px; border-radius: var(--radius-s);   /* 16px avoids iOS focus-zoom */
+  flex: 1 1 140px; min-width: 80px; max-width: 220px;
+  font-size: 16px; padding: 4px 2px;   /* 16px avoids iOS focus-zoom */
+  border: 0; background: transparent; outline: none; box-shadow: none;   /* the pill owns the chrome */
+  color: var(--text-normal);
 }
 .tugtile-ed-find > .tugtile-ed-find-b { margin-left: auto; }   /* the lone direct child is ✕ → far edge */
-.tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-muted); font-size: 0.85em; min-width: 1.6em; text-align: center; }
-/* .tugtile-ed-find-b inherits everything from .tugtile-iconbtn */
+/* The match count sits INSIDE the field's pill, right-aligned against the arrows, the way every Mac
+   find field shows it — floating loose between the box and the chevrons it read as a stray digit. */
+.tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-faint); font-size: 0.8em; min-width: 1.4em; text-align: right; padding-right: 2px; font-variant-numeric: tabular-nums; }
+/* Buttons inside a pill are part of it: no hover plate fighting the border that already groups them. */
+.tugtile-ed-find-grp .tugtile-ed-find-b { width: 24px; height: 24px; padding: 0; border-radius: 5px; }
+.tugtile-ed-find-grp .tugtile-ed-find-b svg { width: 15px; height: 15px; }
+/* .tugtile-ed-find-b inherits everything else from .tugtile-iconbtn */
 /* Settings: compact checkbox grid for choosing which editor toolbar buttons show */
 .tugtile-tools-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-end; }
 .tugtile-tools-pick .tugtile-tool-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
