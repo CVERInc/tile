@@ -61,6 +61,30 @@ let rig = null;
 let ctl = null;        // the head strip: mode cycle + lock
 let locked = false;    // survives a reload, like the mode does
 
+// ── Search every document ────────────────────────────────────────────────────────────────────────
+// The engine asks a host for this and grows no scope control without it, so the capability has to be
+// KNOWN BEFORE the editor mounts — AppKit pushes it on `ready`, ahead of the first open(). A machine
+// with no flintfind installed therefore shows no door at all, rather than one that fails when
+// pressed.
+//
+// 🔴 Interim, and named as such: this shells out to the `ff` CLI, which is a Python tool in someone's
+// homebrew and NOT part of this app. It is behind the engine's one searchAll seam precisely so the
+// Swift port replaces this function and nothing else.
+let caps = { searchAll: false };
+let searchId = 0;
+const pending = new Map();
+
+const searchAll = (query) => new Promise((resolve) => {
+  const id = ++searchId;
+  pending.set(id, resolve);
+  send("search", { id: id, query: query });
+  // A host that never answers must not leave the panel spinning for ever. The engine treats an
+  // empty result as an answer, which is the honest thing to show when the search itself failed.
+  setTimeout(() => {
+    if (pending.has(id)) { pending.delete(id); resolve({ hits: [], offline: [], files: 0, skipped: 0 }); }
+  }, 25000);
+});
+
 // The head layer's lock, applied exactly the way the Obsidian host applies it — same attribute, same
 // class, so the shared stylesheet's read-only rules (editor, toolbar, AND find/replace, which would
 // otherwise let Replace All walk straight past contenteditable) all engage.
@@ -107,11 +131,17 @@ function open(text) {
     // `[[wikilink]]` deliberately does NOT open yet. Resolving one means asking which file on this
     // machine is called that, which is the retrieval side's job and its own piece of work; a link
     // that silently does nothing is better than one that guesses at a file and opens the wrong note.
-    makeWebHost({
-      openLink: (link) => {
-        if (link.kind === 'url' || link.kind === 'image') send('openurl', { url: link.target });
-      },
-    })
+    (() => {
+      const host = makeWebHost({
+        openLink: (link) => {
+          if (link.kind === 'url' || link.kind === 'image') send('openurl', { url: link.target });
+          // A result from the search panel is a file on this machine — AppKit opens it as a document.
+          else if (link.kind === 'file') send('openfile', { path: link.target, line: link.line || 0 });
+        },
+      });
+      if (caps.searchAll) host.searchAll = searchAll;   // absent ⇒ the engine grows no scope control
+      return host;
+    })()
   );
 
   app.classList.add("marktile-ed");   // marktile IS a markdown editor → monospace, not board cards
@@ -167,11 +197,37 @@ window.__mt = {
   // is a second DOOR to each capability, never a second definition of it. Returns false for a key the
   // engine doesn't have, which is how the Swift side can refuse to ship a menu item that does nothing.
   tool: (key) => !!(ctrl && ctrl.runTool(key)),
-  find: () => { if (ctrl) ctrl.toggleFind(true); },
+  // ⌘F, and ⌘F again. 🔴 The engine's own ⌘F⌘F handler CANNOT fire in this app: an AppKit menu key
+  // equivalent is matched before the web view ever sees the event, so the second press hits the menu
+  // item again and never reaches the find field. So the escalation decision lives here, where the
+  // menu actually lands — press once to search this file, press again to search every document.
+  find: () => {
+    if (!ctrl) return;
+    const bar = document.querySelector('.tugtile-ed-find');
+    const open = bar && bar.style.display !== 'none';
+    if (open && caps.searchAll) { ctrl.toggleSearchAll(true); return; }
+    ctrl.toggleFind(true);
+  },
+  toggleSearchAll: (show) => { if (ctrl) ctrl.toggleSearchAll(show); },
+  canSearchAll: () => !!(ctrl && ctrl.canSearchAll()),
   // ⌘+ / ⌘- / ⌘0. One custom property on the root, read by the one rule in index.html that sizes the
   // editable surface — so the TEXT scales and the toolbar, the find bar and the window chrome do not.
   // Swift owns the ladder and the persistence; this end only paints.
   setTextSize: (px) => { document.documentElement.style.setProperty('--mt-ed-size', px + 'px'); },
+  // Pushed on `ready`, before the first open(), because the engine decides at MOUNT whether it has
+  // a scope control to draw.
+  setCapabilities: (c) => { caps = Object.assign({}, caps, c || {}); },
+  // AppKit's answer to one search. `json` is a string flintfind printed — parsed here, never
+  // evaluated. A malformed or missing answer resolves as an empty result, which is what the panel
+  // can honestly show when the search itself failed.
+  searchResult: (id, json) => {
+    const done = pending.get(id);
+    if (!done) return;                      // already timed out, or an answer to a question nobody asked
+    pending.delete(id);
+    let res = null;
+    try { res = json ? JSON.parse(json) : null; } catch (e) { res = null; }
+    done(res && res.hits ? res : { hits: [], offline: [], files: 0, skipped: 0 });
+  },
 };
 
 // Hover tooltips for every icon. The engine labels its icon buttons with `aria-label` — one string,

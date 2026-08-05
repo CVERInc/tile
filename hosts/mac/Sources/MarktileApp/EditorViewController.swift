@@ -176,6 +176,66 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.setTextSize(\(Self.textSize))", completionHandler: nil)
     }
 
+    // MARK: - Search every document (interim: the flintfind CLI)
+
+    /// Where `ff` is, if it is anywhere. Resolved ONCE, at the paths a Mac actually installs to —
+    /// a GUI app does not inherit the shell's PATH, so asking `which` from here answers about a
+    /// login shell that never ran.
+    ///
+    /// 🔴 INTERIM. flintfind is a Python tool in someone's homebrew and is NOT part of this app, so
+    /// this must not become the shipped answer. It sits behind the engine's one `searchAll` seam
+    /// exactly so the Swift port replaces this function and nothing else. Until then the capability
+    /// is reported honestly: no binary, no scope control, rather than a door that fails when pressed.
+    static let flintfind: String? = {
+        let candidates = ["/opt/homebrew/bin/ff", "/usr/local/bin/ff",
+                          NSHomeDirectory() + "/.local/bin/ff"]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }()
+
+    private func pushCapabilities() {
+        let can = Self.flintfind != nil
+        webView.evaluateJavaScript("window.__mt.setCapabilities({searchAll: \(can)})", completionHandler: nil)
+    }
+
+    /// Run one search and hand the JSON back to the page. Off the main thread — flintfind reads up
+    /// to 250 files and has been measured at several seconds, and doing that on the main thread
+    /// would freeze the window while it typed.
+    private func runSearch(id: Int, query: String) {
+        guard let tool = Self.flintfind else { return replySearch(id: id, json: "null") }
+        // Terms split on whitespace, which is flintfind's own semantics: `ff a b` ANDs them. No
+        // shell is involved, so the query is arguments and never a command line.
+        let terms = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !terms.isEmpty else { return replySearch(id: id, json: "null") }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: tool)
+            p.arguments = ["--json"] + terms
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = Pipe()      // its diagnostics are not this window's business
+            var json = "null"
+            do {
+                try p.run()
+                let data = out.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                if p.terminationStatus == 0, let s = String(data: data, encoding: .utf8), !s.isEmpty { json = s }
+            } catch {
+                // Never the error itself: a subprocess failure can carry a path or an argument, and
+                // this string is about to be evaluated inside the page. Type only.
+                NSLog("marktile: search failed (\(type(of: error)))")
+            }
+            DispatchQueue.main.async { self.replySearch(id: id, json: json) }
+        }
+    }
+
+    private func replySearch(id: Int, json: String) {
+        // The payload is JSON built by flintfind, so it goes in as a STRING the page parses — never
+        // spliced into the script as source, where a stray backtick would be code.
+        let quoted = String(data: (try? JSONSerialization.data(withJSONObject: [json], options: []))
+                            ?? Data("[\"null\"]".utf8), encoding: .utf8) ?? "[\"null\"]"
+        webView.evaluateJavaScript("window.__mt.searchResult(\(id), \(quoted)[0])", completionHandler: nil)
+    }
+
     @objc func textSizeUp(_ sender: Any?) { stepTextSize(by: 1) }
     @objc func textSizeDown(_ sender: Any?) { stepTextSize(by: -1) }
     @objc func textSizeReset(_ sender: Any?) { Self.textSize = Self.defaultTextSize; applyTextSize() }
@@ -254,6 +314,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
             pushAccent()
             pushToolbarVisibility()
             applyTextSize()
+            pushCapabilities()   // BEFORE the first open(): the engine decides at mount whether it has a scope control
             if let pending = pendingText {
                 pendingText = nil
                 load(text: pending)
@@ -268,6 +329,15 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
                let scheme = url.scheme?.lowercased(),
                ["http", "https", "mailto"].contains(scheme) {
                 NSWorkspace.shared.open(url)
+            }
+        case "search":
+            if let id = body["id"] as? Int, let q = body["query"] as? String { runSearch(id: id, query: q) }
+        case "openfile":
+            // A search result. NSDocumentController opens it in its own window, which is what a
+            // document app does with a second document — this one is not a vault browser.
+            if let path = body["path"] as? String, FileManager.default.fileExists(atPath: path) {
+                NSDocumentController.shared.openDocument(
+                    withContentsOf: URL(fileURLWithPath: path), display: true) { _, _, _ in }
             }
         case "change":
             if let text = body["text"] as? String { onChange?(text) }
