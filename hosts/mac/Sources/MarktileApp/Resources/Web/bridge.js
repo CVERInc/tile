@@ -74,9 +74,9 @@ let caps = { searchAll: false };
 let searchId = 0;
 const pending = new Map();
 
-const searchAll = (query) => new Promise((resolve) => {
+const searchAll = (query, onPartial) => new Promise((resolve) => {
   const id = ++searchId;
-  pending.set(id, resolve);
+  pending.set(id, { resolve: resolve, onPartial: onPartial });
   send("search", { id: id, query: query });
   // A host that never answers must not leave the panel spinning for ever. The engine treats an
   // empty result as an answer, which is the honest thing to show when the search itself failed.
@@ -84,6 +84,8 @@ const searchAll = (query) => new Promise((resolve) => {
     if (pending.has(id)) { pending.delete(id); resolve({ hits: [], offline: [], files: 0, skipped: 0 }); }
   }, 25000);
 });
+
+const EMPTY = { hits: [], offline: [], files: 0, skipped: 0 };
 
 // The head layer's lock, applied exactly the way the Obsidian host applies it — same attribute, same
 // class, so the shared stylesheet's read-only rules (editor, toolbar, AND find/replace, which would
@@ -220,13 +222,21 @@ window.__mt = {
   // AppKit's answer to one search. `json` is a string flintfind printed — parsed here, never
   // evaluated. A malformed or missing answer resolves as an empty result, which is what the panel
   // can honestly show when the search itself failed.
+  // AppKit's answer to one search — possibly several times. flintfind prints the indexed half as
+  // soon as it has it and the unindexed half ~4s later, so `partial` says whether more is coming.
+  // `json` is a string it printed: parsed here, never evaluated.
   searchResult: (id, json) => {
-    const done = pending.get(id);
-    if (!done) return;                      // already timed out, or an answer to a question nobody asked
-    pending.delete(id);
+    const waiting = pending.get(id);
+    if (!waiting) return;                   // already timed out, or an answer to a question nobody asked
     let res = null;
     try { res = json ? JSON.parse(json) : null; } catch (e) { res = null; }
-    done(res && res.hits ? res : { hits: [], offline: [], files: 0, skipped: 0 });
+    const payload = res && res.hits ? res : EMPTY;
+    if (res && res.partial) {
+      if (waiting.onPartial) waiting.onPartial(payload);
+      return;                               // stays pending: the real answer has not arrived yet
+    }
+    pending.delete(id);
+    waiting.resolve(payload);
   },
 };
 
