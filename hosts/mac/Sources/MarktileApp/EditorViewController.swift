@@ -144,7 +144,12 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// A LADDER, not a multiplier. A text editor's sizes are a short list a person recognises — 16
     /// is the one they know as "normal" — and stepping by a factor lands on 17.6 and 19.36, which
     /// nobody asked for and which look like a rounding bug in a monospace canvas.
-    private static let textSizes = [11, 12, 13, 14, 16, 18, 20, 24, 28, 32]
+    /// The top of the ladder was 32 and that was a guess about how big anyone would want prose. It is
+    /// wrong for the case this app is actually good at — a document open on a screen you are not
+    /// sitting at, or reading with someone. The rungs widen past 32 because the difference between
+    /// 40 and 44 is not a difference anybody reaches for; 48 is where a 1100px window still holds a
+    /// sensible measure and past which this stops being an editor.
+    private static let textSizes = [11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40, 48]
     private static let defaultTextSize = 16
     private static let textSizeKey = "MarktileTextSize"
 
