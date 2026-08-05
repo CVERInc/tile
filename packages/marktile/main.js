@@ -904,6 +904,10 @@ function mountEditor(contentEl, opts, host) {
     // search term and the arrows that move through it. Grouping also gives the row somewhere sane to wrap.
     const findGrp = findbar.createSpan({ cls: 'tugtile-ed-find-grp' });
     const replGrp = findbar.createSpan({ cls: 'tugtile-ed-find-grp' });
+    // A magnifier inside the pill, so the field says what it is without spending a placeholder on it.
+    // It is also where the scope control will live — "search everything" is a property of THIS field,
+    // not a separate button somewhere else on the bar.
+    setIcon(findGrp.createSpan({ cls: 'tugtile-ed-find-lead' }), 'search');
     const findInp = findGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('findPlaceholder') } });
     const findN = findGrp.createSpan({ cls: 'tugtile-ed-find-n' });
     const replInp = replGrp.createEl('input', { cls: 'tugtile-ed-find-i', type: 'text', attr: { placeholder: t('replacePlaceholder') } });
