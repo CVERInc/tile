@@ -590,6 +590,10 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
 }
 .tugtile-ed-rich:focus, .tugtile-ed-rich:focus-visible { outline: none; box-shadow: none; }
 .tugtile-ed-rich .tg-line { min-height: 1.7em; }   /* Empty lines stay tappable and visible */
+/* Hold ⌘ (or Ctrl) and links become doors. The class is added by the engine only while the key is
+   down, so the pointer is the whole affordance — a permanent underline would be lying the rest of
+   the time, when a plain click correctly places the caret instead. */
+.tugtile-ed-linkable .tg-link, .tugtile-ed-linkable .tg-img { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 /* marktile IS a markdown editor, so its body font is monospace in BOTH modes (Seasoned keeps the
    syntax highlighting, just on a monospace base). Scoped to .marktile-ed so tugtile's card editor
    (a board surface, not a markdown editor) stays on the proportional --font-text. */

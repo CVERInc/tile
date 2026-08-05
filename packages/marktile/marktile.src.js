@@ -38,9 +38,20 @@ const DEFAULTS = { editorTools: {}, defaultEditor: false, modes: {}, seasonedCol
 // gates which modes appear in the cycle (missing key = on, like editorTools); the picker keeps >=1 on.
 
 // The editor's board-only hooks are no-ops; a .md file never "submits" on Enter (Enter is always a newline).
-function makeFileHost(plugin) {
+function makeFileHost(plugin, view) {
   const tools = (plugin && plugin.settings && plugin.settings.editorTools) || {};
   return {
+    // ⌘-click on a link. Inside Obsidian the vault already knows how to open both kinds, so this
+    // hands each one to the app rather than reimplementing resolution — `[[wiki]]` goes through the
+    // same link resolver the rest of Obsidian uses (including "create if missing"), and a URL goes
+    // out through the app's own opener so the user's settings about external links still apply.
+    openLink(link) {
+      const app = plugin && plugin.app;
+      if (!app) return;
+      const from = (view && view.file) ? view.file.path : '';
+      if (link.kind === 'wiki' || link.kind === 'ref') app.workspace.openLinkText(link.target, from, false);
+      else if (link.kind === 'url' || link.kind === 'image') window.open(link.target, '_blank');
+    },
     _editModalOpen: false,
     freezeBoard() {}, unfreezeBoard() {}, closePopup() {}, consumePendingReload() {},
     attachDatePicker() {}, isSubmitKey() { return false; },
@@ -161,7 +172,7 @@ class MarktileView extends TextFileView {
     const _tocWasOpen = this._rig && this._rig.toc ? this._rig.toc.isOpen() : false;   // remember across the rebuild
     if (this._rig) { this._rig.destroy(); this._rig = null; }
     this.contentEl.empty();
-    this._ctrl = mountEditor(this.contentEl, { text: data, onChange: () => { this.requestSave(); this._refreshTocSoon(); }, onToc: () => this.toggleToc(), pickImage: () => pickVaultImage(this.app, this.file ? this.file.path : ''), pickVideo: () => promptVideoEmbed() }, makeFileHost(this.plugin));
+    this._ctrl = mountEditor(this.contentEl, { text: data, onChange: () => { this.requestSave(); this._refreshTocSoon(); }, onToc: () => this.toggleToc(), pickImage: () => pickVaultImage(this.app, this.file ? this.file.path : ''), pickVideo: () => promptVideoEmbed() }, makeFileHost(this.plugin, this));
     // mountEditor() empties contentEl, so build the phone control strip AFTER it and prepend above the toolbar.
     if (Platform.isPhone) { const ctl = createDiv({ cls: 'tugtile__ctlbar' }); this._buildHeaderCtl(ctl); this.contentEl.prepend(ctl); }
     this.decorateHeaderTitle();   // desktop: inject into the header title; phone: keep the header filename cleared

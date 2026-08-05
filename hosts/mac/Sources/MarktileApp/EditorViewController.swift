@@ -258,6 +258,17 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
                 pendingText = nil
                 load(text: pending)
             }
+        case "openurl":
+            // ⌘-click on a link (or a plain click in Rendered / when locked). Only http(s) and
+            // mailto leave here: the page can ask for any string, and handing an arbitrary scheme to
+            // NSWorkspace is how a document turns into a way to launch things. A relative or
+            // unrecognised target is dropped rather than guessed at.
+            if let raw = body["url"] as? String,
+               let url = URL(string: raw),
+               let scheme = url.scheme?.lowercased(),
+               ["http", "https", "mailto"].contains(scheme) {
+                NSWorkspace.shared.open(url)
+            }
         case "change":
             if let text = body["text"] as? String { onChange?(text) }
         default:
