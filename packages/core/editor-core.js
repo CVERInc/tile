@@ -1614,9 +1614,14 @@ function decorateTables(root, ctrl, gateClass) {
     menu.appendChild(document.createElement('hr'));
     item(T('TBL_ALIGN', '對齊表格原始碼'), () => blockEdit(line, (ls) => formatBlock(ls)));
     menu.appendChild(document.createElement('hr'));
-    pair(T('TBL_DEL', '刪除'),
-      [T('TBL_DEL_COL_S', '欄'), () => deleteColumn(line, ci), ncol <= 1],
-      [T('TBL_DEL_ROW_S', '列'), () => deleteRow(line), isHead]).classList.add('ej-tblmenu-danger');
+    // Delete does NOT get the paired row. The pattern only holds while the two controls are arrows: an arrow is
+    // an ornament hanging off the label, so the row still reads as one thing. Swap the arrows for WORDS and the
+    // three cells become three siblings of equal weight — chodaict tapped "Delete" and nothing happened, because
+    // the label is a <span> and never was a target. A control that looks tappable and is not is the same defect
+    // as a feature that is announced and not wired ([[no-phantom-features]]); it just costs a tap instead of a
+    // session. Two plain items, each saying the whole thing.
+    item(T('TBL_DEL_COL', '刪除欄'), () => deleteColumn(line, ci), ncol <= 1).classList.add('ej-tblmenu-danger');
+    item(T('TBL_DEL_ROW', '刪除列'), () => deleteRow(line), isHead).classList.add('ej-tblmenu-danger');
     // PUT THE KEYBOARD AWAY FIRST (touch only). On iOS the virtual keyboard does NOT shrink innerHeight, so the
     // clamp below believed there was room and drew the menu underneath the keyboard — half the items unreachable,
     // and worse the more items there are. Rather than guess where the keyboard is (visualViewport does not
