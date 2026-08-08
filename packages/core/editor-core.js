@@ -1558,98 +1558,57 @@ function decorateTables(root, ctrl, gateClass) {
     return { caretLine: ixs[at], caretOff: 2 };
   });
 
-  // ---- Word-habit context menu: right-click a cell → insert/delete column/row ----
-  let menu = null;
-  const closeMenu = () => { if (menu) { menu.remove(); menu = null; } };
-  document.addEventListener('click', closeMenu, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, true);
+  // ---- Word-habit context menu: right-click / long-press a cell ----
+  // Menu comes from the HOST, not from here. Obsidian ships one, and it already knows things this file has no
+  // business knowing: on a phone it is a bottom sheet with a drag handle, it sits above the safe areas, it
+  // scrolls when it is long, and it does not care where the keyboard is. tugtile — same repo, same family —
+  // has been using it since it was written (plugin.src.js: `new Menu()` … `showAtMouseEvent(e)`); this file
+  // hand-rolled a second one next to it, and then spent a day patching the things Obsidian had already solved:
+  // dismissing the keyboard, reading safe-area insets, flipping the menu up against the visible bottom, capping
+  // its height. All of that is gone with this change. The non-Obsidian hosts get a Menu with the same shape
+  // from obsidian-shim.js, alongside Modal / setIcon / Platform — the seam this should have used from day one.
   root.addEventListener('contextmenu', (e) => {
     if (!inPreview() || !ctrl) return;
     const cellEl = e.target && e.target.closest ? e.target.closest('.ej-cell') : null; if (!cellEl) return;
     const line = cellEl.closest('.tg-line'); if (!line || !line.classList.contains('ej-trow')) return;
-    e.preventDefault(); closeMenu();
+    e.preventDefault();
     const ci = [...line.querySelectorAll('.ej-cell')].indexOf(cellEl);
     const rows = blockRows(line);
+    const ri = rows.indexOf(line);
     const ncol = (parseTable(rows.map((l) => l.textContent)) || { ncol: 1 }).ncol;
     const isHead = line.classList.contains('ej-thead');
-    menu = document.createElement('div'); menu.className = 'ej-tblmenu';
-    const item = (label, fn, disabled) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (disabled) b.disabled = true;
-      b.onmousedown = (ev) => ev.preventDefault();
-      b.onclick = (ev) => { ev.stopPropagation(); closeMenu(); fn(); }; menu.appendChild(b); return b; };
-    // ONE ROW PER CONCEPT, the two directions side by side. Eleven flat items is a wall on a phone, and it
-    // read as eleven decisions when there are only six: insert a column, insert a row, move a column, move a
-    // row, sort, align. The pair keeps the label on the left and two arrow buttons on the right, so the row
-    // says what it is once instead of twice. The destructive pair is moved to the bottom, behind a rule,
-    // rather than sitting between "insert" and "move" where a mis-tap costs a column.
-    const ri = rows.indexOf(line);
-    const pair = (label, a, b, glyphs) => {
-      const row = document.createElement('div'); row.className = 'ej-tblmenu-row';
-      const cap = document.createElement('span'); cap.className = 'ej-tblmenu-cap'; cap.textContent = label; row.appendChild(cap);
-      [a, b].forEach(([g, fn, off]) => {
-        const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'ej-tblmenu-dir';
-        btn.textContent = g; btn.setAttribute('aria-label', label + ' ' + g); if (off) btn.disabled = true;
-        btn.onmousedown = (ev) => ev.preventDefault();
-        btn.onclick = (ev) => { ev.stopPropagation(); closeMenu(); fn(); };
-        row.appendChild(btn);
-      });
-      menu.appendChild(row); return row;
-    };
-    pair(T('TBL_INS_COL', '插入欄'),
-      ['←', () => insertColumn(line, ci, line)],
-      ['→', () => insertColumn(line, ci + 1, line)]);
-    pair(T('TBL_INS_ROW', '插入列'),
-      ['↑', () => insertRow(line, false), isHead],
-      ['↓', () => insertRow(line, true)]);
-    // Reordering and sorting: the two things a grid can do that a pile of pipes cannot. Each direction is
-    // disabled at the edge it cannot go past, and the header/separator rows are never movable.
-    pair(T('TBL_MOV_COL', '移動欄'),
-      ['←', () => blockEdit(line, (ls) => moveTableColumn(ls, ci, -1)), ci <= 0],
-      ['→', () => blockEdit(line, (ls) => moveTableColumn(ls, ci, +1)), ci >= ncol - 1]);
-    pair(T('TBL_MOV_ROW', '移動列'),
-      ['↑', () => blockEdit(line, (ls) => moveTableRow(ls, ri, -1)), ri <= 2],
-      ['↓', () => blockEdit(line, (ls) => moveTableRow(ls, ri, +1)), ri < 2 || ri >= rows.length - 1]);
-    pair(T('TBL_SORT', '依此欄排序'),
-      ['↑', () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), rows.length <= 3],
-      ['↓', () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), rows.length <= 3]);
-    menu.appendChild(document.createElement('hr'));
-    item(T('TBL_ALIGN', '對齊表格原始碼'), () => blockEdit(line, (ls) => formatBlock(ls)));
-    menu.appendChild(document.createElement('hr'));
-    // Delete does NOT get the paired row. The pattern only holds while the two controls are arrows: an arrow is
-    // an ornament hanging off the label, so the row still reads as one thing. Swap the arrows for WORDS and the
-    // three cells become three siblings of equal weight — chodaict tapped "Delete" and nothing happened, because
-    // the label is a <span> and never was a target. A control that looks tappable and is not is the same defect
-    // as a feature that is announced and not wired ([[no-phantom-features]]); it just costs a tap instead of a
-    // session. Two plain items, each saying the whole thing.
-    item(T('TBL_DEL_COL', '刪除欄'), () => deleteColumn(line, ci), ncol <= 1).classList.add('ej-tblmenu-danger');
-    item(T('TBL_DEL_ROW', '刪除列'), () => deleteRow(line), isHead).classList.add('ej-tblmenu-danger');
-    // PUT THE KEYBOARD AWAY FIRST (touch only). On iOS the virtual keyboard does NOT shrink innerHeight, so the
-    // clamp below believed there was room and drew the menu underneath the keyboard — half the items unreachable,
-    // and worse the more items there are. Rather than guess where the keyboard is (visualViewport does not
-    // reliably shrink inside Obsidian's webview — see the note by applyVV), dismiss it: the whole screen comes
-    // back and the clamp becomes true again. It is also what a native iOS context menu does. The actions do not
-    // need the caret — each captured its line and cell index above — and docEdit sets the caret afterwards.
-    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-    if (coarse) { const a = document.activeElement; if (a && a.blur) a.blur(); }
-    menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
-    document.body.appendChild(menu);
-    const place = () => {
-      const vv = window.visualViewport;
-      // Trust visualViewport only when it actually shrank — otherwise it reports the full window and lies by
-      // agreeing with innerHeight.
-      const shrunk = !!(vv && vv.height && vv.height < innerHeight - 40);
-      const vTop = shrunk ? vv.offsetTop : 0, vH = shrunk ? vv.height : innerHeight;
-      // The status bar and the home indicator are not free space. Without this the menu was drawn UNDER the
-      // clock and the signal icons — correctly inside the viewport, and still in the wrong place.
-      const cs = getComputedStyle(menu);
-      const safeT = parseFloat(cs.getPropertyValue('--safe-t')) || 0, safeB = parseFloat(cs.getPropertyValue('--safe-b')) || 0;
-      const top = vTop + safeT + 8, bottom = vTop + vH - safeB - 8;
-      menu.style.maxHeight = Math.max(160, bottom - top) + 'px';   // a menu taller than the screen scrolls rather than overflowing it
-      const r = menu.getBoundingClientRect();
-      if (r.right > innerWidth) menu.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
-      if (r.bottom > bottom) menu.style.top = Math.max(top, e.clientY - r.height) + 'px';
-    };
-    place();
-    if (coarse) setTimeout(place, 260);   // the keyboard leaves over ~250ms; re-place once it has gone
+    const menu = new Menu();
+    // One action per row, which is what a menu is. The pairing experiment (label + two arrows on one row) is
+    // gone: it made every row a two-level choice with a dead label in it, and on touch — no hover, no cursor —
+    // that reads as three buttons, one of which does nothing.
+    // Options object, not five positional arguments — and specifically so the icon name is written as
+    // `icon: 'arrow-left'`, the one shape shim-icons.test.cjs knows how to read. Passed positionally it became
+    // a variable by the time it reached setIcon(), and a dozen new icon names entered the core with the gate
+    // looking straight through them. Write it the way the check can see, rather than teaching the check a new
+    // shape every time the code invents one.
+    const item = (o) => menu.addItem((i) => {
+      i.setTitle(o.label).setIcon(o.icon).onClick(o.run);
+      if (o.off) i.setDisabled(true);
+      if (o.warn) i.setWarning(true);
+    });
+    item({ label: T('TBL_INS_COL_L', '在左方插入欄'), icon: 'arrow-left', run: () => insertColumn(line, ci, line) });
+    item({ label: T('TBL_INS_COL_R', '在右方插入欄'), icon: 'arrow-right', run: () => insertColumn(line, ci + 1, line) });
+    item({ label: T('TBL_INS_ROW_A', '在上方插入列'), icon: 'arrow-up', run: () => insertRow(line, false), off: isHead });
+    item({ label: T('TBL_INS_ROW_B', '在下方插入列'), icon: 'arrow-down', run: () => insertRow(line, true) });
+    menu.addSeparator();
+    // Each direction is disabled at the edge it cannot pass; the header and separator rows never move.
+    item({ label: T('TBL_MOV_COL_L', '將此欄左移'), icon: 'chevron-left', run: () => blockEdit(line, (ls) => moveTableColumn(ls, ci, -1)), off: ci <= 0 });
+    item({ label: T('TBL_MOV_COL_R', '將此欄右移'), icon: 'chevron-right', run: () => blockEdit(line, (ls) => moveTableColumn(ls, ci, +1)), off: ci >= ncol - 1 });
+    item({ label: T('TBL_MOV_ROW_U', '將此列上移'), icon: 'chevron-up', run: () => blockEdit(line, (ls) => moveTableRow(ls, ri, -1)), off: ri <= 2 });
+    item({ label: T('TBL_MOV_ROW_D', '將此列下移'), icon: 'chevron-down', run: () => blockEdit(line, (ls) => moveTableRow(ls, ri, +1)), off: ri < 2 || ri >= rows.length - 1 });
+    menu.addSeparator();
+    item({ label: T('TBL_SORT_ASC', '依此欄排序（遞增）'), icon: 'arrow-up-narrow-wide', run: () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), off: rows.length <= 3 });
+    item({ label: T('TBL_SORT_DESC', '依此欄排序（遞減）'), icon: 'arrow-down-wide-narrow', run: () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), off: rows.length <= 3 });
+    item({ label: T('TBL_ALIGN', '對齊表格原始碼'), icon: 'table', run: () => blockEdit(line, (ls) => formatBlock(ls)) });
+    menu.addSeparator();
+    item({ label: T('TBL_DEL_COL', '刪除欄'), icon: 'trash-2', run: () => deleteColumn(line, ci), off: ncol <= 1, warn: true });
+    item({ label: T('TBL_DEL_ROW', '刪除列'), icon: 'trash-2', run: () => deleteRow(line), off: isHead, warn: true });
+    menu.showAtMouseEvent(e);
   });
 
   // ---- table keys (capture phase: marktile's Tab/Enter handlers must not see these) ----
