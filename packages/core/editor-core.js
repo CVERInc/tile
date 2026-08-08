@@ -1576,26 +1576,47 @@ function decorateTables(root, ctrl, gateClass) {
     const item = (label, fn, disabled) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (disabled) b.disabled = true;
       b.onmousedown = (ev) => ev.preventDefault();
       b.onclick = (ev) => { ev.stopPropagation(); closeMenu(); fn(); }; menu.appendChild(b); return b; };
-    item(T('TBL_INS_COL_L', '在左方插入欄'), () => insertColumn(line, ci, line));
-    item(T('TBL_INS_COL_R', '在右方插入欄'), () => insertColumn(line, ci + 1, line));
-    menu.appendChild(document.createElement('hr'));
-    item(T('TBL_INS_ROW_A', '在上方插入列'), () => insertRow(line, false), isHead);
-    item(T('TBL_INS_ROW_B', '在下方插入列'), () => insertRow(line, true));
-    menu.appendChild(document.createElement('hr'));
-    item(T('TBL_DEL_COL', '刪除欄'), () => deleteColumn(line, ci), ncol <= 1);
-    item(T('TBL_DEL_ROW', '刪除列'), () => deleteRow(line), isHead);
-    // Reordering and sorting: the two things a grid can do that a pile of pipes cannot. Each is disabled at the
-    // edge it cannot go past, and the header/separator rows are never movable.
+    // ONE ROW PER CONCEPT, the two directions side by side. Eleven flat items is a wall on a phone, and it
+    // read as eleven decisions when there are only six: insert a column, insert a row, move a column, move a
+    // row, sort, align. The pair keeps the label on the left and two arrow buttons on the right, so the row
+    // says what it is once instead of twice. The destructive pair is moved to the bottom, behind a rule,
+    // rather than sitting between "insert" and "move" where a mis-tap costs a column.
     const ri = rows.indexOf(line);
+    const pair = (label, a, b, glyphs) => {
+      const row = document.createElement('div'); row.className = 'ej-tblmenu-row';
+      const cap = document.createElement('span'); cap.className = 'ej-tblmenu-cap'; cap.textContent = label; row.appendChild(cap);
+      [a, b].forEach(([g, fn, off]) => {
+        const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'ej-tblmenu-dir';
+        btn.textContent = g; btn.setAttribute('aria-label', label + ' ' + g); if (off) btn.disabled = true;
+        btn.onmousedown = (ev) => ev.preventDefault();
+        btn.onclick = (ev) => { ev.stopPropagation(); closeMenu(); fn(); };
+        row.appendChild(btn);
+      });
+      menu.appendChild(row); return row;
+    };
+    pair(T('TBL_INS_COL', '插入欄'),
+      ['←', () => insertColumn(line, ci, line)],
+      ['→', () => insertColumn(line, ci + 1, line)]);
+    pair(T('TBL_INS_ROW', '插入列'),
+      ['↑', () => insertRow(line, false), isHead],
+      ['↓', () => insertRow(line, true)]);
+    // Reordering and sorting: the two things a grid can do that a pile of pipes cannot. Each direction is
+    // disabled at the edge it cannot go past, and the header/separator rows are never movable.
+    pair(T('TBL_MOV_COL', '移動欄'),
+      ['←', () => blockEdit(line, (ls) => moveTableColumn(ls, ci, -1)), ci <= 0],
+      ['→', () => blockEdit(line, (ls) => moveTableColumn(ls, ci, +1)), ci >= ncol - 1]);
+    pair(T('TBL_MOV_ROW', '移動列'),
+      ['↑', () => blockEdit(line, (ls) => moveTableRow(ls, ri, -1)), ri <= 2],
+      ['↓', () => blockEdit(line, (ls) => moveTableRow(ls, ri, +1)), ri < 2 || ri >= rows.length - 1]);
+    pair(T('TBL_SORT', '依此欄排序'),
+      ['↑', () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), rows.length <= 3],
+      ['↓', () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), rows.length <= 3]);
     menu.appendChild(document.createElement('hr'));
-    item(T('TBL_MOV_COL_L', '將此欄左移'), () => blockEdit(line, (ls) => moveTableColumn(ls, ci, -1)), ci <= 0);
-    item(T('TBL_MOV_COL_R', '將此欄右移'), () => blockEdit(line, (ls) => moveTableColumn(ls, ci, +1)), ci >= ncol - 1);
-    item(T('TBL_MOV_ROW_U', '將此列上移'), () => blockEdit(line, (ls) => moveTableRow(ls, ri, -1)), ri <= 2);
-    item(T('TBL_MOV_ROW_D', '將此列下移'), () => blockEdit(line, (ls) => moveTableRow(ls, ri, +1)), ri < 2 || ri >= rows.length - 1);
-    menu.appendChild(document.createElement('hr'));
-    item(T('TBL_SORT_ASC', '依此欄排序（遞增）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), rows.length <= 3);
-    item(T('TBL_SORT_DESC', '依此欄排序（遞減）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), rows.length <= 3);
     item(T('TBL_ALIGN', '對齊表格原始碼'), () => blockEdit(line, (ls) => formatBlock(ls)));
+    menu.appendChild(document.createElement('hr'));
+    pair(T('TBL_DEL', '刪除'),
+      [T('TBL_DEL_COL_S', '欄'), () => deleteColumn(line, ci), ncol <= 1],
+      [T('TBL_DEL_ROW_S', '列'), () => deleteRow(line), isHead]).classList.add('ej-tblmenu-danger');
     // PUT THE KEYBOARD AWAY FIRST (touch only). On iOS the virtual keyboard does NOT shrink innerHeight, so the
     // clamp below believed there was room and drew the menu underneath the keyboard — half the items unreachable,
     // and worse the more items there are. Rather than guess where the keyboard is (visualViewport does not

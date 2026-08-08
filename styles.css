@@ -514,11 +514,18 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
      toolbar above a 640px window, i.e. a bar that has eaten the document it was decorating. Three rows is
      the bound. It is a backstop, not a layout: every surface is supposed to shed its own chrome before
      reaching it (macOS does, in Web/index.html), and where it does engage the row scrolls rather than
-     hides, because a button that is merely below the fold is still findable. 3×40 + 2×4 gap. */
-  max-height: 128px;
+     hides, because a button that is merely below the fold is still findable. */
+  max-height: 104px;   /* 3 rows: 3×32 + 2×4 gap */
   overflow-y: auto;
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
+/* …except size, for the TOOLBAR tools only. .tugtile-iconbtn is 40px around a 20px icon — half of it is empty,
+   which reads as "the buttons are too big" (it is chodaict's word for it) and, on desktop, is what decides
+   whether sixteen tools need one row of chrome or three. The header ✕/✓ and the find bar keep 40: they are
+   lone targets with room around them, not a dense row. Phone keeps a bigger target — a thumb is not a cursor,
+   and the phone row scrolls sideways anyway, so shrinking there buys nothing worth the miss-taps. */
+.tugtile-ed-tool { width: 32px; height: 32px; }
+body.is-phone .tugtile-ed-tool { width: 38px; height: 38px; }
 /* Group divider in the editor toolbar. Kept as a 1px rule between tightly-packed buttons rather than
    promoted into a nowrap group box: measured, unbreakable groups leave the tail of each row empty and cost
    the DEFAULT 760px window a whole third row (101px → 145px of chrome), which is a worse trade than the
@@ -1114,6 +1121,19 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .ej-tblmenu button:hover:not(:disabled) { background: var(--background-modifier-hover, rgba(0, 0, 0, .06)); }
 .ej-tblmenu button:disabled { opacity: .35; cursor: default; }
 .ej-tblmenu hr { border: 0; border-top: 1px solid var(--background-modifier-border, #e4e6e9); margin: 4px 6px; }
+/* Paired rows: one concept on the left, its two directions on the right. The label is a <span>, not a button —
+   the row itself does nothing, which is the point: there is no ambiguous "click the row" target to mis-hit. */
+.ej-tblmenu-row { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 12px; }
+.ej-tblmenu-cap { flex: 1 1 auto; font: 13.5px var(--font-interface, system-ui, sans-serif); color: var(--text-normal, #1f2328); white-space: nowrap; padding-right: 8px; }
+.ej-tblmenu-dir { flex: 0 0 auto; min-width: 34px; height: 30px; font: 14px var(--font-interface, system-ui, sans-serif);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 7px; background: var(--background-modifier-hover, rgba(0, 0, 0, .06));
+  color: var(--text-normal, #1f2328); cursor: pointer; padding: 0 8px; }
+.ej-tblmenu-dir:hover:not(:disabled) { background: var(--background-modifier-border, rgba(0, 0, 0, .12)); }
+.ej-tblmenu-dir:disabled { opacity: .3; cursor: default; }
+/* Delete keeps its own colour so a thumb travelling down the menu knows where it has arrived. */
+.ej-tblmenu-danger .ej-tblmenu-cap { color: var(--text-error, #c0392b); }
+.ej-tblmenu-danger .ej-tblmenu-dir { color: var(--text-error, #c0392b); }
 
 /* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
    line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile
