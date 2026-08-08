@@ -636,6 +636,19 @@ function setListKind(v, s, e, kind) {
   return { text, start: Math.max(firstLs, s + delta), end: Math.max(firstLs, s + delta) };
 }
 
+// Removing formatting can EXPOSE formatting. A real line from the corpus, "3. **>25MB → ...**", loses its
+// list marker and its bold and is then left starting with '>' — which is a blockquote. The text now says
+// something it did not say before, and running the same command again eats the '>' entirely: not idempotent,
+// and character-destroying. So a marker that ends up at the head of the line gets escaped. The digit of an
+// ordered marker is NOT escapable in CommonMark ("\\1" is a literal backslash-one), so 1. escapes as "1\\." —
+// the delimiter, not the number.
+function escapeLeadingMarker(s) {
+  const mo = /^([ \t]*)(\d+)([.)])([ \t])/.exec(s);
+  if (mo) return mo[1] + mo[2] + '\\' + s.slice(mo[1].length + mo[2].length);
+  if (/^[ \t]*(?:>|#{1,6}[ \t]|[-*+][ \t])/.test(s)) return s.replace(/^([ \t]*)/, '$1\\');
+  return s;
+}
+
 // Strip markdown down to plain text. Pure → unit-tested. Two decisions worth stating, because both are the
 // kind of thing that looks like an oversight from the outside:
 //   · IMAGES SURVIVE. ![alt](url) and ![[pic.png]] are CONTENT, not formatting — flattening an image to the
@@ -649,11 +662,18 @@ function stripFormatting(md) {
   const IMG = /!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g;
   const inline = (s) => {
     const held = [];
-    let t = s.replace(IMG, (m) => { held.push(m); return '\u0000' + (held.length - 1) + '\u0000'; });   // NUL-fenced, so no real text can collide with a placeholder
-    t = t.replace(/\[\[([^\][|]*)\|([^\]]*)\]\]/g, '$2');   // [[page|alias]] → the alias, which is what was read
-    t = t.replace(/\[\[([^\]]*)\]\]/g, '$1');
+    const keep = (text) => '\u0000' + (held.push(text) - 1) + '\u0000';   // NUL-fenced, so no real text can collide
+    let t = s.replace(IMG, keep);                       // images survive whole
+    // Inline code loses its backticks but its CONTENTS are held out of every rule below. Without this, a real
+    // line from the corpus — rg -g '!Conversations/**' -g '!Imported/**' -g '!Soul/me/.git/**' — had the `**`
+    // between two of its globs read as bold and DELETED, silently changing what the command does. Fenced code
+    // was already protected; a one-line code span is the same promise and had none of the protection.
+    t = t.replace(/`([^`]*)`/g, (m, code) => keep(code));
+    // .+? rather than [^\]]*: a wikilink's text may itself contain a ']' — [[[handoff → x] note]] is in the
+    // corpus — and the character class stopped at the inner bracket, leaving the '[[' on screen.
+    t = t.replace(/\[\[([^\][|]+)\|(.+?)\]\]/g, '$2');   // [[page|alias]] → the alias, which is what was read
+    t = t.replace(/\[\[(.+?)\]\]/g, '$1');
     t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
-    t = t.replace(/`([^`]*)`/g, '$1');
     t = t.replace(/~~([\s\S]*?)~~/g, '$1');
     t = t.replace(/==([\s\S]*?)==/g, '$1');
     t = t.replace(/\*\*([\s\S]*?)\*\*/g, '$1');
@@ -672,7 +692,7 @@ function stripFormatting(md) {
     let ln = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '').replace(/^[ \t]*#{1,6}[ \t]+/, '');
     const mk = listMarker(ln);
     if (mk) ln = ln.slice(mk.len);   // the indent goes with the marker — a de-listed line is not an item any more
-    out.push(inline(ln));
+    out.push(escapeLeadingMarker(inline(ln)));
   }
   return out.join('\n');
 }
