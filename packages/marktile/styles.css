@@ -1101,7 +1101,7 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-preview .tg-check:hover::before { color: var(--interactive-accent, #3a7afe); }
 
 /* table right-click menu (desktop: insert/delete row/column) */
-.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
+.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
 /* justify-content, not just text-align: Obsidian styles every bare <button> as `display:inline-flex;
    justify-content:center`, which makes the label a FLEX ITEM — and text-align has no say over a flex
    item's position. The old `text-align: left` was applied and did nothing at all. text-align stays for

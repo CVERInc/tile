@@ -1954,11 +1954,29 @@ function decorateTables(root, ctrl, gateClass) {
     item(T('TBL_SORT_ASC', '依此欄排序（遞增）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), rows.length <= 3);
     item(T('TBL_SORT_DESC', '依此欄排序（遞減）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), rows.length <= 3);
     item(T('TBL_ALIGN', '對齊表格原始碼'), () => blockEdit(line, (ls) => formatBlock(ls)));
+    // PUT THE KEYBOARD AWAY FIRST (touch only). On iOS the virtual keyboard does NOT shrink innerHeight, so the
+    // clamp below believed there was room and drew the menu underneath the keyboard — half the items unreachable,
+    // and worse the more items there are. Rather than guess where the keyboard is (visualViewport does not
+    // reliably shrink inside Obsidian's webview — see the note by applyVV), dismiss it: the whole screen comes
+    // back and the clamp becomes true again. It is also what a native iOS context menu does. The actions do not
+    // need the caret — each captured its line and cell index above — and docEdit sets the caret afterwards.
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    if (coarse) { const a = document.activeElement; if (a && a.blur) a.blur(); }
     menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
     document.body.appendChild(menu);
-    const r = menu.getBoundingClientRect();   // keep on screen
-    if (r.right > innerWidth) menu.style.left = (innerWidth - r.width - 8) + 'px';
-    if (r.bottom > innerHeight) menu.style.top = (e.clientY - r.height) + 'px';
+    const place = () => {
+      const vv = window.visualViewport;
+      // Trust visualViewport only when it actually shrank — otherwise it reports the full window and lies by
+      // agreeing with innerHeight.
+      const shrunk = !!(vv && vv.height && vv.height < innerHeight - 40);
+      const top = shrunk ? vv.offsetTop : 0, height = shrunk ? vv.height : innerHeight;
+      menu.style.maxHeight = Math.max(160, height - 24) + 'px';   // a menu taller than the screen scrolls rather than overflowing it
+      const r = menu.getBoundingClientRect();
+      if (r.right > innerWidth) menu.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
+      if (r.bottom > top + height) menu.style.top = Math.max(top + 8, e.clientY - r.height) + 'px';
+    };
+    place();
+    if (coarse) setTimeout(place, 260);   // the keyboard leaves over ~250ms; re-place once it has gone
   });
 
   // ---- table keys (capture phase: marktile's Tab/Enter handlers must not see these) ----
