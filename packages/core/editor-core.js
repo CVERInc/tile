@@ -10,7 +10,7 @@ const EDITOR_TOOLS = [
   { key: 'search', icon: 'search', fixed: true, tip: 'edFind' }, { key: 'undo', icon: 'undo', fixed: true, tip: 'undoAction' }, { key: 'redo', icon: 'redo', fixed: true, tip: 'redoAction' }, 'sep',
   // icons verified present in Obsidian's bundled Lucide subset (not all of Lucide ships); g = text fallback when no icon
   { key: 'h1', g: 'H1', icon: 'heading-1', cat: 'format', tip: 'edH1' }, { key: 'h2', g: 'H2', icon: 'heading-2', cat: 'format', tip: 'edH2' }, { key: 'h3', g: 'H3', icon: 'heading-3', cat: 'format', tip: 'edH3' }, 'sep',
-  { key: 'bold', g: 'B', icon: 'bold', cat: 'format', tip: 'edBold' }, { key: 'italic', g: 'I', icon: 'italic', cat: 'format', tip: 'edItalic' }, { key: 'strike', g: 'S', icon: 'strikethrough', cat: 'format', tip: 'edStrike' }, 'rowbreak',   // phone: wrap to a third toolbar row here (desktop treats it as a separator)
+  { key: 'bold', g: 'B', icon: 'bold', cat: 'format', tip: 'edBold' }, { key: 'italic', g: 'I', icon: 'italic', cat: 'format', tip: 'edItalic' }, { key: 'strike', g: 'S', icon: 'strikethrough', cat: 'format', tip: 'edStrike' }, { key: 'clear', g: 'Tx', icon: 'remove-formatting', cat: 'format', tip: 'edClear' }, 'rowbreak',   // phone: wrap to a third toolbar row here (desktop treats it as a separator)
   // block tools (lists / quote / table) — split out of 'format' (which is now just headings + inline marks)
   { key: 'bullet', g: '•', icon: 'list', cat: 'block', tip: 'edBullet' }, { key: 'number', g: '1.', icon: 'list-ordered', cat: 'block', tip: 'edNumber' }, { key: 'check', g: '☑', icon: 'list-checks', cat: 'block', tip: 'edCheck' }, { key: 'quote', g: '❝', icon: 'text-quote', cat: 'block', tip: 'edQuote' }, { key: 'table', g: '⊞', icon: 'table', cat: 'block', tip: 'edTable' }, 'sep',
   { key: 'code', g: '</>', icon: 'code', cat: 'insert', tip: 'edCode' }, { key: 'link', g: '[[ ]]', icon: 'link', cat: 'insert', tip: 'edLink' },
@@ -245,6 +245,90 @@ function listContinuation(v, s) {
   if (prefix === null) return null;
   if (line.slice(contentStart).trim() === '') return { text: v.slice(0, ls) + v.slice(le), caret: ls };   // empty item → exit the list
   return { text: v.slice(0, s) + '\n' + prefix + v.slice(s), caret: s + 1 + prefix.length };               // continue the list
+}
+
+// The list markers are ONE FAMILY, not four independent prefixes. Pure (unit-tested), so the toolbar's
+// bullet / number / check buttons SWITCH between them instead of stacking one on top of another.
+// Returns { indent, kind, bullet, len } for the marker at the head of a line, or null when there is none.
+// `len` is how many characters the whole marker (indent included) occupies, so callers can slice it off.
+function listMarker(line) {
+  const m = /^([ \t]*)(?:([-*+])[ \t]+(\[[ xX]\][ \t]+)?|(\d+)([.)])[ \t]+)/.exec(String(line));
+  if (!m) return null;
+  if (m[2]) return { indent: m[1], kind: m[3] ? 'check' : 'bullet', bullet: m[2], len: m[0].length };
+  return { indent: m[1], kind: 'number', bullet: '-', len: m[0].length };
+}
+
+// Apply one list kind ('bullet' | 'number' | 'check') to the lines the selection touches — REPLACING whatever
+// marker is already there rather than prepending to it. Toggles OFF (marker removed, indentation kept) when
+// every non-blank line already carries the requested kind. Blank lines are left alone; 'number' renumbers the
+// block 1..N. A line's existing bullet character is preserved when switching bullet ↔ check, so a '*' list
+// stays a '*' list. Quote ('> ') is deliberately NOT part of this family — it nests with lists, it doesn't
+// replace them. Pure: returns { text, start, end } (start === end when the caller had a bare caret).
+function setListKind(v, s, e, kind) {
+  const src = String(v);
+  const lineStart = (pos) => src.lastIndexOf('\n', pos - 1) + 1;
+  const firstLs = lineStart(s);
+  const lastLs = lineStart(e > s ? e - 1 : s);
+  const nlAfter = src.indexOf('\n', lastLs), blockEnd = nlAfter === -1 ? src.length : nlAfter;
+  const lines = src.slice(firstLs, blockEnd).split('\n');
+  const nonBlank = lines.filter((ln) => ln.trim() !== '');
+  const allHave = nonBlank.length > 0 && nonBlank.every((ln) => { const mk = listMarker(ln); return mk && mk.kind === kind; });
+  let n = 0;
+  const out = lines.map((ln) => {
+    if (ln.trim() === '') return ln;
+    const mk = listMarker(ln);
+    const indent = mk ? mk.indent : (/^[ \t]*/.exec(ln)[0]);
+    const body = ln.slice(mk ? mk.len : indent.length);
+    if (allHave) return indent + body;                                  // every non-blank has it → strip, keep the indent
+    if (kind === 'number') { n++; return indent + n + '. ' + body; }
+    const ch = (mk && mk.bullet) || '-';                                 // keep the author's bullet character
+    return indent + ch + (kind === 'check' ? ' [ ] ' : ' ') + body;
+  }).join('\n');
+  const text = src.slice(0, firstLs) + out + src.slice(blockEnd);
+  if (s !== e) return { text, start: firstLs, end: firstLs + out.length };
+  const delta = out.split('\n')[0].length - lines[0].length;             // caret rides the first line's width change
+  return { text, start: Math.max(firstLs, s + delta), end: Math.max(firstLs, s + delta) };
+}
+
+// Strip markdown down to plain text. Pure → unit-tested. Two decisions worth stating, because both are the
+// kind of thing that looks like an oversight from the outside:
+//   · IMAGES SURVIVE. ![alt](url) and ![[pic.png]] are CONTENT, not formatting — flattening an image to the
+//     word "alt" deletes something the writer cannot get back with undo-after-save. Links are the opposite:
+//     the text was always the content, the URL was the decoration, so [text](url) → text.
+//   · FENCED CODE SURVIVES, minus its fences. The whole point of a code block is that its contents are literal;
+//     un-escaping a `*` inside one would change what the code says.
+// Tables are left entirely alone — "plain text" has no agreed meaning for a grid, and silently flattening one
+// would lose the columns. Use the table's own tools for those.
+function stripFormatting(md) {
+  const IMG = /!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g;
+  const inline = (s) => {
+    const held = [];
+    let t = s.replace(IMG, (m) => { held.push(m); return '\u0000' + (held.length - 1) + '\u0000'; });   // NUL-fenced, so no real text can collide with a placeholder
+    t = t.replace(/\[\[([^\][|]*)\|([^\]]*)\]\]/g, '$2');   // [[page|alias]] → the alias, which is what was read
+    t = t.replace(/\[\[([^\]]*)\]\]/g, '$1');
+    t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+    t = t.replace(/`([^`]*)`/g, '$1');
+    t = t.replace(/~~([\s\S]*?)~~/g, '$1');
+    t = t.replace(/==([\s\S]*?)==/g, '$1');
+    t = t.replace(/\*\*([\s\S]*?)\*\*/g, '$1');
+    t = t.replace(/__([\s\S]*?)__/g, '$1');
+    t = t.replace(/\*([^*\n]+)\*/g, '$1');
+    t = t.replace(/(^|[^\w\\])_([^_\n]+)_(?=$|[^\w])/g, '$1$2');   // NOT intraword: snake_case_names stay whole
+    return t.replace(/\u0000(\d+)\u0000/g, (m, i) => held[+i]);
+  };
+  const lines = String(md).replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let fence = false;
+  for (const raw of lines) {
+    if (/^[ \t]*(```|~~~)/.test(raw)) { fence = !fence; continue; }   // drop the fence lines, keep what they hold
+    if (fence) { out.push(raw); continue; }
+    if (isTableLine(raw)) { out.push(raw); continue; }
+    let ln = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '').replace(/^[ \t]*#{1,6}[ \t]+/, '');
+    const mk = listMarker(ln);
+    if (mk) ln = ln.slice(mk.len);   // the indent goes with the marker — a de-listed line is not an item any more
+    out.push(inline(ln));
+  }
+  return out.join('\n');
 }
 
 // Re-sequence contiguous top-level ordered-list blocks so they read 1,2,3… A markdown renderer renumbers
@@ -748,20 +832,20 @@ function mountEditor(contentEl, opts, host) {
     // Editor shortcuts: edit the text model directly, then applyEdit re-highlights + snapshots undo; mousedown preventDefault retains the caret
     const wrap = (pre, post) => { const v = getText(), s = sel().start, e = sel().end; applyEdit(v.slice(0, s) + pre + v.slice(s, e) + post + v.slice(e), s + pre.length, e + pre.length); };
     const lineStartOf = (v, pos) => v.lastIndexOf('\n', pos - 1) + 1;
-    // Line-prefix tools (bullet / number / check / quote). With a SELECTION it applies to EVERY line the selection
-    // touches; with just a caret it toggles that one line (caret kept). ordered=true → numbers: any "N. " counts as
-    // the prefix (so toggling off works on existing numbers), and adding renumbers the block 1..N. Blank lines are
-    // left alone. Toggles OFF only when every non-blank line already has it.
-    const togglePre = (pre, ordered) => {
+    // The list tools (bullet / number / check) go through setListKind, which treats the three as ONE family:
+    // pressing 編號 on a bullet line REPLACES the marker instead of prepending to it. See setListKind above.
+    const setList = (kind) => { const r = setListKind(getText(), sel().start, sel().end, kind); applyEdit(r.text, r.start, r.end); };
+    // Line-prefix tool — now only quote, which is a separate axis (it nests with lists: "> - item" is valid).
+    // With a SELECTION it applies to EVERY line the selection touches; with just a caret it toggles that one
+    // line (caret kept). Blank lines are left alone. Toggles OFF only when every non-blank line already has it.
+    const togglePre = (pre) => {
       const v = getText(), s = sel().start, e = sel().end;
-      const re = ordered ? /^\d+\.[ \t]/ : null;
-      const has = (ln) => (re ? re.test(ln) : ln.startsWith(pre));
-      const strip = (ln) => (re ? ln.replace(re, '') : ln.slice(pre.length));
-      if (s === e) {   // no selection → just the caret's line, caret preserved (original behaviour)
+      const has = (ln) => ln.startsWith(pre);
+      const strip = (ln) => ln.slice(pre.length);
+      if (s === e) {   // no selection → just the caret's line, caret preserved
         const ls = lineStartOf(v, s), ln = v.slice(ls), h = has(ln);
-        const cut = h ? (ln.length - strip(ln).length) : 0;
-        const nv = h ? v.slice(0, ls) + strip(ln) + v.slice(ls + ln.length) : v.slice(0, ls) + (ordered ? '1. ' : pre) + v.slice(ls);
-        applyEdit(nv, Math.max(ls, s + (h ? -cut : (ordered ? 3 : pre.length))));
+        const nv = h ? v.slice(0, ls) + strip(ln) : v.slice(0, ls) + pre + v.slice(ls);
+        applyEdit(nv, Math.max(ls, s + (h ? -pre.length : pre.length)));
         return;
       }
       const firstLs = lineStartOf(v, s), lastLs = lineStartOf(v, e - 1);
@@ -769,12 +853,10 @@ function mountEditor(contentEl, opts, host) {
       const lines = v.slice(firstLs, blockEnd).split('\n');
       const nonBlank = lines.filter((ln) => ln.trim() !== '');
       const allHave = nonBlank.length > 0 && nonBlank.every(has);
-      let n = 0;
       const out = lines.map((ln) => {
         if (ln.trim() === '') return ln;                                   // leave blank lines alone
         if (allHave) return strip(ln);                                     // every non-blank has it → remove
-        if (ordered) { n++; return n + '. ' + (re.test(ln) ? ln.replace(re, '') : ln); }   // renumber the block 1..N
-        return has(ln) ? ln : pre + ln;                                    // bullet/check/quote → add where missing
+        return has(ln) ? ln : pre + ln;                                    // add where missing
       }).join('\n');
       applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);   // keep the block selected
     };
@@ -792,7 +874,14 @@ function mountEditor(contentEl, opts, host) {
     const tbtn = (label, fn, icon, target, tip) => {
       const b = (target || tools).createEl('button', { cls: 'tugtile-iconbtn tugtile-ed-tool' });
       if (tip) b.setAttribute('aria-label', t(tip));   // hover tooltip + accessible name (every tool button — was missing)
-      if (icon) setIcon(b.createSpan(), icon); else b.textContent = label;   // setIcon into a child <span>, NOT the <button> directly — iPad WebKit won't render an inline svg that's a direct button child
+      // setIcon into a child <span>, NOT the <button> directly — iPad WebKit won't render an inline svg that's
+      // a direct button child. setIcon is SILENT on an unknown name (the shim's ICONS lookup, and Obsidian's own
+      // Lucide subset, which does not ship every Lucide icon) — it just leaves the span empty, and an empty span
+      // in a sized button is the blank-button bug that shim-icons.test.cjs exists for. That test can only police
+      // OUR shim; nothing here can police Obsidian's set. So: if nothing got drawn, fall back to the text glyph.
+      // A button that reads 'Tx' is worse-looking than an icon and infinitely better than one that reads nothing.
+      if (icon) { const sp = b.createSpan(); setIcon(sp, icon); if (!sp.firstChild) { sp.remove(); b.textContent = label; } }
+      else b.textContent = label;
       bindTap(b, () => { fn(); ed.focus(); });   // fn (applyEdit / undo / redo) already re-renders and refocuses
     };
     const insertTok = (tok) => { const v = getText(), s = sel().start; applyEdit(v.slice(0, s) + tok + v.slice(s), s + tok.length); };
@@ -811,7 +900,17 @@ function mountEditor(contentEl, opts, host) {
       undo: () => { if (hi > 0) { hi--; restore(hist[hi]); } }, redo: () => { if (hi < hist.length - 1) { hi++; restore(hist[hi]); } },
       h1: () => setHeading('# '), h2: () => setHeading('## '), h3: () => setHeading('### '),
       bold: () => wrap('**', '**'), italic: () => wrap('*', '*'), strike: () => wrap('~~', '~~'),
-      bullet: () => togglePre('- '), number: () => togglePre('1. ', true), check: () => togglePre('- [ ] '), quote: () => togglePre('> '),
+      // Clear formatting works on whole LINES, because half of what it removes (heading, quote, list marker) is a
+      // property of a line, not of a span. With no selection that means the caret's line — the same scope Word
+      // and Pages use when you clear formatting without selecting anything.
+      clear: () => {
+        const v = getText(), s = sel().start, e = sel().end;
+        const firstLs = lineStartOf(v, s), lastLs = lineStartOf(v, e > s ? e - 1 : s);
+        const nlAfter = v.indexOf('\n', lastLs), blockEnd = nlAfter === -1 ? v.length : nlAfter;
+        const out = stripFormatting(v.slice(firstLs, blockEnd));
+        applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);
+      },
+      bullet: () => setList('bullet'), number: () => setList('number'), check: () => setList('check'), quote: () => togglePre('> '),
       table: () => { const v = getText(), s = sel().start, ls = lineStartOf(v, s); const pre = (ls > 0 && v[ls - 1] !== '\n') ? '\n' : ''; const tbl = pre + '|  |  |\n| --- | --- |\n|  |  |\n'; applyEdit(v.slice(0, ls) + tbl + v.slice(ls), ls + pre.length + 2); },   // insert a starter 2×2 table; decorateTables grids it for in-place editing
       code: () => wrap('`', '`'), link: () => wrap('[[', ']]'),
       image: () => insertViaPick(opts.pickImage), video: () => insertViaPick(opts.pickVideo),
@@ -1120,6 +1219,84 @@ function formatBlock(lines) {
   });
 }
 
+// ---- whole-block table transforms (pure → unit-tested). Each takes a block's source lines and returns new
+// ones, already re-aligned by formatBlock, or null when the input is not a table / the move is impossible.
+
+// Split a block into head / sep / body cell arrays. Every row is padded to the block's column count, so a
+// ragged hand-typed table can still be sorted or reordered instead of silently refusing.
+function tableCells(lines) {
+  const rows = lines.map(splitRow);
+  if (rows.length < 2 || !isSepRow(rows[1])) return null;
+  const ncol = Math.max(...rows.map((r) => r.length));
+  const pad = (r, fill) => { const c = r.slice(); while (c.length < ncol) c.push(fill); return c; };
+  return { head: pad(rows[0], ''), sep: pad(rows[1], '---'), body: rows.slice(2).map((r) => pad(r, '')), ncol };
+}
+function renderCells(tc) {
+  const out = [tc.head, tc.sep, ...tc.body].map((cells) => '| ' + cells.join(' | ') + ' |');
+  return formatBlock(out) || out;                                   // every transform leaves the source aligned
+}
+
+// Text comparison for a table sort, split out from the sort itself for one reason: `coll` is a PARAMETER, so
+// a test can pass null and actually execute the no-Intl path. Left inline, that branch was unreachable from
+// any test on any runtime we run tests on — a fallback nobody has ever seen run is a wish, not a fallback.
+function tableCollator() {
+  return (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }) : null;
+}
+function cmpCells(x, y, coll) {
+  if (coll) { const c = coll.compare(x, y); if (c) return c; }
+  const a = x.toLowerCase(), b = y.toLowerCase();   // case-insensitive first, so 'Zebra' does not sort before 'apple'
+  return a < b ? -1 : a > b ? 1 : (x < y ? -1 : x > y ? 1 : 0);
+}
+
+// Sort the BODY rows by one column; the header and the |---| separator never move. Numeric when every
+// non-empty value in the column looks like a number, so 10 lands after 9 — which is most of the reason to
+// have a sort at all. Empty cells sink to the bottom in BOTH directions (an empty cell is not a small value),
+// and the sort is stable, so re-sorting a column you already sorted is a no-op.
+//   Collation: Intl.Collator when the runtime has one (it gives zh/ja readers a sane order for their own
+//   script), falling back to a case-insensitive code-point compare. The fallback is not decoration — a
+//   comparison that only works when full ICU happens to be present is the kind of "MUST match" claim nothing
+//   checks, and this way both paths are the same function's responsibility.
+function sortTableBlock(lines, col, desc) {
+  const tc = tableCells(lines);
+  if (!tc || col < 0 || col >= tc.ncol) return null;
+  const key = (r) => String(r[col] || '').trim();
+  const filled = tc.body.map(key).filter((s) => s !== '');
+  const numeric = filled.length > 0 && filled.every((s) => /^[-+]?\d[\d,]*(?:\.\d+)?%?$/.test(s));
+  const num = (s) => parseFloat(s.replace(/[,%]/g, ''));
+  const coll = tableCollator();
+  // No index tiebreak: Array.prototype.sort has been REQUIRED to be stable since ES2019, so decorating the
+  // rows with their original position bought nothing — a mutation that removed the tiebreak could not be made
+  // to fail. The stability test stays; it now guards the property, not a redundant line of ours.
+  tc.body = tc.body.slice().sort((ra, rb) => {
+    const x = key(ra), y = key(rb);
+    if (x === '' || y === '') return x === y ? 0 : (x === '' ? 1 : -1);
+    const c = numeric ? (num(x) - num(y)) : cmpCells(x, y, coll);
+    return desc ? -c : c;
+  });
+  return renderCells(tc);
+}
+
+// Move a column sideways. The separator cell travels WITH it, so a right-aligned column stays right-aligned
+// after the move — the alignment belongs to the column, not to the position.
+function moveTableColumn(lines, col, delta) {
+  const tc = tableCells(lines);
+  const to = col + delta;
+  if (!tc || col < 0 || col >= tc.ncol || to < 0 || to >= tc.ncol) return null;
+  const shift = (r) => { const c = r.slice(); c.splice(to, 0, c.splice(col, 1)[0]); return c; };
+  tc.head = shift(tc.head); tc.sep = shift(tc.sep); tc.body = tc.body.map(shift);
+  return { lines: renderCells(tc), index: to };
+}
+
+// Move a body row up or down. `row` is an index into the block's LINES (0 = header, 1 = separator), and
+// neither of those is movable — returns null rather than quietly doing something else.
+function moveTableRow(lines, row, delta) {
+  const tc = tableCells(lines);
+  const from = row - 2, to = from + delta;
+  if (!tc || from < 0 || from >= tc.body.length || to < 0 || to >= tc.body.length) return null;
+  const b = tc.body.slice(); b.splice(to, 0, b.splice(from, 1)[0]); tc.body = b;
+  return { lines: renderCells(tc), index: to + 2 };
+}
+
 // Re-align every contiguous markdown table block; non-table text is untouched. Idempotent.
 function formatTables(md) {
   const lines = String(md).replace(/\r\n/g, '\n').split('\n');
@@ -1321,6 +1498,21 @@ function decorateTables(root, ctrl, gateClass) {
     return { caretLine: Math.max(0, ix - 1), caretOff: 2 };
   });
 
+  // Whole-block rewrite: hand the block's source lines to a pure transform and write the result back. The
+  // transforms never change the LINE COUNT, so the block's document indices stay valid and the caret can be
+  // parked on whichever line the transform says the moved thing ended up on.
+  const blockEdit = (line, transform) => docEdit((all, doc) => {
+    const rows = blockRows(line);
+    const ixs = rows.map((r) => all.indexOf(r));
+    if (ixs.some((i) => i < 0)) return null;
+    const res = transform(ixs.map((i) => doc[i]));
+    if (!res) return null;
+    const lines = Array.isArray(res) ? res : res.lines;
+    const at = Array.isArray(res) || res.index == null ? rows.indexOf(line) : res.index;
+    lines.forEach((txt, k) => { if (ixs[k] != null) doc[ixs[k]] = txt; });
+    return { caretLine: ixs[at], caretOff: 2 };
+  });
+
   // ---- Word-habit context menu: right-click a cell → insert/delete column/row ----
   let menu = null;
   const closeMenu = () => { if (menu) { menu.remove(); menu = null; } };
@@ -1347,6 +1539,18 @@ function decorateTables(root, ctrl, gateClass) {
     menu.appendChild(document.createElement('hr'));
     item(T('TBL_DEL_COL', '刪除欄'), () => deleteColumn(line, ci), ncol <= 1);
     item(T('TBL_DEL_ROW', '刪除列'), () => deleteRow(line), isHead);
+    // Reordering and sorting: the two things a grid can do that a pile of pipes cannot. Each is disabled at the
+    // edge it cannot go past, and the header/separator rows are never movable.
+    const ri = rows.indexOf(line);
+    menu.appendChild(document.createElement('hr'));
+    item(T('TBL_MOV_COL_L', '將此欄左移'), () => blockEdit(line, (ls) => moveTableColumn(ls, ci, -1)), ci <= 0);
+    item(T('TBL_MOV_COL_R', '將此欄右移'), () => blockEdit(line, (ls) => moveTableColumn(ls, ci, +1)), ci >= ncol - 1);
+    item(T('TBL_MOV_ROW_U', '將此列上移'), () => blockEdit(line, (ls) => moveTableRow(ls, ri, -1)), ri <= 2);
+    item(T('TBL_MOV_ROW_D', '將此列下移'), () => blockEdit(line, (ls) => moveTableRow(ls, ri, +1)), ri < 2 || ri >= rows.length - 1);
+    menu.appendChild(document.createElement('hr'));
+    item(T('TBL_SORT_ASC', '依此欄排序（遞增）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, false)), rows.length <= 3);
+    item(T('TBL_SORT_DESC', '依此欄排序（遞減）'), () => blockEdit(line, (ls) => sortTableBlock(ls, ci, true)), rows.length <= 3);
+    item(T('TBL_ALIGN', '對齊表格原始碼'), () => blockEdit(line, (ls) => formatBlock(ls)));
     menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
     document.body.appendChild(menu);
     const r = menu.getBoundingClientRect();   // keep on screen
