@@ -1131,9 +1131,9 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
   color: var(--text-normal, #1f2328); cursor: pointer; padding: 0 8px; }
 .ej-tblmenu-dir:hover:not(:disabled) { background: var(--background-modifier-border, rgba(0, 0, 0, .12)); }
 .ej-tblmenu-dir:disabled { opacity: .3; cursor: default; }
-/* Delete keeps its own colour so a thumb travelling down the menu knows where it has arrived. */
-.ej-tblmenu-danger .ej-tblmenu-cap { color: var(--text-error, #c0392b); }
-.ej-tblmenu-danger .ej-tblmenu-dir { color: var(--text-error, #c0392b); }
+/* Delete keeps its own colour so a thumb travelling down the menu knows where it has arrived. It is a plain
+   full-width item, never a paired row: see the note at its call site. */
+.ej-tblmenu button.ej-tblmenu-danger { color: var(--text-error, #c0392b); }
 
 /* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
    line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile
