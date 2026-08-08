@@ -25,7 +25,11 @@ const iconsBlock = (() => {
 const provided = new Set([...iconsBlock.matchAll(/'?([a-z0-9-]+)'?:\s*'/g)].map((m) => m[1]));
 const requested = new Set([
   ...[...core.matchAll(/icon:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]),
-  ...[...core.matchAll(/setIcon\([^,]+,\s*'([a-z0-9-]+)'/g)].map((m) => m[1]),
+  ...[...core.matchAll(/setIcon\([^,)]+,\s*'([a-z0-9-]+)'/g)].map((m) => m[1]),
+  // …and the ONE-argument form, `item.setIcon('trash-2')`, which the menu items use. The two-argument pattern
+  // above could not see it, so a dozen icon names went into the core without this gate looking at any of them —
+  // a check that only inspects the shapes it was written for is silent about every new shape.
+  ...[...core.matchAll(/\.setIcon\('([a-z0-9-]+)'\)/g)].map((m) => m[1]),
 ]);
 
 let pass = 0, fail = 0;

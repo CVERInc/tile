@@ -1108,32 +1108,23 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-preview .tg-check:hover::before { color: var(--interactive-accent, #3a7afe); }
 
 /* table right-click menu (desktop: insert/delete row/column) */
-/* The insets are declared HERE, as custom properties, so the placement code can read them off the menu's own
-   computed style. env() is not readable from JS any other way, and going through the host's variables would
-   tie this to Obsidian — the same menu runs in the web preview and the macOS app. */
-.ej-tblmenu { --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
-  position: fixed; z-index: 2000; min-width: 168px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
-/* justify-content, not just text-align: Obsidian styles every bare <button> as `display:inline-flex;
-   justify-content:center`, which makes the label a FLEX ITEM — and text-align has no say over a flex
-   item's position. The old `text-align: left` was applied and did nothing at all. text-align stays for
-   the hosts (web preview, macOS app) where the button is not a flex container. */
+/* The .ej-tblmenu popover is now the NON-Obsidian rendering only — obsidian-shim.js's Menu draws into it, so
+   the web preview and the macOS app keep the menu they had. Under Obsidian the host's own Menu is used, which
+   is why the safe-area maths, the keyboard dismissal and the flip-up clamp that used to live here are gone. */
+.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
+/* Both properties, deliberately. A host that styles bare <button> as a flex container (Obsidian does:
+   `display:inline-flex; justify-content:center`) makes the label a FLEX ITEM, over which text-align has no
+   say — that rule sat here from the day it was written and moved nothing. Keep both so neither kind of host
+   can centre these labels. */
 .ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; justify-content: flex-start; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
 .ej-tblmenu button:hover:not(:disabled) { background: var(--background-modifier-hover, rgba(0, 0, 0, .06)); }
 .ej-tblmenu button:disabled { opacity: .35; cursor: default; }
 .ej-tblmenu hr { border: 0; border-top: 1px solid var(--background-modifier-border, #e4e6e9); margin: 4px 6px; }
-/* Paired rows: one concept on the left, its two directions on the right. The label is a <span>, not a button —
-   the row itself does nothing, which is the point: there is no ambiguous "click the row" target to mis-hit. */
-.ej-tblmenu-row { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 12px; }
-.ej-tblmenu-cap { flex: 1 1 auto; font: 13.5px var(--font-interface, system-ui, sans-serif); color: var(--text-normal, #1f2328); white-space: nowrap; padding-right: 8px; }
-.ej-tblmenu-dir { flex: 0 0 auto; min-width: 34px; height: 30px; font: 14px var(--font-interface, system-ui, sans-serif);
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: 7px; background: var(--background-modifier-hover, rgba(0, 0, 0, .06));
-  color: var(--text-normal, #1f2328); cursor: pointer; padding: 0 8px; }
-.ej-tblmenu-dir:hover:not(:disabled) { background: var(--background-modifier-border, rgba(0, 0, 0, .12)); }
-.ej-tblmenu-dir:disabled { opacity: .3; cursor: default; }
-/* Delete keeps its own colour so a thumb travelling down the menu knows where it has arrived. It is a plain
-   full-width item, never a paired row: see the note at its call site. */
+/* Delete keeps its own colour: the shim's Menu maps setWarning(true) onto this class, the way Obsidian maps it
+   onto .is-warning. Same menu, two renderers. */
 .ej-tblmenu button.ej-tblmenu-danger { color: var(--text-error, #c0392b); }
+.ej-tblmenu-ic { display: inline-flex; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; color: var(--text-muted, #6b7280); }
+.ej-tblmenu-ic svg { width: 16px; height: 16px; }
 
 /* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
    line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile

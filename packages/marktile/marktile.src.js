@@ -5,7 +5,7 @@
    editor is always one tap away and a bug can never lock you out of a note.
    Built by build-marktile.sh, which (1) injects i18n into the TR object below and (2) inlines the shared
    core blocks (marked core-start / core-end in ../plugin.src.js) at the core-inline line. */
-const { Plugin, Notice, TextFileView, Modal, setIcon, Platform, PluginSettingTab, Setting } = require('obsidian');   // Modal/setIcon/Platform are used by the inlined core editor; PluginSettingTab/Setting for the settings tab
+const { Plugin, Notice, TextFileView, Modal, Menu, setIcon, Platform, PluginSettingTab, Setting } = require('obsidian');   // Modal/Menu/setIcon/Platform are used by the inlined core editor; PluginSettingTab/Setting for the settings tab
 
 // ---- i18n (mirrors tugtile; the same i18n/*.json is injected at build) ----
 const LOCALE = (() => {

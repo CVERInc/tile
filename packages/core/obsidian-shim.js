@@ -49,6 +49,13 @@ const ICONS = {
   'lock-open': '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
   image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
   video: '<path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>',
+  'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  'arrow-up': '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  'chevron-left': '<path d="m15 18-6-6 6-6"/>',
+  'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  'arrow-up-narrow-wide': '<path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 12h4"/><path d="M11 16h7"/><path d="M11 20h10"/>',
+  'arrow-down-wide-narrow': '<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h10"/><path d="M11 8h7"/><path d="M11 12h4"/>',
   'trash-2': '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
@@ -62,3 +69,46 @@ globalThis.lucideSvg = (name) => ICONS[name] ? _svg(ICONS[name]) : '';   // raw 
 globalThis.Modal   = class { constructor(){ this.contentEl=document.createElement('div'); } open(){} close(){} onOpen(){} onClose(){} };
 globalThis.Platform = { isMobile:false, isDesktop:true, isMacOS:true, isIosApp:false, isAndroidApp:false };
 globalThis.Notice  = class { constructor(m){ this.message=m; } };
+
+// Menu — the fourth thing the core borrows from its host, alongside Modal / setIcon / Platform. Obsidian's own
+// Menu is the reason this exists: editor-core builds its table menu with `new Menu()` so that on a phone it gets
+// Obsidian's bottom sheet (drag handle, safe areas, scrolling, keyboard-agnostic) instead of a hand-rolled box
+// that had to be taught each of those separately. Here, where there is no Obsidian, we render the same menu as
+// the plain .ej-tblmenu popover the core used to build inline. Same surface, so the core never asks which host
+// it is in: addItem(cb) with setTitle/setIcon/onClick/setDisabled/setWarning, addSeparator(), showAtMouseEvent.
+globalThis.Menu = class {
+  constructor() {
+    this._el = document.createElement('div');
+    this._el.className = 'ej-tblmenu';
+    this._close = () => this.hide();
+  }
+  addItem(cb) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    let run = () => {};
+    const it = {   // every setter returns `it`, because the core chains them: .setTitle(…).setIcon(…).onClick(…)
+      setTitle: (t) => { b.appendChild(document.createTextNode(t)); return it; },
+      setIcon: (n) => { const s = document.createElement('span'); s.className = 'ej-tblmenu-ic'; s.innerHTML = ICONS[n] ? _svg(ICONS[n]) : ''; b.insertBefore(s, b.firstChild); return it; },
+      onClick: (f) => { run = f; return it; },
+      setDisabled: (v) => { b.disabled = v !== false; return it; },
+      setWarning: (v) => { b.classList.toggle('ej-tblmenu-danger', v !== false); return it; },
+    };
+    cb(it);
+    b.onmousedown = (ev) => ev.preventDefault();
+    b.onclick = (ev) => { ev.stopPropagation(); this.hide(); run(); };
+    this._el.appendChild(b);
+    return this;
+  }
+  addSeparator() { this._el.appendChild(document.createElement('hr')); return this; }
+  showAtMouseEvent(e) {
+    document.body.appendChild(this._el);
+    this._el.style.left = e.clientX + 'px';
+    this._el.style.top = e.clientY + 'px';
+    const r = this._el.getBoundingClientRect();   // keep it on screen; these hosts are pointer-driven desktops
+    if (r.right > innerWidth) this._el.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
+    if (r.bottom > innerHeight) this._el.style.top = Math.max(8, e.clientY - r.height) + 'px';
+    setTimeout(() => { document.addEventListener('click', this._close, true); document.addEventListener('keydown', this._close, true); }, 0);
+    return this;
+  }
+  hide() { document.removeEventListener('click', this._close, true); document.removeEventListener('keydown', this._close, true); if (this._el.parentNode) this._el.remove(); return this; }
+};
