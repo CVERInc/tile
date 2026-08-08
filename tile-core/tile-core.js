@@ -1931,11 +1931,16 @@ function decorateTables(root, ctrl, gateClass) {
       // Trust visualViewport only when it actually shrank — otherwise it reports the full window and lies by
       // agreeing with innerHeight.
       const shrunk = !!(vv && vv.height && vv.height < innerHeight - 40);
-      const top = shrunk ? vv.offsetTop : 0, height = shrunk ? vv.height : innerHeight;
-      menu.style.maxHeight = Math.max(160, height - 24) + 'px';   // a menu taller than the screen scrolls rather than overflowing it
+      const vTop = shrunk ? vv.offsetTop : 0, vH = shrunk ? vv.height : innerHeight;
+      // The status bar and the home indicator are not free space. Without this the menu was drawn UNDER the
+      // clock and the signal icons — correctly inside the viewport, and still in the wrong place.
+      const cs = getComputedStyle(menu);
+      const safeT = parseFloat(cs.getPropertyValue('--safe-t')) || 0, safeB = parseFloat(cs.getPropertyValue('--safe-b')) || 0;
+      const top = vTop + safeT + 8, bottom = vTop + vH - safeB - 8;
+      menu.style.maxHeight = Math.max(160, bottom - top) + 'px';   // a menu taller than the screen scrolls rather than overflowing it
       const r = menu.getBoundingClientRect();
       if (r.right > innerWidth) menu.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
-      if (r.bottom > top + height) menu.style.top = Math.max(top + 8, e.clientY - r.height) + 'px';
+      if (r.bottom > bottom) menu.style.top = Math.max(top, e.clientY - r.height) + 'px';
     };
     place();
     if (coarse) setTimeout(place, 260);   // the keyboard leaves over ~250ms; re-place once it has gone
