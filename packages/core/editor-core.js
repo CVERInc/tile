@@ -290,6 +290,31 @@ function setListKind(v, s, e, kind) {
   return { text, start: Math.max(firstLs, s + delta), end: Math.max(firstLs, s + delta) };
 }
 
+// Inline marks are a TOGGLE, not an insert. Pure → unit-tested. The button has to look at what is already
+// there, exactly like the list buttons do: without this, selecting **bold** and pressing B gave ****bold****,
+// and — the one that quietly changes meaning — selecting *italic* and pressing I gave **italic**, i.e. BOLD.
+// Two shapes count as "already marked": the marks sit just OUTSIDE the selection (double-click a word inside
+// **word** and the selection is the bare word), or just INSIDE it (the user dragged over the markers too).
+//
+// The '*' case needs a guard, because bold is spelled with the same character as italic. Pressing I inside
+// **bold** must ADD italic (→ ***bold***), not eat one of bold's stars, so a '*' only counts as an italic
+// marker when it is not part of a longer run. Bold is checked before italic by the caller for the same reason.
+//
+// A bare caret still just inserts the pair (the historical behaviour): with no ⌘B/⌘I binding in this editor,
+// the toolbar is always reached WITH a selection, and guessing at "the run the caret is inside" would be a
+// second, fiddlier rule earning its keep on a path nobody walks.
+function toggleWrap(v, s, e, pre, post) {
+  const solo = (ch, at) => v[at] !== ch;                                   // not part of a longer run of the same char
+  const starOK = (a, b) => pre !== '*' || (solo('*', a) && solo('*', b));
+  if (v.slice(s - pre.length, s) === pre && v.slice(e, e + post.length) === post && starOK(s - pre.length - 1, e + post.length)) {
+    return { text: v.slice(0, s - pre.length) + v.slice(s, e) + v.slice(e + post.length), start: s - pre.length, end: e - pre.length };
+  }
+  if (e - s >= pre.length + post.length && v.slice(s, s + pre.length) === pre && v.slice(e - post.length, e) === post && starOK(s + pre.length, e - post.length - 1)) {
+    return { text: v.slice(0, s) + v.slice(s + pre.length, e - post.length) + v.slice(e), start: s, end: e - pre.length - post.length };
+  }
+  return { text: v.slice(0, s) + pre + v.slice(s, e) + post + v.slice(e), start: s + pre.length, end: e + pre.length };
+}
+
 // Removing formatting can EXPOSE formatting. A real line from the corpus, "3. **>25MB → ...**", loses its
 // list marker and its bold and is then left starting with '>' — which is a blockquote. The text now says
 // something it did not say before, and running the same command again eats the '>' entirely: not idempotent,
@@ -850,7 +875,7 @@ function mountEditor(contentEl, opts, host) {
     }
 
     // Editor shortcuts: edit the text model directly, then applyEdit re-highlights + snapshots undo; mousedown preventDefault retains the caret
-    const wrap = (pre, post) => { const v = getText(), s = sel().start, e = sel().end; applyEdit(v.slice(0, s) + pre + v.slice(s, e) + post + v.slice(e), s + pre.length, e + pre.length); };
+    const wrap = (pre, post) => { const r = toggleWrap(getText(), sel().start, sel().end, pre, post); applyEdit(r.text, r.start, r.end); };
     const lineStartOf = (v, pos) => v.lastIndexOf('\n', pos - 1) + 1;
     // The list tools (bullet / number / check) go through setListKind, which treats the three as ONE family:
     // pressing 編號 on a bullet line REPLACES the marker instead of prepending to it. See setListKind above.
