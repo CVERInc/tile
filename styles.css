@@ -1102,7 +1102,11 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 
 /* table right-click menu (desktop: insert/delete row/column) */
 .ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
-.ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
+/* justify-content, not just text-align: Obsidian styles every bare <button> as `display:inline-flex;
+   justify-content:center`, which makes the label a FLEX ITEM — and text-align has no say over a flex
+   item's position. The old `text-align: left` was applied and did nothing at all. text-align stays for
+   the hosts (web preview, macOS app) where the button is not a flex container. */
+.ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; justify-content: flex-start; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
 .ej-tblmenu button:hover:not(:disabled) { background: var(--background-modifier-hover, rgba(0, 0, 0, .06)); }
 .ej-tblmenu button:disabled { opacity: .35; cursor: default; }
 .ej-tblmenu hr { border: 0; border-top: 1px solid var(--background-modifier-border, #e4e6e9); margin: 4px 6px; }
