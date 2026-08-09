@@ -303,15 +303,22 @@ function setListKind(v, s, e, kind) {
 // A bare caret still just inserts the pair (the historical behaviour): with no ⌘B/⌘I binding in this editor,
 // the toolbar is always reached WITH a selection, and guessing at "the run the caret is inside" would be a
 // second, fiddlier rule earning its keep on a path nobody walks.
-function toggleWrap(v, s, e, pre, post) {
+// Which of the two shapes (if either) the selection is already wrapped in. Split out of toggleWrap so a MENU
+// can ask the same question the button answers — a menu item that reads "取消粗體" instead of "粗體" is the
+// whole reason a context menu beats a toolbar, and until toggleWrap existed there was no one to ask.
+// 'outer' = the marks sit just outside the selection, 'inner' = the selection contains them, null = neither.
+function wrapState(v, s, e, pre, post) {
   const solo = (ch, at) => v[at] !== ch;                                   // not part of a longer run of the same char
   const starOK = (a, b) => pre !== '*' || (solo('*', a) && solo('*', b));
-  if (v.slice(s - pre.length, s) === pre && v.slice(e, e + post.length) === post && starOK(s - pre.length - 1, e + post.length)) {
-    return { text: v.slice(0, s - pre.length) + v.slice(s, e) + v.slice(e + post.length), start: s - pre.length, end: e - pre.length };
-  }
-  if (e - s >= pre.length + post.length && v.slice(s, s + pre.length) === pre && v.slice(e - post.length, e) === post && starOK(s + pre.length, e - post.length - 1)) {
-    return { text: v.slice(0, s) + v.slice(s + pre.length, e - post.length) + v.slice(e), start: s, end: e - pre.length - post.length };
-  }
+  if (v.slice(s - pre.length, s) === pre && v.slice(e, e + post.length) === post && starOK(s - pre.length - 1, e + post.length)) return 'outer';
+  if (e - s >= pre.length + post.length && v.slice(s, s + pre.length) === pre && v.slice(e - post.length, e) === post && starOK(s + pre.length, e - post.length - 1)) return 'inner';
+  return null;
+}
+
+function toggleWrap(v, s, e, pre, post) {
+  const at = wrapState(v, s, e, pre, post);
+  if (at === 'outer') return { text: v.slice(0, s - pre.length) + v.slice(s, e) + v.slice(e + post.length), start: s - pre.length, end: e - pre.length };
+  if (at === 'inner') return { text: v.slice(0, s) + v.slice(s + pre.length, e - post.length) + v.slice(e), start: s, end: e - pre.length - post.length };
   return { text: v.slice(0, s) + pre + v.slice(s, e) + post + v.slice(e), start: s + pre.length, end: e + pre.length };
 }
 
@@ -1068,6 +1075,52 @@ function mountEditor(contentEl, opts, host) {
     if (vv) { vv.addEventListener('resize', applyVV); vv.addEventListener('scroll', applyVV); applyVV(); }
     ed.addEventListener('input', () => setTimeout(keepCaretVisible, 0));   // keep the caret above the keyboard as you type
 
+    // ---- Selection menu (touch only) ----------------------------------------------------------------
+    // The toolbar is always visible but knows nothing about what you selected; the table menu knows exactly
+    // what you touched but exists for one construct. Nothing answered "I have selected some text, now what?".
+    // This does, and it can say things a toolbar cannot: wrapState lets an item read 取消粗體 rather than 粗體.
+    //
+    // TOUCH ONLY, deliberately. On desktop the right-click already opens the host's editor menu — copy, paste,
+    // spell-check — and taking that over would mean re-implementing paste, which execCommand does not reliably
+    // give us. Trading a daily action for a new menu is a bad trade, and desktop is not where the problem is:
+    // there the whole toolbar is on screen at once. On a phone the toolbar scrolls sideways and hides its tail,
+    // which is exactly where a menu earns its place. Reasonable degradation, stated rather than hidden.
+    ed.addEventListener('contextmenu', (e) => {
+      if (typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches) return;
+      if (ed.getAttribute('contenteditable') === 'false') return;
+      const { start, end } = sel();
+      if (start === end) return;                    // no selection → let the host do whatever it does
+      e.preventDefault();
+      const v = getText();
+      const menu = new Menu();
+      // Options objects again, and again specifically so every icon is spelled `icon: 'bold'` at the call site.
+      // Passed positionally it is a variable by the time it reaches setIcon(), and shim-icons.test.cjs — the
+      // check whose entire job is "an icon the shim lacks renders a blank button" — cannot see a variable.
+      // I fixed exactly this in the table menu half an hour before writing this block, and wrote it the old
+      // way anyway. The habit is the fix, not the one-off repair.
+      const mark = (o) => menu.addItem((i) => {
+        const on = !!wrapState(v, start, end, o.pre, o.post);
+        i.setTitle(on ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => wrap(o.pre, o.post));
+      });
+      mark({ key: 'edBold', text: '粗體', offKey: 'selUnbold', offText: '取消粗體', pre: '**', post: '**', icon: 'bold' });
+      mark({ key: 'edItalic', text: '斜體', offKey: 'selUnitalic', offText: '取消斜體', pre: '*', post: '*', icon: 'italic' });
+      mark({ key: 'edStrike', text: '刪除線', offKey: 'selUnstrike', offText: '取消刪除線', pre: '~~', post: '~~', icon: 'strikethrough' });
+      mark({ key: 'edCode', text: '行內碼', offKey: 'selUncode', offText: '取消行內碼', pre: '`', post: '`', icon: 'code' });
+      mark({ key: 'edLink', text: '連結', offKey: 'selUnlink', offText: '取消連結', pre: '[[', post: ']]', icon: 'link' });
+      menu.addSeparator();
+      // Line-level, so they read the caret line's marker rather than the selection's wrapping.
+      const kind = (listMarker(v.slice(lineStartOf(v, start))) || {}).kind;
+      const listItem = (o) => menu.addItem((i) => {
+        i.setTitle(kind === o.kind ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => setList(o.kind));
+      });
+      listItem({ kind: 'bullet', key: 'edBullet', text: '項目符號清單', offKey: 'selUnbullet', offText: '取消項目符號清單', icon: 'list' });
+      listItem({ kind: 'number', key: 'edNumber', text: '編號清單', offKey: 'selUnnumber', offText: '取消編號清單', icon: 'list-ordered' });
+      listItem({ kind: 'check', key: 'edCheck', text: '待辦清單', offKey: 'selUncheck', offText: '取消待辦清單', icon: 'list-checks' });
+      menu.addSeparator();
+      menu.addItem((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => runs.clear()));
+      menu.showAtMouseEvent(e);
+    });
+
   return {
     getValue: () => getText().replace(/\s+$/, ''),
     rawValue: () => getText(),
@@ -1224,6 +1277,12 @@ const WIDE = [
 ];
 function charWidth(cp) { for (const [a, b] of WIDE) if (cp >= a && cp <= b) return 2; return 1; }
 function dispWidth(s) { let w = 0; for (const ch of String(s)) w += charWidth(ch.codePointAt(0)); return w; }
+
+// Translate with a literal fallback. Module scope because two callers need it now — the table menu inside
+// decorateTables and the selection menu inside mountEditor — and a second copy is how two menus start
+// disagreeing about a string. The fallback is not decoration: a host that ships the core without the i18n
+// injection (or a key added in one place and not the other) gets readable Chinese instead of a raw key.
+const T = (k, fb) => { try { const s = (typeof t === 'function') ? t(k) : null; return (s != null && s !== k) ? s : fb; } catch (e) { return fb; } };
 
 const isTableLine = (l) => /^[ \t]*\|.*\|[ \t]*$/.test(l);
 const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
@@ -1439,7 +1498,6 @@ function decorateTables(root, ctrl, gateClass) {
   const inPreview = () => root.classList.contains(gateClass || 'tugtile-preview');
   const lineOf = (node) => { if (!node || !root.contains(node)) return null; const el = node.nodeType === 3 ? node.parentElement : node; return el && el.closest ? el.closest('.tg-line') : null; };
   const caretLineEl = () => { const s = getSelection(); return s && s.rangeCount ? lineOf(s.anchorNode) : null; };
-  const T = (k, fb) => { try { const s = (typeof t === 'function') ? t(k) : null; return (s != null && s !== k) ? s : fb; } catch (e) { return fb; } };
 
   const setLocks = (line, on) => line.querySelectorAll('.ej-pipe').forEach((p) => { if (on) p.setAttribute('contenteditable', 'false'); else p.removeAttribute('contenteditable'); });
 

@@ -13,9 +13,28 @@ function grab(name) {
   }
   throw new Error('unbalanced: ' + name);
 }
+let pass = 0, fail = 0;
+eval(grab('wrapState'));
 eval(grab('toggleWrap'));
 
-let pass = 0, fail = 0;
+// wrapState is what a menu asks so it can say "取消粗體" instead of "粗體". Assert it directly, not only
+// through toggleWrap — a caller that only ever reads the toggled TEXT cannot tell 'outer' from 'inner'.
+{
+  const cases = [
+    ['**bold**', 2, 6, ['**', '**'], 'outer'],
+    ['**bold**', 0, 8, ['**', '**'], 'inner'],
+    ['**bold**', 2, 6, ['*', '*'], null],      // the star guard: this is bold, not italic
+    ['*x*', 1, 2, ['*', '*'], 'outer'],
+    ['plain', 0, 5, ['**', '**'], null],
+    ['[[Page]]', 2, 6, ['[[', ']]'], 'outer'],
+  ];
+  for (const [v, s, e, [pre, post], want] of cases) {
+    const got = wrapState(v, s, e, pre, post);
+    if (got === want) pass++;
+    else { fail++; console.log(`FAIL wrapState(${JSON.stringify(v)}, ${s}, ${e}, '${pre}') → ${got}, want ${want}`); }
+  }
+}
+
 // The selection is marked by a │…│ pair in both input and expected (a bare caret is one │).
 function t(label, mark, input, expected) {
   const a = input.indexOf('│'), b = input.indexOf('│', a + 1);
