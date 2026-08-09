@@ -1242,11 +1242,14 @@ function mountEditor(contentEl, opts, host) {
     }
 
     // Editor shortcuts: edit the text model directly, then applyEdit re-highlights + snapshots undo; mousedown preventDefault retains the caret
-    const wrap = (pre, post) => { const r = toggleWrap(getText(), sel().start, sel().end, pre, post); applyEdit(r.text, r.start, r.end); };
+    // `at` (optional {start,end}) lets a caller act on a range it captured earlier instead of the LIVE
+    // selection — the selection menu needs this: by the time its Menu item is actually tapped, the DOM
+    // selection that opened the menu may no longer be there (see the pill wiring below).
+    const wrap = (pre, post, at) => { const r0 = at || sel(); const r = toggleWrap(getText(), r0.start, r0.end, pre, post); applyEdit(r.text, r.start, r.end); };
     const lineStartOf = (v, pos) => v.lastIndexOf('\n', pos - 1) + 1;
     // The list tools (bullet / number / check) go through setListKind, which treats the three as ONE family:
     // pressing 編號 on a bullet line REPLACES the marker instead of prepending to it. See setListKind above.
-    const setList = (kind) => { const r = setListKind(getText(), sel().start, sel().end, kind); applyEdit(r.text, r.start, r.end); };
+    const setList = (kind, at) => { const r0 = at || sel(); const r = setListKind(getText(), r0.start, r0.end, kind); applyEdit(r.text, r.start, r.end); };
     // Line-prefix tool — now only quote, which is a separate axis (it nests with lists: "> - item" is valid).
     // With a SELECTION it applies to EVERY line the selection touches; with just a caret it toggles that one
     // line (caret kept). Blank lines are left alone. Toggles OFF only when every non-blank line already has it.
@@ -1308,20 +1311,22 @@ function mountEditor(contentEl, opts, host) {
         const v = getText(); applyEdit(v.slice(0, at) + tok + v.slice(at), at + tok.length);
       }).catch(() => {});
     };
+    // Clear formatting works on whole LINES, because half of what it removes (heading, quote, list marker) is a
+    // property of a line, not of a span. With no selection that means the caret's line — the same scope Word
+    // and Pages use when you clear formatting without selecting anything. Takes an explicit range (not sel())
+    // for the same reason wrap/setList now do — shared by the toolbar button and the selection menu.
+    const clearRange = (s, e) => {
+      const v = getText();
+      const firstLs = lineStartOf(v, s), lastLs = lineStartOf(v, e > s ? e - 1 : s);
+      const nlAfter = v.indexOf('\n', lastLs), blockEnd = nlAfter === -1 ? v.length : nlAfter;
+      const out = stripFormatting(v.slice(firstLs, blockEnd));
+      applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);
+    };
     const runs = {
       undo: () => { if (hi > 0) { hi--; restore(hist[hi]); } }, redo: () => { if (hi < hist.length - 1) { hi++; restore(hist[hi]); } },
       h1: () => setHeading('# '), h2: () => setHeading('## '), h3: () => setHeading('### '),
       bold: () => wrap('**', '**'), italic: () => wrap('*', '*'), strike: () => wrap('~~', '~~'),
-      // Clear formatting works on whole LINES, because half of what it removes (heading, quote, list marker) is a
-      // property of a line, not of a span. With no selection that means the caret's line — the same scope Word
-      // and Pages use when you clear formatting without selecting anything.
-      clear: () => {
-        const v = getText(), s = sel().start, e = sel().end;
-        const firstLs = lineStartOf(v, s), lastLs = lineStartOf(v, e > s ? e - 1 : s);
-        const nlAfter = v.indexOf('\n', lastLs), blockEnd = nlAfter === -1 ? v.length : nlAfter;
-        const out = stripFormatting(v.slice(firstLs, blockEnd));
-        applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);
-      },
+      clear: () => clearRange(sel().start, sel().end),
       bullet: () => setList('bullet'), number: () => setList('number'), check: () => setList('check'), quote: () => togglePre('> '),
       table: () => { const v = getText(), s = sel().start, ls = lineStartOf(v, s); const pre = (ls > 0 && v[ls - 1] !== '\n') ? '\n' : ''; const tbl = pre + '|  |  |\n| --- | --- |\n|  |  |\n'; applyEdit(v.slice(0, ls) + tbl + v.slice(ls), ls + pre.length + 2); },   // insert a starter 2×2 table; decorateTables grids it for in-place editing
       code: () => wrap('`', '`'), link: () => wrap('[[', ']]'),
@@ -1458,13 +1463,18 @@ function mountEditor(contentEl, opts, host) {
     // us. Trading a daily action for a new menu is a bad trade, and desktop is not where the problem is: the
     // whole toolbar is on screen at once there. On a phone it scrolls sideways and hides its tail.
     const coarsePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    // Every action closes over {start, end} — the range CAPTURED when the menu was built — never sel(). For the
+    // contextmenu path that is the same thing sel() would return anyway (the selection is still live while a
+    // native contextmenu's menu is open). For the pill path it is NOT the same thing: see the pill wiring below
+    // for why the DOM selection may already be gone by the time a Menu item is actually tapped, and why that is
+    // now fine to happen.
     const buildSelectionMenu = (v, start, end) => {
       const menu = new Menu();
       // Options objects, so every icon is spelled `icon: 'bold'` at the call site — the one shape
       // shim-icons.test.cjs can read. Passed positionally it is a variable by the time it reaches setIcon().
       const mark = (o) => menu.addItem((i) => {
         const on = !!wrapState(v, start, end, o.pre, o.post);
-        i.setTitle(on ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => wrap(o.pre, o.post));
+        i.setTitle(on ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => wrap(o.pre, o.post, { start, end }));
       });
       mark({ key: 'edBold', text: '粗體', offKey: 'selUnbold', offText: '取消粗體', pre: '**', post: '**', icon: 'bold' });
       mark({ key: 'edItalic', text: '斜體', offKey: 'selUnitalic', offText: '取消斜體', pre: '*', post: '*', icon: 'italic' });
@@ -1475,17 +1485,17 @@ function mountEditor(contentEl, opts, host) {
       // Line-level, so they read the caret line's marker rather than the selection's wrapping.
       const kind = (listMarker(v.slice(lineStartOf(v, start))) || {}).kind;
       const listItem = (o) => menu.addItem((i) => {
-        i.setTitle(kind === o.kind ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => setList(o.kind));
+        i.setTitle(kind === o.kind ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => setList(o.kind, { start, end }));
       });
       listItem({ kind: 'bullet', key: 'edBullet', text: '項目符號清單', offKey: 'selUnbullet', offText: '取消項目符號清單', icon: 'list' });
       listItem({ kind: 'number', key: 'edNumber', text: '編號清單', offKey: 'selUnnumber', offText: '取消編號清單', icon: 'list-ordered' });
       listItem({ kind: 'check', key: 'edCheck', text: '待辦清單', offKey: 'selUncheck', offText: '取消待辦清單', icon: 'list-checks' });
       menu.addSeparator();
-      menu.addItem((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => runs.clear()));
+      menu.addItem((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => clearRange(start, end)));
       return menu;
     };
-    const openSelectionMenu = (atEvent) => {
-      const { start, end } = sel();
+    const openSelectionMenu = (atEvent, at) => {
+      const { start, end } = at || sel();
       if (start === end) return;
       buildSelectionMenu(getText(), start, end).showAtMouseEvent(atEvent);
     };
@@ -1507,6 +1517,9 @@ function mountEditor(contentEl, opts, host) {
     selPill.style.display = 'none';
     document.body.appendChild(selPill);
     const hideSelPill = () => { selPill.style.display = 'none'; };
+    // The last non-collapsed range seen while the pill was visible. NOT reset when the pill hides — that
+    // happens on the same tap that opens the menu (see below), so it has to survive past its own disappearance.
+    let pillSel = null;
     const updateSelPill = () => {
       if (!coarsePointer() || ed.getAttribute('contenteditable') === 'false') return hideSelPill();
       const r = readSel();
@@ -1515,6 +1528,7 @@ function mountEditor(contentEl, opts, host) {
       if (!s || s.rangeCount === 0) return hideSelPill();
       const rect = s.getRangeAt(0).getBoundingClientRect();
       if (!rect || (!rect.width && !rect.height)) return hideSelPill();   // a selection can be non-empty in char offsets but empty in the DOM for one tick during a drag
+      pillSel = r;
       const vv = window.visualViewport;
       const shrunk = !!(vv && vv.height && vv.height < innerHeight - 40);   // see the note by applyVV: does not reliably shrink in Obsidian's webview
       const vTop = shrunk ? vv.offsetTop : 0, vBottom = vTop + (shrunk ? vv.height : innerHeight);
@@ -1524,8 +1538,26 @@ function mountEditor(contentEl, opts, host) {
     };
     document.addEventListener('selectionchange', updateSelPill);
     scroll.addEventListener('scroll', () => { if (selPill.style.display !== 'none') updateSelPill(); }, { passive: true });
-    selPill.addEventListener('mousedown', (e) => e.preventDefault());   // keep the selection/focus alive
-    selPill.addEventListener('click', (e) => { hideSelPill(); openSelectionMenu(e); });
+    // 🩸 This USED to call e.preventDefault() on mousedown "to keep the selection/focus alive" — every other
+    // icon button in this file does the same thing, for the same standard reason (don't blur the editor when
+    // tapping chrome around it). Here it was the wrong instinct copied from the wrong place: chodaict reported
+    // the pill opens the menu correctly but leaves iOS's own selection callout sitting on screen next to it,
+    // "有點可惜". The reason the OTHER touch path — long-pressing text that is already selected, which lands
+    // on 'contextmenu' — does NOT have this problem is that dismissing a native menu is exactly what
+    // preventDefault() on a TRUSTED 'contextmenu' event means to WebKit. A tap on the pill is a plain 'click'
+    // on an unrelated element; nothing about preventDefault-ing IT tells iOS to drop a callout it is showing
+    // for a completely different gesture. The callout only goes away the way iOS normally makes it go away:
+    // by treating the tap as "outside the selection" — which blurring/deselecting IS. So: let it blur. That
+    // used to be unsafe, because wrap()/setList()/clearRange() read the LIVE selection at click time, and a
+    // blurred/collapsed one would have silently pointed every action at an empty caret instead of the text
+    // the menu was opened for. They now take an explicit range (pillSel, captured above, before any of this),
+    // so a lost live selection no longer loses the target — only, maybe, the OS's own leftover UI. Genuinely
+    // untested whether iOS actually reads a blur this way; if it doesn't, the fallback below still does.
+    selPill.addEventListener('click', (e) => {
+      const at = pillSel;
+      hideSelPill();
+      if (at) openSelectionMenu(e, at);
+    });
 
   return {
     getValue: () => getText().replace(/\s+$/, ''),
