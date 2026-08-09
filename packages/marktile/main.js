@@ -1538,21 +1538,18 @@ function mountEditor(contentEl, opts, host) {
     };
     document.addEventListener('selectionchange', updateSelPill);
     scroll.addEventListener('scroll', () => { if (selPill.style.display !== 'none') updateSelPill(); }, { passive: true });
-    // 🩸 This USED to call e.preventDefault() on mousedown "to keep the selection/focus alive" — every other
-    // icon button in this file does the same thing, for the same standard reason (don't blur the editor when
-    // tapping chrome around it). Here it was the wrong instinct copied from the wrong place: chodaict reported
-    // the pill opens the menu correctly but leaves iOS's own selection callout sitting on screen next to it,
-    // "有點可惜". The reason the OTHER touch path — long-pressing text that is already selected, which lands
-    // on 'contextmenu' — does NOT have this problem is that dismissing a native menu is exactly what
-    // preventDefault() on a TRUSTED 'contextmenu' event means to WebKit. A tap on the pill is a plain 'click'
-    // on an unrelated element; nothing about preventDefault-ing IT tells iOS to drop a callout it is showing
-    // for a completely different gesture. The callout only goes away the way iOS normally makes it go away:
-    // by treating the tap as "outside the selection" — which blurring/deselecting IS. So: let it blur. That
-    // used to be unsafe, because wrap()/setList()/clearRange() read the LIVE selection at click time, and a
-    // blurred/collapsed one would have silently pointed every action at an empty caret instead of the text
-    // the menu was opened for. They now take an explicit range (pillSel, captured above, before any of this),
-    // so a lost live selection no longer loses the target — only, maybe, the OS's own leftover UI. Genuinely
-    // untested whether iOS actually reads a blur this way; if it doesn't, the fallback below still does.
+    // 🩸 TESTED AND REVERTED: this used to skip preventDefault on mousedown, on the theory that letting the tap
+    // blur/deselect would make iOS treat it as "tapped outside the selection" and drop its own callout the way
+    // it does for the 'contextmenu' fallback below. Tried on a real device: the callout stayed up regardless.
+    // Checked obsidian.asar for a supported hook (nativeMenus is a macOS-only desktop-menu preference;
+    // selectionMenu belongs to canvas nodes, not text) — nothing exists. Best remaining explanation, unverified
+    // and not worth chasing further on guesswork: Obsidian's iOS app likely supplies this callout from its own
+    // native layer, not from anything DOM-observable, so no amount of JS on our side reaches it. Restored the
+    // preventDefault — every other icon button in this file has it for the same reason (don't blur the editor
+    // when tapping chrome around it) and there was no payoff for the one place that didn't. The explicit-range
+    // plumbing (pillSel, wrap/setList/clearRange taking an optional range) stays: real correctness fix on its
+    // own regardless of whether this particular cosmetic chase ever pays off.
+    selPill.addEventListener('mousedown', (e) => e.preventDefault());
     selPill.addEventListener('click', (e) => {
       const at = pillSel;
       hideSelPill();
