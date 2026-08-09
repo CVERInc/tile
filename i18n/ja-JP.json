@@ -235,6 +235,7 @@
   "selUnbullet": "箇条書きを解除",
   "selUnnumber": "番号付きリストを解除",
   "selUncheck": "チェックリストを解除",
+  "selMoreLabel": "その他の書式オプション",
   "edBullet": "箇条書き",
   "edNumber": "番号付きリスト",
   "edCheck": "チェックリスト",

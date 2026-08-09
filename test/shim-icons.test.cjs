@@ -23,13 +23,41 @@ const iconsBlock = (() => {
 })();
 
 const provided = new Set([...iconsBlock.matchAll(/'?([a-z0-9-]+)'?:\s*'/g)].map((m) => m[1]));
+
+// setIcon(el, 'name') — a REGEX cannot pick out "the icon name" here, because it is not "the second thing
+// after a comma", it is "the last TOP-LEVEL argument". `setIcon(el.createSpan(), 'name')` has a comma and a
+// closing paren INSIDE its first argument; `[^,)]+` (the previous version of this check) stops at the first
+// of either, so it never matched el.createSpan() calls at all — which is most of them (list-tree, x, check,
+// search, and this file's own more-horizontal all went unseen this way, silently, until this was written).
+// A paren-depth scan is the only correct way to find "the argument after the last top-level comma".
+function lastTopLevelArg(argsText) {
+  let depth = 0, lastComma = -1;
+  for (let i = 0; i < argsText.length; i++) {
+    const c = argsText[i];
+    if (c === '(' || c === '{' || c === '[') depth++;
+    else if (c === ')' || c === '}' || c === ']') depth--;
+    else if (c === ',' && depth === 0) lastComma = i;
+  }
+  return argsText.slice(lastComma + 1).trim();
+}
+function findSetIconArgs(src) {
+  const out = [];
+  const re = /\bsetIcon\(/g;
+  let m;
+  while ((m = re.exec(src))) {
+    let depth = 1, i = m.index + m[0].length;
+    const start = i;
+    while (i < src.length && depth > 0) { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; i++; }
+    out.push(src.slice(start, i - 1));
+  }
+  return out;
+}
 const requested = new Set([
   ...[...core.matchAll(/icon:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]),
-  ...[...core.matchAll(/setIcon\([^,)]+,\s*'([a-z0-9-]+)'/g)].map((m) => m[1]),
-  // …and the ONE-argument form, `item.setIcon('trash-2')`, which the menu items use. The two-argument pattern
-  // above could not see it, so a dozen icon names went into the core without this gate looking at any of them —
-  // a check that only inspects the shapes it was written for is silent about every new shape.
-  ...[...core.matchAll(/\.setIcon\('([a-z0-9-]+)'\)/g)].map((m) => m[1]),
+  ...findSetIconArgs(core)
+    .map(lastTopLevelArg)
+    .map((a) => /^'([a-z0-9-]+)'$/.exec(a))   // only a bare string LITERAL is a name to check — a variable
+    .filter(Boolean).map((m) => m[1]),         // (icon, o.icon, m.icon, …) is checked at its own definition site
 ]);
 
 let pass = 0, fail = 0;

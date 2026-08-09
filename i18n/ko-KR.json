@@ -235,6 +235,7 @@
   "selUnbullet": "글머리 기호 목록 해제",
   "selUnnumber": "번호 매기기 목록 해제",
   "selUncheck": "체크리스트 해제",
+  "selMoreLabel": "서식 옵션 더보기",
   "edBullet": "글머리 목록",
   "edNumber": "번호 목록",
   "edCheck": "체크리스트",

@@ -1125,6 +1125,12 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .ej-tblmenu button.ej-tblmenu-danger { color: var(--text-error, #c0392b); }
 .ej-tblmenu-ic { display: inline-flex; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; color: var(--text-muted, #6b7280); }
 .ej-tblmenu-ic svg { width: 16px; height: 16px; }
+/* The selection pill: appears next to a non-empty selection on touch (see the note in mountEditor for why —
+   iOS does not fire 'contextmenu' for a long-press on already-selected text). Fixed position, JS sets top/left. */
+.ej-selpill { position: fixed; z-index: 2001; width: 36px; height: 36px; display: none; align-items: center; justify-content: center;
+  border: 0; border-radius: 999px; background: var(--background-primary, #fff); color: var(--text-normal, #1f2328);
+  box-shadow: 0 4px 14px rgba(10, 22, 40, .22); cursor: pointer; padding: 0; }
+.ej-selpill svg { width: 18px; height: 18px; }
 
 /* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
    line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile
