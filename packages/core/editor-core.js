@@ -335,6 +335,20 @@ function escapeLeadingMarker(s) {
   return s;
 }
 
+// Where to put the selection pill: prefer just above the selection, fall back to below when there is no
+// room, then clamp into the visible rect. Pure (unit-tested) — this is the part that is easy to get subtly
+// wrong (off-by-the-gap, clamped the wrong axis) and impossible to eyeball-debug on a phone you are not
+// holding, so it is worth a ruler that does not depend on a device.
+function pillPlacement(rect, vTop, vBottom, vLeft, vRight, w, h, gap) {
+  let top = rect.top - gap - h, side = 'above';
+  if (top < vTop) { top = rect.bottom + gap; side = 'below'; }
+  if (top + h > vBottom) top = vBottom - h;   // still short on room (short selection near the bottom edge): clamp rather than go off-screen
+  top = Math.max(vTop, top);
+  let left = (rect.left + rect.right) / 2 - w / 2;
+  left = Math.min(Math.max(left, vLeft), vRight - w);
+  return { top, left, side };
+}
+
 // Strip markdown down to plain text. Pure → unit-tested. Two decisions worth stating, because both are the
 // kind of thing that looks like an oversight from the outside:
 //   · IMAGES SURVIVE. ![alt](url) and ![[pic.png]] are CONTENT, not formatting — flattening an image to the
@@ -1076,28 +1090,32 @@ function mountEditor(contentEl, opts, host) {
     ed.addEventListener('input', () => setTimeout(keepCaretVisible, 0));   // keep the caret above the keyboard as you type
 
     // ---- Selection menu (touch only) ----------------------------------------------------------------
-    // The toolbar is always visible but knows nothing about what you selected; the table menu knows exactly
-    // what you touched but exists for one construct. Nothing answered "I have selected some text, now what?".
-    // This does, and it can say things a toolbar cannot: wrapState lets an item read 取消粗體 rather than 粗體.
+    // The toolbar is always visible but knows nothing about your selection; the table menu knows exactly what
+    // you touched but exists for one construct. Nothing answered "I have selected some text, now what?" —
+    // chodaict's observation. This does, and it can say things a toolbar cannot: wrapState lets an item read
+    // 取消粗體 rather than 粗體, and the list items read the caret line's marker the same way.
+    //
+    // 🩸 The FIRST version of this triggered on 'contextmenu' after a selection existed — the same event the
+    // table menu uses, which works fine there. It does not work here: on iOS, long-pressing text you have
+    // ALREADY selected is a gesture WebKit reserves for its own native callout (Copy / Look Up / …), and it
+    // does not dispatch 'contextmenu' for it. chodaict felt the haptic (the native selection UI recognising
+    // the gesture) and got no menu — the event this code was listening for never fired. Verified against a
+    // real phone, not inferred from a changelog.
+    //
+    // So the trigger is 'selectionchange', not a second gesture: a small pill appears next to the selection as
+    // soon as one exists, and tapping it opens the SAME Menu the old contextmenu handler built. No guessing
+    // whether to long-press again. This is also the pattern iA Writer / Bear / Notion's mobile web editors use
+    // for exactly this reason — not a leap, a landed convention.
     //
     // TOUCH ONLY, deliberately. On desktop the right-click already opens the host's editor menu — copy, paste,
-    // spell-check — and taking that over would mean re-implementing paste, which execCommand does not reliably
-    // give us. Trading a daily action for a new menu is a bad trade, and desktop is not where the problem is:
-    // there the whole toolbar is on screen at once. On a phone the toolbar scrolls sideways and hides its tail,
-    // which is exactly where a menu earns its place. Reasonable degradation, stated rather than hidden.
-    ed.addEventListener('contextmenu', (e) => {
-      if (typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches) return;
-      if (ed.getAttribute('contenteditable') === 'false') return;
-      const { start, end } = sel();
-      if (start === end) return;                    // no selection → let the host do whatever it does
-      e.preventDefault();
-      const v = getText();
+    // spell-check — and taking that over means re-implementing paste, which execCommand does not reliably give
+    // us. Trading a daily action for a new menu is a bad trade, and desktop is not where the problem is: the
+    // whole toolbar is on screen at once there. On a phone it scrolls sideways and hides its tail.
+    const coarsePointer = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    const buildSelectionMenu = (v, start, end) => {
       const menu = new Menu();
-      // Options objects again, and again specifically so every icon is spelled `icon: 'bold'` at the call site.
-      // Passed positionally it is a variable by the time it reaches setIcon(), and shim-icons.test.cjs — the
-      // check whose entire job is "an icon the shim lacks renders a blank button" — cannot see a variable.
-      // I fixed exactly this in the table menu half an hour before writing this block, and wrote it the old
-      // way anyway. The habit is the fix, not the one-off repair.
+      // Options objects, so every icon is spelled `icon: 'bold'` at the call site — the one shape
+      // shim-icons.test.cjs can read. Passed positionally it is a variable by the time it reaches setIcon().
       const mark = (o) => menu.addItem((i) => {
         const on = !!wrapState(v, start, end, o.pre, o.post);
         i.setTitle(on ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => wrap(o.pre, o.post));
@@ -1118,8 +1136,50 @@ function mountEditor(contentEl, opts, host) {
       listItem({ kind: 'check', key: 'edCheck', text: '待辦清單', offKey: 'selUncheck', offText: '取消待辦清單', icon: 'list-checks' });
       menu.addSeparator();
       menu.addItem((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => runs.clear()));
-      menu.showAtMouseEvent(e);
+      return menu;
+    };
+    const openSelectionMenu = (atEvent) => {
+      const { start, end } = sel();
+      if (start === end) return;
+      buildSelectionMenu(getText(), start, end).showAtMouseEvent(atEvent);
+    };
+    // Kept as a cheap fallback for whatever platform DOES fire 'contextmenu' on an existing selection (Android
+    // WebViews reportedly do) — free if it never fires, correct if it does.
+    ed.addEventListener('contextmenu', (e) => {
+      if (!coarsePointer() || ed.getAttribute('contenteditable') === 'false') return;
+      const { start, end } = sel();
+      if (start === end) return;
+      e.preventDefault();
+      openSelectionMenu(e);
     });
+
+    // The pill: appears next to the selection, disappears when the selection does.
+    const selPill = document.createElement('button');
+    selPill.type = 'button'; selPill.className = 'ej-selpill';
+    setIcon(selPill.createSpan(), 'more-horizontal');   // .createSpan is a global prototype extension (Obsidian's own, shimmed for other hosts) — every element carries it, same as tbtn's icon buttons above
+    selPill.setAttribute('aria-label', T('selMoreLabel', '更多格式選項'));
+    selPill.style.display = 'none';
+    document.body.appendChild(selPill);
+    const hideSelPill = () => { selPill.style.display = 'none'; };
+    const updateSelPill = () => {
+      if (!coarsePointer() || ed.getAttribute('contenteditable') === 'false') return hideSelPill();
+      const r = readSel();
+      if (!r || r.start === r.end) return hideSelPill();
+      const s = window.getSelection();
+      if (!s || s.rangeCount === 0) return hideSelPill();
+      const rect = s.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return hideSelPill();   // a selection can be non-empty in char offsets but empty in the DOM for one tick during a drag
+      const vv = window.visualViewport;
+      const shrunk = !!(vv && vv.height && vv.height < innerHeight - 40);   // see the note by applyVV: does not reliably shrink in Obsidian's webview
+      const vTop = shrunk ? vv.offsetTop : 0, vBottom = vTop + (shrunk ? vv.height : innerHeight);
+      const pos = pillPlacement(rect, vTop, vBottom, 8, innerWidth - 8, 36, 36, 10);
+      selPill.style.top = pos.top + 'px'; selPill.style.left = pos.left + 'px';
+      selPill.style.display = 'flex';
+    };
+    document.addEventListener('selectionchange', updateSelPill);
+    scroll.addEventListener('scroll', () => { if (selPill.style.display !== 'none') updateSelPill(); }, { passive: true });
+    selPill.addEventListener('mousedown', (e) => e.preventDefault());   // keep the selection/focus alive
+    selPill.addEventListener('click', (e) => { hideSelPill(); openSelectionMenu(e); });
 
   return {
     getValue: () => getText().replace(/\s+$/, ''),
@@ -1138,7 +1198,7 @@ function mountEditor(contentEl, opts, host) {
     toggleSearchAll: (show) => toggleSearchAll(show),
     canSearchAll: () => canSearchAll,
     focus: () => ta.focus(),
-    destroy: () => { clearTimeout(syncT); if (sepRO) { sepRO.disconnect(); sepRO = null; } if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } },
+    destroy: () => { clearTimeout(syncT); if (sepRO) { sepRO.disconnect(); sepRO = null; } if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } document.removeEventListener('selectionchange', updateSelPill); selPill.remove(); },
   };
 }
 
