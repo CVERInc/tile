@@ -1,0 +1,43 @@
+---
+// REEF with Blog — WP author archive /author/<slug>/page/<n> (pages 2+; page 1 is ../index.astro).
+// Fans out to (author × page 2..totalPages). No-op unless `blog-author-routes` is truthy AND
+// `blog-page-size` is set.
+import ArchiveView from '../../../../components/ArchiveView.astro';
+import { uiCopy } from '../../../../packages/lingo/locale.mjs';
+import { allPosts, siteMeta, kvMap, archivePrefixes } from '../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const posts = allPosts(
+    import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const on = meta['blog-author-routes'] != null && String(meta['blog-author-routes']) !== 'false';
+  if (!on) return [];
+  const pageSize = Number(meta['blog-page-size']) || 0;
+  if (!pageSize) return [];
+  const seen = new Set();
+  const authors = [];
+  for (const p of posts) if (p.author && !seen.has(p.author)) { seen.add(p.author); authors.push(p.author); }
+  const paths = [];
+  for (const slug of authors) {
+    const count = posts.reduce((n, p) => n + (p.author === slug ? 1 : 0), 0);
+    const totalPages = Math.ceil(count / pageSize) || 1;
+    for (let n = 2; n <= totalPages; n++) {
+      paths.push({ params: { slug, n: String(n) }, props: { posts, meta, slug, pageNum: n } });
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, slug, pageNum } = Astro.props;
+const base = String(meta['blog-author-base'] || '/author').replace(/\/$/, '');
+const names = kvMap(meta['blog-author-names']);
+const heading = names[slug] || slug;
+const authorPosts = posts.filter((p) => p.author === slug);
+const subhead = archivePrefixes(meta).author + heading;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={authorPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

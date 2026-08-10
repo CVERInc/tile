@@ -1,0 +1,149 @@
+---
+import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+// REEF with Pagetile — preview landing: optional content-notice interstitial + chapter picker.
+// Lightweight notice, NOT real age verification (a click-through confirm, matching the family's
+// no-phantom-features rule: we don't pretend to gate what we don't actually verify). Consent is
+// remembered per-tab (sessionStorage) so returning from a chapter doesn't re-ask.
+//
+// Every word on this page that is ABOUT the book comes from the book (`notice` and `blurb` in its
+// frontmatter). The renderer owns the interstitial, the chapter list and the resume pill; it owns
+// none of the copy. A book with no `notice` gets no interstitial — the reader lands straight on the
+// chapters, rather than on a notice we invented for them.
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { siteMeta } from '../../lib/blog.mjs';
+import { loadFirstReaderBook } from '../../lib/pagetile.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';
+
+const bookGlob = import.meta.glob('../../../pagetile/*.book.md', { query: '?raw', import: 'default', eager: true });
+const meta = siteMeta(
+  import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+);
+const book = loadFirstReaderBook(bookGlob);
+const bookKey = (book?.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const notice = book?.notice || '';
+const blurb = book?.blurb || null;
+---
+<SiteLayout title={`Preview — ${meta.title || ''}`} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  {notice && (
+    <Fragment>
+      <noscript><style>#pv-gate {'{'} display: flex !important; {'}'}</style></noscript>
+      <section class="pv-gate" id="pv-gate" hidden>
+        <div class="pv-gate-card">
+          <p class="pv-gate-badge">Content notice</p>
+          <h1>{book ? book.title : 'Preview'}</h1>
+          <p class="pv-gate-copy">{notice}</p>
+          <button type="button" id="pv-gate-enter" class="pv-gate-btn">I understand — show chapters</button>
+        </div>
+      </section>
+    </Fragment>
+  )}
+
+  {/* `hidden` only when there is something to gate behind. With no notice the chapter list is the
+      page, and must render without waiting for JS — the previous version hid it unconditionally,
+      which was invisible because the only book that ever reached here declared a notice. */}
+  <section class="pv-toc" id="pv-toc" hidden={!!notice}>
+    <header class="pv-toc-head">
+      <h1>{book ? book.title : 'Chapters'}</h1>
+      {blurb && (
+        <p>{blurb.before}{blurb.link && <a href={blurb.link.href}>{blurb.link.label}</a>}{blurb.after}</p>
+      )}
+      <a class="pv-resume group" id="pv-resume" href="#" data-book={bookKey} hidden>Continue reading <Arrow direction="right" /></a>
+    </header>
+    {book && (
+      <ol class="pv-toc-list">
+        {book.chapters.map((c) => (
+          <li>
+            <a href={`/preview/${c.id}`}>
+              {c.coverSrc && <img class="pv-toc-thumb" src={c.coverSrc} alt="" loading="lazy" decoding="async" />}
+              <span class="pv-toc-meta">
+                <span class="pv-toc-title">{c.title}</span>
+                <span class="pv-toc-count">{c.pageCount} pages</span>
+              </span>
+              <span class="pv-toc-go"><Arrow direction="right" size={20} /></span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    )}
+  </section>
+</SiteLayout>
+
+<style>
+  .pv-gate { display: flex; justify-content: center; padding: 72px 24px 96px; }
+  /* the [hidden] attr must actually hide these — an explicit `display` would otherwise
+     override the UA `[hidden]{display:none}`, leaving the notice stacked over the chapter list */
+  .pv-gate[hidden], .pv-toc[hidden] { display: none; }
+  .pv-gate-card {
+    max-width: 480px; text-align: center; padding: 40px 32px; border-radius: var(--gd-radius, 18px);
+    background: var(--gd-surface, #fff); border: 1px solid var(--gd-border, #ece6f4);
+  }
+  .pv-gate-badge {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--gd-muted, #8b8598); margin-bottom: 8px;
+  }
+  .pv-gate-card h1 { margin: 0 0 12px; font-size: clamp(22px, 4vw, 28px); text-wrap: balance; }
+  .pv-gate-copy { color: var(--gd-muted, #8b8598); line-height: 1.6; margin-bottom: 24px; }
+  .pv-gate-btn {
+    font: inherit; font-weight: 600; font-size: 14.5px; padding: 12px 26px; border-radius: 999px; border: none; cursor: pointer;
+    background: var(--gd-accent-deep, #875fb6); color: #fff;
+  }
+  .pv-gate-btn:hover { opacity: .9; }
+
+  .pv-toc { max-width: 640px; margin: 0 auto; padding: 40px 24px 72px; }
+  .pv-toc-head { text-align: center; margin-bottom: 28px; }
+  .pv-toc-head h1 { font-size: clamp(24px, 4.4vw, 32px); margin: 0 0 8px; text-wrap: balance; }
+  .pv-toc-head p { color: var(--gd-muted, #8b8598); margin: 0; font-size: 15px; }
+  .pv-toc-head a { color: var(--gd-accent-deep, #875fb6); text-decoration: underline; text-underline-offset: 2px; }
+  .pv-toc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .pv-toc-list a {
+    display: flex; align-items: center; gap: 16px; padding: 12px 18px 12px 12px;
+    border-radius: var(--gd-radius, 18px); border: 1px solid var(--gd-border, #ece6f4);
+    background: var(--gd-surface, #fff); transition: transform .15s, border-color .15s, background .15s;
+  }
+  .pv-toc-list a:hover { transform: translateY(-1px); border-color: var(--gd-accent, #b98fe0); }
+  .pv-toc-thumb {
+    width: 56px; height: 72px; object-fit: cover; object-position: top;
+    border-radius: 8px; flex-shrink: 0;
+  }
+  .pv-toc-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pv-toc-title { font-weight: 600; font-size: 16px; }
+  .pv-toc-count { color: var(--gd-muted, #8b8598); font-size: 13px; }
+  .pv-toc-go { margin-left: auto; color: var(--gd-muted, #8b8598); line-height: 0; flex-shrink: 0; }
+  .pv-toc-go svg { width: 20px; height: 20px; }
+  .pv-toc-list a:hover .pv-toc-go { color: var(--gd-accent, #b98fe0); }
+  /* specificity must beat `.pv-toc-head a` (0,1,1) — else the pill's label inherits the
+     accent-deep link colour and vanishes into its own accent-deep background (purple on purple) */
+  .pv-toc-head a.pv-resume {
+    display: inline-block; margin-top: 14px; font-weight: 600; font-size: 14px;
+    padding: 9px 20px; border-radius: 999px; background: var(--gd-accent-deep, #875fb6);
+    color: #fff; text-decoration: none;
+  }
+  .pv-toc-head a.pv-resume:hover { opacity: .9; }
+</style>
+
+<script>
+  const KEY = 'pv-notice-ok';
+  const gate = document.getElementById('pv-gate');
+  const toc = document.getElementById('pv-toc');
+  let ok = false;
+  try { ok = sessionStorage.getItem(KEY) === '1'; } catch (e) {}
+  (ok ? toc : gate)?.removeAttribute('hidden');
+  document.getElementById('pv-gate-enter')?.addEventListener('click', () => {
+    try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+    gate?.setAttribute('hidden', '');
+    toc?.removeAttribute('hidden');
+  });
+
+  // "Continue reading" — surfaces the last-read position saved by reader.js (ptr-pos:<book>)
+  const resumeLink = document.getElementById('pv-resume');
+  if (resumeLink) {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ptr-pos:' + (resumeLink.dataset.book || 'book')) || 'null');
+      if (saved && saved.chapter && saved.page) {
+        resumeLink.setAttribute('href', '/preview/' + saved.chapter + '#' + saved.page);
+        resumeLink.removeAttribute('hidden');
+      }
+    } catch (e) {}
+  }
+</script>

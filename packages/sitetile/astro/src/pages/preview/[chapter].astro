@@ -1,0 +1,334 @@
+---
+import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+// REEF with Pagetile — the reader (`/preview/<chapter-id>`). One route per CHAPTER; every page
+// image of the chapter is in the DOM (lazy-loaded), and reader.js switches paged⇄scroll,
+// drives page-turns, the thumbnail scrubber, resume, and immersive mode entirely client-side —
+// the Kindle-manga model the maintainer studied 2026-07-07. Deep-link a page via `#<page-id>`.
+// Without JS this degrades to a readable vertical stack of all pages.
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { siteMeta } from '../../lib/blog.mjs';
+import { loadFirstReaderBook } from '../../lib/pagetile.mjs';
+import { lucideSvg } from '../../lib/lucide.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';
+
+export function getStaticPaths() {
+  const bookGlob = import.meta.glob('../../../pagetile/*.book.md', { query: '?raw', import: 'default', eager: true });
+  const book = loadFirstReaderBook(bookGlob);
+  if (!book) return [];
+  return book.chapters.map((chapter, i) => {
+    const next = book.chapters[i + 1];
+    return {
+      params: { chapter: chapter.id },
+      props: {
+        chapter,
+        book: { title: book.title, direction: book.direction, mode: book.mode, totalPages: book.totalPages },
+        prevChapter: book.chapters[i - 1] ? book.chapters[i - 1].id : null,
+        nextChapter: next ? next.id : null,
+        // richer next-chapter meta powers the end-of-chapter endcap (blurred cover + title)
+        nextMeta: next ? { id: next.id, title: next.title, coverSrc: next.coverSrc || '' } : null,
+      },
+    };
+  });
+}
+
+const { chapter, book, prevChapter, nextChapter, nextMeta } = Astro.props;
+const meta = siteMeta(
+  import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+);
+const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+---
+<SiteLayout title={`${chapter.title} — ${book.title}`} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  <div
+    class="ptr"
+    data-book={bookKey}
+    data-chapter={chapter.id}
+    data-direction={book.direction}
+    data-mode={book.mode}
+    data-prev-chapter={prevChapter ? `/preview/${prevChapter}/` : ''}
+  >
+    <button type="button" class="ptr-close" data-act="close" aria-label="Exit full screen" title="Exit full screen (Esc)">
+      <span class="ptr-ico" aria-hidden="true" set:html={lucideSvg('x')} />
+    </button>
+
+    <header class="ptr-bar ptr-bar-top">
+      <a class="ptr-back group" href="/preview" aria-label="All chapters"><Arrow direction="left" size={15} /> Chapters</a>
+      <span class="ptr-title">{chapter.title}</span>
+      <div class="ptr-tools">
+        {/* spread sits FIRST (left) so — with the tool group right-aligned — hiding it in scroll
+            mode collapses empty space on the left instead of shoving View/Fullscreen sideways (no flicker) */}
+        <button type="button" class="ptr-btn ptr-btn-spread" data-act="spread" title="Two-page spread / single page">
+          <span class="ptr-ico ptr-ico-twopage" aria-hidden="true" set:html={lucideSvg('book-open')} /><span class="ptr-ico ptr-ico-single" aria-hidden="true" set:html={lucideSvg('book-open-check')} />
+        </button>
+        <button type="button" class="ptr-btn ptr-btn-icon" data-act="mode" aria-pressed="false" aria-label="Toggle scroll / paged view" title="Toggle scroll / paged view (v)">
+          <span class="ptr-ico ptr-ico-scroll" aria-hidden="true" set:html={lucideSvg('chevrons-up-down')} /><span class="ptr-ico ptr-ico-paged" aria-hidden="true" set:html={lucideSvg('chevrons-left-right')} />
+        </button>
+        <button type="button" class="ptr-btn" data-act="immersive" aria-pressed="false" title="Full screen (f)">
+          <span class="ptr-ico" aria-hidden="true" set:html={lucideSvg('maximize')} />
+        </button>
+      </div>
+    </header>
+
+    <div class="ptr-stage">
+      <div class="ptr-track">
+        {chapter.pages.map((p) => (
+          <figure class="ptr-page" data-page={p.id} data-idx={p.pageInChapter - 1}>
+            {p.imageSrc && (
+              <img
+                src={p.imageSrc}
+                alt={`${book.title} — ${chapter.title} — page ${p.pageInChapter}`}
+                loading={p.pageInChapter <= 2 ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            )}
+          </figure>
+        ))}
+        {/* end-of-chapter endcap: a trailing panel (NOT a .ptr-page, so it's outside page
+            counting/scrubber) easing the reader into the next chapter — blurred cover + title +
+            link. Only rendered when there IS a next chapter; at the book's end the Next button
+            simply disables (the chapter nav below offers "All chapters"). */}
+        {nextMeta && (
+          <a class="ptr-endcap" href={`/preview/${nextMeta.id}`} aria-label={`Next chapter: ${nextMeta.title}`}>
+            {nextMeta.coverSrc && <img class="ptr-endcap-bg" src={nextMeta.coverSrc} alt="" aria-hidden="true" loading="lazy" decoding="async" />}
+            <span class="ptr-endcap-inner">
+              <span class="ptr-endcap-kicker">Next chapter</span>
+              <span class="ptr-endcap-title">{nextMeta.title}</span>
+              <span class="ptr-endcap-go">Keep reading <span class="ptr-endcap-arrow" set:html={lucideSvg('chevron-right')} /></span>
+            </span>
+          </a>
+        )}
+      </div>
+      <!-- tap zones: edges turn pages (direction-aware via CSS), center toggles chrome -->
+      <button type="button" class="ptr-tap ptr-tap-back" aria-label="Previous page"></button>
+      <button type="button" class="ptr-tap ptr-tap-center" aria-label="Toggle full screen"></button>
+      <button type="button" class="ptr-tap ptr-tap-fwd" aria-label="Next page"></button>
+    </div>
+
+    <!-- immersive-only hover strip: pointer near the bottom edge reveals the collapsed toolbar -->
+    <div class="ptr-hotzone-bottom" aria-hidden="true"></div>
+
+    <footer class="ptr-bar ptr-bar-bottom">
+      <button type="button" class="ptr-btn ptr-page-btn group" data-act="prev" aria-label="Previous page"><Arrow direction="left" size={17} /></button>
+      <span class="ptr-progress">1 / {chapter.pages.length}</span>
+      <div class="ptr-scrub" role="listbox" aria-label="Jump to page">
+        {chapter.pages.map((p) => (
+          <button type="button" class="ptr-thumb" data-idx={p.pageInChapter - 1} aria-current="false" aria-label={`Page ${p.pageInChapter}`}>
+            {p.thumbSrc && <img src={p.thumbSrc} alt="" loading="lazy" decoding="async" width="34" height="46" />}
+          </button>
+        ))}
+      </div>
+      <button type="button" class="ptr-btn ptr-page-btn group" data-act="next" aria-label="Next page"><Arrow direction="right" size={17} /></button>
+    </footer>
+
+    <nav class="ptr-chapnav" aria-label="Chapter navigation">
+      {prevChapter ? <a class="ptr-chapnav-link group" href={`/preview/${prevChapter}`}><Arrow direction="left" size={14} /> Previous chapter</a> : <span class="ptr-chapnav-link is-off"><Arrow direction="left" size={14} /> Previous chapter</span>}
+      <a class="ptr-chapnav-link" href="/preview">All chapters</a>
+      {nextChapter ? <a class="ptr-chapnav-link group" href={`/preview/${nextChapter}`}>Next chapter <Arrow direction="right" size={14} /></a> : <span class="ptr-chapnav-link is-off">Next chapter <Arrow direction="right" size={14} /></span>}
+    </nav>
+  </div>
+</SiteLayout>
+
+<style>
+  .ptr { --ptr-chrome: 210px; position: relative; }
+
+  /* ── chrome bars ─────────────────────────────────────────────────────────── */
+  .ptr-bar {
+    display: flex; align-items: center; gap: 12px;
+    max-width: 1100px; margin: 0 auto; padding: 12px 20px;
+    color: var(--gd-text, #34303c);
+  }
+  /* balanced 3-column header: equal-width sides flank the title so it sits DEAD-centre
+     in the bar (not just centred within the leftover gap between unequal siblings) */
+  .ptr-bar-top { justify-content: space-between; }
+  .ptr-back { flex: 1 1 0; min-width: 0; color: var(--gd-muted, #8b8598); font-size: 14px; white-space: nowrap; }
+  .ptr-back:hover { color: var(--gd-accent, #b98fe0); }
+  .ptr-title { flex: 0 1 auto; font-weight: 600; font-size: 15px; text-align: center; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ptr-tools { flex: 1 1 0; display: flex; gap: 8px; justify-content: flex-end; }
+  /* mode/spread icons swap to reflect current state (axis for view; open-book for spread) */
+  .ptr[data-mode="scroll"] .ptr-ico-paged,
+  .ptr[data-mode="paged"] .ptr-ico-scroll { display: none; }
+  .ptr-ico.ptr-ico-single { display: none; }   /* compound so it beats the base .ptr-ico rule */
+  .ptr[data-spread="off"] .ptr-ico-single { display: inline-flex; }
+  .ptr[data-spread="off"] .ptr-ico-twopage { display: none; }
+  .ptr-btn {
+    font: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 7px 12px; border-radius: 999px; border: 1px solid var(--gd-border, #ece6f4);
+    background: var(--gd-surface, #fff); color: var(--gd-text, #34303c);
+    font-size: 13.5px; line-height: 1; transition: border-color .15s, background .15s;
+  }
+  .ptr-btn:hover { border-color: var(--gd-accent, #b98fe0); }
+  .ptr-btn[aria-pressed="true"] { background: var(--gd-accent-deep, #875fb6); color: #fff; border-color: transparent; }
+  .ptr-ico { display: inline-flex; line-height: 0; }
+  .ptr-ico svg { width: 15px; height: 15px; }
+  .ptr-btn-txt { font-size: 13.5px; }
+  /* spread toggle only meaningful in wide paged mode */
+  .ptr[data-mode="scroll"] .ptr-btn-spread { display: none; }
+
+  /* ── reading stage ───────────────────────────────────────────────────────── */
+  .ptr-stage { position: relative; }
+  .ptr-track { }
+
+  /* SCROLL (縦読み / webtoon): seamless vertical stack — NO gap and NO corner radius between
+     pages, because long-strip comics are sliced panels that must butt together into one
+     continuous image. The whole document scrolls. */
+  .ptr[data-mode="scroll"] .ptr-track {
+    display: flex; flex-direction: column; align-items: center; gap: 0;
+    max-width: 860px; margin: 0 auto; padding: 4px 12px 8px;
+  }
+  .ptr[data-mode="scroll"] .ptr-page { width: 100%; margin: 0; }
+  .ptr[data-mode="scroll"] .ptr-page img {
+    width: 100%; height: auto; display: block; border-radius: 0; vertical-align: top;
+  }
+
+  /* PAGED: fixed-height horizontal scroll-snap track, one page fills the stage */
+  .ptr[data-mode="paged"] .ptr-stage { height: calc(100svh - var(--ptr-chrome)); min-height: 360px; }
+  .ptr[data-mode="paged"] .ptr-track {
+    display: flex; flex-direction: row; height: 100%;
+    overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x mandatory; scroll-behavior: smooth;
+    scrollbar-width: none;
+  }
+  .ptr[data-mode="paged"] .ptr-track::-webkit-scrollbar { display: none; }
+  .ptr[data-mode="paged"] .ptr-page {
+    flex: 0 0 100%; height: 100%; margin: 0;
+    scroll-snap-align: center;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ptr[data-mode="paged"] .ptr-page img {
+    max-width: 100%; max-height: 100%; width: auto; height: auto;
+    object-fit: contain; display: block;
+  }
+  /* two-page spread on wide screens — modelled on a real book:
+     • page 1 stands ALONE like a cover (full width, centred)
+     • the rest pair up (2,3)(4,5)… and snap as clean PAIRS (only the left page of each pair
+       is a snap point, so no sliver of the neighbouring pair bleeds in)
+     • each pair MEETS AT A CENTRE BINDING: the left page hugs its inner (right) edge and the
+       right page hugs its inner (left) edge, instead of splaying to the outer edges. */
+  .ptr[data-mode="paged"][data-spread="on"] .ptr-page { flex-basis: 50%; scroll-snap-align: none; }
+  .ptr[data-mode="paged"][data-spread="on"] .ptr-page:first-child { flex-basis: 100%; scroll-snap-align: center; }
+  .ptr[data-mode="paged"][data-spread="on"] .ptr-page:nth-child(even) { scroll-snap-align: start; justify-content: flex-end; }
+  .ptr[data-mode="paged"][data-spread="on"] .ptr-page:nth-child(odd):not(:first-child) { justify-content: flex-start; }
+
+  /* RTL: mirror the horizontal flow (cover on the right, turn leftward). The binding is still
+     central, so the inner-edge hug flips too. (LTR is the live-verified path — the only live book is
+     LTR; these RTL mirrors are correct-by-symmetry, to re-verify when an RTL book ships.) */
+  .ptr[data-direction="rtl"][data-mode="paged"] .ptr-track { direction: rtl; }
+  .ptr[data-direction="rtl"][data-mode="paged"][data-spread="on"] .ptr-page:nth-child(even) { justify-content: flex-start; }
+  .ptr[data-direction="rtl"][data-mode="paged"][data-spread="on"] .ptr-page:nth-child(odd):not(:first-child) { justify-content: flex-end; }
+
+  /* ── tap zones (paged only) ──────────────────────────────────────────────── */
+  .ptr-tap { position: absolute; top: 0; bottom: 0; border: 0; background: transparent; cursor: pointer; z-index: 3; padding: 0; }
+  .ptr-tap-center { left: 28%; right: 28%; cursor: default; }
+  .ptr[data-direction="ltr"] .ptr-tap-back { left: 0; width: 28%; cursor: w-resize; }
+  .ptr[data-direction="ltr"] .ptr-tap-fwd  { right: 0; width: 28%; cursor: e-resize; }
+  .ptr[data-direction="rtl"] .ptr-tap-fwd  { left: 0; width: 28%; cursor: w-resize; }
+  .ptr[data-direction="rtl"] .ptr-tap-back { right: 0; width: 28%; cursor: e-resize; }
+  .ptr[data-mode="scroll"] .ptr-tap { display: none; }
+
+  /* ── bottom bar: progress + scrubber ─────────────────────────────────────── */
+  .ptr-bar-bottom { gap: 10px; }
+  .ptr-page-btn { flex: 0 0 auto; padding: 7px 11px; line-height: 0; }
+  .ptr-page-btn svg { width: 17px; height: 17px; }
+  /* disabled at the book's absolute ends (start of ch.1 Prev / end of last ch. Next) */
+  .ptr-page-btn:disabled { opacity: .32; pointer-events: none; cursor: default; }
+  .ptr-progress { flex: 0 0 auto; font-size: 12.5px; color: var(--gd-muted, #8b8598); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ptr-scrub {
+    display: flex; gap: 5px; overflow-x: auto; flex: 1; min-width: 0;
+    padding: 4px 2px; scrollbar-width: thin; scroll-behavior: smooth;
+  }
+  .ptr-thumb {
+    flex: 0 0 auto; width: 34px; height: 46px; padding: 0; border-radius: 4px; cursor: pointer;
+    border: 2px solid transparent; background: var(--gd-border, #ece6f4); overflow: hidden; line-height: 0;
+    transition: border-color .12s, transform .12s;
+  }
+  .ptr-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .ptr-thumb:hover { transform: translateY(-2px); }
+  .ptr-thumb[aria-current="true"] { border-color: var(--gd-accent-deep, #875fb6); }
+
+  /* ── chapter nav ─────────────────────────────────────────────────────────── */
+  .ptr-chapnav { display: flex; justify-content: space-between; gap: 12px; max-width: 1100px; margin: 4px auto 48px; padding: 0 20px; }
+  .ptr-chapnav-link { font-size: 14px; color: var(--gd-accent-deep, #875fb6); }
+  .ptr-chapnav-link:hover { text-decoration: underline; }
+  .ptr-chapnav-link.is-off { color: var(--gd-muted, #8b8598); opacity: .4; pointer-events: none; }
+
+  /* ── end-of-chapter endcap: ease into the next chapter (blurred cover + title + link) ── */
+  .ptr-endcap {
+    position: relative; overflow: hidden; text-decoration: none; isolation: isolate;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 10px; color: #fff; background: var(--gd-accent-deep, #875fb6);
+    /* sit ABOVE the absolute tap zones (z-index:3) so the CTA/panel link is clickable —
+       without this the invisible .ptr-tap-center swallows the "Keep reading" click */
+    z-index: 4;
+  }
+  .ptr-endcap-bg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: top center;
+    filter: blur(18px) brightness(.5) saturate(1.1); transform: scale(1.15); z-index: -1;
+  }
+  .ptr-endcap-inner {
+    display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+    padding: 32px 24px; text-shadow: 0 1px 14px rgba(0,0,0,.55);
+  }
+  .ptr-endcap-kicker { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; opacity: .82; }
+  .ptr-endcap-title { font-size: clamp(22px, 4vw, 34px); font-weight: 700; line-height: 1.15; max-width: 18ch; text-wrap: balance; }
+  .ptr-endcap-go {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-size: 15px; font-weight: 600; padding: 10px 20px; border-radius: 999px; text-decoration: none; color: #fff;
+    background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.32); transition: background .15s;
+  }
+  .ptr-endcap:hover .ptr-endcap-go, a.ptr-endcap-go:hover { background: rgba(255,255,255,.3); }
+  .ptr-endcap-arrow { display: inline-flex; line-height: 0; }
+  .ptr-endcap-arrow svg { width: 16px; height: 16px; }
+  /* paged: endcap is its own full-screen slot that snaps like a page */
+  .ptr[data-mode="paged"] .ptr-endcap { flex: 0 0 100%; height: 100%; scroll-snap-align: center; margin: 0; }
+  /* scroll: endcap is a tall panel closing out the vertical column */
+  .ptr[data-mode="scroll"] .ptr-endcap { width: 100%; min-height: 58vh; margin: 10px 0 0; }
+
+  /* ── immersive: hide site + reader chrome, stage fills viewport ──────────── */
+  :global(body.ptr-immersive .rf-header),
+  :global(body.ptr-immersive .rf-footer) { display: none !important; }
+  :global(body.ptr-immersive) .ptr-bar-top,
+  :global(body.ptr-immersive) .ptr-chapnav { display: none; }
+  :global(body.ptr-immersive) .ptr[data-mode="paged"] .ptr-stage { height: 100svh; }
+  /* bottom toolbar: collapsed by default in immersive, revealed on hover of the bottom edge */
+  :global(body.ptr-immersive) .ptr-bar-bottom {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: color-mix(in srgb, var(--gd-bg, #120d1c) 82%, transparent);
+    backdrop-filter: blur(8px); max-width: none;
+    transform: translateY(110%); opacity: 0; pointer-events: none;
+    transition: transform .22s ease, opacity .22s ease;
+  }
+  :global(body.ptr-immersive) .ptr:has(.ptr-hotzone-bottom:hover) .ptr-bar-bottom,
+  :global(body.ptr-immersive) .ptr-bar-bottom:hover {
+    transform: none; opacity: 1; pointer-events: auto;
+  }
+  /* invisible hover strip along the bottom edge (immersive only) that triggers the reveal */
+  .ptr-hotzone-bottom { display: none; }
+  :global(body.ptr-immersive) .ptr-hotzone-bottom {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; height: 64px; z-index: 19;
+  }
+  /* close button: hidden until immersive, then a translucent pill top-left over the artwork */
+  .ptr-close { display: none; }
+  :global(body.ptr-immersive) .ptr-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: fixed; top: 14px; left: 14px; z-index: 21; width: 40px; height: 40px; padding: 0;
+    border-radius: 999px; cursor: pointer; color: #fff;
+    border: 1px solid rgba(255,255,255,.28); background: color-mix(in srgb, var(--gd-bg, #120d1c) 55%, transparent);
+    backdrop-filter: blur(8px); opacity: .6; transition: opacity .15s, border-color .15s;
+  }
+  :global(body.ptr-immersive) .ptr-close:hover { opacity: 1; border-color: rgba(255,255,255,.6); }
+  .ptr-close .ptr-ico { line-height: 0; }
+  .ptr-close .ptr-ico svg { width: 18px; height: 18px; }
+
+  @media (max-width: 640px) {
+    .ptr { --ptr-chrome: 170px; }
+    .ptr-bar { padding: 10px 12px; }
+    .ptr-btn-txt { display: none; }
+    .ptr-title { font-size: 14px; }
+  }
+</style>
+
+<script>
+  import '../../packages/pagetile-reader/reader.js';
+</script>

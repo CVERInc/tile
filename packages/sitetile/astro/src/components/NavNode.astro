@@ -1,0 +1,16 @@
+---
+// Recursive header-nav node. Renders one menu item and, if it has children, a `.rf-nav-sub`
+// submenu whose children are rendered by the SAME component (Astro.self) — so the menu goes to
+// ARBITRARY depth. depth 0 = top bar (`.rf-nav-link`); deeper leaves add `.rf-nav-sublink`;
+// any node with children is a `.rf-nav-group` (2nd+ level also `.rf-nav-subgroup`, opens to the side).
+const { item, depth = 0 } = Astro.props;
+const ext = (h) => /^https?:\/\//i.test(h || '') ? { target: '_blank', rel: 'noopener' } : {};
+const kids = item && item.children && item.children.length ? item.children : null;
+const topLeaf = depth === 0;
+---
+{kids
+  ? <span class={depth === 0 ? 'rf-nav-group' : 'rf-nav-group rf-nav-subgroup'}>
+      <a class={'rf-nav-link rf-nav-parent' + (topLeaf ? '' : ' rf-nav-sublink')} href={item.href} {...ext(item.href)}>{item.label}</a>
+      <span class="rf-nav-sub">{kids.map((c) => <Astro.self item={c} depth={depth + 1} />)}</span>
+    </span>
+  : <a class={topLeaf ? 'rf-nav-link' : 'rf-nav-link rf-nav-sublink'} href={item.href} {...ext(item.href)}>{item.label}</a>}

@@ -1,0 +1,137 @@
+---
+import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml } from '@sitetile';
+const { section } = Astro.props;
+const pm = parseParams(section.params);
+const style = pm.bg ? `background-image:url(${pm.bg})` : undefined;
+const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image variant (round avatar vs uncropped logo)
+// `layout` (e.g. split) = OPT-IN columned hero (eyebrow + lead + button row + side art). Absent →
+// the legacy hero (h1 + body + single `cta=`), kept byte-identical so an existing logo hero is untouched.
+// `layout=bubble` — OPT-IN speech-bubble hero (Card family, a reusable asset — not a one-site hack):
+// same eyebrow/h1/body/CTA content and the same `heroParts` body conventions as `split` (lead prose +
+// one links-only paragraph → CTA button row + one standalone image → art below), just wrapped in a
+// `.st-hero-bubble` card instead of a plain `.st-hero-text` column. The theme draws the card chrome
+// (white rounded card, downward tail, solid button) off `[data-layout="bubble"]`; the only DOM change
+// here is which wrapper class the shared text block gets, so any future site/page can opt in the same
+// way `layout=split` does, with zero new markup to learn. Params: `layout=bubble` (required to opt
+// in), `eyebrow="…"` (optional, same as split), CTA via a links-only paragraph in the body (or the
+// legacy `cta=` param, same fallback as split).
+const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+// `marquee="A|B|C"` — OPT-IN animated background word-marquee: one horizontally-scrolling row per
+// pipe-separated word, faint behind the hero content, alternating direction. General decorative
+// treatment (theme sets colour/size). Each row repeats its word enough to loop seamlessly.
+const marqueeRaw = pm.marquee ? (typeof pm.marquee === 'object' ? pm.marquee.label : pm.marquee) : null;
+const marqueeWords = marqueeRaw ? String(marqueeRaw).split('|').map((w) => w.trim()).filter(Boolean) : [];
+const hp = layout ? heroParts(section.body) : null;
+// `enter` (bare flag) — OPT-IN entrance treatment: renders the `bg=` image as a separate
+// absolutely-positioned layer the theme can scale/fade on load (a ken-burns settle), and marks
+// the section `data-enter` so the theme can stagger the heading/lead/CTA in. General; absent →
+// the section keeps its plain CSS background and no animation (a non-opted site is unaffected).
+const enter = pm.enter != null;
+// `layers=back.webp|front.webp` (back-to-front, pipe-separated) + `parallax` (bare flag) — OPT-IN
+// multi-layer depth hero: each image is an absolutely-stacked layer the client script drifts at a
+// depth-scaled rate on pointer-move + scroll (front moves more). `logo=/logo.png` renders the h1 as
+// an image (its text stays the alt → SEO/AX intact); `logo-pos=top|center|bottom` (default bottom)
+// places the title block over the art's negative space. General; absent → the legacy heroes above.
+const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
+const layerList = layersRaw ? String(layersRaw).split('|').map((s) => s.trim()).filter(Boolean) : [];
+const parallax = pm.parallax != null;
+const logo = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+---
+{layerList.length ? (
+  <section class="st-hero st-hero-layered" data-media={media} data-parallax={parallax ? '' : undefined} data-logo-pos={logoPos} data-enter={enter ? '' : undefined}>
+    <div class="st-hero-stage" aria-hidden="true">
+      {layerList.map((src, i) => (
+        <img class="st-hero-layer" src={src} alt="" data-depth={i} loading="eager" decoding="async" />
+      ))}
+    </div>
+    <div class="st-hero-text st-hero-overlay">
+      {eyebrow && <p class="st-hero-eyebrow" set:html={inlineHtml(eyebrow)} />}
+      {logo
+        ? <h1 class="st-hero-logo"><img src={logo} alt={section.title} loading="eager" decoding="async" /></h1>
+        : <h1 set:html={inlineHtml(section.title)} />}
+      <Fragment set:html={bodyHtml(section.body)} />
+      <Fragment set:html={ctaHtml(pm.cta, 'st-hero-cta')} />
+    </div>
+  </section>
+) : layout ? (
+  <section class="st-hero" data-media={media} data-layout={layout} style={style}>
+    {marqueeWords.length > 0 && (
+      <div class="st-hero-marquee" aria-hidden="true">
+        {marqueeWords.map((w, i) => (
+          <div class="st-hero-marquee-row" data-dir={i % 2 ? 'rev' : 'fwd'}>
+            <div class="st-hero-marquee-track">
+              {Array.from({ length: 12 }).map(() => <span>{w}</span>)}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+    <div class={layout === 'bubble' ? 'st-hero-bubble' : 'st-hero-text'}>
+      {eyebrow && <p class="st-hero-eyebrow" set:html={inlineHtml(eyebrow)} />}
+      {logo
+        ? <h1 class="st-hero-logo"><img src={logo} alt={section.title} loading="eager" decoding="async" /></h1>
+        : <h1 set:html={inlineHtml(section.title)} />}
+      <Fragment set:html={bodyHtml(hp.text)} />
+      <Fragment set:html={hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-hero') : ctaHtml(pm.cta, 'st-hero-cta')} />
+    </div>
+    {hp.images.length > 0 && (
+      <div class="st-hero-art" data-imgs={hp.images.length > 1 ? String(hp.images.length) : undefined}>
+        {hp.images.map((im) => (
+          <img class="st-img" src={im.src} alt={im.alt} loading="eager" decoding="async" />
+        ))}
+      </div>
+    )}
+  </section>
+) : (
+  <section class="st-hero" data-media={media} data-enter={enter ? '' : undefined} style={style}>
+    {enter && pm.bg && <div class="st-hero-bg" aria-hidden="true" style={`background-image:url(${pm.bg})`} />}
+    <h1 set:html={inlineHtml(section.title)} />
+    <Fragment set:html={bodyHtml(section.body)} />
+    <Fragment set:html={ctaHtml(pm.cta, 'st-hero-cta')} />
+  </section>
+)}
+
+<script>
+  // REEF hero parallax — subtle multi-layer depth on pointer-move + scroll. Opt-in via
+  // [data-parallax]; no-op otherwise and under reduced-motion. Back layers drift less than front.
+  // Motion is DAMPED (each frame eases current → target) so pointer-leave glides back to centre
+  // instead of snapping — no flicker when the cursor exits the art.
+  const heroes = Array.from(document.querySelectorAll('.st-hero-layered[data-parallax]'));
+  if (heroes.length && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    for (const hero of heroes) {
+      const layers = Array.from(hero.querySelectorAll('.st-hero-layer'));
+      const maxDepth = Math.max(1, layers.length - 1);
+      let tmx = 0, tmy = 0, tsy = 0;   // targets (pointer x/y, scroll)
+      let mx = 0, my = 0, sy = 0;      // eased current
+      let running = false;
+      const render = () => {
+        mx += (tmx - mx) * 0.09; my += (tmy - my) * 0.09; sy += (tsy - sy) * 0.14;
+        for (const el of layers) {
+          const d = (Number(el.dataset.depth) || 0) / maxDepth;   // 0 back → 1 front
+          const tx = mx * (9 + d * 30);
+          const ty = my * (9 + d * 30) + sy * (22 + d * 54);       // pointer + scroll drift
+          el.style.transform = `translate3d(${tx.toFixed(2)}px, ${ty.toFixed(2)}px, 0) scale(1.06)`;
+        }
+        if (Math.abs(tmx - mx) > 1e-3 || Math.abs(tmy - my) > 1e-3 || Math.abs(tsy - sy) > 1e-3) {
+          requestAnimationFrame(render);
+        } else { running = false; }
+      };
+      const kick = () => { if (!running) { running = true; requestAnimationFrame(render); } };
+      hero.addEventListener('pointermove', (e) => {
+        const r = hero.getBoundingClientRect();
+        tmx = ((e.clientX - r.left) / (r.width || 1) - 0.5) * 2;
+        tmy = ((e.clientY - r.top) / (r.height || 1) - 0.5) * 2;
+        kick();
+      });
+      hero.addEventListener('pointerleave', () => { tmx = 0; tmy = 0; kick(); });   // glide home
+      window.addEventListener('scroll', () => {
+        const r = hero.getBoundingClientRect();
+        tsy = Math.max(-1, Math.min(1, -r.top / (r.height || 1)));
+        kick();
+      }, { passive: true });
+      render();
+    }
+  }
+</script>

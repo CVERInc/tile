@@ -1,0 +1,1210 @@
+/* 🔴 EVERYTHING in this file lives in the `reef.base` layer, and that is load-bearing.
+ *
+ * A site's theme is emitted into `reef.theme`, which SiteLayout declares as the later layer — and
+ * layer order beats specificity and source order both. So a theme rule wins over a renderer rule
+ * without having to out-score it, and nobody has to know which stylesheet the browser loaded first.
+ *
+ * Before this, they did have to, and they got it wrong: four operators lost the same
+ * same-specificity tie against this file, and the first of them shipped a button label at ~1.2:1
+ * contrast on a live site. The old rule was documented in red in
+ * describe_render_css rather than fixed, which is the thing this replaces.
+ *
+ * Unlayered styles still beat every layer — that is how package CSS and an `embed` coral's <style>
+ * keep the precedence they already had. Do not wrap those.
+ */
+@layer reef.base {
+
+/* sitetile platform baseline — reef design tokens + the 5 section layouts (st-*).
+   Clean, modern, responsive, ~zero-weight. This is the "healthy body" a native REEF with Site
+   (or a Recast'd mirror) wears. Tokens are the GAIDO-editable surface (appearance overlay wins). */
+
+.st-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+:root {
+  /* reef / --gd- design tokens (the palette GAIDO references when it writes appearance.css) */
+  --gd-bg: #ffffff;
+  --gd-surface: #f6f7f9;
+  --gd-text: #1f2d3d;
+  --gd-muted: #5b6b7b;
+  --gd-accent: #1f6feb;
+  --gd-accent-ink: #ffffff;
+  --gd-border: #e4e8ee;
+  --gd-font: ui-sans-serif, system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+  --gd-radius: 12px;
+  --gd-maxw: 72ch;
+  --gd-gap: clamp(1rem, 2.5vw, 2rem);
+
+  /* ── treatment-axis tokens — the theme treatment axes (see the block near the end of this file) ──
+     Every default below is chosen so a themeless site renders BYTE-FOR-BYTE as it did
+     before these existed (a switch-off harness proves 0px). A theme overrides them to shape
+     an identity; absent, they are inert.
+     🔴 NEVER give a `:root` default to a token that EXISTING consumers already read as
+     `var(--x, fallback)` — defining it here DISARMS every one of those fallbacks at once.
+     That is not theoretical: an earlier pass defined --gd-soft and --gd-card-shadow here, which silently
+     (a) flattened the dynamic corals' subtle tint (events/square-shop read
+     `var(--gd-soft, rgba(0,0,0,.04))`) to the page background, and (b) KILLED square-shop's
+     card/cart shadows outright — it reads --gd-card-shadow as a COLOUR
+     (`box-shadow: 0 6px 18px var(--gd-card-shadow, rgba(0,0,0,.08))`), so a full shadow value
+     there makes the whole declaration invalid. Both now stay Group B: referenced with an
+     explicit fallback, never defined. Only tokens with NO outside consumer belong below. */
+  --gd-btn-radius: var(--gd-radius);
+  --gd-btn-fill: var(--gd-accent);
+  --gd-avatar-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--gd-font);
+  color: var(--gd-text);
+  background: var(--gd-bg);
+  line-height: 1.65;
+  font-size: clamp(1rem, 0.95rem + 0.2vw, 1.0625rem);
+  display: flex; flex-direction: column; min-height: 100vh;   /* sticky footer: short pages (e.g. /language) still pin footer to viewport bottom, matching live */
+}
+.rf-main { flex: 1 0 auto; }
+/* flex-shrink:1 is the default, so on CONTENT-HEAVY pages the browser's flex-shrink pass
+   compresses whatever flex child has the most slack between its own height and its min-content
+   floor — that's the header (mostly just a logo/nav row) and footer, NOT .rf-main (which is full
+   of images/text near its own min-content size already) — so long pages silently squashed the
+   header down to ~37px on a site whose real header was 95px. Pin both to their
+   declared size regardless of how tall the page's content is. */
+.rf-header, .rf-footer { flex-shrink: 0; }
+
+a { color: var(--gd-accent); text-underline-offset: 0.15em; }
+
+img { max-width: 100%; height: auto; }
+
+/* cssmd inline-marker contract (renderInlineMd prefix 'st'): the markdown delimiters stay in the DOM
+   for exact round-trip and are hidden visually here; the effects are styled. WITHOUT this the raw
+   ** / _ markers show and bold/italic never render. */
+.st-mk { display: none; }
+.st-b { font-weight: 700; }
+.st-i { font-style: italic; }
+
+/* ── platform chrome ───────────────────────────────────────────────────────── */
+.rf-header {
+  display: flex; align-items: center; gap: var(--gd-gap);
+  padding: 1rem clamp(1rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--gd-border);
+}
+.rf-logo { font-weight: 700; font-size: 1.125rem; color: var(--gd-text); text-decoration: none; }
+.rf-nav { display: flex; gap: 1.25rem; }
+.rf-nav a { color: var(--gd-muted); text-decoration: none; }
+.rf-nav a:hover { color: var(--gd-text); }
+/* Header nav submenus — default hover flyout, ANY depth (NavNode renders .rf-nav-sub recursively).
+   Mobile overrides these to a static indented stack (see @media body[data-nav-mobile] below). */
+.rf-nav-group { position: relative; }
+.rf-nav-sub {
+  position: absolute; top: 100%; left: 0; z-index: 60;
+  display: none; flex-direction: column; min-width: 12ch; margin: 0; padding: 0.35rem 0;
+  background: var(--gd-surface, #fff); border: 1px solid var(--gd-border, #e4e8ee);
+  border-radius: var(--gd-radius, 10px); box-shadow: 0 6px 22px rgba(43, 43, 43, 0.14);
+}
+.rf-nav-group:hover > .rf-nav-sub, .rf-nav-group:focus-within > .rf-nav-sub { display: flex; }
+.rf-nav-sub .rf-nav-link { display: block; padding: 0.4rem 1rem; white-space: nowrap; }
+.rf-nav-sub .rf-nav-link:hover { background: var(--gd-soft, rgba(0, 0, 0, 0.05)); }
+.rf-nav-subgroup > .rf-nav-sub { top: -0.35rem; left: 100%; } /* 2nd level and deeper open to the side */
+.rf-lingo { margin-left: auto; display: flex; gap: 0.6rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.rf-breadcrumb {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.9rem clamp(1rem, 4vw, 3rem);
+  font-size: 0.9rem; color: var(--gd-muted); background: var(--gd-bg);
+  border-bottom: 1px solid var(--gd-border);
+}
+.rf-breadcrumb a { color: var(--gd-muted); text-decoration: none; }
+.rf-breadcrumb a:hover { color: var(--gd-text); }
+.rf-breadcrumb-sep { opacity: 0.6; }
+
+.rf-main { display: block; }
+
+/* ── sidebar layout (opt-in: layout: sidebar in frontmatter) ────────────────
+   Two-column shell: fixed-width left sidebar + fluid main content column.
+   Token --st-sidebar-w is theme-overridable (default 280px).
+   Collapses to a single column on narrow screens (< 48rem / 768px).
+   The sidebar never appears for layout: stack / absent (no output changes). */
+:root { --st-sidebar-w: 280px; }
+
+.st-sidebar-layout {
+  display: grid;
+  grid-template-columns: var(--st-sidebar-w) 1fr;
+  align-items: start;
+  min-height: 100%;
+}
+
+.st-sidebar {
+  position: sticky;
+  top: 0;
+  max-height: 100dvh;
+  overflow-y: auto;
+  border-right: 1px solid var(--gd-border);
+  padding: 1.5rem 1rem;
+  background: var(--gd-bg);
+}
+
+.st-sidebar-nav { display: flex; flex-direction: column; gap: 1.5rem; }
+/* .st-sidebar-group is a <li> (not inside a <ul>) purely so its full text is one landmark
+   recastfid can match — strip the default list-item marker/indent so it stays visually identical. */
+.st-sidebar-group { display: block; list-style: none; }
+
+.st-sidebar-search { display: flex; align-items: center; gap: 8px; margin-bottom: 1.5rem; }
+.st-sidebar-search input {
+  flex: 1 1 auto; min-width: 0; padding: 12px 14px; border: 1px solid var(--gd-border);
+  border-radius: var(--gd-radius); font: inherit; color: inherit; background: var(--gd-bg);
+}
+.st-sidebar-search button {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border: none; border-radius: 999px; cursor: pointer;
+  background: var(--gd-accent); color: #fff;
+}
+
+.st-sidebar-group-head {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gd-muted);
+}
+
+.st-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.st-sidebar-list li a,
+.st-sidebar-list li span {
+  display: block;
+  padding: 0.35rem 0.6rem;
+  border-radius: calc(var(--gd-radius) * 0.5);
+  font-size: 0.9rem;
+  color: var(--gd-text);
+  text-decoration: none;
+  transition: background 0.12s;
+}
+
+.st-sidebar-list li a:hover { background: var(--gd-surface); color: var(--gd-accent); }
+.st-sidebar-list li span { color: var(--gd-muted); cursor: default; }
+
+.st-sidebar-archive { margin-top: 1.5rem; font-size: 0.85rem; }
+.st-sidebar-archive > summary { font-weight: 600; color: var(--gd-head); cursor: pointer; margin-bottom: 0.5rem; }
+.st-archive-years, .st-archive-months, .st-archive-posts { list-style: none; margin: 0; padding: 0; }
+.st-archive-years > li, .st-archive-months > li { margin-left: 0.25rem; }
+.st-archive-years summary, .st-archive-months summary { cursor: pointer; color: var(--gd-text); padding: 0.15rem 0; }
+.st-archive-posts { padding-left: 0.75rem; }
+.st-archive-posts li a { display: block; color: var(--gd-muted); text-decoration: none; padding: 0.15rem 0; }
+.st-archive-posts li a:hover { color: var(--gd-accent); }
+
+.st-sidebar-main { min-width: 0; }
+
+/* sidebar-side: right (opt-in) — mirror the two-column shell; default (absent/left) unchanged */
+.st-sidebar-layout[data-side="right"] {
+  grid-template-columns: 1fr var(--st-sidebar-w);
+}
+.st-sidebar-layout[data-side="right"] .st-sidebar { order: 2; border-right: none; border-left: 1px solid var(--gd-border); }
+.st-sidebar-layout[data-side="right"] .st-sidebar-main { order: 1; }
+
+/* timeline style=zigzag (opt-in) — alternating left/right entries around a center dot-spine,
+   the common "vertical timeline" shape (WP Cool Timeline Pro and similar plugins render this
+   way). Default (absent) is the existing single left-gutter column, unchanged for other
+   consumers (e.g. a company-history timeline). Themes still own row padding/colors/fonts —
+   this only owns the alternating-side geometry + spine, general across any theme. */
+.st-timeline[data-style="zigzag"] .st-tl-rows { position: relative; }
+.st-timeline[data-style="zigzag"] .st-tl-rows::before {
+  content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  background: var(--gd-border, var(--gd-hair, currentColor)); opacity: .35; transform: translateX(-50%);
+}
+.st-timeline[data-style="zigzag"] .st-tl-row {
+  position: relative; width: calc(50% - 32px); grid-template-columns: 1fr;
+}
+.st-timeline[data-style="zigzag"] .st-tl-row[data-side="left"] { margin-right: auto; }
+.st-timeline[data-style="zigzag"] .st-tl-row[data-side="right"] { margin-left: auto; }
+.st-timeline[data-style="zigzag"] .st-tl-dot {
+  position: absolute; top: 20px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--gd-accent-deep, var(--gd-accent)); z-index: 1;
+}
+.st-timeline[data-style="zigzag"] .st-tl-row[data-side="left"] .st-tl-dot { right: -39px; }
+.st-timeline[data-style="zigzag"] .st-tl-row[data-side="right"] .st-tl-dot { left: -39px; }
+
+/* narrow screens: sidebar folds above the content (stacked, no horizontal scroll) */
+@media (max-width: 48rem) {
+  .st-sidebar-layout { grid-template-columns: 1fr; }
+  .st-sidebar { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--gd-border); }
+}
+
+.rf-footer {
+  margin-top: 4rem; padding: 2rem clamp(1rem, 4vw, 3rem);
+  /* clear the iOS home-indicator safe area + the bleedblend dynamic bottom bar so the footer's
+     last row never hides under the notch/bar on mobile (shared across all sitetile sites). */
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + var(--bleedblend-dynamic-bar-height, 0px));
+  border-top: 1px solid var(--gd-border); color: var(--gd-muted); font-size: 0.9rem;
+}
+.rf-footer-nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.rf-footer-nav a { color: var(--gd-muted); text-decoration: none; }
+.rf-footer-nav a:hover { color: var(--gd-text); }
+.rf-footer-social { display: flex; justify-content: center; gap: 1rem; }
+.rf-footer-social a { display: inline-flex; width: 22px; height: 22px; color: var(--gd-muted); }
+.rf-footer-social a:hover { color: var(--gd-text); }
+.rf-footer-social svg { width: 100%; height: 100%; }
+/* footer logo is wrapped in an <a href="/"> (SiteLayout). Keep the anchor block-level so any theme's
+   `.rf-footer-logo { margin: 0 auto }` img centering still works inside it (an inline anchor would
+   collapse the centering context). Themes refine the anchor further (sizing, opacity). */
+.rf-footer-logo-link { display: block; }
+.rf-copy { margin: 1rem 0 0; }
+.rf-footer-lingo { display: flex; gap: 0.6rem; margin-top: 0.5rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.rf-footer-lingo a { color: var(--gd-muted); text-decoration: none; }
+
+/* ── section layouts (the 5 types) ─────────────────────────────────────────── */
+.st-prose, .st-grid, .st-cta {
+  max-width: var(--gd-maxw);
+  margin-inline: auto;
+  padding: 2.5rem clamp(1rem, 4vw, 3rem);
+}
+.st-prose h2, .st-grid h2, .st-cta h2 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); line-height: 1.25; margin: 0 0 0.75rem; }
+.st-prose p, .st-cta p { margin: 0 0 1rem; }
+
+/* hero — full-bleed, optional background image */
+.st-hero {
+  display: grid; place-content: center; gap: 1rem; text-align: center;
+  padding: clamp(3rem, 10vw, 7rem) clamp(1rem, 4vw, 3rem);
+  background-color: var(--gd-surface); background-size: cover; background-position: center;
+}
+
+/* ── layered parallax hero — `layers=back|front [parallax]` + `logo=` (general; art is dark) ──
+   The FRONT layer(s) are shown in full (object-fit:contain) so the subject is NEVER cropped — its
+   face stays put across every viewport width; only the BACK layer covers/bleeds. That keeps a
+   composition-anchored logo (bottom = the subject's feet, top = above its head) stable everywhere. */
+.st-hero-layered { position: relative; overflow: hidden; padding: 0; place-content: stretch;
+  min-height: 100svh; background: #0b0713; }
+.st-hero-stage { position: absolute; inset: 0; z-index: 0; }
+.st-hero-layer { position: absolute; inset: 0; width: 100%; height: 100%; will-change: transform; transform: scale(1.05); }
+.st-hero-layer:first-child { object-fit: cover; object-position: center; }              /* back = full-bleed */
+.st-hero-layer:not(:first-child) { object-fit: contain; object-position: center bottom; } /* front = shown whole */
+.st-hero-overlay { position: relative; z-index: 1; display: grid; gap: 1rem; text-align: center;
+  align-self: end; justify-items: center; width: 100%; color: #f3eefb;
+  padding: clamp(3rem, 12vh, 7rem) clamp(1.25rem, 5vw, 3.5rem) clamp(1.75rem, 6vh, 3rem);
+  background: linear-gradient(to top, #0b0713 2%, color-mix(in srgb, #0b0713 72%, transparent) 26%, transparent); }
+.st-hero-overlay > * { max-width: 940px; }
+.st-hero-overlay p { color: #d9d0ec; margin: 0; max-width: 46ch; }
+.st-hero-layered[data-logo-pos="top"] .st-hero-overlay { align-self: start;
+  background: linear-gradient(to bottom, #0b0713 2%, color-mix(in srgb, #0b0713 72%, transparent) 26%, transparent); }
+.st-hero-layered[data-logo-pos="center"] .st-hero-overlay { align-self: center; background: none; }
+.st-hero-logo { margin: 0; max-width: 100%; }
+.st-hero-logo img { width: min(560px, 84vw); height: auto; display: block;
+  filter: drop-shadow(0 6px 28px rgba(0,0,0,.55)); }
+.st-hero-layered .st-hero-eyebrow { color: var(--gd-accent, #b98fe0); letter-spacing: .12em;
+  text-transform: uppercase; font-size: .82rem; margin: 0; }
+
+/* ── the eyebrow, for every coral that has one ──────────────────────────────────────────────
+   🩸 Until 2026-08-08 only `.st-hero-layered .st-hero-eyebrow` had any base paint at all.
+   `.st-prose-eyebrow` and `.st-collection-eyebrow` shipped with none, so on a site whose theme
+   had not thought to style them an eyebrow rendered as an ordinary paragraph — a bare `LOCATION`
+   sitting above its own heading for weeks, reading like a stray English word rather than a label.
+   Nothing was broken; it simply looked like a typo, which is why nobody reported it.
+   A suffix selector so a coral added later is covered without anyone remembering this rule. Kept
+   at specificity 0,1,0 — any theme's `html .foo` (0,1,1) still wins, which is how every custom
+   theme keeps the look it already chose. The layered-hero rule above still overrides it. */
+[class$="-eyebrow"] { color: var(--gd-accent, #14a3b3); letter-spacing: .1em;
+  text-transform: uppercase; font-size: .8rem; font-weight: 600; margin: 0 0 .4rem; }
+/* CTA over the poster = a refined ghost button (thin light border, glass), not the loud solid pill */
+.st-hero-layered .st-hero-cta { margin-top: .4rem; background: transparent; color: #fff;
+  border: 1.5px solid rgba(255,255,255,.5); box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  transition: background .18s, border-color .18s, transform .18s; }
+.st-hero-layered .st-hero-cta:hover { background: rgba(255,255,255,.15); border-color: #fff; transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { .st-hero-layer { transform: scale(1.02) !important; } }
+.st-hero h1 { font-size: clamp(2rem, 1.4rem + 3vw, 3.5rem); line-height: 1.1; margin: 0; max-width: 18ch; }
+.st-hero p { margin: 0; max-width: 50ch; color: var(--gd-muted); }
+.st-hero-cta, .st-cta-btn {
+  display: inline-block; margin-top: 0.5rem; padding: 0.7rem 1.4rem;
+  background: var(--gd-btn-fill); color: var(--gd-accent-ink); border-radius: var(--gd-btn-radius);
+  text-decoration: none; font-weight: 600;
+}
+
+/* grid — responsive cards, cols=N is a hint that collapses on small screens */
+.st-grid { max-width: 80rem; }
+/* opt-in facet filter bar (grid `filter=<label>`): pills over the cards; the active pill filters
+   by the cards' badge. Token-driven so each theme paints it; base = neutral chip row. */
+.st-grid-filter { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+.st-filter-pill {
+  font: inherit; font-size: 0.85rem; line-height: 1; cursor: pointer;
+  padding: 0.5rem 0.9rem; border-radius: 999px;
+  border: 1px solid var(--gd-border); background: var(--gd-surface); color: var(--gd-muted);
+  transition: border-color .15s, color .15s, background .15s;
+}
+.st-filter-pill:hover { border-color: var(--gd-accent); color: var(--gd-fg, inherit); }
+.st-filter-pill.is-active { border-color: var(--gd-accent); background: var(--gd-accent); color: var(--gd-accent-ink, #fff); font-weight: 700; }
+.st-cells {
+  display: grid; gap: var(--gd-gap); margin-top: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+.st-grid[data-cols="2"] .st-cells { grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+.st-cell {
+  padding: 1.5rem; background: var(--gd-surface);
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius);
+}
+.st-cell h3 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.st-cell p { margin: 0 0 0.5rem; color: var(--gd-muted); }
+/* whole-cell link variant (graduated 2026-06-24): the card is clickable, with a chevron CTA */
+a.st-cell-link { display: flex; flex-direction: column; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
+a.st-cell-link:hover { border-color: var(--gd-accent); transform: translateY(-2px); }
+a.st-cell-link .st-cell-cta { margin-top: auto; align-self: flex-end; color: var(--gd-accent); font-weight: 700; font-size: 1.25rem; line-height: 1; }
+/* labeled CTA variant: "<label> →" with the directional arrow (cell heading's "<label>") */
+a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; }
+.st-cta-label { line-height: 1; }
+
+/* carousel — single-row horizontal-scroll track + prev/next arrows. This is the STRUCTURAL
+   mechanism (flex/overflow-x/cols flex-basis) shared by every theme; only card look (colors,
+   image shape/aspect, fonts) is theme-specific. It lived in a single theme until a SECOND site
+   reused the `carousel` coral and rendered as one 7000px-tall vertical stack — that theme had
+   card *styling*, but this base layout mechanic existed nowhere for it to inherit. */
+.st-car-viewport { position: relative; display: flex; align-items: center; }
+.st-car-track {
+  display: flex; align-items: flex-start; gap: var(--gd-gap); overflow-x: auto; overflow-y: visible;
+  scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; flex: 1 1 auto;
+}
+/* Adaptive height (2026-07-04): JS sets an explicit px height here (see hoisted <script> below)
+   equal to the max natural height of only the cells currently visible in the viewport — mirrors
+   slick-carousel's live behavior of sizing the row to the visible slide count (`cols=`), not to
+   the tallest cell across the WHOLE track. align-items:flex-start (not stretch) so cells keep
+   their natural height instead of being force-stretched to the tallest ever-seen cell. */
+.st-car-track::-webkit-scrollbar { display: none; }
+.st-car-cell { flex: 0 0 calc(100% / 5 - 8px); scroll-snap-align: start; }
+.st-carousel[data-cols="2"] .st-car-cell { flex-basis: calc(100% / 2 - 8px); }
+.st-carousel[data-cols="3"] .st-car-cell { flex-basis: calc(100% / 3 - 8px); }
+.st-carousel[data-cols="4"] .st-car-cell { flex-basis: calc(100% / 4 - 8px); }
+.st-carousel[data-cols="6"] .st-car-cell { flex-basis: calc(100% / 5 - 8px); }
+.st-car-nav {
+  flex: 0 0 auto; display: none; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 999px; border: none; cursor: pointer;
+  background: var(--gd-surface); box-shadow: 0 2px 10px rgba(0,0,0,.14); z-index: 2;
+}
+.st-carousel.st-car-has-overflow .st-car-nav { display: inline-flex; }
+.st-car-nav:disabled { opacity: .3; cursor: default; }
+.st-car-prev { margin-right: 4px; }
+.st-car-next { margin-left: 4px; }
+/* footer row: a left action-tag (badge) paired with the right CTA */
+.st-cell .st-cell-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.st-cell-foot .st-cell-cta { margin-top: 0; align-self: auto; }
+.st-cell-foot .st-cell-badge { position: static; }
+/* overlay-link card (`[Label →href]` secondary action — e.g. a card with its own "Open in …" link): a
+   secondary card link can't nest inside the whole-cell <a>, so the card becomes a relative container
+   with an ABSOLUTE full-cell primary link (`.st-cell-overlay`), and the action + "Learn more" foot
+   sit ABOVE it (z-index) as their own interactive layer. General/opt-in; plain cells are untouched.
+   a.st-cell-link's flex-column/colour rules don't match this <div>, so restate the layout here. */
+.st-cell-overlaid { position: relative; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+.st-cell-overlay { position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+.st-cell-overlaid .st-cell-foot { position: relative; z-index: 2; }
+.st-cell-action { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.375rem; text-decoration: none; }
+.st-cell-overlaid .st-cell-cta-labeled { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; }
+
+/* cta — centered call to action band */
+.st-cta { text-align: center; background: var(--gd-surface); border-radius: var(--gd-radius); }
+
+/* ── faq — a Q&A accordion (native <details>), theme-PAINTED so a born site's FAQ is presentable
+   without custom CSS. Chrome is token-driven; a CSS-only chevron replaces the native triangle and
+   rotates on open (zero JS, same posture as the rest). ─────────────────────────────────────── */
+/* 🔴 GATED like the born paint at the end of this file, and for the same reason: this block was
+   added after live themes were authored against an UNPAINTED faq. A live hand-rolled theme
+   styles .st-faq-item itself (a divider list, border-bottom only) — base's surface+border+
+   padding are properties the theme never set, so nothing out-specified them and its next deploy
+   would have turned a deliberate divider list into cards (measured: +266px, 38px x 7 items).
+   THE TEST for new base paint: does DOM that already ships on a live HAND-ROLLED theme get new
+   properties the theme doesn't set? If yes, gate it — base's contract with an existing theme is
+   what base looked like when that theme was written. */
+:where(body:not([data-theme-custom])) .st-faq-head { margin-bottom: 1.25rem; }
+:where(body:not([data-theme-custom])) .st-faq-list { display: flex; flex-direction: column; gap: 0.6rem; }
+:where(body:not([data-theme-custom])) .st-faq-item {
+  background: var(--gd-surface);
+  border: 1px solid var(--gd-border);
+  border-radius: var(--gd-radius);
+  padding: 0.9rem 1.15rem;
+}
+:where(body:not([data-theme-custom])) .st-faq-q {
+  cursor: pointer; font-weight: 700; color: var(--gd-text); list-style: none;
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+}
+:where(body:not([data-theme-custom])) .st-faq-q::-webkit-details-marker { display: none; }
+:where(body:not([data-theme-custom])) .st-faq-q::after {
+  content: ""; flex: none; width: 0.5rem; height: 0.5rem;
+  border-right: 2px solid var(--gd-muted); border-bottom: 2px solid var(--gd-muted);
+  transform: rotate(45deg); transition: transform 0.15s ease;
+}
+:where(body:not([data-theme-custom])) .st-faq-item[open] .st-faq-q::after { transform: rotate(-135deg); }
+:where(body:not([data-theme-custom])) .st-faq-a { margin-top: 0.7rem; color: var(--gd-muted); }
+:where(body:not([data-theme-custom])) .st-faq-a > :first-child { margin-top: 0; }
+:where(body:not([data-theme-custom])) .st-faq-a > :last-child { margin-bottom: 0; }
+
+/* embed — escape hatch; let passthrough content size itself. Default hugs the theme's content
+   width (--gd-max, e.g. 1060/1080px) so a dynamic coral (events / square-shop) reads as page
+   content, not an edge-to-edge band. Opt into full-bleed with `%% sitetile: embed wide %%`
+   (→ .is-wide) for a genuine marketing band the theme can paint. */
+.st-embed { max-width: var(--gd-max, 80rem); margin-inline: auto; padding: 2rem clamp(1rem, 4vw, 3rem); }
+.st-embed.is-wide { max-width: none; }
+
+/* site-core.js emits `<span class="st-cta-arrow">` around every CTA button's arrow, and nothing in
+   this package painted it — so the arrow sat flush against the last character of every label. The
+   glyph inside IS styled (signet-arrow, from its package); it is the WRAPPER, whose only job is to
+   hold the gap, that had no rule.
+   Same shape as .st-notfound below: renderer-emitted markup only the tenant could paint, on a class
+   the tenant never wrote. :where() so a theme sets its own spacing without a fight. */
+:where(.st-cta-arrow) { margin-inline-start: .4em; }
+
+/* 🩸 2026-08-08. The renderer's OWN 404 page is `<section class="st-section st-notfound">`, and
+   until now nothing in this file — or anywhere in the package — styled either class. Content pages
+   never noticed because their sections are .st-prose/.st-grid/… which ARE styled; the 404 is the
+   one page whose only classes are these two. So on any site whose theme lays out sections by coral
+   name (the natural way to write one), the "page not found" message sat flush against the left
+   edge with no container at all.
+   🔴 NOT wrapped in `body:not([data-theme-custom])` like .st-social below. That guard would exempt
+   precisely the custom-theme sites this affects. `:where()` instead: zero specificity, so it is a
+   floor any theme overrides by simply naming the class. */
+:where(.st-notfound) {
+  max-width: var(--gd-maxw);
+  margin-inline: auto;
+  padding: clamp(3rem, 10vw, 6rem) clamp(1rem, 4vw, 3rem);
+}
+.st-embed iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; }
+
+/* ── images (block figures + inline) — zero JS, reef-token styled ───────────────── */
+.st-img { max-width: 100%; height: auto; display: block; }
+.st-video { max-width: 100%; height: auto; display: block; }
+.st-figure { margin: 1.5rem 0; }
+.st-figure .st-img, .st-figure .st-video { border-radius: var(--gd-radius); }
+.st-prose .st-figure, .st-cta .st-figure { margin-inline: auto; }
+.st-cell .st-figure { margin: 0 0 0.75rem; }
+/* hero foreground media variants (data-media): avatar (round portrait, default)
+   vs logo (uncropped wordmark, not round) */
+.st-hero .st-figure { margin: 0 auto 0.5rem; }
+.st-hero[data-media="avatar"] .st-figure .st-img { width: 104px; height: 104px; border-radius: 50%; object-fit: cover; box-shadow: var(--gd-avatar-shadow); }
+.st-hero[data-media="logo"] .st-figure .st-img { width: auto; max-height: 88px; border-radius: 0; box-shadow: none; }
+/* an inline image inside running text stays inline */
+p .st-img { display: inline; vertical-align: middle; }
+/* a figure holding 2+ images (e.g. `![](a.jpg)![](b.jpg)…`) is a photo/avatar cluster row —
+   auto-detected from existing multi-image syntax, no new markdown needed. */
+.st-figure:has(> .st-img ~ .st-img) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.st-figure:has(> .st-img ~ .st-img) .st-img { width: 3.5rem; height: 3.5rem; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px rgba(255,255,255,.2); }
+
+/* ── base-content blocks: lists / blockquote / code / table (reef-token styled, zero JS) ── */
+.st-list { margin: 0 0 1rem; padding-left: 1.4rem; }
+.st-list li { margin: 0.25rem 0; }
+.st-quote { margin: 0 0 1rem; padding: 0.4rem 0 0.4rem 1rem; border-left: 3px solid var(--gd-accent); color: var(--gd-muted); }
+.st-quote p { margin: 0; }
+/* ── dialogue (`> **NAME**` + speech) — a record of an exchange that happened, so it is drawn
+   hard on purpose: hairline border, 4px radius, a notched tail, no fill gradient and no shadow.
+   The initial in the square is not an avatar, it is a label. Everything is drawn from the theme's
+   border/surface tokens rather than colour, because the first reader of this is an e-ink panel
+   where hue collapses to a narrow band of greys and only contrast survives. */
+.st-dialogue { margin: 0 0 1.25rem; display: flex; flex-direction: column; gap: 0.9rem; }
+/* Two columns, two rows: the NAME sits above the bubble and outside it, and the AVATAR shares the
+   bubble's row so the tail still points straight at it. Grid rather than a margin offset — the
+   bubble is pushed down by the label's own height, so it stays right when the label wraps, the
+   font changes, or a `meta` suffix makes it taller. An offset would be a number that is correct
+   until any of those moves. */
+.st-turn { display: grid; column-gap: 0.6rem; row-gap: 0.25rem;
+  grid-template-columns: auto minmax(0, 1fr); }
+.st-turn-name { grid-column: 2; grid-row: 1; margin: 0; padding-left: 0.15rem;
+  font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--gd-muted); }
+.st-turn-who { grid-column: 1; grid-row: 2; align-self: start;
+  width: 1.9rem; height: 1.9rem; display: grid; place-items: center;
+  /* Round: it is a face, not a file. */
+  border: 1px solid var(--gd-border); border-radius: 50%; background: var(--gd-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace;
+  font-size: 0.78rem; line-height: 1; color: var(--gd-muted); }
+.st-bubble { grid-column: 2; grid-row: 2; justify-self: start;
+  position: relative; max-width: min(42rem, 100%); padding: 0.55rem 0.8rem;
+  border: 1px solid var(--gd-border); border-radius: 4px; background: var(--gd-surface); }
+/* The second speaker mirrors: name right-aligned, avatar on the right, bubble hugging that edge. */
+.st-turn[data-side="right"] { grid-template-columns: minmax(0, 1fr) auto; }
+.st-turn[data-side="right"] .st-turn-name { grid-column: 1; justify-self: end; padding: 0 0.15rem 0 0; }
+.st-turn[data-side="right"] .st-turn-who { grid-column: 2; }
+.st-turn[data-side="right"] .st-bubble { grid-column: 1; justify-self: end; }
+.st-bubble p { margin: 0 0 0.45rem; }
+.st-bubble p:last-child { margin-bottom: 0; }
+.st-turn-meta { margin-left: 0.5em; opacity: 0.75; text-transform: none; letter-spacing: 0; }
+/* the tail: two stacked triangles (border colour behind, surface in front) so a 1px outline
+   carries around the notch instead of stopping at the bubble edge. */
+.st-bubble::before, .st-bubble::after { content: ""; position: absolute; top: 0.7rem; width: 0; height: 0; border: 6px solid transparent; }
+.st-turn[data-side="left"] .st-bubble::before { left: -12px; border-right-color: var(--gd-border); }
+.st-turn[data-side="left"] .st-bubble::after { left: -11px; border-right-color: var(--gd-surface); }
+.st-turn[data-side="right"] .st-bubble::before { right: -12px; border-left-color: var(--gd-border); }
+.st-turn[data-side="right"] .st-bubble::after { right: -11px; border-left-color: var(--gd-surface); }
+/* the same speaker again: no label, no initial, no tail — one voice continuing, not a new turn */
+.st-turn[data-cont] .st-turn-who { visibility: hidden; }
+/* `display: none` and the grid's first row collapses to nothing on its own — no offset to undo.
+   `visibility` on the avatar, not display, so its column keeps its width and the bubble does not
+   jump sideways on a continued turn. */
+.st-turn[data-cont] .st-turn-name { display: none; }
+.st-turn[data-cont] .st-bubble::before, .st-turn[data-cont] .st-bubble::after { display: none; }
+@media (max-width: 34rem) {
+  .st-bubble { max-width: 100%; }
+  .st-turn-who { width: 1.6rem; height: 1.6rem; font-size: 0.7rem; }
+}
+/* pre.st-code (block) — scoped to pre so it never hits cssmd's inline `code` span (also .st-code) */
+pre.st-code { margin: 0 0 1rem; padding: 1rem 1.25rem; background: var(--gd-surface); border: 1px solid var(--gd-border); border-radius: var(--gd-radius); overflow-x: auto; }
+pre.st-code code { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: 0.9em; line-height: 1.5; }
+/* ── code highlighting: four token classes and no more (cssmd/highlight.js emits them; an
+   unlabelled or unknown fence emits none, so those blocks are unchanged). Restrained on purpose —
+   the job is to separate machinery from value at a glance, not to decorate. Comments carry their
+   difference in OPACITY and keywords in WEIGHT, so both survive a greyscale screen even where the
+   hue does not; strings and numbers lean on colour, which is a fair trade rather than a refusal to
+   use it. Hues come from the theme's own accent so a site never gets a palette it did not choose. */
+.st-code .st-com { opacity: 0.62; font-style: italic; }
+.st-code .st-kw { font-weight: 650; color: var(--gd-accent); }
+.st-code .st-str { color: color-mix(in oklab, var(--gd-accent) 55%, var(--gd-text)); }
+.st-code .st-num { color: color-mix(in oklab, var(--gd-accent) 35%, var(--gd-text)); }
+/* diff: the one distinction that has to read on paper-white e-ink, so it is carried by a rule and a
+   tint rather than by colour alone. Whole-line, because that is the unit a diff is read in. */
+.st-code .st-ins, .st-code .st-del, .st-code .st-hunk { display: inline-block; width: 100%; }
+.st-code .st-ins { background: color-mix(in oklab, var(--gd-accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--gd-accent); }
+.st-code .st-del { background: color-mix(in oklab, var(--gd-muted) 14%, transparent); box-shadow: inset 2px 0 0 var(--gd-muted); opacity: 0.75; }
+.st-code .st-hunk { opacity: 0.62; font-weight: 650; }
+.st-table { width: 100%; border-collapse: collapse; margin: 0 0 1rem; font-size: 0.95em; }
+.st-table th, .st-table td { padding: 0.5rem 0.75rem; border: 1px solid var(--gd-border); text-align: left; vertical-align: top; }
+.st-table thead th { background: var(--gd-surface); font-weight: 600; }
+/* headerless (def-list) table: a label|value list with no header row (`data-headless`). Borderless
+   by default — a definition list reads cleaner without a grid; the first column is the label. Any
+   theme can restyle (a theme may draw a coloured column divider). */
+.st-table[data-headless] th, .st-table[data-headless] td { border: 0; padding: 0.35rem 1rem 0.35rem 0; }
+.st-table[data-headless] td:first-child { color: var(--gd-muted); white-space: nowrap; padding-right: 1.5rem; }
+/* a bulleted list authored inside a table cell (`- item<br>- item`) */
+.st-cell-list { margin: 0; padding-left: 1.2em; list-style: disc; }
+.st-cell-list li { margin: 0.1em 0; }
+
+/* native cross-document View Transitions: a gentle cross-fade (CSS only, ignored where unsupported) */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; }
+}
+
+/* ── hero animated word-marquee (opt-in via `hero marquee="A|B|C"`) — general decorative
+   background band: one scrolling row per pipe-word, alternating direction, faint behind hero
+   content. Themes set colour/size/position; this is just the mechanics. ── */
+.st-hero-marquee { position: absolute; inset: 0; z-index: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: center; pointer-events: none; user-select: none; }
+.st-hero-marquee-row { overflow: hidden; white-space: nowrap; line-height: 1.05; }
+.st-hero-marquee-track { display: inline-flex; width: max-content; will-change: transform; animation: st-hero-marquee-scroll 26s linear infinite; }
+.st-hero-marquee-track > span { padding-right: 0.4em; }
+.st-hero-marquee-row[data-dir="rev"] .st-hero-marquee-track { animation-direction: reverse; }
+@keyframes st-hero-marquee-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .st-hero-marquee-track { animation: none; } }
+
+/* ── age gate (opt-in `age-gate: true`) — full-screen adult-content confirmation
+   overlay. Progressive enhancement: a hidden checkbox + <label> confirm reveals the
+   page via CSS `:has(:checked)` (zero JS), plus an optional sessionStorage-persistence
+   island (`html[data-age-confirmed]`) that also hides it with no flash. Token-driven so
+   every theme skins it from its --gd-* surface; absent frontmatter → nothing renders. ── */
+.st-age-gate { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .82); box-sizing: border-box; }
+.st-age-gate-check { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+body:has(#st-age-gate-check:checked) .st-age-gate,
+html[data-age-confirmed] .st-age-gate { display: none; }
+.st-age-gate-modal { width: 100%; max-width: 520px; box-sizing: border-box; padding: 2rem 1.75rem; border-radius: var(--gd-radius, 16px); background: var(--gd-surface, #fff); color: var(--gd-text, #111); font-family: var(--gd-font, inherit); text-align: center; box-shadow: 0 12px 48px rgba(0, 0, 0, .4); }
+.st-age-gate-title { margin: 0 0 1rem; font-size: 1.4rem; font-weight: 700; }
+.st-age-gate-body { margin: 0 0 1rem; line-height: 1.7; }
+.st-age-gate-note { margin: 0 0 0.75rem; font-size: 0.8rem; line-height: 1.6; color: var(--gd-muted, #666); }
+.st-age-gate-note-links { margin: 0 0 1.25rem; font-size: 0.8rem; display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+.st-age-gate-note-links a { color: var(--gd-accent, #c33); }
+.st-age-gate-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+.st-age-gate-btn { display: inline-block; min-width: 150px; padding: 0.75rem 1.25rem; border-radius: 999px; font-weight: 600; cursor: pointer; text-decoration: none; box-sizing: border-box; border: 2px solid var(--gd-accent, #111); }
+.st-age-gate-confirm { background: var(--gd-accent, #111); color: var(--gd-accent-ink, #fff); }
+.st-age-gate-decline { background: transparent; color: var(--gd-text, #111); border-color: var(--gd-border, #ccc); }
+
+/* ── blog-search (opt-in: `blog-search: true` in home meta) ──────────────────
+   A header magnifier toggle + a full-width overlay that lazily fetches
+   /search-index.json and filters it client-side. Hidden by default (no flash);
+   shown only when the island sets `data-search-open` on <html>. Empty-state + count
+   text is authored via data-attrs and rendered by ::before, so it's editable /
+   localizable from frontmatter without touching JS. All colour via --gd-* tokens. */
+.rf-search-toggle {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.25rem; height: 2.25rem; padding: 0; line-height: 0; cursor: pointer;
+  border: 1px solid var(--gd-border); border-radius: 999px;
+  background: var(--gd-bg); color: var(--gd-muted);
+}
+.rf-search-toggle:hover { color: var(--gd-text); border-color: var(--gd-accent); }
+
+.st-search { display: none; position: fixed; inset: 0; z-index: 2147483001; }
+html[data-search-open] .st-search { display: block; }
+.st-search-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .5); }
+.st-search-panel {
+  position: relative; box-sizing: border-box; width: calc(100% - 2rem); max-width: 640px;
+  margin: 8vh auto 0; padding: 0.75rem 1rem 1rem; max-height: 80vh;
+  display: flex; flex-direction: column;
+  background: var(--gd-surface); border: 1px solid var(--gd-border);
+  border-radius: var(--gd-radius); box-shadow: 0 12px 48px rgba(0, 0, 0, .35);
+}
+.st-search-bar { display: flex; align-items: center; gap: 0.5rem; }
+.st-search-bar > svg { flex: 0 0 auto; color: var(--gd-muted); }
+.st-search-input {
+  flex: 1 1 auto; min-width: 0; padding: 12px 4px; font: inherit; outline: none;
+  border: 0; background: transparent; color: var(--gd-text);
+}
+.st-search-close {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; padding: 0; line-height: 0; cursor: pointer;
+  border: 0; border-radius: 999px; background: transparent; color: var(--gd-muted);
+}
+.st-search-close:hover { color: var(--gd-text); }
+.st-search-count, .st-search-empty { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--gd-muted); }
+.st-search-count::before { content: attr(data-count) " " attr(data-label); }
+.st-search-empty::before { content: attr(data-text); }
+.st-search-results { list-style: none; margin: 0.5rem 0 0; padding: 0; overflow-y: auto; }
+.st-search-result { border-top: 1px solid var(--gd-border); }
+.st-search-result-link { display: block; padding: 0.6rem 0.25rem; color: var(--gd-text); text-decoration: none; }
+.st-search-result-link:hover { color: var(--gd-accent); }
+
+/* /search page — inline search box + result list (reuses the ::before count/empty rules). */
+.bl-search-form {
+  display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1rem; padding: 0.25rem 0.75rem;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius); background: var(--gd-surface);
+}
+.bl-search-form > svg { flex: 0 0 auto; color: var(--gd-muted); }
+.bl-search-input {
+  flex: 1 1 auto; min-width: 0; padding: 10px 4px; font: inherit; outline: none;
+  border: 0; background: transparent; color: var(--gd-text);
+}
+.bl-search-results { list-style: none; margin: 1rem 0 0; padding: 0; }
+.bl-search-results .st-search-result { border-top: 1px solid var(--gd-border); }
+.bl-search-results .st-search-result-link { display: block; padding: 0.6rem 0.25rem; color: var(--gd-text); text-decoration: none; }
+.bl-search-results .st-search-result-link:hover { color: var(--gd-accent); }
+
+/* ── blog base paint: the FLOOR for classes this renderer emits ──────────────────────────
+   NOT a default blog look. We do not ship templates (2026-08-08 decision — if we ever do,
+   it is a separate template shop). The line these rules stay behind:
+
+     FLOOR  the browser's default box model CONTRADICTS the structure we chose.
+     LOOK   colour, type scale, borders, and the MAGNITUDE of spacing. Theme's job.
+
+   The failure mode is not "undesigned", it is UNREADABLE. Astro emits no whitespace between
+   mapped siblings, so a run of adjacent inline children concatenates into one word:
+   「工程設計筆記」for .bl-tags, 「TwitterFacebook」for .bl-share, 「08082026」for a date badge.
+
+   🩸 We had already made the .bl-list decision and keyed it to the wrong name. `<ul
+   class="bl-list">` is emitted at FIVE call sites; only the /search one also carries
+   .bl-search-results, which is the only place the reset above lives. So four of five blog
+   listings — index, archive, and both tag-label pages — rendered as a bulleted list at the
+   UA's 40px indent, underneath cards that were never bullet items.
+
+   🩸 And .bl-share-btn was found by whoever added the top-of-post share row (2026-07-13):
+   they noticed the renderer had no rule, found it living only in ONE tenant's stylesheet,
+   and reached for `style="display:flex;gap:…"` on the element. Inline styles are the highest
+   specificity short of !important — a theme cannot override them. That is a cage. Same
+   defect, third wrong layer (tenant sheet / inline style / wrong selector).
+
+   Everything here sits in :where() — zero specificity, so ANY tenant rule outranks it
+   without !important. A renderer default a tenant cannot replace is a cage, not a default. */
+
+/* Cards in a <ul>, and .bl-keep-reading's bare inner <ul> which has no class of its own. */
+:where(.bl-list, .bl-keep-reading ul) { list-style: none; margin: 0; padding: 0; }
+
+/* An <a> wrapping <img>/<time>/<h2>/<p> — block children in an inline box. */
+:where(.bl-entry-link) { display: block; }
+
+/* Adjacent-inline runs. .bl-tag-filter carries `hidden` as a progressive-enhancement gate:
+   :where() is zero-specificity but still an AUTHOR rule, and author beats the UA sheet's
+   [hidden]{display:none} regardless of specificity — so without :not([hidden]) this would
+   reveal the tag filter on every site, including ones whose JS never confirmed it works. */
+:where(.bl-tags, .bl-share, .bl-tag-filter:not([hidden])) {
+  display: flex; flex-wrap: wrap; gap: 0.5em;
+}
+
+/* Month/day/year are three adjacent spans inside one <time>. */
+:where(.bl-date-badge) { display: flex; flex-direction: column; }
+
+/* Two anchors, newer then older, each holding label/date/title as three adjacent spans.
+   PostArticle renders a bare `<span />` in newer's place when there is no newer post — that
+   placeholder is only meaningful if the two ends are pushed apart, so the two-column
+   arrangement is structural intent, not taste. */
+:where(.bl-post-nav) { display: flex; flex-wrap: wrap; gap: 1.5em; justify-content: space-between; }
+:where(.bl-post-nav-item) > * { display: block; }
+
+/* ── header-actions (Coral A) + nav-mobile hamburger (Coral B) — the interaction wave ──
+   All checkbox-driven, zero-JS reveal (the age-gate primitive: a hidden checkbox flipped
+   by a <label>, read via `body:has(#…:checked)`). Every rule keys on a class that ONLY
+   exists when a site opts in via `header-actions:` / `nav-mobile:` frontmatter, or is
+   scoped under `body[data-…]` — so a non-opted page gets zero effect (byte-exact).
+   All colour from --gd-* tokens so every theme skins it. */
+
+/* header-actions button row (right side of the header) */
+.rf-header-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+
+/* The header CTA is a SIBLING of <nav> (2026-07-29) so `nav-mobile` can't swallow the site's one
+   primary action into the hamburger. That makes it a THIRD header child, which would move the nav
+   on any theme that right-aligns with `justify-content: space-between` and exactly two children
+   (logo | nav) — such a theme's nav would slide to the centre. Absorbing the free space *before* the nav
+   keeps nav + CTA + actions as one right-hand cluster, which is what those themes already draw.
+   Gated on the CTA existing, so a site without one renders byte-identical. */
+.rf-header:has(> .rf-header-cta) .rf-nav { margin-left: auto; }
+.rf-header > .rf-header-cta { flex: 0 0 auto; }
+.rf-ha-check { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rf-ha-btn {
+  position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.25rem; height: 2.25rem; padding: 0; line-height: 0; cursor: pointer;
+  border: 1px solid var(--gd-border); border-radius: 999px;
+  background: var(--gd-bg); color: var(--gd-muted); text-decoration: none;
+}
+.rf-ha-btn:hover { color: var(--gd-text); border-color: var(--gd-accent); }
+.rf-ha-btn:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
+.rf-ha-btn svg { width: 20px; height: 20px; }
+.rf-ha-icon { display: inline-flex; line-height: 0; }
+/* count badge — hidden at 0 (or empty), so an empty cart shows no number (matches live). */
+.rf-ha-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 1.05rem; height: 1.05rem; padding: 0 0.25rem;
+  box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.68rem; font-weight: 700; line-height: 1; border-radius: 999px;
+  background: var(--gd-accent); color: var(--gd-accent-ink, #fff);
+}
+.rf-ha-badge[data-count="0"], .rf-ha-badge[data-count=""] { display: none; }
+/* `mobile` flag: button shown only on narrow screens (desktop sidebar/nav is always-on). */
+.rf-ha-btn--mobile { display: none; }
+
+/* ONE control-size knob for the header icon boxes. Without this the theme sizes .rf-theme-toggle
+   on its own (e.g. 34px) while the platform sets .rf-ha-btn = 2.25rem and
+   .rf-nav-hamburger = 2.5rem — three near-identical boxes at three sizes. Set --gd-ctl once and the
+   toggle, cart, and hamburger all follow it. Scoped to a wired-cart header (`:has([data-cart-guild])`)
+   so only opted-in sites are affected — every other tenant keeps its exact current sizes
+   (byte-identical). The selector is specific enough (:has + descendant) to win over the theme's own
+   toggle sizing. */
+.rf-header:has(.rf-header-actions[data-cart-guild]) { --gd-ctl: 2.25rem; }
+.rf-header:has(.rf-header-actions[data-cart-guild]) .rf-theme-toggle,
+.rf-header:has(.rf-header-actions[data-cart-guild]) .rf-nav-hamburger,
+.rf-header:has(.rf-header-actions[data-cart-guild]) .rf-ha-btn {
+  width: var(--gd-ctl); height: var(--gd-ctl);
+}
+
+/* shared side-drawer + backdrop (cart drawer; the sidebar offcanvas reuses .st-sidebar below) */
+.rf-ha-overlay { display: none; position: fixed; inset: 0; z-index: 2147483000; background: rgba(0, 0, 0, .4); }
+.rf-ha-drawer {
+  position: fixed; top: 0; height: 100dvh; width: min(420px, 100vw); z-index: 2147483001;
+  display: flex; flex-direction: column; box-sizing: border-box;
+  background: var(--gd-surface, #fff); color: var(--gd-text);
+  box-shadow: 0 0 40px rgba(0, 0, 0, .28); transition: transform .28s ease;
+}
+.rf-ha-drawer[data-side="right"] { right: 0; transform: translateX(100%); }
+.rf-ha-drawer[data-side="left"] { left: 0; transform: translateX(-100%); }
+.rf-ha-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--gd-border); }
+.rf-ha-drawer-title { font-weight: 700; }
+.rf-ha-drawer-close { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; cursor: pointer; border-radius: 999px; color: var(--gd-muted); }
+.rf-ha-drawer-close:hover { color: var(--gd-text); }
+.rf-ha-drawer-close svg { width: 20px; height: 20px; }
+.rf-ha-drawer-body { flex: 1; overflow-y: auto; padding: 1.5rem 1.25rem; }
+.rf-ha-cart-empty { margin: 2rem 0 0; text-align: center; color: var(--gd-muted); }
+/* cart drawer open state (works desktop + mobile — the cart is always accessible). */
+body:has(#st-ha-cart:checked) #st-ha-drawer-cart { transform: none; }
+body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: block; }
+
+/* sidebar mobile-offcanvas close glyph (only meaningful inside the offcanvas panel below) */
+.st-sidebar-close {
+  display: none; position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1;
+  align-items: center; justify-content: center; width: 2rem; height: 2rem; cursor: pointer;
+  border-radius: 999px; color: var(--gd-muted);
+}
+.st-sidebar-close:hover { color: var(--gd-text); }
+.st-sidebar-close svg { width: 20px; height: 20px; }
+
+/* nav-mobile — hidden until the narrow breakpoint (rules live in @media below). */
+.rf-nav-check { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rf-nav-hamburger { display: none; }
+.rf-nav-glyph-close { display: none; }
+
+/* ── overlay header (header-overlay.js) — sitetile owns the STRUCTURE ────────────────
+   The script tags any header that leads with an immersive hero (`.st-hero[data-enter]` or
+   `.st-hero-layered`) so it can float over the art. Until 2026-07-16 sitetile only ever *added the
+   class* and left every last rule to the theme, so the class meant whatever each theme decided —
+   and a theme that forgot got an inert class plus, in the hamburger block below, a `position:
+   relative` that quietly dropped its header out of the hero. Floating over the hero IS the class's
+   whole definition, so it lives here; the theme still owns every pixel of paint (transparency,
+   ink, the scrolled-past `.is-solid` state). `top` is deliberately not set — themes offset it
+   below things like the locale banner. */
+.rf-header--overlay { position: fixed; left: 0; right: 0; }
+/* Wired header cart over an immersive hero: the default .rf-ha-btn fills with --gd-bg, which reads
+   as an opaque block on a dark overlay while the other header controls float transparently. Scoped
+   to a WIRED cart (`[data-cart-guild]`) so no other tenant is touched — make it a transparent,
+   light-outlined control that belongs on the hero. */
+/* Hero (transparent overlay) ONLY: match the theme's overlay toggle/hamburger — transparent, a white
+   .34 outline, white glyph. Scoped to :not(.is-solid) so it does NOT persist once the header scrolls
+   past the hero and goes solid. */
+.rf-header--overlay:not(.is-solid) .rf-header-actions[data-cart-guild] .rf-ha-btn {
+  background: transparent; color: #fff; border-color: rgba(255, 255, 255, .34);
+}
+.rf-header--overlay:not(.is-solid) .rf-header-actions[data-cart-guild] .rf-ha-btn:hover { color: #fff; border-color: #fff; }
+/* Scrolled → solid bar: only drop the base .rf-ha-btn's --gd-bg fill; the base already supplies
+   var(--gd-border)/var(--gd-muted), so the cart becomes a transparent token control matching the
+   toggle's own solid state (this is what makes it read as var(--gd-muted) instead of a white block). */
+.rf-header--overlay.is-solid .rf-header-actions[data-cart-guild] .rf-ha-btn { background: transparent; }
+
+/* nav-mobile: collapse the inline nav at the narrow breakpoint. Two MODES, one control:
+     `hamburger`  — dropdown panel under the header. Default, and the right shape for a
+                    content-heavy recast nav.
+     `fullscreen` — the menu becomes the viewport. For an immersive-hero site with few links,
+                    where a full-width panel is a lot of chrome for three words and its seam
+                    against a transparent header shows.
+   Breakpoint is 64rem (~1024px), NOT the 48rem tablet one: recast WP navs carry many items (+ a
+   dropdown + a CTA, often wide CJK), so the inline row stops fitting well before 48rem. Collapsing
+   at ~1024px keeps the header intact; a light-nav site can say `nav-mobile: none` and keep its nav
+   inline (it wraps). Header-actions/sidebar mobile rules stay at 48rem (separate @media).
+
+   🔴 --gd-nav-panel is the SURFACE the open menu paints itself, and --gd-nav-panel-ink is the text
+   on it. Both default to what shipped before they existed, so no site moves until its theme opts in.
+   They replace `background: var(--gd-head, …)`, which was reaching for a token that means
+   "heading ink" everywhere else in this file (`.st-form-label`, `.st-sidebar-archive > summary`).
+   That worked only by luck — one theme's heading ink is a dark slate and its nav links are white, so
+   dark-panel/white-text came out right by accident. Invert the luck (a dark theme with light
+   headings sets --gd-head to a light colour) and you get a light panel under light links, i.e.
+   invisible. A theme that never set --gd-head at all hit exactly that: measured 1.00:1 in light
+   mode. A token whose name doesn't say what it does will be set wrong eventually. */
+
+@media (max-width: 64rem) {
+  body[data-nav-mobile] .rf-header { flex-wrap: wrap; }
+  /* `position: relative` gives the dropdown its containing block. An overlay header is already
+     `position: fixed` (structure now owned above), which is also a containing block — and this
+     selector outranks it, so applying it here would drop the header out of its hero. */
+  body[data-nav-mobile="hamburger"] .rf-header:not(.rf-header--overlay) { position: relative; }
+  /* While the menu is open, lift the whole header stacking context above page content — a theme
+     may pin `.rf-header { z-index: 0 }`, which would otherwise trap the absolute
+     dropdown *below* an immersive hero. The high-specificity :has() selector beats that. */
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header { z-index: 2147483002; }
+  /* An open menu and the header it hangs from are ONE panel — so a TRANSPARENT header adopts the
+     panel surface while open, or the two read as two materials butted together. Scoped to the
+     overlay header on purpose: a header that already has its
+     own opaque surface has no seam, and must not be repainted. */
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header--overlay {
+    background: var(--gd-nav-panel, var(--gd-head, var(--gd-bg)));
+    backdrop-filter: none; border-bottom-color: transparent;
+  }
+  body[data-nav-mobile] .rf-nav-hamburger {
+    align-items: center; justify-content: center; margin-left: auto;
+    width: 2.5rem; height: 2.5rem; padding: 0; cursor: pointer; color: var(--gd-text);
+    border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-bg);
+  }
+  body[data-nav-mobile] .rf-nav-hamburger svg { width: 24px; height: 24px; }
+  /* glyph swap — bars → close, no JS */
+
+  body[data-nav-mobile="hamburger"] .rf-nav {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 1000;
+    flex-direction: column; align-items: flex-start; gap: 0.25rem;
+    padding: 0.75rem clamp(1rem, 4vw, 3rem) 1rem;
+    background: var(--gd-nav-panel, var(--gd-head, var(--gd-bg)));
+    border-bottom: 1px solid var(--gd-border); box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+  }
+
+  /* ── fullscreen mode ──────────────────────────────────────────────────────────────
+     The menu IS the viewport: one surface, so there's no seam to solve and no dead space beside
+     three links. Sitetile owns the structure + a type scale that reads as deliberate rather than
+     as a stretched dropdown; the theme owns colour and typeface. The header stays above it (z-index
+     rule up top) so the same control closes it. */
+  body[data-nav-mobile="fullscreen"] .rf-nav {
+    position: fixed; inset: 0; z-index: 1000;
+    flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.75rem;
+    padding: clamp(2rem, 10vw, 6rem);
+    background: var(--gd-nav-panel, var(--gd-head, var(--gd-bg)));
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* 🔴 While open, the header IS the panel's top edge — so it takes the panel's surface AND ink,
+     and it MUST drop backdrop-filter. A `backdrop-filter` other than `none` makes an element the
+     containing block for its fixed-position descendants, so a blurred header trapped this panel
+     inside the header's own 78px box: `inset: 0` resolved to the header, not the viewport. It
+     escaped only on a page whose header was an overlay (the theme happens to clear the filter
+     there) — i.e. the home page worked and every other page shipped a broken menu. Measured
+     2026-07-16 after it went live: home 390×800, /faq and /preview 390×78.
+     Ink matters for the same pages: without a hero the header is a light bar with dark-ink
+     controls, which is invisible once this dark panel slides under it. */
+  body[data-nav-mobile="fullscreen"]:has(#rf-nav-toggle:checked) .rf-header {
+    background: var(--gd-nav-panel, var(--gd-head, var(--gd-bg)));
+    /* 🔴 standard property ONLY. Writing `-webkit-backdrop-filter: none` beside it made the
+       minifier keep the prefixed line and DROP the standard one, which doesn't reset Chromium's
+       `backdrop-filter` — the rule applied (the header did take the panel colour) while the
+       filter, and so the containing block, silently survived. The helpful prefix was the bug. */
+    backdrop-filter: none; border-bottom-color: transparent;
+  }
+  body[data-nav-mobile="fullscreen"]:has(#rf-nav-toggle:checked) .rf-logo,
+  body[data-nav-mobile="fullscreen"]:has(#rf-nav-toggle:checked) .rf-nav-hamburger {
+    color: var(--gd-nav-panel-ink, inherit); background: transparent;
+  }
+  /* 🔴 `.rf-nav` is a CHILD of `.rf-header`, not a sibling — so `inset: 0` paints the panel over the
+     wordmark and the toggle, and raising the *header's* z-index does nothing (they share one
+     stacking context; the panel simply has a z-index and they don't). The same control has to close
+     the menu, so lift the header's own children above the panel instead. Verified with
+     elementFromPoint, which returned .rf-nav where the wordmark should be. */
+  body[data-nav-mobile="fullscreen"] .rf-logo,
+  body[data-nav-mobile="fullscreen"] .rf-nav-hamburger { position: relative; z-index: 1001; }
+  /* the CTA used to live in here and needed excluding; since 2026-07-29 it is a sibling of
+     <nav>, so every <a> left inside the panel really is a menu link. */
+  body[data-nav-mobile="fullscreen"] .rf-nav a {
+    font-family: var(--gd-brand-font, inherit);
+    font-size: clamp(2rem, 9vw, 3.25rem); line-height: 1.15;
+    color: var(--gd-nav-panel-ink, inherit);
+  }
+  /* …and being outside the panel, it has to be lifted above it like the logo/hamburger, or the
+     fullscreen overlay paints straight over the button. */
+  body[data-nav-mobile="fullscreen"] .rf-header-cta { position: relative; z-index: 1001; }
+  /* nav submenus stack open (no hover on touch) — true of BOTH modes, so it isn't scoped to one. */
+  body[data-nav-mobile] .rf-nav-group { display: flex; flex-direction: column; align-items: flex-start; }
+  body[data-nav-mobile] .rf-nav-sub { position: static; display: flex; flex-direction: column; box-shadow: none; padding-left: 0.75rem; }
+}
+
+
+@media (max-width: 48rem) {
+  /* header-actions: reveal mobile-only buttons */
+  .rf-ha-btn--mobile { display: inline-flex; }
+
+  /* nav-mobile hamburger rules live in their OWN @media (max-width: 64rem) block below — a
+     content-heavy recast WP nav (many items + a dropdown + CTA) stops fitting a single row well
+     above this 48rem tablet breakpoint, so it collapses earlier than the header-actions/sidebar
+     rules here (which stay at 48rem). */
+
+  /* sidebar mobile offcanvas (a `sidebar` header-action): reuse the EXISTING .st-sidebar DOM as a
+     slide-in drawer instead of the stacked-above layout — the offcanvas shape a recast WP theme
+     usually has. Scoped to
+     `body[data-ha-sidebar]` (only a site with a `sidebar` header-action), so other sidebar sites
+     keep the stacked mobile layout. More specific than the generic `.st-sidebar` static rule above. */
+  body[data-ha-sidebar] .st-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; height: 100dvh; z-index: 2147483001;
+    width: min(320px, 85vw); max-height: none; overflow-y: auto;
+    border-right: 1px solid var(--gd-border); border-bottom: none;
+    box-shadow: 0 0 40px rgba(0, 0, 0, .28); transform: translateX(-100%); transition: transform .28s ease;
+  }
+  body[data-ha-sidebar]:has(#st-ha-sidebar:checked) .st-sidebar { transform: none; }
+  body[data-ha-sidebar]:has(#st-ha-sidebar:checked) .rf-ha-overlay[data-ha-overlay="sidebar"] { display: block; }
+  body[data-ha-sidebar] .st-sidebar-close { display: inline-flex; }
+}
+
+/* form coral (contact/inquiry) — base; themes may override .st-form-*. Token-driven so any theme adapts. */
+.st-form-section { max-width: var(--gd-maxw, 720px); margin: 0 auto; }
+.st-form-head h1, .st-form-head h2 { color: var(--gd-head); }
+.st-form { display: flex; flex-direction: column; gap: var(--gd-gap, 1rem); margin-top: 1.5rem; }
+.st-form-field { display: flex; flex-direction: column; gap: .4rem; }
+.st-form-label { font-weight: 600; color: var(--gd-head); font-size: .95rem; }
+.st-form-input {
+  font: inherit; color: var(--gd-text); background: var(--gd-bg);
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
+  padding: .7rem .85rem; width: 100%; box-sizing: border-box;
+}
+.st-form-input:focus { outline: 2px solid var(--gd-accent); outline-offset: 1px; border-color: var(--gd-accent); }
+.st-form-textarea { resize: vertical; min-height: 7rem; }
+.st-form-submit {
+  align-self: flex-start; font: inherit; font-weight: 700; cursor: pointer;
+  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
+  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .75rem 2rem; margin-top: .5rem;
+}
+.st-form-submit:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   THEME TREATMENT AXES
+   ────────────────────────────────────────────────────────────────────────────────────────────
+   The enumerable "switches" that turn a lilac-class theme (examples/lilac/theme.css) into
+   structured, portable IR (a theme's
+   ir/_theme.md lists them; the compiler stamps them on <body>). Two kinds of rule live here:
+
+     (a) SWITCHES — a `body[data-<axis>="<value>"]` (or element `[data-…]`) override. THE HARD
+         INVARIANT: with the attribute ABSENT, the rule is inert, so today's sites render
+         byte-for-byte unchanged. Proven by the switch-off harness (fixtures = 0.000px).
+
+     (b) BORN PAINT — base styling for section DOM the renderer already emits but base.css never
+         painted (split hero, the social band, hero/social buttons, the columned footer, badges).
+         Until now only a hand-rolled THEME (html-prefixed) painted these, so a themeless born site got
+         bare markup — the same "ships unstyled" gap that was fixed for faq. These are intentional,
+         re-baselined additions, NOT byte-identical; a themed site is unaffected because its
+         html-prefixed rules out-specify these single-class ones.
+
+   Header / footer / announce axes act on SiteLayout CHROME (.rf-header/.rf-foot*), which is NOT in
+   renderSiteToHtml — so the harness guards them through its `chrome` fixture, with a live
+   whole-page diff on top.
+   ════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── (a) SWITCHES — inert unless the compiler stamps the attribute ─────────────────────────── */
+
+/* A.2 #1 · Header material — solid (default) · translucent (glass, mixes the page bg so it adapts
+   per theme) · overlay (float over an immersive hero; the STRUCTURE is already .rf-header--overlay). */
+body[data-header="translucent"] .rf-header {
+  background: color-mix(in srgb, var(--gd-bg) 86%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(10px);
+  backdrop-filter: saturate(160%) blur(10px);
+}
+
+/* A.2 #2 · Header shape — full-bleed (default) · boxed (a centered island) · sticky (own bool). */
+body[data-header-width="boxed"] .rf-header { max-width: var(--gd-maxw); margin-inline: auto; }
+body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
+
+/* A.2 #3 · announcement strip — a thin band at the very top of every page (site chrome). Emitted by
+   SiteLayout from the `announce:` frontmatter (DATA, not a treatment — §3.5), so absent frontmatter =
+   no element = no effect. Painted here, token-driven, so every theme skins it (inverse band by default:
+   ink background, page-bg text). */
+.rf-announce {
+  padding: 0.6rem 1rem; text-align: center; line-height: 1.3;
+  font-size: 0.82rem; font-weight: 500; letter-spacing: 0.02em;
+  background: var(--gd-text); color: var(--gd-bg);
+}
+.rf-announce a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+
+/* A.2 #4 · Button shape — `pill` (999px) is the only override; `rect` (the default) is the token's own
+   --gd-radius, i.e. the absent state, so it needs no rule. Drives every token-routed button
+   (.st-hero-cta/.st-cta-btn/.st-form-submit/.st-hero-btn/.st-social-btn). */
+body[data-button="pill"] { --gd-btn-radius: 999px; }
+
+/* A.2 #7 · Content band — the grid becomes a full-bleed tinted belt with the cards centered inside.
+   Tint is --gd-soft, read WITH its fallback (→ --gd-bg, i.e. invisible until a theme sets it; the
+   token itself stays undefined so the dynamic corals' own `var(--gd-soft, …)` fallbacks survive), so the switch alone
+   never introduces a colour a themeless site didn't have. */
+body[data-band="full-bleed"] .st-grid {
+  max-width: none; margin-inline: 0; background: var(--gd-soft, var(--gd-bg));
+}
+body[data-band="full-bleed"] .st-grid > h2,
+body[data-band="full-bleed"] .st-grid > .st-cells { max-width: var(--gd-maxw); margin-inline: auto; }
+
+/* A.2 #8 · Card — flat (white card, hairline border, hover-lift) · elevated (resting shadow)
+   · glass (translucent). Default (absent) = today's surface-fill bordered cell, untouched. */
+body[data-card="flat"] .st-cell { background: var(--gd-bg); border-color: var(--gd-border); }
+body[data-card="flat"] a.st-cell-link:hover { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.08); }
+body[data-card="elevated"] .st-cell { box-shadow: var(--gd-card-elevation, 0 6px 20px rgba(0, 0, 0, 0.08)); }
+body[data-card="glass"] .st-cell {
+  background: color-mix(in srgb, var(--gd-surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+
+/* A.2 #9 · Card CTA — on (default chevron) · off (chevron-less cards). */
+body[data-cell-cta="off"] .st-cell-cta { display: none; }
+
+/* A.2 #11 · Corner geometry (Signet axis) — round (default rounded rects) · squircle. Absent = today. */
+body[data-corner="squircle"] :where(.st-cell, .st-cta, .st-hero-cta, .st-cta-btn, .st-hero-btn, .st-social-btn, .st-faq-item, .st-img) {
+  corner-shape: superellipse(4);
+}
+
+/* ── 🔤 TYPE SCALE + BRAND FONT (opt-in, structured themes only) ─────────────────────────────────
+   A structured theme sets a base size and a ratio (`gd-font-size` + `type-scale`); the compiler does
+   the arithmetic and emits concrete --gd-h1/h2/h3. Base only READS them, and every fallback below is
+   the exact value this file used before, so a theme that sets none of them renders byte-for-byte as
+   today — the same Group-B discipline as everywhere else (never give these a :root default).
+   Gated on `body:not([data-theme-custom])` (0,1,1, which beats the plain `body`/element rules it
+   overrides) because only a COMPILED theme can set these tokens anyway: a hand-rolled theme keeps
+   exactly the typography it was written against, and gains nothing to fight with.
+   `gd-brand-font` finally reaches headings and the wordmark here — it existed in the vocabulary but
+   base only ever applied it to the fullscreen mobile menu, so setting it did nothing visible. */
+body:not([data-theme-custom]) {
+  font-size: var(--gd-font-size, clamp(1rem, 0.95rem + 0.2vw, 1.0625rem));
+  line-height: var(--gd-line, 1.65);
+}
+body:not([data-theme-custom]) .st-hero h1 { font-size: var(--gd-h1, clamp(2rem, 1.4rem + 3vw, 3.5rem)); }
+body:not([data-theme-custom]) :where(.st-prose, .st-grid, .st-cta, .st-social) h2 { font-size: var(--gd-h2, clamp(1.5rem, 1.2rem + 1.2vw, 2rem)); }
+body:not([data-theme-custom]) .st-cell h3 { font-size: var(--gd-h3, 1.15rem); }
+body:not([data-theme-custom]) :where(h1, h2, h3, h4) {
+  font-weight: var(--gd-heading-weight, bold);
+  font-family: var(--gd-brand-font, var(--gd-font));
+}
+body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family: var(--gd-brand-font, var(--gd-font)); }
+
+/* ── (b) BORN PAINT — base styling for renderer DOM that base.css never painted ─────────────── */
+/* 🔴 EVERY rule below is GATED on `:where(body:not([data-theme-custom]))` — SiteLayout stamps that
+   marker when the site carries a HAND-ROLLED theme.css (a compiled ir/_theme.md is token-only, so it
+   is NOT custom and still gets born paint). `:where()` contributes ZERO specificity, so for a born
+   site the cascade is byte-identical to writing the bare selector.
+   WHY: born paint styles DOM a hand-rolled theme already styles ITS way, and it wins — silently.
+   `.st-hero[data-layout="split"]` is (0,2,0), which OUT-specifies a theme's `html .st-hero` (0,1,1);
+   and `.rf-foot`/`.rf-foot-cols` are DOM no live theme styles at all, so nothing out-specifies them.
+   Both were real latent regressions on live themes — one lost 7 pages' full-bleed hero band to a
+   72ch column, another its columned footer on every page — armed to fire at the next deploy. If you add a rule
+   here, gate it the same way — or prove no live theme has that DOM. */
+
+/* A.2 #5 · Split hero. The renderer emits .st-hero-text/.st-hero-art when the hero uses the
+   `layout=split` coral (content layer). Base now lays it out as two columns so a born site gets a
+   real split hero with no theme; a theme still refines type/colour. `poster` is the already-painted
+   layered hero. (Mechanism note: hero layout is a SECTION coral, not a body axis — the column DOM is
+   content-shaped, so its one source of truth is the coral, per §A.2 #6's "data-media 已是開關".) */
+:where(body:not([data-theme-custom])) .st-hero[data-layout="split"] {
+  grid-template-columns: 1.1fr 0.9fr; gap: var(--gd-gap); align-items: center;
+  place-content: initial; text-align: left; max-width: var(--gd-maxw); margin-inline: auto;
+}
+:where(body:not([data-theme-custom])) .st-hero[data-layout="split"] .st-hero-text { text-align: left; }
+:where(body:not([data-theme-custom])) .st-hero[data-layout="split"] .st-hero-art { text-align: center; }
+@media (max-width: 48rem) { :where(body:not([data-theme-custom])) .st-hero[data-layout="split"] { grid-template-columns: 1fr; text-align: center; } }
+
+/* the social "follow" band (social coral → .st-social + .st-social-btns) — centered heading, blurb,
+   button row. Base never painted it; only a hand-rolled theme did. */
+:where(body:not([data-theme-custom])) .st-social { max-width: var(--gd-maxw); margin-inline: auto; padding: 2.5rem clamp(1rem, 4vw, 3rem); text-align: center; }
+:where(body:not([data-theme-custom])) .st-social h2 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); line-height: 1.25; margin: 0 0 0.5rem; }
+:where(body:not([data-theme-custom])) .st-social p { color: var(--gd-muted); margin: 0 0 1.25rem; }
+
+/* hero + social button rows (linkButtonsHtml `st-hero`/`st-social`): primary fill + secondary ghost,
+   sharing the button-shape/fill tokens so #4's pill/rect axis reaches them too. */
+:where(body:not([data-theme-custom])) .st-hero-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+:where(body:not([data-theme-custom])) .st-social-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
+:where(body:not([data-theme-custom])) .st-hero-btn, :where(body:not([data-theme-custom])) .st-social-btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-weight: 600; font-size: 0.9rem; padding: 0.6rem 1.2rem;
+  border-radius: var(--gd-btn-radius); text-decoration: none;
+  transition: transform 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+}
+:where(body:not([data-theme-custom])) .st-hero-btn-primary, :where(body:not([data-theme-custom])) .st-social-btn-primary { background: var(--gd-btn-fill); color: var(--gd-accent-ink); }
+:where(body:not([data-theme-custom])) .st-hero-btn-primary:hover, :where(body:not([data-theme-custom])) .st-social-btn-primary:hover { transform: translateY(-1px); }
+:where(body:not([data-theme-custom])) .st-hero-btn-secondary, :where(body:not([data-theme-custom])) .st-social-btn-secondary { border: 1.5px solid var(--gd-border); color: var(--gd-text); }
+:where(body:not([data-theme-custom])) .st-hero-btn-secondary:hover, :where(body:not([data-theme-custom])) .st-social-btn-secondary:hover { border-color: var(--gd-accent); color: var(--gd-accent); }
+:where(body:not([data-theme-custom])) .st-hero-plain, :where(body:not([data-theme-custom])) .st-social-plain { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--gd-muted); text-decoration: none; }
+:where(body:not([data-theme-custom])) .st-hero-plain:hover, :where(body:not([data-theme-custom])) .st-social-plain:hover { color: var(--gd-text); }
+
+/* A.2 #12 · Columned footer. SiteLayout already renders .rf-foot / .rf-foot-cols STRUCTURALLY when
+   the site supplies `footer-cols` (a data choice, not a treatment) — but base.css never painted it,
+   so a born columned footer was bare markup (only a hand-rolled theme styled it). Base paints it neutrally now;
+   simple/social footers keep .rf-footer-nav/.rf-footer-social above. */
+:where(body:not([data-theme-custom])) .rf-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap; }
+:where(body:not([data-theme-custom])) .rf-foot-wordmark { font-weight: 700; font-size: 1.15rem; color: var(--gd-text); text-decoration: none; }
+:where(body:not([data-theme-custom])) .rf-foot-copy { color: var(--gd-muted); font-size: 0.85rem; margin-top: 0.5rem; }
+:where(body:not([data-theme-custom])) .rf-foot-cols { display: flex; gap: clamp(1.5rem, 5vw, 3.5rem); flex-wrap: wrap; }
+:where(body:not([data-theme-custom])) .rf-foot-col h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gd-muted); margin: 0 0 0.75rem; font-weight: 700; }
+:where(body:not([data-theme-custom])) .rf-foot-col a, :where(body:not([data-theme-custom])) .rf-foot-col span { display: block; font-size: 0.9rem; color: var(--gd-text); text-decoration: none; margin-bottom: 0.5rem; }
+:where(body:not([data-theme-custom])) .rf-foot-col a:hover { color: var(--gd-accent); }
+:where(body:not([data-theme-custom])) .rf-foot-col span.rf-foot-soon { color: var(--gd-muted); }
+
+/* A.2 #10 · Card badge (partly). Base gives the status pill token-driven chrome so a born
+   `[Soon]`/`[Live]` reads as a pill, not raw text. Kept INLINE (no absolute placement) so the
+   every-site .st-cell stays position-neutral — a theme owns the top-right float. */
+:where(body:not([data-theme-custom])) .st-cell-badge {
+  display: inline-block; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 0.2rem 0.5rem; border-radius: 999px;
+  background: var(--gd-surface); color: var(--gd-muted);
+}
+:where(body:not([data-theme-custom])) .st-cell-badge[data-badge="live"] { background: color-mix(in srgb, #2e9b5b 14%, transparent); color: #2e9b5b; }
+
+}
+
+/* ── @layer reef.responsive ───────────────────────────────────────────────────────────────────
+   Declared AFTER reef.theme, so a site's theme cannot beat these by accident.
+
+   🔴 What is in here, and why it is exactly this and nothing more: these are the `display`
+   declarations that make the mobile menu a STATE MACHINE. Below 64rem, `display` on `.rf-nav`
+   does not mean "lay the nav out this way", it means OPEN or CLOSED, driven by
+   `#rf-nav-toggle:checked`. A theme that writes an unconditional `display: flex` on `.rf-nav` —
+   a perfectly reasonable thing to want — overwrites both states at once and the menu is then
+   permanently open. Measured on two live sites: one's fullscreen panel covered the whole page at
+   768px, another's nav stopped collapsing at 800px.
+
+   🩸 The first version of this moved the ENTIRE `@media (max-width: 64rem)` block up here, which
+   was too much by a long way. That block also carries ordinary styling — the hamburger's colour
+   and border, its margin, the header's `position` — and putting those above the theme took them
+   away from the owner. Measured immediately: a site's hamburger lost its themed teal and fell
+   back to body ink, and its sticky header went `relative`. So the split is by DECLARATION, not by
+   block. Every visual property stays in reef.base where a theme can still reach it; only
+   `display` is protected, and the rules it was extracted from are still there, minus that one
+   line. If you add a rule here, ask whether it says WHETHER the menu is open, or merely what it
+   looks like — only the first belongs.
+
+   Escape hatch intact: an `embed` coral's <style> is unlayered and outranks every layer, so a
+   site that genuinely wants different collapse behaviour opts in deliberately. */
+@layer reef.responsive {
+  @media (max-width: 64rem) {
+    body[data-nav-mobile] .rf-nav-hamburger { display: inline-flex; }
+    body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-nav-glyph-open { display: none; }
+    body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-nav-glyph-close { display: inline-flex; }
+
+    body[data-nav-mobile="hamburger"] .rf-nav,
+    body[data-nav-mobile="fullscreen"] .rf-nav { display: none; }
+    body[data-nav-mobile="hamburger"]:has(#rf-nav-toggle:checked) .rf-nav,
+    body[data-nav-mobile="fullscreen"]:has(#rf-nav-toggle:checked) .rf-nav { display: flex; }
+  }
+}

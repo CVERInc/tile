@@ -1,0 +1,43 @@
+---
+// `timeline` — a chronological list: optional lead intro, then `### <year>` + body per entry.
+// IR: `## title` + `%% sitetile: timeline %%` + intro, then `### 2011` / paragraph pairs.
+// Layout: each entry is a two-column row (year gutter | prose) — the THEME decides
+// the grid/gutter treatment. Block carries structure (year + prose); theme carries the look.
+// First consumer: a company-history timeline. Mirrors the reference renderer in site-core.js.
+import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+const { section, hero } = Astro.props;
+const Title = hero && section.title ? 'h1' : 'h2';   // first section → page <h1>
+const entries = section.entries || [];
+// `style=zigzag` (opt-in) alternates each entry left/right of a center dot-spine — mirrors
+// site-core.js's renderSection for editor-preview parity. Default (absent) unchanged.
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
+// already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
+// explaining the split, so authors reasonably put it everywhere: 22 inert `eyebrow=` on
+// one customer site alone, and their agent had written "added bilingual eyebrows" into a
+// plan. Every coral here renders a heading, which is the thing an eyebrow sits above —
+// the inconsistency was arbitrary, not a design. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const zigzag = pm.style === 'zigzag';
+// `surface=<token>` — OPT-IN per-section background belt (e.g. paper). Absent → transparent
+// (theme default). Styled by the THEME (`[data-surface]`). Lets a timeline join an
+// adjacent grid inside one continuous off-white belt (mixfairy steps under the features belt).
+const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
+---
+<section class="st-timeline" data-style={zigzag ? 'zigzag' : undefined} data-surface={surface}>
+  {eyebrow && <p class="st-timeline-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
+  {section.body && <Fragment set:html={bodyHtml(section.body)} />}
+  <div class="st-tl-rows">
+    {entries.map((e, i) => (
+      <div class="st-tl-row" data-side={zigzag ? (i % 2 === 0 ? 'left' : 'right') : undefined}>
+        {zigzag && <span class="st-tl-dot" aria-hidden="true" />}
+        <p class="st-tl-year" set:html={inlineHtml(e.year)} />
+        <div class="st-tl-body">
+          {e.title && <h3 set:html={inlineHtml(e.title)} />}
+          <Fragment set:html={bodyHtml(e.body)} />
+        </div>
+      </div>
+    ))}
+  </div>
+</section>

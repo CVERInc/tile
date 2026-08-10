@@ -1,0 +1,1133 @@
+---
+import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+// The platform shell every REEF with Site page wears: reef tokens, native View Transitions (default
+// ON for native sites — zero JS), nav/footer landmarks, and Lingo (i18n) mount points. The mirror
+// (ejecta) path keeps fidelity and treats VT as opt-in; the NATIVE path bakes it in here.
+import '../styles/site.css';
+import * as lingo from '../packages/lingo/locale.mjs';
+// Brand/social marks — Simple Icons (CC0), NOT hand-drawn inline SVGs. Lucide dropped brand icons
+// in 2023, so social logos come from lib/brands.mjs (official filled marks) while UI/decorative
+// glyphs stay Lucide line-style. See lib/brands.mjs.
+import { BRAND_ICON } from '../lib/brands.mjs';
+import { FEED_PATH } from '../lib/feed.mjs';
+import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
+import NavNode from '../components/NavNode.astro';
+import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
+// Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
+// with `theme: <name>` in frontmatter, which overrides the --gd-* token surface (and may add family
+// primitives, e.g. Signet squircle). The section renderers never change — only the skin.
+const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'default', eager: true });
+// `alternates: 'all'` — for a route that fans out per locale WITHOUT a content file behind it
+// (pages/[...loc]/language.astro). Everything else has its hreflang set MEASURED from the content
+// glob; see the alternateLocales() block below and locale.mjs for why guessing is not an option.
+const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', robots = '' } = Astro.props;
+const locales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+const themeName = meta.theme ? String(meta.theme).trim() : '';
+// The `?raw` + `set:html` inline path bypasses Vite's CSS minifier, so without this every theme's
+// verbose authoring commentary would ship verbatim in the page's <style> source. Strip the CSS
+// comments before inlining. Comments are non-semantic and no theme has a `/*`/`*/` inside a string
+// literal (verified), so the non-greedy comment-pair match is safe and functionally inert.
+const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+const themeRaw = themeName ? (themes[`../themes/${themeName}.css`] || '') : '';
+const themeCss = themeName ? stripCssComments(themeRaw) : '';
+// Is this a HAND-ROLLED theme (layout decisions of its own) or a COMPILED one (ir/_theme.md → a
+// token-only `html:root` block)? Only the compiler writes that header line, and it survives here
+// because we test the RAW text, before stripCssComments. Base's "born paint" is gated on this: a
+// hand-rolled theme already decided how .st-hero[data-layout=split] / .rf-foot look, and a base
+// selector carrying an attribute out-specifies a theme's `html .foo`, so unguarded born paint would
+// silently win over the site's own design. A compiled theme sets tokens only — it wants born paint.
+// A theme counts as CUSTOM — i.e. base's born paint stays off it — when it carries HAND-WRITTEN CSS,
+// whether that is a fully hand-rolled theme.css or a compiled one with a residue block from the
+// _theme.md body. Both were written against base as it looked THEN, so base must not paint over them.
+// The consequence is the good one: a site converting to a structured theme keeps its exact look, and
+// GRADUATES into born paint automatically once its residue reaches zero — a spectrum with no cliff.
+const compiled = /^\s*\/\*\s*Compiled from ir\/_theme\.md/.test(themeRaw);
+// 🩸 `reef:has-custom-css` is the compiler's MACHINE MARKER (reef src/theme-compile.js
+// CUSTOM_CSS_MARKER). This used to grep the human sentence next to it — /custom CSS from the
+// _theme\.md body/ — and on 2026-08-01 that sentence was reworded for clarity, which silently
+// turned born-paint gating OFF for every site carrying custom CSS. The only visible symptom on
+// the first site checked was one h2's line-height; a full-page computed-style diff found it,
+// nothing else would have. Match the token, never the prose.
+const hasResidue = /reef:has-custom-css/.test(themeRaw);
+const customTheme = !!themeRaw.trim() && (!compiled || hasResidue);
+// IR-driven footer (substrate rule: single-line frontmatter): `footer: Label /href | Label2 /href2`
+// and `copyright: …`. Any site can set them; absent → the footer falls back to the title.
+const footerLinks = String(meta.footer || '').split('|').map((s) => s.trim()).filter(Boolean)
+  // footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
+  .map((s) => { const di = s.indexOf('>>'); return di >= 0 ? s.slice(0, di).trim() : s; })
+  .map((part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; });
+const copyright = meta.copyright ? String(meta.copyright).trim() : '';
+// `footer-social: Label=url ; Label2=url2` — an icon row (facebook/instagram/x/youtube/threads
+// recognized by URL host, else a generic link glyph) instead of the text-link footer nav. OPT-IN:
+// absent → footer-nav / footer-cols behave as before (a non-opted page is unaffected).
+// General for any site whose real footer is icon-only (common WP/Wix convention).
+// The brand marks live in lib/brands.mjs (BRAND_ICON, Simple Icons / CC0) — imported above,
+// no longer hand-drawn here. GENERIC_ICON is the non-brand fallback (a link glyph).
+const GENERIC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg>';
+// ── ACTION ICON registry (inline SVG, Lucide-style clean paths, no emoji) ────
+// Shared by header-actions (Coral A) + nav-mobile hamburger (Coral B). Keyed by a
+// stable name used in frontmatter (`bars`/`hamburger`, `cart`, `magnifier`/`search`).
+// `close` is the drawer/overlay dismiss glyph. These UI glyphs stay Lucide line-style (the family
+// rule); brand/social marks (BRAND_ICON, lib/brands.mjs) are filled official logos by design.
+const ACTION_ICON = {
+  bars: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>',
+  cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>',
+  magnifier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+};
+ACTION_ICON.hamburger = ACTION_ICON.bars;
+ACTION_ICON.search = ACTION_ICON.magnifier;
+const footerSocial = String(meta['footer-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
+  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
+  .filter(Boolean)
+  .map((it) => {
+    const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || '';
+    return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON };
+  });
+// Optional HEADER nav menu (substrate rule: single line): `nav: Label /href | Label2 /href2`.
+// Same syntax as `footer:`. Renders as the top primary menu. OPT-IN: absent → the header keeps just
+// the logo + CTA (a non-opted site is unaffected). For multi-page sites with a top menu (e.g. a WordPress nav).
+// A nav item may carry a DROPDOWN submenu via ` >> ` (parent >> child ; child2). Each child is the
+// same `Label /href` form, separated by ` ; `. Backward-compatible: parts without `>>` stay flat
+// (a non-opted site is unaffected). The submenu renders in the DOM as a `.rf-nav-sub` (theme decides whether
+// to show on hover); its text is always present so multi-page WP mega-menus stay faithful.
+const parseNavPart = (part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; };
+// A nav is a TREE, spelled by its shape:
+//  • one line, FLAT: `nav: A /a | B /b` — the common top-bar case (`|` separates items).
+//  • indented markdown list, ANY depth (dropdowns / mega-menus): a `nav: |` block scalar, one
+//    `- Label /href` per line, indentation = depth. Whitespace is the tree; it reads at a glance.
+// There is exactly ONE way to nest (the indented list). An earlier inline ` >> `/` ; ` submenu
+// spelling was removed once its last user migrated — two spellings for one thing is a tax.
+const parseNavIndented = (text) => {
+  const root = { children: [] };
+  const stack = [{ node: root, indent: -1 }];
+  for (const raw of text.split('\n')) {
+    if (!raw.trim()) continue;
+    const indent = (raw.match(/^[ \t]*/)[0] || '').replace(/\t/g, '  ').length;
+    const item = { ...parseNavPart(raw.replace(/^[ \t]*-?[ \t]*/, '').trim()), children: [] };
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+    stack[stack.length - 1].node.children.push(item);
+    stack.push({ node: item, indent });
+  }
+  return root.children;
+};
+const parseNavFlat = (text) => text.split('|').map((s) => s.trim()).filter(Boolean)
+  .map((part) => ({ ...parseNavPart(part), children: [] }));
+const navRaw = String(meta.nav || '');
+const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(navRaw);
+// Optional COLUMNED footer (substrate rule: single line). `footer-brand:` = a wordmark in the
+// footer's left block; `footer-cols:` = `Heading: Label=href ; Label2 ; … ;; Heading2: …` —
+// `;;` separates columns, `;` separates items, `Label=href` links (href omitted → a plain span,
+// e.g. "coming soon" labels). General (any site's columned footer); absent → the simple centered
+// footer below is untouched (an existing footer stays as-is).
+const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
+const footerCols = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean).map((col) => {
+  const ci = col.indexOf(':');
+  const head = ci >= 0 ? col.slice(0, ci).trim() : '';
+  const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
+  const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
+    const m = it.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
+  });
+  return { head, items };
+});
+const footerLogo = meta['footer-logo'] ? String(meta['footer-logo']).trim() : '';
+// The header/hero logo (`site-logo`) — the REAL site logo (an animated gif, say),
+// shared across hero + sub-page header so a `view-transition-name` morphs it page-to-page.
+const siteLogo = meta['site-logo'] ? String(meta['site-logo']).trim() : footerLogo;
+
+// `generator` — machine-readable provenance, DEFAULT ON. See the <meta> in <head> for why this one
+// defaults the opposite way to the visible `Powered by feelreef` footer. `generator: off` (or an
+// empty value) opts a site out entirely; any other value replaces the string, so a site that is
+// exported and re-hosted can say whatever is then true.
+const generatorTag = (() => {
+  const raw = meta['generator'];
+  if (raw === undefined || raw === null) return 'feelreef';
+  const s = String(raw).trim();
+  if (!s || /^(off|false|no|none)$/i.test(s)) return '';
+  return s;
+})();
+
+// nav / header-cta / footer / social links come from frontmatter and are freely external
+// (a Patreon, an Instagram, a card.* subdomain). External links must open in a new tab like
+// every other button surface (design 2026-07-13) — spread `ext(href)` onto such anchors.
+// Internal links (localeHome, breadcrumbs, blog, tags, language) are left untouched.
+const ext = (h) => /^https?:\/\//i.test(h || '') ? { target: '_blank', rel: 'noopener' } : {};
+// `brand:` = the header wordmark TEXT (when there's no image logo) — lets the <title> stay the
+// full SEO string while the visible wordmark is short (e.g. title "Studio Lilac — comics", brand "Lilac").
+// Falls back to `meta.title` (the site's own frontmatter title), NOT the `title` prop passed in —
+// callers like the /language chooser override `title` with a page-specific string ("Language" /
+// "言語") for the <title> tag, and that must never leak into the logo/wordmark's brand identity.
+const headerBrand = meta.brand ? String(meta.brand).trim() : (meta.title ? String(meta.title).trim() : title);
+// `header-cta: Label=href` — an optional primary action button in the header's right side
+// (e.g. a "Subscribe" pill). General; absent → the header stays as-is.
+const headerCta = (() => { const m = String(meta['header-cta'] || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })();
+// ── HEADER ACTIONS (Coral A) + NAV-MOBILE HAMBURGER (Coral B) — the interaction wave.
+// Both reuse the age-gate primitive: a hidden checkbox + <label> whose click flips
+// `body:has(#…:checked) …` CSS reveal — ZERO JS for the toggle itself (a tiny gated
+// island only adds Esc-close + keyboard activation for the role="button" labels).
+//
+// `header-actions: <aria-label> = <icon> <type> [target] [reveal] [flags…] ; …`
+//   • icon   — ACTION_ICON key (cart | bars | magnifier | close | …)
+//   • type   — `link` (a plain <a href=target>) or `toggle` (checkbox-driven overlay)
+//   • target — link: the href. toggle: a content-source keyword the renderer knows:
+//              `cart` (empty side-drawer + count badge; Square/PAYUNi checkout is
+//              post-cutover) or `sidebar` (mobile offcanvas that reuses the EXISTING
+//              `.st-sidebar` DOM — no duplication, matching the panel toggle a recast WP theme has).
+//   • reveal — `drawer:right` | `drawer:left` | `drawer` (defaults right) | `dropdown`.
+//   • flags  — `mobile` (button shown only ≤48rem; e.g. a sidebar panel, since the
+//              desktop sidebar is always-on) · `badge:<n>` (count badge, hidden at 0).
+// OPT-IN + zero-byte-when-absent: absent → no button, no overlay, no drawer, no CSS
+// effect, no script (every non-opted page renders byte-identical).
+const parseHeaderAction = (label, spec) => {
+  const t = String(spec || '').trim().split(/\s+/).filter(Boolean);
+  const iconName = t[0] || '';
+  const type = (t[1] === 'toggle') ? 'toggle' : 'link';
+  const target = t[2] || '';
+  let reveal = '', badge = null, mobile = false;
+  for (const tok of t.slice(3)) {
+    if (tok === 'mobile') mobile = true;
+    else if (tok === 'dropdown' || tok === 'drawer' || tok.startsWith('drawer:')) reveal = tok;
+    else if (tok === 'badge' || tok.startsWith('badge:')) badge = tok.indexOf(':') >= 0 ? tok.slice(tok.indexOf(':') + 1) : '';
+  }
+  const side = reveal.startsWith('drawer:') ? reveal.slice(7) : (reveal === 'drawer' ? 'right' : 'right');
+  const key = target || iconName;
+  return { label, icon: ACTION_ICON[iconName] || GENERIC_ICON, iconName, type, target, reveal, side, badge, mobile,
+           id: `st-ha-${key}`, drawerId: `st-ha-drawer-${key}` };
+};
+const headerActions = String(meta['header-actions'] || '').split(';').map((s) => s.trim()).filter(Boolean)
+  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S.*)$/); return m ? parseHeaderAction(m[1].trim(), m[2].trim()) : null; })
+  .filter(Boolean);
+const toggleActions = headerActions.filter((a) => a.type === 'toggle');
+const hasSidebarAction = toggleActions.some((a) => a.target === 'sidebar');
+// cart drawer copy (localizable, defaults are English/neutral).
+const cartTitle = (meta['header-actions-cart-title'] ? String(meta['header-actions-cart-title']).trim() : '') || 'Cart';
+const cartEmpty = (meta['header-actions-cart-empty'] ? String(meta['header-actions-cart-empty']).trim() : '') || 'Your cart is empty';
+// cart WIRING (opt-in): `header-actions-cart-guild` binds the cart drawer/badge to a square-shop
+// coral's localStorage cart (`dc-square-shop-cart:<guild>`) so the header cart is live on every
+// page; `header-actions-cart-href` (localized per _site.md) is where the canonical cart lives, so
+// off-shop pages route there instead of opening an empty drawer. Absent guild → not wired → the
+// island below is never imported → byte-identical for every non-opted site.
+const cartGuild = (meta['header-actions-cart-guild'] ? String(meta['header-actions-cart-guild']).trim() : '');
+const cartHref = (meta['header-actions-cart-href'] ? String(meta['header-actions-cart-href']).trim() : '');
+const cartWired = toggleActions.some((a) => a.target === 'cart') && !!cartGuild;
+// `nav-mobile: hamburger` — responsive nav collapse (the real gap: `.rf-nav` had zero
+// breakpoint collapse). Pure CSS below; here it only flips a body attribute + renders
+// the hamburger label. Absent → nothing renders, every site's nav unchanged.
+// 🩸 fixed 2026-07-13: this used to be a strict opt-in read of THIS page's own frontmatter —
+// but `nav:` and `nav-mobile:` are per-page IR fields (each page is its own .md), and a
+// a multi-page WP-style site only had `nav-mobile: hamburger` on home.md, not on
+// character/about/contact/etc. Every one of those pages still renders `nav:` items (same
+// menu), so at ≤64rem they kept the desktop `display:flex` nav with no collapse/hamburger —
+// forced horizontal overflow (verified live via playwright: home had navDisplay:none +
+// working hamburger at 390px, the other three pages had navDisplay:flex + no hamburger).
+// A nav with items and zero breakpoint collapse is a bug on ANY page, not a per-page
+// preference, so auto-detect it: any page that renders a `navMenu` gets the hamburger
+// behavior by default (the CSS is already gated behind the ≤64rem media query + this data
+// attribute, so desktop layout is unaffected either way). `nav-mobile: none` opts back out
+// for a site that truly wants the always-flex nav. Absent nav items → unaffected.
+// MODES (2026-07-16): `hamburger` = the dropdown panel below the header — the default, and the
+// right shape for a content-heavy recast nav. `fullscreen` = the menu takes the viewport (big type,
+// one surface); for a site with an immersive hero and few links, where a full-width panel is a lot
+// of chrome for three words and its seam against a transparent header is visible. `none` = keep the
+// nav inline (it wraps). The MODE is sitetile's; the colours are the theme's.
+const navMobileRaw = String(meta['nav-mobile'] || '').trim();
+const navMobile = navMobileRaw === 'none' ? '' : (navMobileRaw || (navMenu.length > 0 ? 'hamburger' : ''));
+
+// ── theme TREATMENT axes — the compiler stamps these body[data-…] keys into _site.md from the
+// structured _theme (theme-schema TREATMENTS); site.css reads them. Only a non-default value is
+// ever written, so an untreated site sets nothing and renders byte-identical. header-sticky is
+// presence-based, so it stamps an empty attr (never data-header-sticky="false"). The `announce` band
+// (§3.5) is DATA, not a treatment — a plain top-of-page string, escaped (never set:html). ──
+const tHeader = String(meta.header || '').trim();
+const tHeaderWidth = String(meta['header-width'] || '').trim();
+const tHeaderSticky = String(meta['header-sticky'] || '').trim() === 'true';
+const tButton = String(meta.button || '').trim();
+const tBand = String(meta.band || '').trim();
+const tCard = String(meta.card || '').trim();
+const tCellCta = String(meta['cell-cta'] || '').trim();
+const tCorner = String(meta.corner || '').trim();
+const announce = String(meta.announce || '').trim();
+// `breadcrumb-label: <page name>` — opt-in "Home » <page>" trail (WP-theme convention on
+// sub-pages; the home page itself never carries this field so it stays trail-free). General —
+// `breadcrumb-home:` overrides the "Home" label (defaults to "Home"), no href customization
+// needed since it always points at `/`.
+const breadcrumbLabel = meta['breadcrumb-label'] ? String(meta['breadcrumb-label']).trim() : '';
+const breadcrumbHome = meta['breadcrumb-home'] ? String(meta['breadcrumb-home']).trim() : 'Home';
+// `breadcrumb-trail: Label=href ; Label2=href2` — opt-in middle crumb(s) between Home and the
+// page label (WP category-archive convention, e.g. "Home » Category » The post's title").
+// General; absent → trail is just Home » label, unchanged for every other consumer.
+const breadcrumbTrail = String(meta['breadcrumb-trail'] || '').split(';').map((s) => s.trim()).filter(Boolean)
+  .map((s) => { const m = s.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
+  .filter(Boolean);
+const copyrightHref = meta['copyright-href'] ? String(meta['copyright-href']).trim() : '';
+const languageHref = meta['language-href'] ? String(meta['language-href']).trim() : '/language';
+// A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
+// healthy way), NOT a render-blocking @import inside the theme CSS.
+const fontsUrl = meta.fonts ? String(meta.fonts).trim() : '';
+
+// ── PACKAGES (opt-in enhancements) ───────────────────────────────────────────
+// The productized form of the ejecta "enhancements-optin" doctrine: a Recast/native
+// page ships SAME-LOOK + healthy by default and OPTS INTO capabilities with one
+// frontmatter line — `packages: bleedblend, view-transitions`. Each entry is looked
+// up in PKG_REGISTRY below and its assets are injected. Adding a 2nd package is a
+// one-entry change here; section renderers never see packages. (Mirrors feelreef's
+// capability-host-split: sitetile is the host, packages are the pluggable modules.)
+// Same `?raw` + `set:html` path as the themes above, so the same rule applies: a package's
+// authoring commentary would otherwise ship verbatim in every page's <style> source. Strip at the
+// glob boundary rather than per call site, so a package added later is covered by construction.
+const pkgRaw = Object.fromEntries(
+  Object.entries(import.meta.glob('../packages/**/*.css', { query: '?raw', import: 'default', eager: true }))
+    .map(([path, css]) => [path, stripCssComments(css)]));
+const packages = String(meta.packages || '').split(',').map((s) => s.trim()).filter(Boolean);
+// theme-color (browser chrome tint + PWA manifest/splash). Shared by bleedblend (Safari tinting)
+// AND REEF with PWA, so it lives at the top level rather than inside one package's config.
+const themeColorLight = (meta['theme-color-light'] ? String(meta['theme-color-light']).trim() : '#aceace').replace(/^["']|["']$/g, '');
+const themeColorDark = (meta['theme-color-dark'] ? String(meta['theme-color-dark']).trim() : '#084a4c').replace(/^["']|["']$/g, '');
+const PKG_REGISTRY = {
+  // bleedblend — Safari-chrome tinting + a top locale banner that bleeds the chrome
+  // colour into a band. Ships: the .bleedblend-* CSS, the zero-config auto runtime,
+  // viewport-fit=cover (so the page draws under the chrome), and theme-color metas.
+  bleedblend: {
+    css: pkgRaw['../packages/bleedblend/style.css'] || '',
+    viewportFit: true,
+    // chrome colours — overridable per-site, defaulting to the reef mint/teal so the
+    // first dogfood matches; only emitted when this package is on.
+    themeColorLight, themeColorDark,   // shared top-level values (see above)
+    // NOTE: bleedblend's only VISIBLE effect is Safari chrome tinting (invisible
+    // in non-Safari). It does NOT add an on-page band — earlier I wrongly rendered
+    // a top locale strip here; it is off unless a site asks for it.
+    topBanner: false,
+    bodyScript: true,
+  },
+};
+// lingo — i18n install: turns the bare `locales` list into a standards-correct
+// install (lowercase URL paths /zh-tw/, BCP-47 hreflang zh-Hant, x-default). The
+// switching UI + persistence are the platform's; this package owns the wire shape
+// the <head> + links must emit so a Recast site carries a real i18n head.
+const hasLingo = packages.includes('lingo');
+// REEF with PWA — `packages: pwa` makes the site installable: <link> a manifest + serve the
+// opaque icon set (gen-icons.sh output). Off → the plain favicon path, unchanged.
+const hasPwa = packages.includes('pwa');
+// current page's locale → its URL path + BCP-47 attr (only when lingo is on).
+// Lingo's "main language at root" rule: the root locale (the page's own `lang`)
+// lives at `/`, every OTHER locale at `/<lower-full-code>/`.
+// "main language at root": the SITE default (first locale, e.g. en-US) lives at `/`,
+// every OTHER locale at `/<lower-full-code>/`. Root is the site default — NOT the
+// current page's lang — so a /zh-tw/ page still emits en→/ and zh-Hant→/zh-tw/.
+const defaultLocale = (locales[0] || lang || '').trim();
+// PAGE-AWARE locale path: each locale link/hreflang points at the SAME page in that
+// locale (not the locale home). Strip a leading locale prefix off the current URL to
+// get the logical sub-path, then re-prefix per target locale. (default → root, others
+// → /<code>/…). So /about emits en→/about, zh-Hant→/zh-tw/about.
+const urlLocales = locales.map((l) => lingo.toUrlLocale(l));
+const defaultUrlLocale = lingo.toUrlLocale(defaultLocale);
+const rawPath = String(Astro.url?.pathname || '/').replace(/^\/+|\/+$/g, '');
+const pathSegs = rawPath ? rawPath.split('/') : [];
+const firstIsLocale = pathSegs.length > 0 && urlLocales.includes(pathSegs[0]) && pathSegs[0] !== defaultUrlLocale;
+const subPath = (firstIsLocale ? pathSegs.slice(1) : pathSegs).join('/');
+// 🩸 2026-08-06: this returned `/tag/feelreef` while canonicalHref (built from Astro.url.pathname)
+// returned `/tag/feelreef/`. Two self-references to one page, disagreeing by one character — and a
+// self-referencing hreflang that does not match the canonical is how a search engine decides the
+// whole cluster is unreliable. The build emits directory-style URLs, so the trailing slash is the
+// real shape and this is the copy that was wrong.
+const localePath = (l) => {
+  if (!hasLingo) return `/${l}/`;
+  const prefix = l === defaultLocale ? '' : `/${lingo.toUrlLocale(l)}`;
+  return subPath ? `${prefix}/${subPath}/` : (prefix ? `${prefix}/` : '/');
+};
+// Logo "home" href must stay IN the current locale — on /zh-tw/… the logo goes to /zh-tw/,
+// not / (which drops the visitor back to the default locale). Verified on a live site (
+// 2026-07-12 cold-read: live /zh-tw/ header logo → /zh-tw/, recast wrongly hard-coded href="/").
+// Reuses firstIsLocale/pathSegs[0] already computed above; default-locale pages → "/".
+const localeHome = firstIsLocale ? `/${pathSegs[0]}/` : '/';
+const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+// hreflang set — MEASURED, not assumed. A locale is advertised only when this page really exists
+// in it; generated routes (blog index/posts, tag & date archives, search) have no content file in
+// any locale and so advertise nothing. Before 2026-08-06 this was `locales.map(...)`, which put
+// ~429 dead alternates on one site alone. See lingo/locale.mjs → alternateLocales().
+const altLocales = lingo.alternateLocales({
+  locales, defaultLocale, subPath, all: String(alternates) === 'all',
+  contentRels: lingo.contentRelsOf(contentGlob),
+});
+const localeTag = (l) => (hasLingo ? lingo.toBcp47(l) : l);
+const localeLabel = (l) => (hasLingo ? lingo.label(l) : l);
+const htmlLang = hasLingo && lang ? lingo.toBcp47(lang) : lang;
+// Footer "Language" link → the PRIMARY switcher (/language). With Lingo on it's computed per-page:
+// locale-prefixed chooser + ?return=<current path> (so the chooser returns you to THIS page in the
+// chosen locale) + a localized link label. Absent Lingo → the static
+// `language-href:` frontmatter (default /language). General — every Lingo site gets correct per-page returns.
+const langUrlPrefix = hasLingo && lingo.toUrlLocale(lang) !== defaultUrlLocale ? `/${lingo.toUrlLocale(lang)}` : '';
+const currentPath = String(Astro.url?.pathname || '/');
+// 🩸 2026-08-06: `?has=` was never populated by anybody. The chooser's inline script has always
+// supported it — a row whose locale is NOT listed falls back to that locale's home instead of the
+// return path — and with nothing to read it took the other branch every time. So from /devlog the
+// chooser offered /ja-jp/devlog, /ko-kr/devlog and /zh-tw/devlog, all 404: a switcher that walks a
+// visitor off the site. Same root cause as the hreflang above (asserting a page exists in a locale
+// without checking), which is why both now read the same measured set.
+const hasParam = hasLingo && altLocales.length ? `&has=${altLocales.map((l) => lingo.toUrlLocale(l)).join(',')}` : '';
+const computedLanguageHref = hasLingo
+  ? `${langUrlPrefix}/language?return=${encodeURIComponent(currentPath)}${hasParam}`
+  : languageHref;
+// 🩸 corrected: verified against three live locale paths (/ja-jp, /ko-kr, /zh-tw) — the footer
+// "Language" link label stays in English on EVERY locale (a deliberate, consistent choice,
+// not a translation gap), unlike the /language chooser PAGE's own title which IS localized.
+const languageLabel = 'Language';
+// lingo suggestion banner (Signet): rendered hidden; its JS reveals it only when
+// navigator.language ≠ the page locale, offering a switch. Carries bleedblend-top so
+// bleedblend's chrome-band capability is present in the DOM.
+// From the PACKAGE, not a copy in this repo. There used to be an edited duplicate
+// under ../packages/lingo/ and every banner fix landed only there — see the
+// no-second-copy guard in test/. `?raw` keeps the existing shape (inlined only on
+// sites that run lingo, comments stripped) rather than pulling the stylesheet onto
+// every page; the strip still matters because raw text bypasses Vite's minifier.
+const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) : '';
+const localeBanner = (hasLingo && locales.length > 1) ? {
+  current: lingo.toUrlLocale(lang),
+  defaultLocale: lingo.toUrlLocale(defaultLocale),
+  hrefStrategy: 'prefix',
+  excludePath: '/language',
+  options: locales.filter((l) => l !== lang).map((l) => ({ id: lingo.toUrlLocale(l), match: lingo.prefixes(l), ...lingo.bannerCopy(l) })),
+} : null;
+const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
+const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');
+const viewportFit = active.some((p) => p.viewportFit);
+const viewportContent = 'width=device-width, initial-scale=1' + (viewportFit ? ', viewport-fit=cover' : '');
+const bleed = PKG_REGISTRY.bleedblend && packages.includes('bleedblend') ? PKG_REGISTRY.bleedblend : null;
+const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
+
+// ── SIDEBAR LAYOUT (opt-in, page-level) ──────────────────────────────────────
+// `layout: sidebar` in frontmatter activates the two-column shell:
+//   left: fixed `.st-sidebar` aside with nav (sidebar-nav: groups)
+//   right: `.st-sidebar-main` carries the normal <slot /> content
+// All other values (or absent) fall through to the current single-column rf-main.
+// sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
+import { parseSidebarNav } from '../../../site-core.js';
+import { groupByArchive, footerWidgets, blogSearchOn, postUrl } from '../lib/blog.mjs';
+const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
+const isSidebar = pageLayout === 'sidebar';
+const sidebarNavGroups = isSidebar ? parseSidebarNav(meta['sidebar-nav']) : [];
+// `sidebar-archive: true` — opt-in year→month post archive tree (Blogger/WP-widget convention),
+// fed by `blogPosts` (see [...slug].astro). Absent/false → no tree (a non-opted site is unaffected).
+const wantArchive = isSidebar && String(meta['sidebar-archive'] || '').trim() === 'true';
+const archiveTree = wantArchive ? groupByArchive(blogPosts) : [];
+// optional group heading above the archive tree (a site labels it e.g. "All posts" —
+// general opt-in, absent = no heading, unchanged behaviour for sites that don't set it).
+const archiveLabel = meta['sidebar-archive-label'] ? String(meta['sidebar-archive-label']).trim() : '';
+// `sidebar-search: <placeholder text>` — opt-in decorative search box (many WP/Blogger sidebars
+// carry one above the nav groups). Non-functional (no search backend) — visual-fidelity only;
+// absent = no box, unchanged behaviour for sites that don't set it.
+const sidebarSearch = isSidebar && meta['sidebar-search'] ? String(meta['sidebar-search']).trim() : '';
+// `sidebar-side: right` — opt-in mirror of the two-column shell (default left, unchanged for
+// existing consumers). Some live WP sites put the sidebar on the right.
+const sidebarSide = isSidebar && String(meta['sidebar-side'] || '').trim() === 'right' ? 'right' : 'left';
+// `sidebar-social: Label=url ; Label2=url2` — an icon row at the sidebar's BOTTOM. Live WP sidebars
+// commonly end with a social-profile icon row pinned to the column bottom. OPT-IN + sidebar-only,
+// reusing the
+// same host→SVG map as footer-social: absent → nothing renders (existing sidebars are unaffected).
+const sidebarSocial = isSidebar ? String(meta['sidebar-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
+  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
+  .filter(Boolean)
+  .map((it) => { const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || ''; return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON }; }) : [];
+
+// blog — REEF with Blog. When installed it MOUNTS the blog (index + /<slug> detail,
+// default /devlog), rendered by src/pages/[...path].astro — the single root catch-all —
+// from the per-site `blog/` store through THIS shell, and CONTRIBUTES the "Devlog"
+// footer entry — so the link comes from
+// the capability, not a hand-authored IR footer line. `blog-label`/`blog-path`
+// override the defaults.
+const hasBlog = packages.includes('blog');
+// 🩸 `/blog`, not `/devlog`. This capability was extracted from a vendor's own devlog and the
+// extraction was not finished: the LABEL default was made neutral first ("an unnamed blog must not
+// arrive wearing the vendor's name") and the PATH — the same name, the same reason — was left
+// behind. A site shipped a footer link to /devlog because of it: its owner could rename the label,
+// which was a key they could reach, and had no way to move the path, which had no tool at all.
+//
+// A site that genuinely owns a /devlog URL now says so itself, so this default governs only sites
+// that never had one — where it moves nothing. That was checked against every live site before the
+// default changed, rather than assumed.
+const blogPath = (meta['blog-path'] ? String(meta['blog-path']).trim() : '') || '/blog';
+// Neutral fallback: this label goes in the site's own nav/footer, so an unnamed blog must not
+// arrive wearing the vendor's name. A site that wants a different word sets blog-label itself.
+const blogLabel = (meta['blog-label'] ? String(meta['blog-label']).trim() : '') || 'Blog';
+const navLinks = hasBlog ? [{ label: blogLabel, href: blogPath }, ...footerLinks] : footerLinks;
+
+// canonical-redirect coral (opt-in): `blog-canonical-redirects: p,cat,author,m` names the legacy
+// query-string params to watch. When one is present in the URL, a <head> bootstrap loads the
+// canonical-redirect coral (which reads /redirect-map.json and location.replace()s to the pretty
+// URL). The value doubles as the enable flag AND the watch-list, so the bootstrap never fires on the
+// internal ?tag=/?ym= blog filters (they're not listed). Platform-neutral: params are pure data.
+const canonicalRedirectParams = String(meta['blog-canonical-redirects'] || '')
+  .split(',').map((s) => s.trim()).filter((s) => /^[A-Za-z0-9_]+$/.test(s));
+
+// ── BLOG SEARCH (opt-in: `blog-search: true` in home meta) ───────────────────
+// Pure front-end search over the site's blog corpus. Gated on blogSearchOn(meta) AND
+// hasBlog (searching blog posts needs the blog): a header magnifier toggle opens a
+// full-width overlay whose island lazily fetches /search-index.json and filters it
+// client-side. Absent → zero button, zero overlay, zero script (output stays
+// byte-identical). All copy comes from frontmatter (localizable), no station
+// literals. XSS-safe: every field renders through Astro auto-escaping / the island's
+// textContent — no set:html of post data anywhere.
+const blogSearch = blogSearchOn(meta) && hasBlog;
+const searchLabel = (meta['blog-search-label'] ? String(meta['blog-search-label']).trim() : '') || 'Search';
+const searchPlaceholder = (meta['blog-search-placeholder'] ? String(meta['blog-search-placeholder']).trim() : '') || searchLabel;
+const searchEmptyText = (meta['blog-search-empty'] ? String(meta['blog-search-empty']).trim() : '') || 'No matching posts';
+const searchCountLabel = (meta['blog-search-count-label'] ? String(meta['blog-search-count-label']).trim() : '') || 'results';
+
+// ── FOOTER WIDGETS (popular posts + category cloud) ──────────────────────────
+// Live WP/Blogger footers (the stock `#top-posts-N` + `#tag_cloud-N` widgets) repeat a
+// popular-posts list + a tag cloud ABOVE the footer nav on EVERY page. The site authors them
+// ONCE in the home IR body (a prose link-list section + a tagcloud section); the home page
+// renders them in its own body, so here they're gated to NON-home pages only — giving posts/
+// about/etc. the same footer content live has, without doubling up on the home page. Opt-in by
+// data: a site whose home has neither section gets null → nothing renders (a site without them
+// is unaffected). Glob is build-time only (Astro dedupes it against the page routers' own globs).
+const footWidgets = footerWidgets(contentGlob);
+const isHomePath = currentPath === '/' || currentPath === '';
+const showFooterWidgets = !!footWidgets && !isHomePath;
+
+// `color-scheme: toggle` — opt-in light/dark switch (a theme must define BOTH
+// `html:root[data-theme="light"]` and `[data-theme="dark"]` token blocks; absent →
+// no button, no head script, zero bytes added — a non-opted site is unaffected).
+// The head script is a tiny INLINE (non-module) blocking snippet — the one deliberate
+// exception to "zero client JS by default" — because setting data-theme AFTER first
+// paint would flash the wrong palette; a deferred/bundled module runs too late to
+// prevent that. The click-to-toggle behaviour itself IS a normal bundled module
+// (packages/theme-toggle/theme-toggle.js), same pattern as locale-banner.js.
+const colorScheme = meta['color-scheme'] ? String(meta['color-scheme']).trim() : '';
+const themeToggle = colorScheme === 'toggle';
+
+// ── AGE GATE (opt-in adult-content confirmation overlay) ─────────────────────
+// `age-gate: true` mounts a full-screen "are you 18+?" modal over the page (e.g. an
+// R18 works page). PROGRESSIVE ENHANCEMENT, mirroring ejecta's age-gate concept but
+// completing the JS island ejecta had to leave as a TODO:
+//   • CONFIRM is a hidden checkbox + <label> — clicking checks it and CSS
+//     (`body:has(#…:checked)`) reveals the page with ZERO JS (works script-off).
+//   • DECLINE is a plain <a href> back-link — no JS.
+//   • A tiny is:inline island adds sessionStorage persistence so a confirmed visitor
+//     isn't re-prompted across pages (the live Wix `ageConfirmed` behaviour a
+//     pure-CSS gate must otherwise degrade on). No-flash: a HEAD script sets the
+//     reveal attribute before first paint when already confirmed.
+// XSS-SAFE by construction: every field is rendered through Astro's auto-escaping
+// {expr}/attr interpolation — no set:html of author copy anywhere.
+// OPT-IN: absent → nothing renders and no script ships (every other site/page
+// unaffected). GENERIC: all copy + URLs come from frontmatter, no station literals —
+// any site that needs one reuses it by declaring the fields.
+//   age-gate: true
+//   age-gate-title:         Age verification
+//   age-gate-body:          This page contains…\nAre you over 18?        (literal `\n` → line break)
+//   age-gate-note:          A smaller note (optional)                    (literal `\n` → line break)
+//   age-gate-note-links:    Shop A=https://… ; Shop B=https://…          (optional link row; `Label=url` — footer-social syntax)
+//   age-gate-back-url:      /somewhere-else                              (decline target; defaults to /)
+//   age-gate-back-label:    No — take me back
+//   age-gate-confirm-label: Yes, I am over 18
+//   age-gate-key:           sitetile:age-confirmed  (sessionStorage key; default is site-wide so all
+//                                                    gated pages share one confirmation — matches live)
+const ageGateOn = String(meta['age-gate'] || '').trim() === 'true';
+const ageGate = ageGateOn ? {
+  title: String(meta['age-gate-title'] || '').trim(),
+  body: String(meta['age-gate-body'] || '').trim(),
+  note: String(meta['age-gate-note'] || '').trim(),
+  noteLinks: String(meta['age-gate-note-links'] || '').split(';').map((s) => s.trim()).filter(Boolean)
+    .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
+    .filter(Boolean),
+  backUrl: String(meta['age-gate-back-url'] || '').trim() || '/',
+  // 🩸 the two button labels defaulted to Japanese for every tenant. They are the only words in
+  // this dialog the site does not have to write, so they are the only ones that could be wrong
+  // in a language nobody chose. Locale table now, override keys unchanged.
+  backLabel: String(meta['age-gate-back-label'] || '').trim() || lingo.uiCopy(lang).ageBack,
+  confirmLabel: String(meta['age-gate-confirm-label'] || '').trim() || lingo.uiCopy(lang).ageConfirm,
+  key: String(meta['age-gate-key'] || '').trim() || 'sitetile:age-confirmed',
+} : null;
+// literal-`\n`-in-frontmatter → line breaks, rendered as escaped text + <br/> (no set:html).
+const ageGateLines = (s) => String(s || '').split('\\n');
+
+// ── social/share metadata (general, all opt-in via frontmatter) ──────────────
+// `description:` → <meta description> + og/twitter description. `share-image:` (or
+// `og-image:`) → the 1200×630 card for link previews (absolute-ised via Astro.site
+// when set, so Patreon/IG/X render it). `favicon:` → the browser-tab icon (falls
+// back to site-logo). Absent → the tag is simply omitted (a site without one is unaffected).
+// This is load-bearing for share-driven sites (a webcomic's whole funnel is a link
+// posted on socials) yet the renderer emitted none of it before — a real gap, not chrome.
+const absUrl = (u) => (u && Astro.site ? new URL(u, Astro.site).href : u);
+const description = meta.description ? String(meta.description).trim() : '';
+const authoredShareImage = String(meta['share-image'] || meta['og-image'] || '').trim();
+// `og-cards: true` in _site.md → every page gets a generated link-preview card at a path derived
+// from its own URL. The PNG does not exist yet at this point: it is rendered from THIS html after
+// the build (packages/sitetile/og/build-og.mjs), which is why the path has to be derivable from the
+// url alone and cannot depend on anything only the renderer knows. An authored share-image always
+// wins — a site that made its own card keeps it.
+const ogCardsOn = String(meta['og-cards'] || '').trim().toLowerCase() === 'true';
+const ogCardPath = (p) => {
+  const clean = String(p || '/').split('?')[0].split('#')[0].replace(/\/+$/, '');
+  return `/og${clean === '' ? '/index' : clean}.png`;
+};
+const shareImage = absUrl(authoredShareImage
+  || (ogCardsOn && Astro.url ? ogCardPath(Astro.url.pathname) : ''));
+const favicon = String(meta.favicon || meta['site-logo'] || meta['footer-logo'] || '').trim();
+const faviconType = /\.svg$/i.test(favicon) ? 'image/svg+xml' : /\.png$/i.test(favicon) ? 'image/png' : '';
+const ogType = meta['og-type'] ? String(meta['og-type']).trim() : 'website';
+// canonical/og:url = THIS page's own absolute URL. Uses Astro.url.pathname (the real served path)
+// so it's correct for every page on every site: a Lingo locale page keeps its /zh-Hant/… path, and
+// a non-Lingo site gets its real page path (/about-us/) instead of localePath()'s bogus
+// /${lang}/ (which is only meaningful for Lingo). Was `localePath(lang)` → every page on such a site
+// wrongly canonicalised to /zh-Hant/. 2026-07-13.
+const canonicalHref = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : '';
+// Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
+// already named. No new copy, no new default to get wrong in somebody else's language.
+const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
+// JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
+// content page can never accidentally claim to be a blog post.
+const jsonLd = jsonLdScript(pageGraph({
+  kind: ogType === 'article' ? 'article' : 'website',
+  url: canonicalHref,
+  siteName: String(meta['site-title'] || meta.title || '').trim(),
+  siteUrl: Astro.site ? new URL('/', Astro.site).href : '',
+  logo: absUrl(String(meta['site-logo'] || meta['footer-logo'] || '').trim()),
+  title: String(meta['share-title'] || title || '').trim(),
+  description: String(meta.description || '').trim(),
+  image: shareImage,
+  datePublished: String(meta['article-published-time'] || '').trim(),
+  author: String(meta['article-author'] || meta['blog-author'] || '').trim(),
+  // Only when search is really on — advertising a SearchAction for a route that no longer exists
+  // would be the same defect as the hreflang above.
+  searchUrl: blogSearchOn(meta) && hasBlog && Astro.site ? new URL('/search', Astro.site).href : '',
+  inLanguage: htmlLang,
+}));
+// og:site_name is the NAME OF THE SITE, so it must be identical on every page. It used to reuse
+// `headerBrand`, which is a per-page value (meta.brand → meta.title → title) and therefore drifted
+// to whatever the page called itself. `site-title` is stashed by the [...path] catch-all before the
+// page frontmatter merges over the site config, precisely so the head can still see the site's own
+// title. Falls back to headerBrand for surfaces that don't go through that route (and for legacy
+// sites with no _site.md), which is the old behaviour, not a regression.
+const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;
+---
+<!doctype html>
+<html lang={htmlLang} data-lingo-root>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content={viewportContent} />
+    {(bleed || hasPwa) && <meta name="theme-color" content={themeColorLight} media="(prefers-color-scheme: light)" />}
+    {(bleed || hasPwa) && <meta name="theme-color" content={themeColorDark} media="(prefers-color-scheme: dark)" />}
+    {/* 🩸 PROVENANCE. Until this tag existed, a feelreef site said nothing about what built it:
+        `feelreef` appeared ZERO times in a built site's source, and the only accidental fingerprint
+        was a dynamic coral's script URL — present only on the pages that happen to use one.
+        Measured consequence: asked "what is this site built with", an AI read a live site's source,
+        concluded it was a bespoke hand-built site, and then recommended a competing site builder to
+        a non-technical reader. Our own work endorsed a competitor.
+
+        This is `generator`, the standard HTML provenance field (WordPress/Hugo/Ghost/Astro all emit
+        it) — NOT a watermark. A visitor never sees it, it costs no pixel, and it charges the owner
+        nothing; it does not contradict "the site is yours and portable" (removing it after an export
+        is one line). That is why it is DEFAULT ON, the opposite of the visible `Powered by feelreef`
+        footer, which is an ad slot and correctly defaults off.
+        Opt out per site with `generator: off` in ir/_site.md. */}
+    {generatorTag && <meta name="generator" content={generatorTag} />}
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    {favicon && <link rel="icon" type={faviconType || undefined} href={favicon} />}
+    {/* apple-touch wants an OPAQUE icon (iOS blacks out transparency); PWA supplies one, else
+        fall back to the site favicon. `packages: pwa` also links the installable manifest. */}
+    {hasPwa ? <link rel="apple-touch-icon" href="/apple-touch-icon.png" /> : (favicon && <link rel="apple-touch-icon" href={favicon} />)}
+    {hasPwa && <link rel="manifest" href="/manifest.webmanifest" />}
+    {/* Open Graph + Twitter card — link previews on Patreon / IG / X / Discord. */}
+    <meta property="og:title" content={title} />
+    {description && <meta property="og:description" content={description} />}
+    {robots && <meta name="robots" content={robots} />}
+    <meta property="og:type" content={ogType} />
+    {ogType === 'article' && meta['article-published-time'] && <meta property="article:published_time" content={String(meta['article-published-time'])} />}
+    {ogType === 'article' && (meta['article-author'] || meta['blog-author']) && <meta property="article:author" content={String(meta['article-author'] || meta['blog-author'])} />}
+    {ogSiteName && <meta property="og:site_name" content={ogSiteName} />}
+    {canonicalHref && <meta property="og:url" content={canonicalHref} />}
+    {shareImage && <meta property="og:image" content={shareImage} />}
+    <meta name="twitter:card" content={shareImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    {shareImage && <meta name="twitter:image" content={shareImage} />}
+    {fontsUrl && (
+      <>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href={fontsUrl} />
+      </>
+    )}
+    {/* native cross-document View Transitions — pure CSS, progressive enhancement, no client JS.
+        is:inline so Astro emits it VERBATIM (its scoped-style CSS pipeline drops the @view-transition
+        at-rule otherwise). The cross-fade tuning lives in site.css. */}
+    {/* 🔴 The cascade order, declared before anything can use it. Layers are otherwise ordered by
+        first appearance, which would put the renderer first again and change nothing — measured:
+        dropping this one line moves 234 of 246 elements on a real build, because the site's theme
+        would become layer ONE and lose its own tokens.
+
+          reef.base        site.css — resets, tokens, base paint
+          reef.theme       the CSS our packages ship (locale banner, signet, bleedblend) AND then
+                           the site's own theme, in that order. Both in ONE layer on purpose — see
+                           below.
+          reef.responsive  the mobile-nav STATE MACHINE. Declared last on purpose: `display` there
+                           means open/closed, not layout, and a theme must not overwrite it by
+                           accident. See the block comment in site.css.
+
+        🩸 Package CSS shares the theme's layer rather than sitting in one below it, and that took
+        two measured attempts to get right.
+
+        First: leaving it UNLAYERED while the theme moved into a layer demoted the theme beneath it,
+        because unlayered beats every layer. A site owner wrote `html .locale-banner{color:#0a4a4c}`
+        and it was silently ignored — 4.04:1 on a banner that only renders for visitors whose
+        language does not match the page, so nobody testing their own site in their own language
+        would ever have seen it. Another theme hid eight signet arrows; they came back.
+
+        Then a `reef.components` layer BELOW the theme fixed those two and overshot: it also handed
+        the theme every contest it used to lose on specificity. A theme's `html a { color:
+        inherit }` (0,0,2) — a reasonable global reset — began beating `.locale-banner__continue`
+        (0,1,0), putting 2.66:1 dark ink on the banner's purple button.
+
+        One layer, package CSS first, is what the pre-layer world actually was: specificity decides,
+        source order breaks ties in the theme's favour. Every case above comes out right, and the
+        ONLY relationship layers change is the one this was always about — theme over renderer.
+
+        Unlayered still beats every layer, and that is now reserved for what it should always have
+        meant: the deliberate escape hatch, an `embed` coral's <style>. */}
+    <style is:inline>@layer reef.base, reef.theme, reef.responsive;</style>
+    <style is:inline>@view-transition { navigation: auto; }</style>
+    {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
+        <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,
+        other locale). Emitted once per locale THAT ACTUALLY HAS THIS PAGE (altLocales), plus an
+        x-default — and the x-default only when the default locale is one of them, since pointing
+        it at a page that does not exist is the same defect one line down. */}
+    {/* Feed autodiscovery. 🩸 until 2026-08-06 this platform generated a real RSS feed and then
+        advertised it nowhere — the one <link> that makes a feed discoverable by a browser, a reader
+        or any aggregator. WordPress and Blogger both emit it on every page; ours was reachable only
+        by someone who already knew the URL, which is not discovery, it is a password. */}
+    {hasBlog && <link rel="alternate" type="application/rss+xml" title={feedLinkTitle} href={Astro.site ? new URL(FEED_PATH, Astro.site).href : FEED_PATH} />}
+    {/* JSON-LD. og: tags are for sharing; this is what a crawler reads to decide a URL is an
+        article with an author and a date. Emitted only when there is something true to say. */}
+    {jsonLd && <script type="application/ld+json" set:html={jsonLd} />}
+    {altLocales.map((l) => <link rel="alternate" hreflang={localeTag(l)} href={Astro.site ? new URL(localePath(l), Astro.site).href : localePath(l)} />)}
+    {hasLingo && defaultLocale && altLocales.includes(defaultLocale) && <link rel="alternate" hreflang="x-default" href={Astro.site ? new URL(localePath(defaultLocale), Astro.site).href : localePath(defaultLocale)} />}
+    {/* canonical — this page's own absolute self URL (canonicalHref). Lingo sites: each locale page
+        is its own canonical. Non-Lingo sites still need ONE canonical (live WP emits
+        one); previously gated on hasLingo so they emitted none — a real recast regression. 2026-07-13. */}
+    {canonicalHref && <link rel="canonical" href={canonicalHref} />}
+    {/* canonical-redirect (REEF with Blog): expose the watched legacy-param list to the island below.
+        The island guards on it before any fetch, so normal pages + internal ?tag=/?ym= filters pay
+        nothing. Emits nothing unless the site opts in via `blog-canonical-redirects`. */}
+    {canonicalRedirectParams.length > 0 && (
+      <script is:inline define:vars={{ params: canonicalRedirectParams }}>window.__canonicalRedirect = params;</script>
+    )}
+    {/* package CSS (bleedblend's .bleedblend-*, signet's locale banner) — in `reef.components`,
+        which sits BELOW reef.theme. The comment here used to say "before the theme so a theme can
+        still tune package surfaces", and being earlier in <head> is exactly what stopped being
+        enough: once the theme moved into a layer, these unlayered sheets outranked it regardless
+        of order or specificity. The intent was always this; the mechanism now matches it. */}
+    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}
+    {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
+    {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
+        not because of where this tag sits. The previous comment here claimed it won by being last
+        in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
+        and that wrong-but-confident comment is part of how the trap survived being looked at. */}
+    {themeCss && <style is:inline set:html={`@layer reef.theme {\n${themeCss}\n}`}></style>}
+    {themeToggle && (
+      <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
+        (function () {
+          var saved = null;
+          try { saved = localStorage.getItem(storageKey); } catch (e) {}
+          var mode = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', mode);
+        })();
+      </script>
+    )}
+    {/* age-gate no-flash: if this visitor already confirmed (sessionStorage), reveal the
+        page BEFORE first paint so the overlay never flashes. Blocking is:inline — same
+        rationale as the theme-toggle snippet above. */}
+    {ageGate && (
+      <script is:inline define:vars={{ k: ageGate.key }}>
+        try { if (sessionStorage.getItem(k) === '1') document.documentElement.setAttribute('data-age-confirmed', ''); } catch (e) {}
+      </script>
+    )}
+  </head>
+  <body
+    data-page={meta['sitetile-page'] ? String(meta['sitetile-page']).trim() : undefined}
+    data-nav-mobile={navMobile || undefined}
+    data-theme-custom={customTheme ? '' : undefined}
+    data-ha-sidebar={hasSidebarAction ? '' : undefined}
+    data-header={tHeader || undefined}
+    data-header-width={tHeaderWidth || undefined}
+    data-header-sticky={tHeaderSticky ? '' : undefined}
+    data-button={tButton || undefined}
+    data-band={tBand || undefined}
+    data-card={tCard || undefined}
+    data-cell-cta={tCellCta || undefined}
+    data-corner={tCorner || undefined}
+  >
+    {announce && <div class="rf-announce" role="note">{announce}</div>}
+    {ageGate && (
+      <div class="st-age-gate" role="dialog" aria-modal="true" aria-labelledby="st-age-gate-title">
+        {/* CONFIRM checkbox — CSS `:has(:checked)` reveal makes the gate work with zero JS. */}
+        <input type="checkbox" id="st-age-gate-check" class="st-age-gate-check" aria-hidden="true" tabindex="-1" />
+        <div class="st-age-gate-modal">
+          {ageGate.title && <h2 class="st-age-gate-title" id="st-age-gate-title">{ageGate.title}</h2>}
+          {ageGate.body && <p class="st-age-gate-body">{ageGateLines(ageGate.body).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
+          {ageGate.note && <p class="st-age-gate-note">{ageGateLines(ageGate.note).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
+          {ageGate.noteLinks.length > 0 && (
+            <p class="st-age-gate-note-links">
+              {ageGate.noteLinks.map((it) => <a href={it.href} target="_blank" rel="noopener noreferrer">{it.label}</a>)}
+            </p>
+          )}
+          <div class="st-age-gate-actions">
+            <a class="st-age-gate-btn st-age-gate-decline" href={ageGate.backUrl}>{ageGate.backLabel}</a>
+            <label class="st-age-gate-btn st-age-gate-confirm" for="st-age-gate-check" data-age-gate-confirm role="button" tabindex="0">{ageGate.confirmLabel}</label>
+          </div>
+        </div>
+      </div>
+    )}
+    {localeBanner && (
+      <div
+        id="signet-locale-banner"
+        class="locale-banner bleedblend-top bleedblend-push"
+        hidden
+        role="region"
+        aria-label="Language"
+        data-signet-locale-banner
+        data-config={JSON.stringify(localeBanner)}
+      >
+        <div class="locale-banner__inner">
+          <span class="locale-banner__msg" data-banner-message></span>
+          <span class="locale-banner__actions">
+            <button type="button" class="locale-banner__decline" data-banner-dismiss></button>
+            <a href="#" class="locale-banner__continue" data-banner-continue></a>
+          </span>
+        </div>
+      </div>
+    )}
+    {blogSearch && (
+      <div class="st-search" data-search-overlay role="dialog" aria-modal="true" aria-label={searchLabel}>
+        <div class="st-search-backdrop" data-search-close aria-hidden="true"></div>
+        <div class="st-search-panel">
+          <div class="st-search-bar" role="search">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" class="st-search-input" data-search-input placeholder={searchPlaceholder} aria-label={searchPlaceholder} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <button type="button" class="st-search-close" data-search-close aria-label="Close">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <p class="st-search-count" data-search-count data-label={searchCountLabel} hidden></p>
+          <p class="st-search-empty" data-search-empty data-text={searchEmptyText} hidden></p>
+          <ul class="st-search-results" data-search-results></ul>
+        </div>
+      </div>
+    )}
+    {/* header-actions overlays + drawers (Coral A). Each toggle gets a backdrop <label>
+        (click-outside closes). `cart` renders an empty side-drawer (structure only); `sidebar`
+        reuses the existing `.st-sidebar` DOM as a mobile offcanvas (no separate drawer). */}
+    {toggleActions.map((a) => (
+      <Fragment>
+        <label class="rf-ha-overlay" data-ha-overlay={a.target || a.iconName} for={a.id} aria-hidden="true"></label>
+        {a.target === 'cart' && (
+          <aside class="rf-ha-drawer" id={a.drawerId} data-side={a.side} role="dialog" aria-modal="true" aria-label={a.label}>
+            <div class="rf-ha-drawer-head">
+              <span class="rf-ha-drawer-title">{cartTitle}</span>
+              <label class="rf-ha-drawer-close" for={a.id} role="button" tabindex="0" aria-label="Close" data-ha-key set:html={ACTION_ICON.close}></label>
+            </div>
+            <div class="rf-ha-drawer-body"><p class="rf-ha-cart-empty">{cartEmpty}</p></div>
+          </aside>
+        )}
+      </Fragment>
+    ))}
+    <header class="rf-header reef-header">
+      <a class="rf-logo reef-logo" href={localeHome}>{siteLogo ? <img class="rf-logo-img" src={siteLogo} alt={headerBrand} /> : headerBrand}</a>
+      {/* id is what the toggle's aria-controls points at — needed by EVERY nav-mobile mode, not
+          just the dropdown (fullscreen was left dangling at a non-existent id when it was added). */}
+      <nav class="rf-nav reef-nav" aria-label="Site" id={navMobile ? 'rf-nav' : undefined}>
+        <slot name="nav" />
+        {navMenu.map((l) => <NavNode item={l} depth={0} />)}
+        {blogSearch && (
+          <button type="button" class="rf-search-toggle" data-search-toggle aria-label={searchLabel} aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        )}
+        {themeToggle && (
+          <button type="button" class="rf-theme-toggle" id="rf-theme-toggle" aria-label="Toggle light/dark theme">
+            <span class="rf-theme-toggle-icon" aria-hidden="true"></span>
+          </button>
+        )}
+      </nav>
+      {/* The header CTA is a SIBLING of <nav>, not a child of it — otherwise `nav-mobile`
+          collapses the site's one primary action into the hamburger, where nobody finds it.
+          (It lived inside <nav> until an earlier pass; two live sites had their primary CTA
+          buried, and faking the move with CSS makes the button teleport when the menu
+          opens, because one element cannot be in two places.) It sits before .rf-header-actions
+          so the header reads logo → nav → CTA → icon actions → hamburger, left to right. */}
+      {headerCta && <a class="rf-header-cta" href={headerCta.href} {...ext(headerCta.href)}>{headerCta.label}</a>}
+      {/* header-actions (Coral A): icon buttons on the header's right. link → <a>; toggle →
+          a hidden checkbox + <label> whose CSS reveal opens the drawer/offcanvas. */}
+      {headerActions.length > 0 && (
+        <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
+          {headerActions.map((a) => a.type === 'link'
+            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={a.target || '#'} aria-label={a.label} set:html={a.icon}></a>
+            : <Fragment>
+                <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
+                <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
+                  <span class="rf-ha-icon" set:html={a.icon}></span>
+                  {a.badge != null && <span class="rf-ha-badge" data-count={a.badge}>{a.badge}</span>}
+                </label>
+              </Fragment>)}
+        </div>
+      )}
+      {/* nav-mobile hamburger (Coral B): checkbox + label; pure-CSS collapse at ≤64rem
+          (NOT the 48rem tablet breakpoint — see the block comment at site.css's nav-mobile
+          rules for why. This comment said 48rem until 2026-07-29 and misled a recast into
+          writing a 769px desktop override, which pinned the menu open on 769–1024px). */}
+      {navMobile && (
+        <Fragment>
+          <input type="checkbox" id="rf-nav-toggle" class="rf-nav-check" hidden data-ha-toggle />
+          {/* Both nav-mobile modes (`hamburger` dropdown / `fullscreen` overlay) share this one
+              control — they differ only in what `.rf-nav` becomes, which is pure CSS. Both glyphs
+              ship; CSS swaps them on :checked, so closing needs no JS. */}
+          <label class="rf-nav-hamburger" for="rf-nav-toggle" role="button" tabindex="0" aria-label="Menu" aria-controls="rf-nav" aria-haspopup="true" data-ha-key>
+            <span class="rf-ha-icon rf-nav-glyph-open" set:html={ACTION_ICON.bars}></span>
+            <span class="rf-ha-icon rf-nav-glyph-close" set:html={ACTION_ICON.close}></span>
+          </label>
+        </Fragment>
+      )}
+      {/* No inline header locale switcher: the reference sites have none, and printing raw
+          locale codes reads as debug chrome. The PRIMARY switcher is the `/language` chooser page
+          (linked from the footer "Language" link); the non-forced suggestion banner covers the rest. */}
+    </header>
+
+    {breadcrumbLabel && (
+      <nav class="rf-breadcrumb reef-breadcrumb" aria-label="Breadcrumb">
+        <a href="/">{breadcrumbHome}</a>
+        {breadcrumbTrail.map((t) => (
+          <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span><a href={t.href}>{t.label}</a></Fragment>
+        ))}
+        <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
+      </nav>
+    )}
+    <main class="rf-main reef-main">
+      {isSidebar ? (
+        <div class="st-sidebar-layout" data-side={sidebarSide}>
+          <aside class="st-sidebar">
+            {hasSidebarAction && (
+              <label class="st-sidebar-close" for="st-ha-sidebar" role="button" tabindex="0" aria-label="Close" data-ha-key set:html={ACTION_ICON.close}></label>
+            )}
+            {siteLogo && (
+              <a class="st-sidebar-logo" href={localeHome}><img src={siteLogo} alt={headerBrand} /></a>
+            )}
+            {sidebarSearch && (
+              <form class="st-sidebar-search" role="search" onsubmit="return false">
+                <input type="search" placeholder={sidebarSearch} aria-label={sidebarSearch} />
+                <button type="submit" aria-label="Search">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+              </form>
+            )}
+            <nav class="st-sidebar-nav" aria-label="Sidebar">
+              {sidebarNavGroups.map((g) => (
+                // Wrapped in a <li> (visually identical — the CSS below still targets
+                // .st-sidebar-group) so a group's full text (head + all sub-items) is
+                // capturable by recastfid's landmark scan, which reads li/a/span/p but not
+                // div/ul. Live WP menus commonly nest a submenu <ul> inside the parent <li>,
+                // putting a category's full label set in one text node; sitetile's div-based
+                // group previously had no single element recastfid could match that whole
+                // blob against, producing a permanent false "missing content block" report for any
+                // site whose sidebar groups a run of short category labels.
+                <li class="st-sidebar-group">
+                  {g.head && <p class="st-sidebar-group-head">{g.head}</p>}
+                  <ul class="st-sidebar-list">
+                    {g.items.map((it) => (
+                      <li>{it.href ? <a href={it.href} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </nav>
+            {archiveLabel && <h2 class="st-sidebar-archive-label">{archiveLabel}</h2>}
+            {archiveTree.length > 0 && (
+              <Fragment>
+              <details class="st-sidebar-archive">
+                <summary>{lingo.uiCopy(lang).archive}</summary>
+                <ul class="st-archive-years">
+                  {archiveTree.map((y) => (
+                    <li>
+                      <details>
+                        <summary>{lingo.uiCopy(lang).count(y.year, y.count)}</summary>
+                        <ul class="st-archive-months">
+                          {y.months.map((m) => (
+                            <li>
+                              <details>
+                                <summary>{lingo.uiCopy(lang).count(lingo.dateHeading(lang, m.year, m.month), m.count)}</summary>
+                                <ul class="st-archive-posts">
+                                  {m.posts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}
+                                </ul>
+                              </details>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              </Fragment>
+            )}
+            {sidebarSocial.length > 0 && (
+              <nav class="st-sidebar-social" aria-label="Social">
+                {sidebarSocial.map((it) => (
+                  <a href={it.href} {...ext(it.href)} aria-label={it.label} title={it.label} set:html={it.icon} />
+                ))}
+              </nav>
+            )}
+          </aside>
+          <div class="st-sidebar-main"><slot /></div>
+        </div>
+      ) : (
+        <slot />
+      )}
+    </main>
+
+    <footer class="rf-footer reef-footer">
+      {showFooterWidgets && footWidgets.popular && (
+        <section class="st-prose rf-foot-widget rf-foot-popular">
+          {footWidgets.popular.heading && <h2>{footWidgets.popular.heading}</h2>}
+          <ul class="st-list">
+            {footWidgets.popular.items.map((it) => <li><a href={it.href}>{it.label}</a></li>)}
+          </ul>
+        </section>
+      )}
+      {showFooterWidgets && footWidgets.categories && (
+        <section class="st-tagcloud rf-foot-widget rf-foot-tagcloud">
+          {footWidgets.categories.heading && <h2>{footWidgets.categories.heading}</h2>}
+          <div class="st-tag-flow">
+            {footWidgets.categories.items.map((it) => <a class="st-tag" href={it.href}>{it.label}</a>)}
+          </div>
+        </section>
+      )}
+      <slot name="footer">
+        {footerCols.length > 0 ? (
+          <div class="rf-foot">
+            <div class="rf-foot-brand">
+              {footerBrand && <a class="rf-foot-wordmark" href="/">{footerBrand}</a>}
+              {(copyright || (hasLingo && locales.length > 1)) && (
+                <p class="rf-foot-copy">
+                  {copyright && <span>{copyright}</span>}
+                  {hasLingo && locales.length > 1 && (
+                    <a class="rf-foot-lang rf-lang" href={computedLanguageHref}>{languageLabel}</a>
+                  )}
+                </p>
+              )}
+            </div>
+            <div class="rf-foot-cols">
+              {footerCols.map((col) => (
+                <div class="rf-foot-col">
+                  {col.head && <h4>{col.head}</h4>}
+                  {col.items.map((it) => (it.href
+                    ? <a href={it.href} {...ext(it.href)}>{it.label}</a>
+                    : <span class="rf-foot-soon">{it.label}</span>))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : footerSocial.length > 0 ? (
+          <nav class="rf-footer-social" aria-label="Social">
+            {footerSocial.map((it) => (
+              <a href={it.href} {...ext(it.href)} aria-label={it.label} set:html={it.icon} />
+            ))}
+          </nav>
+        ) : navLinks.length > 0 && (
+          <nav class="rf-footer-nav" aria-label="Footer">
+            {navLinks.map((l) => <a href={l.href} {...ext(l.href)}>{l.label}</a>)}
+          </nav>
+        )}
+        {/* footer logo links home.
+            A footer wordmark/logo linking to the site root is a universal convention, so the anchor is
+            emitted for every site; the opacity/hover treatment is theme-scoped. */}
+        {/* The logo image is decorative (alt=""), so the ANCHOR must carry the name — otherwise a
+            screen reader announces a link with no name at all. Found by inspect_page's
+            link-without-accessible-name check on every page. */}
+        {footerCols.length === 0 && footerLogo && <a class="rf-footer-logo-link" href={localeHome} aria-label="Home"><img class="rf-footer-logo" src={footerLogo} alt="" width="44" height="44" /></a>}
+        {/* bottom meta row: copyright + a single "Language" link (NOT raw locale
+            codes — matches how a real site surfaces its language picker). The
+            switching itself lives elsewhere (the bleedblend top band, or the
+            /language page). `copyright-href`/`language-href` are optional.
+            Suppressed when a columned footer carries the copyright in its brand block. */}
+        {footerCols.length === 0 && (copyright || locales.length > 0) && (
+          <div class="rf-footer-meta">
+            {copyright && (() => {
+              const parts = copyright.split(/　　|　|  /);
+              return parts.map((p) => copyrightHref
+                ? <a class="rf-copy" href={copyrightHref}>{p}</a>
+                : <span class="rf-copy">{p}</span>
+              );
+            })()}
+            {locales.length > 0 && <a class="rf-lang" href={computedLanguageHref}>{languageLabel}</a>}
+          </div>
+        )}
+        {footerLinks.length === 0 && !copyright && <p>{title}</p>}
+      </slot>
+    </footer>
+    {/* package runtimes (body-end, module). Astro bundles <script> imports that live
+        in src/, so the vendored bleedblend auto-runtime ships hashed + tree-shaken. */}
+    {bleed && bleed.bodyScript && <script>import '../packages/bleedblend/auto.mjs';</script>}
+    {localeBanner && <script>import '@cvernet/signet/locale-banner.js';</script>}
+    {themeToggle && <script>import '../packages/theme-toggle/theme-toggle.js';</script>}
+    {blogSearch && <script>import '../packages/blog-search/blog-search.js';</script>}
+    {/* blog-archive island: (a) wires the tag-PILL row's in-page filter (needs no index),
+        and (b) rebuilds a paginated index's list from the FULL corpus when opened with a ?tag=/?ym=
+        sidebar deep link (the recent-page DOM only holds one page, so a hide/show filter
+        shows blanks for the long tail). Gated on hasBlog, NOT blogSearch: the pill wiring must ship
+        for pill sites that have no search, and the full-corpus fetch no-ops gracefully when
+        search-index.json is empty ('[]' — the endpoint always exists). No-ops without a .bl-list. */}
+    {/* Copy for that island. It runs in the browser and used to carry hardcoded literals of a single
+        language (empty-state, clear-filter, and a "<year> <month>" label), so every other site's
+        filtered view spoke a language nobody chose. Handing it a JSON blob keeps the locale tables server-side: one table,
+        not a second copy compiled into a bundle. `ym` is precomputed per month present in the corpus,
+        so the island never has to know how a language orders a year and a month. */}
+    {hasBlog && <script type="application/json" data-bl-copy set:html={JSON.stringify((() => {
+      const u = lingo.uiCopy(lang);
+      const ym = {};
+      for (const p of blogPosts) {
+        const d = String(p.date || '');
+        if (d.length >= 7) ym[d.slice(0, 7)] = lingo.dateHeading(lang, d.slice(0, 4), d.slice(5, 7));
+      }
+      const months = Array.from({ length: 12 }, (_, i) => u.monthShort(i + 1));
+      return { noMatches: u.noMatches, clearFilter: u.clearFilter, countWrap: u.countWrap, months, ym };
+    })()).replace(/</g, '\\u003c')} />}
+    {hasBlog && <script>import '../packages/blog-archive/blog-archive.js';</script>}
+    {/* canonical-redirect island (REEF with Blog): maps legacy ?p=/?cat=/?m=/?author= URLs to their
+        pretty canonical page via /redirect-map.json. Guards on window.__canonicalRedirect (set above)
+        so it fetches nothing unless a watched legacy param is present. Opt-in via blog-canonical-redirects. */}
+    {canonicalRedirectParams.length > 0 && <script>import '../packages/canonical-redirect/canonical-redirect.js';</script>}
+    {/* header-actions / nav-mobile a11y polish (Esc-close + Enter/Space on label buttons).
+        The open/close reveal itself is pure CSS; this island only adds keyboard access. */}
+    {(headerActions.length > 0 || navMobile) && <script>import '../packages/header-actions/header-actions.js';</script>}
+    {/* header-actions cart WIRING island — binds the header cart drawer/badge to the square-shop
+        coral's persistent cart, site-wide. Opt-in: only imported when `header-actions-cart-guild`
+        is set (cartWired), so non-opted sites never load it and render byte-identical. */}
+    {cartWired && <script>import '../packages/header-actions/header-actions-cart.js';</script>}
+    {/* age-gate persistence island: on CONFIRM, write sessionStorage so the visitor
+        isn't re-prompted on the next page, and mark the doc revealed. The CSS reveal
+        already fires from the native checkbox check; this only adds persistence +
+        keyboard (Enter/Space) support for the <label>-as-button. */}
+    {ageGate && (
+      <script is:inline define:vars={{ k: ageGate.key }}>
+        (function () {
+          var l = document.querySelector('[data-age-gate-confirm]');
+          if (!l) return;
+          function ok() {
+            try { sessionStorage.setItem(k, '1'); } catch (e) {}
+            document.documentElement.setAttribute('data-age-confirmed', '');
+          }
+          l.addEventListener('click', ok);
+          l.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              var cb = document.getElementById('st-age-gate-check');
+              if (cb) cb.checked = true;
+              ok();
+            }
+          });
+        })();
+      </script>
+    )}
+    <script>import '../packages/header-overlay/header-overlay.js';</script>
+  </body>
+</html>

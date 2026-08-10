@@ -1,0 +1,43 @@
+---
+// REEF with Blog — WP category archive /category/<slug>/page/<n> (pages 2+; page 1 is
+// ../index.astro). Fans out to (category × page 2..totalPages). No-op unless
+// `blog-category-routes` is truthy AND `blog-page-size` is set.
+import ArchiveView from '../../../../components/ArchiveView.astro';
+import { uiCopy } from '../../../../packages/lingo/locale.mjs';
+import { allPosts, siteMeta, kvMap, archivePrefixes } from '../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const posts = allPosts(
+    import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const on = meta['blog-category-routes'] != null && String(meta['blog-category-routes']) !== 'false';
+  if (!on) return [];
+  const pageSize = Number(meta['blog-page-size']) || 0;
+  if (!pageSize) return [];
+  const seen = new Set();
+  const cats = [];
+  for (const p of posts) for (const c of (p.categories || [])) if (c && !seen.has(c)) { seen.add(c); cats.push(c); }
+  const paths = [];
+  for (const slug of cats) {
+    const count = posts.reduce((n, p) => n + ((p.categories || []).includes(slug) ? 1 : 0), 0);
+    const totalPages = Math.ceil(count / pageSize) || 1;
+    for (let n = 2; n <= totalPages; n++) {
+      paths.push({ params: { slug, n: String(n) }, props: { posts, meta, slug, pageNum: n } });
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, slug, pageNum } = Astro.props;
+const base = String(meta['blog-category-base'] || '/category').replace(/\/$/, '');
+const names = kvMap(meta['blog-category-names']);
+const heading = names[slug] || slug;
+const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
+const subhead = archivePrefixes(meta).category + heading;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

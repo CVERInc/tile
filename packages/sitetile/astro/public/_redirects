@@ -1,0 +1,18 @@
+# Cloudflare Pages redirects, shipped by the renderer for every site it builds.
+# A site's own assets are copied OVER this directory, so a site that needs different rules can
+# simply ship its own _redirects — the tenant outranks the platform, as everywhere else.
+
+# Feed aliases. 🩸 2026-08-06: /feed answered 404 on every feelreef site. That is WordPress's
+# canonical feed path, so a site migrating here pointed every subscriber it already had at nothing —
+# the quietest way to lose the readers a site arrives with. /feeds/posts/default is Blogger's, and
+# this renderer already reproduces Blogger's /search/label archives for the same reason.
+#
+# A 301 rather than a second copy of the document: one canonical feed URL, and a reader that follows
+# the redirect records the new address instead of subscribing twice. It also avoids serving XML from
+# an extensionless static file, which Cloudflare Pages would hand over as application/octet-stream —
+# a "capability" that answers 200 with the wrong content type is not a capability.
+/feed                   /rss.xml  301
+/feed/                  /rss.xml  301
+/rss                    /rss.xml  301
+/feeds/posts/default    /rss.xml  301
+/feeds/posts/default/   /rss.xml  301

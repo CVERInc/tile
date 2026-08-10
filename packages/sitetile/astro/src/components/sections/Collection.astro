@@ -1,0 +1,123 @@
+---
+import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+// `collection` — a list of items, optionally grouped by category, with category jump-pills.
+// General: catalogs, portfolios, team pages, tag lists.
+// IR: `## title` + `%% sitetile: collection eyebrow="..." link="label"→href %%` + intro body,
+// then `### Category` groups each holding `#### name →href "badge"` item cards.
+// Layout: a HEAD (title + intro + link) on the page field, then a full-bleed BELT
+// (eyebrow + jump-pills + grouped cards) — mirrors a dark projects belt.
+import { parseParams, inlineHtml, bodyHtml, slugify } from '@sitetile';
+import Arrow from '@cvernet/signet/Arrow.astro';   // tail-retract hover morph — every live
+// /oss "View on GitHub"/"Learn more" link + the head's link=/GitHub button carries this; a bare "→"
+// text glyph (what this used to render) has no `.signet-arrow__tail` to retract, so hover was inert.
+import '@cvernet/signet/arrow.css';
+const { section, hero, lang } = Astro.props;
+// per-locale UI chrome strings (mirrors a real card meta row in each language —
+// word order differs, not just a label swap: en "Updated {x}" vs zh/ja "{x} 更新/更新" suffix vs
+// ko "업데이트 날짜: {x}" prefix+colon).
+const L = String(lang || DEFAULT_LANG).toLowerCase();
+const UI = {
+  'zh-tw': { updated: (x) => `${x} 更新`, gh: '在 GitHub 看', learn: '了解更多' },
+  'ja-jp': { updated: (x) => `${x} 更新`, gh: 'GitHub で見る', learn: '詳しく見る' },
+  'ko-kr': { updated: (x) => `업데이트 날짜: ${x}`, gh: 'GitHub에서 보기', learn: '자세히 알아보기' },
+}[L] || { updated: (x) => `Updated ${x}`, gh: 'View on GitHub', learn: 'Learn more' };
+const Title = hero ? 'h1' : 'h2';   // first section on the page → <h1> (page hero heading)
+const CardTitle = hero ? 'h2' : 'h3';   // card titles sit ONE level below the section title — no skipped heading level (a11y/SEO), matches hand-authored live
+const pm = parseParams(section.params);
+const groups = section.groups || [];
+const multi = groups.length > 1;
+const gid = (t) => 'group-' + slugify(t, 'g');
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const link = pm.link && typeof pm.link === 'object' ? pm.link : null;
+const isGh = (h) => /github\.com/.test(h || '');
+const isExternal = (h) => /^https?:\/\//.test(h || '');
+// external links open in a new tab (rel=noopener), same rule as every other button surface
+// (design 2026-07-13). Internal links (learn pages, anchors) stay in the same tab.
+const tgt = (h) => isExternal(h) ? { target: '_blank', rel: 'noopener' } : {};
+const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Boolean);
+---
+<section class="st-collection">
+  <div class="st-collection-head">
+    {/* 🩸 2026-07-06 (v2 gate /oss incident): inner wrapper mirrors the belt's own
+        outer-padding/inner-max-width split (`.st-collection-belt`/`-belt-inner`), matching
+        live's real DOM (`<section class="px-6">` wrapping `<div class="max-w-3xl mx-auto">`
+        with no padding of its own) — putting padding and max-width on the SAME element ate
+        into the content width and threw off every line's X position. */}
+    <div class="st-collection-head-inner">
+      {section.title && <Title set:html={inlineHtml(section.title)} />}
+      {section.body && <Fragment set:html={bodyHtml(section.body)} />}
+      {link && (
+        <a class={`st-collection-link${isGh(link.href) ? ' st-collection-link-gh' : ''}`} href={link.href} {...tgt(link.href)}>
+          {isGh(link.href) && (
+            <svg class="st-gh-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          )}
+          <span>{link.label}</span>
+          <Arrow direction={isExternal(link.href) ? 'up-right' : 'right'} size={16} />
+        </a>
+      )}
+    </div>
+  </div>
+  <div class="st-collection-belt">
+    <div class="st-collection-belt-inner">
+      {eyebrow && <p class="st-collection-eyebrow">{eyebrow}</p>}
+      {multi && (
+        <nav class="st-collection-pills" aria-label="Categories">
+          {groups.map((g) => <a class="st-collection-pill" href={`#${gid(g.title)}`} set:html={inlineHtml(g.title)} />)}
+        </nav>
+      )}
+      {groups.map((g) => (
+        <div class="st-collection-group">
+          <p class="st-collection-group-head" id={gid(g.title)} set:html={inlineHtml(g.title)} />
+          <div class="st-cells">
+            {(g.items || []).map((it) => {
+              // 🩸 corrected 2026-07-06 (v2 gate /oss incident): live's real card is a bordered,
+              // padded, whole-card-clickable "composite" surface (the Card.astro
+              // `shape="composite"`: rounded-3xl p-8, glass border, absolute inset-0 overlay <a>)
+              // — an earlier session's comment ("live /oss = flat rows, not link-wrapped cards")
+              // was wrong and got baked into a theme as a rule that zeroed out padding/border/
+              // radius entirely. That's the root cause the maintainer caught by eye (98.1% ✅
+              // with the whole card treatment missing — pixelmatch doesn't weight "structure"
+              // any higher than a stray pixel). Primary destination mirrors the real source:
+              // learn page if present, else the GitHub URL itself.
+              const primaryHref = it.learn || it.href;
+              return (
+              <div class="st-cell st-item">
+                {primaryHref && <a class="st-item-cover" href={primaryHref} {...tgt(primaryHref)} aria-label={it.title} />}
+                <div class="st-item-head">
+                  <CardTitle set:html={inlineHtml(it.title)} />
+                  {it.badge && <span class="st-item-badges">{badges(it.badge).map((x) => <span class="st-item-badge">{x}</span>)}</span>}
+                </div>
+                <Fragment set:html={bodyHtml(it.body)} />
+                {it.tags && it.tags.length > 0 && (
+                  <div class="st-item-tags">
+                    {it.tags.map((x) => <span class="st-item-tag">{x}</span>)}
+                  </div>
+                )}
+                {(it.href || it.learn) && (
+                  <div class="st-item-meta">
+                    <div class="st-item-meta-left">
+                      {it.updated && <span class="st-item-updated">{UI.updated(it.updated)}</span>}
+                      {/* 🩸 corrected 2026-07-05 (Sonnet /oss cancellation-signature dig): live only makes
+                          "View on GitHub" its own <a> when the card ALSO has a learn page (the card-wide
+                          overlay link then points to learn, so GH needs its own anchor); without a learn
+                          page the whole card already links to GitHub, so live renders it as plain text
+                          (confirmed on sheersweep/clioil). Rendering it as an <a> in both cases added 2
+                          extra anchor-tagged text occurrences recastfid doesn't see on live, which threw
+                          off its repeated-text pairing for every card after them. */}
+                      {it.updated && it.href && it.learn && <span class="st-item-sep" aria-hidden="true">|</span>}
+                      {it.href && (it.learn
+                        ? <a class="st-item-gh" href={it.href} {...tgt(it.href)}><svg class="st-item-gh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>{UI.gh} <Arrow direction="up-right" size={12} /></a>
+                        : <span class="st-item-gh"><svg class="st-item-gh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>{UI.gh} <Arrow direction="up-right" size={12} /></span>)}
+                    </div>
+                    {it.learn && <a class="st-item-learn" href={it.learn}>{UI.learn} <Arrow direction="right" size={12} /></a>}
+                  </div>
+                )}
+              </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

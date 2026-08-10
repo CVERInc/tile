@@ -1,0 +1,26 @@
+---
+// `social` — a "follow / find us on" band: heading + caption blurb + a row of social link
+// buttons (first = primary/filled, rest = outline). General: any follow / contact-links band.
+// Unlike `cta` (buttons-first belt), order here is heading → caption → buttons. Mirrors the
+// reference renderer's `case 'social'` (site-core.js) so the editor preview matches the build.
+// IR: `## Title` + `%% sitetile: social %%` + caption prose + a links-only paragraph
+// (`[Patreon](url) · [Instagram](url) · [X](url)`); the button row renders after the caption.
+import { parseParams, inlineHtml, bodyHtml, socialParts, linkButtonsHtml } from '@sitetile';
+const { section, hero } = Astro.props;
+const Title = hero ? 'h1' : 'h2';
+// 🔴 The result was discarded here — the call was kept only to VALIDATE the params.
+// It has a reader now, so it is bound.
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam every other
+// heading-bearing coral now has. 🩸 Three had it and six did not, with nothing in the
+// grammar explaining the split; authors reasonably used it everywhere and it silently
+// did nothing. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const sp = socialParts(section.body);
+---
+<section class="st-social">
+  {eyebrow && <p class="st-social-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
+  {sp.caption && <Fragment set:html={bodyHtml(sp.caption)} />}
+  <Fragment set:html={linkButtonsHtml(sp.links, 'st-social')} />
+</section>

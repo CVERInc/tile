@@ -1,0 +1,42 @@
+---
+import { parseParams, inlineHtml, bodyHtml, orderedProseHtml, heroParts, linkButtonsHtml, imgTag } from '@sitetile';
+const { section, hero } = Astro.props;
+// first section on the page → its title is the page's primary heading → <h1> (one per page)
+const Title = hero && section.title ? 'h1' : 'h2';
+const pm = parseParams(section.params);
+// `align=left` opts a prose section out of the default centered lead-band styling
+// (content-heavy pages like /about, /oss, legal read left-aligned).
+const align = pm.align ? (typeof pm.align === 'object' ? pm.align.label : pm.align) : null;
+// `ordered` (bare flag) = a numbered-sections prose (legal/policy). CONTENT stays plain
+// `### Heading`s; the THEME decides how to number them (e.g. number-in-gutter
+// ordered list). Block carries structure; theme carries the site-specific treatment.
+const ordered = pm.ordered != null;
+// 🩸 general (2026-07-05): a trailing paragraph that's ONLY links (e.g. `[A](url) · [B](url)`)
+// renders as real CTA buttons, mirroring Hero's identical `heroParts`/`linkButtonsHtml` seam —
+// found on a real /about page, where the closing links are bordered pill buttons, not inline
+// text joined by "·". Reuses the exact same parser so both seams stay in lockstep.
+const hp = heroParts(section.body);
+// `surface=<token>` — OPT-IN per-section background belt (cream/teal). Absent → the prose
+// section stays transparent (theme default). Styled by the THEME (`[data-surface]`).
+const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
+// `eyebrow="…"` — OPT-IN small label above the heading, same seam as Hero's identical param
+// (`st-hero-eyebrow`/`eyebrow=`). Found on a real product page: a teal cross-sell belt
+// has a "REEF + MixFairy" label above the h2 that the prose block had no way to express — general
+// Card-family primitive, not a mixfairy-only hack. Absent → no DOM change (byte-identical elsewhere).
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+---
+<section class="st-prose" data-align={align} data-ordered={ordered ? '' : undefined} data-surface={surface}>
+  {eyebrow && <p class="st-prose-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
+  {ordered ? (
+    <Fragment set:html={orderedProseHtml(section.body)} />
+  ) : hp.buttons.length || hp.images.length ? (
+    <Fragment set:html={
+      bodyHtml(hp.text)
+      + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-prose') : '')
+      + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '')
+    } />
+  ) : (
+    <Fragment set:html={bodyHtml(section.body)} />
+  )}
+</section>

@@ -1,0 +1,686 @@
+/**
+ * bleedblend v2 — utils (ESM)
+ *
+ * Smart iOS Safari chrome tinting helpers. The exported `createBleedblendAuto()`
+ * controller and the `bleedblend/auto` entry give you a zero-config setup that
+ * paints status bar + URL bar to match the page content at each viewport
+ * edge — gradient interp, opaque sections, page-end overscroll all handled.
+ *
+ * See HANDOFF.md (in repo root during dev) for the mental model and the
+ * iOS 26 quirks this library navigates around.
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Color utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Last-resort normalizer for color values regex can't read — oklch(), lab(),
+// lch(), hwb(), color(display-p3 …), named keywords, etc. getComputedStyle
+// serializes these verbatim (not down-converted to rgb), so we paint 1px and
+// read it back as sRGB. Works for ANY CSS color the browser can render.
+// DOM-only: returns null off-DOM (e.g. Node), keeping the pure path pure.
+let _normCtx;
+function normalizeViaCanvas(str) {
+  if (typeof document === 'undefined') return null;
+  try {
+    if (!_normCtx) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 1;
+      _normCtx = cv.getContext('2d', { willReadFrequently: true });
+    }
+    _normCtx.clearRect(0, 0, 1, 1);
+    _normCtx.fillStyle = 'rgba(0,0,0,0)'; // invalid input leaves this → alpha 0
+    _normCtx.fillStyle = str;
+    _normCtx.fillRect(0, 0, 1, 1);
+    const d = _normCtx.getImageData(0, 0, 1, 1).data;
+    if (d[3] === 0) return null; // unparseable or fully transparent
+    return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+  } catch (e) {
+    return null;
+  }
+}
+
+export function parseColor(str) {
+  if (!str) return null;
+  const s = str.trim();
+  if (s.startsWith('#')) {
+    const hex = s.slice(1);
+    if (hex.length === 3) {
+      return { r: parseInt(hex[0] + hex[0], 16), g: parseInt(hex[1] + hex[1], 16), b: parseInt(hex[2] + hex[2], 16), a: 1 };
+    }
+    if (hex.length === 6) {
+      return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16), a: 1 };
+    }
+    if (hex.length === 8) {
+      return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16), a: parseInt(hex.slice(6, 8), 16) / 255 };
+    }
+  }
+  const m = s.match(/rgba?\(([^)]+)\)/);
+  if (m) {
+    const parts = m[1].split(',').map((p) => p.trim());
+    return {
+      r: parseFloat(parts[0]),
+      g: parseFloat(parts[1]),
+      b: parseFloat(parts[2]),
+      a: parts[3] != null ? parseFloat(parts[3]) : 1,
+    };
+  }
+  return normalizeViaCanvas(s);
+}
+
+export function parseColorWithAlpha(str) {
+  if (!str) return null;
+  const c = parseColor(str);
+  if (!c) return null;
+  if (str.trim().startsWith('rgba')) {
+    const m = str.match(/[\d.]+/g);
+    if (m && m.length >= 4) c.a = parseFloat(m[3]);
+  }
+  return c;
+}
+
+export function colorToRgb(c) {
+  return c ? 'rgb(' + Math.round(c.r) + ', ' + Math.round(c.g) + ', ' + Math.round(c.b) + ')' : null;
+}
+
+export function colorToHex(c) {
+  if (!c) return null;
+  const h = (n) => Math.round(n).toString(16).padStart(2, '0');
+  return '#' + h(c.r) + h(c.g) + h(c.b);
+}
+
+export function isOpaque(colorStr) {
+  const c = parseColor(colorStr);
+  return !!c && c.a >= 0.9;
+}
+
+export function colorsClose(a, b, threshold = 8) {
+  if (!a || !b) return false;
+  return Math.abs(a.r - b.r) < threshold && Math.abs(a.g - b.g) < threshold && Math.abs(a.b - b.b) < threshold;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gradient parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Extract a leading CSS color token from a gradient stop: #hex, a function
+// color with balanced parens (rgb()/hsl()/oklch()/lab()/color() …), or a bare
+// named keyword. Lets parseGradient survive modern-syntax stops that
+// getComputedStyle leaves un-normalized (e.g. oklch / color(display-p3 …)).
+function leadingColorToken(p) {
+  if (p[0] === '#') {
+    const m = p.match(/^#[0-9a-fA-F]{3,8}/);
+    return m ? m[0] : null;
+  }
+  if (/^[a-zA-Z][\w-]*\(/.test(p)) {
+    let depth = 0;
+    for (let i = 0; i < p.length; i++) {
+      if (p[i] === '(') depth++;
+      else if (p[i] === ')') { depth--; if (depth === 0) return p.slice(0, i + 1); }
+    }
+    return null; // unbalanced parens
+  }
+  const id = p.match(/^[a-zA-Z]{2,}/);
+  return id ? id[0] : null;
+}
+
+// Parse a linear-gradient string into ordered stops { color, pos } where
+// pos is 0..1. Tolerates the form getComputedStyle returns (direction may be
+// dropped when it's the 180deg default).
+export function parseGradient(bgImage) {
+  if (!bgImage || bgImage === 'none') return null;
+  const lg = bgImage.match(/linear-gradient\(([\s\S]+)\)/);
+  if (!lg) return null;
+  const inner = lg[1];
+  const parts = [];
+  let depth = 0;
+  let buf = '';
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      parts.push(buf);
+      buf = '';
+    } else buf += ch;
+  }
+  if (buf) parts.push(buf);
+  const stops = [];
+  for (const raw of parts) {
+    const p = raw.trim();
+    if (/^(\d+(\.\d+)?(deg|turn|rad|grad)|to\s+\w+(\s+\w+)?)$/i.test(p)) continue;
+    const colorTok = leadingColorToken(p);
+    if (!colorTok) continue;
+    const color = parseColor(colorTok);
+    if (!color) continue;
+    const posMatch = p.slice(colorTok.length).match(/(-?\d+(?:\.\d+)?)\s*%/);
+    stops.push({ color, posPct: posMatch ? parseFloat(posMatch[1]) : null });
+  }
+  if (stops.length === 0) return null;
+  if (stops[0].posPct == null) stops[0].posPct = 0;
+  if (stops[stops.length - 1].posPct == null) stops[stops.length - 1].posPct = 100;
+  for (let i = 1; i < stops.length - 1; i++) {
+    if (stops[i].posPct != null) continue;
+    let next = i + 1;
+    while (next < stops.length && stops[next].posPct == null) next++;
+    const span = stops[next].posPct - stops[i - 1].posPct;
+    const step = span / (next - (i - 1));
+    for (let j = i; j < next; j++) stops[j].posPct = stops[i - 1].posPct + step * (j - (i - 1));
+  }
+  return stops.map((s) => ({ color: s.color, pos: s.posPct / 100 }));
+}
+
+export function gradientColorAt(stops, progress) {
+  if (!stops || stops.length === 0) return null;
+  if (progress <= stops[0].pos) return stops[0].color;
+  if (progress >= stops[stops.length - 1].pos) return stops[stops.length - 1].color;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (progress >= a.pos && progress <= b.pos) {
+      const span = b.pos - a.pos;
+      const t = span > 0 ? (progress - a.pos) / span : 0;
+      return {
+        r: a.color.r + t * (b.color.r - a.color.r),
+        g: a.color.g + t * (b.color.g - a.color.g),
+        b: a.color.b + t * (b.color.b - a.color.b),
+        a: 1,
+      };
+    }
+  }
+  return stops[stops.length - 1].color;
+}
+
+export function gradientColorAtY(stops, y, viewportHeight) {
+  const vh = viewportHeight || window.innerHeight || 1;
+  const progress = Math.max(0, Math.min(1, y / vh));
+  return gradientColorAt(stops, progress);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Safe area + viewport probes
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Measure actual safe-area-inset in px. env() only falls back when undefined,
+// not when 0 — so we need an active probe (iPhone Mirroring reports 0).
+export function measureInset(side) {
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;visibility:hidden;pointer-events:none;' +
+    side +
+    ':env(safe-area-inset-' +
+    side +
+    ',0px);';
+  document.body.appendChild(probe);
+  const v = parseFloat(getComputedStyle(probe)[side]) || 0;
+  probe.remove();
+  return v;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Background fill detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Detect the "fill" sitting behind page content — used as fallback when a
+// boundary probe lands in a transparent area. Priority: body::before fixed
+// gradient/solid > body > html.
+//   { kind: 'gradient', stops, isFixed }
+//   { kind: 'solid',    color }
+//   null
+export function detectBackgroundFill() {
+  const before = getComputedStyle(document.body, '::before');
+  if (before.position === 'fixed' || before.position === 'absolute') {
+    const stops = parseGradient(before.backgroundImage);
+    if (stops) return { kind: 'gradient', stops, isFixed: true };
+    if (isOpaque(before.backgroundColor)) return { kind: 'solid', color: parseColor(before.backgroundColor) };
+  }
+  const bodyS = getComputedStyle(document.body);
+  const bodyG = parseGradient(bodyS.backgroundImage);
+  if (bodyG) return { kind: 'gradient', stops: bodyG, isFixed: bodyS.backgroundAttachment === 'fixed' };
+  if (isOpaque(bodyS.backgroundColor)) return { kind: 'solid', color: parseColor(bodyS.backgroundColor) };
+  const htmlS = getComputedStyle(document.documentElement);
+  const htmlG = parseGradient(htmlS.backgroundImage);
+  if (htmlG) return { kind: 'gradient', stops: htmlG, isFixed: htmlS.backgroundAttachment === 'fixed' };
+  if (isOpaque(htmlS.backgroundColor)) return { kind: 'solid', color: parseColor(htmlS.backgroundColor) };
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Composite color sampling at a viewport point
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Sample the visually composited color at viewport (x, y). Walks up the DOM
+// from elementFromPoint, collects every translucent/opaque bg-color, then
+// alpha-composites them in stacking order. Returns parsed color or null if
+// no opaque base is found before reaching <html>. Hides ignoreIds while
+// sampling so we don't pick up our own tint.
+export function sampleColorAt(x, y, ignoreIds = []) {
+  const saved = ignoreIds.map((id) => {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const d = el.style.display;
+    el.style.display = 'none';
+    return { el, d };
+  });
+  let element = document.elementFromPoint(x, y);
+  saved.forEach((s) => {
+    if (s) s.el.style.display = s.d;
+  });
+  if (!element) return null;
+
+  const stack = [];
+  while (element && element !== document.documentElement) {
+    const c = parseColorWithAlpha(window.getComputedStyle(element).backgroundColor);
+    if (c && c.a > 0.001) {
+      stack.push(c);
+      if (c.a >= 0.999) break;
+    }
+    element = element.parentElement;
+  }
+  if (stack.length === 0) return null;
+  if (stack[stack.length - 1].a < 0.999) return null;
+
+  let r = stack[stack.length - 1];
+  for (let i = stack.length - 2; i >= 0; i--) {
+    const fg = stack[i];
+    const a = fg.a;
+    r = {
+      r: fg.r * a + r.r * (1 - a),
+      g: fg.g * a + r.g * (1 - a),
+      b: fg.b * a + r.b * (1 - a),
+      a: 1,
+    };
+  }
+  return r;
+}
+
+// Color Safari tints chrome with NATURALLY (no tint override): body bg if
+// opaque, else html bg.
+export function naturalSafariColor() {
+  const bodyBg = parseColorWithAlpha(getComputedStyle(document.body).backgroundColor);
+  if (bodyBg && bodyBg.a > 0.999) return bodyBg;
+  return parseColor(getComputedStyle(document.documentElement).backgroundColor);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Last-opaque-section detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_SECTION_SELECTOR = 'main section, main > *, footer';
+
+export function findLastOpaqueSection(selector = DEFAULT_SECTION_SELECTOR) {
+  const candidates = document.querySelectorAll(selector);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const c = parseColorWithAlpha(getComputedStyle(candidates[i]).backgroundColor);
+    if (c && c.a > 0.999) return candidates[i];
+  }
+  return null;
+}
+
+// Is the element at viewport (xMid, y) inside `lastSection`?
+export function isInsideSection(y, lastSection, ignoreIds = []) {
+  if (!lastSection) return false;
+  const saved = ignoreIds.map((id) => {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const d = el.style.display;
+    el.style.display = 'none';
+    return { el, d };
+  });
+  let el = document.elementFromPoint(window.innerWidth / 2, y);
+  saved.forEach((s) => {
+    if (s) s.el.style.display = s.d;
+  });
+  while (el && el !== document.documentElement) {
+    if (el === lastSection) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
+
+// Classify the page-end opaque section as a DESIGNED end-zone vs an INCIDENTAL
+// footer — the distinction that decides how far the page-end overwrite reaches.
+// See HANDOFF.md "footer flood".
+//   true  → designed end-zone: overscroll is meant to match it, so the full
+//           html + body + body::before overwrite is correct.
+//   false → incidental footer (short footer on a flat content page): only the
+//           rubber-band exposed <html> should be tinted; overwriting the fixed
+//           full-viewport body::before would flood the visible background.
+export function isDesignedEndZone(lastSection, fill) {
+  if (!lastSection) return false;
+  const vh = (typeof window !== 'undefined' && window.innerHeight) || 1;
+  const r = lastSection.getBoundingClientRect();
+  // A closing section that dominates the viewport (≥ half) reads as a designed
+  // ending: it already covers most of the screen, so matching body/overscroll
+  // to it is seamless, not a flood.
+  if (r.height >= vh * 0.5) return true;
+  // A page-spanning gradient behind the content is a designed gradient ending;
+  // the overscroll is meant to continue it down to the footer.
+  if (fill && fill.kind === 'gradient') return true;
+  // Flat opaque page background: seamless only when the footer continues that
+  // same color. A short, high-contrast footer is incidental → don't flood.
+  if (fill && fill.kind === 'solid') {
+    const footer = parseColor(getComputedStyle(lastSection).backgroundColor);
+    return colorsClose(fill.color, footer, 24);
+  }
+  // No detectable fill + short footer → treat as incidental (safe default:
+  // tint <html> for overscroll, leave the visible body alone).
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// theme-color <meta>
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function setMetaThemeColor(hex) {
+  if (!hex) return;
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  if (metas.length === 0) {
+    const m = document.createElement('meta');
+    m.name = 'theme-color';
+    m.content = hex;
+    document.head.appendChild(m);
+  } else {
+    metas.forEach((m) => m.setAttribute('content', hex));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main controller — creates tints, runs the smart tinting state machine
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TINT_ACTIVE_PX = 12; // just above iOS Safari's 3px sampling threshold
+
+const isIOS =
+  typeof navigator !== 'undefined' &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+const TINT_TOP_ID = 'bleedblend-tint-top';
+const TINT_BOT_ID = 'bleedblend-tint-bottom';
+const IGNORE_IDS = [TINT_TOP_ID, TINT_BOT_ID];
+
+function ensureTint(id, isTop) {
+  let el = document.getElementById(id);
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = id;
+  el.style.cssText =
+    'position:fixed;left:0;width:100%;height:0;z-index:99999;' +
+    'pointer-events:none;-webkit-backdrop-filter:none;backdrop-filter:none;' +
+    'box-sizing:content-box;' +
+    (isTop ? 'top:0;' : 'bottom:0;');
+  document.body.appendChild(el);
+  return el;
+}
+
+function ensureBeforeOverride() {
+  let el = document.getElementById('bleedblend-before-override');
+  if (el) return el;
+  el = document.createElement('style');
+  el.id = 'bleedblend-before-override';
+  document.head.appendChild(el);
+  return el;
+}
+
+// One-time injection of CSS transitions on html / body / body::before
+// background so the page-end colour overwrite fades smoothly instead of snapping.
+function ensureTransitionStyle() {
+  let el = document.getElementById('bleedblend-transition-style');
+  if (el) return el;
+  el = document.createElement('style');
+  el.id = 'bleedblend-transition-style';
+  el.textContent =
+    'html, body { transition: background-color 400ms ease; } ' +
+    'body::before { transition: background 400ms ease; }';
+  document.head.appendChild(el);
+  return el;
+}
+
+/**
+ * createBleedblendAuto — zero-config controller.
+ *
+ * Returns `{ update, destroy }`. Call once on page ready (or use
+ * `bleedblend/auto` which calls this for you).
+ *
+ * Options:
+ *   sectionSelector  CSS selector for opaque "section"-like elements used
+ *                    to find the page-end section. Default:
+ *                    'main section, main > *, footer'.
+ *   onPageLoad       function(update). Called once at init; pass the
+ *                    update function so frameworks (Astro, SvelteKit…)
+ *                    can rerun bleedblend after their own page-transition
+ *                    events. Example:
+ *                      onPageLoad: (update) =>
+ *                        document.addEventListener('astro:page-load', update)
+ */
+export function createBleedblendAuto(options = {}) {
+  if (typeof document === 'undefined') return { update() {}, destroy() {} };
+
+  const sectionSelector = options.sectionSelector || DEFAULT_SECTION_SELECTOR;
+  const cleanups = [];
+
+  function pickVisible(sel) {
+    const list = document.querySelectorAll(sel);
+    for (const el of list) {
+      if (el.hidden) continue;
+      const s = window.getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden') continue;
+      return el;
+    }
+    return null;
+  }
+
+  function colorAtY(y, fill, xMid) {
+    const probed = sampleColorAt(xMid, y, IGNORE_IDS);
+    if (probed) return { color: probed, source: 'section' };
+    if (fill && fill.kind === 'gradient') return { color: gradientColorAtY(fill.stops, y), source: 'gradient' };
+    if (fill && fill.kind === 'solid') return { color: fill.color, source: 'gradient' };
+    return null;
+  }
+
+  // Per-edge state resolution.
+  function resolveEdge(edge, userOwned, boundary, lastSection, probeY) {
+    if (userOwned) return { state: 'STICKY_OWNED', color: null };
+    if (edge === 'top') {
+      // Top is ALWAYS SAFE_NATURAL: chrome top stays light/unobtrusive. Safari
+      // naturally samples top edge content — that's correct tinting without
+      // bleed intervention. Sticky-navs take STICKY_OWNED above.
+      return { state: 'SAFE_NATURAL', color: null };
+    }
+    if (!boundary) return { state: 'SAFE_NATURAL', color: null };
+    if (boundary.source === 'section') {
+      // Section reaches bottom edge. OVERRIDE tinting only if it's the LAST
+      // opaque section in DOM (page-end); mid-page sections shouldstep back
+      // so chrome tinting stays light via Safari's edge sampling.
+      if (isInsideSection(probeY, lastSection, IGNORE_IDS)) {
+        return { state: 'BLEED_OVERRIDE', color: boundary.color };
+      }
+      return { state: 'SAFE_NATURAL', color: boundary.color };
+    }
+    // boundary.source === 'gradient' → OVERRIDE tinting only if it would visually
+    // differ from Safari's natural tinting (html/body bg).
+    const natural = naturalSafariColor();
+    if (colorsClose(natural, boundary.color)) {
+      return { state: 'SAFE_NATURAL', color: boundary.color };
+    }
+    return { state: 'BLEED_OVERRIDE', color: boundary.color };
+  }
+
+  function applyTint(el, resolved, isTop) {
+    const padProp = isTop ? 'paddingTop' : 'paddingBottom';
+    if (resolved.state === 'BLEED_OVERRIDE') {
+      if (resolved.color) el.style.backgroundColor = colorToRgb(resolved.color);
+      el.style[padProp] = TINT_ACTIVE_PX + 'px';
+      el.style.display = 'block';
+    } else {
+      // SAFE / STICKY: display:none so Safari truly stops sampling our tint.
+      // (opacity:0 is still sampled per iOS 26 — must be display:none.)
+      el.style.display = 'none';
+      el.style[padProp] = '0px';
+    }
+  }
+
+  let rafScheduled = false;
+  function update() {
+    if (rafScheduled) return;
+    rafScheduled = true;
+    requestAnimationFrame(() => {
+      rafScheduled = false;
+      runUpdate();
+    });
+  }
+
+  function runUpdate() {
+    const topEl = ensureTint(TINT_TOP_ID, true);
+    const botEl = ensureTint(TINT_BOT_ID, false);
+    const beforeOverrideEl = ensureBeforeOverride();
+    ensureTransitionStyle();
+    const htmlEl = document.documentElement;
+
+    const userTop = pickVisible('.bleedblend-top:not(#' + TINT_TOP_ID + ')');
+    const userBottom = pickVisible('.bleedblend-bottom:not(#' + TINT_BOT_ID + ')');
+
+    const fill = detectBackgroundFill();
+
+    const safeTop = measureInset('top');
+    const safeTopPx = safeTop > 0 ? safeTop : 20;
+    const probeYTop = safeTopPx + 1;
+    const probeYBot = window.innerHeight - (TINT_ACTIVE_PX + 1);
+    const xMid = window.innerWidth / 2;
+
+    const topC = colorAtY(probeYTop, fill, xMid);
+    const botC = colorAtY(probeYBot, fill, xMid);
+
+    const lastSection = findLastOpaqueSection(sectionSelector);
+
+    const topResolved = resolveEdge('top', !!userTop, topC, lastSection, probeYTop);
+    const botResolved = resolveEdge('bottom', !!userBottom, botC, lastSection, probeYBot);
+
+    window.__bleedblend_top_state = topResolved.state;
+    window.__bleedblend_bot_state = botResolved.state;
+    window.__bleedblend_has_fixed = !!userTop;
+
+    if (!isIOS) {
+      topEl.style.display = 'none';
+      botEl.style.display = 'none';
+      htmlEl.style.backgroundColor = '';
+      document.body.style.backgroundColor = '';
+      beforeOverrideEl.textContent = '';
+      return;
+    }
+
+    applyTint(topEl, topResolved, true);
+    applyTint(botEl, botResolved, false);
+
+    // theme-color follows top probe (iOS 15-18 compat; iOS 26 ignores it).
+    const topHex = colorToHex(topC && topC.color);
+    if (topHex) setMetaThemeColor(topHex);
+
+    // Page-end overscroll tinting — body::before stretches into iOS rubber-band
+    // exposed area, so html bg alone isn't enough. Overwrite html, body,
+    // AND body::before together. Only when LAST opaque section is in view.
+    let lastSectionColor = null;
+    if (lastSection) {
+      const r = lastSection.getBoundingClientRect();
+      if (r.top < window.innerHeight && r.bottom > 0) {
+        lastSectionColor = parseColor(getComputedStyle(lastSection).backgroundColor);
+      }
+    }
+    if (lastSectionColor) {
+      const colorRgb = colorToRgb(lastSectionColor);
+      // overscrollFill decides how far the page-end overwrite reaches:
+      //   'auto'   (default) heuristic — full overwrite on a designed end-zone,
+      //                      <html>-only tint on an incidental flat-page footer.
+      //   'always'           legacy behavior — always overwrite html+body+::before.
+      //   'never'            chrome-edge tint only — never touch html/body bg.
+      const mode = options.overscrollFill || 'auto';
+      const tintHtml = mode !== 'never';
+      const flood =
+        mode === 'always' ? true : mode === 'never' ? false : isDesignedEndZone(lastSection, fill);
+
+      // <html> bg is what iOS rubber-band overscroll exposes — tint it for the
+      // correct overscroll color in every non-'never' case.
+      htmlEl.style.backgroundColor = tintHtml ? colorRgb : '';
+      if (flood) {
+        // Designed end-zone: also overwrite body + the fixed full-viewport
+        // body::before so the whole ending matches.
+        document.body.style.backgroundColor = colorRgb;
+        beforeOverrideEl.textContent = 'body::before { background: ' + colorRgb + ' !important; }';
+      } else {
+        // Incidental footer: leave the visible body + body::before untouched so
+        // a flat content page's background isn't flooded with the footer color.
+        document.body.style.backgroundColor = '';
+        beforeOverrideEl.textContent = '';
+      }
+      if (tintHtml) {
+        const hex = colorToHex(lastSectionColor);
+        if (hex) setMetaThemeColor(hex);
+      }
+    } else {
+      htmlEl.style.backgroundColor = '';
+      document.body.style.backgroundColor = '';
+      beforeOverrideEl.textContent = '';
+    }
+  }
+
+  const passive = { passive: true };
+  window.addEventListener('scroll', update, passive);
+  window.addEventListener('resize', update, passive);
+  cleanups.push(() => window.removeEventListener('scroll', update));
+  cleanups.push(() => window.removeEventListener('resize', update));
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', update, passive);
+    window.visualViewport.addEventListener('scroll', update, passive);
+    cleanups.push(() => window.visualViewport.removeEventListener('resize', update));
+    cleanups.push(() => window.visualViewport.removeEventListener('scroll', update));
+  }
+
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const mqHandler = () => update();
+  if (mq.addEventListener) mq.addEventListener('change', mqHandler);
+  else if (mq.addListener) mq.addListener(mqHandler);
+  cleanups.push(() => {
+    if (mq.removeEventListener) mq.removeEventListener('change', mqHandler);
+    else if (mq.removeListener) mq.removeListener(mqHandler);
+  });
+
+  if (typeof options.onPageLoad === 'function') {
+    try {
+      options.onPageLoad(update);
+    } catch (e) {
+      // user-supplied hook errored — ignore
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', update, { once: true });
+  } else {
+    update();
+  }
+
+  return {
+    update,
+    destroy() {
+      cleanups.forEach((fn) => {
+        try {
+          fn();
+        } catch (e) {}
+      });
+      cleanups.length = 0;
+      [TINT_TOP_ID, TINT_BOT_ID].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
+      const before = document.getElementById('bleedblend-before-override');
+      if (before) before.remove();
+      const transition = document.getElementById('bleedblend-transition-style');
+      if (transition) transition.remove();
+      document.documentElement.style.backgroundColor = '';
+      document.body.style.backgroundColor = '';
+    },
+  };
+}
+
+export default createBleedblendAuto;

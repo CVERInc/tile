@@ -34,4 +34,26 @@ for t in test/*.cjs; do
   node "$t"
 done
 
+# The site renderer's own suite, which arrived with sitetile/pagetile/pwa. Globbed rather than
+# listed: the private repo these came from keeps a hand-written list, and that list silently
+# stopped covering five real test files — a test nothing runs is indistinguishable from a test
+# that passes. Here the glob IS the list, so a new file cannot be orphaned by forgetting to add it.
+echo "→ site renderer tests"
+shopt -s nullglob
+for t in packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs; do
+  echo "  · $t"
+  node "$t"
+done
+shopt -u nullglob
+
+# The astro smoke builds real pages and audits the emitted HTML/JS — the only gate here that does.
+# It needs the renderer's dependencies, so it runs when they are present and SAYS SO by name when
+# they are not, rather than passing quietly on a check that never ran.
+if [ -d packages/sitetile/astro/node_modules ]; then
+  echo "→ sitetile astro smoke"
+  ( cd packages/sitetile/astro && node smoke-build.mjs )
+else
+  echo "  · sitetile astro smoke SKIPPED — no packages/sitetile/astro/node_modules (run npm install there)"
+fi
+
 echo "✅ ALL GREEN"
