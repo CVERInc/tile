@@ -31,12 +31,6 @@ for bundle in ".build/$CONFIG"/*.bundle; do
   [ -e "$bundle" ] && cp -R "$bundle" "$DEST/Contents/Resources/"
 done
 
-RESBUNDLE="$DEST/Contents/Resources/MarktileMac_MarktileApp.bundle"
-if [ ! -f "$RESBUNDLE/Engine/tile-core.js" ] || [ ! -f "$RESBUNDLE/Web/index.html" ]; then
-  echo "✗ the editor engine is missing from the app bundle — the window would open empty." >&2
-  exit 1
-fi
-
 cat > "$DEST/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -88,6 +82,16 @@ PLIST
 
 chmod +x "$DEST/Contents/MacOS/MarktileApp"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+
+# Ask the installed binary, from its install path, whether it can find its own engine — the exact
+# lookup the app performs at launch, no window and no run loop (see EngineResources.swift).
+#
+# The check this replaces asserted that a path of the SCRIPT's choosing existed. It was green for
+# months while the app was actually loading its engine out of the developer's .build directory,
+# because nothing ever compared the script's idea of "installed" with the code's. A check whose
+# subject is not the code cannot fail for the reason you care about.
+echo "▸ verifying the app can load its engine from $DEST"
+"$DEST/Contents/MacOS/MarktileApp" --verify-resources
 
 echo "✓ built $DEST"
 echo "  Double-click it in Finder (unsigned for now: right-click → Open the first time)."
