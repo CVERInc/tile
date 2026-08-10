@@ -1,0 +1,49 @@
+---
+// `gallery` coral — image-first cards (cast / archive / portfolio / shop). Mirrors the reference
+// renderSection 'gallery' case so the editor live-preview matches the Astro build byte-for-byte.
+// Each cell's leading body image floats to a top <figure>; title + caption below. A cell with an
+// href is a whole-card link. General; theme paints `.st-gallery` / `.st-gal-cell` / `.st-gal-fig`.
+import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag } from '@sitetile';
+const { section } = Astro.props;
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
+// already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
+// explaining the split, so authors reasonably put it everywhere: 22 inert `eyebrow=` on
+// one customer site alone, and their agent had written "added bilingual eyebrows" into a
+// plan. Every coral here renders a heading, which is the thing an eyebrow sits above —
+// the inconsistency was arbitrary, not a design. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const cells = section.cells || [];
+// `align=stretch` — OPT-IN equal-height cards (CSS Grid's own default `align-items: stretch`,
+// declared explicitly per-section rather than left as an unstated browser default). Diagnosed on
+// a live related-posts gallery: the row it renders (`display:grid`, no
+// align-items override) stretches every card to the tallest one in its row (measured 412.5px ×3);
+// our default had drifted to per-card natural height. `undefined` (not `''`) when unset, so the
+// attribute is omitted entirely — every other gallery's markup stays byte-identical.
+const align = pm.align || undefined;
+---
+<section class="st-gallery" data-cols={pm.cols || ''} data-align={align}>
+  {eyebrow && <p class="st-gallery-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <h2 set:html={inlineHtml(section.title)} />}
+  {section.body && <Fragment set:html={bodyHtml(section.body)} />}
+  <div class="st-gal-cells">
+    {cells.map((c) => {
+      const fi = firstImage(c.body);
+      const fig = fi.img ? `<figure class="st-gal-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>` : '';
+      const badge = c.badge ? <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} /> : null;
+      const cta = c.cta ? <span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label" set:html={inlineHtml(c.cta)} /></span> : null;
+      const inner = (
+        <Fragment>
+          {badge}
+          <Fragment set:html={fig} />
+          <h3 set:html={inlineHtml(c.title)} />
+          <Fragment set:html={bodyHtml(fi.rest)} />
+          {cta}
+        </Fragment>
+      );
+      return c.href
+        ? <a class="st-gal-cell st-cell-link group" href={c.href}>{inner}</a>
+        : <div class="st-gal-cell">{inner}</div>;
+    })}
+  </div>
+</section>

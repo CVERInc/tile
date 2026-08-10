@@ -20,3 +20,10 @@ node_modules/
 # never commit those staged payloads back into this repo)
 /pub-*/
 /tmp-*/
+
+# astro build scratch — sitetile's renderer and its smoke.
+# dist-smoke/ is the smoke's ISOLATED output (never dist/, which is the shared build berth a real
+# site build writes to); .astro/ is the framework's own cache.
+packages/sitetile/astro/dist-smoke/
+packages/sitetile/astro/dist/
+packages/sitetile/astro/.astro/

@@ -1,0 +1,28 @@
+---
+// `tagcloud` — a weighted category/tag cloud (WP/Blogger `#tag_cloud-N` / `.wp-tag-cloud`
+// widget): a heading + a flow of inline links. No existing vertical/card coral (grid/gallery/
+// collection) expresses an inline-wrapping link flow, so this is its own coral. General: any
+// site with a tag/category cloud module. Mirrors the reference renderer's `case 'tagcloud'`
+// (site-core.js) so the editor preview matches the build.
+// IR: `## Title` + `%% sitetile: tagcloud %%` + a markdown list of `- [Label](/href)` items.
+// The Label carries its own count baked in (e.g. "comic576"), matching how live themes print it.
+import { parseParams, inlineHtml, tagcloudLinks } from '@sitetile';
+const { section, hero } = Astro.props;
+const Title = hero ? 'h1' : 'h2';
+// 🔴 The result was discarded here — the call was kept only to VALIDATE the params.
+// It has a reader now, so it is bound.
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam every other
+// heading-bearing coral now has. 🩸 Three had it and six did not, with nothing in the
+// grammar explaining the split; authors reasonably used it everywhere and it silently
+// did nothing. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const links = tagcloudLinks(section.body);
+---
+<section class="st-tagcloud">
+  {eyebrow && <p class="st-tagcloud-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
+  <div class="st-tag-flow">
+    {links.map((l) => <a class="st-tag" href={l.href} set:html={inlineHtml(l.label)} />)}
+  </div>
+</section>

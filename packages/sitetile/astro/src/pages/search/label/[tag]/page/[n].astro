@@ -1,0 +1,210 @@
+---
+import { DEFAULT_LANG } from '../../../../../packages/lingo/locale.mjs';
+// REEF with Blog — /search/label/<tag>/page/<n>, pages 2+ of a Blogger-style label
+// listing (page 1 lives at /search/label/<tag>/ in ../index.astro). Mirrors
+// /devlog/page/<n>: same buildIndexView() view-model, same `.bl-*` markup and pager, just
+// filtered to one label. Two extra path segments (/page/<n>) keep it clear of the page-1
+// route, exactly like /devlog/page/<n> stays clear of /devlog.
+//
+// getStaticPaths fans out to (tag × page 2..totalPages-for-that-tag): each tag has its own
+// post count, so a 576-post label emits many /page/<n> pages while a 3-post label emits
+// none. No-op (zero output) unless `blog-label-routes` is truthy AND `blog-page-size` is
+// set — so non-Blogger sites and unpaginated sites generate nothing here.
+import SiteLayout from '../../../../../layouts/SiteLayout.astro';
+import { allPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, sidebarCopy } from '../../../../../lib/blog.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
+
+export function getStaticPaths() {
+  const posts = allPosts(
+    import.meta.glob('../../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const on = meta['blog-label-routes'] != null && String(meta['blog-label-routes']) !== 'false';
+  if (!on) return [];
+  const pageSize = Number(meta['blog-page-size']) || 0;
+  if (!pageSize) return []; // no pagination configured — page 1 (index.astro) holds everything
+  // Distinct tags across every post, same order as page-1's getStaticPaths.
+  const seen = new Set();
+  const tags = [];
+  for (const p of posts) for (const t of p.tags) if (t && !seen.has(t)) { seen.add(t); tags.push(t); }
+  const paths = [];
+  for (const tag of tags) {
+    const count = posts.reduce((n, p) => n + (p.tags.includes(tag) ? 1 : 0), 0);
+    const totalPages = Math.ceil(count / pageSize) || 1;
+    // page 1 is index.astro's job; only emit params for page 2..totalPages here.
+    for (let n = 2; n <= totalPages; n++) {
+      paths.push({ params: { tag, n: String(n) }, props: { posts, meta, tag, pageNum: n } });
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, tag, pageNum } = Astro.props;
+// Sidebar chrome copy — resolved once, from the locale table. This was the FIFTH inline copy of
+// the same Chinese literals; a structural test found it after two hand searches had not.
+const sideCopy = sidebarCopy(meta);
+const labelPosts = posts.filter((p) => p.tags.includes(tag));
+const {
+  pagePosts, tags: pillTags, totalPages, currentPage, pager, showSidebar, dateFormat, readMore,
+} = buildIndexView(labelPosts, meta, pageNum);
+const recentPosts = posts.slice(0, 5);
+const archive = showSidebar ? groupByArchive(posts) : [];
+const title = `${tag} — ${meta.title || ''}`;
+const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag}/page/${n}`);
+---
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
+    <div class="bl-main">
+    <header class="bl-head">
+      <h1>{tag}</h1>
+      <p>{archivePrefixes(meta).tag + tag}</p>
+      <a class="bl-rss" href="/rss.xml">RSS FEED</a>
+    </header>
+
+    {pillTags.length > 0 && (
+      <div class="bl-tag-filter js-tag-filter" data-tag-filter hidden>
+        <button class="bl-filter-pill is-active" data-tag="*">All</button>
+        {pillTags.map((t) => <button class="bl-filter-pill" data-tag={t}>{t}</button>)}
+      </div>
+    )}
+
+    <ul class="bl-list">
+      {pagePosts.map((p) => (
+        <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
+          <a class="bl-entry-link" href={postUrl(p, meta)}>
+            {p.image && <img class="bl-entry-img" src={p.image} alt="" loading="lazy" />}
+            {p.date && (dateFormat === 'cjk-badge' ? (
+              <time class="bl-date bl-date-badge">
+                <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>
+                <span class="bl-date-day">{dateBadgeParts(p.date, meta.lang).day}</span>
+                <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
+              </time>
+            ) : (
+              <time class="bl-date">{fmtDate(p.date, dateFormat)}</time>
+            ))}
+            <h2 class="bl-title">{p.title}</h2>
+            {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}
+            {readMore && <span class="bl-read-more">{readMore}</span>}
+          </a>
+          {p.tags.length > 0 && (
+            <div class="bl-tags">{p.tags.map((t) => <span class="bl-tag">{t}</span>)}</div>
+          )}
+        </li>
+      ))}
+    </ul>
+
+    {totalPages > 1 && (
+      <nav class="bl-pager" aria-label="Label pages">
+        {currentPage > 1 && (
+          <a class="bl-pager-link bl-pager-prev" href={pageHref(currentPage - 1)}><Arrow direction="left" size={14} />Prev</a>
+        )}
+        {pager.map((item) => (
+          item.ellipsis
+            ? <span class="bl-pager-ellipsis">…</span>
+            : (item.page === currentPage
+              ? <span class="bl-pager-link bl-pager-current" aria-current="page">{item.page}</span>
+              : <a class="bl-pager-link" href={pageHref(item.page)}>{item.page}</a>)
+        ))}
+        {currentPage < totalPages && (
+          <a class="bl-pager-link bl-pager-next" href={pageHref(currentPage + 1)}>Next <Arrow direction="right" size={14} /></a>
+        )}
+      </nav>
+    )}
+
+    {String(meta['blog-post-cta-default'] || '').trim().toLowerCase() === 'true' && (
+      <aside class="bl-cta">
+        <p>Notes from the workshop — the door is open.</p>
+        <div class="bl-cta-links">
+          <a href="/contact">Get in touch</a>
+          <a href="/donate">Support the work</a>
+        </div>
+      </aside>
+    )}
+    </div>
+    {showSidebar && (
+      <aside class="bl-sidebar">
+        {/* 🩸 fixed 2026-07-13: real `GET /search?q=` form (was a non-functional shell) —
+            gated on blogSearchOn(meta), same as BlogIndexView.astro's sidebar. */}
+        {blogSearchOn(meta) && (
+          <form class="bl-side-search" role="search" action="/search" method="get">
+            <input type="search" name="q" placeholder={sideCopy.search} aria-label="Search" />
+            <button type="submit" aria-label="Search">🔍</button>
+          </form>
+        )}
+        <div class="bl-side-widget bl-side-recent">
+          <h3>{sideCopy.recent}</h3>
+          <ul>{recentPosts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+        </div>
+        {/* 🩸 fixed 2026-07-13: collapsible year→month tree with real `?ym=` links back to the
+            main blog index (archive is site-wide here, not scoped to this label) — same widget
+            as BlogIndexView.astro, see that file for the full note. */}
+        {archive.length > 0 && (
+          <div class="bl-side-widget bl-side-archive">
+            <h3>{sideCopy.archive}</h3>
+            <ul class="bl-archive-years">
+              {archive.map((y) => (
+                <li>
+                  <details class="bl-archive-year">
+                    <summary>{sideCopy.count(y.year, y.count)}</summary>
+                    <ul class="bl-archive-months">
+                      {y.months.map((m) => (
+                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </aside>
+    )}
+  </section>
+
+  <script is:inline>
+    // Progressive-enhancement tag filter (same as /devlog): pills hidden until JS runs,
+    // then clicking a pill narrows the on-page entries by tag.
+    (() => {
+      const root = document.querySelector('[data-tag-filter]');
+      if (!root) return;
+      root.hidden = false;
+      const pills = [...root.querySelectorAll('.bl-filter-pill')];
+      const entries = [...document.querySelectorAll('.bl-entry')];
+      const apply = (tag) => {
+        for (const li of entries) {
+          const ts = (li.dataset.tags || '').split('|').filter(Boolean);
+          li.style.display = tag === '*' || ts.includes(tag) ? '' : 'none';
+        }
+        for (const pill of pills) pill.classList.toggle('is-active', pill.dataset.tag === tag);
+      };
+      for (const pill of pills) pill.addEventListener('click', () => {
+        apply(pill.classList.contains('is-active') && pill.dataset.tag !== '*' ? '*' : pill.dataset.tag);
+      });
+    })();
+  </script>
+
+  <script is:inline>
+    // 🩸 added 2026-07-13: month-archive filter — same `?ym=YYYY-MM` mechanism as
+    // /devlog (BlogIndexView.astro): narrows this label's already-filtered `.bl-entry` list
+    // further by month, via the matching `data-ym` attribute. Independent IIFE (unlike the
+    // tag-pill filter above, which no-ops with no tags on this label) so it still works on a
+    // tagless label. See BlogIndexView.astro for the full note.
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const ym = params.get('ym');
+      if (!ym) return;
+      const wantedTag = params.get('tag');
+      const pills = [...document.querySelectorAll('.bl-filter-pill')];
+      const tagOk = wantedTag && pills.some((p) => p.dataset.tag === wantedTag);
+      for (const li of document.querySelectorAll('.bl-entry')) {
+        const matchesYm = (li.dataset.ym || '') === ym;
+        const matchesTag = !tagOk || (li.dataset.tags || '').split('|').filter(Boolean).includes(wantedTag);
+        li.style.display = (matchesYm && matchesTag) ? '' : 'none';
+      }
+      if (tagOk) for (const pill of pills) pill.classList.toggle('is-active', pill.dataset.tag === wantedTag);
+    })();
+  </script>
+</SiteLayout>

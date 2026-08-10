@@ -1,0 +1,44 @@
+---
+// REEF with Blog — WP tag archive /tag/<slug>/page/<n> (pages 2+; page 1 is ../index.astro).
+// Fans out to (tag × page 2..totalPages): each tag has its own post count. No-op unless
+// `blog-tag-routes` is truthy AND `blog-page-size` is set. Slug-keyed like ../index.astro.
+// Rendering delegated to the shared ArchiveView.
+import ArchiveView from '../../../../components/ArchiveView.astro';
+import { uiCopy } from '../../../../packages/lingo/locale.mjs';
+import { allPosts, siteMeta, tagSlugMap, archivePrefixes} from '../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const posts = allPosts(
+    import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const on = meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
+  if (!on) return [];
+  const pageSize = Number(meta['blog-page-size']) || 0;
+  if (!pageSize) return [];
+  const slugMap = tagSlugMap(meta);
+  const seen = new Set();
+  const tags = [];
+  for (const p of posts) for (const t of p.tags) if (t && !seen.has(t)) { seen.add(t); tags.push(t); }
+  const paths = [];
+  for (const tag of tags) {
+    const count = posts.reduce((n, p) => n + (p.tags.includes(tag) ? 1 : 0), 0);
+    const totalPages = Math.ceil(count / pageSize) || 1;
+    const slug = slugMap[tag] || tag;
+    for (let n = 2; n <= totalPages; n++) {
+      paths.push({ params: { slug, n: String(n) }, props: { posts, meta, tag, slug, pageNum: n } });
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, tag, slug, pageNum } = Astro.props;
+const base = String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '');
+const labelPosts = posts.filter((p) => p.tags.includes(tag));
+const subhead = archivePrefixes(meta).tag + tag;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+  heading={tag} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

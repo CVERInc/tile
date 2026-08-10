@@ -1,0 +1,75 @@
+/**
+ * bleedblend - v2.3.0
+ * Zero-config Safari chrome tinting across iPhone, iPad, and Mac;
+ * avoids WebKit backdrop-filter clipping.
+ */
+
+:root {
+  --bleedblend-dynamic-bar-height: calc(100lvh - 100svh);
+}
+
+.bleedblend-top {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  min-height: auto !important;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px)) !important;
+  box-sizing: border-box !important;
+  z-index: 50;
+
+  /* Keep blur off the outer safe-area layer to prevent iOS Safari clipping. */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.bleedblend-top[class*="blur"],
+.bleedblend-top[class*="backdrop-filter"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.bleedblend-bottom {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  min-height: auto !important;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px) + var(--bleedblend-dynamic-bar-height, 0px)) !important;
+  box-sizing: border-box !important;
+  z-index: 50;
+
+  /* Keep blur off the outer safe-area layer to prevent iOS Safari clipping. */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.bleedblend-bottom[class*="blur"],
+.bleedblend-bottom[class*="backdrop-filter"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Push variant — reserve layout space instead of overlaying. The base
+   .bleedblend-top / .bleedblend-bottom bars are position:fixed, so they float
+   OVER the page and can cover content (a top banner hides whatever's beneath
+   it, e.g. a logo). Add .bleedblend-push to switch the bar to position:sticky:
+   it now takes its own row in the normal flow and pushes content away from the
+   edge, yet STILL tints the chrome — Safari 26 samples top/bottom `sticky`
+   elements the same as `fixed`, and the controller's STICKY_OWNED detection is
+   position-agnostic (it queries the class, not the position). Compose with
+   .bleedblend-top / .bleedblend-bottom; the compound selector outranks the
+   base `position: fixed !important` by specificity. */
+.bleedblend-top.bleedblend-push,
+.bleedblend-bottom.bleedblend-push {
+  position: sticky !important;
+}
+
+.bleedblend-bottom-safe-padding {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--bleedblend-dynamic-bar-height, 0px)) !important;
+}
+
+.bleedblend-inner-blur {
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}

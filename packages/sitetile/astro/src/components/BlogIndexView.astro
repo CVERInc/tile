@@ -1,0 +1,209 @@
+---
+import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+// Blog index view — the /devlog listing (page 1 AND pages 2+), rendered through SiteLayout.
+// Split out of the old pages/devlog/index.astro + pages/devlog/page/[n].astro (whose templates
+// were byte-for-byte identical, both driven by buildIndexView) — the routing/getStaticPaths now
+// lives in pages/[...path].astro, the single root catch-all, which supplies `posts`/`meta`/`pageNum`
+// so page 1 and the pager share this one component and can't drift. Template is verbatim from the
+// old index.astro so output stays byte-for-byte identical.
+import SiteLayout from '../layouts/SiteLayout.astro';
+import Section from './Section.astro';
+import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
+
+const { posts, meta, pageNum } = Astro.props;
+// Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
+// These strings used to be Chinese literals inline in this file AND in two sibling
+// components, so a non-CJK tenant read 最新文章 and a fix could land in one of three copies.
+const sideCopy = sidebarCopy(meta);
+// blog-page-size: page 1 lives here, page 2+ at /devlog/page/<n>
+// (a new route file — /devlog/page/2 is TWO path segments so it never collides with the
+// single-segment [slug].astro route). blog-sidebar (WP-archive themes): recent
+// posts + tag cloud + year/month archive, all derived from the post corpus (never
+// fabricated). Both opt-in via home meta; buildIndexView() is the one place that computes
+// this so /devlog and /devlog/page/<n> can't drift apart.
+const {
+  pagePosts, tags, tagCounts, totalPages, currentPage, pager, showSidebar, archiveSidebar, categories, recentPosts, archive, dateFormat, readMore,
+} = buildIndexView(posts, meta, pageNum);
+const pageHref = (n) => indexUrl(meta, n);
+// Root-mounted blog index (blog-path:"") page 1 IS the site home. A live root-mount home
+// (a root-mounted blog) shows the post grid with NO archive heading and the site's own
+// <title>; only the paginated/archive view (page 2+ or a /posts route) carries the
+// "所有貼文"/Devlog head. So at home: suppress .bl-head and use meta.title for <title>.
+const isHome = blogBase(meta) === '' && currentPage === 1;
+// A root-mounted blog home (blog-path '') shows the post grid as its main content, but live also
+// carries the site's CURATED widgets below the grid (a featured carousel → a popular list →
+// 分類). The root catch-all router drops home.md's body as a page (the post list owns `/`), so those
+// sections — authored in the home IR body — would vanish here unless we render them. Lift them from
+// the home IR (the SAME source footerWidgets reads for non-home pages) and emit them below the grid.
+// isHome is only ever true for a root-mounted blog's page 1, so every index mounted at a path —
+// which is nearly all of them — never enters this
+// branch and stays byte-for-byte identical.
+const homeCards = isHome
+  ? homeSections(import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true }))
+  : [];
+// Fallbacks are NEUTRAL, not the vendor's. An absent `blog-title` once fell back to the literal
+// 'Devlog' and an absent `blog-tagline` to the vendor's own tagline, so a tenant who installed
+// the blog without naming it published the vendor's identity. A site names itself
+// explicitly now (blog-title/blog-tagline/blog-label in its own ir/_site.md), so its output is
+// unchanged; every other site either names its blog or gets a plain generic.
+const title = isHome
+  ? (meta.title || meta['blog-title'] || 'Blog')
+  : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
+---
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
+    <div class="bl-main">
+    {!isHome && (
+    <header class="bl-head">
+      <h1>{meta['blog-title'] || 'Blog'}</h1>
+      {/* No tagline unless the site wrote one — an unwritten tagline is absent copy, not a
+          licence to print someone else's. (It used to print the vendor's.) */}
+      {meta['blog-tagline'] && <p>{meta['blog-tagline']}</p>}
+      <a class="bl-rss" href="/rss.xml">RSS FEED</a>
+    </header>
+    )}
+
+    {tags.length > 0 && (
+      <div class="bl-tag-filter js-tag-filter" data-tag-filter hidden>
+        <button class="bl-filter-pill is-active" data-tag="*">All</button>
+        {tags.map((t) => <button class="bl-filter-pill" data-tag={t}>{t}</button>)}
+      </div>
+    )}
+
+    <ul class="bl-list">
+      {pagePosts.map((p) => (
+        <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
+          <a class="bl-entry-link" href={postUrl(p, meta)}>
+            {p.image && <img class="bl-entry-img" src={p.image} alt="" loading="lazy" />}
+            {p.date && (dateFormat === 'cjk-badge' ? (
+              <time class="bl-date bl-date-badge">
+                <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>
+                <span class="bl-date-day">{dateBadgeParts(p.date, meta.lang).day}</span>
+                <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
+              </time>
+            ) : (
+              <time class="bl-date">{fmtDate(p.date, dateFormat)}</time>
+            ))}
+            <h2 class="bl-title">{p.title}</h2>
+            {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}
+            {readMore && <span class="bl-read-more">{readMore}</span>}
+          </a>
+          {p.tags.length > 0 && (
+            <div class="bl-tags">{p.tags.map((t) => <span class="bl-tag">{t}</span>)}</div>
+          )}
+        </li>
+      ))}
+    </ul>
+
+    {totalPages > 1 && (
+      <nav class="bl-pager" aria-label={`${meta['blog-title'] || 'Blog'} pages`}>
+        {currentPage > 1 && (
+          <a class="bl-pager-link bl-pager-prev" href={pageHref(currentPage - 1)}><Arrow direction="left" size={14} />Prev</a>
+        )}
+        {pager.map((item) => (
+          item.ellipsis
+            ? <span class="bl-pager-ellipsis">…</span>
+            : (item.page === currentPage
+              ? <span class="bl-pager-link bl-pager-current" aria-current="page">{item.page}</span>
+              : <a class="bl-pager-link" href={pageHref(item.page)}>{item.page}</a>)
+        ))}
+        {currentPage < totalPages && (
+          <a class="bl-pager-link bl-pager-next" href={pageHref(currentPage + 1)}>Next <Arrow direction="right" size={14} /></a>
+        )}
+      </nav>
+    )}
+
+    {String(meta['blog-post-cta-default'] || '').trim().toLowerCase() === 'true' && (
+      <aside class="bl-cta">
+        <p>Notes from the workshop — the door is open.</p>
+        <div class="bl-cta-links">
+          <a href="/contact">Get in touch</a>
+          <a href="/donate">Support the work</a>
+        </div>
+      </aside>
+    )}
+    </div>
+    {showSidebar && (
+      <aside class="bl-sidebar">
+        {categories.length > 0 && (
+          <div class="bl-side-widget bl-side-categories">
+            {meta['blog-category-title'] && <h3>{meta['blog-category-title']}</h3>}
+            <ul>{categories.map((c) => (
+              <li>{c.href
+                ? <a href={c.href}>{c.label}{c.count && `（${c.count}）`}</a>
+                : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
+            ))}</ul>
+          </div>
+        )}
+        {/* 🩸 fixed 2026-07-13: was a decorative shell (no name/action — submit did nothing).
+            Now a REAL `GET /search?q=` form — works with zero JS (native navigation), then the
+            /search page's blog-search island (search-index.json + blog-search.js, already built
+            for the header overlay) fetches + filters client-side. Gated on blogSearchOn(meta) —
+            the same opt-in the header overlay/`/search` page use — so a site with the WP archive
+            rail but no `blog-search: true` shows no box at all rather than one that quietly does
+            nothing (no-phantom-features), matching how the overlay itself disappears when off. */}
+        {archiveSidebar && blogSearchOn(meta) && (
+          <form class="bl-side-search" role="search" action="/search" method="get">
+            <input type="search" name="q" placeholder={sideCopy.search} aria-label="Search" />
+            <button type="submit" aria-label="Search">🔍</button>
+          </form>
+        )}
+        {archiveSidebar && (
+          <div class="bl-side-widget bl-side-recent">
+            <h3>{sideCopy.recent}</h3>
+            <ul>{recentPosts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+          </div>
+        )}
+        {archiveSidebar && tags.length > 0 && (
+          <div class="bl-side-widget bl-side-tags">
+            <h3>{sideCopy.tags}</h3>
+            <div class="bl-side-tagcloud">{tags.map((t) => <a href={tagHref(meta, t)} style={`font-size:${tagFontSize(tagCounts[t], tagCounts)}`}>{t}</a>)}</div>
+          </div>
+        )}
+        {/* 🩸 fixed 2026-07-13: was flat static text ("2025（128）", no links, no collapse).
+            groupByArchive() (blog.mjs) already builds the year→month tree — this just renders it:
+            native <details>/<summary> gives a real collapsible disclosure with zero theme CSS
+            (browser UA default), and each month is a REAL link to `?ym=YYYY-MM` on this same
+            index, filtered client-side below (mirrors the `?tag=` mechanism another builder wired
+            for the tag cloud — one URL-param-filter convention, not two). Counts kept, per-year AND
+            now per-month. Live's own /YYYY/MM/ archive URLs 404 (a live bug) — this recast's
+            month links actually work, intentionally exceeding live here. */}
+        {archive.length > 0 && (
+          <div class="bl-side-widget bl-side-archive">
+            <h3>{sideCopy.archive}</h3>
+            <ul class="bl-archive-years">
+              {archive.map((y) => (
+                <li>
+                  <details class="bl-archive-year">
+                    <summary>{sideCopy.count(y.year, y.count)}</summary>
+                    <ul class="bl-archive-months">
+                      {y.months.map((m) => (
+                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </aside>
+    )}
+  </section>
+
+  {/* Root-mount home only: the curated home-IR widgets (carousel / popular list / tag cloud),
+      rendered as direct children of the layout main so the theme's home-body rules apply
+      (`body[data-page="home"] .st-prose`, `.st-sidebar-main > .st-tagcloud`, `.st-carousel`).
+      index starts at 1 so none is promoted to <h1> (the post grid is the home's primary content,
+      not a widget). Empty on every non-root-mount site → nothing emitted. */}
+  {isHome && homeCards.map((s, i) => <Section section={s} index={i + 1} lang={meta.lang} />)}
+
+  {/* tag-pill wiring + ?tag=/?ym= deep-link filtering are handled by the shared blog-archive
+      island (src/packages/blog-archive/blog-archive.js), bundled once by SiteLayout. It rebuilds
+      the list from the FULL corpus (search-index.json) for sidebar deep links — the old inline
+      hide/show filter could only narrow the ~10 posts in the page DOM, so counted long-tail
+      archive links ("2015 年 4 月（41）") rendered blank. One island, shared by the index and the
+      Blogger-label routes, so the two can't drift. */}
+</SiteLayout>

@@ -1,0 +1,24 @@
+---
+// REEF with Blog — WordPress date archive (/YYYY/ year, /YYYY/MM/ month, + pagination). A thin
+// adapter over ArchiveView: it can't be a pages/ route file because /2013/ is a ROOT-level path
+// that would collide with the post catch-all, so [...path].astro emits these paths (kind
+// 'date-archive') and hands the raw {posts, year, month, pageNum} here to compute the date filter,
+// heading, and pageHref before delegating to the shared archive shell. Day archives (/YYYY/MM/DD/)
+// are intentionally absent — verified 404 on a live WP source, so replicating the capability faithfully
+// means NOT inventing them.
+import ArchiveView from './ArchiveView.astro';
+import { dateHeading } from '../packages/lingo/locale.mjs';
+import { archivePrefixes } from '../lib/blog.mjs';
+
+const { posts, meta, year, month, pageNum = 1 } = Astro.props;
+const base = month ? `/${year}/${month}` : `/${year}`;
+const prefix = month ? `${year}-${month}` : `${year}`;          // pubDate is YYYY-MM-DD
+const filtered = posts.filter((p) => (p.date || '').startsWith(prefix));
+// The ORDER of year and month is a language fact, not a template a site can share: this used
+// to be hardcoded `2026 年 7 月` for every tenant, including the English and Korean ones.
+const heading = dateHeading(meta.lang, year, month);
+const subhead = archivePrefixes(meta).date + heading;
+const pageHref = (n) => (n === 1 ? base : `${base}/page/${n}`);
+---
+<ArchiveView posts={filtered} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

@@ -1,0 +1,43 @@
+/* REEF with Lingo — the `/language` chooser page (the PRIMARY locale switcher).
+ * Theme-agnostic, token-driven (reads the site's --gd-* / reef tokens so it inherits
+ * whatever skin the page wears). Mirrors a centered card list.
+ * corrected 2026-07-06 (task #79, v2 gate): real value is Tailwind's max-w-lg = 32rem
+ * (512px), not 34rem (544px) — the 32px-wider column pushed the row's right-aligned "Switch"
+ * link 21px right of live's real position (row uses justify-content:space-between, so any
+ * width difference pushes the far-right item). General package file — this fixes the
+ * language page for every site using Lingo, not just the first one. */
+/* corrected 2026-07-06 (task #96, honest-stop pass): the 1.5rem horizontal padding shrank
+   the heading column to 512-48=464px, so the centered <h1>/subtitle sat in a narrower box than
+   live's `max-w-lg mx-auto` (full 512, no padding) → x+24px. width:min(32rem,100%-3rem) gives
+   exactly 512 on desktop (matches live) while keeping a 1.5rem gutter on <560px viewports
+   (mobile-safe without a media query). The list escapes this via its own full-bleed rule. */
+.rf-lang-page { width: min(32rem, 100% - 3rem); max-width: none; margin: 0 auto; padding: 5.5rem 0 0; }
+.rf-lang-head { text-align: center; margin-bottom: 3.2rem; }
+.rf-lang-head h1 { font-size: clamp(1.8rem, 4vw, 2.4rem); line-height: 1.1; margin: 0 0 .6rem; }
+.rf-lang-head p { margin: 0; opacity: .75; font-weight: 300; line-height: 1.6; }
+/* live wraps the list in a full-bleed dark band (measured: bg rgb(8,74,76) = --gd-bg-dark,
+   full viewport width, py-16/px-6 = 64px/24px padding) — not just a light-background card list. */
+.rf-lang-list {
+  list-style: none; margin: 0; padding: 4rem 1.5rem; display: flex; flex-direction: column; gap: .75rem;
+  width: 100vw; margin-left: calc(-50vw + 50%); margin-right: calc(-50vw + 50%);
+  max-width: 100vw; box-sizing: border-box;
+  background: var(--gd-bg-dark, #084a4c);
+}
+.rf-lang-list > li { max-width: 32rem; margin: 0 auto; width: 100%; }
+.rf-lang-list a {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  /* corrected 2026-07-06 (task #96): live row h=62, driven by the 20px name span (28px line
+     box) + 16px vertical padding + 1px border. Match live's 1rem(16px) padding; do NOT pin
+     line-height on the <a> (that clamps the flex line box and starves the 20px name → h=58). */
+  padding: 1rem 1.5rem; border-radius: 1rem; text-decoration: none; color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  transition: border-color .15s ease, background-color .15s ease, transform .15s ease;
+}
+.rf-lang-list a:hover { border-color: color-mix(in srgb, currentColor 45%, transparent); transform: translateY(-1px); }
+.rf-lang-list a[aria-current="true"] { border-color: color-mix(in srgb, currentColor 55%, transparent); }
+/* 2026-07-06 (task #96): live name span = 20px (1.25rem, drives row height to 62);
+   action = 14px (.875rem). recast had 1.15rem(18.4px)/.85rem(13.6px) → row 58, the 4px/row
+   deficit accumulated down the list. These are the row-height driver (name is the tallest child). */
+.rf-lang-name { font-size: 1.25rem; line-height: 1.4; font-weight: 600; }  /* live name box = 28px (20px×1.4) → row h=62 */
+.rf-lang-action { font-size: .875rem; font-weight: 600; opacity: .7; display: inline-flex; align-items: center; gap: .4rem; }
+.rf-lang-action .rf-lang-arrow { width: .8em; height: .8em; }

@@ -1,0 +1,12 @@
+{
+  "name": "@tile/sitetile-import",
+  "version": "0.0.0",
+  "description": "mirror → sitetile/Blog IR converter (the Recast SKU import path). Best-effort extraction from an ejecta mirror's HTML into clean Markdown IR; flags per-template manual work. NOT a parallel transform — this is sitetile's import side.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "node-html-parser": "^6.1.13",
+    "turndown": "^7.2.0"
+  }
+}

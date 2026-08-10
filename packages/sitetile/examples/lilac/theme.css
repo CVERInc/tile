@@ -1,0 +1,176 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   LILAC — an example sitetile theme: a soft white-and-lavender personal landing
+   page. Poppins, round-pill buttons, lavender accent, white cards floating on a
+   pale lavender band.
+
+   This file is an EXAMPLE, not a shipped theme. The renderer carries only the
+   base `site.css`; a real site's look lives in that site's own repo as its
+   `theme.css` and is staged into the build. Copy this file into a site repo to
+   start from it — that is the whole mechanism.
+
+   What it is meant to demonstrate: the SAME section renderers (hero / grid /
+   social / cta) wear a completely different identity from theme tokens and
+   treatments alone. Not one renderer knows this theme exists. Selectors are
+   html-prefixed so they beat site.css regardless of source order; the webfont
+   arrives through `fonts:` in the page's frontmatter, not from here.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+html:root {
+  --gd-bg: #ffffff;
+  --gd-soft: #f6f1fc;
+  --gd-surface: #ffffff;
+  --gd-text: #34303c;            /* ink */
+  --gd-muted: #8b8598;
+  --gd-accent: #b98fe0;          /* lavender */
+  --gd-accent-deep: #875fb6;     /* deep lavender */
+  --gd-accent-ink: #ffffff;
+  --gd-hair: #ece6f4;
+  --gd-border: #ece6f4;
+  --gd-font: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --gd-brand-font: "Poppins", system-ui, sans-serif;
+  --gd-radius: 18px;
+  --gd-max: 1060px;
+}
+
+:where(*) { corner-shape: normal; }   /* lilac uses plain rounded rects, not squircles */
+
+html body { background: var(--gd-bg); color: var(--gd-text); font-family: var(--gd-font); line-height: 1.6; }
+html h1, html h2, html h3, html h4 { font-family: var(--gd-brand-font); }
+html a { color: inherit; text-decoration: none; }
+
+/* ── header: sticky translucent white bar, brand wordmark left ─────────────────
+   The thin dark announcement strip above it is site chrome, not page content, so
+   it is themed as a body::before band (see below) rather than asked of the page.
+   Right-side links are deliberately not invented here: they belong to the hero,
+   follow and footer sections, where the page's own IR already declares them. */
+html .rf-header {
+  position: sticky; top: 40px; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 66px; padding: 0 24px;
+  max-width: var(--gd-max); margin-inline: auto;
+  background: rgba(255,255,255,.86);
+  backdrop-filter: saturate(160%) blur(10px);
+  border-bottom: 1px solid var(--gd-hair);
+}
+html .rf-header .rf-logo { font-weight: 700; font-size: 24px; letter-spacing: .5px; color: var(--gd-text); }
+html .rf-header .rf-lingo { display: none; }
+html .rf-header .rf-nav { display: flex; align-items: center; gap: 18px; }
+html .rf-header-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 14px; padding: 9px 18px; border-radius: 999px;
+  background: var(--gd-text); color: #fff;
+  transition: transform .15s, background .15s;
+}
+html .rf-header-cta:hover { background: var(--gd-accent-deep); transform: translateY(-1px); }
+/* announce strip — fixed dark band at the very top (site chrome). Text is theme
+   content (decorative promo, not a page landmark). */
+html body::before {
+  content: "✦  Something new is on the way — follow along for updates";
+  display: block; position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+  background: var(--gd-text); color: #fff; text-align: center;
+  font-size: 13px; letter-spacing: .4px; font-weight: 500;
+  padding: 11px 16px; line-height: 1.2;
+}
+html body { padding-top: 40px; }   /* clear the fixed announce strip */
+
+/* ── hero (layout=split): two-column, deliberately NOT full-viewport ─────────── */
+html .st-hero {
+  display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center;
+  min-height: 0; max-width: var(--gd-max); margin-inline: auto;
+  padding: 72px 24px 64px; color: var(--gd-text);
+}
+html .st-hero-text { text-align: left; }
+/* p.st-hero-eyebrow — specificity must beat `.st-hero p` (which would otherwise force the
+   eyebrow to 17px / 30px-margin like the lead, pushing the h1 down). */
+html .st-hero p.st-hero-eyebrow {
+  text-transform: uppercase; letter-spacing: 2.5px; font-size: 12px; max-width: none;
+  color: var(--gd-accent-deep); font-weight: 600; margin: 0 0 16px;
+}
+html .st-hero h1 {
+  color: var(--gd-text); max-width: none;
+  font-size: clamp(38px, 6.4vw, 60px); font-weight: 700; line-height: 1.05;
+  letter-spacing: -1px; margin-bottom: 18px;
+}
+html .st-hero p { color: var(--gd-muted); font-size: 17px; max-width: 30ch; margin: 0 0 30px; }
+html .st-hero-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+html .st-hero-art { text-align: center; }
+html .st-hero[data-media="avatar"] .st-hero-art .st-img {
+  width: clamp(210px, 72%, 300px); aspect-ratio: 1 / 1; object-fit: cover;
+  border-radius: 50%; corner-shape: round; background: #fff; border: 6px solid #fff;
+  outline: 1px solid var(--gd-hair); box-shadow: 0 18px 40px rgba(135,95,182,.22);
+}
+
+/* ── pill buttons (shared by hero + social rows): fill (ink) + ghost (outline) ── */
+html .st-hero-btn, html .st-social-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 14px; padding: 9px 18px; border-radius: 999px;
+  transition: transform .15s, box-shadow .15s, background .15s, color .15s, border-color .15s;
+}
+html .st-hero-btn-primary, html .st-social-btn-primary { background: var(--gd-text); color: #fff; }
+html .st-hero-btn-primary:hover, html .st-social-btn-primary:hover { background: var(--gd-accent-deep); transform: translateY(-1px); }
+html .st-hero-btn-secondary, html .st-social-btn-secondary { border: 1.5px solid var(--gd-hair); color: var(--gd-text); }
+html .st-hero-btn-secondary:hover, html .st-social-btn-secondary:hover { border-color: var(--gd-accent); color: var(--gd-accent-deep); }
+
+/* ── "What's coming" grid: soft lavender full-bleed band, white cards ─────────── */
+html .st-grid {
+  background: var(--gd-soft); max-width: none;
+  padding: 64px 24px; margin: 0;
+}
+html .st-grid > h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 2.5px;
+  color: var(--gd-muted); font-weight: 600; text-align: center; margin: 0 auto 36px;
+  max-width: var(--gd-max);
+}
+html .st-grid > .st-cells {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+  max-width: var(--gd-max); margin-inline: auto;
+}
+html .st-grid[data-cols="2"] > .st-cells { grid-template-columns: repeat(2, 1fr); }
+html .st-grid[data-cols="3"] > .st-cells { grid-template-columns: repeat(3, 1fr); }
+html .st-cell, html a.st-cell-link {
+  position: relative; min-height: 0;
+  background: #fff; border: 1px solid var(--gd-hair); border-radius: 18px;
+  padding: 26px 22px; color: var(--gd-text);
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+}
+html a.st-cell-link:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(135,95,182,.12); border-color: var(--gd-accent); }
+html .st-cell:hover { transform: none; }
+html .st-cell-badge {
+  position: absolute; top: 16px; right: 16px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 999px;
+}
+html .st-cell-badge[data-badge="soon"] { background: var(--gd-soft); color: var(--gd-accent-deep); }
+html .st-cell-badge[data-badge="live"] { background: #eafaf0; color: #2e9b5b; }
+html .st-cell-emoji { font-size: 26px; display: block; margin-bottom: 12px; }
+html .st-cell h3 { font-size: 17px; font-weight: 600; margin: 0 0 6px; color: var(--gd-text); }
+html .st-cell p { font-size: 14px; color: var(--gd-muted); margin: 0; }
+html .st-cell-cta { display: none; }   /* this identity has no chevron on cards */
+
+/* ── follow band (social coral): centered heading + blurb + button row ────────── */
+html .st-social {
+  text-align: center; max-width: var(--gd-max); margin-inline: auto; padding: 64px 24px;
+}
+html .st-social h2 {
+  color: var(--gd-text); font-size: clamp(24px, 4vw, 32px); text-transform: none;
+  letter-spacing: -.5px; margin: 0 0 10px; font-weight: 700;
+}
+html .st-social p { color: var(--gd-muted); margin: 0 0 26px; }
+html .st-social-btns { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+
+/* ── footer: brand + copyright left, two link columns right ──────────────────── */
+html .rf-footer {
+  border-top: 1px solid var(--gd-hair); padding: 40px 24px;
+  max-width: var(--gd-max); margin: 0 auto; text-align: left;   /* reset site.css's 4rem margin-top (the follow band's 64px pad provides the space) */
+}
+html .rf-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; flex-wrap: wrap; }
+html .rf-foot-wordmark { font-weight: 700; font-size: 20px; color: var(--gd-text); letter-spacing: .5px; }
+html .rf-foot-copy { color: var(--gd-muted); font-size: 13px; margin-top: 8px; }
+html .rf-foot-cols { display: flex; gap: 56px; flex-wrap: wrap; }
+html .rf-foot-col h4 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--gd-muted); margin: 0 0 12px; font-weight: 600;
+}
+html .rf-foot-col a, html .rf-foot-col span { display: block; font-size: 14px; color: var(--gd-text); margin-bottom: 8px; }
+html .rf-foot-col a:hover { color: var(--gd-accent-deep); }
+html .rf-foot-col span.rf-foot-soon { color: var(--gd-muted); }

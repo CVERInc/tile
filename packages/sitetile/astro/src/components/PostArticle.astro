@@ -1,0 +1,175 @@
+---
+// The <article class="bl-post"> for a single post — extracted VERBATIM from PostView.astro so the
+// post body can be rendered either bare (single column, unchanged) OR as the main column of the
+// opt-in two-column post-sidebar layout, from ONE source (no duplicated article markup that could
+// drift). Astro adds zero wrapper bytes around a component at a template position, so a bare
+// <PostArticle/> emits byte-for-byte what the old inline <article> did — every existing post
+// pages stay identical. The only additions over the extracted original are two OPT-IN, absent-safe
+// touches: a configurable byline label and a breadcrumb trail (both default to the prior output).
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
+import { flowingHtml, fmtDate, postUrl, blogBase } from '../lib/blog.mjs';
+
+const { post, meta, newer, older, keepReading, related } = Astro.props;
+// blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
+// the three-span badge layout is index-cards-only (see blog.mjs fmtDate()).
+const dateFormat = meta['blog-date-format'];
+// blog-post-linebreaks: br → WP-wpautop mode (single newline inside a paragraph → <br>), for
+// WP-sourced recasts whose live keeps manual line breaks. Default (unset) = CommonMark join.
+const html = flowingHtml(post.body, { br: String(meta['blog-post-linebreaks'] || '').trim().toLowerCase() === 'br' });
+
+// byline (By <author>): author from the post's own frontmatter, else the site-wide `blog-author`
+// meta. Empty when a site has no author frontmatter and no blog-author → byline not rendered.
+// `blog-byline-label` lets a non-English site set the prefix (e.g. "作者: <author>"); the default
+// "By" keeps existing output byte-identical ("By" + literal space + author == the old "By {author}").
+const author = post.author || String(meta['blog-author'] || '').trim();
+const bylineLabel = String(meta['blog-byline-label'] || 'By').trim();
+// post-nav / related labels — overridable so a non-English site localizes them.
+const newerLabel = String(meta['blog-newer-label'] || 'Newer').trim();
+const olderLabel = String(meta['blog-older-label'] || 'Older').trim();
+const keepReadingLabel = String(meta['blog-keep-reading-label'] || 'Keep reading').trim();
+
+// share buttons (`blog-share: email,facebook,twitter`): a share row using standard share URLs for
+// THIS post's canonical URL + title. Absent → no row. Canonical = configured site + this path.
+const canonical = new URL(Astro.url.pathname, Astro.site || Astro.url.origin).href;
+const shareTokens = String(meta['blog-share'] || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+const SHARE = {
+  email: { label: 'Email', href: `mailto:?subject=${encodeURIComponent(post.title)}&body=${encodeURIComponent(canonical)}` },
+  // 🩸 2026-07-13: normalized to the modern `sharer.php` path (was `/sharer/sharer.php`) to match
+  // the exact share URL a live WP site emits. Both paths open the same Facebook share dialog, and
+  // an existing theme's `[href*="facebook"]` selector still matches (substring, not exact), so an
+  // already-shipped bottom share row is unaffected.
+  facebook: { label: 'Facebook', href: `https://www.facebook.com/sharer.php?u=${encodeURIComponent(canonical)}` },
+  twitter: { label: 'Twitter', href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(canonical)}&text=${encodeURIComponent(post.title)}` },
+  // 'x' — a live WP share pair uses x.com (not the legacy twitter.com/intent/tweet the 'twitter'
+  // token above still serves for existing `blog-share:` consumers).
+  x: { label: 'X', href: `https://x.com/share?url=${encodeURIComponent(canonical)}&text=${encodeURIComponent(post.title)}` },
+  linkedin: { label: 'LinkedIn', href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(canonical)}` },
+  tumblr: { label: 'Tumblr', href: `https://www.tumblr.com/share/link?url=${encodeURIComponent(canonical)}&name=${encodeURIComponent(post.title)}` },
+  pinterest: { label: 'Pinterest', href: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(canonical)}&description=${encodeURIComponent(post.title)}` },
+};
+const shareLinks = shareTokens.map((t) => SHARE[t]).filter(Boolean);
+
+// top-of-post share pair (Facebook + X), placed by the byline — a WP/Astra theme-share
+// convention a live WP blog carries on EVERY post (verified via playwright: live shows exactly
+// these two icons directly under the title, at canonical URLs `facebook.com/sharer.php?u=`
+// and `x.com/share?url=…&text=…`). Recast posts had no share buttons at all. This is a
+// SEPARATE row from the opt-in `blog-share` list above (an existing bottom-of-post
+// row, already positioned there) — gated on `blog-share` being unset so a site that already
+// configured its own row doesn't also get a redundant duplicate up top.
+// `blog-share-top: none` opts a site back out if it truly wants neither.
+const topShareOff = String(meta['blog-share-top'] || '').trim() === 'none';
+const topShareLinks = (!topShareOff && shareTokens.length === 0) ? ['facebook', 'x'].map((t) => SHARE[t]) : [];
+
+// RELATED POSTS heading (opt-in `blog-related-label`, default "Related posts") — lets a zh site
+// set its own wording without another code change. Only shown when `related` has posts.
+const relatedLabel = String(meta['blog-related-label'] || 'Related posts').trim();
+
+// comments (`blog-comments-url`): live comment threads are dynamic (Blogger/Disqus backend) — a
+// reasonable static degradation here is an opt-in "留言" heading linking out to the real thread,
+// NOT a fake inline widget. Absent → nothing (no comments UI is invented).
+const commentsUrl = String(meta['blog-comments-url'] || '').trim();
+const commentsLabel = String(meta['blog-comments-label'] || 'Comments').trim();
+
+// breadcrumb (opt-in `blog-breadcrumb: true`): a WP single-post trail "Home » Category » <title>"
+// REPLACING the "← All posts" back-link (a site opts in; every other site keeps the back-link).
+// Reuses the platform `.rf-breadcrumb` styles. Labels are real: home = `breadcrumb-home` (default
+// "Home"), middle = the blog's own `blog-title`, leaf = this post's title. Absent → back-link as before.
+const showBreadcrumb = String(meta['blog-breadcrumb'] || '').trim() === 'true';
+const crumbHome = String(meta['breadcrumb-home'] || 'Home').trim();
+const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
+---
+<article class="bl-post">
+  {showBreadcrumb ? (
+    <nav class="rf-breadcrumb reef-breadcrumb bl-breadcrumb" aria-label="Breadcrumb">
+      <a href="/">{crumbHome}</a>
+      <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><a href={blogBase(meta)}>{crumbBlog}</a>
+      <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{post.title}</span>
+    </nav>
+  ) : (
+    <a class="bl-back" href={blogBase(meta)}><Arrow direction="left" size={14} />All posts</a>
+  )}
+  <header class="bl-post-head">
+    {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat)}</time>}
+    <h1>{post.title}</h1>
+    {author && <p class="bl-byline">{bylineLabel} {author}</p>}
+    {/* 🩸 added 2026-07-13: top-of-post share pair (see topShareLinks above) — matches live
+        the live placement directly under the title/byline. A site's theme typically has no
+        `.bl-share`/`.bl-share-btn` CSS at all (bottom-row styling lives in the themes that use it), so a minimal
+        inline style keeps this legible as plain static anchors, per the fix's "static anchor
+        tags are fine" note — no JS, no new stylesheet touched. */}
+    {topShareLinks.length > 0 && (
+      <nav class="bl-share bl-share-top" aria-label="Share this post" style="display:flex;gap:0.6rem;margin-top:0.5rem;">
+        {topShareLinks.map((s) => (
+          <a class="bl-share-btn" href={s.href} rel="noopener" target="_blank" style="font-size:0.85em;text-decoration:underline;">{s.label}</a>
+        ))}
+      </nav>
+    )}
+  </header>
+  <div class="bl-body" set:html={html}></div>
+  {shareLinks.length > 0 && (
+    <nav class="bl-share" aria-label="Share this post">
+      {shareLinks.map((s) => (
+        <a class="bl-share-btn" href={s.href} rel="noopener" target="_blank">{s.label}</a>
+      ))}
+    </nav>
+  )}
+  {(newer || older) && (
+    <nav class="bl-post-nav" aria-label="More posts">
+      {newer ? (
+        <a class="bl-post-nav-item bl-post-nav-newer" href={postUrl(newer, meta)}>
+          <span class="bl-post-nav-label"><Arrow direction="left" size={12} />{newerLabel}</span>
+          {newer.date && <span class="bl-post-nav-date">{fmtDate(newer.date, dateFormat)}</span>}
+          <span class="bl-post-nav-title">{newer.title}</span>
+        </a>
+      ) : <span />}
+      {older && (
+        <a class="bl-post-nav-item bl-post-nav-older" href={postUrl(older, meta)}>
+          <span class="bl-post-nav-label">{olderLabel}<Arrow direction="right" size={12} /></span>
+          {older.date && <span class="bl-post-nav-date">{fmtDate(older.date, dateFormat)}</span>}
+          <span class="bl-post-nav-title">{older.title}</span>
+        </a>
+      )}
+    </nav>
+  )}
+  {!meta['blog-related'] && keepReading.length > 0 && (
+    <section class="bl-keep-reading" aria-label="Related posts">
+      <h2>{keepReadingLabel}</h2>
+      <ul>
+        {keepReading.map((p) => (
+          <li>
+            <a href={postUrl(p, meta)}>
+              {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
+              <h3>{p.title}</h3>
+              {p.description && <p>{p.description}</p>}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+  {related.length > 0 && (
+    <section class="bl-keep-reading bl-related" aria-label="Related posts">
+      <h2>{relatedLabel}</h2>
+      <ul>
+        {related.map((p) => (
+          <li>
+            <a href={postUrl(p, meta)}>
+              {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
+              <h3>{p.title}</h3>
+              {p.description && <p>{p.description}</p>}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+  {commentsUrl && (
+    <section class="bl-comments" aria-label="Comments">
+      <h2>{commentsLabel}</h2>
+      <a class="bl-comments-link" href={commentsUrl}>{commentsLabel} <Arrow direction="right" size={14} /></a>
+    </section>
+  )}
+</article>

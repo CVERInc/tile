@@ -1,0 +1,108 @@
+---
+// REEF with Lingo — the `/language` chooser page (the PRIMARY locale switcher).
+// GENERAL Lingo capability: an ENGINE page (not authored IR content). It renders at the root
+// `/language` (site default locale) AND locale-prefixed `/<loc>/language` for every other locale,
+// wearing the same SiteLayout shell (so header/footer/logo/theme match the locale's home page).
+//
+// Behaviour (matches a live /language page):
+//   • title + heading + lead + per-row action are localized to the PAGE's locale.
+//   • each row links to that locale's ROOT (default → /, others → /<loc>/), marked Current/Switch.
+//   • honors ?return=<path> (+ optional ?has=<csv of locales that HAVE that path>): a tiny inline
+//     script rewrites each row's href to the return path, per-locale-prefixed — same script as live.
+//   • the suggestion banner is suppressed here (SiteLayout's localeBanner.excludePath = '/language').
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { parseSite, isSiteFile } from '@sitetile';
+import { loadSite } from '../../lib/blog.mjs';
+import { toUrlLocale, label, languageCopy } from '../../packages/lingo/locale.mjs';
+import '../../packages/lingo/language-page.css';
+
+export function getStaticPaths() {
+  // Discover the site's locale set + per-locale chrome from the HOME pages authored in content/.
+  // A home file's basename is "home" (root: content/home.md; locale: content/<loc>/home.md).
+  const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  // The build maps each locale HOME to a single-segment path: the default → content/home.md,
+  // every other locale → content/<loc>.md (mkpages' `<loc>/home.md → <loc>` collapse). So a
+  // file is a locale-home iff its rel is "home" (default) or equals its own url-locale code.
+  const homesByLang = {};        // lang (e.g. en-US) → meta
+  let rootHome = null;           // the site-default home (content/home.md)
+  for (const [path, raw] of Object.entries(files)) {
+    if (!isSiteFile(raw)) continue;
+    const rel = path.split('/content/')[1].replace(/\.md$/, '');
+    const site = parseSite(raw);
+    // resolve site-config layer (_site + <locale>/_site) UNDER the home's own frontmatter, so a
+    // slimmed home (chrome moved to _site) still exposes packages/lang/locales here.
+    const cfg = loadSite(files, rel);
+    if (cfg) site.meta = { ...cfg, ...site.meta };
+    if (!String(site.meta.packages || '').includes('lingo')) continue;
+    const lang = String(site.meta.lang || '').trim();
+    if (!lang) continue;
+    const isRoot = rel === 'home';
+    const isLocaleHome = rel === toUrlLocale(lang);
+    if (!isRoot && !isLocaleHome) continue;
+    homesByLang[lang] = site.meta;
+    if (isRoot) rootHome = site.meta;
+  }
+  if (!rootHome) return [];       // no lingo home → no chooser (site isn't multi-lingual)
+
+  const defaultLocale = String(rootHome.lang || '').trim();
+  const locales = String(rootHome.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  return locales.map((L) => {
+    const meta = homesByLang[L] || rootHome;
+    const url = toUrlLocale(L);
+    return {
+      params: { loc: L === defaultLocale ? undefined : url },
+      props: { pageLocale: L, defaultLocale, locales, meta },
+    };
+  });
+}
+
+const { pageLocale, defaultLocale, locales, meta } = Astro.props;
+const copy = languageCopy(pageLocale);
+// Resolved to a plain string BEFORE the client <script> template literal below — a prior version
+// called `toUrlLocale(defaultLocale)` inline inside that nested backtick string, which threw
+// "toUrlLocale is not defined" in the browser (the interpolation wasn't evaluating server-side as
+// intended, silently breaking the ?return= path-preservation feature). A plain precomputed string
+// removes any nested-template-literal ambiguity.
+const defaultUrlLocale = toUrlLocale(defaultLocale);
+// ALL url-locales (precomputed JSON) so the ?return= rewriter can strip the SOURCE locale prefix
+// off the return path before re-prefixing per target locale — without this it treated e.g.
+// "/zh-tw/" as the bare path, so English resolved to "/zh-tw/" (you couldn't switch back).
+const urlLocalesJson = JSON.stringify(locales.map((L) => toUrlLocale(L)));
+const rows = locales.map((L) => {
+  const url = toUrlLocale(L);
+  return {
+    url,
+    name: label(L),
+    href: L === defaultLocale ? '/' : `/${url}/`,
+    current: L === pageLocale,
+  };
+});
+---
+<SiteLayout title={copy.word} lang={pageLocale} meta={meta} alternates="all">
+  <section class="rf-lang-page">
+    <div class="rf-lang-head">
+      <h1>{copy.word}</h1>
+      <p>{copy.prompt}</p>
+    </div>
+    <ul class="rf-lang-list" aria-label={copy.word}>
+      {rows.map((r) => (
+        <li>
+          <a href={r.href} hreflang={r.url} data-language-link data-locale={r.url}
+             aria-current={r.current ? 'true' : undefined}>
+            <span class="rf-lang-name">{r.name}</span>
+            <span class="rf-lang-action">
+              {r.current ? copy.current : copy.switch}
+              {!r.current && (
+                <svg class="rf-lang-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18" /></svg>
+              )}
+            </span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
+  {/* ?return=<path> (+ optional ?has=<locales with that path>) → rewrite each row to that page,
+      per-locale-prefixed. Same contract as a live /language page. is:inline so it ships verbatim. */}
+  <script is:inline set:html={`(function(){var LOCS=${urlLocalesJson},DEF="${defaultUrlLocale}";function bare(p){for(var i=0;i<LOCS.length;i++){var loc=LOCS[i];if(loc===DEF)continue;if(p==="/"+loc||p==="/"+loc+"/")return"/";if(p.indexOf("/"+loc+"/")===0)return p.slice(("/"+loc).length)}return p}function l(){var n=new URLSearchParams(window.location.search),e=n.get("return");if(!e||e.charAt(0)!=="/"||e.indexOf("//")===0)return;var b=bare(e),r=(n.get("has")||"").split(",").filter(Boolean);document.querySelectorAll("[data-language-link]").forEach(function(s){var t=s.getAttribute("data-locale");if(!t)return;var a=r.length&&r.indexOf(t)<0?"/":b,o=a;t!==DEF&&(o=a==="/"?"/"+t+"/":"/"+t+a),s.setAttribute("href",o)})}l();document.addEventListener("astro:page-load",l)})();`}></script>
+</SiteLayout>

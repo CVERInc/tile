@@ -1,0 +1,27 @@
+---
+import { parseParams, inlineHtml, bodyHtml, ctaButtonsHtml, ctaCaptionFirst } from '@sitetile';
+import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for external cta buttons' up-right signet-arrow
+const { section } = Astro.props;
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
+// already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
+// explaining the split, so authors reasonably put it everywhere: 22 inert `eyebrow=` on
+// one customer site alone, and their agent had written "added bilingual eyebrows" into a
+// plan. Every coral here renders a heading, which is the thing an eyebrow sits above —
+// the inconsistency was arbitrary, not a design. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+// cta supports N buttons: primary from `button=`, secondary from body link-paragraphs
+// (e.g. donate's Give once + Monthly); remaining body text is the caption.
+const icon = pm.icon ? (typeof pm.icon === 'object' ? pm.icon.label : pm.icon) : null;
+const { row, caption } = ctaButtonsHtml(pm.button, section.body, icon);
+// `caption=before` leads with the blurb (see site-core ctaCaptionFirst) — shared with the reference
+// renderer so this seam can't drift; default keeps caption after the buttons.
+const captionFirst = ctaCaptionFirst(pm);
+---
+<section class="st-cta">
+  {eyebrow && <p class="st-cta-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <h2 set:html={inlineHtml(section.title)} />}
+  {captionFirst && caption && <Fragment set:html={bodyHtml(caption)} />}
+  <Fragment set:html={row} />
+  {!captionFirst && caption && <Fragment set:html={bodyHtml(caption)} />}
+</section>

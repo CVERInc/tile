@@ -1,0 +1,37 @@
+---
+import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+// Content-page view — one sitetile .md in content/ rendered through SiteLayout.
+// Split out of the old pages/[...slug].astro (the routing/getStaticPaths now lives in
+// pages/[...path].astro, the single root catch-all). The template + frontmatter below are
+// verbatim from that page so its output stays byte-for-byte identical; only the data entry
+// point changed (the page's `site` prop now arrives via the catch-all's getStaticPaths).
+import SiteLayout from '../layouts/SiteLayout.astro';
+import Section from './Section.astro';
+import { allPosts } from '../lib/blog.mjs';
+import { deriveDescription } from '../../../site-core.js';
+
+const { site } = Astro.props;
+// The <title> is the page's own frontmatter title, but a page may omit it and inherit the
+// site-default from the `_site` config layer (SPEC-site-data-model: effective = Site ⊕ page).
+// parseSite exposes the page's raw title as `site.title` (NOT merged with _site), so fall back to
+// the RESOLVED `site.meta.title` when the page bares its title — this is what lets a slimmed home
+// (chrome + site-default title in _site) render its <title> instead of an empty one. Existing sites
+// whose pages all carry their own title are unaffected (site.title truthy → used as before).
+const pageTitle = site.title || site.meta.title || '';
+// `sidebar-archive: true` (+ `packages: blog`) opts a Site page into a year→month archive tree in
+// its sidebar (SiteLayout reads `blogPosts` off this prop) — General for any real site whose
+// sidebar carries a Blogger/WP-style archive widget (a Blogger-descended site is the first
+// consumer). Glob is cheap even when unused (Astro dedupes it against the /devlog pages' own glob).
+const blogPosts = String(site.meta.packages || '').includes('blog')
+  ? allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true }))
+  : [];
+// A page that never wrote `description:` used to emit no description meta at all — blank search
+// snippet, blank share card. Fall back to what the page opens with (see deriveDescription). An
+// authored description always wins; this only fills the hole. Head-only, like PostView's merge.
+const headMeta = site.meta.description
+  ? site.meta
+  : { ...site.meta, description: deriveDescription(site.sections) };
+---
+<SiteLayout title={pageTitle} lang={site.meta.lang || DEFAULT_LANG} meta={headMeta} blogPosts={blogPosts}>
+  {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} />)}
+</SiteLayout>

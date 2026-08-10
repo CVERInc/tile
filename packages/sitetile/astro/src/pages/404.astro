@@ -1,0 +1,32 @@
+---
+// The 404 page, wearing the site's own chrome.
+//
+// 🩸 Until 2026-08-06 this file did not exist, and the build script wrote a bare unstyled 404.html
+// instead — with the reason recorded honestly in its own comment: "a themed 404 needs the renderer
+// (a src/pages/404.astro in tile) and that is a bigger, cross-repo change. An honest unstyled 404
+// beats a beautiful lie, and this can land today." That was the right call at the time. The result
+// was a page with exactly one internal link on it: a visitor who mistyped a URL had nowhere to go
+// but the homepage, on a site with a full nav two lines above in every other page. Every WordPress
+// theme renders its 404 inside the site chrome, which is the whole point of having chrome.
+//
+// The shell fallback stays: build-deploy-sitetile.sh only writes its own 404.html when dist has
+// none, so it now covers the case where this route somehow did not emit, rather than being the
+// normal path. Two layers, and the honest one is still underneath.
+//
+// noindex, because a 404 that gets indexed is a search result that wastes somebody's click. It is
+// passed as a prop rather than written into <head> here — a page cannot reach the layout's head.
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { siteMeta } from '../lib/blog.mjs';
+import { uiCopy, DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+
+const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
+const lang = meta.lang || DEFAULT_LANG;
+const copy = uiCopy(lang);
+---
+<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex">
+  <section class="st-section st-notfound">
+    <h1>{copy.notFoundTitle}</h1>
+    <p>{copy.notFoundBody}</p>
+    <p><a href="/">{copy.notFoundHome}</a></p>
+  </section>
+</SiteLayout>

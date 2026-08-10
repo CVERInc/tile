@@ -1,0 +1,148 @@
+---
+import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+// Shared WP-style archive listing — the ONE renderer behind every term/date/author archive route
+// (/tag/<slug>/, /category/<slug>/, /author/<slug>/, /YYYY/, /YYYY/MM/). WordPress publishes all of
+// these as the same "filtered post list + sidebar" shell; replicating that routing capability with
+// four hand-copied templates would guarantee drift, so each route computes only its OWN filter +
+// heading + pageHref and delegates the markup here. Extracted verbatim from the original
+// tag/[slug]/index.astro body so tag archives render byte-identical to before.
+//
+// Props:
+//   posts    — the posts belonging to THIS archive (already filtered), newest-first
+//   corpus   — the full post corpus (for the recent/archive sidebar, never fabricated)
+//   meta     — site meta
+//   title    — <title> string
+//   heading  — <h1> (tag name / category name / author name / "2013" / "2013 年 7 月")
+//   subhead  — the descriptive line under the heading (WP's "顯示…的文章")
+//   pageHref — (n) => url for this archive's page n (page 1 = base, 2+ = base/page/n)
+//   pageNum  — current page (1-based)
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, sidebarCopy} from '../lib/blog.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';
+
+const { posts, corpus, meta, title, heading, subhead, pageHref, pageNum = 1 } = Astro.props;
+// Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
+// These strings used to be Chinese literals inline in this file AND in two sibling
+// components, so a non-CJK tenant read 最新文章 and a fix could land in one of three copies.
+const sideCopy = sidebarCopy(meta);
+const {
+  pagePosts, tags: pillTags, totalPages, currentPage, pager, showSidebar, dateFormat, readMore,
+} = buildIndexView(posts, meta, pageNum);
+const recentPosts = corpus.slice(0, 5);
+const archive = showSidebar ? groupByArchive(corpus) : [];
+---
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
+    <div class="bl-main">
+    <header class="bl-head">
+      <h1>{heading}</h1>
+      {subhead && <p>{subhead}</p>}
+      <a class="bl-rss" href="/rss.xml">RSS FEED</a>
+    </header>
+
+    {pillTags.length > 0 && (
+      <div class="bl-tag-filter js-tag-filter" data-tag-filter hidden>
+        <button class="bl-filter-pill is-active" data-tag="*">All</button>
+        {pillTags.map((t) => <button class="bl-filter-pill" data-tag={t}>{t}</button>)}
+      </div>
+    )}
+
+    <ul class="bl-list">
+      {pagePosts.map((p) => (
+        <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
+          <a class="bl-entry-link" href={postUrl(p, meta)}>
+            {p.image && <img class="bl-entry-img" src={p.image} alt="" loading="lazy" />}
+            {p.date && (dateFormat === 'cjk-badge' ? (
+              <time class="bl-date bl-date-badge">
+                <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>
+                <span class="bl-date-day">{dateBadgeParts(p.date, meta.lang).day}</span>
+                <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
+              </time>
+            ) : (
+              <time class="bl-date">{fmtDate(p.date, dateFormat)}</time>
+            ))}
+            <h2 class="bl-title">{p.title}</h2>
+            {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}
+            {readMore && <span class="bl-read-more">{readMore}</span>}
+          </a>
+          {p.tags.length > 0 && (
+            <div class="bl-tags">{p.tags.map((t) => <span class="bl-tag">{t}</span>)}</div>
+          )}
+        </li>
+      ))}
+    </ul>
+
+    {totalPages > 1 && (
+      <nav class="bl-pager" aria-label="Archive pages">
+        {currentPage > 1 && (
+          <a class="bl-pager-link bl-pager-prev" href={pageHref(currentPage - 1)}><Arrow direction="left" size={14} />Prev</a>
+        )}
+        {pager.map((item) => (
+          item.ellipsis
+            ? <span class="bl-pager-ellipsis">…</span>
+            : (item.page === currentPage
+              ? <span class="bl-pager-link bl-pager-current" aria-current="page">{item.page}</span>
+              : <a class="bl-pager-link" href={pageHref(item.page)}>{item.page}</a>)
+        ))}
+        {currentPage < totalPages && (
+          <a class="bl-pager-link bl-pager-next" href={pageHref(currentPage + 1)}>Next <Arrow direction="right" size={14} /></a>
+        )}
+      </nav>
+    )}
+    </div>
+    {showSidebar && (
+      <aside class="bl-sidebar">
+        {blogSearchOn(meta) && (
+          <form class="bl-side-search" role="search" action="/search" method="get">
+            <input type="search" name="q" placeholder={sideCopy.search} aria-label="Search" />
+            <button type="submit" aria-label="Search">🔍</button>
+          </form>
+        )}
+        <div class="bl-side-widget bl-side-recent">
+          <h3>{sideCopy.recent}</h3>
+          <ul>{recentPosts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+        </div>
+        {archive.length > 0 && (
+          <div class="bl-side-widget bl-side-archive">
+            <h3>{sideCopy.archive}</h3>
+            <ul class="bl-archive-years">
+              {archive.map((y) => (
+                <li>
+                  <details class="bl-archive-year">
+                    <summary>{sideCopy.count(y.year, y.count)}</summary>
+                    <ul class="bl-archive-months">
+                      {y.months.map((m) => (
+                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </aside>
+    )}
+  </section>
+
+  <script is:inline>
+    (() => {
+      const root = document.querySelector('[data-tag-filter]');
+      if (!root) return;
+      root.hidden = false;
+      const pills = [...root.querySelectorAll('.bl-filter-pill')];
+      const entries = [...document.querySelectorAll('.bl-entry')];
+      const apply = (tag) => {
+        for (const li of entries) {
+          const ts = (li.dataset.tags || '').split('|').filter(Boolean);
+          li.style.display = tag === '*' || ts.includes(tag) ? '' : 'none';
+        }
+        for (const pill of pills) pill.classList.toggle('is-active', pill.dataset.tag === tag);
+      };
+      for (const pill of pills) pill.addEventListener('click', () => {
+        apply(pill.classList.contains('is-active') && pill.dataset.tag !== '*' ? '*' : pill.dataset.tag);
+      });
+    })();
+  </script>
+</SiteLayout>

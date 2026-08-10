@@ -1,0 +1,71 @@
+---
+import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+import GridCell from './GridCell.astro';
+const { section } = Astro.props;
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
+// already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
+// explaining the split, so authors reasonably put it everywhere: 22 inert `eyebrow=` on
+// one customer site alone, and their agent had written "added bilingual eyebrows" into a
+// plan. Every coral here renders a heading, which is the thing an eyebrow sits above —
+// the inconsistency was arbitrary, not a design. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const cells = section.cells || [];
+// `cards=image` — cells become image-first cards (leading image → top figure, title + caption
+// below), reusing gallery's exact cell markup/CSS (.st-gal-cell/.st-gal-fig) inside the grid's
+// own column layout. General — character cards, blog post cards. Mirrors site-core.js.
+const imageCards = pm.cards === 'image' || (pm.cards && typeof pm.cards === 'object' && pm.cards.label === 'image');
+// `pack=masonry` — opt-in responsive card grid, DOM order preserved (not CSS multicol's
+// `column-fill:balance`, which silently reflows items across the column boundary as card
+// heights vary — the exact drift this mode exists to kill). 🩸 corrected 2026-07-05: an
+// earlier version of this comment claimed live's grid was "NOT CSS multicol... two static
+// columns, DOM-first-half/second-half" and hardcoded that fixed 2-way split at render time.
+// A background diagnostic agent re-measured live directly (playwright rects on the real
+// `.eskimo-masonry-grid` at 1440px) and found it's actually RESPONSIVE — 3 columns ≥1400px,
+// 2 columns 992–1399px, 1 column <992px (`.eskimo-three-columns` media queries) — the
+// build-time fixed-split array only ever matched the single narrow viewport it was measured
+// at. Fixed (at the time): render cells as one flat DOM sequence, tracking the real live
+// breakpoints instead of being frozen at build time.
+// 🩸 corrected 2026-07-07: this component still renders cells as one flat SSR sequence below
+// (unchanged) — but grid-masonry.js (the client script wired in below) now restructures that
+// sequence into `cols` real column-wrapper `<div>`s at ≥992px, bucketing card `i` into column
+// `i % cols` (matching live's Salvattore.js index-parity assignment, not a height measurement).
+// So DOM order is "flat" only in this file's SSR output and at the <992px single-column
+// breakpoint; at 2/3-column breakpoints the live DOM is columnar (cards 0,2,4… together, then
+// 1,3,5…), same as live. See grid-masonry.js's header comment for the full trail.
+// `more="LABEL=/href"` — OPT-IN "view all" CTA button, general (mirrors Carousel's identical seam).
+const moreRaw = pm.more ? (typeof pm.more === 'object' ? pm.more.label : pm.more) : null;
+const more = moreRaw && moreRaw.includes('=')
+  ? { label: moreRaw.split('=')[0].trim(), href: moreRaw.split('=').slice(1).join('=').trim() }
+  : null;
+const packMasonry = pm.pack === 'masonry' || (pm.pack && typeof pm.pack === 'object' && pm.pack.label === 'masonry');
+// `surface=<token>` — OPT-IN per-section background belt (glass/paper/cream/teal). Absent →
+// the theme's default section surface (e.g. a deep-teal grid belt) is untouched. Drives a set of
+// product pages' vertical colour rhythm to match a bespoke belt sequence; the token is styled by
+// the THEME (`[data-surface="…"]`). General seam.
+const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
+// `filter=<all-label>` — OPT-IN client-side facet filter over the cards' badges. The first pill
+// (labelled with the param value, e.g. "品牌") resets to ALL; one pill per DISTINCT cell badge
+// toggles to just that facet (cells carry data-cat via GridCell). Zero-JS-degradation: without JS
+// every card shows (the filter bar is progressive enhancement). General — any badged card grid
+// (a 90-product catalogue filtered by two facets is its first consumer).
+const filterLabel = pm.filter ? (typeof pm.filter === 'object' ? pm.filter.label : String(pm.filter)) : null;
+const facets = filterLabel ? [...new Set(cells.map((c) => c.badge).filter(Boolean))] : [];
+---
+<section class="st-grid" data-cols={pm.cols || ''} data-cards={imageCards ? 'image' : undefined} data-surface={surface}>
+  {eyebrow && <p class="st-grid-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <h2 set:html={inlineHtml(section.title)} />}
+  {section.body && <Fragment set:html={bodyHtml(section.body)} />}
+  {filterLabel && facets.length > 0 && (
+    <div class="st-grid-filter" role="group" aria-label={filterLabel}>
+      <button type="button" class="st-filter-pill is-active" data-cat="" aria-pressed="true">{filterLabel}</button>
+      {facets.map((f) => <button type="button" class="st-filter-pill" data-cat={f} aria-pressed="false" set:html={inlineHtml(f)} />)}
+    </div>
+  )}
+  <div class="st-cells" data-pack={packMasonry ? 'masonry' : undefined}>
+    {cells.map((c) => <GridCell c={c} imageCards={imageCards} />)}
+  </div>
+  {more && <a class="st-grid-more" href={more.href} set:html={inlineHtml(more.label)} />}
+</section>
+{packMasonry && <script>import './grid-masonry.js';</script>}
+{filterLabel && facets.length > 0 && <script>import './grid-filter.js';</script>}

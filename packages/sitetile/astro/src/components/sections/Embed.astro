@@ -1,0 +1,10 @@
+---
+// Escape hatch: body is passed through VERBATIM (no markdown processing) — the one portability-debt
+// seam. Per the marker-growth policy, a recurring shape should graduate to a real marker instead.
+// Modifier: `%% sitetile: embed wide %%` → `.is-wide` (full-bleed marketing band); default hugs the
+// theme content width (site.css .st-embed → --gd-max) so an embedded coral reads as page content.
+import { parseParams } from '@sitetile';
+const { section } = Astro.props;
+const cls = 'st-embed' + (parseParams(section.params).wide ? ' is-wide' : '');
+---
+<section class={cls} set:html={section.body || ''} />

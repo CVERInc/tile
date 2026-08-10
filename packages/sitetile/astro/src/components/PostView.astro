@@ -1,0 +1,150 @@
+---
+import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
+// Blog post view — renders a single post's body (via PostArticle) inside SiteLayout, EITHER bare
+// (single column) OR as the main column of the OPT-IN two-column post-sidebar layout. The wrapper +
+// aside appear ONLY when the site set `blog-post-sidebar: left|right` (→ `sidebar` prop is non-null,
+// computed once in the [...path] catch-all from the full corpus). Absent → a bare <PostArticle/>,
+// byte-identical to the old inline <article> (including `layout: sidebar` sites,
+// which already get their column from SiteLayout, are unaffected — zero new DOM, still single-column).
+// The sidebar REUSES the blog-index widget markup + theme CSS (`.bl-sidebar` / `.bl-side-*`) so a
+// post's rail and its index's rail read as one thing; content is corpus-derived (buildPostSidebar).
+import SiteLayout from '../layouts/SiteLayout.astro';
+import PostArticle from './PostArticle.astro';
+import { postUrl, blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
+
+const { post, meta, newer, older, keepReading, related, sidebar = null } = Astro.props;
+// Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
+// These strings used to be Chinese literals inline in this file AND in two sibling
+// components, so a non-CJK tenant read 最新文章 and a fix could land in one of three copies.
+const sideCopy = sidebarCopy(meta);
+
+// post-end donate CTA (`blog-post-cta: 贊助成為 VIP 會員=/donate`): parses `label=href`. When present
+// it REPLACES the default hardcoded belt below (a site supplies its own card instead).
+const ctaRaw = String(meta['blog-post-cta'] || '').trim();
+const ctaEq = ctaRaw.indexOf('=');
+const postCta = ctaRaw && ctaEq > 0
+  ? { label: ctaRaw.slice(0, ctaEq).trim(), href: ctaRaw.slice(ctaEq + 1).trim() } : null;
+
+// the hardcoded "Notes from the workshop" belt below is the VENDOR's OWN copy (voice + /donate route),
+// not a generic default — it used to render on every site's posts unless they opted into a custom
+// blog-post-cta. It was leaking onto tenants with no /donate page and zero relation to that copy.
+// Now opt-in via `blog-post-cta-default: true`, which exactly one site sets.
+const defaultCtaOn = String(meta['blog-post-cta-default'] || '').trim().toLowerCase() === 'true';
+
+// sidebar related-widget heading (blog-related-label, default "Related posts") — only used when a
+// site opts into the related widget (blog-sidebar-related). Recent/tagcloud/archive/category headings
+// are the SAME strings the blog index uses (最新文章 / 標籤雲 / 所有貼文), so both rails match.
+const relatedLabel = String(meta['blog-related-label'] || 'Related posts').trim();
+
+// 🩸 A post's own frontmatter `description:` never reached the <head>. SiteLayout reads its
+// description from `meta`, and `meta` here is the SITE's frontmatter — the post's was parsed
+// (parsePost → post.description) and then dropped on the floor. Measured 2026-08-03 on live
+// on a live site: every page and every post emitted og:title but zero description / og:description /
+// twitter:description, so search snippets and every share card were blank on a site whose whole
+// point is being found. The pages are a separate cause (their md has no `description:` to pass);
+// this is the plumbing half.
+//
+// Only the head cares, so we override for SiteLayout alone and leave `meta` untouched for the
+// body — the sidebar/CTA/label reads above must keep seeing site values.
+// 🩸 2026-08-06: every post declared `og:type: website`, because nothing ever set it. The platform
+// was telling crawlers and social cards that a post is not a post. These three keys also feed the
+// JSON-LD BlogPosting in SiteLayout — passed once, so the share card and the structured data cannot
+// disagree about who wrote a thing or when.
+const headMeta = {
+  ...meta,
+  ...(post.description ? { description: post.description } : {}),
+  'og-type': 'article',
+  ...(post.date ? { 'article-published-time': post.date } : {}),
+  ...(String(post.author || '').trim() ? { 'article-author': String(post.author).trim() } : {}),
+  'share-title': post.title,
+};
+---
+<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={meta.lang || DEFAULT_LANG} meta={headMeta}>
+  {sidebar ? (
+    <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
+      <PostArticle post={post} meta={meta} newer={newer} older={older} keepReading={keepReading} related={related} />
+      <aside class="bl-sidebar bl-post-sidebar">
+        {sidebar.categories.length > 0 && (
+          <div class="bl-side-widget bl-side-categories">
+            {meta['blog-category-title'] && <h3>{meta['blog-category-title']}</h3>}
+            <ul>{sidebar.categories.map((c) => (
+              <li>{c.href
+                ? <a href={c.href}>{c.label}{c.count && `（${c.count}）`}</a>
+                : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
+            ))}</ul>
+          </div>
+        )}
+        {/* 🩸 fixed 2026-07-13: same real `GET /search?q=` form as the index sidebar (was a
+            non-functional shell) — gated on blogSearchOn(meta), see BlogIndexView.astro. */}
+        {sidebar.archiveSidebar && blogSearchOn(meta) && (
+          <form class="bl-side-search" role="search" action="/search" method="get">
+            <input type="search" name="q" placeholder={sideCopy.search} aria-label="Search" />
+            <button type="submit" aria-label="Search">🔍</button>
+          </form>
+        )}
+        {sidebar.archiveSidebar && (
+          <div class="bl-side-widget bl-side-recent">
+            <h3>{sideCopy.recent}</h3>
+            <ul>{sidebar.recentPosts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+          </div>
+        )}
+        {sidebar.related.length > 0 && (
+          <div class="bl-side-widget bl-side-recent bl-side-related">
+            <h3>{relatedLabel}</h3>
+            <ul>{sidebar.related.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+          </div>
+        )}
+        {sidebar.archiveSidebar && sidebar.tags.length > 0 && (
+          <div class="bl-side-widget bl-side-tags">
+            <h3>{sideCopy.tags}</h3>
+            <div class="bl-side-tagcloud">{sidebar.tags.map((t) => <a href={tagHref(meta, t)} style={`font-size:${tagFontSize(sidebar.tagCounts[t], sidebar.tagCounts)}`}>{t}</a>)}</div>
+          </div>
+        )}
+        {/* 🩸 fixed 2026-07-13: collapsible year→month tree with real `?ym=` links on the
+            blog index, same widget as BlogIndexView.astro — see that file for the full note. */}
+        {sidebar.archive.length > 0 && (
+          <div class="bl-side-widget bl-side-archive">
+            <h3>{sideCopy.archive}</h3>
+            <ul class="bl-archive-years">
+              {sidebar.archive.map((y) => (
+                <li>
+                  <details class="bl-archive-year">
+                    <summary>{sideCopy.count(y.year, y.count)}</summary>
+                    <ul class="bl-archive-months">
+                      {y.months.map((m) => (
+                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </aside>
+    </div>
+  ) : (
+    <PostArticle post={post} meta={meta} newer={newer} older={older} keepReading={keepReading} related={related} />
+  )}
+  {/* Post-end donate CTA (opt-in `blog-post-cta`) — a single per-site card (e.g. a
+      "贊助成為 VIP 會員"), reusing the same .st-cta belt so it inherits the theme's belt look. */}
+  {postCta && (
+    <section class="st-cta bl-post-cta">
+      <div class="st-cta-btns">
+        <a class="st-cta-btn" href={postCta.href}>{postCta.label}</a>
+      </div>
+    </section>
+  )}
+  {/* The opt-in closing CTA belt — dark-belt/button-row look reusing the site's other
+      .st-cta belts (donate/contact). Opt-in via blog-post-cta-default; a per-site
+      blog-post-cta card also suppresses it. */}
+  {!postCta && defaultCtaOn && (
+    <section class="st-cta">
+      <p>Notes from the workshop — the door is open.</p>
+      <div class="st-cta-btns">
+        <a class="st-cta-btn st-cta-btn-secondary" href="/contact">Get in touch</a>
+        <a class="st-cta-btn st-cta-btn-secondary" href="/donate">Support the work</a>
+      </div>
+    </section>
+  )}
+</SiteLayout>

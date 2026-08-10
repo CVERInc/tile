@@ -1,0 +1,52 @@
+---
+// `form` — a contact / inquiry form: an optional lead (intro), then one field per `### <label>`
+// (parsed in site-core.js: a trailing `{email}`/`{tel}`/`{textarea}` sets the input kind, `- option`
+// lines under a field become a <select>). Renders a native <form> with <label> + <input>/<textarea>/
+// <select> per field + a submit button; the THEME paints `.st-form-*`. This coral carries only
+// STRUCTURE — the `action`/`method` params wire submission (a deploy concern, per
+// cutover-structure-before-data); no action → a structural form (never claims a backend it lacks,
+// no-phantom-features). Family posture: CommonMark, one `%% sitetile: %%` sentinel, native elements,
+// zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
+// coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
+// grow a GENERAL coral).
+import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+const { section, hero } = Astro.props;
+const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam every other
+// heading-bearing coral now has. 🩸 Three had it and six did not, with nothing in the
+// grammar explaining the split; authors reasonably used it everywhere and it silently
+// did nothing. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+const submit = pm.submit || 'Send';
+const action = pm.action || undefined;
+const method = (pm.method || 'post').toLowerCase();
+const fields = section.fields || [];
+const idOf = (i) => 'st-form-f' + (i + 1);
+---
+<section class="st-form-section">
+  <div class="st-form-head">
+    {eyebrow && <p class="st-form-eyebrow" set:html={inlineHtml(eyebrow)} />}
+    {section.title && <Title set:html={inlineHtml(section.title)} />}
+    {section.body && <Fragment set:html={bodyHtml(section.body)} />}
+  </div>
+  <form class="st-form" action={action} method={method}>
+    {fields.map((f, i) => (
+      <div class="st-form-field">
+        <label class="st-form-label" for={idOf(i)} set:html={inlineHtml(f.label)} />
+        {f.kind === 'textarea' ? (
+          <textarea class="st-form-input st-form-textarea" id={idOf(i)} name={f.label} rows="5"></textarea>
+        ) : f.kind === 'select' ? (
+          <select class="st-form-input st-form-select" id={idOf(i)} name={f.label}>
+            <option value="" disabled selected>—</option>
+            {(f.options || []).map((o) => <option value={o}>{o}</option>)}
+          </select>
+        ) : (
+          <input class="st-form-input" id={idOf(i)} name={f.label}
+            type={f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text'} />
+        )}
+      </div>
+    ))}
+    <button class="st-form-submit" type="submit">{submit}</button>
+  </form>
+</section>

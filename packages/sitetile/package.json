@@ -1,0 +1,12 @@
+{
+  "name": "@tile/sitetile",
+  "version": "0.0.0",
+  "description": "tile family — whole-site content model: typed Markdown sections (hero/grid/cta/prose/embed) → clean static site. The REEF with Site renderer.",
+  "type": "module",
+  "main": "site-core.js",
+  "scripts": {
+    "test": "node site-core.test.js"
+  },
+  "license": "MIT",
+  "private": true
+}

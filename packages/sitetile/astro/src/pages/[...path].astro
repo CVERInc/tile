@@ -1,0 +1,191 @@
+---
+// The single ROOT catch-all. ONE getStaticPaths arbitrates every root-level path so the site's
+// content pages AND its blog (index, pager, posts) can share the root namespace without two
+// separate root routes fighting over it. This merge is what lets a blog mount at source-faithful
+// URLs — a WP `/YYYY/MM/slug`, a bare `/postname`, or the site root — which would otherwise collide
+// with content pages (Phase 2 of source-faithful blog URLs). With the DEFAULT blog-path (`/devlog`)
+// every emitted path AND rendered byte is identical to the pre-merge routes it replaces:
+//   pages/[...slug].astro           → content pages   (kind: 'page'  → PageView)
+//   pages/devlog/index.astro        → blog index p.1   (kind: 'blog-index' → BlogIndexView)
+//   pages/devlog/page/[n].astro     → blog index p.2+  (kind: 'blog-index' → BlogIndexView)
+//   pages/devlog/[slug].astro       → blog posts       (kind: 'post'  → PostView)
+// Each kind renders through its OWN view component (byte-identical to the old page it came from);
+// this file only routes + selects. /search/label/<tag>/… stays its own nested route (two path
+// segments never collide with this catch-all).
+import PageView from '../components/PageView.astro';
+import BlogIndexView from '../components/BlogIndexView.astro';
+import PostView from '../components/PostView.astro';
+import DateArchiveView from '../components/DateArchiveView.astro';
+import { parseSite, isSiteFile } from '@sitetile';
+import { allPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar } from '../lib/blog.mjs';
+
+
+export function getStaticPaths() {
+  const paths = [];
+
+  // ── blog (index + pager + posts) ──
+  // Loaded with the SAME globs/meta the old devlog/* routes used, so with the default blog-path
+  // this reproduces /devlog, /devlog/page/<n>, /devlog/<slug> exactly. As before, the index is
+  // ungated (a postless site still gets an empty /devlog, matching the old static index.astro) and
+  // the pager only appears when blog-page-size is set (matching the old page/[n].astro's `return []`).
+  // Computed BEFORE the content loop so the loop can see whether the blog is root-mounted.
+  const posts = allPosts(
+    import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  // rootMount: the blog is mounted at the site root (blog-path '' or '/'). Rare — nearly every
+  // site has a non-empty base (default /devlog), so
+  // rootMount is false and the collision guard below is inert → their paths stay byte-identical.
+  // …and only when there IS a blog: without this guard a site that set `blog-path: ''` but has
+  // no blog would suppress its own home page in favour of a blog index that never gets emitted.
+  const rootMount = blogInstalled(meta, posts) && blogBase(meta) === '';
+
+  // ── content pages ── (verbatim from the old pages/[...slug].astro)
+  // Recursive glob so NESTED pages route faithfully: content/legal/terms.md → /legal/terms.
+  const files = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  // site-config layer: `content/_site.md` chrome (+ `content/<locale>/_site.md` override),
+  // inherited UNDER each page's own frontmatter (page keys win). null when absent → legacy
+  // per-page behavior (SPEC-site-data-model). loadSite is called PER PAGE with its rel path so a
+  // Lingo page (ja-jp/about) gets its locale's chrome.
+  for (const [path, raw] of Object.entries(files)) {
+    // `_site.md` (config) and `_theme.md` (the structured theme source, SPEC-theming-as-portable-ir)
+    // are site DATA, NOT routable pages — else /_theme would render the theme's own frontmatter + its
+    // residue CSS as a bogus page. `_site` was skipped from the start; `_theme` joined the ir/ layer
+    // later and needs the same exclusion (a regenerated site_pages.json includes it).
+    if (/(^|\/)_(site|theme)\.md$/.test(path)) continue;
+    if (!isSiteFile(raw)) continue;
+    const rel = path.split('/content/')[1].replace(/\.md$/, '');   // e.g. "home" or "ja-jp/about"
+    const slug = rel === 'home' ? undefined : rel;                 // [...path] accepts "legal/terms"
+    // Root-mount collision guard: when the blog owns `/` (rootMount), the home page must NOT also
+    // emit `/` as a content page — two paths with `path: undefined` is a duplicate-route BUILD ERROR.
+    // Skip home here and let the blog-index below own `/`. home.md still contributes its frontmatter
+    // (siteMeta → title/nav/footer/sidebar) and its footer-widget body sections (footerWidgets reads
+    // the glob directly, not this route), so nothing of home is lost except its BODY rendering as a
+    // page — which is exactly the intent: a root-mounted blog's `/` is the post list, faithful to
+    // live (a root-mounted blog is a paginated post list + sidebar, no curated hero). Non-root sites:
+    // rootMount is false → this never fires → home emits exactly as before.
+    if (rootMount && slug === undefined) continue;
+    // effective meta = { ...siteConfig(locale-aware), ...pageFrontmatter } — page keys override
+    // site defaults. Absent _site → site is unchanged (legacy). This is what makes header/nav/
+    // blog-search etc. consistent across ALL pages instead of each page duplicating the chrome.
+    const site = parseSite(raw);
+    const siteConfig = loadSite(files, rel);
+    // 🩸 `site-title` is stashed BEFORE the merge because the merge destroys the distinction the
+    // head needs. og:site_name must be a constant per site, but it was reading headerBrand, which
+    // falls back to meta.title — and after this merge meta.title is the PAGE's title on any page
+    // that sets one. Measured on a live site: og:site_name came out as the PAGE's title on
+    // /about/ and /oss/, while / and the posts correctly carried the site's name.
+    // A crawler reading two pages of one site saw three different site names.
+    // Reserved key, not authorable: a page setting `site-title:` itself is overwritten here.
+    if (siteConfig) site.meta = { ...siteConfig, ...site.meta, 'site-title': siteConfig.title || '' };
+    paths.push({ params: { path: slug }, props: { kind: 'page', site } });
+  }
+
+  // ── everything below this line is the blog; a site without one emits none of it ──
+  // The index used to be UNGATED (see the note at the top of this function): a postless site
+  // still got an empty /devlog, on the theory that an empty index is harmless. It wasn't — the
+  // index carries the blog's title and tagline, and those defaulted to the VENDOR's, so tenants
+  // who never installed the blog published the vendor's voice. Measured across the live tenants:
+  // two sites with zero posts and no `packages: blog` both served a /devlog reading
+  // "Devlog" + "Short build logs and hard-won tricks from the workshop."
+  // blogInstalled() qualifies a site by DECLARATION or by CONTENT, so a site with 632 posts and a
+  // deliberately empty _site.md — keeps every one of its URLs.
+  if (!blogInstalled(meta, posts)) return paths;
+
+  // index page 1 at the blog base (default /devlog → "devlog"; root mount → undefined).
+  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts, meta, pageNum: 1 } });
+
+  // pager pages 2..N — only when blog-page-size is set; else zero extra routes (as before).
+  const pageSize = Number(meta['blog-page-size']) || 0;
+  if (pageSize) {
+    const totalPages = Math.ceil(posts.length / pageSize) || 1;
+    for (let n = 2; n <= totalPages; n++) {
+      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts, meta, pageNum: n } });
+    }
+  }
+
+  // posts — one per post at its source-faithful URL (default → /devlog/<slug>). newer/older +
+  // keepReading + related are computed EXACTLY as the old devlog/[slug].astro did (same shared-tag
+  // rules), so post pages stay byte-identical.
+  const relatedN = Number(meta['blog-related']) || 0;
+
+  // ── INCREMENTAL RENDER (task #39) ──────────────────────────────────────────────────────────
+  // `REEF_ONLY_POSTS` is a comma-separated slug list. When set, only those posts EMIT a page; the
+  // build script then fetches every other post's HTML from the site's own previous deployment.
+  // Unset (the default, and every local build) renders everything exactly as before.
+  //
+  // 🔴 It filters EMISSION ONLY. `posts` stays the full corpus above and below this line, because
+  // newer/older/keepReading/related/sidebar are computed FROM it — a filtered corpus would render
+  // the surviving pages with the wrong neighbours, which is far worse than rendering too many.
+  //
+  // 🔴 And only a BODY-ONLY edit is ever allowed to arrive here. detect-changes.mjs falls back to a
+  // full render for anything that adds, deletes, retitles, redates or retags a post, because each
+  // of those rewrites OTHER posts' keep-reading and prev/next. Measured on a live page: five
+  // other posts' titles and URLs are baked into every post. Nothing embeds a post's BODY.
+  const onlyRaw = typeof process !== 'undefined' && process.env && process.env.REEF_ONLY_POSTS;
+  const only = onlyRaw ? new Set(String(onlyRaw).split(',').map((s) => s.trim()).filter(Boolean)) : null;
+
+  posts.forEach((post, i) => {
+    if (only && !only.has(post.slug)) return;
+    const newer = posts[i - 1] || null, older = posts[i + 1] || null;
+    const others = posts.filter((p) => p.slug !== post.slug);
+    const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
+    const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
+    const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
+    // opt-in post sidebar view-model (blog-post-sidebar: left|right). null unless opted in →
+    // PostView renders single-column exactly as before. Computed here where the FULL corpus +
+    // site meta are in scope (recent/tags/archive/categories are corpus-derived, never fabricated).
+    const sidebar = buildPostSidebar(posts, meta, post);
+    paths.push({
+      params: { path: toPath(postUrl(post, meta)) },
+      props: { kind: 'post', post, meta, newer, older, keepReading, related, sidebar },
+    });
+  });
+
+  // ── WP date archives (/YYYY/ + /YYYY/MM/, + pagination) ──
+  // Root-level paths (a bare /2013/), so they belong to THIS catch-all, not a pages/ route (which
+  // would fight the post namespace). WP generates these rewrite rules for any %postname% site; we
+  // replicate the ones live actually serves — year + month (day archives 404 upstream, so
+  // they're omitted). Distinct years/months are derived from the corpus (never fabricated). OPT-IN
+  // via `blog-date-routes`; the deleted year-slug artifact posts (2013.md…) are why /2013/ is free
+  // to mean "year archive" and not collide with a post.
+  const dateOn = meta['blog-date-routes'] != null && String(meta['blog-date-routes']) !== 'false';
+  if (dateOn) {
+    const pageSize = Number(meta['blog-page-size']) || 0;
+    const years = new Map();          // "2013" → count
+    const months = new Map();         // "2013/07" → count
+    for (const p of posts) {
+      const d = p.date || '';
+      const y = d.slice(0, 4), mo = d.slice(5, 7);
+      if (!/^\d{4}$/.test(y)) continue;
+      years.set(y, (years.get(y) || 0) + 1);
+      if (/^\d{2}$/.test(mo)) months.set(`${y}/${mo}`, (months.get(`${y}/${mo}`) || 0) + 1);
+    }
+    const emit = (path, year, month, count) => {
+      paths.push({ params: { path }, props: { kind: 'date-archive', posts, meta, year, month, pageNum: 1 } });
+      if (pageSize) {
+        const totalPages = Math.ceil(count / pageSize) || 1;
+        for (let n = 2; n <= totalPages; n++) {
+          paths.push({ params: { path: `${path}/page/${n}` }, props: { kind: 'date-archive', posts, meta, year, month, pageNum: n } });
+        }
+      }
+    };
+    for (const [y, count] of years) emit(y, y, null, count);
+    for (const [ym, count] of months) { const [y, mo] = ym.split('/'); emit(ym, y, mo, count); }
+  }
+
+  return paths;
+}
+
+const props = Astro.props;
+// Dispatch to the kind's view. A single dynamic <View/> at the template root adds ZERO bytes
+// around the view's own output (verified against the Astro compiler), so each page is byte-for-byte
+// what the old dedicated route emitted.
+const View = props.kind === 'page' ? PageView
+  : props.kind === 'blog-index' ? BlogIndexView
+  : props.kind === 'date-archive' ? DateArchiveView
+  : PostView;
+---
+<View {...props} />

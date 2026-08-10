@@ -1,0 +1,58 @@
+---
+import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+// REEF with Blog — /search, the shareable full-page search view (the header overlay's
+// Enter target and a bookmarkable `?q=` URL, semantically matching live Blogger's own
+// /search page). Wears the SAME SiteLayout shell + `.bl-*` result markup as /devlog, so
+// the per-site theme applies identically. It does NOT collide with /search/label/<tag>
+// (that route lives one segment deeper, at search/label/…/index.html).
+//
+// The blog-search island is injected by SiteLayout (gated on blog-search + blog), so this
+// page needs no <script> of its own — the island detects `[data-search-page-input]` and
+// wires the page (seeding from location.search, updating the address bar as you type).
+//
+// OPT-IN + no phantom feature: the interactive search UI renders ONLY when the site opts
+// into `blog-search` AND ships the blog.
+//
+// 🩸 2026-08-06: "absent → a plain heading" was still the wrong answer. A site with the blog but
+// no `blog-search` published a real, crawlable URL whose entire content was <h1>Search</h1> —
+// measured on a live site, where nothing even links to it. Hiding the form removed the phantom
+// FEATURE and left a phantom PAGE. A capability that is off should have no URL, so this is a
+// catch-all route whose getStaticPaths returns nothing when the feature is off; `rest: undefined`
+// emits exactly /search when it is on. The deeper /search/label/<tag> routes are more specific and
+// keep winning — asserted by the build, not assumed.
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { siteMeta, blogSearchOn } from '../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const meta = siteMeta(import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true }));
+  const hasBlog = String(meta.packages || '').split(',').map((s) => s.trim()).includes('blog');
+  // No feature, no URL. Returning [] emits nothing at all — not a 404 page, not a stub.
+  if (!blogSearchOn(meta) || !hasBlog) return [];
+  return [{ params: { rest: undefined }, props: { meta } }];
+}
+
+const { meta } = Astro.props;
+const heading = (meta['blog-search-title'] ? String(meta['blog-search-title']).trim() : '') || 'Search';
+const placeholder = (meta['blog-search-placeholder'] ? String(meta['blog-search-placeholder']).trim() : '') || heading;
+const emptyText = (meta['blog-search-empty'] ? String(meta['blog-search-empty']).trim() : '') || 'No matching posts';
+const countLabel = (meta['blog-search-count-label'] ? String(meta['blog-search-count-label']).trim() : '') || 'results';
+const title = heading + ' — ' + (meta.title || '');
+---
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+  <section class="bl-index bl-search">
+    <div class="bl-main">
+      <header class="bl-head">
+        <h1>{heading}</h1>
+      </header>
+      <Fragment>
+          <form class="bl-search-form" role="search" data-search-page onsubmit="return false">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" class="bl-search-input" data-search-page-input name="q" placeholder={placeholder} aria-label={placeholder} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          </form>
+          <p class="st-search-count" data-search-page-count data-label={countLabel} hidden></p>
+          <p class="st-search-empty" data-search-page-empty data-text={emptyText} hidden></p>
+          <ul class="bl-list bl-search-results" data-search-page-results></ul>
+      </Fragment>
+    </div>
+  </section>
+</SiteLayout>

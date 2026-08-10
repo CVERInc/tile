@@ -1,0 +1,106 @@
+---
+// Single grid-card renderer, factored out of Grid.astro so `pack=masonry` can call it once per
+// column without duplicating the markup (Astro frontmatter can't return JSX from a plain helper
+// function — only a template/component can — so this got its own tiny component instead).
+import { inlineHtml, bodyHtml, firstImage, imgTag } from '@sitetile';
+import { lucideSvg } from '../../lib/lucide.mjs';
+import Arrow from '@cvernet/signet/Arrow.astro';
+import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS — was dropped when Grid.astro's
+// per-cell markup got factored out into this component (Arrow moved here, its stylesheet did not).
+const { c, imageCards } = Astro.props;
+const isExternal = (h) => /^https?:\/\//.test(h || '');
+// external cell links open in a new tab (rel=noopener), mirroring every other button surface
+// (design 2026-07-13). Internal links stay in the same tab. Spread onto the anchor.
+const tgt = (h) => isExternal(h) ? { target: '_blank', rel: 'noopener' } : {};
+const fi = imageCards ? firstImage(c.body) : null;
+const badge = c.badge ? true : false;
+const footTag = c.badge && c.cta;
+// `[Label →href]` badge = a SECONDARY card link (e.g. an "Open in …" action). It can't
+// nest inside the whole-cell <a>, so such a cell uses the OVERLAY pattern: a relative container, an
+// absolute full-cell overlay <a> (primary link), and the action + "Learn more" stacked above it.
+const hasAction = !!(c.href && c.badgeHref);
+---
+{imageCards ? (
+  c.href ? (
+    <a class="st-cell st-gal-cell st-cell-link group" href={c.href} {...tgt(c.href)} data-cat={c.badge || undefined}>
+      {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
+      {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
+      {c.title && <h3 set:html={inlineHtml(c.title)} />}
+      <Fragment set:html={bodyHtml(fi.rest)} />
+    </a>
+  ) : (
+    <div class="st-cell st-gal-cell" data-cat={c.badge || undefined}>
+      {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
+      {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
+      {c.title && <h3 set:html={inlineHtml(c.title)} />}
+      <Fragment set:html={bodyHtml(fi.rest)} />
+    </div>
+  )
+) : hasAction ? (
+  <div class="st-cell st-cell-link st-cell-overlaid group">
+    <a class="st-cell-overlay" href={c.href} {...tgt(c.href)} aria-label={c.title}></a>
+    {c.icon
+      ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
+      : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
+    {c.title && <h3 set:html={inlineHtml(c.title)} />}
+    <Fragment set:html={bodyHtml(c.body)} />
+    <div class="st-cell-foot">
+      <a class="st-cell-action" href={c.badgeHref} {...tgt(c.badgeHref)}>
+        <span class="st-cta-label" set:html={inlineHtml(c.badge)} />
+        <Arrow direction={isExternal(c.badgeHref) ? 'up-right' : 'right'} size={12} />
+      </a>
+      {c.cta && (
+        <span class="st-cell-cta st-cell-cta-labeled">
+          <span class="st-cta-label">{c.cta}</span>
+          <Arrow direction={isExternal(c.href) ? 'up-right' : 'right'} size={18} />
+        </span>
+      )}
+    </div>
+  </div>
+) : (
+  c.href ? (
+    <a class="st-cell st-cell-link group" href={c.href} {...tgt(c.href)}>
+      {footTag ? null : (badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />)}
+      {c.icon
+        ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
+        : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
+      {c.title && <h3 set:html={inlineHtml(c.title)} />}
+      <Fragment set:html={bodyHtml(c.body)} />
+      {footTag ? (
+        <div class="st-cell-foot">
+          <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />
+          <span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">{c.cta}</span><Arrow direction={isExternal(c.href) ? 'up-right' : 'right'} size={18} /></span>
+        </div>
+      ) : c.cta ? (
+        <span class="st-cell-cta st-cell-cta-labeled">
+          <span class="st-cta-label">{c.cta}</span>
+          <Arrow direction={isExternal(c.href) ? 'up-right' : 'right'} size={18} />
+        </span>
+      ) : (c.badge || c.emoji || c.icon) ? null : (
+        <span class="st-cell-cta" aria-hidden="true"><Arrow direction="right" size={18} /></span>
+      )}
+    </a>
+  ) : (
+    <div class="st-cell">
+      {footTag ? null : (badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />)}
+      {c.icon
+        ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
+        : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
+      {c.title && <h3 set:html={inlineHtml(c.title)} />}
+      <Fragment set:html={bodyHtml(c.body)} />
+      {footTag ? (
+        <div class="st-cell-foot">
+          <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />
+          <span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">{c.cta}</span><Arrow direction={isExternal(c.href) ? 'up-right' : 'right'} size={18} /></span>
+        </div>
+      ) : c.cta ? (
+        <span class="st-cell-cta st-cell-cta-labeled">
+          <span class="st-cta-label">{c.cta}</span>
+          <Arrow direction={isExternal(c.href) ? 'up-right' : 'right'} size={18} />
+        </span>
+      ) : (c.badge || c.emoji || c.icon) ? null : (
+        <span class="st-cell-cta" aria-hidden="true"><Arrow direction="right" size={18} /></span>
+      )}
+    </div>
+  )
+)}
