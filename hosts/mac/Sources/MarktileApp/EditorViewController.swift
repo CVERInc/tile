@@ -25,7 +25,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         // away or open a second window.
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
 
-        schemeHandler = BundleSchemeHandler(resourceRoot: Bundle.module.resourceURL)
+        schemeHandler = BundleSchemeHandler(resourceRoot: EngineResources.resourceRoot())
         if let schemeHandler {
             config.setURLSchemeHandler(schemeHandler, forURLScheme: BundleSchemeHandler.scheme)
         }
@@ -104,9 +104,28 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     override func viewDidLoad() {
         super.viewDidLoad()
         observeAccent()
-        guard schemeHandler != nil else { return }
+        guard schemeHandler != nil else { showMissingEngine(); return }
         let index = BundleSchemeHandler.baseURL.appendingPathComponent("Web/index.html")
         webView.load(URLRequest(url: index))
+    }
+
+    /// A broken install used to look like a blank window — the app was up, the menus worked, and
+    /// nothing said why the page was empty. Say it on screen instead, in the one place the person
+    /// is already looking.
+    private func showMissingEngine() {
+        webView.isHidden = true
+        let label = NSTextField(wrappingLabelWithString:
+            "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, "
+            + "or rebuild with scripts/build-app.sh.")
+        label.alignment = .center
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+        ])
     }
 
     // MARK: - Text in / out
