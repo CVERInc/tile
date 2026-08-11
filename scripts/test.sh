@@ -47,7 +47,8 @@ done
 # that passes. Here the glob IS the list, so a new file cannot be orphaned by forgetting to add it.
 echo "→ site renderer tests"
 shopt -s nullglob
-for t in packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs; do
+for t in packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs \
+         flowtile-w/*.test.mjs; do
   echo "  · $t"
   node "$t"
 done
