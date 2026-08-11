@@ -31,8 +31,18 @@ echo "→ generated artifacts in sync (committed == fresh build)"
 # and this is what stops the copies drifting from it again.
 bash tugtile-w/build.sh >/dev/null
 bash modaltile-w/build.sh >/dev/null
+bash pagetile-w/build.sh >/dev/null
+# 🩸 pagetile-w was NOT in this list, and its build.sh did not copy the engine at all — it still
+# claimed the copy came from the other repo's fetch script. Its vendor/tile-core.js was 33 KB behind
+# the canonical one, on a preview that reported nothing wrong. Two of the three surfaces were
+# localised at graduation; this one was missed, and only a list that nobody diffed said otherwise.
+bash scripts/build-board-core.sh >/dev/null
+# 🩸 board-core.js carried a DO-NOT-EDIT banner with no generator in this repo — the slicing lived
+# in the private lab's fetch script and did not graduate with the artifact. It was still identical
+# to a fresh slice, which is luck, not a mechanism.
 git diff --exit-code -- packages/tugtile/main.js packages/marktile/main.js tile-core/tile-core.js \
-  tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js \
+  tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js pagetile-w/vendor/tile-core.js \
+  tugtile-w/board-core.js \
   || { echo "✗ a committed build artifact is stale — run the builds and commit the result"; exit 1; }
 
 echo "→ tests"

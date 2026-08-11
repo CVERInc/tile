@@ -1,5 +1,5 @@
 #!/bin/bash
-# Emit tile-core.js — the SHARED editor core (single source = plugin.src.js #core-start/#core-end),
+# Emit tile-core.js — the SHARED editor core (single source = packages/core/editor-core.js),
 # wrapped as a platform-agnostic ES module for EXTERNAL web consumers.
 # Core is UNMODIFIED (no fork). Consumer must load an Obsidian-shim first (HTMLElement.prototype DOM sugar
 # + globalThis.setIcon + globalThis.Modal). tugtile/marktile keep using the inlined core (build-marktile.sh).

@@ -2449,7 +2449,7 @@ function promptVideoEmbed() {
   const u = url && url.trim();
   return u ? videoEmbed(u) : null;
 }
-
+   (build replaces this line with packages/core/editor-core.js — the shared engine)
 
 const VIEW_TYPE = 'marktile-editor';
 
