@@ -45,10 +45,36 @@ done
 # listed: the private repo these came from keeps a hand-written list, and that list silently
 # stopped covering five real test files — a test nothing runs is indistinguishable from a test
 # that passes. Here the glob IS the list, so a new file cannot be orphaned by forgetting to add it.
+#
+# 🩸 …within a directory. The DIRECTORIES are still hand-kept, and that is the same defect one level
+# up: drop a `foo.test.mjs` into pagetile-w/ or packages/core/ and it is silently never run. The
+# guard below closes it by asking the TREE instead of the list — which matters most right now,
+# because the next thing that happens to this repo is that several of these directories move.
+SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs
+             flowtile-w/*.test.mjs test/*.test.mjs)
+
+echo "→ every test file in the tree is actually run"
+shopt -s nullglob
+covered=$(printf '%s\n' test/*.cjs "${SUITE_GLOBS[@]}" | sort -u)
+shopt -u nullglob
+# `test/*.cjs` is deliberately non-recursive: test/golden/corpus.cjs is a fixture another test
+# requires, not a suite. Anything matching *.test.* IS a suite, wherever it sits.
+#
+# `--others --exclude-standard` as well as tracked: a test file you wrote thirty seconds ago and
+# have not staged is EXACTLY the one at risk of never being run, and `git ls-files` alone would
+# say nothing until after it was committed. Ignored paths (node_modules, dist) stay out.
+present=$( { git ls-files --cached --others --exclude-standard '*.test.mjs' '*.test.js'
+             printf '%s\n' test/*.cjs 2>/dev/null; } | sort -u)
+orphans=$(comm -23 <(echo "$present") <(echo "$covered") || true)
+if [ -n "$orphans" ]; then
+  echo "✗ these test files exist but nothing runs them — add their directory to SUITE_GLOBS:" >&2
+  echo "$orphans" | sed 's/^/    /' >&2
+  exit 1
+fi
+
 echo "→ site renderer tests"
 shopt -s nullglob
-for t in packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs \
-         flowtile-w/*.test.mjs; do
+for t in "${SUITE_GLOBS[@]}"; do
   echo "  · $t"
   node "$t"
 done
