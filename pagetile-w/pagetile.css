@@ -501,12 +501,36 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
 .tugtile-prompt-ok, .tugtile-prompt-ok:hover { color: var(--text-success, var(--interactive-accent)); }
 .tugtile-ed-tools {
   flex: 1; min-width: 0;
-  display: flex; flex-wrap: nowrap; gap: 4px; align-items: center;
-  justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned + scrollable when it overflows */
+  /* wrap, not nowrap: `twoRow = Platform.isPhone` decides the second row from the DEVICE, but what
+     actually runs out is WIDTH. A desktop pane dragged narrow — an Obsidian sidebar, a macOS window —
+     used to push the last tools off the right edge into a horizontal scroll nobody looks for. Wrapping
+     turns "buttons are missing" into "the toolbar is two rows", which is what the phone layout already
+     decided is the right answer when space is short. */
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned when it overflows */
   overflow-x: auto;
+  /* Wrapping fixed "buttons fall off the right edge", and then had no floor of its own: keep narrowing an
+     Obsidian sidebar or a macOS window and the rows keep multiplying — measured at 20 rows, 813px of
+     toolbar above a 640px window, i.e. a bar that has eaten the document it was decorating. Three rows is
+     the bound. It is a backstop, not a layout: every surface is supposed to shed its own chrome before
+     reaching it (macOS does, in Web/index.html), and where it does engage the row scrolls rather than
+     hides, because a button that is merely below the fold is still findable. */
+  max-height: 104px;   /* 3 rows: 3×32 + 2×4 gap */
+  overflow-y: auto;
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
-/* Group divider in the editor toolbar */
+/* …except size, for the TOOLBAR tools only. .tugtile-iconbtn is 40px around a 20px icon — half of it is empty,
+   which reads as "the buttons are too big" (it is chodaict's word for it) and, on desktop, is what decides
+   whether sixteen tools need one row of chrome or three. The header ✕/✓ and the find bar keep 40: they are
+   lone targets with room around them, not a dense row. Phone keeps a bigger target — a thumb is not a cursor,
+   and the phone row scrolls sideways anyway, so shrinking there buys nothing worth the miss-taps. */
+.tugtile-ed-tool { width: 32px; height: 32px; }
+body.is-phone .tugtile-ed-tool { width: 38px; height: 38px; }
+/* Group divider in the editor toolbar. Kept as a 1px rule between tightly-packed buttons rather than
+   promoted into a nowrap group box: measured, unbreakable groups leave the tail of each row empty and cost
+   the DEFAULT 760px window a whole third row (101px → 145px of chrome), which is a worse trade than the
+   thing it fixes. The one artifact wrapping does produce — a divider that lands at a row edge, dividing it
+   from nothing — is handled where it can actually be seen, in tidySeps(). */
 .tugtile-ed-sep { flex: 0 0 auto; width: 1px; height: 20px; margin: 0 4px; background: var(--background-modifier-border); }
 /* Phone: second toolbar row (format/insert tools), below the bar's essentials. Centered, scrolls if it overflows. */
 .tugtile-ed-tools2 {
@@ -529,18 +553,84 @@ body.is-phone .tugtile-ed-sep { display: none; }   /* no group separators in the
 body.is-phone .tugtile-edit-modal-full { padding-top: 4px; }
 body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
 /* Find / replace bar (below the toolbar) */
+/* The find bar is SUBORDINATE to the toolbar, not a second one. It used to carry the same filled
+   background and a full-weight border, so the two read as competing stripes; now it is the same
+   surface with a hairline under it and the controls do the talking. */
 .tugtile-ed-find {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  padding: 6px 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
 }
+/* 🔴 GROUPING IS DRAWN, NOT SPACED. The arrows belong to the find field and the replace buttons
+   belong to the replace field, and that was previously said only with 6px-vs-10px gaps — which
+   reads as one evenly-spaced row of loose parts. Each group is now ONE control with a border around
+   it, so "these act on this field" is visible instead of inferred. */
+.tugtile-ed-find-grp {
+  display: inline-flex; align-items: center; gap: 1px; min-width: 0; flex: 0 1 auto;
+  padding: 0 3px 0 6px; border-radius: 7px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field, var(--background-primary));
+}
+/* Focus lands on the GROUP, not the bare input: the pill is the control now, so it is what lights up. */
+.tugtile-ed-find-grp:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+.tugtile-ed-find-lead { display: inline-flex; align-items: center; color: var(--text-muted); margin-right: 4px; }
+.tugtile-ed-find-lead svg { width: 15px; height: 15px; }
 .tugtile-ed-find-i {
-  flex: 1; min-width: 80px;
-  font-size: 16px; padding: 5px 8px; border-radius: var(--radius-s);   /* 16px avoids iOS focus-zoom */
+  /* Grows with the row, but stops: left at flex:1 the two fields split the whole window between them, so a
+     1200px window bought two 500px boxes to hold the word "hello". Every Mac find bar keeps its field the
+     size of a search term. */
+  flex: 1 1 140px; min-width: 80px; max-width: 220px;
+  font-size: 16px; padding: 4px 2px;   /* 16px avoids iOS focus-zoom */
+  border: 0; background: transparent; outline: none; box-shadow: none;   /* the pill owns the chrome */
+  color: var(--text-normal);
 }
-.tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-muted); font-size: 0.85em; min-width: 1.6em; text-align: center; }
-/* .tugtile-ed-find-b inherits everything from .tugtile-iconbtn */
+.tugtile-ed-find > .tugtile-ed-find-b { margin-left: auto; }   /* the lone direct child is ✕ → far edge */
+/* The match count sits INSIDE the field's pill, right-aligned against the arrows, the way every Mac
+   find field shows it — floating loose between the box and the chevrons it read as a stray digit. */
+.tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-faint); font-size: 0.8em; min-width: 1.4em; text-align: right; padding-right: 2px; font-variant-numeric: tabular-nums; }
+/* Buttons inside a pill are part of it: no hover plate fighting the border that already groups them. */
+.tugtile-ed-find-grp .tugtile-ed-find-b { width: 24px; height: 24px; padding: 0; border-radius: 5px; }
+.tugtile-ed-find-grp .tugtile-ed-find-b svg { width: 15px; height: 15px; }
+/* .tugtile-ed-find-b inherits everything else from .tugtile-iconbtn */
+/* ── Search every document ───────────────────────────────────────────────────────────────────────
+   A centred overlay, because picking a result ENDS this panel's job — unlike the table of contents,
+   which is about the document you are already in and stays with you. Same reason Spotlight, Open
+   Quickly and every quick-switcher are modals rather than rails. It also needs the width: the
+   context line under a hit is what tells you it is the right file, and a 240px sidebar eats it. */
+.tugtile-sa { position: absolute; inset: 0; z-index: 20; display: none; }
+.tugtile-sa.is-open { display: block; }
+.tugtile-sa-scrim { position: absolute; inset: 0; background: var(--background-modifier-cover, rgba(0,0,0,0.35)); }
+.tugtile-sa-box {
+  position: relative; margin: 8vh auto 0; width: min(680px, 92%); max-height: 74vh;
+  display: flex; flex-direction: column;
+  background: var(--background-primary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.28); overflow: hidden;
+}
+.tugtile-sa-top { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--background-modifier-border); }
+.tugtile-sa-i { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; outline: none; color: var(--text-normal); font-size: 17px; padding: 2px 0; }
+.tugtile-sa-stat { flex: 0 0 auto; color: var(--text-faint); font-size: 0.78em; white-space: nowrap; }
+/* Busy is shown on the FIELD, not as a spinner over the results: the previous answer stays readable
+   while the next one is on its way, which is the difference between a search that feels fast and one
+   that blanks every time you type a letter. */
+.tugtile-sa.is-busy .tugtile-sa-top { border-bottom-color: var(--interactive-accent); }
+.tugtile-sa-list { overflow-y: auto; padding: 6px; }
+.tugtile-sa-hint { padding: 22px 14px; color: var(--text-muted); text-align: center; }
+.tugtile-sa-row { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.tugtile-sa-row:hover { background: var(--background-modifier-hover); }
+.tugtile-sa-row.is-sel { background: var(--background-modifier-hover); box-shadow: inset 2px 0 0 var(--interactive-accent); }
+.tugtile-sa-head { display: flex; align-items: baseline; gap: 8px; }
+.tugtile-sa-name { color: var(--text-accent); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tugtile-sa-age { margin-left: auto; color: var(--text-faint); font-size: 0.75em; font-variant-numeric: tabular-nums; }
+.tugtile-sa-hit { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tugtile-sa-ctx { color: var(--text-faint); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The magnifier is a door only when a host can widen the search. */
+.tugtile-ed-find-lead.is-scope { cursor: pointer; border-radius: 4px; }
+.tugtile-ed-find-lead.is-scope:hover { color: var(--text-accent); }
+
 /* Settings: compact checkbox grid for choosing which editor toolbar buttons show */
 .tugtile-tools-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-end; }
 .tugtile-tools-pick .tugtile-tool-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -552,6 +642,11 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
    which is what lets a heading line render bigger while the literal '## ' markers stay in place. */
 .tugtile-ed-rich {
   min-height: 100%;
+  /* border-box or the padding lands OUTSIDE the 100%: 508px of container + 14px top + 14px bottom = 536px of
+     content, so the editor is permanently 28px taller than its scroller and a one-line file still shows a
+     scrollbar. Overlay scrollbars hid this for years — it only becomes visible the moment a host styles the
+     scrollbar to stay on screen. */
+  box-sizing: border-box;
   margin: 0; border: 0; outline: none;
   padding: 14px 16px;
   font-family: var(--font-text); font-size: 16px; line-height: 1.7;
@@ -561,6 +656,10 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
 }
 .tugtile-ed-rich:focus, .tugtile-ed-rich:focus-visible { outline: none; box-shadow: none; }
 .tugtile-ed-rich .tg-line { min-height: 1.7em; }   /* Empty lines stay tappable and visible */
+/* Hold ⌘ (or Ctrl) and links become doors. The class is added by the engine only while the key is
+   down, so the pointer is the whole affordance — a permanent underline would be lying the rest of
+   the time, when a plain click correctly places the caret instead. */
+.tugtile-ed-linkable .tg-link, .tugtile-ed-linkable .tg-img { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 /* marktile IS a markdown editor, so its body font is monospace in BOTH modes (Seasoned keeps the
    syntax highlighting, just on a monospace base). Scoped to .marktile-ed so tugtile's card editor
    (a board surface, not a markdown editor) stays on the proportional --font-text. */
@@ -647,8 +746,47 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .tugtile-ed-rich .tg-task-done { color: var(--text-muted); }   /* whole completed task line dims */
 .tugtile-ed-rich .tg-code { font-family: var(--font-monospace); color: var(--text-accent); }
 .tugtile-ed-rich .tg-tag,
+.tugtile-ed-rich .tg-img,
+.tugtile-ed-rich .tg-ref,
 .tugtile-ed-rich .tg-link { color: var(--text-accent); }
+/* A link-reference or footnote DEFINITION produces nothing in a rendered document — it is the
+   addressing behind a link, so it recedes rather than reading as a paragraph of its own. */
+.tugtile-preview .tg-refdef { color: var(--text-faint); font-size: 0.9em; }
+/* An ordered list's number is content, not syntax, so it never hides — it just stops shouting. The
+   inline-block width is what lines "1." up with the • a bullet line gets from its ::before. */
+.tugtile-ed-rich .tg-num { color: var(--text-muted); }
+.tugtile-preview .tg-num { display: inline-block; min-width: 1.25em; }
+/* A thematic break: the dashes hide with every other marker and the line itself becomes the rule. */
+.tugtile-preview .tg-hr { border-top: 1px solid var(--background-modifier-border); }
+/* A setext underline goes entirely — unlike a thematic break it draws nothing, it only says that the
+   line above was a heading, and that line is already wearing the heading. Leaving an empty row under
+   every such heading would be the marker still taking up space after being hidden. */
+.tugtile-preview .tg-srule { display: none; }
 .tugtile-ed-rich .tg-date { color: var(--color-yellow); }
+/* ── Fenced code + frontmatter ────────────────────────────────────────────────────────────────────
+   Whole LINES, not spans: what marks them is their position between two fences, which is a fact about
+   the sequence (blockScan) and not about the line. Their contents carry no inline markup at all —
+   inside a fence `**this**` is two asterisks and a word, and rendering it bold was a lie the editor
+   used to tell on every surface.
+   Each line keeps its own <div>, so the background lands as a continuous band without a wrapper
+   element — which is what keeps the round-trip exact (getText still just joins the children). */
+.tugtile-ed-rich .tg-cblock,
+.tugtile-ed-rich .tg-cfence {
+  font-family: var(--font-monospace);
+  background: var(--background-secondary);
+  padding-left: 10px; padding-right: 10px;
+}
+.tugtile-ed-rich .tg-cfence { color: var(--text-faint); }
+.tugtile-ed-rich .tg-fm { color: var(--text-muted); font-family: var(--font-monospace); }
+.tugtile-ed-rich .tg-fmfence { color: var(--text-faint); font-family: var(--font-monospace); }
+/* Rendered: the fences are pure syntax, so they go — the same call .tugtile-preview already makes for
+   the |---| row of a table. The band stays, which is what tells you the block is still there. */
+.tugtile-preview .tg-cfence,
+.tugtile-preview .tg-fmfence { display: none; }
+.tugtile-preview .tg-cblock { padding-top: 1px; padding-bottom: 1px; }
+/* With its --- gone, the frontmatter needs some other reason not to read as the first paragraph. */
+.tugtile-preview .tg-fm { border-left: 2px solid var(--background-modifier-border); padding-left: 10px; font-size: 0.9em; }
+
 /* Seasoned "彩色" palette — opt-in via settings (seasonedColor → .marktile-palette-color on the editor mount).
    Each syntax token gets its own hue instead of the single accent tint. Obsidian theme color vars (hex fallbacks
    for the web host) so it tracks light/dark + custom themes. quote/strike/date/check keep their base styling. */
@@ -909,7 +1047,7 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 }
 
 /* ── In-grid markdown tables — the "locked markers" editor (decorateTables in editor-core.js). SHARED by
-   marktile (inlined) and ejecta (this file is vendored as tile-core.css). Gate = .marktile-grid: hosts add it
+   marktile (inlined) and the web host (this file is vendored as tile-core.css). Gate = .marktile-grid: hosts add it
    in Seasoned + Rendered, drop it in Plain. The pipe `|` is the table's `##` — in Seasoned it stays VISIBLE
    (dimmed, locked) so the markdown coexists with the layout; the .tugtile-preview overlay (Rendered) hides the
    pipes into a real bordered grid. textContent is byte-identical either way → round-trip exact. (Dormant in
@@ -930,16 +1068,73 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
    leaves the text. Dormant in tugtile (no .tugtile-preview). */
 .tugtile-preview .tg-mk { display: none; }
 
+/* …but a list has to still LOOK like a list once its markers are gone. Hiding `- ` and `[x] ` with nothing
+   in their place turned every checklist and bullet list into bare indented text: markers gone AND the shape
+   gone with them, which is a mode that renders less than the source, not more.
+   These are pseudo-elements on purpose — ::before content is invisible to textContent, so the editor's
+   text<->DOM round-trip stays byte-exact (the same reason .tg-mk hides rather than removes).
+   The engine already emits the hooks: .tg-li on a bullet line, and a .tg-check/.tg-check-done span sitting
+   exactly where the `[x]` box was. Nothing here is new markup — the seam was always there, unused. */
+.tugtile-preview .tg-li::before {
+  content: "•";
+  display: inline-block;
+  width: 1.25em;
+  color: var(--text-muted, #6b7280);
+}
+/* A task line is also a .tg-li; it gets the box instead of the dot, not both. */
+.tugtile-preview .tg-li.tg-task::before { content: none; }
+/* The box is pressable (wireTaskToggle in the core), so it is sized and cursored like a control, not
+   like punctuation: a bigger glyph, a fixed centred box so ☐ and ☑ never shift the text beside them,
+   and a hit area that a fingertip or a quick click can actually land on. */
+.tugtile-preview .tg-check::before {
+  content: "☐";
+  display: inline-block;
+  width: 1.4em;
+  font-size: 1.35em;
+  line-height: 1;
+  text-align: center;
+  vertical-align: -0.12em;
+  color: var(--text-muted, #6b7280);
+}
+.tugtile-preview .tg-check-done::before {
+  content: "☑";
+  color: var(--interactive-accent, #3a7afe);
+}
+.tugtile-preview .tg-check {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tugtile-preview .tg-check:hover::before { color: var(--interactive-accent, #3a7afe); }
+
 /* table right-click menu (desktop: insert/delete row/column) */
-.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
-.ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
+/* The .ej-tblmenu popover is now the NON-Obsidian rendering only — obsidian-shim.js's Menu draws into it, so
+   the web preview and the macOS app keep the menu they had. Under Obsidian the host's own Menu is used, which
+   is why the safe-area maths, the keyboard dismissal and the flip-up clamp that used to live here are gone. */
+.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
+/* Both properties, deliberately. A host that styles bare <button> as a flex container (Obsidian does:
+   `display:inline-flex; justify-content:center`) makes the label a FLEX ITEM, over which text-align has no
+   say — that rule sat here from the day it was written and moved nothing. Keep both so neither kind of host
+   can centre these labels. */
+.ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; justify-content: flex-start; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
 .ej-tblmenu button:hover:not(:disabled) { background: var(--background-modifier-hover, rgba(0, 0, 0, .06)); }
 .ej-tblmenu button:disabled { opacity: .35; cursor: default; }
 .ej-tblmenu hr { border: 0; border-top: 1px solid var(--background-modifier-border, #e4e6e9); margin: 4px 6px; }
+/* Delete keeps its own colour: the shim's Menu maps setWarning(true) onto this class, the way Obsidian maps it
+   onto .is-warning. Same menu, two renderers. */
+.ej-tblmenu button.ej-tblmenu-danger { color: var(--text-error, #c0392b); }
+.ej-tblmenu-ic { display: inline-flex; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; color: var(--text-muted, #6b7280); }
+.ej-tblmenu-ic svg { width: 16px; height: 16px; }
+/* The selection pill: appears next to a non-empty selection on touch (see the note in mountEditor for why —
+   iOS does not fire 'contextmenu' for a long-press on already-selected text). Fixed position, JS sets top/left. */
+.ej-selpill { position: fixed; z-index: 2001; width: 36px; height: 36px; display: none; align-items: center; justify-content: center;
+  border: 0; border-radius: 999px; background: var(--background-primary, #fff); color: var(--text-normal, #1f2328);
+  box-shadow: 0 4px 14px rgba(10, 22, 40, .22); cursor: pointer; padding: 0; }
+.ej-selpill svg { width: 18px; height: 18px; }
 
 /* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
    line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile
-   + ejecta; dormant in tugtile (never calls decorateImages). The first step of Rendered "growing". */
+   + the web host; dormant in tugtile (never calls decorateImages). The first step of Rendered "growing". */
 .ej-inlimg { display: block; max-width: min(280px, 100%); max-height: 220px; border-radius: 8px; margin: 4px 0 8px; border: 1px solid var(--background-modifier-border, #e4e6e9); }
 .tg-line.ej-hasimg { color: var(--text-faint, #9aa0a6); font-size: 12px; }
 .tugtile-plain .ej-inlimg { display: none; }

@@ -25,7 +25,7 @@ function t(key, ...args) {
   return s;
 }
 
-//#core-inline   (build replaces this line with the shared core blocks from ../plugin.src.js)
+//#core-inline   (build replaces this line with packages/core/editor-core.js — the shared engine)
 
 const VIEW_TYPE = 'marktile-editor';
 
