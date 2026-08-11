@@ -30,24 +30,24 @@
   "paths": {
     "tile-core/tile-core.js": {
       "namedBy": [
-        "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:139 — gh contents API @ main, run by Heroku post_compile",
+        "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:139 — gh/curl contents API @ main, run at DYNO BOOT",
         "CVERInc/ejecta  core/editor/fetch-tile-core.sh:26 — same fetch, into the web editor's vendor/"
       ],
-      "breaks": "mixfairy's Heroku build fails (set -euo pipefail, so loudly) and the web editor ships without an engine"
+      "breaks": "🔴 NOT a red build — SILENT DEGRADATION IN PRODUCTION. Corrected 2026-08-12; the first version of this entry said 'mixfairy's Heroku build fails, so loudly', which described a build step that does not exist (there is no bin/post_compile). Measured: bootstrap.py:_boot_prep runs the fetch in a BACKGROUND asyncio task at dyno boot and catches every exception on purpose ('must never take the bot down'), logging 'editor UI assets will 404 until fixed (bot unaffected)'. So the bot stays up, the editor serves nothing, and only a log line says why. Worse: dl() is `gh api … | base64 --decode > $3`, and the redirect truncates the destination BEFORE the fetch fails — on any host with an existing static/, a 404 leaves a ZERO-BYTE file, which assets.py serves as 200 text/javascript. An empty module is not an error anyone sees."
     },
     "packages/marktile/styles.css": {
       "namedBy": [
         "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:140 — lands as vendor/tile-core.css",
         "CVERInc/ejecta  core/editor/fetch-tile-core.sh:30 — same"
       ],
-      "breaks": "same two builds. Note both consumers rename it on arrival, so grepping them for 'styles.css' finds nothing"
+      "breaks": "Same silent degradation. Note both consumers RENAME it on arrival (to tile-core.css), so grepping them for 'styles.css' finds nothing — and `set -euo pipefail` means a failure on line 139 above kills this line too, so the blast radius of ONE renamed path is all three assets."
     },
     "Sortable.min.js": {
       "namedBy": [
         "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:141",
         "CVERInc/ejecta  core/editor/fetch-tile-core.sh:32"
       ],
-      "breaks": "drag-to-reorder stops working in the web editor; the build itself fails first"
+      "breaks": "Drag-to-reorder stops working. This one is the quietest of the three: it is loaded as a plain <script>, not a module, so a missing or empty file produces no console error at all — the handles simply do not drag."
     },
     "packages/core/editor-core.js": {
       "namedBy": [
