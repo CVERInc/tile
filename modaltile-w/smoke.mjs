@@ -1,8 +1,23 @@
 // modaltile-w smoke — the surface really is host-agnostic, proven by opening it against NO backend.
-// Run from a dir that has playwright (ejecta/tools/fidelity):
-//   (cd ~/Developer/tile && python3 -m http.server 8731 &)
-//   (cd ~/Developer/ejecta/tools/fidelity && node ~/Developer/tile/modaltile-w/smoke.mjs http://localhost:8731/modaltile-w/)
-import { chromium } from 'playwright';
+//
+//   (cd <this repo> && python3 -m http.server 8731 &)
+//   PLAYWRIGHT=/path/to/node_modules/playwright/index.js \
+//     node modaltile-w/smoke.mjs http://localhost:8731/modaltile-w/
+//
+// 🩸 The instruction here used to be "run it from a dir that has playwright", with a `cd` into one.
+// That cannot work and never did: Node resolves a bare ESM specifier from the IMPORTING FILE's
+// location, not from the working directory — so `import 'playwright'` looks next to this file, in a
+// repo that deliberately has no browser dependency, whatever you cd into first. The command was
+// written down, committed, and had never been run.
+//
+// So the specifier is an input. This repo ships no playwright and should not: a browser is 300 MB
+// and nothing else here needs one. Point PLAYWRIGHT at whichever install you already have — the
+// version matters, because each playwright pins a browser build and only installs its own.
+// `?? .default` because playwright is CommonJS: importing the package by NAME gets you named
+// exports, importing its index.js by PATH gets you `{ default: … }`. Both are valid inputs here.
+const pw = await import(process.env.PLAYWRIGHT || 'playwright');
+const chromium = pw.chromium ?? pw.default?.chromium;
+if (!chromium) throw new Error(`no chromium export from ${process.env.PLAYWRIGHT || 'playwright'}`);
 const url = process.argv[2];
 const b = await chromium.launch();
 const p = await b.newContext().then((c) => c.newPage());
