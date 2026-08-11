@@ -29,6 +29,16 @@ echo "→ generated artifacts in sync (committed == fresh build)"
 # to be FETCHED across a repo boundary, and three surfaces once carried two different builds while
 # every one of them was nominally "latest". Same repo now, so their build.sh copies tile-core/ in,
 # and this is what stops the copies drifting from it again.
+# 🩸 The BUILT plugins were never syntax-checked, only their sources were. On 2026-08-11 an edit to
+# a comment on the //#core-inline marker line made build-marktile.sh emit a main.js with a bare
+# `(build replaces this line …)` in it — invalid JavaScript — and this script's next word about it
+# was "a committed build artifact is stale", which reads like bookkeeping. It got committed.
+# marktile survives only because test/marktile-load.test.cjs requires main.js; NOTHING loads
+# tugtile's, so the same break there would have shipped in silence.
+echo "→ built plugins parse"
+node --check packages/marktile/main.js
+node --check packages/tugtile/main.js
+
 bash tugtile-w/build.sh >/dev/null
 bash modaltile-w/build.sh >/dev/null
 bash pagetile-w/build.sh >/dev/null

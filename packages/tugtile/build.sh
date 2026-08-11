@@ -14,9 +14,16 @@ sort=open(root+"/Sortable.min.js",encoding="utf-8").read()
 plug=open(d+"/plugin.src.js",encoding="utf-8").read()
 # Inject the shared editor core (packages/core) at plugin.src.js's //#core-inline marker
 core=open(root+"/packages/core/editor-core.js",encoding="utf-8").read()
-if "//#core-inline" not in plug:
-    raise SystemExit("build: //#core-inline marker not found in plugin.src.js")
-plug=plug.replace("//#core-inline", core, 1)
+# Whole-LINE replacement, same as build-marktile.sh: token replacement leaves anything else written
+# on the marker line behind as bare JavaScript. plugin.src.js's marker line happens to be bare
+# today, so this was never wrong here — it was one edit away from being wrong, which is the same
+# thing a week later.
+_lines = plug.split("\n")
+_hits = [n for n, ln in enumerate(_lines) if "//#core-inline" in ln]
+if len(_hits) != 1:
+    raise SystemExit(f"build: expected exactly one //#core-inline line in plugin.src.js, found {len(_hits)}")
+_lines[_hits[0]] = core
+plug = "\n".join(_lines)
 # Inline the shared cssmd primitive at the core's //#cssmd-inline marker (delegated inline marks).
 plug=inline_cssmd(plug, root)
 # Inject i18n: Reads i18n/*.json → builds the TR object → replaces the placeholder
