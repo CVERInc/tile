@@ -106,6 +106,12 @@ The **editor engine** needs no separate repo: it lives here as
 platform-agnostic ES module). Drop it into any page with the small host shim — see
 **Use the engine** below.
 
+**Before you move or rename a file**, check [`PUBLIC-PATHS.json`](PUBLIC-PATHS.json). Some
+paths here are fetched by name from outside this repo — nothing in this tree imports
+`Sortable.min.js`, but two other builds download it by that exact string. The manifest
+lists them with what breaks, and `test/public-paths.test.cjs` fails the moment one goes
+missing, so the rename goes red here rather than in someone else's deploy log next week.
+
 ## Development
 
 Requirements: **Node**, **python3**, **bash** (the builds inline sources via a short
