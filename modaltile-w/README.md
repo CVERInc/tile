@@ -53,8 +53,19 @@ is why it is part of the contract now.
 
 ```bash
 (cd .. && python3 -m http.server 8731 &)
-node smoke.mjs http://localhost:8731/modaltile-w/     # needs playwright on the path
+# 🔴 COPY it next to a playwright install first. Node resolves an ESM import from the FILE's
+# location, not the working directory, so running this file in place fails no matter where you cd
+# to. An earlier version of this README said "run it from a dir that has playwright", which reads
+# perfectly and does not work.
+cp smoke.mjs <somewhere-with-playwright>/_modaltile-smoke.mjs
+(cd <somewhere-with-playwright> && node _modaltile-smoke.mjs http://localhost:8731/modaltile-w/)
 ```
+
+⚠️ **This has not been run since the surface moved here** (2026-08-11). The machine it was written
+on has playwright but its downloaded browser is a version behind what playwright now asks for, so
+the run ends at `npx playwright install` rather than at an assertion. The harness is unchanged and
+nothing about the move should affect it — but "should" is the word, and nobody has seen it pass in
+this repo.
 
 What it checks is not "it renders" but that it **works**: the modal opens, the editor mounts, the
 title comes from the host, all six action buttons are present, `GET /api/post` is reached, the view
