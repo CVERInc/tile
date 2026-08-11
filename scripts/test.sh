@@ -25,7 +25,14 @@ node --check tile-core/tile-core.js
 # Assert each committed artifact still equals a fresh build: edit a source and forget to rebuild → CI/pre-push fails
 # instead of pushing a stale artifact that silently feeds downstream old code.
 echo "→ generated artifacts in sync (committed == fresh build)"
+# The two web surfaces' vendored engines are in this list for the reason the list exists. They used
+# to be FETCHED across a repo boundary, and three surfaces once carried two different builds while
+# every one of them was nominally "latest". Same repo now, so their build.sh copies tile-core/ in,
+# and this is what stops the copies drifting from it again.
+bash tugtile-w/build.sh >/dev/null
+bash modaltile-w/build.sh >/dev/null
 git diff --exit-code -- packages/tugtile/main.js packages/marktile/main.js tile-core/tile-core.js \
+  tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js \
   || { echo "✗ a committed build artifact is stale — run the builds and commit the result"; exit 1; }
 
 echo "→ tests"

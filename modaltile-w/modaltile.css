@@ -1,0 +1,154 @@
+/* modaltile.css — the web HOST layer for the COMPLETE marktile editor.
+   (Was `web-editor.css` in ejecta/core/editor until 歸位 2026-08-02; renamed to the family name,
+   contents unchanged. 🔴 A FIFTH copy of these rules is pasted inline in ejecta's
+   `service/src/index.ts` as EDITOR_WEB_CSS — the frozen Heroku editor. It is dark and nobody has
+   ever used it, so it is deliberately left alone; do not "fix" it into a dependency without
+   retiring that service first.)
+   The editor's look now comes from marktile's actual stylesheet, vendored verbatim as tile-core.css (single
+   source, fetched like tile-core.js). This file only supplies what the web host must: (1) the Obsidian CSS
+   variables marktile's rules reference (Obsidian provides these in-app; we shim them, feelreef-tinted),
+   (2) an editor height (no Obsidian leaf to size it here), (3) ejecta-only chrome that isn't marktile's
+   (inline-image thumbnails, the editor modal, the delete button). No fork; presentation = upstream marktile. */
+
+/* (1) Obsidian CSS-variable shim — the full set marktile/styles.css depends on, on :root so its global rules resolve everywhere */
+:root {
+  --background-primary: #ffffff;
+  --background-secondary: #f6f7f9;
+  --background-modifier-border: #e4e6e9;
+  --background-modifier-border-hover: #cfd4d8;
+  --background-modifier-form-field: #ffffff;
+  --background-modifier-hover: rgba(0,0,0,.06);
+  --text-normal: #1f2328;
+  --text-muted: #6b7280;
+  --text-faint: #9aa0a6;
+  --text-accent: #0a8c8e;
+  --text-error: #e2725b;
+  --text-on-accent: #ffffff;
+  --text-success: #0a8c8e;
+  --color-green: #0a8c8e;
+  --color-red: #e2725b;
+  --color-yellow: #b7791f;
+  --interactive-accent: #0a8c8e;
+  --brand-mint: #7fdbca;
+  --font-text: "Nunito", system-ui, sans-serif;
+  --font-text-size: 16px;
+  --font-monospace: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-medium: 600; --font-normal: 400;
+  --radius-s: 6px; --radius-m: 8px;
+  --shadow-l: 0 8px 24px rgba(10,22,40,.18);
+  --tg-d1: .26s; --tg-d2: .24s; --tugtile-lane-width: 272px; --tugtile-row-pad: 8px;
+
+  /* button role tokens (feelreef palette) — ONE definition for every surface (admin list, modal, /edit bar,
+     login). Roles: primary = the one main action per surface; outline = secondary call-to-action; toggled =
+     outline's engaged state; ghost = neutral/navigation; danger = destructive, DELIBERATELY quiet (text+wash,
+     never solid red — danger should be calm, not inviting). */
+  --btn-primary: #0a8c8e; --btn-primary-h: #087577;
+  --btn-outline: #0a8c8e;
+  --btn-toggled: #8a95a3;
+  --btn-ghost: #eef0f2; --btn-ghost-text: #333;
+  --btn-danger: #c0392b; --btn-danger-wash: #fde6ea;
+
+  /* structure tokens — the left RAIL (one geometry for the editor TOC and the admin facet sidebar: a fixed
+     full-height panel on the left edge, border-right only) and the modal chrome heights the sticky stack and
+     the rail's top anchor are computed from. Change here = both surfaces move together. */
+  --rail-w: 240px; --rail-bg: #f6f7f9; --rail-line: #e4e6e9; --rail-pad-y: 12px;
+  --rail-title-font: 700 12px/18px "Nunito", system-ui, sans-serif; --rail-title-color: #6b7280;
+  --rail-row-fs: 15px; --rail-row-h: 40px; --rail-row-color: #1f2328; --rail-inset: 16px; --rail-hover: rgba(0,0,0,.06);
+  --chrome-head-h: 66px;   /* .ej-modal-head (and the list topbar pins itself to the same height) */
+  --chrome-bar-h: 57px;    /* .tugtile-ed-bar */
+}
+
+/* (2) editor height — Obsidian sizes the editor via its leaf/modal; in our hosts we give it a usable min-height */
+[data-ejecta-id] .tugtile-ed-rich, [data-ejecta-id] .tugtile-ed { min-height: 55vh; }
+
+/* (3a) ejecta-only: inline image thumbnails (host decoration; see editabilize.js decorateImages — NOT in marktile).
+   Source line stays (dimmed) + the real image shows beneath; hidden in 原味/plain so power users see raw. */
+[data-ejecta-id] .ej-inlimg { display: block; max-width: min(260px, 100%); max-height: 200px; border-radius: 8px; margin: 4px 0 8px; border: 1px solid var(--background-modifier-border); }
+[data-ejecta-id] .tg-line.ej-hasimg { color: var(--text-faint); font-size: 12px; }
+[data-ejecta-id].tugtile-plain .ej-inlimg { display: none; }
+[data-ejecta-id].tugtile-plain .tg-line.ej-hasimg { color: var(--text-normal); font-size: 1em; }
+
+/* (3a′) #10 「編輯」mode — hide ONLY the markdown syntax markers (the .tg-mk spans marktile core emits) so the
+   editor LOOKS WYSIWYG without rendering any HTML; heading/bold/list styling stays. Flowtile-only — marktile in
+   Obsidian never adds .tugtile-preview, so its markers stay visible (2-mode 調味/原味 unchanged). */
+[data-ejecta-id].tugtile-preview .tg-mk { display: none; }
+
+/* (3a″) tables: the in-place editable grid (locked markers) now lives ENTIRELY in the shared core —
+   decorateTables in tile-core.js + the .marktile-grid rules and .ej-tblmenu styling in tile-core.css.
+   Hosts only toggle the gate class: 編輯/調味 add 'marktile-grid', 原味 drops it. No ejecta-side rules. */
+
+/* (3b) ejecta-only: editor modal — tugtile-style big focused editor popped over the timeline (no site chrome). */
+.ej-modal-backdrop { position: fixed; inset: 0; background: rgba(10,22,40,.55); backdrop-filter: blur(2px); z-index: 1000; display: flex; align-items: flex-start; justify-content: center; padding: 3vh 16px; overflow: auto; overscroll-behavior: contain; animation: ej-fade .15s ease; }
+body.ej-modal-open { overflow: hidden; }   /* lock the page behind the modal — scroll must not chain through */
+@keyframes ej-fade { from { opacity: 0 } to { opacity: 1 } }
+.ej-modal { background: var(--background-primary,#fff); width: min(820px,100%); border-radius: 16px; box-shadow: 0 20px 60px rgba(10,22,40,.35); display: flex; flex-direction: column; overflow: hidden; }
+.ej-modal-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #eceef1; }
+.ej-modal-body { padding: 14px 18px; }
+.ej-mb { font: inherit; padding: 9px 14px; border: 0; border-radius: 9px; cursor: pointer; color: #fff; background: var(--btn-primary); }
+.ej-mb:hover { background: var(--btn-primary-h); }
+.ej-mb.ghost { background: var(--btn-ghost); color: var(--btn-ghost-text) } .ej-mb.ghost:hover { background: var(--btn-ghost); filter: brightness(.96) }
+.ej-mb.grey { background: var(--btn-toggled) } .ej-mb.grey:hover { background: var(--btn-toggled); filter: brightness(.96) }
+.ej-mb.outline { background: #fff; color: var(--btn-outline); box-shadow: inset 0 0 0 1px var(--btn-outline); } .ej-mb.outline:hover { background: #f2fafa; }
+.ej-mb.del { background: transparent; color: var(--btn-danger); } .ej-mb.del:hover { background: var(--btn-danger-wash); filter: none; }
+/* calm-work variants for the /edit bar: rest as ghost, reveal the role on hover (mirrors .ej-act behaviour) */
+.ej-mb.reveal-primary, .ej-mb.reveal-outline, .ej-mb.reveal-toggled { background: var(--btn-ghost); color: var(--btn-ghost-text); transition: background .15s, color .15s, box-shadow .15s; }
+.ej-mb.reveal-primary:hover { background: var(--btn-primary); color: #fff; filter: none; }
+.ej-mb.reveal-outline:hover { background: #fff; color: var(--btn-outline); box-shadow: inset 0 0 0 1px var(--btn-outline); filter: none; }
+.ej-mb.reveal-toggled:hover { background: var(--btn-toggled); color: #fff; filter: none; }
+.ej-mb-msg { align-self: center; color: #5b626b; font-size: 13px; }
+
+/* (3c) full-screen editor modal (#3 — like opening tugtile's big editor) + editable title (#2) + video embed (#7) */
+/* align-items must NOT be stretch: stretch pins the card to ONE viewport height, so a long document overflows
+   the white card onto the dark backdrop (the "broken" look past the first screen). flex-start lets it grow. */
+/* backdrop-filter:none — the full-screen card covers the page, so the inherited blur is invisible anyway, and
+   any filter/backdrop-filter makes the backdrop the containing block for position:fixed descendants (the TOC
+   would scroll with the document instead of staying pinned to the viewport). */
+.ej-modal-backdrop.ej-full { padding: 0; align-items: flex-start; background: rgba(10,22,40,.4); backdrop-filter: none; }
+/* full-screen: the BACKDROP is the scroller — the card must not clip (overflow:hidden would cut the document
+   off at one viewport and chain every wheel event to the page behind) nor cap its own height */
+.ej-modal-full { width: 100%; max-width: 100%; min-height: 100vh; height: auto; border-radius: 0; overflow: visible; }
+/* long documents: keep the action header + the editor toolbar reachable while scrolled (sticky in the backdrop).
+   NOTE: sticky needs every ancestor between the element and the scroller (.ej-modal-backdrop) to be overflow
+   visible — .ej-modal-full/.ej-modal-body/.ej-mount all are. The bar's sticky top MUST equal the real header
+   height and the body must have NO top padding — any mismatch makes the bar travel/tuck under the header while
+   scrolling (the "float" glitch). Heights are pinned as chrome tokens. */
+.ej-modal-full .ej-modal-head { position: sticky; top: 0; z-index: 30; background: var(--background-primary,#fff); height: var(--chrome-head-h); box-sizing: border-box; }
+.ej-modal-full .ej-modal-body { padding-top: 0; }
+.ej-modal-full .tugtile-ed-bar { position: sticky; top: var(--chrome-head-h); z-index: 29; background: var(--background-primary,#fff); }
+.ej-modal-full .ej-modal-body { flex: 1; display: flex; flex-direction: column; }
+.ej-modal-full .ej-mount { flex: 1; }
+.ej-title { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: 700 19px "Comfortaa", system-ui, sans-serif; color: #16323a; padding: 2px 4px; text-align: center; }
+.ej-title::placeholder { color: #bcc6c8; font-weight: 500; }
+.ej-video { margin: 8px 0; }
+.ej-video iframe, .ej-video video { width: 100%; max-width: 560px; aspect-ratio: 16/9; border-radius: 8px; border: 0; background: #000; }
+
+/* (3d) editor header action cluster (icon+text): Delete / Preview / Cancel / Save / Publish (#9) */
+.ej-actions { display: flex; gap: 6px; flex: none; }
+/* calm-work header: EVERY button rests as ghost; the three special ones on the right reveal their role color
+   only on hover (delete → danger wash, save → primary solid, publish → outline / toggled when on). */
+.ej-act { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 0; border-radius: 10px; cursor: pointer; font: 600 13px "Nunito", system-ui, sans-serif; background: var(--btn-ghost); color: var(--btn-ghost-text); transition: background .15s, color .15s, box-shadow .15s; }
+.ej-act svg { width: 16px; height: 16px; }
+.ej-act:hover { filter: brightness(.97); }
+.ej-act.save:hover { background: #fff; color: var(--btn-outline); box-shadow: inset 0 0 0 1px var(--btn-outline); filter: none; }
+.ej-act.publish:hover { background: var(--btn-primary); color: #fff; filter: none; }
+.ej-act.publish.on:hover { background: var(--btn-toggled); color: #fff; }
+.ej-act.del:hover { background: var(--btn-danger-wash); color: var(--btn-danger); filter: none; }
+/* status text floats as a small toast under the header's right edge (the header rows are layout-stable) */
+.ej-mb-msg { display: inline-flex; align-items: center; gap: 5px; }
+.ej-mb-msg svg { width: 13px; height: 13px; }
+.ej-modal-full .ej-modal-head .ej-mb-msg { position: absolute; top: calc(var(--chrome-head-h) + 10px); right: 18px; z-index: 31; }
+.ej-modal-full .ej-modal-head .ej-mb-msg:not(:empty) { background: #fff; border: 1px solid var(--rail-line); border-radius: 8px; padding: 4px 10px; box-shadow: 0 4px 14px rgba(10,22,40,.10); }
+
+/* TOC: marktile's native look (left sidebar, slide-in, content clears it) — base styling comes from
+   tile-core.css. Host adaptations: (1) position fixed instead of absolute (in Obsidian the editor pane has a
+   fixed height so absolute anchors to the visible pane; our mount grows with the document, so absolute would
+   scroll away — fixed pins it to the viewport, which IS our pane); (2) expand from the TOP-left corner, not
+   bottom; (3) metrics pinned in px — title 12px, rows 15px/40px, 16px inset — the SAME numbers the admin list
+   sidebar uses, so the inside and outside sidebars are identical (one visual, shared by agreement). */
+[data-ejecta-id] .marktile-toc { position: fixed; top: 0; bottom: 0; max-height: none; width: var(--rail-w); background: var(--rail-bg); border-right: 1px solid var(--rail-line); padding: var(--rail-pad-y) 0; font-size: 15px; }
+.ej-modal-full [data-ejecta-id] .marktile-toc { top: calc(var(--chrome-head-h) + var(--chrome-bar-h)); }   /* below the sticky header+toolbar */
+[data-ejecta-id] .marktile-toc-title { font: var(--rail-title-font); text-transform: uppercase; letter-spacing: .06em; color: var(--rail-title-color); padding: 0 var(--rail-inset) 6px; }
+[data-ejecta-id] .marktile-toc-item { padding: 0 var(--rail-inset); font-size: var(--rail-row-fs); line-height: var(--rail-row-h); color: var(--rail-row-color); }
+[data-ejecta-id] .marktile-toc-item:hover { background: var(--rail-hover); }
+[data-ejecta-id] .marktile-toc-l2 { padding-left: 33px; }
+[data-ejecta-id] .marktile-toc-l3 { padding-left: 50px; }
