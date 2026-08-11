@@ -17,10 +17,21 @@ core = open(root + "/packages/core/editor-core.js", encoding="utf-8").read()
 
 # 2. Inline the core into marktile.src.js
 src = open(d + "/marktile.src.js", encoding="utf-8").read()
-if "//#core-inline" not in src:
-    raise SystemExit("build: //#core-inline marker not found in marktile.src.js")
-src = src.replace("//#core-inline   (build replaces this line with the shared core blocks from ../plugin.src.js)", core, 1)
-src = src.replace("//#core-inline", core, 1)  # fallback if the comment text changed
+# 🩸 This used to try an EXACT full-line match first, then fall back to replacing just the
+# `//#core-inline` token "if the comment text changed". The fallback is what makes that dangerous:
+# editing the comment did not fail the build, it left the trailing `(build replaces this line …)`
+# behind as bare JavaScript, and main.js shipped a SyntaxError. Caught on 2026-08-11 by editing the
+# comment to name the right source file. A fallback that produces invalid output is worse than no
+# fallback — it converts a mismatch from loud into silent.
+#
+# So: replace the whole LINE the marker sits on, whatever else is written on it. The comment is now
+# free to say anything.
+_lines = src.split("\n")
+_hits = [n for n, ln in enumerate(_lines) if "//#core-inline" in ln]
+if len(_hits) != 1:
+    raise SystemExit(f"build: expected exactly one //#core-inline line in marktile.src.js, found {len(_hits)}")
+_lines[_hits[0]] = core
+src = "\n".join(_lines)
 
 # 2b. Inline the shared cssmd primitive at the core's //#cssmd-inline marker (delegated inline marks).
 src = inline_cssmd(src, root)
