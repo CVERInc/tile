@@ -1,0 +1,120 @@
+{
+  "_comment": [
+    "Paths in THIS repo that something OUTSIDE it fetches by name.",
+    "",
+    "A path listed here is load-bearing in a way `git grep` inside this repo cannot show you. Nothing",
+    "here imports `Sortable.min.js` by that name — but two other repos download it from GitHub by that",
+    "exact string at build time, and one of those builds is a production deploy. Move the file and this",
+    "repo stays green; someone else's deploy goes red, days later, in a log nobody is reading.",
+    "",
+    "So: `test/public-paths.test.cjs` asserts every path below still exists. Moving one turns THIS",
+    "repo's CI red, on the commit that moved it, with the consumer named in the failure message.",
+    "",
+    "🩸 WHY IT IS SHAPED THIS WAY. The first draft of this idea was a CONSUMERS.md — prose listing who",
+    "depends on us. It was withdrawn before it was written, because a list of facts about OTHER repos is",
+    "a list this repo cannot verify: it rots the moment a consumer changes, and it rots invisibly. What",
+    "is asserted below is the opposite — our OWN paths, which we can check on every push. The `namedBy`",
+    "lines are a hint for whoever gets the red, not the thing being tested. They may go stale. The paths",
+    "cannot, because a stale path is a failing test.",
+    "",
+    "This list is one-directional and deliberately so. Being absent means 'nobody outside was known to",
+    "name this' — never 'safe to move'. Before moving anything, also run:",
+    "",
+    "    node ~/Developer/tools/cross-repo-paths-lint.mjs --who <dir>",
+    "",
+    "which catches the other mechanism: absolute machine paths written into other repos' source.",
+    "",
+    "TO ADD an entry, say who names it and what breaks — an entry without both is a path with no claim",
+    "attached, and the test rejects it."
+  ],
+  "paths": {
+    "tile-core/tile-core.js": {
+      "namedBy": [
+        "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:139 — gh contents API @ main, run by Heroku post_compile",
+        "CVERInc/ejecta  core/editor/fetch-tile-core.sh:26 — same fetch, into the web editor's vendor/"
+      ],
+      "breaks": "mixfairy's Heroku build fails (set -euo pipefail, so loudly) and the web editor ships without an engine"
+    },
+    "packages/marktile/styles.css": {
+      "namedBy": [
+        "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:140 — lands as vendor/tile-core.css",
+        "CVERInc/ejecta  core/editor/fetch-tile-core.sh:30 — same"
+      ],
+      "breaks": "same two builds. Note both consumers rename it on arrival, so grepping them for 'styles.css' finds nothing"
+    },
+    "Sortable.min.js": {
+      "namedBy": [
+        "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:141",
+        "CVERInc/ejecta  core/editor/fetch-tile-core.sh:32"
+      ],
+      "breaks": "drag-to-reorder stops working in the web editor; the build itself fails first"
+    },
+    "packages/core/editor-core.js": {
+      "namedBy": [
+        "CVERInc/reef  apps/feelreef/src/lib/tile-core/tile-core.js:3 — generated-from banner",
+        "CVERInc/reef  apps/rsp/src/routes/admin-editor-assets.generated.ts:432 — same banner, inlined"
+      ],
+      "breaks": "nothing at build time — the banner is prose. It is here because the banner is the only record of where those generated files come from, and a rename makes it point at nothing"
+    },
+    "packages/cssmd/cssmd.js": {
+      "namedBy": [
+        "CVERInc/tile-lab  scripts/fetch-tile.sh — gh contents API, recorded in scripts/tile-vendor.lock.json",
+        "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:43 — git show at a pinned sha",
+        "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:58"
+      ],
+      "breaks": "tile-lab cannot refresh its vendored copy; reef-mcp's vendor step fails at the next refresh"
+    },
+    "packages/cssmd/highlight.js": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:50 — git show at a pinned sha"
+      ],
+      "breaks": "reef-mcp's code highlighter stops being refreshable"
+    },
+    "packages/sitetile/site-core.js": {
+      "namedBy": [
+        "CVERInc/tile-lab  scripts/fetch-tile.sh — cardtile imports parseParams + splitFrontmatter from it",
+        "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:129 — also parses regex literals OUT of the source text",
+        "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:57"
+      ],
+      "breaks": "cardtile loses its param parser; reef-mcp cannot re-vendor the site model. Note vendor-tile.sh reads this file's TEXT, so its internals are load-bearing too, not just its path"
+    },
+    "packages/tugtile/plugin.src.js": {
+      "namedBy": [
+        "CVERInc/tile-lab  scripts/fetch-tile.sh — slices the CORE section out into tugtile-w/board-core.js"
+      ],
+      "breaks": "cardtile loses board-core. The slice is by text markers inside this file, so editing those markers breaks it without moving anything"
+    },
+    "packages/sitetile/astro": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/runner/Dockerfile:39,54 — WORKDIR and ENV SITETILE_ASTRO_DIR=/opt/tile/…",
+        "CVERInc/reef  apps/mixfairy/scripts/build-deploy-sitetile.sh:25 — default for $SITETILE_ASTRO_DIR"
+      ],
+      "breaks": "the reef-runner container image no longer builds any customer site"
+    },
+    "packages/sitetile/astro/src/components/sections": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:91 — ls-tree's this directory to extract each coral's params"
+      ],
+      "breaks": "the MCP server's coral vocabulary table generates empty, so describe_page_grammar starts lying"
+    },
+    "packages/sitetile/astro/src/styles/site.css": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:61,103,110",
+        "CVERInc/reef  apps/reef-mcp/tests/render-css.test.js:14 and tests/theme-schema.test.js:18"
+      ],
+      "breaks": "three reef-mcp test files go red — which is the right outcome, but in the wrong repo"
+    },
+    "packages/sitetile/astro/src/layouts/SiteLayout.astro": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:62,216 and tests/theme-schema.test.js:19"
+      ],
+      "breaks": "same three test files"
+    },
+    "packages/sitetile/og/build-og.mjs": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/runner/entrypoint.sh:392,473 — invoked as node /opt/tile/…"
+      ],
+      "breaks": "every published site loses its OG cards, and the runner keeps reporting success"
+    }
+  }
+}
