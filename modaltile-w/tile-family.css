@@ -1,0 +1,1141 @@
+/* tugtile — markdown kanban (prototype, read-only renderer) */
+
+/* Squircle (continuous-curvature) corners — progressive enhancement.
+   corner-shape is Chromium-only as of mid-2026; Safari/WebKit & Firefox ignore it and keep the
+   border-radius arc, so this is ZERO visual regression. Requires a non-zero border-radius (still
+   set per-surface below). Token lives here because corner-shape is NOT inherited but a custom
+   property IS. Applied only to finite-radius card/button/panel/input surfaces — never pills/circles. */
+:root { --corner: squircle; }
+:where(
+  .tugtile-brand, .tugtile__lane, .tugtile__tile, .tugtile__num, .tugtile__popup,
+  .tugtile__popup-d, .tugtile__popup-t, .tugtile__add-btn,
+  .tugtile-prompt-field, .tugtile-iconbtn, .tugtile-ed-find-i,
+  .tugtile-viewcycle, .tugtile__archivebar, .tugtile__lane-chevron,
+  .tugtile-archive-row, .tugtile__addcol-btn
+) { corner-shape: var(--corner); }
+
+.tugtile {
+  height: 100%;
+  padding: 0;
+  position: relative;   /* Contain the view-swap snapshot overlay */
+}
+/* Search/Undo/Redo live in the native back/forward container (repurposed by setupLeftActions), so they line up with the left-sidebar toggle above. */
+.tugtile-leftacts { display: flex; align-items: center; gap: 2px; padding-left: 4px; }   /* Nudge right to line up the first icon with the left-sidebar toggle above (auto-measure couldn't find the toggle on iPad) */
+/* iPad only, Obsidian sets `.is-mobile .view-action { margin: auto 0 }` (specificity (0,2,0)) on these addAction
+   icons, which misaligns Search/Undo/Redo. This (0,3,0) compound out-specifies it and resets the margin without
+   !important — the children always carry both classes (addAction → .clickable-icon.view-action). */
+.tugtile-leftacts > .clickable-icon.view-action { margin: 0; }
+/* Board⇄table swap: the outgoing snapshot slides up & out while the new view rises from below (two panels shuffling). */
+.tugtile-viewsnap {
+  position: absolute; inset: 0; z-index: 3;
+  background: var(--background-primary); overflow: hidden; pointer-events: none;
+  animation: tugtile-view-out 0.38s cubic-bezier(.7, 0, .3, 1) forwards;   /* ease-in-out: slow → fast → slow */
+}
+@keyframes tugtile-view-out { from { transform: translateY(0); } to { transform: translateY(-100%); } }
+.tugtile--switching .tugtile__board,
+.tugtile--switching .tugtile__table-wrap { animation: tugtile-view-in 0.38s cubic-bezier(.7, 0, .3, 1); }
+@keyframes tugtile-view-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+/* Phone: the centered control (view-cycle · lock) sits in a top-bar in the content, not the cramped header */
+/* Solid bg + z-index above the view-swap snapshot (z-index 3): the bar stays put on top while board/table
+   slide beneath it, so the up-slide animation never leaks through the control row. */
+.tugtile__ctlbar { flex: 0 0 auto; width: 100%; box-sizing: border-box; display: flex; justify-content: center; padding: 2px 8px 8px; position: relative; z-index: 4; background: var(--background-primary); }
+/* Phone: kill the view-content top padding so the control bar sits flush against the header — otherwise that
+   strip sits ABOVE the bar and the view-swap snapshot (which covers the whole content) leaks through it. */
+body.is-phone .workspace-leaf-content[data-type="tugtile-board"] .view-content { padding: 0; }   /* All sides: the left/right padding inset the content so the full-width bar still left gaps on both edges */
+/* Greyed-out (disabled-looking) header action — used for undo/redo when their stack is empty, instead of hiding the button */
+.tugtile-act-off { opacity: 0.35; pointer-events: none; }
+/* Dimmed brand suffix appended to the centered header title: "<file name> · tugtile-ing" */
+/* Centered header controls: [view-cycle] · [lock]. Sized up (font-size) to roughly match the right-hand toolbar icons. */
+.tugtile-headerctl {
+  display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
+  font-size: 18px;
+}
+.tugtile-sep { color: var(--text-faint); }   /* Neutral separator, NOT a button — equal button padding + the flex gap keep its two sides symmetric */
+/* Brand suffix + lock icon = one button (t('brandSuffix') + padlock) that toggles the read-only lock */
+.tugtile-brand {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--text-faint); font-weight: var(--font-normal);
+  cursor: pointer; border-radius: var(--radius-s); padding: 2px 6px;
+}
+.tugtile-brand:hover { background: var(--background-modifier-hover); color: var(--text-muted); }
+
+/* TileEditModal (tugtile's big editor) control strip — scoped to the modal so marktile's own strip is untouched.
+   A uniform gray bar spanning the full width: ✕ pinned far left, ✓ far right, the mode·lock centered between. */
+.tugtile-edit-modal-full .tugtile__ctlbar { background: var(--background-secondary); }
+.tugtile-edit-modal-full .tugtile-headerctl { display: flex; width: 100%; }
+.tugtile-edit-modal-full .tugtile-headerctl > .tugtile-iconbtn:first-child { margin-right: auto; }   /* ✕ → far left */
+.tugtile-edit-modal-full .tugtile-headerctl > .tugtile-iconbtn:last-child { margin-left: auto; }      /* ✓ → far right */
+.tugtile-lock-icon { display: inline-flex; }
+.tugtile-lock-icon svg { width: 0.9em; height: 0.9em; }
+/* Locked board (read-only): hide add/edit affordances, disable checkboxes, drop drag cursors. View-only actions (collapse, view switch, search) still work. */
+.tugtile--locked .tugtile__add,
+.tugtile--locked .tugtile__addcol,
+.tugtile--locked .tugtile__tile-more,
+.tugtile--locked .tugtile__lane-more { display: none; }
+.tugtile--locked .tugtile__check,
+.tugtile--locked .tugtile__row-title input { pointer-events: none; }
+.tugtile--locked .tugtile__tile,
+.tugtile--locked .tugtile__lane-head { cursor: default; }
+.tugtile__empty {
+  padding: 16px;
+  color: var(--text-muted);
+}
+.tugtile__board {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  height: 100%;
+  overflow-x: auto;
+  padding: 12px;
+}
+.tugtile__lane {
+  flex: 0 0 auto;
+  width: var(--tugtile-lane-width, 300px);   /* Uniform fixed column width (configurable in settings); all lanes line up evenly */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  padding: 8px;
+  overflow: hidden;         /* Cleanly clips content into the changing lane width during collapse/expand (dragging uses a clone on body and is unaffected) */
+  --tg-d1: 0.26s;           /* Stage 1: lane narrows + horizontal title tucks into the chevron (collapse) / widens + title grows back (expand) */
+  --tg-d2: 0.24s;           /* Stage 2: vertical title grows down out of the chevron (collapse) / retracts up into it (expand) */
+  transition: width var(--tg-d1) cubic-bezier(.4, 0, .2, 1);   /* Smooth width change on collapse/expand */
+}
+.tugtile__lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0 8px;       /* Horizontal 0 → header rails line up with the card column (cards sit at the lane's own 8px padding on both sides) */
+  font-weight: 700;
+  cursor: grab;             /* Header acts as the drag handle for the lane */
+}
+.tugtile__lane-head:active { cursor: grabbing; }
+.tugtile__lane--ghost { opacity: 0.4; }
+.tugtile__lane--chosen { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.tugtile__lane--drag {   /* Slightly tilts and lifts the lane when dragging the entire column */
+  rotate: 2deg;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+}
+.tugtile__lane-count {
+  flex: 0 0 auto;
+  opacity: 0.55;
+  font-size: 0.85em;
+  transition: opacity var(--tg-d1) ease;
+}
+.tugtile__lane-count--over {   /* WIP: Warning indicator when exceeding limits */
+  color: var(--text-error);
+  opacity: 1;
+  font-weight: 700;
+}
+.tugtile--hide-counts .tugtile__lane-count {
+  display: none;
+}
+.tugtile__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  /* Scrollbar gutter without changing the card layout: the list extends 8px to the right (eating the lane's right padding) via the negative margin, while padding-right keeps the cards in their original position. The iOS/iPadOS overlay scrollbar then sits in that right padding instead of on top of the cards. */
+  margin-right: -8px;
+  padding-right: 8px;
+}
+.tugtile__tile:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--interactive-accent); }   /* keyboard-focused card (arrow keys move it) */
+.tugtile__tile {
+  position: relative;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: 8px;
+  cursor: grab;
+}
+.tugtile__tile:active {
+  cursor: grabbing;
+}
+.tugtile__tile:hover {
+  border-color: var(--background-modifier-border-hover, var(--interactive-accent));
+}
+/* Dragging state (corresponding to the Sortable class in main.js) */
+/* Placeholder left behind: faded out with a dashed border, similar to a Trello card slot */
+.tugtile__tile--ghost {
+  opacity: 0.4;
+  background: var(--background-modifier-hover);
+  border-style: dashed;
+}
+.tugtile__tile--ghost > * { visibility: hidden; }
+.tugtile__tile--chosen {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);   /* Inner ring — an outer ring's left/right 2px gets clipped by the list's overflow (cards are full-width with no horizontal room) */
+}
+/* The card following the cursor feels "picked up": slightly tilted, scaled up, with a floating shadow.
+   Uses standalone rotate/scale properties (not transform) to avoid overwriting translations applied by Sortable. */
+.tugtile__tile--drag {
+  opacity: 0.97;
+  rotate: 3deg;
+  scale: 1.03;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+  cursor: grabbing;
+}
+/* Index number: a rounded inline chip prepended to the card text.
+   Key detail: keeping font-size unscaled (matching body text size) aligns the number and adjacent text to the same baseline,
+   achieving natural vertical alignment without magic numbers, font, line-height, or scale issues. The background chip sits snug
+   around the number (slight horizontal, minimal vertical padding), centering itself on the first line and wrapping naturally. */
+.tugtile__num {
+  display: inline-block;
+  margin-right: 0.4em;
+  padding: 0 0.4em;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-s);
+  font-weight: 700;
+  line-height: 1.25;
+}
+/* Floating control area in the top-right: checkbox + ⋯. Using float allows the first line of text to wrap around it, keeping content aligned to the top without wasting space. */
+.tugtile__tile-ctrls {
+  float: right;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px 8px;
+}
+.tugtile__tile-body {
+  padding-top: 0.15em;       /* Subtle top padding for breathing room (kept smaller than the control height so the first line still wraps around it) */
+  overflow-wrap: anywhere;   /* Alphanumeric text/URLs do not overflow the lane */
+  contain: layout paint;     /* The body's internal layout is self-contained, so animating the tile's height doesn't re-flow the rendered markdown every frame — kills the stutter on content-heavy tiles */
+}
+/* Long card collapse: hides the full text when folded, showing only the first line of the title (Approach C, without clipping) */
+.tugtile__tile-title {
+  display: none;
+  padding-top: 0.15em;
+  font-weight: 600;
+}
+.tugtile__tile-title > :first-child { margin-top: 0; }
+.tugtile__tile-title > :last-child { margin-bottom: 0; }
+.tugtile__tile--folded .tugtile__tile-body { display: none; }
+.tugtile__tile--folded .tugtile__tile-title { display: block; }
+/* On expand the tile height snaps (one reflow), then the body slides + fades in on the GPU — no per-frame
+   layout, so it stays smooth no matter how much content the tile holds. */
+.tugtile__tile--revealing .tugtile__tile-body { animation: tugtile-body-reveal 0.24s cubic-bezier(.4, 0, .2, 1) both; }
+@keyframes tugtile-body-reveal {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}.tugtile__tile-body > :first-child {
+  margin-top: 0;
+}
+.tugtile__tile-body > :last-child {
+  margin-bottom: 0;
+}
+/* Date and time picker popup */
+.tugtile__popup {
+  position: fixed;
+  z-index: 9999;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-l);
+  padding: 8px;
+  user-select: none;
+}
+.tugtile__popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  padding: 2px 4px 8px;
+}
+.tugtile__popup-nav {
+  cursor: pointer;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+}
+.tugtile__popup-nav svg { width: 1.15em; height: 1.15em; }
+.tugtile__popup-nav:hover { color: var(--text-accent); }
+.tugtile__popup-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 2em);
+  gap: 2px;
+  text-align: center;
+}
+.tugtile__popup-w { opacity: 0.5; font-size: 0.8em; }
+.tugtile__popup-d {
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  padding: 3px 0;
+  line-height: 1.4;
+}
+.tugtile__popup-d:hover { background: var(--background-modifier-hover); }
+.tugtile__popup-d--today { color: var(--text-accent); font-weight: 700; }
+.tugtile__popup--time {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.tugtile__popup-t {
+  cursor: pointer;
+  padding: 4px 16px;
+  border-radius: var(--radius-s);
+}
+.tugtile__popup-t:hover { background: var(--background-modifier-hover); }
+/* Tag chips at the bottom of the card (when move-tags-to-card-footer is enabled) */
+.tugtile__tags {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tugtile__tag {
+  font-size: 0.78em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-accent);
+  cursor: pointer;
+}
+.tugtile__tag:hover { filter: brightness(1.1); }
+/* Date/time chips at the bottom of the card */
+.tugtile__date {
+  margin-top: 6px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;   /* separates the date and time chips (replaces the old full-width-space spacer) */
+}
+.tugtile__date-d, .tugtile__date-t { display: inline-flex; align-items: center; gap: 3px; }
+.tugtile__date svg { width: 1em; height: 1em; }                 /* Lucide calendar/clock, sized to the chip text */
+.tugtile__archivebar-i { display: inline-flex; }
+.tugtile__archivebar svg { width: 1.1em; height: 1.1em; }       /* Lucide archive icon (was a 📥 emoji) */
+/* Date status colors: red for overdue, accent for today, yellow for upcoming (≤7 days), and green for safe (>7 days); colored whenever a date exists */
+.tugtile__date--overdue { color: var(--color-red); font-weight: 600; }
+.tugtile__date--today { color: var(--text-accent); font-weight: 600; }
+.tugtile__date--soon { color: var(--color-yellow); font-weight: 600; }
+.tugtile__date--safe { color: var(--color-green); }
+.tugtile__date--unknown { color: var(--text-muted); }   /* Neutral color used when the date cannot be parsed */
+
+/* Freeze container scrolling during dragging (adding .is-dragging in main.js onStart) to prevent native mobile scrolling from fighting the drag gesture */
+.tugtile.is-dragging .tugtile__board,
+.tugtile.is-dragging .tugtile__list {
+  /* (0,2,0) already out-specifies the base .tugtile__board/__list (0,1,0) in this file, so no !important needed */
+  overflow: hidden;
+  touch-action: none;
+}
+/* Add card button and input */
+.tugtile__add {
+  padding-top: 8px;          /* Match the 8px gap between cards so the add button keeps the same vertical rhythm */
+}
+.tugtile__add-btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  padding: 8px;              /* Match card padding and the add-lane button (consistent 8px rhythm); left-aligned "+" lines up with the card number chip */
+  cursor: pointer;
+}
+.tugtile__add-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+/* ⋯ More actions */
+.tugtile__tile-more {
+  color: var(--text-faint);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.3;
+  display: inline-flex;
+  align-items: center;
+}
+.tugtile__tile-more svg { width: 1em; height: 1em; }
+.tugtile__tile-more:hover {
+  opacity: 1;
+  color: var(--text-normal);
+}
+/* Card checkbox */
+.tugtile__check {
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+}
+/* "Undo" button for toast notifications (to restore deleted/archived items in one tap) */
+.tugtile-toast-undo {
+  margin-left: 10px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--text-accent);
+}
+/* Focused editing sheet (integrated with iOS 26 rounded sheet design; hides native ✕ to use our own left ❌ and right ✓) */
+.tugtile-edit-modal-full {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;           /* Dynamic viewport: shrinks with the on-screen keyboard so the editor stays inside the visible area and the textarea can scroll. dvh is supported on every Obsidian-supported renderer (Electron + iOS/Android webview), so no 100vh fallback is needed. */
+  max-height: 100dvh;
+  border-radius: 0;   /* Full-screen focus editor — nothing of the board shows behind */
+  /* Inset content past the iPad status bar / notch / home indicator; env() = 0 on desktop. The solid background still bleeds into these strips. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow: hidden;
+  transform-origin: center;
+  animation: tugtile-pop-in 0.4s cubic-bezier(.34, 1.56, .64, 1);    /* Keep the bounce — full-screen ≠ unrefined */
+}
+/* Backdrop darkens to solid FAST (so the board vanishes quickly, not lingering behind the bounce); zero container padding */
+.modal-container.tugtile-edit-host { padding: 0; align-items: flex-start; }   /* Top-pinned, so shrinking the editor to the visual viewport (keyboard) keeps it above the keyboard. Class set in TileEditModal.onOpen — a direct container target, no parent-match selector. */
+/* The status-bar / home-indicator strips show --background-secondary (white in light, grey in dark) and sit
+   outside the modal's reach. So instead of fighting to cover them, dye the WHOLE editor --background-secondary
+   to match — seamless in both modes (the old --background-primary only matched in light mode). */
+.modal-container.tugtile-edit-host .modal-bg { background: var(--background-secondary); opacity: 1; animation: tugtile-bg-in 0.12s ease both; }
+.tugtile-edit-modal-full,
+.tugtile-edit-modal-full .tugtile-edit-modal { background: var(--background-secondary); }
+/* macOS: push the editor down so its top bar (✕) isn't covered by the window traffic lights (class is .mod-macos) */
+.mod-macos .tugtile-edit-modal-full { padding-top: 28px; }
+@keyframes tugtile-bg-in { from { opacity: 0; } to { opacity: 1; } }
+.tugtile-edit-modal-full.tugtile-ed-closing {
+  animation: tugtile-pop-out 0.28s ease-in forwards;                 /* Exit transition: reverse scaling animation */
+}
+/* Opacity reaches 1 early (~0.1s) so the editor covers the board fast — the scale still bounces to settle. Fixes the "laggy / see-through during the animation" feel. */
+@keyframes tugtile-pop-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  35%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes tugtile-pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.92); }
+}
+/* In-content text bars (search · rename · add-lane) — none of these use an Obsidian Modal any more. The view
+   renders a strip at the top of its content: .tugtile-searchbar is persistent (toggled by .tugtile--searching),
+   .tugtile-promptbar is transient (built on demand for rename / add-lane). Both reuse the .tugtile-prompt-row/
+   -field/-input styles below, and the JS freezes the board height while they're open so the virtual keyboard
+   can't collapse it into a black gap. On phone they take over the .tugtile__ctlbar slot. */
+.tugtile-searchbar { display: none; }
+.tugtile--searching .tugtile-searchbar,
+.tugtile-promptbar {
+  flex: 0 0 auto;
+  padding: 4px 8px 8px;
+  background: var(--background-primary);
+}
+.tugtile--searching .tugtile-searchbar { display: block; }
+body.is-phone .tugtile--searching .tugtile__ctlbar,
+body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
+.tugtile-prompt-row { display: flex; align-items: center; gap: 8px; }
+/* The input is wrapped in a rounded "field" so a leading icon (search) can sit inside it */
+.tugtile-prompt-field {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  box-sizing: border-box; height: 40px; padding: 0 12px;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  overflow: hidden;   /* Clip the input to the rounded box so it can never poke out of the corners */
+}
+.tugtile-prompt-field:focus-within { border-color: var(--interactive-accent); }
+.tugtile-prompt-fieldicon { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--text-muted); }
+.tugtile-prompt-fieldicon svg { width: 1.15em; height: 1.15em; }
+/* The input is our OWN contenteditable element (not a native <input>), so Obsidian's input chrome never
+   applies — no overrides, no !important. The .tugtile-prompt-field IS the visible box; this is the bare
+   single-line text surface inside it. plaintext-only keeps paste/IME clean (no rich markup, CJK-safe). */
+.tugtile-prompt-input {
+  flex: 1; min-width: 0;
+  outline: none;
+  white-space: pre; overflow-x: auto; overflow-y: hidden;   /* single line: scroll sideways, never wrap */
+  font-size: 16px; color: var(--text-normal);               /* 16px prevents iOS auto-zoom on focus */
+  -webkit-user-modify: read-write-plaintext-only;
+}
+.tugtile-prompt-input::-webkit-scrollbar { display: none; }   /* hide the horizontal scrollbar on the one-line field */
+.tugtile-prompt-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;   /* placeholder text isn't selectable / doesn't block the caret */
+}
+/* .tugtile-prompt-x / -ok inherit from .tugtile-iconbtn (the ✓ colour override lives up there) */
+.tugtile-edit-modal-full .modal-close-button { display: none; }   /* Hides the native top-right ✕ button in favor of our custom ❌ button with safety checks */
+.tugtile-edit-modal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: var(--background-primary);   /* Opaque: in the marktile pane there's no modal-bg behind it, so without this the area the iOS keyboard reveals shows through as a black gap */
+}
+/* marktile lives in a leaf, not a modal — fill the pane opaquely and use the dynamic viewport so the editor
+   shrinks WITH the on-screen keyboard instead of leaving a black void below it. */
+.workspace-leaf-content[data-type="marktile-editor"] .view-content {
+  padding: 0;
+  background: var(--background-primary);
+}
+.workspace-leaf-content[data-type="marktile-editor"] .tugtile-ed-scroll { max-height: 100dvh; }
+.tugtile-ed-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* ── Single source of truth for EVERY icon button ──────────────────────────────────────────────
+   editor ✕/✓, toolbar tools, find/replace, search ✕/✓. 40×40, flat, non-flex centering. Two hard
+   rules baked in here so they can never drift again and re-break iPad:
+     1) NO display:flex on the button — iPad WebKit blanks an inline svg that's a flex item.
+     2) the svg is nested in a <span> (done in JS) — iPad WebKit won't render an svg that's a direct
+        button child. So a size rule on the svg is safe.
+   Per-button classes below only override what's genuinely unique (colour of ✓, hover colour of ✕). */
+.tugtile-iconbtn {
+  flex: 0 0 auto;
+  -webkit-appearance: none; appearance: none;
+  position: relative;
+  width: 40px; height: 40px;
+  border: none; border-radius: var(--radius-m);
+  background: transparent; color: var(--text-muted);
+  cursor: pointer;
+}
+/* The icon's svg is wrapped in a <span> (the iPad svg-in-button fix). Absolutely-centre that span — true
+   pixel-centre, and NO flex on the button (flex on a <button> blanks the inline svg on iPad). */
+.tugtile-iconbtn > span { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: block; }
+.tugtile-iconbtn svg { width: 20px; height: 20px; display: block; }
+.tugtile-iconbtn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+/* unique bits only */
+.tugtile-ed-ok, .tugtile-ed-ok:hover { color: var(--color-green); }
+.tugtile-ed-ok { font-weight: 700; }
+.tugtile-ed-x:hover { color: var(--text-error); }
+.tugtile-prompt-ok, .tugtile-prompt-ok:hover { color: var(--text-success, var(--interactive-accent)); }
+.tugtile-ed-tools {
+  flex: 1; min-width: 0;
+  /* wrap, not nowrap: `twoRow = Platform.isPhone` decides the second row from the DEVICE, but what
+     actually runs out is WIDTH. A desktop pane dragged narrow — an Obsidian sidebar, a macOS window —
+     used to push the last tools off the right edge into a horizontal scroll nobody looks for. Wrapping
+     turns "buttons are missing" into "the toolbar is two rows", which is what the phone layout already
+     decided is the right answer when space is short. */
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  justify-content: safe center;   /* Centered in the bar (not crammed next to ✕); falls back to start-aligned when it overflows */
+  overflow-x: auto;
+  /* Wrapping fixed "buttons fall off the right edge", and then had no floor of its own: keep narrowing an
+     Obsidian sidebar or a macOS window and the rows keep multiplying — measured at 20 rows, 813px of
+     toolbar above a 640px window, i.e. a bar that has eaten the document it was decorating. Three rows is
+     the bound. It is a backstop, not a layout: every surface is supposed to shed its own chrome before
+     reaching it (macOS does, in Web/index.html), and where it does engage the row scrolls rather than
+     hides, because a button that is merely below the fold is still findable. */
+  max-height: 104px;   /* 3 rows: 3×32 + 2×4 gap */
+  overflow-y: auto;
+}
+/* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
+/* …except size, for the TOOLBAR tools only. .tugtile-iconbtn is 40px around a 20px icon — half of it is empty,
+   which reads as "the buttons are too big" (it is chodaict's word for it) and, on desktop, is what decides
+   whether sixteen tools need one row of chrome or three. The header ✕/✓ and the find bar keep 40: they are
+   lone targets with room around them, not a dense row. Phone keeps a bigger target — a thumb is not a cursor,
+   and the phone row scrolls sideways anyway, so shrinking there buys nothing worth the miss-taps. */
+.tugtile-ed-tool { width: 32px; height: 32px; }
+body.is-phone .tugtile-ed-tool { width: 38px; height: 38px; }
+/* Group divider in the editor toolbar. Kept as a 1px rule between tightly-packed buttons rather than
+   promoted into a nowrap group box: measured, unbreakable groups leave the tail of each row empty and cost
+   the DEFAULT 760px window a whole third row (101px → 145px of chrome), which is a worse trade than the
+   thing it fixes. The one artifact wrapping does produce — a divider that lands at a row edge, dividing it
+   from nothing — is handled where it can actually be seen, in tidySeps(). */
+.tugtile-ed-sep { flex: 0 0 auto; width: 1px; height: 20px; margin: 0 4px; background: var(--background-modifier-border); }
+/* Phone: second toolbar row (format/insert tools), below the bar's essentials. Centered, scrolls if it overflows. */
+.tugtile-ed-tools2 {
+  flex: 0 0 auto;
+  display: flex; flex-wrap: nowrap; gap: 2px; align-items: center;
+  justify-content: safe center;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* Thin horizontal scrollbar for the overflowing toolbar rows, styled via ::-webkit-scrollbar — Obsidian's
+   renderer is Chromium/WebKit on every platform, so this is the portable way to thin the bar (the standard
+   thin-scrollbar property is only partially supported by Obsidian's older builds). */
+.tugtile-ed-tools::-webkit-scrollbar,
+.tugtile-ed-tools2::-webkit-scrollbar { height: 6px; }
+.tugtile-ed-tools::-webkit-scrollbar-thumb,
+.tugtile-ed-tools2::-webkit-scrollbar-thumb { background: var(--background-modifier-border); border-radius: 3px; }
+body.is-phone .tugtile-ed-sep { display: none; }   /* no group separators in the compact phone rows */
+/* Phone: pull the editor near the top so the toolbar hugs the Dynamic Island (4px breathing room below it) */
+body.is-phone .tugtile-edit-modal-full { padding-top: 4px; }
+body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
+/* Find / replace bar (below the toolbar) */
+/* The find bar is SUBORDINATE to the toolbar, not a second one. It used to carry the same filled
+   background and a full-weight border, so the two read as competing stripes; now it is the same
+   surface with a hairline under it and the controls do the talking. */
+.tugtile-ed-find {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* 🔴 GROUPING IS DRAWN, NOT SPACED. The arrows belong to the find field and the replace buttons
+   belong to the replace field, and that was previously said only with 6px-vs-10px gaps — which
+   reads as one evenly-spaced row of loose parts. Each group is now ONE control with a border around
+   it, so "these act on this field" is visible instead of inferred. */
+.tugtile-ed-find-grp {
+  display: inline-flex; align-items: center; gap: 1px; min-width: 0; flex: 0 1 auto;
+  padding: 0 3px 0 6px; border-radius: 7px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field, var(--background-primary));
+}
+/* Focus lands on the GROUP, not the bare input: the pill is the control now, so it is what lights up. */
+.tugtile-ed-find-grp:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+.tugtile-ed-find-lead { display: inline-flex; align-items: center; color: var(--text-muted); margin-right: 4px; }
+.tugtile-ed-find-lead svg { width: 15px; height: 15px; }
+.tugtile-ed-find-i {
+  /* Grows with the row, but stops: left at flex:1 the two fields split the whole window between them, so a
+     1200px window bought two 500px boxes to hold the word "hello". Every Mac find bar keeps its field the
+     size of a search term. */
+  flex: 1 1 140px; min-width: 80px; max-width: 220px;
+  font-size: 16px; padding: 4px 2px;   /* 16px avoids iOS focus-zoom */
+  border: 0; background: transparent; outline: none; box-shadow: none;   /* the pill owns the chrome */
+  color: var(--text-normal);
+}
+.tugtile-ed-find > .tugtile-ed-find-b { margin-left: auto; }   /* the lone direct child is ✕ → far edge */
+/* The match count sits INSIDE the field's pill, right-aligned against the arrows, the way every Mac
+   find field shows it — floating loose between the box and the chevrons it read as a stray digit. */
+.tugtile-ed-find-n { flex: 0 0 auto; color: var(--text-faint); font-size: 0.8em; min-width: 1.4em; text-align: right; padding-right: 2px; font-variant-numeric: tabular-nums; }
+/* Buttons inside a pill are part of it: no hover plate fighting the border that already groups them. */
+.tugtile-ed-find-grp .tugtile-ed-find-b { width: 24px; height: 24px; padding: 0; border-radius: 5px; }
+.tugtile-ed-find-grp .tugtile-ed-find-b svg { width: 15px; height: 15px; }
+/* .tugtile-ed-find-b inherits everything else from .tugtile-iconbtn */
+/* ── Search every document ───────────────────────────────────────────────────────────────────────
+   A centred overlay, because picking a result ENDS this panel's job — unlike the table of contents,
+   which is about the document you are already in and stays with you. Same reason Spotlight, Open
+   Quickly and every quick-switcher are modals rather than rails. It also needs the width: the
+   context line under a hit is what tells you it is the right file, and a 240px sidebar eats it. */
+.tugtile-sa { position: absolute; inset: 0; z-index: 20; display: none; }
+.tugtile-sa.is-open { display: block; }
+.tugtile-sa-scrim { position: absolute; inset: 0; background: var(--background-modifier-cover, rgba(0,0,0,0.35)); }
+.tugtile-sa-box {
+  position: relative; margin: 8vh auto 0; width: min(680px, 92%); max-height: 74vh;
+  display: flex; flex-direction: column;
+  background: var(--background-primary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.28); overflow: hidden;
+}
+.tugtile-sa-top { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--background-modifier-border); }
+.tugtile-sa-i { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; outline: none; color: var(--text-normal); font-size: 17px; padding: 2px 0; }
+.tugtile-sa-stat { flex: 0 0 auto; color: var(--text-faint); font-size: 0.78em; white-space: nowrap; }
+/* Busy is shown on the FIELD, not as a spinner over the results: the previous answer stays readable
+   while the next one is on its way, which is the difference between a search that feels fast and one
+   that blanks every time you type a letter. */
+.tugtile-sa.is-busy .tugtile-sa-top { border-bottom-color: var(--interactive-accent); }
+.tugtile-sa-list { overflow-y: auto; padding: 6px; }
+.tugtile-sa-hint { padding: 22px 14px; color: var(--text-muted); text-align: center; }
+.tugtile-sa-row { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.tugtile-sa-row:hover { background: var(--background-modifier-hover); }
+.tugtile-sa-row.is-sel { background: var(--background-modifier-hover); box-shadow: inset 2px 0 0 var(--interactive-accent); }
+.tugtile-sa-head { display: flex; align-items: baseline; gap: 8px; }
+.tugtile-sa-name { color: var(--text-accent); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tugtile-sa-age { margin-left: auto; color: var(--text-faint); font-size: 0.75em; font-variant-numeric: tabular-nums; }
+.tugtile-sa-hit { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tugtile-sa-ctx { color: var(--text-faint); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The magnifier is a door only when a host can widen the search. */
+.tugtile-ed-find-lead.is-scope { cursor: pointer; border-radius: 4px; }
+.tugtile-ed-find-lead.is-scope:hover { color: var(--text-accent); }
+
+/* Settings: compact checkbox grid for choosing which editor toolbar buttons show */
+.tugtile-tools-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-end; }
+.tugtile-tools-pick .tugtile-tool-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.tugtile-tools-pick .tugtile-tool-chk input { margin: 0; }
+.tugtile-tools-pick .tugtile-tool-chk-i { display: inline-flex; align-items: center; min-width: 1.2em; justify-content: center; }
+.tugtile-tools-pick .tugtile-tool-chk-i svg { width: 1.15em; height: 1.15em; }
+.tugtile-ed-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* Single contenteditable surface — the visible styled text IS the editable text (no overlay to keep aligned),
+   which is what lets a heading line render bigger while the literal '## ' markers stay in place. */
+.tugtile-ed-rich {
+  min-height: 100%;
+  /* border-box or the padding lands OUTSIDE the 100%: 508px of container + 14px top + 14px bottom = 536px of
+     content, so the editor is permanently 28px taller than its scroller and a one-line file still shows a
+     scrollbar. Overlay scrollbars hid this for years — it only becomes visible the moment a host styles the
+     scrollbar to stay on screen. */
+  box-sizing: border-box;
+  margin: 0; border: 0; outline: none;
+  padding: 14px 16px;
+  font-family: var(--font-text); font-size: 16px; line-height: 1.7;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+  color: var(--text-normal); caret-color: var(--text-normal);
+  -webkit-user-modify: read-write-plaintext-only;   /* Keep paste/IME plaintext so no rich markup leaks into the markdown */
+}
+.tugtile-ed-rich:focus, .tugtile-ed-rich:focus-visible { outline: none; box-shadow: none; }
+.tugtile-ed-rich .tg-line { min-height: 1.7em; }   /* Empty lines stay tappable and visible */
+/* Hold ⌘ (or Ctrl) and links become doors. The class is added by the engine only while the key is
+   down, so the pointer is the whole affordance — a permanent underline would be lying the rest of
+   the time, when a plain click correctly places the caret instead. */
+.tugtile-ed-linkable .tg-link, .tugtile-ed-linkable .tg-img { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+/* marktile IS a markdown editor, so its body font is monospace in BOTH modes (Seasoned keeps the
+   syntax highlighting, just on a monospace base). Scoped to .marktile-ed so tugtile's card editor
+   (a board surface, not a markdown editor) stays on the proportional --font-text. */
+.marktile-ed .tugtile-ed-rich { font-family: var(--font-monospace); tab-size: 2; }   /* default tab-size is 8 — far too wide; a tab shows as 2 cells (one space · rule · one space) */
+/* Distinguish a literal tab from spaces: a 1px accent rule drawn INSIDE each 2-cell tab (one space · rule ·
+   one space) so it neither hugs the right edge nor touches the following text. A background gradient (not a
+   border) lets the rule sit at an arbitrary x. marktile + Seasoned only — Plain's neutralizer strips backgrounds
+   too. padding-block extends the rule's height (bg fills the padding box) to ~line-height so consecutive tab
+   lines join into one continuous vertical guide. Tune background-position (rule x) / padding-block (continuity). */
+.marktile-ed .tg-tab {
+  background: linear-gradient(var(--text-accent), var(--text-accent)) no-repeat;
+  background-size: 1px 100%;
+  background-position: 1ch center;   /* one cell in; tab is 2 cells, so one cell of space after the rule */
+  padding-block: 0.35em;
+}
+/* A leading tab on a heading line must NOT inflate the indent guide — its 1ch position / 100% height / 0.35em
+   padding are all font-size-relative, so on a grown heading the thin rule balloons. Counter-scale the tab's own
+   font-size by the heading's scale so its metrics fall back to the base text size (the guide stays thin). */
+.marktile-ed .tg-h1 .tg-tab { font-size: calc(1em / 1.7); padding-block: 0.85em; }
+.marktile-ed .tg-h2 .tg-tab { font-size: calc(1em / 1.45); padding-block: 0.68em; }
+.marktile-ed .tg-h3 .tg-tab { font-size: calc(1em / 1.25); padding-block: 0.55em; }
+.marktile-ed .tg-h4 .tg-tab { font-size: calc(1em / 1.12); padding-block: 0.45em; }
+.marktile-ed .tg-h5 .tg-tab, .marktile-ed .tg-h6 .tg-tab { font-size: calc(1em / 1.05); padding-block: 0.4em; }
+
+/* ── Table of contents (marktile only). A toggle side panel of H1–H3; click a heading to scroll to it.
+   Absolute overlay anchored (top set in JS) to the editor content, so the toolbar + the TOC toggle button
+   stay above/clickable. Desktop/iPad: a left sidebar that pushes the text right. Phone: a full-width overlay. */
+.marktile-ed { position: relative; }
+.marktile-ed .tugtile-ed-bar { position: relative; z-index: 6; }   /* keep the toggle (top-left) above the panel */
+.marktile-toc {
+  position: absolute; left: 0; bottom: 0; width: 240px; z-index: 5;
+  background: var(--background-secondary); border-right: 1px solid var(--background-modifier-border);
+  overflow-y: auto; padding: 0.6em 0;
+  transform: translateX(-100%); transition: transform 0.18s ease;   /* slid out by default */
+}
+.marktile-toc-open .marktile-toc { transform: none; }
+.marktile-ed .tugtile-ed-scroll { transition: padding-left 0.18s ease; }
+.marktile-toc-open .tugtile-ed-scroll { padding-left: 240px; }      /* clear the sidebar (desktop/iPad) */
+.marktile-toc-open .tugtile-ed-toc { color: var(--text-accent); }   /* toggle active state */
+.marktile-toc-title { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 0 1.1em 0.5em; }
+.marktile-toc-list { display: flex; flex-direction: column; }
+.marktile-toc-item { padding: 0 1.1em; line-height: 40px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* ~40px tap target (single-line, vertically centred) — button-like, easier to hit */
+.marktile-toc-item:hover { background: var(--background-modifier-hover); }
+.marktile-toc-l1 { font-weight: 600; }
+.marktile-toc-l2 { padding-left: 2.2em; }
+.marktile-toc-l3 { padding-left: 3.3em; color: var(--text-muted); font-size: 0.95em; }
+.marktile-toc-empty { padding: 0.4em 1.1em; color: var(--text-muted); font-style: italic; }
+/* drag-reorder feedback (borrowed from tugtile's tile Sortable, scaled to a TOC row) */
+.marktile-toc-item--ghost { opacity: 0.4; background: var(--background-modifier-hover); }   /* the gap left behind */
+.marktile-toc-item--chosen { box-shadow: inset 0 0 0 2px var(--interactive-accent); }        /* the picked row */
+.marktile-toc-item--drag {   /* the row following the finger (re-parented to <body> by fallbackOnBody) */
+  opacity: 0.97; background: var(--background-secondary); border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4); cursor: grabbing;
+  rotate: 3deg; scale: 1.03;   /* "picked up" tilt — standalone props (NOT transform) so Sortable's drag translation isn't overwritten */
+}
+.is-phone .marktile-toc { width: 100%; border-right: none; }       /* phone: full-width overlay (sidebar too cramped) */
+.is-phone .marktile-toc-open .tugtile-ed-scroll { padding-left: 0; }
+/* marktile viewcycle → Plain mode neutralizer lives AFTER the syntax rules below — it must out-specify every one
+   of them WITHOUT !important, so it's placed past the last competitor (see the specificity-contract comment there). */
+/* marktile lock → read-only. contenteditable=false alone is OVERRIDDEN on WebKit by the editor's
+   -webkit-user-modify: read-write-plaintext-only, so flip that to read-only here (the real switch). Also
+   disable the toolbar so a stray tap can't edit (Obsidian has no save step — whatever changes IS saved). */
+.tugtile--locked .tugtile-ed-rich { -webkit-user-modify: read-only; user-modify: read-only; }
+.tugtile--locked .tugtile-ed-tools,
+.tugtile--locked .tugtile-ed-tools2,
+.tugtile--locked .tugtile-ed-find { pointer-events: none; opacity: 0.4; }   /* find/replace too — else Replace All bypasses contenteditable (B2) */
+/* Phone: tall bottom padding gives scroll room so the last real line can always be scrolled up above the
+   on-screen keyboard (see keepCaretVisible) instead of being trapped under it. */
+body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
+
+/* Headings: markers kept (## still shows), the line just renders larger */
+.tugtile-ed-rich .tg-h { font-weight: 700; color: var(--text-accent); }
+.tugtile-ed-rich .tg-h1 { font-size: 1.7em; line-height: 1.35; }
+.tugtile-ed-rich .tg-h2 { font-size: 1.45em; line-height: 1.4; }
+.tugtile-ed-rich .tg-h3 { font-size: 1.25em; }
+.tugtile-ed-rich .tg-h4 { font-size: 1.12em; }
+.tugtile-ed-rich .tg-h5, .tugtile-ed-rich .tg-h6 { font-size: 1.05em; }
+.tugtile-ed-rich .tg-quote { color: var(--text-muted); }
+.tugtile-ed-rich .tg-b { font-weight: 700; }
+.tugtile-ed-rich .tg-i { font-style: italic; }
+.tugtile-ed-rich .tg-strike { text-decoration: line-through; color: var(--text-muted); }
+.tugtile-ed-rich .tg-check { font-family: var(--font-monospace); color: var(--text-accent); }
+.tugtile-ed-rich .tg-check-done { color: var(--color-green); }
+.tugtile-ed-rich .tg-task-done { color: var(--text-muted); }   /* whole completed task line dims */
+.tugtile-ed-rich .tg-code { font-family: var(--font-monospace); color: var(--text-accent); }
+.tugtile-ed-rich .tg-tag,
+.tugtile-ed-rich .tg-img,
+.tugtile-ed-rich .tg-ref,
+.tugtile-ed-rich .tg-link { color: var(--text-accent); }
+/* A link-reference or footnote DEFINITION produces nothing in a rendered document — it is the
+   addressing behind a link, so it recedes rather than reading as a paragraph of its own. */
+.tugtile-preview .tg-refdef { color: var(--text-faint); font-size: 0.9em; }
+/* An ordered list's number is content, not syntax, so it never hides — it just stops shouting. The
+   inline-block width is what lines "1." up with the • a bullet line gets from its ::before. */
+.tugtile-ed-rich .tg-num { color: var(--text-muted); }
+.tugtile-preview .tg-num { display: inline-block; min-width: 1.25em; }
+/* A thematic break: the dashes hide with every other marker and the line itself becomes the rule. */
+.tugtile-preview .tg-hr { border-top: 1px solid var(--background-modifier-border); }
+/* A setext underline goes entirely — unlike a thematic break it draws nothing, it only says that the
+   line above was a heading, and that line is already wearing the heading. Leaving an empty row under
+   every such heading would be the marker still taking up space after being hidden. */
+.tugtile-preview .tg-srule { display: none; }
+.tugtile-ed-rich .tg-date { color: var(--color-yellow); }
+/* ── Fenced code + frontmatter ────────────────────────────────────────────────────────────────────
+   Whole LINES, not spans: what marks them is their position between two fences, which is a fact about
+   the sequence (blockScan) and not about the line. Their contents carry no inline markup at all —
+   inside a fence `**this**` is two asterisks and a word, and rendering it bold was a lie the editor
+   used to tell on every surface.
+   Each line keeps its own <div>, so the background lands as a continuous band without a wrapper
+   element — which is what keeps the round-trip exact (getText still just joins the children). */
+.tugtile-ed-rich .tg-cblock,
+.tugtile-ed-rich .tg-cfence {
+  font-family: var(--font-monospace);
+  background: var(--background-secondary);
+  padding-left: 10px; padding-right: 10px;
+}
+.tugtile-ed-rich .tg-cfence { color: var(--text-faint); }
+.tugtile-ed-rich .tg-fm { color: var(--text-muted); font-family: var(--font-monospace); }
+.tugtile-ed-rich .tg-fmfence { color: var(--text-faint); font-family: var(--font-monospace); }
+/* Rendered: the fences are pure syntax, so they go — the same call .tugtile-preview already makes for
+   the |---| row of a table. The band stays, which is what tells you the block is still there. */
+.tugtile-preview .tg-cfence,
+.tugtile-preview .tg-fmfence { display: none; }
+.tugtile-preview .tg-cblock { padding-top: 1px; padding-bottom: 1px; }
+/* With its --- gone, the frontmatter needs some other reason not to read as the first paragraph. */
+.tugtile-preview .tg-fm { border-left: 2px solid var(--background-modifier-border); padding-left: 10px; font-size: 0.9em; }
+
+/* Seasoned "彩色" palette — opt-in via settings (seasonedColor → .marktile-palette-color on the editor mount).
+   Each syntax token gets its own hue instead of the single accent tint. Obsidian theme color vars (hex fallbacks
+   for the web host) so it tracks light/dark + custom themes. quote/strike/date/check keep their base styling. */
+.marktile-palette-color .tugtile-ed-rich .tg-h { color: var(--color-orange, #d19a66); }
+.marktile-palette-color .tugtile-ed-rich .tg-b { color: var(--color-yellow, #e5c07b); }
+.marktile-palette-color .tugtile-ed-rich .tg-i { color: var(--color-purple, #c678dd); }
+.marktile-palette-color .tugtile-ed-rich .tg-code { color: var(--color-green, #98c379); }
+.marktile-palette-color .tugtile-ed-rich .tg-tag,
+.marktile-palette-color .tugtile-ed-rich .tg-link { color: var(--color-cyan, #56b6c2); }
+/* Plain mode = a hard reset of ALL the syntax styling above to a bare monospace baseline. This used to be one
+   !important block; it's now specificity-only (no !important) so styles.css is 100% !important-free.
+   ⚠️ SPECIFICITY CONTRACT — do not weaken, and keep this block AFTER every syntax rule above:
+     • every syntax rule above tops out at (0,3,0) — the .marktile-palette-color and .marktile-ed .tg-hN .tg-tab rules.
+     • `.tugtile-plain .tugtile-ed-rich .tg-line[ *]`            = (0,3,0): covers non-marktile hosts (tugtile card
+        editor, web), where NO (0,3,0) competitor exists (palette + tab rules are all .marktile-* gated → only (0,2,0)).
+     • `.marktile-ed.tugtile-plain .tugtile-ed-rich .tg-line[ *]` = (0,4,0): clears marktile's (0,3,0) palette + tab rules.
+   .tugtile-plain sits on the editor mount (an ANCESTOR of .tugtile-ed-rich); .tg-line are direct children of it.
+   If you ever add a syntax rule at (0,4,0)+, or a new editor host that runs Plain WITHOUT .marktile-ed, Plain mode
+   silently stops neutralising (symptom: colours/sizes leak through) — fix it here. There is no test guarding this. */
+.tugtile-plain .tugtile-ed-rich .tg-line,
+.tugtile-plain .tugtile-ed-rich .tg-line *,
+.marktile-ed.tugtile-plain .tugtile-ed-rich .tg-line,
+.marktile-ed.tugtile-plain .tugtile-ed-rich .tg-line * {
+  font-size: 1em; font-weight: normal; font-style: normal;
+  text-decoration: none; color: var(--text-normal); background: transparent;
+  font-family: var(--font-monospace); line-height: inherit;   /* monospace = raw-source feel */
+  border: 0; padding-left: 0; margin: 0;
+}
+/* Lane header container */
+.tugtile__lane-title {
+  flex: 1;
+  cursor: text;
+  white-space: nowrap;        /* Prevents the title from wrapping to expand the lane width, avoiding overlap with count/buttons */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform-origin: left center;   /* Tucks toward the chevron (left) on collapse */
+  transition: transform var(--tg-d1) ease, opacity var(--tg-d1) ease;
+}
+.tugtile__lane-title-v { display: none; }   /* Vertical title clone — only rendered in the collapsed strip */
+/* Collapse stage 1 / expand stage 2: lane is narrow, the horizontal title is tucked into the chevron, and the row trimmings fade */
+.tugtile__lane--narrowing { width: 40px; }
+.tugtile__lane--narrowing .tugtile__lane-title { transform: scaleX(0); opacity: 0; }
+.tugtile__lane--narrowing .tugtile__lane-count,
+.tugtile__lane--narrowing .tugtile__lane-more { opacity: 0; }
+/* Responsive board (opt-in, default off): on a narrow pane the horizontal lanes reflow into a single full-width vertical stack — the behaviour of the retired List view, now automatic via a container query. Drag-and-drop/editing logic is shared with the board view. */
+.tugtile--rwd { container-type: inline-size; container-name: tugtileboard; }
+@container tugtileboard (max-width: 640px) {
+  .tugtile__board { flex-direction: column; overflow-x: hidden; overflow-y: auto; align-items: stretch; }
+  .tugtile__lane { width: auto; max-width: none; flex: 0 0 auto; }
+  .tugtile__addcol { width: auto; }
+  /* Collapsed lane in vertical layout: keep a standard horizontal header (the board view's narrow vertical strip would become a full-width black box here). The board view's two-stage strip animation no-ops here — the horizontal title stays, the vertical clone is unused. */
+  .tugtile__lane--collapsed { min-width: 0; max-width: none; width: auto; }
+  .tugtile__lane--collapsed .tugtile__lane-head { flex-direction: row; height: auto; padding: 8px; overflow: visible; }
+  .tugtile__lane--collapsed .tugtile__lane-title { display: revert; writing-mode: horizontal-tb; max-height: none; transform: none; opacity: 1; }
+  .tugtile__lane--collapsed .tugtile__lane-title-v { display: none; }
+  .tugtile__lane--narrowing { width: auto; }
+  .tugtile__lane--narrowing .tugtile__lane-title { transform: none; opacity: 1; }
+}
+/* Centered header view-cycle control: "<icon> <name>" — click cycles board → table → markdown. Same padding as the lock button so the "·" separator sits symmetrically between them. */
+.tugtile-viewcycle {
+  display: inline-flex; align-items: center; gap: 5px;
+  cursor: pointer; border-radius: var(--radius-s);
+  padding: 2px 6px;
+}
+.tugtile-viewcycle:hover { background: var(--background-modifier-hover); }
+.tugtile-viewcycle-icon { display: inline-flex; }
+.tugtile-viewcycle-icon svg { width: 1em; height: 1em; }
+.tugtile-viewcycle-name { font-weight: var(--font-medium, 500); }
+/* Table view */
+.tugtile__table-wrap {
+  height: 100%;
+  overflow: auto;
+  padding: 0 12px;   /* No top padding → the sticky header sits flush at the top, so rows can't peek above it while scrolling */
+}
+.tugtile__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tugtile__table th,
+.tugtile__table td {
+  text-align: left;
+  padding: var(--tugtile-row-pad, 8px) 10px;   /* Vertical padding is the table density preset (settings) */
+  border-bottom: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+}
+.tugtile__table th {
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  z-index: 2;   /* Stay above scrolling rows */
+  background: var(--background-primary);   /* Solid — rows scroll cleanly behind, no show-through */
+  box-shadow: 0 1px 0 var(--background-modifier-border);
+  user-select: none;
+}
+.tugtile__table th:hover { color: var(--text-accent); }
+.tugtile__row:hover { background: var(--background-modifier-hover); }
+.tugtile__row-title { cursor: text; }
+/* Table rows: displays plain text where we manage styles (without markdown rendering), keeping font sizes uniform and truncating long text to avoid breaking the layout */
+.tugtile__row-text { font-size: var(--font-text-size); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; display: inline-block; vertical-align: bottom; }
+.tugtile__row-title input { margin-right: 6px; }
+.tugtile__row-lane { color: var(--text-muted); white-space: nowrap; }
+/* Tag cell stays a normal table cell (NOT display:flex — that breaks cell layout and collapses when empty). Chips flow inline-block instead. */
+.tugtile__row-tags .tugtile__tag { display: inline-block; margin: 0 4px 2px 0; }
+/* Drag-to-archive zone (only shown when dragging cards) */
+.tugtile__archivebar {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 12px;
+  border: 2px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+/* Lane collapse chevron: a visible rounded square button. Its left edge lines up with the tile (card) left edge below — both sit at the lane's inner padding (8px), so no extra offset is needed. Square size also gives a comfortable tap target. */
+.tugtile__lane-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: var(--radius-s);
+  /* Opaque (translucent hover tint composited over the lane bg) so the vertical title retracting INTO the
+     chevron during collapse/expand is fully masked — a see-through button would leak that text. */
+  background: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover)), var(--background-secondary);
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+  position: relative;
+  z-index: 3;   /* Highest in the lane header, so it sits over the retracting title */
+}
+.tugtile__lane-chevron:hover { background: linear-gradient(var(--background-modifier-border), var(--background-modifier-border)), var(--background-secondary); color: var(--text-normal); }
+/* Only the inner glyph rotates (the button stays still). Rotating the same ▾ by -90° to ▸ rather than swapping glyphs keeps height perfectly consistent. */
+.tugtile__lane-chevron-glyph {
+  display: inline-flex;
+  transition: transform 0.3s cubic-bezier(.34, 1.56, .64, 1);   /* Springy overshoot */
+}
+.tugtile__lane-chevron-glyph svg { width: 1.1em; height: 1.1em; }
+.tugtile__lane--collapsed .tugtile__lane-chevron-glyph { transform: rotate(-90deg); }
+/* In the collapsed vertical strip: drop the margin AND pin the toggle to the top-left corner (align-self:
+   flex-start) instead of centering it — so it stays exactly where the expanded header's chevron was and
+   doesn't drift sideways when a lane collapses/expands. */
+.tugtile__lane--collapsed .tugtile__lane-chevron { margin: 0; align-self: flex-start; }
+/* Collapsed lanes: a fixed narrow column with vertical title orientation (upright CJK characters, truncated if too long) */
+.tugtile__lane--collapsed {
+  width: 40px;              /* Base lane sets a plain width + width transition, so collapsing to 40px animates smoothly */
+  max-height: 100%;
+  cursor: pointer;
+}
+.tugtile__lane--collapsed .tugtile__list,
+.tugtile__lane--collapsed .tugtile__add,
+.tugtile__lane--collapsed .tugtile__lane-more {
+  display: none;
+}
+.tugtile__lane--collapsed .tugtile__lane-head {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;   /* Reset the base header's space-between, which in a column would spread chevron/title/count apart and push the chevron off the top */
+  gap: 10px;
+  padding: 4px 0 8px;            /* Top 4 matches the expanded header so the chevron doesn't jump down when a lane collapses */
+  height: 100%;
+  overflow: hidden;
+}
+.tugtile__lane--collapsed .tugtile__lane-title { display: none; }   /* Horizontal title hidden in the strip; the vertical clone takes over */
+.tugtile__lane--collapsed .tugtile__lane-title-v {
+  display: block;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;       /* Keeps CJK characters upright while rotating alphanumeric text */
+  white-space: nowrap;           /* Prevents wrapping into multiple vertical lines, which is the primary cause of text overlap */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 100%;
+  flex: 0 1 auto;
+  cursor: pointer;
+  transform: scaleY(0);          /* Grows down out of / shrinks up into the chevron */
+  opacity: 0;
+  transform-origin: top center;
+  /* Grow and retract are the SAME motion in reverse: scaleY + opacity, one shared easing + duration, both
+     directions — so "grow out" and "shrink in" read as one symmetric concept (a dissolve into the button). */
+  transition: transform var(--tg-d2) ease-in-out, opacity var(--tg-d2) ease-in-out;
+}
+.tugtile__lane--collapsed.tugtile__lane--grown .tugtile__lane-title-v { transform: scaleY(1); opacity: 1; }
+/* Retract = the exact reverse of grow (same easing + duration), driven by a keyframe so it reliably animates
+   instead of snapping. scaleY + opacity dissolve up into the chevron in lockstep. */
+.tugtile__lane--retracting .tugtile__lane-title-v { animation: tugtile-title-retract var(--tg-d2) ease-in-out both; }
+@keyframes tugtile-title-retract {
+  from { transform: scaleY(1); opacity: 1; }
+  to   { transform: scaleY(0); opacity: 0; }
+}
+.tugtile__lane--collapsed .tugtile__lane-count {
+  writing-mode: horizontal-tb;
+  flex: 0 0 auto;
+  margin-top: auto;   /* Sink the count to the bottom of the strip (chevron + title stay grouped at the top) */
+}
+/* Lane ⋯ menu */
+.tugtile__lane-more {
+  cursor: pointer;
+  color: var(--text-faint);
+  opacity: 0.4;
+  display: inline-flex;
+  align-items: center;
+}
+.tugtile__lane-more svg { width: 1em; height: 1em; }
+.tugtile__lane-more:hover {
+  opacity: 1;
+  color: var(--text-normal);
+}
+/* Archive list modal */
+.tugtile-archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.tugtile-archive-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+.tugtile-archive-body {
+  flex: 1;
+  min-width: 0;
+}
+.tugtile-archive-body > :first-child { margin-top: 0; }
+.tugtile-archive-body > :last-child { margin-bottom: 0; }
+.tugtile-archive-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+/* Add lane container */
+.tugtile__addcol {
+  flex: 0 0 auto;
+  width: var(--tugtile-lane-width, 300px);   /* Same fixed width as a lane, so the add-lane button lines up with the columns */
+  /* No padding: the button's top lines up with the lane boxes (both at the board padding), and the board's 12px gap already spaces it from the last lane */
+}
+.tugtile__addcol-btn {
+  width: 100%;
+  text-align: left;          /* Match the add-card button (consistent left-aligned "+ label") */
+  background: transparent;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  padding: 8px;
+  cursor: pointer;
+}
+.tugtile__addcol-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ── In-grid markdown tables — the "locked markers" editor (decorateTables in editor-core.js). SHARED by
+   marktile (inlined) and the web host (this file is vendored as tile-core.css). Gate = .marktile-grid: hosts add it
+   in Seasoned + Rendered, drop it in Plain. The pipe `|` is the table's `##` — in Seasoned it stays VISIBLE
+   (dimmed, locked) so the markdown coexists with the layout; the .tugtile-preview overlay (Rendered) hides the
+   pipes into a real bordered grid. textContent is byte-identical either way → round-trip exact. (Dormant in
+   tugtile, which never sets .marktile-grid.) */
+.marktile-grid .ej-trow { display: table-row; white-space: normal; }
+.marktile-grid .ej-trow .ej-cell { display: table-cell; padding: 3px 12px; vertical-align: top; cursor: text; min-width: 36px; }
+.marktile-grid .ej-trow .ej-pipe { display: table-cell; color: var(--text-faint, #9aa0a6); padding: 0 1px; }   /* the locked pipe, dimmed — the visible "seasoning" in Seasoned */
+.marktile-grid .ej-tsep .ej-cell { color: var(--text-faint, #9aa0a6); }                                       /* the |---| separator row, dimmed (also shown in Seasoned) */
+.marktile-grid .ej-trow .ej-cell[data-a=center] { text-align: center; }
+.marktile-grid .ej-trow .ej-cell[data-a=right] { text-align: right; }
+/* Rendered overlay: the markers give way to a real grid (pipes + separator gone, cells get borders). */
+.tugtile-preview .ej-trow .ej-pipe { display: none; }
+.tugtile-preview .ej-tsep { display: none; }
+.tugtile-preview .ej-trow .ej-cell { border: 1px solid var(--background-modifier-border, #e4e6e9); padding: 6px 14px; }
+.tugtile-preview .ej-trow.ej-thead .ej-cell { background: var(--background-secondary, #f6f7f9); font-weight: 700; }
+/* Rendered hides EVERY marker, not just the table pipes — the `##`/`**`/`` ` `` markers (.tg-mk) give way too, so
+   the whole view reads as output (the third point of raw → coexist → output). Still fully editable; markup never
+   leaves the text. Dormant in tugtile (no .tugtile-preview). */
+.tugtile-preview .tg-mk { display: none; }
+
+/* …but a list has to still LOOK like a list once its markers are gone. Hiding `- ` and `[x] ` with nothing
+   in their place turned every checklist and bullet list into bare indented text: markers gone AND the shape
+   gone with them, which is a mode that renders less than the source, not more.
+   These are pseudo-elements on purpose — ::before content is invisible to textContent, so the editor's
+   text<->DOM round-trip stays byte-exact (the same reason .tg-mk hides rather than removes).
+   The engine already emits the hooks: .tg-li on a bullet line, and a .tg-check/.tg-check-done span sitting
+   exactly where the `[x]` box was. Nothing here is new markup — the seam was always there, unused. */
+.tugtile-preview .tg-li::before {
+  content: "•";
+  display: inline-block;
+  width: 1.25em;
+  color: var(--text-muted, #6b7280);
+}
+/* A task line is also a .tg-li; it gets the box instead of the dot, not both. */
+.tugtile-preview .tg-li.tg-task::before { content: none; }
+/* The box is pressable (wireTaskToggle in the core), so it is sized and cursored like a control, not
+   like punctuation: a bigger glyph, a fixed centred box so ☐ and ☑ never shift the text beside them,
+   and a hit area that a fingertip or a quick click can actually land on. */
+.tugtile-preview .tg-check::before {
+  content: "☐";
+  display: inline-block;
+  width: 1.4em;
+  font-size: 1.35em;
+  line-height: 1;
+  text-align: center;
+  vertical-align: -0.12em;
+  color: var(--text-muted, #6b7280);
+}
+.tugtile-preview .tg-check-done::before {
+  content: "☑";
+  color: var(--interactive-accent, #3a7afe);
+}
+.tugtile-preview .tg-check {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tugtile-preview .tg-check:hover::before { color: var(--interactive-accent, #3a7afe); }
+
+/* table right-click menu (desktop: insert/delete row/column) */
+/* The .ej-tblmenu popover is now the NON-Obsidian rendering only — obsidian-shim.js's Menu draws into it, so
+   the web preview and the macOS app keep the menu they had. Under Obsidian the host's own Menu is used, which
+   is why the safe-area maths, the keyboard dismissal and the flip-up clamp that used to live here are gone. */
+.ej-tblmenu { position: fixed; z-index: 2000; min-width: 168px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--background-primary, #fff); border: 1px solid var(--background-modifier-border, #e4e6e9); border-radius: 10px; box-shadow: 0 10px 30px rgba(10, 22, 40, .18); padding: 5px; display: flex; flex-direction: column; }
+/* Both properties, deliberately. A host that styles bare <button> as a flex container (Obsidian does:
+   `display:inline-flex; justify-content:center`) makes the label a FLEX ITEM, over which text-align has no
+   say — that rule sat here from the day it was written and moved nothing. Keep both so neither kind of host
+   can centre these labels. */
+.ej-tblmenu button { font: 13.5px var(--font-interface, system-ui, sans-serif); text-align: left; justify-content: flex-start; border: 0; background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; color: var(--text-normal, #1f2328); }
+.ej-tblmenu button:hover:not(:disabled) { background: var(--background-modifier-hover, rgba(0, 0, 0, .06)); }
+.ej-tblmenu button:disabled { opacity: .35; cursor: default; }
+.ej-tblmenu hr { border: 0; border-top: 1px solid var(--background-modifier-border, #e4e6e9); margin: 4px 6px; }
+/* Delete keeps its own colour: the shim's Menu maps setWarning(true) onto this class, the way Obsidian maps it
+   onto .is-warning. Same menu, two renderers. */
+.ej-tblmenu button.ej-tblmenu-danger { color: var(--text-error, #c0392b); }
+.ej-tblmenu-ic { display: inline-flex; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; color: var(--text-muted, #6b7280); }
+.ej-tblmenu-ic svg { width: 16px; height: 16px; }
+/* The selection pill: appears next to a non-empty selection on touch (see the note in mountEditor for why —
+   iOS does not fire 'contextmenu' for a long-press on already-selected text). Fixed position, JS sets top/left. */
+.ej-selpill { position: fixed; z-index: 2001; width: 36px; height: 36px; display: none; align-items: center; justify-content: center;
+  border: 0; border-radius: 999px; background: var(--background-primary, #fff); color: var(--text-normal, #1f2328);
+  box-shadow: 0 4px 14px rgba(10, 22, 40, .22); cursor: pointer; padding: 0; }
+.ej-selpill svg { width: 18px; height: 18px; }
+
+/* Inline image thumbnails (decorateImages in editor-core.js) — the picture shows beside its still-editable source
+   line; the source markdown stays but dims. Hidden in Plain so power users see raw source only. Shared by marktile
+   + the web host; dormant in tugtile (never calls decorateImages). The first step of Rendered "growing". */
+.ej-inlimg { display: block; max-width: min(280px, 100%); max-height: 220px; border-radius: 8px; margin: 4px 0 8px; border: 1px solid var(--background-modifier-border, #e4e6e9); }
+.tg-line.ej-hasimg { color: var(--text-faint, #9aa0a6); font-size: 12px; }
+.tugtile-plain .ej-inlimg { display: none; }
+.tugtile-plain .tg-line.ej-hasimg { color: var(--text-normal, #1f2328); font-size: 1em; }
