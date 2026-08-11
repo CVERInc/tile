@@ -131,13 +131,27 @@ than assumed, 2026-08-11:
 So an Arabic or Hebrew page would render, and render left-to-right. That is a defect, listed here
 because a reader who finds out by trying it has lost more than a reader who was told.
 
-🔴 It is also not a change this package can make alone. A site's theme lives in that site's own
-repo, so base going logical fixes nothing for a theme that writes `margin-left` — RTL needs every
-theme author to follow. That is the first concrete cost of themes travelling with their sites, and
-it belongs in the estimate rather than in the surprise.
+**"RTL" is three different features, and this is the only one missing.** Worth separating before
+anyone estimates it:
 
-(`pagetile`'s reader has a `direction: ltr|rtl` for a book's PAGE ORDER — a right-opening comic.
-That is sequence, not text direction, and it is not RTL support.)
+| | where it lives |
+|---|---|
+| Bidirectional text (Arabic, Hebrew) — `dir=rtl`, logical properties | **not built** — this section |
+| Vertical CJK setting (縦書き) — `writing-mode: vertical-rl` | built, in the EPUB toolchain |
+| Right-opening page order (comics) | built — `pagetile`'s `direction: ltr\|rtl` |
+
+**PRs are welcome for the first row, and this is what one would need.** We are not building it
+ourselves: nobody here reads or writes an RTL script, so we could not dogfood it, and a typographic
+feature verified only by someone who cannot read the output is a feature verified by nobody.
+
+1. `dir` on `<html>`, derived from the page's locale.
+2. The physical properties above become logical ones. The count is the estimate.
+3. 🔴 **The part that is not ours to merge.** A site's theme lives in that site's own repo, so base
+   going logical fixes nothing for a theme that writes `margin-left`. RTL needs every theme author
+   to follow, and no PR here can do that for them. Say so in the PR rather than discovering it
+   after: a renderer that is RTL-correct under themes that are not has moved the bug, not fixed it.
+4. A fixture in an RTL script, and — this is the one that actually matters — a reviewer who reads
+   that script. We will merge on their word, not on ours.
 
 ## Import path (Recast SKU)
 
