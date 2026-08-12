@@ -84,10 +84,17 @@ done
 # because the next thing that happens to this repo is that several of these directories move.
 SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs
              packages/flowtile/*.test.mjs test/*.test.mjs)
+# 🩸 …and within a NAMING CONVENTION. The guard below asked the tree for `*.test.*` and nothing else,
+# so hosts/web/modaltile/ could hold TWO browser harnesses that nothing has ever run and the check
+# designed to catch exactly that stayed green — they were invisible to it because of what they are
+# called. (Both pass, as of 2026-08-12. Unrun is not the same as broken, and you cannot tell which
+# one you have without running them: seven harnesses in the sibling repo were found dead the same
+# day, and every one of them had also been "fine" right up until somebody looked.)
+SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs)
 
 echo "→ every test file in the tree is actually run"
 shopt -s nullglob
-covered=$(printf '%s\n' test/*.cjs "${SUITE_GLOBS[@]}" | sort -u)
+covered=$(printf '%s\n' test/*.cjs "${SUITE_GLOBS[@]}" "${SMOKE_GLOBS[@]}" | sort -u)
 shopt -u nullglob
 # `test/*.cjs` is deliberately non-recursive: test/golden/corpus.cjs is a fixture another test
 # requires, not a suite. Anything matching *.test.* IS a suite, wherever it sits.
@@ -95,7 +102,7 @@ shopt -u nullglob
 # `--others --exclude-standard` as well as tracked: a test file you wrote thirty seconds ago and
 # have not staged is EXACTLY the one at risk of never being run, and `git ls-files` alone would
 # say nothing until after it was committed. Ignored paths (node_modules, dist) stay out.
-present=$( { git ls-files --cached --others --exclude-standard '*.test.mjs' '*.test.js'
+present=$( { git ls-files --cached --others --exclude-standard '*.test.mjs' '*.test.js' '*smoke.mjs'
              printf '%s\n' test/*.cjs 2>/dev/null; } | sort -u)
 orphans=$(comm -23 <(echo "$present") <(echo "$covered") || true)
 if [ -n "$orphans" ]; then
@@ -120,6 +127,40 @@ if [ -d packages/sitetile/astro/node_modules ]; then
   ( cd packages/sitetile/astro && node smoke-build.mjs )
 else
   echo "  · sitetile astro smoke SKIPPED — no packages/sitetile/astro/node_modules (run npm install there)"
+fi
+
+# The browser smokes drive a real page in a real engine — the only gates here that touch the DOM the
+# way a person does. They need Playwright, which this repo does not depend on, so they run when
+# PLAYWRIGHT points at one and SAY SO by name when it does not.
+#
+# 🩸 They were listed in SMOKE_GLOBS before this block existed, which made the orphan guard above go
+# green on the strength of a declaration. That is the same defect the guard is for, one level up:
+# "covered" has to mean "run", not "mentioned". If you add a smoke, add it here too.
+if [ -n "${PLAYWRIGHT:-}" ] && [ -f "${PLAYWRIGHT}" ]; then
+  echo "→ browser smokes"
+  _port=8749
+  python3 -m http.server "$_port" --bind 127.0.0.1 >/dev/null 2>&1 &
+  _srv=$!
+  trap 'kill "$_srv" 2>/dev/null || true' EXIT
+  # 🔴 Wait for it to answer rather than sleeping a guessed amount. A smoke that fails because the
+  # server was not up yet is a red about this script.
+  for _i in $(seq 1 40); do
+    curl -sf "http://127.0.0.1:$_port/" >/dev/null 2>&1 && break
+    sleep 0.1
+    [ "$_i" = 40 ] && { echo "✗ the static server never answered on $_port" >&2; exit 1; }
+  done
+  shopt -s nullglob
+  for _s in "${SMOKE_GLOBS[@]}"; do
+    _dir=$(dirname "$_s")
+    echo "  · $_s"
+    node "$_s" "http://127.0.0.1:$_port/$_dir/"
+  done
+  shopt -u nullglob
+  kill "$_srv" 2>/dev/null || true
+  trap - EXIT
+else
+  echo "  · browser smokes SKIPPED — set PLAYWRIGHT to a playwright index.js to run them"
+  echo "    (they are the only gates that drive a real DOM; a green run without them is narrower)"
 fi
 
 echo "✅ ALL GREEN"
