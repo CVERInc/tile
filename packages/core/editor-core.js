@@ -1334,7 +1334,7 @@ class TileEditModal extends Modal {
 
 // ───────────────────────────────────────────────────────────────────────────
 // TABLE GRID (the "locked markers" in-grid markdown-table editor). Single source
-// for tugtile/marktile (inlined) AND the web host (tile-core emit). decorateTables(root,
+// for tugtile/marktile (inlined) AND the web host (dist/editor-core.js emit). decorateTables(root,
 // ctrl, gateClass) restyles contiguous |table| line-divs into an aligned grid and
 // makes them editable in place; gateClass selects the host's "grid on" class —
 // both marktile and the web host use 'marktile-grid' (set in Seasoned + Rendered, dropped

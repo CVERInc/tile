@@ -8,8 +8,8 @@
 // jsdom, no Obsidian — same zero-dependency spirit as the rest of the suite.
 const fs = require('fs');
 const path = require('path');
-const tug = fs.readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
-const mt = fs.readFileSync(path.join(__dirname, '..', 'packages', 'marktile', 'marktile.src.js'), 'utf8');
+const tug = fs.readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
+const mt = fs.readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'marktile', 'marktile.src.js'), 'utf8');
 
 // Extract a 2-space-indented class method `name(...) { ... }` and return a callable function.
 function grabMethod(src, name) {

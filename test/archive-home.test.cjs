@@ -3,7 +3,7 @@
 // Pure Node.js, extracting the CORE from plugin.src.js (View methods like addToArchive/restoreArchived are
 // DOM-bound and live outside CORE; this covers the serialisable + display logic they rely on).
 const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = require('fs').readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const core = src.slice(src.indexOf('function tileRenderText'), src.indexOf('/* ===================== /CORE'));
 const m = {};
 new Function('module', core + '\nmodule.exports={parseFile,serializeFile,tileRenderText};')(m);

@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // ---------- Load CORE ----------
-const SRC_PATH = path.resolve(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js');
+const SRC_PATH = path.resolve(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js');
 const src = fs.readFileSync(SRC_PATH, 'utf8');
 
 const START_MARK = 'function tileRenderText';

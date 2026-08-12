@@ -1,4 +1,4 @@
-// web shim：讓未改的 tile-core（Obsidian 風味）在瀏覽器跑。無 fork——核心不動,缺的 API 這裡補。
+// web shim：讓未改的 editor-core（Obsidian 風味）在瀏覽器跑。無 fork——核心不動,缺的 API 這裡補。
 const set = (e,o={})=>{ if(o.cls) e.className=o.cls; if(o.text!=null) e.textContent=o.text;
   for(const k of ['type','value','placeholder','href','title','id']) if(o[k]!=null) e[k]=o[k];
   if(o.attr) for(const k in o.attr) e.setAttribute(k,o.attr[k]); return e; };

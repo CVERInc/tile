@@ -6,9 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "→ syntax check"
-node --check packages/tugtile/plugin.src.js
+node --check hosts/obsidian/tugtile/plugin.src.js
 node --check packages/core/editor-core.js
-node --check packages/marktile/marktile.src.js
+node --check hosts/obsidian/marktile/marktile.src.js
 
 echo "→ i18n JSON valid"
 for f in i18n/*.json; do
@@ -16,10 +16,10 @@ for f in i18n/*.json; do
 done
 
 echo "→ build (inlines core + i18n; needs python3 + bash)"
-bash packages/tugtile/build.sh >/dev/null
-bash packages/marktile/build-marktile.sh >/dev/null
-bash build-tile-core.sh >/dev/null            # web core emit — guard it so a core move can't silently break it
-node --check tile-core/tile-core.js
+bash hosts/obsidian/tugtile/build.sh >/dev/null
+bash hosts/obsidian/marktile/build-marktile.sh >/dev/null
+bash scripts/build-editor-core.sh >/dev/null            # web core emit — guard it so a core move can't silently break it
+node --check dist/editor-core.js
 
 # The three build outputs are committed (so consumers — incl. external web hosts — fetch them without rebuilding).
 # Assert each committed artifact still equals a fresh build: edit a source and forget to rebuild → CI/pre-push fails
@@ -27,7 +27,7 @@ node --check tile-core/tile-core.js
 echo "→ generated artifacts in sync (committed == fresh build)"
 # The two web surfaces' vendored engines are in this list for the reason the list exists. They used
 # to be FETCHED across a repo boundary, and three surfaces once carried two different builds while
-# every one of them was nominally "latest". Same repo now, so their build.sh copies tile-core/ in,
+# every one of them was nominally "latest". Same repo now, so their build.sh copies dist/ in,
 # and this is what stops the copies drifting from it again.
 # 🩸 The BUILT plugins were never syntax-checked, only their sources were. On 2026-08-11 an edit to
 # a comment on the //#core-inline marker line made build-marktile.sh emit a main.js with a bare
@@ -36,23 +36,23 @@ echo "→ generated artifacts in sync (committed == fresh build)"
 # marktile survives only because test/marktile-load.test.cjs requires main.js; NOTHING loads
 # tugtile's, so the same break there would have shipped in silence.
 echo "→ built plugins parse"
-node --check packages/marktile/main.js
-node --check packages/tugtile/main.js
+node --check hosts/obsidian/marktile/main.js
+node --check hosts/obsidian/tugtile/main.js
 
-bash tugtile-w/build.sh >/dev/null
-bash modaltile-w/build.sh >/dev/null
-bash pagetile-w/build.sh >/dev/null
+bash hosts/web/tugtile/build.sh >/dev/null
+bash hosts/web/modaltile/build.sh >/dev/null
+bash hosts/web/pagetile/build.sh >/dev/null
 # 🩸 pagetile-w was NOT in this list, and its build.sh did not copy the engine at all — it still
-# claimed the copy came from the other repo's fetch script. Its vendor/tile-core.js was 33 KB behind
+# claimed the copy came from the other repo's fetch script. Its vendor/editor-core.js was 33 KB behind
 # the canonical one, on a preview that reported nothing wrong. Two of the three surfaces were
 # localised at graduation; this one was missed, and only a list that nobody diffed said otherwise.
 bash scripts/build-board-core.sh >/dev/null
 # 🩸 board-core.js carried a DO-NOT-EDIT banner with no generator in this repo — the slicing lived
 # in the private lab's fetch script and did not graduate with the artifact. It was still identical
 # to a fresh slice, which is luck, not a mechanism.
-ARTIFACTS=(packages/tugtile/main.js packages/marktile/main.js tile-core/tile-core.js
-           tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js pagetile-w/vendor/tile-core.js
-           tugtile-w/board-core.js)
+ARTIFACTS=(hosts/obsidian/tugtile/main.js hosts/obsidian/marktile/main.js dist/editor-core.js
+           hosts/web/tugtile/vendor/editor-core.js hosts/web/modaltile/vendor/editor-core.js hosts/web/pagetile/vendor/editor-core.js
+           packages/tugtile/board-core.js)
 
 # 🩸 `git diff --exit-code -- <path that does not exist>` exits 0, silently. This list is typed by
 # hand, so a typo, a deletion, or a file that MOVED turns the gate green instead of red — and the
@@ -79,11 +79,11 @@ done
 # that passes. Here the glob IS the list, so a new file cannot be orphaned by forgetting to add it.
 #
 # 🩸 …within a directory. The DIRECTORIES are still hand-kept, and that is the same defect one level
-# up: drop a `foo.test.mjs` into pagetile-w/ or packages/core/ and it is silently never run. The
+# up: drop a `foo.test.mjs` into hosts/web/pagetile/ or packages/core/ and it is silently never run. The
 # guard below closes it by asking the TREE instead of the list — which matters most right now,
 # because the next thing that happens to this repo is that several of these directories move.
 SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs
-             flowtile-w/*.test.mjs test/*.test.mjs)
+             packages/flowtile/*.test.mjs test/*.test.mjs)
 
 echo "→ every test file in the tree is actually run"
 shopt -s nullglob

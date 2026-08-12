@@ -1,7 +1,7 @@
 // Guard against the 7 bugs identified during the Phase A adversarial review (out/review-phaseA.md): C1 C2 H1 M1 M2 M3 L1.
 // Pure Node.js, extracting the CORE from plugin.src.js.
 const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = require('fs').readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const core = src.slice(src.indexOf('function tileRenderText'), src.indexOf('/* ===================== /CORE'));
 const m = {};
 new Function('module', core + '\nmodule.exports={parseFile,serializeFile};')(m);

@@ -13,12 +13,12 @@ ENGINE="Sources/MarktileApp/Resources/Engine"
 # tile-core.js is itself emitted from packages/core/editor-core.js. Regenerate it rather than
 # trusting whatever is checked in, so a stale emit can't ship inside the app.
 echo "▸ regenerating tile-core.js from packages/core/editor-core.js"
-bash "$ROOT/build-tile-core.sh"
+bash "$ROOT/scripts/build-editor-core.sh"
 
 mkdir -p "$ENGINE"
 for f in \
-  "tile-core/tile-core.js" \
-  "tile-core/host.js" \
+  "dist/editor-core.js" \
+  "packages/core/web-host.js" \
   "packages/core/obsidian-shim.js" \
   "Sortable.min.js" \
   "styles.css"

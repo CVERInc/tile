@@ -66,14 +66,14 @@ are injected at build time.
 ## Use the engine
 
 The engine is framework-agnostic — drop it into any page with a small host shim. A
-runnable demo lives at [`tile-core/example.html`](tile-core/example.html); the shape:
+runnable demo lives at [`hosts/web/example/index.html`](hosts/web/example/index.html); the shape:
 
 ```html
 <div id="app"></div>
 <script type="module">
   import '../packages/core/obsidian-shim.js';  // browser equivalents of the DOM-sugar the engine calls
   import { mountEditor } from './tile-core.js'; // the engine
-  import { makeWebHost } from './host.js';      // a tiny host — see tile-core/host.js
+  import { makeWebHost } from './host.js';      // a tiny host — see packages/core/web-host.js
 
   mountEditor(document.getElementById('app'), {
     text: '## Hello\n\n- edit me',
@@ -102,7 +102,7 @@ This monorepo is the **source**. The two Obsidian plugins ship as thin publish m
 publish mirrors can never drift into their own development line.
 
 The **editor engine** needs no separate repo: it lives here as
-`packages/core/editor-core.js` (source), emitted to `tile-core/tile-core.js` (a
+`packages/core/editor-core.js` (source), emitted to `dist/editor-core.js` (a
 platform-agnostic ES module). Drop it into any page with the small host shim — see
 **Use the engine** below.
 
@@ -127,7 +127,7 @@ fresh build, and runs the full Node test suite. The same script backs the `hooks
 git hook and CI (`.github/workflows/ci.yml`), so local and CI can never disagree.
 
 Edit the `*.src.js` and `packages/core/editor-core.js` sources — **never** the generated
-`main.js` / `tile-core/tile-core.js`; those are overwritten on the next build and the
+`main.js` / `dist/editor-core.js`; those are overwritten on the next build and the
 freshness check fails if a committed artifact is stale.
 
 To activate the pre-push hook once: `git config core.hooksPath hooks`.

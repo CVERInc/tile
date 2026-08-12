@@ -16,7 +16,7 @@ const obsidian = {
   Component: class { load() {} unload() {} },
   setIcon, Platform: { isMobile: false }, Modal: class {},
 };
-const src = fs.readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'main.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'main.js'), 'utf8');
 const m = { exports: {} };
 const req = (n) => (n === 'obsidian' ? obsidian : require(n));
 new Function('module', 'exports', 'require', src + '\ntry{module.exports.__BoardView=BoardView;}catch(e){}')(m, m.exports, req);
