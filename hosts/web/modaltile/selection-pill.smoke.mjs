@@ -59,38 +59,47 @@ async function run({ label, touch }) {
     return { present: true, shown: cs.display !== 'none' && r.width > 0 && r.height > 0 };
   });
 
-  // 🩸 SELECT VIA THE RANGE API, NOT THE KEYBOARD. The first version pressed Home / Shift+End /
-  // End, and neither arm did what the label said: on touch the selection never collapsed, on mouse
-  // it never became ranged. The touch arm then reported "the pill outlived its selection" — a
-  // finding about my keystrokes, not about the pill. And the mouse arm PASSED for the wrong reason:
-  // no pill, because there was no selection to show one for. A control that holds because nothing
-  // happened is not a control.
+  // 🩸 SELECT BY DRAGGING, NOT BY BUILDING A RANGE. Two earlier versions of this file each measured
+  // something other than the pill. Pressing Home/Shift+End did not produce the state the label
+  // claimed. Then a programmatic Range DID put the document into a ranged selection — asserted — and
+  // still no pill appeared on touch, which I recorded as "not yet attributable, needs a real finger".
   //
-  // So the selection is made explicitly and ASSERTED at both ends (selA/selB below). The pill
-  // listens to `selectionchange`, which a programmatic range fires exactly as a gesture does.
-  const setSel = (ranged) => p.evaluate((wantRanged) => {
-    const ed = document.querySelector('.ej-mount [contenteditable="true"]');
-    // 🔴 A TEXT node, found by walking. `[...ed.childNodes].find(…)` picked an ELEMENT the first
-    // time, and Range treats an offset on an element as a CHILD INDEX — so setEnd(node, 3) threw
-    // IndexSizeError instead of selecting three characters. Offsets only mean characters in text.
-    const w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
-    let node = null;
-    while (w.nextNode()) { if (w.currentNode.textContent.trim()) { node = w.currentNode; break; } }
-    if (!node) throw new Error('the editor holds no text node to select');
-    const r = document.createRange();
-    const len = node.textContent.length;
-    if (wantRanged) r.setStart(node, 0), r.setEnd(node, Math.max(1, len));
-    else r.setStart(node, Math.max(0, len)), r.collapse(true);
-    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    document.dispatchEvent(new Event('selectionchange'));
-  }, ranged);
+  // 🔴 It never needed a finger. updateSelPill() looks at exactly two things: coarsePointer(), and
+  // the EDITOR'S OWN readSel(). It has no way to know what moved the caret. A synthetic Range fires
+  // selectionchange but does not give readSel() a non-collapsed pair, so the pill hid — correctly.
+  // The probe was the finding. A drag with the mouse under mobile emulation gives a coarse pointer
+  // AND a real browser selection, which is everything the pill can observe, and it appears.
+  const dragSelect = async () => {
+    const t = await p.evaluate((sel) => {
+      const root = document.querySelector(sel);
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (w.nextNode()) {
+        const n = w.currentNode;
+        if (n.textContent.trim().length < 6) continue;
+        const r = document.createRange(); r.selectNodeContents(n);
+        const b = r.getBoundingClientRect();
+        if (b.width > 40 && b.height > 0) return { x: b.x, y: b.y + b.height / 2, w: b.width };
+      }
+      return null;
+    }, ed);
+    if (!t) throw new Error('no line long enough to drag across — the editor loaded no sample text');
+    await p.mouse.move(t.x + 2, t.y);
+    await p.mouse.down();
+    for (let i = 1; i <= 8; i++) { await p.mouse.move(t.x + 2 + (t.w - 4) * i / 8, t.y); await p.waitForTimeout(20); }
+    await p.mouse.up();
+  };
+  // Collapse the way a person does: one tap inside the text. 🔴 Not a click at some fixed screen
+  // point — the first version used (20, 20), which lands outside the editor, left the selection
+  // exactly where it was, and the SETUP assertion below caught it. A collapse that does not collapse
+  // would have turned the next check into a claim about my click.
+  const collapse = () => p.click(ed, { position: { x: 8, y: 8 } });
 
-  await setSel(true);
-  await p.waitForTimeout(250);
+  await dragSelect();
+  await p.waitForTimeout(300);
   const onSelect = await pillShown(); const selA = await selState();
 
-  await setSel(false);
-  await p.waitForTimeout(250);
+  await collapse();
+  await p.waitForTimeout(300);
   const onCollapse = await pillShown(); const selB = await selState();
 
   await ctx.close();
@@ -120,20 +129,12 @@ for (const r of results) {
   if (r.selB !== 'collapsed') { console.log(`   🔴 SETUP: the "after collapsing" step is ${r.selB} — the selection never went away, so "the pill outlived it" would be about this probe`); bad++; continue; }
 
   if (r.touch) {
-    // ⚠️ REPORTED, NOT GATED — and the distinction is deliberate.
-    //
-    // A programmatic Range does put the document into a ranged selection (asserted above), but this
-    // arm has not yet been shown to reproduce what a FINGER does: the editor is pre-loaded with
-    // sample markdown, a typed string did not land where expected, and the range lands on whichever
-    // text node comes first rather than on a word a person would drag over. So "no pill" here is
-    // not yet attributable — it could be the pill, or it could be that this is not the gesture.
-    //
-    // 🔴 Failing on it would add a red that nobody can act on, which is the exact shape this file
-    // was written to remove. It gates what it can prove (the setup, and the mouse control) and
-    // reports what it cannot, until the touch gesture is reproduced properly.
-    if (!r.onSelect.shown) console.log('   ⚠️ a selection showed no pill — NOT gated yet: see the note above');
-    if (r.onCollapse.shown) console.log('   ⚠️ the pill outlived its selection — NOT gated yet');
-    if (r.onSelect.shown && !r.onCollapse.shown) console.log('   ✓ pill followed the selection and left with it');
+    // 🔴 GATED since 2026-08-12. This arm used to only REPORT, because a synthetic Range produced no
+    // pill and I could not tell the pill from the probe. A real drag settles it: the pill appears.
+    // Both halves are assertions now — it must show up, and it must leave when the selection does.
+    if (!r.onSelect.shown) { console.log('   🔴 a selection on a coarse pointer showed NO pill'); bad++; }
+    else if (r.onCollapse.shown) { console.log('   🔴 the pill outlived its selection'); bad++; }
+    else console.log('   ✓ pill followed the selection and left with it');
   } else if (r.onSelect.shown) {
     console.log('   🔴 CONTROL: the pill appeared on a MOUSE — the coarse-pointer gate is not holding,');
     console.log('      and a phone-only test would never have noticed');
@@ -141,5 +142,5 @@ for (const r of results) {
   }
 }
 
-console.log(bad ? `\n❌ ${bad} problem(s)` : '\n✅ the setup is what it claims, and the pill stays away from a mouse (touch arm reported, not gated)');
+console.log(bad ? `\n❌ ${bad} problem(s)` : '\n✅ the pill follows a real selection on a coarse pointer, leaves with it, and never appears on a mouse');
 process.exit(bad ? 1 : 0);
