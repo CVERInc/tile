@@ -111,7 +111,7 @@
     },
     "packages/sitetile/og/build-og.mjs": {
       "namedBy": [
-        "CVERInc/reef  apps/reef-mcp/runner/entrypoint.sh:392,473 — invoked as node /opt/tile/…"
+        "CVERInc/reef  apps/reef-mcp/runner/entrypoint.sh:392 — invoked as node /opt/tile/…"
       ],
       "breaks": "every published site loses its OG cards, and the runner keeps reporting success"
     }
