@@ -50,9 +50,21 @@ bash scripts/build-board-core.sh >/dev/null
 # 🩸 board-core.js carried a DO-NOT-EDIT banner with no generator in this repo — the slicing lived
 # in the private lab's fetch script and did not graduate with the artifact. It was still identical
 # to a fresh slice, which is luck, not a mechanism.
-git diff --exit-code -- packages/tugtile/main.js packages/marktile/main.js tile-core/tile-core.js \
-  tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js pagetile-w/vendor/tile-core.js \
-  tugtile-w/board-core.js \
+ARTIFACTS=(packages/tugtile/main.js packages/marktile/main.js tile-core/tile-core.js
+           tugtile-w/vendor/tile-core.js modaltile-w/vendor/tile-core.js pagetile-w/vendor/tile-core.js
+           tugtile-w/board-core.js)
+
+# 🩸 `git diff --exit-code -- <path that does not exist>` exits 0, silently. This list is typed by
+# hand, so a typo, a deletion, or a file that MOVED turns the gate green instead of red — and the
+# next thing that happens to this repo is that several of these move. Measured 2026-08-12:
+#   git diff --exit-code -- this/does/not/exist.js  →  0
+# So assert the subjects exist before asking whether they differ. A gate must fail closed on a
+# question it cannot ask.
+for a in "${ARTIFACTS[@]}"; do
+  [ -f "$a" ] || { echo "✗ the freshness gate names \`$a\`, which does not exist — it moved, or the"; \
+                   echo "  path is a typo. Either way this gate has been passing without checking it."; exit 1; }
+done
+git diff --exit-code -- "${ARTIFACTS[@]}" \
   || { echo "✗ a committed build artifact is stale — run the builds and commit the result"; exit 1; }
 
 echo "→ tests"
