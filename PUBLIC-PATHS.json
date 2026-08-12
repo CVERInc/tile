@@ -27,14 +27,14 @@
     "attached, and the test rejects it."
   ],
   "paths": {
-    "tile-core/tile-core.js": {
+    "dist/editor-core.js": {
       "namedBy": [
         "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:139 — gh/curl contents API @ main, run at DYNO BOOT",
         "CVERInc/ejecta  core/editor/fetch-tile-core.sh:26 — same fetch, into the web editor's vendor/"
       ],
       "breaks": "🔴 NOT a red build — SILENT DEGRADATION IN PRODUCTION. Corrected 2026-08-12; the first version of this entry said 'mixfairy's Heroku build fails, so loudly', which described a build step that does not exist (there is no bin/post_compile). Measured: bootstrap.py:_boot_prep runs the fetch in a BACKGROUND asyncio task at dyno boot and catches every exception on purpose ('must never take the bot down'), logging 'editor UI assets will 404 until fixed (bot unaffected)'. So the bot stays up, the editor serves nothing, and only a log line says why. Worse: dl() is `gh api … | base64 --decode > $3`, and the redirect truncates the destination BEFORE the fetch fails — on any host with an existing static/, a 404 leaves a ZERO-BYTE file, which assets.py serves as 200 text/javascript. An empty module is not an error anyone sees."
     },
-    "packages/marktile/styles.css": {
+    "hosts/obsidian/marktile/styles.css": {
       "namedBy": [
         "CVERInc/reef  apps/mixfairy/modules/editor_backend/fetch-editor-assets.sh:140 — lands as vendor/tile-core.css",
         "CVERInc/ejecta  core/editor/fetch-tile-core.sh:30 — same"
@@ -50,7 +50,7 @@
     },
     "packages/core/editor-core.js": {
       "namedBy": [
-        "CVERInc/reef  apps/feelreef/src/lib/tile-core/tile-core.js:3 — generated-from banner",
+        "CVERInc/reef  apps/feelreef/src/lib/dist/editor-core.js:3 — generated-from banner",
         "CVERInc/reef  apps/rsp/src/routes/admin-editor-assets.generated.ts:432 — same banner, inlined"
       ],
       "breaks": "nothing at build time — the banner is prose. It is here because the banner is the only record of where those generated files come from, and a rename makes it point at nothing"
@@ -77,9 +77,9 @@
       ],
       "breaks": "cardtile loses its param parser; reef-mcp cannot re-vendor the site model. Note vendor-tile.sh reads this file's TEXT, so its internals are load-bearing too, not just its path"
     },
-    "packages/tugtile/plugin.src.js": {
+    "hosts/obsidian/tugtile/plugin.src.js": {
       "namedBy": [
-        "CVERInc/tile-lab  scripts/fetch-tile.sh — slices the CORE section out into tugtile-w/board-core.js"
+        "CVERInc/tile-lab  scripts/fetch-tile.sh — slices the CORE section out into packages/tugtile/board-core.js"
       ],
       "breaks": "cardtile loses board-core. The slice is by text markers inside this file, so editing those markers breaks it without moving anything"
     },

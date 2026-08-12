@@ -1,4 +1,4 @@
-// Loads the built packages/marktile/main.js with a stubbed 'obsidian' so all top-level definitions
+// Loads the built hosts/obsidian/marktile/main.js with a stubbed 'obsidian' so all top-level definitions
 // (i18n, EDITOR_TOOLS, escHtml/highlighters/listContinuation, mountEditor, TileEditModal,
 // MarktileView, the plugin class) evaluate — catching missing/undefined symbols from the core
 // extraction — then runs onload() so the view registration + button wiring is exercised too.
@@ -27,7 +27,7 @@ Module._load = function (req, parent, isMain) {
 global.window = { localStorage: { getItem: () => '' } };
 
 (async () => {
-  const P = require('../packages/marktile/main.js');
+  const P = require('../hosts/obsidian/marktile/main.js');
   if (typeof P !== 'function') throw new Error('marktile main.js did not export a plugin class');
   const inst = new P();
   if (typeof inst.onload !== 'function') throw new Error('plugin has no onload');

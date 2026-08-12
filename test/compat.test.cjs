@@ -3,7 +3,7 @@
 // blockId / @{} / #tags / 4-space indentation / [x] / CJK are all safely preserved.
 // Pure Node.js, extracting the CORE from plugin.src.js.
 const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = require('fs').readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const core = src.slice(src.indexOf('function tileRenderText'), src.indexOf('/* ===================== /CORE'));
 const m = {};
 new Function('module', core + '\nmodule.exports={parseFile,serializeFile,setListCollapse,parseWip,extractMeta,extractTags,setSetting,formatDateTokens,parseDateStr};')(m);

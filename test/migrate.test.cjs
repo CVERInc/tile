@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const src = fs.readFileSync(path.resolve(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = fs.readFileSync(path.resolve(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const startIdx = src.indexOf('function tileRenderText');
 const endIdx = src.indexOf('/* ===================== /CORE');
 assert.ok(startIdx !== -1 && endIdx > startIdx, 'CORE block not found');

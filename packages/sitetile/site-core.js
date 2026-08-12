@@ -7,7 +7,7 @@
 // feelreef seam (see renderSiteToHtml TODO) — this file owns only the pure model + a zero-dep
 // reference HTML renderer.
 //
-// Same family trick as pagetile-w/book-core.js + tugtile board-core: ONE pure model, parsed and
+// Same family trick as packages/pagetile/book-core.js + tugtile board-core: ONE pure model, parsed and
 // serialized here, exact round-trip (the family's "your data stays Markdown, not a database" rule),
 // unit-testable in plain Node. Structure is encoded with NATIVE Markdown (headings) — the family
 // never invents block syntax when CommonMark expresses it. The ONE thing Markdown can't express —

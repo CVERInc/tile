@@ -1,11 +1,11 @@
 #!/bin/bash
-# Emit tugtile-w/board-core.js — the BOARD model, sliced out of packages/tugtile/plugin.src.js.
+# Emit packages/tugtile/board-core.js — the BOARD model, sliced out of hosts/obsidian/tugtile/plugin.src.js.
 #
 # 🩸 WHY THIS FILE EXISTS. board-core.js was already generated, already carried a
 # "AUTO-GENERATED … DO NOT EDIT" banner, and had NO GENERATOR IN THIS REPO. The slicing logic lived
 # in the private lab's scripts/fetch-tile.sh, which fetched plugin.src.js from GitHub and cut the
 # CORE section out of it. When tugtile-w graduated, the artifact came along and the generator did
-# not — so tugtile-w/build.sh still says "board-core.js is vendored via scripts/fetch-tile.sh",
+# not — so hosts/web/tugtile/build.sh still says "board-core.js is vendored via scripts/fetch-tile.sh",
 # naming a script that does not exist here and never will.
 #
 # It was still byte-identical to a fresh slice on 2026-08-11 (17,850 = 17,850), which is the only
@@ -17,8 +17,8 @@
 # re-cutting it, and there stops being a second implementation of the cut.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/packages/tugtile/plugin.src.js"
-OUT="$ROOT/tugtile-w/board-core.js"
+SRC="$ROOT/hosts/obsidian/tugtile/plugin.src.js"
+OUT="$ROOT/packages/tugtile/board-core.js"
 
 node -e '
 const fs = require("fs");
@@ -45,7 +45,7 @@ for (const name of EXPORTS.split(",").map((s) => s.trim())) {
 }
 
 fs.writeFileSync(out,
-  "// AUTO-GENERATED from CVERInc/tile packages/tugtile/plugin.src.js CORE — board model, platform-free. DO NOT EDIT.\n"
+  "// AUTO-GENERATED from CVERInc/tile hosts/obsidian/tugtile/plugin.src.js CORE — board model, platform-free. DO NOT EDIT.\n"
   + "const t=(k)=>k;\n" + core + "\nexport { " + EXPORTS + " };\n");
 console.log(`emitted ${out.replace(process.env.HOME, "~")} (${core.length} chars of CORE)`);
 ' "$SRC" "$OUT"

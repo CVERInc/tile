@@ -1,6 +1,6 @@
 // kitchen-sink: a board with all possible kanban structures, verifying that tugtile round-trips without data loss and the board remains readable by kanban.
 const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = require('fs').readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const core = src.slice(src.indexOf('function tileRenderText'), src.indexOf('/* ===================== /CORE'));
 const m = {};
 new Function('module', core + '\nmodule.exports={parseFile,serializeFile,extractMeta,extractTags};')(m);

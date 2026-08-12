@@ -11,7 +11,7 @@
 // with `new Function` so the pure helpers run Obsidian-free. We slice from `function homeKey` (rather
 // than `function tileRenderText`) so homeKey is included alongside displayWidth/parseFile/serializeFile.
 const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '..', 'packages', 'tugtile', 'plugin.src.js'), 'utf8');
+const src = require('fs').readFileSync(path.join(__dirname, '..', 'hosts', 'obsidian', 'tugtile', 'plugin.src.js'), 'utf8');
 const core = src.slice(src.indexOf('function homeKey'), src.indexOf('/* ===================== /CORE'));
 const m = {};
 new Function('module', core + '\nmodule.exports={homeKey,displayWidth,parseFile,serializeFile,tileRenderText};')(m);

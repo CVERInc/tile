@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'pagetile-w', 'book-core.js'), 'utf8')
+const src = fs.readFileSync(path.join(__dirname, '..', 'packages', 'pagetile', 'book-core.js'), 'utf8')
   .replace(/export\s*\{[\s\S]*?\};?\s*$/, '');   // drop the ESM export footer; functions become module-local
 const sandbox = {};
 new Function('module', 'exports', src + '\nObject.assign(module.exports, { parseBook, serializeBook, isBookFile, flattenPages, pageById, allImageSrcs });')(

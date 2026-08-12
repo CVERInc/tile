@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import { slugify as siteSlug, splitFrontmatter, parseSite, serializeSite, FRONTMATTER_KEY as SITE_KEY }
   from '../packages/sitetile/site-core.js';
 import { slugify as bookSlug, parseBook, serializeBook, FRONTMATTER_KEY as BOOK_KEY }
-  from '../pagetile-w/book-core.js';
+  from '../packages/pagetile/book-core.js';
 
 // Specimens, not examples. Each line is here because it lands on a boundary some plausible
 // implementation gets wrong — and the CJK ones are public-domain primers chosen for coverage:
@@ -78,7 +78,7 @@ test('🔴 the two slugify implementations agree — a slug is a URL, and there 
   // CONTROL: they must actually be two functions. If a refactor ever made one re-export the other,
   // every assertion below would pass while proving nothing at all.
   assert.notEqual(siteSlug, bookSlug,
-    'site-core and pagetile-w now export the SAME slugify — delete this test, or it is measuring a '
+    'site-core and book-core now export the SAME slugify — delete this test, or it is measuring a '
     + 'function against itself');
 
   const disagree = [];

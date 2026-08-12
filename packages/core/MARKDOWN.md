@@ -88,7 +88,7 @@ worse than one that renders plainly.
 Every structural regex in `editor-core.js` now uses `[ \t]`: bullets, ordered markers, headings,
 thematic breaks, reference definitions, tasks, fences, frontmatter, setext underlines, table lines,
 and the editing paths (list continuation, renumbering, the heading and checkbox toggles). Two more in
-`packages/tugtile/plugin.src.js`. The board parser needed nothing — it matches a literal `'- ['`.
+`hosts/obsidian/tugtile/plugin.src.js`. The board parser needed nothing — it matches a literal `'- ['`.
 
 Two things are deliberately NOT `[ \t]`: `>` keeps taking any following character as content,
 because the `>` **is** the marker and the space after it is optional (the reference agrees:

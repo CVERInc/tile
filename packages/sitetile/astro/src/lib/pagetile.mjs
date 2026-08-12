@@ -1,9 +1,9 @@
 // REEF with Pagetile — sitetile-side render helpers for a paged comic/book.
 // Reuses the family's book-core.js model VERBATIM (parse/serialize/flatten — the same
-// engine pagetile-w's authoring editor uses). This file adds ONLY the read-only reader
+// engine the pagetile web host's authoring editor uses). This file adds ONLY the read-only reader
 // projection (prev/next, chapter table of contents, image URL resolution) — it does NOT
 // reimplement parsing, per the family rule (one model, every surface consumes it).
-import { parseBook, flattenPages } from '../../../../../pagetile-w/book-core.js';
+import { parseBook, flattenPages } from '../../../../../packages/pagetile/book-core.js';
 
 // A pagetile image src is repo-relative (`pagetile/ch1/p01.jpg`, matching the family's
 // `![[name]]` convention). The reader serves it from /pagetile/... in public/ (staged there

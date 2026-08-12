@@ -1,5 +1,5 @@
 // The Mac host's half of the seam — the counterpart of MarktileView in the Obsidian plugin and of
-// makeWebHost() in tile-core/example.html. It mounts the SAME engine; it does not reimplement any
+// makeWebHost() in hosts/web/example/index.html. It mounts the SAME engine; it does not reimplement any
 // part of it.
 //
 // Rule inherited from the family (three-layer architecture): the core toolbar is the single source

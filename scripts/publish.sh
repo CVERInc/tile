@@ -18,8 +18,8 @@ mkdir -p "$dest"
 
 # 1. fresh build from the monorepo
 case "$plugin" in
-  tugtile)  bash "$ROOT/packages/tugtile/build.sh" >/dev/null; styles="$ROOT/styles.css" ;;
-  marktile) bash "$ROOT/packages/marktile/build-marktile.sh" >/dev/null; styles="$ROOT/packages/marktile/styles.css" ;;
+  tugtile)  bash "$ROOT/hosts/obsidian/tugtile/build.sh" >/dev/null; styles="$ROOT/styles.css" ;;
+  marktile) bash "$ROOT/hosts/obsidian/marktile/build-marktile.sh" >/dev/null; styles="$ROOT/hosts/obsidian/marktile/styles.css" ;;
   *) echo "unknown plugin: $plugin" >&2; exit 1 ;;
 esac
 
