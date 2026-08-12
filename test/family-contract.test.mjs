@@ -49,8 +49,15 @@ const SLUG_CASES = [
   ['tabs\there', 'tab is whitespace'],
   ['new\nline', 'so is a newline — a heading can wrap in the source'],
   ['ALLCAPS', 'case folding'],
-  ['İstanbul', '🔴 Turkish dotted capital I. Naive toLowerCase is locale-dependent here, so two '
-    + 'implementations can disagree on a machine and agree on another'],
+  ['İstanbul', '🔴 Turkish dotted capital I, U+0130. Its DEFAULT lowercase is two code points — '
+    + '"i" + U+0307 COMBINING DOT ABOVE — and U+0307 is a Mark, so it is neither \\p{L} nor \\p{N}. '
+    + 'Which means a slugifier that lowercases then replaces non-alphanumerics splits a Turkish '
+    + 'word at its FIRST letter: İstanbul -> i-stanbul. One implementation that normalises or '
+    + 'strips marks and one that does not will hand back "istanbul" and "i-stanbul", and both look '
+    + 'entirely reasonable. (An earlier version of this note said toLowerCase is locale-dependent '
+    + 'here. It is not — it is locale-independent by spec, measured identical under LANG=C, en_US '
+    + 'and tr_TR. Only toLocaleLowerCase varies, and 🔴 nobody may switch to it: under "tr", plain '
+    + '"I".toLocaleLowerCase() is "ı", so every existing anchor on the site would break at once.)'],
   ['ß sharp', 'ß has no single-character uppercase; some folds expand it to ss'],
   ['Ω mega', 'Greek, to prove folding is not ASCII-only'],
   ['Ünïcödé Ácçents', 'combining marks — kept, or stripped to ASCII? both are defensible, so both '
