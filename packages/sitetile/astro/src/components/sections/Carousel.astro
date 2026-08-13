@@ -5,7 +5,8 @@
 // reference renderSection 'carousel' case so the editor live-preview matches the Astro build.
 // The hoisted <script> below is emitted ONCE by Astro (deduped) and wires every `.st-carousel`.
 import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag } from '@sitetile';
-const { section } = Astro.props;
+import { postUrl } from '../../lib/blog.mjs';
+const { section, blogPosts = [], meta = {} } = Astro.props;
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
 // already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
@@ -13,7 +14,19 @@ const pm = parseParams(section.params);
 // one customer site alone. Every coral here renders a heading, which is the thing an
 // eyebrow sits above — the inconsistency was arbitrary. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
-const cells = section.cells || [];
+// `posts=N` — OPT-IN: auto-source cells from the site's N newest blog posts (a home "recent
+// posts / NEWS" strip) instead of hand-listed ### cells. Needs `packages: blog` — PageView passes
+// the already-loaded, newest-first `blogPosts` down; absent (no blog / param off) → hand-listed
+// cells render byte-identically. Each post → an image-first cell: featured image + date (YY/M/D) +
+// title, linking to the post's real URL (postUrl expands the site's blog-url-pattern).
+const postCount = pm.posts ? parseInt(pm.posts, 10) : 0;
+const newsDate = (s) => {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s || ''));
+  return m ? `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}` : '';
+};
+const cells = (postCount > 0 && blogPosts.length)
+  ? blogPosts.slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: newsDate(p.date), body: p.img ? `![](${p.img})` : '' }))
+  : (section.cells || []);
 // `more="LABEL=/href"` — OPT-IN "view all" link rendered top-right of the heading row (a section
 // that also links to a full listing). General — any carousel fronting a longer collection.
 const moreRaw = pm.more ? (typeof pm.more === 'object' ? pm.more.label : pm.more) : null;
@@ -62,6 +75,7 @@ function arrowSvg(left = false) {
           <Fragment>
             {badge}
             <Fragment set:html={fig} />
+            {c.date && <p class="st-car-date">{c.date}</p>}
             <h3 set:html={inlineHtml(c.title)} />
             {isBlogFull && <div class="st-car-byline" aria-hidden="true"></div>}
             <Fragment set:html={bodyHtml(fi.rest)} />

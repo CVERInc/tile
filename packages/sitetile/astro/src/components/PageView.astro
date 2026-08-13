@@ -33,5 +33,5 @@ const headMeta = site.meta.description
   : { ...site.meta, description: deriveDescription(site.sections) };
 ---
 <SiteLayout title={pageTitle} lang={site.meta.lang || DEFAULT_LANG} meta={headMeta} blogPosts={blogPosts}>
-  {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} />)}
+  {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
 </SiteLayout>
