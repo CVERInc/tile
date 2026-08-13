@@ -27,3 +27,8 @@ node_modules/
 packages/sitetile/astro/dist-smoke/
 packages/sitetile/astro/dist/
 packages/sitetile/astro/.astro/
+# 🔴 THE WALL. `lab/` is the incubator's never-graduates folder — creators' cards, our deployment
+# config, the forbidden-terms list. It lives in CVERInc/tile-lab, which has this repo as a
+# submodule at engine/. Ignoring it here means a careless copy in the wrong direction cannot commit
+# somebody's card into the public repo. Naming alone was a habit; this is a wall. (2026-08-13)
+lab/
