@@ -290,5 +290,15 @@
   "searchAllNone": "找不到。試試只用一個詞，或換一個猜法。",
   "searchAllStat": "{0} 個檔案・顯示 {1} 個",
   "searchAllOffline": "雲端上還有 {0} 個尚未下載",
-  "searchAllCapped": "由新到舊讀了 {1} 個中的 {0} 個"
+  "searchAllCapped": "由新到舊讀了 {1} 個中的 {0} 個",
+  "TBL_INS_COL_L": "在左方插入欄",
+  "TBL_INS_COL_R": "在右方插入欄",
+  "TBL_INS_ROW_A": "在上方插入列",
+  "TBL_INS_ROW_B": "在下方插入列",
+  "TBL_MOV_COL_L": "將此欄左移",
+  "TBL_MOV_COL_R": "將此欄右移",
+  "TBL_MOV_ROW_U": "將此列上移",
+  "TBL_MOV_ROW_D": "將此列下移",
+  "TBL_SORT_ASC": "依此欄排序（遞增）",
+  "TBL_SORT_DESC": "依此欄排序（遞減）"
 }

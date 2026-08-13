@@ -290,5 +290,15 @@
   "searchAllNone": "見つかりません。一語だけにするか、別の言葉で試してください。",
   "searchAllStat": "{0} 件のファイル・{1} 件を表示",
   "searchAllOffline": "クラウドに未ダウンロードのファイルがあと {0} 件",
-  "searchAllCapped": "新しい順に {1} 件中 {0} 件を読み込み"
+  "searchAllCapped": "新しい順に {1} 件中 {0} 件を読み込み",
+  "TBL_INS_COL_L": "左に列を挿入",
+  "TBL_INS_COL_R": "右に列を挿入",
+  "TBL_INS_ROW_A": "上に行を挿入",
+  "TBL_INS_ROW_B": "下に行を挿入",
+  "TBL_MOV_COL_L": "列を左へ移動",
+  "TBL_MOV_COL_R": "列を右へ移動",
+  "TBL_MOV_ROW_U": "行を上へ移動",
+  "TBL_MOV_ROW_D": "行を下へ移動",
+  "TBL_SORT_ASC": "昇順で並べ替え",
+  "TBL_SORT_DESC": "降順で並べ替え"
 }

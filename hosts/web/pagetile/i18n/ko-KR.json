@@ -290,5 +290,15 @@
   "searchAllNone": "없습니다. 한 단어만 쓰거나 다른 단어로 시도해 보세요.",
   "searchAllStat": "파일 {0}개 · {1}개 표시",
   "searchAllOffline": "클라우드에 내려받지 않은 파일 {0}개 더",
-  "searchAllCapped": "최신순으로 {1}개 중 {0}개를 읽음"
+  "searchAllCapped": "최신순으로 {1}개 중 {0}개를 읽음",
+  "TBL_INS_COL_L": "왼쪽에 열 삽입",
+  "TBL_INS_COL_R": "오른쪽에 열 삽입",
+  "TBL_INS_ROW_A": "위에 행 삽입",
+  "TBL_INS_ROW_B": "아래에 행 삽입",
+  "TBL_MOV_COL_L": "열 왼쪽으로 이동",
+  "TBL_MOV_COL_R": "열 오른쪽으로 이동",
+  "TBL_MOV_ROW_U": "행 위로 이동",
+  "TBL_MOV_ROW_D": "행 아래로 이동",
+  "TBL_SORT_ASC": "오름차순 정렬",
+  "TBL_SORT_DESC": "내림차순 정렬"
 }
