@@ -24,8 +24,10 @@ const newsDate = (s) => {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s || ''));
   return m ? `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}` : '';
 };
+// Only posts WITH a featured image — this is an image-first carousel, and a card with no
+// thumbnail (a text-only announcement post) reads as broken. `parsePost` exposes it as `image`.
 const cells = (postCount > 0 && blogPosts.length)
-  ? blogPosts.slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: newsDate(p.date), body: p.img ? `![](${p.img})` : '' }))
+  ? blogPosts.filter((p) => p.image).slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: newsDate(p.date), body: `![](${p.image})` }))
   : (section.cells || []);
 // `more="LABEL=/href"` — OPT-IN "view all" link rendered top-right of the heading row (a section
 // that also links to a full listing). General — any carousel fronting a longer collection.
