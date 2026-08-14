@@ -380,7 +380,18 @@ const languageLabel = 'Language';
 // no-second-copy guard in test/. `?raw` keeps the existing shape (inlined only on
 // sites that run lingo, comments stripped) rather than pulling the stylesheet onto
 // every page; the strip still matters because raw text bypasses Vite's minifier.
-const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) : '';
+// The Lingo bar owns its POSITION — it must not depend on the site also enabling
+// `packages: bleedblend`. The banner markup always carries `bleedblend-top bleedblend-push`,
+// but those classes only get their position/z-index CSS when the bleedblend package is loaded.
+// On a lingo-only site the banner falls back to position:static / z-index:auto, so any header
+// that forms a stacking context (a themed header with z-index + transform) paints OVER it and a
+// top-bleed logo/backdrop pokes through the bar (measured: a header at z-index:20 sat above the
+// static bar). Mirror bleedblend's push variant — sticky reserves a row and shoves content down —
+// and its z-index:50, !important so it holds against a site's own chrome. Idempotent when
+// bleedblend IS loaded (same declarations). Opaque bar: the header is cleanly cut at the bar's
+// bottom edge; a translucent/blur bar would still show it through and needs a clip, not a cover.
+const LINGO_BAR_POSITION = '\n.locale-banner.bleedblend-top{position:sticky!important;top:0!important;z-index:50!important}\n';
+const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
 const localeBanner = (hasLingo && locales.length > 1) ? {
   current: lingo.toUrlLocale(lang),
   defaultLocale: lingo.toUrlLocale(defaultLocale),
