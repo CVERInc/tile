@@ -18,6 +18,7 @@ import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { allPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar } from '../lib/blog.mjs';
+import { toUrlLocale } from '../packages/lingo/locale.mjs';
 
 
 export function getStaticPaths() {
@@ -174,6 +175,54 @@ export function getStaticPaths() {
     };
     for (const [y, count] of years) emit(y, y, null, count);
     for (const [ym, count] of months) { const [y, mo] = ym.split('/'); emit(ym, y, mo, count); }
+  }
+
+  // ── per-locale blog (REEF with Blog × Lingo) ────────────────────────────────────────────────
+  // Translated posts live at ir/posts/<url-locale>/<slug>.md, which the runner's `cp -R ir/posts/.
+  // astro/blog/` stages RECURSIVELY into blog/<url-locale>/<slug>.md. For each NON-default locale
+  // that actually has translated posts, emit its index/pager/posts under /<url-locale>, reusing the
+  // exact same builders via a locale-prefixed `meta` (blog-path + blog-url-pattern gain the /<loc>
+  // prefix, so every URL the builders produce is already localized — no builder changes). The
+  // default-locale routes above are untouched: this block only ADDS paths, and a locale with zero
+  // translated posts emits nothing (no empty localized index, no hreflang pointing at a 404).
+  // One STATIC glob (import.meta.glob needs a literal) one level deep, partitioned in JS by subdir.
+  const localeBlogFiles = import.meta.glob('../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const blogLocales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const defaultBlogLocale = blogLocales[0] || '';
+  for (const L of blogLocales) {
+    if (L === defaultBlogLocale) continue;                       // default locale handled above
+    const url = toUrlLocale(L);                                  // zh-TW → zh-tw
+    const sub = {};
+    for (const [path, raw] of Object.entries(localeBlogFiles)) {
+      const m = path.match(/\/blog\/([^/]+)\/([^/]+)\.md$/);
+      if (m && m[1] === url) sub[path] = raw;
+    }
+    if (!Object.keys(sub).length) continue;                      // no translated posts for this locale
+    const postsL = allPosts(sub);
+    const base = blogBase(meta);
+    const pat = (meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim()) || `${base}/%postname%`;
+    const metaL = {
+      ...meta,
+      ...(loadSite(files, `${url}/x`) || {}),                    // content/<loc>/_site.md chrome if any
+      lang: L,                                                   // DATA code → SiteLayout toBcp47 → <html lang>
+      'blog-path': `/${url}${base}`,
+      'blog-url-pattern': `/${url}${pat}`,
+    };
+    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: postsL, meta: metaL, pageNum: 1 } });
+    const psL = Number(metaL['blog-page-size']) || 0;
+    if (psL) {
+      const tpL = Math.ceil(postsL.length / psL) || 1;
+      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: postsL, meta: metaL, pageNum: n } });
+    }
+    postsL.forEach((post, i) => {
+      const newer = postsL[i - 1] || null, older = postsL[i + 1] || null;
+      const others = postsL.filter((p) => p.slug !== post.slug);
+      const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
+      const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
+      const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
+      const sidebar = buildPostSidebar(postsL, metaL, post);
+      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReading, related, sidebar } });
+    });
   }
 
   return paths;
