@@ -62,7 +62,11 @@
   var nav = document.querySelector('.rf-header .rf-nav');
   var hamburger = document.querySelector('.rf-header .rf-nav-hamburger');
   var homeParent = actions.parentNode, homeNext = actions.nextSibling;
-  var mq = window.matchMedia('(min-width: 641px)');
+  // Must match the nav-collapse breakpoint in site.css (`@media (width <= 64rem)` turns .rf-nav
+  // into the hamburger panel and hides it). Pairing this with any other width strands the cart:
+  // at 641–1024px the old value put it INSIDE a display:none nav, so a wired cart was invisible
+  // on every tablet. Keep the two in lockstep — desktop = nav visible = cart may live in the nav.
+  var mq = window.matchMedia('(min-width: 64.0625rem)');
   function place() {
     if (!nav) return;
     if (mq.matches) {
