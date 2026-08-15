@@ -42,7 +42,7 @@ import { renderInlineMd, escHtml } from '../cssmd/cssmd.js';
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
-const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form'];
+const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people'];
 
 // tagcloudLinks: a tagcloud section body (a markdown list of `- [Label](/href)` items) → an
 // ordered [{label, href}]. General — a weighted category/tag cloud is a near-universal WP/Blogger
@@ -295,6 +295,70 @@ function parseSite(text) {
       }
       body = blockOf(lead);
       cells = cells.map((c) => ({ icon: c.icon || '', emoji: c.emoji || '', title: c.title, href: c.href || '', cta: c.cta || '', badge: c.badge || '', badgeHref: c.badgeHref || '', body: blockOf(c.lines) }));
+    } else if (type === 'people') {
+      // `people` — a roster of humans (or the companies they stand for): portrait, name, the roles
+      // they hold, what they do, where to find them. The shape five different pages of one client
+      // site were each hand-rolling out of `gallery` + bespoke CSS: collaborating artists by
+      // discipline, teaching staff by class, recommended graduates by cohort, talents with their
+      // own channels, partner companies as a logo wall. What made it its own coral rather than a
+      // gallery variant: a person carries SEVERAL roles at once (a graduate lists four cohorts),
+      // and their links are a row of named destinations, not one card-wide href.
+      //
+      // Depth is INFERRED, not declared, because most rosters are flat and only some are grouped:
+      // a section containing any `####` reads `###` as a group heading and `####` as a person;
+      // with no `####` anywhere, `###` IS the person. One rule, both shapes read naturally, and
+      // an author never has to know which mode they are in.
+      const hasSub = rest.some((ln) => !RE_FENCE.test(ln) && RE_H4.test(ln));
+      const lead = [];
+      let group = null, person = null, f2 = false;
+      const pushLine = (ln) => (person ? person.lines : (group ? group.lead : lead)).push(ln);
+      const startGroup = (title) => { group = { title, people: [], lead: [] }; groups.push(group); person = null; };
+      const startPerson = (raw) => {
+        if (!group) startGroup('');           // flat mode / people before the first `###`
+        const ch = splitCellHeading(raw);
+        person = { title: ch.title, href: ch.href, badge: ch.badge, badgeHref: ch.badgeHref, lines: [] };
+        group.people.push(person);
+      };
+      for (let j = 0; j < rest.length; j++) {
+        const ln = rest[j];
+        if (RE_FENCE.test(ln)) { f2 = !f2; pushLine(ln); continue; }
+        if (!f2) {
+          const h3 = RE_H3.exec(ln);
+          if (h3) { hasSub ? startGroup(h3[1].trim()) : startPerson(h3[1]); continue; }
+          const h4 = RE_H4.exec(ln);
+          if (h4) { startPerson(h4[1]); continue; }
+        }
+        pushLine(ln);
+      }
+      body = blockOf(lead);
+      groups = groups.map((g) => ({
+        title: g.title,
+        lead: blockOf(g.lead),
+        people: g.people.map((p) => {
+          // Two order-free per-person seams, one each, pulled out of the body lines:
+          //   `links: Label=https://…, Label=/…`  → the row of named destinations
+          //   `tone: dark`                        → this tile carries a light-on-dark mark
+          // `tone` exists because a logo wall is not uniform: on the wall this coral was grown
+          // for, 3 of 13 marks are white and vanish on the default tile. Luminance is not
+          // knowable from CSS, so it is authored — per person, not per section.
+          let links = [], tone = '';
+          const kept = [];
+          for (const ln of p.lines) {
+            const ml = /^links:\s*(.+)$/i.exec(ln.trim());
+            if (ml) {
+              links = ml[1].split(',').map((s) => s.trim()).filter(Boolean).map((pair) => {
+                const eq = pair.indexOf('=');
+                return eq === -1 ? { label: pair, href: pair } : { label: pair.slice(0, eq).trim(), href: pair.slice(eq + 1).trim() };
+              }).filter((l) => l.href);
+              continue;
+            }
+            const mt = /^tone:\s*(\S+)$/i.exec(ln.trim());
+            if (mt) { tone = mt[1].toLowerCase(); continue; }
+            kept.push(ln);
+          }
+          return { title: p.title, href: p.href || '', badge: p.badge || '', badgeHref: p.badgeHref || '', links, tone, body: blockOf(kept) };
+        }),
+      }));
     } else if (type === 'collection') {
       // Two levels: `### Group` → a category, `#### name →href "badge"` → an item card.
       // Lead (before the first `###`) is the section intro. Mirrors grid's cell walk one essence deeper.
@@ -376,6 +440,24 @@ function serializeSite(site) {
     if (s.type === 'grid' || s.type === 'gallery' || s.type === 'carousel') {
       if (s.body) out.push(s.body);
       (s.cells || []).forEach((c) => { out.push('### ' + (c.emoji ? c.emoji + ' ' : '') + (c.title || '') + (c.href ? ' →' + c.href : '') + (c.cta ? ' "' + c.cta + '"' : '') + (c.badge ? ' [' + c.badge + (c.badgeHref ? ' →' + c.badgeHref : '') + ']' : '')); if (c.body) out.push(c.body); });
+    } else if (s.type === 'people') {
+      if (s.body) out.push(s.body);
+      // Round-trips the inferred depth: a roster parsed flat has exactly one untitled group, and
+      // must serialize back to `###` people — not to a `###`-with-empty-title plus `####` people,
+      // which would re-parse as GROUPED and silently change the document's shape on every save.
+      const gs = s.groups || [];
+      const flat = gs.length === 1 && !gs[0].title;
+      gs.forEach((g) => {
+        if (!flat) out.push('### ' + (g.title || ''));
+        if (g.lead) out.push(g.lead);
+        (g.people || []).forEach((p) => {
+          out.push((flat ? '### ' : '#### ') + (p.title || '') + (p.href ? ' →' + p.href : '') +
+            (p.badge ? ' [' + p.badge + (p.badgeHref ? ' →' + p.badgeHref : '') + ']' : ''));
+          if (p.body) out.push(p.body);
+          if (p.links && p.links.length) out.push('links: ' + p.links.map((l) => l.label + '=' + l.href).join(', '));
+          if (p.tone) out.push('tone: ' + p.tone);
+        });
+      });
     } else if (s.type === 'collection') {
       if (s.body) out.push(s.body);
       (s.groups || []).forEach((g) => {
@@ -1105,6 +1187,45 @@ function renderSection(s) {
       // `wide` modifier → `.is-wide` full-bleed band; default hugs the theme content width (--gd-max).
       const wide = parseParams(s.params).wide ? ' is-wide' : '';
       return '<section class="st-embed' + wide + '">' + (s.body || '') + '</section>';
+    }
+    case 'people': {
+      // Roster of people/companies: portrait, name, roles, blurb, link row. Mirrors People.astro.
+      // A flat roster (one untitled group) renders WITHOUT the group wrapper, so its cells sit
+      // directly in the section — the markup an ungrouped page would have had if the coral had no
+      // grouping at all. `shape=logo` swaps the portrait for a contain-fit mark on a tile.
+      const shape = pm.shape === 'logo' ? 'logo' : 'avatar';
+      const gs = s.groups || [];
+      const flat = gs.length === 1 && !gs[0].title;
+      const gid = (t) => 'people-' + slugify(t, 'g');
+      const roles = (b) => String(b || '').split('·').map((x) => x.trim()).filter(Boolean);
+      const cellsOf = (g) => (g.people || []).map((p) => {
+        const fi = firstImage(p.body);
+        const fig = fi.img
+          ? '<figure class="st-person-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>'
+          : '';
+        // The name is the link when the person has one href and no named link row; with a link
+        // row the name stays text and every destination is reachable from the row, so a card
+        // never has two competing "the" links.
+        const nm = inlineHtml(p.title);
+        const name = p.href
+          ? '<h3 class="st-person-name"><a href="' + escAttr(p.href) + '"' + (/^https?:\/\//.test(p.href) ? ' target="_blank" rel="noopener"' : '') + '>' + nm + '</a></h3>'
+          : '<h3 class="st-person-name">' + nm + '</h3>';
+        const rl = p.badge
+          ? '<span class="st-person-roles">' + roles(p.badge).map((x) => '<span class="st-person-role">' + escHtml(x) + '</span>').join('') + '</span>'
+          : '';
+        const lk = (p.links && p.links.length)
+          ? '<div class="st-person-links">' + p.links.map((l) => '<a class="st-person-link" href="' + escAttr(l.href) + '"' + (/^https?:\/\//.test(l.href) ? ' target="_blank" rel="noopener"' : '') + '>' + escHtml(l.label) + '</a>').join('') + '</div>'
+          : '';
+        return '<div class="st-person"' + (p.tone ? ' data-tone="' + escAttr(p.tone) + '"' : '') + '>' +
+          fig + name + rl + '<div class="st-person-body">' + bodyHtml(fi.rest) + '</div>' + lk + '</div>';
+      }).join('');
+      const inner = flat
+        ? '<div class="st-people-cells">' + cellsOf(gs[0]) + '</div>'
+        : gs.map((g) => '<div class="st-people-group">' +
+            '<p class="st-people-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p>' +
+            bodyHtml(g.lead) + '<div class="st-people-cells">' + cellsOf(g) + '</div></div>').join('');
+      return '<section class="st-people" data-cols="' + escAttr(pm.cols || '') + '" data-shape="' + shape + '">' +
+        (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + inner + '</section>';
     }
     case 'collection': {
       // A list of items, optionally grouped (### category / #### item), with category jump-pills.

@@ -550,4 +550,100 @@ test('links: a URL with a matched pair of underscores stays a link (emphasis mus
 });
 
 
+// ── people coral ───────────────────────────────────────────────────────────────────────────────
+// Grown for a client whose ONE roster shape was hand-rolled on five different pages (collaborating
+// artists by discipline, teaching staff by class, graduates by cohort, talents with channels,
+// partner companies as a logo wall) — each out of `gallery` plus its own CSS, each drifted.
+const people = (bodyLines) => '---\nsitetile-page: home\ntitle: T\n---\n\n## Roster\n%% sitetile: people %%\n' + bodyLines.join('\n') + '\n';
+
+test('people: a roster with no ####: `###` IS the person, and it renders without a group wrapper', () => {
+  const site = parseSite(people(['### Ake Fumi', '![Ake Fumi](/media/a.jpg)', 'Illustrator.']));
+  const s = site.sections[0];
+  assert.equal(s.type, 'people');
+  assert.equal(s.groups.length, 1, 'one implicit group');
+  assert.equal(s.groups[0].title, '', 'and it is untitled');
+  assert.equal(s.groups[0].people.length, 1);
+  assert.equal(s.groups[0].people[0].title, 'Ake Fumi');
+  const html = renderSiteToHtml(site);
+  assert.ok(html.includes('class="st-people-cells"'), 'cells are rendered');
+  assert.ok(!html.includes('st-people-group'), 'a flat roster grows no group wrapper');
+  assert.ok(html.includes('src="/media/a.jpg"'), 'the leading image becomes the portrait');
+});
+
+test('people: one `####` anywhere flips the whole section to grouped — `###` becomes the heading', () => {
+  const site = parseSite(people(['### 繪師', 'Illustrators we work with.', '#### 白露', '#### 鴉參', '### 背景', '#### 游象宜']));
+  const gs = site.sections[0].groups;
+  assert.equal(gs.length, 2, 'two groups');
+  assert.deepEqual(gs.map((g) => g.title), ['繪師', '背景']);
+  assert.deepEqual(gs[0].people.map((p) => p.title), ['白露', '鴉參']);
+  assert.equal(gs[0].lead, 'Illustrators we work with.', 'prose under the group heading is the group lead');
+  const html = renderSiteToHtml(site);
+  assert.ok(html.includes('class="st-people-group"'), 'grouped rosters get the wrapper');
+  assert.ok(html.includes('id="people-'), 'each group head is addressable');
+});
+
+test('people: a person holds SEVERAL roles at once — the reason this is not a gallery cell', () => {
+  // A recommended graduate really does list four cohorts; a `gallery` badge is one string.
+  const site = parseSite(people(['### 朔光 [建模班第二期 · 建模班第三期 · 動畫班第三期 · 延伸班第一期]']));
+  const html = renderSiteToHtml(site);
+  const roles = html.match(/class="st-person-role"/g) || [];
+  assert.equal(roles.length, 4, 'four separate role pills, not one run-on string');
+  assert.ok(html.includes('>建模班第二期<') && html.includes('>延伸班第一期<'), 'first and last survive');
+});
+
+test('people: `links:` is a row of named destinations, and external ones get rel=noopener', () => {
+  const site = parseSite(people(['### 莉芙', 'links: YouTube=https://youtube.com/@liv, プロフィール=/vtuber/liv']));
+  const p = site.sections[0].groups[0].people[0];
+  assert.deepEqual(p.links, [
+    { label: 'YouTube', href: 'https://youtube.com/@liv' },
+    { label: 'プロフィール', href: '/vtuber/liv' },
+  ]);
+  const html = renderSiteToHtml(site);
+  assert.ok(/href="https:\/\/youtube\.com\/@liv"[^>]*rel="noopener"/.test(html), 'external link is safe');
+  assert.ok(!/href="\/vtuber\/liv"[^>]*target=/.test(html), 'an internal link does not open a new tab');
+  assert.ok(!html.includes('links:'), 'the seam is consumed, never left as body text');
+});
+
+test('people: `tone: dark` is per-person, because a logo wall is not uniform', () => {
+  // 3 of 13 marks on the wall this was grown for are white and vanish on a light tile. CSS cannot
+  // read a PNG's luminance, so it is authored — and authored per person, not per section.
+  const site = parseSite(people(['### Work to Night', '![w](/media/w.png)', 'tone: dark', '### Krosa', '![k](/media/k.png)']));
+  const ps = site.sections[0].groups[0].people;
+  assert.equal(ps[0].tone, 'dark');
+  assert.equal(ps[1].tone, '', 'its neighbour is untouched');
+  const html = renderSiteToHtml(site);
+  assert.equal((html.match(/data-tone="dark"/g) || []).length, 1, 'exactly one dark tile');
+  assert.ok(!html.includes('tone: dark'), 'the seam is consumed');
+});
+
+test('people: `shape=logo` contains the mark instead of cropping it to a square', () => {
+  const src = '---\nsitetile-page: home\ntitle: T\n---\n\n## Partners\n%% sitetile: people shape=logo %%\n### ACME\n';
+  assert.ok(renderSiteToHtml(parseSite(src)).includes('data-shape="logo"'), 'the section declares its shape');
+  assert.ok(renderSiteToHtml(parseSite(people(['### ACME']))).includes('data-shape="avatar"'), 'default is a portrait');
+});
+
+test('people: round-trip preserves the INFERRED depth — a flat roster must not become grouped', () => {
+  // 🩸 The failure this guards: serializing a flat roster's one untitled group as `### ` + `#### `
+  // re-parses as GROUPED, so the document silently changes shape on every save.
+  const flat = people(['### Ake Fumi', 'Illustrator.', 'links: X=https://x.com/a', 'tone: dark']);
+  const once = serializeSite(parseSite(flat));
+  assert.ok(/^### Ake Fumi$/m.test(once), 'still a `###` person');
+  assert.ok(!/^#### /m.test(once), 'no phantom sub-level');
+  assert.equal(serializeSite(parseSite(once)), once, 'and it is idempotent');
+  const grouped = people(['### 繪師', '#### 白露', 'links: pixiv=https://pixiv.net/u/1']);
+  const g1 = serializeSite(parseSite(grouped));
+  assert.ok(/^### 繪師$/m.test(g1) && /^#### 白露$/m.test(g1), 'grouped stays grouped');
+  assert.equal(serializeSite(parseSite(g1)), g1, 'idempotent too');
+  assert.equal(parseSite(g1).sections[0].groups[0].people[0].links.length, 1, 'and the link row survives a round-trip');
+});
+
+test('people: an unknown type still falls back to prose — `people` had to be REGISTERED to work', () => {
+  // Control: proves the tests above are reading a real registration, not a coincidence of the
+  // prose fallback. `peopl` is not in KNOWN_TYPES.
+  const src = '---\nsitetile-page: home\ntitle: T\n---\n\n## Roster\n%% sitetile: peopl %%\n### Ake Fumi\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('st-people'), 'a near-miss type does NOT render the coral');
+});
+
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
