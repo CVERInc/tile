@@ -4,11 +4,15 @@ title: Form coverage — wired to an inbox, and deliberately not
 lang: en-US
 ---
 
-## Wired to an inbox
-%% sitetile: form inbox="site:smoke" submit="Send it" %%
-The `inbox="<kind>:<id>"` knob: one param instead of four hand-written hidden
-inputs. Posts form-encoded to feelreef's `/api/inbox`, with **no JavaScript** —
-a contact form is often the only way a visitor can reach a business.
+## Wired with the escape hatch
+%% sitetile: form action="https://example.test/collect" submit="Send it" %%
+A form with somewhere to send. `action=` is the general wiring seam — a deploy
+concern, not a content one.
+
+🩸 An `inbox="<kind>:<id>"` knob pointing straight at feelreef was tried and
+withdrawn the same day: SvelteKit refuses cross-origin POSTs with a form content
+type, app-wide, and that refusal is what protects every cookie-authenticated form
+action in that app. See the note in Form.astro.
 
 ### Your name
 ### Email {email}
