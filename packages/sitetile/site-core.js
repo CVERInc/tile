@@ -467,7 +467,17 @@ function imgTag(alt, src) {
 // `![alt](src)` and Obsidian `![[wikilink]]` embeds both become <img>. A `[![img](s)](href)` linked
 // image works too (image resolves first, then the surrounding link).
 function inlineHtml(text) {
-  let s = renderInlineMd(String(text == null ? '' : text), { prefix: 'st' });
+  // 🔴 A link/image DESTINATION must not go through the emphasis pass. renderInlineMd runs first,
+  // so a URL that happens to contain a matched pair of `_` — a twitter handle like /_Malachite_,
+  // any snake_case path — is shredded into <span class="st-i"> before the link regex below ever
+  // sees it, and the whole link then renders as literal `[X](https://…)` text on the page.
+  // Stash destinations, run the inline pass on everything else, restore. (\u0001 cannot appear in
+  // authored markdown and renderInlineMd leaves it alone, so it is a safe placeholder.)
+  const hrefs = [];
+  const stashed = String(text == null ? '' : text)
+    .replace(/\]\(([^)\s]+)\)/g, (m, href) => { hrefs.push(href); return '](\u0001' + (hrefs.length - 1) + '\u0001)'; });
+  let s = renderInlineMd(stashed, { prefix: 'st' });
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => hrefs[+i]);
   s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => imgTag(inner.split('/').pop(), inner));     // wikilink embed
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => imgTag(alt, src));               // markdown image
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
