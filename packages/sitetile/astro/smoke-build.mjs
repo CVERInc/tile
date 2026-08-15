@@ -34,6 +34,9 @@ execFileSync('npx', ['astro', 'build', '--outDir', DIST], { cwd: HERE, stdio: 'i
 const html = readFileSync(join(DIST, 'index.html'), 'utf8');
 const blocks = readFileSync(join(DIST, 'blocks/index.html'), 'utf8');
 const rss = readFileSync(join(DIST, 'rss.xml'), 'utf8');
+// forms.md — the `form` coral, which until 2026-08-15 had no rendering test of
+// any kind. Two sections: one wired to an inbox, one deliberately not.
+const forms = readFileSync(join(DIST, 'forms/index.html'), 'utf8');
 // a built post page by slug — walks DIST itself rather than borrowing the script audit's list,
 // which is built later in the file (and is that function's local).
 const findPost = (slug) => {
@@ -292,8 +295,39 @@ const checks = [
     blocks.includes('rf-header--overlay')
     && blocks.includes('signet-locale-banner-dismiss')
     && executableScripts(blocks) === 2],
+  // -- forms.md: the `form` coral. Its FIRST rendering test. --
+  ['form: inbox= wires the action to /api/inbox', () =>
+    /<form class="st-form" action="https:\/\/feelreef\.com\/api\/inbox" method="post">/.test(forms)],
+  ['form: the tenant travels as two hidden fields, split from one param', () =>
+    /name="kind" value="site"/.test(forms) && /name="id" value="smoke"/.test(forms)],
+  // Relative on purpose: the endpoint resolves it against the browser's own
+  // Referer and refuses anything leaving that origin, so a path can return the
+  // visitor here and can never make feelreef.com a redirector.
+  ['form: return_to is a PATH, not an absolute URL', () =>
+    /name="return_to" value="\/forms\/"/.test(forms)],
+  // Declared, not sniffed. Which field is the reply address is the form's own
+  // statement; guessing it from an `@` would lift an address out of the middle
+  // of somebody's question.
+  ['form: the email field names itself', () => /name="email_field" value="Email"/.test(forms)],
+  ['form: the honeypot is present and hidden without the theme\'s help', () =>
+    /position:absolute;left:-9999px[^>]*>\s*<span>Leave this empty<\/span>\s*<input type="text" name="_hp"/.test(
+      forms.replace(/\n\s*/g, ' ')
+    )],
+  // 🩸 The one that would have caught the bug this fixture was written for: an
+  // unwired form used to render a LIVE submit posting to the page's own URL — a
+  // 405 on any static host, invisible to the visitor who just lost their words.
+  ['form: unwired → the submit button is DISABLED', () =>
+    /<button class="st-form-submit" type="submit" disabled>/.test(forms)],
+  ['form: wired → the submit button is NOT disabled (the check above is a state, not a constant)', () =>
+    /<button class="st-form-submit" type="submit">/.test(forms)],
+  ['form: an unwired form has no action and no routing fields', () => {
+    const second = forms.slice(forms.lastIndexOf('<form class="st-form"'));
+    return !/action=/.test(second.slice(0, second.indexOf('>'))) && !/name="kind"/.test(second);
+  }],
+  ['form: still zero JavaScript — it has to work with scripts off', () =>
+    !/<script/i.test(forms.slice(forms.indexOf('<form'), forms.lastIndexOf('</form>')))],
   ['fixtures never reference the pkg-runtimes chunk', () =>
-    [html, blocks, markers].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
+    [html, blocks, markers, forms].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
 ];
 
 let fail = 0;

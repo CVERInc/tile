@@ -3,9 +3,11 @@
 // (parsed in site-core.js: a trailing `{email}`/`{tel}`/`{textarea}` sets the input kind, `- option`
 // lines under a field become a <select>). Renders a native <form> with <label> + <input>/<textarea>/
 // <select> per field + a submit button; the THEME paints `.st-form-*`. This coral carries only
-// STRUCTURE — the `action`/`method` params wire submission (a deploy concern, per
-// cutover-structure-before-data); no action → a structural form (never claims a backend it lacks,
-// no-phantom-features). Family posture: CommonMark, one `%% sitetile: %%` sentinel, native elements,
+// STRUCTURE — `inbox="<kind>:<id>"` wires it to REEF with Inbox in one knob, `action`/`method`
+// remain the general escape hatch (a deploy concern, per cutover-structure-before-data); with
+// NEITHER, the submit button renders DISABLED — 🩸 it used to render live and post to the page's
+// own URL, which on a static host is a 405 the visitor never sees (measured on sodaart, 2026-08-15).
+// "Never claims a backend it lacks" was in this comment before it was in the markup. Family posture: CommonMark, one `%% sitetile: %%` sentinel, native elements,
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
@@ -19,10 +21,43 @@ const pm = parseParams(section.params);
 // did nothing. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const submit = pm.submit || 'Send';
-const action = pm.action || undefined;
-const method = (pm.method || 'post').toLowerCase();
 const fields = section.fields || [];
 const idOf = (i) => 'st-form-f' + (i + 1);
+
+// ── `inbox="<kind>:<id>"` — one knob for REEF with Inbox ─────────────────────
+//
+// Without it this coral has always been structure only, and `action=` was the
+// escape hatch. That is still true; `inbox=` just spares an author from
+// hand-wiring four hidden inputs correctly, which is the kind of thing that goes
+// wrong silently.
+//
+// It points at feelreef's `/api/inbox`, which accepts a plain form-encoded POST
+// natively — 🔴 no JavaScript anywhere in this file, because a contact form is
+// often the only way a visitor can reach a business and it must not stop working
+// because a script failed to load. The N fields below collapse into ONE message
+// on the server; the schema never learns what the fields were.
+const inboxTenant = typeof pm.inbox === 'string' ? pm.inbox.trim() : '';
+const inboxParts = inboxTenant ? inboxTenant.split(':') : [];
+const inboxKind = inboxParts.length === 2 ? inboxParts[0].trim() : '';
+const inboxId = inboxParts.length === 2 ? inboxParts[1].trim() : '';
+const inboxWired = Boolean(inboxKind && inboxId);
+const inboxBase = (pm['inbox-base'] || 'https://feelreef.com').replace(/\/$/, '');
+
+const action = inboxWired ? inboxBase + '/api/inbox' : pm.action || undefined;
+const method = (pm.method || 'post').toLowerCase();
+
+// Which field carries the visitor's reply address, BY THE FORM'S OWN ACCOUNT.
+// The alternative is sniffing every value for an `@`, which would lift an address
+// out of the middle of somebody's question — a different thing entirely from them
+// offering us one. Declared rather than guessed, and it costs one hidden input.
+const emailField = fields.find((f) => f.kind === 'email');
+
+// 🔴 A form with nowhere to send is not a form with a working button. Before
+// this, an unwired coral rendered a live submit that posted to the page's own
+// URL — which on a static host is a 405 the visitor cannot see: they type, they
+// press, the words vanish, and nothing says so. The header above already claimed
+// "never claims a backend it lacks"; a pressable button was claiming one.
+const wired = Boolean(action);
 ---
 <section class="st-form-section">
   <div class="st-form-head">
@@ -31,6 +66,26 @@ const idOf = (i) => 'st-form-f' + (i + 1);
     {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   </div>
   <form class="st-form" action={action} method={method}>
+    {inboxWired && (
+      <Fragment>
+        <input type="hidden" name="kind" value={inboxKind} />
+        <input type="hidden" name="id" value={inboxId} />
+        {/* Relative on purpose: the endpoint resolves it against the browser's
+            own Referer and refuses anything that leaves that origin, so a path
+            can bring the visitor back to this page and can never make
+            feelreef.com a redirector to somewhere else. */}
+        <input type="hidden" name="return_to" value={Astro.url.pathname} />
+        {emailField && <input type="hidden" name="email_field" value={emailField.label} />}
+        {/* Bot trap. Styled inline rather than by the theme because "is it
+            hidden" must not depend on which stylesheet loaded. A real browser
+            never fills this; a filled one is silently accepted and stored
+            nowhere, because telling a bot it failed only tells it what to fix. */}
+        <label style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+          <span>Leave this empty</span>
+          <input type="text" name="_hp" tabindex="-1" autocomplete="off" />
+        </label>
+      </Fragment>
+    )}
     {fields.map((f, i) => (
       <div class="st-form-field">
         <label class="st-form-label" for={idOf(i)} set:html={inlineHtml(f.label)} />
@@ -47,6 +102,6 @@ const idOf = (i) => 'st-form-f' + (i + 1);
         )}
       </div>
     ))}
-    <button class="st-form-submit" type="submit">{submit}</button>
+    <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>
 </section>
