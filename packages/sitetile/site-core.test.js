@@ -537,4 +537,17 @@ test('code: the fence body is still verbatim — markdown inside it is not rende
   assert.ok(html.includes('**not bold**'), 'the asterisks survive as text');
 });
 
+test('links: a URL with a matched pair of underscores stays a link (emphasis must not eat it)', () => {
+  // 🩸 Real case: a partner page linking https://twitter.com/_Malachite_ rendered the LITERAL text
+  // `[X](https://twitter.com/…)` — the emphasis pass ran before the link pass and turned the `_…_`
+  // inside the URL into <span class="st-i">, so the link regex no longer matched. Destinations are
+  // now stashed across that pass.
+  const src = '---\nsitetile-page: home\ntitle: T\n---\n\n## H\n%% sitetile: prose %%\nFollow [X](https://twitter.com/_Malachite_) today.\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(html.includes('href="https://twitter.com/_Malachite_"'), 'the href survives intact');
+  assert.ok(!/https:\/\/twitter\.com\/<span/.test(html), 'no emphasis span leaked into the URL');
+  assert.ok(!html.includes(']\(http'), 'no literal markdown link syntax left on the page');
+});
+
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
