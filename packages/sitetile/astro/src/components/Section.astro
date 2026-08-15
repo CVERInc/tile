@@ -14,9 +14,10 @@ import Social from './sections/Social.astro';
 import Tagcloud from './sections/Tagcloud.astro';
 import Faq from './sections/Faq.astro';
 import Form from './sections/Form.astro';
+import People from './sections/People.astro';
 
 const { section, index = 0, lang, blogPosts = [], meta = {} } = Astro.props;
-const MAP = { hero: Hero, prose: Prose, grid: Grid, gallery: Gallery, carousel: Carousel, cta: Cta, embed: Embed, collection: Collection, timeline: Timeline, social: Social, tagcloud: Tagcloud, faq: Faq, form: Form };
+const MAP = { hero: Hero, prose: Prose, grid: Grid, gallery: Gallery, carousel: Carousel, cta: Cta, embed: Embed, collection: Collection, timeline: Timeline, social: Social, tagcloud: Tagcloud, faq: Faq, form: Form, people: People };
 const Cmp = MAP[section.type] || Prose;
 // The page's FIRST section carries its primary heading → render it as <h1> (one per page,
 // semantic/SEO), the rest stay <h2>. Components opt in by honouring the `hero` prop.

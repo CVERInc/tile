@@ -362,6 +362,58 @@ a.st-cell-link .st-cell-cta { margin-top: auto; align-self: flex-end; color: var
 a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; }
 .st-cta-label { line-height: 1; }
 
+/* `people` coral — roster of humans/companies: portrait, name, roles, blurb, link row.
+   🩸 Shipped WITH base CSS on purpose. `gallery` has none at all, so every roster page on every
+   site had to hand-roll its layout in theme CSS, and each one drifted (one client site: four
+   variants of the same card, radii 20/18px, padding 0/24px, type 19.9/18.4px). A coral with no
+   base look is a coral that gets re-invented per page.
+
+   The split below is deliberate: STRUCTURE (grid, sizing, object-fit) is ungated so the roster is
+   laid out correctly even on a site with its own stylesheet — a themed site should have to restyle
+   this, never rebuild it. SKIN (surface, border, radius) sits behind the born-paint gate so a
+   custom theme paints it without fighting a default. */
+.st-people { max-width: 80rem; }
+.st-people-group + .st-people-group { margin-top: 2.5rem; }
+.st-people-group-head { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.st-people-cells {
+  display: grid; gap: var(--gd-gap); margin-top: 1.5rem;
+  /* Fixed track, not `1fr`: an auto-fit/1fr grid stretches the cards when a group has few people,
+     and a stretched card scales its portrait past the source's own pixels (visibly soft). Rosters
+     are exactly the case where group sizes are uneven — 20 artists, then 2. */
+  grid-template-columns: repeat(auto-fill, 13rem); justify-content: start;
+}
+.st-people[data-cols="2"] .st-people-cells { grid-template-columns: repeat(auto-fill, 20rem); }
+.st-people[data-cols="3"] .st-people-cells { grid-template-columns: repeat(auto-fill, 16rem); }
+.st-person { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.st-person-fig { margin: 0; }
+.st-person-fig img {
+  display: block; width: 100%; height: auto; max-width: 100%;
+  aspect-ratio: 1; object-fit: cover; border-radius: var(--gd-radius);
+}
+/* A logo wall is not a portrait wall: marks have their own aspect ratios and must sit INSIDE the
+   tile untouched (`contain`), never be cropped to a square. */
+.st-people[data-shape="logo"] .st-person-fig img { object-fit: contain; padding: 0.75rem; }
+.st-person-name { margin: 0; font-size: 1rem; line-height: 1.35; }
+.st-person-name a { color: inherit; text-decoration: none; }
+.st-person-name a:hover { text-decoration: underline; }
+.st-person-roles { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.st-person-role { font-size: 0.72rem; line-height: 1; padding: 0.3rem 0.55rem; border-radius: 999px; }
+.st-person-body { font-size: 0.85rem; line-height: 1.6; }
+.st-person-body p { margin: 0 0 0.35rem; }
+.st-person-body :last-child { margin-bottom: 0; }
+.st-person-links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: auto; padding-top: 0.25rem; }
+.st-person-link { font-size: 0.8rem; text-decoration: none; }
+.st-person-link:hover { text-decoration: underline; }
+/* skin — born-paint only; a themed site paints these itself */
+:where(body:not([data-theme-custom])) .st-people-group-head { color: var(--gd-muted); }
+:where(body:not([data-theme-custom])) .st-person-fig img { background: var(--gd-surface); }
+:where(body:not([data-theme-custom])) .st-person-role { background: var(--gd-surface); color: var(--gd-muted); border: 1px solid var(--gd-border); }
+:where(body:not([data-theme-custom])) .st-person-body { color: var(--gd-muted); }
+:where(body:not([data-theme-custom])) .st-person-link { color: var(--gd-accent); }
+/* `tone: dark` — this person's mark is light-on-transparent and disappears on the default tile.
+   Authored per person, because CSS cannot know a PNG's luminance and a wall is rarely uniform. */
+:where(body:not([data-theme-custom])) .st-person[data-tone="dark"] .st-person-fig img { background: var(--gd-text); }
+
 /* carousel — single-row horizontal-scroll track + prev/next arrows. This is the STRUCTURAL
    mechanism (flex/overflow-x/cols flex-basis) shared by every theme; only card look (colors,
    image shape/aspect, fonts) is theme-specific. It lived in a single theme until a SECOND site
