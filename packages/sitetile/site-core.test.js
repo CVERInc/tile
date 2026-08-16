@@ -646,4 +646,18 @@ test('people: an unknown type still falls back to prose — `people` had to be R
 });
 
 
+test('video: a postered clip preloads NOTHING, an unpostered one still preloads metadata', () => {
+  // 🩸 A 198-video portfolio issued 202 metadata requests and took ~11s to settle, for a duration
+  // the markup never displays — the poster was already the visual. Without a poster, `metadata` is
+  // what gives the player a first frame instead of a black rectangle, so it stays.
+  const page = (alt, src) => '---\nsitetile-page: home\ntitle: T\n---\n\n## V\n%% sitetile: prose %%\n![' + alt + '](' + src + ')\n';
+  const withPoster = renderSiteToHtml(parseSite(page('https://cdn/p.avif', 'https://cdn/v.mp4')));
+  assert.ok(withPoster.includes('poster="https://cdn/p.avif"'), 'the alt slot became the poster');
+  assert.ok(withPoster.includes('preload="none"'), 'and nothing is fetched before a click');
+  const noPoster = renderSiteToHtml(parseSite(page('just alt text', 'https://cdn/v.mp4')));
+  assert.ok(!noPoster.includes('poster='), 'plain alt text is not a poster URL');
+  assert.ok(noPoster.includes('preload="metadata"'), 'so it still needs a first frame');
+});
+
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
