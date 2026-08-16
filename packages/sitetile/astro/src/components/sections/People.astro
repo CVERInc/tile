@@ -8,7 +8,12 @@
 // `.st-people` / `.st-person` / `.st-person-role`; site.css carries the structural defaults so a
 // roster is legible on a site that has never been themed.
 import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, slugify } from '@sitetile';
-const { section } = Astro.props;
+const { section, hero } = Astro.props;
+// The page's FIRST section carries its primary heading as <h1> — the same seam Prose/Faq/
+// Timeline already honour. A roster that opened a page rendered <h2> and the page had NO h1:
+// bad for the document outline, and the theme's title band attaches to h1, so those pages
+// silently lost their band too.
+const Title = hero && section.title ? 'h1' : 'h2';
 const pm = parseParams(section.params);
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const shape = pm.shape === 'logo' ? 'logo' : 'avatar';
@@ -20,7 +25,7 @@ const ext = (h) => /^https?:\/\//.test(h);
 ---
 <section class="st-people" data-cols={pm.cols || ''} data-shape={shape}>
   {eyebrow && <p class="st-people-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <h2 set:html={inlineHtml(section.title)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   {groups.map((g) => {
     const cells = (
