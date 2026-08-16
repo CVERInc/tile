@@ -510,7 +510,12 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
    content, not an edge-to-edge band. Opt into full-bleed with `%% sitetile: embed wide %%`
    (→ .is-wide) for a genuine marketing band the theme can paint. */
 .st-embed { max-width: var(--gd-max, 80rem); margin-inline: auto; padding: 2rem clamp(1rem, 4vw, 3rem); }
-.st-embed.is-wide { max-width: none; }
+/* `wide` on an embed means edge to edge. Keeping the inline padding made it mean only "no max
+   width", so every site that wanted a real full-bleed band had to break out with
+   `width:100vw; margin-left:calc(50% - 50vw)` — and THAT is the bug: 100vw counts the classic
+   scrollbar, the content box does not, so each such band overflowed by exactly the scrollbar
+   width and put a horizontal scrollbar on the page. Measured on one: four bands, 17px each. */
+.st-embed.is-wide { max-width: none; padding-inline: 0; }
 
 /* site-core.js emits `<span class="st-cta-arrow">` around every CTA button's arrow, and nothing in
    this package painted it — so the arrow sat flush against the last character of every label. The
@@ -848,8 +853,13 @@ html[data-search-open] .st-search { display: block; }
   background: var(--gd-surface, #fff); color: var(--gd-text);
   box-shadow: 0 0 40px rgba(0, 0, 0, .28); transition: transform .28s ease;
 }
-.rf-ha-drawer[data-side="right"] { right: 0; transform: translateX(100%); }
-.rf-ha-drawer[data-side="left"] { left: 0; transform: translateX(-100%); }
+/* Parked off-screen — and `right: 0` alone does not park it. A fixed element's offsets resolve
+   against the viewport MINUS a classic scrollbar, while the drawer only travels its own width, so
+   on any page long enough to scroll it stopped 17px inside the frame: a lit strip with a 40px
+   shadow down the right edge of every scrolling page, on every site using this header. The
+   negative offset is exactly that gap (100% of the containing block minus the full viewport). */
+.rf-ha-drawer[data-side="right"] { right: calc(100% - 100vw); transform: translateX(100%); }
+.rf-ha-drawer[data-side="left"] { left: calc(100% - 100vw); transform: translateX(-100%); }
 .rf-ha-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--gd-border); }
 .rf-ha-drawer-title { font-weight: 700; }
 .rf-ha-drawer-close { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; cursor: pointer; border-radius: 999px; color: var(--gd-muted); }
