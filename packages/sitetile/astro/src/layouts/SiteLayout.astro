@@ -613,7 +613,7 @@ const jsonLd = jsonLdScript(pageGraph({
 const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;
 ---
 <!doctype html>
-<html lang={htmlLang} data-lingo-root class="rf-preload">
+<html lang={htmlLang} data-lingo-root class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content={viewportContent} />
@@ -769,8 +769,11 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     data-cell-cta={tCellCta || undefined}
     data-corner={tCorner || undefined}
   >
-    {/* 🩸 preload guard: `.rf-ha-drawer`'s `transition: transform .28s ease` is unconditional from
-        the very first paint. A user reported the cart drawer visibly popping open and hastily
+    {/* 🩸 preload guard, OPT-IN (toggleActions.length > 0 — same condition that renders
+        .rf-ha-drawer/.rf-ha-overlay below): a page with no header-actions toggle carries neither
+        element, so the guard has nothing to protect and must not ship. `.rf-ha-drawer`'s
+        `transition: transform .28s ease` is unconditional from the very first paint on the pages
+        that DO have one. A user reported the cart drawer visibly popping open and hastily
         retracting on plain page loads — reproducible only on a heavier page, not on a lighter
         sister site, which rules out a real open→close state change (nothing in this codebase ever
         sets #st-ha-cart's checked=true outside a genuine click) and points at a transient transform
@@ -780,7 +783,9 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         frames have definitely painted, then release — kills this whole bug class regardless of the
         exact recompute cause, for both drawers that share this shell (cart + mobile sidebar
         offcanvas, see .rf-ha-drawer's own comment). */}
-    <script is:inline>requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('rf-preload');});});</script>
+    {toggleActions.length > 0 && (
+      <script is:inline>requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('rf-preload');});});</script>
+    )}
     {announce && <div class="rf-announce" role="note">{announce}</div>}
     {ageGate && (
       <div class="st-age-gate" role="dialog" aria-modal="true" aria-labelledby="st-age-gate-title">
