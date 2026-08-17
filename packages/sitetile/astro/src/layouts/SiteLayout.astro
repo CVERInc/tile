@@ -460,7 +460,14 @@ const blogPath = (meta['blog-path'] ? String(meta['blog-path']).trim() : '') || 
 // Neutral fallback: this label goes in the site's own nav/footer, so an unnamed blog must not
 // arrive wearing the vendor's name. A site that wants a different word sets blog-label itself.
 const blogLabel = (meta['blog-label'] ? String(meta['blog-label']).trim() : '') || 'Blog';
-const navLinks = hasBlog ? [{ label: blogLabel, href: blogPath }, ...footerLinks] : footerLinks;
+// `blog-footer-link: false` — OPT-OUT of the auto-contributed footer entry. The blog capability
+// contributes it so the link comes from the capability rather than a hand-authored footer line,
+// which is right for a site whose blog is ONLY reachable from the footer. But a site that already
+// carries the blog in its main nav gets the same destination twice, and had no way to say so: the
+// entry was unconditional, and removing it meant uninstalling the blog. Absent/true → unchanged,
+// so no existing site's footer moves.
+const blogFooterLink = !(meta['blog-footer-link'] != null && String(meta['blog-footer-link']).trim() === 'false');
+const navLinks = hasBlog && blogFooterLink ? [{ label: blogLabel, href: blogPath }, ...footerLinks] : footerLinks;
 
 // canonical-redirect coral (opt-in): `blog-canonical-redirects: p,cat,author,m` names the legacy
 // query-string params to watch. When one is present in the URL, a <head> bootstrap loads the
