@@ -1,7 +1,12 @@
 ---
 import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
 import GridCell from './GridCell.astro';
-const { section } = Astro.props;
+const { section, hero } = Astro.props;
+// The page's FIRST section carries its primary heading as <h1> — the same seam Prose/Faq/
+// Timeline/People already honour. A grid that opened a page (e.g. a portfolio/works page)
+// rendered <h2> and the page had NO h1: bad for the document outline, and the theme's title
+// band attaches to h1, so those pages silently lost their band too.
+const Title = hero && section.title ? 'h1' : 'h2';
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
 // already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
@@ -54,7 +59,7 @@ const facets = filterLabel ? [...new Set(cells.map((c) => c.badge).filter(Boolea
 ---
 <section class="st-grid" data-cols={pm.cols || ''} data-cards={imageCards ? 'image' : undefined} data-surface={surface}>
   {eyebrow && <p class="st-grid-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <h2 set:html={inlineHtml(section.title)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   {filterLabel && facets.length > 0 && (
     <div class="st-grid-filter" role="group" aria-label={filterLabel}>
