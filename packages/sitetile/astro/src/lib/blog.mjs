@@ -528,14 +528,38 @@ export function kvMap(val) {
 // clouds/chips link to the real `/tag/<slug>/` server page (source-faithful, and consistent with
 // links elsewhere); otherwise they fall back to the `?tag=` client-side filter on the blog index
 // (the pre-archive behaviour — a site with no /tag/ pages is unchanged).
-export function tagHref(meta, tag, slugMap) {
+export function tagHref(meta, tag, slugMap, catSet) {
+  // A tag that IS a real category slug goes to its category archive. On sites where per-post
+  // `categories:` is the only axis (tags fall back to it — see parsePost), the /category/<slug>/
+  // page is the destination the source itself published; sending those chips to the ?tag= filter
+  // instead would be a worse answer than the one already on disk. Gated on catSet so it can only
+  // fire for slugs that really got a route emitted — same "never link a page that isn't there"
+  // rule blogCategories() follows with its empty hrefs.
+  if (catSet && catSet.has(tag)) {
+    const base = String((meta && meta['blog-category-base']) || '/category').replace(/\/$/, '');
+    return `${base}/${tag}/`;
+  }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
     const base = String((meta && meta['blog-tag-base']) || '/tag').replace(/\/$/, '');
     const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
     return `${base}/${slug}/`;
   }
+  const label = meta && meta['blog-label-routes'] != null && String(meta['blog-label-routes']) !== 'false';
+  if (label) return `/search/label/${tag}/`;
   return `${blogBase(meta)}?tag=${encodeURIComponent(tag)}`;
+}
+
+// routedCategories: the set of category slugs that /category/<slug>/ really emitted a page for —
+// i.e. `blog-category-routes` is on AND the slug occurs in the corpus. Exactly the condition
+// category/[slug]/index.astro's getStaticPaths uses, kept in one place so a chip can't link to a
+// category page that route decided not to build. Empty Set when the routes are off.
+export function routedCategories(posts, meta) {
+  const on = meta && meta['blog-category-routes'] != null && String(meta['blog-category-routes']) !== 'false';
+  if (!on) return new Set();
+  const out = new Set();
+  for (const p of posts || []) for (const c of (p.categories || [])) if (c) out.add(c);
+  return out;
 }
 
 // postUrl: the source-faithful URL for one post. Priority:

@@ -27,7 +27,7 @@ import { DEFAULT_LANG } from '../../../../packages/lingo/locale.mjs';
 // (`/search/label/活動`) alike; both decode to the same dir, and trailingSlash:'ignore'
 // + build.format:'directory' serve them with or without the trailing slash.
 import SiteLayout from '../../../../layouts/SiteLayout.astro';
-import { allPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, sidebarCopy} from '../../../../lib/blog.mjs';
+import { allPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
@@ -53,6 +53,10 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, tag } = Astro.props;
+// 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
+// one destination, two affordances, and the chip was the one readers actually reach for
+// (chodaict: 「貼文tag點了沒有反應」). They're anchors now, to whichever archive really exists.
+const catSet = routedCategories(posts, meta);
 // Sidebar chrome copy — resolved once, from the locale table. These were the FOURTH and
 // FIFTH inline copies of the same Chinese literals; a structural test found them after two
 // hand searches had not.
@@ -108,7 +112,7 @@ const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag
             {readMore && <span class="bl-read-more">{readMore}</span>}
           </a>
           {p.tags.length > 0 && (
-            <div class="bl-tags">{p.tags.map((t) => <span class="bl-tag">{t}</span>)}</div>
+            <div class="bl-tags">{p.tags.map((t) => <a class="bl-tag" href={tagHref(meta, t, undefined, catSet)}>{t}</a>)}</div>
           )}
         </li>
       ))}
