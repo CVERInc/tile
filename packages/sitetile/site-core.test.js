@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
 } from './site-core.js';
 
 let passed = 0;
@@ -184,6 +184,23 @@ test('button affordance: signet-arrow chosen by link kind, no heart/envelope gly
 });
 
 test('render: inline markdown goes through cssmd (bold → st-b span)', () => {
+
+// 🩸 CJK soft-wrap joining. Both halves earned on sodaart 2026-08-18, and both were invisible to
+// every other gate: the page looked fine, measured fine, and read wrong.
+test('render: CJK soft-wrapped lines join with NO space, and a ・ line starts its own line', () => {
+  const cjk = bodyHtml('SODAARTのLIVE2D制作は、\nあなたのキャラクターに命を吹き込む！');
+  assert.match(cjk, /制作は、あなたの/, 'no space may appear at a CJK soft wrap');
+  assert.doesNotMatch(cjk, /制作は、 あなたの/);
+
+  const bullets = bodyHtml('・台湾台北出身\n・全てのLive2D制作\n・イラストレーター');
+  assert.equal((bullets.match(/<br>/g) || []).length, 2, 'each ・ line is its own line');
+  assert.doesNotMatch(bullets, /出身 ・/, 'and they are not run together with a space');
+
+  // 🔴 CONTROLS — the three things that must NOT change.
+  assert.match(bodyHtml('Hello world\ncontinued here'), /Hello world continued here/);
+  assert.match(bodyHtml('日本語 and English\nmixed line'), /English mixed line/);   // Latin↔CJK keeps its gap
+  assert.match(bodyHtml('first line  \nsecond line'), /first line<br>second line/);  // hard break untouched
+});
   const html = renderSiteToHtml(parseSite(CANON));
   assert.ok(html.includes('class="st-b"'), 'bold should render via cssmd st-b');
 });

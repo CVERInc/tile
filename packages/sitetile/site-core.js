@@ -833,7 +833,27 @@ function bodyHtml(body) {
     // placeholder (not literal `<br>`) because inlineHtml escapes the whole string before marking
     // bold/italic — a literal tag here would render as visible text, not a real line break.
     const BR = 'ST-BR-TOKEN';
-    const t = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln)).join(' ').split(BR + ' ').join(BR).trim();
+    // 🩸 Soft-wrapped lines were joined with a plain space, which is wrong twice over for CJK copy.
+    // (a) CJK has no inter-word space, so `…制作は、\nあなたの…` came out as `…制作は、 あなたの…`
+    //     — a visible gap after the comma that no Japanese typesetter would put there.
+    // (b) A line starting with `・` is a BULLET in Japanese/Chinese prose, and the author means one
+    //     per line. Joining them produced `<p>・A ・B ・C ・D</p>` — a run-on where the source (and
+    //     the site being recast) shows a list. sodaart alone has 530 such lines; rewriting them by
+    //     hand is not the fix, joining them correctly is.
+    // Latin↔CJK boundaries KEEP the space: that is a real word gap, and removing it would glue
+    // `SODAART` onto the kana beside it.
+    const CJK = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+    const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
+    let joined = marked.length ? marked[0] : '';
+    for (let k = 1; k < marked.length; k++) {
+      const next = marked[k];
+      const gap = joined.endsWith(BR) ? ''
+        : /^[・※]/.test(next.trim()) ? BR
+        : (CJK.test(joined.slice(-1)) && CJK.test(next.trim().slice(0, 1))) ? ''
+        : ' ';
+      joined += gap + next;
+    }
+    const t = joined.split(BR + ' ').join(BR).trim();
     const html = inlineHtml(t).split(BR).join('<br>');
     out.push(isImageOnly(t) ? '<figure class="st-figure">' + html + '</figure>' : '<p>' + html + '</p>');
   }
