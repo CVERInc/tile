@@ -40,7 +40,7 @@ const logo = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.l
 const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
 ---
 {layerList.length ? (
-  <section class="st-hero st-hero-layered" data-media={media} data-parallax={parallax ? '' : undefined} data-logo-pos={logoPos} data-enter={enter ? '' : undefined}>
+  <section class="st-hero st-hero-layered" id={section.id} data-media={media} data-parallax={parallax ? '' : undefined} data-logo-pos={logoPos} data-enter={enter ? '' : undefined}>
     <div class="st-hero-stage" aria-hidden="true">
       {layerList.map((src, i) => (
         <img class="st-hero-layer" src={src} alt="" data-depth={i} loading="eager" decoding="async" />
@@ -56,7 +56,7 @@ const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm[
     </div>
   </section>
 ) : layout ? (
-  <section class="st-hero" data-media={media} data-layout={layout} style={style}>
+  <section class="st-hero" id={section.id} data-media={media} data-layout={layout} style={style}>
     {marqueeWords.length > 0 && (
       <div class="st-hero-marquee" aria-hidden="true">
         {marqueeWords.map((w, i) => (
@@ -85,7 +85,7 @@ const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm[
     )}
   </section>
 ) : (
-  <section class="st-hero" data-media={media} data-enter={enter ? '' : undefined} style={style}>
+  <section class="st-hero" id={section.id} data-media={media} data-enter={enter ? '' : undefined} style={style}>
     {enter && pm.bg && <div class="st-hero-bg" aria-hidden="true" style={`background-image:url(${pm.bg})`} />}
     <h1 set:html={inlineHtml(section.title)} />
     <Fragment set:html={bodyHtml(section.body)} />

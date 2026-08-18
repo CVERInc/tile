@@ -18,7 +18,7 @@ const { row, caption } = ctaButtonsHtml(pm.button, section.body, icon);
 // renderer so this seam can't drift; default keeps caption after the buttons.
 const captionFirst = ctaCaptionFirst(pm);
 ---
-<section class="st-cta">
+<section class="st-cta" id={section.id}>
   {eyebrow && <p class="st-cta-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <h2 set:html={inlineHtml(section.title)} />}
   {captionFirst && caption && <Fragment set:html={bodyHtml(caption)} />}

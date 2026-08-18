@@ -62,7 +62,7 @@ const method = (pm.method || 'post').toLowerCase();
 // "never claims a backend it lacks"; a pressable button was claiming one.
 const wired = Boolean(action);
 ---
-<section class="st-form-section">
+<section class="st-form-section" id={section.id}>
   <div class="st-form-head">
     {eyebrow && <p class="st-form-eyebrow" set:html={inlineHtml(eyebrow)} />}
     {section.title && <Title set:html={inlineHtml(section.title)} />}

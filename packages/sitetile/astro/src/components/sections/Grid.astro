@@ -57,7 +57,7 @@ const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label 
 const filterLabel = pm.filter ? (typeof pm.filter === 'object' ? pm.filter.label : String(pm.filter)) : null;
 const facets = filterLabel ? [...new Set(cells.map((c) => c.badge).filter(Boolean))] : [];
 ---
-<section class="st-grid" data-cols={pm.cols || ''} data-cards={imageCards ? 'image' : undefined} data-surface={surface}>
+<section class="st-grid" id={section.id} data-cols={pm.cols || ''} data-cards={imageCards ? 'image' : undefined} data-surface={surface}>
   {eyebrow && <p class="st-grid-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}

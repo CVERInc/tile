@@ -1328,8 +1328,48 @@ function renderSection(s) {
   }
 }
 
+/**
+ * Stamp a section's `id` onto the `<section>` tag renderSection just produced.
+ *
+ * 🔴 Done HERE, at the one seam, and not inside each branch of renderSection.
+ * There are fifteen-plus hand-written `<section ...>` strings in that function;
+ * editing each one is how three of them silently never get an id, and a missing
+ * anchor does not look broken — the link simply lands at the top of the page,
+ * which reads as "the citation is a bit vague" rather than as a defect.
+ *
+ * 🩸 The id itself has been computed since the parser was written
+ * (`id: 's' + (si+1) + …`, above) and NOTHING has ever read it: measured
+ * 2026-08-18 across this file — zero `.id` reads, zero destructures — and
+ * confirmed against live cver.net, whose entire homepage carried one `id`
+ * attribute, belonging to a locale banner. A value computed on every parse and
+ * thrown away every time.
+ *
+ * What it buys: deep links to a section, a table of contents that can point at
+ * one, and — the reason it is being done now — KAITO citing the PASSAGE it
+ * quoted instead of the page containing it. A reader who is handed an article
+ * and told the answer is in there somewhere has been given a worse version of
+ * the promise "verbatim, and cited".
+ */
+function withSectionId(html, id) {
+  if (!id) return html;
+  // 🔴 AFTER the class attribute, never before it, and this is measured rather
+  // than stylistic. `reef-mcp/src/inspect.js` reads a page's structure with
+  //     [...html.matchAll(/<section class="st-([a-z-]+)/g)]
+  // — a literal, position-dependent match. Putting `id` first turns that into
+  // zero matches on every page, so `inspect_page` would report a site as having
+  // no sections at all, silently, and inspect_page is the tool an agent uses to
+  // check its own work. Appended, this change is additive to every string
+  // matcher downstream: the existing render assertions in this file's own test
+  // suite pass untouched, which is the proof.
+  //
+  // Only the OPENING tag, only when it has no id already, and anchored to the
+  // very start so a nested `<section>` inside an embed body is never rewritten.
+  if (!/^<section\b/.test(html) || /^<section\b[^>]*\sid=/.test(html)) return html;
+  return html.replace(/^(<section class="[^"]*")/, '$1 id="' + escAttr(id) + '"');
+}
+
 function renderSiteToHtml(site) {
-  const sectionsHtml = (site.sections || []).map(renderSection).join('\n');
+  const sectionsHtml = (site.sections || []).map((s) => withSectionId(renderSection(s), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
   if (String((site.meta || {}).layout || '').trim() === 'sidebar') {
