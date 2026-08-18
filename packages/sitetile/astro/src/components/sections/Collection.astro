@@ -36,7 +36,7 @@ const isExternal = (h) => /^https?:\/\//.test(h || '');
 const tgt = (h) => isExternal(h) ? { target: '_blank', rel: 'noopener' } : {};
 const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Boolean);
 ---
-<section class="st-collection">
+<section class="st-collection" id={section.id}>
   <div class="st-collection-head">
     {/* 🩸 2026-07-06 (v2 gate /oss incident): inner wrapper mirrors the belt's own
         outer-padding/inner-max-width split (`.st-collection-belt`/`-belt-inner`), matching

@@ -19,7 +19,7 @@ const pm = parseParams(section.params);
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const links = tagcloudLinks(section.body);
 ---
-<section class="st-tagcloud">
+<section class="st-tagcloud" id={section.id}>
   {eyebrow && <p class="st-tagcloud-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   <div class="st-tag-flow">

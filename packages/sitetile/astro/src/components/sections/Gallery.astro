@@ -22,7 +22,7 @@ const cells = section.cells || [];
 // attribute is omitted entirely — every other gallery's markup stays byte-identical.
 const align = pm.align || undefined;
 ---
-<section class="st-gallery" data-cols={pm.cols || ''} data-align={align}>
+<section class="st-gallery" id={section.id} data-cols={pm.cols || ''} data-align={align}>
   {eyebrow && <p class="st-gallery-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <h2 set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}

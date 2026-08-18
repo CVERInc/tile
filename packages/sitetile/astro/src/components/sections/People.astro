@@ -23,7 +23,7 @@ const gid = (t) => 'people-' + slugify(t, 'g');
 const roles = (b) => String(b || '').split('·').map((x) => x.trim()).filter(Boolean);
 const ext = (h) => /^https?:\/\//.test(h);
 ---
-<section class="st-people" data-cols={pm.cols || ''} data-shape={shape}>
+<section class="st-people" id={section.id} data-cols={pm.cols || ''} data-shape={shape}>
   {eyebrow && <p class="st-people-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}

@@ -7,4 +7,4 @@ import { parseParams } from '@sitetile';
 const { section } = Astro.props;
 const cls = 'st-embed' + (parseParams(section.params).wide ? ' is-wide' : '');
 ---
-<section class={cls} set:html={section.body || ''} />
+<section class={cls} id={section.id} set:html={section.body || ''} />

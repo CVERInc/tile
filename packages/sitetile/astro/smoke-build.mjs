@@ -182,13 +182,27 @@ const checks = [
   ['hero background-image', () => /class="st-hero"[^>]*background-image:url\(/.test(html)],
   ['hero CTA anchor', () => /st-hero-cta"\s+href="\/checkup"/.test(html)],
   ['grid has 3 cells', () => occ('class="st-cell"') === 3],
-  ['grid cols=3', () => /class="st-grid"\s+data-cols="3"/.test(html)],
+  ['grid cols=3', () => /class="st-grid"[^>]*\sdata-cols="3"/.test(html)],
   // The label is the fixture's, so it moves WITH the fixture — what the assertion is actually
   // about is the shape around it: primary class, the declared href, the label verbatim, arrow span.
   ['cta button anchor (primary + arrow)', () =>
     /class="st-cta-btn st-cta-btn-primary" href="\/start">Come by<span class="st-cta-arrow"/.test(html)],
-  ['embed iframe verbatim', () => /<section class="st-embed"><iframe src="https:\/\/www\.youtube\.com\/embed\//.test(html)],
+  ['embed iframe verbatim', () => /<section class="st-embed"[^>]*><iframe src="https:\/\/www\.youtube\.com\/embed\//.test(html)],
   ['cssmd inline (bold span)', () => occ('class="st-b"') >= 1],
+  // 🩸 Section anchors, 2026-08-18. The id has been computed by `parseSite` since
+  // it was written and was never emitted — measured on live cver.net, whose whole
+  // homepage carried one id, belonging to a locale banner. It is emitted now so a
+  // KAITO citation can point at the PASSAGE it quoted rather than the page around
+  // it. This assertion is the only one that proves the attribute survives a real
+  // build; a miss is invisible in use, because the link still resolves and just
+  // lands at the top of the page.
+  ['every section carries an id', () => {
+    const tags = html.match(/<section\b[^>]*>/g) || [];
+    const anchored = tags.filter((t) => /\sid="s\d+/.test(t));
+    return tags.length > 0 && anchored.length === tags.length;
+  }],
+  ['section id is s<n>-<slug> and matches its own heading', () =>
+    /<section class="st-grid"[^>]*\sid="s\d+-[^"]+"/.test(html)],
   ['native View Transitions', () => html.includes('@view-transition { navigation: auto; }')],
   ['reef landmarks', () => html.includes('reef-header') && html.includes('reef-nav') && html.includes('reef-footer')],
   // 🩸 2026-08-08. This was `/hreflang="ja-JP"/` and had been red since 2026-08-06, when the
@@ -226,7 +240,7 @@ const checks = [
   ['nav: ARBITRARY depth — 3rd-level leaf renders', () => html.includes('rf-nav-subgroup') && html.includes('href="/games/puzzle"')],
   ['nav: default flyout CSS present (hover reveal)', () => allCss().replace(/\s+/g, '').includes('.rf-nav-group:hover>.rf-nav-sub')],
   // -- markers.md: graduated markers the home fixture can't reach --
-  ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero" data-media="logo"/.test(markers)],
+  ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero"[^>]*\sdata-media="logo"/.test(markers)],
   ['markers: block image → figure+img', () => /<figure class="st-figure">\s*<img class="st-img" src="\/img\/demo-logo\.gif" alt="Mark"/.test(markers)],
   ['markers: captioned whole-cell link with labeled chevron', () =>
     markers.includes('<a class="st-cell st-cell-link group" href="/products">') &&
