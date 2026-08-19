@@ -20,13 +20,17 @@
 // The list is DERIVED from the same globs the routers use, so it cannot claim a page that was
 // never built. That is the whole point of it: the previous defect on this site was an index
 // (hreflang) that asserted pages into existence, and a sitemap is the same promise at larger scale.
-import { allPosts, siteMeta, postUrl, blogBase, tagSlugMap } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, postUrl, blogBase, tagSlugMap } from '../lib/blog.mjs';
 import { contentUrls, tagUrls, canonicalPath } from '../lib/sitemap.mjs';
 import { isSiteFile } from '@sitetile';
 
 const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
-const posts = allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true }));
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
+// 🔴 The sitemap is the list we hand to crawlers, so it is where "unlisted" and "deleted"
+// are easiest to confuse. Dropping an unlisted post from here is the FADE (its URL still
+// answers 200 for anyone holding a link, and no 404 burns its history); emitting a 404 or a
+// noindex instead would be the other decision entirely, and that one is retire_page's.
+const posts = listedPosts(allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true })), meta);
 
 const esc = (s) => String(s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 

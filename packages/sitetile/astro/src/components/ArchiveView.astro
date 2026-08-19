@@ -17,11 +17,18 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 //   pageHref — (n) => url for this archive's page n (page 1 = base, 2+ = base/page/n)
 //   pageNum  — current page (1-based)
 import SiteLayout from '../layouts/SiteLayout.astro';
-import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy} from '../lib/blog.mjs';
+import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, listedPosts, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy} from '../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';
 
-const { posts, corpus, meta, title, heading, subhead, pageHref, pageNum = 1 } = Astro.props;
+const { posts: postsIn, corpus: corpusIn, meta, title, heading, subhead, pageHref, pageNum = 1 } = Astro.props;
+// Every archive route filters its own corpus before getting here; this is the backstop that makes
+// that a belt rather than the only strap. Five routes feed this one shell (/tag /category /author
+// /YYYY /YYYY/MM) and a sixth will be added by someone who reads the props doc above and not this
+// file — so the shell no site can bypass is where "no list shows an unlisted post" is enforced.
+// listedPosts is idempotent, so the routes that already filtered are unaffected.
+const posts = listedPosts(postsIn, meta);
+const corpus = listedPosts(corpusIn, meta);
 // 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
 // one destination, two affordances, and the chip was the one readers actually reach for
 // (chodaict: 「貼文tag點了沒有反應」). They're anchors now, to whichever archive really exists.
@@ -32,7 +39,7 @@ const catSet = routedCategories(corpus, meta);
 const sideCopy = sidebarCopy(meta);
 const {
   pagePosts, tags: pillTags, totalPages, currentPage, pager, showSidebar, dateFormat, readMore,
-} = buildIndexView(posts, meta, pageNum);
+} = buildIndexView(posts, meta, pageNum, corpus);
 const recentPosts = corpus.slice(0, 5);
 const archive = showSidebar ? groupByArchive(corpus) : [];
 ---
