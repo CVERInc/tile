@@ -21,6 +21,12 @@
 // build deployed. Cheap: allPosts() parses raw markdown and renders no HTML.
 import { allPosts, siteMeta, postUrl } from '../lib/blog.mjs';
 
+// 🔴 THE FULL CORPUS, DELIBERATELY — never listedPosts(). This file is the only one in the blog
+// that must ignore `blog-unlisted-categories`, and getting it wrong is invisible for exactly one
+// build: an unlisted post still renders today, so the site looks right, and it is the NEXT
+// incremental build that drops it — absent from this list means never fetched from the previous
+// deployment and never re-rendered, so the URL 404s. That is "unlisted" quietly becoming
+// "deleted", a build later, with nobody's change to blame.
 const posts = allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true }));
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
 

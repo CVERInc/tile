@@ -27,17 +27,21 @@ import { DEFAULT_LANG } from '../../../../packages/lingo/locale.mjs';
 // (`/search/label/活動`) alike; both decode to the same dir, and trailingSlash:'ignore'
 // + build.format:'directory' serve them with or without the trailing slash.
 import SiteLayout from '../../../../layouts/SiteLayout.astro';
-import { allPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
 export function getStaticPaths() {
-  const posts = allPosts(
+  const allPostsIn = allPosts(
     import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
   );
   const meta = siteMeta(
     import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
   );
+  // Unlisted posts are absent from this archive AND from the set of archives that exist at
+  // all: a term every one of whose posts is unlisted gets no route, so nothing can link to an
+  // empty one. The posts themselves keep their own URLs — see listedPosts in lib/blog.mjs.
+  const posts = listedPosts(allPostsIn, meta);
   // Opt-in gate: only a Blogger-descended site turns these on. Without the
   // flag this route generates ZERO pages — every other site is untouched no matter how
   // many tags their posts carry.

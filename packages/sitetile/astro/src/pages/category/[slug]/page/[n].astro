@@ -4,15 +4,19 @@
 // `blog-category-routes` is truthy AND `blog-page-size` is set.
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../packages/lingo/locale.mjs';
-import { allPosts, siteMeta, kvMap, archivePrefixes } from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes } from '../../../../lib/blog.mjs';
 
 export function getStaticPaths() {
-  const posts = allPosts(
+  const allPostsIn = allPosts(
     import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
   );
   const meta = siteMeta(
     import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
   );
+  // Unlisted posts are absent from this archive AND from the set of archives that exist at
+  // all: a term every one of whose posts is unlisted gets no route, so nothing can link to an
+  // empty one. The posts themselves keep their own URLs — see listedPosts in lib/blog.mjs.
+  const posts = listedPosts(allPostsIn, meta);
   const on = meta['blog-category-routes'] != null && String(meta['blog-category-routes']) !== 'false';
   if (!on) return [];
   const pageSize = Number(meta['blog-page-size']) || 0;

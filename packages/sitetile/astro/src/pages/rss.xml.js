@@ -5,12 +5,14 @@
 //
 // The document itself is built by lib/feed.mjs, which the /feed and /feeds/posts/default aliases
 // also call. One builder, so an alias can never serve a different feed from the canonical URL.
-import { allPosts, siteMeta, postUrl, blogBase, feedTitle, feedDescription } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, postUrl, blogBase, feedTitle, feedDescription } from '../lib/blog.mjs';
 import { toBcp47 } from '../packages/lingo/locale.mjs';
 import { feedXml, latestBuildDate, FEED_PATH } from '../lib/feed.mjs';
 
-const posts = allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true }));
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
+// A feed is a list, and the one that travels furthest: an item that reaches a reader's
+// inbox cannot be unsent. Unlisted posts never enter it.
+const posts = listedPosts(allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true })), meta);
 
 /** The channel + items for this site, ready for feedXml. Exported so the alias routes build from
  *  exactly this, and not from their own second reading of the same data. */
