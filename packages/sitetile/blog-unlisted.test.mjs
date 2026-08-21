@@ -79,6 +79,7 @@ const OFF = { ...META };
 delete OFF['blog-unlisted-categories'];
 
 const slugs = (ps) => ps.map((p) => p.slug);
+const cardSlugs = (cards) => cards.map((p) => String(p.href).replace(/\/+$/, '').split('/').pop());
 
 test('the config line parses, and an absent one is an empty set', () => {
   assert.deepEqual([...unlistedCategories(META)], ['深空眠']);
@@ -142,11 +143,11 @@ test('the index paginates what it will show, not what exists', () => {
 test("a post page's own sidebar offers no way into the unlisted set", () => {
   const meta = { ...META, 'blog-post-sidebar': 'left', 'blog-sidebar-related': 'true' };
   const side = buildPostSidebar(CORPUS, meta, CORPUS.find((p) => p.slug === 'staff-1'));
-  assert.deepEqual(slugs(side.recentPosts), ['staff-1', 'sesame', 'plain']);
-  assert.ok(!slugs(side.related).includes('both'));
+  assert.deepEqual(cardSlugs(side.recentPosts), ['staff-1', 'sesame', 'plain']);
+  assert.ok(!cardSlugs(side.related).includes('both'));
   // …and that holds on an UNLISTED post's page too, which still renders.
   const fromHidden = buildPostSidebar(CORPUS, meta, CORPUS.find((p) => p.slug === 'mine-1'));
-  assert.ok(!slugs(fromHidden.recentPosts).some((s) => ['mine-1', 'mine-2', 'both'].includes(s)));
+  assert.ok(!cardSlugs(fromHidden.recentPosts).some((s) => ['mine-1', 'mine-2', 'both'].includes(s)));
 });
 
 // ── structural: the two failure modes the unit tests above cannot see ─────────────────────────
