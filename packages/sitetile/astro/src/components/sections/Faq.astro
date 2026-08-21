@@ -19,7 +19,7 @@ const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label 
 const openAll = pm.open != null;
 const faqs = section.faqs || [];
 ---
-<section class="st-faq">
+<section class="st-faq" id={section.id}>
   <div class="st-faq-head">
     {eyebrow && <p class="st-faq-eyebrow" set:html={inlineHtml(eyebrow)} />}
     {section.title && <Title set:html={inlineHtml(section.title)} />}

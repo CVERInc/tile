@@ -25,7 +25,7 @@ const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label 
 // Card-family primitive, not a mixfairy-only hack. Absent → no DOM change (byte-identical elsewhere).
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 ---
-<section class="st-prose" data-align={align} data-ordered={ordered ? '' : undefined} data-surface={surface}>
+<section class="st-prose" id={section.id} data-align={align} data-ordered={ordered ? '' : undefined} data-surface={surface}>
   {eyebrow && <p class="st-prose-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   {ordered ? (

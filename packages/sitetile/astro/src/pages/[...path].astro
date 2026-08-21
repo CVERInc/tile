@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards } from '../lib/blog.mjs';
 import { toUrlLocale } from '../packages/lingo/locale.mjs';
 
 
@@ -42,6 +42,11 @@ export function getStaticPaths() {
   // …and only when there IS a blog: without this guard a site that set `blog-path: ''` but has
   // no blog would suppress its own home page in favour of a blog index that never gets emitted.
   const rootMount = blogInstalled(meta, posts) && blogBase(meta) === '';
+  // The LISTED corpus — everything except what `blog-unlisted-categories` holds back. Two corpora
+  // exist from here down and the difference is the feature: `posts` decides which pages get BUILT,
+  // `listed` decides which pages get LINKED. blogInstalled() above deliberately reads the full one,
+  // because a site whose every post is unlisted still has a blog.
+  const listed = listedPosts(posts, meta);
 
   // ── content pages ── (verbatim from the old pages/[...slug].astro)
   // Recursive glob so NESTED pages route faithfully: content/legal/terms.md → /legal/terms.
@@ -96,14 +101,17 @@ export function getStaticPaths() {
   if (!blogInstalled(meta, posts)) return paths;
 
   // index page 1 at the blog base (default /devlog → "devlog"; root mount → undefined).
-  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts, meta, pageNum: 1 } });
+  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: 1 } });
 
   // pager pages 2..N — only when blog-page-size is set; else zero extra routes (as before).
+  // 🔴 Counted over `listed`, not `posts`: buildIndexView paginates what it will actually show, so
+  // counting the full corpus here would emit trailing pages that render nothing and a pager whose
+  // last numbers lead to blank listings.
   const pageSize = Number(meta['blog-page-size']) || 0;
   if (pageSize) {
-    const totalPages = Math.ceil(posts.length / pageSize) || 1;
+    const totalPages = Math.ceil(listed.length / pageSize) || 1;
     for (let n = 2; n <= totalPages; n++) {
-      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts, meta, pageNum: n } });
+      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: n } });
     }
   }
 
@@ -128,10 +136,22 @@ export function getStaticPaths() {
   const onlyRaw = typeof process !== 'undefined' && process.env && process.env.REEF_ONLY_POSTS;
   const only = onlyRaw ? new Set(String(onlyRaw).split(',').map((s) => s.trim()).filter(Boolean)) : null;
 
-  posts.forEach((post, i) => {
+  // 🔑 `posts`, not `listed` — an unlisted post KEEPS ITS PAGE. That is the whole difference
+  // between this feature and deleting it, so the loop that emits post routes is the one place that
+  // must never see the filtered corpus.
+  //
+  // Its NEIGHBOURS are another matter: prev/older, keep-reading and related are links, and a
+  // listed post must not offer a door into the unlisted set. All of them are computed over
+  // `listed`, which also gives an unlisted post's own page a way back into the site rather than a
+  // dead end. An unlisted post has no position in that sequence, so it gets no prev/next at all —
+  // honest, and it means no listed post can be reached only through one.
+  const seq = new Map(listed.map((p, i) => [p.slug, i]));
+  posts.forEach((post) => {
     if (only && !only.has(post.slug)) return;
-    const newer = posts[i - 1] || null, older = posts[i + 1] || null;
-    const others = posts.filter((p) => p.slug !== post.slug);
+    const at = seq.has(post.slug) ? seq.get(post.slug) : -1;
+    const newer = at >= 0 ? (listed[at - 1] || null) : null;
+    const older = at >= 0 ? (listed[at + 1] || null) : null;
+    const others = listed.filter((p) => p.slug !== post.slug);
     const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
     const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
     const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
@@ -140,7 +160,7 @@ export function getStaticPaths() {
     // opt-in post sidebar view-model (blog-post-sidebar: left|right). null unless opted in →
     // PostView renders single-column exactly as before. Computed here where the FULL corpus +
     // site meta are in scope (recent/tags/archive/categories are corpus-derived, never fabricated).
-    const sidebar = buildPostSidebar(posts, meta, post);
+    const sidebar = buildPostSidebar(listed, meta, post);
     paths.push({
       params: { path: toPath(postUrl(post, meta)) },
       props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar },
@@ -159,7 +179,9 @@ export function getStaticPaths() {
     const pageSize = Number(meta['blog-page-size']) || 0;
     const years = new Map();          // "2013" → count
     const months = new Map();         // "2013/07" → count
-    for (const p of posts) {
+    // Over `listed`: a year archive exists because posts a reader can reach live in it. A month
+    // whose every post is unlisted would otherwise be a linked, empty page.
+    for (const p of listed) {
       const d = p.date || '';
       const y = d.slice(0, 4), mo = d.slice(5, 7);
       if (!/^\d{4}$/.test(y)) continue;
@@ -167,11 +189,11 @@ export function getStaticPaths() {
       if (/^\d{2}$/.test(mo)) months.set(`${y}/${mo}`, (months.get(`${y}/${mo}`) || 0) + 1);
     }
     const emit = (path, year, month, count) => {
-      paths.push({ params: { path }, props: { kind: 'date-archive', posts, meta, year, month, pageNum: 1 } });
+      paths.push({ params: { path }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: 1 } });
       if (pageSize) {
         const totalPages = Math.ceil(count / pageSize) || 1;
         for (let n = 2; n <= totalPages; n++) {
-          paths.push({ params: { path: `${path}/page/${n}` }, props: { kind: 'date-archive', posts, meta, year, month, pageNum: n } });
+          paths.push({ params: { path: `${path}/page/${n}` }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: n } });
         }
       }
     };
@@ -200,7 +222,29 @@ export function getStaticPaths() {
       if (m && m[1] === url) sub[path] = raw;
     }
     if (!Object.keys(sub).length) continue;                      // no translated posts for this locale
-    const postsL = allPosts(sub);
+    // 🩸 A translated post carries `title` and `pubDate` and NOTHING ELSE — measured on
+    // feelreef/site-sodaart, 2026-08-19: `ir/posts/*.md` has `categories:` on 517 of 585, and
+    // `ir/posts/zh-tw/*.md` and `ir/posts/en-us/*.md` have it on ZERO of 585 each. Slugs are
+    // identical across all three (585/585/585, no orphans), because these files ARE the same posts
+    // in another language.
+    //
+    // So taxonomy is a property of the POST, not of one rendering of it: a category-based rule
+    // applied per-locale is right on the default locale and silently inert everywhere else. Left
+    // alone, unlisting eight categories would have cleaned the Japanese NEWS and left all 291 posts
+    // sitting in /zh-tw/diary and /en-us/diary — two thirds broken, nothing red, and only visible
+    // to someone who reads the other language.
+    //
+    // Inherit by slug, and only where the translation states nothing itself (a locale that DOES
+    // carry its own categories keeps them). `tags` is deliberately NOT back-filled: it is computed
+    // in parsePost and drives tag clouds and archive routes, so touching it here would sprout
+    // routes on sites that never had them. This adds no URL to any site; it only lets the filter
+    // see what it is filtering.
+    const catsBySlug = new Map(posts.map((p) => [p.slug, p.categories || []]));
+    const postsL = allPosts(sub).map((p) => (
+      (p.categories && p.categories.length) || !catsBySlug.get(p.slug)?.length
+        ? p
+        : { ...p, categories: catsBySlug.get(p.slug) }
+    ));
     const base = blogBase(meta);
     const pat = (meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim()) || `${base}/%postname%`;
     const metaL = {
@@ -210,21 +254,28 @@ export function getStaticPaths() {
       'blog-path': `/${url}${base}`,
       'blog-url-pattern': `/${url}${pat}`,
     };
-    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: postsL, meta: metaL, pageNum: 1 } });
+    // Same two corpora as the default locale, resolved against THIS locale's meta so a locale
+    // `_site.md` may unlist more (or, by setting the key empty, less).
+    const listedL = listedPosts(postsL, metaL);
+    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1 } });
     const psL = Number(metaL['blog-page-size']) || 0;
     if (psL) {
-      const tpL = Math.ceil(postsL.length / psL) || 1;
-      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: postsL, meta: metaL, pageNum: n } });
+      const tpL = Math.ceil(listedL.length / psL) || 1;
+      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: n } });
     }
-    postsL.forEach((post, i) => {
-      const newer = postsL[i - 1] || null, older = postsL[i + 1] || null;
-      const others = postsL.filter((p) => p.slug !== post.slug);
+    // Every translated post keeps its page; every link off it stays in this locale's listed set.
+    const seqL = new Map(listedL.map((p, i) => [p.slug, i]));
+    postsL.forEach((post) => {
+      const at = seqL.has(post.slug) ? seqL.get(post.slug) : -1;
+      const newer = at >= 0 ? (listedL[at - 1] || null) : null;
+      const older = at >= 0 ? (listedL[at + 1] || null) : null;
+      const others = listedL.filter((p) => p.slug !== post.slug);
       const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
       const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
       const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
       const keepReadingCards = postCards(keepReading, metaL);
       const relatedCards = postCards(related, metaL);
-      const sidebar = buildPostSidebar(postsL, metaL, post);
+      const sidebar = buildPostSidebar(listedL, metaL, post);
       paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar } });
     });
   }

@@ -56,7 +56,7 @@ function arrowSvg(left = false) {
   return `<span class="signet-arrow${dir}" style="width:18px;height:18px;--signet-arrow-w:18px" aria-hidden="true"><span class="signet-arrow__tail"></span><svg class="signet-arrow__head" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="10 6 16 12 10 18"/></svg></span>`;
 }
 ---
-<section class="st-carousel" data-cols={pm.cols || ''}>
+<section class="st-carousel" id={section.id} data-cols={pm.cols || ''}>
   {(section.title || more || eyebrow) && (
     <div class="st-car-head">
       {eyebrow && <p class="st-carousel-eyebrow" set:html={inlineHtml(eyebrow)} />}

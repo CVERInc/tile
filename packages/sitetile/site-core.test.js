@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
 } from './site-core.js';
 
 let passed = 0;
@@ -125,7 +125,7 @@ test('render: each of the 5 types emits its st- section', () => {
   const html = renderSiteToHtml(parseSite(CANON));
   assert.ok(html.includes('<section class="st-hero"'), 'hero');
   assert.ok(html.includes('<section class="st-prose"'), 'prose');
-  assert.ok(html.includes('<section class="st-grid" data-cols="3"'), 'grid + cols');
+  assert.ok(/<section class="st-grid"[^>]*data-cols="3"/.test(html), 'grid + cols');
   assert.ok(html.includes('<section class="st-cta"'), 'cta');
   assert.ok(html.includes('<section class="st-embed"'), 'embed');
 });
@@ -184,6 +184,23 @@ test('button affordance: signet-arrow chosen by link kind, no heart/envelope gly
 });
 
 test('render: inline markdown goes through cssmd (bold → st-b span)', () => {
+
+// 🩸 CJK soft-wrap joining. Both halves earned on sodaart 2026-08-18, and both were invisible to
+// every other gate: the page looked fine, measured fine, and read wrong.
+test('render: CJK soft-wrapped lines join with NO space, and a ・ line starts its own line', () => {
+  const cjk = bodyHtml('SODAARTのLIVE2D制作は、\nあなたのキャラクターに命を吹き込む！');
+  assert.match(cjk, /制作は、あなたの/, 'no space may appear at a CJK soft wrap');
+  assert.doesNotMatch(cjk, /制作は、 あなたの/);
+
+  const bullets = bodyHtml('・台湾台北出身\n・全てのLive2D制作\n・イラストレーター');
+  assert.equal((bullets.match(/<br>/g) || []).length, 2, 'each ・ line is its own line');
+  assert.doesNotMatch(bullets, /出身 ・/, 'and they are not run together with a space');
+
+  // 🔴 CONTROLS — the three things that must NOT change.
+  assert.match(bodyHtml('Hello world\ncontinued here'), /Hello world continued here/);
+  assert.match(bodyHtml('日本語 and English\nmixed line'), /English mixed line/);   // Latin↔CJK keeps its gap
+  assert.match(bodyHtml('first line  \nsecond line'), /first line<br>second line/);  // hard break untouched
+});
   const html = renderSiteToHtml(parseSite(CANON));
   assert.ok(html.includes('class="st-b"'), 'bold should render via cssmd st-b');
 });
@@ -203,16 +220,19 @@ test('render: grid cells become st-cell with h3', () => {
 
 test('render: embed body passed through VERBATIM (no markdown processing)', () => {
   const html = renderSiteToHtml(parseSite(CANON));
-  assert.ok(html.includes('<section class="st-embed"><div class="custom">verbatim ## not a heading</div></section>'), 'embed verbatim');
+  // The claim is that the BODY is untouched, not that the tag serialises a
+  // particular way — `id` was added to every section on 2026-08-18 and an
+  // order-sensitive match would have read that as "the embed body changed".
+  assert.ok(/<section class="st-embed"[^>]*><div class="custom">verbatim ## not a heading<\/div><\/section>/.test(html), 'embed verbatim');
 });
 
 test('embed wide: `embed wide` modifier → .is-wide (full-bleed band); plain embed unchanged', () => {
   const wide = parseSite('## R\n%% sitetile: embed wide %%\n<div>x</div>').sections[0];
   assert.equal(wide.type, 'embed');
-  assert.ok(renderSiteToHtml(parseSite('## R\n%% sitetile: embed wide %%\n<div>x</div>'))
-    .includes('<section class="st-embed is-wide"><div>x</div></section>'), 'wide → is-wide');
-  assert.ok(renderSiteToHtml(parseSite('## R\n%% sitetile: embed %%\n<div>x</div>'))
-    .includes('<section class="st-embed"><div>x</div></section>'), 'plain unchanged');
+  assert.ok(/<section class="st-embed is-wide"[^>]*><div>x<\/div><\/section>/
+    .test(renderSiteToHtml(parseSite('## R\n%% sitetile: embed wide %%\n<div>x</div>'))), 'wide → is-wide');
+  assert.ok(/<section class="st-embed"[^>]*><div>x<\/div><\/section>/
+    .test(renderSiteToHtml(parseSite('## R\n%% sitetile: embed %%\n<div>x</div>'))), 'plain unchanged');
 });
 
 // ── block-image render (hero portraits / in-body figures / wikilink embeds) ─────────────────────
@@ -276,9 +296,9 @@ test('render: cell with href → <a class="st-cell st-cell-link"> + chevron; pla
 });
 
 test('render: hero media=logo → data-media="logo"; default → avatar', () => {
-  assert.ok(renderSiteToHtml(parseSite(GRAD)).includes('<section class="st-hero" data-media="logo"'), 'logo variant');
+  assert.ok(/<section class="st-hero"[^>]*data-media="logo"/.test(renderSiteToHtml(parseSite(GRAD))), 'logo variant');
   const def = renderSiteToHtml(parseSite('---\nsitetile-page: t\n---\n\n## H\n%% sitetile: hero %%\nhi\n'));
-  assert.ok(def.includes('<section class="st-hero" data-media="avatar"'), 'default avatar');
+  assert.ok(/<section class="st-hero"[^>]*data-media="avatar"/.test(def), 'default avatar');
 });
 
 // ── base-content block rendering (2026-06-24): lists / blockquote / fenced code / GFM table ──────

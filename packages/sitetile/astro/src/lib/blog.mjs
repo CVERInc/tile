@@ -37,13 +37,36 @@ function fmList(v) {
 // Doctrine forbids shipping dead links, so the count+name still show (real, harvested) but
 // without an anchor until a re-harvest supplies real category pages. Returns
 // [{ label, count, href }] (href '' → non-clickable), or [] when unset.
-export function blogCategories(meta) {
+// `listed` (optional) is the site's LISTED corpus — pass it whenever unlisting may be in play.
+export function blogCategories(meta, listed) {
   const raw = fmStr(meta['blog-categories']);
   if (!raw) return [];
-  return raw.split('||').map((entry) => {
+  const entries = raw.split('||').map((entry) => {
     const [label, count, href] = entry.split('|').map((s) => s.trim());
     return label ? { label, count: count || '', href: href || '' } : null;
   }).filter(Boolean);
+  const hidden = unlistedCategories(meta);
+  if (!hidden.size) return entries;   // every site that unlists nothing leaves here, untouched.
+  // 🔴 These counts are AUTHORED (see above) — harvested from live so they match what a reader saw
+  // there. Unlisting falsifies them all at once, and not just the hidden rows: sodaart's
+  // `☆ STAFF|224` would keep promising 224 posts while 14 of them are no longer reachable. An
+  // authored number that has stopped measuring what it names is precisely what this site's own
+  // _site.md already ruled on (「兩個數字對不上比顯示過期的舊承諾更誠實」). So the moment a site
+  // unlists anything, this rail counts the corpus instead of quoting the harvest.
+  const kept = [];
+  for (const e of entries) {
+    const slug = categoryHrefSlug(e.href, meta);
+    if (hidden.has(slug)) continue;
+    if (!Array.isArray(listed)) { kept.push(e); continue; }
+    if (slug == null) { kept.push({ ...e, count: e.count === '' ? '' : String(listed.length) }); continue; }
+    const n = listed.filter((p) => (p.categories || []).includes(slug)).length;
+    // A category every one of whose posts is unlisted gets no archive route (routedCategories
+    // reads the LISTED corpus), so keeping its row would ship exactly the dangling category link
+    // this function's header says doctrine forbids.
+    if (n === 0) continue;
+    kept.push({ ...e, count: e.count === '' ? '' : String(n) });
+  }
+  return kept;
 }
 
 // capExcerpt: truncate joined body text to a char budget, appending live's "[…]" overflow
@@ -165,6 +188,58 @@ export function allPosts(glob, excerptMax) {
     posts.push(parsePost(slug, raw, excerptMax)); // undefined → parsePost default 180 (unchanged)
   }
   return posts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+// ── Unlisting: a post that keeps its URL but leaves every list ───────────────────────────────
+//
+// `blog-unlisted-categories: <slug>, <slug>` — the category slugs this site keeps OUT of every
+// list it GENERATES: the blog index and its pager, the term/date/author archives, RSS, the
+// sitemap, the search index, the category rail, and every corpus-derived sidebar (recent posts /
+// tag cloud / year archive / related).
+//
+// 🔴 IT IS NOT A DRAFT STATE, and that difference is the whole reason it exists. sodaart asked to
+// take eight VTubers' 291 posts out of NEWS (chodaict, 2026-08-19). Every one of them has been
+// published for years and carries a live, indexed URL from the Wix era, so a draft flag would 404
+// all 291 — the exact cost retirePage's header already names ("removing a live, indexed URL makes
+// a 404 and burns its search weight"). Here the post PAGE still renders and its URL still answers
+// 200: a reader holding a link keeps it, search engines fade it out on their own, and deleting the
+// config line brings every post back because no post file was ever touched. A real draft state —
+// for a post that never had a URL — is a different feature and stays unbuilt.
+//
+// 🔴 A post is unlisted when ANY of its categories is unlisted, not only when all of them are.
+// 14 of sodaart's 291 also carry `staff`, a category being KEPT, and "hide this person's posts" is
+// not satisfied by a rule that leaks them out through the company archive. The per-post escape
+// hatch is the one that already exists: take that category off that post's frontmatter.
+export function unlistedCategories(meta) {
+  return new Set(fmList((meta || {})['blog-unlisted-categories']));
+}
+
+// The listed corpus: `posts` minus anything unlisted. Idempotent, so a surface that filters and
+// then hands the result to a helper that filters again is unharmed — which is deliberate, because
+// the alternative is fourteen call sites each of which is silently wrong if it forgets.
+//
+// 🔴 TWO CALLERS MUST NEVER USE THIS, and both would turn "unlisted" into "deleted":
+//   · the post's own route in pages/[...path].astro — filtering it 404s the very URL this feature
+//     exists to keep alive.
+//   · pages/reef-posts.json.js — that file tells the NEXT incremental build which pages the last
+//     deployment still holds. A page missing from it is neither fetched nor re-rendered, so an
+//     unlisted post would vanish from the deployment entirely, one build later, with nothing red.
+export function listedPosts(posts, meta) {
+  const hidden = unlistedCategories(meta);
+  if (!hidden.size) return posts || [];
+  return (posts || []).filter((p) => !(p.categories || []).some((c) => hidden.has(c)));
+}
+
+// The category slug a rail entry's href points at — `/category/深空眠/` → `深空眠` — or null when
+// the href is not a category archive at all (the rail's own `All Posts|585|/diary` row). Keyed off
+// the site's own `blog-category-base`, so a site publishing archives elsewhere still matches.
+function categoryHrefSlug(href, meta) {
+  const base = String((meta || {})['blog-category-base'] || '/category').replace(/\/+$/, '');
+  const path = String(href || '').split(/[?#]/)[0].replace(/\/+$/, '');
+  if (!path.startsWith(base + '/')) return null;
+  const seg = path.slice(base.length + 1);
+  if (!seg || seg.includes('/')) return null;
+  try { return decodeURIComponent(seg); } catch { return seg; }
 }
 
 // loadSite: the OPT-IN site-config layer (SPEC-site-data-model.md). A `content/_site.md`
@@ -398,7 +473,15 @@ export function pagerItems(current, total) {
 // so both routes — and a single unpaginated page — stay in lockstep instead of
 // two copies of pagination/sidebar/tag logic drifting apart. `pageNum` is 1-based;
 // out-of-range values clamp into range.
-export function buildIndexView(posts, meta, pageNum = 1) {
+// `corpusIn` (optional) is the WHOLE site's posts when `allPostsIn` is only a slice of them — an
+// archive route lists one term but its rail still describes the site. Defaults to the same corpus,
+// so the blog index (where the two ARE the same) is unchanged.
+export function buildIndexView(allPostsIn, meta, pageNum = 1, corpusIn) {
+  // Filter HERE, not only at the route: every number this function returns (page count, pager,
+  // recent posts, tag cloud, year archive) is derived from the corpus it is handed, so a caller
+  // that forgets would produce a correct-looking page whose pager runs off the end.
+  const posts = listedPosts(allPostsIn, meta);
+  const corpus = corpusIn === undefined ? posts : listedPosts(corpusIn, meta);
   const pageSize = Number(meta['blog-page-size']) || 0;
   const pages = pageSize > 0 ? paginate(posts, pageSize) : [posts];
   const totalPages = pages.length;
@@ -421,8 +504,10 @@ export function buildIndexView(posts, meta, pageNum = 1) {
   // site can show ONLY the category list — a real Wix blog sidebar is exactly that, with no
   // recent/tagcloud/archive. Either turns the sidebar column on.
   const archiveSidebar = meta['blog-sidebar'] != null && String(meta['blog-sidebar']) !== 'false';
+  // 🔴 `corpus`, not `posts`. The rail answers "what does this site hold", the list answers "what
+  // is on this page" — and on an archive route those are different questions with different sizes.
   const categories = (meta['blog-category-sidebar'] != null && String(meta['blog-category-sidebar']) !== 'false')
-    ? blogCategories(meta) : [];
+    ? blogCategories(meta, corpus) : [];
   const showSidebar = archiveSidebar || categories.length > 0;
   const recentPosts = posts.slice(0, 5).map(capPost);
   const archive = archiveSidebar ? groupByArchive(posts) : [];
@@ -475,12 +560,16 @@ export function tagFontSize(count, counts) {
 // whenever the site opts into `blog-search: true` (blogSearchOn()); absent, the box doesn't
 // render at all rather than sitting there non-functional (no-phantom-features). `side` (left|right)
 // only picks which grid column the aside occupies (theme CSS).
-export function buildPostSidebar(posts, meta, current) {
+export function buildPostSidebar(allPostsIn, meta, current) {
+  // 🔑 This sidebar renders on an UNLISTED post's own page too — that page stays alive on purpose.
+  // What it must not do is hand the reader a way back into the unlisted set, so its recent list,
+  // tag cloud, archive and related links are all built from the listed corpus.
+  const posts = listedPosts(allPostsIn, meta);
   const side = String((meta && meta['blog-post-sidebar']) || '').trim().toLowerCase();
   if (side !== 'left' && side !== 'right') return null; // opt-in gate → PostView unchanged
   const archiveSidebar = meta['blog-sidebar'] != null && String(meta['blog-sidebar']) !== 'false';
   const categories = (meta['blog-category-sidebar'] != null && String(meta['blog-category-sidebar']) !== 'false')
-    ? blogCategories(meta) : [];
+    ? blogCategories(meta, posts) : [];
   const sidebarPost = (p) => ({ title: p.title, href: postUrl(p, meta) });
   const recentPosts = posts.slice(0, 5).map(sidebarPost);
   // corpus-wide tag cloud (capped so a large blog's cloud stays a cloud, not a wall). First-seen
@@ -566,14 +655,42 @@ export function kvMap(val) {
 // clouds/chips link to the real `/tag/<slug>/` server page (source-faithful, and consistent with
 // links elsewhere); otherwise they fall back to the `?tag=` client-side filter on the blog index
 // (the pre-archive behaviour — a site with no /tag/ pages is unchanged).
-export function tagHref(meta, tag, slugMap) {
+export function tagHref(meta, tag, slugMap, catSet) {
+  // A tag that IS a real category slug goes to its category archive. On sites where per-post
+  // `categories:` is the only axis (tags fall back to it — see parsePost), the /category/<slug>/
+  // page is the destination the source itself published; sending those chips to the ?tag= filter
+  // instead would be a worse answer than the one already on disk. Gated on catSet so it can only
+  // fire for slugs that really got a route emitted — same "never link a page that isn't there"
+  // rule blogCategories() follows with its empty hrefs.
+  if (catSet && catSet.has(tag)) {
+    const base = String((meta && meta['blog-category-base']) || '/category').replace(/\/$/, '');
+    return `${base}/${tag}/`;
+  }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
     const base = String((meta && meta['blog-tag-base']) || '/tag').replace(/\/$/, '');
     const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
     return `${base}/${slug}/`;
   }
+  const label = meta && meta['blog-label-routes'] != null && String(meta['blog-label-routes']) !== 'false';
+  if (label) return `/search/label/${tag}/`;
   return `${blogBase(meta)}?tag=${encodeURIComponent(tag)}`;
+}
+
+// routedCategories: the set of category slugs that /category/<slug>/ really emitted a page for —
+// i.e. `blog-category-routes` is on AND the slug occurs in the corpus. Exactly the condition
+// category/[slug]/index.astro's getStaticPaths uses, kept in one place so a chip can't link to a
+// category page that route decided not to build. Empty Set when the routes are off.
+export function routedCategories(posts, meta) {
+  const on = meta && meta['blog-category-routes'] != null && String(meta['blog-category-routes']) !== 'false';
+  if (!on) return new Set();
+  // Belt and braces: the callers pass the listed corpus, but this is the function that decides
+  // whether a tag chip becomes an <a>, and a chip pointing at a route getStaticPaths never emitted
+  // is a dead link on a live page. Re-checking here costs nothing and cannot be forgotten.
+  const hidden = unlistedCategories(meta);
+  const out = new Set();
+  for (const p of posts || []) for (const c of (p.categories || [])) if (c && !hidden.has(c)) out.add(c);
+  return out;
 }
 
 // postUrl: the source-faithful URL for one post. Priority:
@@ -655,5 +772,4 @@ export function searchIndex(posts, meta) {
 }
 
 export { fmStr };
-
 
