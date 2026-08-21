@@ -10,7 +10,7 @@ import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase } from '../lib/blog.mjs';
 
-const { post, meta, newer, older, keepReading, related } = Astro.props;
+const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
 // the three-span badge layout is index-cards-only (see blog.mjs fmtDate()).
 const dateFormat = meta['blog-date-format'];
@@ -132,13 +132,13 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
       )}
     </nav>
   )}
-  {!meta['blog-related'] && keepReading.length > 0 && (
+  {!meta['blog-related'] && keepReadingCards.length > 0 && (
     <section class="bl-keep-reading" aria-label="Related posts">
       <h2>{keepReadingLabel}</h2>
       <ul>
-        {keepReading.map((p) => (
+        {keepReadingCards.map((p) => (
           <li>
-            <a href={postUrl(p, meta)}>
+              <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
               {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
               <h3>{p.title}</h3>
@@ -149,13 +149,13 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
       </ul>
     </section>
   )}
-  {related.length > 0 && (
+  {relatedCards.length > 0 && (
     <section class="bl-keep-reading bl-related" aria-label="Related posts">
       <h2>{relatedLabel}</h2>
       <ul>
-        {related.map((p) => (
+        {relatedCards.map((p) => (
           <li>
-            <a href={postUrl(p, meta)}>
+              <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
               {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
               <h3>{p.title}</h3>

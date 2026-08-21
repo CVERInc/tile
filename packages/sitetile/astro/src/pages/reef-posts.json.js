@@ -19,12 +19,14 @@
 //
 // Emitted on EVERY build, incremental or not, because the next build's fetcher reads the one this
 // build deployed. Cheap: allPosts() parses raw markdown and renders no HTML.
-import { allPosts, siteMeta, postUrl } from '../lib/blog.mjs';
+import { allPosts, siteMeta } from '../lib/blog.mjs';
+import { buildReefPostsBody } from '../lib/public-artifacts.mjs';
 
 const posts = allPosts(import.meta.glob('../../blog/*.md', { query: '?raw', import: 'default', eager: true }));
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
 
 export function GET() {
-  const body = JSON.stringify(posts.map((p) => ({ slug: p.slug, url: postUrl(p, meta) })));
-  return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+  return new Response(buildReefPostsBody(posts, meta), {
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
 }

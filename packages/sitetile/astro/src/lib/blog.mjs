@@ -28,11 +28,11 @@ function fmList(v) {
 // ☆ STAFF（n）/ …` linking to /blog/categories/<x>). Read from a single `blog-categories` meta
 // line, NOT grouped from the post corpus: a Wix capture carries no per-post category in its IR
 // (the capture grabs title/date/hero/body, and Wix post pages expose no category data-hook), so grouping
-// would UNDERCOUNT / invent membership. Instead the site authors the real published counts
+// would UNDERCOUNT / invent category counts. Instead the site authors the real published counts
 // verbatim from live's own category menu — same "authored-from-live, never fabricated"
 // discipline as footerWidgets. Format: `label|count|href` entries joined by ` || `; count
 // AND href both optional. An entry with an EMPTY href (`STAFF|211|`) renders as a plain,
-// NON-CLICKABLE label — deliberate: when per-post category membership isn't recoverable from the
+// NON-CLICKABLE label — deliberate: when per-post category data isn't recoverable from the
 // snapshot, linking those categories would dangle (a broken /category/<x> page).
 // Doctrine forbids shipping dead links, so the count+name still show (real, harvested) but
 // without an anchor until a re-harvest supplies real category pages. Returns
@@ -111,6 +111,8 @@ export function parsePost(slug, raw, excerptMax = 180) {
     title: fmStr(meta.title) || effectiveSlug,
     description: fmStr(meta.description),
     date: fmStr(meta.pubDate || meta.date),
+    // access marker, read by isPrivatePost() below. '' for a post that does not set it.
+    visibility: fmStr(meta.visibility),
     tags: fmList(meta.tags || meta.categories),
     // WP category slugs as a DISTINCT axis from tags (a post lives in categories AND carries tags).
     // Powers /category/<slug>/ archives without polluting the tag cloud. Empty on sites that don't
@@ -122,6 +124,36 @@ export function parsePost(slug, raw, excerptMax = 180) {
     excerpt,
     excerptText: fullText, // full join for per-site excerpt re-capping in buildIndexView
   };
+}
+
+// `visibility: private` is the ONE value that marks a post private. Every other value --
+// absent, empty, or a key an imported corpus arrived carrying from its old platform -- reads as
+// public, because gating on an unrecognised value would change what those sites already serve.
+export function isPrivatePost(post) {
+  return !!post && String(post.visibility || '').trim() === 'private';
+}
+
+// The same post with its non-public parts removed: body, description, excerpt.
+// Title, date, slug, tags and featured image stay, so a listing still shows the post exists.
+// A public post comes back as the SAME object, so a corpus with no private post keeps its
+// object identity and not just its values.
+export function publicFacing(post) {
+  if (!isPrivatePost(post)) return post;
+  return { ...post, body: '', description: '', excerpt: '', excerptText: '' };
+}
+
+export function publicFacingPosts(posts) {
+  return (posts || []).map((p) => publicFacing(p));
+}
+
+export function postCards(posts, meta) {
+  return publicFacingPosts(posts).map((p) => ({
+    title: p.title,
+    href: postUrl(p, meta),
+    date: p.date,
+    image: p.image,
+    description: p.description,
+  }));
 }
 
 // Read every post from a glob of raw markdown (`import.meta.glob('../../blog/*.md',
@@ -375,8 +407,12 @@ export function buildIndexView(posts, meta, pageNum = 1) {
   // full excerptText. OPT-IN — absent/0 → capPost is identity, so the excerpt stays exactly what
   // parsePost produced (default 180) and existing cards are byte-for-byte unchanged.
   const excerptChars = Number(meta['blog-excerpt-chars']) || 0;
-  const capPost = (p) => (excerptChars > 0 && p.excerptText != null)
-    ? { ...p, excerpt: capExcerpt(p.excerptText, excerptChars) } : p;
+  // publicFacing first: a private post reaches a card with no excerpt left to cap.
+  const capPost = (post) => {
+    const p = publicFacing(post);
+    return (excerptChars > 0 && p.excerptText != null)
+      ? { ...p, excerpt: capExcerpt(p.excerptText, excerptChars) } : p;
+  };
   const pagePosts = (pages[currentPage - 1] || []).map(capPost);
   const tags = [];
   for (const p of pagePosts) for (const t of p.tags) if (!tags.includes(t)) tags.push(t);
@@ -400,7 +436,7 @@ export function buildIndexView(posts, meta, pageNum = 1) {
 
 // corpusTagCounts: { tagName → how many posts carry it } over the WHOLE corpus (not one page).
 // Powers the tag-cloud weighting so a popular tag renders bigger — a real, harvested signal, not
-// an invented weight (the count IS the membership).
+// an invented weight (the count is the number of posts carrying the tag).
 export function corpusTagCounts(posts) {
   const c = {};
   for (const p of posts) for (const t of p.tags) c[t] = (c[t] || 0) + 1;
@@ -445,7 +481,8 @@ export function buildPostSidebar(posts, meta, current) {
   const archiveSidebar = meta['blog-sidebar'] != null && String(meta['blog-sidebar']) !== 'false';
   const categories = (meta['blog-category-sidebar'] != null && String(meta['blog-category-sidebar']) !== 'false')
     ? blogCategories(meta) : [];
-  const recentPosts = posts.slice(0, 5);
+  const sidebarPost = (p) => ({ title: p.title, href: postUrl(p, meta) });
+  const recentPosts = posts.slice(0, 5).map(sidebarPost);
   // corpus-wide tag cloud (capped so a large blog's cloud stays a cloud, not a wall). First-seen
   // order over the newest-first corpus — real tags, no invented weights.
   const tags = [];
@@ -453,9 +490,10 @@ export function buildPostSidebar(posts, meta, current) {
   const wantRelated = String(meta['blog-sidebar-related'] || '').trim() === 'true';
   const relatedN = Number(meta['blog-related']) || 5;
   const cur = current || {};
-  const related = (wantRelated && cur.tags && cur.tags.length)
+  const relatedPosts = (wantRelated && cur.tags && cur.tags.length)
     ? posts.filter((p) => p.slug !== cur.slug && p.tags.some((t) => cur.tags.includes(t))).slice(0, relatedN)
     : [];
+  const related = relatedPosts.map(sidebarPost);
   const archive = archiveSidebar ? groupByArchive(posts) : [];
   return { side, archiveSidebar, categories, recentPosts, tags, tagCounts: corpusTagCounts(posts), related, archive };
 }
@@ -607,7 +645,9 @@ export function indexUrl(meta, n = 1) {
 export function searchIndex(posts, meta) {
   const withBody = meta != null && meta['blog-search-body'] != null && String(meta['blog-search-body']).trim() === 'true';
   const bodyChars = Number(meta && meta['blog-search-excerpt-chars']) > 0 ? Number(meta['blog-search-excerpt-chars']) : 80;
-  return (posts || []).map((p) => {
+  return (posts || []).map((post) => {
+    // This file is served to anyone who asks for it, so `e` is built from the public-facing post.
+    const p = publicFacing(post);
     const row = { t: p.title, u: postUrl(p, meta), g: p.tags || [], d: p.date || '', i: p.image || '' };
     if (withBody) row.e = String(p.excerptText || '').slice(0, bodyChars);
     return row;
@@ -615,8 +655,5 @@ export function searchIndex(posts, meta) {
 }
 
 export { fmStr };
-
-
-
 
 
