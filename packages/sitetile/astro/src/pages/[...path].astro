@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar } from '../lib/blog.mjs';
+import { allPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards } from '../lib/blog.mjs';
 import { toUrlLocale } from '../packages/lingo/locale.mjs';
 
 
@@ -135,13 +135,15 @@ export function getStaticPaths() {
     const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
     const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
     const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
+    const keepReadingCards = postCards(keepReading, meta);
+    const relatedCards = postCards(related, meta);
     // opt-in post sidebar view-model (blog-post-sidebar: left|right). null unless opted in →
     // PostView renders single-column exactly as before. Computed here where the FULL corpus +
     // site meta are in scope (recent/tags/archive/categories are corpus-derived, never fabricated).
     const sidebar = buildPostSidebar(posts, meta, post);
     paths.push({
       params: { path: toPath(postUrl(post, meta)) },
-      props: { kind: 'post', post, meta, newer, older, keepReading, related, sidebar },
+      props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar },
     });
   });
 
@@ -220,8 +222,10 @@ export function getStaticPaths() {
       const tagged = others.filter((p) => p.tags.some((t) => post.tags.includes(t)));
       const keepReading = [...tagged, ...others.filter((p) => !tagged.includes(p))].slice(0, 3);
       const related = relatedN > 0 ? tagged.slice(0, relatedN) : [];
+      const keepReadingCards = postCards(keepReading, metaL);
+      const relatedCards = postCards(related, metaL);
       const sidebar = buildPostSidebar(postsL, metaL, post);
-      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReading, related, sidebar } });
+      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar } });
     });
   }
 

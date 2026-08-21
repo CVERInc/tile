@@ -10,9 +10,9 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // post's rail and its index's rail read as one thing; content is corpus-derived (buildPostSidebar).
 import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from './PostArticle.astro';
-import { postUrl, blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
+import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
 
-const { post, meta, newer, older, keepReading, related, sidebar = null } = Astro.props;
+const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null } = Astro.props;
 // Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
 // These strings used to be Chinese literals inline in this file AND in two sibling
 // components, so a non-CJK tenant read 最新文章 and a fix could land in one of three copies.
@@ -62,7 +62,7 @@ const headMeta = {
 <SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={meta.lang || DEFAULT_LANG} meta={headMeta}>
   {sidebar ? (
     <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
-      <PostArticle post={post} meta={meta} newer={newer} older={older} keepReading={keepReading} related={related} />
+      <PostArticle post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
       <aside class="bl-sidebar bl-post-sidebar">
         {sidebar.categories.length > 0 && (
           <div class="bl-side-widget bl-side-categories">
@@ -85,13 +85,13 @@ const headMeta = {
         {sidebar.archiveSidebar && (
           <div class="bl-side-widget bl-side-recent">
             <h3>{sideCopy.recent}</h3>
-            <ul>{sidebar.recentPosts.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+            <ul>{sidebar.recentPosts.map((p) => <li><a href={p.href}>{p.title}</a></li>)}</ul>
           </div>
         )}
         {sidebar.related.length > 0 && (
           <div class="bl-side-widget bl-side-recent bl-side-related">
             <h3>{relatedLabel}</h3>
-            <ul>{sidebar.related.map((p) => <li><a href={postUrl(p, meta)}>{p.title}</a></li>)}</ul>
+            <ul>{sidebar.related.map((p) => <li><a href={p.href}>{p.title}</a></li>)}</ul>
           </div>
         )}
         {sidebar.archiveSidebar && sidebar.tags.length > 0 && (
@@ -124,7 +124,7 @@ const headMeta = {
       </aside>
     </div>
   ) : (
-    <PostArticle post={post} meta={meta} newer={newer} older={older} keepReading={keepReading} related={related} />
+    <PostArticle post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
   )}
   {/* Post-end donate CTA (opt-in `blog-post-cta`) — a single per-site card (e.g. a
       "贊助成為 VIP 會員"), reusing the same .st-cta belt so it inherits the theme's belt look. */}

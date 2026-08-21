@@ -64,7 +64,7 @@ test('the search index endpoint stays, and stays honest', () => {
   // It always exists and serves [] when off — a tiny inert file, which is fine. The page was the
   // problem, not the endpoint: an empty JSON file is not a URL anybody lands on from a search engine.
   const idx = readFileSync(join(HERE, 'astro/src/pages/search-index.json.js'), 'utf8');
-  assert.match(idx, /blogSearchOn\(meta\) \? JSON\.stringify\(searchIndex\(posts, meta\)\) : '\[\]'/);
+  assert.match(idx, /buildSearchIndexBody\(posts, meta\)/);
 });
 
 test('no other route under search/ is unconditionally static', () => {
