@@ -860,6 +860,11 @@ html[data-search-open] .st-search { display: block; }
    negative offset is exactly that gap (100% of the containing block minus the full viewport). */
 .rf-ha-drawer[data-side="right"] { right: calc(100% - 100vw); transform: translateX(100%); }
 .rf-ha-drawer[data-side="left"] { left: calc(100% - 100vw); transform: translateX(-100%); }
+/* preload guard (paired with the inline unlock script at the top of <body>): the drawer's
+   transition above is unconditional from first paint, so any transient transform recompute
+   during initial layout settling gets animated into a visible pop even though the logical
+   open/closed state never actually changed. Held off for the page's first two frames. */
+html.rf-preload .rf-ha-drawer, html.rf-preload .rf-ha-overlay { transition: none !important; }
 .rf-ha-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--gd-border); }
 .rf-ha-drawer-title { font-weight: 700; }
 .rf-ha-drawer-close { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; cursor: pointer; border-radius: 999px; color: var(--gd-muted); }

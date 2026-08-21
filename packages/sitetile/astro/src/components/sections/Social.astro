@@ -18,7 +18,7 @@ const pm = parseParams(section.params);
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const sp = socialParts(section.body);
 ---
-<section class="st-social">
+<section class="st-social" id={section.id}>
   {eyebrow && <p class="st-social-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   {sp.caption && <Fragment set:html={bodyHtml(sp.caption)} />}

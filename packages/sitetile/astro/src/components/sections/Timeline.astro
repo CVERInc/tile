@@ -24,7 +24,7 @@ const zigzag = pm.style === 'zigzag';
 // adjacent grid inside one continuous off-white belt (mixfairy steps under the features belt).
 const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
 ---
-<section class="st-timeline" data-style={zigzag ? 'zigzag' : undefined} data-surface={surface}>
+<section class="st-timeline" id={section.id} data-style={zigzag ? 'zigzag' : undefined} data-surface={surface}>
   {eyebrow && <p class="st-timeline-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}
