@@ -48,6 +48,7 @@ const {
   publicFacing,
   publicFacingPosts,
   isPrivatePost,
+  gatedPostPaths,
   inheritLocalePrivacy,
 } = blog;
 
@@ -110,6 +111,31 @@ const META = {
 };
 
 const hits = (haystack) => haystack.split(SENTINEL).length - 1;
+
+test('gated URL manifest follows the renderer URL builder across source-faithful shapes', () => {
+  const posts = allPosts({
+    '../../blog/default-one.md': gated('private'),
+    '../../blog/pattern-one.md': gated('private'),
+    '../../blog/permalink-one.md': gated('private').replace('visibility: private', 'visibility: private\npermalink: /archive/deep/permalink-one'),
+    '../../blog/public-one.md': gated('public'),
+  });
+  assert.deepEqual(
+    gatedPostPaths(posts, { 'blog-path': '/devlog' }),
+    ['/devlog/default-one', '/devlog/pattern-one', '/archive/deep/permalink-one'],
+  );
+  assert.deepEqual(
+    gatedPostPaths(posts, { 'blog-url-pattern': '/%year%/%monthnum%/%postname%' }),
+    ['/2026/08/default-one', '/2026/08/pattern-one', '/archive/deep/permalink-one'],
+  );
+
+  const translated = allPosts({ '../../blog/zh-tw/default-one.md': gated('public') });
+  const inherited = translated.map((post) => inheritLocalePrivacy(post, posts.find((p) => p.slug === 'default-one')));
+  assert.deepEqual(
+    gatedPostPaths(inherited, { 'blog-path': '/zh-tw/devlog', 'blog-url-pattern': '/zh-tw/devlog/%postname%' }),
+    ['/zh-tw/devlog/default-one'],
+  );
+  assert.deepEqual(gatedPostPaths(posts.filter((p) => !isPrivatePost(p)), { 'blog-path': '/devlog' }), []);
+});
 
 // ---- the three public artifacts -------------------------------------------------------------
 

@@ -161,6 +161,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   const effectiveSlug = fits ? fmSlug : slug;
   return {
     slug: effectiveSlug,
+    ...(fmStr(meta.permalink) ? { permalink: fmStr(meta.permalink) } : {}),
     title: fmStr(meta.title) || effectiveSlug,
     description: fmStr(meta.description),
     date: fmStr(meta.pubDate || meta.date),
@@ -185,6 +186,15 @@ export function parsePost(slug, raw, excerptMax = 180) {
 // public, because gating on an unrecognised value would change what those sites already serve.
 export function isPrivatePost(post) {
   return !!post && String(post.visibility || '').trim() === 'private';
+}
+
+// Exact post paths selected by the same postUrl() builder that emits the page route. The build
+// seam consumes this set; it never reconstructs a permalink from a slug or a URL family.
+export function gatedPostPaths(posts, meta) {
+  return [...new Set((posts || []).filter(isPrivatePost).map((post) => {
+    const path = toPath(postUrl(post, meta));
+    return path ? `/${path}` : '/';
+  }))];
 }
 
 // A translated file is the same logical post as its default-locale file. Privacy can tighten in a
