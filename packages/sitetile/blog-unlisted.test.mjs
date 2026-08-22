@@ -182,7 +182,9 @@ const code = (p) => {
 };
 
 // Named, and only these two. Both are places where filtering would DELETE rather than hide.
-const EXEMPT = ['pages/reef-posts.json.js'];
+// The verdict manifest is also a full-corpus consumer: unlisted means hidden from lists, not
+// unrouted, so a private unlisted post still needs its generated gate.
+const EXEMPT = ['pages/reef-posts.json.js', 'pages/reef-verdict.json.js'];
 
 test('every surface that reads the post corpus filters it — or is a named exception', () => {
   const offenders = [];
