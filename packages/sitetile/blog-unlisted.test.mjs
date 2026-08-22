@@ -224,9 +224,11 @@ test('a translated post inherits its categories, or the filter is inert outside 
   const at = src.indexOf('const postsL =');
   assert.ok(at > 0, 'the per-locale corpus is built here');
   const before = src.slice(0, at);
-  assert.match(before, /new Map\(posts\.map\(\(p\) => \[p\.slug, p\.categories/,
+  assert.match(before, /new Map\(posts\.map\(\(p\) => \[p\.slug, p\]/,
     'the locale block must map the DEFAULT corpus by slug before parsing its own posts');
-  assert.match(src.slice(at, at + 400), /categories: catsBySlug\.get\(p\.slug\)/,
+  assert.match(src.slice(at, at + 500), /inheritLocalePrivacy\(p, baseBySlug\.get\(p\.slug\)\)/,
+    'the locale block must apply the monotonic privacy verdict before rendering a translation');
+  assert.match(src.slice(at, at + 700), /const categories = baseBySlug\.get\(p\.slug\)\?\.categories/,
     'and hand those categories to a translation that states none');
 });
 

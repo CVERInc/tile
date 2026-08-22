@@ -10,6 +10,8 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite } from '@sitetile';
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-copy.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
+const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+const PRIVACY_KEY = /^(?:"([^"]+)"|'([^']+)'|([A-Za-z][\w-]*))\s*:\s*(.*)\s*$/;
 
 // frontmatter value → string (strips surrounding quotes).
 function fmStr(v) {
@@ -21,6 +23,32 @@ function fmList(v) {
   const m = FM_LIST_RE.exec(s);
   const inner = m ? m[1] : s;
   return inner.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+}
+
+function fmScalar(v) {
+  const value = String(v || '').trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value); } catch { return value; }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
+// The general sitetile frontmatter reader intentionally stays minimal. Privacy is a security
+// boundary, so it gets a dedicated top-level scan that matches reef's accepted bare/quoted key
+// grammar and treats any valid private marker as authoritative over a later duplicate.
+function privacyVerdict(raw) {
+  const match = PRIVACY_FRONTMATTER.exec(String(raw || ''));
+  if (!match) return { values: [], value: '', isPrivate: false };
+  const values = match[1].split(/\r?\n/)
+    .map((line) => PRIVACY_KEY.exec(line))
+    .filter((entry) => entry && (entry[1] ?? entry[2] ?? entry[3]) === 'visibility')
+    .map((entry) => fmScalar(entry[4]));
+  return {
+    values,
+    value: values.includes('private') ? 'private' : (values[0] || ''),
+    isPrivate: values.includes('private'),
+  };
 }
 
 // blogCategories: the blog's category menu — a list of { label, count, href } for a
@@ -83,7 +111,9 @@ function capExcerpt(text, max) {
 // excerptMax caps the derived excerpt (default 180 = historic behavior); callers that want a
 // per-site cap pass it, but the effective index cap is normally applied later in buildIndexView.
 export function parsePost(slug, raw, excerptMax = 180) {
-  const { meta, body } = splitFrontmatter(String(raw || ''));
+  const source = String(raw || '');
+  const { meta, body } = splitFrontmatter(source);
+  const privacy = privacyVerdict(source);
   const b = body || '';
   // featured image (first markdown image) + a text excerpt — for archive-grid blog indexes
   // (WP/Blogger/Wix layouts) that show an image card + excerpt, unlike a text-only blog.
@@ -134,8 +164,9 @@ export function parsePost(slug, raw, excerptMax = 180) {
     title: fmStr(meta.title) || effectiveSlug,
     description: fmStr(meta.description),
     date: fmStr(meta.pubDate || meta.date),
-    // access marker, read by isPrivatePost() below. '' for a post that does not set it.
-    visibility: fmStr(meta.visibility),
+    // access marker, read by isPrivatePost() below. A dedicated verdict covers quoted keys and
+    // raw-repo duplicate edits that the general metadata object would otherwise overwrite.
+    visibility: privacy.value || fmStr(meta.visibility),
     tags: fmList(meta.tags || meta.categories),
     // WP category slugs as a DISTINCT axis from tags (a post lives in categories AND carries tags).
     // Powers /category/<slug>/ archives without polluting the tag cloud. Empty on sites that don't
@@ -154,6 +185,13 @@ export function parsePost(slug, raw, excerptMax = 180) {
 // public, because gating on an unrecognised value would change what those sites already serve.
 export function isPrivatePost(post) {
   return !!post && String(post.visibility || '').trim() === 'private';
+}
+
+// A translated file is the same logical post as its default-locale file. Privacy can tighten in a
+// locale, but a translated public/omitted marker cannot relax a private base post.
+export function inheritLocalePrivacy(post, basePost) {
+  if (!isPrivatePost(basePost) || isPrivatePost(post)) return post;
+  return { ...post, visibility: 'private' };
 }
 
 // The same post with its non-public parts removed: body, description, excerpt.
@@ -772,4 +810,3 @@ export function searchIndex(posts, meta) {
 }
 
 export { fmStr };
-
