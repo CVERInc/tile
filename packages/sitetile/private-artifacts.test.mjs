@@ -39,7 +39,17 @@ register(
 const blog = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
 const { buildFeedBody, buildReefPostsBody, buildSearchIndexBody } =
   await import(pathToFileURL(join(SRC, 'lib/public-artifacts.mjs')).href);
-const { allPosts, postUrl, postCards, buildIndexView, buildPostSidebar, publicFacing, publicFacingPosts } = blog;
+const {
+  allPosts,
+  postUrl,
+  postCards,
+  buildIndexView,
+  buildPostSidebar,
+  publicFacing,
+  publicFacingPosts,
+  isPrivatePost,
+  inheritLocalePrivacy,
+} = blog;
 
 // One string, unlikely to occur anywhere else, planted in both the body and the description of the
 // post under test. Every assertion below counts its occurrences in a generated artifact.
@@ -79,6 +89,11 @@ const open = [
 // Shaped like the `import.meta.glob('../../blog/*.md')` result the routes and endpoints pass in.
 const corpus = (visibility) => allPosts({
   '../../blog/gated-one.md': gated(visibility),
+  '../../blog/open-one.md': open,
+});
+
+const corpusFromRaw = (raw) => allPosts({
+  '../../blog/gated-one.md': raw,
   '../../blog/open-one.md': open,
 });
 
@@ -192,6 +207,45 @@ test('only `visibility: private` gates; every other value reads as public', () =
     const raw = bodyOf(v);
     assert.equal(publicFacing(raw), raw, `visibility ${JSON.stringify(v)} must read as public`);
   }
+});
+
+test('🔴 privacy redaction recognizes quoted keys and survives duplicate ordering', () => {
+  const variants = [
+    gated('private').replace('visibility: private', '"visibility" : "private"'),
+    gated('private').replace('visibility: private', 'visibility: private\nvisibility: public'),
+    gated('public').replace('visibility: public', 'visibility: public\n"visibility" : "private"'),
+  ];
+  for (const raw of variants) {
+    const posts = corpusFromRaw(raw);
+    assert.equal(hits(JSON.stringify(publicFacingPosts(posts))), 0, 'a valid private marker must redact every public-facing field');
+    assert.equal(hits(buildSearchIndexBody(posts, META)), 0, 'search must use the same privacy verdict');
+    assert.equal(hits(buildFeedBody(posts, META, 'https://fixture.example')), 0, 'feed must use the same privacy verdict');
+  }
+
+  const quotedPublic = gated('public').replace('visibility: public', '"visibility" : "public"');
+  assert.ok(hits(buildSearchIndexBody(corpusFromRaw(quotedPublic), META)) > 0, 'a quoted public marker remains public');
+});
+
+test('🔴 indented and nested visibility-like forms do not become privacy markers', () => {
+  for (const raw of [
+    gated('public').replace('visibility: public', '  visibility: private'),
+    gated('public').replace('visibility: public', 'meta:\n  visibility: private'),
+  ]) {
+    assert.ok(hits(buildSearchIndexBody(corpusFromRaw(raw), META)) > 0, 'only top-level visibility controls redaction');
+  }
+});
+
+test('🔴 locale privacy is monotonic: a private base cannot be relaxed, and a private translation tightens itself', () => {
+  const basePrivate = corpus('private').find((p) => p.slug === 'gated-one');
+  const translatedPublic = corpus('public').find((p) => p.slug === 'gated-one');
+  const inheritedPrivate = inheritLocalePrivacy(translatedPublic, basePrivate);
+  assert.equal(isPrivatePost(inheritedPrivate), true);
+  assert.equal(hits(JSON.stringify(publicFacing(inheritedPrivate))), 0);
+
+  const basePublic = corpus('public').find((p) => p.slug === 'gated-one');
+  const translatedPrivate = corpus('private').find((p) => p.slug === 'gated-one');
+  assert.equal(isPrivatePost(inheritLocalePrivacy(translatedPrivate, basePublic)), true);
+  assert.equal(isPrivatePost(inheritLocalePrivacy(translatedPublic, basePublic)), false);
 });
 
 test('post-page cards: private content is absent before the component receives the cards', () => {

@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, inheritLocalePrivacy } from '../lib/blog.mjs';
 import { toUrlLocale } from '../packages/lingo/locale.mjs';
 
 
@@ -239,12 +239,14 @@ export function getStaticPaths() {
     // in parsePost and drives tag clouds and archive routes, so touching it here would sprout
     // routes on sites that never had them. This adds no URL to any site; it only lets the filter
     // see what it is filtering.
-    const catsBySlug = new Map(posts.map((p) => [p.slug, p.categories || []]));
-    const postsL = allPosts(sub).map((p) => (
-      (p.categories && p.categories.length) || !catsBySlug.get(p.slug)?.length
-        ? p
-        : { ...p, categories: catsBySlug.get(p.slug) }
-    ));
+    const baseBySlug = new Map(posts.map((p) => [p.slug, p]));
+    const postsL = allPosts(sub).map((p) => {
+      const inherited = inheritLocalePrivacy(p, baseBySlug.get(p.slug));
+      const categories = baseBySlug.get(p.slug)?.categories || [];
+      return (inherited.categories && inherited.categories.length) || !categories.length
+        ? inherited
+        : { ...inherited, categories };
+    });
     const base = blogBase(meta);
     const pat = (meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim()) || `${base}/%postname%`;
     const metaL = {
