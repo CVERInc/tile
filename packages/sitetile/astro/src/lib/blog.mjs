@@ -373,6 +373,20 @@ export function flowingHtml(body, opts) {
 // WP-with-archive-widget site needs it.
 // Requires `date` to be an ISO-ish `YYYY-MM-DD` string (pubDate frontmatter) — posts missing a
 // parseable date are dropped from the tree (they still appear in the flat /devlog list).
+// The archive is a public-facing view-model. Keep an explicit metadata allowlist here so a
+// future archive component cannot accidentally serialize private content carried by a raw post.
+function archivePostView(post) {
+  return {
+    slug: post.slug,
+    title: post.title,
+    date: post.date,
+    tags: post.tags,
+    image: post.image,
+    author: post.author,
+    permalink: post.permalink,
+  };
+}
+
 export function groupByArchive(posts) {
   const years = new Map();
   for (const p of posts) {
@@ -382,7 +396,7 @@ export function groupByArchive(posts) {
     if (!years.has(y)) years.set(y, new Map());
     const months = years.get(y);
     if (!months.has(mo)) months.set(mo, []);
-    months.get(mo).push(p);
+    months.get(mo).push(archivePostView(p));
   }
   return [...years.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([year, months]) => ({
     year,

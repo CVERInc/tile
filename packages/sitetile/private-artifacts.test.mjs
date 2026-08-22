@@ -180,6 +180,34 @@ test('listing cards (blog index, tag, category, author, date archive) drop the e
   assert.ok(cards.includes('The Gated One'), 'the gated post must still appear in the list');
 });
 
+test('archive view-models carry public metadata but no private content', () => {
+  const indexMeta = { ...META, 'blog-sidebar': 'true' };
+  const sidebarMeta = { ...indexMeta, 'blog-post-sidebar': 'right' };
+  const posts = corpus('private');
+  const indexArchive = buildIndexView(posts, indexMeta, 1).archive;
+  const sidebarArchive = buildPostSidebar(posts, sidebarMeta, posts.find((p) => p.slug === 'open-one')).archive;
+
+  assert.ok(hits(JSON.stringify(posts)) > 0, 'control failed: the raw corpus has no private sentinel');
+  for (const [name, archive] of [['index', indexArchive], ['post sidebar', sidebarArchive]]) {
+    const entries = archive.flatMap((year) => year.months.flatMap((month) => month.posts));
+    const gatedEntry = entries.find((p) => p.slug === 'gated-one');
+    assert.ok(gatedEntry, `${name} archive lost the gated post`);
+    assert.equal(hits(JSON.stringify(archive)), 0, `${name} archive carried private content`);
+    for (const field of ['body', 'description', 'excerpt', 'excerptText']) {
+      assert.equal(Object.hasOwn(gatedEntry, field), false,
+        `${name} archive retained private field ${field}`);
+    }
+    assert.deepEqual(gatedEntry, {
+      slug: 'gated-one', title: 'The Gated One', date: '2026-08-20', tags: ['alpha'],
+      image: '', author: 'Ada', permalink: undefined,
+    });
+  }
+
+  const shape = (archive) => archive.map((year) => [year.year, year.count,
+    year.months.map((month) => [month.month, month.count, month.posts.map((p) => p.slug)])]);
+  assert.deepEqual(shape(indexArchive), shape(sidebarArchive), 'archive paths disagreed');
+});
+
 test('public-facing corpus: private body absent from EVERY field, whatever an artifact picks', () => {
   // Field-agnostic, and the durable half of this file: an artifact built from this corpus cannot
   // leak by reaching for a field nobody thought to check.
