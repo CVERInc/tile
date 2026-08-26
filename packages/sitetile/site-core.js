@@ -510,10 +510,14 @@ function parseParams(raw) {
     } else map[key] = val;
   }
   // bare boolean flags (a word NOT used as a `key=…`): `ordered`, `wide`, … → true.
+  // 🩸 Scan with the quoted values BLANKED OUT: a label such as `button="Go wide now"` used to read
+  // `wide` (and `now`, `Go`) out of the quotes and set them as flags — a CTA's wording could switch a
+  // layout on. The `key=` re-check below reads the same blanked string, so `wide="…"` still counts.
+  const bare = raw.replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
   let bm; const bre = /(?:^|\s)([a-zA-Z]\w*)(?=\s|$)/g;
-  while ((bm = bre.exec(raw))) {
+  while ((bm = bre.exec(bare))) {
     const w = bm[1];
-    if (!(w in map) && !new RegExp('\\b' + w + '\\s*=').test(raw)) map[w] = true;
+    if (!(w in map) && !new RegExp('\\b' + w + '\\s*=').test(bare)) map[w] = true;
   }
   return map;
 }

@@ -103,6 +103,16 @@ test('fenced prose: the ``` block (with fake ## / ###) is kept as one section bo
   assert.ok(fenced.body.includes('### not a cell'), 'fenced ### should survive inside body');
 });
 
+test('parseParams: words inside a quoted label are not bare flags', () => {
+  // A CTA reading "Go wide now" must not turn `wide` on; "Talk to us" must not invent `to`/`us`.
+  const pm = parseParams('button="Go wide now"→/start ordered');
+  assert.deepEqual(pm, { button: { label: 'Go wide now', href: '/start' }, ordered: true });
+  const pm2 = parseParams('cta="Talk to us"→/contact');
+  assert.deepEqual(pm2, { cta: { label: 'Talk to us', href: '/contact' } });
+  // CONTROL: a real bare flag outside the quotes still works, on either side of the label.
+  assert.deepEqual(parseParams('wide button="Sign up"→/signup'), { wide: true, button: { label: 'Sign up', href: '/signup' } });
+});
+
 test('parseParams: bare value + quoted-link value', () => {
   const pm = parseParams('bg=cover.jpg cta="Get started"→/signup');
   assert.equal(pm.bg, 'cover.jpg');
