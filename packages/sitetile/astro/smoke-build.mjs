@@ -172,6 +172,21 @@ function allCss() {
 const { pages, unaccounted, dataBlocks } = auditScripts();
 const badChunks = auditChunks();
 
+// ---- the icon set (see packages/sitetile/icon-core.mjs) ----
+// The model's own unit tests decode the bytes; what only THIS gate can prove is that a real
+// `astro build` emits the three routes as files and that the pages link them. The fixtures set no
+// `favicon:`, so what is being built here is the born-valid path: a site that configured nothing.
+const distFile = (p) => join(DIST, p.replace(/^\//, ''));
+/** every icon href every built page claims — the dead-link gate below reads this. */
+function claimedIcons() {
+  const claimed = new Set();
+  for (const page of pages) {
+    const h = readFileSync(page, 'utf8');
+    for (const m of h.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]*href="([^"]+)"/g)) claimed.add(m[1]);
+  }
+  return [...claimed];
+}
+
 const checks = [
   // -- home.md: the 5 section types + platform defaults --
   ['hero renders', () => occ('class="st-hero"') === 1],
@@ -330,6 +345,29 @@ const checks = [
     !/action="https:\/\/feelreef\.com/.test(forms) && !/name="kind"/.test(forms)],
   ['form: still zero JavaScript — it has to work with scripts off', () =>
     !/<script/i.test(forms.slice(forms.indexOf('<form'), forms.lastIndexOf('</form>')))],
+  // -- icons: the three well-known paths a browser, a crawler and iOS ask for unprompted --
+  ['icons: all three well-known paths are emitted', () =>
+    ['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'].every((p) => existsSync(distFile(p)))],
+  ['icons: apple-touch-icon.png really is a 180×180 PNG', () => {
+    const b = readFileSync(distFile('/apple-touch-icon.png'));
+    return b.subarray(1, 4).toString('latin1') === 'PNG' && b.readUInt32BE(16) === 180 && b.readUInt32BE(20) === 180;
+  }],
+  ['icons: favicon.ico really is an ICO holding one image', () => {
+    const b = readFileSync(distFile('/favicon.ico'));
+    return b.readUInt16LE(0) === 0 && b.readUInt16LE(2) === 1 && b.readUInt16LE(4) === 1
+      && b.subarray(b.readUInt32LE(18) + 1, b.readUInt32LE(18) + 4).toString('latin1') === 'PNG';
+  }],
+  ['icons: every page links an icon AND an apple-touch-icon', () => pages.every((p) => {
+    const h = readFileSync(p, 'utf8');
+    return /<link rel="icon"[^>]*href="\/favicon\.(?:ico|svg)"/.test(h) && h.includes('rel="apple-touch-icon"');
+  })],
+  // 🔴 THE GATE, same shape as build-og's: a link tag aimed at a 404 looks exactly like no icon at
+  // all to everyone except the person whose home screen shows a screenshot. The fixtures name no
+  // off-site mark, so every claim here is ours and every one must be on disk.
+  ['🔴 icons: no page claims an icon that is not on disk', () => {
+    const claimed = claimedIcons();
+    return claimed.length > 0 && claimed.every((h) => !h.startsWith('/') || existsSync(distFile(h)));
+  }],
   ['fixtures never reference the pkg-runtimes chunk', () =>
     [html, blocks, markers, forms].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
 ];
