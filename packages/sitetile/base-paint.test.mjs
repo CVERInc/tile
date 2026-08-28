@@ -117,6 +117,66 @@ test('🩸 CONTROL: the sibling that DOES gate on theme is still there, so this 
   assert.match(CSS, /data-theme-custom/, 'the guarded idiom still exists elsewhere in this sheet');
 });
 
+// ── .st-faq: the same defect, third instance ────────────────────────────────────────────────────
+//
+// 🩸 2026-08-28. `.st-faq` had NO rule — while thirty lines of the stylesheet styled .st-faq-head,
+// .st-faq-list, .st-faq-item, .st-faq-q and .st-faq-a. Every one of those is a DESCENDANT, so the
+// file looked like a package that had thought about the faq, and the container it all hangs from
+// had no width and no padding. On a built site probe_render showed `.st-faq` matching a single
+// rule: `* { box-sizing }`. The FAQ ran edge to edge under a prose section inset 48px.
+//
+// Why nobody caught it by reading: the missing rule is invisible against a block of present ones.
+// The detector was a screenshot, again.
+
+const FAQ_PAGE = readFileSync(join(HERE, 'astro', 'src', 'components', 'sections', 'Faq.astro'), 'utf8');
+
+test('the faq coral still emits the class this guard is about', () => {
+  assert.match(FAQ_PAGE, /class="st-faq"/, 'Faq.astro must still emit .st-faq');
+});
+
+test('🔴 .st-faq is a CONTAINER — it gets width and padding from the package', () => {
+  // `rulesFor` matches substrings, so .st-faq-item etc. all come back; the container rule is the
+  // one whose selector names .st-faq and nothing after it. That distinction IS the bug: a file
+  // full of .st-faq-* rules is not a styled .st-faq.
+  const rules = rulesFor('st-faq').filter((r) => /\.st-faq(?![\w-])/.test(r.selector));
+  assert.ok(rules.length > 0, '.st-faq itself must be styled, not only its descendants');
+  assert.ok(rules.some((r) => /padding[^;]*clamp|padding-inline/.test(r.css)),
+    `no padding rule; selectors were: ${rules.map((r) => r.selector).join(' | ')}`);
+  assert.ok(rules.some((r) => /max-width/.test(r.css)), 'and a max-width, or it is inset but unbounded');
+});
+
+test('🔴 the container rule must NOT be gated on a custom theme', () => {
+  // The faq PAINT below it is gated, correctly — a hand-rolled theme already chose the disclosure
+  // look. Copying that guard onto the container would exempt precisely the sites with the bug.
+  const rules = rulesFor('st-faq').filter((r) => /\.st-faq(?![\w-])/.test(r.selector));
+  assert.ok(rules.length > 0, 'nothing to check means this proves nothing — assert existence first');
+  for (const r of rules) {
+    assert.ok(!/data-theme-custom/.test(r.selector),
+      `custom-theme sites are the ones affected, but this rule excludes them: ${r.selector}`);
+  }
+});
+
+test('🩸 CONTROL: the faq PAINT is still gated, so the test above can tell paint from box model', () => {
+  // Without this, "no data-theme-custom on any .st-faq rule" could go green because the gate was
+  // stripped off the disclosure paint too — which is a different, live regression.
+  const paint = rulesFor('st-faq-item');
+  assert.ok(paint.length > 0, 'the disclosure paint still exists');
+  assert.ok(paint.some((r) => /data-theme-custom/.test(r.selector)),
+    'the born paint for .st-faq-item must stay behind its gate');
+});
+
+test('the faq borrows the SHARED wrapper width, it does not invent one', () => {
+  // 🔴 The cheapest way to get this wrong is a number. Sections are inset by one token and one
+  // padding expression; a second opinion about page width is a layout that drifts by coral.
+  const shared = rulesFor('.st-cta').find((r) => /max-width/.test(r.css) && /st-prose/.test(r.selector));
+  assert.ok(shared, 'the shared section wrapper rule (.st-prose, .st-grid, .st-cta, .st-people) is gone');
+  const faq = rulesFor('st-faq').filter((r) => /\.st-faq(?![\w-])/.test(r.selector));
+  const norm = (s) => s.replace(/\s+/g, ' ').trim();
+  const want = norm(shared.css);
+  assert.ok(faq.some((r) => norm(r.css) === want),
+    `the faq container should carry the same declarations as the shared wrapper.\n  shared: ${want}\n  faq:    ${faq.map((r) => norm(r.css)).join(' // ')}`);
+});
+
 // ── .st-cta-arrow: the same defect, found the same day ──────────────────────────────────────────
 
 const CORE = readFileSync(join(HERE, 'site-core.js'), 'utf8');
