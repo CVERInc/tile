@@ -667,6 +667,60 @@ test('people: round-trip preserves the INFERRED depth — a flat roster must not
   assert.equal(parseSite(g1).sections[0].groups[0].people[0].links.length, 1, 'and the link row survives a round-trip');
 });
 
+// ── collection coral ───────────────────────────────────────────────────────────────────────────
+// 🩸 A category's lead paragraph was parsed into `group.lead` by the collection walk, dropped by the
+// model builder, and had nowhere to go in serializeSite — so `serialize(parse(page)) !== page` for
+// every collection whose categories carry an intro, and EVERY save through EVERY door (MCP
+// `save_page`, the console editor, batch `save_pages`) silently deleted those paragraphs. Found by
+// reef W88 against a real 制作実績 page (two categories, each with a lead). `people` — the other
+// two-level coral — had it right all along; collection just never grew the matching emit.
+const collection = (bodyLines) => '---\nsitetile-page: home\ntitle: T\n---\n\n## 制作実績\n%% sitetile: collection %%\n' + bodyLines.join('\n') + '\n';
+
+test('collection: a category lead survives the round trip — two categories, each with one', () => {
+  const src = collection([
+    'What we have shipped.',
+    '### Web',
+    '受託開発とサイト制作。',
+    '#### Alpha →/a',
+    'Body a.',
+    '### Print',
+    '書籍と図録の装丁。',
+    '#### Beta →/b',
+  ]);
+  const site = parseSite(src);
+  const gs = site.sections[0].groups;
+  assert.equal(gs.length, 2);
+  assert.equal(gs[0].lead, '受託開発とサイト制作。', 'the parser keeps the first category lead ON the model');
+  assert.equal(gs[1].lead, '書籍と図録の装丁。', 'and the second');
+  assert.equal(serializeSite(site), src, 'and both survive serialize verbatim');
+});
+
+test('collection: a category lead sits between its `###` heading and its first `####` item', () => {
+  // Position matters as much as survival: emitted after the items it would re-parse as the LAST
+  // item's body, and the paragraph would change owner on every save instead of vanishing.
+  const src = collection(['### Web', 'Sites we built.', '#### Alpha →/a', 'Body a.']);
+  const once = serializeSite(parseSite(src));
+  assert.equal(once, src, 'byte-identical');
+  const i = once.indexOf('Sites we built.');
+  assert.ok(i > once.indexOf('### Web') && i < once.indexOf('#### Alpha'), 'between the heading and the first item');
+  assert.equal(parseSite(once).sections[0].groups[0].items[0].body, 'Body a.', 'the item body stays the ITEM\'s');
+});
+
+test('collection: a category with NO lead gains nothing — not even a blank line', () => {
+  const src = collection(['### Web', '#### Alpha →/a', '### Print', '#### Beta →/b']);
+  assert.equal(serializeSite(parseSite(src)), src, 'leadless categories are byte-unchanged');
+  assert.equal(parseSite(src).sections[0].groups[0].lead, '', 'and the model says empty, not undefined');
+});
+
+test('collection: the SECTION lead and a CATEGORY lead are different paragraphs', () => {
+  // Control for the fix: it would be possible to "preserve" the category lead by folding it into
+  // the section body, which round-trips as bytes while moving the text to another owner.
+  const site = parseSite(collection(['Section intro.', '### Web', 'Category intro.', '#### Alpha →/a']));
+  const s = site.sections[0];
+  assert.equal(s.body, 'Section intro.', 'the section keeps its own');
+  assert.equal(s.groups[0].lead, 'Category intro.', 'the category keeps its own');
+});
+
 test('people: an unknown type still falls back to prose — `people` had to be REGISTERED to work', () => {
   // Control: proves the tests above are reading a real registration, not a coincidence of the
   // prose fallback. `peopl` is not in KNOWN_TYPES.

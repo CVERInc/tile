@@ -185,6 +185,12 @@ function splitTypeInner(inner) {
 //   Site    = { title, meta, sections: [Section] }
 //   Section = { id, title, type, params, hasTypeLine, body, cells: [Cell] }   // body = lead text; cells only for grid
 //   Cell    = { title, body }                                                 // a grid cell (### heading + body)
+//   Group   = { title, lead, items|people }                                   // a `collection`/`people` category
+//
+// 🩸 `Group` was missing from this sketch, and so was `lead` from collection's group builder — the
+// model's own documentation named neither, which is part of why a dropped field stayed invisible.
+// Anything the parser collects has to have a home here AND a line in serializeSite, or it is
+// deleted on the next save. site-core-roundtrip.test.mjs is the ruler that says so.
 function parseSite(text) {
   const { meta, body } = splitFrontmatter(String(text || ''));
   const lines = body.split('\n');
@@ -378,6 +384,11 @@ function parseSite(text) {
       body = blockOf(lead);
       groups = groups.map((g) => ({
         title: g.title,
+        // 🩸 `lead` was collected by the walk above and dropped right here, and serializeSite had
+        // nothing to write back — so every save through every door deleted a category's intro
+        // paragraph. `people`, the other two-level coral, kept its group lead from the day it was
+        // written; collection walked the same shape and only ever built half the model.
+        lead: blockOf(g.lead),
         items: g.items.map((it) => {
           // pull three optional per-item seams out of the body lines (order-free, one each):
           //   `tags: a, b, c`     → topic pills (mirrors live /oss GitHub topics)
@@ -439,7 +450,10 @@ function serializeSite(site) {
     if (s.hasTypeLine) out.push('%% sitetile: ' + s.type + (s.params ? ' ' + s.params : '') + ' %%');
     if (s.type === 'grid' || s.type === 'gallery' || s.type === 'carousel') {
       if (s.body) out.push(s.body);
-      (s.cells || []).forEach((c) => { out.push('### ' + (c.emoji ? c.emoji + ' ' : '') + (c.title || '') + (c.href ? ' →' + c.href : '') + (c.cta ? ' "' + c.cta + '"' : '') + (c.badge ? ' [' + c.badge + (c.badgeHref ? ' →' + c.badgeHref : '') + ']' : '')); if (c.body) out.push(c.body); });
+      // 🩸 `c.icon` was parsed by splitCellHeading, RENDERED (astro GridCell.astro → lucideSvg) and
+      // then not emitted here — so a cell's Lucide shortcode survived until the first save and the
+      // icon disappeared off the built page. Icon before emoji, the order splitCellHeading reads them.
+      (s.cells || []).forEach((c) => { out.push('### ' + (c.icon ? ':' + c.icon + ': ' : '') + (c.emoji ? c.emoji + ' ' : '') + (c.title || '') + (c.href ? ' →' + c.href : '') + (c.cta ? ' "' + c.cta + '"' : '') + (c.badge ? ' [' + c.badge + (c.badgeHref ? ' →' + c.badgeHref : '') + ']' : '')); if (c.body) out.push(c.body); });
     } else if (s.type === 'people') {
       if (s.body) out.push(s.body);
       // Round-trips the inferred depth: a roster parsed flat has exactly one untitled group, and
@@ -462,6 +476,10 @@ function serializeSite(site) {
       if (s.body) out.push(s.body);
       (s.groups || []).forEach((g) => {
         out.push('### ' + (g.title || ''));
+        // Between the `###` heading and the first `####` item — the exact position the parser reads
+        // it from. Emitted after the items it would re-parse as the LAST item's body, which would
+        // change the paragraph's owner on every save instead of deleting it. Mirrors the people arm.
+        if (g.lead) out.push(g.lead);
         (g.items || []).forEach((it) => { out.push('#### ' + (it.title || '') + (it.href ? ' →' + it.href : '') + (it.badge ? ' "' + it.badge + '"' : '')); if (it.body) out.push(it.body); if (it.tags && it.tags.length) out.push('tags: ' + it.tags.join(', ')); if (it.learn) out.push('learn: ' + it.learn); if (it.updated) out.push('updated: ' + it.updated); });
       });
     } else if (s.type === 'faq') {
