@@ -474,6 +474,23 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
 /* ── faq — a Q&A accordion (native <details>), theme-PAINTED so a born site's FAQ is presentable
    without custom CSS. Chrome is token-driven; a CSS-only chevron replaces the native triangle and
    rotates on open (zero JS, same posture as the rest). ─────────────────────────────────────── */
+/* 🩸 2026-08-28. The faq CONTAINER had no rule at all — the paint below styles .st-faq-head /
+   -list / -item, and every one of those selectors is a DESCENDANT of .st-faq, so a full-looking
+   block of faq CSS coexisted with a section that had no width and no padding. On a built site
+   probe_render showed `.st-faq` matching only `* { box-sizing }`: the faq sat flush at x=0 while
+   the prose section above it was inset. Same defect class as .st-notfound below — a class the
+   renderer emits and the package never painted.
+   The width and the padding are the SHARED wrapper values (`.st-prose, .st-grid, .st-cta,
+   .st-people`, above); nothing new is invented here, the faq simply joins the others.
+   🔴 NOT gated on data-theme-custom, unlike the paint that follows. That guard is right for
+   PAINT — a hand-rolled theme already chose the disclosure look — but it would exempt exactly
+   the sites that have this bug. :where() instead: zero specificity, so any theme that names
+   .st-faq wins without !important, and box-model floor stays ours (see base-paint.test.mjs). */
+:where(.st-faq) {
+  max-width: var(--gd-maxw);
+  margin-inline: auto;
+  padding: 2.5rem clamp(1rem, 4vw, 3rem);
+}
 /* 🔴 GATED like the born paint at the end of this file, and for the same reason: this block was
    added after live themes were authored against an UNPAINTED faq. A live hand-rolled theme
    styles .st-faq-item itself (a divider list, border-bottom only) — base's surface+border+
