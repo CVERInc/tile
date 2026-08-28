@@ -931,9 +931,17 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
 // marketing card can LEAD with its blurb without dropping to an `embed` hand-roll (dogfood #68: the
 // coral couldn't express caption-first, which pushed agents off the born-valid path). This reorders
 // the real DOM, so the reading order is correct for screen readers too — not a CSS `order` illusion.
-function ctaCaptionFirst(pm) {
-  const v = pm && pm.caption;
-  return (typeof v === 'object' ? v.label : v) === 'before';
+//
+// 🩸 2026-08-28. This took the whole `pm` bag and reached inside for `pm.caption`. It works, and it
+// is invisible: the table of "which params each coral reads" is DERIVED by scanning a section
+// component for `pm.<name>`, so a param read inside a helper that was handed the bag appears in no
+// component and the write-time checker reported `caption= … read by nothing` on a param that
+// reorders the DOM. A checker that is wrong is worse than no checker — an author who trusts it
+// deletes working markup. So the READ happens at the call site, in the component, where the thing
+// deriving the table can see it; the helper takes the VALUE. Guarded by coral-params.test.mjs.
+function ctaCaptionFirst(caption) {
+  const v = caption && typeof caption === 'object' ? caption.label : caption;
+  return v === 'before';
 }
 
 // heroParts: a hero body → { text, buttons:[{label,href,primary}], image:{alt,src}|null }. Lets a hero
@@ -1227,7 +1235,7 @@ function renderSection(s) {
       const cb = ctaButtonsHtml(pm.button, s.body);
       const cap = cb.caption ? bodyHtml(cb.caption) : '';
       // `caption=before` → caption leads (see ctaCaptionFirst); default keeps the buttons-first belt.
-      const inner = ctaCaptionFirst(pm) ? cap + cb.row : cb.row + cap;
+      const inner = ctaCaptionFirst(pm.caption) ? cap + cb.row : cb.row + cap;
       return '<section class="st-cta">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
         inner + '</section>';
     }
