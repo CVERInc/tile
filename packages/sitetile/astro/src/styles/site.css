@@ -91,7 +91,13 @@ img { max-width: 100%; height: auto; }
   display: flex; align-items: center; gap: var(--gd-gap);
   padding: 1rem clamp(1rem, 4vw, 3rem);
   border-bottom: 1px solid var(--gd-border);
+  /* A header has a floor: the page background. Without it a sticky header lets the page scroll
+     through it (measured on a built site: computed background rgba(0,0,0,0) while sticky).
+     `header: translucent` below still layers its 86% + blur on top; `header: solid` is now a
+     real, explicit value that means exactly this floor. */
+  background: var(--gd-bg);
 }
+body[data-header="solid"] .rf-header { background: var(--gd-bg); }
 .rf-logo { font-weight: 700; font-size: 1.125rem; color: var(--gd-text); text-decoration: none; }
 .rf-nav { display: flex; gap: 1.25rem; }
 .rf-nav a { color: var(--gd-muted); text-decoration: none; }
