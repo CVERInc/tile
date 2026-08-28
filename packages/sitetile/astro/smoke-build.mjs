@@ -189,12 +189,17 @@ function claimedIcons() {
 
 const checks = [
   // -- home.md: the 5 section types + platform defaults --
-  ['hero renders', () => occ('class="st-hero"') === 1],
+  // 🩸 2026-08-28. `class="st-hero"` was an EXACT string match, so it broke the moment the section
+  // gained a second class — which every hero variant now does (`.st-full-bleed`, the opt-out from
+  // the generic section-inset floor below; see site.css). Matched here as `st-hero st-full-bleed`
+  // rather than loosened to a substring check, so the assertion still pins the exact class list a
+  // non-layered hero renders, not just "some class starting with st-hero".
+  ['hero renders', () => occ('class="st-hero st-full-bleed"') === 1],
   ['grid renders', () => occ('class="st-grid"') === 1],
   ['prose renders', () => occ('class="st-prose"') >= 1],
   ['cta renders', () => occ('class="st-cta"') === 1],
   ['embed renders', () => occ('class="st-embed"') === 1],
-  ['hero background-image', () => /class="st-hero"[^>]*background-image:url\(/.test(html)],
+  ['hero background-image', () => /class="st-hero st-full-bleed"[^>]*background-image:url\(/.test(html)],
   ['hero CTA anchor', () => /st-hero-cta"\s+href="\/checkup"/.test(html)],
   ['grid has 3 cells', () => occ('class="st-cell"') === 3],
   ['grid cols=3', () => /class="st-grid"[^>]*\sdata-cols="3"/.test(html)],
@@ -255,7 +260,7 @@ const checks = [
   ['nav: ARBITRARY depth — 3rd-level leaf renders', () => html.includes('rf-nav-subgroup') && html.includes('href="/games/puzzle"')],
   ['nav: default flyout CSS present (hover reveal)', () => allCss().replace(/\s+/g, '').includes('.rf-nav-group:hover>.rf-nav-sub')],
   // -- markers.md: graduated markers the home fixture can't reach --
-  ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero"[^>]*\sdata-media="logo"/.test(markers)],
+  ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero st-full-bleed"[^>]*\sdata-media="logo"/.test(markers)],
   ['markers: block image → figure+img', () => /<figure class="st-figure">\s*<img class="st-img" src="\/img\/demo-logo\.gif" alt="Mark"/.test(markers)],
   ['markers: captioned whole-cell link with labeled chevron', () =>
     markers.includes('<a class="st-cell st-cell-link group" href="/products">') &&
