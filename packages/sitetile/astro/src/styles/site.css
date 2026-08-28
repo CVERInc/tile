@@ -272,6 +272,35 @@ img { max-width: 100%; height: auto; }
 .st-prose h2, .st-grid h2, .st-cta h2, .st-people h2 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); line-height: 1.25; margin: 0 0 0.75rem; }
 .st-prose p, .st-cta p { margin: 0 0 1rem; }
 
+/* ── generic section-container floor ── every coral the renderer emits wraps its content in
+   `<section class="st-<name>" …>` (verified against every file in astro/src/components/sections/
+   plus the renderer's own 404/footer-widget markup). A handful of those containers have their OWN
+   rule above/below (.st-prose/.st-grid/.st-cta/.st-people here, .st-embed/.st-form-section/.st-faq/
+   .st-social/.st-notfound further down) — this is the floor for every OTHER one, so a coral that
+   has never been given its own layout still isn't flush against the viewport edge.
+
+   🪩 2026-08-28. probe_render on a built site (desktop AND phone) found `.st-gallery`,
+   `.st-carousel`, `.st-collection` and `.st-timeline` headings sitting at x=0 — the exact defect
+   .st-faq had above, just not caught per coral because each one's DESCENDANTS may well be styled
+   (a carousel's cards, a timeline's rows), so nothing about the file LOOKS incomplete. The
+   container — the box that carries the page's left/right margin — is the one thing no individual
+   coral's CSS remembers to add, because from inside that file it looks like somebody else's job.
+   Written once, generically, it stops being anyone's job to remember.
+
+   `[class^="st-"]` (attribute, not `.st-`) so it also reaches the renderer's OWN two-class markup
+   (404's `st-section st-notfound`, the footer widgets' `st-prose rf-foot-widget …`) without
+   needing every future emitter to lead with one clean class. `:where()` is zero specificity — any
+   of the specific rules named above (also zero, but written later in this file) still wins the
+   properties it cares about, and a theme overrides all of it without a fight, same as .st-faq. */
+:where(section[class^="st-"]:not(.st-full-bleed)) {
+  max-width: var(--gd-maxw);
+  margin-inline: auto;
+  padding: 2.5rem clamp(1rem, 4vw, 3rem);
+}
+/* Opt-out for a section that is deliberately edge-to-edge — the hero's own background (below) is
+   the only current user. The exemption is for the OUTER box only: a full-bleed section still
+   insets its own inner content itself (.st-hero-overlay / .st-hero h1,p already do that). */
+
 /* hero — full-bleed, optional background image */
 .st-hero {
   display: grid; place-content: center; gap: 1rem; text-align: center;
@@ -343,6 +372,20 @@ img { max-width: 100%; height: auto; }
 }
 .st-filter-pill:hover { border-color: var(--gd-accent); color: var(--gd-fg, inherit); }
 .st-filter-pill.is-active { border-color: var(--gd-accent); background: var(--gd-accent); color: var(--gd-accent-ink, #fff); font-weight: 700; }
+
+/* ── tagcloud / tag-flow + collection jump-pills ── same pill idiom as the grid facet filter
+   above (`.st-filter-pill`), reused rather than reinvented: an inline-wrapping row of chips is one
+   look, not three. Until now neither `.st-tagcloud` nor `.st-collection-pills` matched anything
+   beyond `* { box-sizing }` (tile-lab#11) — a tag cloud rendered as a run of plain underlined
+   links with no wrap gap, and the collection's category nav the same. */
+.st-tag-flow, .st-collection-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+.st-tag, .st-collection-pill {
+  display: inline-flex; align-items: center; font-size: 0.85rem; line-height: 1;
+  padding: 0.5rem 0.9rem; border-radius: 999px; text-decoration: none;
+  border: 1px solid var(--gd-border); color: var(--gd-muted); transition: border-color .15s, color .15s;
+}
+.st-tag:hover, .st-collection-pill:hover { border-color: var(--gd-accent); color: var(--gd-text); }
+
 .st-cells {
   display: grid; gap: var(--gd-gap); margin-top: 1.5rem;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
@@ -361,6 +404,29 @@ a.st-cell-link .st-cell-cta { margin-top: auto; align-self: flex-end; color: var
 /* labeled CTA variant: "<label> →" with the directional arrow (cell heading's "<label>") */
 a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; }
 .st-cta-label { line-height: 1; }
+
+/* ── gallery / carousel shared cells ── the reference renderer (site-core.js) emits the SAME
+   `.st-gal-cell` / `.st-gal-fig` markup for three call sites (grid's `cards=image` variant,
+   `gallery`, and `carousel`'s track — see the "reusing gallery's exact cell markup/CSS" comment
+   at the grid case in site-core.js). grid's cells additionally carry `.st-cell` (skinned above);
+   gallery's and carousel's do not, so until now neither had a painted card: `.st-gallery` and
+   `.st-carousel` matched nothing beyond `* { box-sizing }` (tile-lab#11).
+   STRUCTURE (grid/flex, aspect-ratio, object-fit) is ungated, same split as the people roster
+   below — a themed site restyles a card, it should never have to lay one out from scratch. */
+.st-gal-cells {
+  display: grid; gap: var(--gd-gap); margin-top: 1.5rem; align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+.st-gallery[data-cols="2"] .st-gal-cells { grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+/* `align=stretch` (Gallery.astro's own `pm.align`) opts back into CSS Grid's default row-stretch;
+   the floor above overrides it to natural per-card height, which is what most photo/cast grids want. */
+.st-gallery[data-align="stretch"] .st-gal-cells { align-items: stretch; }
+.st-gal-cell { display: flex; flex-direction: column; min-width: 0; border-radius: var(--gd-radius); overflow: hidden; }
+.st-gal-fig { margin: 0; aspect-ratio: 4 / 3; }
+.st-gal-fig .st-img, .st-gal-fig .st-video { width: 100%; height: 100%; object-fit: cover; }
+.st-gal-cell h3 { margin: 0.75rem 1rem 0.35rem; font-size: 1.1rem; }
+.st-gal-cell p { margin: 0 1rem 1rem; color: var(--gd-muted); }
+:where(body:not([data-theme-custom])) .st-gal-cell { background: var(--gd-surface); border: 1px solid var(--gd-border); }
 
 /* `people` coral — roster of humans/companies: portrait, name, roles, blurb, link row.
    🩸 Shipped WITH base CSS on purpose. `gallery` has none at all, so every roster page on every
@@ -633,8 +699,14 @@ p .st-img { display: inline; vertical-align: middle; }
   .st-turn-who { width: 1.6rem; height: 1.6rem; font-size: 0.7rem; }
 }
 /* pre.st-code (block) — scoped to pre so it never hits cssmd's inline `code` span (also .st-code) */
-pre.st-code { margin: 0 0 1rem; padding: 1rem 1.25rem; background: var(--gd-surface); border: 1px solid var(--gd-border); border-radius: var(--gd-radius); overflow-x: auto; }
+pre.st-code { margin: 0 0 1rem; padding: 1rem 1.25rem; background: var(--gd-surface); border: 1px solid var(--gd-border); border-radius: var(--gd-radius); max-width: 100%; overflow-x: auto; }
 pre.st-code code { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: 0.9em; line-height: 1.5; }
+/* cssmd's INLINE code span shares that class name (see comment above) with no rule of its own —
+   a long unbroken token quoted inline in prose (a URL, a hash, a path with no spaces) had nowhere
+   to break, so it pushed the whole page wider instead of the block form's own overflow-x:auto
+   scrollbar. `anywhere` (not `break-word`) so it also breaks mid-word when there is no better
+   opportunity, which is the case that actually occurs in a quoted inline token. */
+span.st-code { overflow-wrap: anywhere; }
 /* ── code highlighting: four token classes and no more (cssmd/highlight.js emits them; an
    unlabelled or unknown fence emits none, so those blocks are unchanged). Restrained on purpose —
    the job is to separate machinery from value at a glance, not to decorate. Comments carry their
