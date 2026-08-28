@@ -258,3 +258,11 @@ test('🩸 CONTROL: the inline-span rule stays scoped to span, so it can never r
 });
 
 console.log(`  ${passed} passed`);
+
+// A sticky header must not let the page scroll through it: the base .rf-header carries the page
+// background, and `header: solid` names that floor explicitly (2026-08-28).
+{
+  const base = CSS.match(/\.rf-header \{[^}]*\}/);
+  assert.ok(base && /background:\s*var\(--gd-bg\)/.test(base[0]), '.rf-header base rule paints the page background');
+  assert.ok(/body\[data-header="solid"\] \.rf-header \{[^}]*background:\s*var\(--gd-bg\)/.test(CSS), 'header: solid is a real treatment value');
+}
