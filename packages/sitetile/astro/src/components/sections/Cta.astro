@@ -16,7 +16,11 @@ const icon = pm.icon ? (typeof pm.icon === 'object' ? pm.icon.label : pm.icon) :
 const { row, caption } = ctaButtonsHtml(pm.button, section.body, icon);
 // `caption=before` leads with the blurb (see site-core ctaCaptionFirst) — shared with the reference
 // renderer so this seam can't drift; default keeps caption after the buttons.
-const captionFirst = ctaCaptionFirst(pm);
+// 🔴 Read `pm.caption` HERE and pass the value — do not hand the whole `pm` to the helper. The
+// table of params each coral reads is derived by scanning this file for `pm.<name>`; a param read
+// only inside a helper is invisible to it, and the write-time checker then tells authors that a
+// working param is inert. (Was exactly that until 2026-08-28; coral-params.test.mjs holds the line.)
+const captionFirst = ctaCaptionFirst(pm.caption);
 ---
 <section class="st-cta" id={section.id}>
   {eyebrow && <p class="st-cta-eyebrow" set:html={inlineHtml(eyebrow)} />}
