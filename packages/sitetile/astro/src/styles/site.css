@@ -379,18 +379,15 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
 .st-filter-pill:hover { border-color: var(--gd-accent); color: var(--gd-fg, inherit); }
 .st-filter-pill.is-active { border-color: var(--gd-accent); background: var(--gd-accent); color: var(--gd-accent-ink, #fff); font-weight: 700; }
 
-/* ── tagcloud / tag-flow + collection jump-pills ── same pill idiom as the grid facet filter
-   above (`.st-filter-pill`), reused rather than reinvented: an inline-wrapping row of chips is one
-   look, not three. Until now neither `.st-tagcloud` nor `.st-collection-pills` matched anything
-   beyond `* { box-sizing }` (tile-lab#11) — a tag cloud rendered as a run of plain underlined
-   links with no wrap gap, and the collection's category nav the same. */
-.st-tag-flow, .st-collection-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-.st-tag, .st-collection-pill {
+/* ── tagcloud / tag-flow ── same pill idiom as the grid facet filter above. Collection jump-pills
+   use the gated born-paint block below so a hand-authored theme does not gain new presentation. */
+.st-tag-flow { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+.st-tag {
   display: inline-flex; align-items: center; font-size: 0.85rem; line-height: 1;
   padding: 0.5rem 0.9rem; border-radius: 999px; text-decoration: none;
   border: 1px solid var(--gd-border); color: var(--gd-muted); transition: border-color .15s, color .15s;
 }
-.st-tag:hover, .st-collection-pill:hover { border-color: var(--gd-accent); color: var(--gd-text); }
+.st-tag:hover { border-color: var(--gd-accent); color: var(--gd-text); }
 
 .st-cells {
   display: grid; gap: var(--gd-gap); margin-top: 1.5rem;
