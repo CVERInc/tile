@@ -185,6 +185,12 @@ function splitTypeInner(inner) {
 //   Site    = { title, meta, sections: [Section] }
 //   Section = { id, title, type, params, hasTypeLine, body, cells: [Cell] }   // body = lead text; cells only for grid
 //   Cell    = { title, body }                                                 // a grid cell (### heading + body)
+//   Group   = { title, lead, items|people }                                   // a `collection`/`people` category
+//
+// 🩸 `Group` was missing from this sketch, and so was `lead` from collection's group builder — the
+// model's own documentation named neither, which is part of why a dropped field stayed invisible.
+// Anything the parser collects has to have a home here AND a line in serializeSite, or it is
+// deleted on the next save. site-core-roundtrip.test.mjs is the ruler that says so.
 function parseSite(text) {
   const { meta, body } = splitFrontmatter(String(text || ''));
   const lines = body.split('\n');
@@ -378,6 +384,11 @@ function parseSite(text) {
       body = blockOf(lead);
       groups = groups.map((g) => ({
         title: g.title,
+        // 🩸 `lead` was collected by the walk above and dropped right here, and serializeSite had
+        // nothing to write back — so every save through every door deleted a category's intro
+        // paragraph. `people`, the other two-level coral, kept its group lead from the day it was
+        // written; collection walked the same shape and only ever built half the model.
+        lead: blockOf(g.lead),
         items: g.items.map((it) => {
           // pull three optional per-item seams out of the body lines (order-free, one each):
           //   `tags: a, b, c`     → topic pills (mirrors live /oss GitHub topics)
@@ -439,7 +450,10 @@ function serializeSite(site) {
     if (s.hasTypeLine) out.push('%% sitetile: ' + s.type + (s.params ? ' ' + s.params : '') + ' %%');
     if (s.type === 'grid' || s.type === 'gallery' || s.type === 'carousel') {
       if (s.body) out.push(s.body);
-      (s.cells || []).forEach((c) => { out.push('### ' + (c.emoji ? c.emoji + ' ' : '') + (c.title || '') + (c.href ? ' →' + c.href : '') + (c.cta ? ' "' + c.cta + '"' : '') + (c.badge ? ' [' + c.badge + (c.badgeHref ? ' →' + c.badgeHref : '') + ']' : '')); if (c.body) out.push(c.body); });
+      // 🩸 `c.icon` was parsed by splitCellHeading, RENDERED (astro GridCell.astro → lucideSvg) and
+      // then not emitted here — so a cell's Lucide shortcode survived until the first save and the
+      // icon disappeared off the built page. Icon before emoji, the order splitCellHeading reads them.
+      (s.cells || []).forEach((c) => { out.push('### ' + (c.icon ? ':' + c.icon + ': ' : '') + (c.emoji ? c.emoji + ' ' : '') + (c.title || '') + (c.href ? ' →' + c.href : '') + (c.cta ? ' "' + c.cta + '"' : '') + (c.badge ? ' [' + c.badge + (c.badgeHref ? ' →' + c.badgeHref : '') + ']' : '')); if (c.body) out.push(c.body); });
     } else if (s.type === 'people') {
       if (s.body) out.push(s.body);
       // Round-trips the inferred depth: a roster parsed flat has exactly one untitled group, and
@@ -462,6 +476,10 @@ function serializeSite(site) {
       if (s.body) out.push(s.body);
       (s.groups || []).forEach((g) => {
         out.push('### ' + (g.title || ''));
+        // Between the `###` heading and the first `####` item — the exact position the parser reads
+        // it from. Emitted after the items it would re-parse as the LAST item's body, which would
+        // change the paragraph's owner on every save instead of deleting it. Mirrors the people arm.
+        if (g.lead) out.push(g.lead);
         (g.items || []).forEach((it) => { out.push('#### ' + (it.title || '') + (it.href ? ' →' + it.href : '') + (it.badge ? ' "' + it.badge + '"' : '')); if (it.body) out.push(it.body); if (it.tags && it.tags.length) out.push('tags: ' + it.tags.join(', ')); if (it.learn) out.push('learn: ' + it.learn); if (it.updated) out.push('updated: ' + it.updated); });
       });
     } else if (s.type === 'faq') {
@@ -510,10 +528,14 @@ function parseParams(raw) {
     } else map[key] = val;
   }
   // bare boolean flags (a word NOT used as a `key=…`): `ordered`, `wide`, … → true.
+  // 🩸 Scan with the quoted values BLANKED OUT: a label such as `button="Go wide now"` used to read
+  // `wide` (and `now`, `Go`) out of the quotes and set them as flags — a CTA's wording could switch a
+  // layout on. The `key=` re-check below reads the same blanked string, so `wide="…"` still counts.
+  const bare = raw.replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
   let bm; const bre = /(?:^|\s)([a-zA-Z]\w*)(?=\s|$)/g;
-  while ((bm = bre.exec(raw))) {
+  while ((bm = bre.exec(bare))) {
     const w = bm[1];
-    if (!(w in map) && !new RegExp('\\b' + w + '\\s*=').test(raw)) map[w] = true;
+    if (!(w in map) && !new RegExp('\\b' + w + '\\s*=').test(bare)) map[w] = true;
   }
   return map;
 }
@@ -909,9 +931,17 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
 // marketing card can LEAD with its blurb without dropping to an `embed` hand-roll (dogfood #68: the
 // coral couldn't express caption-first, which pushed agents off the born-valid path). This reorders
 // the real DOM, so the reading order is correct for screen readers too — not a CSS `order` illusion.
-function ctaCaptionFirst(pm) {
-  const v = pm && pm.caption;
-  return (typeof v === 'object' ? v.label : v) === 'before';
+//
+// 🩸 2026-08-28. This took the whole `pm` bag and reached inside for `pm.caption`. It works, and it
+// is invisible: the table of "which params each coral reads" is DERIVED by scanning a section
+// component for `pm.<name>`, so a param read inside a helper that was handed the bag appears in no
+// component and the write-time checker reported `caption= … read by nothing` on a param that
+// reorders the DOM. A checker that is wrong is worse than no checker — an author who trusts it
+// deletes working markup. So the READ happens at the call site, in the component, where the thing
+// deriving the table can see it; the helper takes the VALUE. Guarded by coral-params.test.mjs.
+function ctaCaptionFirst(caption) {
+  const v = caption && typeof caption === 'object' ? caption.label : caption;
+  return v === 'before';
 }
 
 // heroParts: a hero body → { text, buttons:[{label,href,primary}], image:{alt,src}|null }. Lets a hero
@@ -1205,7 +1235,7 @@ function renderSection(s) {
       const cb = ctaButtonsHtml(pm.button, s.body);
       const cap = cb.caption ? bodyHtml(cb.caption) : '';
       // `caption=before` → caption leads (see ctaCaptionFirst); default keeps the buttons-first belt.
-      const inner = ctaCaptionFirst(pm) ? cap + cb.row : cb.row + cap;
+      const inner = ctaCaptionFirst(pm.caption) ? cap + cb.row : cb.row + cap;
       return '<section class="st-cta">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
         inner + '</section>';
     }
