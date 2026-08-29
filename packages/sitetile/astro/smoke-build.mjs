@@ -1,8 +1,9 @@
 // smoke-build — re-runnable end-to-end check for the sitetile Astro seam.
 // Runs `astro build` on the fixtures (content/home.md — a realistic marketing homepage exercising
 // all 5 section types; content/blocks.md — base content blocks; content/markers.md — graduated
-// markers the home fixture can't reach: logo hero, block-image figure, whole-cell links) and
-// asserts the rendered output. Exits non-zero on any miss.
+// markers the home fixture can't reach: logo hero, block-image figure, whole-cell links;
+// content/custom-theme.md — the existing Lilac hand-authored theme) and asserts the rendered output.
+// Exits non-zero on any miss.
 //   usage: node smoke-build.mjs   (or: npm run smoke)
 //
 // ISOLATED OUTPUT: builds into dist-smoke/ (gitignored), NEVER dist/ — dist/ is the shared build
@@ -21,15 +22,23 @@
 // client JS must be added here CONSCIOUSLY, with its doctrine, or the build goes red.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
+const LILAC_SOURCE = join(HERE, '../examples/lilac/theme.css');
+const LILAC_STAGED = join(HERE, 'src/themes/lilac.css');
 
-console.log('▸ astro build → dist-smoke/ (fixtures: home.md, blocks.md, markers.md)…');
-execFileSync('npx', ['astro', 'build', '--outDir', DIST], { cwd: HERE, stdio: 'inherit' });
+console.log('▸ astro build → dist-smoke/ (themeless + staged Lilac custom-theme fixtures)…');
+if (existsSync(LILAC_STAGED)) throw new Error(`refusing to shadow an existing staged theme: ${LILAC_STAGED}`);
+copyFileSync(LILAC_SOURCE, LILAC_STAGED);
+try {
+  execFileSync('npx', ['astro', 'build', '--outDir', DIST], { cwd: HERE, stdio: 'inherit' });
+} finally {
+  rmSync(LILAC_STAGED, { force: true });
+}
 
 const html = readFileSync(join(DIST, 'index.html'), 'utf8');
 const blocks = readFileSync(join(DIST, 'blocks/index.html'), 'utf8');
@@ -53,6 +62,11 @@ const findPost = (slug) => {
 const signedPost = findPost('a-signed-post');
 const unsignedPost = findPost('an-unsigned-post');
 const markers = readFileSync(join(DIST, 'markers/index.html'), 'utf8');
+const customThemeBuilt = readFileSync(join(DIST, 'custom-theme/index.html'), 'utf8');
+// Safe negative-control seam: mutate only the HTML held by this test process, never source/output.
+const customTheme = process.env.SITETILE_SMOKE_REMOVE_CUSTOM_MARKER === '1'
+  ? customThemeBuilt.replace(/\sdata-theme-custom(?:="")?/, '')
+  : customThemeBuilt;
 
 const occIn = (s, str) => (s.match(new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
 const occ = (s) => occIn(html, s);
@@ -248,6 +262,24 @@ const checks = [
   ['markers: bare external cell link hardened (target+noopener)', () =>
     /<a class="st-cell st-cell-link group" href="https:\/\/example\.com\/patreon" target="_blank" rel="noopener"/.test(markers)],
   ['markers: both cells carry the chevron', () => (markers.match(/<span class="st-cell-cta/g) || []).length === 2],
+  ['markers: grouped collection renders through the shared cell system', () =>
+    /<section class="st-collection"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(markers)],
+  ['markers: collection cover targets the learn page across the full card', () =>
+    /<a class="st-item-cover" href="\/tools\/compose" aria-label="Compose"><\/a>/.test(markers)],
+  ['markers: collection secondary GitHub link remains an independent anchor', () =>
+    /<a class="st-item-gh" href="https:\/\/github\.com\/example\/compose" target="_blank" rel="noopener">/.test(markers)],
+  // -- custom-theme.md: the existing hand-authored Lilac theme through the production glob/build --
+  ['custom theme: existing Lilac CSS is staged and inlined', () =>
+    customTheme.includes('--gd-accent: #b98fe0') && customTheme.includes('html .st-cell, html a.st-cell-link')],
+  ['custom theme: built body carries the custom-theme marker', () =>
+    /<body\b[^>]*\bdata-theme-custom(?:=""|(?=[\s>]))/.test(customTheme)],
+  ['custom theme: collection renders through production markup', () =>
+    /<section class="st-collection"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(customTheme)
+    && /<a class="st-item-cover" href="\/tools\/compose" aria-label="Compose"><\/a>/.test(customTheme)
+    && /<a class="st-item-gh" href="https:\/\/github\.com\/example\/compose" target="_blank" rel="noopener">/.test(customTheme)],
+  ['custom theme: collection born paint remains excluded by the built compatibility gate', () =>
+    /<body\b[^>]*\bdata-theme-custom(?:=""|(?=[\s>]))/.test(customTheme)
+    && allCss().replace(/\s+/g, '').includes(':where(body:not([data-theme-custom])).st-collection-head')],
   // -- blocks.md: base content blocks --
   ['blocks: ul + ol render', () => /<ul class="st-list"><li>/.test(blocks) && /<ol class="st-list"><li>/.test(blocks)],
   ['blocks: blockquote renders', () => blocks.includes('<blockquote class="st-quote"><p>')],
@@ -331,7 +363,7 @@ const checks = [
   ['form: still zero JavaScript — it has to work with scripts off', () =>
     !/<script/i.test(forms.slice(forms.indexOf('<form'), forms.lastIndexOf('</form>')))],
   ['fixtures never reference the pkg-runtimes chunk', () =>
-    [html, blocks, markers, forms].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
+    [html, blocks, markers, forms, customTheme].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
 ];
 
 let fail = 0;
