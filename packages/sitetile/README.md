@@ -8,6 +8,7 @@ Card = one page (WYSIWYG) · Blog = flowing posts · pagetile = paged books · *
 packages/sitetile/
 ├─ site-core.js        # pure model: parse / serialize (round-trip) / reference HTML renderer
 ├─ site-core.test.js   # 16 tests (round-trip, fence guards, all 5 types, params)
+├─ icon-core.mjs       # pure model: the favicon / apple-touch-icon set every build emits
 ├─ astro/              # the production rendering seam (per-type Astro components + platform shell)
 └─ import/             # mirror → IR converter (the Recast SKU import path)
 ```
@@ -73,7 +74,7 @@ Lists **nest** by indentation (ul/ol, mixed), blockquotes carry **multiple parag
 cd packages/sitetile/astro
 npm install
 npm run build      # content/*.md  →  dist/  (static)
-npm run smoke      # isolated build (dist-smoke/) + assert: 5 types, VT, markers, blocks, zero UNACCOUNTED JS (30 checks)
+npm run smoke      # isolated build (dist-smoke/) + assert: 5 types, VT, markers, blocks, zero UNACCOUNTED JS, the icon set (59 checks)
 ```
 
 - **Content** lives in `astro/content/*.md`. `home.md` → `/`; `<name>.md` → `/<name>`. Files are read **raw** and parsed by `site-core` — they are NOT Astro's own Markdown loader (they have `%%` sentinels + non-YAML frontmatter).
@@ -82,6 +83,20 @@ npm run smoke      # isolated build (dist-smoke/) + assert: 5 types, VT, markers
 - `content/home.md` is the **canonical fixture** — a realistic marketing homepage exercising all 5 types; `npm run smoke` builds and verifies it.
 
 > ⚠️ `<style>` with `@view-transition` must be `is:inline` — Astro's scoped-style CSS pipeline drops the at-rule otherwise.
+
+### Icons — every built site has one, without being asked
+
+Three routes emit an icon set on **every** build, no opt-in: `/favicon.ico` (32×32), `/favicon.svg` and `/apple-touch-icon.png` (180×180, opaque). They are drawn by `icon-core.mjs` — a pure, zero-dependency model aliased as **`@icons`** — and `SiteLayout` takes its `<link rel=icon>` / `<link rel=apple-touch-icon>` hrefs from **that same model**, so a link can never name a file the build did not emit.
+
+🩸 Before 2026-08-28 none of those paths existed. A site that had not set `favicon:` got no icon link either, so the two absences hid each other: three live sites answered **404** to every one of the three paths — which is what a browser, a crawler and iOS all ask for unprompted.
+
+| a site that… | gets |
+|---|---|
+| has set `favicon:` (or `site-logo:` / `footer-logo:`) | its own mark in `<link rel=icon>`, and as the apple-touch icon too when the mark is a raster (iOS ignores SVG) |
+| has set nothing | a badge: its own initial on its own `theme-color` (override with `icon-color: #rrggbb`) |
+| hand-places `public/favicon.ico` etc. | that file — Astro skips a route whose name a `public/` file claims, which is also how REEF with PWA's `gen-icons.sh` output keeps winning |
+
+The badge is deterministic: same site → byte-identical files, so a rebuild never churns them.
 
 ## 🔴 Marker growth policy (dogfood phase)
 
@@ -116,6 +131,16 @@ A basic marketing homepage fits the 5 cleanly. A *fuller* real one recurs these,
 `grid` is currently doing double-to-quintuple duty (features / steps / logos / stats / pricing). Short-term fine (features/steps fit well), but stats/logos/pricing each have their own structure — long-term they should split into their own markers rather than turning `grid` into a parameter monster.
 
 ## Known limits
+
+**The raster badge can draw A–Z and 0–9, and nothing else.** `favicon.ico` and
+`apple-touch-icon.png` are PNGs, and this package has no font engine and no image library to make
+one with — putting either on the critical path of every site build is a price the icon set is not
+worth. So the letter in those two files is drawn from a stroked geometric alphabet in
+`icon-core.mjs` (accents fold to their base letter: É → E). A site whose initial is 山, Ж or 한 gets
+its real character in `favicon.svg` — which is what browsers use for the tab — and a plain
+colour badge on the iOS home screen. A wrong letter would be worse than none, so nothing is guessed
+at; the test asserts the blank case rather than describing it. A site that wants a lettered iOS
+icon in any script sets `favicon:` to its own mark, or hand-places `public/apple-touch-icon.png`.
 
 **Text direction: LTR only.** The renderer ships nine-language localisation and will happily set
 Han, kana and Hangul, but it has no right-to-left support and does not pretend to. Measured rather

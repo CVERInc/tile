@@ -9,6 +9,9 @@ import * as lingo from '../packages/lingo/locale.mjs';
 // in 2023, so social logos come from lib/brands.mjs (official filled marks) while UI/decorative
 // glyphs stay Lucide line-style. See lib/brands.mjs.
 import { BRAND_ICON } from '../lib/brands.mjs';
+// The site icon set — ONE model behind both the emitted files (the three icon routes) and the
+// <link> tags below. See packages/sitetile/icon-core.mjs.
+import { iconHrefs } from '@icons';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import NavNode from '../components/NavNode.astro';
@@ -306,7 +309,8 @@ const PKG_REGISTRY = {
 // the <head> + links must emit so a Recast site carries a real i18n head.
 const hasLingo = packages.includes('lingo');
 // REEF with PWA — `packages: pwa` makes the site installable: <link> a manifest + serve the
-// opaque icon set (gen-icons.sh output). Off → the plain favicon path, unchanged.
+// opaque icon set (gen-icons.sh output, which lands in public/ and therefore wins the icon paths
+// over the generated badge). Off → the ordinary icon set below, which every site now gets.
 const hasPwa = packages.includes('pwa');
 // current page's locale → its URL path + BCP-47 attr (only when lingo is on).
 // Lingo's "main language at root" rule: the root locale (the page's own `lang`)
@@ -581,8 +585,13 @@ const ogCardPath = (p) => {
 };
 const shareImage = absUrl(authoredShareImage
   || (ogCardsOn && Astro.url ? ogCardPath(Astro.url.pathname) : ''));
-const favicon = String(meta.favicon || meta['site-logo'] || meta['footer-logo'] || '').trim();
-const faviconType = /\.svg$/i.test(favicon) ? 'image/svg+xml' : /\.png$/i.test(favicon) ? 'image/png' : '';
+// `favicon:` (falling back to site-logo/footer-logo) is the site's own mark, and it still wins
+// every slot it can fill. What changed on 2026-08-28 is what happens when a site has NOT set one:
+// it used to mean NO icon link at all and no icon file anywhere, so /favicon.ico, /favicon.svg and
+// /apple-touch-icon.png all answered 404 on live sites — measured. The three routes beside this
+// layout now emit a badge for every build, and the hrefs below come from the SAME model that draws
+// them (packages/sitetile/icon-core.mjs), so a link here can never name a file that isn't emitted.
+const iconLinks = iconHrefs(meta, { hasPwa });
 const ogType = meta['og-type'] ? String(meta['og-type']).trim() : 'website';
 // canonical/og:url = THIS page's own absolute URL. Uses Astro.url.pathname (the real served path)
 // so it's correct for every page on every site: a Lingo locale page keeps its /zh-Hant/… path, and
@@ -642,10 +651,14 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     {generatorTag && <meta name="generator" content={generatorTag} />}
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
-    {favicon && <link rel="icon" type={faviconType || undefined} href={favicon} />}
-    {/* apple-touch wants an OPAQUE icon (iOS blacks out transparency); PWA supplies one, else
-        fall back to the site favicon. `packages: pwa` also links the installable manifest. */}
-    {hasPwa ? <link rel="apple-touch-icon" href="/apple-touch-icon.png" /> : (favicon && <link rel="apple-touch-icon" href={favicon} />)}
+    {/* Icons. A site WITH a mark links the mark and only the mark (two rel=icon links would let
+        each browser's own preference order pick which brand a visitor sees); a site without one
+        links the two generated files. apple-touch-icon is ALWAYS linked because iOS reads that and
+        ignores rel=icon — and it points at the mark only when the mark is a raster, since an SVG
+        linked here is an icon iOS silently drops. The rule itself lives in iconHrefs(). */}
+    {iconLinks.icon.map((l) => <link rel="icon" type={l.type || undefined} sizes={l.sizes || undefined} href={l.href} />)}
+    <link rel="apple-touch-icon" href={iconLinks.appleTouch} />
+    {/* `packages: pwa` also links the installable manifest. */}
     {hasPwa && <link rel="manifest" href="/manifest.webmanifest" />}
     {/* Open Graph + Twitter card — link previews on Patreon / IG / X / Discord. */}
     <meta property="og:title" content={title} />

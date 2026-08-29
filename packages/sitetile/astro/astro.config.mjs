@@ -22,6 +22,10 @@ export default defineConfig({
         // REEF with PWA — the shared, framework-agnostic manifest model (root packages/pwa,
         // also consumed by cardtile). Same out-of-dir alias pattern as @sitetile.
         '@pwa': fileURLToPath(new URL('../../pwa/pwa-core.mjs', import.meta.url)),
+        // The site icon set (favicon / apple-touch-icon) — pure model, zero deps, shared by the
+        // three icon routes AND by SiteLayout's <head>, so the files and the links that name them
+        // cannot disagree. Same out-of-dir alias pattern as @sitetile / @pwa.
+        '@icons': fileURLToPath(new URL('../icon-core.mjs', import.meta.url)),
       },
     },
   },
