@@ -99,6 +99,12 @@ const ALLOWED_INLINE = [
   // Signatures are STRING LITERALS, not identifiers — minification renames locals every build.
   ['signet locale banner (Lingo suggest-your-language)', 'signet-locale-banner-dismiss'],
   ['language chooser (/language route)', '[data-language-link]'],
+  // form: action=inbox only. Progressive enhancement over a real POST/GET-less static
+  // build — the coral cannot read `?inbox=` at build time, so a tiny script toggles the
+  // pre-rendered (server-hidden) status line after a real submit redirects back here. A
+  // no-JS visitor still gets a working <form method="post" action="/__reef/inbox">; they
+  // just don't see the thank-you/error line swap in.
+  ['form inbox status (action=inbox only, self-gating on ?inbox=)', '[data-inbox-sent]'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
@@ -380,8 +386,45 @@ const checks = [
   // endpoint directly and 403s for every real visitor.
   ['form: no coral emits a cross-origin post to feelreef', () =>
     !/action="https:\/\/feelreef\.com/.test(forms) && !/name="kind"/.test(forms)],
-  ['form: still zero JavaScript — it has to work with scripts off', () =>
-    !/<script/i.test(forms.slice(forms.indexOf('<form'), forms.lastIndexOf('</form>')))],
+  // The fixture's 1st (escape-hatch) and 3rd (unwired, still last) forms carry no JS at
+  // all — sliced individually now that the 2nd form (action=inbox) legitimately does.
+  // Each slice is bounded to its OWN `</form>` — an open-ended slice on the last form
+  // would also swallow the page's trailing header-overlay script, unrelated to this coral.
+  ['form: the non-inbox forms are still zero-JS — they have to work with scripts off', () => {
+    const first = forms.slice(forms.indexOf('<form class="st-form"'), forms.indexOf('</form>') + '</form>'.length);
+    const last = forms.slice(forms.lastIndexOf('<form class="st-form"'), forms.lastIndexOf('</form>') + '</form>'.length);
+    return !/<script/i.test(first) && !/<script/i.test(last);
+  }],
+  // -- action=inbox: the same-origin forwarder route (2026-09-03) --
+  ['form: action=inbox rewrites to the same-origin forwarder, method forced to post', () =>
+    /<form class="st-form" action="\/__reef\/inbox" method="post">/.test(forms)],
+  ['form: action=inbox emits return_to (this page\'s own path) + a honeypot, not display:none', () =>
+    /<input type="hidden" name="return_to" value="\/forms\/">/.test(forms)
+    && /<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="[^"]*"/.test(forms)
+    && !/name="_hp"[^>]*display:\s*none/.test(forms)],
+  ['form: the {email} field is wired to visitor_email on the inbox route, not the general one', () => {
+    const general = forms.slice(0, forms.indexOf('Wired to the reef inbox'));
+    const inbox = forms.slice(forms.indexOf('Wired to the reef inbox'));
+    return /name="Email"/.test(general) && !/name="visitor_email"/.test(general)
+      && /name="visitor_email"/.test(inbox);
+  }],
+  ['form: a label colliding with a reserved inbox name is wire-prefixed, visible label untouched', () =>
+    /<label class="st-form-label" for="[^"]+">Text<\/label>/.test(forms)
+    && /name="field_Text"/.test(forms)],
+  ['form: inbox status lines render hidden by default, localized to the page lang (en-US)', () =>
+    /<p class="st-form-status st-form-status-sent" data-inbox-sent hidden>Thanks — your message is on its way\.<\/p>/.test(forms)
+    && /<p class="st-form-status st-form-status-error" data-inbox-error hidden>Could not send — please try again\.<\/p>/.test(forms)],
+  // Not a page-wide script count (the header-overlay module ships on every page,
+  // unrelated to this coral) — just that the inbox status toggle itself appears
+  // exactly once, matching the fixture's one `action=inbox` section.
+  ['form: the inbox status toggle script appears exactly once, matching the one action=inbox section', () =>
+    (forms.match(/\[data-inbox-sent\]/g) || []).length === 1],
+  ['form: the non-inbox forms emit no return_to/honeypot (fixed contract, action=inbox only)', () => {
+    const general = forms.slice(0, forms.indexOf('Wired to the reef inbox'));
+    const unwired = forms.slice(forms.lastIndexOf('<form class="st-form"'));
+    return !/name="return_to"/.test(general) && !/name="_hp"/.test(general)
+      && !/name="return_to"/.test(unwired) && !/name="_hp"/.test(unwired);
+  }],
   // -- icons: the three well-known paths a browser, a crawler and iOS ask for unprompted --
   ['icons: all three well-known paths are emitted', () =>
     ['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'].every((p) => existsSync(distFile(p)))],

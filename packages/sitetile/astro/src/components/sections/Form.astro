@@ -7,12 +7,14 @@
 // cutover-structure-before-data); with no action the submit button renders DISABLED — 🩸 it used
 // to render live and post to the page's own URL, which on a static host is a 405 the visitor never
 // sees (measured on sodaart, 2026-08-15). "Never claims a backend it lacks" was in this comment
-// before it was in the markup. See the `inbox=` note below for a knob that was tried and withdrawn. Family posture: CommonMark, one `%% sitetile: %%` sentinel, native elements,
+// before it was in the markup. `action=inbox` is the one special value — a fixed, wired route to
+// feelreef's own same-origin inbox forwarder; see the note below. Family posture: CommonMark, one `%% sitetile: %%` sentinel, native elements,
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
-const { section, hero } = Astro.props;
+import { uiCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+const { section, hero, lang } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every other
@@ -24,36 +26,66 @@ const submit = pm.submit || 'Send';
 const fields = section.fields || [];
 const idOf = (i) => 'st-form-f' + (i + 1);
 
-// ── 🩸 `inbox=` IS NOT HERE, AND THIS IS WHY ─────────────────────────────────
+// ── 🩸 `inbox=` IS BACK, 2026-09-03 — the same-origin route it needed exists now ──
 //
-// It shipped on 2026-08-15 and was withdrawn the same day, measured against
-// production rather than reasoned about. The idea: one param that points the
-// form at feelreef's `/api/inbox` and emits the routing fields, so a contact
-// page reaches a real inbox with no JavaScript.
+// It first shipped on 2026-08-15 and was withdrawn the same day: the idea then was
+// one param pointing the form straight at feelreef's `/api/inbox`, cross-origin.
+// That cannot work — feelreef is a SvelteKit app, and SvelteKit refuses any
+// cross-origin POST whose content type is a FORM type, app-wide, before routing
+// (`Cross-site POST form submissions are forbidden` — the same check that protects
+// the dashboard's reply/claim actions, signup, checkout, the pay links). No enctype
+// a browser sends for a plain `<form>` dodges it.
 //
-// It cannot work as a direct cross-origin post. feelreef is a SvelteKit app, and
-// SvelteKit refuses any cross-origin POST whose content type is a FORM type —
-// `Cross-site POST form submissions are forbidden`, app-wide, before routing.
-// That check is not in the way of the feature; it IS the feature that protects
-// every cookie-authenticated form action in that app (the dashboard's reply and
-// claim actions, signup, checkout, the pay links). Turning it off to let this
-// through would trade real protection for a convenience.
+// The withdrawal note said the fix was a SAME-ORIGIN route: the form posts to the
+// site's own path and the site's emitted `_worker.js` forwards it server-to-server.
+// That forwarder now exists on the reef side, so this coral's half is just wiring
+// `action=inbox` to it — a fixed, non-configurable contract:
 //
-// And an HTML form cannot dodge it: the three enctypes a browser will send are
-// exactly the three that check matches. The bubble is unaffected because it
-// posts `application/json`, which is not a form type — but a form cannot.
+//   • `action=inbox` → `<form action="/__reef/inbox" method="post">`. `method=` is
+//     ignored for this value — the forwarder only accepts POST.
+//   • Two hidden inputs the forwarder reads: `return_to` (this page's own path,
+//     locale-aware — Astro.url.pathname already carries the locale segment) and a
+//     honeypot `_hp` (visually hidden, NOT `display:none`, so a bot's autofill still
+//     reaches it — a display:none field is exactly what a scripted filler is taught
+//     to skip; kept out of the tab order and off-screen instead).
+//   • No `kind`/`id` param here — the forwarder bakes the site key server-side. This
+//     coral still carries only STRUCTURE, per cutover-structure-before-data.
+//   • Field naming: the `{email}` field is posted as `visitor_email` (the forwarder's
+//     one semantic field — it composes every other field into the message body under
+//     its own visible label). A label that collides with one of the forwarder's
+//     reserved names gets `field_` prefixed on the WIRE name only — the visible
+//     `<label>` text an author wrote never changes.
 //
-// ⇒ The route that WOULD work is a same-origin one: the form posts to the site's
-// OWN path and the site's emitted `_worker.js` forwards it server-to-server.
-// That is a build-pipeline change, not a coral change, so it is not smuggled in
-// here. Until it exists, `action=` remains the escape hatch and an unwired form
-// renders a disabled button rather than a live one that 403s.
-//
-// 🔴 Do not re-add a version of this that posts straight to feelreef.com. It
-// will look correct in every test that calls the endpoint directly, and fail for
-// every real visitor.
+// 🔴 Do not re-add a version of this that posts straight to feelreef.com. It will
+// look correct in every test that calls the endpoint directly, and fail for every
+// real visitor — that is the exact failure this route exists to avoid.
 const action = pm.action || undefined;
-const method = (pm.method || 'post').toLowerCase();
+const isInbox = action === 'inbox';
+const method = isInbox ? 'post' : (pm.method || 'post').toLowerCase();
+const formAction = isInbox ? '/__reef/inbox' : action;
+
+// The forwarder's reserved field names — an owner field must never land on the wire
+// under one of these, or it would be read as routing data instead of message content.
+// Checked case-insensitively (the forwarder's own keys are all lowercase) so a field
+// authored as "Kind" or "Text" cannot collide either. The visible label is untouched;
+// only the wire `name=` gets `field_` prefixed.
+const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', '_hp', 'visitor_email', 'email_field']);
+const inboxNameFor = (label, kind) => {
+  if (kind === 'email') return 'visitor_email';
+  const s = String(label);
+  return RESERVED_INBOX_NAMES.has(s.toLowerCase()) ? `field_${s}` : s;
+};
+const nameFor = (f) => (isInbox ? inboxNameFor(f.label, f.kind) : f.label);
+// `return_to` — locale-aware because Astro.url.pathname IS the built path, which
+// already carries the locale segment for every non-default-locale page (the router
+// bakes it in via toUrlLocale; see lib routing). Read once, per page render.
+const returnTo = Astro.url.pathname;
+
+// Client-only status line: the build is static, so the coral cannot read `?inbox=`
+// at build time — only a visitor's browser can, after a real submit redirects back
+// here. Kept tiny and inline (no import, no event handler attributes) like
+// ArchiveView's tag-filter script, so it stays CSP-clean under a default script-src.
+const copy = isInbox ? uiCopy(lang || DEFAULT_LANG) : null;
 
 // 🔴 A form with nowhere to send is not a form with a working button. Before
 // this, an unwired coral rendered a live submit that posted to the page's own
@@ -68,23 +100,58 @@ const wired = Boolean(action);
     {section.title && <Title set:html={inlineHtml(section.title)} />}
     {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   </div>
-  <form class="st-form" action={action} method={method}>
+  {isInbox && (
+    <p class="st-form-status st-form-status-sent" data-inbox-sent hidden set:html={inlineHtml(copy.inboxSent)} />
+  )}
+  {isInbox && (
+    <p class="st-form-status st-form-status-error" data-inbox-error hidden set:html={inlineHtml(copy.inboxError)} />
+  )}
+  <form class="st-form" action={formAction} method={method}>
+    {isInbox && (
+      <input type="hidden" name="return_to" value={returnTo} />
+    )}
+    {isInbox && (
+      // Honeypot: a real visitor never sees or tabs to this, so it stays empty; a
+      // bot's autofill routine — which reads the DOM, not computed CSS — still finds
+      // and fills it. Off-screen + zero-size, deliberately NOT `display:none`.
+      <input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true"
+        style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;" />
+    )}
     {fields.map((f, i) => (
       <div class="st-form-field">
         <label class="st-form-label" for={idOf(i)} set:html={inlineHtml(f.label)} />
         {f.kind === 'textarea' ? (
-          <textarea class="st-form-input st-form-textarea" id={idOf(i)} name={f.label} rows="5"></textarea>
+          <textarea class="st-form-input st-form-textarea" id={idOf(i)} name={nameFor(f)} rows="5"></textarea>
         ) : f.kind === 'select' ? (
-          <select class="st-form-input st-form-select" id={idOf(i)} name={f.label}>
+          <select class="st-form-input st-form-select" id={idOf(i)} name={nameFor(f)}>
             <option value="" disabled selected>—</option>
             {(f.options || []).map((o) => <option value={o}>{o}</option>)}
           </select>
         ) : (
-          <input class="st-form-input" id={idOf(i)} name={f.label}
+          <input class="st-form-input" id={idOf(i)} name={nameFor(f)}
             type={f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text'} />
         )}
       </div>
     ))}
     <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>
+  {isInbox && (
+    <script is:inline>
+      (() => {
+        const root = document.currentScript.closest('.st-form-section');
+        if (!root) return;
+        const v = new URLSearchParams(location.search).get('inbox');
+        if (!v) return;
+        const form = root.querySelector('.st-form');
+        if (v === 'sent') {
+          const sent = root.querySelector('[data-inbox-sent]');
+          if (sent) sent.hidden = false;
+          if (form) form.hidden = true;
+        } else {
+          const err = root.querySelector('[data-inbox-error]');
+          if (err) err.hidden = false;
+        }
+      })();
+    </script>
+  )}
 </section>
