@@ -156,6 +156,7 @@ const LINGO_UI = {
     noMatches: 'No matching posts', clearFilter: '\u2715 Clear filter', monthShort: (n) => (EN_MONTHS[Number(n) - 1] || String(n)).slice(0, 3),
     ageBack: 'Go back', ageConfirm: 'Yes',
     notFoundTitle: 'Page not found', notFoundBody: "That address doesn't exist on this site.", notFoundHome: 'Go to the homepage',
+    inboxSent: "Thanks — your message is on its way.", inboxError: 'Could not send — please try again.',
     month: (n) => EN_MONTHS[Number(n) - 1] || String(n), countWrap: [' (', ')'] },
   'zh-TW': { recent: '最新文章', tags: '標籤雲', archive: '所有貼文', search: '搜尋......',
     tagPrefix: '顯示具有以下標籤的文章：', datePrefix: '發表於：',
@@ -163,6 +164,7 @@ const LINGO_UI = {
     noMatches: '沒有符合的文章', clearFilter: '\u2715 清除篩選', monthShort: (n) => `${Number(n)}月`,
     ageBack: '返回', ageConfirm: '是',
     notFoundTitle: '找不到頁面', notFoundBody: '這個網站上沒有這個網址。', notFoundHome: '回到首頁',
+    inboxSent: '訊息已送出，謝謝。', inboxError: '傳送失敗，請再試一次。',
     month: (n) => `${Number(n)}月`, countWrap: ['（', '）'] },
   'ja-JP': { recent: '最新の記事', tags: 'タグクラウド', archive: 'すべての記事', search: '検索......',
     tagPrefix: 'タグ：', datePrefix: '投稿日：',
@@ -170,6 +172,7 @@ const LINGO_UI = {
     noMatches: '一致する記事はありません', clearFilter: '\u2715 絞り込みを解除', monthShort: (n) => `${Number(n)}月`,
     ageBack: '戻る', ageConfirm: 'はい',
     notFoundTitle: 'ページが見つかりません', notFoundBody: 'このサイトにそのアドレスはありません。', notFoundHome: 'ホームへ',
+    inboxSent: '送信しました。ありがとうございます。', inboxError: '送信できませんでした。もう一度お試しください。',
     month: (n) => `${Number(n)}月`, countWrap: ['（', '）'] },
   'ko-KR': { recent: '최근 글', tags: '태그 클라우드', archive: '모든 글', search: '검색...',
     tagPrefix: '태그: ', datePrefix: '게시일: ',
@@ -177,6 +180,7 @@ const LINGO_UI = {
     noMatches: '일치하는 글이 없습니다', clearFilter: '\u2715 필터 해제', monthShort: (n) => `${Number(n)}월`,
     ageBack: '돌아가기', ageConfirm: '예',
     notFoundTitle: '페이지를 찾을 수 없습니다', notFoundBody: '이 사이트에 해당 주소가 없습니다.', notFoundHome: '홈으로',
+    inboxSent: '메시지가 전송되었습니다. 감사합니다.', inboxError: '전송하지 못했습니다. 다시 시도해 주세요.',
     month: (n) => `${Number(n)}월`, countWrap: [' (', ')'] },
 };
 /**
