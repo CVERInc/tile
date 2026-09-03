@@ -1182,6 +1182,32 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .75rem 2rem; margin-top: .5rem;
 }
 .st-form-submit:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
+.st-form-submit:disabled { opacity: .6; cursor: not-allowed; }
+/* Post-submit feedback (owner ruling, 2026-09-03): the failure this replaces was a same-size
+   paragraph under a form that STAYS — indistinguishable at a glance from every other line of
+   text on the page, which is why people resubmitted. The success CARD below is deliberately a
+   different SHAPE (bordered block, centred, its own vertical rhythm), not just different text,
+   so "this worked" reads before anyone reads a word of it. */
+.st-form-success {
+  display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  text-align: center; margin-top: 1.5rem; padding: 2rem 1.5rem;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-surface);
+}
+.st-form-success:focus { outline: none; } /* focused programmatically for AT, not by pointer/keyboard nav */
+.st-form-success-check { color: var(--gd-accent); }
+.st-form-success-heading { margin: 0; font-size: 1.3rem; font-weight: 700; color: var(--gd-head); }
+.st-form-success-next { margin: 0; color: var(--gd-text); max-width: 46ch; }
+.st-form-success-excerpt {
+  margin: .25rem 0 0; padding: .6rem .9rem; max-width: 46ch; white-space: pre-line;
+  font-style: italic; color: var(--gd-muted); border-left: 3px solid var(--gd-border); text-align: left;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.st-form-success-back { margin: .5rem 0 0; }
+.st-form-success-back a { color: var(--gd-accent); font-weight: 600; }
+/* Inline, ABOVE the button (owner ruling) — a form that failed keeps every value the visitor
+   typed, so the error is the only thing that changes; no colour token exists for this concept
+   yet (see the required-marker note above), so a plain accessible red carries it alone. */
+.st-form-error { margin: 0; color: #c0392b; font-size: .95rem; }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    THEME TREATMENT AXES
