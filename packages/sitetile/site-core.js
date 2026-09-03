@@ -43,6 +43,12 @@ import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people'];
+// Site-layer vocabulary exported beside KNOWN_TYPES so grammar vendors have one renderer-owned
+// source of truth for chrome keys that are otherwise invisible to the section model.
+const SITE_LAYER_KEYS = [
+  { key: 'inbox-bubble', syntax: 'inbox-bubble: on | off', purpose: 'Show the site visitor Q&A/message bubble on every page by default; a page value overrides the site value.' },
+  { key: 'inbox-bubble-except', syntax: 'inbox-bubble-except: /shop/*, /checkout', purpose: 'Comma-separated locale-agnostic paths to suppress the bubble; a trailing * matches any suffix.' },
+];
 
 // tagcloudLinks: a tagcloud section body (a markdown list of `- [Label](/href)` items) → an
 // ordered [{label, href}]. General — a weighted category/tag cloud is a near-universal WP/Blogger
@@ -1500,6 +1506,6 @@ export {
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks,
   // sidebar layout helpers — exported so the Astro layer can reuse the same parser.
   parseSidebarNav,
-  FRONTMATTER_KEY, KNOWN_TYPES,
+  FRONTMATTER_KEY, KNOWN_TYPES, SITE_LAYER_KEYS,
   deriveDescription, DESC_MAX,
 };

@@ -45,3 +45,7 @@ supposed to mean.
 
 ### Your name
 ### Tell us more {textarea}
+
+## Existing inbox bubble
+%% sitetile: embed %%
+<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-kaito="1" data-api-base="https://feelreef.com" data-title="Form coral coverage"></div><script type="module" src="https://feelreef.com/corals/inbox-bubble/v0/inbox-bubble.js"></script>

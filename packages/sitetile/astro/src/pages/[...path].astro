@@ -78,6 +78,9 @@ export function getStaticPaths() {
     // blog-search etc. consistent across ALL pages instead of each page duplicating the chrome.
     const site = parseSite(raw);
     const siteConfig = loadSite(files, rel);
+    // Reserved resolution marker: after Site ⊕ page both values look identical, but the layout
+    // must know that an explicit page `on` wins over the site's exclusion patterns.
+    if (Object.prototype.hasOwnProperty.call(site.meta, 'inbox-bubble')) site.meta['inbox-bubble-page-override'] = true;
     // 🩸 `site-title` is stashed BEFORE the merge because the merge destroys the distinction the
     // head needs. og:site_name must be a constant per site, but it was reading headerBrand, which
     // falls back to meta.title — and after this merge meta.title is the PAGE's title on any page
