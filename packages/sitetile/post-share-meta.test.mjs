@@ -142,6 +142,41 @@ check('og:site_name still falls back to headerBrand (legacy sites with no _site.
   assert.equal(resolve({ 'site-title': 'ATLAS.DEV' }, 'About Atlas'), 'ATLAS.DEV');
 });
 
+// ── 4b. og:site_name must not fall through to headerBrand's page-title tail when the site DOES
+// carry a chrome-level name — a `_site.md` with nav/footer/theme filled in but no `title:` of its
+// own (sodaart /faq, 2026-09-03: og:site_name and the inbox bubble's data-site-name both rendered
+// "よくある質問 | SODAART【新HP移行中】", the PAGE's own composed <title>, because `site-title`
+// stashed as '' and the chain fell straight to headerBrand — which on that page IS the page's own
+// merged title). `brand:` and `footer-brand:` are the two fields already documented elsewhere in
+// this file as site-level chrome, so they must outrank that tail.
+check('og:site_name prefers `brand`/`footer-brand` over headerBrand\'s page-title fallback', () => {
+  const m = layout.match(/const ogSiteName = [^;]+;/);
+  const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
+  // eslint-disable-next-line no-new-func
+  const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
+  // `headerBrand` here stands in for what it resolves to on a page with no site-level name of its
+  // own: the page's own composed <title>, exactly as measured live.
+  const pageComposedTitle = 'よくある質問 | SODAART【新HP移行中】';
+  assert.equal(resolve({ brand: 'SODAART' }, pageComposedTitle), 'SODAART');
+  assert.equal(resolve({ 'footer-brand': 'SODAART' }, pageComposedTitle), 'SODAART');
+  // site-title still outranks both when a site sets its own title too.
+  assert.equal(resolve({ 'site-title': 'ATLAS.DEV', brand: 'Atlas' }, 'ignored'), 'ATLAS.DEV');
+  // brand still outranks footer-brand.
+  assert.equal(resolve({ brand: 'Header Name', 'footer-brand': 'Footer Name' }, 'ignored'), 'Header Name');
+});
+
+mustFail('the og:site_name brand/footer-brand precedence check', () => {
+  const broken = layout.replace(
+    /const ogSiteName = \(meta\['site-title'\][^;]+;/,
+    "const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;",
+  );
+  const m = broken.match(/const ogSiteName = [^;]+;/);
+  const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
+  // eslint-disable-next-line no-new-func
+  const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
+  assert.equal(resolve({ brand: 'SODAART' }, 'よくある質問 | SODAART【新HP移行中】'), 'SODAART');
+});
+
 mustFail('the og:site_name consumer check', () => {
   const broken = layout.replace('content={ogSiteName}', 'content={headerBrand}');
   assert.match(broken, /<meta property="og:site_name" content=\{ogSiteName\}/);

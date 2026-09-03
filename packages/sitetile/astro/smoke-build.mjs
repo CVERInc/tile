@@ -215,12 +215,26 @@ function claimedIcons() {
 
 const checks = [
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
-  ['inbox bubble: default on with the build site key, platform origin, site title, and site name', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress — one character, one piece of lead"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
+  ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
   ['inbox bubble: site off suppresses it', () => occIn(siteOff, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: locale-agnostic except suppresses /zh-tw/blocks via /blocks', () => occIn(localeExcept, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: explicit page on wins over the site /markers exclusion', () => occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1],
   ['inbox bubble: a hand-mounted embed is not doubled', () => occIn(forms, 'data-dynamic-coral="inbox-bubble"') === 1],
+  // -- sodaart /faq, 2026-09-03: the bubble's panel header is the STORE's stable name, and must
+  // stay that on every page — not each page's own composed <title> (was measured live as
+  // "常見問題 | SODAART【新官網轉移中】", the FAQ page's own title text, on a page whose title has
+  // nothing to do with the home page's). `markers.md` is the fixture's only non-home page with the
+  // auto-mounted (not hand-authored) bubble on, and its own title is deliberately unrelated to the
+  // site's `brand:` — proving data-site-name tracks the SITE config, not whichever page renders it.
+  ['inbox bubble: on a non-home page, data-site-name is the SITE\'s name, not that page\'s own title', () =>
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress"><\/div>/.test(markers)],
+  // og:site_name — per Open Graph it is the SITE's name (og:title already carries the page).
+  ['og:site_name: the home page emits it as the site\'s own brand', () =>
+    /<meta property="og:site_name" content="Yamada Letterpress">/.test(html)],
+  ['og:site_name: a non-home page still emits the site\'s brand, not its own <title>', () =>
+    /<meta property="og:site_name" content="Yamada Letterpress">/.test(markers)
+    && !markers.includes('<meta property="og:site_name" content="Marker coverage')],
   // -- home.md: the 5 section types + platform defaults --
   // 🩸 2026-08-28. `class="st-hero"` was an EXACT string match, so it broke the moment the section
   // gained a second class — which every hero variant now does (`.st-full-bleed`, the opt-out from

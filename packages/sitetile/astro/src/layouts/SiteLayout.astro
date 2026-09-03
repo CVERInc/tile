@@ -633,9 +633,26 @@ const jsonLd = jsonLdScript(pageGraph({
 // `headerBrand`, which is a per-page value (meta.brand → meta.title → title) and therefore drifted
 // to whatever the page called itself. `site-title` is stashed by the [...path] catch-all before the
 // page frontmatter merges over the site config, precisely so the head can still see the site's own
-// title. Falls back to headerBrand for surfaces that don't go through that route (and for legacy
-// sites with no _site.md), which is the old behaviour, not a regression.
-const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;
+// title.
+//
+// 🩸 2026-09-03 (sodaart /faq, also feeding the inbox-bubble's data-site-name below): that fix was
+// incomplete. A site can have `_site.md` — nav/footer/theme all configured — and still never set
+// its OWN `title:` there, because nothing forces it to. `site-title` then stashes as '' and
+// ogSiteName fell all the way through to `headerBrand`, which on any page with no dedicated
+// `brand:` reads `meta.title` — the PAGE's own merged title. Measured: /faq rendered
+// "よくある質問 | SODAART【新HP移行中】" (the page author's own composed <title> text, "page | site")
+// as the site name — same class of defect the site-title stash was meant to close, one fallback
+// step further down the chain.
+// Fix: prefer the two chrome fields that are already documented as SITE-level, never per-page —
+// `brand:` (the header's own short wordmark text — see its comment above: title "Studio Lilac —
+// comics", brand "Lilac") and `footer-brand:` (the footer wordmark) — before ever falling through
+// to `headerBrand`'s page-title tail. `headerBrand` itself stays the LAST resort, kept for legacy
+// sites with no _site.md at all (no site-title key, no brand, no footer-brand set anywhere) —
+// there is nothing site-level left to prefer there, which is the old behaviour, not a regression.
+const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
+  || (meta.brand ? String(meta.brand).trim() : '')
+  || (meta['footer-brand'] ? String(meta['footer-brand']).trim() : '')
+  || headerBrand;
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
