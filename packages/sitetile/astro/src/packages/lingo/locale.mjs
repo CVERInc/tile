@@ -227,6 +227,59 @@ export function uiCopy(locale) {
   return { ...row, count: (label, n) => `${label}${open}${n}${close}` };
 }
 
+/**
+ * Copy for the `form` coral's `action=inbox` path — required-field validation and the
+ * "what happens next" success line (2026-09-03 cold-read findings #9/#10).
+ *
+ * Deliberately its OWN small table, not folded into `LINGO_UI`/`_canon`: those recognise exactly
+ * Lingo's four SITE locales (en-US/ja-JP/zh-TW/ko-KR — zh-Hant, never a genuine Simplified
+ * variant), because every other consumer of them — the locale picker, hreflang, the suggestion
+ * banner — enumerates that fixed set. This is a DIFFERENT question ("what script is the page's
+ * own `lang` written in"), asked of the site's raw `lang:` frontmatter rather than a Lingo data
+ * code, and it distinguishes Simplified (zh-Hans/zh-CN) from Traditional — which finding #15's
+ * `square-shop` fix needs too. Widening `_canon` itself to a 5th locale would be a bigger, riskier
+ * change than either fix calls for.
+ */
+const INBOX_FORM_LOCALE = {
+  ja: {
+    fieldRequired: 'この項目は必須です。',
+    sentWithEmail: '確認メールをお送りしました。店主からの返信も同じメールアドレスに届きます。',
+    sentNoEmail: '店主が確認次第対応します。返信をご希望の場合はメールアドレスをご記入ください。',
+  },
+  'zh-tw': {
+    fieldRequired: '這是必填欄位。',
+    sentWithEmail: '已寄一封確認信到您的信箱；店家的回覆也會寄到同一個信箱。',
+    sentNoEmail: '店家會盡快處理；如需回信請留 email。',
+  },
+  'zh-cn': {
+    fieldRequired: '这是必填字段。',
+    sentWithEmail: '已经发送一封确认信到您的邮箱；店家的回复也会发送到同一个邮箱。',
+    sentNoEmail: '店家会尽快处理；如需回复请留 email。',
+  },
+  ko: {
+    fieldRequired: '필수 입력 항목입니다.',
+    sentWithEmail: '확인 메일을 보냈습니다. 담당자의 답변도 같은 메일 주소로 전달됩니다.',
+    sentNoEmail: '담당자가 곧 확인합니다. 답변을 받고 싶다면 이메일을 남겨 주세요.',
+  },
+  en: {
+    fieldRequired: 'This field is required.',
+    sentWithEmail: "We've sent a confirmation to your email — the owner's reply will go to the same address.",
+    sentNoEmail: "The owner will get to this soon. Leave an email if you'd like a reply.",
+  },
+};
+/** A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys. */
+function inboxFormLocaleKey(lang) {
+  const tag = String(lang || '').toLowerCase();
+  const primary = tag.split('-')[0];
+  if (primary === 'ja') return 'ja';
+  if (primary === 'ko') return 'ko';
+  if (primary === 'zh') return /hans|-cn\b|-sg\b/.test(tag) ? 'zh-cn' : 'zh-tw';
+  return 'en';
+}
+export function inboxFormCopy(lang) {
+  return INBOX_FORM_LOCALE[inboxFormLocaleKey(lang)];
+}
+
 /** The date-archive heading ("July 2026" / "2026 年 7 月"), same reasoning as uiCopy: the ORDER of
  *  year and month is a language fact, not a format string somebody can share between locales. */
 export function dateHeading(locale, year, month) {

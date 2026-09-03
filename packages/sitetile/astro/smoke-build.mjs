@@ -215,8 +215,8 @@ function claimedIcons() {
 
 const checks = [
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
-  ['inbox bubble: default on with the build site key, platform origin, and site title', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
+  ['inbox bubble: default on with the build site key, platform origin, site title, and site name', () =>
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress — one character, one piece of lead"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
   ['inbox bubble: site off suppresses it', () => occIn(siteOff, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: locale-agnostic except suppresses /zh-tw/blocks via /blocks', () => occIn(localeExcept, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: explicit page on wins over the site /markers exclusion', () => occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1],
@@ -292,6 +292,22 @@ const checks = [
   ['nav: 1st-level submenu link', () => /class="rf-nav-sub">[\s\S]*?class="rf-nav-link rf-nav-sublink" href="\/apps"/.test(html)],
   ['nav: ARBITRARY depth — 3rd-level leaf renders', () => html.includes('rf-nav-subgroup') && html.includes('href="/games/puzzle"')],
   ['nav: default flyout CSS present (hover reveal)', () => allCss().replace(/\s+/g, '').includes('.rf-nav-group:hover>.rf-nav-sub')],
+  // -- nav-mobile backdrop (finding #1, 2026-09-03 cold-read): an open hamburger menu used to sit
+  // directly on undimmed page content with nothing marking where the menu layer ended. --
+  ['nav-mobile: the hamburger menu gets its own backdrop label, wired to the same checkbox', () =>
+    /<label class="rf-ha-overlay" data-ha-overlay="nav" for="rf-nav-toggle" aria-hidden="true"><\/label>/.test(html)],
+  ['nav-mobile: the backdrop is revealed only while the menu checkbox is checked (state-machine CSS)', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes('body[data-nav-mobile=hamburger]:has(#rf-nav-toggle:checked).rf-ha-overlay[data-ha-overlay=nav]{display:block}');
+  }],
+  ['nav-mobile: the page behind the open menu is scroll-locked', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked){overflow:hidden}');
+  }],
+  // Esc-to-close needs no new wiring: `#rf-nav-toggle` already carries `data-ha-toggle`, which
+  // header-actions.js's existing Escape handler (already asserted allowlisted above) sweeps.
+  ['nav-mobile: the toggle that drives the backdrop still carries data-ha-toggle (Esc-to-close)', () =>
+    /<input type="checkbox" id="rf-nav-toggle" class="rf-nav-check" hidden data-ha-toggle>/.test(html)],
   // -- markers.md: graduated markers the home fixture can't reach --
   ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero st-full-bleed"[^>]*\sdata-media="logo"/.test(markers)],
   ['markers: block image → figure+img', () => /<figure class="st-figure">\s*<img class="st-img" src="\/img\/demo-logo\.gif" alt="Mark"/.test(markers)],
@@ -424,14 +440,34 @@ const checks = [
   ['form: a label colliding with a reserved inbox name is wire-prefixed, visible label untouched', () =>
     /<label class="st-form-label" for="[^"]+">Text<\/label>/.test(forms)
     && /name="field_Text"/.test(forms)],
+  // 🩸 2026-09-03: the fixture's inbox form's `{email}` field now defaults `required` (no field
+  // says otherwise), which is GUARANTEED filled on any submission the browser lets through — so
+  // the success line is the "we emailed you a confirmation" variant, not the generic old one.
   ['form: inbox status lines render hidden by default, localized to the page lang (en-US)', () =>
-    /<p class="st-form-status st-form-status-sent" data-inbox-sent hidden>Thanks — your message is on its way\.<\/p>/.test(forms)
+    /<p class="st-form-status st-form-status-sent" data-inbox-sent hidden>We've sent a confirmation to your email — the owner's reply will go to the same address\.<\/p>/.test(forms)
     && /<p class="st-form-status st-form-status-error" data-inbox-error hidden>Could not send — please try again\.<\/p>/.test(forms)],
   // Not a page-wide script count (the header-overlay module ships on every page,
   // unrelated to this coral) — just that the inbox status toggle itself appears
   // exactly once, matching the fixture's one `action=inbox` section.
   ['form: the inbox status toggle script appears exactly once, matching the one action=inbox section', () =>
     (forms.match(/\[data-inbox-sent\]/g) || []).length === 1],
+  // -- required fields (2026-09-03, cold-read findings #9/#10) --
+  ['form: action=inbox defaults its {email} field to required — native attr, marker, localized message', () =>
+    /<span>Email<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
+    && /<input class="st-form-input" id="st-form-f2" name="visitor_email" type="email" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
+  ['form: action=inbox defaults its {textarea} message field to required the same way', () =>
+    /<span>Tell us more<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
+    && /<textarea class="st-form-input st-form-textarea" id="st-form-f4" name="Tell us more" rows="5" required aria-required="true" data-required-msg="This field is required\."><\/textarea>/.test(forms)],
+  ['form: action=inbox leaves a plain field (no email/textarea kind, no explicit required) optional', () =>
+    /<label class="st-form-label" for="st-form-f3">Text<\/label> <input class="st-form-input" id="st-form-f3" name="field_Text" type="text">/.test(forms)],
+  ['form: an explicit {required} on a non-inbox form field still renders native required + marker', () =>
+    /<span>Your name<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
+    && /<input class="st-form-input" id="st-form-f1" name="Your name" type="text" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
+  // Control for the marker being OPT-IN, not the field grammar suddenly defaulting everything:
+  // this form's own "Your name" (unwired, not action=inbox, no `{required}`) renders BYTE-IDENTICAL
+  // to before — no marker wrapper, no attribute, same as every pre-existing site's forms today.
+  ['form: an unwired form with no explicit required stays byte-identical (no marker, no attr)', () =>
+    /<label class="st-form-label" for="st-form-f1">Your name<\/label> <input class="st-form-input" id="st-form-f1" name="Your name" type="text">/.test(forms)],
   ['form: the non-inbox forms emit no return_to/honeypot (fixed contract, action=inbox only)', () => {
     const general = forms.slice(0, forms.indexOf('Wired to the reef inbox'));
     const unwired = forms.slice(forms.lastIndexOf('<form class="st-form"'));

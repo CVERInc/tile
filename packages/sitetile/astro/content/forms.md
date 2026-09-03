@@ -14,7 +14,7 @@ withdrawn the same day: SvelteKit refuses cross-origin POSTs with a form content
 type, app-wide, and that refusal is what protects every cookie-authenticated form
 action in that app. See the note in Form.astro.
 
-### Your name
+### Your name {required}
 ### Email {email}
 ### What is this about
 - A quote

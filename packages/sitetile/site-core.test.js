@@ -744,4 +744,72 @@ test('video: a postered clip preloads NOTHING, an unpostered one still preloads 
 });
 
 
+// ── form field `required` grammar (2026-09-03, cold-read findings #9/#10) ──────────────────────
+const form = (bodyLines) => '---\nsitetile-page: home\ntitle: T\n---\n\n## Contact\n%% sitetile: form %%\n' + bodyLines.join('\n') + '\n';
+
+test('form field: no brace at all → kind text, required left unstated (undefined)', () => {
+  const f = parseSite(form(['### Name'])).sections[0].fields[0];
+  assert.equal(f.kind, 'text');
+  assert.equal(f.required, undefined);
+});
+
+test('form field: a bare kind brace is unaffected by the new grammar (backwards compatible)', () => {
+  const f = parseSite(form(['### Email {email}'])).sections[0].fields[0];
+  assert.equal(f.label, 'Email');
+  assert.equal(f.kind, 'email');
+  assert.equal(f.required, undefined);
+});
+
+test('form field: bare `{required}` sets required=true and leaves kind at its default', () => {
+  const f = parseSite(form(['### Company {required}'])).sections[0].fields[0];
+  assert.equal(f.label, 'Company');
+  assert.equal(f.kind, 'text');
+  assert.equal(f.required, true);
+});
+
+test('form field: `{kind required}` sets both, either space- or comma-separated', () => {
+  const a = parseSite(form(['### Phone {tel required}'])).sections[0].fields[0];
+  assert.equal(a.kind, 'tel');
+  assert.equal(a.required, true);
+  const b = parseSite(form(['### Message {textarea, required}'])).sections[0].fields[0];
+  assert.equal(b.kind, 'textarea');
+  assert.equal(b.required, true);
+});
+
+test('form field: `required: false` is an explicit, distinguishable opt-out', () => {
+  const f = parseSite(form(['### Newsletter {required: false}'])).sections[0].fields[0];
+  assert.equal(f.required, false);
+  assert.notEqual(f.required, undefined, 'explicit false must not collapse into "unstated"');
+});
+
+test('form field: `{email, required: false}` — comma + spaced colon, still parses cleanly', () => {
+  const f = parseSite(form(['### Newsletter email {email, required: false}'])).sections[0].fields[0];
+  assert.equal(f.kind, 'email');
+  assert.equal(f.required, false);
+});
+
+test('form field: an inferred `select` never gets a `{select}` brace, but keeps its own required', () => {
+  const src = form(['### Topic {required}', '- Sales', '- Support']);
+  const f = parseSite(src).sections[0].fields[0];
+  assert.equal(f.kind, 'select');
+  assert.equal(f.required, true);
+  assert.equal(serializeSite(parseSite(src)), src, 'round-trips byte-identical');
+});
+
+test('form field: required round-trips through serializeSite for every stated value', () => {
+  const cases = [
+    ['### Name', '### Name'],
+    ['### Email {email}', '### Email {email}'],
+    ['### Company {required}', '### Company {required}'],
+    ['### Phone {tel required}', '### Phone {tel required}'],
+    ['### Newsletter {required: false}', '### Newsletter {required: false}'],
+    ['### Newsletter email {email, required: false}', '### Newsletter email {email required: false}'],
+  ];
+  for (const [input, canonical] of cases) {
+    const src = form([input]);
+    const expected = form([canonical]);
+    assert.equal(serializeSite(parseSite(src)), expected, `round-trip of "${input}"`);
+  }
+});
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

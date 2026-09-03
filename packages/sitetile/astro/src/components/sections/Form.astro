@@ -13,7 +13,7 @@
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
-import { uiCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+import { uiCopy, inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
@@ -93,6 +93,31 @@ const copy = isInbox ? uiCopy(lang || DEFAULT_LANG) : null;
 // press, the words vanish, and nothing says so. The header above already claimed
 // "never claims a backend it lacks"; a pressable button was claiming one.
 const wired = Boolean(action);
+
+// ── required fields (2026-09-03, cold-read findings #9/#10) ────────────────────────────────────
+// Before this, EVERY field rendered `required=false` — blank was indistinguishable from filled,
+// so a form with nothing in it "sent successfully" with no field flagged and the owner received an
+// empty message. `f.required` (site-core.js's new brace grammar) wins whenever an author states
+// one, either way; unstated, `action=inbox` defaults ONLY its message textarea and email field —
+// the two the forwarder actually needs to do anything with the submission — everything else
+// (a plain `{tel}`, a name field, a non-inbox form entirely) stays exactly as permissive as before.
+function isRequired(f) {
+  if (typeof f.required === 'boolean') return f.required;
+  return isInbox && (f.kind === 'textarea' || f.kind === 'email');
+}
+// Locale copy for the marker's error text + the two "what happens next" success variants below.
+// Its OWN small table (see locale.mjs) — not `uiCopy`'s four Lingo site locales — because it
+// distinguishes Simplified from Traditional, which `uiCopy` does not.
+const fieldCopy = inboxFormCopy(lang || DEFAULT_LANG);
+const renderFields = fields.map((f, i) => ({ ...f, id: idOf(i), name: nameFor(f), required: isRequired(f) }));
+// 🔴 Knowable at BUILD time, not by echoing what the visitor typed back through the redirect: an
+// email field that is REQUIRED is, by construction, filled on every submission the browser lets
+// through at all (that's what `required` means) — so which success sentence applies is a fact
+// about this form's own configuration, not about one particular visitor's request. An email field
+// that is present but explicitly opted OUT of the default (`required: false`) may or may not have
+// been filled, so it gets the same safe fallback as having no email field at all.
+const emailGuaranteed = isInbox && renderFields.some((f) => f.kind === 'email' && f.required);
+const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmail : fieldCopy.sentNoEmail;
 ---
 <section class="st-form-section" id={section.id}>
   <div class="st-form-head">
@@ -101,7 +126,7 @@ const wired = Boolean(action);
     {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   </div>
   {isInbox && (
-    <p class="st-form-status st-form-status-sent" data-inbox-sent hidden set:html={inlineHtml(copy.inboxSent)} />
+    <p class="st-form-status st-form-status-sent" data-inbox-sent hidden set:html={inlineHtml(inboxSentText)} />
   )}
   {isInbox && (
     <p class="st-form-status st-form-status-error" data-inbox-error hidden set:html={inlineHtml(copy.inboxError)} />
@@ -117,19 +142,34 @@ const wired = Boolean(action);
       <input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true"
         style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;" />
     )}
-    {fields.map((f, i) => (
+    {renderFields.map((f) => (
       <div class="st-form-field">
-        <label class="st-form-label" for={idOf(i)} set:html={inlineHtml(f.label)} />
+        {/* Byte-identical to before for every field that stays optional (the common case, and
+            every field on every pre-existing site) — the required marker's wrapper renders ONLY
+            for a field that IS required, so nothing else moves. */}
+        {f.required ? (
+          <label class="st-form-label" for={f.id}>
+            <span set:html={inlineHtml(f.label)} /><span class="st-form-required-mark" aria-hidden="true"> *</span>
+          </label>
+        ) : (
+          <label class="st-form-label" for={f.id} set:html={inlineHtml(f.label)} />
+        )}
         {f.kind === 'textarea' ? (
-          <textarea class="st-form-input st-form-textarea" id={idOf(i)} name={nameFor(f)} rows="5"></textarea>
+          <textarea class="st-form-input st-form-textarea" id={f.id} name={f.name} rows="5"
+            required={f.required || undefined} aria-required={f.required || undefined}
+            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined}></textarea>
         ) : f.kind === 'select' ? (
-          <select class="st-form-input st-form-select" id={idOf(i)} name={nameFor(f)}>
+          <select class="st-form-input st-form-select" id={f.id} name={f.name}
+            required={f.required || undefined} aria-required={f.required || undefined}
+            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined}>
             <option value="" disabled selected>—</option>
             {(f.options || []).map((o) => <option value={o}>{o}</option>)}
           </select>
         ) : (
-          <input class="st-form-input" id={idOf(i)} name={nameFor(f)}
-            type={f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text'} />
+          <input class="st-form-input" id={f.id} name={f.name}
+            type={f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text'}
+            required={f.required || undefined} aria-required={f.required || undefined}
+            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined} />
         )}
       </div>
     ))}
@@ -140,6 +180,15 @@ const wired = Boolean(action);
       (() => {
         const root = document.currentScript.closest('.st-form-section');
         if (!root) return;
+        // Localized required-field messages (2026-09-03, finding #9): native `required` already
+        // blocks an empty submit with ZERO js — this only swaps the browser's own generic bubble
+        // text for the site-language one baked into `data-required-msg` at build time. `invalid`
+        // fires per-field on a blocked submit attempt; `input` clears the custom message again the
+        // moment the visitor starts fixing it, so a since-filled field doesn't keep re-showing it.
+        root.querySelectorAll('[data-required-msg]').forEach((el) => {
+          el.addEventListener('invalid', () => { el.setCustomValidity(el.validity.valueMissing ? el.dataset.requiredMsg : ''); });
+          el.addEventListener('input', () => { el.setCustomValidity(''); });
+        });
         const v = new URLSearchParams(location.search).get('inbox');
         if (!v) return;
         const form = root.querySelector('.st-form');
