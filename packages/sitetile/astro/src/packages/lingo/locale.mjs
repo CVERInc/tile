@@ -229,7 +229,10 @@ export function uiCopy(locale) {
 
 /**
  * Copy for the `form` coral's `action=inbox` path — required-field validation and the
- * "what happens next" success line (2026-09-03 cold-read findings #9/#10).
+ * "what happens next" success line (2026-09-03 cold-read findings #9/#10), plus the post-submit
+ * feedback states (submitting / success card / inline retry error — owner ruling 2026-09-03,
+ * "the standard pattern"): a same-size paragraph under a form that STAYS is too weak a signal,
+ * measured as visitors resubmitting because nothing told them it had already worked.
  *
  * Deliberately its OWN small table, not folded into `LINGO_UI`/`_canon`: those recognise exactly
  * Lingo's four SITE locales (en-US/ja-JP/zh-TW/ko-KR — zh-Hant, never a genuine Simplified
@@ -239,32 +242,75 @@ export function uiCopy(locale) {
  * code, and it distinguishes Simplified (zh-Hans/zh-CN) from Traditional — which finding #15's
  * `square-shop` fix needs too. Widening `_canon` itself to a 5th locale would be a bigger, riskier
  * change than either fix calls for.
+ *
+ * `errorNetwork` vs `errorServer`: the AJAX enhancement in Form.astro can tell "the fetch itself
+ * never completed" (offline, DNS, timeout — a `fetch()` rejection) from "the request reached the
+ * forwarder and it said no" (any non-`sent` `?inbox=` outcome) — two different things a visitor
+ * can act on differently (check your connection vs. just try again), so two different sentences.
+ *
+ * `sentWithEmail` vs `sentWithEmailGeneric`: build time cannot know what a visitor will TYPE, only
+ * whether the `{email}` field is guaranteed filled (`required`) — so the server-rendered fallback
+ * (what a no-JS visitor sees after the real POST/303 round trip) uses the generic phrasing. The
+ * AJAX enhancement captures the actual typed address from `FormData` at submit time and has
+ * something build time never could, so it fills `sentWithEmail`'s `{email}` placeholder with it —
+ * literally what the owner asked for ("確認信已寄到 <email>"). `{email}` is a literal token this
+ * table defines and Form.astro's inline script substitutes; it is not printf/template-string syntax.
  */
 const INBOX_FORM_LOCALE = {
   ja: {
     fieldRequired: 'この項目は必須です。',
-    sentWithEmail: '確認メールをお送りしました。店主からの返信も同じメールアドレスに届きます。',
+    sentWithEmail: '確認メールを {email} にお送りしました。店主からの返信も同じメールアドレスに届きます。',
+    sentWithEmailGeneric: '確認メールをお送りしました。店主からの返信も同じメールアドレスに届きます。',
     sentNoEmail: '店主が確認次第対応します。返信をご希望の場合はメールアドレスをご記入ください。',
+    submitting: '送信中…',
+    successHeading: '送信しました',
+    backHome: 'ホームに戻る',
+    errorNetwork: 'ネット接続が不安定なようです。確認してもう一度お試しください。',
+    errorServer: '送信できませんでした。もう一度お試しください。',
   },
   'zh-tw': {
     fieldRequired: '這是必填欄位。',
-    sentWithEmail: '已寄一封確認信到您的信箱；店家的回覆也會寄到同一個信箱。',
+    sentWithEmail: '確認信已寄到 {email}；店家的回覆也會寄到同一個信箱。',
+    sentWithEmailGeneric: '確認信已寄到您的信箱；店家的回覆也會寄到同一個信箱。',
     sentNoEmail: '店家會盡快處理；如需回信請留 email。',
+    submitting: '送出中…',
+    successHeading: '已送出',
+    backHome: '回首頁',
+    errorNetwork: '網路連線好像不穩，請檢查後再試一次。',
+    errorServer: '暫時無法送出，請再試一次。',
   },
   'zh-cn': {
     fieldRequired: '这是必填字段。',
-    sentWithEmail: '已经发送一封确认信到您的邮箱；店家的回复也会发送到同一个邮箱。',
+    sentWithEmail: '确认信已发送到 {email}；店家的回复也会发送到同一个邮箱。',
+    sentWithEmailGeneric: '确认信已发送到您的邮箱；店家的回复也会发送到同一个邮箱。',
     sentNoEmail: '店家会尽快处理；如需回复请留 email。',
+    submitting: '发送中…',
+    successHeading: '已发送',
+    backHome: '返回首页',
+    errorNetwork: '网络连接好像不稳定，请检查后再试一次。',
+    errorServer: '暂时无法发送，请再试一次。',
   },
   ko: {
     fieldRequired: '필수 입력 항목입니다.',
-    sentWithEmail: '확인 메일을 보냈습니다. 담당자의 답변도 같은 메일 주소로 전달됩니다.',
+    sentWithEmail: '확인 메일을 {email}(으)로 보냈습니다. 담당자의 답변도 같은 메일 주소로 전달됩니다.',
+    sentWithEmailGeneric: '확인 메일을 보냈습니다. 담당자의 답변도 같은 메일 주소로 전달됩니다.',
     sentNoEmail: '담당자가 곧 확인합니다. 답변을 받고 싶다면 이메일을 남겨 주세요.',
+    submitting: '전송 중…',
+    successHeading: '전송 완료',
+    backHome: '홈으로 돌아가기',
+    errorNetwork: '네트워크 연결이 불안정한 것 같습니다. 확인 후 다시 시도해 주세요.',
+    errorServer: '전송하지 못했습니다. 다시 시도해 주세요.',
   },
   en: {
     fieldRequired: 'This field is required.',
-    sentWithEmail: "We've sent a confirmation to your email — the owner's reply will go to the same address.",
+    sentWithEmail: "We've sent a confirmation to {email} — the owner's reply will go to the same address.",
+    sentWithEmailGeneric: "We've sent a confirmation to your email — the owner's reply will go to the same address.",
     sentNoEmail: "The owner will get to this soon. Leave an email if you'd like a reply.",
+    submitting: 'Sending…',
+    successHeading: 'Sent',
+    backHome: 'Back to homepage',
+    errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
+    errorServer: "Couldn't send that — please try again.",
   },
 };
 /** A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys. */

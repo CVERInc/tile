@@ -13,7 +13,7 @@
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
-import { uiCopy, inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+import { inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
@@ -81,12 +81,6 @@ const nameFor = (f) => (isInbox ? inboxNameFor(f.label, f.kind) : f.label);
 // bakes it in via toUrlLocale; see lib routing). Read once, per page render.
 const returnTo = Astro.url.pathname;
 
-// Client-only status line: the build is static, so the coral cannot read `?inbox=`
-// at build time — only a visitor's browser can, after a real submit redirects back
-// here. Kept tiny and inline (no import, no event handler attributes) like
-// ArchiveView's tag-filter script, so it stays CSP-clean under a default script-src.
-const copy = isInbox ? uiCopy(lang || DEFAULT_LANG) : null;
-
 // 🔴 A form with nowhere to send is not a form with a working button. Before
 // this, an unwired coral rendered a live submit that posted to the page's own
 // URL — which on a static host is a 405 the visitor cannot see: they type, they
@@ -117,19 +111,64 @@ const renderFields = fields.map((f, i) => ({ ...f, id: idOf(i), name: nameFor(f)
 // that is present but explicitly opted OUT of the default (`required: false`) may or may not have
 // been filled, so it gets the same safe fallback as having no email field at all.
 const emailGuaranteed = isInbox && renderFields.some((f) => f.kind === 'email' && f.required);
-const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmail : fieldCopy.sentNoEmail;
+const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCopy.sentNoEmail;
+
+// ── post-submit feedback: submitting / success card / inline retry error ───────────────────────
+// (owner ruling, 2026-09-03: a same-size paragraph under a form that STAYS is too weak a signal —
+// measured as visitors resubmitting because nothing told them it had already worked). The
+// STATIC markup above (inboxSentText, the disabled-by-default success card, the error line) is
+// the full experience for a no-JS visitor after the real POST → 303 → reload round trip; the
+// `is:inline` script below is a progressive AJAX enhancement over the exact same `formAction` —
+// same contract, same `/__reef/inbox` forwarder, same `?inbox=<outcome>` vocabulary — that avoids
+// the reload entirely so it can show a "submitting…" state, keep the visitor's typed values on
+// failure, and (JS-only, since only the browser ever holds it) fill the real email address into
+// the success sentence and quote back what they wrote. No fetch to feelreef.com, no new endpoint —
+// see the file-header note above `RESERVED_INBOX_NAMES` for why that road stays closed.
+//
+// `emailField`/`excerptField` are the WIRE names (post-`nameFor` — `visitor_email`, or an
+// author's own field label) so the client script can `FormData.get()` them without re-deriving
+// the reserved-name/collision rules that already ran at build time.
+const emailFieldName = renderFields.some((f) => f.kind === 'email') ? 'visitor_email' : null;
+const excerptField = renderFields.find((f) => f.kind === 'textarea');
+const inboxCopy = isInbox ? {
+  submitting: fieldCopy.submitting,
+  successHeading: fieldCopy.successHeading,
+  errorNetwork: fieldCopy.errorNetwork,
+  errorServer: fieldCopy.errorServer,
+  // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
+  // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
+  sentWithEmail: fieldCopy.sentWithEmail,
+  sentNoEmail: fieldCopy.sentNoEmail,
+  emailField: emailFieldName,
+  excerptField: excerptField ? excerptField.name : null,
+} : null;
 ---
-<section class="st-form-section" id={section.id}>
+<section class="st-form-section" id={section.id} data-inbox-copy={inboxCopy ? JSON.stringify(inboxCopy) : undefined}>
   <div class="st-form-head">
     {eyebrow && <p class="st-form-eyebrow" set:html={inlineHtml(eyebrow)} />}
     {section.title && <Title set:html={inlineHtml(section.title)} />}
     {section.body && <Fragment set:html={bodyHtml(section.body)} />}
   </div>
   {isInbox && (
-    <p class="st-form-status st-form-status-sent" data-inbox-sent hidden set:html={inlineHtml(inboxSentText)} />
-  )}
-  {isInbox && (
-    <p class="st-form-status st-form-status-error" data-inbox-error hidden set:html={inlineHtml(copy.inboxError)} />
+    // The success CARD — replaces the whole form on submit (hidden, not removed: focus lands here
+    // and screen-reader users still have the form's own DOM to tab back into if they want it).
+    // `role="status"` + `tabindex="-1"` so the script can move focus AND have it announced without
+    // adding this element to the normal tab order the rest of the time.
+    <div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>
+      <svg class="st-form-success-check" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true" focusable="false">
+        <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"></circle>
+        <path d="M14 25l7 7 14-15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <p class="st-form-success-heading" role="heading" aria-level="3">{fieldCopy.successHeading}</p>
+      {/* Server-rendered default (a no-JS visitor, after the real POST → 303 → reload, sees exactly
+          this): the safe generic sentence, since build time cannot know a per-submission email
+          address. The script overwrites this text on a JS-handled submit — see below. */}
+      <p class="st-form-success-next" data-inbox-next set:html={inlineHtml(inboxSentText)} />
+      {/* Only ever filled in by the script (a no-JS submit has no typed values left to quote back
+          after the redirect round trip) — stays hidden until it has something to show. */}
+      <p class="st-form-success-excerpt" data-inbox-excerpt hidden></p>
+      <p class="st-form-success-back"><a href="/">{fieldCopy.backHome}</a></p>
+    </div>
   )}
   <form class="st-form" action={formAction} method={method}>
     {isInbox && (
@@ -173,9 +212,23 @@ const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmail : fieldCopy.sent
         )}
       </div>
     ))}
+    {isInbox && (
+      // Inline, ABOVE the button (owner ruling): failure keeps the form and every value the
+      // visitor already typed — nothing here is inside a `hidden` ancestor that would also hide
+      // the fields — and the button re-enables so "再試一次" is just pressing it again, not
+      // re-typing anything. Static default is the generic server-refusal sentence; the script
+      // swaps in the network-vs-server distinction it alone can tell apart.
+      <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
+    )}
     <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>
   {isInbox && (
+    // Client-only status line: the build is static, so the coral cannot read `?inbox=` at build
+    // time, capture what a visitor typed, or know whether a fetch it makes will succeed — only
+    // the visitor's own browser can. Kept tiny and inline (no import, no event handler
+    // attributes) like ArchiveView's tag-filter script, so it stays CSP-clean under a default
+    // script-src, and it is a PROGRESSIVE ENHANCEMENT over the static markup above, never a
+    // replacement for it — every branch below degrades to something that already worked.
     <script is:inline>
       (() => {
         const root = document.currentScript.closest('.st-form-section');
@@ -189,17 +242,99 @@ const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmail : fieldCopy.sent
           el.addEventListener('invalid', () => { el.setCustomValidity(el.validity.valueMissing ? el.dataset.requiredMsg : ''); });
           el.addEventListener('input', () => { el.setCustomValidity(''); });
         });
-        const v = new URLSearchParams(location.search).get('inbox');
-        if (!v) return;
+        // ── post-submit feedback (owner ruling, 2026-09-03) ─────────────────────────────────────
         const form = root.querySelector('.st-form');
-        if (v === 'sent') {
-          const sent = root.querySelector('[data-inbox-sent]');
-          if (sent) sent.hidden = false;
-          if (form) form.hidden = true;
-        } else {
-          const err = root.querySelector('[data-inbox-error]');
-          if (err) err.hidden = false;
+        const successEl = root.querySelector('[data-inbox-success]');
+        const errorEl = root.querySelector('[data-inbox-error]');
+        const nextEl = root.querySelector('[data-inbox-next]');
+        const excerptEl = root.querySelector('[data-inbox-excerpt]');
+        const btn = form && form.querySelector('.st-form-submit');
+        // The button's OWN rendered label (whatever `submit="…"` the author wrote, or the
+        // default) — captured now, before anything can change it, so a failed submit restores
+        // exactly this rather than a hardcoded guess.
+        const btnDefaultText = btn ? btn.textContent : null;
+        let copy = null;
+        try { copy = JSON.parse(root.dataset.inboxCopy || 'null'); } catch (e) { copy = null; }
+
+        // Two LINES, the way a person reads a quoted excerpt back — split on the visitor's own
+        // newlines rather than a character count, which would cut mid-word; a single very long
+        // line still gets a CSS line-clamp as a visual fallback (site.css `.st-form-success-excerpt`).
+        function twoLineExcerpt(raw) {
+          return String(raw || '').trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 2).join('\n');
         }
+
+        // `fd` is the FormData captured at submit time — only ever present on the JS-handled path.
+        // A no-JS visitor's real POST navigates away and back; nothing they typed survives that
+        // round trip, so `fd` is null there and the excerpt/exact-address text stay at their
+        // build-time defaults (already rendered: the generic sentence, no excerpt paragraph).
+        function showSuccess(fd) {
+          if (form) form.hidden = true;
+          if (errorEl) errorEl.hidden = true;
+          if (!successEl) return;
+          if (copy && nextEl && fd) {
+            const addr = copy.emailField ? String(fd.get(copy.emailField) || '').trim() : '';
+            nextEl.textContent = addr ? copy.sentWithEmail.replace('{email}', addr) : copy.sentNoEmail;
+          }
+          if (excerptEl) {
+            const excerpt = copy && copy.excerptField && fd ? twoLineExcerpt(fd.get(copy.excerptField)) : '';
+            if (excerpt) { excerptEl.textContent = excerpt; excerptEl.hidden = false; }
+            else excerptEl.hidden = true;
+          }
+          successEl.hidden = false;
+          successEl.focus();
+          if (successEl.scrollIntoView) successEl.scrollIntoView({ block: 'center' });
+        }
+
+        // Failure keeps the form exactly as the visitor left it — this never touches field
+        // values, only the error line and the button — and re-enables the button so trying again
+        // is pressing it, not retyping anything.
+        function showError(message) {
+          if (errorEl) {
+            if (message) errorEl.textContent = message;
+            errorEl.hidden = false;
+          }
+          if (btn) {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            if (btnDefaultText != null) btn.textContent = btnDefaultText;
+          }
+        }
+
+        // No-JS-equivalent fallback: a real submit navigated away and the browser came back here
+        // with `?inbox=<outcome>` — the forwarder's own 303 contract, unchanged. Same two states,
+        // just without a captured FormData to enrich them with.
+        const v = new URLSearchParams(location.search).get('inbox');
+        if (v === 'sent') showSuccess(null);
+        else if (v) showError(copy ? copy.errorServer : null);
+
+        if (!form || !btn || typeof window.fetch !== 'function') return; // native submit still works fine without this
+
+        let submitting = false;
+        form.addEventListener('submit', (ev) => {
+          if (submitting) { ev.preventDefault(); return; } // no double submit — the button is
+          ev.preventDefault();                              // disabled too, but Enter can outrace a click
+          submitting = true;
+          if (errorEl) errorEl.hidden = true;
+          btn.disabled = true;
+          btn.setAttribute('aria-busy', 'true');
+          if (copy && copy.submitting) btn.textContent = copy.submitting;
+          const fd = new FormData(form);
+          fetch(form.getAttribute('action'), { method: 'POST', body: fd })
+            .then((res) => {
+              submitting = false;
+              // fetch() follows the forwarder's 303 itself — the visible page never navigates —
+              // so the outcome is read off the FINAL response's own URL, the same `?inbox=`
+              // vocabulary a no-JS round trip would have landed the browser on.
+              let outcome = '';
+              try { outcome = new URL(res.url, location.href).searchParams.get('inbox') || ''; } catch (e) {}
+              if (outcome === 'sent') showSuccess(fd);
+              else showError(copy ? copy.errorServer : null);
+            })
+            .catch(() => {
+              submitting = false;
+              showError(copy ? copy.errorNetwork : null);
+            });
+        });
       })();
     </script>
   )}

@@ -109,8 +109,9 @@ const ALLOWED_INLINE = [
   // build — the coral cannot read `?inbox=` at build time, so a tiny script toggles the
   // pre-rendered (server-hidden) status line after a real submit redirects back here. A
   // no-JS visitor still gets a working <form method="post" action="/__reef/inbox">; they
-  // just don't see the thank-you/error line swap in.
-  ['form inbox status (action=inbox only, self-gating on ?inbox=)', '[data-inbox-sent]'],
+  // just don't see the submitting-state / success-card / inline-retry-error swap in — see
+  // Form.astro's file-header note on this script, 2026-09-03 owner ruling.
+  ['form inbox status (action=inbox only, self-gating on ?inbox= + AJAX submit)', '[data-inbox-success]'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
@@ -454,17 +455,82 @@ const checks = [
   ['form: a label colliding with a reserved inbox name is wire-prefixed, visible label untouched', () =>
     /<label class="st-form-label" for="[^"]+">Text<\/label>/.test(forms)
     && /name="field_Text"/.test(forms)],
+  // -- post-submit feedback: submitting / success card / inline retry error (owner ruling, 2026-09-03) --
   // 🩸 2026-09-03: the fixture's inbox form's `{email}` field now defaults `required` (no field
   // says otherwise), which is GUARANTEED filled on any submission the browser lets through — so
-  // the success line is the "we emailed you a confirmation" variant, not the generic old one.
-  ['form: inbox status lines render hidden by default, localized to the page lang (en-US)', () =>
-    /<p class="st-form-status st-form-status-sent" data-inbox-sent hidden>We've sent a confirmation to your email — the owner's reply will go to the same address\.<\/p>/.test(forms)
-    && /<p class="st-form-status st-form-status-error" data-inbox-error hidden>Could not send — please try again\.<\/p>/.test(forms)],
-  // Not a page-wide script count (the header-overlay module ships on every page,
-  // unrelated to this coral) — just that the inbox status toggle itself appears
-  // exactly once, matching the fixture's one `action=inbox` section.
-  ['form: the inbox status toggle script appears exactly once, matching the one action=inbox section', () =>
-    (forms.match(/\[data-inbox-sent\]/g) || []).length === 1],
+  // the success line's BUILD-TIME default is the "we emailed you a confirmation" variant (the
+  // generic phrasing, since build time can never know the address one visitor will type — see
+  // `sentWithEmailGeneric` in locale.mjs), not the "no email" fallback.
+  ['form: success card renders hidden by default — check icon, heading, next-step copy, hidden excerpt, home link', () => {
+    const card = /<div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>([\s\S]*?)<\/div>/.exec(forms);
+    if (!card) return false;
+    const c = card[1];
+    return /<svg class="st-form-success-check"/.test(c)
+      && /<p class="st-form-success-heading" role="heading" aria-level="3">Sent<\/p>/.test(c)
+      && /<p class="st-form-success-next" data-inbox-next>We've sent a confirmation to your email — the owner's reply will go to the same address\.<\/p>/.test(c)
+      && /<p class="st-form-success-excerpt" data-inbox-excerpt hidden><\/p>/.test(c)
+      && /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/.test(c);
+  }],
+  // The card is a SIBLING of the form, positioned BEFORE it — both exist in the DOM at once
+  // (hidden, not removed) so focus management / a screen reader's "back into the form" both work.
+  ['form: the success card sits before the form it stands in for, not inside it', () =>
+    forms.indexOf('data-inbox-success') < forms.indexOf('<form class="st-form" action="/__reef/inbox"')],
+  // Inline, ABOVE the button — owner ruling's exact placement, so failure never requires
+  // scrolling past the button to find out why. Default text is the localized server-refusal
+  // sentence (the safe assumption for a no-JS reload, which can't distinguish network from server).
+  ['form: inline retry error sits inside the form, immediately before the submit button, hidden by default', () => {
+    const section = forms.slice(forms.indexOf('id="s2-wired-to-the-reef-inbox"'));
+    const btnIdx = section.indexOf('<button class="st-form-submit"');
+    const errIdx = section.indexOf('<p class="st-form-error" data-inbox-error hidden>');
+    return errIdx > -1 && errIdx < btnIdx
+      && /<p class="st-form-error" data-inbox-error hidden>Couldn't send that — please try again\.<\/p>/.test(section.slice(0, btnIdx));
+  }],
+  // The AJAX-enhancement payload the script reads at runtime — one JSON attribute rather than a
+  // pile of `data-*`s, and it is the ONLY place the per-submission strings (the `{email}`
+  // template, the two error variants, the submitting label) reach the browser, since build time
+  // cannot know which one a given visitor's submit will need.
+  ['form: the inbox-copy payload carries the submitting/error/template strings + the email+excerpt field names', () => {
+    const m = /<section class="st-form-section" id="s2-wired-to-the-reef-inbox" data-inbox-copy="([^"]+)">/.exec(forms);
+    if (!m) return false;
+    const payload = JSON.parse(m[1].replace(/&quot;/g, '"'));
+    return payload.submitting === 'Sending…'
+      && payload.successHeading === 'Sent'
+      && payload.errorNetwork === 'Your connection seems to be having trouble — check it and try again.'
+      && payload.errorServer === "Couldn't send that — please try again."
+      && payload.sentWithEmail.includes('{email}')
+      && payload.sentNoEmail.length > 0
+      && payload.emailField === 'visitor_email'
+      && payload.excerptField === 'Tell us more'; // the fixture's one {textarea} field
+  }],
+  // Not a page-wide script count (the header-overlay module ships on every page, unrelated to
+  // this coral) — just that the inbox enhancement script itself appears exactly once, matching
+  // the fixture's one `action=inbox` section.
+  ['form: the inbox enhancement script appears exactly once, matching the one action=inbox section', () =>
+    (forms.match(/\[data-inbox-success\]/g) || []).length === 1],
+  // -- the script's own logic, asserted by source signature (no DOM/Playwright harness for
+  //    sitetile astro pages exists yet — see scripts/test.sh's browser-smoke gate, which is for
+  //    hosts/web/*, not this renderer) --
+  ['form: submit is intercepted, shows the submitting state, and guards against a double submit', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    return /form\.addEventListener\('submit', \(ev\) => \{/.test(s)
+      && /if \(submitting\) \{ ev\.preventDefault\(\); return; \}/.test(s)
+      && /btn\.disabled = true;/.test(s)
+      && /btn\.setAttribute\('aria-busy', 'true'\);/.test(s)
+      && /btn\.textContent = copy\.submitting;/.test(s);
+  }],
+  ['form: failure never touches the form\'s fields — only the error line and the button re-enable', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    const showError = /function showError\(message\) \{([\s\S]*?)\n {8}\}/.exec(s);
+    return !!showError && !/\.value\s*=/.test(showError[1]) && !/\.reset\(/.test(showError[1])
+      && /btn\.disabled = false;/.test(showError[1])
+      && /btn\.textContent = btnDefaultText;/.test(showError[1]);
+  }],
+  ['form: success reads the fetch\'s own final URL for the outcome and fills the real email + a two-line excerpt', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    return /new URL\(res\.url, location\.href\)\.searchParams\.get\('inbox'\)/.test(s)
+      && /copy\.sentWithEmail\.replace\('\{email\}', addr\)/.test(s)
+      && /\.slice\(0, 2\)\.join\('\\n'\)/.test(s);
+  }],
   // -- required fields (2026-09-03, cold-read findings #9/#10) --
   ['form: action=inbox defaults its {email} field to required — native attr, marker, localized message', () =>
     /<span>Email<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
