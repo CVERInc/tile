@@ -889,6 +889,15 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         )}
       </Fragment>
     ))}
+    {/* nav-mobile backdrop (Coral B, finding #1 2026-09-03 cold-read): the open menu used to sit
+        directly on top of the page with nothing dimmed behind it — indistinguishable at a glance
+        from the layout having broken. Same primitive as the header-actions overlays above (a
+        <label> targeting the SAME checkbox the hamburger drives), so clicking it un-checks
+        `#rf-nav-toggle` with zero JS; Escape already closes it too (header-actions.js keys off
+        `[data-ha-toggle]`, which this checkbox already carries). */}
+    {navMobile && (
+      <label class="rf-ha-overlay" data-ha-overlay="nav" for="rf-nav-toggle" aria-hidden="true"></label>
+    )}
     <header class="rf-header reef-header">
       <a class="rf-logo reef-logo" href={localeHome}>{siteLogo ? <img class="rf-logo-img" src={siteLogo} alt={headerBrand} /> : headerBrand}</a>
       {/* id is what the toggle's aria-controls points at — needed by EVERY nav-mobile mode, not
@@ -1123,7 +1132,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     </footer>
     {bubbleOn && (
       <>
-        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle}></div>
+        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName}></div>
         <script type="module" src={`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`}></script>
       </>
     )}

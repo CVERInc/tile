@@ -1038,6 +1038,12 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 
 @media (max-width: 64rem) {
   body[data-nav-mobile] .rf-header { flex-wrap: wrap; }
+  /* Scroll lock while the menu is open (finding #1, 2026-09-03 cold-read). Not a `display`
+     declaration, so — unlike the backdrop's own reveal, which IS one — it stays here in
+     reef.base rather than reef.responsive (see that layer's block comment for the split). Applies
+     to both nav-mobile modes: a fullscreen menu is already `position: fixed; inset: 0`, but the
+     page behind it still needs to stop scrolling while it's up. */
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) { overflow: hidden; }
   /* `position: relative` gives the dropdown its containing block. An overlay header is already
      `position: fixed` (structure now owned above), which is also a containing block — and this
      selector outranks it, so applying it here would drop the header out of its hero. */
@@ -1157,6 +1163,12 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 .st-form { display: flex; flex-direction: column; gap: var(--gd-gap, 1rem); margin-top: 1.5rem; }
 .st-form-field { display: flex; flex-direction: column; gap: .4rem; }
 .st-form-label { font-weight: 600; color: var(--gd-head); font-size: .95rem; }
+/* Required-field marker (finding #9, 2026-09-03 cold-read) — the visible half of "native required
+   + a marker + a localized error"; the other two live in Form.astro (the `required` attribute
+   itself and the `data-required-msg` custom-validity script). A plain, undecorated asterisk reads
+   everywhere without a colour token pointing at a "required" concept that doesn't otherwise exist
+   in the palette; `--gd-accent` is close enough and already meaningful on every theme. */
+.st-form-required-mark { color: var(--gd-accent); }
 .st-form-input {
   font: inherit; color: var(--gd-text); background: var(--gd-bg);
   border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
@@ -1421,6 +1433,14 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
     body[data-nav-mobile] .rf-nav-hamburger { display: inline-flex; }
     body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-nav-glyph-open { display: none; }
     body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-nav-glyph-close { display: inline-flex; }
+    /* Backdrop reveal (finding #1, 2026-09-03 cold-read) — WHETHER the dimmed backdrop shows is
+       exactly the same kind of open/closed fact as the glyph swap and the `.rf-nav` display swap
+       below, so it belongs here, not in reef.base. `hamburger`-only: a `fullscreen` menu is
+       already an opaque full-viewport panel (`position: fixed; inset: 0`), so a second dimmed
+       layer under it would paint and cost a stacking context for nothing visible. */
+    body[data-nav-mobile="hamburger"]:has(#rf-nav-toggle:checked) .rf-ha-overlay[data-ha-overlay="nav"] {
+      display: block;
+    }
 
     body[data-nav-mobile="hamburger"] .rf-nav,
     body[data-nav-mobile="fullscreen"] .rf-nav { display: none; }

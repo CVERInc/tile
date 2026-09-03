@@ -249,6 +249,15 @@ function parseSite(text) {
       // carries only STRUCTURE (labels + field kinds + options + submit text) — the THEME paints the
       // inputs and submission wiring (action/backend) is a deploy concern, per cutover-structure-
       // before-data. General: any recast contact/inquiry page (no other coral expresses a form).
+      //
+      // 🩸 2026-09-03 (cold-read findings #9/#10): the brace also carries an explicit `required`
+      // (or `required: false`) modifier now — `### Message {textarea required}`, `### Company
+      // {required: false}`, `### Email {email, required: false}`. Backwards compatible: a brace
+      // with no `required` token parses exactly as before (kind only, `required` left `undefined`
+      // so the RENDERER decides the default — see Form.astro's `isRequired`, which defaults
+      // `action=inbox`'s message/email fields required and leaves everything else opt-in). Parsed
+      // by REMOVING the modifier from the brace text first and reading whatever's left as the kind,
+      // rather than splitting on whitespace, because "required: false" is itself two words.
       const lead = [];
       let field = null, f2 = false;
       for (let j = 0; j < rest.length; j++) {
@@ -260,13 +269,26 @@ function parseSite(text) {
       }
       body = blockOf(lead);
       fields = fields.map((f) => {
-        let label = f.label, kind = 'text';
-        const km = /\{(\w+)\}\s*$/.exec(label);
-        if (km) { kind = km[1].toLowerCase(); label = label.replace(/\s*\{\w+\}\s*$/, '').trim(); }
+        let label = f.label, kind = 'text', required; // required: undefined = "not stated"
+        const km = /\{([^}]*)\}\s*$/.exec(label);
+        if (km) {
+          label = label.replace(/\s*\{[^}]*\}\s*$/, '').trim();
+          let content = km[1];
+          const reqValue = /required\s*:\s*(true|false)/i.exec(content);
+          if (reqValue) {
+            required = reqValue[1].toLowerCase() === 'true';
+            content = content.slice(0, reqValue.index) + content.slice(reqValue.index + reqValue[0].length);
+          } else if (/(^|[\s,])required($|[\s,])/i.test(content)) {
+            required = true;
+            content = content.replace(/(^|[\s,])required($|[\s,])/i, '$1$2');
+          }
+          const rest2 = content.replace(/[\s,]+/g, ' ').trim().toLowerCase();
+          if (rest2) kind = rest2;
+        }
         const options = [];
         for (const ln of f.lines) { const mo = /^-\s+(.+)$/.exec(ln.trim()); if (mo) options.push(mo[1].trim()); }
         if (options.length && kind === 'text') kind = 'select';
-        return { label, kind, options };
+        return { label, kind, options, required };
       });
     } else if (type === 'timeline') {
       // `timeline` — a chronological list: lead intro, then `### <year>` + body per entry.
@@ -494,7 +516,14 @@ function serializeSite(site) {
     } else if (s.type === 'form') {
       if (s.body) out.push(s.body);
       (s.fields || []).forEach((f) => {
-        const marker = (f.kind && f.kind !== 'text' && f.kind !== 'select') ? ' {' + f.kind + '}' : '';
+        // `select` is INFERRED from the field's own `- option` lines (see the parser above), never
+        // authored — so it never re-enters the brace, or a round-trip would invent a `{select}` a
+        // human never wrote.
+        const tokens = [];
+        if (f.kind && f.kind !== 'text' && f.kind !== 'select') tokens.push(f.kind);
+        if (f.required === true) tokens.push('required');
+        else if (f.required === false) tokens.push('required: false');
+        const marker = tokens.length ? ' {' + tokens.join(' ') + '}' : '';
         out.push('### ' + (f.label || '') + marker);
         (f.options || []).forEach((o) => out.push('- ' + o));
       });
