@@ -167,6 +167,14 @@ const inboxCopy = isInbox ? {
       {/* Only ever filled in by the script (a no-JS submit has no typed values left to quote back
           after the redirect round trip) — stays hidden until it has something to show. */}
       <p class="st-form-success-excerpt" data-inbox-excerpt hidden></p>
+      {/* 🔑 bug #2 (2026-09-04): without this the card had no way back — reload, the back
+          button, or sharing the URL all kept showing this same card forever, and the JS
+          path left it up with nothing to press. A plain `<a>` to the form's own CLEAN path
+          (`returnTo` — `Astro.url.pathname`, already query-free) works with zero JS: it
+          navigates, the reload lands with no `?inbox=`, and the form is there again. The
+          script below intercepts the same click to reset and re-show the form in place
+          instead of navigating — see the `data-inbox-again` handler. */}
+      <p class="st-form-success-again"><a href={returnTo} data-inbox-again>{fieldCopy.sendAnother}</a></p>
       <p class="st-form-success-back"><a href="/">{fieldCopy.backHome}</a></p>
     </div>
   )}
@@ -269,6 +277,12 @@ const inboxCopy = isInbox ? {
         // build-time defaults (already rendered: the generic sentence, no excerpt paragraph).
         function showSuccess(fd) {
           if (form) form.hidden = true;
+          // 🔑 bug #2, bullet (c): clear the typed values now, not just hide them — the excerpt
+          // paragraph already has its own COPY of what was typed (read from `fd` above, a
+          // snapshot independent of the live form fields), so resetting the form here cannot lose
+          // it. Without this, pressing "再送一則" would re-show the visitor's PREVIOUS message
+          // still sitting in the fields behind the fresh form.
+          if (form) form.reset();
           if (errorEl) errorEl.hidden = true;
           if (!successEl) return;
           if (copy && nextEl && fd) {
@@ -306,6 +320,43 @@ const inboxCopy = isInbox ? {
         const v = new URLSearchParams(location.search).get('inbox');
         if (v === 'sent') showSuccess(null);
         else if (v) showError(copy ? copy.errorServer : null);
+
+        // 🔑 bug #2, bullet (a) (2026-09-04): strip `?inbox=` the moment it has been shown once, so
+        // a reload / the back button / a shared URL land on the clean page instead of re-showing
+        // this same one-time confirmation forever — the exact production report. `replaceState`
+        // (not `pushState`): this is a correction of the CURRENT entry, not a new stop in history —
+        // pressing back from here should leave the site, not bounce to the same page again.
+        // 🩸 JS-only, by construction: a no-JS visitor's `?inbox=sent` survives on their address
+        // bar and a reload of THAT URL still re-shows the card (their real POST → 303 landed them
+        // there and nothing here can rewrite it without a script). That is today's behaviour,
+        // unchanged for them — see the file header on why this whole enhancement stays optional.
+        if (v && window.history && typeof window.history.replaceState === 'function') {
+          const clean = new URL(location.href);
+          clean.searchParams.delete('inbox');
+          window.history.replaceState(window.history.state, '', clean.pathname + clean.search + clean.hash);
+        }
+
+        // 「再送一則」/「もう一度送る」— bullet (b). The `<a href={returnTo}>` in the markup above
+        // already works with zero JS (a plain navigation to the form's own clean path); here it is
+        // upgraded to reset-in-place so a visitor who already has JS running doesn't lose the page.
+        const againLink = root.querySelector('[data-inbox-again]');
+        if (againLink && form) {
+          againLink.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            form.reset();
+            form.hidden = false;
+            if (successEl) successEl.hidden = true;
+            if (errorEl) errorEl.hidden = true;
+            if (excerptEl) excerptEl.hidden = true;
+            if (btn) {
+              btn.disabled = false;
+              btn.removeAttribute('aria-busy');
+              if (btnDefaultText != null) btn.textContent = btnDefaultText;
+            }
+            const firstField = form.querySelector('.st-form-input');
+            if (firstField && firstField.focus) firstField.focus();
+          });
+        }
 
         if (!form || !btn || typeof window.fetch !== 'function') return; // native submit still works fine without this
 
