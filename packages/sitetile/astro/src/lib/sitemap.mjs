@@ -57,3 +57,17 @@ export function tagUrls(postList, siteMetaObj = {}, slugMap = {}) {
   return [...seen].sort().map((slug) => `${base}/${encodeURI(slug)}/`);
 }
 
+/** Category archive paths — the same "only when the site turned the routes on" rule as tagUrls,
+ *  gated on `blog-category-routes` (mirrors pages/category/[slug]/index.astro's own getStaticPaths
+ *  gate, and its locale sibling's). Until this feature, category archives were the one blog term
+ *  the sitemap never listed at all — tagUrls existed, this did not — a bare gap, not a locale one:
+ *  a base-locale site with `blog-category-routes: true` published pages the sitemap never named. */
+export function categoryUrls(postList, siteMetaObj = {}) {
+  const on = siteMetaObj['blog-category-routes'] != null && String(siteMetaObj['blog-category-routes']) !== 'false';
+  if (!on) return [];
+  const base = String(siteMetaObj['blog-category-base'] || '/category').replace(/\/$/, '');
+  const seen = new Set();
+  for (const p of postList) for (const c of p.categories || []) if (c) seen.add(c);
+  return [...seen].sort().map((slug) => `${base}/${encodeURI(slug)}/`);
+}
+

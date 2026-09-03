@@ -14,10 +14,15 @@
 // CJK tags whose slug == name need no entry — slug defaults to the name, URL-encoded like live).
 //
 // OPT-IN: emits nothing unless the site's home meta sets `blog-tag-routes` truthy.
+//
+// Lingo sibling: pages/[...loc]/tag/[slug]/index.astro emits the SAME slug set for each translated
+// locale that routes it. `alternates` is that reciprocal hreflang — see category/[slug]/index.astro's
+// header (same mechanism, termLocaleMap/alternateArchiveLocales, kind='tag').
 import ArchiveView from '../../../components/ArchiveView.astro';
-import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes} from '../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, termLocaleMap, alternateArchiveLocales } from '../../../lib/blog.mjs';
 
 export function getStaticPaths() {
+  const contentFiles = import.meta.glob('../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   const allPostsIn = allPosts(
     import.meta.glob('../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
   );
@@ -34,14 +39,19 @@ export function getStaticPaths() {
   const seen = new Set();
   const tags = [];
   for (const p of posts) for (const t of p.tags) if (t && !seen.has(t)) { seen.add(t); tags.push(t); }
-  return tags.map((tag) => ({ params: { slug: slugMap[tag] || tag }, props: { posts, meta, tag, slug: slugMap[tag] || tag } }));
+  const localeBlogFiles = import.meta.glob('../../../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const { mapByUrl, urlToLocale } = termLocaleMap('tag', contentFiles, localeBlogFiles, meta, allPostsIn, posts);
+  return tags.map((tag) => {
+    const slug = slugMap[tag] || tag;
+    return { params: { slug }, props: { posts, meta, tag, slug, alternates: alternateArchiveLocales(mapByUrl, slug, urlToLocale) } };
+  });
 }
 
-const { posts, meta, tag, slug } = Astro.props;
+const { posts, meta, tag, slug, alternates } = Astro.props;
 const base = String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '');
 const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
 <ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag} — ${meta.title || ''}`}
-  heading={tag} subhead={subhead} pageHref={pageHref} pageNum={1} />
+  heading={tag} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />

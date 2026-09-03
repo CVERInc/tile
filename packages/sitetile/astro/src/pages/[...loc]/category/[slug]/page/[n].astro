@@ -1,0 +1,54 @@
+---
+// REEF with Blog × Lingo — LOCALE category pager `/<url-locale>/category/<slug>/page/<n>` (pages
+// 2+; page 1 is ../index.astro). Mirrors pages/category/[slug]/page/[n].astro, fanned out over
+// (locale × category × page 2..totalPages) via localeBlogCorpora. No-op unless a locale's own
+// `blog-category-routes` is truthy AND `blog-page-size` is set (both inherited from the site
+// default unless that locale's own `_site.md` overrides them).
+//
+// No `alternates` here either — same reasoning as the base pager's own header: a locale's page N
+// existing is not implied by the base (or a third locale's) page N existing, and this feature does
+// not attempt that cross-locale page-count reconciliation. Page 1 (../index.astro) carries the
+// verified hreflang; every other locale's own page 2+ is reachable from there.
+import ArchiveView from '../../../../../components/ArchiveView.astro';
+import { uiCopy } from '../../../../../packages/lingo/locale.mjs';
+import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, localeBlogCorpora } from '../../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const contentFiles = import.meta.glob('../../../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  const localeBlogFiles = import.meta.glob('../../../../../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const allPostsIn = allPosts(
+    import.meta.glob('../../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const paths = [];
+  for (const { url, meta: metaL, listed: listedL } of localeBlogCorpora(contentFiles, localeBlogFiles, meta, allPostsIn)) {
+    const on = metaL['blog-category-routes'] != null && String(metaL['blog-category-routes']) !== 'false';
+    if (!on) continue;
+    const pageSize = Number(metaL['blog-page-size']) || 0;
+    if (!pageSize) continue;
+    const seen = new Set();
+    const cats = [];
+    for (const p of listedL) for (const c of (p.categories || [])) if (c && !seen.has(c)) { seen.add(c); cats.push(c); }
+    for (const slug of cats) {
+      const count = listedL.reduce((n, p) => n + ((p.categories || []).includes(slug) ? 1 : 0), 0);
+      const totalPages = Math.ceil(count / pageSize) || 1;
+      for (let n = 2; n <= totalPages; n++) {
+        paths.push({ params: { loc: url, slug, n: String(n) }, props: { posts: listedL, meta: metaL, slug, pageNum: n, urlLoc: url } });
+      }
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, slug, pageNum, urlLoc } = Astro.props;
+const base = `/${urlLoc}${String(meta['blog-category-base'] || '/category').replace(/\/$/, '')}`;
+const names = kvMap(meta['blog-category-names']);
+const heading = names[slug] || slug;
+const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
+const subhead = archivePrefixes(meta).category + heading;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

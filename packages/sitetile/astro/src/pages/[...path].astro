@@ -17,8 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, inheritLocalePrivacy } from '../lib/blog.mjs';
-import { toUrlLocale } from '../packages/lingo/locale.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora } from '../lib/blog.mjs';
 
 
 export function getStaticPaths() {
@@ -213,55 +212,11 @@ export function getStaticPaths() {
   // default-locale routes above are untouched: this block only ADDS paths, and a locale with zero
   // translated posts emits nothing (no empty localized index, no hreflang pointing at a 404).
   // One STATIC glob (import.meta.glob needs a literal) one level deep, partitioned in JS by subdir.
+  // Resolution (translated-post glob → per-locale meta/corpus) is `localeBlogCorpora()` in
+  // lib/blog.mjs — shared with the locale category/tag archives and the sitemap, so a locale's
+  // corpus can't drift between what this route builds and what those list/advertise.
   const localeBlogFiles = import.meta.glob('../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
-  const blogLocales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const defaultBlogLocale = blogLocales[0] || '';
-  for (const L of blogLocales) {
-    if (L === defaultBlogLocale) continue;                       // default locale handled above
-    const url = toUrlLocale(L);                                  // zh-TW → zh-tw
-    const sub = {};
-    for (const [path, raw] of Object.entries(localeBlogFiles)) {
-      const m = path.match(/\/blog\/([^/]+)\/([^/]+)\.md$/);
-      if (m && m[1] === url) sub[path] = raw;
-    }
-    if (!Object.keys(sub).length) continue;                      // no translated posts for this locale
-    // 🩸 A translated post carries `title` and `pubDate` and NOTHING ELSE — measured on
-    // feelreef/site-sodaart, 2026-08-19: `ir/posts/*.md` has `categories:` on 517 of 585, and
-    // `ir/posts/zh-tw/*.md` and `ir/posts/en-us/*.md` have it on ZERO of 585 each. Slugs are
-    // identical across all three (585/585/585, no orphans), because these files ARE the same posts
-    // in another language.
-    //
-    // So taxonomy is a property of the POST, not of one rendering of it: a category-based rule
-    // applied per-locale is right on the default locale and silently inert everywhere else. Left
-    // alone, unlisting eight categories would have cleaned the Japanese NEWS and left all 291 posts
-    // sitting in /zh-tw/diary and /en-us/diary — two thirds broken, nothing red, and only visible
-    // to someone who reads the other language.
-    //
-    // Inherit by slug, and only where the translation states nothing itself (a locale that DOES
-    // carry its own categories keeps them). `tags` is deliberately NOT back-filled: it is computed
-    // in parsePost and drives tag clouds and archive routes, so touching it here would sprout
-    // routes on sites that never had them. This adds no URL to any site; it only lets the filter
-    // see what it is filtering.
-    const baseBySlug = new Map(posts.map((p) => [p.slug, p]));
-    const postsL = allPosts(sub).map((p) => {
-      const inherited = inheritLocalePrivacy(p, baseBySlug.get(p.slug));
-      const categories = baseBySlug.get(p.slug)?.categories || [];
-      return (inherited.categories && inherited.categories.length) || !categories.length
-        ? inherited
-        : { ...inherited, categories };
-    });
-    const base = blogBase(meta);
-    const pat = (meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim()) || `${base}/%postname%`;
-    const metaL = {
-      ...meta,
-      ...(loadSite(files, `${url}/x`) || {}),                    // content/<loc>/_site.md chrome if any
-      lang: L,                                                   // DATA code → SiteLayout toBcp47 → <html lang>
-      'blog-path': `/${url}${base}`,
-      'blog-url-pattern': `/${url}${pat}`,
-    };
-    // Same two corpora as the default locale, resolved against THIS locale's meta so a locale
-    // `_site.md` may unlist more (or, by setting the key empty, less).
-    const listedL = listedPosts(postsL, metaL);
+  for (const { meta: metaL, posts: postsL, listed: listedL } of localeBlogCorpora(files, localeBlogFiles, meta, posts)) {
     paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1 } });
     const psL = Number(metaL['blog-page-size']) || 0;
     if (psL) {

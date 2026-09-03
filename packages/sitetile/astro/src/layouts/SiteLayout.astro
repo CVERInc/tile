@@ -24,6 +24,10 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // `alternates: 'all'` — for a route that fans out per locale WITHOUT a content file behind it
 // (pages/[...loc]/language.astro). Everything else has its hreflang set MEASURED from the content
 // glob; see the alternateLocales() block below and locale.mjs for why guessing is not an option.
+// `alternates: [...]` — an EXPLICIT locale list, for a route that also has no content file but
+// (unlike /language) is not "every configured locale": a category/tag archive page exists per
+// SLUG, not per site, so its hreflang set is "which locales route an archive for THIS slug"
+// (blog.mjs's alternateArchiveLocales) — computed by the route, since only it knows the slug.
 const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', robots = '' } = Astro.props;
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
 // the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
@@ -352,8 +356,12 @@ const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', i
 // hreflang set — MEASURED, not assumed. A locale is advertised only when this page really exists
 // in it; generated routes (blog index/posts, tag & date archives, search) have no content file in
 // any locale and so advertise nothing. Before 2026-08-06 this was `locales.map(...)`, which put
-// ~429 dead alternates on one site alone. See lingo/locale.mjs → alternateLocales().
-const altLocales = lingo.alternateLocales({
+// ~429 dead alternates on one site alone. See lingo/locale.mjs → alternateLocales(). An ARRAY
+// bypasses this content-glob measurement entirely — the caller already measured existence its own
+// way (blog.mjs's alternateArchiveLocales, for a category/tag archive) and is handing the answer
+// straight through; content-file detection would only find nothing (an archive has no content file
+// in any locale) and wrongly empty out a real answer.
+const altLocales = Array.isArray(alternates) ? alternates.filter(Boolean) : lingo.alternateLocales({
   locales, defaultLocale, subPath, all: String(alternates) === 'all',
   contentRels: lingo.contentRelsOf(contentGlob),
 });

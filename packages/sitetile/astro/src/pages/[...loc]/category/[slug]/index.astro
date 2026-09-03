@@ -1,0 +1,71 @@
+---
+// REEF with Blog × Lingo — the LOCALE-scoped mirror of pages/category/[slug]/index.astro: WordPress
+// category archives at `/<url-locale>/category/<slug>/`, PAGE 1 (pages 2+ at ./page/[n].astro).
+//
+// THE GAP this closes (confirmed live on sodaart.co.jp, 2026-09-02, a Lingo site with translated
+// posts at ir/posts/zh-tw/…, ir/posts/en-us/…): the base route only ever emitted `/category/<slug>/`
+// — the DEFAULT locale's own posts — so every zh-TW/en-US reader who followed a category link (the
+// `blog-category-sidebar` rail, or a tag chip resolving to a category) landed on a page of Japanese
+// posts. A third-party AI editing the site could only hide the rail; it had no page to send readers
+// to instead. This route is that page.
+//
+// One page per (locale × distinct category slug present in THAT locale's OWN translated posts) —
+// a category with posts only at the base locale gets no route here, same "never link a page that
+// isn't there" discipline blog-categories/routedCategories already follow. Reuses
+// `localeBlogCorpora` (lib/blog.mjs) for the translated-post resolution — the SAME one
+// pages/[...path].astro's locale blog index/posts and the sitemap use, so this route's slug set
+// can't drift from what those already emit or list.
+//
+// Heading uses `blog-category-names` resolved for THIS locale (content/<loc>/_site.md overrides
+// the base value automatically — see localeBlogCorpora's metaL build), so a translated category
+// name shows even though the SLUG itself (like a post slug) stays untranslated. uiCopy/lang follow
+// the locale via ArchiveView → SiteLayout reading `meta.lang`. `alternates` is the reciprocal
+// hreflang back to the base route (and any other locale) for this SAME slug.
+//
+// OPT-IN per locale, mirroring the base gate: a locale's own `blog-category-routes` (inherited from
+// the site default unless its own `_site.md` overrides it) must be truthy.
+//
+// pageHref/base carry the `/<loc>` prefix explicitly (metaL['blog-category-base'] itself stays
+// UNPREFIXED — see lib/blog.mjs's sitemap.xml.js note: the physical archive directory is a literal
+// `category` segment, prefixed here, not derived from that meta key at build time).
+import ArchiveView from '../../../../components/ArchiveView.astro';
+import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, localeBlogCorpora, termLocaleMap, alternateArchiveLocales } from '../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const contentFiles = import.meta.glob('../../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  const localeBlogFiles = import.meta.glob('../../../../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const allPostsIn = allPosts(
+    import.meta.glob('../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const baseListed = listedPosts(allPostsIn, meta);
+  const { mapByUrl, urlToLocale, corpora } = termLocaleMap('category', contentFiles, localeBlogFiles, meta, allPostsIn, baseListed);
+  const paths = [];
+  for (const { url, meta: metaL, listed: listedL } of corpora) {
+    const on = metaL['blog-category-routes'] != null && String(metaL['blog-category-routes']) !== 'false';
+    if (!on) continue;
+    const seen = new Set();
+    const cats = [];
+    for (const p of listedL) for (const c of (p.categories || [])) if (c && !seen.has(c)) { seen.add(c); cats.push(c); }
+    for (const slug of cats) {
+      paths.push({
+        params: { loc: url, slug },
+        props: { posts: listedL, meta: metaL, slug, urlLoc: url, alternates: alternateArchiveLocales(mapByUrl, slug, urlToLocale) },
+      });
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, slug, urlLoc, alternates } = Astro.props;
+const base = `/${urlLoc}${String(meta['blog-category-base'] || '/category').replace(/\/$/, '')}`;
+const names = kvMap(meta['blog-category-names']);
+const heading = names[slug] || slug;
+const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
+const subhead = archivePrefixes(meta).category + heading;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />

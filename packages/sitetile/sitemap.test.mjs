@@ -12,7 +12,7 @@
 // URL that does not exist. So every assertion below is about NOT claiming something.
 
 import assert from 'node:assert/strict';
-import { contentUrls, tagUrls, canonicalPath } from './astro/src/lib/sitemap.mjs';
+import { contentUrls, tagUrls, categoryUrls, canonicalPath } from './astro/src/lib/sitemap.mjs';
 
 let passed = 0;
 const test = (name, fn) => {
@@ -76,6 +76,25 @@ test('tag archives honour the site\'s base and slug map', () => {
   const posts = [{ tags: ['研究筆記 RESEARCH'] }];
   const out = tagUrls(posts, { 'blog-tag-routes': true, 'blog-tag-base': '/label' }, { '研究筆記 RESEARCH': 'research' });
   assert.deepEqual(out, ['/label/research/'], 'slug, not display name — the route is slug-keyed');
+});
+
+test('🔴 category archives appear only when the site turned the routes on — categoryUrls existed for tags only until this feature, a bare gap on any base-locale site that DID turn them on', () => {
+  const posts = [{ categories: ['press', 'diary'] }, { categories: ['diary'] }];
+  assert.deepEqual(categoryUrls(posts, {}), [], 'off by default — the routes emit nothing, so neither may we');
+  assert.deepEqual(categoryUrls(posts, { 'blog-category-routes': 'false' }), [], 'explicitly off');
+  assert.deepEqual(categoryUrls(posts, { 'blog-category-routes': true }), ['/category/diary/', '/category/press/']);
+});
+
+test('category archives honour the site\'s own base', () => {
+  const out = categoryUrls([{ categories: ['staff'] }], { 'blog-category-routes': true, 'blog-category-base': '/classification' });
+  assert.deepEqual(out, ['/classification/staff/']);
+});
+
+test('a CJK category slug is URL-encoded, like the route emits it', () => {
+  const out = categoryUrls([{ categories: ['深空眠'] }], { 'blog-category-routes': true });
+  assert.equal(out.length, 1);
+  assert.ok(!/[^\x00-\x7F]/.test(out[0]), `must be encoded for a sitemap, got ${out[0]}`);
+  assert.equal(decodeURI(out[0]), '/category/深空眠/');
 });
 
 test('a CJK tag with no slug entry is URL-encoded, like the route emits it', () => {

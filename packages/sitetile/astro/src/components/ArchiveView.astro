@@ -16,12 +16,17 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 //   subhead  — the descriptive line under the heading (WP's "顯示…的文章")
 //   pageHref — (n) => url for this archive's page n (page 1 = base, 2+ = base/page/n)
 //   pageNum  — current page (1-based)
+//   alternates — (optional) explicit hreflang locale list, for a category/tag archive: which OTHER
+//                locales route an archive for this SAME slug (blog.mjs's alternateArchiveLocales).
+//                Passed straight through to SiteLayout's array form — see its own header for why an
+//                array bypasses the (here, always-empty) content-glob measurement. Omitted (the
+//                default) on /author /YYYY /YYYY-MM, which stay exactly as they always rendered.
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, listedPosts, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy} from '../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';
 
-const { posts: postsIn, corpus: corpusIn, meta, title, heading, subhead, pageHref, pageNum = 1 } = Astro.props;
+const { posts: postsIn, corpus: corpusIn, meta, title, heading, subhead, pageHref, pageNum = 1, alternates } = Astro.props;
 // Every archive route filters its own corpus before getting here; this is the backstop that makes
 // that a belt rather than the only strap. Five routes feed this one shell (/tag /category /author
 // /YYYY /YYYY/MM) and a sixth will be added by someone who reads the props doc above and not this
@@ -43,7 +48,7 @@ const {
 const recentPosts = corpus.slice(0, 5);
 const archive = showSidebar ? groupByArchive(corpus) : [];
 ---
-<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta} alternates={alternates}>
   <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
     <div class="bl-main">
     <header class="bl-head">
@@ -137,23 +142,11 @@ const archive = showSidebar ? groupByArchive(corpus) : [];
     )}
   </section>
 
-  <script is:inline>
-    (() => {
-      const root = document.querySelector('[data-tag-filter]');
-      if (!root) return;
-      root.hidden = false;
-      const pills = [...root.querySelectorAll('.bl-filter-pill')];
-      const entries = [...document.querySelectorAll('.bl-entry')];
-      const apply = (tag) => {
-        for (const li of entries) {
-          const ts = (li.dataset.tags || '').split('|').filter(Boolean);
-          li.style.display = tag === '*' || ts.includes(tag) ? '' : 'none';
-        }
-        for (const pill of pills) pill.classList.toggle('is-active', pill.dataset.tag === tag);
-      };
-      for (const pill of pills) pill.addEventListener('click', () => {
-        apply(pill.classList.contains('is-active') && pill.dataset.tag !== '*' ? '*' : pill.dataset.tag);
-      });
-    })();
-  </script>
+  {/* No inline tag-filter script here — the pill row (`[data-tag-filter]`) is wired by the SAME
+      shared blog-archive island BlogIndexView already relies on (SiteLayout: `{hasBlog && <script>
+      import '../packages/blog-archive/blog-archive.js';</script>}`, its own `wirePills()`). This
+      file used to carry a byte-identical SECOND copy of that click-handler — dead code no site ever
+      exercised (no archive route ever built in the fixtures before locale category/tag archives),
+      caught by turning them on: two handlers wired to the same pills would have double-toggled. One
+      island, one implementation — matching BlogIndexView's own comment on the same seam. */}
 </SiteLayout>

@@ -8,6 +8,9 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite } from '@sitetile';
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-copy.mjs';
+// toUrlLocale is a pure string transform (no @sitetile import), so pulling it in here costs
+// nothing a plain `node` test can't already afford — sitemap.mjs already does the same cross-import.
+import { toUrlLocale } from '../packages/lingo/locale.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
 const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -69,12 +72,17 @@ function privacyVerdict(raw) {
 export function blogCategories(meta, listed) {
   const raw = fmStr(meta['blog-categories']);
   if (!raw) return [];
+  // href stays the AUTHORED string through this whole function — categoryHrefSlug() below reads
+  // meta['blog-category-base'] (e.g. '/category'), never a locale-prefixed one, so a href already
+  // rewritten to '/zh-tw/category/<slug>/' would stop matching it and silently lose its slug. The
+  // locale rewrite (localizeArchiveHref) is applied ONCE, right at the end, to the href only.
   const entries = raw.split('||').map((entry) => {
     const [label, count, href] = entry.split('|').map((s) => s.trim());
     return label ? { label, count: count || '', href: href || '' } : null;
   }).filter(Boolean);
   const hidden = unlistedCategories(meta);
-  if (!hidden.size) return entries;   // every site that unlists nothing leaves here, untouched.
+  const localize = (list) => list.map((e) => ({ ...e, href: localizeArchiveHref(e.href, meta, listed) }));
+  if (!hidden.size) return localize(entries);   // every site that unlists nothing leaves here, untouched.
   // 🔴 These counts are AUTHORED (see above) — harvested from live so they match what a reader saw
   // there. Unlisting falsifies them all at once, and not just the hidden rows: sodaart's
   // `☆ STAFF|224` would keep promising 224 posts while 14 of them are no longer reachable. An
@@ -94,7 +102,7 @@ export function blogCategories(meta, listed) {
     if (n === 0) continue;
     kept.push({ ...e, count: e.count === '' ? '' : String(n) });
   }
-  return kept;
+  return localize(kept);
 }
 
 // capExcerpt: truncate joined body text to a char budget, appending live's "[…]" overflow
@@ -288,6 +296,66 @@ function categoryHrefSlug(href, meta) {
   const seg = path.slice(base.length + 1);
   if (!seg || seg.includes('/')) return null;
   try { return decodeURIComponent(seg); } catch { return seg; }
+}
+
+// ── locale-scoped term archives (REEF with Blog × Lingo) ──────────────────────────────────────
+//
+// localeUrlPrefix / localizeArchiveHref / alternateArchiveLocales are the "link helper" this
+// feature turns on: every category/tag chip and the authored category rail carried a BARE
+// `/category/<slug>/` href regardless of which locale was rendering, so a zh-TW or en-US edition
+// of a Lingo + Blog site (sodaart.co.jp, confirmed live 2026-09-02) sent readers to the JAPANESE
+// archive — the base locale's posts, in the base locale's language — no matter which edition they
+// were reading. A third-party AI editing the site could only hide the rail, because the link
+// itself had no way to know it was wrong.
+//
+// `meta` here is always a LOCALE's OWN meta (the `metaL` this file's own `localeBlogCorpora`
+// below builds, or the site's default meta on the default locale) — `lang` is that locale's DATA
+// code, `locales` is the site-wide CSV (unchanged by locale, `locales[0]` is the site default per
+// SiteLayout's "main language at root" rule). Never call this with a site meta whose `lang` was
+// swapped out for anything else.
+
+// localeUrlPrefix: '/<url-locale>' when `meta` is a NON-DEFAULT locale's own meta; '' for the
+// default/base locale or a non-Lingo site (both must stay byte-identical to before this feature).
+export function localeUrlPrefix(meta) {
+  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const defaultLocale = locales[0] || '';
+  const lang = String((meta && meta.lang) || '').trim();
+  if (!lang || !defaultLocale || lang === defaultLocale) return '';
+  return `/${toUrlLocale(lang)}`;
+}
+
+// localizeArchiveHref: rewrite an AUTHORED category-rail href (`blog-categories: label|count|href`)
+// to this locale's own `/<loc>/category/<slug>/` address — but ONLY when THIS locale's own build
+// actually routes an archive for that exact slug (routedCategories() over `listed`, the SAME
+// locale-scoped corpus the caller already filtered). A slug this locale never routes — because
+// none of its OWN posts carry that category, e.g. only the base locale's posts do — is left
+// UNCHANGED, i.e. still pointing at the base/default-locale archive: the historic behaviour, and
+// exactly "fall back to base so nothing 404s". A non-category href (the rail's own "All Posts"
+// row, or any href categoryHrefSlug can't parse) is also left unchanged — it isn't a claim this
+// function can verify, so it isn't a claim this function rewrites.
+// No-op (byte-identical) on the default locale, where localeUrlPrefix is always ''.
+export function localizeArchiveHref(href, meta, listed) {
+  const urlLoc = localeUrlPrefix(meta);
+  if (!urlLoc || !href) return href;
+  const slug = categoryHrefSlug(href, meta);
+  if (slug == null) return href;
+  const routed = routedCategories(listed || [], meta);
+  return routed.has(slug) ? `${urlLoc}${href}` : href;
+}
+
+// alternateArchiveLocales: which locale DATA codes ALSO route an archive for the SAME slug — the
+// hreflang set for a category/tag archive page. `mapByUrl` is `{ '': Set<slug> (base/default
+// locale), '<url-locale>': Set<slug>, … }` — each entry's own routedCategories()/routedTags()
+// result, so a locale is only ever offered when its OWN build really emits the page (same
+// "measured, not assumed" discipline as lingo/locale.mjs's alternateLocales — an hreflang pointing
+// at a 404 poisons the whole reciprocal cluster). `urlToLocale('')` must resolve to the site's
+// default locale DATA code; `urlToLocale('<url>')` to that locale's own DATA code.
+export function alternateArchiveLocales(mapByUrl, slug, urlToLocale) {
+  const out = [];
+  for (const [url, set] of Object.entries(mapByUrl || {})) {
+    if (set && set.has(slug)) out.push(urlToLocale(url));
+  }
+  return out;
 }
 
 // loadSite: the OPT-IN site-config layer (SPEC-site-data-model.md). A `content/_site.md`
@@ -718,6 +786,12 @@ export function kvMap(val) {
 // links elsewhere); otherwise they fall back to the `?tag=` client-side filter on the blog index
 // (the pre-archive behaviour — a site with no /tag/ pages is unchanged).
 export function tagHref(meta, tag, slugMap, catSet) {
+  // Locale-scope every route this function can emit — '' on the default locale (byte-identical to
+  // before). Safe by construction, not by a second existence check: `tag` is always drawn from a
+  // POST in the same locale-scoped corpus (`posts`/`listed`) that `catSet` and this locale's own
+  // /tag /category route files were built from, so a slug reachable here was necessarily routed
+  // for THIS locale too — see localizeArchiveHref's header for the fuller "link helper" reasoning.
+  const urlLoc = localeUrlPrefix(meta);
   // A tag that IS a real category slug goes to its category archive. On sites where per-post
   // `categories:` is the only axis (tags fall back to it — see parsePost), the /category/<slug>/
   // page is the destination the source itself published; sending those chips to the ?tag= filter
@@ -726,16 +800,20 @@ export function tagHref(meta, tag, slugMap, catSet) {
   // rule blogCategories() follows with its empty hrefs.
   if (catSet && catSet.has(tag)) {
     const base = String((meta && meta['blog-category-base']) || '/category').replace(/\/$/, '');
-    return `${base}/${tag}/`;
+    return `${urlLoc}${base}/${tag}/`;
   }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
     const base = String((meta && meta['blog-tag-base']) || '/tag').replace(/\/$/, '');
     const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
-    return `${base}/${slug}/`;
+    return `${urlLoc}${base}/${slug}/`;
   }
+  // Blogger's /search/label/<tag> route is not locale-scoped (a separate, older capability this
+  // feature doesn't touch) — left exactly as it always was.
   const label = meta && meta['blog-label-routes'] != null && String(meta['blog-label-routes']) !== 'false';
   if (label) return `/search/label/${tag}/`;
+  // blogBase(meta) is ALREADY locale-prefixed on a locale's own meta (metaL sets `blog-path` to
+  // `/${url}${base}` — see localeBlogCorpora below), so this branch needs no urlLoc of its own.
   return `${blogBase(meta)}?tag=${encodeURIComponent(tag)}`;
 }
 
@@ -752,6 +830,25 @@ export function routedCategories(posts, meta) {
   const hidden = unlistedCategories(meta);
   const out = new Set();
   for (const p of posts || []) for (const c of (p.categories || [])) if (c && !hidden.has(c)) out.add(c);
+  return out;
+}
+
+// routedTags: the set of tag SLUGS (post-slugMap, matching tag/[slug]/index.astro's own
+// getStaticPaths) that /tag/<slug>/ really emitted a page for. Mirrors routedCategories — kept
+// separate because tags and categories are DISTINCT axes (a post's tags fall back to its
+// categories only when it sets no `tags:` of its own — see parsePost) and gate on different meta
+// flags (`blog-tag-routes` vs `blog-category-routes`). Empty Set when the routes are off, exactly
+// like routedCategories.
+export function routedTags(posts, meta) {
+  const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
+  if (!on) return new Set();
+  const hidden = unlistedCategories(meta);
+  const slugMap = tagSlugMap(meta);
+  const out = new Set();
+  for (const p of posts || []) {
+    if ((p.categories || []).some((c) => hidden.has(c))) continue;
+    for (const t of p.tags || []) if (t) out.add(slugMap[t] || t);
+  }
   return out;
 }
 
@@ -807,6 +904,80 @@ export function postUrl(post, meta) {
 export function indexUrl(meta, n = 1) {
   const base = blogBase(meta);
   return Number(n) <= 1 ? (base || '/') : `${base}/page/${n}`;
+}
+
+// localeBlogCorpora: for each NON-DEFAULT configured locale that actually has translated posts
+// (`ir/posts/<url-locale>/<slug>.md`, staged by the runner into `blog/<url-locale>/<slug>.md`),
+// the locale-scoped { locale, url, meta, posts, listed } a caller needs to build that locale's own
+// blog routes — index/pager/posts (pages/[...path].astro), and now the category/tag archives
+// (pages/[...loc]/category|tag/[slug]/…) and the sitemap. Factored out of what was, until this
+// feature, a block inlined once in pages/[...path].astro — a second hand-copy of this resolution
+// is exactly how the base/locale drift this file's own `localizeArchiveHref` was written to fix
+// would happen again, one file later.
+//   contentFiles     — import.meta.glob('…/content/**/*.md', {query:'?raw', import:'default', eager:true})
+//                       (for each locale's own content/<loc>/_site.md chrome override)
+//   blogLocaleFiles  — import.meta.glob('…/blog/*/*.md', {query:'?raw', import:'default', eager:true})
+//                       (ONE static glob, one level deep — import.meta.glob needs a literal;
+//                       partitioned per locale in JS below)
+//   meta             — the site's DEFAULT meta (siteMeta())
+//   basePosts        — the DEFAULT locale's FULL post corpus (allPosts on blog/*.md) — for the
+//                       category-inheritance-by-slug rule: a translated post carries no
+//                       `categories:` of its own (measured live: 0 of 585 translated posts do),
+//                       so taxonomy is inherited from the base post with the same slug.
+// A locale with zero translated posts contributes nothing — no empty locale index, no dangling
+// hreflang, no locale category/tag archive with nothing in it.
+export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts) {
+  const blogLocales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const defaultBlogLocale = blogLocales[0] || '';
+  const baseBySlug = new Map((basePosts || []).map((p) => [p.slug, p]));
+  const out = [];
+  for (const L of blogLocales) {
+    if (L === defaultBlogLocale) continue;                        // default locale handled by the caller
+    const url = toUrlLocale(L);
+    const sub = {};
+    for (const [path, raw] of Object.entries(blogLocaleFiles || {})) {
+      const m = path.match(/\/blog\/([^/]+)\/([^/]+)\.md$/);
+      if (m && m[1] === url) sub[path] = raw;
+    }
+    if (!Object.keys(sub).length) continue;                       // no translated posts for this locale
+    const postsL = allPosts(sub).map((p) => {
+      const inherited = inheritLocalePrivacy(p, baseBySlug.get(p.slug));
+      const categories = baseBySlug.get(p.slug)?.categories || [];
+      return (inherited.categories && inherited.categories.length) || !categories.length
+        ? inherited
+        : { ...inherited, categories };
+    });
+    const base = blogBase(meta);
+    const pat = (meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim()) || `${base}/%postname%`;
+    const metaL = {
+      ...meta,
+      ...(loadSite(contentFiles, `${url}/x`) || {}),              // content/<loc>/_site.md chrome if any
+      lang: L,                                                    // DATA code → SiteLayout toBcp47 → <html lang>
+      'blog-path': `/${url}${base}`,
+      'blog-url-pattern': `/${url}${pat}`,
+    };
+    const listedL = listedPosts(postsL, metaL);
+    out.push({ locale: L, url, meta: metaL, posts: postsL, listed: listedL });
+  }
+  return out;
+}
+
+// termLocaleMap: everything a category/tag archive route (base OR locale) needs to compute its own
+// hreflang — the per-locale "which slugs does THIS locale route" map (`mapByUrl`, keyed '' for the
+// default locale and '<url-locale>' for each translated one), a `urlToLocale` lookup back to DATA
+// codes (what alternateArchiveLocales needs), and the resolved `corpora` (localeBlogCorpora's own
+// result) so the caller doesn't fetch it twice. `kind` picks routedCategories or routedTags — the
+// two term axes gate on different meta flags and read different post fields, so the map itself
+// must be built per-kind (a category archive's hreflang must never consult the tag-routed set).
+export function termLocaleMap(kind, contentFiles, blogLocaleFiles, meta, basePosts, baseListed) {
+  const routed = kind === 'tag' ? routedTags : routedCategories;
+  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const defaultLocale = locales[0] || '';
+  const corpora = localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts);
+  const mapByUrl = { '': routed(baseListed, meta) };
+  const urlToData = { '': defaultLocale };
+  for (const c of corpora) { mapByUrl[c.url] = routed(c.listed, c.meta); urlToData[c.url] = c.locale; }
+  return { defaultLocale, mapByUrl, urlToLocale: (url) => urlToData[url] || defaultLocale, corpora };
 }
 
 // searchIndex: the lean, all-in-one JSON payload the blog-search AND blog-archive islands

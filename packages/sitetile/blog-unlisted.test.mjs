@@ -194,7 +194,13 @@ test('every surface that reads the post corpus filters it — or is a named exce
     const src = code(f);
     if (!/\ballPosts\s*\(/.test(src)) continue;
     if (EXEMPT.includes(rel)) continue;
-    if (!/\blistedPosts\s*\(/.test(src)) offenders.push(rel);
+    // localeBlogCorpora (lib/blog.mjs) is the OTHER legitimate filter, alongside listedPosts
+    // itself: it calls listedPosts internally, per locale, and hands back the result as its own
+    // `.listed` field — the Lingo × Blog locale category/tag archive routes (and the sitemap) read
+    // ONLY that field downstream, never the corpus they pass in. A file that calls allPosts() and
+    // then only ever narrows it through one of these two names is filtering; one that calls
+    // neither is the defect this test exists to catch.
+    if (!/\blistedPosts\s*\(/.test(src) && !/\blocaleBlogCorpora\s*\(/.test(src)) offenders.push(rel);
   }
   assert.deepEqual(offenders, [], 'these read every post and list them unfiltered:\n      ' + offenders.join('\n      '));
 });
@@ -220,18 +226,31 @@ test('the router still emits a page for EVERY post, unlisted ones included', () 
 test('a translated post inherits its categories, or the filter is inert outside the default locale', () => {
   // 🩸 Measured on feelreef/site-sodaart, 2026-08-19: `ir/posts/*.md` carries `categories:` on 517
   // of 585 files; `ir/posts/zh-tw/*.md` and `ir/posts/en-us/*.md` carry it on 0 of 585 each, with
-  // identical slugs across all three. Without the inheritance in the locale block, unlisting would
-  // have cleaned the Japanese NEWS and left all 291 posts sitting in /zh-tw/diary and /en-us/diary.
-  const src = code(join(SRC, 'pages/[...path].astro'));
+  // identical slugs across all three. Without this inheritance, unlisting would have cleaned the
+  // Japanese NEWS and left all 291 posts sitting in /zh-tw/diary and /en-us/diary.
+  //
+  // 🩸 2026-09-03 (Lingo × Blog locale category/tag archives): this used to be inline in
+  // pages/[...path].astro's own getStaticPaths — the ONLY place a translated post's corpus was
+  // built. It moved to lib/blog.mjs's localeBlogCorpora() so the sitemap and the NEW locale
+  // category/tag archive routes could share the identical resolution instead of a second hand-copy
+  // (exactly the class of drift this whole file's unlisting feature would have shipped as, one
+  // file later, unnoticed — see blog-locale-archives.test.mjs for the behavioural unit tests on the
+  // function itself). [...path].astro now just calls it; the source pattern below moved with it.
+  const src = code(join(SRC, 'lib/blog.mjs'));
   const at = src.indexOf('const postsL =');
-  assert.ok(at > 0, 'the per-locale corpus is built here');
+  assert.ok(at > 0, 'the per-locale corpus is built here (localeBlogCorpora)');
   const before = src.slice(0, at);
-  assert.match(before, /new Map\(posts\.map\(\(p\) => \[p\.slug, p\]/,
-    'the locale block must map the DEFAULT corpus by slug before parsing its own posts');
+  assert.match(before, /new Map\(\(basePosts \|\| \[\]\)\.map\(\(p\) => \[p\.slug, p\]/,
+    'localeBlogCorpora must map the FULL base corpus by slug before parsing a locale\'s own posts');
   assert.match(src.slice(at, at + 500), /inheritLocalePrivacy\(p, baseBySlug\.get\(p\.slug\)\)/,
-    'the locale block must apply the monotonic privacy verdict before rendering a translation');
+    'localeBlogCorpora must apply the monotonic privacy verdict before rendering a translation');
   assert.match(src.slice(at, at + 700), /const categories = baseBySlug\.get\(p\.slug\)\?\.categories/,
     'and hand those categories to a translation that states none');
+  // And the call site: [...path].astro must still be the one place a default-locale build reaches
+  // this — not a second, drifted copy of the block itself.
+  const caller = code(join(SRC, 'pages/[...path].astro'));
+  assert.match(caller, /\blocaleBlogCorpora\s*\(/, '[...path].astro must call the shared helper, not re-inline it');
+  assert.ok(!/const postsL =/.test(caller), 'and must not ALSO carry its own copy of the block');
 });
 
 test('the rail counts the whole site, even on an archive page that lists a slice of it', () => {
@@ -263,17 +282,43 @@ test('no pager is sized from the unfiltered corpus', () => {
 });
 
 test('the archive routes touch their unfiltered corpus only to filter it', () => {
-  // Each of the eight reads the glob into `allPostsIn` and immediately narrows it. Two mentions is
-  // the whole legitimate life of that name; a third is a counter, a slice or a props hand-off that
-  // skipped the filter — the same defect as above, one directory over.
-  for (const rel of [
-    'pages/category/[slug]/index.astro', 'pages/category/[slug]/page/[n].astro',
-    'pages/tag/[slug]/index.astro',      'pages/tag/[slug]/page/[n].astro',
-    'pages/author/[slug]/index.astro',   'pages/author/[slug]/page/[n].astro',
-    'pages/search/label/[tag]/index.astro', 'pages/search/label/[tag]/page/[n].astro',
-  ]) {
+  // Each of these reads the glob into `allPostsIn` and immediately narrows it. Two mentions is the
+  // whole legitimate life of that name; a third is normally a counter, a slice or a props hand-off
+  // that skipped the filter — the same defect as above, one directory over.
+  //
+  // 🩸 2026-09-03 (Lingo × Blog locale category/tag archives): the two PAGE-1 routes gained a real
+  // third use — termLocaleMap('category'|'tag', …, allPostsIn, posts) needs the FULL base corpus
+  // for the SAME inheritance reason localeBlogCorpora does (a category-inheritance-by-slug check
+  // must see every base post, not just the listed ones), to compute this page's own reciprocal
+  // hreflang (alternateArchiveLocales). Their own pager siblings (page/[n].astro) don't compute
+  // hreflang at all (see their file header) and stay at 2, like every route this feature left
+  // untouched.
+  const EXPECT = {
+    'pages/category/[slug]/index.astro': 3, 'pages/category/[slug]/page/[n].astro': 2,
+    'pages/tag/[slug]/index.astro': 3,      'pages/tag/[slug]/page/[n].astro': 2,
+    'pages/author/[slug]/index.astro': 2,   'pages/author/[slug]/page/[n].astro': 2,
+    'pages/search/label/[tag]/index.astro': 2, 'pages/search/label/[tag]/page/[n].astro': 2,
+  };
+  for (const [rel, expected] of Object.entries(EXPECT)) {
     const n = (code(join(SRC, rel)).match(/\ballPostsIn\b/g) || []).length;
-    assert.equal(n, 2, `${rel}: mentions the unfiltered corpus ${n} times, expected 2 (bind + filter)`);
+    assert.equal(n, expected, `${rel}: mentions the unfiltered corpus ${n} times, expected ${expected}`);
+  }
+});
+
+test('the two NEW locale-scoped archive routes read the base corpus only for hreflang, and their own locale corpus only through localeBlogCorpora', () => {
+  // [...loc]/category and [...loc]/tag PAGE-1 mirror the base routes' shape: bind, listedPosts →
+  // baseListed (termLocaleMap's own 6th arg needs the LISTED base corpus, matching what the base
+  // routes already pass), then termLocaleMap's basePosts arg — 3, same as the base routes. Their
+  // pager siblings don't compute hreflang and never call termLocaleMap, so they stay at 2 (bind +
+  // the localeBlogCorpora call, which does the rest — their own locale corpus never touches
+  // allPostsIn a third time).
+  const EXPECT = {
+    'pages/[...loc]/category/[slug]/index.astro': 3, 'pages/[...loc]/category/[slug]/page/[n].astro': 2,
+    'pages/[...loc]/tag/[slug]/index.astro': 3,       'pages/[...loc]/tag/[slug]/page/[n].astro': 2,
+  };
+  for (const [rel, expected] of Object.entries(EXPECT)) {
+    const n = (code(join(SRC, rel)).match(/\ballPostsIn\b/g) || []).length;
+    assert.equal(n, expected, `${rel}: mentions the unfiltered corpus ${n} times, expected ${expected}`);
   }
 });
 

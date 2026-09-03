@@ -67,6 +67,18 @@ const unsignedPost = findPost('an-unsigned-post');
 const markers = readFileSync(join(DIST, 'markers/index.html'), 'utf8');
 const customThemeBuilt = readFileSync(join(DIST, 'custom-theme/index.html'), 'utf8');
 const localeExcept = readFileSync(join(DIST, 'zh-tw/blocks/index.html'), 'utf8');
+// Lingo × Blog category/tag archive fixture (blog/{a-signed,an-unsigned}-post.md carry
+// `categories: ["press"]`; their zh-TW translations, blog/zh-tw/*.md, carry none and inherit it
+// by slug). Proves the gap confirmed live on sodaart.co.jp 2026-09-02: the base-locale-only
+// /category & /tag archives, and the site-wide links that pointed at them regardless of which
+// locale was rendering.
+const devlogIndex = readFileSync(join(DIST, 'devlog/index.html'), 'utf8');
+const zhDevlogIndex = readFileSync(join(DIST, 'zh-tw/devlog/index.html'), 'utf8');
+const categoryPress = readFileSync(join(DIST, 'category/press/index.html'), 'utf8');
+const zhCategoryPress = readFileSync(join(DIST, 'zh-tw/category/press/index.html'), 'utf8');
+const tagFixture = readFileSync(join(DIST, 'tag/fixture/index.html'), 'utf8');
+const zhTagFixture = readFileSync(join(DIST, 'zh-tw/tag/fixture/index.html'), 'utf8');
+const sitemapXml = readFileSync(join(DIST, 'sitemap.xml'), 'utf8');
 const siteOff = readFileSync(join(DIST, 'ko-kr/index.html'), 'utf8');
 // Safe negative-control seam: mutate only the HTML held by this test process, never source/output.
 const customTheme = process.env.SITETILE_SMOKE_REMOVE_CUSTOM_MARKER === '1'
@@ -579,6 +591,62 @@ const checks = [
   }],
   ['fixtures never reference the pkg-runtimes chunk', () =>
     [html, blocks, markers, forms, customTheme].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
+
+  // -- Lingo × Blog locale category/tag archives (the sodaart gap, 2026-09-02) --
+  ['locale category archive exists at /<loc>/category/<slug>/', () => existsSync(distFile('/zh-tw/category/press/index.html'))],
+  ['locale tag archive exists at /<loc>/tag/<slug>/', () => existsSync(distFile('/zh-tw/tag/fixture/index.html'))],
+  ['locale category archive lists ONLY that locale\'s own (translated) posts', () =>
+    zhCategoryPress.includes('bl-entry-link" href="/zh-tw/devlog/a-signed-post"')
+    && zhCategoryPress.includes('bl-entry-link" href="/zh-tw/devlog/an-unsigned-post"')
+    && !zhCategoryPress.includes('href="/devlog/a-signed-post"')],
+  ['locale tag archive lists ONLY that locale\'s own posts too', () =>
+    zhTagFixture.includes('bl-entry-link" href="/zh-tw/devlog/a-signed-post"')
+    && !zhTagFixture.includes('href="/devlog/a-signed-post"')],
+  // Taxonomy inheritance: blog/zh-tw/*.md carry NO `categories:` of their own — the base
+  // locale's `press` category reaches the archive above only via localeBlogCorpora's
+  // inherit-by-slug rule (a translated post carries no categories of its own — see live measured
+  // on feelreef/site-sodaart, 585/585 both zh-tw and en-us).
+  ['locale category heading is resolved for THAT locale (content/zh-tw/_site.md overrides the base name)', () =>
+    /<h1>新聞稿<\/h1>/.test(zhCategoryPress) && /<h1>Press<\/h1>/.test(categoryPress)],
+  ['locale archive <html lang> is the locale\'s own BCP-47 tag', () => /<html lang="zh-Hant"/.test(zhCategoryPress)],
+  ['base archive is unaffected — still lists the base posts, in the base language, at the base URL', () =>
+    categoryPress.includes('bl-entry-link" href="/devlog/a-signed-post"')
+    && categoryPress.includes('bl-entry-link" href="/devlog/an-unsigned-post"')
+    && /<html lang="en"/.test(categoryPress)],
+  // -- hreflang between locale editions of the SAME slug (item 1: "when both exist") --
+  ['🔴 category archive hreflang: base ⇄ locale, reciprocally, for the SAME slug', () =>
+    /hreflang="en" href="[^"]*\/category\/press\/"/.test(categoryPress)
+    && /hreflang="zh-Hant" href="[^"]*\/zh-tw\/category\/press\/"/.test(categoryPress)
+    && /hreflang="en" href="[^"]*\/category\/press\/"/.test(zhCategoryPress)
+    && /hreflang="zh-Hant" href="[^"]*\/zh-tw\/category\/press\/"/.test(zhCategoryPress)],
+  ['tag archive hreflang is reciprocal too', () =>
+    /hreflang="zh-Hant" href="[^"]*\/zh-tw\/tag\/fixture\/"/.test(tagFixture)
+    && /hreflang="en" href="[^"]*\/tag\/fixture\/"/.test(zhTagFixture)],
+  // -- item 2: post cards / the category-sidebar rail / tag chips link to the LOCALE archive when
+  //    it exists, and fall back to the base archive on a locale that doesn't route it --
+  ['blog index (locale edition): the authored category rail links to the LOCALE archive', () =>
+    zhDevlogIndex.includes('href="/zh-tw/category/press">Press（2）<')],
+  ['blog index (base/default edition): the SAME rail is unprefixed — no regression on the locale this feature did not touch', () =>
+    devlogIndex.includes('href="/category/press">Press（2）<')],
+  ['blog index (locale edition): tag chips resolving to /tag/ also carry the locale prefix', () =>
+    (zhDevlogIndex.match(/bl-tag" href="\/zh-tw\/tag\/fixture\/"/g) || []).length === 2],
+  ['blog index (base edition): tag chips stay unprefixed', () =>
+    (devlogIndex.match(/bl-tag" href="\/tag\/fixture\/"/g) || []).length === 2
+    && !devlogIndex.includes('/zh-tw/tag/')],
+  // -- item 3: sitemap includes the new routes (base categoryUrls — missing entirely before this
+  //    feature — and both term archives for the locale edition) --
+  ['sitemap: base category archive is listed (categoryUrls existed for tags only, before this feature)', () =>
+    sitemapXml.includes('<loc>https://example.com/category/press/</loc>')],
+  ['sitemap: locale term archives are listed, locale-prefixed', () =>
+    sitemapXml.includes('<loc>https://example.com/zh-tw/category/press/</loc>')
+    && sitemapXml.includes('<loc>https://example.com/zh-tw/tag/fixture/</loc>')],
+  ['sitemap: the locale blog index + its own posts are listed too', () =>
+    sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/</loc>')
+    && sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/a-signed-post/</loc>')],
+  // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
+  //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
+  //    still pass unmodified against this same build, which is the byte-identical proof: nothing
+  //    in this feature altered a single non-Lingo, non-archive code path. --
 ];
 
 let fail = 0;

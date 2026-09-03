@@ -1,0 +1,48 @@
+---
+// REEF with Blog × Lingo — LOCALE tag pager `/<url-locale>/tag/<slug>/page/<n>` (pages 2+; page 1
+// is ../index.astro). Mirrors pages/tag/[slug]/page/[n].astro, fanned out over
+// (locale × tag × page 2..totalPages). No `alternates` — same reasoning as the category pager's own
+// header (page 1 carries the verified cross-locale hreflang).
+import ArchiveView from '../../../../../components/ArchiveView.astro';
+import { uiCopy } from '../../../../../packages/lingo/locale.mjs';
+import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, localeBlogCorpora } from '../../../../../lib/blog.mjs';
+
+export function getStaticPaths() {
+  const contentFiles = import.meta.glob('../../../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  const localeBlogFiles = import.meta.glob('../../../../../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const allPostsIn = allPosts(
+    import.meta.glob('../../../../../../blog/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const meta = siteMeta(
+    import.meta.glob('../../../../../../content/*.md', { query: '?raw', import: 'default', eager: true })
+  );
+  const paths = [];
+  for (const { url, meta: metaL, listed: listedL } of localeBlogCorpora(contentFiles, localeBlogFiles, meta, allPostsIn)) {
+    const on = metaL['blog-tag-routes'] != null && String(metaL['blog-tag-routes']) !== 'false';
+    if (!on) continue;
+    const pageSize = Number(metaL['blog-page-size']) || 0;
+    if (!pageSize) continue;
+    const slugMap = tagSlugMap(metaL);
+    const seen = new Set();
+    const tags = [];
+    for (const p of listedL) for (const t of p.tags) if (t && !seen.has(t)) { seen.add(t); tags.push(t); }
+    for (const tag of tags) {
+      const count = listedL.reduce((n, p) => n + (p.tags.includes(tag) ? 1 : 0), 0);
+      const totalPages = Math.ceil(count / pageSize) || 1;
+      const slug = slugMap[tag] || tag;
+      for (let n = 2; n <= totalPages; n++) {
+        paths.push({ params: { loc: url, slug, n: String(n) }, props: { posts: listedL, meta: metaL, tag, slug, pageNum: n, urlLoc: url } });
+      }
+    }
+  }
+  return paths;
+}
+
+const { posts, meta, tag, slug, pageNum, urlLoc } = Astro.props;
+const base = `/${urlLoc}${String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '')}`;
+const labelPosts = posts.filter((p) => p.tags.includes(tag));
+const subhead = archivePrefixes(meta).tag + tag;
+const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
+---
+<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+  heading={tag} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />
