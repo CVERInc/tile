@@ -3,6 +3,7 @@ sitetile-page: markers
 title: Marker coverage — hero variants + linked cells
 lang: en-US
 locales: en-US, zh-TW
+inbox-bubble: on
 ---
 
 ## Logo hero, uncropped

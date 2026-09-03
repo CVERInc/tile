@@ -14,6 +14,7 @@ import { BRAND_ICON } from '../lib/brands.mjs';
 import { iconHrefs } from '@icons';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
+import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
 // Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
@@ -24,6 +25,9 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // (pages/[...loc]/language.astro). Everything else has its hreflang set MEASURED from the content
 // glob; see the alternateLocales() block below and locale.mjs for why guessing is not an option.
 const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', robots = '' } = Astro.props;
+// Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
+// the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
+const renderedPageBody = await Astro.slots.render('default');
 const locales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
 const themeName = meta.theme ? String(meta.theme).trim() : '';
 // The `?raw` + `set:html` inline path bypasses Vite's CSS minifier, so without this every theme's
@@ -599,6 +603,11 @@ const ogType = meta['og-type'] ? String(meta['og-type']).trim() : 'website';
 // /${lang}/ (which is only meaningful for Lingo). Was `localePath(lang)` → every page on such a site
 // wrongly canonicalised to /zh-Hant/. 2026-07-13.
 const canonicalHref = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : '';
+const bubbleSiteId = String(process.env.SITE_ID || process.env.SITE_KEY || meta['site-key'] || '').trim();
+const platformOrigin = String(process.env.PLATFORM_ORIGIN || 'https://feelreef.com').replace(/\/+$/, '');
+const bubbleTitle = String(meta['site-title'] || meta.title || title || '').trim();
+const bubbleKaito = meta['kaito-corpus'] != null || String(meta.packages || '').split(',').map((v) => v.trim()).includes('kaito');
+const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, renderedPageBody);
 // Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
 // already named. No new copy, no new default to get wrong in somebody else's language.
 const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
@@ -1025,10 +1034,10 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
               </nav>
             )}
           </aside>
-          <div class="st-sidebar-main"><slot /></div>
+          <div class="st-sidebar-main" set:html={renderedPageBody} />
         </div>
       ) : (
-        <slot />
+        <Fragment set:html={renderedPageBody} />
       )}
     </main>
 
@@ -1112,6 +1121,12 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         {footerLinks.length === 0 && !copyright && <p>{title}</p>}
       </slot>
     </footer>
+    {bubbleOn && (
+      <>
+        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle}></div>
+        <script type="module" src={`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`}></script>
+      </>
+    )}
     {/* package runtimes (body-end, module). Astro bundles <script> imports that live
         in src/, so the vendored bleedblend auto-runtime ships hashed + tree-shaken. */}
     {bleed && bleed.bodyScript && <script>import '../packages/bleedblend/auto.mjs';</script>}

@@ -35,7 +35,10 @@ console.log('▸ astro build → dist-smoke/ (themeless + staged Lilac custom-th
 if (existsSync(LILAC_STAGED)) throw new Error(`refusing to shadow an existing staged theme: ${LILAC_STAGED}`);
 copyFileSync(LILAC_SOURCE, LILAC_STAGED);
 try {
-  execFileSync('npx', ['astro', 'build', '--outDir', DIST], { cwd: HERE, stdio: 'inherit' });
+  execFileSync('npx', ['astro', 'build', '--outDir', DIST], {
+    cwd: HERE, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: 'smoke-site', PLATFORM_ORIGIN: 'https://feelreef.com' },
+  });
 } finally {
   rmSync(LILAC_STAGED, { force: true });
 }
@@ -63,6 +66,8 @@ const signedPost = findPost('a-signed-post');
 const unsignedPost = findPost('an-unsigned-post');
 const markers = readFileSync(join(DIST, 'markers/index.html'), 'utf8');
 const customThemeBuilt = readFileSync(join(DIST, 'custom-theme/index.html'), 'utf8');
+const localeExcept = readFileSync(join(DIST, 'zh-tw/blocks/index.html'), 'utf8');
+const siteOff = readFileSync(join(DIST, 'ko-kr/index.html'), 'utf8');
 // Safe negative-control seam: mutate only the HTML held by this test process, never source/output.
 const customTheme = process.env.SITETILE_SMOKE_REMOVE_CUSTOM_MARKER === '1'
   ? customThemeBuilt.replace(/\sdata-theme-custom(?:="")?/, '')
@@ -83,6 +88,7 @@ const occ = (s) => occIn(html, s);
 // pkg-runtimes    SiteLayout body-end conditional imports (bleedblend et al) — Astro emits the
 //                 chunk even when no fixture page opts in; it must stay UNREFERENCED by fixtures.
 const ALLOWED_INLINE = [
+  ['site inbox bubble module', '/corals/inbox-bubble/v0/inbox-bubble.js'],
   ['header-overlay', 'rf-header--overlay'],
   ['parallax', 'st-hero-layered[data-parallax]'],
   ['pv-gate', 'pv-notice-ok'],
@@ -156,7 +162,7 @@ function auditScripts() {
     while ((m = re.exec(h))) {
       if (!executesAsScript(m[1])) { dataBlocks.push(m[1].trim()); continue; }
       const src = /src="([^"]+)"/.exec(m[1]);
-      const body = src ? readFileSync(join(DIST, src[1].replace(/^\//, '')), 'utf8') : m[2];
+      const body = src ? (/^https?:\/\//.test(src[1]) ? src[1] : readFileSync(join(DIST, src[1].replace(/^\//, '')), 'utf8')) : m[2];
       const hit = [...ALLOWED_INLINE, ...ALLOWED_CHUNKS].find(([, sig]) => body.includes(sig));
       if (!hit) unaccounted.push(`${page.slice(DIST.length + 1)}: ${(src ? 'src ' + src[1] + ' → ' : '') + body.trim().slice(0, 70)}`);
     }
@@ -208,6 +214,13 @@ function claimedIcons() {
 }
 
 const checks = [
+  // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
+  ['inbox bubble: default on with the build site key, platform origin, and site title', () =>
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
+  ['inbox bubble: site off suppresses it', () => occIn(siteOff, 'data-dynamic-coral="inbox-bubble"') === 0],
+  ['inbox bubble: locale-agnostic except suppresses /zh-tw/blocks via /blocks', () => occIn(localeExcept, 'data-dynamic-coral="inbox-bubble"') === 0],
+  ['inbox bubble: explicit page on wins over the site /markers exclusion', () => occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1],
+  ['inbox bubble: a hand-mounted embed is not doubled', () => occIn(forms, 'data-dynamic-coral="inbox-bubble"') === 1],
   // -- home.md: the 5 section types + platform defaults --
   // 🩸 2026-08-28. `class="st-hero"` was an EXACT string match, so it broke the moment the section
   // gained a second class — which every hero variant now does (`.st-full-bleed`, the opt-out from
