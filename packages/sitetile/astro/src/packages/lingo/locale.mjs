@@ -255,6 +255,12 @@ export function uiCopy(locale) {
  * something build time never could, so it fills `sentWithEmail`'s `{email}` placeholder with it —
  * literally what the owner asked for ("確認信已寄到 <email>"). `{email}` is a literal token this
  * table defines and Form.astro's inline script substitutes; it is not printf/template-string syntax.
+ *
+ * `sendAnother` (2026-09-04, sodaart production report): the success card's own escape hatch —
+ * without it, a reload / back button / shared URL kept showing 「送信しました」 with the form gone
+ * and nothing on the card to press. It labels a plain `<a>` back to the form's own clean path
+ * (works with zero JS); the AJAX enhancement intercepts the same click to reset and re-show the
+ * form in place instead of navigating.
  */
 const INBOX_FORM_LOCALE = {
   ja: {
@@ -267,6 +273,7 @@ const INBOX_FORM_LOCALE = {
     backHome: 'ホームに戻る',
     errorNetwork: 'ネット接続が不安定なようです。確認してもう一度お試しください。',
     errorServer: '送信できませんでした。もう一度お試しください。',
+    sendAnother: 'もう一度送る',
   },
   'zh-tw': {
     fieldRequired: '這是必填欄位。',
@@ -278,6 +285,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '回首頁',
     errorNetwork: '網路連線好像不穩，請檢查後再試一次。',
     errorServer: '暫時無法送出，請再試一次。',
+    sendAnother: '再送一則',
   },
   'zh-cn': {
     fieldRequired: '这是必填字段。',
@@ -289,6 +297,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '返回首页',
     errorNetwork: '网络连接好像不稳定，请检查后再试一次。',
     errorServer: '暂时无法发送，请再试一次。',
+    sendAnother: '再发一条',
   },
   ko: {
     fieldRequired: '필수 입력 항목입니다.',
@@ -300,6 +309,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '홈으로 돌아가기',
     errorNetwork: '네트워크 연결이 불안정한 것 같습니다. 확인 후 다시 시도해 주세요.',
     errorServer: '전송하지 못했습니다. 다시 시도해 주세요.',
+    sendAnother: '다시 보내기',
   },
   en: {
     fieldRequired: 'This field is required.',
@@ -311,6 +321,7 @@ const INBOX_FORM_LOCALE = {
     backHome: 'Back to homepage',
     errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
     errorServer: "Couldn't send that — please try again.",
+    sendAnother: 'Send another',
   },
 };
 /** A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys. */

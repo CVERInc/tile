@@ -1202,6 +1202,18 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   font-style: italic; color: var(--gd-muted); border-left: 3px solid var(--gd-border); text-align: left;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+/* 「再送一則」/「もう一度送る」— bug #2 (2026-09-04): the card's own way back to a fresh form,
+   shaped like a real button (not a text link) because it is the primary thing to do from here —
+   `.st-form-success-back` (below) stays a quieter link since leaving the page entirely is the
+   secondary option. Same token recipe as `.st-form-submit`, on an `<a>` rather than a `<button>`
+   so it still works with zero JS (see Form.astro's `data-inbox-again` comment). */
+.st-form-success-again { margin: .5rem 0 0; }
+.st-form-success-again a {
+  display: inline-block; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
+  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
+  border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .6rem 1.5rem;
+}
+.st-form-success-again a:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
 .st-form-success-back { margin: .5rem 0 0; }
 .st-form-success-back a { color: var(--gd-accent); font-weight: 600; }
 /* Inline, ABOVE the button (owner ruling) — a form that failed keeps every value the visitor

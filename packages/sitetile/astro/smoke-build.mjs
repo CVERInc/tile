@@ -473,7 +473,7 @@ const checks = [
   // the success line's BUILD-TIME default is the "we emailed you a confirmation" variant (the
   // generic phrasing, since build time can never know the address one visitor will type — see
   // `sentWithEmailGeneric` in locale.mjs), not the "no email" fallback.
-  ['form: success card renders hidden by default — check icon, heading, next-step copy, hidden excerpt, home link', () => {
+  ['form: success card renders hidden by default — check icon, heading, next-step copy, hidden excerpt, send-another + home links', () => {
     const card = /<div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>([\s\S]*?)<\/div>/.exec(forms);
     if (!card) return false;
     const c = card[1];
@@ -481,7 +481,20 @@ const checks = [
       && /<p class="st-form-success-heading" role="heading" aria-level="3">Sent<\/p>/.test(c)
       && /<p class="st-form-success-next" data-inbox-next>We've sent a confirmation to your email — the owner's reply will go to the same address\.<\/p>/.test(c)
       && /<p class="st-form-success-excerpt" data-inbox-excerpt hidden><\/p>/.test(c)
+      && /<p class="st-form-success-again"><a href="\/forms\/" data-inbox-again>Send another<\/a><\/p>/.test(c)
       && /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/.test(c);
+  }],
+  // bug #2 (2026-09-04): "send another" sits BEFORE "back home" — the primary action (send another
+  // message) ahead of the secondary one (leave the page) — and its href is the form's own clean
+  // path, so a no-JS visitor clicking it lands back on a `?inbox=`-free reload of this same page.
+  ['form: "send another" comes before "back home" in the card, and its href has no query string', () => {
+    const card = /<div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>([\s\S]*?)<\/div>/.exec(forms);
+    if (!card) return false;
+    const c = card[1];
+    const againIdx = c.indexOf('data-inbox-again');
+    const backIdx = c.indexOf('st-form-success-back');
+    return againIdx > -1 && backIdx > -1 && againIdx < backIdx
+      && /href="\/forms\/" data-inbox-again/.test(c); // no "?inbox=…" tacked on
   }],
   // The card is a SIBLING of the form, positioned BEFORE it — both exist in the DOM at once
   // (hidden, not removed) so focus management / a screen reader's "back into the form" both work.
@@ -542,6 +555,30 @@ const checks = [
     return /new URL\(res\.url, location\.href\)\.searchParams\.get\('inbox'\)/.test(s)
       && /copy\.sentWithEmail\.replace\('\{email\}', addr\)/.test(s)
       && /\.slice\(0, 2\)\.join\('\\n'\)/.test(s);
+  }],
+  // -- bug #2 (2026-09-04): reload / back button / a shared URL kept showing 「送信しました」
+  //    forever, and the JS path left the card up with no way to send another --
+  ['form: a successful submit resets the form\'s own fields (the excerpt keeps its own captured copy)', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    const showSuccess = /function showSuccess\(fd\) \{([\s\S]*?)\n {8}\}/.exec(s);
+    return !!showSuccess && /form\.reset\(\);/.test(showSuccess[1]);
+  }],
+  ['form: a shown `?inbox=` outcome is stripped from the URL via replaceState, not pushState (no new history entry)', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    return /window\.history\.replaceState\(window\.history\.state, '', clean\.pathname \+ clean\.search \+ clean\.hash\);/.test(s)
+      && /clean\.searchParams\.delete\('inbox'\);/.test(s)
+      && !/\.pushState\(/.test(s);
+  }],
+  ['form: the "send another" link resets and re-shows the form in place, focuses a field, and re-enables the button', () => {
+    const s = forms.slice(forms.indexOf('<script>', forms.indexOf('id="s2-wired-to-the-reef-inbox"')));
+    const handler = /root\.querySelector\('\[data-inbox-again\]'\);[\s\S]*?againLink\.addEventListener\('click', \(ev\) => \{([\s\S]*?)\n {10}\}\);/.exec(s);
+    return !!handler
+      && /ev\.preventDefault\(\);/.test(handler[1])
+      && /form\.reset\(\);/.test(handler[1])
+      && /form\.hidden = false;/.test(handler[1])
+      && /successEl\.hidden = true;/.test(handler[1])
+      && /btn\.disabled = false;/.test(handler[1])
+      && /firstField\.focus\(\);/.test(handler[1]);
   }],
   // -- required fields (2026-09-03, cold-read findings #9/#10) --
   ['form: action=inbox defaults its {email} field to required — native attr, marker, localized message', () =>

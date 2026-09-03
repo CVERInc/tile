@@ -23,7 +23,7 @@ const test = (name, fn) => {
 // below rather than assumed here.
 const KEYS = [
   'fieldRequired', 'sentWithEmail', 'sentWithEmailGeneric', 'sentNoEmail',
-  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer',
+  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'sendAnother',
 ];
 const LANGS = { ja: 'ja-JP', 'zh-tw': 'zh-TW', 'zh-cn': 'zh-CN', ko: 'ko-KR', en: 'en-US' };
 
@@ -75,6 +75,24 @@ test('errorNetwork and errorServer are two different sentences, in every locale'
     const c = inboxFormCopy(lang);
     assert.notEqual(c.errorNetwork, c.errorServer, `${lang} uses the same text for both — the whole point of the split`);
   }
+});
+
+// bug #2 (2026-09-04): the success card had no way back to the form — reload, the back button, or
+// sharing the URL all kept showing 「送信しました」 forever, and the JS-handled submit left the
+// card up with no escape either. `sendAnother` is the card's own way out.
+test('🔴 sendAnother exists, is non-empty, and is not just backHome relabelled, in every locale', () => {
+  for (const [key, lang] of Object.entries(LANGS)) {
+    const c = inboxFormCopy(lang);
+    assert.equal(typeof c.sendAnother, 'string', `${key} (${lang}) sendAnother is not a string`);
+    assert.ok(c.sendAnother.trim(), `${key} (${lang}) sendAnother is blank`);
+    assert.notEqual(c.sendAnother, c.backHome, `${key} (${lang}) sendAnother is identical to backHome — two different destinations need two different labels`);
+  }
+});
+
+test('sendAnother does not borrow another script (Simplified vs Traditional, in particular)', () => {
+  const tw = inboxFormCopy('zh-TW');
+  const cn = inboxFormCopy('zh-CN');
+  assert.notEqual(tw.sendAnother, cn.sendAnother, 'zh-TW and zh-CN share the same sendAnother');
 });
 
 test('🔴 routes every lang a site could plausibly write, including Simplified vs Traditional Chinese', () => {
