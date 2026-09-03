@@ -1161,6 +1161,16 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 .st-form-section { max-width: var(--gd-maxw, 720px); margin: 0 auto; }
 .st-form-head h1, .st-form-head h2 { color: var(--gd-head); }
 .st-form { display: flex; flex-direction: column; gap: var(--gd-gap, 1rem); margin-top: 1.5rem; }
+/* 🔴 bug (2026-09-04, cold-read round two): an AUTHOR rule setting `display` beats the UA
+   sheet's `[hidden]{display:none}` regardless of specificity (author always outranks UA in the
+   cascade) — so every `display:` declaration below on an element the inbox-form script toggles
+   via the `hidden` PROPERTY (Form.astro: form.hidden / successEl.hidden / excerptEl.hidden) needs
+   its own `[hidden]` override or `hidden` does nothing and the element stays visible. Measured
+   live: `.st-form-success` had no override, so its success card — server-rendered `hidden` —
+   showed to every first-time visitor of every `action=inbox` form on the internet, above an
+   otherwise-empty form. `.st-form-error` is NOT listed here: it declares no `display` of its own,
+   so the UA rule is the only one setting that property and already wins untouched. */
+.st-form[hidden] { display: none; }
 .st-form-field { display: flex; flex-direction: column; gap: .4rem; }
 .st-form-label { font-weight: 600; color: var(--gd-head); font-size: .95rem; }
 /* Required-field marker (finding #9, 2026-09-03 cold-read) — the visible half of "native required
@@ -1193,6 +1203,7 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   text-align: center; margin-top: 1.5rem; padding: 2rem 1.5rem;
   border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-surface);
 }
+.st-form-success[hidden] { display: none; } /* see the `.st-form[hidden]` note above — same defect, the one actually measured live */
 .st-form-success:focus { outline: none; } /* focused programmatically for AT, not by pointer/keyboard nav */
 .st-form-success-check { color: var(--gd-accent); }
 .st-form-success-heading { margin: 0; font-size: 1.3rem; font-weight: 700; color: var(--gd-head); }
@@ -1202,6 +1213,7 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   font-style: italic; color: var(--gd-muted); border-left: 3px solid var(--gd-border); text-align: left;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+.st-form-success-excerpt[hidden] { display: none; } /* same defect — `display: -webkit-box` is a real declaration too */
 /* 「再送一則」/「もう一度送る」— bug #2 (2026-09-04): the card's own way back to a fresh form,
    shaped like a real button (not a text link) because it is the primary thing to do from here —
    `.st-form-success-back` (below) stays a quieter link since leaving the page entirely is the

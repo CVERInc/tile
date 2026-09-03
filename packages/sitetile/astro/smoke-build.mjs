@@ -484,6 +484,21 @@ const checks = [
       && /<p class="st-form-success-again"><a href="\/forms\/" data-inbox-again>Send another<\/a><\/p>/.test(c)
       && /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/.test(c);
   }],
+  // 🩸 bug (2026-09-04, cold-read round two): `hidden` was present in the markup above, but
+  // `.st-form-success { display: flex }` in site.css is an AUTHOR rule, which beats the UA
+  // sheet's `[hidden]{display:none}` regardless of specificity — so the card showed to every
+  // first-time visitor of every `action=inbox` form, above an empty form. Measured live on
+  // sodaart.co.jp/zh-tw/contact/. The markup-level check above can't catch this — `hidden` was
+  // always in the HTML, the CSS silently overrode it — so this asserts the actual rendered CSS
+  // carries a `[hidden]` override for every element the script's `.hidden = true/false` toggles
+  // (Form.astro: `form.hidden`, `successEl.hidden`, `excerptEl.hidden`). `.st-form-error` is
+  // deliberately not asserted here — it sets no `display` of its own, so the UA rule already wins.
+  ['form: CSS makes `hidden` win over every `display:` rule the inbox script toggles (.st-form, .st-form-success, .st-form-success-excerpt)', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes('.st-form[hidden]{display:none}')
+      && css.includes('.st-form-success[hidden]{display:none}')
+      && css.includes('.st-form-success-excerpt[hidden]{display:none}');
+  }],
   // bug #2 (2026-09-04): "send another" sits BEFORE "back home" — the primary action (send another
   // message) ahead of the secondary one (leave the page) — and its href is the form's own clean
   // path, so a no-JS visitor clicking it lands back on a `?inbox=`-free reload of this same page.
