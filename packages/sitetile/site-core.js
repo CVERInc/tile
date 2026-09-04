@@ -48,6 +48,7 @@ const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'emb
 const SITE_LAYER_KEYS = [
   { key: 'inbox-bubble', syntax: 'inbox-bubble: on | off', purpose: 'Show the site visitor Q&A/message bubble on every page by default; a page value overrides the site value.' },
   { key: 'inbox-bubble-except', syntax: 'inbox-bubble-except: /shop/*, /checkout', purpose: 'Comma-separated locale-agnostic paths to suppress the bubble; a trailing * matches any suffix.' },
+  { key: 'assistant-name', syntax: 'assistant-name: 小美', purpose: "What visitors see the site's Q&A assistant called in the inbox bubble (default KAITO). Single line; the bubble still marks it as AI." },
 ];
 
 // tagcloudLinks: a tagcloud section body (a markdown list of `- [Label](/href)` items) → an

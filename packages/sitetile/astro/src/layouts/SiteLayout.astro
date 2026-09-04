@@ -614,6 +614,10 @@ const canonicalHref = Astro.site ? new URL(Astro.url.pathname, Astro.site).href 
 const bubbleSiteId = String(process.env.SITE_ID || process.env.SITE_KEY || meta['site-key'] || '').trim();
 const platformOrigin = String(process.env.PLATFORM_ORIGIN || 'https://feelreef.com').replace(/\/+$/, '');
 const bubbleTitle = String(meta['site-title'] || meta.title || title || '').trim();
+// assistant-name: the owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
+// applied by the coral itself when this attribute is absent/empty). Single line — a raw multi-line
+// value would otherwise leak into the attribute and the coral's copy.
+const assistantName = String(meta['assistant-name'] || '').trim().split('\n')[0].trim();
 const bubbleKaito = meta['kaito-corpus'] != null || String(meta.packages || '').split(',').map((v) => v.trim()).includes('kaito');
 const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, renderedPageBody);
 // Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
@@ -1157,7 +1161,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     </footer>
     {bubbleOn && (
       <>
-        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName}></div>
+        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined}></div>
         <script type="module" src={`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`}></script>
       </>
     )}
