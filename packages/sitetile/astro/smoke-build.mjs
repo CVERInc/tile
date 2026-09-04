@@ -241,7 +241,14 @@ const checks = [
   // auto-mounted (not hand-authored) bubble on, and its own title is deliberately unrelated to the
   // site's `brand:` — proving data-site-name tracks the SITE config, not whichever page renders it.
   ['inbox bubble: on a non-home page, data-site-name is the SITE\'s name, not that page\'s own title', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress"><\/div>/.test(markers)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress" data-assistant-name="小美"><\/div>/.test(markers)],
+  // assistant-name: owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
+  // applied by the coral itself). markers.md sets `assistant-name: 小美`; home.md does not, so the
+  // attribute must be present on one build and wholly absent on the other.
+  ['inbox bubble: assistant-name configured on the page emits data-assistant-name', () =>
+    /data-assistant-name="小美"/.test(markers)],
+  ['inbox bubble: no assistant-name configured omits the attribute entirely', () =>
+    !/data-assistant-name/.test(html)],
   // og:site_name — per Open Graph it is the SITE's name (og:title already carries the page).
   ['og:site_name: the home page emits it as the site\'s own brand', () =>
     /<meta property="og:site_name" content="Yamada Letterpress">/.test(html)],

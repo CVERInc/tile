@@ -4,6 +4,7 @@ title: Marker coverage — hero variants + linked cells
 lang: en-US
 locales: en-US, zh-TW
 inbox-bubble: on
+assistant-name: 小美
 ---
 
 ## Logo hero, uncropped
