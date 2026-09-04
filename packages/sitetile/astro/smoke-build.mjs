@@ -334,14 +334,36 @@ const checks = [
     const css = allCss().replace(/\s+/g, '');
     return css.includes('body[data-nav-mobile=hamburger]:has(#rf-nav-toggle:checked).rf-ha-overlay[data-ha-overlay=nav]{display:block}');
   }],
-  ['nav-mobile: the page behind the open menu is scroll-locked', () => {
+  ['nav-mobile: the page behind the open menu is scroll-locked (!important — a theme own body-level overflow rule must not silently re-enable background scroll while the menu is open)', () => {
     const css = allCss().replace(/\s+/g, '');
-    return css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked){overflow:hidden}');
+    return css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked){overflow:hidden!important}');
   }],
   // Esc-to-close needs no new wiring: `#rf-nav-toggle` already carries `data-ha-toggle`, which
   // header-actions.js's existing Escape handler (already asserted allowlisted above) sweeps.
   ['nav-mobile: the toggle that drives the backdrop still carries data-ha-toggle (Esc-to-close)', () =>
     /<input type="checkbox" id="rf-nav-toggle" class="rf-nav-check" hidden data-ha-toggle>/.test(html)],
+  // -- nav-mobile open menu vs. an unlayered theme z-index (sodaart.co.jp, live): the dropdown
+  // rendered UNDER its own dimmed backdrop because a site's own unlayered CSS (`z-index: 20` on
+  // `.rf-header`) beats any layered declaration — including this file's `@layer reef.base` — at
+  // equal importance, no matter how specific the selector. Only `!important` (decided BEFORE
+  // layer order) survives that. Both live inside the `(width<=64rem)` media block above. --
+  ['nav-mobile: the open header is lifted above an unlayered theme z-index with !important, not just a specific selector (sodaart.co.jp regression)', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes('@media(width<=64rem)')
+      && css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked).rf-header{z-index:2147483002!important}');
+  }],
+  ['nav-mobile (hamburger): the open panel scrolls itself when taller than the viewport (952px panel vs 720px viewport, sodaart.co.jp — body is scroll-locked above, so without this the tail of the menu is unreachable), and the position/z-index FACTS that keep it a floating panel stay !important', () => {
+    const css = allCss().replace(/\s+/g, '');
+    const m = css.match(/body\[data-nav-mobile=hamburger\]\.rf-nav\{([^}]*)\}/);
+    if (!m) return false;
+    const rule = m[1];
+    return rule.includes('max-height:calc(100dvh-4.5rem)')
+      && rule.includes('overflow-y:auto')
+      && rule.includes('overscroll-behavior:contain')
+      && rule.includes('-webkit-overflow-scrolling:touch')
+      && rule.includes('position:absolute!important')
+      && rule.includes('z-index:1000!important');
+  }],
   // -- markers.md: graduated markers the home fixture can't reach --
   ['markers: hero media=logo (uncropped, not round)', () => /<section class="st-hero st-full-bleed"[^>]*\sdata-media="logo"/.test(markers)],
   ['markers: block image → figure+img', () => /<figure class="st-figure">\s*<img class="st-img" src="\/img\/demo-logo\.gif" alt="Mark"/.test(markers)],

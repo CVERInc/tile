@@ -1042,16 +1042,36 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
      declaration, so — unlike the backdrop's own reveal, which IS one — it stays here in
      reef.base rather than reef.responsive (see that layer's block comment for the split). Applies
      to both nav-mobile modes: a fullscreen menu is already `position: fixed; inset: 0`, but the
-     page behind it still needs to stop scrolling while it's up. */
-  body[data-nav-mobile]:has(#rf-nav-toggle:checked) { overflow: hidden; }
+     page behind it still needs to stop scrolling while it's up. `!important` for the same reason
+     as the z-index lift below: this is an open/closed FACT, and a site's own unlayered CSS (a
+     `body`-level `overflow` rule is a common thing to want) would otherwise silently win it and
+     re-enable background scroll while the menu sits open on top. */
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) { overflow: hidden !important; }
   /* `position: relative` gives the dropdown its containing block. An overlay header is already
      `position: fixed` (structure now owned above), which is also a containing block — and this
      selector outranks it, so applying it here would drop the header out of its hero. */
   body[data-nav-mobile="hamburger"] .rf-header:not(.rf-header--overlay) { position: relative; }
   /* While the menu is open, lift the whole header stacking context above page content — a theme
-     may pin `.rf-header { z-index: 0 }`, which would otherwise trap the absolute
-     dropdown *below* an immersive hero. The high-specificity :has() selector beats that. */
-  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header { z-index: 2147483002; }
+     may pin `.rf-header { z-index: 0 }` (or, on a live site, `z-index: 20` — sodaart.co.jp's own
+     header rule), which would otherwise trap the absolute dropdown *below* an immersive hero, or
+     under the backdrop that dims the page behind it.
+
+     🩸 The old comment here said the high-specificity `:has()` selector "beats that" — wrong in
+     the presence of layers, and it shipped: this whole file lives in `@layer reef.base`
+     (top-of-file comment), and cascade layers settle ties by LAYER ORDER before specificity is
+     ever consulted — but only among declarations of equal importance. A site's own theme CSS,
+     when it is unlayered (a tenant's custom/embed stylesheet, exactly what sodaart.co.jp's
+     `z-index: 20` was), sits OUTSIDE every layer, and unlayered normal declarations beat every
+     layered normal declaration regardless of specificity or how many layers separate them. No
+     `:has()`, however specific, changes that. Measured live: overlay `z-index: 2147483000`
+     (open, working), `.rf-header` computed `z-index: 20` (this rule, losing), dropdown rendered
+     UNDER its own backdrop — every tap on the open menu closed it instead of following the link.
+
+     `!important` is the actual lever: importance is decided before layer order, so a layered
+     `!important` declaration outranks any unlayered *normal* one. This is a stacking-order FACT
+     the menu's open state depends on, not a look a theme should get to keep — hence important
+     here where the same block's colour/typography declarations stay plain. */
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header { z-index: 2147483002 !important; }
   /* An open menu and the header it hangs from are ONE panel — so a TRANSPARENT header adopts the
      panel surface while open, or the two read as two materials butted together. Scoped to the
      overlay header on purpose: a header that already has its
@@ -1068,12 +1088,24 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   body[data-nav-mobile] .rf-nav-hamburger svg { width: 24px; height: 24px; }
   /* glyph swap — bars → close, no JS */
 
+  /* position/z-index !important for the same reason as the header lift above: an unlayered theme
+     rule (or another `.rf-nav` declaration the theme has every reason to write, e.g. for the
+     inline ≥64rem row) beats a layered normal declaration regardless of specificity, and the
+     dropdown MUST stay an absolutely-positioned panel above the page while open — that's a FACT,
+     not a look, so it gets `!important` where the block's colour/spacing does not.
+     max-height/overflow-y: the panel can outgrow the viewport (measured: 952px of links against a
+     720px mobile viewport, sodaart.co.jp), and `body` is scroll-locked while open (above), so
+     without its own scroll the tail of the menu is simply unreachable — no amount of z-index
+     fixes that. 4.5rem ≈ this header's own row height (padding + line height at the default
+     scale); there is no shared `--gd-header-height` token to read instead. */
   body[data-nav-mobile="hamburger"] .rf-nav {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 1000;
+    position: absolute !important; top: 100%; left: 0; right: 0; z-index: 1000 !important;
     flex-direction: column; align-items: flex-start; gap: 0.25rem;
     padding: 0.75rem clamp(1rem, 4vw, 3rem) 1rem;
     background: var(--gd-nav-panel, var(--gd-head, var(--gd-bg)));
     border-bottom: 1px solid var(--gd-border); box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+    max-height: calc(100dvh - 4.5rem); overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* ── fullscreen mode ──────────────────────────────────────────────────────────────
