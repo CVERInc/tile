@@ -32,3 +32,8 @@ packages/sitetile/astro/.astro/
 # submodule at engine/. Ignoring it here means a careless copy in the wrong direction cannot commit
 # somebody's card into the public repo. Naming alone was a habit; this is a wall. (2026-08-13)
 lab/
+
+# A local `node packages/dynamic-corals/build.mjs` publishes into this path by default. The real
+# registry is a DEPLOYMENT's — passed with --registry, and living in the repo that owns the deploy.
+# What lands here is scratch, and committing it would be committing somebody else's serving data.
+/packages/dynamic-corals/registry/versions/

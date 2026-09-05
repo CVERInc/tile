@@ -87,8 +87,23 @@ done
 # up: drop a `foo.test.mjs` into hosts/web/pagetile/ or packages/core/ and it is silently never run. The
 # guard below closes it by asking the TREE instead of the list — which matters most right now,
 # because the next thing that happens to this repo is that several of these directories move.
+# 🩸 nullglob AROUND THE ASSIGNMENTS, not only around the loops that read them. A bash array literal
+# expands its globs AT ASSIGNMENT, so a directory listed here with no test file in it yet stored the
+# PATTERN as a literal word — and the loop below then ran `node 'packages/…/*.test.mjs'` and died
+# with MODULE_NOT_FOUND. The two `shopt -s nullglob` further down were guarding the wrong moment.
+# Measured 2026-09-07, the first time a listed directory (drawer/) had no tests in it.
+shopt -s nullglob
 SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs
-             packages/flowtile/*.test.mjs test/*.test.mjs)
+             packages/flowtile/*.test.mjs test/*.test.mjs
+             # dynamic-corals arrived 2026-09-07 — the corals, their build and the registry worker.
+             # 🔴 One glob per DIRECTORY, which is the same hand-kept list this block complains about
+             # one level up; the orphan guard below is what stops it going stale, and it is the
+             # reason a new coral directory fails loudly here instead of never being run.
+             packages/dynamic-corals/*.test.mjs
+             packages/dynamic-corals/drawer/*.test.mjs packages/dynamic-corals/events/*.test.mjs
+             packages/dynamic-corals/inbox-bubble/*.test.mjs packages/dynamic-corals/qr/*.test.mjs
+             packages/dynamic-corals/registry/*.test.mjs packages/dynamic-corals/shared/*.test.mjs
+             packages/dynamic-corals/sponsor/*.test.mjs packages/dynamic-corals/square-shop/*.test.mjs)
 # 🩸 …and within a NAMING CONVENTION. The guard below asked the tree for `*.test.*` and nothing else,
 # so hosts/web/modaltile/ could hold TWO browser harnesses that nothing has ever run and the check
 # designed to catch exactly that stayed green — they were invisible to it because of what they are
@@ -96,6 +111,7 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
 # one you have without running them: seven harnesses in the sibling repo were found dead the same
 # day, and every one of them had also been "fine" right up until somebody looked.)
 SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs)
+shopt -u nullglob
 
 echo "→ every test file in the tree is actually run"
 shopt -s nullglob

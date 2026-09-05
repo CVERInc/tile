@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-events",
+  "version": "0.9.4",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Events — calendar-driven event list coral. Client (events.js) is BUILT from events-client.mjs + events-core.mjs; the edge worker renders with the same core. Version covers the UNIT: client JS + worker render + data-* attributes + --gd-* token contract.",
+  "scripts": {
+    "test": "node --test events-core.test.mjs"
+  }
+}

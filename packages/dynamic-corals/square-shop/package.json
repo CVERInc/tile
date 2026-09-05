@@ -1,0 +1,7 @@
+{
+  "name": "@cver/coral-square-shop",
+  "version": "0.11.12",
+  "private": true,
+  "type": "module",
+  "description": "Live Square catalog coral (browser-side fetch, zero caching of third-party data). square-shop.js is the hand-written distributable — no core split, so no bundling; the build only stamps it. Version covers client JS + data-* attributes + --gd-* token contract + the feelreef catalog API shape it consumes."
+}

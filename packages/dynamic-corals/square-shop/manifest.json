@@ -1,0 +1,21 @@
+{
+  "name": "square-shop",
+  "version": "0.11.12",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/square-shop/0.11.12/square-shop.js",
+  "source_note": "原始碼將隨 OSS 化公開",
+  "requires": ["checkout"],
+  "calls": [
+    "GET <data-api-base>/api/v2/shop/catalog?guild_id=<data-guild-id> — or ?site_id=<data-site-id> on a site that names no guild: exactly one locator key is sent and the guild wins when there is one, never both and never an empty guild_id (square-shop.js#shopLocator / #shopLocatorParam — one rule shared by all three calls below). Reads the seller's own live catalog (processor-neutral as of 0.11.6; was /api/v2/square/catalog through 0.11.5; the site_id alternative is new in 0.11.7, before which this read was hard-wired to guild_id)",
+    "POST <data-api-base>/api/v2/square/catalog/checkout — mints a single-item Square checkout link (still Square-specific: RSP has no processor-neutral single-item route yet). JSON body {guild_id|site_id, variation_id, client_request_ref} — the locator is spread first under the same one-of rule as the catalog read (new in 0.11.7; through 0.11.6 this body carried guild_id only)",
+    "POST <data-api-base>/api/v2/shop/cart — mints a checkout link for the whole cart (processor-neutral as of 0.11.6; was /api/v2/square/catalog/cart through 0.11.5). JSON body {guild_id|site_id, items, collect_shipping, redirect_url, client_request_ref} — the locator is spread first under the same one-of rule as the catalog read (new in 0.11.7; through 0.11.6 this body carried guild_id only)"
+  ],
+  "stores": [
+    "browser localStorage — this visitor's own cart contents (variation ids + quantities), keyed per guild id, or per site id on a site that names no guild (square-shop.js#renderCart: storeId = guildId || siteId — new in 0.11.7; through 0.11.6 the key was the guild id alone); cleared on a successful checkout return or by the visitor; never sent anywhere except inside the cart checkout request itself"
+  ],
+  "paid": false,
+  "funding": null,
+  "without": "Without the `checkout` module active on the site: RSP refuses all three calls above (403) and the widget renders its own honest empty/error state — no catalog, no working buy button, never fabricated data. Without feelreef entirely (no feelreef-compatible backend reachable at data-api-base): the widget has no offline or static fallback — every view re-fetches live, so an unreachable backend reads the same as a network outage. This is a description of today's behaviour, not a promise.",
+  "capabilities": ["money"]
+}

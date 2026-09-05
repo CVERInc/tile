@@ -1,0 +1,17 @@
+{
+  "name": "sponsor",
+  "version": "0.2.1",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/sponsor/0.2.1/sponsor.js",
+  "source_note": "原始碼將隨 OSS 化公開",
+  "requires": ["checkout"],
+  "calls": [
+    "POST <data-api-base>/api/v2/shop/sponsor — the bundle's only fetch; sends { guild_id, amount, currency, redirect_url, client_request_ref }; on an ok JSON response, the response's `url` value is assigned to `location.href` without further validation; a 403 JSON checkout_module_not_activated response restores the button and shows the not-activated label; every other failure restores the button with the generic error and stays put"
+  ],
+  "stores": ["none"],
+  "paid": false,
+  "funding": null,
+  "without": "requires `checkout`; RSP enforces this by returning 403 with checkout_module_not_activated, which restores the button and shows the coral's configurable not-activated sentence. Without a valid data-api-base, the bundle performs no request and renders its unconnected message; with no feelreef-compatible sponsor endpoint, submission restores the button and shows its configured generic error instead of navigating.",
+  "capabilities": ["money"]
+}

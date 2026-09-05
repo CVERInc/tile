@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-qr",
+  "version": "0.14.7",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Card — avatar-morph animated QR popup as a dynamic coral. One home for the 表演 (born Python → Svelte → now portable): mount [data-dynamic-coral=qr] with a .cp-icon inside; client (qr.js) is BUILT from qr-client.mjs + qr-core.mjs (vendored qrcode-generator, MIT). Version covers the UNIT: popup JS + encoder + data-* contract + --cp-*/--gd-* token theming. 0.10.0 drops data-site-id along with the dead owner edit-mode picker, which POSTed to the Heroku Python app. 0.10.1 makes the opening keyframe read the avatar's real box instead of a baked 80px, so the morph starts from the avatar at every viewport now that it is a ratio (23.6cqw), not a fixed 78px. 0.11.0 locks the avatar's occlusion of the QR to 10% of its area (EC 'M' recovers 15%): the code grows where there is room, the avatar shrinks where there is not. 0.11.1 stops baking one card's accent (#b890e8) into the cell-painting modes: the QR paints the HOST card's --cp-accent, so a creator's code is their own colour.",
+  "scripts": {
+    "build": "node ../build.mjs qr"
+  }
+}
