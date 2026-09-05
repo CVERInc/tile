@@ -1,0 +1,8 @@
+{
+  "name": "@tile/dynamic-corals",
+  "version": "0.0.0",
+  "description": "Portable, framework-agnostic live-data widgets (dynamic corals) that install unmodified into a sitetile page or a cardtile card. Source and tests only \u2014 a deployment's published artifacts, channel table and deploy config are its own.",
+  "type": "module",
+  "license": "MIT",
+  "private": true
+}

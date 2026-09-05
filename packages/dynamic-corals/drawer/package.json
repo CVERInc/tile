@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-drawer",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "An overlay drawer as a dynamic coral — depth without pages. Mount [data-dynamic-coral=drawer] over a layer of [data-drawer-panel] panels; triggers are [data-drawer=<id>]. Opening is pure CSS (:has(:checked)), so it works before the script arrives; JS adds the focus trap, Escape, focus restore and hash deep-links. Shares the close button's identity with the qr coral. Version covers the UNIT: the client JS + the data-* contract + the dc-drawer-* class names.",
+  "scripts": {
+    "build": "node ../build.mjs drawer"
+  }
+}

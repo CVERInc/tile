@@ -1,0 +1,11 @@
+{
+  "name": "@cver/coral-sponsor",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Sponsor — the sponsor block: a few suggested amounts, a field the visitor types into, one button. Client (sponsor.js) is BUILT from sponsor-client.mjs + sponsor-core.mjs. Deliberately NOT the cta section: a generic action button has a destination, this has an AMOUNT, and the amount is the whole shape. It collects the amount and asks the feelreef backend for a link — no payment provider code lives here, so adding a rail is never an edit to this coral. Version covers the UNIT: client JS + the data-* attribute API + the request body it sends + the --gd-* token contract.",
+  "scripts": {
+    "build": "node ../build.mjs sponsor",
+    "test": "node --test sponsor-core.test.mjs sponsor-mount.test.mjs sponsor-registry.test.mjs"
+  }
+}
