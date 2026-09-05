@@ -604,6 +604,9 @@ const shareImage = absUrl(authoredShareImage
 // layout now emit a badge for every build, and the hrefs below come from the SAME model that draws
 // them (packages/sitetile/icon-core.mjs), so a link here can never name a file that isn't emitted.
 const iconLinks = iconHrefs(meta, { hasPwa });
+// Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
+const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
+const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
 const ogType = meta['og-type'] ? String(meta['og-type']).trim() : 'website';
 // canonical/og:url = THIS page's own absolute URL. Uses Astro.url.pathname (the real served path)
 // so it's correct for every page on every site: a Lingo locale page keeps its /zh-Hant/… path, and
@@ -687,6 +690,9 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         footer, which is an ad slot and correctly defaults off.
         Opt out per site with `generator: off` in ir/_site.md. */}
     {generatorTag && <meta name="generator" content={generatorTag} />}
+    {analyticsToken && (
+      <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={JSON.stringify({ token: analyticsToken })}></script>
+    )}
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
     {/* Icons. A site WITH a mark links the mark and only the mark (two rel=icon links would let
