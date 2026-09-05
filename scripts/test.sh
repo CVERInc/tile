@@ -52,6 +52,11 @@ bash scripts/build-board-core.sh >/dev/null
 # to a fresh slice, which is luck, not a mechanism.
 ARTIFACTS=(hosts/obsidian/tugtile/main.js hosts/obsidian/marktile/main.js dist/editor-core.js
            hosts/web/tugtile/vendor/editor-core.js hosts/web/modaltile/vendor/editor-core.js hosts/web/pagetile/vendor/editor-core.js
+           # 🩸 the web host's own copy, which build.sh started writing on 2026-09-06 and nothing
+           # tracked. An UNTRACKED file is a third silence this gate has: it exists, so the check
+           # above passes, and `git diff` has nothing to say about it either. Committed now, which
+           # is what makes this line ask a question.
+           hosts/web/tugtile/board-core.js
            packages/tugtile/board-core.js)
 
 # 🩸 `git diff --exit-code -- <path that does not exist>` exits 0, silently. This list is typed by
