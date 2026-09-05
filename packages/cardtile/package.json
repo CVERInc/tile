@@ -1,0 +1,21 @@
+{
+  "name": "@tile/cardtile",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Card — the Card content model (markdown in, a rendered page out) and its edge worker. Not published to npm; this manifest exists so serve/gen-assets.mjs can RESOLVE @cvernet/signet instead of reaching into a sibling package's node_modules.",
+  "//": [
+    "🩸 WHY THIS FILE EXISTS (2026-08-12). gen-assets.mjs read signet from",
+    "packages/sitetile/astro/node_modules/@cvernet/signet. sitetile graduated to the public",
+    "CVERInc/tile repo, that path stopped existing here, and the generator has been dead since —",
+    "silently, because nothing runs it on a schedule. The drift gate ('the bundled stylesheet is",
+    "the one on disk') is what surfaced it, on the first edit to card.css after the graduation.",
+    "",
+    "🔴 A vendored COPY of signet was the wrong fix and is a standing red line: signet is an import",
+    "package, and the only copy lives in npm. To reach live it goes publish -> bump -> deploy, and a",
+    "local copy is how that chain gets quietly bypassed. So: a declared dependency, at `latest`,",
+    "matching how tile's own packages/sitetile/astro/package.json declares it."
+  ],
+  "dependencies": {
+    "@cvernet/signet": "latest"
+  }
+}

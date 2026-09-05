@@ -1,0 +1,301 @@
+/* cardtile-w's own chrome. Deliberately NOT the card's stylesheet — the canvas is an iframe and the
+   card's :root tokens stay in there, where they belong. Nothing here can reach the card, and nothing
+   in the card can reach this. */
+
+:root {
+  --ctw-bg: #12161c;
+  --ctw-panel: #1a1f27;
+  --ctw-line: #2b323d;
+  --ctw-ink: #e6ecf3;
+  --ctw-dim: #93a2b4;
+  --ctw-go: #0556ff;
+  --ctw-danger: #d3574a;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --ctw-bg:#f2f4f7; --ctw-panel:#fff; --ctw-line:#d8dee7; --ctw-ink:#111820; --ctw-dim:#5b6879; color-scheme: light; }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ctw-bg); color: var(--ctw-ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+  height: 100vh; display: flex; flex-direction: column;
+}
+
+/* SANDBOX ONLY — see index.html's #sandbox-banner and editor.mjs's bootSandbox(). Sits above the
+   bar, on purpose: the one fact a sandbox visitor must see before anything else. */
+.ctw-sandbox-banner {
+  display: flex; align-items: center; justify-content: center; gap: .9rem; flex-wrap: wrap;
+  padding: .55rem 1rem; text-align: center;
+  background: color-mix(in srgb, var(--ctw-go) 16%, var(--ctw-panel));
+  border-bottom: 1px solid var(--ctw-line); font-size: .82rem; font-weight: 600;
+}
+.ctw-btn-ghost { background: transparent; border-color: color-mix(in srgb, var(--ctw-ink) 30%, transparent); }
+/* the banner carries BOTH sentences; the media query below picks one. Desktop reads the long form. */
+#sandbox-banner-status { display: none; }
+
+.ctw-bar { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem; border-bottom: 1px solid var(--ctw-line); background: var(--ctw-panel); }
+.ctw-bar h1 { font-size: .95rem; margin: 0; letter-spacing: .02em; opacity: .8; }
+/* 🩸 THE SANDBOX'S MASTHEAD. The internal editor's <h1> says `cardtile-w` and should — it is a
+   local ops tool and that is its name. The PUBLIC sandbox got the same <h1>, so a visitor arriving
+   from feelreef.com/store read an internal codename in the largest text on the page, with no
+   feelreef anywhere on screen and no way back. card-worker.mjs swaps in this markup for the
+   sandbox only; the link IS the way back. */
+.ctw-bar h1.ctw-brand { display: flex; align-items: baseline; gap: .38rem; opacity: 1; }
+.ctw-brand a { color: inherit; text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
+.ctw-brand a:hover { text-decoration: underline; }
+.ctw-brand span { font-weight: 600; opacity: .7; }
+.ctw-brand span::before { content: '·'; margin-right: .38rem; opacity: .55; }
+.ctw-lanes { display: flex; gap: .35rem; flex: 1; flex-wrap: wrap; }
+.ctw-actions { display: flex; gap: .4rem; }
+
+.ctw-tab, .ctw-btn {
+  font: inherit; font-size: .85rem; padding: .35rem .7rem; border-radius: 8px;
+  border: 1px solid var(--ctw-line); background: transparent; color: var(--ctw-ink); cursor: pointer;
+}
+.ctw-tab.is-on { background: color-mix(in srgb, var(--ctw-go) 20%, transparent); border-color: var(--ctw-go); }
+.ctw-tab-add { opacity: .7; }
+/* 🩸 A SPECIFICITY LOSS, MEASURED AS WHITE TEXT ON NOTHING. `.ctw-btn:hover` is (0,2,0) and
+   `.ctw-btn-go` below is (0,1,0), so hovering the primary button replaced its solid blue with
+   `rgba(17,24,32,.08)` and left `color:#fff` behind: the door out of the sandbox read as an empty
+   outline with white words that vanished into it. On a phone it is worse than a desktop hover —
+   after tapping 完成 in the bottom sheet the finger's leftover :hover lands on the fixed bottom bar
+   in the same place, so the main call to action sat there transparent with the palette showing
+   through it.
+   `:not(.ctw-btn-go)` costs one selector and makes the two rules disjoint instead of ranked; the
+   primary button gets its own hover, which brightens the blue rather than replacing it. */
+.ctw-btn:not(.ctw-btn-go):hover, .ctw-tab:hover { background: color-mix(in srgb, var(--ctw-ink) 8%, transparent); }
+.ctw-btn[disabled] { opacity: .4; cursor: default; }
+.ctw-btn-go { background: var(--ctw-go); border-color: var(--ctw-go); color: #fff; }
+.ctw-btn-go:hover { filter: brightness(1.08); }
+.ctw-btn-go[disabled]:hover { filter: none; }
+.ctw-btn-danger { color: var(--ctw-danger); border-color: color-mix(in srgb, var(--ctw-danger) 45%, transparent); }
+.ctw-file { display: inline-flex; align-items: center; }
+/* 🔴 PRE-EXISTING BUG, found while building the mobile menu (2026-09-05): `.ctw-file{display:
+   inline-flex}` above and the browser's own `[hidden]{display:none}` have EQUAL specificity
+   (0,1,0 vs 0,1,0) — a tie the author stylesheet wins over the UA one, so `el('file-block').hidden
+   = true` (bootSandbox(), for the real-editor-only "開啟 .md"/Open .md button) was silently not
+   hiding anything: the button stayed visible — and unlocalised — in every sandbox session, on
+   desktop too, just easy to miss inline in a busy toolbar. It only became obvious once it showed up
+   as its own row in the new mobile dropdown. `[hidden]` alone cannot out-specificity a class rule;
+   this one line can, and needs nothing else to change. */
+.ctw-file[hidden] { display: none; }
+
+.ctw-main { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+.ctw-side { border-right: 1px solid var(--ctw-line); padding: .9rem; overflow: auto; display: flex; flex-direction: column; gap: .6rem; background: var(--ctw-panel); }
+.ctw-side h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ctw-dim); margin: .4rem 0 0; }
+
+.ctw-palette { display: grid; gap: .4rem; }
+.ctw-add { text-align: left; font: inherit; padding: .5rem .6rem; border-radius: 10px; border: 1px solid var(--ctw-line); background: transparent; color: inherit; cursor: pointer; display: grid; gap: .15rem; }
+.ctw-add:hover { border-color: var(--ctw-go); }
+.ctw-add b { font-size: .9rem; }
+.ctw-add span { font-size: .76rem; color: var(--ctw-dim); }
+
+.ctw-url { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: .45rem .55rem; border-radius: 8px; border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink); width: 100%; }
+.ctw-md { flex: 1; min-height: 180px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; padding: .6rem; border-radius: 10px; border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink); }
+.ctw-note { font-size: .76rem; color: var(--ctw-dim); margin: 0; }
+
+.ctw-canvas-wrap { min-height: 0; overflow: hidden; }
+.ctw-canvas { width: 100%; height: 100%; border: 0; display: block; }
+
+.ctw-modal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.5); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 1.2rem; }
+.ctw-modal[hidden] { display: none; }
+.ctw-modal-panel { position: relative; width: min(560px, 100%); max-height: 86vh; overflow: auto; background: var(--ctw-panel); border: 1px solid var(--ctw-line); border-radius: 16px; padding: 1.4rem 1.2rem 1rem; }
+/* top-LEFT, matching the card's own overlays — one place to reach for "close", everywhere */
+.ctw-modal-close { position: absolute; top: .7rem; left: .7rem; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ctw-line); background: transparent; color: inherit; cursor: pointer; }
+.ctw-modal-panel h2 { margin: .2rem 0 .2rem 2.4rem; font-size: 1.05rem; }
+.ctw-modal-hint { margin: 0 0 1rem; color: var(--ctw-dim); font-size: .82rem; }
+
+.ctw-field { display: grid; gap: .25rem; margin-bottom: .85rem; }
+.ctw-field[hidden] { display: none; }
+.ctw-field > span { font-size: .82rem; font-weight: 600; }
+.ctw-field > em { font-size: .74rem; color: var(--ctw-dim); font-style: normal; }
+.ctw-field input[type=text], .ctw-field input[type=url], .ctw-field select, .ctw-field textarea {
+  font: inherit; font-size: .88rem; padding: .45rem .55rem; border-radius: 8px;
+  border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink); width: 100%;
+}
+/* 🩸 WAS MONOSPACE. A prose cell's content box in Menlo reads as a code editor — the review's
+   first-time visitor met a programming font the moment they tried to write a sentence. The form
+   asks for writing now, and it looks like somewhere you write. (Raw markdown still gets a
+   monospace box; that one is Markdown mode's, and it is opt-in.) */
+.ctw-field textarea { font-size: .88rem; line-height: 1.5; resize: vertical; }
+.ctw-field input[type=checkbox] { width: 20px; height: 20px; }
+/* per-field validation, empty until saveCell fills it — never an alert(), never a lost sheet */
+.ctw-err { font-size: .76rem; color: var(--ctw-danger); font-style: normal; }
+.ctw-err:empty { display: none; }
+
+/* a collapsed group of advanced rows (icon settings, "add a heading") — closed by default, so the
+   short form is the one a first-time visitor meets and the long one is still one tap away */
+.ctw-group { margin: 0 0 .9rem; border: 1px solid var(--ctw-line); border-radius: 10px; padding: .55rem .7rem; }
+.ctw-group > summary { cursor: pointer; font-size: .82rem; font-weight: 600; }
+.ctw-group[open] > summary { margin-bottom: .7rem; }
+
+/* ── the picture picker (CONTROL.ASSET) ────────────────────────────────────────────────────────
+   `<input type="file" accept="image/*">` inside the label is what opens a phone's photo library.
+   The thumbnail is the confirmation — before this, a picture field gave no feedback at all until
+   the canvas repainted, and the canvas is below the fold on a phone. */
+.ctw-asset { display: grid; gap: .5rem; }
+.ctw-asset-shot { display: grid; place-items: center; min-height: 0; }
+.ctw-asset-shot:empty { display: none; }
+.ctw-asset-shot img { max-width: 100%; max-height: 8rem; border-radius: 10px; display: block; }
+.ctw-asset-acts { display: flex; gap: .4rem; }
+.ctw-asset-pick { display: inline-flex; align-items: center; justify-content: center; }
+.ctw-asset-orurl { display: grid; gap: .2rem; }
+.ctw-asset-orurl > span { font-size: .74rem; color: var(--ctw-dim); }
+.ctw-asset-err { font-size: .76rem; color: var(--ctw-danger); font-style: normal; }
+.ctw-asset-err:empty { display: none; }
+
+.ctw-raw { font-size: .78rem; color: var(--ctw-dim); margin-bottom: .8rem; }
+.ctw-raw input { width: 100%; font: 12px ui-monospace, Menlo, monospace; padding: .35rem .5rem; margin: .4rem 0 .2rem; border-radius: 6px; border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-dim); }
+.ctw-raw p { margin: 0; }
+
+/* move up / move down — the reordering path that does not need a gesture (see editor.mjs) */
+.ctw-move { display: flex; gap: .5rem; margin: .2rem 0 .9rem; }
+.ctw-move[hidden] { display: none; }
+.ctw-move-btn { flex: 1; }
+
+.ctw-modal-foot { display: flex; justify-content: space-between; gap: .6rem; padding-top: .4rem; border-top: 1px solid var(--ctw-line); }
+
+/* the save confirmation — deliberately plainer than the cell editor: it asks one question. */
+.ctw-pub { max-width: 30rem; }
+.ctw-pub-backup { display: flex; align-items: center; gap: .55rem; margin: .9rem 0 .5rem; font-size: .95rem; }
+.ctw-pub-backup input { width: 20px; height: 20px; }
+.ctw-pub-note { margin: 0 0 .9rem; font-size: .8rem; color: var(--ctw-dim); }
+.ctw-pub-result { font-size: .82rem; line-height: 1.55; margin-bottom: .9rem; padding: .6rem .7rem; border-radius: 8px; background: var(--ctw-bg); border: 1px solid var(--ctw-line); white-space: pre-wrap; }
+
+/* ── Markdown mode ─────────────────────────────────────────────────────────────────────────────
+   ONE page, TWO complete views, never both — the same either/or as tugtile's header view toggle.
+   Everything the card view owns is display:none'd rather than moved, so nothing about the form
+   layout has to know this mode exists. */
+.ctw-md-toggle { display: inline-flex; align-items: center; gap: .4rem; }
+.ctw-md-ico { width: 16px; height: 16px; flex: 0 0 auto; }
+.ctw-md-ico-grid { display: none; }
+.ctw-md-toggle[aria-pressed="true"] .ctw-md-ico-doc { display: none; }
+.ctw-md-toggle[aria-pressed="true"] .ctw-md-ico-grid { display: inline; }
+
+body[data-md="1"] .ctw-main { grid-template-columns: 1fr; }
+body[data-md="1"] .ctw-canvas-wrap,
+body[data-md="1"] .ctw-palette,
+body[data-md="1"] #add-cell-h2,
+body[data-md="1"] #cardurl-block,
+body[data-md="1"] .ctw-lanes { display: none; }
+body[data-md="1"] .ctw-side { border-right: 0; }
+body[data-md="1"] #md-block { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: .5rem; }
+/* 🔴 raw markdown IS allowed a monospace box — this one is opt-in and it is the file. What is not
+   allowed is a monospace box in a FORM, which is what a first-time visitor met instead of a
+   sentence. Two different questions, two different answers. */
+body[data-md="1"] .ctw-md { flex: 1; min-height: 55vh; min-height: 55dvh; }
+.ctw-md-error { margin: 0; font-size: .82rem; color: var(--ctw-danger); font-weight: 600; }
+.ctw-md-error[hidden] { display: none; }
+
+/* ── mobile disclosure menu ("toolbar collapsed into a menu") ──────────────────────────────────
+   Native <details>/<summary> — no JS, so it costs nothing under prefers-reduced-motion (there is
+   no animation to guard) and stays keyboard/AT operable for free. See index.html for the markup;
+   this is the ONLY styling that decides whether it acts like a menu (mobile, below) or is
+   invisible as a wrapper (desktop, further down). */
+.ctw-mobile-menu > summary { list-style: none; cursor: pointer; }
+.ctw-mobile-menu > summary::-webkit-details-marker { display: none; }
+.ctw-mobile-menu-body { display: flex; gap: .4rem; }
+
+/* ── mobile layout (≤768px — phones and small tablets in portrait; 1024px+ keeps the desktop grid
+   unchanged, per the guardrail) ───────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  html, body { overflow-x: hidden; }   /* belt-and-braces: nothing below should ever need this, but a
+                                          runaway child must never be able to open page-level h-scroll */
+
+  /* 🩸 ONE PAGE, ONE SCROLL — and the last tile in the palette was UNREACHABLE without it.
+     Measured at 390×844: chrome 232px + canvas `min-height:45dvh` (380) + side `max-height:42dvh`
+     (354) = 966px of boxes in an 844px viewport. The side panel's own frame hung 123px off the
+     bottom, the fixed door button covered 55 more, and `document.scrollHeight` was exactly 844 — so
+     the PAGE could not scroll to bring any of it back. Scrolling inside the panel reached its own
+     end while the last two buttons sat below the window. Three nested scrollers, and the one that
+     mattered was the one that did not exist.
+     The fix is to stop capping anything. The canvas is as tall as the card (set in JS from the
+     iframe's own content — see fitCanvas), the panel is as tall as its buttons, and the page
+     scrolls, once, the way every other page on a phone does. */
+  body { height: auto; min-height: 100vh; min-height: 100dvh; }
+  .ctw-main { display: flex; flex-direction: column; min-height: 0; }
+  .ctw-canvas-wrap { order: 1; flex: 0 0 auto; height: auto; min-height: 0; overflow: visible; }
+  .ctw-canvas { height: auto; min-height: 40vh; min-height: 40dvh; }
+  .ctw-side { order: 2; flex: 0 0 auto; max-height: none; overflow: visible; border-right: 0; border-top: 1px solid var(--ctw-line); }
+
+  /* the banner drops to ONE line: 27% of the first screen was an explanation, not the card. Both
+     sentences are in the markup and written server-side (a visitor with no JavaScript must still be
+     able to read one), and this chooses which — never a truncation. */
+  #sandbox-banner-text { display: none; }
+  #sandbox-banner-status { display: inline; }
+
+  /* Markdown mode on a phone: the textarea IS the page. `dvh`, so an on-screen keyboard shrinks the
+     space available instead of pushing the box off the bottom of it. */
+  body[data-md="1"] .ctw-md { min-height: 60vh; min-height: 60dvh; }
+  body[data-md="1"] #md-h2, body[data-md="1"] #md-note { display: none; }
+  .ctw-md-toggle .ctw-md-ico { width: 18px; height: 18px; }
+  .ctw-sandbox-banner { padding: .45rem .8rem; font-size: .78rem; }
+
+  /* top bar: title + lanes + menu can outgrow 390px in one row, so it wraps — lanes get their own
+     full-width, horizontally-scrollable row (never page-level h-scroll: this scrolls, the page
+     does not) instead of cramming or wrapping tab text. */
+  .ctw-bar { flex-wrap: wrap; row-gap: .5rem; }
+  .ctw-lanes { order: 3; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .ctw-tab { flex: 0 0 auto; }
+  .ctw-actions { order: 2; margin-left: auto; }
+
+  /* tap targets ≥44px (buttons, tabs, the palette's add-block rows, the modal's close button) */
+  .ctw-tab, .ctw-btn, .ctw-add { min-height: 44px; }
+  .ctw-tab, .ctw-btn { padding: .6rem 1rem; font-size: .95rem; }
+  .ctw-modal-close { width: 44px; height: 44px; }
+
+  /* text inputs ≥16px — below that, iOS Safari zooms the whole page in on focus */
+  .ctw-field input[type=text], .ctw-field input[type=url], .ctw-field select, .ctw-field textarea,
+  .ctw-asset input[type=url],
+  .ctw-url, .ctw-md, .ctw-raw input { font-size: 16px; }
+
+  /* the mobile menu: a real dropdown, opened by tapping ☰ (native <details> — no script) */
+  .ctw-mobile-menu { position: relative; }
+  .ctw-mobile-menu > summary { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--ctw-line); font-size: 1.15rem; }
+  .ctw-mobile-menu-body { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; flex-direction: column; min-width: 11rem; padding: .5rem; background: var(--ctw-panel); border: 1px solid var(--ctw-line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); }
+  .ctw-mobile-menu-body .ctw-btn, .ctw-mobile-menu-body .ctw-file { width: 100%; justify-content: flex-start; }
+
+  /* the door CTA becomes a fixed bottom action bar — the one thing a sandbox visitor must always be
+     able to reach without hunting for it. `data-sandbox="1"` (set once, in editor.mjs's
+     bootSandbox()) scopes this to the sandbox: the REAL internal editor's 存到線上 button keeps its
+     normal place in the top bar, unaffected — it was never meant for a stranger's phone. */
+  /* 🔴 the MEASURED height of the fixed bottom bar (44px floor + .9rem padding top and bottom),
+     not a round number that happened to look right. Under it, the palette's last button hid behind
+     the door. */
+  body[data-sandbox="1"] { padding-bottom: calc(3.6rem + env(safe-area-inset-bottom)); }
+  body[data-sandbox="1"] #publish:not([hidden]) {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    width: 100%; margin: 0; border-radius: 0; min-height: 44px;
+    padding: .9rem 1rem calc(.9rem + env(safe-area-inset-bottom));
+    font-size: 1rem; box-shadow: 0 -4px 16px rgba(0,0,0,.28);
+  }
+
+  /* the cell editor (and the real editor's save-confirm) become a bottom sheet: anchored to the
+     bottom edge instead of centred, full width, rounded top corners only. `dvh` (not `vh`) for the
+     height cap so an on-screen keyboard shrinks the AVAILABLE space instead of the sheet spilling
+     off-screen underneath it — same fix release/obsidian-tugtile/styles.css uses for its own
+     full-screen edit view ("Dynamic viewport: shrinks with the on-screen keyboard so the editor
+     stays inside the visible area"). No open/close animation: there was none before, and adding one
+     here would be exactly the kind of motion prefers-reduced-motion exists to catch — easier to
+     simply not add it than to guard it. */
+  .ctw-modal { align-items: flex-end; padding: 0; }
+  .ctw-modal-panel {
+    width: 100%; max-width: 100%;
+    max-height: 88vh; max-height: 88dvh;
+    border-radius: 16px 16px 0 0;
+    padding: 1.1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  }
+  /* the close button is 44px wide at this width, so 2.6rem left the heading touching it */
+  .ctw-modal-panel h2 { margin-left: 3.2rem; }
+}
+
+/* desktop: the mobile-menu wrapper must add NOTHING to the layout — `display: contents` makes the
+   <details>/<div> boxes disappear so undo/open/download sit directly in .ctw-actions, byte-for-byte
+   the row that existed before this wrapper — guardrail (4), desktop layout stays intact. */
+@media (min-width: 769px) {
+  .ctw-mobile-menu { display: contents; }
+  .ctw-mobile-menu > summary { display: none; }
+  .ctw-mobile-menu-body { display: contents; }
+}

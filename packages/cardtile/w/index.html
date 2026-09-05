@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cardtile-w — 編輯你的卡片</title>
+<!-- cardtile-w. See docs/SPEC-cardtile-w.md.
+
+     The canvas below is an IFRAME carrying the document renderCardHTML produces — the same function
+     the Worker calls. Not a preview of the card: the card. That is why the editor's own chrome lives
+     out here and the modal is in THIS document: the card's stylesheet defines :root tokens and styles
+     bare elements, so sharing a document with it means every fix is a specificity war whose result is
+     a preview that drifts from production.
+
+     Serve from the REPO ROOT (the modules import across packages):
+       node packages/cardtile/w/serve.mjs      → http://127.0.0.1:8787/packages/cardtile/w/ -->
+<link rel="stylesheet" href="./editor.css">
+</head>
+<body>
+
+<!-- 🔴 SANDBOX ONLY — hidden unless boot({sandbox:true}) shows it. See editor.mjs's boot(). Sits
+     above everything else on the page: the one thing a sandbox visitor must not be able to miss is
+     that nothing here is being saved anywhere but their own browser. -->
+<div class="ctw-sandbox-banner" id="sandbox-banner" hidden>
+  <!-- 🔴 BOTH sentences ship, and CSS picks one by width — never a truncation, and never a line a
+       visitor with no JavaScript cannot read (card-worker.mjs writes both server-side). The long
+       one is the desktop banner; the short one is the phone's, where 27% of the first screen used
+       to be this explanation instead of the card. -->
+  <span id="sandbox-banner-text"></span>
+  <span id="sandbox-banner-status"></span>
+  <button id="sandbox-reset" class="ctw-btn ctw-btn-ghost" type="button"></button>
+</div>
+
+<header class="ctw-bar">
+  <h1>cardtile-w</h1>
+  <div class="ctw-lanes" id="lanes"></div>
+  <div class="ctw-actions">
+    <!-- Mobile-only disclosure ("toolbar collapsed into a menu" — see editor.css's mobile block).
+         At desktop widths .ctw-mobile-menu/.ctw-mobile-menu-body render as `display:contents`, so
+         undo/open/download sit directly in .ctw-actions exactly as before — this wrapper changes
+         nothing about the desktop layout, only how narrow viewports reach the same three buttons. -->
+    <details class="ctw-mobile-menu" id="actions-menu">
+      <summary class="ctw-menu-btn" id="actions-menu-btn" aria-label="選單">☰</summary>
+      <div class="ctw-mobile-menu-body">
+        <button id="undo" class="ctw-btn" disabled>復原</button>
+        <label class="ctw-btn ctw-file" id="file-block"><span id="file-block-label">開啟 .md</span><input type="file" id="file" accept=".md,text/markdown" hidden></label>
+        <button id="download" class="ctw-btn">下載 .md</button>
+      </div>
+    </details>
+    <!-- Real use: hidden until `/_w/can-save` says yes, then reads 存到線上 / opens the publish
+         modal. Sandbox use: always visible, relabelled to the door CTA, and its click goes straight
+         to feelreef.com/dashboard/cards instead — see boot()'s sandbox branch. Deliberately OUTSIDE
+         the collapsible menu above: on mobile this becomes the fixed bottom action bar (editor.css),
+         so the one button a sandbox visitor must always be able to reach is never one tap away
+         behind ☰. -->
+    <!-- 🔴 SANDBOX ONLY (revealed by bootSandbox). The whole-page view toggle, the same shape
+         tugtile's header `file-text` action has: the forms and the raw file are two complete ways
+         to edit one card, and they are never on screen at once. It exists so the FORMS can stop
+         teaching markdown — anyone who wants the syntax has a door to it, and everyone else never
+         sees a bracket. -->
+    <button id="md-toggle" class="ctw-btn ctw-md-toggle" type="button" hidden aria-pressed="false">
+      <svg class="ctw-md-ico ctw-md-ico-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>
+      <svg class="ctw-md-ico ctw-md-ico-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+      <span id="md-toggle-label">Markdown</span>
+    </button>
+    <button id="publish" class="ctw-btn ctw-btn-go" hidden>存到線上</button>
+  </div>
+</header>
+
+<main class="ctw-main">
+  <section class="ctw-side">
+    <h2 id="add-cell-h2">加一張牌</h2>
+    <div class="ctw-palette" id="palette"></div>
+    <div id="cardurl-block">
+      <h2 id="cardurl-h2">卡片網址</h2>
+      <input id="cardurl" class="ctw-url" spellcheck="false">
+      <p class="ctw-note" id="cardurl-note">QR 碼指向這裡，社群列裡連到同一個網域的那個也會換成手繪的房子圖示。它不存在檔案裡 — 上線時由網址決定。</p>
+    </div>
+
+    <div id="md-block">
+      <h2 id="md-h2">markdown（就是存起來的那份）</h2>
+      <!-- shown only when leaving Markdown mode would break the card — see editor.mjs's whatIsWrong -->
+      <p class="ctw-md-error" id="md-error" hidden></p>
+      <textarea id="md" class="ctw-md" spellcheck="false"></textarea>
+      <p class="ctw-note" id="md-note">改這裡的文字，卡片會跟著變 — 兩個方向都是同一份檔案。</p>
+    </div>
+  </section>
+  <section class="ctw-canvas-wrap">
+    <iframe id="canvas" class="ctw-canvas" title="卡片"></iframe>
+  </section>
+</main>
+
+<!-- 🔴 The save confirmation. The friction lives HERE, at the dangerous moment, and nowhere else:
+     opening a card downloads nothing, because a surprise download when you open something teaches
+     people to dismiss downloads. 「先存一份」 is pre-ticked, and it saves the FAT card — the one with
+     the pictures, which is the part nobody can retype.
+
+     🩸 THE SANDBOX NEVER OPENS THIS SHEET, AND SHIPPED IT ANYWAY. `/try/edit` repurposes #publish
+     into the door, so nothing here is reachable there — which is exactly why it was the last
+     Traditional-Chinese thing left in an en-US visitor's document, read off the live page on
+     2026-09-05 as two buttons saying 「取消」 and 「存」. Hidden is not absent: every id below is
+     one `hidden = false` away, so they carry ids and bootSandbox() localises them like the rest. -->
+<div class="ctw-modal" id="pubmodal" hidden>
+  <div class="ctw-modal-box ctw-pub">
+    <h2 id="pub-title">存到線上</h2>
+    <p class="ctw-modal-hint" id="pub-what"></p>
+    <label class="ctw-pub-backup"><input type="checkbox" id="pub-backup" checked> <span id="pub-backup-label">先存一份 .md 到下載資料夾</span></label>
+    <p class="ctw-pub-note" id="pub-note">卡片沒有「發佈」這一步 — 按下去就是線上的樣子。</p>
+    <div id="pub-result" class="ctw-pub-result" hidden></div>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn" id="pub-cancel">取消</button>
+      <button class="ctw-btn ctw-btn-go" id="pub-go">存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 🔴 SANDBOX ONLY — the sentence before the door. Pressing 「把這張變成真的」 used to navigate
+     straight to a sign-in page a stranger had never seen, having first deleted their draft. Now it
+     says what happens next and offers the way back; see editor.mjs's bootSandbox(). -->
+<div class="ctw-modal" id="doormodal" hidden>
+  <div class="ctw-modal-panel ctw-door" role="dialog" aria-modal="true" aria-labelledby="door-title">
+    <h2 id="door-title"></h2>
+    <p class="ctw-modal-hint" id="door-note"></p>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn" id="door-back"></button>
+      <button class="ctw-btn ctw-btn-go" id="door-go"></button>
+    </div>
+  </div>
+</div>
+
+<div class="ctw-modal" id="modal" hidden>
+  <div class="ctw-modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button class="ctw-modal-close" id="modal-close" aria-label="關閉">✕</button>
+    <h2 id="modal-title"></h2>
+    <p class="ctw-modal-hint" id="modal-hint"></p>
+    <div id="modal-body"></div>
+    <details class="ctw-raw">
+      <summary id="raw-summary">原始參數</summary>
+      <input id="modal-raw" readonly spellcheck="false">
+      <p id="raw-note">表單只動它認得的參數，其他的原封不動留著。</p>
+    </details>
+    <!-- 🔴 REORDERING WITHOUT A GESTURE. Nine attempts to drag a tile in the live sandbox changed
+         the order zero times, and there was no other way: no handle, no hint, and the only note
+         about it was a code comment claiming click-to-reorder worked. These two buttons are the
+         path that cannot fail — and they are the CONTROL the drag harness measures against. -->
+    <div class="ctw-move" id="modal-move">
+      <button class="ctw-btn ctw-move-btn" id="modal-up" type="button">往上移</button>
+      <button class="ctw-btn ctw-move-btn" id="modal-down" type="button">往下移</button>
+    </div>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn ctw-btn-danger" id="modal-delete">刪除這張牌</button>
+      <button class="ctw-btn ctw-btn-go" id="modal-save">完成</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { boot } from './editor.mjs';
+// `card.feelreef.com/try/edit` sets `window.__CARDTILE_W_OPTS__` before this module loads (see
+// serve/gen-editor-assets.mjs / card-worker.mjs). Local dev (w/serve.mjs) never sets it, so `boot()`
+// here is byte-for-byte the call this file has always made.
+boot(window.__CARDTILE_W_OPTS__ || {});
+</script>
+</body>
+</html>

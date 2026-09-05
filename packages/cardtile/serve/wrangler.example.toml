@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# EXAMPLE deployment config. Copy it, fill in your own account and routes, deploy with
+#   npx wrangler deploy --config <your-copy.toml>
+#
+# 🔴 THIS FILE IS THE SHAPE, NOT OUR DEPLOYMENT. The real one names a Cloudflare account, a KV
+# namespace, a workers.dev subdomain and the creators whose domains point at this Worker — which is
+# a record of who our customers are and how our account is laid out, not a part of the product. It
+# lives in our own private workspace for the same reason their cards do.
+#
+# 🩸 Two of those four used to be here anyway. The account id was a placeholder from the start, and
+# right beside it sat the real KV namespace id (twice) and the real workers.dev hostname — because
+# they read as "the config", not as "the account". A file that says it is de-identified is the
+# easiest place in a repo to stop looking. Everything angle-bracketed below is yours to fill in.
+#
+# Everything below the placeholders is the actual config: the bindings the Worker needs, the routing
+# topology, and the scars that explain why each line is the way it is.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+# REEF with Card — the multi-tenant edge renderer. Deploy:
+#   CLOUDFLARE_API_TOKEN=<your token> npx wrangler deploy
+# The CARDS KV holds handle → card.md. Create once, then paste the id below:
+#   CLOUDFLARE_API_TOKEN=… npx wrangler kv namespace create CARDS
+#   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS <handle> --path=<card.md>
+#   preview (default): npx wrangler deploy                 → cardtile-preview.<your-subdomain>.workers.dev
+#   production:        npx wrangler deploy --env production → cardtile + its custom domains
+# Same code, same CARDS store; they differ only in PREVIEW (which gates the noindex header) and in
+# which hostnames route to them. Naming follows the fleet convention: `<name>` / `<name>-preview`.
+name = "cardtile-preview"
+main = "card-worker.mjs"
+compatibility_date = "2026-07-01"
+account_id = "<your-cloudflare-account-id>"
+workers_dev = true
+
+[vars]
+PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outrank the real card)
+
+# handle → card.md store. Create it once (see the header) and paste its id here.
+[[kv_namespaces]]
+binding = "CARDS"
+id = "<your-cards-kv-namespace-id>"
+
+# ── production ─────────────────────────────────────────────────────────────────────────────────
+# The native replacement for the legacy Python renderer. A creator's own host is a VANITY host (see the
+# worker's VANITY map) — the canonical form is card.feelreef.com/<handle>, added once that hostname
+# is pointed here. Rollback is a DNS change: the Python renderer stays frozen, not deleted.
+[env.production]
+name = "cardtile"
+workers_dev = true
+account_id = "<your-cloudflare-account-id>"
+
+routes = [
+  { pattern = "card.example.com", custom_domain = true },   # ← a creator's own domain
+  # 🔴 The multi-tenant origin. NOT a custom_domain — a plain route on our own zone, over an
+  # originless `saas.feelreef.com AAAA 100::`. This is the fallback origin Cloudflare for SaaS sends
+  # custom-hostname traffic to, and it is deliberately testable on its own: a creator's domain is not
+  # required to prove the Worker answers here.
+  #
+  # Why SaaS at all: a creator's zone lives in THEIR Cloudflare account, and Workers Custom Domains
+  # refuse that outright — "You cannot create a Custom Domain on a hostname with an existing CNAME
+  # DNS record or on a zone you do not own." Asking a creator to move their DNS to us would be worse
+  # than the platform they are leaving; Portaly only asks for a CNAME, and so do we.
+  { pattern = "saas.feelreef.com/*", zone_name = "feelreef.com" },
+  # 🔴 The CANONICAL host, and it was not routed here until 2026-07-30 — while `CANON_HOST` in
+  # card-worker.mjs named it and `resolveHandle` built every non-vanity card's `cardUrl` from it.
+  # That URL is what the QR encodes. Measured before the fix: card.feelreef.com/<handle> → 301 to
+  # feelreef.com. All three live cards have vanity domains so nothing was broken today; the FIRST
+  # card without one would have shipped a QR that scans to the marketing site — and a QR is a thing
+  # people discover after it is printed.
+  #
+  # A plain route, not a custom_domain, for a different reason than saas: `card.feelreef.com` is
+  # already a proxied CNAME to feelreef.pages.dev (the marketing site), and a Custom Domain refuses a
+  # hostname that has one. A route wins over the origin without touching DNS — so this is reversible
+  # by deleting one line, and deleting it puts the 301 back exactly as it was.
+  { pattern = "card.feelreef.com/*", zone_name = "feelreef.com" },
+]
+
+[env.production.vars]
+PREVIEW = "false"
+
+[[env.production.kv_namespaces]]
+binding = "CARDS"
+id = "<your-cards-kv-namespace-id>"
