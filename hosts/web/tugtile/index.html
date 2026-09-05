@@ -132,7 +132,30 @@ const blockHtml = (line) => {
   return '<p>' + inlineMd(line) + '</p>';
 };
 const mdToHtml = (text) => String(text).split('\n').filter((l) => l.trim() !== '').map(blockHtml).join('') || '<p></p>';
-const numbered = (html, n) => html.replace('>', '><span class="tugtile__num">' + n + '</span>');
+const numbered = (html, n) => (HOST.numbers ? html.replace('>', '><span class="tugtile__num">' + n + '</span>') : html);
+
+/* ---- host options ----------------------------------------------------------------------------
+   This page is also MOUNTED — in an iframe, driven through `window.__load` — by products that are
+   not a kanban (cardtile's Card sandbox is the first). Those hosts need a smaller board than a
+   backlog does: no per-lane number chips, no folding, a shorter header, and a tile that shows THEIR
+   element rather than the markdown behind it.
+
+   🔴 EVERY OPTION DEFAULTS TO THE KANBAN BEHAVIOUR. A page that never calls `__configure` renders
+   exactly what it rendered before this existed — which is what makes this an opening rather than a
+   fork. The alternative an embedder has otherwise is a patched copy of this file, and a patched copy
+   stops receiving fixes the day it is made.
+
+     numbers   false → no `.tugtile__num` chip (a link page's tiles are not numbered)
+     fold      false → nothing is `--folded`; no `.tugtile__tile-title` duplicate is emitted
+     controls  an array of header control ids to build (`search undo redo viewcycle lock fold md
+               archive settings open`); null = all of them, as before
+     tileHtml  (tile, tid) => string|null — the INNER html of `.tugtile__tile-body`. Returning null
+               falls back to this file's own markdown render. The board's chrome, drag, keyboard
+               tugging and `data-tid` are unaffected: what is replaced is what the tile SAYS.
+               The string is inserted as markup, so an embedder escapes its own values — same
+               contract as any innerHTML, and it comes from the embedding page, not from a file. */
+const HOST = { numbers: true, fold: true, controls: null, tileHtml: null };
+const wants = (id) => !HOST.controls || HOST.controls.indexOf(id) !== -1;
 
 /* ---- state ---- */
 const board = document.getElementById('board');
@@ -182,11 +205,14 @@ function tileHtml(tile, tid, n) {
   const meta = extractMeta(String(tile.text), cfg.dateTrigger, cfg.timeTrigger);   // strips @{}/@@{} tokens from the body
   const text = meta.clean;
   const first = (text.split('\n').find((l) => l.trim() !== '') || text).trim();
-  const isLong = text.indexOf('\n') !== -1 || text.length > 60;
+  // an embedding host's own element for this tile (see HOST.tileHtml). It is one line, complete,
+  // and already the thing it stands for — so it is never folded and never gets a title clone.
+  const face = HOST.tileHtml ? HOST.tileHtml(tile, tid) : null;
+  const isLong = face == null && HOST.fold && (text.indexOf('\n') !== -1 || text.length > 60);
   const folded = isLong && !cardsExpanded;
   const cls = 'tugtile__tile' + (folded ? ' tugtile__tile--folded' : '');
   const cb = cfg.showCheckbox ? '<input type="checkbox" class="tugtile__check"' + ((tile.check && tile.check !== ' ') ? ' checked' : '') + '>' : '';
-  const body = '<div class="tugtile__tile-body">' + numbered(mdToHtml(text), n) + '</div>';
+  const body = '<div class="tugtile__tile-body">' + (face == null ? numbered(mdToHtml(text), n) : face) + '</div>';
   const title = isLong ? '<div class="tugtile__tile-title">' + numbered(mdToHtml(first), n) + '</div>' : '';
   return '<div class="' + cls + '" data-tid="' + tid + '" data-long="' + isLong + '" tabindex="0">'
     + '<div class="tugtile__tile-ctrls">' + cb + '<span class="tugtile__tile-more">' + svg('more-horizontal') + '</span></div>'
@@ -458,18 +484,22 @@ function refreshFoldBtn() {
 function ib(id, icon, title) { return '<span class="tw-iconbtn" id="' + id + '" title="' + esc(title || '') + '">' + svg(icon) + '</span>'; }
 function buildHeader() {
   const header = document.getElementById('header');
-  const left = ib('search', 'search', t('searchAction'))
-    + '<input class="tw-search" id="searchin" placeholder="' + esc(t('searchPlaceholder')) + '" style="display:none">'
-    + ib('undo', 'undo', t('undoAction')) + ib('redo', 'redo', t('redoAction'));
-  const center = '<span class="tugtile-headerctl">'
-    + '<span class="tugtile-viewcycle" id="viewcycle"></span>'
-    + '<span class="tugtile-sep">·</span>'
-    + '<span class="tugtile-brand" id="lock"><span class="tugtile-brand-text">' + esc(locked ? t('brandSuffixLocked') : t('brandSuffix')) + '</span>'
-    +   '<span class="tugtile-lock-icon">' + svg(locked ? 'lock' : 'lock-open') + '</span></span>'
-    + '</span>';
-  const right = '<span class="tw-iconbtn" id="fold"></span>'
-    + ib('md', 'file-text', t('editMarkdown')) + ib('archive', 'archive', t('archiveAction')) + ib('settings', 'settings', t('boardSettingsAction'))
-    + ib('open', 'folder-open', t('emptyNoFile'));
+  const left = (wants('search') ? ib('search', 'search', t('searchAction'))
+      + '<input class="tw-search" id="searchin" placeholder="' + esc(t('searchPlaceholder')) + '" style="display:none">' : '')
+    + (wants('undo') ? ib('undo', 'undo', t('undoAction')) : '')
+    + (wants('redo') ? ib('redo', 'redo', t('redoAction')) : '');
+  // the centre cluster is the view name and the brand/lock. A host that wants neither gets neither —
+  // including the separator between them, which on its own is a stray dot.
+  const centre = (wants('viewcycle') ? '<span class="tugtile-viewcycle" id="viewcycle"></span>' : '')
+    + (wants('viewcycle') && wants('lock') ? '<span class="tugtile-sep">·</span>' : '')
+    + (wants('lock') ? '<span class="tugtile-brand" id="lock"><span class="tugtile-brand-text">' + esc(locked ? t('brandSuffixLocked') : t('brandSuffix')) + '</span>'
+      + '<span class="tugtile-lock-icon">' + svg(locked ? 'lock' : 'lock-open') + '</span></span>' : '');
+  const center = centre ? '<span class="tugtile-headerctl">' + centre + '</span>' : '';
+  const right = (wants('fold') ? '<span class="tw-iconbtn" id="fold"></span>' : '')
+    + (wants('md') ? ib('md', 'file-text', t('editMarkdown')) : '')
+    + (wants('archive') ? ib('archive', 'archive', t('archiveAction')) : '')
+    + (wants('settings') ? ib('settings', 'settings', t('boardSettingsAction')) : '')
+    + (wants('open') ? ib('open', 'folder-open', t('emptyNoFile')) : '');
   header.innerHTML = '<div class="tw-cluster tw-left">' + left + '</div>' + center + '<div class="tw-cluster tw-right">' + right + '</div>';
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on('viewcycle', cycleView); on('lock', toggleLock); on('fold', foldAll); on('open', openFile);
@@ -477,8 +507,10 @@ function buildHeader() {
   on('md', () => { if (!locked) openMarkdownEditor(); });
   on('archive', openArchiveView); on('settings', openSettings);
   const sb = document.getElementById('search'), si = document.getElementById('searchin');
-  sb.onclick = () => { const show = si.style.display === 'none'; si.style.display = show ? '' : 'none'; if (show) si.focus(); else { searchTerm = ''; applySearch(); } };
-  si.oninput = () => { searchTerm = si.value; applySearch(); };
+  if (sb && si) {
+    sb.onclick = () => { const show = si.style.display === 'none'; si.style.display = show ? '' : 'none'; if (show) si.focus(); else { searchTerm = ''; applySearch(); } };
+    si.oninput = () => { searchTerm = si.value; applySearch(); };
+  }
   refreshViewCycle(); refreshFoldBtn(); refreshSearchIcon(); updateUndoRedo();
 }
 function toggleLock() {
@@ -753,6 +785,10 @@ const SAMPLE = ['---','kanban-plugin: board','---','',
 
 const LOCALE = (() => { const l = (navigator.language || 'en').toLowerCase(); if (l.startsWith('ja')) return 'ja-JP'; if (l.startsWith('ko')) return 'ko-KR'; if (l.startsWith('zh')) return 'zh-TW'; return 'en-US'; })();
 window.__load = (md) => { fileHandle = null; load(md); };
+// 🔴 The other half of the embedding contract, beside `__load`. Call it before or after loading —
+// it re-builds the header and re-renders whatever is on the board, so an embedder never has to
+// guess whether it is early. See HOST above for the options and why each defaults to the kanban.
+window.__configure = (opts) => { Object.assign(HOST, opts || {}); buildHeader(); if (MODEL) render(); };
 fetch('./i18n/' + LOCALE + '.json').then((r) => r.json()).then((j) => { TR = j; }).catch(() => {}).finally(() => { buildHeader(); load(SAMPLE); window.__ready = true; });
 </script>
 </body>
