@@ -17,6 +17,13 @@ echo "copied tugtile.css (verbatim styles.css)"
 # SortableJS — the same drag engine, so cards/lanes are draggable ("tug").
 cp "$ROOT/Sortable.min.js" "$ROOT/hosts/web/tugtile/Sortable.min.js"
 echo "copied Sortable.min.js"
+# 🩸 THE BOARD MODEL, AND IT WAS NEVER COPIED (2026-09-06). index.html's first import is
+# `./board-core.js`; scripts/build-board-core.sh writes it to packages/tugtile/ and nothing copied it
+# here, so a clean checkout served a host whose module never evaluated: an empty board, no handlers.
+# Not a symlink and not an import rewrite: this directory is meant to be servable on its own.
+[ -f "$ROOT/packages/tugtile/board-core.js" ] || { echo "board-core.js is missing — run scripts/build-board-core.sh first" >&2; exit 1; }
+cp "$ROOT/packages/tugtile/board-core.js" "$ROOT/hosts/web/tugtile/board-core.js"
+echo "copied board-core.js (from packages/tugtile/)"
 
 # i18n — the same locale JSON, so strings match exactly.
 mkdir -p "$ROOT/hosts/web/tugtile/i18n"
