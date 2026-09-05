@@ -57,11 +57,10 @@
     },
     "packages/cssmd/cssmd.js": {
       "namedBy": [
-        "CVERInc/tile-lab  scripts/fetch-tile.sh — gh contents API, recorded in scripts/tile-vendor.lock.json",
         "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:43 — git show at a pinned sha",
         "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:58"
       ],
-      "breaks": "tile-lab cannot refresh its vendored copy; reef-mcp's vendor step fails at the next refresh"
+      "breaks": "reef-mcp's vendor step fails at the next refresh. 🩸 This entry also named `CVERInc/tile-lab scripts/fetch-tile.sh`, which had not existed since 2026-08-13 — that copy-and-pin mechanism retired when the incubator started consuming this repo as a git submodule. A `namedBy` line is a fact about someone else's repo and this one cannot verify it, which is exactly why the PATHS are what the test asserts; but a consumer that is gone is worse than one that moved, because it makes the entry look better-supported than it is."
     },
     "packages/cssmd/highlight.js": {
       "namedBy": [
@@ -71,17 +70,10 @@
     },
     "packages/sitetile/site-core.js": {
       "namedBy": [
-        "CVERInc/tile-lab  scripts/fetch-tile.sh — cardtile imports parseParams + splitFrontmatter from it",
         "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh:129 — also parses regex literals OUT of the source text",
         "CVERInc/reef  apps/reef-mcp/tests/vendor-freshness.test.js:57"
       ],
-      "breaks": "cardtile loses its param parser; reef-mcp cannot re-vendor the site model. Note vendor-tile.sh reads this file's TEXT, so its internals are load-bearing too, not just its path"
-    },
-    "hosts/obsidian/tugtile/plugin.src.js": {
-      "namedBy": [
-        "CVERInc/tile-lab  scripts/fetch-tile.sh — slices the CORE section out into packages/tugtile/board-core.js"
-      ],
-      "breaks": "cardtile loses board-core. The slice is by text markers inside this file, so editing those markers breaks it without moving anything"
+      "breaks": "reef-mcp cannot re-vendor the site model. Note vendor-tile.sh reads this file's TEXT, so its internals are load-bearing too, not just its path. 🩸 Also named tile-lab's retired fetch-tile.sh, 'cardtile imports parseParams + splitFrontmatter from it'. Both halves of that are stale twice over: the fetch mechanism retired 2026-08-13, and cardtile MOVED INTO THIS REPO on 2026-09-07 — so that import is now an ordinary sibling import (packages/cardtile/card-core.js), which `git grep` here can see and the suite covers."
     },
     "packages/sitetile/astro": {
       "namedBy": [
@@ -114,6 +106,25 @@
         "CVERInc/reef  apps/reef-mcp/runner/entrypoint.sh:392 — invoked as node /opt/tile/…"
       ],
       "breaks": "every published site loses its OG cards, and the runner keeps reporting success"
+    },
+    "packages/dynamic-corals/square-shop/emit-shop-function.mjs": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/runner/stage.sh MUST_EXIST — asserted present before the runner image is built",
+        "CVERInc/reef  apps/mixfairy/scripts/build-deploy-sitetile.sh:500 — resolved as $ASTRO_DIR/../../dynamic-corals/square-shop/emit-shop-function.mjs"
+      ],
+      "breaks": "every site's dist/_worker.js — which is EVERY site, not only shops: /api/* and the buyer face reach RSP only through the emitted worker, and build-deploy-sitetile.sh exits 1 when it cannot find this file. 🩸 The 2026-08-11 version of this failure is the reason that MUST_EXIST list exists: dynamic-corals stopped being staged when the MIT packages graduated, the image built green, the contract test passed, runner-deploy reported success, and the break surfaced days later as a customer's deploy that would not go out. This path arrived in THIS repo on 2026-09-07 and is listed the same day, because the sibling-relative walk in build-deploy-sitetile.sh resolves against packages/sitetile/astro — it is our layout, not theirs, that keeps it working."
+    },
+    "packages/dynamic-corals/registry/registry-worker.mjs": {
+      "namedBy": [
+        "CVERInc/tile-lab  packages/dynamic-corals/registry/wrangler.toml — `main`, resolved through the submodule at engine/"
+      ],
+      "breaks": "`wrangler deploy` of the coral registry cannot find its entry point. Not silent — but the worker serves feelreef.com/corals/*, which every customer site loads its corals from, so the window between a rename here and somebody noticing there is the window in which no coral can be published or rolled back. 🔴 This module imports the bare specifier `coral-manifest`, which nothing HERE resolves; the deployment aliases it to its own channel table. Moving the file and moving that import are the same kind of break."
+    },
+    "packages/cardtile/ai-ops.mjs": {
+      "namedBy": [
+        "CVERInc/reef  apps/reef-mcp/scripts/vendor-tile.sh + tests/vendor-freshness.test.js:52 — vendored into vendor/cardtile/, pinned by commit in vendor/PROVENANCE.json"
+      ],
+      "breaks": "reef-mcp's vendored cardtile copy cannot be refreshed, and vendor-freshness goes red — which is the right outcome in the wrong repo. 🔴 Its lookup names the repo `tile-lab` and the path `packages/cardtile/ai-ops.mjs`; cardtile moved HERE on 2026-09-07, so that test is now pinning a file to a repo that no longer holds it. Listed so the rename lands here rather than there."
     }
   }
 }

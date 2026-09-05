@@ -5,8 +5,10 @@ editor engine projects headings, lists, tables, and inline marks as real UI whil
 `##`, `**`, and `` ` `` stay present in the document, so every keystroke round-trips
 back to plain Markdown byte-for-byte.
 
-This monorepo is the source of truth for the **tile family**: a shared editor engine
-and the Obsidian plugins built on top of it.
+This monorepo is the source of truth for the **tile family**: a shared editor engine, the
+hosts built on top of it, and the renderers that turn the same Markdown into published pages,
+cards and embeddable widgets. Every piece of the family's CODE lives here; what does not is a
+particular deployment's data and deploy configuration, which belongs to whoever runs it.
 
 ## What & why
 
@@ -18,7 +20,8 @@ with `getText()` and you get exactly what a plain editor would. That "structure 
 top of an unmodified text substrate" is the whole design, and it is why the same
 engine can drive very different hosts.
 
-Three hosts ship from here today — two Obsidian plugins and a macOS app:
+Three editor hosts ship from here today — two Obsidian plugins and a macOS app — alongside the
+renderers described under **How it works**:
 
 - **tugtile** — a card table (kanban) for your Markdown notes: tug tiles to reorder,
   lanes with WIP limits, and it reads your existing kanban-style boards. CJK-friendly.
@@ -46,13 +49,34 @@ per host.
 - **`packages/cssmd`** — the shared inline-mark primitive (`**bold**` / `*italic*` /
   `` `code` `` rendered with the raw markers hidden via one CSS rule). The engine
   delegates to it so there is one implementation, not a copy per consumer.
-- **`packages/tugtile`** — the kanban host: wires the engine to a board view that
-  parses/serializes a `.md` board.
-- **`packages/marktile`** — the editor host: wires the same engine to a minimal file
-  view.
-- **`hosts/mac`** — the macOS host: an `NSDocument` + `WKWebView` shell. The engine is
-  copied in at build time (`scripts/sync-engine.sh`) rather than vendored, so there is
-  no second copy that could drift.
+- **`packages/tugtile`** — the board model: `board-core.js`, the platform-free half of the
+  kanban host, sliced out of the plugin source by `scripts/build-board-core.sh`.
+- **`hosts/obsidian/{tugtile,marktile}`** — the two Obsidian plugins; **`hosts/web/*`** the
+  browser surfaces; **`hosts/mac`** the macOS host, an `NSDocument` + `WKWebView` shell whose
+  engine is copied in at build time rather than vendored, so there is no second copy to drift.
+
+### The renderers
+
+- **`packages/sitetile`** — the site renderer: an Astro build that turns a directory of Markdown
+  into a published multilingual site, plus the page/theme model (`site-core.js`) it round-trips.
+  **`packages/pagetile`** is the long-form reader core and **`packages/pwa`** the installable shell.
+- **`packages/cardtile`** — REEF with Card: a one-page Card as Markdown, its multi-tenant edge
+  worker, and two sandbox editors (`w/` a modal, `w2/` the tugtile board as an editing desktop).
+  It imports `packages/tugtile`, `packages/sitetile` and `packages/cssmd` directly — the Card model
+  is a projection of the board model, not a second one.
+- **`packages/dynamic-corals`** — edge-rendered widgets that install unmodified into a sitetile page
+  or a Card: a shop, an events list, an animated QR, a sponsor form, a drawer, an inbox bubble.
+  Vanilla JS and the native `fetch`/DOM only, configured entirely from `data-*` attributes, so the
+  same file drops into a static build or a framework component without a wrapper.
+  **`packages/flowtile`** is the flow/diagram core.
+
+  🔴 **No hostname and no published artifact lives here.** A coral's source carries a NEUTRAL
+  default marked `/*coral-default:<key>*/`, and a deployment substitutes its own at build time
+  (`build.mjs --defaults <file>`); the registry it publishes into — the immutable versions and the
+  mutable channel table — belongs to that deployment too, and `registry/registry-worker.mjs`
+  imports the table from a specifier nothing here resolves. See
+  [`packages/dynamic-corals/registry/README.md`](packages/dynamic-corals/registry/README.md) for
+  why an unresolvable import is the safe design and a fallback would not be.
 
 Each plugin builds to a single `main.js` by inlining the engine, cssmd, the shared
 `i18n/*.json` strings, and SortableJS (drag-and-drop) — so what a user installs is one
@@ -125,6 +149,15 @@ That single entry point runs syntax checks, validates the i18n JSON, builds both
 plugins and the tile-core emit, asserts the committed build artifacts still equal a
 fresh build, and runs the full Node test suite. The same script backs the `hooks/pre-push`
 git hook and CI (`.github/workflows/ci.yml`), so local and CI can never disagree.
+
+A handful of tests ask about a *deployment's* published artifacts — whether a coral's channel
+table, the artifact on disk and the coral's own version agree. There is no deployment here, so they
+**skip by name** and say what they did not look at. Point `CORAL_REGISTRY` at a registry directory
+to run them: "I could not look" and "I looked and it is fine" must never print the same thing.
+
+`docs/experiments/` holds one-off investigations kept for their measurements. Some of their inputs
+(screenshots of real pages) are deliberately not in this repo; each README says so where a reader
+would otherwise read an empty directory as an empty result.
 
 Edit the `*.src.js` and `packages/core/editor-core.js` sources — **never** the generated
 `main.js` / `dist/editor-core.js`; those are overwritten on the next build and the
