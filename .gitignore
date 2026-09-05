@@ -37,3 +37,12 @@ lab/
 # registry is a DEPLOYMENT's — passed with --registry, and living in the repo that owns the deploy.
 # What lands here is scratch, and committing it would be committing somebody else's serving data.
 /packages/dynamic-corals/registry/versions/
+
+# 🩸 wrangler's local state. It was NOT here until 2026-09-07, and the incubator ignored it — so
+# `cp -R packages/cardtile` carried `serve/.wrangler/state/v3/kv/<real namespace id>/blobs/…` into
+# this repo, containing a CUSTOMER'S CARD, and `git add -A` staged it without comment. The
+# publish-safety scan is what found it, on the namespace id in the path.
+#
+# 🔴 The lesson is not "remember to delete it". It is that an ignore rule is part of the wall, and
+# a file crossing between two repos is only as protected as the WEAKER of their two ignore lists.
+.wrangler/

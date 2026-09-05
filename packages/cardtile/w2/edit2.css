@@ -1,0 +1,132 @@
+/* cardtile-w2's own chrome — LAYERED ON TOP of w/editor.css, never a copy of it.
+   The banner, the buttons, the sheet, the fields, the picture picker and the modal shell all come
+   from there, because the seven sheets are the same seven sheets. What is here is only what this
+   surface adds: the table/preview split, the one-row icon picker, and the phone's single toggle.
+
+   🔴 RWD IS CORRECTNESS, not polish. The three things this file is answerable for at 390px: the
+   page never scrolls sideways, every target a finger has to hit is at least 44px, and the table and
+   the finished card are never both on screen pretending to fit. */
+
+.ctw-bar-spacer { flex: 1; }
+
+/* ── the split ──────────────────────────────────────────────────────────────────────────────────
+   ONE grid, two iframes. Below 1024 the preview is a second full-screen view the toggle swaps to;
+   at 1024 and up both are on screen and the toggle is not rendered. */
+.ctw-w2 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;                 /* the panes scroll; the page does not */
+}
+.ctw-w2 > section { min-width: 0; min-height: 0; display: flex; }
+.ctw-w2-frame {
+  flex: 1; width: 100%; height: 100%; border: 0; background: var(--ctw-bg);
+  /* the table fades in once its host has published __ready and been handed the card — otherwise
+     the engine's own SAMPLE board is visible for a beat, which reads as somebody else's data */
+  opacity: 0; transition: opacity .18s ease;
+}
+#table.is-ready, #canvas { opacity: 1; }
+.ctw-w2-preview { border-left: 1px solid var(--ctw-line); background: #fff; }
+
+/* ── the phone's two tabs ───────────────────────────────────────────────────────────────────────
+   🩸 THE FIRST SCREEN HAD NO CARD ON IT. Measured 2026-09-06 at 390×844: banner 59 + masthead 95 +
+   the board's own header 45 put the first tile at y=275 (zh) / 308 (en) / 327 (ja) — a third of the
+   screen was chrome, and `#canvas` was hidden, so the one thing a visitor came to see was neither
+   in front of them nor visibly one tap away.
+   Three rules, in the order they win back pixels: the view control leaves the top bar for the
+   BOTTOM edge (where a phone puts navigation, and where it is also the answer to "where is my
+   card"), the masthead stops wrapping to two rows, and the banner stops wrapping to three. */
+.ctw-w2-tabs { display: none; }
+
+/* ≥44px targets, everywhere a finger lands. Above the phone rules below, so that shrinking a ROW
+   can never quietly shrink the target inside it — same specificity, and the last one would win. */
+.ctw-bar .ctw-btn, .ctw-sandbox-banner .ctw-btn { min-height: 44px; }
+
+@media (max-width: 1023px) {
+  body[data-view="table"] .ctw-w2-preview,
+  body[data-view="preview"] .ctw-w2-table { display: none; }
+  .ctw-w2-preview { border-left: 0; }
+  .ctw-w2-preview .ctw-w2-frame { overflow: auto; }
+
+  /* a flex ROW of the page's own column, not a fixed overlay: the panes then end exactly where the
+     bar begins, and no pane needs a padding that has to be kept equal to a height somewhere else. */
+  .ctw-w2-tabs {
+    display: flex; flex: 0 0 auto;
+    background: var(--ctw-panel); border-top: 1px solid var(--ctw-line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ctw-w2-tab {
+    flex: 1; min-height: 46px; font: inherit; font-size: .9rem; font-weight: 600;
+    border: 0; border-top: 2px solid transparent; margin-top: -1px;
+    background: transparent; color: var(--ctw-dim); cursor: pointer;
+  }
+  .ctw-w2-tab[aria-selected="true"] { color: var(--ctw-ink); border-top-color: var(--ctw-go); }
+
+  /* the masthead: ONE row. The brand and the door, nothing else — `.ctw-bar` wraps by default
+     below 769px (w/editor.css), and with two children that is a second row for no reason. */
+  .ctw-bar { flex-wrap: nowrap; gap: .6rem; padding: .3rem .8rem; }
+  .ctw-bar h1 { font-size: .9rem; white-space: nowrap; }
+  .ctw-bar .ctw-btn { padding: .45rem .8rem; font-size: .85rem; }
+
+  /* the banner: ONE row too. 🩸 111px in ja (three wrapped lines plus 「はじめからやり直す」 on its
+     own) against 59 in zh — the widest language paid the most for the least. The sentence
+     ellipsises and the button keeps its own width, so nothing wraps in any of the nine. Neither
+     button gets shorter than 44px: winning ten pixels off the top of the screen by shrinking the
+     thing a thumb has to hit is not a trade this file makes. */
+  .ctw-sandbox-banner { flex-wrap: nowrap; gap: .5rem; padding: .25rem .7rem; font-size: .75rem; }
+  #sandbox-banner-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctw-sandbox-banner .ctw-btn { flex: 0 0 auto; padding: .3rem .7rem; font-size: .78rem; white-space: nowrap; }
+}
+@media (min-width: 1024px) {
+  .ctw-w2 { grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); }
+}
+
+/* ── 「＋加一張牌」: ONE ROW, seven icons ────────────────────────────────────────────────────────
+   🩸 The palette this replaces was a COLUMN of seven cards, each with a title and a sentence of
+   explanation — 27% of a phone's first screen before the card itself began, and a scroll to reach
+   the seventh. A row of icons with a name under each is the same seven choices in one glance.
+
+   It WRAPS rather than scrolling sideways: a horizontally scrolling row hides its own last item,
+   and the seventh kind is the one nobody would ever find. */
+.ctw-pick { width: min(520px, 100%); }
+.ctw-pick-row {
+  display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; margin: .4rem 0 .6rem;
+}
+.ctw-pick-btn {
+  flex: 0 0 auto; width: 4.4rem; min-height: 4.6rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .3rem;
+  font: inherit; font-size: .72rem; padding: .5rem .25rem;
+  border: 1px solid var(--ctw-line); border-radius: 12px;
+  background: transparent; color: var(--ctw-ink); cursor: pointer;
+}
+.ctw-pick-btn:hover, .ctw-pick-btn:focus-visible {
+  background: color-mix(in srgb, var(--ctw-go) 14%, transparent); border-color: var(--ctw-go);
+}
+.ctw-pick-ico { display: block; width: 24px; height: 24px; color: var(--ctw-go); }
+.ctw-pick-ico svg { width: 100%; height: 100%; display: block; }
+.ctw-pick-name { text-align: center; line-height: 1.25; }
+
+/* ── whole-page Markdown mode ───────────────────────────────────────────────────────────────────
+   Opened by the board's OWN `file-text` header action (edit2.mjs intercepts it) — one page, two
+   complete ways to edit one card, never both at once. The text is the CARD, because the card is
+   the file the board is a view of. */
+.ctw-md-panel { width: min(760px, 100%); }
+.ctw-md {
+  width: 100%; min-height: 46vh; resize: vertical;
+  font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  padding: .6rem .7rem; border-radius: 10px;
+  border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink);
+}
+.ctw-md-error {
+  margin: 0 0 .6rem; padding: .5rem .6rem; border-radius: 8px; font-size: .82rem;
+  color: var(--ctw-danger); border: 1px solid color-mix(in srgb, var(--ctw-danger) 45%, transparent);
+}
+.ctw-md-error[hidden] { display: none; }
+
+/* the banner reads the long sentence on a wide screen and the short one on a phone — same rule
+   /try/edit uses, restated here because this document's banner is the same markup. */
+@media (max-width: 640px) {
+  #sandbox-banner-text { display: none; }
+  #sandbox-banner-status { display: inline; }
+}

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cardtile-w2 — 編輯桌</title>
+<!-- cardtile-w2 — the Card sandbox with the TUGTILE BOARD as its editing table, served at the
+     official path `/try/edit` since the 2026-09-06 "換上正式路徑" ruling (`/try/edit2` is now a
+     301 to it; this file kept the `w2`/`edit2` name it was built under).
+
+     🔴 THE TABLE IS NOT OURS. The left pane is an IFRAME carrying the engine's own web tugtile
+     (engine/hosts/web/tugtile/index.html), byte-for-byte, driven through its published entry point
+     `window.__load(md)`. Lanes, tiles, the grip, SortableJS drag, keyboard tugging, fold, lane
+     collapse, search and the view cycle are all ITS behaviour running ITS code — this document adds
+     the seven Card-typed sheets on top and never reimplements a board.
+
+     🔴 The right pane is a second iframe carrying what `renderCardHTML` produces — the same function
+     the Worker calls. Not a preview of the card: the card. Both panes are iframes for the same
+     reason w/index.html gives: the card's stylesheet and tugtile's stylesheet each define `:root`
+     tokens and style bare elements, and sharing a document with either is a specificity war.
+
+     Serve from the REPO ROOT (the modules import across packages):
+       node packages/cardtile/w/serve.mjs   → http://127.0.0.1:8787/packages/cardtile/w2/ -->
+<link rel="stylesheet" href="../w/editor.css">
+<link rel="stylesheet" href="./edit2.css">
+</head>
+<body>
+
+<!-- 🔴 SANDBOX ONLY — and IDENTICAL markup to w/index.html's, ids included, because card-worker.mjs
+     writes both sentences into it SERVER-SIDE with the same two string replacements it does for the
+     internal editor. A visitor (or a crawler, or `curl`) who never runs the JavaScript must still be
+     able to read "nothing here is saved". Two banners that differ by one attribute is how one of
+     them stops being written to. -->
+<div class="ctw-sandbox-banner" id="sandbox-banner" hidden>
+  <span id="sandbox-banner-text"></span>
+  <span id="sandbox-banner-status"></span>
+  <button id="sandbox-reset" class="ctw-btn ctw-btn-ghost" type="button"></button>
+</div>
+
+<header class="ctw-bar">
+  <h1>cardtile-w2</h1>
+  <div class="ctw-bar-spacer"></div>
+  <div class="ctw-actions">
+    <!-- 🔴 THE DOOR, and it behaves exactly as it does on the internal editor: it opens a sheet
+         that says what happens next, parks the whole card for an hour, and walks. It never clears
+         the draft — see editor.mjs's bootSandbox() for the day that button deleted ten minutes of
+         somebody's work. -->
+    <button id="publish" class="ctw-btn ctw-btn-go" hidden></button>
+  </div>
+</header>
+
+<main class="ctw-w2">
+  <!-- the editing table: the engine's web tugtile, loaded by edit2.mjs -->
+  <section class="ctw-w2-table">
+    <iframe id="table" class="ctw-w2-frame" title="editing table"></iframe>
+  </section>
+  <!-- the card itself -->
+  <section class="ctw-w2-preview">
+    <iframe id="canvas" class="ctw-w2-frame" title="preview"></iframe>
+  </section>
+</main>
+
+<!-- 🔴 PHONE ONLY, AND ALONG THE BOTTOM EDGE. At 390px the table and the finished card cannot both
+     be on screen and a split showing a sliver of each shows neither — so one is on screen and the
+     other is one thumb-reach away, where a phone puts navigation. It replaces a toggle in the top
+     bar, which cost the first screen a row it could not spare: the cold read measured 275px of
+     chrome above the first tile (390, zh; 327 in ja), on a screen whose whole job is to show the
+     card being edited. At ≥1024 both panes are on screen and this bar is not rendered. -->
+<nav class="ctw-w2-tabs" id="viewtabs">
+  <button class="ctw-w2-tab" id="tab-table" type="button" aria-selected="true"></button>
+  <button class="ctw-w2-tab" id="tab-preview" type="button" aria-selected="false"></button>
+</nav>
+
+<!-- 「＋加一張牌」 → ONE ROW of seven icons. Not a scrolling column of cards with paragraphs of
+     explanation: the seven kinds of tile a Card has, side by side, each with its name under it.
+     Opens from the button at the END of a lane, and remembers which lane that was. -->
+<div class="ctw-modal" id="picker" hidden>
+  <div class="ctw-modal-panel ctw-pick" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+    <button class="ctw-modal-close" id="picker-close" aria-label="Close">✕</button>
+    <h2 id="picker-title"></h2>
+    <p class="ctw-modal-hint" id="picker-lane"></p>
+    <div class="ctw-pick-row" id="picker-row"></div>
+  </div>
+</div>
+
+<!-- The Card-typed sheet. EVERY id below is w/index.html's own, because the rows inside #modal-body
+     are built by w/cell-form-core.mjs — the same module, the same field ids (`f-<name>`, `e-<name>`)
+     — and a second set of names for the same controls is how two surfaces start disagreeing about
+     what "the address box" is called. -->
+<div class="ctw-modal" id="modal" hidden>
+  <div class="ctw-modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button class="ctw-modal-close" id="modal-close" aria-label="關閉">✕</button>
+    <h2 id="modal-title"></h2>
+    <p class="ctw-modal-hint" id="modal-hint"></p>
+    <div id="modal-body"></div>
+    <details class="ctw-raw">
+      <summary id="raw-summary">原始參數</summary>
+      <input id="modal-raw" readonly spellcheck="false">
+      <p id="raw-note">表單只動它認得的參數，其他的原封不動留著。</p>
+    </details>
+    <!-- kept from the internal editor, and for the same reason: a reorder path that cannot fail, and the
+         CONTROL the drag harness measures against. On this surface the drag is the board's own. -->
+    <div class="ctw-move" id="modal-move">
+      <button class="ctw-btn ctw-move-btn" id="modal-up" type="button">往上移</button>
+      <button class="ctw-btn ctw-move-btn" id="modal-down" type="button">往下移</button>
+    </div>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn ctw-btn-danger" id="modal-delete">刪除這張牌</button>
+      <button class="ctw-btn ctw-btn-go" id="modal-save">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- Whole-page Markdown mode. The board's own `file-text` header action opens THIS — one page, two
+     complete ways to edit one card, never both on screen at once. Leaving validates first
+     (w/md-guard.mjs), so there is no way out of this mode having quietly lost a tile. -->
+<div class="ctw-modal" id="mdmodal" hidden>
+  <div class="ctw-modal-panel ctw-md-panel" role="dialog" aria-modal="true" aria-labelledby="md-title">
+    <button class="ctw-modal-close" id="md-close" aria-label="關閉">✕</button>
+    <h2 id="md-title"></h2>
+    <p class="ctw-md-error" id="md-error" hidden></p>
+    <textarea id="md" class="ctw-md" spellcheck="false"></textarea>
+    <p class="ctw-modal-hint" id="md-note"></p>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn" id="md-cancel"></button>
+      <button class="ctw-btn ctw-btn-go" id="md-done"></button>
+    </div>
+  </div>
+</div>
+
+<!-- the sentence before the door — identical behaviour to the internal editor's -->
+<div class="ctw-modal" id="doormodal" hidden>
+  <div class="ctw-modal-panel ctw-door" role="dialog" aria-modal="true" aria-labelledby="door-title">
+    <h2 id="door-title"></h2>
+    <p class="ctw-modal-hint" id="door-note"></p>
+    <div class="ctw-modal-foot">
+      <button class="ctw-btn" id="door-back"></button>
+      <button class="ctw-btn ctw-btn-go" id="door-go"></button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { boot } from './edit2.mjs';
+// `card.feelreef.com/try/edit` sets `window.__CARDTILE_W2_OPTS__` before this module loads (see
+// serve/gen-edit2-assets.mjs / card-worker.mjs). Local dev never sets it, so the default below is
+// what a developer opening this file from w/serve.mjs gets.
+//
+// 🔴 The table's default base is the WORKER's path, not `../../../engine/hosts/web/tugtile/`. That
+// directory is missing its `board-core.js` — the engine generates that file (scripts/build-board-
+// core.sh writes `packages/tugtile/board-core.js`) and `hosts/web/tugtile/build.sh` never copies it
+// across, so the engine's own host cannot run from disk as shipped. This surface serves it from the
+// one place it does exist; see REPORT-card-tugtile.md and the engine patch note.
+boot(window.__CARDTILE_W2_OPTS__ || { sandbox: true });
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0a1226;color:#e8f2ff;font:15px/1.6 -apple-system,"PingFang TC",sans-serif;padding:16px}
+/* THE CANDIDATE: every implicit row is at least one unit, and grows if what is in it needs more. */
+.g{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;
+   grid-auto-rows:minmax(calc((100cqw - 5*12px)/6), auto);grid-auto-flow:row dense}
+.wrap{container-type:inline-size}
+.c{background:rgba(12,22,44,.75);border:1px solid rgba(120,160,220,.3);border-radius:16px;padding:10px;overflow:hidden;font-size:.8rem}
+[data-s="2x2"]{grid-column:span 2;grid-row:span 2}
+[data-s="3x3"]{grid-column:span 3;grid-row:span 3}
+[data-s="6x2"]{grid-column:span 6;grid-row:span 2}
+.pic{padding:0;border:0}.pic img{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:16px}
+</style>
+<div class="wrap"><div class="g">
+  <div class="c" data-s="2x2" id="short">短</div>
+  <div class="c" data-s="2x2" id="long">這是一段很長的文字，長到絕對塞不進兩格見方的空間裡，用來測試當內容超過作者指定的尺寸時，這一格會撐開還是會被裁掉或內捲。如果 minmax 成立，它應該把整列一起撐高，而不是自己偷偷長出捲軸。再加一點字確保真的超過。再加一點。再加一點。</div>
+  <div class="c pic" data-s="3x3" id="pic"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iNDAwIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgZmlsbD0iIzM3N2RmZiIvPjwvc3ZnPg==" alt=""></div>
+  <div class="c" data-s="6x2" id="wide">整寬兩格高</div>
+</div></div>
+<script>
+window.__m=()=>{const g=document.querySelector('.g');const gap=12;const unit=(g.getBoundingClientRect().width-5*gap)/6;
+ const q=id=>{const e=document.getElementById(id);const r=e.getBoundingClientRect();
+  return {h:Math.round(r.height),units:+((r.height+gap)/(unit+gap)).toFixed(2),scrolls:e.scrollHeight-e.clientHeight>2};};
+ return {unit:+unit.toFixed(1),short:q('short'),long:q('long'),pic:q('pic'),wide:q('wide')};};
+</script>
