@@ -17,6 +17,7 @@ a support department, and nearly every REEF customer is one person.
 | `data-kaito` | `"1"` asks the site first (needs REEF with KAITO on that tenant) |
 | `data-assistant-name` | what VISITORS see the assistant called instead of "KAITO" (owner-chosen; the panel still marks the reply with the non-removable **AI** chip — the name can change, the AI identity cannot). The BAKED opening answer only: from 0.7.2 the bubble also reads the platform's current value once per mount (`GET /api/inbox/assistant`) and patches the two nodes that carry the name, so an owner's rename reaches visitors without a republish. That read only beats the baked value when the proxy says it actually asked the platform (`resolved: true` in the body) — which is also how CLEARING the name works: a resolved empty answer means「no override」and falls back to KAITO, while an empty answer without `resolved` means「we could not ask」and this attribute stands. Whichever value wins is trimmed to one line and capped at **40 grapheme clusters and 200 UTF-16 units** — a cluster has no length of its own, so both halves are needed for「40 characters」to also mean「not a wall of text」— and bidi/format controls (U+202A–202E, U+2066–2069, U+061C, U+200E/F) are removed, since a name is not allowed to change the direction the rest of the status line reads in |
 | `data-open-on-hash` | `"1"` lets `#inbox` in the URL open the panel at load. Off by default — see "Opening the panel programmatically" |
+| `data-ai-log` | `"0"` opts this mount out of the deferred question log entirely — see "What the visitor asked the machine". Anything else, including the attribute being absent, leaves it on |
 | `data-api-base` | override the feelreef origin (previews) |
 | `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides |
 
@@ -88,6 +89,59 @@ visitor's own action in the panel) and cannot vouch for one it reads; a `ts` in 
 expire at all.
 
 There is no in-place switch for an already-mounted panel, on purpose. If you need one, reload.
+
+## What the visitor asked the machine (0.7.6)
+
+Every question a visitor asks reaches a person; the machine only answers first so nobody has to
+wait. From 0.7.6 the questions asked through the ask-the-site half are shown to the site's owner
+in their Inbox — as an aggregate, under 「AI 已答」, which never notifies anybody.
+
+**It is a deferred write, and the shape is the point.**
+
+- The questions stay in **this browser**, in the same `localStorage` the conversation handle lives
+  in, keyed `reef-inbox:ai:<kind>:<id>`.
+- They leave **at most once per `pagehide`, and only when there is something new** — as a
+  `navigator.sendBeacon`, or the moment the visitor presses for a person, whichever comes first.
+  Never one request per question, and a second `pagehide` with nothing new sends nothing. It is
+  **not** once per session: a visitor who asks something on a second page sends the same
+  `session_id` again, carrying the whole session, which is why the endpoint is idempotent on that
+  id rather than inserting a row per request.
+- **A send that is refused changes nothing.** A beacon the browser will not take, a fetch that
+  never arrives, anything but a 2xx: the questions stay in this browser and the next `pagehide`
+  carries them. Only an accepted send moves the mark, and only the escalation press — which
+  happens with the page still alive — waits to hear what the server said.
+- A session spans **pages**, not documents: on a static site every navigation is a new `mount()`,
+  so a per-document buffer would make the page sequence — the whole reason the row exists — always
+  one entry long. Thirty idle minutes ends a session instead.
+- **Only when the site has an Inbox.** The coral asks `GET /api/inbox/session?kind=…&id=…` the
+  first time a visitor actually types a question (not at mount — that would be a request on every
+  page view of every site to answer a question that matters on a small share of them). A definite
+  answer is cached for six hours; a probe that could not answer — no network, or the endpoint's own
+  `throttled` — is **not** an answer, so it is never written down as「no」, and it is retried at most
+  once every five minutes rather than once per question. The six hours are counted from the answer
+  itself: a probe that could not answer **does not extend them**, so a cached「no」expires on
+  schedule however many failed probes there have been since. Not knowing behaves exactly like「no」for
+  sending: nothing leaves until somebody actually says yes. A KAITO-only tenant writes nothing,
+  ever, and while that answer stands an unclaimed site holds nothing either — the buffer is dropped
+  every time, not only when the answer first arrives.
+- **The machine's answers are never sent**, and cannot be: what travels is the visitor's own
+  question, the path it was asked on, the cited passage's URL (or `null`), the page's locale, and
+  the time. The row is assembled from that list of five fields rather than from whatever the buffer
+  holds, and the citation must parse as an `http(s)` URL — so an answer handed in by mistake lands
+  as `null` instead of on the wire. Query strings never travel: a page is `/pricing`, not
+  `/pricing?token=…`.
+- **Caps are applied on the way in**, so a hostile client cannot bloat a row: 20 questions per
+  session, 500 characters each, 40 pages of at most 200 characters, oldest dropped first — and the
+  page sequence is bounded in UTF-8 octets as well, because the transport's ~64 KiB budget counts
+  octets while every cap above counts characters, and one CJK character is three of them. The
+  conversation handle is bounded too, at 64 characters — the length the contract gives
+  `session_id`, its twin — and a handle that is not a non-empty string is dropped rather than sent.
+- **If storage stops accepting writes** (a full quota, not a disabled store), the session continues
+  in memory for the rest of the document, under the same caps. What it loses is the ability to
+  outlive that document or be seen by another tab — never the questions already asked, which is
+  what a stale read would have cost.
+
+The escalation press stays the only thing that notifies the owner. This log does not.
 
 ## The three things not to break
 

@@ -590,9 +590,14 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	const api = await import('./inbox-bubble.js');
 	assert.equal('acceptHandoff' in api, false, 'acceptHandoff is exported again');
 	assert.equal('handoffState' in api, false, 'handoffState is exported again');
-	// The one window listener that remains names no conversation: it says "open", nothing more.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	// 🔴 NEITHER WINDOW LISTENER NAMES A CONVERSATION, which is the claim B3 actually left behind —
+	// not the count. `reef-inbox:open` says "open", nothing more; `pagehide` (0.7.6, ruling 54) is
+	// the browser's own event and takes no argument at all. The count is asserted so that a THIRD
+	// one has to be a deliberate act, and both are named so that swapping one for a listener that
+	// does take a handle cannot pass by keeping the total the same.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('pagehide', \(\) => aiLog\.flush\(\)\);/);
 });
 
 // REVIEW B3, ROUND 3: the test that used to sit here asserted that the header SENTENCE existed
@@ -620,8 +625,11 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 // REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
 // The honest half of the fix is that there is now only ONE of them, and the file says so.
 
-test('B9: one window listener per mount, and mount() documents that nothing removes it', () => {
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+test('B9: the window listeners per mount are bounded, and mount() documents that nothing removes them', () => {
+	// Two since 0.7.6 (`reef-inbox:open` and ruling 54's `pagehide`). B9's cost is unchanged in
+	// kind — a page accumulates a fixed number per element it ever mounted, not per re-render —
+	// and this number is pinned so growing it stays a decision somebody makes on purpose.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
 	assert.equal(CORAL_CODE.includes('removeEventListener'), false,
 		'a teardown appeared — B9 can now be closed properly, and this test should assert it instead');
 	assert.match(CORAL_SOURCE, /no teardown to remove it from \(review B9, still open\)/);
@@ -1231,4 +1239,1306 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 	});
 	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
 	assert.equal(name, '\u5C0F\u7F8E');
+});
+
+// ── ruling 54: the deferred question log ────────────────────────────────────────────────────
+//
+// Everything below drives `createAiLog` with an injected world — a Map for storage, a counter for
+// the clock, an array for the transport — because the behaviour worth pinning is arithmetic, and
+// arithmetic that can only be exercised through a browser is arithmetic nobody exercises.
+
+const {
+	AI_LOG_CLAIM_RETRY_MS, AI_LOG_CLAIM_TTL_MS, AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS,
+	AI_LOG_MAX_FIELD, AI_LOG_MAX_PAGES, AI_LOG_MAX_PAGE_BYTES, AI_LOG_MAX_TEXT,
+	AI_LOG_MAX_WIRE_BYTES, AI_LOG_MAX_HANDLE, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiHandle,
+	aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiPages, capAiQuestions, createAiLog,
+	parseAiLog, probeInboxClaim, sendAiSession, utf8Bytes
+} = await import('./inbox-bubble.js');
+
+function logFixture(over = {}) {
+	const cells = new Map();
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => cells.set(k, v)
+	};
+	const sent = [];
+	let clock = 1_700_000_000_000;
+	let n = 0;
+	const log = createAiLog({
+		tenant: 'site:acme',
+		kind: 'site',
+		id: 'acme',
+		storage,
+		now: () => clock,
+		newId: () => `sid-${++n}`,
+		send: (payload) => {
+			sent.push(payload);
+			return true;
+		},
+		probeClaim: async () => true,
+		...over
+	});
+	return {
+		log, sent, cells, storage,
+		tick: (ms) => (clock += ms),
+		at: () => clock,
+		/** The claim probe is a promise; let it settle before asserting on a flush. */
+		settle: () => new Promise((r) => setTimeout(r, 0))
+	};
+}
+
+test('54: the caps are applied on the way IN — 20 questions of 500 chars, oldest dropped', () => {
+	const rows = [];
+	for (let i = 0; i < 25; i++) rows.push({ text: `q${i}`, page: '/', hit: null, lang: '', at: i });
+	const capped = capAiQuestions(rows);
+	assert.equal(capped.length, AI_LOG_MAX_QUESTIONS);
+	// The OLDEST went: the newest question — the one somebody would escalate on — is still here.
+	assert.equal(capped[capped.length - 1].text, 'q24');
+	assert.equal(capped[0].text, 'q5');
+
+	const long = capAiQuestions([{ text: 'x'.repeat(4000), page: '/', at: 1 }]);
+	assert.equal(long[0].text.length, AI_LOG_MAX_TEXT);
+	// 🔴 Not `'x'.repeat(n)` alone as the specimen — that cannot tell「kept the head」from
+	// 「kept the tail」. An uneven one can.
+	const uneven = capAiQuestions([{ text: `HEAD${'x'.repeat(4000)}TAIL`, page: '/', at: 1 }]);
+	assert.ok(uneven[0].text.startsWith('HEAD'));
+	assert.ok(!uneven[0].text.endsWith('TAIL'));
+});
+
+test('54: a page is a PATH — no query string, no fragment, ever', () => {
+	assert.equal(aiPagePath('https://shop.example/pricing?token=abc123&email=a@b.c'), '/pricing');
+	assert.equal(aiPagePath('https://shop.example/a/b#inbox'), '/a/b');
+	assert.equal(aiPagePath(''), '/');
+	assert.equal(aiPagePath(undefined), '/');
+	// Consecutive duplicates collapse; a real move does not.
+	assert.deepEqual(appendAiPage(['/a'], '/a'), ['/a']);
+	assert.deepEqual(appendAiPage(['/a'], '/b'), ['/a', '/b']);
+});
+
+test('54: it flushes ONCE — a second pagehide with nothing new sends nothing', async () => {
+	const f = logFixture();
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/pricing', 'https://shop.example/faq', 'ja-jp');
+	await f.settle();
+
+	const first = f.log.flush();
+	assert.ok(first, 'the first flush carries the session');
+	assert.equal(f.sent.length, 1);
+	assert.equal(first.session_id, 'sid-1');
+	assert.equal(first.questions.length, 1);
+	assert.equal(first.questions[0].hit, 'https://shop.example/faq');
+	assert.deepEqual(first.pages, ['/pricing']);
+
+	assert.equal(f.log.flush(), null, 'a second pagehide sends nothing new');
+	assert.equal(f.sent.length, 1);
+
+	// One more question, and the SAME session id goes again — which is exactly why the server
+	// has to be idempotent on it rather than inserting a row per request.
+	f.log.question('and to Korea?', '/pricing', null, 'ja-jp');
+	const second = f.log.flush();
+	assert.equal(second.session_id, 'sid-1');
+	assert.equal(second.questions.length, 2);
+	assert.equal(f.sent.length, 2);
+});
+
+test('54: an unclaimed tenant writes NOTHING, and「we could not ask」is not permission', async () => {
+	const unclaimed = logFixture({ probeClaim: async () => false });
+	unclaimed.log.page('/');
+	unclaimed.log.question('anyone there?', '/', null, '');
+	await unclaimed.settle();
+	assert.equal(unclaimed.log.flush(), null);
+	assert.equal(unclaimed.sent.length, 0);
+	// 🔴 And it did not merely refuse to send — it stopped holding them.
+	assert.equal(unclaimed.log.state().questions.length, 0);
+
+	// A probe that never answered leaves `claim` null, and null behaves exactly like false.
+	const unknown = logFixture({ probeClaim: async () => null });
+	unknown.log.question('anyone there?', '/', null, '');
+	await unknown.settle();
+	assert.equal(unknown.log.flush(), null);
+	assert.equal(unknown.sent.length, 0);
+	// …but the questions are still HELD, so the next page view can send them once we know.
+	assert.equal(unknown.log.state().questions.length, 1);
+});
+
+test('54: data-ai-log="0" buffers nothing, probes nothing, sends nothing', async () => {
+	const f = logFixture({ enabled: false });
+	assert.equal(f.log.enabled(), false);
+	f.log.page('/');
+	f.log.question('hello?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+	assert.equal(f.log.state(), null);
+	assert.equal(f.cells.size, 0, 'nothing reached storage either');
+});
+
+test('54: the press flushes with the handle and CLEARS the session', async () => {
+	const f = logFixture({ probeClaim: async () => null });
+	f.log.page('/pricing');
+	f.log.question('can I return it?', '/pricing', null, '');
+	// 🔴 No settled probe at all here, on purpose: a minted conversation id is itself proof the
+	// tenant is claimed, so escalation must send without one.
+	const went = await f.log.escalated('conv-7');
+	assert.ok(went);
+	assert.equal(went.handle, 'conv-7');
+	assert.equal(went.questions.length, 1);
+
+	const after = f.log.state();
+	assert.equal(after.questions.length, 0, 'cleared');
+	assert.equal(after.pages.length, 0);
+	assert.notEqual(after.sid, went.session_id, 'a fresh session, so nothing travels twice');
+	assert.equal(after.claim, true, 'and the claim answer is now known without a probe');
+
+	// A press with nothing buffered sends nothing at all.
+	const quiet = logFixture();
+	assert.equal(await quiet.log.escalated('conv-8'), null);
+	assert.equal(quiet.sent.length, 0);
+});
+
+test('54: a session spans pages and ends on idle, not on navigation', async () => {
+	const f = logFixture();
+	f.log.page('/');
+	f.log.question('what are your hours?', '/', null, '');
+	await f.settle();
+	// A navigation: new document, new mount, same buffer.
+	f.tick(30_000);
+	const second = logFixture();
+	// (the fixture above is a second browser; this one keeps going in the same storage)
+	f.log.page('/contact');
+	assert.deepEqual(f.log.state().pages, ['/', '/contact']);
+	assert.equal(f.log.state().sid, 'sid-1');
+	assert.equal(second.sent.length, 0);
+
+	// Idle past the ceiling and the next page view is a new session — with the claim answer
+	// carried over, since that is a fact about the SITE and not about this visit.
+	f.tick(AI_LOG_IDLE_MS + 1);
+	f.log.page('/again');
+	assert.equal(f.log.state().sid, 'sid-2');
+	assert.deepEqual(f.log.state().pages, ['/again']);
+	assert.equal(f.log.state().claim, true);
+});
+
+test('54: the 21st question is not silently pre-marked as sent by the cap', async () => {
+	const f = logFixture();
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) f.log.question(`q${i}`, '/', null, '');
+	await f.settle();
+	f.log.flush();
+	assert.equal(f.sent.length, 1);
+	assert.equal(f.log.state().sent, AI_LOG_MAX_QUESTIONS);
+
+	// 🩸 `sent` counts from the front, so the cap dropping the oldest has to bring it down too.
+	// Clamping it to the new LENGTH instead makes this question look already-flushed.
+	f.log.question('the one they escalate on', '/', null, '');
+	const went = f.log.flush();
+	assert.ok(went, 'the 21st question still travels');
+	assert.equal(went.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(went.questions[AI_LOG_MAX_QUESTIONS - 1].text, 'the one they escalate on');
+});
+
+test('54: a malformed buffer somebody else wrote is ignored, not thrown', () => {
+	assert.equal(parseAiLog(null), null);
+	assert.equal(parseAiLog({ sid: '', started: 1, last: 1 }), null);
+	assert.equal(parseAiLog({ sid: 'x', started: NaN, last: 1 }), null);
+	const ok = parseAiLog({ sid: 'x', started: 1, last: 2, questions: [{ text: 'a', at: 3 }], sent: 99 });
+	assert.equal(ok.sent, 1, 'a `sent` that outran the buffer cannot永久 convince us there is nothing left');
+	assert.equal(ok.claim, null);
+
+	const f = logFixture();
+	f.cells.set(aiLogKey('site:acme'), '{ not json');
+	f.log.page('/');
+	assert.ok(f.log.state().sid, 'a corrupt cell starts a new session rather than taking the panel down');
+});
+
+test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', async () => {
+	const beacons = [];
+	const okBeacon = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+		navigator: { sendBeacon: (url, blob) => (beacons.push({ url, blob }), true) },
+		Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } }
+	});
+	assert.equal(okBeacon, true);
+	// 🔴 `application/json`, not the `text/plain` a bare-string beacon sends — the endpoint
+	// refuses an unlabelled body, so this is the difference between sending and appearing to.
+	assert.equal(beacons[0].blob.type, 'application/json');
+	assert.equal(beacons[0].blob.parts[0], '{"a":1}');
+
+	const calls = [];
+	const viaFetch = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+		navigator: {},
+		fetch: (url, init) => (calls.push({ url, init }), Promise.resolve({ ok: true }))
+	});
+	// 🔴 A PROMISE, not a bare `true` (review D1): the fetch path is the one that can be answered,
+	// so what it hands back is what the SERVER said rather than what the browser accepted.
+	assert.equal(await viaFetch, true);
+	assert.equal(calls[0].init.keepalive, true);
+	assert.equal(calls[0].init.headers['content-type'], 'application/json');
+
+	// No transport at all is `false`, never a throw inside a pagehide handler.
+	assert.equal(sendAiSession('u', {}, { navigator: {}, fetch: null }), false);
+});
+
+// ── review D4 (2026-09-08, round 2): the fallback missed the case it was written for ─────────
+//
+// 🩸 The comment above the beacon said the fetch below it exists for「a browser that counts it
+// against a quota」— and the spec's answer to being over quota is `sendBeacon` RETURNING FALSE,
+// which the code returned straight to the caller. The fallback covered the throw, which hardly
+// happens, and missed the false, which is the documented one. With D1 in place a false is not
+// merely a lost send: it is the answer that decides whether the buffer survives.
+
+const RecordingBlob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
+
+test('D4: a beacon that refuses falls through to the keepalive fetch, and one that throws does too', async () => {
+	for (const [name, sendBeacon] of [
+		['returns false (over quota — the documented answer)', () => false],
+		['throws', () => { throw new Error('quota'); }],
+		['answers something that is not true', () => undefined]
+	]) {
+		const calls = [];
+		const out = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+			navigator: { sendBeacon },
+			Blob: RecordingBlob,
+			fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true, status: 200 }))
+		});
+		assert.equal(calls.length, 1, `a beacon that ${name} lost the session`);
+		assert.equal(JSON.parse(calls[0].body).a, 1);
+		assert.equal(await out, true);
+	}
+
+	// With no fetch to fall through TO, a refused beacon is an honest `false` — which is what
+	// keeps the questions in the browser rather than reporting them told.
+	assert.equal(sendAiSession('u', { a: 1 },
+		{ navigator: { sendBeacon: () => false }, Blob: RecordingBlob, fetch: null }), false);
+});
+
+/** Every field of a question at its character cap, in a script where one character is 3 octets. */
+const worstCaseQuestions = () => {
+	const rows = [];
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) {
+		rows.push({ text: '嗎'.repeat(AI_LOG_MAX_TEXT), page: '/' + '產品'.repeat(99),
+			hit: `https://shop.example/${'a'.repeat(150)}`, lang: 'zh-tw', at: 1_770_000_000_000 });
+	}
+	return rows;
+};
+
+test('D4: the questions are bounded in OCTETS too, and the two units are not the same number', () => {
+	const capped = capAiQuestions(worstCaseQuestions());
+	assert.equal(capped.length, AI_LOG_MAX_QUESTIONS, 'a legitimate Chinese session lost questions');
+	const bytes = utf8Bytes(JSON.stringify(capped));
+	// 🔴 THE ARITHMETIC NOBODY HAD DONE. 20 × 500 characters is a number about UTF-16; what the
+	// transport counts is this one, and it is three times bigger in Chinese. The questions are
+	// bounded by the character caps alone — raise `AI_LOG_MAX_TEXT` or `AI_LOG_MAX_QUESTIONS`
+	// past what the wire will take and this goes red before a visitor's session does.
+	assert.ok(bytes > JSON.stringify(capped).length, 'this specimen is not measuring octets at all');
+	assert.ok(bytes < AI_LOG_MAX_WIRE_BYTES * 0.75,
+		`the questions alone are ${bytes} octets — there is no room left for the page sequence`);
+
+	// The counting itself, against the cases a hand-rolled encoder gets wrong.
+	assert.equal(utf8Bytes('abc'), 3);
+	assert.equal(utf8Bytes('é'), 2);
+	assert.equal(utf8Bytes('嗎'), 3);
+	assert.equal(utf8Bytes('😀'), 4, 'a surrogate pair is one character and four octets');
+	assert.equal(utf8Bytes('\ud800'), 3, 'a lone surrogate is what it encodes as, not a crash');
+	assert.equal(utf8Bytes(null), 0);
+});
+
+test('D4: a body over the wire budget skips the beacon for the path that can report failure', () => {
+	const beacons = [];
+	const calls = [];
+	const env = {
+		navigator: { sendBeacon: (url, blob) => (beacons.push(blob), true) },
+		Blob: RecordingBlob,
+		fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true }))
+	};
+	assert.equal(sendAiSession('u', { q: 'a'.repeat(100) }, env), true);
+	assert.equal(beacons.length, 1, 'an ordinary body did not take the beacon');
+	assert.equal(calls.length, 0);
+
+	sendAiSession('u', { q: '嗎'.repeat(AI_LOG_MAX_WIRE_BYTES / 2) }, env);
+	assert.equal(beacons.length, 1, 'a body the beacon cannot carry was handed to it anyway');
+	assert.equal(calls.length, 1);
+});
+
+// ── review D5 (2026-09-08, round 2): pages[] was bounded in count and in nothing else ────────
+//
+// 🩸 `AI_LOG_MAX_FIELD`'s own comment says「Longest path or locale tag kept, so neither can be
+// used to pad a row」, and `questions[].page` really did go through it. The identical value in
+// `pages[]` went through nothing: the review planted a 50,001-character path in this browser's
+// cell and watched it reach the wire whole, next to a `questions[0].page` capped to one.
+
+test('D5: a page is bounded in length, in count, and in octets — the constant\'s comment is true now', () => {
+	const long = '/' + 'x'.repeat(50_000);
+	assert.equal(capAiPages([long])[0].length, AI_LOG_MAX_FIELD, 'a 50,001-character path went whole');
+	assert.equal(appendAiPage([], long)[0].length, AI_LOG_MAX_FIELD);
+	// The same bound on the way OUT of storage — the review's probe wrote the cell directly.
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2, pages: [long] }).pages[0].length,
+		AI_LOG_MAX_FIELD);
+	// …and on the way onto the wire, which is the only measurement the endpoint ever makes.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 's', pages: [long], questions: [{ text: 'q', page: '/', at: 1 }] });
+	assert.equal(body.pages[0].length, AI_LOG_MAX_FIELD);
+
+	// Count, unchanged, and still the OLDEST that go.
+	let pages = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES + 5; i++) pages = appendAiPage(pages, `/p${i}`);
+	assert.equal(pages.length, AI_LOG_MAX_PAGES);
+	assert.equal(pages[pages.length - 1], `/p${AI_LOG_MAX_PAGES + 4}`);
+
+	// Octets: forty Chinese paths at the character cap is 24 KiB, which is more of the beacon's
+	// budget than the page sequence gets. The newest survive.
+	const cjkPath = (i) => `/${i}` + '產品'.repeat(95); // 192 characters, 574 octets
+	let cjk = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES; i++) cjk = appendAiPage(cjk, cjkPath(i));
+	assert.ok(cjkPath(0).length <= AI_LOG_MAX_FIELD, 'the specimen is measuring the length cap');
+	assert.ok(cjk.length < AI_LOG_MAX_PAGES, 'the octet budget never bit');
+	assert.ok(utf8Bytes(JSON.stringify(cjk)) <= AI_LOG_MAX_PAGE_BYTES);
+	assert.equal(cjk[cjk.length - 1], cjkPath(AI_LOG_MAX_PAGES - 1));
+
+	// Consecutive duplicates still collapse, and the dedupe compares what will be STORED — a
+	// reload of a path longer than the cap is not a second page either.
+	assert.deepEqual(appendAiPage(['/a'], '/a'), ['/a']);
+	assert.deepEqual(appendAiPage(['/a'], '/b'), ['/a', '/b']);
+	assert.deepEqual(appendAiPage([long], long).length, 1);
+});
+
+test('D5+D4: the worst session this coral can hold still fits what the transport carries', () => {
+	// Every cap at its ceiling, in the script where a character costs three octets — the profile
+	// the review measured at 70,403 bytes, over the beacon's 64 KiB. Assembled the way the coral
+	// assembles it, not by hand: caps in, wire out.
+	let pages = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES; i++) pages = appendAiPage(pages, `/${i}` + '產品'.repeat(95));
+	// 🩸 THE HANDLE IS A CAP NOW, NOT A CONVENTION (review E2). This specimen used to hand in
+	// `'c'.repeat(64)` — a number no line of code was enforcing, so the gate measured the world it
+	// had chosen rather than the worst session this coral can hold. What goes in is a handle
+	// nobody bounded; what has to come out is the bound.
+	const body = aiSessionPayload('site', 'a-tenant-with-a-long-enough-id', {
+		sid: 'x'.repeat(64), pages, questions: worstCaseQuestions(), handle: 'c'.repeat(200_000)
+	});
+	assert.equal(body.handle.length, AI_LOG_MAX_HANDLE, 'nothing capped the handle');
+	const bytes = utf8Bytes(JSON.stringify(body));
+	assert.ok(bytes < AI_LOG_MAX_WIRE_BYTES,
+		`the worst session this coral can hold is ${bytes} octets — the beacon would refuse it`);
+	// And it is not a hollow pass: the body really is most of the budget, in a unit the caps
+	// themselves never counted in.
+	assert.ok(bytes > AI_LOG_MAX_WIRE_BYTES / 2, 'this specimen is not the worst case any more');
+});
+
+// ── review D1 (2026-09-08, round 2): a transport that says no must not destroy the buffer ────
+//
+// 🩸 `escalated()` computed `went`, returned it, and cleared the session either way. The review's
+// probe — `send: () => false` — asked two questions, pressed for a person, and watched both
+// questions vanish from the browser while the caller got `null` back and could not tell. That is
+// the one row this whole file exists to carry: the question somebody escalated ON.
+//
+// What is pinned below is the rule in all four of the transport's tenses.
+
+test('D1: a beacon that refuses keeps the buffer, and the next pagehide carries it', async () => {
+	let accept = false;
+	const f = logFixture({ send: (p) => (accept ? (f.sent.push(p), true) : false) });
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/pricing', null, '');
+	f.log.question('and to Korea?', '/pricing', null, '');
+
+	assert.equal(await f.log.escalated('conv-7'), null, 'a refused send reported as a send');
+	assert.equal(f.sent.length, 0);
+	// 🔴 THE MEASUREMENT. Both questions are still in this browser — in memory AND in storage,
+	// because a second tab, or the next document, reads the cell and not the variable.
+	assert.deepEqual(f.log.state().questions.map((q) => q.text),
+		['do you ship to Japan?', 'and to Korea?']);
+	assert.equal(f.log.state().sent, 0);
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 2);
+	// The handle and the claim answer survive the failure too — they were never the network's.
+	assert.equal(f.log.state().handle, 'conv-7');
+	assert.equal(f.log.state().claim, true);
+
+	// The next pagehide is the retry, under the SAME session id — which is why the server side
+	// is idempotent on it rather than inserting a row per request.
+	accept = true;
+	const went = f.log.flush();
+	assert.ok(went, 'the retry sent nothing');
+	assert.equal(went.questions.length, 2);
+	assert.equal(went.handle, 'conv-7');
+});
+
+test('D1: only a 2xx clears — a rejected fetch and a 404 both leave the questions where they are', async () => {
+	for (const [name, answer] of [
+		['a rejected fetch', () => Promise.reject(new Error('offline'))],
+		['a 404 not_claimed', () => Promise.resolve(false)],
+		['a 429', () => Promise.resolve(false)]
+	]) {
+		const f = logFixture({ send: () => answer() });
+		f.log.question('is anybody there?', '/', null, '');
+		assert.equal(await f.log.escalated('conv-9'), null, `${name} was read as a send`);
+		assert.equal(f.log.state().questions.length, 1, `${name} destroyed the buffer`);
+		assert.equal(f.log.state().sent, 0);
+	}
+
+	// And the 2xx — the one answer that does clear it, replay included.
+	const ok = logFixture({ send: () => Promise.resolve(true) });
+	ok.log.question('is anybody there?', '/', null, '');
+	const went = await ok.log.escalated('conv-9');
+	assert.ok(went, 'a 2xx did not clear the session');
+	assert.equal(ok.log.state().questions.length, 0);
+	assert.notEqual(ok.log.state().sid, went.session_id);
+});
+
+test('D1: a pagehide flush that the server later refuses is un-sent, not left marked told', async () => {
+	let served = false;
+	const f = logFixture({ send: () => Promise.resolve(served) });
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+
+	// The pagehide itself cannot wait — it hands the request over and the document may be gone.
+	assert.ok(f.log.flush(), 'the flush did not go out at all');
+	assert.equal(f.log.state().sent, 1, 'queued means marked sent until we hear otherwise');
+	await f.settle();
+	// …and this document did survive (a bfcache restore), so the answer arrived: not stored.
+	assert.equal(f.log.state().sent, 0, 'a refused send stayed marked as told');
+	served = true;
+	const again = f.log.flush();
+	assert.equal(again.questions.length, 1, 'the second pagehide did not carry it');
+	await f.settle();
+	assert.equal(f.log.state().sent, 1);
+	assert.equal(f.log.flush(), null, 'a stored session went a third time');
+});
+
+// ── review D2/D8 (2026-09-08, round 2):「we do not know」is not「there is no Inbox」 ──────────
+//
+// 🩸 THE FIELD THAT EXISTS TO SPLIT THOSE TWO WAS NEVER READ. Contract §一.1 answers a
+// rate-limited probe with 200 `{claimed:false, throttled:true}` rather than 429, precisely so a
+// coral that cannot ask does not write — and the coral flattened it back to `false`, which does
+// not merely refuse to send: it EMPTIES this browser's buffer and caches the no for six hours.
+// The probe shares the `read` bucket with a 15-second transcript poll, so on a busy site that is
+// the ordinary path, and nothing anywhere would have gone red.
+
+test('D2: the probe reads all four contract answers, and only two of them are answers', async () => {
+	const saved = globalThis.fetch;
+	try {
+		const probe = async (body, ok = true) => {
+			globalThis.fetch = async () => ({ ok, json: async () => body });
+			return probeInboxClaim('https://feelreef.com', 'site', 'acme');
+		};
+		assert.equal(await probe({ ok: true, claimed: true }), true, 'a claimed site');
+		assert.equal(await probe({ ok: true, claimed: false }), false, 'a KAITO-only site');
+		// 🔴 The one the review found. It arrives DRESSED AS A NO — same `claimed:false` — and the
+		// only thing telling it apart is the field this line reads.
+		assert.equal(await probe({ ok: true, claimed: false, throttled: true }), null,
+			'a throttled probe was read as「this site has no Inbox」');
+		assert.equal(await probe({ ok: true, claimed: true, throttled: true }), null);
+		assert.equal(await probe({ ok: false, reason: 'bad_kind' }, false), null);
+		assert.equal(await probe({ ok: true }), null, 'a shape we cannot read is not a no either');
+		globalThis.fetch = async () => { throw new TypeError('network'); };
+		assert.equal(await probeInboxClaim('https://feelreef.com', 'site', 'acme'), null);
+	} finally {
+		globalThis.fetch = saved;
+	}
+});
+
+test('D2: a throttled probe holds the questions, writes down nothing, and retries on the backoff', async () => {
+	let answer = null; // 「we do not know」
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, answer) });
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().claim, null, 'a non-answer was cached as an answer');
+	assert.equal(f.log.state().questions.length, 1, 'a non-answer emptied the buffer');
+	// Unknown is still not permission: nothing leaves until somebody actually says yes.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// 🔴 AND IT IS BOUNDED (D8). The review measured one probe per question against a manifest
+	// that promises at most one per six hours; eight more questions now cost none.
+	for (let i = 0; i < 8; i++) f.log.question(`q${i}`, '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a non-answer re-asked on every question');
+
+	// A backoff, not a cache: it asks again five minutes later, and nothing was lost meanwhile.
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	answer = true;
+	f.log.question('and to Korea?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2);
+	assert.equal(f.log.state().claim, true);
+	const went = f.log.flush();
+	assert.equal(went.questions.length, 10, 'the questions asked while we did not know were dropped');
+	assert.equal(went.questions[0].text, 'do you ship to Japan?');
+
+	// The shorter window belongs to not-knowing only — a definite answer still gets six hours.
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('one more', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2, 'a definite answer was re-asked inside its TTL');
+	f.tick(AI_LOG_CLAIM_TTL_MS);
+	f.log.question('and another', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 3, 'the six-hour TTL never expired');
+});
+
+test('D2: a probe that never came back is the same non-answer, bounded the same way', async () => {
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => { probes++; throw new TypeError('network'); } });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.state().claim, null);
+	assert.equal(f.log.state().questions.length, 1, 'a network failure dropped the buffer');
+	assert.equal(f.log.flush(), null);
+
+	f.log.question('still anyone?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a thrown probe re-asked immediately');
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('hello?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2);
+});
+
+// ── review D9/D8 (2026-09-08, round 2): three public documents said the opposite of the wire ──
+//
+// 🩸 The README and the manifest promised「only ONCE per session」, and the contract's own §一 says
+// the same `session_id` is sent MORE than once — that is why the endpoint has to be idempotent on
+// it, and this suite's own flush-once test asserts a second send under `sid-1`. The manifest is
+// where this coral tells an integrator what it calls; a sentence there that the code contradicts
+// is not a typo, it is the wrong answer to「what does this thing do to my visitors」.
+
+const MANIFEST = JSON.parse(
+	readFileSync(fileURLToPath(new URL('./manifest.json', import.meta.url)), 'utf8'));
+const MANIFEST_CALLS = MANIFEST.calls.join('\n');
+const MANIFEST_STORES = MANIFEST.stores.join('\n');
+
+test('D9: the README and the manifest describe the flush the contract describes', () => {
+	// The claim that was false. It is not once per session — it is once per pagehide, when there
+	// is something new, and the same session id goes again as the session grows.
+	assert.equal(/ONCE per session/.test(MANIFEST_CALLS), false, 'the manifest still says it');
+	// The README may still say the phrase exactly once — to deny it. A second occurrence is a
+	// claim again, which is how the first one got there.
+	assert.deepEqual(README.match(/once per session/gi), ['once per session']);
+	assert.match(README, /\*\*not\*\* once per session/, 'the README asserts it rather than denying it');
+	assert.match(README, /at most once per `pagehide`, and only when there is something new/);
+	assert.match(MANIFEST_CALLS, /idempotent/,
+		'the manifest describes a repeat send without saying why that is safe');
+
+	// D8: the six-hour sentence was true of an answer and false of everything else, and the
+	// failure path is the one an integrator's request count actually sees.
+	const hours = Number(CORAL_CODE.match(/AI_LOG_CLAIM_TTL_MS = (\d+) \* 60 \* 60 \* 1000;/)[1]);
+	const minutes = Number(CORAL_CODE.match(/AI_LOG_CLAIM_RETRY_MS = (\d+) \* 60 \* 1000;/)[1]);
+	assert.equal(hours, 6);
+	assert.equal(minutes, 5);
+	assert.match(MANIFEST_CALLS, /at most once every five minutes while it cannot/);
+	assert.match(README, /retried at most\s+once every five minutes/);
+	assert.match(README, /A definite\s+answer is cached for six hours/);
+	// E1: and the six hours are counted from the answer, which is the half that was untrue —
+	// the sentence above was being kept true only by a browser nobody had put in that state.
+	assert.match(README, /does not extend them/);
+	assert.match(MANIFEST_CALLS, /does not extend the six hours of the answer it could not refresh/);
+
+	// D10, D5, D7 and D3's structural half — each of them changed what these documents may claim.
+	assert.match(README, /dropped\s+every time, not only when the answer first arrives/);
+	assert.match(MANIFEST_STORES, /dropped every time/);
+	assert.match(README, /40 pages of at most 200 characters/);
+	assert.match(README, /bounded in UTF-8 octets/);
+	// E2: the row's last uncapped field, named in both documents now that a line of code enforces it.
+	const handleCap = Number(CORAL_CODE.match(/AI_LOG_MAX_HANDLE = (\d+);/)[1]);
+	assert.equal(handleCap, 64);
+	assert.match(README, new RegExp(`conversation handle is bounded too, at ${handleCap} characters`));
+	assert.match(MANIFEST_STORES, new RegExp(`a conversation handle of ${handleCap}`));
+	assert.match(README, /must parse as an `http\(s\)` URL/);
+	assert.match(README, /\*\*If storage stops accepting writes\*\*/);
+});
+
+// ── review D10 (2026-09-08, round 2): the drop was honoured once, not every time ─────────────
+//
+// 🩸 The first `claimed:false` cleared the buffer; after that the six-hour cache took the early
+// return and every question asked in those six hours accumulated in the visitor's browser — up
+// to 20 × 500 characters, never sent, but HELD. The online guarantee held (a KAITO-only tenant
+// received nothing) and the README's sentence — that an unclaimed answer drops what is buffered
+// rather than「holding it against the day somebody claims the inbox」— did not.
+
+test('D10: a site with no Inbox holds nothing, on every question and every page after the answer', async () => {
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, false) });
+	f.log.page('/');
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().questions.length, 0, 'the answer did not drop what was buffered');
+
+	// A minute later, inside the six-hour cache — the review measured one question held here.
+	f.tick(60_000);
+	f.log.question('hello?', '/', null, '');
+	f.log.question('is anyone reading this?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a cached answer was re-asked');
+	assert.equal(f.log.state().questions.length, 0, 'the questions are being held after all');
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 0,
+		'they are being held in storage, which is where they outlive the tab');
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// And the page sequence does not refill between questions either.
+	f.log.page('/pricing');
+	f.log.page('/contact');
+	assert.deepEqual(f.log.state().pages, []);
+
+	// The buffer comes back the moment somebody claims the inbox — that is what the TTL is for,
+	// and the answer that arrives then is about the site, not retroactively about this visit.
+	f.tick(AI_LOG_CLAIM_TTL_MS + 1);
+	// A later mount, same browser, same clock — the answer is due to be asked again by now.
+	const claimed = logFixture({ storage: f.storage, now: f.at, probeClaim: async () => true });
+	claimed.log.question('now?', '/', null, '');
+	await claimed.settle();
+	assert.equal(claimed.log.state().questions.length, 1);
+});
+
+// ── review D7 (2026-09-08, round 2): a storage that stops taking writes ──────────────────────
+//
+// 🩸 The review asked three questions with a full quota and the buffer held ONE — the newest, on
+// its own. Because every method re-reads the cell, a failed write meant the next read came back
+// with the state from before the question that failed, over and over. The owner would have seen
+// a visitor who asked once, which is indistinguishable from a visitor who did.
+
+test('D7: a full quota keeps the session in memory, not the last question on its own', async () => {
+	const cells = new Map();
+	let full = false;
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => {
+			if (full) throw new Error('QuotaExceededError');
+			cells.set(k, v);
+		}
+	};
+	const f = logFixture({ storage });
+	f.log.page('/');
+	f.log.question('第一題', '/', null, '');
+	await f.settle();
+
+	full = true; // the quota fills — subsequent writes throw, reads still work
+	f.log.question('第二題', '/', null, '');
+	f.log.question('第三題', '/', null, '');
+	assert.deepEqual(f.log.state().questions.map((q) => q.text), ['第一題', '第二題', '第三題'],
+		'the buffer fell back to what storage last accepted');
+	const went = f.log.flush();
+	assert.equal(went.questions.length, 3, 'a partial record went to the owner');
+
+	// The caps still bound what memory holds —「keep the last N」is the same N as ever.
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS + 5; i++) f.log.question(`q${i}`, '/', null, '');
+	assert.equal(f.log.state().questions.length, AI_LOG_MAX_QUESTIONS);
+	// …and what it cannot do is be shared: storage still holds the last thing it accepted.
+	assert.equal(JSON.parse(cells.get(aiLogKey('site:acme'))).questions.length, 1);
+
+	// When the store starts accepting writes again it is the source of truth again.
+	full = false;
+	f.log.question('後來', '/', null, '');
+	const stored = JSON.parse(cells.get(aiLogKey('site:acme')));
+	assert.equal(stored.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(stored.questions[stored.questions.length - 1].text, '後來');
+});
+
+// ── review D6 (2026-09-08, round 2): one browser, two tabs, one idempotency key ──────────────
+//
+// 🩸 `flush()` was the only method that did not start by re-reading storage, and the only one
+// that reaches the network. The review opened two tabs on one localStorage: tab A's pagehide sent
+// four questions, tab B's sent the two it had held since it mounted — same `session_id`, shorter
+// body, and what the server does with a session that got SHORTER is not something this side can
+// see. The fix is the line the other three methods already have.
+
+/** Two mounts of the same tenant in the same browser — one storage, two in-memory states. */
+function twoTabs() {
+	const cells = new Map();
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => cells.set(k, v)
+	};
+	let clock = 1_700_000_000_000;
+	let n = 0;
+	const open = () => {
+		const sent = [];
+		const log = createAiLog({
+			tenant: 'site:acme', kind: 'site', id: 'acme', storage,
+			now: () => clock, newId: () => `sid-${++n}`,
+			send: (p) => (sent.push(p), true),
+			probeClaim: async () => true
+		});
+		return { log, sent };
+	};
+	return { open, cells, tick: (ms) => (clock += ms), settle: () => new Promise((r) => setTimeout(r, 0)) };
+}
+
+test('D6: a second tab flushes what the BROWSER holds, not what it happened to mount with', async () => {
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	a.log.question('請問有現貨嗎', '/', null, '');
+	a.log.question('可以退貨嗎', '/', null, '');
+
+	// The visitor opens a second tab here. Its memory stops at these two questions for good.
+	const b = browser.open();
+	a.log.question('那有大尺碼嗎', '/', null, '');
+	a.log.question('運費多少', '/', null, '');
+	await browser.settle();
+
+	// Tab B's pagehide fires first — the phone was backgrounded on that tab.
+	const wentB = b.log.flush();
+	assert.ok(wentB, 'the second tab sent nothing at all');
+	assert.equal(wentB.questions.length, 4, 'the second tab sent a SHORTER body under the same key');
+	assert.deepEqual(wentB.questions.map((q) => q.text),
+		['請問有現貨嗎', '可以退貨嗎', '那有大尺碼嗎', '運費多少']);
+	// It is the same session id either way — which is exactly why the shorter body was dangerous.
+	assert.equal(wentB.session_id, 'sid-1');
+
+	// And tab A's pagehide now costs nothing: the browser's own record says it already went.
+	assert.equal(a.log.flush(), null, 'the same four questions travelled twice');
+	assert.equal(a.sent.length, 0);
+});
+
+test('D6: the claim answer another tab learned is honoured too, and an idle session is not rotated by a flush', async () => {
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	const b = browser.open();
+	b.log.page('/contact'); // a mount records its page view, which is how a tab joins the session
+	a.log.question('anyone there?', '/', null, '');
+	await browser.settle(); // tab A's probe answers yes and writes it down
+
+	// Tab B never probed — its own `state.claim` is what it mounted with, which is null.
+	assert.equal(b.log.state().claim, null);
+	const went = b.log.flush();
+	assert.ok(went, 'the second tab held questions it was already allowed to send');
+	assert.equal(went.questions[0].text, 'anyone there?');
+
+	// 🔴 A flush reads the session, it does not decide whether the session is over: thirty idle
+	// minutes later the unsent questions still go, rather than being rotated away unsent.
+	const c = twoTabs();
+	const one = c.open();
+	one.log.question('do you ship to Japan?', '/', null, '');
+	await c.settle();
+	c.tick(AI_LOG_IDLE_MS + 1);
+	const late = one.log.flush();
+	assert.ok(late, 'a pagehide after an idle gap threw the questions away instead of sending them');
+	assert.equal(late.questions.length, 1);
+});
+
+// ── review D3 (2026-09-08, round 2): the loudest rule in this file had no ruler ──────────────
+//
+// 🩸「The machine's answers are never sent」is written in four places — this file's header, the
+// README, the manifest, contract §一.3 — and the review put the answer on the wire with a
+// two-token edit at the one call site (`answer.source_url` → `answer.text`) while all hundred
+// tests stayed green. Existence assertions cannot see an EXTRA thing: every 54 test above asks
+// whether a value it names is present, and none of them ever asked what ELSE the body carries.
+//
+// So the key sets are enumerated here, against the contract's own list spelled out literally
+// rather than read back out of the code, and the BYTES a real `mount()` sends are measured in
+// mount.test.mjs. A field added to the buffer, to a question row, or to the wire body without
+// being added to the contract turns one of the two red.
+
+const PLANTED_ANSWER = 'THE-MACHINE-SAID-THIS';
+
+test('D3: a question row is BUILT from the whitelist — five fields, and nothing that rode along', () => {
+	assert.deepEqual([...AI_QUESTION_FIELDS], ['text', 'page', 'hit', 'lang', 'at']);
+
+	// The answer under every name a future refactor might hang off the same object, plus the
+	// transcript it came from — the shapes the review's M21/M22 mutations added.
+	const [row] = capAiQuestions([{
+		text: 'do you ship to Japan?', page: '/pricing', hit: 'https://shop.example/faq',
+		lang: 'ja-jp', at: 7,
+		answer: PLANTED_ANSWER,
+		text_answer: PLANTED_ANSWER,
+		kaito: { kind: 'grounded', text: PLANTED_ANSWER },
+		messages: [{ role: 'assistant', body: PLANTED_ANSWER }]
+	}]);
+	assert.deepEqual(Object.keys(row), ['text', 'page', 'hit', 'lang', 'at']);
+	assert.equal(JSON.stringify(row).includes(PLANTED_ANSWER), false,
+		'a field nobody whitelisted travelled with the row');
+});
+
+test('D3: a hit is a URL, so the answer cannot be handed in as one', () => {
+	// 🔴 THIS IS THE STRUCTURAL HALF. `hit` is the only argument of `question()` that could hold
+	// the machine's words, and the fix is not「remember to pass source_url」— it is that prose is
+	// not a URL. The review's own mutation, spelled out:
+	const asAnswer = capAiQuestions([{ text: 'q', page: '/', at: 1,
+		hit: 'We ship to Japan on Tuesdays. See our shipping page for the cut-off times.' }]);
+	assert.equal(asAnswer[0].hit, null, 'a sentence became a hit');
+	// Including one that quotes a URL, which is what a cited answer's text looks like.
+	const withUrl = capAiQuestions([{ text: 'q', page: '/', at: 1,
+		hit: 'Yes — see https://shop.example/faq#stock for the current stock.' }]);
+	assert.equal(withUrl[0].hit, null);
+	// A real citation still travels, whole.
+	assert.equal(capAiQuestions([{ hit: 'https://shop.example/faq#stock' }])[0].hit,
+		'https://shop.example/faq#stock');
+	assert.equal(capAiQuestions([{ hit: 'javascript:alert(1)' }])[0].hit, null);
+	assert.equal(capAiQuestions([{ hit: '/faq' }])[0].hit, null, 'a hit is the PUBLIC url, absolute');
+});
+
+test('D3: the wire body carries the contract keys and no field of the buffer rides along', () => {
+	assert.deepEqual([...AI_SESSION_FIELDS],
+		['kind', 'id', 'session_id', 'pages', 'questions', 'handle']);
+
+	// A buffer holding everything the log holds today, plus everything a future field might be.
+	const body = aiSessionPayload('site', 'acme', {
+		sid: 'sid-1', started: 1, last: 2, sent: 1, claim: true, claimAt: 3,
+		pages: ['/pricing'], handle: null,
+		questions: [{ text: 'can I return it?', page: '/pricing', hit: null, lang: '', at: 4 }],
+		transcript: [{ role: 'assistant', text: PLANTED_ANSWER }],
+		lastAnswer: PLANTED_ANSWER
+	});
+	assert.deepEqual(Object.keys(body).sort(),
+		['id', 'kind', 'pages', 'questions', 'session_id'],
+		'the body grew a key the contract does not name');
+	const json = JSON.stringify(body);
+	assert.equal(json.includes(PLANTED_ANSWER), false);
+	for (const own of ['claim', 'claimAt', '"sent"', 'started', '"last"', '"sid"', 'transcript']) {
+		assert.equal(json.includes(own), false, `the buffer's own \`${own}\` reached the wire`);
+	}
+
+	// `handle` is the sixth key and appears only when this session reached a person.
+	const escalated = aiSessionPayload('site', 'acme',
+		{ sid: 'sid-1', pages: [], questions: [], handle: 'conv-7' });
+	assert.deepEqual(Object.keys(escalated).sort(),
+		['handle', 'id', 'kind', 'pages', 'questions', 'session_id']);
+});
+
+// ── review E1 (2026-09-08, round 3): one field was carrying two different questions ──────────
+//
+// 🩸 D2 stamped `claimAt` on every reply so the backoff had a starting point, and D10 read
+// `claimAt` to decide how old the cached answer was. Separately correct; together, a probe that
+// could not answer re-dated the answer it failed to refresh. The review's scenario is a site the
+// owner opened the Inbox on AFTER a `claimed:false`, and which is then busy enough to throttle
+// every probe: seventy-two hours of hourly questions, sixty of them destroyed, and the six-hour
+// expiry that was supposed to save them never arrived — while all 121 tests stayed green.
+
+test('E1: a probe that could not answer never renews the answer it failed to bring back', async () => {
+	let answer = false; // a KAITO-only site, and then the owner opens the Inbox
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, answer) });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().claim, false);
+	const learned = f.log.state().claimAt;
+	assert.ok(learned, 'the answer was not dated at all');
+
+	// The six hours belong to the answer, and they run out. This is where the owner opened the
+	// Inbox: the site is busy from here on, so every probe comes back throttled — the contract's
+	// 200 `{claimed:false, throttled:true}`, which `probeInboxClaim` reads as null.
+	answer = null;
+	f.tick(AI_LOG_CLAIM_TTL_MS + 1);
+	f.log.question('is anyone reading this?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2, 'the expired answer was never asked about again');
+	assert.equal(f.log.state().questions.length, 1, 'an EXPIRED no still emptied the buffer');
+	assert.equal(f.log.state().claimAt, learned, 'a non-answer re-dated the answer');
+
+	// 🔴 AN HOUR OF THROTTLED PROBES, and every question asked in it is still here. This is where
+	// the old shape destroyed them: each probe stamped `claimAt` with today's date, so the very
+	// next question saw a minutes-old「no」and dropped everything — the harm D2 was ruled a
+	// blocker for, reached by a road `unclaimedStands()` could not see.
+	for (let i = 0; i < 12; i++) {
+		f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+		f.log.page(`/p${i}`);
+		f.log.question(`q${i}`, '/', null, '');
+		await f.settle();
+	}
+	// 🔴 AND THE PROMISE THE MANIFEST MAKES:「at most once every five minutes while it cannot」.
+	// The old gate picked the wait by the cached `claim` rather than by whether the last probe
+	// had answered, so a browser in this state asked once every six hours and said otherwise.
+	assert.equal(probes, 14, 'a probe that could not answer was backed off for six hours');
+	assert.equal(f.log.state().claim, false, 'a non-answer was written down as an answer');
+	assert.equal(f.log.state().claimAt, learned, 'a non-answer re-dated the answer');
+	assert.equal(f.log.state().questions.length, 13, 'the questions asked past the TTL were destroyed');
+	assert.equal(f.log.state().questions[0].text, 'is anyone reading this?');
+	assert.equal(f.log.state().pages.length, 12);
+	// Unknown is still not permission: they are held, not sent.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// And when somebody finally answers, the answer decides — including a second `false`, which
+	// empties the buffer and is dated NOW, so it is worth another six hours of its own.
+	answer = false;
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('anyone now?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 15);
+	assert.equal(f.log.state().questions.length, 0);
+	assert.equal(f.log.state().claimAt, f.at(), 'the fresh answer was not dated');
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('and now?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 15, 'a fresh answer was re-asked inside its own six hours');
+});
+
+test('E1: the two quantities survive a reload, and neither of them reaches the wire', async () => {
+	// 🔴 THEY HAVE TO BE PERSISTED. On a static site every navigation is a new document and a new
+	// `createAiLog`, so a backoff held in a variable is no backoff at all — the review's own note
+	// on why the second field goes into storage rather than beside it.
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, null) });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+
+	const stored = JSON.parse(f.cells.get(aiLogKey('site:acme')));
+	assert.ok(Number.isFinite(stored.probedAt) && stored.probedAt > 0, 'the backoff was not written down');
+	assert.equal(parseAiLog(stored).probedAt, stored.probedAt);
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2 }).probedAt, 0, 'a buffer without one is not NaN');
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2, probedAt: 'soon' }).probedAt, 0);
+
+	// The next document, same browser, same clock: the backoff still holds.
+	const next = logFixture({ storage: f.storage, now: f.at, probeClaim: async () => (probes++, null) });
+	next.log.question('still anyone?', '/', null, '');
+	await next.settle();
+	assert.equal(probes, 1, 'a new document re-asked inside the backoff');
+
+	// …and it is a whitelist that decides the wire, so the new field is not on it.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 'sid-1', pages: [], questions: [], probedAt: 12345, claimAt: 12345 });
+	assert.equal(JSON.stringify(body).includes('probedAt'), false);
+	assert.equal(JSON.stringify(body).includes('12345'), false);
+});
+
+// ── review E2 (2026-09-08, round 3): the field D5's knife did not reach ──────────────────────
+//
+// 🩸 `session_id` was sliced to 64 twice, `page` to 200 four times, `text` to 500 — and `handle`,
+// the only other opaque id on the row, went from this browser's storage to the wire on a `typeof`
+// check alone. The threat model is D5's own, and it is the reason D5 was ruled a blocker: a
+// same-origin script writes `reef-inbox:ai:site:acme`. The review planted 200,000 characters in
+// `handle` and measured a 200,189-octet body — three times what the transport carries — while the
+// README said caps are applied on the way in so a hostile client cannot bloat a row.
+
+test('E2: a handle is admitted by shape and bounded in length, or it is dropped', () => {
+	// The shape `saveHandle` writes: a non-empty, single-line string.
+	assert.equal(aiHandle('conv-7'), 'conv-7');
+	assert.equal(aiHandle(''), null);
+	assert.equal(aiHandle('   '), null, 'a handle of whitespace is not a conversation');
+	assert.equal(aiHandle(null), null);
+	assert.equal(aiHandle(undefined), null);
+	assert.equal(aiHandle(7), null);
+	assert.equal(aiHandle({ conv: 'conv-7' }), null, 'an object stringified its way onto the wire');
+	assert.equal(aiHandle(['conv-7']), null);
+	// One line, like every other field — a header cannot be split across one of these.
+	assert.equal(aiHandle('conv-7\r\nx-inbox-conversation: conv-8'),
+		'conv-7 x-inbox-conversation: conv-8');
+	// And the length, which is the half that did not exist at all.
+	assert.equal(aiHandle('c'.repeat(200_000)).length, AI_LOG_MAX_HANDLE);
+	assert.equal(AI_LOG_MAX_HANDLE, 64, 'the contract gives session_id 64 and this is its twin');
+});
+
+test('E2: the planted handle the review measured reaches neither storage nor the wire', () => {
+	const hostile = 'SENTINEL-' + 'c'.repeat(200_000);
+	// Door one: read back out of the cell a same-origin script wrote.
+	const parsed = parseAiLog({ sid: 'x', started: 1, last: 2, handle: hostile, questions: [] });
+	assert.equal(parsed.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(parsed.handle.startsWith('SENTINEL-'), 'the cap kept the wrong end');
+	// Door two: onto the wire, which is the only measurement the endpoint ever makes.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 's', pages: ['/'], questions: [{ text: 'q', page: '/', at: 1 }], handle: hostile });
+	assert.equal(body.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(utf8Bytes(JSON.stringify(body)) < 1_000, 'the body is still the review\'s 200,189 octets');
+
+	// And through a real log, exactly as the review's probe drove it: plant the cell, mount on it,
+	// ask, flush, read the bytes that went.
+	const f = logFixture();
+	f.cells.set(aiLogKey('site:acme'), JSON.stringify({
+		sid: 'sid-planted', started: f.at(), last: f.at(), pages: [], questions: [],
+		sent: 0, handle: hostile, claim: true, claimAt: f.at()
+	}));
+	f.log.question('do you ship to Japan?', '/', null, '');
+	const went = f.log.flush();
+	assert.equal(went.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(utf8Bytes(JSON.stringify(went)) < AI_LOG_MAX_WIRE_BYTES / 8);
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).handle.length, AI_LOG_MAX_HANDLE,
+		'this browser is still holding the whole thing for the next flush');
+});
+
+test('E2: an escalation carries the id the server minted, capped, and a blank one is no key at all', async () => {
+	const f = logFixture({ send: () => Promise.resolve(true) });
+	f.log.question('is anybody there?', '/', null, '');
+	const went = await f.log.escalated('conv-7');
+	assert.equal(went.handle, 'conv-7', 'an ordinary conversation id was mangled');
+
+	const long = logFixture({ send: () => Promise.resolve(true) });
+	long.log.question('is anybody there?', '/', null, '');
+	const big = await long.log.escalated('c'.repeat(5000));
+	assert.equal(big.handle.length, AI_LOG_MAX_HANDLE);
+
+	// An empty id is not a handle, and the sixth key is absent rather than `""` — the contract's
+	// `handle` means「this row reached a person」, and an empty string would say so untruthfully.
+	const blank = logFixture({ send: () => Promise.resolve(true) });
+	blank.log.question('is anybody there?', '/', null, '');
+	const none = await blank.log.escalated('');
+	assert.equal('handle' in none, false);
+	assert.equal(blank.log.state().handle, null);
+});
+
+// ── review E3 (2026-09-08, round 3): the refusal branch that had no ruler ────────────────────
+//
+// 🩸 D1 has two halves — `escalated()`, once per visitor who presses, and `flush()`, once per
+// `pagehide`, which is very nearly all of the traffic — and all three D1 tests entered through the
+// first one. The review mutated `flush()`'s refusal branch twice (mark everything sent, so it
+// never goes again; and reset the session outright, destroying the questions) and both times all
+// 121 tests passed. What follows is the case none of them made: a transport that answers `false`
+// SYNCHRONOUSLY, through the door the beacon uses.
+
+test('E3: a transport that says no leaves flush()\'s buffer exactly where it was', async () => {
+	let accept = false;
+	const f = logFixture({ send: (p) => (accept ? (f.sent.push(p), true) : false) });
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.state().claim, true, 'the site never answered, so this measures the wrong gate');
+
+	// 🔴 THE REFUSAL. `sendBeacon` returning false is the browser saying nothing was queued: not a
+	// send, not a failure to report later — nothing moved.
+	assert.equal(f.log.flush(), null, 'a refused beacon was reported as a send');
+	assert.equal(f.sent.length, 0);
+	assert.equal(f.log.state().sent, 0, 'the questions were marked told to a transport that refused');
+	assert.deepEqual(f.log.state().questions.map((q) => q.text), ['do you ship to Japan?']);
+	assert.deepEqual(f.log.state().pages, ['/pricing']);
+	// And in storage, which is where they outlive this document — the mutation that reset the
+	// session wrote the empty one back over them.
+	const cell = JSON.parse(f.cells.get(aiLogKey('site:acme')));
+	assert.equal(cell.questions.length, 1);
+	assert.equal(cell.sent, 0);
+	assert.equal(cell.sid, f.log.state().sid, 'the refusal rotated the session');
+
+	// A second refusal changes nothing either, and neither one costs the session its id.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.log.state().questions.length, 1);
+
+	// 🔴 AND THE NEXT PAGEHIDE REALLY DOES CARRY IT, under the same idempotency key — the half
+	// that goes red when a refusal quietly marks everything as already sent.
+	accept = true;
+	const went = f.log.flush();
+	assert.ok(went, 'the retry sent nothing at all');
+	assert.equal(went.session_id, 'sid-1');
+	assert.deepEqual(went.questions.map((q) => q.text), ['do you ship to Japan?']);
+	assert.deepEqual(went.pages, ['/pricing']);
+	assert.equal(f.log.state().sent, 1);
+	assert.equal(f.log.flush(), null, 'the accepted session went twice');
+});
+
+// ── review E4 (2026-09-08, round 3): the bound the contract delta promised reef ──────────────
+//
+// 🩸 The delta told reef that a tenant answering 404 would be retried「until the browser's own
+// claim cache (≤6 hours) expires」. `flush()` reads `state.claim`, never its age, and
+// `ensureClaim()` is reached from `question()` alone — so a visitor who stopped asking and kept
+// browsing never probes again, and the retries do not stop at six hours. The review measured 288
+// POSTs and ONE probe over 48 hours. Nothing is broken: one request per `pagehide` is what D1
+// intends and it is bounded. What was wrong is the number reef would have built against.
+
+test('E4: the retry is ended by the idle rotation or a 2xx — never by the age of the claim cache', async () => {
+	let probes = 0;
+	let posts = 0;
+	const f = logFixture({
+		probeClaim: async () => (probes++, true),
+		send: () => (posts++, Promise.resolve(false)) // 404 not_claimed, over and over
+	});
+	f.log.page('/');
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+
+	// 48 hours of browsing every ten minutes — under the idle window, so the session never rotates.
+	for (let i = 0; i < 288; i++) {
+		f.tick(10 * 60 * 1000);
+		f.log.page(`/p${i}`);
+		f.log.flush();
+		await f.settle();
+	}
+	// 🔴 THE READING THE DELTA GOT WRONG. Eight times the claim TTL has passed and the retries are
+	// still going, because nothing here consults it — and the probe count is 1, because a visitor
+	// who is only browsing never asks anything.
+	assert.equal(posts, 288, 'a pagehide with something unsent stopped retrying');
+	assert.equal(probes, 1, 'browsing on its own probed the claim endpoint');
+	assert.ok(f.at() - f.log.state().claimAt > AI_LOG_CLAIM_TTL_MS * 7);
+	assert.equal(f.log.state().questions.length, 1, 'the refused question was lost on the way');
+
+	// 🔴 WHAT DOES STOP IT, ONE: the thirty-minute idle. The next `page()` rotates the session and
+	// the unsent question goes with it — `flush()` deliberately does not rotate (D6), so this is
+	// the only door that closes on a visitor who never comes back to the panel.
+	f.tick(AI_LOG_IDLE_MS + 1);
+	f.log.page('/after-a-coffee');
+	assert.equal(f.log.state().questions.length, 0);
+	const before = posts;
+	assert.equal(f.log.flush(), null);
+	assert.equal(posts, before, 'a rotated session was still POSTed');
+
+	// 🔴 AND TWO: a 2xx. Nothing else clears the mark, which is the other half of the same delta.
+	let served = false;
+	const g = logFixture({ send: () => (posts++, Promise.resolve(served)) });
+	g.log.question('is anybody there?', '/', null, '');
+	await g.settle();
+	g.log.flush();
+	await g.settle();
+	assert.equal(g.log.state().sent, 0);
+	served = true;
+	g.log.flush();
+	await g.settle();
+	assert.equal(g.log.state().sent, 1);
+	const settled = posts;
+	g.tick(10 * 60 * 1000);
+	g.log.page('/still-here');
+	assert.equal(g.log.flush(), null);
+	assert.equal(posts, settled, 'a session the server took went again');
+});
+
+// ── review E5 (2026-09-08, round 3): the round-trip window the report argued was shut ────────
+//
+// 🩸 The report's「我沒驗證什麼」said a question asked between the press and the server's answer
+// would be cleared by the `fresh()` that follows, and judged the window shut「because the panel
+// changes to the human thread after the press」. It does change — to a panel whose second button
+// is「ask <assistant> again」, one click from the compose box, while the `fetch(keepalive)` is
+// still in flight. The review's probe caught the question there: never sent, never stored.
+
+test('E5: a question asked while the server was answering survives the escalation that cleared', async () => {
+	let answer;
+	const f = logFixture({ send: () => new Promise((r) => { answer = r; }) });
+	f.log.page('/pricing');
+	f.log.question('the escalated question', '/pricing', null, '');
+	await f.settle();
+
+	const press = f.log.escalated('conv-7');
+	await f.settle(); // the press is now waiting on the server
+	const sid = f.log.state().sid;
+
+	// The visitor pressed「ask again」, typed, and sent — three actions inside one round trip.
+	f.log.question('asked while the server was answering', '/pricing', null, '');
+	answer(true);
+	const payload = await press;
+
+	// What went is what was there when it went: one question, and the handle.
+	assert.equal(payload.questions.length, 1);
+	assert.equal(payload.questions[0].text, 'the escalated question');
+	assert.equal(payload.handle, 'conv-7');
+	// 🔴 THE MEASUREMENT. The review's probe read `[]` here, and「DESTROYED — never sent, never
+	// stored」of the second question.
+	assert.deepEqual(f.log.state().questions.map((q) => q.text),
+		['the escalated question', 'asked while the server was answering']);
+	assert.equal(f.log.state().sent, 1, 'the delivered question is queued to go a second time');
+	assert.equal(f.log.state().sid, sid, 'the session rotated out from under the unsent question');
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 2);
+
+	// And the next pagehide carries it — under the same idempotency key, which is what that key
+	// is for. The delivered question rides along; the server is idempotent on the session.
+	const went = f.log.flush();
+	assert.equal(went.session_id, sid);
+	assert.deepEqual(went.questions.map((q) => q.text),
+		['the escalated question', 'asked while the server was answering']);
+	assert.equal(went.handle, 'conv-7');
+	assert.equal(f.log.flush(), null, 'and then it stops');
+});
+
+test('E5: a press with nothing asked behind it still clears, exactly as before', async () => {
+	// The ordinary case is unchanged: nothing arrived during the trip, so the session is done and
+	// the next question opens a new one. This is the D1/ruling-54 behaviour, re-pinned here
+	// because the fix above is the one that could quietly take it away.
+	const f = logFixture({ send: () => Promise.resolve(true) });
+	f.log.question('is anybody there?', '/', null, '');
+	const sid = f.log.state().sid;
+	const payload = await f.log.escalated('conv-7');
+	assert.ok(payload);
+	assert.equal(f.log.state().questions.length, 0);
+	assert.notEqual(f.log.state().sid, sid, 'the press did not start a new session');
+	assert.equal(f.log.state().handle, null, 'the new session inherited the old conversation');
+	assert.equal(f.log.flush(), null);
+
+	// The buffer at its cap is the case a length comparison alone would miss: the new question
+	// drops the oldest, so the count comes back identical to what was carried.
+	let answerAtCap;
+	const g = logFixture({ send: () => new Promise((r) => { answerAtCap = r; }) });
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) {
+		g.tick(1000);
+		g.log.question(`q${i}`, '/', null, '');
+	}
+	await g.settle();
+	const pressAtCap = g.log.escalated('conv-8');
+	await g.settle();
+	g.tick(1000);
+	g.log.question('the twenty-first, asked mid-flight', '/', null, '');
+	answerAtCap(true);
+	const carried = await pressAtCap;
+	assert.equal(carried.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(g.log.state().questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(g.log.state().questions[AI_LOG_MAX_QUESTIONS - 1].text,
+		'the twenty-first, asked mid-flight', 'the question asked mid-flight was dropped');
+	const late = g.log.flush();
+	assert.equal(late.questions[AI_LOG_MAX_QUESTIONS - 1].text, 'the twenty-first, asked mid-flight');
+});
+
+// ── review E6 (2026-09-08, round 3): the specimen that could only pass ───────────────────────
+//
+// 🩸 `utf8Bytes` treated any high surrogate with a character after it as half a pair and ate the
+// next character with it. The suite's specimen was `'\ud800'` — a lone surrogate at the END of the
+// string, the single position where the old `i + 1 < s.length` test is false, so the only
+// arrangement that could pass. The review's: `'\ud800嗎'`, counted 4, actually 6.
+
+test('E6: a lone surrogate costs three octets wherever it stands, and never eats its neighbour', () => {
+	// The review's specimen, and the encoder's own answer to it.
+	assert.equal(utf8Bytes('\ud800嗎'), 6);
+	assert.equal(Buffer.byteLength('\ud800嗎', 'utf8'), 6, 'the ruler and the encoder disagree');
+	// Every arrangement, each against what a real UTF-8 encoder produces.
+	for (const specimen of [
+		'\ud800', '\ud800x', '\ud800嗎', 'x\ud800', 'x\ud800x', '\udc00', '\udc00\ud800',
+		'\ud800𐀀', '😀', '😀\ud800', 'abc', 'é', '嗎', '😀', ''
+	]) {
+		assert.equal(utf8Bytes(specimen), Buffer.byteLength(specimen, 'utf8'),
+			`utf8Bytes disagrees with the encoder on ${JSON.stringify(specimen)}`);
+	}
+	// A real pair is still one character of four octets, and a low surrogate does not start one.
+	assert.equal(utf8Bytes('😀'), 4);
+	assert.equal(utf8Bytes('\udc00\ud800'), 6);
+	assert.equal(utf8Bytes(null), 0);
+
+	// 🔴 AND WHY THIS IS A RULER, NOT A BUDGET FIX. What the wire budget measures is the output of
+	// `JSON.stringify`, which escapes a lone surrogate into six ASCII characters — so the hot path
+	// cannot reach the branch above, and the count there was right before and after.
+	const body = { text: '\ud800嗎' };
+	assert.equal(utf8Bytes(JSON.stringify(body)), Buffer.byteLength(JSON.stringify(body), 'utf8'));
+	assert.equal(JSON.stringify(body).includes('\\ud800'), true);
+});
+
+// ── review E7 = round 1's D11 and D12 (2026-09-08) ───────────────────────────────────────────
+//
+// 🩸 D11: `escalated()` defended the handle against a server that answers `ok:true` with no
+// `conversation_id`, and left `state.claim = true` beside it undefended — and a claim is carried
+// across sessions for six hours, so that is a write permission opened by a conversation that does
+// not exist. D12: the header's B3 concession names one storage key, and 0.7.6 added a second one
+// that carries a handle of its own onto the wire.
+
+test('E7: a press with no conversation id behind it opens no claim (D11)', async () => {
+	for (const empty of ['', null, undefined, 7, '   ']) {
+		const f = logFixture({ send: () => Promise.resolve(true), probeClaim: async () => null });
+		f.log.question('is anybody there?', '/', null, '');
+		await f.settle();
+		assert.equal(f.log.state().claim, null, 'the probe answered after all');
+
+		await f.log.escalated(empty);
+		assert.equal(f.log.state().handle, null);
+		assert.equal(f.log.state().claim, null,
+			`a claim was opened on the conversation ${JSON.stringify(empty)}`);
+		assert.equal(f.log.state().claimAt, 0, 'and dated, so it would be trusted for six hours');
+		// 🔴 THE CONSEQUENCE THE FIELD HAS. A claim survives the session, so the next document
+		// would have sent this browser's questions on the strength of it.
+		assert.equal(f.log.flush(), null);
+	}
+
+	// The real press still learns the answer without asking anybody — that is what D11 leaves alone.
+	const real = logFixture({ send: () => Promise.resolve(true), probeClaim: async () => null });
+	real.log.question('is anybody there?', '/', null, '');
+	await real.settle();
+	assert.ok(await real.log.escalated('conv-7'));
+	assert.equal(real.log.state().claim, true);
+	assert.equal(real.log.state().claimAt, real.at());
+});
+
+test('E7: the header names both storage keys its concession is about (D12)', () => {
+	// The concession itself, unchanged — this is the sentence B3 round 3 put there.
+	assert.match(CORAL_SOURCE, /can still choose the conversation a visitor's next message is filed under/);
+	// 🔴 AND THE SECOND KEY, WHICH 0.7.6 ADDED. A ruler that still points at live code but measures
+	// less than it claims is the failure mode this test exists to prevent.
+	assert.match(CORAL_SOURCE, /AND SINCE 0\.7\.6 THERE ARE TWO KEYS, NOT ONE/);
+	assert.match(CORAL_SOURCE, /`reef-inbox:ai:<kind>:<id>`/);
+	// Both keys are real, and they are the two this file writes.
+	assert.equal(aiLogKey('site:acme'), 'reef-inbox:ai:site:acme');
+	assert.match(CORAL_CODE, /const STORE_PREFIX = 'reef-inbox:';/);
+	assert.match(CORAL_CODE, /const AI_LOG_PREFIX = 'reef-inbox:ai:';/);
 });

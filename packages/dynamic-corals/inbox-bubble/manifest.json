@@ -1,22 +1,25 @@
 {
   "name": "inbox-bubble",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/inbox-bubble/0.7.5/inbox-bubble.js",
+  "source": "https://feelreef.com/corals/inbox-bubble/0.7.6/inbox-bubble.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": [],
   "calls": [
     "GET <data-api-base>/api/inbox?kind=<data-kind>&id=<data-id> — reads this visitor's own transcript; the conversation id travels in the x-inbox-conversation header, never the query string",
     "POST <data-api-base>/api/inbox — sends a visitor message",
     "POST <data-api-base>/api/kaito — only when data-kaito=\"1\": asks the site's own published content for an extractive, always-cited answer before offering to escalate to a person",
-    "GET <data-api-base>/api/inbox/assistant?kind=<data-kind>&id=<data-id> — reads the name the owner set for this site's assistant on the platform, once per mount, after the first paint; nothing about the visitor travels and every failure keeps the name baked into data-assistant-name"
+    "GET <data-api-base>/api/inbox/assistant?kind=<data-kind>&id=<data-id> — reads the name the owner set for this site's assistant on the platform, once per mount, after the first paint; nothing about the visitor travels and every failure keeps the name baked into data-assistant-name",
+    "GET <data-api-base>/api/inbox/session?kind=<data-kind>&id=<data-id> — asks whether this tenant has an Inbox at all, so the coral knows whether the line below may ever be sent. NOT called at mount: only the first time a visitor actually types a question, then at most once per six hours per browser once it answers, and at most once every five minutes while it cannot (a network failure or the endpoint's own `throttled` is not an answer, is never cached as one, and does not extend the six hours of the answer it could not refresh). Nothing about the visitor travels",
+    "POST <data-api-base>/api/inbox/session — only with data-ai-log unset or not \"0\", only for a tenant the call above said is claimed, and at most ONCE per pagehide and only when there is something new: the questions this visitor asked the machine, sent as a beacon or the moment they press for a person. The same session_id is sent again when the session grows, which is why the endpoint is idempotent on it. Never one request per question, and never the machine's answers"
   ],
   "stores": [
-    "browser localStorage — this visitor's own conversation handle (an opaque id minted by the site's backend, never invented client-side) plus which view (KAITO or the human thread) they last chose, per tenant, with a 30-day expiry; the transcript itself lives on the feelreef backend this coral talks to, not in the coral"
+    "browser localStorage — this visitor's own conversation handle (an opaque id minted by the site's backend, never invented client-side) plus which view (KAITO or the human thread) they last chose, per tenant, with a 30-day expiry; the transcript itself lives on the feelreef backend this coral talks to, not in the coral",
+    "browser localStorage — the current session's own questions, the paths they were asked on and a client-minted session id, per tenant, until they are sent once (pagehide or a press for a person) or the session goes 30 minutes idle. Capped at 20 questions of 500 characters, 40 paths of 200 and a conversation handle of 64, in octets as well as characters. On a tenant with no Inbox this is dropped every time rather than kept, and nothing is ever sent"
   ],
   "paid": false,
   "funding": null,
-  "without": "Without feelreef (no compatible backend at data-api-base): both /api/inbox and /api/kaito are unreachable and the widget shows its own honest failure state — never a fabricated queue or an invented 'someone will reply' promise. `requires` is empty because, as of this manifest, no module gate is enforced on either call: the plain messaging half is ungated by design, and the data-kaito=\"1\" ask-the-site half calls /api/kaito, which today does not check site_entitlements. That is a fact about the current code, not a statement about intended pricing.",
+  "without": "Without feelreef (no compatible backend at data-api-base): /api/inbox, /api/kaito and /api/inbox/session are unreachable and the widget shows its own honest failure state — never a fabricated queue or an invented 'someone will reply' promise. `requires` is empty because, as of this manifest, no module gate is enforced on either call: the plain messaging half is ungated by design, and the data-kaito=\"1\" ask-the-site half calls /api/kaito, which today does not check site_entitlements. That is a fact about the current code, not a statement about intended pricing.",
   "capabilities": ["site-write"]
 }
