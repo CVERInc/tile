@@ -27,6 +27,12 @@ node_modules/
 packages/sitetile/astro/dist-smoke/
 packages/sitetile/astro/dist/
 packages/sitetile/astro/.astro/
+# @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
+# somebody's site, and moves them back afterwards — including when the build throws. The directory
+# should never outlive a build; it is ignored because the one time it does (a killed process) the
+# next thing that must not happen is `git add -A` committing a copy of the renderer into the
+# renderer, or a site's staged pages into this repo.
+packages/sitetile/astro/.tile-build-stash-*
 # 🔴 THE WALL. `lab/` is the incubator's never-graduates folder — creators' cards, our deployment
 # config, the forbidden-terms list. It lives in CVERInc/tile-lab, which has this repo as a
 # submodule at engine/. Ignoring it here means a careless copy in the wrong direction cannot commit
