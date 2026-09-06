@@ -256,7 +256,7 @@ export function uiCopy(locale) {
  * literally what the owner asked for ("確認信已寄到 <email>"). `{email}` is a literal token this
  * table defines and Form.astro's inline script substitutes; it is not printf/template-string syntax.
  *
- * `sendAnother` (2026-09-04, atelier-a production report): the success card's own escape hatch —
+ * `sendAnother` (2026-09-04, a customer's production report): the success card's own escape hatch —
  * without it, a reload / back button / shared URL kept showing 「送信しました」 with the form gone
  * and nothing on the card to press. It labels a plain `<a>` back to the form's own clean path
  * (works with zero JS); the AJAX enhancement intercepts the same click to reset and re-show the
