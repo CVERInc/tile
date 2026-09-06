@@ -1249,9 +1249,10 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 
 const {
 	AI_LOG_CLAIM_RETRY_MS, AI_LOG_CLAIM_TTL_MS, AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS,
-	AI_LOG_MAX_TEXT, AI_LOG_MAX_WIRE_BYTES, AI_QUESTION_FIELDS,
-	AI_SESSION_FIELDS, aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiQuestions,
-	createAiLog, parseAiLog, probeInboxClaim, sendAiSession, utf8Bytes
+	AI_LOG_MAX_FIELD, AI_LOG_MAX_PAGES, AI_LOG_MAX_PAGE_BYTES, AI_LOG_MAX_TEXT,
+	AI_LOG_MAX_WIRE_BYTES, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiLogKey, aiPagePath,
+	aiSessionPayload, appendAiPage, capAiPages, capAiQuestions, createAiLog, parseAiLog,
+	probeInboxClaim, sendAiSession, utf8Bytes
 } = await import('./inbox-bubble.js');
 
 function logFixture(over = {}) {
@@ -1555,6 +1556,65 @@ test('D4: a body over the wire budget skips the beacon for the path that can rep
 	sendAiSession('u', { q: '嗎'.repeat(AI_LOG_MAX_WIRE_BYTES / 2) }, env);
 	assert.equal(beacons.length, 1, 'a body the beacon cannot carry was handed to it anyway');
 	assert.equal(calls.length, 1);
+});
+
+// ── review D5 (2026-09-08, round 2): pages[] was bounded in count and in nothing else ────────
+//
+// 🩸 `AI_LOG_MAX_FIELD`'s own comment says「Longest path or locale tag kept, so neither can be
+// used to pad a row」, and `questions[].page` really did go through it. The identical value in
+// `pages[]` went through nothing: the review planted a 50,001-character path in this browser's
+// cell and watched it reach the wire whole, next to a `questions[0].page` capped to one.
+
+test('D5: a page is bounded in length, in count, and in octets — the constant\'s comment is true now', () => {
+	const long = '/' + 'x'.repeat(50_000);
+	assert.equal(capAiPages([long])[0].length, AI_LOG_MAX_FIELD, 'a 50,001-character path went whole');
+	assert.equal(appendAiPage([], long)[0].length, AI_LOG_MAX_FIELD);
+	// The same bound on the way OUT of storage — the review's probe wrote the cell directly.
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2, pages: [long] }).pages[0].length,
+		AI_LOG_MAX_FIELD);
+	// …and on the way onto the wire, which is the only measurement the endpoint ever makes.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 's', pages: [long], questions: [{ text: 'q', page: '/', at: 1 }] });
+	assert.equal(body.pages[0].length, AI_LOG_MAX_FIELD);
+
+	// Count, unchanged, and still the OLDEST that go.
+	let pages = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES + 5; i++) pages = appendAiPage(pages, `/p${i}`);
+	assert.equal(pages.length, AI_LOG_MAX_PAGES);
+	assert.equal(pages[pages.length - 1], `/p${AI_LOG_MAX_PAGES + 4}`);
+
+	// Octets: forty Chinese paths at the character cap is 24 KiB, which is more of the beacon's
+	// budget than the page sequence gets. The newest survive.
+	const cjkPath = (i) => `/${i}` + '產品'.repeat(95); // 192 characters, 574 octets
+	let cjk = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES; i++) cjk = appendAiPage(cjk, cjkPath(i));
+	assert.ok(cjkPath(0).length <= AI_LOG_MAX_FIELD, 'the specimen is measuring the length cap');
+	assert.ok(cjk.length < AI_LOG_MAX_PAGES, 'the octet budget never bit');
+	assert.ok(utf8Bytes(JSON.stringify(cjk)) <= AI_LOG_MAX_PAGE_BYTES);
+	assert.equal(cjk[cjk.length - 1], cjkPath(AI_LOG_MAX_PAGES - 1));
+
+	// Consecutive duplicates still collapse, and the dedupe compares what will be STORED — a
+	// reload of a path longer than the cap is not a second page either.
+	assert.deepEqual(appendAiPage(['/a'], '/a'), ['/a']);
+	assert.deepEqual(appendAiPage(['/a'], '/b'), ['/a', '/b']);
+	assert.deepEqual(appendAiPage([long], long).length, 1);
+});
+
+test('D5+D4: the worst session this coral can hold still fits what the transport carries', () => {
+	// Every cap at its ceiling, in the script where a character costs three octets — the profile
+	// the review measured at 70,403 bytes, over the beacon's 64 KiB. Assembled the way the coral
+	// assembles it, not by hand: caps in, wire out.
+	let pages = [];
+	for (let i = 0; i < AI_LOG_MAX_PAGES; i++) pages = appendAiPage(pages, `/${i}` + '產品'.repeat(95));
+	const body = aiSessionPayload('site', 'a-tenant-with-a-long-enough-id', {
+		sid: 'x'.repeat(64), pages, questions: worstCaseQuestions(), handle: 'c'.repeat(64)
+	});
+	const bytes = utf8Bytes(JSON.stringify(body));
+	assert.ok(bytes < AI_LOG_MAX_WIRE_BYTES,
+		`the worst session this coral can hold is ${bytes} octets — the beacon would refuse it`);
+	// And it is not a hollow pass: the body really is most of the budget, in a unit the caps
+	// themselves never counted in.
+	assert.ok(bytes > AI_LOG_MAX_WIRE_BYTES / 2, 'this specimen is not the worst case any more');
 });
 
 // ── review D1 (2026-09-08, round 2): a transport that says no must not destroy the buffer ────

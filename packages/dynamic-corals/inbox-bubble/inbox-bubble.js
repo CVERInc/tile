@@ -512,6 +512,16 @@ export const AI_LOG_MAX_FIELD = 200;
  */
 export const AI_LOG_MAX_WIRE_BYTES = 64 * 1024;
 /**
+ * The page sequence's share of that budget, in octets.
+ *
+ * 🩸 THE ONE FIELD WITH NO LENGTH LIMIT AT ALL (review D5) — `AI_LOG_MAX_PAGES` bounded how many
+ * pages, never how long each one was, while the constant beside it promised「so neither can be
+ * used to pad a row」. Forty paths at the 200-character cap in Chinese is 24 KiB, and the
+ * questions may already be 46; together they are the review's 70,403 bytes, which is over what
+ * the beacon carries. This is what the page sequence gets, and the oldest pages go first.
+ */
+export const AI_LOG_MAX_PAGE_BYTES = 12 * 1024;
+/**
  * How long a session may sit idle before the next page view is a NEW session.
  *
  * 🔴 A SESSION IS NOT A PAGE. On a static site every navigation is a fresh document and a
@@ -644,11 +654,41 @@ export function capAiQuestions(list) {
 	return rows;
 }
 
+/**
+ * Drop the OLDEST rows until the array's own JSON fits a budget of octets — the same posture as
+ * every other cap here, and never down to nothing: one row, whatever it costs, still goes.
+ */
+function capBytes(rows, budget) {
+	const sizes = rows.map((row) => utf8Bytes(JSON.stringify(row)));
+	let total = sizes.reduce((n, size) => n + size + 1, 1); // the commas, and the two brackets
+	let cut = 0;
+	while (cut < rows.length - 1 && total > budget) total -= sizes[cut++] + 1;
+	return cut ? rows.slice(cut) : rows;
+}
+
+/**
+ * The page sequence, bounded the way `AI_LOG_MAX_FIELD`'s own comment says it is.
+ *
+ * 🩸 IT WAS BOUNDED IN COUNT ONLY (review D5). `questions[].page` went through `aiLine`, and the
+ * identical value in `pages[]` did not — nothing between `localStorage` and the wire ever looked
+ * at how long one of these strings was, so a 50,001-character「path」planted in this browser's own
+ * cell arrived at the endpoint whole. reef truncates it on the other side, which is why this was
+ * a missing layer rather than a hole; the layer is here now, where the README says it is.
+ */
+export function capAiPages(list) {
+	const rows = (Array.isArray(list) ? list : [])
+		.filter((p) => typeof p === 'string')
+		.map((p) => aiLine(p, AI_LOG_MAX_FIELD) || '/')
+		.slice(-AI_LOG_MAX_PAGES);
+	return capBytes(rows, AI_LOG_MAX_PAGE_BYTES);
+}
+
 /** Consecutive duplicates collapse — a reload is not a second page. */
 export function appendAiPage(pages, page) {
-	const rows = Array.isArray(pages) ? pages.filter((p) => typeof p === 'string') : [];
-	if (rows[rows.length - 1] === page) return rows.slice(-AI_LOG_MAX_PAGES);
-	return [...rows, page].slice(-AI_LOG_MAX_PAGES);
+	const rows = capAiPages(pages);
+	const row = aiLine(page, AI_LOG_MAX_FIELD) || '/';
+	if (rows[rows.length - 1] === row) return rows;
+	return capAiPages([...rows, row]);
 }
 
 /**
@@ -666,9 +706,7 @@ export function parseAiLog(raw) {
 		sid: raw.sid.slice(0, 64),
 		started: raw.started,
 		last: raw.last,
-		pages: (Array.isArray(raw.pages) ? raw.pages : [])
-			.filter((p) => typeof p === 'string')
-			.slice(-AI_LOG_MAX_PAGES),
+		pages: capAiPages(raw.pages),
 		questions,
 		// 🔴 CLAMPED TO WHAT IS ACTUALLY HERE. A `sent` that outran the buffer — a value
 		// somebody hand-wrote, or a cap that dropped an already-counted question — would
@@ -695,7 +733,7 @@ export function aiSessionPayload(kind, id, state) {
 		kind,
 		id,
 		session_id: typeof held.sid === 'string' ? held.sid.slice(0, 64) : '',
-		pages: Array.isArray(held.pages) ? held.pages.filter((p) => typeof p === 'string') : [],
+		pages: capAiPages(held.pages),
 		questions: capAiQuestions(held.questions)
 	};
 	if (typeof held.handle === 'string' && held.handle) body.handle = held.handle;
