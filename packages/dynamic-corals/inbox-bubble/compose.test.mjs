@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
-	refusalNeedsHandoffForm, resolveAssistantName, resolveLocale, resolveSiteName, resolveViewMode,
-	statusFor
+	parseHandle, pollGeneration, privateCharsOf, refusalNeedsHandoffForm, resolveAssistantName,
+	resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -538,4 +538,697 @@ test('the second-action label switches between "ask <assistant> again" and "star
 		assert.equal(typeof copy.handoffEnded, 'string');
 		assert.ok(copy.handoffEnded.length > 0, `${locale} handoffEnded is empty`);
 	}
+});
+
+// ── #13: a programmatic way to open the panel ───────────────────────────────
+
+test('shouldAutoOpenFromHash: only the exact #inbox fragment, never a prefix match', () => {
+	assert.equal(shouldAutoOpenFromHash('#inbox', '1'), true);
+	assert.equal(shouldAutoOpenFromHash('#inbox-pricing', '1'), false);
+	assert.equal(shouldAutoOpenFromHash('#other', '1'), false);
+	assert.equal(shouldAutoOpenFromHash('', '1'), false);
+	assert.equal(shouldAutoOpenFromHash(undefined, '1'), false);
+});
+
+// REVIEW B5 (2026-09-08): the fragment that opens the panel is written by whoever authored the
+// LINK, not by the site. Without an opt-in, any external page, email or QR code could make a
+// customer's site open a panel and take the cursor, on any page, for every visitor.
+
+test('B5: #inbox does nothing unless the SITE opted in with data-open-on-hash="1"', () => {
+	// The review's own payloads - an outside link at a page the site never marked up for this.
+	assert.equal(shouldAutoOpenFromHash('#inbox', null), false, 'attribute absent');
+	assert.equal(shouldAutoOpenFromHash('#inbox', undefined), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', ''), false, 'attribute present but empty');
+	// Exactly "1", the same shape data-kaito already uses - not "true", not any truthy string.
+	assert.equal(shouldAutoOpenFromHash('#inbox', '0'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', 'true'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', 'yes'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', '1'), true);
+});
+
+test('B5: mount reads the opt-in from the mount element, and wires the entry point before the fetch', () => {
+	assert.match(CORAL_CODE,
+		/shouldAutoOpenFromHash\(location\.hash, el\.getAttribute\('data-open-on-hash'\)\)/);
+	// 🔴 Order, not just presence: the listener used to be registered after `await refresh()`, so
+	// a site dispatching reef-inbox:open from its own DOMContentLoaded handler raced a network
+	// round trip for a listener to exist, and #inbox stole focus a round trip late.
+	const listenAt = CORAL_CODE.indexOf("window.addEventListener('reef-inbox:open'");
+	const readAt = CORAL_CODE.indexOf('if (conv && !open) await refresh();');
+	assert.ok(listenAt > 0 && readAt > 0, 'mount no longer has the two lines');
+	assert.ok(listenAt < readAt, 'the open listener is registered behind a network round trip again');
+});
+
+// REVIEW B3 (2026-09-08, round 2): tile #15's `reef-inbox:handle` event is GONE, not narrowed.
+// Addressing it to `detail.target` fixed misdelivery between two corals and left the file header's
+// own invariant false — the address is the mount element, and the README's own snippet showed how
+// to look one up, so any script on the page could still choose which conversation the visitor's
+// next message was filed under. A hand-off is a full navigation now: reef's `/report` form writes
+// storage and the coral re-reads it at mount, which is the one intake this file has.
+
+test('B3: nothing is left of the hand-off event — no listener, no export, no README recipe', async () => {
+	assert.equal(CORAL_CODE.includes('reef-inbox:handle'), false, 'the listener is back');
+	const api = await import('./inbox-bubble.js');
+	assert.equal('acceptHandoff' in api, false, 'acceptHandoff is exported again');
+	assert.equal('handoffState' in api, false, 'handoffState is exported again');
+	// The one window listener that remains names no conversation: it says "open", nothing more.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+});
+
+// REVIEW B3, ROUND 3: the test that used to sit here asserted that the header SENTENCE existed
+// (`assert.match(CORAL_SOURCE, /WHICH IS WHY THERE IS NO HAND-OFF EVENT/)`), and the sentence it
+// pinned was false — a page script that writes `reef-inbox:<kind>:<id>` and navigates still picks
+// the conversation, which is the recipe the README itself gives. A regex measures wording, not
+// truth. The claim the file can keep — one window listener, of one type, naming no conversation,
+// and no export that takes a handle — is asserted against a real mount() in mount.test.mjs.
+//
+// What is left here is the DOCUMENT half, and it is stated as a limit rather than an absolute: the
+// header has to keep saying that the storage intake is reachable by any same-origin script.
+
+test('B3: the header bounds its own claim to what this file controls', () => {
+	// The sentence the review called a false claim, in the form it took while the event existed.
+	assert.equal(/AND THAT SURVIVES `reef-inbox:handle`/.test(CORAL_SOURCE), false);
+	assert.match(CORAL_SOURCE, /THE CONVERSATION ID COMES FROM THE SERVER/);
+	// 🩸 An absolute claim about what「no script on the page」can do is the thing that was wrong.
+	// The header may say this file offers no API for it; it may not say nobody can.
+	assert.equal(/NO SCRIPT ON THE PAGE PICKS IT EITHER/.test(CORAL_SOURCE), false,
+		'the header claims a page script cannot pick the conversation — the storage intake means it can');
+	assert.match(CORAL_SOURCE, /can still choose the conversation a visitor's next message is filed under/);
+	assert.match(CORAL_SOURCE, /third-party script it does not trust \(ads, analytics, a plugin\)/);
+});
+
+// REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
+// The honest half of the fix is that there is now only ONE of them, and the file says so.
+
+test('B9: one window listener per mount, and mount() documents that nothing removes it', () => {
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	assert.equal(CORAL_CODE.includes('removeEventListener'), false,
+		'a teardown appeared — B9 can now be closed properly, and this test should assert it instead');
+	assert.match(CORAL_SOURCE, /no teardown to remove it from \(review B9, still open\)/);
+	// The guard that keeps it one-per-element rather than one-per-render.
+	assert.match(CORAL_CODE, /if \(el\.getAttribute\('data-dynamic-coral-mounted'\) === '1'\) return;/);
+});
+
+// REVIEW B10 (2026-09-08): reef-inbox:open on an already-open panel was a total no-op, so the
+// site's own "report a problem" link read as broken to a visitor who had left the panel open.
+
+test('B10: opening an already-open panel refocuses the compose box instead of doing nothing', () => {
+	const openPanel = CORAL_CODE.match(/function openPanel\(\) \{[\s\S]*?\n\t\}/);
+	assert.ok(openPanel, 'expected openPanel() in mount()');
+	// It still must not re-render - that is what would throw away a half-typed message.
+	assert.ok(!/render(Open|Closed|Ask|Messages)\(\);\n\t\t\treturn;/.test(openPanel[0]),
+		'the already-open branch re-renders, discarding the visitor\'s draft');
+	assert.match(openPanel[0], /if \(open\) \{[\s\S]*?focus\(\)[\s\S]*?return;/);
+});
+
+// NOTE ON COVERAGE: what mount() DOES with the event — the render, the focus, the refocus, the
+// opt-in — is exercised against the real exported mount() in mount.test.mjs beside this file
+// (review B11, round 2: a source regex goes green for a call left in a branch that never runs).
+// What is checked here is the pure decision mount() delegates to, and the wiring order.
+
+// ── the stored handle: the one intake, read at mount ────────────────────────
+
+test('parseHandle accepts exactly the shape saveHandle stores, ts included', () => {
+	assert.deepEqual(parseHandle({ conv: 'c1', ts: 1000, hasEmail: true, mode: 'human' }),
+		{ conv: 'c1', ts: 1000, hasEmail: true, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c2', ts: 1000 }),
+		{ conv: 'c2', ts: 1000, hasEmail: false, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c3', ts: 1000, mode: 'ask' }),
+		{ conv: 'c3', ts: 1000, hasEmail: false, mode: 'ask' });
+	// An unrecognised mode normalises to 'human' — the same rule saveHandle itself applies when it
+	// writes the value in the first place.
+	assert.deepEqual(parseHandle({ conv: 'c4', ts: 1000, mode: 'bogus' }),
+		{ conv: 'c4', ts: 1000, hasEmail: false, mode: 'human' });
+});
+
+test('parseHandle ignores a malformed handle — no exception thrown, just null back', () => {
+	assert.equal(parseHandle(undefined), null);
+	assert.equal(parseHandle(null), null);
+	assert.equal(parseHandle('a string'), null);
+	assert.equal(parseHandle(42), null);
+	assert.equal(parseHandle({}), null);
+	assert.equal(parseHandle({ conv: 123, ts: Date.now() }), null); // conv not a string
+	assert.equal(parseHandle({ conv: 'c', ts: 'not a number' }), null); // ts not a number
+	assert.equal(parseHandle({ ts: Date.now() }), null); // no conv at all
+	assert.equal(parseHandle([1, 2, 3]), null); // an array is typeof 'object' but has no conv/ts
+	// REVIEW B6: typeof NaN is 'number', and every TTL comparison against a NaN answers "fresh",
+	// so this was the one malformed timestamp that used to pass the shape test AND the expiry one.
+	assert.equal(parseHandle({ conv: 'c', ts: NaN }), null);
+	assert.equal(parseHandle({ conv: 'c', ts: Infinity }), null);
+});
+
+// REVIEW B6 (2026-09-08): a NaN or long-dead `ts` used to come back to life. The TTL now lives on
+// one path only — the mount-time storage read — because the event path that also had to answer
+// 「how old is this handle」 is gone (B3, round 2).
+//
+// 🔴 WHERE THE TTL ITSELF IS TESTED: mount.test.mjs, against a real mount() (review B12, round 3).
+// What used to be here was `assert.match(load[0], /Date\.now\(\) - handle\.ts > HANDLE_TTL_MS/)`,
+// and the review's mutant `if (false && Date.now() - handle.ts > HANDLE_TTL_MS)` left that string
+// exactly where it was and the whole suite green — a dead branch reads the same as a live one. The
+// 29-day and 31-day handles over there tell them apart. What stays here is the other half of B6,
+// which is an ABSENCE and so has nowhere else to live: no caller can supply the `ts`.
+
+test('B6: nothing but a visitor\'s own action supplies the ts saveHandle writes', () => {
+	// The parameter that let a caller choose it existed for adoption, which is what B3 removed.
+	assert.match(CORAL_CODE, /function saveHandle\(tenant, conv, hasEmail, mode = 'human'\) \{/);
+	assert.match(CORAL_CODE, /JSON\.stringify\(\{ conv, ts: Date\.now\(\),/);
+	assert.match(CORAL_CODE, /function storeHandle\(convId, email, mode\) \{/);
+	// One comparison, in one place: a second one is a second answer to「how old is this handle」.
+	assert.equal((CORAL_CODE.match(/HANDLE_TTL_MS/g) || []).length, 2, 'a second TTL check appeared');
+});
+
+// REVIEW B4 (2026-09-08): the README told integrators the opposite of what the code does.
+
+const README = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8');
+
+test('B4: the README documents no event this file no longer has', () => {
+	// 🩸 B4 was the README describing a write the code performs as a write it does not. The whole
+	// section went with the event (B3, round 2), so what this now measures is that the document and
+	// the code agree about what exists at all — an integrator who wires up a recipe the coral has
+	// dropped gets silence, which is the same class of failure the original sentence caused.
+	assert.equal(CORAL_CODE.includes('reef-inbox:handle'), false);
+	// The README may still NAME the event — an integrator who wired it up in 0.7.4 has to be able
+	// to find out what happened to it — but it may not hand anybody a recipe for dispatching one.
+	assert.equal(/dispatchEvent\([^)]*reef-inbox:handle/.test(README), false,
+		'the README still teaches how to dispatch the removed event');
+	assert.match(README, /`reef-inbox:handle`[\s\S]{0,120}removed it again/);
+	assert.equal(/does not write to `localStorage`/.test(README), false);
+	// The event this file DOES have is still documented, and still described as taking no id.
+	assert.match(README, /reef-inbox:open/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+});
+
+test('B3: the README keeps the warning next to the recipe that needs it', () => {
+	// 🩸 Round 2 deleted the storage recipe's own caveat along with the event's, so the README was
+	// left teaching how to write the key on one screen and calling the same move impossible on the
+	// next. The warning belongs BESIDE the recipe: whoever reads「write the key and navigate」is
+	// exactly the reader who has to know who else on the page can do it.
+	const section = README.slice(README.indexOf('reef-inbox:<kind>:<id>'),
+		README.indexOf('## The three things not to break'));
+	assert.ok(section, 'the hand-off section moved — this test is measuring nothing');
+	// Whitespace-tolerant: the README is hard-wrapped, so any of these gaps may be a newline.
+	assert.match(section, /third-party script it does not trust \(ads,\s+analytics, a plugin\)/);
+	assert.match(section, /the same way it has already given it\s+`localStorage` and the DOM/);
+	// And the absolute the review struck down — the same claim the file header no longer makes.
+	assert.equal(/A full navigation has no such gap/.test(README), false,
+		'the README claims the navigation recipe has no gap; it is the same gap, one navigation wide');
+	// The expiry is counted from a ts this file did not choose, and the README has to say whose.
+	assert.match(section, /the timestamp\s+whoever wrote that key chose/);
+});
+
+test('B4: the README quotes the TTL the code actually enforces', () => {
+	// 🩸 The same class of drift, found while fixing B4: the TTL went from seven days to thirty on
+	// 2026-09-04 and this line did not. Pinned to the constant so the next bump cannot leave it
+	// behind either.
+	const days = Number(CORAL_CODE.match(/const HANDLE_TTL_MS = (\d+) \* 24 \* 60 \* 60 \* 1000;/)[1]);
+	assert.equal(days, 30);
+	assert.match(README, new RegExp(`expires locally after ${days} days`));
+});
+
+// REVIEW B2 (2026-09-08): stopPolling() cleared the interval and nothing else, so a transcript
+// fetch already in the air came back after the view had moved on and painted the OLD conversation
+// into the new one — every view renders into the same .dc-inbox-log, so it looked like part of it.
+// 🔴 The hand-off event that first exposed this is gone (B3, round 2) and the guard stays: every
+// close, re-render and "start a new conversation" calls the same stopPolling().
+
+test('B2: a result that arrives after invalidate() is dropped, not applied', async () => {
+	const generation = pollGeneration();
+	// The panel, reduced to what the race actually corrupts.
+	const panel = { conv: 'old-conv', messages: [{ text: 'old' }] };
+	let settle;
+	// The delayed fetch: still in flight when the visitor starts a new conversation.
+	const inFlight = generation.run(
+		() => new Promise((resolve) => { settle = resolve; }),
+		(got) => { panel.messages = got.messages; return true; }
+	);
+
+	// ...the switch. stopPolling() invalidates, then the panel moves to the new conversation.
+	generation.invalidate();
+	panel.conv = 'new-conv';
+	panel.messages = [];
+
+	// ...and only NOW does the old conversation's transcript come back.
+	settle({ messages: [{ text: 'from the old conversation' }] });
+	assert.equal(await inFlight, false, 'the stale result was applied');
+	assert.deepEqual(panel.messages, [], 'the old transcript landed in the new panel');
+});
+
+test('B2: an uninterrupted result is applied exactly as before', async () => {
+	const generation = pollGeneration();
+	let settle;
+	const applied = [];
+	const inFlight = generation.run(
+		() => new Promise((resolve) => { settle = resolve; }),
+		(got) => { applied.push(got); return true; }
+	);
+	settle({ messages: ['a reply'] });
+	assert.equal(await inFlight, true);
+	assert.deepEqual(applied, [{ messages: ['a reply'] }]);
+});
+
+test('B2: invalidating cancels what is in flight without cancelling what starts after it', async () => {
+	const generation = pollGeneration();
+	const applied = [];
+	let settleFirst;
+	const first = generation.run(
+		() => new Promise((resolve) => { settleFirst = resolve; }),
+		(got) => { applied.push(got); return true; }
+	);
+	generation.invalidate();
+	// The new view's own first read, started after the tear-down — this one must survive.
+	const second = generation.run(async () => 'new', (got) => { applied.push(got); return true; });
+	settleFirst('old');
+	assert.equal(await first, false);
+	assert.equal(await second, true);
+	assert.deepEqual(applied, ['new']);
+});
+
+test('B2: a rejected fetch is a null result, never an unhandled rejection from a timer', async () => {
+	const generation = pollGeneration();
+	const seen = [];
+	assert.equal(
+		await generation.run(async () => { throw new TypeError('network'); }, (got) => { seen.push(got); return false; }),
+		false
+	);
+	assert.deepEqual(seen, [null], 'the failure path must still be told the request failed');
+	// And a failure that arrives after a tear-down is not even counted.
+	let settle;
+	const inFlight = generation.run(() => new Promise((_, reject) => { settle = reject; }), () => {
+		throw new Error('apply must not run for an invalidated failure');
+	});
+	generation.invalidate();
+	settle(new TypeError('network'));
+	assert.equal(await inFlight, false);
+});
+
+test('B2: refresh() runs through the generation, and stopPolling() invalidates it', () => {
+	// The structural half: the guard is only real if refresh() is the thing wearing it.
+	const stop = CORAL_SOURCE.match(/function stopPolling\(\) \{[\s\S]*?\n\t\}/);
+	assert.ok(stop, 'expected stopPolling() in mount()');
+	assert.match(stop[0], /generation\.invalidate\(\)/);
+
+	const refreshFn = CORAL_SOURCE.match(/async function refresh\(\) \{[\s\S]*?\n\t\}\n/);
+	assert.ok(refreshFn, 'expected refresh() in mount()');
+	assert.match(refreshFn[0], /generation\.run\(/);
+	assert.ok(!/const got = await fetchTranscript/.test(refreshFn[0]),
+		'refresh() awaits the transcript outside the generation guard again');
+	// The re-render's first read must be started AFTER the tear-down, or it invalidates itself.
+	assert.match(CORAL_CODE, /stopPolling\(\);\n\t\trefresh\(\);\n\t\tpoller = setInterval\(refresh, POLL_MS\);/);
+});
+
+// NOTE ON COVERAGE: what remains inside mount() for this event is three lines — call
+// acceptHandoff, copy handoffState's fields onto the panel's own variables, stopPolling() and
+// re-render. The decisions and the transition are both above, driven by their real inputs; the
+// DOM half (which render function runs) is left to reef's own browser-driven suite.
+
+// ── #17: the assistant-name cap counts grapheme clusters, and bidi/format controls are stripped ──
+
+test('#17: the 40-char cap counts grapheme clusters, so a name under the cap is never touched', () => {
+	// The issue's own repro: 21 grapheme clusters (well under the cap) but 41 UTF-16 code units --
+	// the old .slice(0, 40) cut one code unit short of completing the 20th emoji's surrogate
+	// pair, producing a lone high surrogate.
+	const raw = 'a' + '\u{1F600}'.repeat(20);
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, raw);
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+});
+
+test('#17: a name OVER the cap is truncated by whole grapheme, never mid-surrogate-pair', () => {
+	const raw = '\u{1F600}'.repeat(45); // 45 grapheme clusters, 90 UTF-16 code units
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, '\u{1F600}'.repeat(40));
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+});
+
+test('#17: the Array.from fallback (no Intl.Segmenter) is also grapheme-safe, not a UTF-16 slice', () => {
+	const realSegmenter = Intl.Segmenter;
+	delete Intl.Segmenter;
+	try {
+		const raw = '\u{1F600}'.repeat(45);
+		const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+		const name = resolveAssistantName(el);
+		assert.equal(name, '\u{1F600}'.repeat(40));
+		if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+	} finally {
+		Intl.Segmenter = realSegmenter;
+	}
+});
+
+// Every bidi/format control the issue names (U+202A-202E, U+2066-2069, U+061C, U+200E/U+200F),
+// spelled as \u escapes — never as literal source bytes. A literal bidi override sitting in this
+// file's own text is exactly the "Trojan Source" (CVE-2021-42574) class of problem the code under
+// test exists to strip; the escape is how the test asserts the stripping without reintroducing it.
+const BIDI_TEST_CONTROLS = [
+		'\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2067', '\u2068', '\u2069', '\u061C', '\u200E', '\u200F'
+	];
+
+test('#17: every bidi/format control the issue names is stripped from the name', () => {
+	for (const ctrl of BIDI_TEST_CONTROLS) {
+		const el = { getAttribute: (n) => (n === 'data-assistant-name' ? `\u5C0F${ctrl}\u7F8E` : null) };
+		const name = resolveAssistantName(el);
+		assert.equal(name, '\u5C0F\u7F8E', `control U+${ctrl.codePointAt(0).toString(16).toUpperCase()} survived`);
+	}
+});
+
+test('#17: an RTL-override payload cannot reach the status line unisolated', () => {
+	// The issue's own example: a name opening with U+202E would otherwise flip the reading
+	// direction of everything after it in the same rendered sentence.
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? '\u202Eevil' : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, 'evil');
+	const html = statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+	assert.ok(!html.includes('\u202E'));
+	assert.match(html, /^evil<span class="dc-inbox-ai-chip"/);
+});
+
+// REVIEW B1 (P1, 2026-09-08): the two strips ran in the order that let one UNDO the other.
+//
+// 0.7.4 added the bidi strip AFTER the AI_CHIP_TOKEN strip, so a control character the token
+// strip could not see and the bidi strip then deleted smuggled the token in and reassembled it
+// downstream -- the exact invariant the 0.7.2 test above ('a name carrying the chip sentinel
+// cannot eat the rest of the status line') defends, walked around through the side door.
+//
+// The payload is written with \u escapes, never literal bytes: a literal U+202E in this file
+// would render this test's own source in an order that does not match how it runs, which is the
+// Trojan Source class (CVE-2021-42574) the code under test exists to strip.
+const SMUGGLED_TOKEN = '\u2063A\u202EI_CHIP\u2063';
+
+// The half of the zh-TW status line that follows the chip, taken from COPY rather than retyped:
+// what is being asserted is that the sentence SURVIVES, and hardcoding it here would make this
+// test fail on the day the owner rewords it, for a reason that has nothing to do with B1. It
+// carries no HTML-escapable character, so statusFor's escHtml leaves it byte-for-byte.
+const ZH_STATUS_TAIL = COPY['zh-tw'].statusDefault('').split(AI_CHIP_TOKEN)[1];
+
+function chipCount(html) {
+	return html.split('<span class="dc-inbox-ai-chip"').length - 1;
+}
+
+function nameFromAttribute(raw) {
+	return resolveAssistantName({ getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) });
+}
+
+// The platform read, cleaned by the same helper — the second intake point, so every payload below
+// is asserted at both. `resolved: true` with nothing left after cleaning means「the owner cleared
+// the name」, which is KAITO, exactly as an absent attribute is.
+async function nameFromPlatform(raw) {
+	const saved = globalThis.fetch;
+	globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, assistantName: raw, resolved: true }) });
+	try {
+		return (await fetchAssistantName('https://feelreef.com', 'site', 'x')) || 'KAITO';
+	} finally {
+		globalThis.fetch = saved;
+	}
+}
+
+test('B1: a bidi control cannot smuggle the chip sentinel past the strip and reassemble it', () => {
+	// The reassembly, spelled out: delete the U+202E from this payload by hand and what is left
+	// IS the sentinel. That is what the old order handed to statusFor.
+	assert.equal(SMUGGLED_TOKEN.replace(/\u202E/g, ''), AI_CHIP_TOKEN);
+
+	// Nothing survives the two strips, so the name falls back -- a sentinel is not a name.
+	assert.equal(nameFromAttribute(SMUGGLED_TOKEN), 'KAITO');
+
+	const html = statusFor(
+		COPY['zh-tw'],
+		{ hasConv: false, hasEmail: false, kaitoOn: true },
+		nameFromAttribute(SMUGGLED_TOKEN)
+	);
+	// The two things the smuggled token used to break: the sentence after the chip was eaten
+	// whole, and the name went with it, leaving one lone chip as the entire status line.
+	assert.ok(html.endsWith(ZH_STATUS_TAIL), `the status line lost its tail: ${JSON.stringify(html)}`);
+	assert.equal(chipCount(html), 1, 'chip count');
+	assert.ok(!html.includes(AI_CHIP_TOKEN), 'the sentinel reached the DOM');
+	assert.ok(!html.includes('\u202E'), 'the override reached the DOM');
+});
+
+test('B1: every stripped control works as the smuggling character, at any position - none of them do now', () => {
+	for (const ctrl of BIDI_TEST_CONTROLS) {
+		// Two insertion points, because the review measured that the position does not matter.
+		for (const payload of [`\u2063A${ctrl}I_CHIP\u2063`, `\u2063AI_CH${ctrl}IP\u2063`]) {
+			const label = `U+${ctrl.codePointAt(0).toString(16).toUpperCase()}`;
+			const name = nameFromAttribute(`小${payload}美`);
+			assert.ok(!name.includes(AI_CHIP_TOKEN), `${label} rebuilt the sentinel`);
+			const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+			assert.equal(chipCount(html), 1, label);
+			assert.ok(html.endsWith(ZH_STATUS_TAIL), label);
+		}
+	}
+});
+
+test('B1: the platform path shares the helper, so the same payload dies there too', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: SMUGGLED_TOKEN, resolved: true })
+	});
+	// `resolved: true` with nothing left after cleaning means "the owner cleared the name" - KAITO.
+	assert.equal(await fetchAssistantName('https://feelreef.com', 'site', 'x'), 'KAITO');
+});
+
+// REVIEW B1, ROUND 2 (2026-09-08): the smuggling character was never the point. A single
+// split(T).join('') REASSEMBLES the token out of the remnants it leaves behind, so the payload
+// needs no control character and no second U+2063 at all:
+//
+//   T.slice(0, 3) + T + T.slice(3)   -- remove the middle T, and the two halves ARE T
+//
+// The fix is structural rather than ordinal: the token comes out to a fixed point, and then every
+// character the token cannot exist without comes out unconditionally. These tests assert the
+// STRUCTURE (no sentinel character survives, ever, and cleaning is a fixed point) rather than one
+// more payload, because the review's whole point was that payload-shaped defences are enumerable.
+
+// The sentinel's own private characters, taken from the token rather than retyped - if the token
+// ever changes its wrapper, this follows it, exactly as AI_CHIP_PRIVATE_RE does in the source.
+const SENTINEL_CHARS = [...new Set(AI_CHIP_TOKEN)].filter((ch) => ch.codePointAt(0) > 0x7e);
+const NESTED_TOKEN = AI_CHIP_TOKEN.slice(0, 3) + AI_CHIP_TOKEN + AI_CHIP_TOKEN.slice(3);
+const DOUBLY_NESTED_TOKEN = NESTED_TOKEN.slice(0, 3) + NESTED_TOKEN + NESTED_TOKEN.slice(3);
+
+test('B1 round 2: one split reassembles the sentinel - this is the payload, spelled out', () => {
+	// Not an assertion about the fix: an assertion that the attack is real, so that a future
+	// simplification back to a single split cannot pass by making this test meaningless.
+	assert.equal(NESTED_TOKEN.split(AI_CHIP_TOKEN).join(''), AI_CHIP_TOKEN);
+	assert.equal(DOUBLY_NESTED_TOKEN.split(AI_CHIP_TOKEN).join('').split(AI_CHIP_TOKEN).join(''),
+		AI_CHIP_TOKEN);
+	// And it carries no bidi control at all - the 0.7.5 strip order has nothing to do with it.
+	for (const ctrl of BIDI_TEST_CONTROLS) assert.ok(!NESTED_TOKEN.includes(ctrl));
+});
+
+test('B1 round 2: no sentinel character survives cleaning, from any nesting', async () => {
+	const payloads = [
+		AI_CHIP_TOKEN,
+		NESTED_TOKEN,
+		DOUBLY_NESTED_TOKEN,
+		// Nested AND smuggled, the review's second payload: both weaknesses in one string. The
+		// override is written as an escape, never a literal byte - see BIDI_CONTROL_RE.
+		NESTED_TOKEN.replace('AI_CHIP', 'A\u202EI_CHIP'),
+		// Something real either side, so the KAITO fallback is not what is doing the work.
+		`小${NESTED_TOKEN}美`,
+		`小${DOUBLY_NESTED_TOKEN}美`,
+		// A lone private character that never formed a token at all: still not a thing a name carries.
+		...SENTINEL_CHARS.map((ch) => `小${ch}美`)
+	];
+	for (const payload of payloads) {
+		const label = JSON.stringify(payload);
+		// Both intake points, because they are one helper and this is the assertion that says so.
+		for (const name of [nameFromAttribute(payload), await nameFromPlatform(payload)]) {
+			for (const ch of SENTINEL_CHARS) {
+				assert.ok(!name.includes(ch),
+					`a sentinel character survived cleaning of ${label}: ${JSON.stringify(name)}`);
+			}
+			assert.ok(!name.includes(AI_CHIP_TOKEN), `the whole sentinel survived ${label}`);
+			// 🔴 THE FIXED POINT: cleaning the cleaned name changes nothing. A step that can rebuild
+			// what an earlier step removed shows up here as a name that keeps moving.
+			assert.equal(nameFromAttribute(name), name, `cleaning is not a fixed point for ${label}`);
+			// And the status line keeps both halves: one chip, tail intact.
+			const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+			assert.equal(chipCount(html), 1, label);
+			assert.ok(html.endsWith(ZH_STATUS_TAIL), `${label} lost the tail: ${JSON.stringify(html)}`);
+		}
+	}
+});
+
+// REVIEW B14 (2026-09-08, round 3): the comment above AI_CHIP_PRIVATE_RE promises that a sentinel
+// which ever changes its wrapper is covered "the day it changes". With four-digit `\uXXXX` escapes
+// and no `u` flag that was true only for a BMP wrapper: U+1F5A5 was spelled `὚5`, which reads
+// as U+1F5A followed by the digit 5 — the new wrapper survives (B1's guarantee silently off) and
+// two unrelated characters are deleted instead. Nothing throws. So the promise is tested against a
+// wrapper the sentinel does not use, which is the only way to test a promise about CHANGING it.
+
+test('B14: the private-character class covers a non-BMP wrapper, not the pieces of one', () => {
+	const astral = '\u{1F5A5}'; // a stand-in wrapper: astral, so a surrogate pair
+	const re = privateCharsOf(`${astral}AI_CHIP${astral}`);
+
+	// The wrapper itself goes, whole.
+	assert.equal(`小${astral}美`.replace(re, ''), '小美');
+	assert.equal(`${astral}AI_CHIP${astral}`.replace(re, ''), 'AI_CHIP');
+	// 🩸 And the two characters the old spelling deleted by accident stay: `὚5` without the
+	// `u` flag is the class { U+1F5A, '5' }, so 「὚」 and every digit 5 in somebody's name went.
+	assert.equal('὚5'.replace(re, ''), '὚5');
+	assert.equal('小5美'.replace(re, ''), '小5美');
+	// Half a surrogate pair is not a match either — the class is code points, not units.
+	assert.equal(astral.slice(0, 1).replace(re, ''), astral.slice(0, 1));
+	// ASCII is still excluded on purpose: the letters are a legal name, the wrapper is not.
+	assert.equal('AI_CHIP'.replace(re, ''), 'AI_CHIP');
+
+	// The live sentinel keeps behaving exactly as it did — the derivation, not the token, changed.
+	const live = privateCharsOf(AI_CHIP_TOKEN);
+	for (const ch of SENTINEL_CHARS) assert.equal(`小${ch}美`.replace(live, ''), '小美');
+});
+
+test('B1 round 2: a name that is nothing but sentinel is no name at all, nested or not', () => {
+	// The courtesy half of the strip: a pure sentinel cleans to empty and falls back, rather than
+	// leaving the bare letters of the marker behind as somebody's assistant name.
+	assert.equal(nameFromAttribute(NESTED_TOKEN), 'KAITO');
+	assert.equal(nameFromAttribute(DOUBLY_NESTED_TOKEN), 'KAITO');
+	// ...while those letters typed BY THEMSELVES are just letters. The invisible wrapper is what a
+	// name may not carry; "AI_CHIP" as ASCII never was, and stripping it would be censoring text.
+	assert.equal(nameFromAttribute('AI_CHIP'), 'AI_CHIP');
+});
+
+test('B1 round 2: the cap cannot be used to cut a name back into a sentinel', () => {
+	// The cap runs AFTER the strip, so it only ever deletes. This is the payload that would matter
+	// if that were ever reordered: a full 40 clusters of padding with a nested token behind it.
+	const padded = '小'.repeat(40) + NESTED_TOKEN;
+	const name = nameFromAttribute(padded);
+	for (const ch of SENTINEL_CHARS) assert.ok(!name.includes(ch), 'the cap left a sentinel behind');
+	assert.equal(name, '小'.repeat(40));
+});
+
+test('B1 round 2: an enormous nested name is bounded before the fixed point, not after', () => {
+	// Deep nesting is what makes a repeated strip expensive, so the input is bounded first (the
+	// same class as B7, on the cost side rather than the output side). Asserted on the outcome: a
+	// bounded, sentinel-free name, arriving promptly rather than after a quadratic walk.
+	const deep = NESTED_TOKEN.repeat(20000); // ~360k UTF-16 units
+	const started = Date.now();
+	const name = nameFromAttribute(deep);
+	assert.ok(Date.now() - started < 2000, 'cleaning a huge name took seconds');
+	assert.ok(name.length <= 200);
+	for (const ch of SENTINEL_CHARS) assert.ok(!name.includes(ch));
+});
+
+// REVIEW B7 (2026-09-08): counting grapheme clusters removed the LENGTH limit. A cluster has no
+// upper bound, so 40 clusters can be 20,040 UTF-16 units, and the pre-#17 .slice(0, 40) was the
+// only thing that had been bounding it.
+
+test('B7: the cap is clusters AND code units - a 40-cluster Zalgo wall does not get through', () => {
+	// The review's own payload: exactly 40 clusters, 20,040 units, waved through untouched.
+	const zalgo = ('a' + '\u0301'.repeat(500)).repeat(40);
+	assert.equal(zalgo.length, 20040);
+	// The first cluster alone is 501 units - over the ceiling on its own, so nothing fits and the
+	// name falls back rather than being cut mid-sequence.
+	assert.equal(nameFromAttribute(zalgo), 'KAITO');
+});
+
+test('B7: the ceiling truncates on a cluster boundary, it does not slice UTF-16', () => {
+	// 10-unit clusters ('a' plus nine combining acutes): 40 of them is 400 units, so the UNIT
+	// ceiling bites first, at 20 clusters, and lands exactly on a boundary.
+	const cluster = 'a' + '\u0301'.repeat(9);
+	const name = nameFromAttribute(cluster.repeat(40));
+	assert.equal(name, cluster.repeat(20));
+	assert.ok(name.length <= 200, `${name.length} units got through`);
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+	// A plain 60-character name is still capped at 40: the ceiling only ever binds on text that is
+	// long in units without being long in characters.
+	assert.equal(nameFromAttribute('a'.repeat(60)), 'a'.repeat(40));
+});
+
+test('B7: the platform read enforces the ceiling too - it is the same last line of defence', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: ('a' + '\u0301'.repeat(9)).repeat(40) })
+	});
+	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
+	assert.ok(name.length <= 200, `the platform path let ${name.length} units through`);
+});
+
+// REVIEW B8 (2026-09-08): with and without Intl.Segmenter, the same name came out different --
+// a ZWJ family x45 capped to 40 families with a Segmenter and 8 without one -- and the fallback
+// left a dangling U+200D where it cut.
+
+test('B8: with and without Intl.Segmenter the cap produces the SAME name', () => {
+	const inputs = {
+		emoji: '\u{1F600}'.repeat(45),
+		zwjFamily: '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'.repeat(45),
+		rainbowFlag: '\u{1F3F3}\uFE0F\u200D\u{1F308}'.repeat(45),
+		regionalFlags: '\u{1F1F9}\u{1F1FC}'.repeat(45),
+		combining: 'e\u0301'.repeat(45),
+		skinTone: '\u{1F44D}\u{1F3FF}'.repeat(45),
+		keycap: '1\uFE0F\u20E3'.repeat(45),
+		hangul: '각'.repeat(45),
+		zalgo: ('a' + '\u0301'.repeat(9)).repeat(40),
+		// A joiner between two things that are NOT both pictographs does not weld them: this is 41
+		// clusters, not 40, and the fallback has to agree with the Segmenter about that too.
+		joinerBetweenNonPictographs: 'a'.repeat(40) + '\u200D\u{1F469}',
+		// The review's own dangling-joiner case: 38 plain characters then one family.
+		reviewDanglingJoiner: 'a'.repeat(38) + '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
+	};
+	const realSegmenter = Intl.Segmenter;
+	for (const [label, raw] of Object.entries(inputs)) {
+		const withSegmenter = nameFromAttribute(raw);
+		let without;
+		delete Intl.Segmenter;
+		try {
+			without = nameFromAttribute(raw);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+		assert.equal(without, withSegmenter, `${label}: the fallback produced a different name`);
+		if (typeof without.isWellFormed === 'function') assert.equal(without.isWellFormed(), true, label);
+	}
+});
+
+test('B8: a name never ends on a dangling joiner, on either path', () => {
+	const realSegmenter = Intl.Segmenter;
+	// A long joiner chain is ONE cluster on both paths, and it ends on a joiner with nothing after
+	// it to join -- exactly the debris the review measured, arriving from the input rather than
+	// from the cut now that clusters are never split.
+	const chain = '\u{1F468}\u200D'.repeat(45);
+	for (const path of ['segmenter', 'fallback']) {
+		if (path === 'fallback') delete Intl.Segmenter;
+		try {
+			assert.ok(!nameFromAttribute(chain).endsWith('\u200D'), `${path} left a dangling U+200D`);
+			// A joiner the OWNER typed at the end of a short name is the same debris.
+			assert.equal(nameFromAttribute('小美\u200D'), '小美', path);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+	}
+});
+
+// REVIEW B13 (2026-09-08, round 3): the joiner strip ran BEFORE the final trim(), so a trim could
+// uncover a joiner that nothing looked at again. B8's own comment claimed it ran "after every cut
+// that could produce one", and `.trim()` on the same line was one of those cuts.
+
+test('B13: a joiner uncovered by the final trim is removed too, on either path', () => {
+	const realSegmenter = Intl.Segmenter;
+	for (const path of ['segmenter', 'fallback']) {
+		if (path === 'fallback') delete Intl.Segmenter;
+		try {
+			// 🩸 The review's case. The strip takes the last joiner, the trim then takes the space
+			// that was hiding the one before it — and the old order stopped there, handing the DOM
+			// 「小美 ZWJ」.
+			assert.equal(nameFromAttribute('小美\u200D \u200D'), '小美', path);
+			// Deeper alternation, and whitespace of more than one kind.
+			assert.equal(nameFromAttribute('小美\u200D\t\u200D \u200D'), '小美', path);
+			// A cleaned name is a FIXED POINT: cleaning it again may not change it (the property the
+			// round-3 fuzz run failed on — 200,000 cases, this shape the only one).
+			const once = nameFromAttribute('小小\u200D \u200D\nA');
+			assert.equal(nameFromAttribute(once), once, path);
+			assert.ok(!once.endsWith('\u200D'), `${path} left a dangling U+200D`);
+			// The joiners that are NOT debris still are not: a family emoji is untouched.
+			const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+			assert.equal(nameFromAttribute(family), family, path);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+	}
+});
+
+test('#17: the platform read (fetchAssistantName) is capped and stripped the same way as the baked attribute', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: `\u5C0F\u202E\u7F8E` })
+	});
+	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
+	assert.equal(name, '\u5C0F\u7F8E');
 });

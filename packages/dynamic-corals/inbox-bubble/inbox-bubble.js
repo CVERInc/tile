@@ -28,6 +28,31 @@
 // studied against lets the browser generate the id, and a browser that can
 // choose an id can choose whose conversation to open.
 //
+// 🔴 AND THIS FILE OFFERS NO API FOR A PAGE SCRIPT TO PICK ONE — WHICH IS WHY THERE IS NO
+// HAND-OFF EVENT (0.7.5, review B3). 0.7.4 added `reef-inbox:handle` so a page holding an id the
+// server minted by another route could push it into an already-mounted panel. 0.7.5 addressed that
+// event to one mount, and addressing fixed misdelivery, not reach: the address IS the mount
+// element, and any script on the page can `querySelector` it. So the EVENT is what went (tile #15,
+// won't do). No event, no export, no attribute takes a conversation id from the page.
+//
+// 🔴 WHAT THAT DOES NOT BUY, SAID PLAINLY (review B3, round 3 — this header used to claim more).
+// A same-origin script that can write `localStorage['reef-inbox:<kind>:<id>']` and then navigate
+// can still choose the conversation a visitor's next message is filed under: that is the same
+// intake reef's own `/report` form uses, and it belongs to storage access, not to this widget.
+// Removing the event took away the IN-PLACE, INVISIBLE version — switching the thread under a
+// visitor who is mid-sentence in an open panel, with no navigation and nothing on screen to see.
+// It did not take away the capability, and no code in this file can. A site that loads
+// third-party script it does not trust (ads, analytics, a plugin) has given that script this
+// capability the same way it has already given it `localStorage` and the DOM.
+//
+// A hand-off is a FULL NAVIGATION instead, which is what the platform already does: reef's own
+// `/report` form writes the handle to storage and sends the visitor to a page where this coral
+// mounts — and this file reads its handle at mount, from storage, which stays its one intake.
+// A page that wants a mounted panel to switch conversations reloads it. The thirty days that
+// handle then lives for are counted from the `ts` INSIDE IT — the timestamp whoever wrote the key
+// chose (see `loadHandle`); `saveHandle` only stamps `Date.now()` on the handles this file writes
+// itself.
+//
 // ── Two doors, and the second one has to be pressed ────────────────────────
 //
 // With data-kaito="1" the panel asks the SITE first (/api/kaito, extractive:
@@ -53,12 +78,17 @@
 //   data-kind      (required) — 'site' | 'card' | 'cardtile' | 'ext'
 //   data-id        (required) — the tenant key for that kind
 //   data-kaito     (optional) — "1" asks the site first (needs REEF with KAITO)
+//   data-open-on-hash (optional) — "1" lets `#inbox` in the URL open the panel at load. Off by
+//                  default: a fragment is written by whoever authored the LINK, not by the site
+//                  (see shouldAutoOpenFromHash).
 //   data-api-base  (optional) — override the feelreef origin
 //   data-assistant-name (optional) — what VISITORS see the assistant called
 //                  instead of "KAITO" (owner ruling, 2026-09-05: the name may
 //                  change, but the panel still marks the reply as AI — see
 //                  statusDefault). Trimmed to a single line, capped at 40
-//                  chars; blank/whitespace falls back to "KAITO".
+//                  grapheme clusters AND 200 UTF-16 units (a cluster has no
+//                  length limit of its own — see ASSISTANT_NAME_MAX_UNITS);
+//                  blank/whitespace falls back to "KAITO".
 //   data-title / data-placeholder / data-send / data-… (optional) — copy
 //
 // Usage:
@@ -378,6 +408,29 @@ function storeKey(tenant) {
  * report 2026-09-04: hand-off used to be a one-way door with no way back to
  * asking KAITO or starting over).
  */
+/**
+ * Is `raw` a well-formed handle — the shape `saveHandle` writes, read back out of this browser's
+ * own storage by `JSON.parse`. Pure and exported because storage is a place OTHER code writes
+ * (reef's own `/report` form writes this exact shape before navigating the visitor to a page the
+ * coral mounts on), so「well-formed」has to be one decision this file can state and test, and a
+ * malformed entry has to be provably ignored rather than thrown.
+ */
+export function parseHandle(raw) {
+	// 🔴 `Number.isFinite`, not `typeof raw.ts === 'number'` — `typeof NaN` is 'number', and a NaN
+	// timestamp passes every comparison a TTL check can make (`now - NaN > TTL` is false), so the
+	// old shape test let through the one value that makes an expiry test silently answer「fresh」.
+	if (!raw || typeof raw !== 'object' || typeof raw.conv !== 'string' || !Number.isFinite(raw.ts)) return null;
+	// `ts` is CARRIED OUT, not dropped (review B6). The reader has to answer 「how old is this
+	// handle」 without reaching past this function into the raw JSON to find out.
+	return { conv: raw.conv, ts: raw.ts, hasEmail: raw.hasEmail === true, mode: raw.mode === 'ask' ? 'ask' : 'human' };
+}
+
+// 🔴 THE THIRTY DAYS ARE COUNTED FROM THE `ts` IN THE STORED VALUE, which is to say from a
+// timestamp chosen by whoever wrote that key (review B3, round 3 — the header says the same). The
+// handles THIS file writes are stamped `Date.now()` by `saveHandle` and nothing else, but anything
+// same-origin can write the key, and a `ts` in the future never satisfies the `>` below at all.
+// That is a property of the storage intake, not a check this function can make: the value is not
+// signed and there is nothing here to check it against.
 function loadHandle(tenant) {
 	let raw;
 	try {
@@ -392,8 +445,9 @@ function loadHandle(tenant) {
 	} catch {
 		return null;
 	}
-	if (!parsed || typeof parsed.conv !== 'string' || typeof parsed.ts !== 'number') return null;
-	if (Date.now() - parsed.ts > HANDLE_TTL_MS) {
+	const handle = parseHandle(parsed);
+	if (!handle) return null;
+	if (Date.now() - handle.ts > HANDLE_TTL_MS) {
 		try {
 			window.localStorage.removeItem(storeKey(tenant));
 		} catch {
@@ -401,9 +455,13 @@ function loadHandle(tenant) {
 		}
 		return null;
 	}
-	return { conv: parsed.conv, hasEmail: parsed.hasEmail === true, mode: parsed.mode === 'ask' ? 'ask' : 'human' };
+	return handle;
 }
 
+// 🔴 `ts` IS `Date.now()` AND NOTHING ELSE MAY SUPPLY IT (review B6). Every caller is a visitor's
+// own action in this panel — they just used the thread, so the thirty days may start again. The
+// fifth parameter that let a value from elsewhere be written here existed for the hand-off event,
+// and went with it (B3, round 2): a TTL counted from a timestamp somebody else chose is not a TTL.
 function saveHandle(tenant, conv, hasEmail, mode = 'human') {
 	try {
 		window.localStorage.setItem(
@@ -446,6 +504,195 @@ export function resolveSiteName(el, doc) {
 
 const DEFAULT_ASSISTANT_NAME = 'KAITO';
 const ASSISTANT_NAME_MAX = 40;
+/**
+ * The second half of the cap, and the reason there are two (review B7, 2026-09-08).
+ *
+ * 🩸 COUNTING GRAPHEMES REMOVED THE LENGTH LIMIT. `.slice(0, 40)` counted UTF-16 units, so it was
+ * a hard ceiling as well as a cap; counting clusters is right for「40 characters」 as a person
+ * means it, but a cluster has no upper bound — `('a' + '́'.repeat(500)).repeat(40)` is
+ * exactly 40 clusters and 20,040 units, and the measured result was that it passed through
+ * untouched into the status line and the second-action button as a page-high wall of Zalgo.
+ *
+ * So the cluster cap says how many characters, and this says how much text. 200 units is five
+ * times the cluster cap — far past any real name in any script, including a fully-decomposed one,
+ * and still a bound. The truncation lands on a cluster boundary either way, never mid-sequence.
+ */
+const ASSISTANT_NAME_MAX_UNITS = 200;
+
+/**
+ * Bidi/format controls (issue #17, pre-existing, found by the review of #12 R2/R3 P3): an
+ * embedding override or isolate reaching the status text node is unisolated there, so a name
+ * carrying U+202E could flip the reading direction of everything AFTER it in the same sentence.
+ * Every code point that can do that — the five embedding/override controls, the four isolates,
+ * ALM, and the two marks — is stripped at the same intake point `AI_CHIP_TOKEN` already goes
+ * through, so nothing downstream (`statusFor`, the second-action label) has to defend itself.
+ *
+ * 🔴 `\u` ESCAPES, NEVER THE LITERAL CHARACTERS. These are exactly the code points behind
+ * "Trojan Source" (CVE-2021-42574): a bidi override sitting as literal source bytes can make an
+ * editor or a diff RENDER this file's own code in an order that does not match how it executes.
+ * Spelling them out defeats the one thing this constant exists to strip.
+ */
+const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]/g;
+
+/**
+ * The characters `AI_CHIP_TOKEN` cannot exist without — the U+2063 either side of it — derived
+ * FROM the token rather than retyped, so a sentinel that ever changes its wrapper is covered by
+ * this the day it changes. ASCII is deliberately excluded: "AI_CHIP" as letters is a legal thing
+ * for an owner to call their assistant; it is the invisible wrapper that makes `statusFor`'s
+ * `split` see a marker.
+ *
+ * 🔴 THIS IS WHAT MAKES THE STRIP STRUCTURAL — review B1, round 2, and the reason the old
+ * 「convergent order」claim was not true (see `cleanAssistantName`). Removing the token as a
+ * STRING can hand back the very thing it removed: `T.slice(0, 3) + T + T.slice(3)` is one whole
+ * token with its own prefix in front and its matching suffix behind, so deleting that one
+ * occurrence joins the two remnants into a complete new token. Deleting the characters instead
+ * has no fixed point to miss — afterwards there is no U+2063 anywhere in the name, and every step
+ * that follows only ever deletes characters, so not one of them can put one back.
+ *
+ * 🔴 `\u{…}` AND THE `u` FLAG, WHICH IS WHAT MAKES 「covered the day it changes」 TRUE (review B14,
+ * round 3). The escapes used to be four-digit `\uXXXX` with no flag, and that is a BMP-only
+ * spelling: a wrapper of U+1F5A5 came out as `὚5`, which a non-unicode regex reads as
+ * `὚` followed by a literal `5` — so the new wrapper was NOT stripped (B1's guarantee off,
+ * silently) while U+1F5A and the digit 5 were, and nothing threw. A one-character change to the
+ * sentinel would have done that. `\u{…}` with `u` spells any code point, and `[...new Set(token)]`
+ * already iterates by code point, so a surrogate pair arrives here whole. Exported only so the
+ * derivation can be tested against a stand-in wrapper the sentinel does not currently use — the
+ * sentinel itself stays private, as it always has.
+ */
+export function privateCharsOf(token) {
+	return new RegExp(
+		`[${[...new Set(token)]
+			.filter((ch) => ch.codePointAt(0) > 0x7e)
+			.map((ch) => `\\u{${ch.codePointAt(0).toString(16)}}`)
+			.join('')}]`,
+		'gu'
+	);
+}
+
+const AI_CHIP_PRIVATE_RE = privateCharsOf(AI_CHIP_TOKEN);
+
+/**
+ * How much of an incoming name is examined at all, and B7's sibling: the fixed-point loop in
+ * `cleanAssistantName` is the one pass there that can run more than once, and a deeply nested
+ * payload could otherwise make it quadratic in the length of an attribute nobody bounded. The
+ * result is capped at `ASSISTANT_NAME_MAX_UNITS` regardless, so twenty times that is far past any
+ * real name in any script and still a ceiling on the work a one-megabyte attribute can ask for.
+ */
+const RAW_NAME_MAX_UNITS = ASSISTANT_NAME_MAX_UNITS * 20;
+
+/**
+ * A ZERO WIDTH JOINER left dangling at the end of a truncated name (review B8) — the one format
+ * character `BIDI_CONTROL_RE` deliberately does not carry, because U+200D inside a name is
+ * meaningful (it is what holds an emoji sequence together) and only a TRAILING one is debris.
+ * Cutting a three-person family emoji straight after its first joiner leaves one figure and a
+ * joiner with nothing left to join, sitting in the DOM.
+ *
+ * 🔴 STRIPPED TO A FIXED POINT WITH `trim()`, NOT BEFORE IT (review B13, round 3). The claim used
+ * to be 「trimmed after every cut that could produce one has already been made」 and the `.trim()`
+ * on the same line was itself such a cut: taking a trailing joiner off 「小美 ZWJ SP ZWJ」 uncovers
+ * the space, trimming the space uncovers the joiner before it, and one pass in one order stopped
+ * there with the joiner still in the DOM. Each step only ever deletes, so alternating them
+ * converges — see the end of `cleanAssistantName`.
+ */
+const TRAILING_JOINER_RE = /\u200D+$/;
+
+/**
+ * The three Unicode questions `fallbackGraphemes` below asks:
+ *   EXTENDS — does this code point continue the cluster before it (combining marks, variation
+ *             selectors, the enclosing keycap, the Fitzpatrick skin-tone modifiers)?
+ *   PIC_END / PIC_START — is a ZERO WIDTH JOINER sitting between two PICTOGRAPHS? That is the
+ *             one place a joiner actually welds two clusters into one (UAX #29 GB11), which is
+ *             how 「👨‍👩‍👧」 and 「🏳️‍🌈」 count once each. A joiner between anything else does
+ *             not, so `a` + ZWJ + `👩` stays two clusters exactly as `Intl.Segmenter` says.
+ *
+ * 🔴 Built with `new RegExp` inside a `try`, never as regex LITERALS. Unicode property escapes
+ * are younger than some of the engines that reach the fallback at all, and a literal an engine
+ * cannot parse is a SyntaxError for the WHOLE MODULE — the bubble would not render, to make a
+ * name one cluster tidier. `null` means the fallback degrades to counting code points, which is
+ * exactly what it did before this.
+ */
+const [GRAPHEME_EXTEND_RE, PICTOGRAPH_END_RE, PICTOGRAPH_START_RE] = (() => {
+	try {
+		return [
+			new RegExp('^(?:\\p{Grapheme_Extend}|\\p{Emoji_Modifier})$', 'u'),
+			new RegExp('\\p{Extended_Pictographic}(?:\\p{Grapheme_Extend}|\\p{Emoji_Modifier})*$', 'u'),
+			new RegExp('^\\p{Extended_Pictographic}', 'u')
+		];
+	} catch {
+		return [null, null, null];
+	}
+})();
+
+/** U+200D, spelled as an escape for the same reason `BIDI_CONTROL_RE` is — see its comment. */
+const ZWJ = '\u200D';
+
+const REGIONAL_INDICATOR_LO = 0x1f1e6;
+const REGIONAL_INDICATOR_HI = 0x1f1ff;
+
+/**
+ * The `Intl.Segmenter`-free path, and 🔴 it now AGREES with the Segmenter path rather than
+ * merely avoiding lone surrogates (review B8).
+ *
+ * 🩸 `Array.from` alone counts CODE POINTS, so the same name was two different names depending
+ * on the browser: a three-person ZWJ family ×45 capped to 40 whole families with a Segmenter and
+ * to 8 without one, and Firefox only shipped `Intl.Segmenter` in 125 — this is a live split, not
+ * a museum piece. Worse, the cut landed anywhere inside a sequence, which is where the dangling
+ * joiner `TRAILING_JOINER_RE` above exists to clean up came from.
+ *
+ * Three joining rules: an extending code point glues to what precedes it, two regional
+ * indicators pair up into one flag, and a joiner welds two pictographs. That is enough to agree
+ * with `Intl.Segmenter` cluster-for-cluster on every sequence the review measured plus the ones
+ * the tests add (families, flags, keycaps, skin tones, rainbow/kiss ZWJ sequences, Hangul,
+ * combining stacks) — which is what the test asserts, against the real Segmenter, rather than
+ * against a table written here.
+ *
+ * 🔴 IT IS NOT A UAX #29 IMPLEMENTATION and must not be described as one. Indic conjuncts
+ * (virama sequences) still count as more clusters here than a Segmenter says, so a Devanagari
+ * name is capped shorter on an engine without one. That is a display-length difference on a
+ * label, in the same direction the old code already erred, and buying the rest of UAX #29 to
+ * close it would put a segmentation table in a widget that has to stay small.
+ */
+function fallbackGraphemes(str) {
+	const out = [];
+	let joinNext = false;
+	let riOpen = false;
+	for (const cp of str) {
+		const code = cp.codePointAt(0);
+		const isRI = code >= REGIONAL_INDICATOR_LO && code <= REGIONAL_INDICATOR_HI;
+		const pairsWithPrevious = isRI && riOpen;
+		const previous = out.length ? out[out.length - 1] : '';
+		const extendsPrevious = GRAPHEME_EXTEND_RE ? GRAPHEME_EXTEND_RE.test(cp) : false;
+		// GB11: pictograph, joiner, pictograph — the joiner is already part of `previous`, so what
+		// is tested for the left-hand pictograph is `previous` with that trailing joiner removed.
+		const weldedByJoiner =
+			joinNext &&
+			!!PICTOGRAPH_START_RE &&
+			PICTOGRAPH_START_RE.test(cp) &&
+			PICTOGRAPH_END_RE.test(previous.slice(0, -1));
+		if (out.length && (weldedByJoiner || extendsPrevious || cp === ZWJ || pairsWithPrevious)) {
+			out[out.length - 1] += cp;
+		} else {
+			out.push(cp);
+		}
+		joinNext = cp === ZWJ;
+		riOpen = isRI && !pairsWithPrevious;
+	}
+	return out;
+}
+
+/**
+ * Splits `str` into user-perceived characters — an emoji or a combining sequence counts once —
+ * using `Intl.Segmenter` where it exists and `fallbackGraphemes` where it does not. Either is
+ * enough to stop the cap producing a lone surrogate (issue #17): a plain `.slice(0, N)` counts
+ * UTF-16 units, so a 40-char cap could land inside a surrogate pair and cut an astral character
+ * in half.
+ */
+function graphemes(str) {
+	if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+		return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(str), (s) => s.segment);
+	}
+	return fallbackGraphemes(str);
+}
 
 /**
  * What VISITORS see the site's Q&A assistant called (owner ruling, 2026-09-05:
@@ -469,18 +716,88 @@ export function resolveAssistantName(el) {
  * attribute falls back to "KAITO"; the platform read falls back to「change nothing」).
  *
  * 🩸 THE TOKEN STRIP IS NOT HOUSEKEEPING. `AI_CHIP_TOKEN` is U+2063-wrapped text, and U+2063
- * is a format character, not whitespace — so `trim()`, the newline check and the 40-char cap
- * all wave it straight through. An owner who set the name to a string containing the token
- * would make `statusFor`'s `split` yield THREE parts, and `[before, after]` drops the third:
- * 「自動回覆・需要時可轉真人」 disappears from the status line and only the chip is left. The
+ * is a format character, not whitespace — so `trim()`, the newline check and the cap all wave it
+ * straight through. An owner who set the name to a string containing the token would make
+ * `statusFor`'s `split` yield THREE parts, and `[before, after]` drops the third:
+ * 「先回，轉出去真人會看」 disappears from the status line and only the chip is left. The
  * AI disclosure itself never breaks (the chip is still there, by construction), but the rest
  * of the sentence does, so the token is stripped where names arrive rather than defended
  * against where they render.
+ *
+ * 🩸 THE ORDER WAS THE DEFENCE, AND THE ORDER WAS NOT ENOUGH — review B1, twice. 0.7.4 ran the
+ * bidi strip AFTER the token strip, so a control character the token strip could not see and the
+ * bidi strip then deleted smuggled a token in and reassembled it:
+ *
+ *   data-assistant-name = "\u2063A\u202EI_CHIP\u2063"   (\u202E written as an escape, never
+ *      as a literal byte — see BIDI_CONTROL_RE)
+ *     → split(AI_CHIP_TOKEN) sees no token (the U+202E is in the middle of it) and passes it on
+ *     → replace(BIDI_CONTROL_RE) deletes the U+202E and hands back a COMPLETE AI_CHIP_TOKEN
+ *     → `statusFor` splits into three, drops the third, and the whole sentence is gone
+ *
+ * Every one of the twelve stripped controls worked as the smuggling character, at any position.
+ * 0.7.5 put the deletes first and called the resulting order convergent. It was not, and round 2
+ * of the review supplied the eighteen characters that show why — with T for the token:
+ *
+ *   T.slice(0, 3) + T + T.slice(3)
+ *     → ONE split(T).join('') removes the middle T, and the two remnants left either side of the
+ *       hole are exactly T's own first three characters and its own last nine: T again
+ *     → so the LAST step in the chain handed the DOM the token it exists to remove
+ *
+ * Nothing had to invent a U+2063 for that; the string arrived carrying the pieces. The fix is to
+ * stop making「is the token here」a question about a string at all. The token comes out to a
+ * FIXED POINT (which is what the nested payload defeats in a single pass), and then, whatever is
+ * left in whatever arrangement, every character `AI_CHIP_TOKEN` cannot exist without goes — see
+ * `AI_CHIP_PRIVATE_RE`. From that line to the `return` nothing does anything but delete, so the
+ * name that comes back provably carries no sentinel character and has nothing to reassemble from.
  */
 function cleanAssistantName(raw) {
-	const stripped = String(raw || '').split(AI_CHIP_TOKEN).join('');
-	const trimmed = stripped.trim().split('\n')[0].trim();
-	return trimmed ? trimmed.slice(0, ASSISTANT_NAME_MAX) : '';
+	// 1. Bound the input before the one pass below that can repeat (see RAW_NAME_MAX_UNITS), and
+	//    cut on a code point boundary so it cannot leave half a surrogate pair behind.
+	let name = String(raw || '');
+	if (name.length > RAW_NAME_MAX_UNITS) {
+		name = name.slice(0, RAW_NAME_MAX_UNITS).replace(/[\uD800-\uDBFF]$/, '');
+	}
+	// 2. Format controls out — nothing downstream can be tricked by what is no longer here.
+	name = name.replace(BIDI_CONTROL_RE, '');
+	// 3. The token as a string, to a fixed point. This is the courtesy half: it is what makes a
+	//    name that is NOTHING BUT the sentinel come out empty, and so fall back to KAITO, rather
+	//    than leaving the bare letters behind as somebody's name. It is not the guarantee.
+	let previous;
+	do {
+		previous = name;
+		name = name.split(AI_CHIP_TOKEN).join('');
+	} while (name !== previous);
+	// 4. 🔴 THE GUARANTEE, and the whole of round 2's B1: every character the sentinel cannot
+	//    exist without, gone, whatever step 3 left and however it was arranged. No line below
+	//    this one adds a character to the name.
+	name = name.replace(AI_CHIP_PRIVATE_RE, '');
+	// 5. One line, trimmed.
+	const trimmed = name.trim().split('\n')[0].trim();
+	if (!trimmed) return '';
+	// 6. Both halves of the cap, on the same pass and always on a cluster boundary: at most
+	//    ASSISTANT_NAME_MAX clusters, and at most ASSISTANT_NAME_MAX_UNITS UTF-16 units (B7 — a
+	//    single cluster can be 500 units on its own, and one that does not fit stops the name
+	//    rather than being cut in half).
+	let capped = '';
+	let count = 0;
+	for (const cluster of graphemes(trimmed)) {
+		if (count >= ASSISTANT_NAME_MAX || capped.length + cluster.length > ASSISTANT_NAME_MAX_UNITS) break;
+		capped += cluster;
+		count++;
+	}
+	// 7. The joiner a cut in step 6 may have left dangling (B8), and the whitespace stripping it
+	//    exposes, and the joiner stripping THAT exposes — to a fixed point (review B13, round 3).
+	//    `replace(...).trim()` ran once and in that order, so 「小美 ZWJ SP ZWJ」 came back as
+	//    「小美 ZWJ」: the replace took the last joiner, the trim then took the space that had been
+	//    hiding the one before it, and nothing looked again. Deletes only — see step 4 — so this
+	//    loop is bounded by the length of a name already capped at ASSISTANT_NAME_MAX_UNITS.
+	let tail = capped;
+	let before;
+	do {
+		before = tail;
+		tail = tail.trim().replace(TRAILING_JOINER_RE, '');
+	} while (tail !== before);
+	return tail;
 }
 
 /**
@@ -618,6 +935,74 @@ export function resolveViewMode({ hasHandoffConv, storedMode, concluded, kaitoOn
 	if (!hasHandoffConv) return kaitoOn ? 'ask' : 'human';
 	if (concluded) return 'ask';
 	return storedMode === 'ask' ? 'ask' : 'human';
+}
+
+/**
+ * The poller's identity, so that stopping it stops the requests it already made (review B2).
+ *
+ * 🩸 `clearInterval` STOPS THE TIMER, NOT THE FETCH THAT IS ALREADY IN THE AIR. `refresh()` read
+ * `conv` once on the way in and then wrote whatever came back straight into the panel, with no
+ * second look at whether it was still the same panel. So: a visitor is mid-poll on conversation
+ * A; a hand-off arrives; the poller is torn down, `conv` becomes B, the log is emptied and
+ * redrawn; then A's fetch resolves and paints A's messages into B's log — `.dc-inbox-log` is the
+ * class both views use, so the stale reply lands in the new conversation's window looking exactly
+ * like part of it. If the new handle resolved to ask mode it is worse: 「問 KAITO」 shows a human
+ * transcript. The same race existed on 「重新問」 before this branch, but only a visitor's own
+ * click could open the window; #15 let any script open it at will, as often as it liked.
+ *
+ * 🔴 A GENERATION, NOT AN AbortController. Aborting cancels the request; this has to cancel the
+ * RESULT, including a response that already arrived and is sitting in a resolved promise, and it
+ * has to do it for every in-flight call at once rather than one handle at a time. Exported and
+ * dependency-free so the race itself is testable with a delayed fetch and no browser.
+ */
+export function pollGeneration() {
+	let current = 0;
+	return {
+		/** Everything in flight is now stale; results still to come are dropped. */
+		invalidate() {
+			current += 1;
+		},
+		/**
+		 * Await `work`, then hand the result to `apply` — unless `invalidate()` ran while it was in
+		 * flight, in which case `apply` is never called. Resolves to whatever `apply` returned, or
+		 * `false` for a result that was thrown away. A rejected `work` is a `null` result, not a
+		 * throw: the caller's failure handling is the same either way and this must never reach an
+		 * unhandled rejection from a background timer.
+		 */
+		async run(work, apply) {
+			const token = current;
+			const got = await work().catch(() => null);
+			if (token !== current) return false;
+			return apply(got);
+		}
+	};
+}
+
+/**
+ * #13: should a page LOAD, by itself, open the panel? Pure so mount()'s one-line call is the only
+ * place this reads `location.hash`, and this file's tests can drive it without a browser.
+ *
+ * Exactly `#inbox`, not a prefix or substring test — a page's own anchor (`#inbox-pricing`, a
+ * heading id that happens to start the same way) must not trip a widget its author never asked
+ * for.
+ *
+ * 🔴 AND THE SITE HAS TO HAVE ASKED FOR IT — `data-open-on-hash="1"`, review B5. The original
+ * reasoning here was that 「a site that wants this deliberately writes the literal fragment, the
+ * same way data-kind is a deliberate attribute」, and that was simply wrong about who writes a
+ * URL fragment: `location.hash` comes from whoever authored the LINK. Any external page, email,
+ * QR code or search result could point at `https://customer.example/anything#inbox` and make a
+ * customer's site pop a message panel open and pull the cursor into it, on any page, for every
+ * visitor, with no way for the owner to turn it off. It is also a WCAG 3.2.1/3.2.5 change of
+ * context nobody requested, on a `role="dialog"` with no Escape binding.
+ *
+ * An attribute is a different thing entirely: it is in the site's own markup, so the deliberate
+ * act belongs to the person whose site it is. It also settles the other half of the same
+ * problem — a docs page with an `<h2 id="inbox">`, or a hash-router SPA whose `#inbox` route is
+ * its own, no longer trips a widget by coincidence.
+ */
+export function shouldAutoOpenFromHash(hash, optedIn) {
+	if (optedIn !== '1') return false;
+	return hash === '#inbox';
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────
@@ -996,6 +1381,14 @@ export async function mount(el) {
 	/** The visitor's last CHOSEN view — see `loadHandle`'s header comment. */
 	let storedMode = handle ? handle.mode : 'human';
 	/**
+	 * The one writer, so every path that changes what this panel is showing stamps storage the same
+	 * way — `saveHandle`'s own `ts` default, meaning「the visitor just used this thread」. Nothing
+	 * in `mount()` calls `saveHandle` direct.
+	 */
+	function storeHandle(convId, email, mode) {
+		saveHandle(tenant, convId, email, mode);
+	}
+	/**
 	 * The active conversation — `handoffConv` while showing the human thread,
 	 * `null` while asking KAITO or composing fresh. Every existing `conv` read
 	 * in this file (the send payloads, `refresh()`'s guard, `headHtml()`'s
@@ -1088,7 +1481,7 @@ export async function mount(el) {
 	/** 「重新問 KAITO」/「新對話」— leave the human thread up without discarding it. */
 	function goAsk() {
 		storedMode = 'ask';
-		saveHandle(tenant, handoffConv, hasEmail, storedMode);
+		storeHandle(handoffConv, hasEmail, storedMode);
 		conv = null;
 		messages = [];
 		handoffEndedNote = false;
@@ -1100,7 +1493,7 @@ export async function mount(el) {
 	/** 「回到真人對話」— the human thread was never gone, only not the active view. */
 	function goHuman() {
 		storedMode = 'human';
-		saveHandle(tenant, handoffConv, hasEmail, storedMode);
+		storeHandle(handoffConv, hasEmail, storedMode);
 		conv = handoffConv;
 		handoffEndedNote = false;
 		renderMessages();
@@ -1110,7 +1503,14 @@ export async function mount(el) {
 	root.className = `${PREFIX}-root`;
 	el.appendChild(root);
 
+	/** See `pollGeneration` — what makes `stopPolling()` reach the requests already in the air. */
+	const generation = pollGeneration();
+
 	function stopPolling() {
+		// 🔴 UNCONDITIONAL, and before the `poller` check: there can be a `refresh()` in flight with
+		// no interval running at all (mount's own first read, `escalate`'s, a poller that gave up),
+		// and those are exactly the ones that used to paint a dead conversation into a live panel.
+		generation.invalidate();
 		if (poller) {
 			clearInterval(poller);
 			poller = null;
@@ -1121,19 +1521,28 @@ export async function mount(el) {
 
 	async function refresh() {
 		if (!conv) return;
-		const got = await fetchTranscript(apiBase, kind, id, conv).catch(() => null);
-		if (got) {
-			pollFailures = 0;
-			messages = got.messages;
-			conversationStatus = got.status;
-			const log = root.querySelector(`.${PREFIX}-log`);
-			if (log) renderLog(log, messages);
-			return;
-		}
-		// Counted, not ignored: a 404 for a conversation the server no longer has
-		// and a network that is down look identical from here, and neither is
-		// worth asking about forever.
-		if (++pollFailures >= POLL_GIVE_UP_AFTER) stopPolling();
+		const at = conv;
+		await generation.run(
+			() => fetchTranscript(apiBase, kind, id, conv),
+			(got) => {
+				// Belt and braces alongside the generation: every path that changes `conv` calls
+				// `stopPolling()` today, and this is what keeps the guard true of one that forgets.
+				if (conv !== at) return false;
+				if (got) {
+					pollFailures = 0;
+					messages = got.messages;
+					conversationStatus = got.status;
+					const log = root.querySelector(`.${PREFIX}-log`);
+					if (log) renderLog(log, messages);
+					return true;
+				}
+				// Counted, not ignored: a 404 for a conversation the server no longer has
+				// and a network that is down look identical from here, and neither is
+				// worth asking about forever.
+				if (++pollFailures >= POLL_GIVE_UP_AFTER) stopPolling();
+				return false;
+			}
+		);
 	}
 
 	/**
@@ -1207,7 +1616,7 @@ export async function mount(el) {
 			// The quiet "still want a person?" button carries no form — no email
 			// was ever offered on this path.
 			hasEmail = false;
-			saveHandle(tenant, conv, hasEmail, storedMode);
+			storeHandle(conv, hasEmail, storedMode);
 			replyWithinHours = body.reply_within_hours ?? null;
 			renderMessages();
 			const log = root.querySelector(`.${PREFIX}-log`);
@@ -1248,7 +1657,7 @@ export async function mount(el) {
 				handoffConv = conv;
 				storedMode = 'human';
 				hasEmail = emailGiven;
-				saveHandle(tenant, conv, hasEmail, storedMode);
+				storeHandle(conv, hasEmail, storedMode);
 				replyWithinHours = body.reply_within_hours ?? null;
 				// 🩸 The confirmation used to render AFTER `await refresh()` — a real
 				// network round trip — so the panel sat on the freshly-reset empty
@@ -1390,7 +1799,7 @@ export async function mount(el) {
 				// This is the direct compose form — it has no email field, so
 				// whatever `hasEmail` already recorded (from an earlier hand-off,
 				// or never-set) stands.
-				saveHandle(tenant, conv, hasEmail, storedMode);
+				storeHandle(conv, hasEmail, storedMode);
 				// Trust our own copy, not the local one: the server has just told us
 				// what it stored, and a locally-appended message that silently failed
 				// to save is the exact lie this product cannot tell.
@@ -1415,15 +1824,74 @@ export async function mount(el) {
 			return false;
 		});
 
-		refresh();
+		// 🔴 STOP FIRST, THEN READ. The old order (read, stop, restart) started a fetch and then
+		// invalidated its own generation one line later, so the first read after every re-render
+		// would be thrown away — the read that exists so a returning visitor sees the reply
+		// waiting for them.
 		stopPolling();
+		refresh();
 		poller = setInterval(refresh, POLL_MS);
 	}
 
 	renderClosed();
-	// One read at mount so a returning visitor sees the reply waiting for them
-	// behind the closed bubble — without opening a panel nobody asked for.
-	if (conv) await refresh();
+
+	/**
+	 * Opens the panel exactly as the closed bubble's own click does.
+	 *
+	 * 🩸 ALREADY OPEN IS NOT NOTHING (review B10). `if (open) return;` is right about not
+	 * re-rendering — that would throw away a draft mid-sentence — but it used to return without
+	 * doing anything at all, and the use README recommends is a site's footer 「report a problem」
+	 * link. A visitor whose panel is already open, scrolled out of view at the other end of the
+	 * page, clicked that link and NOTHING happened: an ordinary broken link, as far as they can
+	 * tell. Refocusing the compose box is the whole fix — it scrolls the panel into view and puts
+	 * the cursor where the visitor was going anyway, without touching what they have typed.
+	 */
+	function openPanel() {
+		if (open) {
+			const textarea = root.querySelector('textarea');
+			if (textarea && textarea.focus) textarea.focus();
+			return;
+		}
+		open = true;
+		renderOpen();
+	}
+
+	// #13: a programmatic way in. A site's own "report a problem" footer link can open this panel
+	// in place instead of sending the visitor to another page — a `reef-inbox:open` CustomEvent on
+	// `window`, or `#inbox` in the URL the visitor already landed on. Both are wired only here,
+	// inside a successful `mount()`, so either is inert wherever the coral is not mounted: there is
+	// no listener and no hash check running for an element that failed the `data-kind`/`data-id`
+	// guard at the top of this function. `openPanel` reaches `renderOpen()`, which every existing
+	// path into the panel already funnels through — the ask/compose textarea's own `.focus()` call
+	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
+	// to keep in sync.
+	//
+	// 🔴 THE ONLY `window` LISTENER THIS FILE INSTALLS, and it is never removed because `mount()`
+	// has no teardown to remove it from (review B9, still open). What that costs is bounded and
+	// worth naming rather than implying otherwise: an SPA that tears the container out leaves this
+	// listener holding `root` and `el`, and `openPanel` on a detached root re-renders into a node
+	// nobody can see. `mountAll`'s `data-dynamic-coral-mounted` guard stops the same element being
+	// mounted twice, so a page accumulates one listener per element it ever mounted, not per
+	// re-render. `reef-inbox:open` is a BROADCAST on purpose —「open the panel」 is a request any
+	// script may honestly make of every panel on the page, and it names no conversation, which is
+	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
+	window.addEventListener('reef-inbox:open', openPanel);
+	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
+
+	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
+	// bubble — without opening a panel nobody asked for.
+	//
+	// 🔴 AFTER THE LISTENER, NOT BEFORE (review B5). This is a network round trip, and everything
+	// below it used to be everything above: on a slow connection a site's own `DOMContentLoaded`
+	// handler could dispatch `reef-inbox:open` seconds before there was a listener for it, and the
+	// event went nowhere — an intermittent failure nobody would ever debug. `#inbox` had the same
+	// problem from the other side: it stole focus a round trip late, by which time the visitor may
+	// have started typing in the site's own search box. Registering first costs nothing; every
+	// handler only runs once the panel exists, and `renderClosed()` above already built it.
+	//
+	// `!open` because an auto-opened panel has already started its own read through
+	// `renderMessages()`, and a second one would be two requests for one paint.
+	if (conv && !open) await refresh();
 
 	// 🏛 The platform's name, applied AFTER the first paint (CANON 第一條 / ruling #36).
 	//
