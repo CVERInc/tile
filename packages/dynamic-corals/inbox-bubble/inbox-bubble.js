@@ -548,14 +548,28 @@ const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]/g;
  * occurrence joins the two remnants into a complete new token. Deleting the characters instead
  * has no fixed point to miss — afterwards there is no U+2063 anywhere in the name, and every step
  * that follows only ever deletes characters, so not one of them can put one back.
+ *
+ * 🔴 `\u{…}` AND THE `u` FLAG, WHICH IS WHAT MAKES 「covered the day it changes」 TRUE (review B14,
+ * round 3). The escapes used to be four-digit `\uXXXX` with no flag, and that is a BMP-only
+ * spelling: a wrapper of U+1F5A5 came out as `὚5`, which a non-unicode regex reads as
+ * `὚` followed by a literal `5` — so the new wrapper was NOT stripped (B1's guarantee off,
+ * silently) while U+1F5A and the digit 5 were, and nothing threw. A one-character change to the
+ * sentinel would have done that. `\u{…}` with `u` spells any code point, and `[...new Set(token)]`
+ * already iterates by code point, so a surrogate pair arrives here whole. Exported only so the
+ * derivation can be tested against a stand-in wrapper the sentinel does not currently use — the
+ * sentinel itself stays private, as it always has.
  */
-const AI_CHIP_PRIVATE_RE = new RegExp(
-	`[${[...new Set(AI_CHIP_TOKEN)]
-		.filter((ch) => ch.codePointAt(0) > 0x7e)
-		.map((ch) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`)
-		.join('')}]`,
-	'g'
-);
+export function privateCharsOf(token) {
+	return new RegExp(
+		`[${[...new Set(token)]
+			.filter((ch) => ch.codePointAt(0) > 0x7e)
+			.map((ch) => `\\u{${ch.codePointAt(0).toString(16)}}`)
+			.join('')}]`,
+		'gu'
+	);
+}
+
+const AI_CHIP_PRIVATE_RE = privateCharsOf(AI_CHIP_TOKEN);
 
 /**
  * How much of an incoming name is examined at all, and B7's sibling: the fixed-point loop in

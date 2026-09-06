@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
-	parseHandle, pollGeneration, refusalNeedsHandoffForm, resolveAssistantName, resolveLocale,
-	resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
+	parseHandle, pollGeneration, privateCharsOf, refusalNeedsHandoffForm, resolveAssistantName,
+	resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -1045,6 +1045,34 @@ test('B1 round 2: no sentinel character survives cleaning, from any nesting', as
 			assert.ok(html.endsWith(ZH_STATUS_TAIL), `${label} lost the tail: ${JSON.stringify(html)}`);
 		}
 	}
+});
+
+// REVIEW B14 (2026-09-08, round 3): the comment above AI_CHIP_PRIVATE_RE promises that a sentinel
+// which ever changes its wrapper is covered "the day it changes". With four-digit `\uXXXX` escapes
+// and no `u` flag that was true only for a BMP wrapper: U+1F5A5 was spelled `὚5`, which reads
+// as U+1F5A followed by the digit 5 — the new wrapper survives (B1's guarantee silently off) and
+// two unrelated characters are deleted instead. Nothing throws. So the promise is tested against a
+// wrapper the sentinel does not use, which is the only way to test a promise about CHANGING it.
+
+test('B14: the private-character class covers a non-BMP wrapper, not the pieces of one', () => {
+	const astral = '\u{1F5A5}'; // a stand-in wrapper: astral, so a surrogate pair
+	const re = privateCharsOf(`${astral}AI_CHIP${astral}`);
+
+	// The wrapper itself goes, whole.
+	assert.equal(`小${astral}美`.replace(re, ''), '小美');
+	assert.equal(`${astral}AI_CHIP${astral}`.replace(re, ''), 'AI_CHIP');
+	// 🩸 And the two characters the old spelling deleted by accident stay: `὚5` without the
+	// `u` flag is the class { U+1F5A, '5' }, so 「὚」 and every digit 5 in somebody's name went.
+	assert.equal('὚5'.replace(re, ''), '὚5');
+	assert.equal('小5美'.replace(re, ''), '小5美');
+	// Half a surrogate pair is not a match either — the class is code points, not units.
+	assert.equal(astral.slice(0, 1).replace(re, ''), astral.slice(0, 1));
+	// ASCII is still excluded on purpose: the letters are a legal name, the wrapper is not.
+	assert.equal('AI_CHIP'.replace(re, ''), 'AI_CHIP');
+
+	// The live sentinel keeps behaving exactly as it did — the derivation, not the token, changed.
+	const live = privateCharsOf(AI_CHIP_TOKEN);
+	for (const ch of SENTINEL_CHARS) assert.equal(`小${ch}美`.replace(live, ''), '小美');
 });
 
 test('B1 round 2: a name that is nothing but sentinel is no name at all, nested or not', () => {
