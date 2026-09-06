@@ -1377,7 +1377,7 @@ test('54: the press flushes with the handle and CLEARS the session', async () =>
 	f.log.question('can I return it?', '/pricing', null, '');
 	// 🔴 No settled probe at all here, on purpose: a minted conversation id is itself proof the
 	// tenant is claimed, so escalation must send without one.
-	const went = f.log.escalated('conv-7');
+	const went = await f.log.escalated('conv-7');
 	assert.ok(went);
 	assert.equal(went.handle, 'conv-7');
 	assert.equal(went.questions.length, 1);
@@ -1390,7 +1390,7 @@ test('54: the press flushes with the handle and CLEARS the session', async () =>
 
 	// A press with nothing buffered sends nothing at all.
 	const quiet = logFixture();
-	assert.equal(quiet.log.escalated('conv-8'), null);
+	assert.equal(await quiet.log.escalated('conv-8'), null);
 	assert.equal(quiet.sent.length, 0);
 });
 
@@ -1448,7 +1448,7 @@ test('54: a malformed buffer somebody else wrote is ignored, not thrown', () => 
 	assert.ok(f.log.state().sid, 'a corrupt cell starts a new session rather than taking the panel down');
 });
 
-test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', () => {
+test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', async () => {
 	const beacons = [];
 	const okBeacon = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
 		navigator: { sendBeacon: (url, blob) => (beacons.push({ url, blob }), true) },
@@ -1465,12 +1465,93 @@ test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', ()
 		navigator: {},
 		fetch: (url, init) => (calls.push({ url, init }), Promise.resolve({ ok: true }))
 	});
-	assert.equal(viaFetch, true);
+	// 🔴 A PROMISE, not a bare `true` (review D1): the fetch path is the one that can be answered,
+	// so what it hands back is what the SERVER said rather than what the browser accepted.
+	assert.equal(await viaFetch, true);
 	assert.equal(calls[0].init.keepalive, true);
 	assert.equal(calls[0].init.headers['content-type'], 'application/json');
 
 	// No transport at all is `false`, never a throw inside a pagehide handler.
 	assert.equal(sendAiSession('u', {}, { navigator: {}, fetch: null }), false);
+});
+
+// ── review D1 (2026-09-08, round 2): a transport that says no must not destroy the buffer ────
+//
+// 🩸 `escalated()` computed `went`, returned it, and cleared the session either way. The review's
+// probe — `send: () => false` — asked two questions, pressed for a person, and watched both
+// questions vanish from the browser while the caller got `null` back and could not tell. That is
+// the one row this whole file exists to carry: the question somebody escalated ON.
+//
+// What is pinned below is the rule in all four of the transport's tenses.
+
+test('D1: a beacon that refuses keeps the buffer, and the next pagehide carries it', async () => {
+	let accept = false;
+	const f = logFixture({ send: (p) => (accept ? (f.sent.push(p), true) : false) });
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/pricing', null, '');
+	f.log.question('and to Korea?', '/pricing', null, '');
+
+	assert.equal(await f.log.escalated('conv-7'), null, 'a refused send reported as a send');
+	assert.equal(f.sent.length, 0);
+	// 🔴 THE MEASUREMENT. Both questions are still in this browser — in memory AND in storage,
+	// because a second tab, or the next document, reads the cell and not the variable.
+	assert.deepEqual(f.log.state().questions.map((q) => q.text),
+		['do you ship to Japan?', 'and to Korea?']);
+	assert.equal(f.log.state().sent, 0);
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 2);
+	// The handle and the claim answer survive the failure too — they were never the network's.
+	assert.equal(f.log.state().handle, 'conv-7');
+	assert.equal(f.log.state().claim, true);
+
+	// The next pagehide is the retry, under the SAME session id — which is why the server side
+	// is idempotent on it rather than inserting a row per request.
+	accept = true;
+	const went = f.log.flush();
+	assert.ok(went, 'the retry sent nothing');
+	assert.equal(went.questions.length, 2);
+	assert.equal(went.handle, 'conv-7');
+});
+
+test('D1: only a 2xx clears — a rejected fetch and a 404 both leave the questions where they are', async () => {
+	for (const [name, answer] of [
+		['a rejected fetch', () => Promise.reject(new Error('offline'))],
+		['a 404 not_claimed', () => Promise.resolve(false)],
+		['a 429', () => Promise.resolve(false)]
+	]) {
+		const f = logFixture({ send: () => answer() });
+		f.log.question('is anybody there?', '/', null, '');
+		assert.equal(await f.log.escalated('conv-9'), null, `${name} was read as a send`);
+		assert.equal(f.log.state().questions.length, 1, `${name} destroyed the buffer`);
+		assert.equal(f.log.state().sent, 0);
+	}
+
+	// And the 2xx — the one answer that does clear it, replay included.
+	const ok = logFixture({ send: () => Promise.resolve(true) });
+	ok.log.question('is anybody there?', '/', null, '');
+	const went = await ok.log.escalated('conv-9');
+	assert.ok(went, 'a 2xx did not clear the session');
+	assert.equal(ok.log.state().questions.length, 0);
+	assert.notEqual(ok.log.state().sid, went.session_id);
+});
+
+test('D1: a pagehide flush that the server later refuses is un-sent, not left marked told', async () => {
+	let served = false;
+	const f = logFixture({ send: () => Promise.resolve(served) });
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+
+	// The pagehide itself cannot wait — it hands the request over and the document may be gone.
+	assert.ok(f.log.flush(), 'the flush did not go out at all');
+	assert.equal(f.log.state().sent, 1, 'queued means marked sent until we hear otherwise');
+	await f.settle();
+	// …and this document did survive (a bfcache restore), so the answer arrived: not stored.
+	assert.equal(f.log.state().sent, 0, 'a refused send stayed marked as told');
+	served = true;
+	const again = f.log.flush();
+	assert.equal(again.questions.length, 1, 'the second pagehide did not carry it');
+	await f.settle();
+	assert.equal(f.log.state().sent, 1);
+	assert.equal(f.log.flush(), null, 'a stored session went a third time');
 });
 
 // ── review D3 (2026-09-08, round 2): the loudest rule in this file had no ruler ──────────────

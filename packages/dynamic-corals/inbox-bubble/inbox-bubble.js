@@ -670,36 +670,52 @@ export function aiSessionPayload(kind, id, state) {
  * fallback for a browser without `sendBeacon`, and it is a fallback rather than the first
  * choice because a `pagehide` handler's ordinary `fetch` is cancelled with the document.
  *
- * Returns whether the request was ACCEPTED FOR SENDING — never whether it arrived. Nothing
- * here can know that, and a caller that treats「queued」as「stored」is the reason the server
- * side has to be idempotent on the session id.
+ * 🔴 THE ANSWER COMES IN ONE OF THE TWO TENSES A BROWSER HAS, and the caller has to read
+ * which one it got (review D1):
+ *
+ * - `false` — REFUSED. Nothing was sent and nothing will be; the buffer must survive.
+ * - `true` — QUEUED, and that is everything a beacon can ever say. `sendBeacon` hands the
+ *   request to the browser and the document is gone before any response exists.
+ * - a `Promise<boolean>` — the fetch path, which resolves to whether the SERVER took it
+ *   (a 2xx, including the idempotent replay of one). A caller that can still act — the
+ *   escalation press, a bfcache restore — waits for that instead of assuming.
+ *
+ * `opts.confirm` asks for the third of those on purpose: the press for a person happens with
+ * the document alive, so it can afford one round trip to learn what a `pagehide` never can.
  */
-export function sendAiSession(url, body, env = {}) {
+export function sendAiSession(url, body, env = {}, opts = {}) {
 	// 🔴 `in`, NOT `??`. An injected `null` means「this world has no such thing」and `??` would
 	// fall straight through to the real global — so a test asserting「no transport sends nothing」
 	// would have been sending through the browser's own fetch and reading it as a pass.
 	const pick = (name, real) => (name in env ? env[name] : real);
 	const nav = pick('navigator', typeof navigator === 'undefined' ? null : navigator);
 	const json = JSON.stringify(body);
-	try {
-		const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
-		if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
-			return nav.sendBeacon(url, new BlobCtor([json], { type: 'application/json' })) === true;
+	if (!opts.confirm) {
+		try {
+			const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
+			if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
+				// 🔴 `false` FALLS THROUGH TO THE FETCH, it does not return (review D4). The spec's
+				// answer to「over the beacon quota」is a `false` return, not a throw — so returning it
+				// here meant the fallback below covered the one case that hardly happens and missed
+				// the exact case its own comment was written for.
+				if (nav.sendBeacon(url, new BlobCtor([json], { type: 'application/json' })) === true) {
+					return true;
+				}
+			}
+		} catch {
+			// A beacon that throws (a browser that counts it against a quota, say) falls through
+			// to the fetch below rather than losing the session.
 		}
-	} catch {
-		// A beacon that throws (a browser that counts it against a quota, say) falls through
-		// to the fetch below rather than losing the session.
 	}
 	const f = pick('fetch', typeof fetch === 'undefined' ? null : fetch);
 	if (!f) return false;
 	try {
-		void f(url, {
+		return f(url, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: json,
 			keepalive: true
-		}).catch(() => {});
-		return true;
+		}).then((res) => !!res && res.ok === true, () => false);
 	} catch {
 		return false;
 	}
@@ -765,6 +781,21 @@ export function createAiLog(opts) {
 	}
 	let state = null;
 	let probing = false;
+
+	/**
+	 * Put back what a send turned out not to have delivered.
+	 *
+	 * 🔴 ONLY IF IT IS STILL THE SAME SESSION. A late「no」about `sid-1` must not lower the sent
+	 * mark of `sid-2` — the questions it is talking about are not in this buffer any more, and
+	 * re-sending a session that already went is what the server's idempotency is for anyway.
+	 */
+	function unsend(sid, sent) {
+		const held = read() ?? state;
+		if (!held || held.sid !== sid) return;
+		held.sent = Math.min(held.sent, sent);
+		state = held;
+		write(state);
+	}
 
 	/**
 	 * The live session, starting a new one when the old one has gone cold.
@@ -871,9 +902,21 @@ export function createAiLog(opts) {
 			if (state.claim !== true) return null;
 			if (state.questions.length <= state.sent) return null;
 			const payload = aiSessionPayload(kind, id, state);
-			if (!send(payload)) return null;
+			const outcome = send(payload);
+			// A refusal is not a send: nothing moves, and the next `pagehide` tries again.
+			if (!outcome) return null;
+			const sid = state.sid;
+			const before = state.sent;
 			state.sent = state.questions.length;
 			write(state);
+			if (typeof outcome.then === 'function') {
+				// 🔴 QUEUED NOW, UNSENT IF THE SERVER SAYS NO. The fetch path can still be answered
+				// while this document is alive (a bfcache restore, an escalation on the same page),
+				// and a definite no has to put the questions back rather than leave them marked told.
+				// A `pagehide` that really is the end of the document never sees this — which is
+				// exactly why the server side is idempotent on `session_id`.
+				void outcome.then((ok) => { if (ok !== true) unsend(sid, before); }, () => unsend(sid, before));
+			}
 			return payload;
 		},
 
@@ -885,10 +928,18 @@ export function createAiLog(opts) {
 		 * one place claim state is learned without asking anybody.
 		 *
 		 * Flushes immediately (this session is now attached to a real conversation, and the
-		 * owner is about to open it) and CLEARS, so the next question starts a fresh session
-		 * rather than re-sending questions that already travelled.
+		 * owner is about to open it) and CLEARS — but only once the send has been ANSWERED.
+		 *
+		 * 🩸 IT USED TO CLEAR EITHER WAY (review D1). `went` was computed, returned, and never
+		 * consulted about whether to reset, so a transport that said no destroyed the whole
+		 * conversation's questions in the browser — including the one the visitor escalated on,
+		 * the single most valuable row this file exists to carry — and returned `null`, so the
+		 * caller could not tell it had happened either. This is the one send that happens with
+		 * the document alive, so it can wait for the server's own answer rather than the
+		 * transport's; anything short of a 2xx leaves the buffer exactly where it was, and the
+		 * next `pagehide` carries it under the same idempotency key.
 		 */
-		escalated(conv) {
+		async escalated(conv) {
 			if (!state) return null;
 			const at = now();
 			state = current(at);
@@ -896,11 +947,21 @@ export function createAiLog(opts) {
 			state.claim = true;
 			state.claimAt = at;
 			state.last = at;
-			const payload = state.questions.length > state.sent && send ? aiSessionPayload(kind, id, state) : null;
-			const went = payload ? send(payload) : false;
-			state = fresh(at, state);
+			// The handle and the claim answer are facts already — a failed send must not cost
+			// them, so they are written before the network is asked anything.
 			write(state);
-			return went ? payload : null;
+			const payload = state.questions.length > state.sent && send ? aiSessionPayload(kind, id, state) : null;
+			if (!payload) return null;
+			let went = false;
+			try {
+				went = (await send(payload, { confirm: true })) === true;
+			} catch {
+				went = false;
+			}
+			if (!went) return null;
+			state = fresh(now(), state);
+			write(state);
+			return payload;
 		}
 	};
 }
@@ -1887,7 +1948,7 @@ export async function mount(el) {
 				return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 			}
 		},
-		send: (payload) => sendAiSession(`${apiBase}/api/inbox/session`, payload),
+		send: (payload, opts) => sendAiSession(`${apiBase}/api/inbox/session`, payload, {}, opts),
 		probeClaim: () => probeInboxClaim(apiBase, kind, id)
 	});
 	/**
@@ -2112,7 +2173,11 @@ export async function mount(el) {
 			// The press is the flush. This session now belongs to a conversation the owner is
 			// about to open, so the questions that led to it travel with it rather than waiting
 			// for the visitor to close the tab.
-			aiLog.escalated(conv);
+			//
+			// 🔴 NOT AWAITED, and it settles on its own: the confirmed send is a round trip and the
+			// visitor is waiting for the panel to say their message went, not for our bookkeeping.
+			// A send the server does not take leaves the buffer alone; the next `pagehide` carries it.
+			void aiLog.escalated(conv);
 			replyWithinHours = body.reply_within_hours ?? null;
 			renderMessages();
 			const log = root.querySelector(`.${PREFIX}-log`);
@@ -2155,7 +2220,7 @@ export async function mount(el) {
 				hasEmail = emailGiven;
 				storeHandle(conv, hasEmail, storedMode);
 				// Same press, the other door — see `escalate`.
-				aiLog.escalated(conv);
+				void aiLog.escalated(conv);
 				replyWithinHours = body.reply_within_hours ?? null;
 				// 🩸 The confirmation used to render AFTER `await refresh()` — a real
 				// network round trip — so the panel sat on the freshly-reset empty
