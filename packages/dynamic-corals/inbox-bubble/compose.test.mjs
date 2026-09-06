@@ -2495,3 +2495,50 @@ test('E6: a lone surrogate costs three octets wherever it stands, and never eats
 	assert.equal(utf8Bytes(JSON.stringify(body)), Buffer.byteLength(JSON.stringify(body), 'utf8'));
 	assert.equal(JSON.stringify(body).includes('\\ud800'), true);
 });
+
+// ── review E7 = round 1's D11 and D12 (2026-09-08) ───────────────────────────────────────────
+//
+// 🩸 D11: `escalated()` defended the handle against a server that answers `ok:true` with no
+// `conversation_id`, and left `state.claim = true` beside it undefended — and a claim is carried
+// across sessions for six hours, so that is a write permission opened by a conversation that does
+// not exist. D12: the header's B3 concession names one storage key, and 0.7.6 added a second one
+// that carries a handle of its own onto the wire.
+
+test('E7: a press with no conversation id behind it opens no claim (D11)', async () => {
+	for (const empty of ['', null, undefined, 7, '   ']) {
+		const f = logFixture({ send: () => Promise.resolve(true), probeClaim: async () => null });
+		f.log.question('is anybody there?', '/', null, '');
+		await f.settle();
+		assert.equal(f.log.state().claim, null, 'the probe answered after all');
+
+		await f.log.escalated(empty);
+		assert.equal(f.log.state().handle, null);
+		assert.equal(f.log.state().claim, null,
+			`a claim was opened on the conversation ${JSON.stringify(empty)}`);
+		assert.equal(f.log.state().claimAt, 0, 'and dated, so it would be trusted for six hours');
+		// 🔴 THE CONSEQUENCE THE FIELD HAS. A claim survives the session, so the next document
+		// would have sent this browser's questions on the strength of it.
+		assert.equal(f.log.flush(), null);
+	}
+
+	// The real press still learns the answer without asking anybody — that is what D11 leaves alone.
+	const real = logFixture({ send: () => Promise.resolve(true), probeClaim: async () => null });
+	real.log.question('is anybody there?', '/', null, '');
+	await real.settle();
+	assert.ok(await real.log.escalated('conv-7'));
+	assert.equal(real.log.state().claim, true);
+	assert.equal(real.log.state().claimAt, real.at());
+});
+
+test('E7: the header names both storage keys its concession is about (D12)', () => {
+	// The concession itself, unchanged — this is the sentence B3 round 3 put there.
+	assert.match(CORAL_SOURCE, /can still choose the conversation a visitor's next message is filed under/);
+	// 🔴 AND THE SECOND KEY, WHICH 0.7.6 ADDED. A ruler that still points at live code but measures
+	// less than it claims is the failure mode this test exists to prevent.
+	assert.match(CORAL_SOURCE, /AND SINCE 0\.7\.6 THERE ARE TWO KEYS, NOT ONE/);
+	assert.match(CORAL_SOURCE, /`reef-inbox:ai:<kind>:<id>`/);
+	// Both keys are real, and they are the two this file writes.
+	assert.equal(aiLogKey('site:acme'), 'reef-inbox:ai:site:acme');
+	assert.match(CORAL_CODE, /const STORE_PREFIX = 'reef-inbox:';/);
+	assert.match(CORAL_CODE, /const AI_LOG_PREFIX = 'reef-inbox:ai:';/);
+});

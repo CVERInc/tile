@@ -39,6 +39,12 @@
 // A same-origin script that can write `localStorage['reef-inbox:<kind>:<id>']` and then navigate
 // can still choose the conversation a visitor's next message is filed under: that is the same
 // intake reef's own `/report` form uses, and it belongs to storage access, not to this widget.
+// 🔴 AND SINCE 0.7.6 THERE ARE TWO KEYS, NOT ONE (review D12). `reef-inbox:ai:<kind>:<id>` — the
+// deferred question buffer — carries a `handle` of its own, and that handle goes onto the wire
+// with the questions, so the same one script can file this visitor's buffered questions under a
+// conversation it chose. Same capability, same intake, second key; both are bounded by what they
+// are read through (`parseHandle`, `parseAiLog`, `aiHandle`) and neither is a place this file can
+// tell one same-origin writer from another.
 // Removing the event took away the IN-PLACE, INVISIBLE version — switching the thread under a
 // visitor who is mid-sentence in an open panel, with no navigation and nothing on screen to see.
 // It did not take away the capability, and no code in this file can. A site that loads
@@ -1173,8 +1179,16 @@ export function createAiLog(opts) {
 			const at = now();
 			state = current(at);
 			state.handle = aiHandle(conv);
-			state.claim = true;
-			state.claimAt = at;
+			// 🩸 THE PROOF IS THE ID, SO THE ID IS WHAT IT IS CONDITIONED ON (review D11/E7). The
+			// handle was defended against a server that answered `ok:true` with no
+			// `conversation_id`; the claim beside it was not, and a `claim: true` is carried across
+			// sessions for six hours by `fresh()` — a write permission opened by a conversation
+			// that does not exist. Both call sites pass `body.conversation_id` after a 2xx, so this
+			// is a shape rather than a bug today, and it is the shape that has to be right.
+			if (state.handle) {
+				state.claim = true;
+				state.claimAt = at;
+			}
 			state.last = at;
 			// The handle and the claim answer are facts already — a failed send must not cost
 			// them, so they are written before the network is asked anything.
