@@ -142,6 +142,11 @@ moves them back — on success, on a failed build, and on a throw. `blog/` and `
 EMPTIED even for a site that has neither, because otherwise the renderer's demo posts and demo book
 build into your site, under your domain, with nothing saying so.
 
+**One build at a time.** The renderer is a single borrowed machine, so `stageSite` takes a
+`.tile-build-lock` directory (`mkdir` is atomic; `EEXIST` is the answer) and a second concurrent
+build is refused in a sentence instead of stashing what the first one just staged — which used to
+delete the renderer's own `content/` for good, silently.
+
 …and on **Ctrl-C**, which is none of those three and is the likeliest of the four. `finally` does
 not run on a signal, so `stageSite` installs `SIGINT`/`SIGTERM` handlers that restore and then exit
 130. A kill nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside

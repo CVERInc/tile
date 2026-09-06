@@ -33,6 +33,9 @@ packages/sitetile/astro/.astro/
 # next thing that must not happen is `git add -A` committing a copy of the renderer into the
 # renderer, or a site's staged pages into this repo.
 packages/sitetile/astro/.tile-build-stash-*
+# …and the one-build-at-a-time lock beside it. Same reason: it should never outlive a build, and the
+# one time it does it must not be committed into the repo as a permanent "someone is building".
+packages/sitetile/astro/.tile-build-lock
 # 🔴 THE WALL. `lab/` is the incubator's never-graduates folder — creators' cards, our deployment
 # config, the forbidden-terms list. It lives in CVERInc/tile-lab, which has this repo as a
 # submodule at engine/. Ignoring it here means a careless copy in the wrong direction cannot commit

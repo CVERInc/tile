@@ -21,6 +21,10 @@ const exists = async (p) => { try { await stat(p); return true; } catch { return
 // `.gitignore`, by the leftover check below, and by the tests, and those three must not drift.
 export const STASH_PREFIX = '.tile-build-stash-';
 
+// The same, for the one-build-at-a-time lock. A DIRECTORY, because `mkdir` either creates it or
+// says EEXIST and never both — which is the entire concurrency argument.
+export const LOCK_NAME = '.tile-build-lock';
+
 /**
  * Reduce ONE page path to something safe to be a filename, keeping the slashes.
  *
@@ -90,16 +94,41 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   const publicDir = path.join(astroDir, 'public');
   const themesDir = path.join(astroDir, 'src/themes');
 
+  const leftovers = async () =>
+    (await readdir(astroDir)).filter((n) => n.startsWith(STASH_PREFIX)).map((n) => path.join(astroDir, n));
+
+  // 🩸 ONE BUILD AT A TIME, and `mkdir` is the whole mechanism: it is atomic, so EEXIST IS the
+  // answer. Two concurrent stageSites did not merely mix content — the second stashed what the
+  // first had staged, and the renderer's own content/ was gone for good afterwards, with no line of
+  // output saying so. Measured 2026-09-07, both in one process and across two.
+  //
+  // 🔴 The lock is taken BEFORE the leftover check below, and that order is the whole distinction:
+  // a running build's stash and a dead build's stash look identical on disk. The lock is what says
+  // which one you are looking at.
+  const lock = path.join(astroDir, LOCK_NAME);
+  try {
+    await mkdir(lock);
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    const held = await leftovers();
+    throw new Error(`stageSite: another build is already using this renderer (${lock} exists). `
+      + 'One site at a time — a second would stash what the first just staged, and the renderer '
+      + 'would not survive it. Wait for that build to finish; if nothing is running it was killed, '
+      + `and ${held.length ? `its stash is ${held[0]} — put those directories back and remove both`
+        : 'that directory is stale and can be removed'}.`);
+  }
+
   // 🩸 A STASH THAT OUTLIVED ITS BUILD IS THE RENDERER WEARING SOMEBODY ELSE'S CLOTHES, and the
   // next build here would put that site's leftover pages inside YOURS. `.gitignore` hides the stash
   // from `git status`, and a site owner working from a tarball has no `git status` at all — so this
   // is the only place it can be noticed. Refusing rather than auto-restoring is deliberate: what is
   // in content/ right now may be a half-staged site, and only the person looking knows which of the
   // two is theirs.
-  const leftovers = (await readdir(astroDir)).filter((n) => n.startsWith(STASH_PREFIX));
-  if (leftovers.length) {
-    throw new Error(`stageSite: a previous build here was killed and left its stash behind — `
-      + `${path.join(astroDir, leftovers[0])}${leftovers.length > 1 ? ` (and ${leftovers.length - 1} more)` : ''}. `
+  const orphans = await leftovers();
+  if (orphans.length) {
+    await rm(lock, { recursive: true, force: true });
+    throw new Error('stageSite: a previous build here was killed and left its stash behind — '
+      + `${orphans[0]}${orphans.length > 1 ? ` (and ${orphans.length - 1} more)` : ''}. `
       + `That directory holds the renderer's OWN ${stagedDirNames.join('/, ')}/, and what is in their `
       + 'place now belongs to another site. Move the ones inside it back over the renderer\'s, remove '
       + 'it, and run this again.');
@@ -109,7 +138,8 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   // across devices fails (EXDEV) and the temp dir is routinely on a different one; and none of the
   // renderer's globs are rooted here — they all name ../../content, ../../blog, ../themes — so a
   // directory sitting beside them is invisible to the build.
-  const stash = await mkdtemp(path.join(astroDir, STASH_PREFIX));
+  const stash = await mkdtemp(path.join(astroDir, STASH_PREFIX))
+    .catch(async (err) => { await rm(lock, { recursive: true, force: true }); throw err; });
   const stashed = new Set();   // moved aside, and owed back
   const touched = new Set();   // emptied or created by US, and therefore ours to undo
   let stagedTheme = null;
@@ -142,10 +172,13 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   const disarm = () => { for (const s of SIGNALS) process.off(s, onSignal); };
   for (const s of SIGNALS) process.once(s, onSignal);
 
+  // 🩸 `restored` IS SET AT THE END, not the start. It used to be the first statement here, so a
+  // restore that threw half way — a rename losing a race, an ENOTEMPTY — marked itself done and
+  // every later call returned immediately. That renderer could never be put back, and the contract
+  // "if this function throws, it has ALREADY restored" was false on exactly the path that needed it.
+  // Every step below is therefore idempotent: a second call finishes what the first one dropped.
   async function restore() {
     if (restored) return;
-    restored = true;
-    disarm();
     // A site's theme belongs to that site's repo, never to the renderer (the renderer ships only
     // the baseline skin). Staged in for the build, removed after — so a site's theme can never
     // accumulate here.
@@ -158,13 +191,24 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
       // pagetile/ and had no stash to put back. Measured here 2026-09-06, by the test that walks
       // the renderer before and after a throw. Undo only what this run actually did.
       if (!touched.has(name) && !stashed.has(name)) continue;
-      await rm(dir, { recursive: true, force: true });
-      if (stashed.has(name)) await rename(path.join(stash, name), dir);
-      // content/ is the one directory the renderer cannot be left without, even if it arrived
-      // without one: the renderer's globs name it.
-      else if (name === 'content') await mkdir(dir, { recursive: true });
+      if (stashed.has(name)) {
+        // …and only if it is still IN the stash. On a retry it is already back where it belongs,
+        // and removing `dir` first would delete the thing this loop just finished putting there.
+        const from = path.join(stash, name);
+        if (!(await exists(from))) continue;
+        await rm(dir, { recursive: true, force: true });
+        await rename(from, dir);
+      } else {
+        await rm(dir, { recursive: true, force: true });
+        // content/ is the one directory the renderer cannot be left without, even if it arrived
+        // without one: the renderer's globs name it.
+        if (name === 'content') await mkdir(dir, { recursive: true });
+      }
     }
     await rm(stash, { recursive: true, force: true });
+    await rm(lock, { recursive: true, force: true });
+    restored = true;
+    disarm();
   }
 
   try {
