@@ -626,18 +626,12 @@ test('B10: opening an already-open panel refocuses the compose box instead of do
 	assert.match(openPanel[0], /if \(open\) \{[\s\S]*?focus\(\)[\s\S]*?return;/);
 });
 
-// NOTE ON COVERAGE: mount() wires window.addEventListener('reef-inbox:open', ...) and calls
-// shouldAutoOpenFromHash(location.hash) itself — both only ever run for an element that already
-// passed the data-kind/data-id guard at the top of mount(), which is what makes each inert
-// wherever the coral is not mounted. mount() builds real DOM (document.createElement,
-// root.querySelector, ...) that this jsdom-free suite has no stand-in for, so the wiring itself —
-// and the "opening focuses the ask input" behaviour, which falls out for free because openPanel
-// calls the same renderOpen() a click already did — is not exercised here. What is checked here
-// is the one pure decision mount() delegates to: shouldAutoOpenFromHash. The DOM-level proof
-// belongs in reef's own inbox-bubble.svelte.test.ts, which already drives this exact artifact in
-// a real browser.
+// NOTE ON COVERAGE: what mount() DOES with the event — the render, the focus, the refocus, the
+// opt-in — is exercised against the real exported mount() in mount.test.mjs beside this file
+// (review B11, round 2: a source regex goes green for a call left in a branch that never runs).
+// What is checked here is the pure decision mount() delegates to, and the wiring order.
 
-// ── #15: the handle hand-off — the mounted panel adopts an externally-minted handle ─────────
+// ── the stored handle: the one intake, read at mount ────────────────────────
 
 test('parseHandle accepts exactly the shape saveHandle stores, ts included', () => {
 	assert.deepEqual(parseHandle({ conv: 'c1', ts: 1000, hasEmail: true, mode: 'human' }),
