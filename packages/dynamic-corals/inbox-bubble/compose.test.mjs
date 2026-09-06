@@ -595,3 +595,74 @@ test('parseHandle ignores a malformed detail — no exception thrown, just null 
 // "is this detail well-formed"; the render-and-poller-teardown behaviour it drives is left to
 // reef's own browser-driven suite, the same split this file already draws for #13 and for the
 // late-rename test above.
+
+// ── #17: the assistant-name cap counts grapheme clusters, and bidi/format controls are stripped ──
+
+test('#17: the 40-char cap counts grapheme clusters, so a name under the cap is never touched', () => {
+	// The issue's own repro: 21 grapheme clusters (well under the cap) but 41 UTF-16 code units --
+	// the old .slice(0, 40) cut one code unit short of completing the 20th emoji's surrogate
+	// pair, producing a lone high surrogate.
+	const raw = 'a' + '\u{1F600}'.repeat(20);
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, raw);
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+});
+
+test('#17: a name OVER the cap is truncated by whole grapheme, never mid-surrogate-pair', () => {
+	const raw = '\u{1F600}'.repeat(45); // 45 grapheme clusters, 90 UTF-16 code units
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, '\u{1F600}'.repeat(40));
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+});
+
+test('#17: the Array.from fallback (no Intl.Segmenter) is also grapheme-safe, not a UTF-16 slice', () => {
+	const realSegmenter = Intl.Segmenter;
+	delete Intl.Segmenter;
+	try {
+		const raw = '\u{1F600}'.repeat(45);
+		const el = { getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) };
+		const name = resolveAssistantName(el);
+		assert.equal(name, '\u{1F600}'.repeat(40));
+		if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+	} finally {
+		Intl.Segmenter = realSegmenter;
+	}
+});
+
+// Every bidi/format control the issue names (U+202A-202E, U+2066-2069, U+061C, U+200E/U+200F),
+// spelled as \u escapes — never as literal source bytes. A literal bidi override sitting in this
+// file's own text is exactly the "Trojan Source" (CVE-2021-42574) class of problem the code under
+// test exists to strip; the escape is how the test asserts the stripping without reintroducing it.
+const BIDI_TEST_CONTROLS = [
+		'\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2067', '\u2068', '\u2069', '\u061C', '\u200E', '\u200F'
+	];
+
+test('#17: every bidi/format control the issue names is stripped from the name', () => {
+	for (const ctrl of BIDI_TEST_CONTROLS) {
+		const el = { getAttribute: (n) => (n === 'data-assistant-name' ? `\u5C0F${ctrl}\u7F8E` : null) };
+		const name = resolveAssistantName(el);
+		assert.equal(name, '\u5C0F\u7F8E', `control U+${ctrl.codePointAt(0).toString(16).toUpperCase()} survived`);
+	}
+});
+
+test('#17: an RTL-override payload cannot reach the status line unisolated', () => {
+	// The issue's own example: a name opening with U+202E would otherwise flip the reading
+	// direction of everything after it in the same rendered sentence.
+	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? '\u202Eevil' : null) };
+	const name = resolveAssistantName(el);
+	assert.equal(name, 'evil');
+	const html = statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+	assert.ok(!html.includes('\u202E'));
+	assert.match(html, /^evil<span class="dc-inbox-ai-chip"/);
+});
+
+test('#17: the platform read (fetchAssistantName) is capped and stripped the same way as the baked attribute', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: `\u5C0F\u202E\u7F8E` })
+	});
+	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
+	assert.equal(name, '\u5C0F\u7F8E');
+});

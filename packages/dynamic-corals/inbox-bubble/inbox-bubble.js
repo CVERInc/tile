@@ -462,6 +462,35 @@ const DEFAULT_ASSISTANT_NAME = 'KAITO';
 const ASSISTANT_NAME_MAX = 40;
 
 /**
+ * Bidi/format controls (issue #17, pre-existing, found by the review of #12 R2/R3 P3): an
+ * embedding override or isolate reaching the status text node is unisolated there, so a name
+ * carrying U+202E could flip the reading direction of everything AFTER it in the same sentence.
+ * Every code point that can do that — the five embedding/override controls, the four isolates,
+ * ALM, and the two marks — is stripped at the same intake point `AI_CHIP_TOKEN` already goes
+ * through, so nothing downstream (`statusFor`, the second-action label) has to defend itself.
+ *
+ * 🔴 `\u` ESCAPES, NEVER THE LITERAL CHARACTERS. These are exactly the code points behind
+ * "Trojan Source" (CVE-2021-42574): a bidi override sitting as literal source bytes can make an
+ * editor or a diff RENDER this file's own code in an order that does not match how it executes.
+ * Spelling them out defeats the one thing this constant exists to strip.
+ */
+const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]/g;
+
+/**
+ * Splits `str` into user-perceived characters — an emoji or a combining sequence counts once —
+ * using `Intl.Segmenter` where it exists and `Array.from` (code points, not UTF-16 units) where
+ * it does not. Either is enough to stop the cap producing a lone surrogate (issue #17): a plain
+ * `.slice(0, N)` counts UTF-16 units, so a 40-char cap could land inside a surrogate pair and cut
+ * an astral character in half.
+ */
+function graphemes(str) {
+	if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+		return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(str), (s) => s.segment);
+	}
+	return Array.from(str);
+}
+
+/**
  * What VISITORS see the site's Q&A assistant called (owner ruling, 2026-09-05:
  * "KAITO" is OUR product name; the site owner may rename what visitors see it
  * as — e.g. 「重新問 KAITO」→「重新問 小美」 — but the AI identity itself must
@@ -492,9 +521,11 @@ export function resolveAssistantName(el) {
  * against where they render.
  */
 function cleanAssistantName(raw) {
-	const stripped = String(raw || '').split(AI_CHIP_TOKEN).join('');
+	const stripped = String(raw || '').split(AI_CHIP_TOKEN).join('').replace(BIDI_CONTROL_RE, '');
 	const trimmed = stripped.trim().split('\n')[0].trim();
-	return trimmed ? trimmed.slice(0, ASSISTANT_NAME_MAX) : '';
+	if (!trimmed) return '';
+	const parts = graphemes(trimmed);
+	return parts.length > ASSISTANT_NAME_MAX ? parts.slice(0, ASSISTANT_NAME_MAX).join('') : trimmed;
 }
 
 /**
