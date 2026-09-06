@@ -60,11 +60,25 @@ window.dispatchEvent(new CustomEvent('reef-inbox:handle', {
 `detail` is the object this file's own `saveHandle` stores, plus an addressee — `target` (the
 coral's own mount element), `conv` (string) and `ts` (number, when the handle was minted) are
 required; `hasEmail` and `mode` (`'human'` or `'ask'`) are optional and default the same way
-`saveHandle` itself defaults them. This does not write to `localStorage` itself; it assumes the
-emitter already has, under this tenant's own key. The gap it closes: a same-document
-`localStorage.setItem` raises no `storage` event, so without this a mounted panel never finds out
-that another script on the same page just gave this visitor a handle. On receipt the panel adopts
-it, tears down whatever poller was running against the previous conversation, and re-renders.
+`saveHandle` itself defaults them. The gap it closes: a same-document `localStorage.setItem`
+raises no `storage` event, so without this a mounted panel never finds out that another script on
+the same page just gave this visitor a handle. On receipt the panel adopts it, tears down
+whatever poller was running against the previous conversation, and re-renders.
+
+🔴 **The panel DOES write the adopted handle to `localStorage`**, under its own
+`reef-inbox:<kind>:<id>` key — this paragraph said the opposite until 0.7.5 and the code was
+right, not the sentence. It writes because a panel showing one conversation and a storage key
+pointing at another is the worse of the two failures: the next page load would open a different
+thread than the one the visitor was just looking at. Two consequences to design around, since
+that key holds only one handle:
+
+- adopting **replaces** whatever handle this browser held for this tenant, and there is no second
+  copy of it on this machine. That pointer is the visitor's only route back to their own thread —
+  the owner's copy never expires, this one does — so an emitter that hands over a handle is
+  taking that decision on the visitor's behalf.
+- the key it writes is **this mount's** tenant, which is not necessarily the key the emitter
+  wrote under. If the emitter minted the handle for a different `kind`/`id`, both keys now exist
+  and only one of them is what the panel is showing.
 
 The event is **addressed, not broadcast** — four things have to be true or it is silently ignored:
 
@@ -91,8 +105,10 @@ person, and a person is far easier to feel lied to about than a widget.
 
 **The conversation id comes from the SERVER.** This browser stores what the server
 minted and sends it back; it never invents one. A browser that can choose an id
-can choose whose conversation to open. The handle expires locally after seven
-days; the owner's copy never expires.
+can choose whose conversation to open — which is why the hand-off event above is
+addressed to a mount and refuses to invent, extend or rewind a handle. The
+handle expires locally after 30 days (`HANDLE_TTL_MS`, bumped from seven on
+2026-09-04; this line still said seven); the owner's copy never expires.
 
 **A KAITO answer is never stored and never joins the transcript.** It is a machine
 quoting one of the owner's own pages; a message is a person speaking. Only the

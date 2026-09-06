@@ -710,6 +710,31 @@ test('B3: the listener delegates to acceptHandoff, addressed to its own element'
 	assert.match(listener[0], /storeHandle\(handoffConv, hasEmail, storedMode, handleTs\)/);
 });
 
+// REVIEW B4 (2026-09-08): the README told integrators the opposite of what the code does.
+
+const README = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8');
+
+test('B4: the README does not deny the localStorage write the hand-off actually performs', () => {
+	// The code half, so this test measures the two against each other rather than against a
+	// sentence somebody typed: the listener writes the adopted handle.
+	const listener = CORAL_CODE.match(/window\.addEventListener\('reef-inbox:handle'[\s\S]*?\n\t\}\);/);
+	assert.ok(listener && /storeHandle\(/.test(listener[0]), 'the hand-off listener no longer writes');
+	// The README half. An integrator who believed the old sentence ("it assumes the emitter
+	// already has") would design around a write that happens anyway, under a key they did not
+	// choose, over a handle they cannot get back.
+	assert.ok(!/does not write to `localStorage`/.test(README), 'the README denies the write again');
+	assert.match(README, /DOES write the adopted handle to `localStorage`/);
+});
+
+test('B4: the README quotes the TTL the code actually enforces', () => {
+	// 🩸 The same class of drift, found while fixing B4: the TTL went from seven days to thirty on
+	// 2026-09-04 and this line did not. Pinned to the constant so the next bump cannot leave it
+	// behind either.
+	const days = Number(CORAL_CODE.match(/const HANDLE_TTL_MS = (\d+) \* 24 \* 60 \* 60 \* 1000;/)[1]);
+	assert.equal(days, 30);
+	assert.match(README, new RegExp(`expires locally after ${days} days`));
+});
+
 // REVIEW B2 (2026-09-08): stopPolling() cleared the interval and nothing else, so a transcript
 // fetch already in the air came back after the hand-off and painted the OLD conversation into
 // the NEW panel — both views render into the same .dc-inbox-log, so it looked like part of it.
