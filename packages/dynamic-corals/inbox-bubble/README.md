@@ -17,11 +17,17 @@ a support department, and nearly every REEF customer is one person.
 | `data-kaito` | `"1"` asks the site first (needs REEF with KAITO on that tenant) |
 | `data-assistant-name` | what VISITORS see the assistant called instead of "KAITO" (owner-chosen; the panel still marks the reply with the non-removable **AI** chip — the name can change, the AI identity cannot). The BAKED opening answer only: from 0.7.2 the bubble also reads the platform's current value once per mount (`GET /api/inbox/assistant`) and patches the two nodes that carry the name, so an owner's rename reaches visitors without a republish. That read only beats the baked value when the proxy says it actually asked the platform (`resolved: true` in the body) — which is also how CLEARING the name works: a resolved empty answer means「no override」and falls back to KAITO, while an empty answer without `resolved` means「we could not ask」and this attribute stands |
 | `data-api-base` | override the feelreef origin (previews) |
-| `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` / `data-empty-label` | copy overrides |
+| `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides |
 
 Words default from the PAGE's `<html lang>` — the site's own statement about who
 it is for, not a guess and not the visitor's browser preference. Unknown language
 falls back to English.
+
+From 0.7.3 the ask panel says two things, not four (owner ruling 2026-09-07,
+「太囉唆」): the status line under the site name —「\<名字\>**AI**先回，轉出去真人會看」—
+and the box's own placeholder. The body line in the empty log and the
+「站主看得到」 footer under the form are gone in every locale, and
+`data-empty-label` went with the string it overrode.
 
 ## The three things not to break
 

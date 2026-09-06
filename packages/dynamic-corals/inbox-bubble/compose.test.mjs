@@ -178,7 +178,7 @@ test('resolveSiteName ignores blank data-site-name and blank og:site_name', () =
 test('statusFor shows the default only before a hand-off, and only when KAITO is on', () => {
 	assert.equal(
 		statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }),
-		'KAITO<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>自動回覆・需要時可轉真人'
+		'KAITO<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>先回，轉出去真人會看'
 	);
 	assert.equal(statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: false }), '');
 });
@@ -211,7 +211,7 @@ test('resolveAssistantName caps at 40 chars and takes only the first line', () =
 test('statusFor threads a custom assistant name through, and still carries the AI marker', () => {
 	assert.equal(
 		statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: true }, '小美'),
-		'小美<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>auto-replies · escalate to a person anytime'
+		'小美<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>answers first, a person reads what you send on'
 	);
 	assert.match(
 		statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, '小美'),
@@ -247,11 +247,12 @@ test('a name carrying the chip sentinel cannot eat the rest of the status line',
 	// 🩸 U+2063 is a FORMAT character, not whitespace: `trim()`, the newline split and the
 	// 40-char cap all pass it through, so an owner who typed the sentinel used to lose
 	// 「自動回覆・需要時可轉真人」 entirely — `split` yielded three parts and `[before, after]`
-	// dropped the third. Stripped at intake now (0.7.2), so BOTH halves survive.
+	// dropped the third. Stripped at intake now (0.7.2), so BOTH halves survive. The sentence
+	// after the chip is shorter since 0.7.3; what is being measured is that it is still THERE.
 	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? `小${AI_CHIP_TOKEN}美` : null) };
 	assert.equal(resolveAssistantName(el), '小美');
 	const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, resolveAssistantName(el));
-	assert.match(html, /自動回覆・需要時可轉真人$/);
+	assert.match(html, /先回，轉出去真人會看$/);
 	assert.equal(html.split('<span class="dc-inbox-ai-chip"').length - 1, 1);
 });
 
@@ -365,20 +366,105 @@ test('statusFor switches to the hand-off wording once a conversation exists, by 
 	);
 });
 
-// ── panel spacing (owner report 2026-09-03: the seen line sat flush against
-// the panel's bottom edge; 0.6.5 gives it breathing room) ───────────────────
+// ── owner ruling 2026-09-07 (「太囉唆」): the ask panel opens with a status line and a
+// placeholder, and nothing else. The body line in the empty log (`empty`) and the
+// 「站主看得到」 footer under the form (`seen`) were REMOVED, not shortened.
+//
+// 🩸 The test this replaced asserted the FOOTER's bottom margin (owner report 2026-09-03: it sat
+// flush against the panel edge). Keeping it would have been a gate defending the spacing of an
+// element that no longer renders — green for ever, about nothing.
+//
+// 🔴 ASSERTED AS ABSENCE OF THE KEY, not of the sentence. A locale that re-grew
+// 「想問什麼都可以，是真人在看。」 under a NEW name would pass a string comparison and put the
+// line straight back on screen, so what is pinned is that there is no key for it to come back in.
 
-test('the "seen by a person" line keeps a non-zero bottom margin — never flush with the panel edge', () => {
-	const source = readFileSync(fileURLToPath(new URL('./inbox-bubble.js', import.meta.url)), 'utf8');
-	const rule = source.match(/\$\{PREFIX\}-seen\{[^}]*\}/);
-	assert.ok(rule, 'expected a .dc-inbox-seen rule in the injected stylesheet');
-	const margin = rule[0].match(/margin:([^;]+);/);
-	assert.ok(margin, 'expected the .dc-inbox-seen rule to declare margin');
-	const sides = margin[1].trim().split(/\s+/);
-	// CSS margin shorthand: 1 value = all sides; 2 = top/bottom, left/right;
-	// 3 = top, left/right, bottom; 4 = top, right, bottom, left.
-	const bottom = sides.length === 2 ? sides[0] : (sides[2] ?? sides[0]);
-	assert.notEqual(bottom, '0', `expected a non-zero bottom margin, got "${margin[1].trim()}"`);
+const LOCALES = ['en', 'zh-tw', 'zh-cn', 'ja'];
+const CORAL_SOURCE = readFileSync(fileURLToPath(new URL('./inbox-bubble.js', import.meta.url)), 'utf8');
+// 🔴 COMMENTS STRIPPED, the same trick release.mjs uses on a client before diffing it against a
+// bundle. The removal is DOCUMENTED in that file — the 🩸 explaining where `copy.empty` went names
+// it — so a scan of the raw text would fail on the comment that explains why it should pass, and
+// the fix for that would be to stop writing the comment. `(^|\s)//` rather than a bare `//` so the
+// `https://` inside DEFAULT_API_BASE survives.
+const CORAL_CODE = CORAL_SOURCE
+	.replace(/\/\*[\s\S]*?\*\//g, '')
+	.split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+
+test('🔴 the body line and the footer sentence are gone from every locale, key and all', () => {
+	for (const locale of LOCALES) {
+		const copy = COPY[locale];
+		assert.ok(!('empty' in copy), `${locale} still carries an "empty" body line`);
+		assert.ok(!('seen' in copy), `${locale} still carries a "seen" footer line`);
+	}
+	// Every string this table still holds, flattened — the removed sentences must not have been
+	// moved sideways into some other key rather than deleted.
+	const gone = [
+		'想問什麼都可以，是真人在看。', '想问什么都可以，是真人在看。',
+		'Say anything. A person reads these.', 'なんでもどうぞ。人が読んでいます。',
+		'你在這裡問的問題，站主看得到。', '你在这里问的问题，站主看得到。',
+		"The site's owner can read what you ask here.", 'ここでの質問は、サイトの運営者が読めます。'
+	];
+	for (const locale of LOCALES) {
+		const strings = Object.values(COPY[locale]).map((v) => (typeof v === 'function' ? v('KAITO') : String(v)));
+		for (const sentence of gone) {
+			assert.ok(!strings.includes(sentence), `${locale} still says "${sentence}" under some other key`);
+		}
+	}
+});
+
+test('🔴 nothing renders the removed lines any more — no -seen element, no copy.empty read', () => {
+	// The source, not the table: a key can be gone while the renderer still reaches for it, which
+	// is `undefined` printed into the panel rather than a line that disappeared.
+	assert.ok(!/copy\.empty|base\.empty|empty-label/.test(CORAL_CODE),
+		'the renderer still reads an `empty` string that COPY no longer defines');
+	assert.ok(!/copy\.seen/.test(CORAL_CODE), 'the renderer still reads a `seen` string that COPY no longer defines');
+	assert.ok(!/\$\{PREFIX\}-seen/.test(CORAL_CODE),
+		'the .dc-inbox-seen element or its stylesheet rule is still here');
+	// 🔴 CONTROL: the strip above must not have eaten the file. A regex that deleted everything
+	// would make all three assertions above pass and say nothing.
+	assert.match(CORAL_CODE, /\$\{PREFIX\}-hint/, 'the comment strip removed real code — this scan measured nothing');
+	// The ask panel's log opens EMPTY — the placeholder in the box is the only invitation left.
+	assert.match(CORAL_CODE, /<div class="\$\{PREFIX\}-log"><\/div>/);
+});
+
+test('🔴 the title line still carries the AI marker after data-assistant-name substitution, in every locale', () => {
+	for (const locale of LOCALES) {
+		const el = { getAttribute: (n) => (n === 'data-assistant-name' ? '小美' : null) };
+		const html = statusFor(COPY[locale], { hasConv: false, hasEmail: false, kaitoOn: true }, resolveAssistantName(el));
+		assert.ok(html.startsWith('小美'), `${locale} lost the substituted name: ${html}`);
+		assert.equal(html.split('<span class="dc-inbox-ai-chip"').length - 1, 1, `${locale} chip count`);
+		assert.match(html, /aria-label="AI"/, `${locale} chip lost its accessible name`);
+		assert.ok(!html.includes(AI_CHIP_TOKEN), `${locale} leaked the sentinel`);
+		// The shortened sentence is still a sentence — the marker must not be the whole line.
+		assert.ok(html.replace(/<[^>]*>/g, '').replace('小美', '').replace('AI', '').trim().length > 0,
+			`${locale} status line is nothing but a name and a chip`);
+	}
+	// The 40-char cap and the default both still end up marked.
+	const capped = { getAttribute: (n) => (n === 'data-assistant-name' ? 'あ'.repeat(60) : null) };
+	const cappedHtml = statusFor(COPY.ja, { hasConv: false, hasEmail: false, kaitoOn: true }, resolveAssistantName(capped));
+	assert.ok(cappedHtml.startsWith('あ'.repeat(40) + '<span class="dc-inbox-ai-chip"'), cappedHtml.slice(0, 80));
+	assert.match(statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }), /^KAITO<span class="dc-inbox-ai-chip"/);
+});
+
+test('the shortened title line reads as the owner ruled it, per locale', () => {
+	assert.equal(COPY['zh-tw'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，轉出去真人會看`);
+	assert.equal(COPY.en.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}answers first, a person reads what you send on`);
+	assert.equal(COPY['zh-cn'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，转出去真人会看`);
+	assert.equal(COPY.ja.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`);
+	// Traditional and Simplified are two rows for a reason — see inbox-form-copy.test.mjs.
+	assert.notEqual(COPY['zh-tw'].statusDefault('K'), COPY['zh-cn'].statusDefault('K'));
+});
+
+test('the ask placeholder is the short one, and every locale writes it in its own script', () => {
+	assert.equal(COPY['zh-tw'].ask, '問這個站的事…');
+	assert.equal(COPY.en.ask, 'Ask about this site…');
+	assert.equal(COPY['zh-cn'].ask, '问这个网站的事…');
+	assert.equal(COPY.ja.ask, 'このサイトについて質問…');
+	assert.notEqual(COPY['zh-tw'].ask, COPY['zh-cn'].ask);
+	for (const locale of LOCALES) {
+		assert.ok(COPY[locale].ask.length > 0, `${locale} ask is empty`);
+		// It is a PLACEHOLDER, not a paragraph — the whole point of the ruling.
+		assert.ok(COPY[locale].ask.length <= 40, `${locale} ask is ${COPY[locale].ask.length} chars`);
+	}
 });
 
 // ── bug #1 (2026-09-04): the hand-off used to be a one-way door — once a

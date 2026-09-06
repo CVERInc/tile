@@ -171,6 +171,18 @@ let stylesInjected = false;
 // visitor's browser (a Japanese reader on a Taiwanese site should see the site's
 // language, the same as every other word on the page). Every string is still
 // overridable per-embed via data-*, and anything unknown falls back to English.
+//
+// 🔴 0.7.3 (owner ruling 2026-09-07): THE ASK PANEL SAYS TWO THINGS FEWER. It used to open with
+// four sentences before the visitor could type — a status line, a body line in the empty log, a
+// placeholder, and a 「站主看得到」 footer under the form — and the owner's word for that was
+// 「太囉唆」. What survives is the status line (now 「<名字>[AI]先回，轉出去真人會看」: the same two
+// facts, in half the words) and the placeholder. `empty` and `seen` are GONE, not shortened, so
+// there is no key left for a locale to re-grow them from — and `data-empty-label` went with
+// `empty`, because an override for a string nothing renders is a promise this file cannot keep.
+//
+// 🔴 The status line keeps carrying `AI_CHIP_TOKEN` and the assistant-name slot. Shorter copy is
+// exactly where a disclosure gets dropped by accident, and the 2026-09-05 ruling did not move:
+// the name may change, the reply is always marked AI.
 export const COPY = {
 	en: {
 		ask: 'Ask about this site…',
@@ -191,14 +203,12 @@ export const COPY = {
 		sending: 'Sending…',
 		stored: "Got it — we've saved your message.",
 		within: (h) => `Usually replies within ${h} hours.`,
-		empty: 'Say anything. A person reads these.',
 		you: 'You',
 		them: 'Reply',
 		error: "That didn't go through. Please try again.",
 		rate: "That's a lot of messages — please try again in a minute.",
 		closed: 'Close',
-		seen: "The site's owner can read what you ask here.",
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}auto-replies · escalate to a person anytime`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
 		statusHandedOffEmail: "Passed to the owner — they'll reply by email.",
 		statusHandedOffNoEmail: 'Passed to the owner — the reply will show here.',
 		askAgain: (a) => `Ask ${a} again`,
@@ -207,7 +217,7 @@ export const COPY = {
 		handoffEnded: 'Your last conversation has ended.'
 	},
 	'zh-tw': {
-		ask: '這個站的事都可以問⋯⋯',
+		ask: '問這個站的事…',
 		asking: '找找看⋯⋯',
 		source: '這段出自哪裡',
 		refused: '我沒有這方面的紀錄。',
@@ -225,14 +235,12 @@ export const COPY = {
 		sending: '送出中⋯⋯',
 		stored: '已經記下來了。',
 		within: (h) => `通常 ${h} 小時內回覆。`,
-		empty: '想問什麼都可以，是真人在看。',
 		you: '你',
 		them: '回覆',
 		error: '沒有送出去，請再試一次。',
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closed: '關閉',
-		seen: '你在這裡問的問題，站主看得到。',
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}自動回覆・需要時可轉真人`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusHandedOffEmail: '已交給店家，會透過信箱回覆',
 		statusHandedOffNoEmail: '已交給店家，回覆會顯示在這裡',
 		askAgain: (a) => `重新問 ${a}`,
@@ -241,7 +249,7 @@ export const COPY = {
 		handoffEnded: '上次的對話已結束'
 	},
 	ja: {
-		ask: 'このサイトのことを何でも…',
+		ask: 'このサイトについて質問…',
 		asking: '探しています…',
 		source: 'この一節の出どころ',
 		refused: 'そのことについては記録がありません。',
@@ -259,14 +267,12 @@ export const COPY = {
 		sending: '送信中…',
 		stored: '受け取りました。',
 		within: (h) => `通常 ${h} 時間以内に返信します。`,
-		empty: 'なんでもどうぞ。人が読んでいます。',
 		you: 'あなた',
 		them: '返信',
 		error: '送信できませんでした。もう一度お試しください。',
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closed: '閉じる',
-		seen: 'ここでの質問は、サイトの運営者が読めます。',
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が自動返信・必要なら人に取り次げます`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusHandedOffEmail: '担当者に取り次ぎました。メールで返信します。',
 		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
@@ -275,7 +281,7 @@ export const COPY = {
 		handoffEnded: '前回のやり取りは終了しました。'
 	},
 	'zh-cn': {
-		ask: '这个网站的事都可以问⋯⋯',
+		ask: '问这个网站的事…',
 		asking: '找找看⋯⋯',
 		source: '这段出自哪里',
 		refused: '我没有这方面的记录。',
@@ -293,14 +299,12 @@ export const COPY = {
 		sending: '发送中⋯⋯',
 		stored: '已经记下来了。',
 		within: (h) => `通常 ${h} 小时内回复。`,
-		empty: '想问什么都可以，是真人在看。',
 		you: '你',
 		them: '回复',
 		error: '没有发送出去，请再试一次。',
 		rate: '消息有点多，请稍等一分钟再试。',
 		closed: '关闭',
-		seen: '你在这里问的问题，站主看得到。',
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}自动回复・需要时可转真人`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusHandedOffEmail: '已交给店家，会通过邮箱回复',
 		statusHandedOffNoEmail: '已交给店家，回复会显示在这里',
 		askAgain: (a) => `重新问 ${a}`,
@@ -352,8 +356,7 @@ function copyFor(el) {
 		open: attr('open-label', base.open),
 		title: attr('title', base.title),
 		placeholder: attr('placeholder', base.placeholder),
-		send: attr('send-label', base.send),
-		empty: attr('empty-label', base.empty)
+		send: attr('send-label', base.send)
 	};
 }
 
@@ -715,10 +718,11 @@ function injectStyles() {
   color:var(--reef-inbox-on-accent,#fff)}
 .${PREFIX}-msg-owner{align-self:flex-start;background:rgba(0,0,0,.06)}
 .${PREFIX}-hint{font-size:.8rem;opacity:.65;margin:0;text-align:center}
-/* 🔴 Quieter than the hint and never hidden. It is the line that makes「A wrote to B」
-   true for the person doing the writing, so it may not become a hover, a tooltip, or
-   something that only appears after the first question. */
-.${PREFIX}-seen{font-size:.72rem;opacity:.55;margin:.4rem .2rem .6rem;text-align:center;line-height:1.4}
+/* 🩸 A .dc-inbox-seen rule lived here until 0.7.3 — the 「站主看得到」 footer under the form, with a
+   comment saying it may never be hidden. The owner removed the SENTENCE (2026-09-07), and a rule
+   for an element nothing renders is dead CSS that reads like a live promise, so it went with it.
+   What the line was defending is unchanged and now lives in the status line above the log: the
+   panel still says, before anyone types, that a person is on the other end. */
 .${PREFIX}-src{display:block;margin-top:.4rem;font-size:.75rem;opacity:.7;color:inherit}
 .${PREFIX}-tohuman{align-self:flex-start;border:1px solid currentColor;border-radius:.5rem;
   padding:.35rem .7rem;cursor:pointer;background:transparent;color:inherit;font:inherit;font-size:.8rem}
@@ -760,9 +764,16 @@ function injectStyles() {
 	document.head.appendChild(style);
 }
 
-function renderLog(logEl, messages, copy) {
+// 🔴 No `copy` parameter any more (0.7.3): `copy.empty` was the only string this function ever
+// read, and a parameter nothing reads is the next thing somebody re-fills with a sentence.
+function renderLog(logEl, messages) {
+	// 🔴 An empty thread is EMPTY (0.7.3). This used to paint `copy.empty` —
+	// 「想問什麼都可以，是真人在看。」— and that sentence was removed by the same ruling that
+	// removed it from the ask panel, so the placeholder in the box below is the only invitation
+	// left. Deliberately not replaced with a different sentence: the ruling was about how many
+	// lines the panel says before the visitor types, and this is one of them.
 	if (!messages.length) {
-		logEl.innerHTML = `<p class="${PREFIX}-hint">${escHtml(copy.empty)}</p>`;
+		logEl.innerHTML = '';
 		return;
 	}
 	logEl.innerHTML = messages
@@ -1116,7 +1127,7 @@ export async function mount(el) {
 			messages = got.messages;
 			conversationStatus = got.status;
 			const log = root.querySelector(`.${PREFIX}-log`);
-			if (log) renderLog(log, messages, copy);
+			if (log) renderLog(log, messages);
 			return;
 		}
 		// Counted, not ignored: a 404 for a conversation the server no longer has
@@ -1283,12 +1294,11 @@ export async function mount(el) {
 		root.innerHTML = `
 <div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(copy.title)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
-  <div class="${PREFIX}-log"><p class="${PREFIX}-hint">${escHtml(copy.empty)}</p></div>
+  <div class="${PREFIX}-log"></div>
   <form class="${PREFIX}-form">
     <textarea name="q" rows="1" placeholder="${escHtml(copy.ask)}"></textarea>
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
-  <p class="${PREFIX}-seen">${escHtml(copy.seen)}</p>
 </div>`;
 		wireHead();
 
@@ -1355,7 +1365,7 @@ export async function mount(el) {
 </div>`;
 
 		const log = root.querySelector(`.${PREFIX}-log`);
-		renderLog(log, messages, copy);
+		renderLog(log, messages);
 
 		wireHead();
 
