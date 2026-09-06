@@ -124,6 +124,13 @@ becomes `home`. Unicode letters are KEPT deliberately — CJK slugs are live URL
 an ASCII-only rule would rewrite a working address into a row of dashes. Path traversal cannot
 survive: `../x` becomes `--/x`.
 
+Two page paths that land on the same file are REFUSED, and "the same file" is asked of the
+filesystem's terms rather than the string's: the collision key is the sanitised name case-folded and
+NFC-normalised, so `About` and `about` are refused as one file — the same refusal on APFS, on NTFS
+and on ext4, because the fold is computed in memory and the filesystem is never consulted. A rule
+that answered differently per host would hand a Linux CI a green run for an IR that cannot be
+rebuilt on the owner's laptop.
+
 There is a second, smaller difference between the two pre-move implementations, and it is NOT
 equivalent: how they find the theme's NAME. The shell reads the first page whose markdown carries a
 `theme:` line and requires a bare word (`/^theme:\s*(\S+)\s*$/m`); the ejected builder reads only

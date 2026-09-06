@@ -225,6 +225,56 @@ test('two page paths that sanitise to one filename are refused, both named', asy
   noStashLeft(astroDir);
 });
 
+// 🩸 …and the refusal above asked the wrong question. It asked whether two paths sanitise to the
+// same STRING; the thing that loses a page is whether they become the same FILE. `About` and
+// `about` are two strings and one file on APFS and on NTFS. Measured 2026-09-07 with exactly this
+// payload: `pageCount` 2, `content/` holding a single `About.md`, and its body the SECOND page's —
+// the first page gone, the filename the first page's, exit 0, nothing printed. Word for word the
+// shape the case above exists to stop.
+//
+// 🔴 The assertions below are host-independent ON PURPOSE. Nothing here creates the two files and
+// looks at what survived — that would pass on ext4 by not reproducing anything. The refusal is a
+// property of the input, so it is measured as one, and this case is the same red on every host.
+test('page paths that differ only in case, or in Unicode form, are refused too', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+
+  const pairs = [
+    ['About', 'about'],                       // the measured one
+    ['Legal/Terms', 'legal/terms'],           // …and nested, where content/ holds one Legal/Terms.md
+    ['ZH-TW/關於', 'zh-tw/關於'],              // case-folding is not an ASCII-only rule
+    ['한글', '한글'.normalize('NFD')],          // …and NFC: jamo survive sanitising and then compose
+  ];
+  for (const [a, b] of pairs) {
+    assert.notEqual(safePagePath(a), safePagePath(b),
+      `${JSON.stringify([a, b])} already collide as strings — this case is not testing the fold`);
+    await assert.rejects(
+      () => stageSite({ astroDir, pages: [{ path: a, markdown: 'PAGE A\n' }, { path: b, markdown: 'PAGE B\n' }] }),
+      (err) => {
+        assert.match(err.message, /two pages become the same file/);
+        assert.match(err.message, /ONE file on a case-insensitive or normalising filesystem/,
+          'the refusal does not say WHY these two are one file');
+        assert.match(err.message, new RegExp(`content/${safePagePath(a)}\\.md`), 'the first filename is not named');
+        assert.match(err.message, new RegExp(`content/${safePagePath(b)}\\.md`), 'the second filename is not named');
+        return true;
+      },
+      `${JSON.stringify([a, b])} become one file and were not refused`,
+    );
+  }
+
+  assert.deepEqual(await snapshot(astroDir), before, 'the refusal must still hand the renderer back');
+  noStashLeft(astroDir);
+
+  // …and the fold does not swallow two pages that really are two files: `a` and `b` still stage.
+  const { restore } = await stageSite({
+    astroDir, pages: [{ path: 'About', markdown: 'A\n' }, { path: 'contact', markdown: 'B\n' }],
+  });
+  assert.deepEqual(await listStaged(join(astroDir, 'content')), ['About.md', 'contact.md']);
+  await restore();
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
 // ── one build at a time ─────────────────────────────────────────────────────────────────────────
 // 🩸 Two concurrent stageSites did not merely mix two sites' content: the second stashed what the
 // first had staged, and the renderer's own content/ was gone for good afterwards — measured
