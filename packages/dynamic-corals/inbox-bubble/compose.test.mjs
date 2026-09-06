@@ -1167,6 +1167,35 @@ test('B8: a name never ends on a dangling joiner, on either path', () => {
 	}
 });
 
+// REVIEW B13 (2026-09-08, round 3): the joiner strip ran BEFORE the final trim(), so a trim could
+// uncover a joiner that nothing looked at again. B8's own comment claimed it ran "after every cut
+// that could produce one", and `.trim()` on the same line was one of those cuts.
+
+test('B13: a joiner uncovered by the final trim is removed too, on either path', () => {
+	const realSegmenter = Intl.Segmenter;
+	for (const path of ['segmenter', 'fallback']) {
+		if (path === 'fallback') delete Intl.Segmenter;
+		try {
+			// 🩸 The review's case. The strip takes the last joiner, the trim then takes the space
+			// that was hiding the one before it — and the old order stopped there, handing the DOM
+			// 「小美 ZWJ」.
+			assert.equal(nameFromAttribute('小美\u200D \u200D'), '小美', path);
+			// Deeper alternation, and whitespace of more than one kind.
+			assert.equal(nameFromAttribute('小美\u200D\t\u200D \u200D'), '小美', path);
+			// A cleaned name is a FIXED POINT: cleaning it again may not change it (the property the
+			// round-3 fuzz run failed on — 200,000 cases, this shape the only one).
+			const once = nameFromAttribute('小小\u200D \u200D\nA');
+			assert.equal(nameFromAttribute(once), once, path);
+			assert.ok(!once.endsWith('\u200D'), `${path} left a dangling U+200D`);
+			// The joiners that are NOT debris still are not: a family emoji is untouched.
+			const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+			assert.equal(nameFromAttribute(family), family, path);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+	}
+});
+
 test('#17: the platform read (fetchAssistantName) is capped and stripped the same way as the baked attribute', async () => {
 	globalThis.fetch = async () => ({
 		ok: true,

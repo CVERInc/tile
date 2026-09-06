@@ -571,8 +571,14 @@ const RAW_NAME_MAX_UNITS = ASSISTANT_NAME_MAX_UNITS * 20;
  * character `BIDI_CONTROL_RE` deliberately does not carry, because U+200D inside a name is
  * meaningful (it is what holds an emoji sequence together) and only a TRAILING one is debris.
  * Cutting a three-person family emoji straight after its first joiner leaves one figure and a
- * joiner with nothing left to join, sitting in the DOM. Trimmed at the end of
- * `cleanAssistantName`, after every cut that could produce one has already been made.
+ * joiner with nothing left to join, sitting in the DOM.
+ *
+ * 🔴 STRIPPED TO A FIXED POINT WITH `trim()`, NOT BEFORE IT (review B13, round 3). The claim used
+ * to be 「trimmed after every cut that could produce one has already been made」 and the `.trim()`
+ * on the same line was itself such a cut: taking a trailing joiner off 「小美 ZWJ SP ZWJ」 uncovers
+ * the space, trimming the space uncovers the joiner before it, and one pass in one order stopped
+ * there with the joiner still in the DOM. Each step only ever deletes, so alternating them
+ * converges — see the end of `cleanAssistantName`.
  */
 const TRAILING_JOINER_RE = /\u200D+$/;
 
@@ -765,8 +771,19 @@ function cleanAssistantName(raw) {
 		capped += cluster;
 		count++;
 	}
-	// 7. The joiner a cut in step 6 may have left dangling (B8). Deletes only — see step 4.
-	return capped.replace(TRAILING_JOINER_RE, '').trim();
+	// 7. The joiner a cut in step 6 may have left dangling (B8), and the whitespace stripping it
+	//    exposes, and the joiner stripping THAT exposes — to a fixed point (review B13, round 3).
+	//    `replace(...).trim()` ran once and in that order, so 「小美 ZWJ SP ZWJ」 came back as
+	//    「小美 ZWJ」: the replace took the last joiner, the trim then took the space that had been
+	//    hiding the one before it, and nothing looked again. Deletes only — see step 4 — so this
+	//    loop is bounded by the length of a name already capped at ASSISTANT_NAME_MAX_UNITS.
+	let tail = capped;
+	let before;
+	do {
+		before = tail;
+		tail = tail.trim().replace(TRAILING_JOINER_RE, '');
+	} while (tail !== before);
+	return tail;
 }
 
 /**
