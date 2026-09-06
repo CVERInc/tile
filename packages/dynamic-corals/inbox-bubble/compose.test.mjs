@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
-	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
-	parseHandle, refusalNeedsHandoffForm, resolveAssistantName, resolveLocale, resolveSiteName,
-	resolveViewMode, shouldAutoOpenFromHash, statusFor
+	acceptHandoff, bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml,
+	handoffState, inboxPayload, parseHandle, refusalNeedsHandoffForm, resolveAssistantName,
+	resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -563,17 +563,17 @@ test('shouldAutoOpenFromHash: only the exact #inbox fragment, never a prefix mat
 
 // ── #15: the handle hand-off — the mounted panel adopts an externally-minted handle ─────────
 
-test('parseHandle accepts exactly the shape saveHandle stores', () => {
-	assert.deepEqual(parseHandle({ conv: 'c1', ts: Date.now(), hasEmail: true, mode: 'human' }),
-		{ conv: 'c1', hasEmail: true, mode: 'human' });
-	assert.deepEqual(parseHandle({ conv: 'c2', ts: Date.now() }),
-		{ conv: 'c2', hasEmail: false, mode: 'human' });
-	assert.deepEqual(parseHandle({ conv: 'c3', ts: Date.now(), mode: 'ask' }),
-		{ conv: 'c3', hasEmail: false, mode: 'ask' });
+test('parseHandle accepts exactly the shape saveHandle stores, ts included', () => {
+	assert.deepEqual(parseHandle({ conv: 'c1', ts: 1000, hasEmail: true, mode: 'human' }),
+		{ conv: 'c1', ts: 1000, hasEmail: true, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c2', ts: 1000 }),
+		{ conv: 'c2', ts: 1000, hasEmail: false, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c3', ts: 1000, mode: 'ask' }),
+		{ conv: 'c3', ts: 1000, hasEmail: false, mode: 'ask' });
 	// An unrecognised mode normalises to 'human' — the same rule saveHandle itself applies when it
 	// writes the value in the first place.
-	assert.deepEqual(parseHandle({ conv: 'c4', ts: Date.now(), mode: 'bogus' }),
-		{ conv: 'c4', hasEmail: false, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c4', ts: 1000, mode: 'bogus' }),
+		{ conv: 'c4', ts: 1000, hasEmail: false, mode: 'human' });
 });
 
 test('parseHandle ignores a malformed detail — no exception thrown, just null back', () => {
@@ -586,15 +586,133 @@ test('parseHandle ignores a malformed detail — no exception thrown, just null 
 	assert.equal(parseHandle({ conv: 'c', ts: 'not a number' }), null); // ts not a number
 	assert.equal(parseHandle({ ts: Date.now() }), null); // no conv at all
 	assert.equal(parseHandle([1, 2, 3]), null); // an array is typeof 'object' but has no conv/ts
+	// REVIEW B6: typeof NaN is 'number', and every TTL comparison against a NaN answers "fresh",
+	// so this was the one malformed timestamp that used to pass the shape test AND the expiry one.
+	assert.equal(parseHandle({ conv: 'c', ts: NaN }), null);
+	assert.equal(parseHandle({ conv: 'c', ts: Infinity }), null);
 });
 
-// NOTE ON COVERAGE: the reef-inbox:handle listener itself lives inside mount() — adopting the
-// parsed handle into handoffConv/hasEmail/storedMode/conv, tearing down the old poller, and
-// re-rendering via renderOpen()/renderClosed() — and needs the same real DOM mount() needs
-// throughout this file. parseHandle above is the pure decision that listener delegates to for
-// "is this detail well-formed"; the render-and-poller-teardown behaviour it drives is left to
-// reef's own browser-driven suite, the same split this file already draws for #13 and for the
-// late-rename test above.
+// REVIEW B3 (2026-09-08): the listener took ANY well-formed detail from ANY script on the page,
+// which meant a page script chose which conversation the visitor's next message was filed under,
+// and overwrote the only pointer this browser had to the visitor's own thread. The rules now live
+// in acceptHandoff, so they are assertable without a DOM.
+//
+// The panel-side transition is handoffState, separately, for the same reason: the listener used
+// to be a state change and a redraw welded together (review B11).
+
+const DAY = 24 * 60 * 60 * 1000;
+const MOUNT = { nodeName: 'DIV' }; // stands in for the coral's own element - identity is the point
+const OTHER_MOUNT = { nodeName: 'DIV' };
+
+test('B3: a handle addressed to this mount is adopted', () => {
+	const now = 1_000_000_000_000;
+	assert.deepEqual(
+		acceptHandoff({ target: MOUNT, conv: 'c1', ts: now - DAY, hasEmail: true, mode: 'human' },
+			{ target: MOUNT, currentTs: 0, now }),
+		{ conv: 'c1', ts: now - DAY, hasEmail: true, mode: 'human' }
+	);
+});
+
+test('B3: an event that does not name THIS mount is refused', () => {
+	const now = 1_000_000_000_000;
+	const at = { target: MOUNT, currentTs: 0, now };
+	// The review's own payload: a script that just fires at window, naming nobody. This is the one
+	// that used to redirect the visitor's next message into a conversation of the sender's choice.
+	assert.equal(acceptHandoff({ conv: 'ATTACKER-OWNED-CONV-ID', ts: now, mode: 'human' }, at), null);
+	// Naming the wrong coral is no better than naming none.
+	assert.equal(acceptHandoff({ target: OTHER_MOUNT, conv: 'c', ts: now }, at), null);
+	// Lookalikes are not the element: identity is ===, never a shape test.
+	assert.equal(acceptHandoff({ target: { nodeName: 'DIV' }, conv: 'c', ts: now }, at), null);
+	assert.equal(acceptHandoff({ target: 'site:cver', conv: 'c', ts: now }, at), null);
+	// And a mount that somehow has no element cannot be addressed at all, rather than matching
+	// every detail that happens to leave `target` undefined.
+	assert.equal(acceptHandoff({ conv: 'c', ts: now }, { target: null, currentTs: 0, now }), null);
+});
+
+test('B3: a malformed detail is still just ignored, addressed or not', () => {
+	const now = 1_000_000_000_000;
+	const at = { target: MOUNT, currentTs: 0, now };
+	for (const detail of [undefined, null, 'a string', 42, {}, [1, 2, 3]]) {
+		assert.equal(acceptHandoff(detail, at), null);
+	}
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 123, ts: now }, at), null);
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'c' }, at), null);
+	// No options at all — the listener is the only caller, but a null-safe default is what keeps
+	// "this file did not raise the event" true of the helper as well.
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'c', ts: now }), null);
+});
+
+test('B6: the event path honours the same TTL storage does, and cannot restamp its way past it', () => {
+	const now = 1_000_000_000_000;
+	const at = { target: MOUNT, currentTs: 0, now };
+	// The review's payloads: ts values that used to be accepted and then rewritten to Date.now(),
+	// bringing a long-dead conversation id back for another thirty days.
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: 0 }, at), null);
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: -1 }, at), null);
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: NaN }, at), null);
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 31 * DAY }, at), null);
+	// Just inside the window is still inside it, and the boundary itself is not over it.
+	assert.ok(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 29 * DAY }, at));
+	assert.ok(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 30 * DAY }, at));
+	// 🔴 The adopted ts is the SENDER's, never `now` — that is what stops adoption granting an
+	// extension the storage path would have refused.
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 29 * DAY }, at).ts, now - 29 * DAY);
+});
+
+test('B3: an older handle never replaces a newer one', () => {
+	const now = 1_000_000_000_000;
+	const held = now - 2 * DAY;
+	const at = { target: MOUNT, currentTs: held, now };
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'older', ts: now - 3 * DAY }, at), null);
+	// Same age is allowed: re-sending the handle the panel already holds, with a different mode,
+	// is a legitimate move and not a rewind.
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'same', ts: held, mode: 'ask' }, at).mode, 'ask');
+	assert.equal(acceptHandoff({ target: MOUNT, conv: 'newer', ts: now - DAY }, at).conv, 'newer');
+});
+
+test('B3: handoffState adopts the thread and clears everything the old conversation owned', () => {
+	const ts = 1_000_000_000_000;
+	assert.deepEqual(handoffState({ conv: 'c9', ts, hasEmail: true, mode: 'human' }), {
+		handoffConv: 'c9',
+		hasEmail: true,
+		storedMode: 'human',
+		handleTs: ts,
+		conv: 'c9',
+		// 🔴 The old conversation's transcript, status, ended-note and reply window all go. A
+		// message from the PREVIOUS thread surviving into the new panel is exactly the bug the
+		// in-flight refresh guard exists to stop; nothing static may reintroduce it either.
+		messages: [],
+		conversationStatus: null,
+		handoffEndedNote: false,
+		replyWithinHours: null
+	});
+});
+
+test('B3: an adopted ask-mode handle keeps the thread but shows no active conversation', () => {
+	const ts = 1_000_000_000_000;
+	const state = handoffState({ conv: 'c9', ts, hasEmail: false, mode: 'ask' });
+	assert.equal(state.handoffConv, 'c9', 'the thread is still reachable behind the quiet link');
+	assert.equal(state.conv, null, 'ask mode has no active conversation to send into or poll');
+	assert.equal(state.storedMode, 'ask');
+});
+
+test('B3: the listener delegates to acceptHandoff, addressed to its own element', () => {
+	// 🔴 The rules above are only worth anything if the listener actually asks them. This is the
+	// structural half, in the same style as the late-rename test: a listener that went back to
+	// calling parseHandle direct would keep every assertion above green while accepting exactly
+	// the events they exist to refuse.
+	const listener = CORAL_SOURCE.match(/window\.addEventListener\('reef-inbox:handle'[\s\S]*?\n\t\}\);/);
+	assert.ok(listener, 'expected the hand-off listener in mount()');
+	assert.match(listener[0], /acceptHandoff\(event && event\.detail, \{ target: el, currentTs: handleTs \}\)/);
+	assert.ok(!/parseHandle\(/.test(listener[0]), 'the listener bypasses acceptHandoff');
+	// And it writes the handle with the ts it adopted, not a fresh one (B6).
+	assert.match(listener[0], /storeHandle\(handoffConv, hasEmail, storedMode, handleTs\)/);
+});
+
+// NOTE ON COVERAGE: what remains inside mount() for this event is three lines — call
+// acceptHandoff, copy handoffState's fields onto the panel's own variables, stopPolling() and
+// re-render. The decisions and the transition are both above, driven by their real inputs; the
+// DOM half (which render function runs) is left to reef's own browser-driven suite.
 
 // ── #17: the assistant-name cap counts grapheme clusters, and bidi/format controls are stripped ──
 

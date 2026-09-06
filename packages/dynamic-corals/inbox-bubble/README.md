@@ -51,19 +51,37 @@ forms — reef's own `/report` form, for instance, which writes the same handle 
 `saveHandle` does — can make an ALREADY-mounted panel switch to it:
 
 ```js
+const coral = document.querySelector('[data-dynamic-coral="inbox-bubble"]');
 window.dispatchEvent(new CustomEvent('reef-inbox:handle', {
-  detail: { conv: 'the-conversation-id', ts: Date.now(), hasEmail: true, mode: 'human' }
+  detail: { target: coral, conv: 'the-conversation-id', ts: Date.now(), hasEmail: true, mode: 'human' }
 }));
 ```
 
-`detail` is exactly the object this file's own `saveHandle` stores — `conv` (string) and `ts`
-(number) are required, `hasEmail` and `mode` (`'human'` or `'ask'`) are optional and default the
-same way `saveHandle` itself defaults them. This does not write to `localStorage` itself; it
-assumes the emitter already has, under this tenant's own key. The gap it closes: a same-document
+`detail` is the object this file's own `saveHandle` stores, plus an addressee — `target` (the
+coral's own mount element), `conv` (string) and `ts` (number, when the handle was minted) are
+required; `hasEmail` and `mode` (`'human'` or `'ask'`) are optional and default the same way
+`saveHandle` itself defaults them. This does not write to `localStorage` itself; it assumes the
+emitter already has, under this tenant's own key. The gap it closes: a same-document
 `localStorage.setItem` raises no `storage` event, so without this a mounted panel never finds out
 that another script on the same page just gave this visitor a handle. On receipt the panel adopts
-it, tears down whatever poller was running against the previous conversation, and re-renders. A
-malformed `detail` — not an object, or missing/wrong-typed `conv`/`ts` — is silently ignored.
+it, tears down whatever poller was running against the previous conversation, and re-renders.
+
+The event is **addressed, not broadcast** — four things have to be true or it is silently ignored:
+
+- `detail.target` is that mount's own element. This is a `window` event, so every script on the
+  page can reach it; requiring the element means a sender has to know which coral it is talking
+  to, so two corals on one page do not both adopt a handle meant for one of them, and a script
+  firing blindly at `window` reaches none. 🔴 It is an addressee, not a secret — any script on
+  the page can look the element up, so a site that loads third-party script it does not trust
+  (ads, analytics, a plugin) has given that script this capability, the same way it has already
+  given it `localStorage` and the DOM.
+- `conv` is a string and `ts` a finite number — a malformed `detail` (not an object, missing or
+  wrong-typed) is ignored, never thrown.
+- the handle is inside the same 30-day TTL storage enforces, counted from the `ts` the sender
+  supplied. Adoption keeps that `ts` rather than restamping it, so handing a handle over cannot
+  extend a life the storage path would have let end.
+- it is not older than the handle the panel already holds, so a replayed or stale event cannot
+  rewind a visitor to a conversation they have moved past.
 
 ## The three things not to break
 
