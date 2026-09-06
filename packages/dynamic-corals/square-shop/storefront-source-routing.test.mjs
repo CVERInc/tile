@@ -33,9 +33,16 @@ function emit(name, args) {
   return { out, load: () => import(`${pathToFileURL(out).href}?${Date.now()}-${Math.random()}`) };
 }
 
+// 🔴 No `--api` here, and SQUARE_SHOP_API_BASE is stripped from the child's environment rather
+// than inherited. One of the failures below is precisely "no shop API base was given" — and the
+// emitter reads that variable as a fallback, so a developer who happens to have it exported would
+// run a test that measures the opposite of what it claims. A negative test has to be immune to
+// the shell that launched it.
 function emitFailure(name, args) {
   const out = path.join(temp, `${name}.mjs`);
-  const result = spawnSync('node', [emitter, '--api-contract', contract, ...args, '--out', out], { encoding: 'utf8' });
+  const env = { ...process.env };
+  delete env.SQUARE_SHOP_API_BASE;
+  const result = spawnSync('node', [emitter, '--api-contract', contract, ...args, '--out', out], { encoding: 'utf8', env });
   return { out, result };
 }
 
@@ -186,6 +193,32 @@ test('a provider descriptor requires a supported provider', () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /emit-shop-function: --storefronts\[0\] provider must be stripe or square/);
   assert.equal(existsSync(out), false);
+});
+
+// ── the --api fatal: a gate nobody had watched fail ────────────────────────────────────────
+// 🔴 Every other test in this package passes `--api`, so until these three the emitter's loudest
+// rule had never been seen red. That rule is the whole basis for "loud, not a silent downgrade":
+// an empty base makes a Worker's relative fetch() THROW at request time, which is a shop that
+// builds green and has no product pages. The next refactor of arg()'s defaulting would return it
+// silently to '' — the exact outcome it exists to prevent — and nothing would have said so.
+test('a configured storefront with no --api is fatal, not an empty base', () => {
+  const { out, result } = emitFailure('storefront-without-api', ['--site-id', 'site-no-api', '--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }])]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /no shop API base was given/);
+  assert.equal(existsSync(out), false, 'no half-built worker is left on disk');
+});
+
+// CONTROL, both directions — without these the test above is satisfied by an emitter that simply
+// always dies.
+test('CONTROL: the same storefront WITH --api emits', () => {
+  const { out } = emit('storefront-with-api', ['--site-id', 'site-with-api', '--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }])]);
+  assert.equal(existsSync(out), true);
+});
+
+test('CONTROL: a site with no storefront at all still emits without --api', () => {
+  const { out, result } = emitFailure('shopless-without-api', ['--site-id', 'site-shopless', '--storefronts', '[]']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(out), true, 'apiBase is unreachable for a shopless site — it must not be required');
 });
 
 test('native grid and detail use an ASSETS shell plus the JSON-only RSP projection', async () => {
