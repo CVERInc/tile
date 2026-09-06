@@ -888,6 +888,47 @@ export function resolveViewMode({ hasHandoffConv, storedMode, concluded, kaitoOn
 }
 
 /**
+ * The poller's identity, so that stopping it stops the requests it already made (review B2).
+ *
+ * 🩸 `clearInterval` STOPS THE TIMER, NOT THE FETCH THAT IS ALREADY IN THE AIR. `refresh()` read
+ * `conv` once on the way in and then wrote whatever came back straight into the panel, with no
+ * second look at whether it was still the same panel. So: a visitor is mid-poll on conversation
+ * A; a hand-off arrives; the poller is torn down, `conv` becomes B, the log is emptied and
+ * redrawn; then A's fetch resolves and paints A's messages into B's log — `.dc-inbox-log` is the
+ * class both views use, so the stale reply lands in the new conversation's window looking exactly
+ * like part of it. If the new handle resolved to ask mode it is worse: 「問 KAITO」 shows a human
+ * transcript. The same race existed on 「重新問」 before this branch, but only a visitor's own
+ * click could open the window; #15 let any script open it at will, as often as it liked.
+ *
+ * 🔴 A GENERATION, NOT AN AbortController. Aborting cancels the request; this has to cancel the
+ * RESULT, including a response that already arrived and is sitting in a resolved promise, and it
+ * has to do it for every in-flight call at once rather than one handle at a time. Exported and
+ * dependency-free so the race itself is testable with a delayed fetch and no browser.
+ */
+export function pollGeneration() {
+	let current = 0;
+	return {
+		/** Everything in flight is now stale; results still to come are dropped. */
+		invalidate() {
+			current += 1;
+		},
+		/**
+		 * Await `work`, then hand the result to `apply` — unless `invalidate()` ran while it was in
+		 * flight, in which case `apply` is never called. Resolves to whatever `apply` returned, or
+		 * `false` for a result that was thrown away. A rejected `work` is a `null` result, not a
+		 * throw: the caller's failure handling is the same either way and this must never reach an
+		 * unhandled rejection from a background timer.
+		 */
+		async run(work, apply) {
+			const token = current;
+			const got = await work().catch(() => null);
+			if (token !== current) return false;
+			return apply(got);
+		}
+	};
+}
+
+/**
  * #13: should a page LOAD, by itself, open the panel? Pure so mount()'s one-line call is the only
  * place this reads `location.hash`, and this file's tests can drive it without a browser.
  *
@@ -1405,7 +1446,14 @@ export async function mount(el) {
 	root.className = `${PREFIX}-root`;
 	el.appendChild(root);
 
+	/** See `pollGeneration` — what makes `stopPolling()` reach the requests already in the air. */
+	const generation = pollGeneration();
+
 	function stopPolling() {
+		// 🔴 UNCONDITIONAL, and before the `poller` check: there can be a `refresh()` in flight with
+		// no interval running at all (mount's own first read, `escalate`'s, a poller that gave up),
+		// and those are exactly the ones that used to paint a dead conversation into a live panel.
+		generation.invalidate();
 		if (poller) {
 			clearInterval(poller);
 			poller = null;
@@ -1416,19 +1464,28 @@ export async function mount(el) {
 
 	async function refresh() {
 		if (!conv) return;
-		const got = await fetchTranscript(apiBase, kind, id, conv).catch(() => null);
-		if (got) {
-			pollFailures = 0;
-			messages = got.messages;
-			conversationStatus = got.status;
-			const log = root.querySelector(`.${PREFIX}-log`);
-			if (log) renderLog(log, messages);
-			return;
-		}
-		// Counted, not ignored: a 404 for a conversation the server no longer has
-		// and a network that is down look identical from here, and neither is
-		// worth asking about forever.
-		if (++pollFailures >= POLL_GIVE_UP_AFTER) stopPolling();
+		const at = conv;
+		await generation.run(
+			() => fetchTranscript(apiBase, kind, id, conv),
+			(got) => {
+				// Belt and braces alongside the generation: every path that changes `conv` calls
+				// `stopPolling()` today, and this is what keeps the guard true of one that forgets.
+				if (conv !== at) return false;
+				if (got) {
+					pollFailures = 0;
+					messages = got.messages;
+					conversationStatus = got.status;
+					const log = root.querySelector(`.${PREFIX}-log`);
+					if (log) renderLog(log, messages);
+					return true;
+				}
+				// Counted, not ignored: a 404 for a conversation the server no longer has
+				// and a network that is down look identical from here, and neither is
+				// worth asking about forever.
+				if (++pollFailures >= POLL_GIVE_UP_AFTER) stopPolling();
+				return false;
+			}
+		);
 	}
 
 	/**
@@ -1710,8 +1767,12 @@ export async function mount(el) {
 			return false;
 		});
 
-		refresh();
+		// 🔴 STOP FIRST, THEN READ. The old order (read, stop, restart) started a fetch and then
+		// invalidated its own generation one line later, so the first read after every re-render
+		// would be thrown away — the read that exists so a returning visitor sees the reply
+		// waiting for them.
 		stopPolling();
+		refresh();
 		poller = setInterval(refresh, POLL_MS);
 	}
 

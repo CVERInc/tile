@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	acceptHandoff, bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml,
-	handoffState, inboxPayload, parseHandle, refusalNeedsHandoffForm, resolveAssistantName,
-	resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
+	handoffState, inboxPayload, parseHandle, pollGeneration, refusalNeedsHandoffForm,
+	resolveAssistantName, resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash,
+	statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -707,6 +708,95 @@ test('B3: the listener delegates to acceptHandoff, addressed to its own element'
 	assert.ok(!/parseHandle\(/.test(listener[0]), 'the listener bypasses acceptHandoff');
 	// And it writes the handle with the ts it adopted, not a fresh one (B6).
 	assert.match(listener[0], /storeHandle\(handoffConv, hasEmail, storedMode, handleTs\)/);
+});
+
+// REVIEW B2 (2026-09-08): stopPolling() cleared the interval and nothing else, so a transcript
+// fetch already in the air came back after the hand-off and painted the OLD conversation into
+// the NEW panel — both views render into the same .dc-inbox-log, so it looked like part of it.
+
+test('B2: a result that arrives after invalidate() is dropped, not applied', async () => {
+	const generation = pollGeneration();
+	// The panel, reduced to what the race actually corrupts.
+	const panel = { conv: 'old-conv', messages: [{ text: 'old' }] };
+	let settle;
+	// The delayed fetch: still in flight when the hand-off arrives.
+	const inFlight = generation.run(
+		() => new Promise((resolve) => { settle = resolve; }),
+		(got) => { panel.messages = got.messages; return true; }
+	);
+
+	// ...the hand-off. stopPolling() invalidates, then the panel adopts the new conversation.
+	generation.invalidate();
+	panel.conv = 'new-conv';
+	panel.messages = [];
+
+	// ...and only NOW does the old conversation's transcript come back.
+	settle({ messages: [{ text: 'from the old conversation' }] });
+	assert.equal(await inFlight, false, 'the stale result was applied');
+	assert.deepEqual(panel.messages, [], 'the old transcript landed in the new panel');
+});
+
+test('B2: an uninterrupted result is applied exactly as before', async () => {
+	const generation = pollGeneration();
+	let settle;
+	const applied = [];
+	const inFlight = generation.run(
+		() => new Promise((resolve) => { settle = resolve; }),
+		(got) => { applied.push(got); return true; }
+	);
+	settle({ messages: ['a reply'] });
+	assert.equal(await inFlight, true);
+	assert.deepEqual(applied, [{ messages: ['a reply'] }]);
+});
+
+test('B2: invalidating cancels what is in flight without cancelling what starts after it', async () => {
+	const generation = pollGeneration();
+	const applied = [];
+	let settleFirst;
+	const first = generation.run(
+		() => new Promise((resolve) => { settleFirst = resolve; }),
+		(got) => { applied.push(got); return true; }
+	);
+	generation.invalidate();
+	// The new view's own first read, started after the tear-down — this one must survive.
+	const second = generation.run(async () => 'new', (got) => { applied.push(got); return true; });
+	settleFirst('old');
+	assert.equal(await first, false);
+	assert.equal(await second, true);
+	assert.deepEqual(applied, ['new']);
+});
+
+test('B2: a rejected fetch is a null result, never an unhandled rejection from a timer', async () => {
+	const generation = pollGeneration();
+	const seen = [];
+	assert.equal(
+		await generation.run(async () => { throw new TypeError('network'); }, (got) => { seen.push(got); return false; }),
+		false
+	);
+	assert.deepEqual(seen, [null], 'the failure path must still be told the request failed');
+	// And a failure that arrives after a tear-down is not even counted.
+	let settle;
+	const inFlight = generation.run(() => new Promise((_, reject) => { settle = reject; }), () => {
+		throw new Error('apply must not run for an invalidated failure');
+	});
+	generation.invalidate();
+	settle(new TypeError('network'));
+	assert.equal(await inFlight, false);
+});
+
+test('B2: refresh() runs through the generation, and stopPolling() invalidates it', () => {
+	// The structural half: the guard is only real if refresh() is the thing wearing it.
+	const stop = CORAL_SOURCE.match(/function stopPolling\(\) \{[\s\S]*?\n\t\}/);
+	assert.ok(stop, 'expected stopPolling() in mount()');
+	assert.match(stop[0], /generation\.invalidate\(\)/);
+
+	const refreshFn = CORAL_SOURCE.match(/async function refresh\(\) \{[\s\S]*?\n\t\}\n/);
+	assert.ok(refreshFn, 'expected refresh() in mount()');
+	assert.match(refreshFn[0], /generation\.run\(/);
+	assert.ok(!/const got = await fetchTranscript/.test(refreshFn[0]),
+		'refresh() awaits the transcript outside the generation guard again');
+	// The re-render's first read must be started AFTER the tear-down, or it invalidates itself.
+	assert.match(CORAL_CODE, /stopPolling\(\);\n\t\trefresh\(\);\n\t\tpoller = setInterval\(refresh, POLL_MS\);/);
 });
 
 // NOTE ON COVERAGE: what remains inside mount() for this event is three lines — call
