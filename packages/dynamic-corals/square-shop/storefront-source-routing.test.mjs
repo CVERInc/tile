@@ -363,11 +363,18 @@ test('provider source pins its rail in emitted SSR and browser bytes, while comp
 // category buttons, nav) the moment a provider shop rendered — live on a customer's /shop/.
 // These shells carry BOTH an author intro section outside the coral AND the author's own
 // [data-dynamic-coral="square-shop"] div with real localized attributes, mirroring the
-// evidence (soda-shop-intro sections + data-buy-label="購入" etc.) from that incident.
+// SHAPE of the evidence from that incident (an author-namespaced intro <section> and
+// category <nav>, a CJK shop title, data-buy-label="購入" etc.).
+//
+// 🔴 The names here are a stand-in, and the shape is the part that has to be faithful: the
+// customer's own class prefix and their Japanese brand name are what the incident actually
+// carried, and neither belongs in a public repo. What the assertions below measure is that
+// markup the PLATFORM did not author survives a coral mount — that is a property of the
+// markup being foreign, not of whose it is. See scripts/publish-safety.sh in tile-lab.
 const AUTHORED_SHELL = '<!doctype html><html lang="ja"><head><title>Shop</title></head><body>' +
   '<header>NAV</header><main class="rf-main">' +
-  '<section class="soda-shop-intro"><h1>SODA ART ショップ</h1><p>作品紹介文</p></section>' +
-  '<nav class="soda-shop-categories"><a href="#a">カテゴリA</a></nav>' +
+  '<section class="nw-shop-intro"><h1>NORTHWIND ショップ</h1><p>作品紹介文</p></section>' +
+  '<nav class="nw-shop-categories"><a href="#a">カテゴリA</a></nav>' +
   '<div data-dynamic-coral="square-shop" data-guild-id="g1" data-cart="header" data-detail-base="/shop" ' +
   'data-add-label="カートに追加" data-buy-label="購入" data-locale="ja-JP"></div>' +
   '</main><footer>FOOT</footer></body></html>';
@@ -389,9 +396,9 @@ test('coral-preserving mount: author main survives, author attrs ride through, e
     assert.equal(response.status, 200);
 
     // The author's own <main> content — never touched by a whole-<main> replaceMain — survives.
-    assert.match(html, /soda-shop-intro/, 'author intro section must survive');
-    assert.match(html, /SODA ART ショップ/, 'author intro copy must survive');
-    assert.match(html, /soda-shop-categories/, 'author category nav must survive');
+    assert.match(html, /nw-shop-intro/, 'author intro section must survive');
+    assert.match(html, /NORTHWIND ショップ/, 'author intro copy must survive');
+    assert.match(html, /nw-shop-categories/, 'author category nav must survive');
     assert.match(html, /NAV/);
     assert.match(html, /FOOT/);
 
@@ -468,7 +475,7 @@ test('native path analogue: still replaces the whole <main>, even with extra aut
   const { load } = emit('native-analogue', ['--site-id', 'site-native-analogue', '--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }])]);
   const mod = await load();
   const nativeShellWithIntro = '<!doctype html><html><head></head><body><header>NAV</header><main>' +
-    '<section class="soda-shop-intro"><h1>Intro that native still drops today</h1></section>' +
+    '<section class="nw-shop-intro"><h1>Intro that native still drops today</h1></section>' +
     '</main><footer>FOOT</footer></body></html>';
   const response = await mod.default.fetch(new Request('https://site.example/shop'), {
     ASSETS: { fetch: async () => new Response(nativeShellWithIntro) },

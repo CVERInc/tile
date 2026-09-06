@@ -1040,8 +1040,8 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		// Seed from the seller's OWN catalog, not a hardcoded 'USD'. The lines
 		// below overwrite this per item once the cart has contents, but an EMPTY
 		// cart never reaches them — so a JPY seller's resting panel rendered
-		// "$0.00" next to a wall of ¥ prices (caught live on soda, the first
-		// non-USD BYO seller). 'USD' stays the last-resort fallback for a
+		// "$0.00" next to a wall of ¥ prices (caught live on the first non-USD
+		// BYO seller's shop). 'USD' stays the last-resort fallback for a
 		// catalog that carries no currency at all.
 		let currency = (items.find((it) => it.currency) || {}).currency || 'USD';
 		panel.innerHTML = '';
