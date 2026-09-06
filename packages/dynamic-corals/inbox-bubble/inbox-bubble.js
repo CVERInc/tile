@@ -61,6 +61,9 @@
 //   data-kind      (required) — 'site' | 'card' | 'cardtile' | 'ext'
 //   data-id        (required) — the tenant key for that kind
 //   data-kaito     (optional) — "1" asks the site first (needs REEF with KAITO)
+//   data-open-on-hash (optional) — "1" lets `#inbox` in the URL open the panel at load. Off by
+//                  default: a fragment is written by whoever authored the LINK, not by the site
+//                  (see shouldAutoOpenFromHash).
 //   data-api-base  (optional) — override the feelreef origin
 //   data-assistant-name (optional) — what VISITORS see the assistant called
 //                  instead of "KAITO" (owner ruling, 2026-09-05: the name may
@@ -934,10 +937,24 @@ export function pollGeneration() {
  *
  * Exactly `#inbox`, not a prefix or substring test — a page's own anchor (`#inbox-pricing`, a
  * heading id that happens to start the same way) must not trip a widget its author never asked
- * for. A site that wants this deliberately writes the literal fragment, the same way `data-kind`
- * is a deliberate attribute rather than an inferred one.
+ * for.
+ *
+ * 🔴 AND THE SITE HAS TO HAVE ASKED FOR IT — `data-open-on-hash="1"`, review B5. The original
+ * reasoning here was that 「a site that wants this deliberately writes the literal fragment, the
+ * same way data-kind is a deliberate attribute」, and that was simply wrong about who writes a
+ * URL fragment: `location.hash` comes from whoever authored the LINK. Any external page, email,
+ * QR code or search result could point at `https://customer.example/anything#inbox` and make a
+ * customer's site pop a message panel open and pull the cursor into it, on any page, for every
+ * visitor, with no way for the owner to turn it off. It is also a WCAG 3.2.1/3.2.5 change of
+ * context nobody requested, on a `role="dialog"` with no Escape binding.
+ *
+ * An attribute is a different thing entirely: it is in the site's own markup, so the deliberate
+ * act belongs to the person whose site it is. It also settles the other half of the same
+ * problem — a docs page with an `<h2 id="inbox">`, or a hash-router SPA whose `#inbox` route is
+ * its own, no longer trips a widget by coincidence.
  */
-export function shouldAutoOpenFromHash(hash) {
+export function shouldAutoOpenFromHash(hash, optedIn) {
+	if (optedIn !== '1') return false;
 	return hash === '#inbox';
 }
 
@@ -1777,13 +1794,24 @@ export async function mount(el) {
 	}
 
 	renderClosed();
-	// One read at mount so a returning visitor sees the reply waiting for them
-	// behind the closed bubble — without opening a panel nobody asked for.
-	if (conv) await refresh();
 
-	/** Opens the panel exactly as the closed bubble's own click does — a no-op while already open. */
+	/**
+	 * Opens the panel exactly as the closed bubble's own click does.
+	 *
+	 * 🩸 ALREADY OPEN IS NOT NOTHING (review B10). `if (open) return;` is right about not
+	 * re-rendering — that would throw away a draft mid-sentence — but it used to return without
+	 * doing anything at all, and the use README recommends is a site's footer 「report a problem」
+	 * link. A visitor whose panel is already open, scrolled out of view at the other end of the
+	 * page, clicked that link and NOTHING happened: an ordinary broken link, as far as they can
+	 * tell. Refocusing the compose box is the whole fix — it scrolls the panel into view and puts
+	 * the cursor where the visitor was going anyway, without touching what they have typed.
+	 */
 	function openPanel() {
-		if (open) return;
+		if (open) {
+			const textarea = root.querySelector('textarea');
+			if (textarea && textarea.focus) textarea.focus();
+			return;
+		}
 		open = true;
 		renderOpen();
 	}
@@ -1798,7 +1826,7 @@ export async function mount(el) {
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
 	window.addEventListener('reef-inbox:open', openPanel);
-	if (shouldAutoOpenFromHash(location.hash)) openPanel();
+	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
 
 	// #15: the handle hand-off. The coral reads its handle from localStorage only at mount, so a
 	// page that mints a hand-off another way — reef's own `/report` form writes the exact shape
@@ -1841,6 +1869,21 @@ export async function mount(el) {
 		if (open) renderOpen();
 		else renderClosed();
 	});
+
+	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
+	// bubble — without opening a panel nobody asked for.
+	//
+	// 🔴 AFTER THE LISTENERS, NOT BEFORE (review B5). This is a network round trip, and everything
+	// below it used to be everything above: on a slow connection a site's own `DOMContentLoaded`
+	// handler could dispatch `reef-inbox:open` seconds before there was a listener for it, and the
+	// event went nowhere — an intermittent failure nobody would ever debug. `#inbox` had the same
+	// problem from the other side: it stole focus a round trip late, by which time the visitor may
+	// have started typing in the site's own search box. Registering first costs nothing; every
+	// handler only runs once the panel exists, and `renderClosed()` above already built it.
+	//
+	// `!open` because an auto-opened panel has already started its own read through
+	// `renderMessages()`, and a second one would be two requests for one paint.
+	if (conv && !open) await refresh();
 
 	// 🏛 The platform's name, applied AFTER the first paint (CANON 第一條 / ruling #36).
 	//

@@ -544,11 +544,53 @@ test('the second-action label switches between "ask <assistant> again" and "star
 // ── #13: a programmatic way to open the panel ───────────────────────────────
 
 test('shouldAutoOpenFromHash: only the exact #inbox fragment, never a prefix match', () => {
-	assert.equal(shouldAutoOpenFromHash('#inbox'), true);
-	assert.equal(shouldAutoOpenFromHash('#inbox-pricing'), false);
-	assert.equal(shouldAutoOpenFromHash('#other'), false);
-	assert.equal(shouldAutoOpenFromHash(''), false);
-	assert.equal(shouldAutoOpenFromHash(undefined), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', '1'), true);
+	assert.equal(shouldAutoOpenFromHash('#inbox-pricing', '1'), false);
+	assert.equal(shouldAutoOpenFromHash('#other', '1'), false);
+	assert.equal(shouldAutoOpenFromHash('', '1'), false);
+	assert.equal(shouldAutoOpenFromHash(undefined, '1'), false);
+});
+
+// REVIEW B5 (2026-09-08): the fragment that opens the panel is written by whoever authored the
+// LINK, not by the site. Without an opt-in, any external page, email or QR code could make a
+// customer's site open a panel and take the cursor, on any page, for every visitor.
+
+test('B5: #inbox does nothing unless the SITE opted in with data-open-on-hash="1"', () => {
+	// The review's own payloads - an outside link at a page the site never marked up for this.
+	assert.equal(shouldAutoOpenFromHash('#inbox', null), false, 'attribute absent');
+	assert.equal(shouldAutoOpenFromHash('#inbox', undefined), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', ''), false, 'attribute present but empty');
+	// Exactly "1", the same shape data-kaito already uses - not "true", not any truthy string.
+	assert.equal(shouldAutoOpenFromHash('#inbox', '0'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', 'true'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', 'yes'), false);
+	assert.equal(shouldAutoOpenFromHash('#inbox', '1'), true);
+});
+
+test('B5: mount reads the opt-in from the mount element, and wires both entry points before the fetch', () => {
+	assert.match(CORAL_CODE,
+		/shouldAutoOpenFromHash\(location\.hash, el\.getAttribute\('data-open-on-hash'\)\)/);
+	// 🔴 Order, not just presence: the listeners used to be registered after `await refresh()`, so
+	// a site dispatching reef-inbox:open from its own DOMContentLoaded handler raced a network
+	// round trip for a listener to exist, and #inbox stole focus a round trip late.
+	const listenAt = CORAL_CODE.indexOf("window.addEventListener('reef-inbox:open'");
+	const handleAt = CORAL_CODE.indexOf("window.addEventListener('reef-inbox:handle'");
+	const readAt = CORAL_CODE.indexOf('if (conv && !open) await refresh();');
+	assert.ok(listenAt > 0 && handleAt > 0 && readAt > 0, 'mount no longer has the three lines');
+	assert.ok(listenAt < readAt, 'the open listener is registered behind a network round trip again');
+	assert.ok(handleAt < readAt, 'the handle listener is registered behind a network round trip again');
+});
+
+// REVIEW B10 (2026-09-08): reef-inbox:open on an already-open panel was a total no-op, so the
+// site's own "report a problem" link read as broken to a visitor who had left the panel open.
+
+test('B10: opening an already-open panel refocuses the compose box instead of doing nothing', () => {
+	const openPanel = CORAL_CODE.match(/function openPanel\(\) \{[\s\S]*?\n\t\}/);
+	assert.ok(openPanel, 'expected openPanel() in mount()');
+	// It still must not re-render - that is what would throw away a half-typed message.
+	assert.ok(!/render(Open|Closed|Ask|Messages)\(\);\n\t\t\treturn;/.test(openPanel[0]),
+		'the already-open branch re-renders, discarding the visitor\'s draft');
+	assert.match(openPanel[0], /if \(open\) \{[\s\S]*?focus\(\)[\s\S]*?return;/);
 });
 
 // NOTE ON COVERAGE: mount() wires window.addEventListener('reef-inbox:open', ...) and calls

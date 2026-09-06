@@ -16,6 +16,7 @@ a support department, and nearly every REEF customer is one person.
 | `data-id` | required — the tenant key for that kind |
 | `data-kaito` | `"1"` asks the site first (needs REEF with KAITO on that tenant) |
 | `data-assistant-name` | what VISITORS see the assistant called instead of "KAITO" (owner-chosen; the panel still marks the reply with the non-removable **AI** chip — the name can change, the AI identity cannot). The BAKED opening answer only: from 0.7.2 the bubble also reads the platform's current value once per mount (`GET /api/inbox/assistant`) and patches the two nodes that carry the name, so an owner's rename reaches visitors without a republish. That read only beats the baked value when the proxy says it actually asked the platform (`resolved: true` in the body) — which is also how CLEARING the name works: a resolved empty answer means「no override」and falls back to KAITO, while an empty answer without `resolved` means「we could not ask」and this attribute stands. Whichever value wins is trimmed to one line and capped at **40 grapheme clusters and 200 UTF-16 units** — a cluster has no length of its own, so both halves are needed for「40 characters」to also mean「not a wall of text」— and bidi/format controls (U+202A–202E, U+2066–2069, U+061C, U+200E/F) are removed, since a name is not allowed to change the direction the rest of the status line reads in |
+| `data-open-on-hash` | `"1"` lets `#inbox` in the URL open the panel at load. Off by default — see "Opening the panel programmatically" |
 | `data-api-base` | override the feelreef origin (previews) |
 | `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides |
 
@@ -37,12 +38,24 @@ has already run:
 
 - `window.dispatchEvent(new CustomEvent('reef-inbox:open'))` — a site's own link (a footer "report
   a problem" anchor, say) can open the panel in place instead of sending the visitor to another
-  page.
-- `#inbox` in the page's URL fragment at load — honoured once, at mount, the same way.
+  page. When the panel is **already** open this refocuses the compose box rather than doing
+  nothing, so that footer link is never a dead click for a visitor who left the panel open and
+  scrolled away.
+- `#inbox` in the page's URL fragment at load — honoured once, at mount, and **only with
+  `data-open-on-hash="1"` on the mount**. 🔴 Off by default on purpose: a fragment is written by
+  whoever authored the LINK, not by the site, so without the opt-in any external page, email or
+  QR code could make your site open a message panel and take the cursor on any page, for every
+  visitor, with nothing you could do about it. The attribute puts that decision back in your own
+  markup — and stops a page whose own `<h2 id="inbox">` or hash route happens to be spelled the
+  same way from tripping it by coincidence.
 
 Either reaches exactly what a click on the closed bubble reaches, so it focuses the ask/compose
 input the same way every other way into the panel already does — there is no separate focus path
 to keep in sync.
+
+Both are wired **before** the panel's first transcript fetch, so a site that dispatches
+`reef-inbox:open` from its own `DOMContentLoaded` handler is not racing a network round trip for
+a listener to exist.
 
 ## Handing off a conversation from elsewhere
 
