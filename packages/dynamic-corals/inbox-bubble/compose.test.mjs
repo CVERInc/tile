@@ -1822,6 +1822,10 @@ test('D9: the README and the manifest describe the flush the contract describes'
 	assert.match(MANIFEST_CALLS, /at most once every five minutes while it cannot/);
 	assert.match(README, /retried at most\s+once every five minutes/);
 	assert.match(README, /A definite\s+answer is cached for six hours/);
+	// E1: and the six hours are counted from the answer, which is the half that was untrue —
+	// the sentence above was being kept true only by a browser nobody had put in that state.
+	assert.match(README, /does not extend them/);
+	assert.match(MANIFEST_CALLS, /does not extend the six hours of the answer it could not refresh/);
 
 	// D10, D5, D7 and D3's structural half — each of them changed what these documents may claim.
 	assert.match(README, /dropped\s+every time, not only when the answer first arrives/);
@@ -2081,4 +2085,102 @@ test('D3: the wire body carries the contract keys and no field of the buffer rid
 		{ sid: 'sid-1', pages: [], questions: [], handle: 'conv-7' });
 	assert.deepEqual(Object.keys(escalated).sort(),
 		['handle', 'id', 'kind', 'pages', 'questions', 'session_id']);
+});
+
+// ── review E1 (2026-09-08, round 3): one field was carrying two different questions ──────────
+//
+// 🩸 D2 stamped `claimAt` on every reply so the backoff had a starting point, and D10 read
+// `claimAt` to decide how old the cached answer was. Separately correct; together, a probe that
+// could not answer re-dated the answer it failed to refresh. The review's scenario is a site the
+// owner opened the Inbox on AFTER a `claimed:false`, and which is then busy enough to throttle
+// every probe: seventy-two hours of hourly questions, sixty of them destroyed, and the six-hour
+// expiry that was supposed to save them never arrived — while all 121 tests stayed green.
+
+test('E1: a probe that could not answer never renews the answer it failed to bring back', async () => {
+	let answer = false; // a KAITO-only site, and then the owner opens the Inbox
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, answer) });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().claim, false);
+	const learned = f.log.state().claimAt;
+	assert.ok(learned, 'the answer was not dated at all');
+
+	// The six hours belong to the answer, and they run out. This is where the owner opened the
+	// Inbox: the site is busy from here on, so every probe comes back throttled — the contract's
+	// 200 `{claimed:false, throttled:true}`, which `probeInboxClaim` reads as null.
+	answer = null;
+	f.tick(AI_LOG_CLAIM_TTL_MS + 1);
+	f.log.question('is anyone reading this?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2, 'the expired answer was never asked about again');
+	assert.equal(f.log.state().questions.length, 1, 'an EXPIRED no still emptied the buffer');
+	assert.equal(f.log.state().claimAt, learned, 'a non-answer re-dated the answer');
+
+	// 🔴 AN HOUR OF THROTTLED PROBES, and every question asked in it is still here. This is where
+	// the old shape destroyed them: each probe stamped `claimAt` with today's date, so the very
+	// next question saw a minutes-old「no」and dropped everything — the harm D2 was ruled a
+	// blocker for, reached by a road `unclaimedStands()` could not see.
+	for (let i = 0; i < 12; i++) {
+		f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+		f.log.page(`/p${i}`);
+		f.log.question(`q${i}`, '/', null, '');
+		await f.settle();
+	}
+	// 🔴 AND THE PROMISE THE MANIFEST MAKES:「at most once every five minutes while it cannot」.
+	// The old gate picked the wait by the cached `claim` rather than by whether the last probe
+	// had answered, so a browser in this state asked once every six hours and said otherwise.
+	assert.equal(probes, 14, 'a probe that could not answer was backed off for six hours');
+	assert.equal(f.log.state().claim, false, 'a non-answer was written down as an answer');
+	assert.equal(f.log.state().claimAt, learned, 'a non-answer re-dated the answer');
+	assert.equal(f.log.state().questions.length, 13, 'the questions asked past the TTL were destroyed');
+	assert.equal(f.log.state().questions[0].text, 'is anyone reading this?');
+	assert.equal(f.log.state().pages.length, 12);
+	// Unknown is still not permission: they are held, not sent.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// And when somebody finally answers, the answer decides — including a second `false`, which
+	// empties the buffer and is dated NOW, so it is worth another six hours of its own.
+	answer = false;
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('anyone now?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 15);
+	assert.equal(f.log.state().questions.length, 0);
+	assert.equal(f.log.state().claimAt, f.at(), 'the fresh answer was not dated');
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('and now?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 15, 'a fresh answer was re-asked inside its own six hours');
+});
+
+test('E1: the two quantities survive a reload, and neither of them reaches the wire', async () => {
+	// 🔴 THEY HAVE TO BE PERSISTED. On a static site every navigation is a new document and a new
+	// `createAiLog`, so a backoff held in a variable is no backoff at all — the review's own note
+	// on why the second field goes into storage rather than beside it.
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, null) });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+
+	const stored = JSON.parse(f.cells.get(aiLogKey('site:acme')));
+	assert.ok(Number.isFinite(stored.probedAt) && stored.probedAt > 0, 'the backoff was not written down');
+	assert.equal(parseAiLog(stored).probedAt, stored.probedAt);
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2 }).probedAt, 0, 'a buffer without one is not NaN');
+	assert.equal(parseAiLog({ sid: 'x', started: 1, last: 2, probedAt: 'soon' }).probedAt, 0);
+
+	// The next document, same browser, same clock: the backoff still holds.
+	const next = logFixture({ storage: f.storage, now: f.at, probeClaim: async () => (probes++, null) });
+	next.log.question('still anyone?', '/', null, '');
+	await next.settle();
+	assert.equal(probes, 1, 'a new document re-asked inside the backoff');
+
+	// …and it is a whitelist that decides the wire, so the new field is not on it.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 'sid-1', pages: [], questions: [], probedAt: 12345, claimAt: 12345 });
+	assert.equal(JSON.stringify(body).includes('probedAt'), false);
+	assert.equal(JSON.stringify(body).includes('12345'), false);
 });

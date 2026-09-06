@@ -118,7 +118,9 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
   page view of every site to answer a question that matters on a small share of them). A definite
   answer is cached for six hours; a probe that could not answer — no network, or the endpoint's own
   `throttled` — is **not** an answer, so it is never written down as「no」, and it is retried at most
-  once every five minutes rather than once per question. Not knowing behaves exactly like「no」for
+  once every five minutes rather than once per question. The six hours are counted from the answer
+  itself: a probe that could not answer **does not extend them**, so a cached「no」expires on
+  schedule however many failed probes there have been since. Not knowing behaves exactly like「no」for
   sending: nothing leaves until somebody actually says yes. A KAITO-only tenant writes nothing,
   ever, and while that answer stands an unclaimed site holds nothing either — the buffer is dropped
   every time, not only when the answer first arrives.

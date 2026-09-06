@@ -718,7 +718,12 @@ export function parseAiLog(raw) {
 		sent: Number.isFinite(raw.sent) ? Math.max(0, Math.min(raw.sent, questions.length)) : 0,
 		handle: typeof raw.handle === 'string' && raw.handle ? raw.handle : null,
 		claim: raw.claim === true || raw.claim === false ? raw.claim : null,
-		claimAt: Number.isFinite(raw.claimAt) ? raw.claimAt : 0
+		// 🔴 WHEN WE LEARNED, and separately WHEN WE LAST ASKED (review E1). Both are persisted
+		// because a static site's every navigation is a new document: a backoff kept in a variable
+		// is a backoff that resets on the next page, and an answer's age kept in a variable is an
+		// answer that is never old. Neither is on the wire — `aiSessionPayload` is a whitelist.
+		claimAt: Number.isFinite(raw.claimAt) ? raw.claimAt : 0,
+		probedAt: Number.isFinite(raw.probedAt) ? raw.probedAt : 0
 	};
 }
 
@@ -878,7 +883,10 @@ export function createAiLog(opts) {
 			// another probe — and a `false` must not be forgotten, since forgetting it is how a
 			// KAITO-only tenant starts receiving requests again.
 			claim: carry ? carry.claim : null,
-			claimAt: carry ? carry.claimAt : 0
+			claimAt: carry ? carry.claimAt : 0,
+			// The backoff outlives the session for the same reason the answer does: it says how
+			// recently this browser bothered the endpoint, which is not a fact about this visit.
+			probedAt: carry ? carry.probedAt : 0
 		};
 	}
 	let state = null;
@@ -937,6 +945,9 @@ export function createAiLog(opts) {
 	 * somebody answers it this browser is in the same「we do not know」state as a throttled probe
 	 * (review D2) — so the questions asked in that window are HELD, not dropped, and the next
 	 * answer decides what becomes of them.
+	 *
+	 * The age is measured from `claimAt`, which is stamped by an ANSWER and by nothing else
+	 * (review E1) — otherwise the expiry this guards is one a failed probe keeps postponing.
 	 */
 	function unclaimedStands() {
 		return !!state && state.claim === false && now() - state.claimAt < AI_LOG_CLAIM_TTL_MS;
@@ -951,6 +962,13 @@ export function createAiLog(opts) {
 	 * false is a fact about the site and is worth six hours; a throttle, a dropped connection or
 	 * a shape we could not read is worth a retry and nothing else — it may never be written down
 	 * as a no, because a no here also empties this visitor's buffer.
+	 *
+	 * 🩸 AND「WHEN WE ASKED」IS NOT「WHEN WE LEARNED」(review E1). D2 stamped `claimAt` on every
+	 * reply so the backoff had something to measure from, and D10 read `claimAt` to decide how old
+	 * the cached answer was — so a throttled probe, which brings back NOTHING, re-dated the answer
+	 * it failed to refresh. A site whose owner opened the Inbox after a `false` never saw that
+	 * `false` expire: the review ran seventy-two hours of hourly questions past it and watched
+	 * sixty of them destroyed, with every test green. Two quantities, two fields, two gates.
 	 */
 	function ensureClaim() {
 		if (!state || probing || !probeClaim) return;
@@ -963,16 +981,22 @@ export function createAiLog(opts) {
 			dropBuffer(state);
 			write(state);
 		}
-		const wait = state.claim === null ? AI_LOG_CLAIM_RETRY_MS : AI_LOG_CLAIM_TTL_MS;
-		if (state.claimAt && now() - state.claimAt < wait) return;
+		// An answer we still hold is not due to be asked again — six hours from the moment we
+		// LEARNED it, never from the last time somebody failed to tell us.
+		if (state.claim !== null && state.claimAt && now() - state.claimAt < AI_LOG_CLAIM_TTL_MS) return;
+		// And whatever the state of the answer, a probe costs one request per backoff and no more.
+		if (state.probedAt && now() - state.probedAt < AI_LOG_CLAIM_RETRY_MS) return;
 		probing = true;
 		const settle = (claimed) => {
 			probing = false;
 			if (!state) return;
-			// Every answer costs one probe and no more, including「we do not know」— that is what
+			// Every reply costs one probe and no more, including「we do not know」— that is what
 			// the backoff is measured from, and what the manifest's sentence was untrue about.
-			state.claimAt = now();
+			state.probedAt = now();
+			// 🔴 ONLY AN ANSWER RE-DATES THE ANSWER (review E1). A throttled probe learned nothing,
+			// so the six hours go on running from the reply that did.
 			if (typeof claimed === 'boolean') {
+				state.claimAt = now();
 				state.claim = claimed;
 				if (!claimed) dropBuffer(state);
 			}
