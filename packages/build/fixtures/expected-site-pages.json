@@ -1,0 +1,30 @@
+[
+  {
+    "path": "_site",
+    "markdown": "---\n# The site-wide config layer. It is NOT a content page, and it must survive collectPages —\n# `_theme.md` is dropped, `_site.md` is kept, and the renderer reads it as config.\nbrand: Paper Kite Atelier\nlang: en-US\nlocales: en-US, zh-TW, ja-JP\n# The theme NAME the staging step looks for. A site's skin lives in the site's own repo; this\n# line is what tells the build which filename to stage it under.\ntheme: paperkite\n---\n"
+  },
+  {
+    "path": "home",
+    "markdown": "---\nsitetile-page: home\ntitle: Paper Kite Atelier — kites cut, folded and flown by hand\nlang: en-US\nlocales: en-US, zh-TW, ja-JP\n---\n\n## A workshop for paper that wants to leave the ground\n%% sitetile: hero %%\n\nWe cut bamboo, we fold paper, and once a month we walk to the river to find out whether we were\nright. This fixture site exists so the build has a home page to produce.\n\n## What we make\n%% sitetile: grid cols=2 %%\n\n### Deltas\nA single spar, a wide mouth, and enough lift to stay up on a still afternoon.\n\n### Box kites\nFour cells, more wind needed, and worth every gram of the extra bamboo.\n"
+  },
+  {
+    "path": "ja-jp",
+    "markdown": "---\nsitetile-page: home\ntitle: 紙鳶工房 — 手で裁ち、折り、飛ばす凧\nlang: ja\nlocales: en-US, zh-TW, ja-JP\n---\n\n## 地を離れたい紙\n%% sitetile: hero %%\n\n二つ目のロケール。ロケールが一つだけの木では、ロケール首頁の摺り畳みが一度しか起きず、\n偶然でも通ってしまう。\n"
+  },
+  {
+    "path": "legal/terms",
+    "markdown": "---\nsitetile-page: terms\ntitle: Terms — Paper Kite Atelier\nlang: en-US\n---\n\n## Terms\n\nA nested page. Its path must stay nested all the way through — `legal/terms.md` in the IR becomes\nthe page path `legal/terms`, the file `content/legal/terms.md`, and the route `/legal/terms/`. A\ncollector that flattened it would put a stray `/terms` at the top of the site instead.\n"
+  },
+  {
+    "path": "our team & friends",
+    "markdown": "---\nsitetile-page: team\ntitle: Our team & friends — Paper Kite Atelier\nlang: en-US\n---\n\n## The people and the birds\n\nThis page's own FILENAME is the fixture. `our team & friends` is a legal page path in the IR and an\nillegal one on disk once it is a route segment, so the collector keeps it verbatim (it emits data)\nand the staging step is where the spaces and the ampersand become dashes.\n"
+  },
+  {
+    "path": "zh-tw",
+    "markdown": "---\nsitetile-page: home\ntitle: 紙鳶工坊 — 手裁、手摺、手放的風箏\nlang: zh-Hant\nlocales: en-US, zh-TW, ja-JP\n---\n\n## 想離地的紙\n%% sitetile: hero %%\n\n這是語系首頁。`zh-tw/home.md` 必須摺疊成頁面路徑 `zh-tw`，路由才會是 `/zh-tw/` 而不是\n`/zh-tw/home/`。\n"
+  },
+  {
+    "path": "zh-tw/關於",
+    "markdown": "---\nsitetile-page: about\ntitle: 關於 — 紙鳶工坊\nlang: zh-Hant\n---\n\n## 關於\n\n這一頁的檔名本身就是測試：CJK slug 是真實網站上活著的網址，消毒規則必須保留 Unicode 字母，\n所以這頁的路徑一路到 `content/zh-tw/關於.md` 都不會被改寫成破折號。\n"
+  }
+]

@@ -1,0 +1,8 @@
+/* The fixture site's own skin. A theme belongs to the SITE's repo, never to the renderer — this
+   file stands in for the one a real site would hand the build with --theme. Its NAME on arrival
+   comes from ir/_site.md's `theme:` line (here: paperkite), because the layout looks the stylesheet
+   up by that name. */
+:root {
+  --ink: #241f1c;
+  --paper: #f7f3ec;
+}

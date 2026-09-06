@@ -1,0 +1,20 @@
+{
+  "name": "@tile/build",
+  "version": "0.0.0",
+  "description": "The page-generation half of a site build: an IR directory in, a directory of static HTML out. Collect the IR into the site_pages shape, stage it into packages/sitetile/astro, run astro build, put the renderer back. Deployment — uploading, build stamps, redirect merging, canonical-host rewriting, API workers — is not here and is not meant to be.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./mkpages.mjs": "./mkpages.mjs",
+    "./stage.mjs": "./stage.mjs"
+  },
+  "bin": {
+    "tile-build": "./cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
