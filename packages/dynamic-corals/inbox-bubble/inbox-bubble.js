@@ -548,6 +548,45 @@ export function aiPagePath(href) {
 }
 
 /**
+ * A hit is a URL, and that is what keeps the machine's answer off the wire BY SHAPE.
+ *
+ * 🔴 THE ONE FIELD ON THIS ROW THAT COULD EVER CARRY THE ANSWER. `text` is the visitor's own
+ * sentence and `page` is a path; `hit` is the only slot where a caller could hand us the
+ * machine's words by passing the wrong property of the same object — and review D3 measured
+ * exactly that: swapping `answer.source_url` for `answer.text` at the one call site left all
+ * hundred tests green. Prose is not a URL, so it lands here as `null` instead of on the wire.
+ * The rule is enforced by the value's own shape rather than by everyone who ever calls
+ * `question()` remembering it, which is what「cannot become an argument」has to mean.
+ */
+function aiHit(raw) {
+	if (typeof raw !== 'string') return null;
+	const url = aiLine(raw, AI_LOG_MAX_FIELD);
+	return /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
+/**
+ * The whitelist a question row is BUILT FROM — never a filter applied to something richer.
+ *
+ * 🔴 EVERY FIELD ON THE WIRE IS NAMED HERE, and a field that is not named here cannot get
+ * there: the row is assembled by walking these keys, so「the log grew a field」and「the wire
+ * grew a field」are no longer the same event. Contract §一.2 names the same five, and
+ * `compose.test.mjs` asserts this list against that one — a sixth key added to the buffer,
+ * to a transcript object, or to `question()`'s arguments turns those tests red rather than
+ * turning up in somebody's Inbox.
+ */
+const AI_QUESTION_READERS = {
+	text: (q) => aiLine(q.text, AI_LOG_MAX_TEXT),
+	page: (q) => aiLine(q.page, AI_LOG_MAX_FIELD) || '/',
+	hit: (q) => aiHit(q.hit),
+	lang: (q) => aiLine(q.lang, 16),
+	at: (q) => (Number.isFinite(q.at) ? q.at : 0)
+};
+/** The five fields of a question row, in contract order. */
+export const AI_QUESTION_FIELDS = Object.keys(AI_QUESTION_READERS);
+/** The six keys of the wire body — `handle` only when this session reached a person. */
+export const AI_SESSION_FIELDS = ['kind', 'id', 'session_id', 'pages', 'questions', 'handle'];
+
+/**
  * The size cap, applied where a hostile client cannot skip it — on the way IN, every time.
  *
  * 🔴 THE OLDEST GO, not the newest refused. The row is a session read back in order; a
@@ -556,13 +595,12 @@ export function aiPagePath(href) {
  */
 export function capAiQuestions(list) {
 	const rows = Array.isArray(list) ? list : [];
-	return rows.slice(-AI_LOG_MAX_QUESTIONS).map((q) => ({
-		text: aiLine(q && q.text, AI_LOG_MAX_TEXT),
-		page: aiLine(q && q.page, AI_LOG_MAX_FIELD) || '/',
-		hit: typeof (q && q.hit) === 'string' && q.hit ? aiLine(q.hit, AI_LOG_MAX_FIELD) : null,
-		lang: aiLine(q && q.lang, 16),
-		at: Number.isFinite(q && q.at) ? q.at : 0
-	}));
+	return rows.slice(-AI_LOG_MAX_QUESTIONS).map((q) => {
+		const src = q && typeof q === 'object' ? q : {};
+		const row = {};
+		for (const field of AI_QUESTION_FIELDS) row[field] = AI_QUESTION_READERS[field](src);
+		return row;
+	});
 }
 
 /** Consecutive duplicates collapse — a reload is not a second page. */
@@ -601,16 +639,25 @@ export function parseAiLog(raw) {
 	};
 }
 
-/** The wire body — see reef `docs/SPEC-inbox-bubble-position.md` §三 and the endpoint's header. */
+/**
+ * The wire body — see reef `docs/SPEC-inbox-bubble-position.md` §三 and the endpoint's header.
+ *
+ * 🔴 ASSEMBLED FROM NAMED FIELDS, NEVER SPREAD FROM THE BUFFER. `{ ...state }` would put
+ * whatever the log happens to hold — today `claim`, `claimAt`, `sent`, `started` — on the
+ * wire the day somebody adds a field, and the review's mutation of exactly that shape
+ * (M20) left every test green. `AI_SESSION_FIELDS` is the list, and it is asserted against
+ * the bytes a real `mount()` sends, not against this literal.
+ */
 export function aiSessionPayload(kind, id, state) {
+	const held = state && typeof state === 'object' ? state : {};
 	const body = {
 		kind,
 		id,
-		session_id: state.sid,
-		pages: state.pages,
-		questions: capAiQuestions(state.questions)
+		session_id: typeof held.sid === 'string' ? held.sid.slice(0, 64) : '',
+		pages: Array.isArray(held.pages) ? held.pages.filter((p) => typeof p === 'string') : [],
+		questions: capAiQuestions(held.questions)
 	};
-	if (state.handle) body.handle = state.handle;
+	if (typeof held.handle === 'string' && held.handle) body.handle = held.handle;
 	return body;
 }
 
@@ -787,7 +834,9 @@ export function createAiLog(opts) {
 		 *
 		 * 🔴 THE ANSWER IS NOT AN ARGUMENT HERE and cannot become one. What travels is the
 		 * question, the page, whether a passage was cited (and which), the language and the
-		 * time — the same line `kaito_exchanges` already holds on the server.
+		 * time — the same line `kaito_exchanges` already holds on the server. `hit` is the
+		 * only argument that could hold the answer instead, and `aiHit` refuses anything
+		 * that is not an http(s) URL, so passing `answer.text` here sends `null`.
 		 */
 		question(text, page, hit, lang) {
 			if (!state) return;

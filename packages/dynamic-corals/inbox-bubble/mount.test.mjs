@@ -95,10 +95,32 @@ globalThis.clearInterval = (id) => timers.delete(id);
 // handle. What the calls carry is the point — which conversation id this browser asks about and
 // sends under is the only place a handle it adopted becomes visible from outside.
 const requests = [];
+/**
+ * A test's own router, or `null` for the default failure above. It is set for the ruling-54 tests
+ * at the bottom, which are the only ones here that need an endpoint to ANSWER — a KAITO answer to
+ * plant the machine's words in, and a claim probe that says yes so the questions may leave at all.
+ */
+let respond = null;
 globalThis.fetch = async (url, init = {}) => {
 	requests.push({ url, init });
-	return { ok: false, status: 500, json: async () => ({}) };
+	return respond?.(url, init) ?? { ok: false, status: 500, json: async () => ({}) };
 };
+
+/**
+ * The beacon, which is the path a real `pagehide` takes and the one `requests` cannot see.
+ *
+ * 🔴 Node has its own `navigator` (a read-only accessor on `globalThis`), so it is REPLACED here
+ * rather than assigned — without this the coral finds no `sendBeacon`, silently falls through to
+ * the keepalive fetch, and a test believing it measured the beacon measured the other branch.
+ */
+const beacons = [];
+let beaconResult = true;
+const sendBeacon = (url, blob) => (beacons.push({ url, blob }), beaconResult);
+const navStub = { sendBeacon };
+Object.defineProperty(globalThis, 'navigator', { value: navStub, configurable: true, writable: true });
+globalThis.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 /** The conversation id on each transcript GET — the header `fetchTranscript` puts it in. */
 const transcriptConvs = (from = 0) =>
@@ -356,10 +378,14 @@ const firePagehide = () => {
 test('54: an ordinary page view — nobody asked anything — sends NOTHING on pagehide', async () => {
 	await mountFresh();
 	const from = requests.length;
+	beacons.length = 0;
 	firePagehide();
 	// 🔴 The whole cost claim, measured rather than asserted in prose: a visit where nobody typed
-	// a question reaches the network exactly as often as it did before ruling 54 existed.
+	// a question reaches the network exactly as often as it did before ruling 54 existed. Both
+	// channels are counted — a beacon does not appear in `requests`, so counting only that array
+	// would have called a beacon-shaped leak zero.
 	assert.deepEqual(requests.slice(from).map((r) => r.url), []);
+	assert.deepEqual(beacons, []);
 });
 
 test('54: the buffer is beside the handle, never inside it', async () => {
@@ -380,4 +406,111 @@ test('54: data-ai-log="0" installs no pagehide listener and writes no buffer', a
 	const { el } = await mountFresh({ 'data-ai-log': '0' });
 	assert.equal(listenerCount(), before + 1, 'the opt-out still wired a pagehide listener');
 	assert.equal(storage.has(`reef-inbox:ai:site:${el.attrs['data-id']}`), false);
+});
+
+// ── review D3: the machine's answer, measured in BYTES against the real mount() ──────────────
+//
+// 🩸 THE RULE WITH NO RULER. Four documents say the machine's answers never leave, and the review
+// put one on the wire by editing two tokens at the single call site — `answer.source_url` became
+// `answer.text` — with all hundred tests green. compose.test.mjs now enumerates the key sets;
+// what is measured HERE is the only thing that catches a wrong VALUE in a right-shaped field:
+// a real answer, driven through the real `mount()`, and then every byte this mount handed to the
+// network searched for it.
+//
+// 🔴 THE SENTINEL IS PLANTED EVERYWHERE IT COULD LIVE — in the KAITO response, in the buffer's
+// own cell under three field names it does not have, and inside the question row. What the assert
+// says is not「the field we remembered to check is clean」but「the string is in none of the bytes」.
+
+const AI_ANSWER = 'KAITO-SAID-THIS-AND-IT-MUST-NEVER-TRAVEL';
+const CITED = 'https://example.test/faq#stock';
+
+/** A site with an Inbox, whose KAITO answers with a cited passage — and with the sentinel in it. */
+const claimedSiteAnswering = () => (url) => {
+	if (url.includes('/api/kaito')) {
+		return { ok: true, status: 200, json: async () => ({ kind: 'grounded', text: AI_ANSWER, source_url: CITED }) };
+	}
+	if (url.includes('/api/inbox/session')) {
+		return { ok: true, status: 200, json: async () => ({ ok: true, claimed: true }) };
+	}
+	return undefined;
+};
+
+/** Everything that left this mount, as text: beacon bodies and fetch bodies alike. */
+const bytesSent = (from) => [
+	...beacons.map((b) => b.blob.parts.join('')),
+	...requests.slice(from).map((r) => String(r.init.body ?? ''))
+];
+
+/** One visitor, one question, on a claimed site whose KAITO answers. Returns the tenant id. */
+async function askOneQuestion(question = 'do you ship to Japan?') {
+	const { el, root } = await mountFresh({ 'data-kaito': '1' });
+	const id = el.attrs['data-id'];
+	respond = claimedSiteAnswering();
+	await openBubble(root);
+
+	// The answer, planted in the buffer under every name a future field might have — including
+	// inside the question row itself, which is where M21 put it.
+	const key = `reef-inbox:ai:site:${id}`;
+	const planted = JSON.parse(storage.get(key));
+	planted.answer = AI_ANSWER;
+	planted.transcript = [{ role: 'assistant', text: AI_ANSWER }];
+	planted.lastAnswer = { kind: 'grounded', text: AI_ANSWER, source_url: CITED };
+	planted.questions = [{ text: 'an earlier question', page: '/', hit: null, lang: '', at: 1,
+		answer: AI_ANSWER }];
+	storage.set(key, JSON.stringify(planted));
+
+	composeBox(root).value = question;
+	await root.querySelector('.dc-inbox-form').emit('submit');
+	await settle(); // the claim probe is a promise, and nothing may leave before it answers
+	return { el, root, id, key };
+}
+
+test('D3: the answer is in no byte the beacon sends, and the body has only the contract keys', async () => {
+	const { id } = await askOneQuestion();
+	const from = requests.length;
+	beacons.length = 0;
+	beaconResult = true;
+	firePagehide();
+
+	assert.equal(beacons.length, 1, 'the questions did not leave as a beacon');
+	assert.equal(beacons[0].blob.type, 'application/json');
+	const body = JSON.parse(beacons[0].blob.parts[0]);
+	assert.deepEqual(Object.keys(body).sort(), ['id', 'kind', 'pages', 'questions', 'session_id'],
+		'the wire body grew a key the contract does not name');
+	assert.equal(body.id, id);
+	for (const row of body.questions) {
+		assert.deepEqual(Object.keys(row), ['text', 'page', 'hit', 'lang', 'at'],
+			'a question row grew a field nobody whitelisted');
+	}
+	// The visitor's own sentence travelled, and the citation — a URL — travelled with it.
+	assert.equal(body.questions[body.questions.length - 1].text, 'do you ship to Japan?');
+	assert.equal(body.questions[body.questions.length - 1].hit, CITED);
+
+	// 🔴 THE MEASUREMENT. Not「the field we checked is clean」: the string is in none of the bytes.
+	for (const sent of bytesSent(from)) {
+		assert.equal(sent.includes(AI_ANSWER), false, `the machine's answer left in: ${sent}`);
+	}
+});
+
+test('D3: the same is true of the keepalive fetch path — no browser has a cleaner branch', async () => {
+	delete navStub.sendBeacon;
+	try {
+		await askOneQuestion('can I return it?');
+		const from = requests.length;
+		beacons.length = 0;
+		firePagehide();
+
+		const posts = requests.slice(from).filter((r) => r.url.includes('/api/inbox/session'));
+		assert.equal(posts.length, 1, 'without sendBeacon the session did not go by fetch');
+		assert.equal(posts[0].init.keepalive, true);
+		const body = JSON.parse(posts[0].init.body);
+		assert.deepEqual(Object.keys(body).sort(), ['id', 'kind', 'pages', 'questions', 'session_id']);
+		assert.equal(beacons.length, 0, 'a beacon went out through a navigator that has none');
+		for (const sent of bytesSent(from)) {
+			assert.equal(sent.includes(AI_ANSWER), false, `the machine's answer left in: ${sent}`);
+		}
+	} finally {
+		navStub.sendBeacon = sendBeacon;
+		respond = null;
+	}
 });

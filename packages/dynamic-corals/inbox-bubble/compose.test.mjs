@@ -1248,8 +1248,9 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 // arithmetic that can only be exercised through a browser is arithmetic nobody exercises.
 
 const {
-	AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS, AI_LOG_MAX_TEXT, aiLogKey, aiPagePath,
-	appendAiPage, capAiQuestions, createAiLog, parseAiLog, sendAiSession
+	AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS, AI_LOG_MAX_TEXT, AI_QUESTION_FIELDS, AI_SESSION_FIELDS,
+	aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiQuestions, createAiLog, parseAiLog,
+	sendAiSession
 } = await import('./inbox-bubble.js');
 
 function logFixture(over = {}) {
@@ -1470,4 +1471,83 @@ test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', ()
 
 	// No transport at all is `false`, never a throw inside a pagehide handler.
 	assert.equal(sendAiSession('u', {}, { navigator: {}, fetch: null }), false);
+});
+
+// ── review D3 (2026-09-08, round 2): the loudest rule in this file had no ruler ──────────────
+//
+// 🩸「The machine's answers are never sent」is written in four places — this file's header, the
+// README, the manifest, contract §一.3 — and the review put the answer on the wire with a
+// two-token edit at the one call site (`answer.source_url` → `answer.text`) while all hundred
+// tests stayed green. Existence assertions cannot see an EXTRA thing: every 54 test above asks
+// whether a value it names is present, and none of them ever asked what ELSE the body carries.
+//
+// So the key sets are enumerated here, against the contract's own list spelled out literally
+// rather than read back out of the code, and the BYTES a real `mount()` sends are measured in
+// mount.test.mjs. A field added to the buffer, to a question row, or to the wire body without
+// being added to the contract turns one of the two red.
+
+const PLANTED_ANSWER = 'THE-MACHINE-SAID-THIS';
+
+test('D3: a question row is BUILT from the whitelist — five fields, and nothing that rode along', () => {
+	assert.deepEqual([...AI_QUESTION_FIELDS], ['text', 'page', 'hit', 'lang', 'at']);
+
+	// The answer under every name a future refactor might hang off the same object, plus the
+	// transcript it came from — the shapes the review's M21/M22 mutations added.
+	const [row] = capAiQuestions([{
+		text: 'do you ship to Japan?', page: '/pricing', hit: 'https://shop.example/faq',
+		lang: 'ja-jp', at: 7,
+		answer: PLANTED_ANSWER,
+		text_answer: PLANTED_ANSWER,
+		kaito: { kind: 'grounded', text: PLANTED_ANSWER },
+		messages: [{ role: 'assistant', body: PLANTED_ANSWER }]
+	}]);
+	assert.deepEqual(Object.keys(row), ['text', 'page', 'hit', 'lang', 'at']);
+	assert.equal(JSON.stringify(row).includes(PLANTED_ANSWER), false,
+		'a field nobody whitelisted travelled with the row');
+});
+
+test('D3: a hit is a URL, so the answer cannot be handed in as one', () => {
+	// 🔴 THIS IS THE STRUCTURAL HALF. `hit` is the only argument of `question()` that could hold
+	// the machine's words, and the fix is not「remember to pass source_url」— it is that prose is
+	// not a URL. The review's own mutation, spelled out:
+	const asAnswer = capAiQuestions([{ text: 'q', page: '/', at: 1,
+		hit: 'We ship to Japan on Tuesdays. See our shipping page for the cut-off times.' }]);
+	assert.equal(asAnswer[0].hit, null, 'a sentence became a hit');
+	// Including one that quotes a URL, which is what a cited answer's text looks like.
+	const withUrl = capAiQuestions([{ text: 'q', page: '/', at: 1,
+		hit: 'Yes — see https://shop.example/faq#stock for the current stock.' }]);
+	assert.equal(withUrl[0].hit, null);
+	// A real citation still travels, whole.
+	assert.equal(capAiQuestions([{ hit: 'https://shop.example/faq#stock' }])[0].hit,
+		'https://shop.example/faq#stock');
+	assert.equal(capAiQuestions([{ hit: 'javascript:alert(1)' }])[0].hit, null);
+	assert.equal(capAiQuestions([{ hit: '/faq' }])[0].hit, null, 'a hit is the PUBLIC url, absolute');
+});
+
+test('D3: the wire body carries the contract keys and no field of the buffer rides along', () => {
+	assert.deepEqual([...AI_SESSION_FIELDS],
+		['kind', 'id', 'session_id', 'pages', 'questions', 'handle']);
+
+	// A buffer holding everything the log holds today, plus everything a future field might be.
+	const body = aiSessionPayload('site', 'acme', {
+		sid: 'sid-1', started: 1, last: 2, sent: 1, claim: true, claimAt: 3,
+		pages: ['/pricing'], handle: null,
+		questions: [{ text: 'can I return it?', page: '/pricing', hit: null, lang: '', at: 4 }],
+		transcript: [{ role: 'assistant', text: PLANTED_ANSWER }],
+		lastAnswer: PLANTED_ANSWER
+	});
+	assert.deepEqual(Object.keys(body).sort(),
+		['id', 'kind', 'pages', 'questions', 'session_id'],
+		'the body grew a key the contract does not name');
+	const json = JSON.stringify(body);
+	assert.equal(json.includes(PLANTED_ANSWER), false);
+	for (const own of ['claim', 'claimAt', '"sent"', 'started', '"last"', '"sid"', 'transcript']) {
+		assert.equal(json.includes(own), false, `the buffer's own \`${own}\` reached the wire`);
+	}
+
+	// `handle` is the sixth key and appears only when this session reached a person.
+	const escalated = aiSessionPayload('site', 'acme',
+		{ sid: 'sid-1', pages: [], questions: [], handle: 'conv-7' });
+	assert.deepEqual(Object.keys(escalated).sort(),
+		['handle', 'id', 'kind', 'pages', 'questions', 'session_id']);
 });
