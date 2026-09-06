@@ -53,6 +53,30 @@ if (!irDir || !outDir) { console.error(USAGE); process.exit(2); }
 const here = path.dirname(fileURLToPath(import.meta.url));
 const engineDir = flag('engine') ?? path.resolve(here, '../..');
 
+// 🩸 THE SIGNALS ARE INSTALLED HERE, IN THE PROGRAM, and nowhere in the library. `stageSite` used
+// to put `SIGINT`/`SIGTERM` handlers on `process` itself and end them in `process.exit(130/143)`, so
+// `import { stageSite } from '@tile/build'` silently took over the caller's shutdown and then killed
+// it — measured 2026-09-07 against a consumer whose own SIGTERM handler asked for exit 0 and got
+// 143 without ever finishing its drain. A CLI may own the process's signals because the CLI IS the
+// process; a library may not. What crosses the boundary is an AbortSignal, and nothing else.
+const stopping = new AbortController();
+let signalled = '';
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    if (signalled) {
+      // The teardown is already in flight and cannot be hurried: a copy of a site's media is not
+      // interruptible half way. Say what a kill from here would cost rather than doing it silently.
+      console.error(`  still putting the renderer back after ${signalled} — killing this now leaves a`);
+      console.error('  .tile-build-stash-* and a .tile-build-lock in the renderer to move back by hand.');
+      return;
+    }
+    signalled = sig;
+    stopping.abort();
+  });
+}
+// The shell's own spelling for "died on this signal": 128 + the signal number.
+const signalExit = () => (signalled === 'SIGINT' ? 130 : 143);
+
 let result;
 try {
   result = await buildSite({
@@ -66,10 +90,19 @@ try {
     blogDir: flag('blog'),
     pagetileDir: flag('pagetile'),
     includePosts: argv.includes('--include-posts'),
+    signal: stopping.signal,
   });
 } catch (err) {
-  // Every throw out of buildSite/stageSite is a sentence about what to do next, not a surprise —
-  // print the sentence, not a stack trace whose first useful line is twelve frames down.
+  // A signal is not a failure to report as one: buildSite has already put the renderer back, so say
+  // which signal stopped it and leave with the code a shell reads as that signal.
+  if (signalled) {
+    console.error(err.name === 'AbortError'
+      ? `✗ ${signalled} — the build was stopped and the renderer put back.`
+      : `✗ ${signalled} during a build and the renderer could not be put back: ${err.message}`);
+    process.exit(signalExit());
+  }
+  // Every other throw out of buildSite/stageSite is a sentence about what to do next, not a
+  // surprise — print the sentence, not a stack trace whose first useful line is twelve frames down.
   console.error(`✗ ${err.message}`);
   process.exit(2);
 }

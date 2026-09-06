@@ -72,11 +72,14 @@ export function themeNameFromPages(pages) {
  * @param {string} [o.blogDir]     the site's posts, staged into blog/
  * @param {string} [o.pagetileDir] the site's books (*.book.md), staged into pagetile/
  * @param {string} [o.themeFile]   the site's compiled theme.css
+ * @param {AbortSignal} [o.signal] abort staging: the renderer is put back and this rejects with an
+ *                                 AbortError. 🔴 It does NOT exit, and NOTHING here listens on the
+ *                                 process's signals — see the note above `abortError`.
  * @returns {Promise<{restore: () => Promise<void>, pageCount: number, themeName: string}>}
  *
  * 🔴 If this function throws, it has ALREADY restored. The caller owns `restore` only on success.
  */
-export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileDir, themeFile }) {
+export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileDir, themeFile, signal }) {
   if (!astroDir) throw new Error('stageSite: astroDir is required');
   if (!Array.isArray(pages)) throw new Error('stageSite: pages must be an array of {path, markdown}');
   for (const p of pages) {
@@ -87,6 +90,26 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   if (!(await exists(path.join(astroDir, 'package.json')))) {
     throw new Error(`stageSite: not a renderer directory — ${astroDir} has no package.json`);
   }
+
+  // 🩸 A LIBRARY DOES NOT OWN THE HOST PROCESS'S SIGNALS. This function used to install
+  // `SIGINT`/`SIGTERM` handlers on `process` the moment it was called, and those handlers ended in
+  // `process.exit(130/143)`. Measured 2026-09-07 against a consumer that manages its own shutdown:
+  // its own SIGTERM handler ran, started draining, and never finished — the process left with 143
+  // where it had asked for 0, and its "drained cleanly" line was never printed. `import { stageSite }
+  // from '@tile/build'` is an invitation in the README; taking over the caller's shutdown and then
+  // killing it is not something an import may do.
+  //
+  // So: nothing here touches `process`. A caller that wants a signal to unwind a build passes an
+  // AbortSignal and keeps its own handler, its own ordering and its own exit code — `cli.mjs` is the
+  // program that does exactly that, and it is where the 130/143 lives.
+  const abortError = () => Object.assign(
+    new Error('stageSite: aborted — the renderer has been put back and nothing of this site is left in it.'),
+    { name: 'AbortError', code: 'ABORT_ERR' },
+  );
+  // 🔴 Checked at the seams rather than mid-copy: an abort that landed inside a `cp` and started a
+  // restore beside it is the race this is here to avoid. A long copy finishes, and THEN we unwind.
+  const checkAborted = () => { if (signal?.aborted) throw abortError(); };
+  checkAborted();
 
   const contentDir = path.join(astroDir, 'content');
   const blogBuildDir = path.join(astroDir, 'blog');
@@ -154,24 +177,6 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     touched.add(name);
   }
 
-  // 🩸 `finally` DOES NOT RUN ON A SIGNAL, and Ctrl-C during `astro build` is the single most
-  // likely thing a person does to this module — far likelier than the `kill -9` the notes used to
-  // cover. Measured 2026-09-07: a real SIGINT left the stash in place, the renderer's own blog/ and
-  // pagetile/ inside it, and the previous site's `content/a.md` sitting where the next build would
-  // sweep it up into somebody else's HTML. README promised restore "on success, on a failed build,
-  // and on a throw"; a signal is none of the three.
-  const SIGNALS = ['SIGINT', 'SIGTERM'];
-  const onSignal = (signal) => {
-    const leave = () => process.exit(signal === 'SIGINT' ? 130 : 143);
-    restore().then(leave, (err) => {
-      console.error(`✗ ${signal} during a build and the renderer could not be put back: ${err.message}`);
-      console.error(`  Its own ${stagedDirNames.join('/, ')}/ are in ${stash} — move them back.`);
-      leave();
-    });
-  };
-  const disarm = () => { for (const s of SIGNALS) process.off(s, onSignal); };
-  for (const s of SIGNALS) process.once(s, onSignal);
-
   // 🩸 `restored` IS SET AT THE END, not the start. It used to be the first statement here, so a
   // restore that threw half way — a rename losing a race, an ENOTEMPTY — marked itself done and
   // every later call returned immediately. That renderer could never be put back, and the contract
@@ -208,23 +213,25 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     await rm(stash, { recursive: true, force: true });
     await rm(lock, { recursive: true, force: true });
     restored = true;
-    disarm();
   }
 
   try {
     await takeOver(contentDir, 'content');
+    checkAborted();
 
     await takeOver(blogBuildDir, 'blog');
     if (blogDir) {
       if (!(await exists(blogDir))) throw new Error(`stageSite: blog dir not found: ${blogDir}`);
       await cp(blogDir, blogBuildDir, { recursive: true, force: true });
     }
+    checkAborted();
 
     await takeOver(pagetileBuildDir, 'pagetile');
     if (pagetileDir) {
       if (!(await exists(pagetileDir))) throw new Error(`stageSite: pagetile dir not found: ${pagetileDir}`);
       await cp(pagetileDir, pagetileBuildDir, { recursive: true, force: true });
     }
+    checkAborted();
 
     // ── the site's OWN theme, from the site's OWN repo ──────────────────────────────────────────
     const themeName = themeNameFromPages(pages);
@@ -256,6 +263,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
       await cp(themeFile, target, { force: true });
       stagedTheme = target;   // only now is it OURS to remove
     }
+    checkAborted();
 
     // ── the site's media, overlaid onto the renderer's public/ ──────────────────────────────────
     if (assetsDir) {
@@ -273,6 +281,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
       // concern and is deliberately not in this repo — see README §"What is not here".
       await cp(assetsDir, publicDir, { recursive: true, force: true });
     }
+    checkAborted();
 
     // ── this site's IR pages into content/ ──────────────────────────────────────────────────────
     // 🩸 `safePagePath` IS MANY-TO-ONE, and until this map existed nothing on the writing side was
@@ -312,8 +321,12 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
       const outPath = path.join(contentDir, `${safe}.md`);
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, p.markdown);
+      checkAborted();
     }
 
+    // 🔴 The last seam, and the one that closes the window: between the final write and handing
+    // `restore` to the caller there is no owner for it. An abort landing here unwinds on THIS side.
+    checkAborted();
     return { restore, pageCount: pages.length, themeName };
   } catch (err) {
     await restore();

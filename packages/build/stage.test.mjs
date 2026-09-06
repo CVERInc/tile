@@ -324,45 +324,98 @@ test('a restore that fails part way can be retried', async (t) => {
 });
 
 // ── a signal, which is neither success nor a failed build nor a throw ───────────────────────────
-// 🩸 `finally` does not run on a signal, and Ctrl-C during `astro build` is the likeliest thing a
-// person does to this module. Measured 2026-09-07 with a REAL SIGINT (not kill -9): the stash
-// survived with the renderer's own blog/ and pagetile/ inside it, and the previous site's page sat
-// in content/ waiting for the next build to publish it under somebody else's domain.
-test('a real SIGINT mid-build hands the renderer back and takes the stash with it', async (t) => {
+// 🩸 …AND IT IS NOT THIS MODULE'S SIGNAL TO TAKE. `stageSite` used to install SIGINT/SIGTERM
+// handlers on `process` the moment it was called, and those handlers ended in
+// `process.exit(130/143)`. Measured 2026-09-07 against a host that manages its own shutdown: the
+// host's own SIGTERM handler started draining, the library's handler exited underneath it, and the
+// process left with 143 where it had asked for 0 — its "drained cleanly" line never printed. An
+// `import` may not do that. The 130/143 belongs to `cli.mjs`, and `cli-signal.test.mjs` holds it
+// there; what a library gets is the AbortSignal below.
+test("a consumer's own SIGTERM handler and exit code survive a stageSite in flight", async (t) => {
   const astroDir = makeRenderer(t);
   const before = await snapshot(astroDir);
   const dir = mkdtempSync(join(tmpdir(), 'tile-build-signal-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  // Staged, then held open the way `astro build` holds it open — a signal is the only way out.
-  const script = join(dir, 'run.mjs');
-  writeFileSync(script, 'import { stageSite } from ' + JSON.stringify(pathToFileURL(STAGE).href) + ';\n'
-    + 'await stageSite({ astroDir: ' + JSON.stringify(astroDir) + ',\n'
-    + "  pages: [{ path: 'home', markdown: '# another site entirely\\n' }] });\n"
-    + "process.stdout.write('STAGED\\n');\n"
-    + 'setInterval(() => {}, 1000);\n');
+  // A host process that borrows the renderer AND owns its own shutdown: it drains, it restores in
+  // its own order, and it leaves with the code it chose. Verbatim the shape measured in the review.
+  const script = join(dir, 'consumer.mjs');
+  writeFileSync(script, [
+    `import { stageSite } from ${JSON.stringify(pathToFileURL(STAGE).href)};`,
+    `const { restore } = await stageSite({ astroDir: ${JSON.stringify(astroDir)},`,
+    "  pages: [{ path: 'home', markdown: '# another site entirely\\n' }] });",
+    "console.log('LISTENERS ' + process.listenerCount('SIGINT') + ' ' + process.listenerCount('SIGTERM'));",
+    'process.on(\'SIGTERM\', async () => {',
+    "  console.log('CONSUMER: my own SIGTERM handler ran — draining for 300ms, then exit 0');",
+    '  await new Promise((r) => setTimeout(r, 300));',
+    '  await restore();',
+    "  console.log('CONSUMER: drained cleanly');",
+    '  process.exit(0);',
+    '});',
+    "console.log('STAGED');",
+    'setInterval(() => {}, 1000);',
+    '',
+  ].join('\n'));
 
   const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'inherit'] });
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } });
+  let out = '';
+  child.stdout.on('data', (b) => { out += b; });
   await new Promise((resolve, reject) => {
-    let out = '';
-    const died = (c) => reject(new Error(`the child exited ${c} before it staged anything`));
-    const timer = setTimeout(() => reject(new Error('the child never staged')), 20_000);
+    const died = (c) => reject(new Error(`the consumer exited ${c} before it staged anything`));
+    const timer = setTimeout(() => reject(new Error('the consumer never staged')), 20_000);
     child.on('exit', died);
-    child.stdout.on('data', (b) => {
-      out += b;
+    child.stdout.on('data', () => {
       if (!out.includes('STAGED')) return;
       clearTimeout(timer); child.off('exit', died); resolve();
     });
   });
+  assert.match(out, /LISTENERS 0 0/,
+    'stageSite put handlers on the host process — a library call may not own the host\'s signals');
   assert.deepEqual(await listStaged(join(astroDir, 'content')), ['home.md'],
-    'the child is not actually mid-build — this case would prove nothing');
+    'the consumer is not actually holding the renderer — this case would prove nothing');
 
-  const code = await new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGINT'); });
-  assert.equal(code, 130, 'a SIGINT during a build must restore and then exit 130');
-  assert.deepEqual(await snapshot(astroDir), before,
-    'after a SIGINT the renderer is still wearing the other site — the next build would ship it');
+  const code = await new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGTERM'); });
+  assert.match(out, /CONSUMER: drained cleanly/, 'the drain never finished — something exited underneath it');
+  assert.equal(code, 0, "the consumer asked for exit 0 and the library decided otherwise");
+  assert.deepEqual(await snapshot(astroDir), before);
   noStashLeft(astroDir);
+});
+
+// 🔴 …and the thing a library IS allowed: a signal the caller owns. Aborting unwinds staging, puts
+// the renderer back and REJECTS — it never exits, and it never registers anything on `process`.
+test('the signal option unwinds staging and rejects, touching nothing on the process', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const sigints = process.listenerCount('SIGINT');
+  const sigterms = process.listenerCount('SIGTERM');
+
+  // Already aborted before the call: nothing is staged, and no lock is even taken.
+  await assert.rejects(
+    () => stageSite({ astroDir, pages: [{ path: 'home', markdown: '# a site\n' }], signal: AbortSignal.abort() }),
+    (err) => { assert.equal(err.name, 'AbortError'); return true; },
+  );
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+
+  // …and aborted from INSIDE the staging window. The lock appearing is the window opening, so this
+  // lands in it deterministically rather than on a timer that is a race on a slower machine.
+  const assetsDir = mkdtempSync(join(tmpdir(), 'tile-build-abort-assets-'));
+  t.after(() => rmSync(assetsDir, { recursive: true, force: true }));
+  for (let i = 0; i < 400; i++) writeFileSync(join(assetsDir, `f${i}.txt`), `${i}\n`);
+
+  const stopping = new AbortController();
+  const pending = stageSite({
+    astroDir, pages: [{ path: 'home', markdown: '# a site\n' }], assetsDir, signal: stopping.signal,
+  });
+  while (!existsSync(join(astroDir, LOCK_NAME))) await new Promise((r) => setImmediate(r));
+  stopping.abort();
+  await assert.rejects(() => pending, (err) => { assert.equal(err.name, 'AbortError'); return true; });
+
+  assert.deepEqual(await snapshot(astroDir), before, 'an abort mid-stage left the renderer changed');
+  noStashLeft(astroDir);
+  assert.equal(process.listenerCount('SIGINT'), sigints, 'stageSite left a SIGINT listener behind');
+  assert.equal(process.listenerCount('SIGTERM'), sigterms, 'stageSite left a SIGTERM listener behind');
 });
 
 // …and if a build is killed in a way no handler can catch (SIGKILL, a power cut), the stash it left

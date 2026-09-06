@@ -36,6 +36,10 @@ export const RENDERER_SUBPATH = 'packages/sitetile/astro';
  * @param {string} [o.blogDir]        the site's posts; defaults to <irDir>/posts when that exists
  * @param {string} [o.pagetileDir]    the site's books (*.book.md)
  * @param {string} [o.npxBin='npx']   the runner for `astro build` (a seam for tests)
+ * @param {AbortSignal} [o.signal]    unwind the build: the renderer is put back and this rejects
+ *                                    with an AbortError. 🔴 It does NOT exit and installs NO
+ *                                    process-level handler — the program owns its own signals, and
+ *                                    `cli.mjs` is the program that turns Ctrl-C into one of these.
  * @returns {Promise<{code: number, outDir: string, pageCount: number}>}
  *
  * The renderer is ALWAYS restored — on success, on a failed build, and on a throw.
@@ -52,6 +56,7 @@ export async function buildSite({
   blogDir,
   pagetileDir,
   npxBin = 'npx',
+  signal,
 } = {}) {
   if (!irDir) throw new Error('buildSite: irDir is required');
   if (!engineDir) throw new Error('buildSite: engineDir is required');
@@ -74,12 +79,19 @@ export async function buildSite({
   const defaultBlog = path.join(irDir, 'posts');
   const blog = blogDir ?? (!includePosts && await exists(defaultBlog) ? defaultBlog : undefined);
 
+  const abortError = () => Object.assign(
+    new Error('buildSite: aborted — the build was stopped and the renderer has been put back.'),
+    { name: 'AbortError', code: 'ABORT_ERR' },
+  );
+
   const { restore } = await stageSite({
-    astroDir, pages, assetsDir, blogDir: blog, pagetileDir, themeFile,
+    astroDir, pages, assetsDir, blogDir: blog, pagetileDir, themeFile, signal,
   });
 
   let code = 1;
   try {
+    // Aborted between staging and spawning: there is nothing to interrupt, so do not start one.
+    if (signal?.aborted) throw abortError();
     code = await new Promise((resolve) => {
       const child = spawn(npxBin, ['astro', 'build', '--outDir', absOut], {
         cwd: astroDir,
@@ -93,6 +105,7 @@ export async function buildSite({
     await restore();
   }
 
+  if (signal?.aborted) throw abortError();
   return { code, outDir: absOut, pageCount: pages.length };
 }
 
