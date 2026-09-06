@@ -3,9 +3,11 @@
 //
 //     git clone https://github.com/CVERInc/tile.git engine
 //     (cd engine/packages/sitetile/astro && npm install)
-//     node engine/packages/build/cli.mjs ./ir ./dist --site-url https://your-domain.example
+//     node engine/packages/build/cli.mjs ./ir ./dist --theme ./theme.css --site-url https://your-domain.example
 //
-// The result is a directory of plain static HTML. Serve it with anything.
+// The result is a directory of plain static HTML. Serve it with anything. `theme.css` is the
+// compiled stylesheet that travels with the export, beside `ir/`; drop `--theme` if your IR
+// declares no `theme:`.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +18,8 @@ const USAGE = `usage: node packages/build/cli.mjs <ir-dir> <out-dir> [options]
   --site-url <url>     this site's own origin, for canonical / og:url / hreflang
   --site-id <id>       ONLY if you want the ask-me bubble and have something for it to talk to.
                        Unset (the default) the build emits no call home.
-  --theme <file>       this site's compiled theme.css. Required when its IR declares 'theme:'.
+  --theme <file>       this site's compiled theme.css — it travels with the export, beside ir/.
+                       Required when the IR declares 'theme:'.
   --assets <dir>       this site's media, overlaid onto the renderer's public/
   --blog <dir>         this site's posts (default: <ir-dir>/posts when it exists)
   --pagetile <dir>     this site's books (*.book.md)

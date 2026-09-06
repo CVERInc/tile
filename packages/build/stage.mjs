@@ -193,8 +193,9 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     // site: 68.9KB of stylesheet down to 32.5KB, zero errors, and a naked site ready to deploy.
     if (themeName && !themeFile) {
       throw new Error(`stageSite: this site's IR declares 'theme: ${themeName}' but no themeFile was given. `
-        + 'A theme lives in the SITE\'s repo, not in the renderer — pass it, or the build silently '
-        + 'succeeds wearing only the baseline skin.');
+        + 'The compiled theme.css is produced by the platform and travels with the export, beside '
+        + 'ir/ — pass that file (--theme ./theme.css), or the build silently succeeds wearing only '
+        + 'the baseline skin.');
     }
     if (themeFile) {
       if (!(await exists(themeFile))) throw new Error(`stageSite: theme file not found: ${themeFile}`);
