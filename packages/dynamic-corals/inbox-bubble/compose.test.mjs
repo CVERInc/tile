@@ -1788,6 +1788,90 @@ test('D2: a probe that never came back is the same non-answer, bounded the same 
 	assert.equal(probes, 2);
 });
 
+// ── review D6 (2026-09-08, round 2): one browser, two tabs, one idempotency key ──────────────
+//
+// 🩸 `flush()` was the only method that did not start by re-reading storage, and the only one
+// that reaches the network. The review opened two tabs on one localStorage: tab A's pagehide sent
+// four questions, tab B's sent the two it had held since it mounted — same `session_id`, shorter
+// body, and what the server does with a session that got SHORTER is not something this side can
+// see. The fix is the line the other three methods already have.
+
+/** Two mounts of the same tenant in the same browser — one storage, two in-memory states. */
+function twoTabs() {
+	const cells = new Map();
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => cells.set(k, v)
+	};
+	let clock = 1_700_000_000_000;
+	let n = 0;
+	const open = () => {
+		const sent = [];
+		const log = createAiLog({
+			tenant: 'site:acme', kind: 'site', id: 'acme', storage,
+			now: () => clock, newId: () => `sid-${++n}`,
+			send: (p) => (sent.push(p), true),
+			probeClaim: async () => true
+		});
+		return { log, sent };
+	};
+	return { open, cells, tick: (ms) => (clock += ms), settle: () => new Promise((r) => setTimeout(r, 0)) };
+}
+
+test('D6: a second tab flushes what the BROWSER holds, not what it happened to mount with', async () => {
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	a.log.question('請問有現貨嗎', '/', null, '');
+	a.log.question('可以退貨嗎', '/', null, '');
+
+	// The visitor opens a second tab here. Its memory stops at these two questions for good.
+	const b = browser.open();
+	a.log.question('那有大尺碼嗎', '/', null, '');
+	a.log.question('運費多少', '/', null, '');
+	await browser.settle();
+
+	// Tab B's pagehide fires first — the phone was backgrounded on that tab.
+	const wentB = b.log.flush();
+	assert.ok(wentB, 'the second tab sent nothing at all');
+	assert.equal(wentB.questions.length, 4, 'the second tab sent a SHORTER body under the same key');
+	assert.deepEqual(wentB.questions.map((q) => q.text),
+		['請問有現貨嗎', '可以退貨嗎', '那有大尺碼嗎', '運費多少']);
+	// It is the same session id either way — which is exactly why the shorter body was dangerous.
+	assert.equal(wentB.session_id, 'sid-1');
+
+	// And tab A's pagehide now costs nothing: the browser's own record says it already went.
+	assert.equal(a.log.flush(), null, 'the same four questions travelled twice');
+	assert.equal(a.sent.length, 0);
+});
+
+test('D6: the claim answer another tab learned is honoured too, and an idle session is not rotated by a flush', async () => {
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	const b = browser.open();
+	b.log.page('/contact'); // a mount records its page view, which is how a tab joins the session
+	a.log.question('anyone there?', '/', null, '');
+	await browser.settle(); // tab A's probe answers yes and writes it down
+
+	// Tab B never probed — its own `state.claim` is what it mounted with, which is null.
+	assert.equal(b.log.state().claim, null);
+	const went = b.log.flush();
+	assert.ok(went, 'the second tab held questions it was already allowed to send');
+	assert.equal(went.questions[0].text, 'anyone there?');
+
+	// 🔴 A flush reads the session, it does not decide whether the session is over: thirty idle
+	// minutes later the unsent questions still go, rather than being rotated away unsent.
+	const c = twoTabs();
+	const one = c.open();
+	one.log.question('do you ship to Japan?', '/', null, '');
+	await c.settle();
+	c.tick(AI_LOG_IDLE_MS + 1);
+	const late = one.log.flush();
+	assert.ok(late, 'a pagehide after an idle gap threw the questions away instead of sending them');
+	assert.equal(late.questions.length, 1);
+});
+
 // ── review D3 (2026-09-08, round 2): the loudest rule in this file had no ruler ──────────────
 //
 // 🩸「The machine's answers are never sent」is written in four places — this file's header, the

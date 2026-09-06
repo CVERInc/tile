@@ -997,6 +997,19 @@ export function createAiLog(opts) {
 		 */
 		flush() {
 			if (!state || !send) return null;
+			// 🩸 THE ONE METHOD THAT DID NOT RE-READ ITS OWN STORAGE — and the only one that puts
+			// anything on the network (review D6). `page()`, `question()` and `escalated()` all
+			// begin at `current(at)`; this one used a `state` frozen at the mount of ITS tab, so a
+			// visitor with two tabs open sent, from the second one, a SHORTER body under the same
+			// `session_id` — and whether that truncates the row is decided on the far side of a
+			// boundary this file cannot see. It knew there was fresher state and sent the older.
+			//
+			// 🔴 THE SAME SESSION ONLY, NOT `current()`. `current()` would rotate a session that
+			// has gone idle and take the unsent questions with it; what is wanted here is the
+			// freshest copy of the session this tab is holding, never a decision about whether
+			// that session is over.
+			const held = read();
+			if (held && held.sid === state.sid) state = held;
 			// 🔴 UNKNOWN IS NOT PERMISSION. A probe that never came back leaves `claim` null,
 			// and null must behave exactly like `false` here: the questions stay in this
 			// browser and go on the next page view, once we actually know.
