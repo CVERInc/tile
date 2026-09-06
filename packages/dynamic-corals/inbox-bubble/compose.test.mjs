@@ -1249,8 +1249,9 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 
 const {
 	AI_LOG_CLAIM_RETRY_MS, AI_LOG_CLAIM_TTL_MS, AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS,
-	AI_LOG_MAX_TEXT, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiLogKey, aiPagePath, aiSessionPayload,
-	appendAiPage, capAiQuestions, createAiLog, parseAiLog, probeInboxClaim, sendAiSession
+	AI_LOG_MAX_TEXT, AI_LOG_MAX_WIRE_BYTES, AI_QUESTION_FIELDS,
+	AI_SESSION_FIELDS, aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiQuestions,
+	createAiLog, parseAiLog, probeInboxClaim, sendAiSession, utf8Bytes
 } = await import('./inbox-bubble.js');
 
 function logFixture(over = {}) {
@@ -1473,6 +1474,87 @@ test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', as
 
 	// No transport at all is `false`, never a throw inside a pagehide handler.
 	assert.equal(sendAiSession('u', {}, { navigator: {}, fetch: null }), false);
+});
+
+// ── review D4 (2026-09-08, round 2): the fallback missed the case it was written for ─────────
+//
+// 🩸 The comment above the beacon said the fetch below it exists for「a browser that counts it
+// against a quota」— and the spec's answer to being over quota is `sendBeacon` RETURNING FALSE,
+// which the code returned straight to the caller. The fallback covered the throw, which hardly
+// happens, and missed the false, which is the documented one. With D1 in place a false is not
+// merely a lost send: it is the answer that decides whether the buffer survives.
+
+const RecordingBlob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
+
+test('D4: a beacon that refuses falls through to the keepalive fetch, and one that throws does too', async () => {
+	for (const [name, sendBeacon] of [
+		['returns false (over quota — the documented answer)', () => false],
+		['throws', () => { throw new Error('quota'); }],
+		['answers something that is not true', () => undefined]
+	]) {
+		const calls = [];
+		const out = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+			navigator: { sendBeacon },
+			Blob: RecordingBlob,
+			fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true, status: 200 }))
+		});
+		assert.equal(calls.length, 1, `a beacon that ${name} lost the session`);
+		assert.equal(JSON.parse(calls[0].body).a, 1);
+		assert.equal(await out, true);
+	}
+
+	// With no fetch to fall through TO, a refused beacon is an honest `false` — which is what
+	// keeps the questions in the browser rather than reporting them told.
+	assert.equal(sendAiSession('u', { a: 1 },
+		{ navigator: { sendBeacon: () => false }, Blob: RecordingBlob, fetch: null }), false);
+});
+
+/** Every field of a question at its character cap, in a script where one character is 3 octets. */
+const worstCaseQuestions = () => {
+	const rows = [];
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) {
+		rows.push({ text: '嗎'.repeat(AI_LOG_MAX_TEXT), page: '/' + '產品'.repeat(99),
+			hit: `https://shop.example/${'a'.repeat(150)}`, lang: 'zh-tw', at: 1_770_000_000_000 });
+	}
+	return rows;
+};
+
+test('D4: the questions are bounded in OCTETS too, and the two units are not the same number', () => {
+	const capped = capAiQuestions(worstCaseQuestions());
+	assert.equal(capped.length, AI_LOG_MAX_QUESTIONS, 'a legitimate Chinese session lost questions');
+	const bytes = utf8Bytes(JSON.stringify(capped));
+	// 🔴 THE ARITHMETIC NOBODY HAD DONE. 20 × 500 characters is a number about UTF-16; what the
+	// transport counts is this one, and it is three times bigger in Chinese. The questions are
+	// bounded by the character caps alone — raise `AI_LOG_MAX_TEXT` or `AI_LOG_MAX_QUESTIONS`
+	// past what the wire will take and this goes red before a visitor's session does.
+	assert.ok(bytes > JSON.stringify(capped).length, 'this specimen is not measuring octets at all');
+	assert.ok(bytes < AI_LOG_MAX_WIRE_BYTES * 0.75,
+		`the questions alone are ${bytes} octets — there is no room left for the page sequence`);
+
+	// The counting itself, against the cases a hand-rolled encoder gets wrong.
+	assert.equal(utf8Bytes('abc'), 3);
+	assert.equal(utf8Bytes('é'), 2);
+	assert.equal(utf8Bytes('嗎'), 3);
+	assert.equal(utf8Bytes('😀'), 4, 'a surrogate pair is one character and four octets');
+	assert.equal(utf8Bytes('\ud800'), 3, 'a lone surrogate is what it encodes as, not a crash');
+	assert.equal(utf8Bytes(null), 0);
+});
+
+test('D4: a body over the wire budget skips the beacon for the path that can report failure', () => {
+	const beacons = [];
+	const calls = [];
+	const env = {
+		navigator: { sendBeacon: (url, blob) => (beacons.push(blob), true) },
+		Blob: RecordingBlob,
+		fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true }))
+	};
+	assert.equal(sendAiSession('u', { q: 'a'.repeat(100) }, env), true);
+	assert.equal(beacons.length, 1, 'an ordinary body did not take the beacon');
+	assert.equal(calls.length, 0);
+
+	sendAiSession('u', { q: '嗎'.repeat(AI_LOG_MAX_WIRE_BYTES / 2) }, env);
+	assert.equal(beacons.length, 1, 'a body the beacon cannot carry was handed to it anyway');
+	assert.equal(calls.length, 1);
 });
 
 // ── review D1 (2026-09-08, round 2): a transport that says no must not destroy the buffer ────

@@ -507,6 +507,11 @@ export const AI_LOG_MAX_PAGES = 40;
 /** Longest path or locale tag kept, so neither can be used to pad a row. */
 export const AI_LOG_MAX_FIELD = 200;
 /**
+ * What the transport will actually carry, in OCTETS: `sendBeacon` and `fetch(keepalive)` are
+ * both budgeted at ~64 KiB per origin, and a body over it is refused rather than truncated.
+ */
+export const AI_LOG_MAX_WIRE_BYTES = 64 * 1024;
+/**
  * How long a session may sit idle before the next page view is a NEW session.
  *
  * 🔴 A SESSION IS NOT A PAGE. On a static site every navigation is a fresh document and a
@@ -539,6 +544,32 @@ export function aiLogKey(tenant) {
 function aiLine(raw, max) {
 	if (typeof raw !== 'string') return '';
 	return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, max);
+}
+
+/**
+ * How many UTF-8 octets a string costs — the unit the transport and the server both count in.
+ *
+ * 🩸 TWO NUMBERS IN DIFFERENT COORDINATE SYSTEMS (review D4). Every cap above is applied with
+ * `String.prototype.slice`, which counts UTF-16 characters, while `sendBeacon`'s ~64 KiB budget
+ * counts octets — and one CJK character is three of them. So a row measured at「20 × 500」can
+ * reach the transport at three times the size it was capped to: the review's worst profile came
+ * to 70,403 bytes, and a beacon that big is refused. Nothing in this file had ever counted the
+ * other unit.
+ *
+ * Spelled out rather than `new TextEncoder()`: this runs inside a `pagehide` handler, where a
+ * global that may not exist is not worth a try/catch for arithmetic this small.
+ */
+export function utf8Bytes(text) {
+	const s = typeof text === 'string' ? text : '';
+	let n = 0;
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c < 0x80) n += 1;
+		else if (c < 0x800) n += 2;
+		else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) { n += 4; i++; }
+		else n += 3;
+	}
+	return n;
 }
 
 /**
@@ -604,13 +635,13 @@ export const AI_SESSION_FIELDS = ['kind', 'id', 'session_id', 'pages', 'question
  * that question silently dropped while twenty older ones stayed.
  */
 export function capAiQuestions(list) {
-	const rows = Array.isArray(list) ? list : [];
-	return rows.slice(-AI_LOG_MAX_QUESTIONS).map((q) => {
+	const rows = (Array.isArray(list) ? list : []).slice(-AI_LOG_MAX_QUESTIONS).map((q) => {
 		const src = q && typeof q === 'object' ? q : {};
 		const row = {};
 		for (const field of AI_QUESTION_FIELDS) row[field] = AI_QUESTION_READERS[field](src);
 		return row;
 	});
+	return rows;
 }
 
 /** Consecutive duplicates collapse — a reload is not a second page. */
@@ -700,7 +731,12 @@ export function sendAiSession(url, body, env = {}, opts = {}) {
 	const pick = (name, real) => (name in env ? env[name] : real);
 	const nav = pick('navigator', typeof navigator === 'undefined' ? null : navigator);
 	const json = JSON.stringify(body);
-	if (!opts.confirm) {
+	// 🔴 THE BUDGET IS MEASURED, NOT ASSUMED. A body over the beacon's ~64 KiB is refused by the
+	// browser, so it goes to the fetch instead — the path that can say what happened, and whose
+	//「no」leaves the questions in this browser rather than throwing them away (D1). The caps in
+	// `capAiQuestions`/`capAiPages` are what keep an ordinary session from ever reaching this.
+	const overBudget = utf8Bytes(json) > AI_LOG_MAX_WIRE_BYTES;
+	if (!opts.confirm && !overBudget) {
 		try {
 			const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
 			if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
