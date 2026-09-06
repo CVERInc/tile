@@ -1788,6 +1788,50 @@ test('D2: a probe that never came back is the same non-answer, bounded the same 
 	assert.equal(probes, 2);
 });
 
+// ── review D10 (2026-09-08, round 2): the drop was honoured once, not every time ─────────────
+//
+// 🩸 The first `claimed:false` cleared the buffer; after that the six-hour cache took the early
+// return and every question asked in those six hours accumulated in the visitor's browser — up
+// to 20 × 500 characters, never sent, but HELD. The online guarantee held (a KAITO-only tenant
+// received nothing) and the README's sentence — that an unclaimed answer drops what is buffered
+// rather than「holding it against the day somebody claims the inbox」— did not.
+
+test('D10: a site with no Inbox holds nothing, on every question and every page after the answer', async () => {
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, false) });
+	f.log.page('/');
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().questions.length, 0, 'the answer did not drop what was buffered');
+
+	// A minute later, inside the six-hour cache — the review measured one question held here.
+	f.tick(60_000);
+	f.log.question('hello?', '/', null, '');
+	f.log.question('is anyone reading this?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a cached answer was re-asked');
+	assert.equal(f.log.state().questions.length, 0, 'the questions are being held after all');
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 0,
+		'they are being held in storage, which is where they outlive the tab');
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// And the page sequence does not refill between questions either.
+	f.log.page('/pricing');
+	f.log.page('/contact');
+	assert.deepEqual(f.log.state().pages, []);
+
+	// The buffer comes back the moment somebody claims the inbox — that is what the TTL is for,
+	// and the answer that arrives then is about the site, not retroactively about this visit.
+	f.tick(AI_LOG_CLAIM_TTL_MS + 1);
+	// A later mount, same browser, same clock — the answer is due to be asked again by now.
+	const claimed = logFixture({ storage: f.storage, now: f.at, probeClaim: async () => true });
+	claimed.log.question('now?', '/', null, '');
+	await claimed.settle();
+	assert.equal(claimed.log.state().questions.length, 1);
+});
+
 // ── review D7 (2026-09-08, round 2): a storage that stops taking writes ──────────────────────
 //
 // 🩸 The review asked three questions with a full quota and the buffer held ONE — the newest, on

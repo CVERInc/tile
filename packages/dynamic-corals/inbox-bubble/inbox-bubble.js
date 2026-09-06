@@ -926,6 +926,18 @@ export function createAiLog(opts) {
 	}
 
 	/**
+	 * Whether「this site has no Inbox」is still in force.
+	 *
+	 * 🔴 AN EXPIRED NO IS NOT A NO. Past the TTL the answer is due to be asked again, and until
+	 * somebody answers it this browser is in the same「we do not know」state as a throttled probe
+	 * (review D2) — so the questions asked in that window are HELD, not dropped, and the next
+	 * answer decides what becomes of them.
+	 */
+	function unclaimedStands() {
+		return !!state && state.claim === false && now() - state.claimAt < AI_LOG_CLAIM_TTL_MS;
+	}
+
+	/**
 	 * Ask whether this tenant has an inbox at all — once per TTL for an answer, once per the
 	 * shorter backoff for a non-answer.
 	 *
@@ -937,6 +949,15 @@ export function createAiLog(opts) {
 	 */
 	function ensureClaim() {
 		if (!state || probing || !probeClaim) return;
+		// 🩸 EVERY TIME, NOT ONLY WHEN THE ANSWER ARRIVES (review D10). The first `false` emptied
+		// the buffer and then the six-hour cache took the early return below, so every question
+		// asked in those six hours went on accumulating in this visitor's browser — never sent,
+		// but HELD, which is the one thing the README promises does not happen to a site with no
+		// Inbox. Nothing left, so nothing broke; it was just untrue.
+		if (unclaimedStands() && (state.questions.length || state.pages.length)) {
+			dropBuffer(state);
+			write(state);
+		}
 		const wait = state.claim === null ? AI_LOG_CLAIM_RETRY_MS : AI_LOG_CLAIM_TTL_MS;
 		if (state.claimAt && now() - state.claimAt < wait) return;
 		probing = true;
@@ -969,8 +990,12 @@ export function createAiLog(opts) {
 			if (!state) return;
 			const at = now();
 			state = current(at);
-			state.pages = appendAiPage(state.pages, path);
 			state.last = at;
+			// 🔴 A SITE WITH NO INBOX ACCUMULATES NOTHING — not the questions (see `ensureClaim`)
+			// and not the page sequence either. The answer is already known here, so this costs
+			// no request; what it stops is the buffer quietly refilling between questions.
+			if (unclaimedStands()) dropBuffer(state);
+			else state.pages = appendAiPage(state.pages, path);
 			write(state);
 		},
 
