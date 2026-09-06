@@ -39,8 +39,10 @@ export function collectPages(irDir, { includePosts = false } = {}) {
         if (!includePosts && /^posts(-|$)/.test(e.name)) continue;
         acc.push(...walk(path.join(dir, e.name)));
       } else if (e.isFile() && e.name.endsWith('.md')) {
-        // `_theme.md` is the structured THEME source — it compiles to theme.css, which the build
-        // stages under the name `theme:` asks for; it is NOT a content page and must not enter
+        // `_theme.md` is the structured THEME source. The compiled theme.css the build stages under
+        // the name `theme:` asks for is made by the platform and travels with the export beside
+        // ir/ — nothing in this repo compiles it. Either way this is NOT a content page and must
+        // not enter
         // site_pages.json (it would bloat the JSON with the residue block and, pre-renderer-guard,
         // route as a bogus /_theme page). `_site.md` DOES stay — the renderer reads it as config.
         if (e.name === '_theme.md') continue;

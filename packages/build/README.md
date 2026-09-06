@@ -12,15 +12,17 @@ MIT, because a site you can export but not rebuild is not a site you own.
 ```
 git clone https://github.com/CVERInc/tile.git engine
 (cd engine/packages/sitetile/astro && npm install)
-node engine/packages/build/cli.mjs ./ir ./dist --site-url https://your-domain.example
+node engine/packages/build/cli.mjs ./ir ./dist --theme ./theme.css --site-url https://your-domain.example
 ```
 
 `./ir` is the site's exported IR directory — `home.md`, `_site.md`, `legal/terms.md`, `zh-tw/…`,
-`posts/…`. `./dist` is the result: static HTML. Serve it with anything.
+`posts/…`. `./theme.css` is the compiled stylesheet that ships beside it. `./dist` is the result:
+static HTML. Serve it with anything.
 
-Pass `--theme ./theme.css` if the site's `_site.md` declares a `theme:` (it will refuse to build
-without it, rather than quietly produce a site wearing only the baseline skin), and `--assets ./assets`
-for the site's own media. `node engine/packages/build/cli.mjs` with no arguments prints the rest.
+`--theme` is in the line because a site whose `_site.md` declares a `theme:` refuses to build
+without it, rather than quietly producing a site wearing only the baseline skin. Drop it if your IR
+declares none. Add `--assets ./assets` for the site's own media; `node engine/packages/build/cli.mjs`
+with no arguments prints the rest.
 
 ## The API
 
@@ -60,8 +62,15 @@ the point: something outside this repo reads it.
 | `legal/terms.md` | `legal/terms` | `/legal/terms/` |
 | `zh-tw/home.md` | `zh-tw` | `/zh-tw/` |
 | `posts/*.md` | — | staged into `blog/`, not `content/` |
-| `_theme.md` | — | it is the theme SOURCE; it compiles to `theme.css` |
+| `_theme.md` | — | the theme SOURCE. Not a page, at any depth |
 | `_site.md` | `_site` | not a route — the renderer reads it as config |
+
+The stylesheet you pass as `--theme` is `theme.css`, and it is **compiled by the platform and
+travels with the export**, next to `ir/`. Nothing in this repo compiles it: `_theme.md` is the
+source the compiler reads, and it is exported alongside the result and kept here for the day that
+compiler is public. Until then, hand the build the `theme.css` you were given — the site you rebuild
+looks like your site because that file came with it, not because anything here recreated it.
+(`packages/build/fixtures/theme.css` is a hand-written stand-in so this repo's own tests have one.)
 
 A locale home COLLAPSES: `zh-tw/home.md` becomes the page path `zh-tw`, so the Chinese homepage is
 `/zh-tw/` and not `/zh-tw/home/`. Preserving the nested name instead is a real, measured defect —
