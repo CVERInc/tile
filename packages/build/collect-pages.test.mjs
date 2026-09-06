@@ -1,9 +1,9 @@
 // collectPages parity — the bytes and the CLI, held to what the original produced.
 //
-// 🔴 WHY A COMMITTED FIXTURE AND NOT AN IMPORT. This collector arrived from a private checkout
-// (CVERInc/ejecta tools/fidelity/mkpages.mjs) and a private runner will swap THIS file in for that
-// one, by path, inside a container. The contract is therefore the output, not the source — so the
-// expected JSON below was generated ONCE by the pre-move original against fixtures/ir/ and
+// 🔴 WHY A COMMITTED FIXTURE AND NOT AN IMPORT. This collector arrived from a private checkout, and
+// a private runner will swap THIS file in for the one there, by path, inside a container. The
+// contract is therefore the output, not the source — so the expected JSON below was generated ONCE
+// by the pre-move original against fixtures/ir/ and
 // committed. Nothing here reaches across a repo boundary at test time: a test that imported the
 // original would pass on the one machine that has it and be unrunnable everywhere else, which is
 // the same as not having a parity test at all.
