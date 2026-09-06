@@ -748,8 +748,9 @@ function renderList(items) {
 // which is the whole point of keeping the substrate portable.
 //
 // The trigger is deliberately narrow — the line must be ONLY the bold span, the name is capped,
-// and a name with nothing under it is not a turn — because an ordinary quotation that happens to
-// open with a bold word must keep rendering as a quotation.
+// a name with nothing under it is not a turn, and the line under the name must be prose — a list
+// item is never speech — because an ordinary quotation that happens to open with a bold word must
+// keep rendering as a quotation.
 const RE_TURN_HEAD = /^\*\*([^*\n]{1,24}?)\*\*(?:\s*[·:]\s*(.+?))?\s*$/;
 
 // Quote lines → paragraphs (a blank `>` line separates them; soft newlines fold to spaces).
@@ -762,9 +763,8 @@ function dialogueTurn(buf) {
   const body = buf.slice(1);
   const firstLine = body.find((l) => l.trim());
   if (!firstLine) return null;                       // a name with no speech under it is not a turn
-  // A list item under the bold line is never speech — it's the shape of a hand-built series-nav
-  // block (`> **Series: …**` + a numbered link list), which must stay a plain quotation regardless
-  // of how short the bold line happens to be.
+  // The fourth condition of the convention above: a list item under the name is never speech,
+  // whatever the bold line happens to say and however short it happens to be.
   if (RE_LIST_ITEM.test(firstLine)) return null;
   return { name: m[1].trim(), meta: (m[2] || '').trim(), body };
 }
