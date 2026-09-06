@@ -590,9 +590,14 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	const api = await import('./inbox-bubble.js');
 	assert.equal('acceptHandoff' in api, false, 'acceptHandoff is exported again');
 	assert.equal('handoffState' in api, false, 'handoffState is exported again');
-	// The one window listener that remains names no conversation: it says "open", nothing more.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	// 🔴 NEITHER WINDOW LISTENER NAMES A CONVERSATION, which is the claim B3 actually left behind —
+	// not the count. `reef-inbox:open` says "open", nothing more; `pagehide` (0.7.6, ruling 54) is
+	// the browser's own event and takes no argument at all. The count is asserted so that a THIRD
+	// one has to be a deliberate act, and both are named so that swapping one for a listener that
+	// does take a handle cannot pass by keeping the total the same.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('pagehide', \(\) => aiLog\.flush\(\)\);/);
 });
 
 // REVIEW B3, ROUND 3: the test that used to sit here asserted that the header SENTENCE existed
@@ -620,8 +625,11 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 // REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
 // The honest half of the fix is that there is now only ONE of them, and the file says so.
 
-test('B9: one window listener per mount, and mount() documents that nothing removes it', () => {
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+test('B9: the window listeners per mount are bounded, and mount() documents that nothing removes them', () => {
+	// Two since 0.7.6 (`reef-inbox:open` and ruling 54's `pagehide`). B9's cost is unchanged in
+	// kind — a page accumulates a fixed number per element it ever mounted, not per re-render —
+	// and this number is pinned so growing it stays a decision somebody makes on purpose.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
 	assert.equal(CORAL_CODE.includes('removeEventListener'), false,
 		'a teardown appeared — B9 can now be closed properly, and this test should assert it instead');
 	assert.match(CORAL_SOURCE, /no teardown to remove it from \(review B9, still open\)/);
@@ -1231,4 +1239,235 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 	});
 	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
 	assert.equal(name, '\u5C0F\u7F8E');
+});
+
+// ── ruling 54: the deferred question log ────────────────────────────────────────────────────
+//
+// Everything below drives `createAiLog` with an injected world — a Map for storage, a counter for
+// the clock, an array for the transport — because the behaviour worth pinning is arithmetic, and
+// arithmetic that can only be exercised through a browser is arithmetic nobody exercises.
+
+const {
+	AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS, AI_LOG_MAX_TEXT, aiLogKey, aiPagePath,
+	appendAiPage, capAiQuestions, createAiLog, parseAiLog, sendAiSession
+} = await import('./inbox-bubble.js');
+
+function logFixture(over = {}) {
+	const cells = new Map();
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => cells.set(k, v)
+	};
+	const sent = [];
+	let clock = 1_700_000_000_000;
+	let n = 0;
+	const log = createAiLog({
+		tenant: 'site:acme',
+		kind: 'site',
+		id: 'acme',
+		storage,
+		now: () => clock,
+		newId: () => `sid-${++n}`,
+		send: (payload) => {
+			sent.push(payload);
+			return true;
+		},
+		probeClaim: async () => true,
+		...over
+	});
+	return {
+		log, sent, cells, storage,
+		tick: (ms) => (clock += ms),
+		at: () => clock,
+		/** The claim probe is a promise; let it settle before asserting on a flush. */
+		settle: () => new Promise((r) => setTimeout(r, 0))
+	};
+}
+
+test('54: the caps are applied on the way IN — 20 questions of 500 chars, oldest dropped', () => {
+	const rows = [];
+	for (let i = 0; i < 25; i++) rows.push({ text: `q${i}`, page: '/', hit: null, lang: '', at: i });
+	const capped = capAiQuestions(rows);
+	assert.equal(capped.length, AI_LOG_MAX_QUESTIONS);
+	// The OLDEST went: the newest question — the one somebody would escalate on — is still here.
+	assert.equal(capped[capped.length - 1].text, 'q24');
+	assert.equal(capped[0].text, 'q5');
+
+	const long = capAiQuestions([{ text: 'x'.repeat(4000), page: '/', at: 1 }]);
+	assert.equal(long[0].text.length, AI_LOG_MAX_TEXT);
+	// 🔴 Not `'x'.repeat(n)` alone as the specimen — that cannot tell「kept the head」from
+	// 「kept the tail」. An uneven one can.
+	const uneven = capAiQuestions([{ text: `HEAD${'x'.repeat(4000)}TAIL`, page: '/', at: 1 }]);
+	assert.ok(uneven[0].text.startsWith('HEAD'));
+	assert.ok(!uneven[0].text.endsWith('TAIL'));
+});
+
+test('54: a page is a PATH — no query string, no fragment, ever', () => {
+	assert.equal(aiPagePath('https://shop.example/pricing?token=abc123&email=a@b.c'), '/pricing');
+	assert.equal(aiPagePath('https://shop.example/a/b#inbox'), '/a/b');
+	assert.equal(aiPagePath(''), '/');
+	assert.equal(aiPagePath(undefined), '/');
+	// Consecutive duplicates collapse; a real move does not.
+	assert.deepEqual(appendAiPage(['/a'], '/a'), ['/a']);
+	assert.deepEqual(appendAiPage(['/a'], '/b'), ['/a', '/b']);
+});
+
+test('54: it flushes ONCE — a second pagehide with nothing new sends nothing', async () => {
+	const f = logFixture();
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/pricing', 'https://shop.example/faq', 'ja-jp');
+	await f.settle();
+
+	const first = f.log.flush();
+	assert.ok(first, 'the first flush carries the session');
+	assert.equal(f.sent.length, 1);
+	assert.equal(first.session_id, 'sid-1');
+	assert.equal(first.questions.length, 1);
+	assert.equal(first.questions[0].hit, 'https://shop.example/faq');
+	assert.deepEqual(first.pages, ['/pricing']);
+
+	assert.equal(f.log.flush(), null, 'a second pagehide sends nothing new');
+	assert.equal(f.sent.length, 1);
+
+	// One more question, and the SAME session id goes again — which is exactly why the server
+	// has to be idempotent on it rather than inserting a row per request.
+	f.log.question('and to Korea?', '/pricing', null, 'ja-jp');
+	const second = f.log.flush();
+	assert.equal(second.session_id, 'sid-1');
+	assert.equal(second.questions.length, 2);
+	assert.equal(f.sent.length, 2);
+});
+
+test('54: an unclaimed tenant writes NOTHING, and「we could not ask」is not permission', async () => {
+	const unclaimed = logFixture({ probeClaim: async () => false });
+	unclaimed.log.page('/');
+	unclaimed.log.question('anyone there?', '/', null, '');
+	await unclaimed.settle();
+	assert.equal(unclaimed.log.flush(), null);
+	assert.equal(unclaimed.sent.length, 0);
+	// 🔴 And it did not merely refuse to send — it stopped holding them.
+	assert.equal(unclaimed.log.state().questions.length, 0);
+
+	// A probe that never answered leaves `claim` null, and null behaves exactly like false.
+	const unknown = logFixture({ probeClaim: async () => null });
+	unknown.log.question('anyone there?', '/', null, '');
+	await unknown.settle();
+	assert.equal(unknown.log.flush(), null);
+	assert.equal(unknown.sent.length, 0);
+	// …but the questions are still HELD, so the next page view can send them once we know.
+	assert.equal(unknown.log.state().questions.length, 1);
+});
+
+test('54: data-ai-log="0" buffers nothing, probes nothing, sends nothing', async () => {
+	const f = logFixture({ enabled: false });
+	assert.equal(f.log.enabled(), false);
+	f.log.page('/');
+	f.log.question('hello?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+	assert.equal(f.log.state(), null);
+	assert.equal(f.cells.size, 0, 'nothing reached storage either');
+});
+
+test('54: the press flushes with the handle and CLEARS the session', async () => {
+	const f = logFixture({ probeClaim: async () => null });
+	f.log.page('/pricing');
+	f.log.question('can I return it?', '/pricing', null, '');
+	// 🔴 No settled probe at all here, on purpose: a minted conversation id is itself proof the
+	// tenant is claimed, so escalation must send without one.
+	const went = f.log.escalated('conv-7');
+	assert.ok(went);
+	assert.equal(went.handle, 'conv-7');
+	assert.equal(went.questions.length, 1);
+
+	const after = f.log.state();
+	assert.equal(after.questions.length, 0, 'cleared');
+	assert.equal(after.pages.length, 0);
+	assert.notEqual(after.sid, went.session_id, 'a fresh session, so nothing travels twice');
+	assert.equal(after.claim, true, 'and the claim answer is now known without a probe');
+
+	// A press with nothing buffered sends nothing at all.
+	const quiet = logFixture();
+	assert.equal(quiet.log.escalated('conv-8'), null);
+	assert.equal(quiet.sent.length, 0);
+});
+
+test('54: a session spans pages and ends on idle, not on navigation', async () => {
+	const f = logFixture();
+	f.log.page('/');
+	f.log.question('what are your hours?', '/', null, '');
+	await f.settle();
+	// A navigation: new document, new mount, same buffer.
+	f.tick(30_000);
+	const second = logFixture();
+	// (the fixture above is a second browser; this one keeps going in the same storage)
+	f.log.page('/contact');
+	assert.deepEqual(f.log.state().pages, ['/', '/contact']);
+	assert.equal(f.log.state().sid, 'sid-1');
+	assert.equal(second.sent.length, 0);
+
+	// Idle past the ceiling and the next page view is a new session — with the claim answer
+	// carried over, since that is a fact about the SITE and not about this visit.
+	f.tick(AI_LOG_IDLE_MS + 1);
+	f.log.page('/again');
+	assert.equal(f.log.state().sid, 'sid-2');
+	assert.deepEqual(f.log.state().pages, ['/again']);
+	assert.equal(f.log.state().claim, true);
+});
+
+test('54: the 21st question is not silently pre-marked as sent by the cap', async () => {
+	const f = logFixture();
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) f.log.question(`q${i}`, '/', null, '');
+	await f.settle();
+	f.log.flush();
+	assert.equal(f.sent.length, 1);
+	assert.equal(f.log.state().sent, AI_LOG_MAX_QUESTIONS);
+
+	// 🩸 `sent` counts from the front, so the cap dropping the oldest has to bring it down too.
+	// Clamping it to the new LENGTH instead makes this question look already-flushed.
+	f.log.question('the one they escalate on', '/', null, '');
+	const went = f.log.flush();
+	assert.ok(went, 'the 21st question still travels');
+	assert.equal(went.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(went.questions[AI_LOG_MAX_QUESTIONS - 1].text, 'the one they escalate on');
+});
+
+test('54: a malformed buffer somebody else wrote is ignored, not thrown', () => {
+	assert.equal(parseAiLog(null), null);
+	assert.equal(parseAiLog({ sid: '', started: 1, last: 1 }), null);
+	assert.equal(parseAiLog({ sid: 'x', started: NaN, last: 1 }), null);
+	const ok = parseAiLog({ sid: 'x', started: 1, last: 2, questions: [{ text: 'a', at: 3 }], sent: 99 });
+	assert.equal(ok.sent, 1, 'a `sent` that outran the buffer cannot永久 convince us there is nothing left');
+	assert.equal(ok.claim, null);
+
+	const f = logFixture();
+	f.cells.set(aiLogKey('site:acme'), '{ not json');
+	f.log.page('/');
+	assert.ok(f.log.state().sid, 'a corrupt cell starts a new session rather than taking the panel down');
+});
+
+test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', () => {
+	const beacons = [];
+	const okBeacon = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+		navigator: { sendBeacon: (url, blob) => (beacons.push({ url, blob }), true) },
+		Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } }
+	});
+	assert.equal(okBeacon, true);
+	// 🔴 `application/json`, not the `text/plain` a bare-string beacon sends — the endpoint
+	// refuses an unlabelled body, so this is the difference between sending and appearing to.
+	assert.equal(beacons[0].blob.type, 'application/json');
+	assert.equal(beacons[0].blob.parts[0], '{"a":1}');
+
+	const calls = [];
+	const viaFetch = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
+		navigator: {},
+		fetch: (url, init) => (calls.push({ url, init }), Promise.resolve({ ok: true }))
+	});
+	assert.equal(viaFetch, true);
+	assert.equal(calls[0].init.keepalive, true);
+	assert.equal(calls[0].init.headers['content-type'], 'application/json');
+
+	// No transport at all is `false`, never a throw inside a pagehide handler.
+	assert.equal(sendAiSession('u', {}, { navigator: {}, fetch: null }), false);
 });

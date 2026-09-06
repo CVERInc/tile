@@ -201,13 +201,15 @@ test('B11: the event is inert where the coral is not mounted', async () => {
 	assert.match(el.innerHTML, /missing data-kind \/ data-id/, 'the event rendered into a failed mount');
 });
 
-test('B11: one window listener per successful mount, and it is the only kind there is', async () => {
+test('B11: the window listeners per successful mount are the two there may be', async () => {
 	const before = listenerCount();
 	await mountFresh();
-	assert.equal(listenerCount(), before + 1, 'a mount installs exactly one window listener');
+	// Two since 0.7.6: `reef-inbox:open` and ruling 54's `pagehide`.
+	assert.equal(listenerCount(), before + 2, 'a mount installs a listener nobody named');
 	// 🔴 B3, round 2: `reef-inbox:handle` is gone. A page script can ask a panel to OPEN — that
-	// names no conversation — and there is no event through which it can name one.
-	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open']);
+	// names no conversation — and there is no event through which it can name one. `pagehide` is
+	// the browser's own event and carries nothing a page script chooses.
+	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide']);
 });
 
 test('B11: #inbox opens the panel only for a site that opted in', async () => {
@@ -265,8 +267,8 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	await mount(el);
 	const root = el.children[0];
 
-	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open'],
-		'a second window event type exists — the only one there may be names no conversation');
+	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide'],
+		'a window event type nobody named exists — neither of the two may name a conversation');
 
 	// Round 2's payload, addressed to this mount and unaddressed, exactly as the review dispatched
 	// it. There is nobody to receive either, and the visitor's own handle does not move.
@@ -337,4 +339,45 @@ test('B12: a handle past the 30-day TTL is not adopted at mount, and one inside 
 		'the expired handle still opened the human thread');
 	assert.doesNotMatch(stale.children[0].innerHTML, /name="text"/);
 	assert.equal(timers.size, armed, 'ask mode armed a poller');
+});
+
+// ── ruling 54, observed from the outside ────────────────────────────────────────────────────
+//
+// compose.test.mjs drives `createAiLog` directly. What is measured HERE is what an ordinary page
+// view actually costs a visitor, against the real `mount()`: the listener that exists, the storage
+// key it writes, and — the number that matters — how many requests leave when nobody asked
+// anything.
+
+/** Every `pagehide` handler on `window`, as the browser would fire them. */
+const firePagehide = () => {
+	for (const fn of windowListeners.get('pagehide') ?? []) fn({});
+};
+
+test('54: an ordinary page view — nobody asked anything — sends NOTHING on pagehide', async () => {
+	await mountFresh();
+	const from = requests.length;
+	firePagehide();
+	// 🔴 The whole cost claim, measured rather than asserted in prose: a visit where nobody typed
+	// a question reaches the network exactly as often as it did before ruling 54 existed.
+	assert.deepEqual(requests.slice(from).map((r) => r.url), []);
+});
+
+test('54: the buffer is beside the handle, never inside it', async () => {
+	const { el } = await mountFresh();
+	const id = el.attrs['data-id'];
+	// The page view is recorded locally, under its OWN key — a reader of the handle key sees the
+	// same bytes it always did, which is what keeps `parseHandle`'s shape a shape.
+	const buffer = JSON.parse(storage.get(`reef-inbox:ai:site:${id}`));
+	assert.deepEqual(buffer.pages, ['/']);
+	assert.equal(buffer.questions.length, 0);
+	assert.ok(buffer.sid);
+	assert.equal(buffer.claim, null, 'a mount asks nobody whether this tenant is claimed');
+	assert.equal(storage.has(`reef-inbox:site:${id}`), false, 'a mount minted a handle');
+});
+
+test('54: data-ai-log="0" installs no pagehide listener and writes no buffer', async () => {
+	const before = listenerCount();
+	const { el } = await mountFresh({ 'data-ai-log': '0' });
+	assert.equal(listenerCount(), before + 1, 'the opt-out still wired a pagehide listener');
+	assert.equal(storage.has(`reef-inbox:ai:site:${el.attrs['data-id']}`), false);
 });

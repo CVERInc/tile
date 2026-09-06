@@ -81,6 +81,11 @@
 //   data-open-on-hash (optional) — "1" lets `#inbox` in the URL open the panel at load. Off by
 //                  default: a fragment is written by whoever authored the LINK, not by the site
 //                  (see shouldAutoOpenFromHash).
+//   data-ai-log    (optional) — "0" opts this mount out of the deferred question
+//                  log entirely (ruling 54): nothing is buffered, nothing is
+//                  probed, nothing is ever sent. Any other value, including the
+//                  attribute being absent, leaves it on — and「on」still writes
+//                  nothing at all unless the tenant actually has an Inbox.
 //   data-api-base  (optional) — override the feelreef origin
 //   data-assistant-name (optional) — what VISITORS see the assistant called
 //                  instead of "KAITO" (owner ruling, 2026-09-05: the name may
@@ -475,6 +480,382 @@ function saveHandle(tenant, conv, hasEmail, mode = 'human') {
 	}
 }
 
+// ── what the visitor asked the machine, kept here until they leave ──────────
+//
+// Owner ruling 54 (2026-09-07, reef `docs/SPEC-inbox-bubble-position.md` §三):
+//「訪客問的每一句真人都看得到，AI 只是先服務不必等」. The owner sees the questions; the
+// machine's answers are still never sent anywhere (§5, and the file header above).
+//
+// 🔴 DEFERRED WRITE, NOT A PING PER QUESTION. The obvious shape — POST each question as
+// it is asked — is the shape this coral exists not to be: it turns a browsing visitor
+// into a request stream, and it makes the owner's own inbox the busiest thing on their
+// site. So the questions live HERE, in this browser, in the same storage the handle
+// lives in, and leave ONCE: on `pagehide` as a beacon, or the moment the visitor presses
+// for a person, whichever comes first.
+//
+// 🔴 AND ONLY WHEN THE SITE HAS AN INBOX. A KAITO-only tenant — somebody who bought the
+// ask-the-site half and nothing else — writes nothing, ever. That is not a quota, it is
+// whose data this is: the questions are addressed to a person, and a site with no inbox
+// has no person to address them to.
+
+/** Longest single question kept. Beyond this it is prose, and the row is not a transcript. */
+export const AI_LOG_MAX_TEXT = 500;
+/** Most questions carried in one session row. When full the OLDEST go — see `capAiQuestions`. */
+export const AI_LOG_MAX_QUESTIONS = 20;
+/** Most pages named in one session row's page sequence. */
+export const AI_LOG_MAX_PAGES = 40;
+/** Longest path or locale tag kept, so neither can be used to pad a row. */
+export const AI_LOG_MAX_FIELD = 200;
+/**
+ * How long a session may sit idle before the next page view is a NEW session.
+ *
+ * 🔴 A SESSION IS NOT A PAGE. On a static site every navigation is a fresh document and a
+ * fresh `mount()`, so a buffer scoped to one document would make「一列一個 session」mean
+ *「一列一頁」— and the page SEQUENCE, which is the whole point of the row, would never have
+ * more than one entry in it. The buffer therefore lives in `localStorage` (the same place
+ * the handle lives, per the ruling) and this is what ends the session instead.
+ */
+export const AI_LOG_IDLE_MS = 30 * 60 * 1000;
+/** How long this browser trusts a claim-state answer before asking again. */
+export const AI_LOG_CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
+const AI_LOG_PREFIX = 'reef-inbox:ai:';
+
+/** The buffer's own key — beside the handle's (`reef-inbox:<tenant>`), never inside it. */
+export function aiLogKey(tenant) {
+	return AI_LOG_PREFIX + tenant;
+}
+
+/** One line of text, bounded, with the control characters a row is not allowed to carry. */
+function aiLine(raw, max) {
+	if (typeof raw !== 'string') return '';
+	return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, max);
+}
+
+/**
+ * 🔴 THE PATH, NEVER THE QUERY STRING. A page is `/pricing`; `?token=…&email=…` is whatever
+ * the site put in its own links, and a row that carries it is a row holding somebody's
+ * credentials because they happened to ask a question on the page they landed on.
+ */
+export function aiPagePath(href) {
+	// 🔴 The non-string cases have to be refused BEFORE `new URL`, not caught after it: `new URL`
+	// stringifies its first argument, so `undefined` resolves — quietly — to the page `/undefined`.
+	if (typeof href !== 'string') return '/';
+	try {
+		return aiLine(new URL(href, 'https://x.invalid').pathname, AI_LOG_MAX_FIELD) || '/';
+	} catch {
+		return '/';
+	}
+}
+
+/**
+ * The size cap, applied where a hostile client cannot skip it — on the way IN, every time.
+ *
+ * 🔴 THE OLDEST GO, not the newest refused. The row is a session read back in order; a
+ * visitor whose twenty-first question is the one they escalated on would otherwise have
+ * that question silently dropped while twenty older ones stayed.
+ */
+export function capAiQuestions(list) {
+	const rows = Array.isArray(list) ? list : [];
+	return rows.slice(-AI_LOG_MAX_QUESTIONS).map((q) => ({
+		text: aiLine(q && q.text, AI_LOG_MAX_TEXT),
+		page: aiLine(q && q.page, AI_LOG_MAX_FIELD) || '/',
+		hit: typeof (q && q.hit) === 'string' && q.hit ? aiLine(q.hit, AI_LOG_MAX_FIELD) : null,
+		lang: aiLine(q && q.lang, 16),
+		at: Number.isFinite(q && q.at) ? q.at : 0
+	}));
+}
+
+/** Consecutive duplicates collapse — a reload is not a second page. */
+export function appendAiPage(pages, page) {
+	const rows = Array.isArray(pages) ? pages.filter((p) => typeof p === 'string') : [];
+	if (rows[rows.length - 1] === page) return rows.slice(-AI_LOG_MAX_PAGES);
+	return [...rows, page].slice(-AI_LOG_MAX_PAGES);
+}
+
+/**
+ * Read a buffer back out of this browser's own storage.
+ *
+ * Same posture as `parseHandle`: storage is a place other code can write, so「well-formed」
+ * is one decision stated once and a malformed entry is provably ignored rather than thrown.
+ */
+export function parseAiLog(raw) {
+	if (!raw || typeof raw !== 'object') return null;
+	if (typeof raw.sid !== 'string' || !raw.sid) return null;
+	if (!Number.isFinite(raw.started) || !Number.isFinite(raw.last)) return null;
+	const questions = capAiQuestions(raw.questions);
+	return {
+		sid: raw.sid.slice(0, 64),
+		started: raw.started,
+		last: raw.last,
+		pages: (Array.isArray(raw.pages) ? raw.pages : [])
+			.filter((p) => typeof p === 'string')
+			.slice(-AI_LOG_MAX_PAGES),
+		questions,
+		// 🔴 CLAMPED TO WHAT IS ACTUALLY HERE. A `sent` that outran the buffer — a value
+		// somebody hand-wrote, or a cap that dropped an already-counted question — would
+		// permanently convince this browser it had nothing left to flush.
+		sent: Number.isFinite(raw.sent) ? Math.max(0, Math.min(raw.sent, questions.length)) : 0,
+		handle: typeof raw.handle === 'string' && raw.handle ? raw.handle : null,
+		claim: raw.claim === true || raw.claim === false ? raw.claim : null,
+		claimAt: Number.isFinite(raw.claimAt) ? raw.claimAt : 0
+	};
+}
+
+/** The wire body — see reef `docs/SPEC-inbox-bubble-position.md` §三 and the endpoint's header. */
+export function aiSessionPayload(kind, id, state) {
+	const body = {
+		kind,
+		id,
+		session_id: state.sid,
+		pages: state.pages,
+		questions: capAiQuestions(state.questions)
+	};
+	if (state.handle) body.handle = state.handle;
+	return body;
+}
+
+/**
+ * Hand one payload to the network in a way that survives the page going away.
+ *
+ * 🔴 `sendBeacon` FIRST, and with a `Blob` typed `application/json` — a bare string beacon
+ * is sent as `text/plain`, which this endpoint refuses (see `readBody` on reef's side: an
+ * unlabelled body is a client we do not recognise). `fetch(..., { keepalive: true })` is the
+ * fallback for a browser without `sendBeacon`, and it is a fallback rather than the first
+ * choice because a `pagehide` handler's ordinary `fetch` is cancelled with the document.
+ *
+ * Returns whether the request was ACCEPTED FOR SENDING — never whether it arrived. Nothing
+ * here can know that, and a caller that treats「queued」as「stored」is the reason the server
+ * side has to be idempotent on the session id.
+ */
+export function sendAiSession(url, body, env = {}) {
+	// 🔴 `in`, NOT `??`. An injected `null` means「this world has no such thing」and `??` would
+	// fall straight through to the real global — so a test asserting「no transport sends nothing」
+	// would have been sending through the browser's own fetch and reading it as a pass.
+	const pick = (name, real) => (name in env ? env[name] : real);
+	const nav = pick('navigator', typeof navigator === 'undefined' ? null : navigator);
+	const json = JSON.stringify(body);
+	try {
+		const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
+		if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
+			return nav.sendBeacon(url, new BlobCtor([json], { type: 'application/json' })) === true;
+		}
+	} catch {
+		// A beacon that throws (a browser that counts it against a quota, say) falls through
+		// to the fetch below rather than losing the session.
+	}
+	const f = pick('fetch', typeof fetch === 'undefined' ? null : fetch);
+	if (!f) return false;
+	try {
+		void f(url, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: json,
+			keepalive: true
+		}).catch(() => {});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The buffer itself, as a thing that can be tested without a DOM.
+ *
+ * Every side effect it has is an injected function — storage, the clock, the id source, the
+ * transport, the claim probe — because the behaviour worth pinning here (the caps, flush-once,
+ * never-when-unclaimed, escalation clears) is arithmetic, and arithmetic that can only be
+ * exercised through a browser is arithmetic nobody exercises.
+ */
+export function createAiLog(opts) {
+	const {
+		tenant,
+		kind,
+		id,
+		storage,
+		now = () => Date.now(),
+		newId,
+		send,
+		probeClaim,
+		enabled = true
+	} = opts;
+	const key = aiLogKey(tenant);
+
+	function read() {
+		if (!storage) return null;
+		try {
+			const raw = storage.getItem(key);
+			return raw ? parseAiLog(JSON.parse(raw)) : null;
+		} catch {
+			return null;
+		}
+	}
+	function write(state) {
+		if (!storage) return;
+		try {
+			storage.setItem(key, JSON.stringify(state));
+		} catch {
+			// Storage disabled or full. The bubble still answers questions; this browser just
+			// will not be able to tell the owner about them. Degrading silently is right —
+			// the visitor came for an answer, not for our bookkeeping.
+		}
+	}
+	function fresh(at, carry) {
+		return {
+			sid: newId(),
+			started: at,
+			last: at,
+			pages: [],
+			questions: [],
+			sent: 0,
+			handle: null,
+			// 🔴 THE CLAIM ANSWER OUTLIVES THE SESSION, deliberately. It is a fact about the
+			// SITE, not about this visit, so a second session ten minutes later must not cost
+			// another probe — and a `false` must not be forgotten, since forgetting it is how a
+			// KAITO-only tenant starts receiving requests again.
+			claim: carry ? carry.claim : null,
+			claimAt: carry ? carry.claimAt : 0
+		};
+	}
+	let state = null;
+	let probing = false;
+
+	/**
+	 * The live session, starting a new one when the old one has gone cold.
+	 *
+	 * 🩸 `read() ?? state`, NOT `read()` ALONE. Storage is re-read on every call so a second tab
+	 * cannot drift, and it is the source of truth the moment there IS one — but a session that
+	 * has been minted and not yet written (this coral mints one at mount and writes at the first
+	 * `page()`) is not in storage yet, and treating that as「no session」made every mount mint an
+	 * id, throw it away and mint a second one. The symptom was not an error: it was a page
+	 * sequence that reset itself, i.e. exactly the thing the row exists to record.
+	 */
+	function current(at) {
+		const held = read() ?? state;
+		if (!held) return fresh(at, null);
+		if (at - held.last > AI_LOG_IDLE_MS) return fresh(at, held);
+		return held;
+	}
+
+	if (enabled) state = current(now());
+
+	/** Ask, at most once per TTL, whether this tenant has an inbox at all. */
+	function ensureClaim() {
+		if (!state || probing || !probeClaim) return;
+		if (state.claim !== null && now() - state.claimAt < AI_LOG_CLAIM_TTL_MS) return;
+		probing = true;
+		void Promise.resolve()
+			.then(() => probeClaim())
+			.then((claimed) => {
+				probing = false;
+				if (!state || typeof claimed !== 'boolean') return;
+				state.claim = claimed;
+				state.claimAt = now();
+				// 🔴 AN UNCLAIMED ANSWER DROPS WHAT IS ALREADY HELD, rather than merely refusing to
+				// send it. Keeping a KAITO-only site's visitors' questions in their browsers against
+				// the day somebody claims the inbox would make the claim retroactive, and nobody
+				// asked those questions of a person.
+				if (!claimed) {
+					state.questions = [];
+					state.pages = [];
+					state.sent = 0;
+				}
+				write(state);
+			})
+			.catch(() => {
+				probing = false;
+			});
+	}
+
+	return {
+		/** Whether this mount is logging at all — `data-ai-log="0"` turns everything below off. */
+		enabled: () => !!state,
+		/** For tests and for the mount's own reads. Never a live reference. */
+		state: () => (state ? JSON.parse(JSON.stringify(state)) : null),
+
+		/** This page view, recorded at mount. Costs no request and reaches no network. */
+		page(path) {
+			if (!state) return;
+			const at = now();
+			state = current(at);
+			state.pages = appendAiPage(state.pages, path);
+			state.last = at;
+			write(state);
+		},
+
+		/**
+		 * One question, asked and answered by the machine.
+		 *
+		 * 🔴 THE ANSWER IS NOT AN ARGUMENT HERE and cannot become one. What travels is the
+		 * question, the page, whether a passage was cited (and which), the language and the
+		 * time — the same line `kaito_exchanges` already holds on the server.
+		 */
+		question(text, page, hit, lang) {
+			if (!state) return;
+			const at = now();
+			state = current(at);
+			const merged = [...state.questions, { text, page, hit: hit || null, lang, at }];
+			const capped = capAiQuestions(merged);
+			// 🔴 `sent` COUNTS FROM THE FRONT, so when the cap drops the oldest it has to come
+			// down by exactly as many. Clamping it to the new LENGTH instead — which is what the
+			// first draft did — makes a 21st question look already-flushed the moment the buffer
+			// is full, i.e. the one shape where a hostile client and an ordinary chatty visitor
+			// both silently lose the question they actually escalated on.
+			const dropped = merged.length - capped.length;
+			state.questions = capped;
+			state.sent = Math.max(0, state.sent - dropped);
+			state.last = at;
+			write(state);
+			ensureClaim();
+		},
+
+		/**
+		 * Send what is unsent, or nothing.
+		 *
+		 * Returns the payload that went, or `null` — which is the ordinary case, and the
+		 * reason the second `pagehide` of a page view costs nothing.
+		 */
+		flush() {
+			if (!state || !send) return null;
+			// 🔴 UNKNOWN IS NOT PERMISSION. A probe that never came back leaves `claim` null,
+			// and null must behave exactly like `false` here: the questions stay in this
+			// browser and go on the next page view, once we actually know.
+			if (state.claim !== true) return null;
+			if (state.questions.length <= state.sent) return null;
+			const payload = aiSessionPayload(kind, id, state);
+			if (!send(payload)) return null;
+			state.sent = state.questions.length;
+			write(state);
+			return payload;
+		},
+
+		/**
+		 * The visitor pressed for a person, and the server minted a conversation.
+		 *
+		 * 🔴 THE PRESS PROVES THE CLAIM. A conversation id only exists because `/api/inbox`
+		 * accepted a message, and it only accepts one for a claimed tenant — so this is the
+		 * one place claim state is learned without asking anybody.
+		 *
+		 * Flushes immediately (this session is now attached to a real conversation, and the
+		 * owner is about to open it) and CLEARS, so the next question starts a fresh session
+		 * rather than re-sending questions that already travelled.
+		 */
+		escalated(conv) {
+			if (!state) return null;
+			const at = now();
+			state = current(at);
+			state.handle = typeof conv === 'string' && conv ? conv : null;
+			state.claim = true;
+			state.claimAt = at;
+			state.last = at;
+			const payload = state.questions.length > state.sent && send ? aiSessionPayload(kind, id, state) : null;
+			const went = payload ? send(payload) : false;
+			state = fresh(at, state);
+			write(state);
+			return went ? payload : null;
+		}
+	};
+}
+
 // ── the panel's title ───────────────────────────────────────────────────────
 
 /**
@@ -848,6 +1229,32 @@ export async function fetchAssistantName(apiBase, kind, id) {
 		const name = cleanAssistantName(raw);
 		if (name) return name;
 		return body && body.resolved === true ? DEFAULT_ASSISTANT_NAME : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Does this tenant have an Inbox — i.e. is there a person at the other end at all?
+ *
+ * 🔴 THE ONLY QUESTION THIS ASKS, and it is asked LAZILY: not at mount, but the first time a
+ * visitor actually types a question, and then at most once per `AI_LOG_CLAIM_TTL_MS` per
+ * browser. A probe at mount would put a request on every page view of every site carrying
+ * this coral to answer a question that matters only for the small share of visits where
+ * somebody asks something.
+ *
+ * `null` (a network failure, a shape we cannot read, a 429) is NOT `false` — it is「we do not
+ * know」, and `createAiLog`'s flush treats not-knowing exactly like a no.
+ */
+export async function probeInboxClaim(apiBase, kind, id) {
+	try {
+		const res = await fetch(
+			`${apiBase}/api/inbox/session?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`,
+			{ headers: { accept: 'application/json' } }
+		);
+		if (!res.ok) return null;
+		const body = await res.json();
+		return typeof body?.claimed === 'boolean' ? body.claimed : null;
 	} catch {
 		return null;
 	}
@@ -1398,6 +1805,42 @@ export async function mount(el) {
 	let messages = [];
 	/** Speculative — see `handoffConcluded`. `null` until a fetch says otherwise. */
 	let conversationStatus = null;
+
+	/**
+	 * The deferred question log (ruling 54). Built here, wired in exactly three places below —
+	 * this page view, each answered question, and the escalation — plus the one `pagehide`
+	 * listener at the bottom of `mount`.
+	 *
+	 * 🔴 IT IS HANDED ITS WORLD RATHER THAN REACHING FOR ONE, so the same object the browser
+	 * runs is the object `compose.test.mjs` drives with a plain Map and a counter.
+	 */
+	const aiLog = createAiLog({
+		tenant,
+		kind,
+		id,
+		enabled: el.getAttribute('data-ai-log') !== '0',
+		storage: (() => {
+			try {
+				return window.localStorage;
+			} catch {
+				return null;
+			}
+		})(),
+		newId: () => {
+			// 🔴 A SESSION ID IS NOT A CONVERSATION ID. The file header's rule —「the conversation
+			// id comes from the server」— is about a bearer token that opens somebody's transcript.
+			// This one names a row of questions nobody can read back through any endpoint; it is
+			// minted here because the whole point is that the row is assembled before the first
+			// request exists.
+			try {
+				return crypto.randomUUID();
+			} catch {
+				return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+			}
+		},
+		send: (payload) => sendAiSession(`${apiBase}/api/inbox/session`, payload),
+		probeClaim: () => probeInboxClaim(apiBase, kind, id)
+	});
 	/**
 	 * Set only by `renderOpen()`, only when it auto-returns to ask mode because
 	 * the human thread concluded — never by a deliberate "ask again" click.
@@ -1617,6 +2060,10 @@ export async function mount(el) {
 			// was ever offered on this path.
 			hasEmail = false;
 			storeHandle(conv, hasEmail, storedMode);
+			// The press is the flush. This session now belongs to a conversation the owner is
+			// about to open, so the questions that led to it travel with it rather than waiting
+			// for the visitor to close the tab.
+			aiLog.escalated(conv);
 			replyWithinHours = body.reply_within_hours ?? null;
 			renderMessages();
 			const log = root.querySelector(`.${PREFIX}-log`);
@@ -1658,6 +2105,8 @@ export async function mount(el) {
 				storedMode = 'human';
 				hasEmail = emailGiven;
 				storeHandle(conv, hasEmail, storedMode);
+				// Same press, the other door — see `escalate`.
+				aiLog.escalated(conv);
 				replyWithinHours = body.reply_within_hours ?? null;
 				// 🩸 The confirmation used to render AFTER `await refresh()` — a real
 				// network round trip — so the panel sat on the freshly-reset empty
@@ -1719,6 +2168,18 @@ export async function mount(el) {
 
 		bindCompose(form, textarea, button, copy.asking, copy.send, async (question) => {
 			const answer = await askKaito(apiBase, kind, id, question, copy);
+
+			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the
+			// visitor's own sentence, the page they were on, the passage that was cited (or `null`
+			// — a refusal, an uncited answer and an engine we could not reach are all「no hit」),
+			// and the page's locale. `answer.text` is never passed: the machine's words are the
+			// owner's own page quoted back, and §5 keeps them out of every record we hold.
+			aiLog.question(
+				question,
+				aiPagePath(location.href),
+				answer && answer.kind === 'grounded' ? answer.source_url : null,
+				pageLocale()
+			);
 
 			// The question the visitor asked, shown back to them, so the panel
 			// reads as an exchange rather than a slot machine.
@@ -1866,7 +2327,8 @@ export async function mount(el) {
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
 	//
-	// 🔴 THE ONLY `window` LISTENER THIS FILE INSTALLS, and it is never removed because `mount()`
+	// 🔴 ONE OF THE TWO `window` LISTENERS THIS FILE INSTALLS (the other is ruling 54's `pagehide`,
+	// at the bottom of `mount`), and it is never removed because `mount()`
 	// has no teardown to remove it from (review B9, still open). What that costs is bounded and
 	// worth naming rather than implying otherwise: an SPA that tears the container out leaves this
 	// listener holding `root` and `el`, and `openPanel` on a detached root re-renders into a node
@@ -1877,6 +2339,24 @@ export async function mount(el) {
 	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
 	window.addEventListener('reef-inbox:open', openPanel);
 	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
+
+	// ── the deferred write's two lines (ruling 54) ─────────────────────────────────────────
+	//
+	// This page view, recorded locally — no request, no cookie, nothing leaves. It is what makes
+	// the row's page SEQUENCE a sequence rather than a single entry, and it is why the buffer is
+	// in `localStorage` rather than scoped to this document.
+	aiLog.page(aiPagePath(location.href));
+
+	// 🔴 `pagehide`, NOT `beforeunload` OR `unload`. Both of the others are ignored or actively
+	// penalised on mobile Safari (a page that registers `unload` is excluded from the back/forward
+	// cache), and neither fires when an app is backgrounded and later discarded — which is exactly
+	// how a phone visit ends. `pagehide` is the one that fires in all of those.
+	//
+	// 🔴 AND IT IS THE SAME LISTENER WHETHER OR NOT THERE IS ANYTHING TO SEND. `flush()` answers
+	// `null` for a session with no unsent questions, for an unclaimed tenant and for a tenant whose
+	// claim state we could not learn — so the ordinary page view, the one where nobody asked
+	// anything, reaches the network exactly as often as it did before this existed: never.
+	if (aiLog.enabled()) window.addEventListener('pagehide', () => aiLog.flush());
 
 	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
 	// bubble — without opening a panel nobody asked for.
