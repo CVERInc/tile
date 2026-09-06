@@ -896,10 +896,10 @@ function bodyHtml(body) {
     //     — a visible gap after the comma that no Japanese typesetter would put there.
     // (b) A line starting with `・` is a BULLET in Japanese/Chinese prose, and the author means one
     //     per line. Joining them produced `<p>・A ・B ・C ・D</p>` — a run-on where the source (and
-    //     the site being recast) shows a list. atelier-a alone has 530 such lines; rewriting them by
-    //     hand is not the fix, joining them correctly is.
+    //     the site being recast) shows a list. One recast site alone carried 530 such lines;
+    //     rewriting them by hand is not the fix, joining them correctly is.
     // Latin↔CJK boundaries KEEP the space: that is a real word gap, and removing it would glue
-    // `atelier-a` onto the kana beside it.
+    // an ASCII wordmark onto the kana beside it.
     const CJK = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
     const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
     let joined = marked.length ? marked[0] : '';

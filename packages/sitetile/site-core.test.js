@@ -195,10 +195,10 @@ test('button affordance: signet-arrow chosen by link kind, no heart/envelope gly
 
 test('render: inline markdown goes through cssmd (bold → st-b span)', () => {
 
-// 🩸 CJK soft-wrap joining. Both halves earned on atelier-a 2026-08-18, and both were invisible to
-// every other gate: the page looked fine, measured fine, and read wrong.
+// 🩸 CJK soft-wrap joining. Both halves earned on a customer's site, 2026-08-18, and both were
+// invisible to every other gate: the page looked fine, measured fine, and read wrong.
 test('render: CJK soft-wrapped lines join with NO space, and a ・ line starts its own line', () => {
-  const cjk = bodyHtml('atelier-aのLIVE2D制作は、\nあなたのキャラクターに命を吹き込む！');
+  const cjk = bodyHtml('HOSHIYAのLIVE2D制作は、\nあなたのキャラクターに命を吹き込む！');
   assert.match(cjk, /制作は、あなたの/, 'no space may appear at a CJK soft wrap');
   assert.doesNotMatch(cjk, /制作は、 あなたの/);
 
@@ -402,10 +402,13 @@ test('render: a bare `---` is NOT a table separator (no leading pipe → stays a
 });
 
 // ── headerless def-list table + list-in-cell: a company-profile label|value table ──────────────
+// 株式会社HOSHIYA is a fictional wordmark. What is under test is the SHAPE — 2 columns × 3 rows,
+// no separator row, a CJK label cell against a value cell that mixes 株式会社 with ASCII, and one
+// cell holding a `<br>`-joined list — not whose company profile it was copied from.
 const HEADLESS = [
   '---', 'sitetile-page: t', '---', '',
   '## Co', '',
-  '| 法人名 | 株式会社atelier-a |',
+  '| 法人名 | 株式会社HOSHIYA |',
   '| 資本金 | 500万円 |',
   '| 事業内容 | - イラスト<br>- ゲーム<br>- 動画 |', '',
   'A paragraph with a | pipe | inside stays prose.', '',
@@ -413,7 +416,7 @@ const HEADLESS = [
 
 test('render: headerless table → <table data-headless> all-<td>, no <thead>', () => {
   const html = renderSiteToHtml(parseSite(HEADLESS));
-  assert.ok(html.includes('<table class="st-table" data-headless><tbody><tr><td>法人名</td><td>株式会社atelier-a</td></tr><tr><td>資本金</td><td>500万円</td></tr>'), 'headerless rows');
+  assert.ok(html.includes('<table class="st-table" data-headless><tbody><tr><td>法人名</td><td>株式会社HOSHIYA</td></tr><tr><td>資本金</td><td>500万円</td></tr>'), 'headerless rows');
   assert.equal((html.match(/<thead/g) || []).length, 0, 'no thead in a headerless table');
 });
 
@@ -429,7 +432,7 @@ test('render: a prose sentence containing a mid-line `|` is NOT a table', () => 
 
 test('round-trip: headerless table + in-cell list survive serialize(parse) verbatim', () => {
   const out = serializeSite(parseSite(HEADLESS));
-  ['| 法人名 | 株式会社atelier-a |', '| 事業内容 | - イラスト<br>- ゲーム<br>- 動画 |'].forEach((frag) =>
+  ['| 法人名 | 株式会社HOSHIYA |', '| 事業内容 | - イラスト<br>- ゲーム<br>- 動画 |'].forEach((frag) =>
     assert.ok(out.includes(frag), 'round-trips: ' + frag));
 });
 
