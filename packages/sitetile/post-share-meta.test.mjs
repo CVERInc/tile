@@ -144,8 +144,8 @@ check('og:site_name still falls back to headerBrand (legacy sites with no _site.
 
 // ── 4b. og:site_name must not fall through to headerBrand's page-title tail when the site DOES
 // carry a chrome-level name — a `_site.md` with nav/footer/theme filled in but no `title:` of its
-// own (sodaart /faq, 2026-09-03: og:site_name and the inbox bubble's data-site-name both rendered
-// "よくある質問 | SODAART【新HP移行中】", the PAGE's own composed <title>, because `site-title`
+// own (a customer's /faq page, 2026-09-03: og:site_name and the inbox bubble's data-site-name both
+// rendered "よくある質問 | HOSHIYA【新HP移行中】", the PAGE's own composed <title>, because `site-title`
 // stashed as '' and the chain fell straight to headerBrand — which on that page IS the page's own
 // merged title). `brand:` and `footer-brand:` are the two fields already documented elsewhere in
 // this file as site-level chrome, so they must outrank that tail.
@@ -155,10 +155,13 @@ check('og:site_name prefers `brand`/`footer-brand` over headerBrand\'s page-titl
   // eslint-disable-next-line no-new-func
   const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
   // `headerBrand` here stands in for what it resolves to on a page with no site-level name of its
-  // own: the page's own composed <title>, exactly as measured live.
-  const pageComposedTitle = 'よくある質問 | SODAART【新HP移行中】';
-  assert.equal(resolve({ brand: 'SODAART' }, pageComposedTitle), 'SODAART');
-  assert.equal(resolve({ 'footer-brand': 'SODAART' }, pageComposedTitle), 'SODAART');
+  // own: the page's own composed <title>, in the shape measured live — `<page> | <brand>【<notice>】`,
+  // CJK either side of an ASCII wordmark that is a SUBSTRING of the whole title. That containment is
+  // the entire point: a resolver that returns the tail instead of the brand still returns something
+  // that "looks like" the brand, so the fixture has to be a title the brand sits INSIDE.
+  const pageComposedTitle = 'よくある質問 | HOSHIYA【新HP移行中】';
+  assert.equal(resolve({ brand: 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
+  assert.equal(resolve({ 'footer-brand': 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
   // site-title still outranks both when a site sets its own title too.
   assert.equal(resolve({ 'site-title': 'ATLAS.DEV', brand: 'Atlas' }, 'ignored'), 'ATLAS.DEV');
   // brand still outranks footer-brand.
@@ -174,7 +177,7 @@ mustFail('the og:site_name brand/footer-brand precedence check', () => {
   const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
   // eslint-disable-next-line no-new-func
   const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
-  assert.equal(resolve({ brand: 'SODAART' }, 'よくある質問 | SODAART【新HP移行中】'), 'SODAART');
+  assert.equal(resolve({ brand: 'HOSHIYA' }, 'よくある質問 | HOSHIYA【新HP移行中】'), 'HOSHIYA');
 });
 
 mustFail('the og:site_name consumer check', () => {
