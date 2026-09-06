@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
-	refusalNeedsHandoffForm, resolveAssistantName, resolveLocale, resolveSiteName, resolveViewMode,
-	shouldAutoOpenFromHash, statusFor
+	parseHandle, refusalNeedsHandoffForm, resolveAssistantName, resolveLocale, resolveSiteName,
+	resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -560,3 +560,38 @@ test('shouldAutoOpenFromHash: only the exact #inbox fragment, never a prefix mat
 // is the one pure decision mount() delegates to: shouldAutoOpenFromHash. The DOM-level proof
 // belongs in reef's own inbox-bubble.svelte.test.ts, which already drives this exact artifact in
 // a real browser.
+
+// ── #15: the handle hand-off — the mounted panel adopts an externally-minted handle ─────────
+
+test('parseHandle accepts exactly the shape saveHandle stores', () => {
+	assert.deepEqual(parseHandle({ conv: 'c1', ts: Date.now(), hasEmail: true, mode: 'human' }),
+		{ conv: 'c1', hasEmail: true, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c2', ts: Date.now() }),
+		{ conv: 'c2', hasEmail: false, mode: 'human' });
+	assert.deepEqual(parseHandle({ conv: 'c3', ts: Date.now(), mode: 'ask' }),
+		{ conv: 'c3', hasEmail: false, mode: 'ask' });
+	// An unrecognised mode normalises to 'human' — the same rule saveHandle itself applies when it
+	// writes the value in the first place.
+	assert.deepEqual(parseHandle({ conv: 'c4', ts: Date.now(), mode: 'bogus' }),
+		{ conv: 'c4', hasEmail: false, mode: 'human' });
+});
+
+test('parseHandle ignores a malformed detail — no exception thrown, just null back', () => {
+	assert.equal(parseHandle(undefined), null);
+	assert.equal(parseHandle(null), null);
+	assert.equal(parseHandle('a string'), null);
+	assert.equal(parseHandle(42), null);
+	assert.equal(parseHandle({}), null);
+	assert.equal(parseHandle({ conv: 123, ts: Date.now() }), null); // conv not a string
+	assert.equal(parseHandle({ conv: 'c', ts: 'not a number' }), null); // ts not a number
+	assert.equal(parseHandle({ ts: Date.now() }), null); // no conv at all
+	assert.equal(parseHandle([1, 2, 3]), null); // an array is typeof 'object' but has no conv/ts
+});
+
+// NOTE ON COVERAGE: the reef-inbox:handle listener itself lives inside mount() — adopting the
+// parsed handle into handoffConv/hasEmail/storedMode/conv, tearing down the old poller, and
+// re-rendering via renderOpen()/renderClosed() — and needs the same real DOM mount() needs
+// throughout this file. parseHandle above is the pure decision that listener delegates to for
+// "is this detail well-formed"; the render-and-poller-teardown behaviour it drives is left to
+// reef's own browser-driven suite, the same split this file already draws for #13 and for the
+// late-rename test above.

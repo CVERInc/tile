@@ -378,6 +378,19 @@ function storeKey(tenant) {
  * report 2026-09-04: hand-off used to be a one-way door with no way back to
  * asking KAITO or starting over).
  */
+/**
+ * Is `raw` a well-formed handle — the shape `saveHandle` writes, whether it arrived by
+ * `JSON.parse`-ing this browser's own storage or as a `reef-inbox:handle` CustomEvent's `detail`
+ * (#15, minted elsewhere — reef's own `/report` form writes the same format). Pure and exported so
+ * both intake points share the one place that decides "well-formed", and so a malformed `detail` —
+ * this file did not raise that event, so it cannot trust its shape — is provably ignored rather
+ * than thrown into an unhandled listener exception.
+ */
+export function parseHandle(raw) {
+	if (!raw || typeof raw !== 'object' || typeof raw.conv !== 'string' || typeof raw.ts !== 'number') return null;
+	return { conv: raw.conv, hasEmail: raw.hasEmail === true, mode: raw.mode === 'ask' ? 'ask' : 'human' };
+}
+
 function loadHandle(tenant) {
 	let raw;
 	try {
@@ -392,7 +405,8 @@ function loadHandle(tenant) {
 	} catch {
 		return null;
 	}
-	if (!parsed || typeof parsed.conv !== 'string' || typeof parsed.ts !== 'number') return null;
+	const handle = parseHandle(parsed);
+	if (!handle) return null;
 	if (Date.now() - parsed.ts > HANDLE_TTL_MS) {
 		try {
 			window.localStorage.removeItem(storeKey(tenant));
@@ -401,7 +415,7 @@ function loadHandle(tenant) {
 		}
 		return null;
 	}
-	return { conv: parsed.conv, hasEmail: parsed.hasEmail === true, mode: parsed.mode === 'ask' ? 'ask' : 'human' };
+	return handle;
 }
 
 function saveHandle(tenant, conv, hasEmail, mode = 'human') {
@@ -1456,6 +1470,37 @@ export async function mount(el) {
 	// to keep in sync.
 	window.addEventListener('reef-inbox:open', openPanel);
 	if (shouldAutoOpenFromHash(location.hash)) openPanel();
+
+	// #15: the handle hand-off. The coral reads its handle from localStorage only at mount, so a
+	// page that mints a hand-off another way — reef's own `/report` form writes the exact shape
+	// `saveHandle` does — cannot make an ALREADY-mounted panel switch to it: a same-document
+	// `localStorage.setItem` raises no `storage` event. This is the CustomEvent that closes that
+	// gap. `detail` is expected to be the same object `saveHandle` stores; `parseHandle` (shared
+	// with `loadHandle` above) is the one place that decides whether it actually is, and anything
+	// else — `undefined`, a string, `{}`, a `conv` that is not a string — is silently ignored, never
+	// thrown into an unhandled listener exception over an event this file did not raise itself.
+	//
+	// 🔴 STOPS THE OLD POLLER FIRST, unconditionally — not left to `renderMessages()`'s own
+	// `stopPolling()` call, because the NEW handle can resolve to ask mode (`resolveViewMode`),
+	// whose `renderAsk()` never touches the poller at all. Without this line a hand-off adopted
+	// while the visitor was mid-poll on the OLD conversation would keep polling it, invisibly,
+	// alongside whatever the new view shows.
+	window.addEventListener('reef-inbox:handle', (event) => {
+		const next = parseHandle(event && event.detail);
+		if (!next) return;
+		stopPolling();
+		handoffConv = next.conv;
+		hasEmail = next.hasEmail;
+		storedMode = next.mode;
+		saveHandle(tenant, handoffConv, hasEmail, storedMode);
+		conv = storedMode === 'human' ? handoffConv : null;
+		messages = [];
+		conversationStatus = null;
+		handoffEndedNote = false;
+		replyWithinHours = null;
+		if (open) renderOpen();
+		else renderClosed();
+	});
 
 	// 🏛 The platform's name, applied AFTER the first paint (CANON 第一條 / ruling #36).
 	//

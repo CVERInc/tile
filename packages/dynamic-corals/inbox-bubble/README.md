@@ -44,6 +44,27 @@ Either reaches exactly what a click on the closed bubble reaches, so it focuses 
 input the same way every other way into the panel already does — there is no separate focus path
 to keep in sync.
 
+## Handing off a conversation from elsewhere
+
+From 0.7.4, a page that mints a hand-off some other way than this file's own escalate/compose
+forms — reef's own `/report` form, for instance, which writes the same handle shape this file's
+`saveHandle` does — can make an ALREADY-mounted panel switch to it:
+
+```js
+window.dispatchEvent(new CustomEvent('reef-inbox:handle', {
+  detail: { conv: 'the-conversation-id', ts: Date.now(), hasEmail: true, mode: 'human' }
+}));
+```
+
+`detail` is exactly the object this file's own `saveHandle` stores — `conv` (string) and `ts`
+(number) are required, `hasEmail` and `mode` (`'human'` or `'ask'`) are optional and default the
+same way `saveHandle` itself defaults them. This does not write to `localStorage` itself; it
+assumes the emitter already has, under this tenant's own key. The gap it closes: a same-document
+`localStorage.setItem` raises no `storage` event, so without this a mounted panel never finds out
+that another script on the same page just gave this visitor a handle. On receipt the panel adopts
+it, tears down whatever poller was running against the previous conversation, and re-renders. A
+malformed `detail` — not an object, or missing/wrong-typed `conv`/`ts` — is silently ignored.
+
 ## The three things not to break
 
 **It never claims anyone is there.** The panel shows a reply window only when the
