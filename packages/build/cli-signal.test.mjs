@@ -109,7 +109,9 @@ async function until(what, pred, ms = 30_000) {
   }
 }
 
-// An `npx` that behaves like `astro build`: it takes a while and it writes into --outDir.
+// An `npx` that behaves like `astro build`: it takes a while and it writes into --outDir. It also
+// leaves a mark the moment it starts, so a test can tell which window a signal actually landed in
+// rather than believing a comment about it.
 const SLOW_NPX = `#!/bin/sh
 out=""
 while [ $# -gt 0 ]; do
@@ -117,6 +119,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 mkdir -p "$out"
+: > "$out/../npx-started"
 sleep 3
 echo built > "$out/index.html"
 `;
@@ -146,3 +149,41 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     assert.deepEqual(leftovers(astroDir), [], 'a stash or a lock survived the signal');
   });
 }
+
+// ── the whole window, not one point in it ───────────────────────────────────────────────────────
+// 🩸 THE REVIEW'S TIMING PAYLOAD, and the reason a single sample proves nothing here. Ctrl-C at
+// t=600ms, 900ms and 1200ms against a site with media each left a DIFFERENT wreck — 600ms lost both
+// `blog/` and `pagetile/`, 900ms and 1200ms lost only `blog/` — because two restores were in flight
+// at once and which one won the rename depended on where the signal landed. All three exited 2 with
+// a bare ENOENT. The invariant is not "one moment is safe": it is that EVERY moment is, so this
+// walks the delay across staging and across the build and asserts the same three things each time.
+//
+// The signal goes to the whole process group, which is what a terminal's Ctrl-C is. `kill -INT
+// <pid>` and `docker stop` reach ONE process and are a different question — that one is below.
+test('Ctrl-C anywhere across the staging and build windows: 130, and a byte-identical renderer', async (t) => {
+  const landedInBuild = [];
+  for (const delayMs of [100, 300, 600, 1000, 1500, 2200]) {
+    const { root, astroDir, binDir } = fakeEngine(t, SLOW_NPX);
+    const before = await snapshot(astroDir);
+    const outDir = join(root, 'out');
+
+    const run = runCli(t, { root, binDir, outDir, args: ['--assets', ASSETS] });
+    await new Promise((r) => setTimeout(r, delayMs));
+    run.ctrlC('SIGINT');
+
+    const { code, sig, stderr } = await run.ended;
+    assert.equal(sig, null, `t=${delayMs}ms: the CLI was killed rather than leaving on its own terms`);
+    assert.equal(code, 130, `t=${delayMs}ms: exit ${code}, not 130. stderr was:\n${stderr}`);
+    assert.doesNotMatch(stderr, /ENOENT|ENOTEMPTY|EEXIST/,
+      `t=${delayMs}ms: an errno reached the user where a sentence belongs:\n${stderr}`);
+    assert.deepEqual(await snapshot(astroDir), before,
+      `t=${delayMs}ms: the renderer did not come back — the next build here would ship this site`);
+    assert.deepEqual(leftovers(astroDir), [], `t=${delayMs}ms: a stash or a lock survived`);
+    landedInBuild.push(existsSync(join(root, 'npx-started')));
+  }
+
+  // 🔴 …and the sweep says out loud that it covered both windows. The case this replaces looked
+  // like it was testing a signal mid-build and was testing a signal against a `setInterval`.
+  assert.ok(landedInBuild.includes(false), 'no sample landed in the staging window — widen the assets');
+  assert.ok(landedInBuild.includes(true), 'no sample reached the build at all — the sleep is too short');
+});

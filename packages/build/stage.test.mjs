@@ -323,6 +323,104 @@ test('a restore that fails part way can be retried', async (t) => {
   noStashLeft(astroDir);
 });
 
+// 🩸 …AND A FLAG SET AT THE END SERIALISES NOTHING. Two restores in flight both saw `restored ===
+// false` and both ran the whole body, so the second renamed a directory the first had already
+// moved: measured 2026-09-07, 2 concurrent calls → 1 rejected ENOENT, 3 → 2 rejected. That
+// arrangement is the DOCUMENTED one — the README hands a consumer `finally { await restore() }`
+// alongside a `signal`, and a signal landing in the restore window fires both at once. What a
+// person then saw was a bare `ENOENT: rename '<stash>/public' -> '<astro>/public'`, naming the one
+// directory that HAD come back while `blog/` and `pagetile/` stayed in the stash unmentioned.
+test('restores in flight at the same time are ONE restore, not a race and an ENOENT', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+
+  for (const n of [2, 3, 8]) {
+    const { restore } = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# a site\n' }] });
+    const settled = await Promise.allSettled(Array.from({ length: n }, () => restore()));
+    const failed = settled.filter((s) => s.status === 'rejected');
+    assert.deepEqual(failed.map((f) => f.reason.message), [],
+      `${n} restores in flight and ${failed.length} of them lost a race`);
+    assert.deepEqual(await snapshot(astroDir), before, `the renderer did not survive ${n} concurrent restores`);
+    noStashLeft(astroDir);
+
+    // …and a later one, after they have all finished, is still free.
+    await restore();
+    assert.deepEqual(await snapshot(astroDir), before);
+  }
+
+  // Staggered rather than simultaneous: a second call landing WHILE the first is still working.
+  const { restore } = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# a site\n' }] });
+  const first = restore();
+  await new Promise((r) => setImmediate(r));
+  const second = restore();
+  await Promise.all([first, second]);
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+
+  // …and the renderer is genuinely free afterwards, not merely looking like it.
+  const next = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# the next site\n' }] });
+  await next.restore();
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
+// 🔴 A restore has to be able to run over a HALF-staged tree, not just a finished one: an abort
+// lands wherever it lands. This walks the window rather than sampling one point in it.
+test('a stage stopped at any point in the window still hands the whole renderer back', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const assetsDir = mkdtempSync(join(tmpdir(), 'tile-build-partial-assets-'));
+  t.after(() => rmSync(assetsDir, { recursive: true, force: true }));
+  mkdirSync(join(assetsDir, 'img'), { recursive: true });
+  for (let i = 0; i < 200; i++) writeFileSync(join(assetsDir, `img/p${i}.bin`), `${i}\n`);
+
+  // A stage does a bounded number of awaits; aborting after each Nth one walks across all of them.
+  for (const ticks of [0, 1, 2, 3, 5, 8, 13, 21, 34]) {
+    const stopping = new AbortController();
+    const pending = stageSite({
+      astroDir, pages: collectPages(IR), themeFile: THEME, assetsDir, blogDir: join(IR, 'posts'),
+      signal: stopping.signal,
+    });
+    (async () => {
+      for (let i = 0; i < ticks; i++) await new Promise((r) => setImmediate(r));
+      stopping.abort();
+    })();
+    // Either it finished before the abort landed or it unwound — both must leave the same renderer.
+    await pending.then(
+      (r) => r.restore(),
+      (err) => assert.equal(err.name, 'AbortError', `unexpected throw at tick ${ticks}: ${err.message}`),
+    );
+    assert.deepEqual(await snapshot(astroDir), before, `aborting after ${ticks} ticks left the renderer changed`);
+    noStashLeft(astroDir);
+  }
+});
+
+// 🔴 …and when it does fail, it fails in a sentence. `cli.mjs` prints `err.message` and nothing
+// else, so a bare errno here is the whole of what a person gets.
+test('a restore that cannot finish says where the renderer is and that it can be retried', async (t) => {
+  if (process.getuid?.() === 0) return;   // root may unlink in a directory it cannot write
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const { restore } = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# a site\n' }] });
+
+  t.after(() => { try { chmodSync(astroDir, 0o700); } catch { /* already back */ } });
+  chmodSync(astroDir, 0o500);
+  await assert.rejects(() => restore(), (err) => {
+    assert.match(err.message, /the renderer could not be put back/);
+    assert.match(err.message, /EACCES|EPERM/, 'the underlying errno is gone — nothing says what failed');
+    assert.match(err.message, new RegExp(`${STASH_PREFIX}`), 'the stash holding the renderer is not named');
+    assert.match(err.message, /content\/, blog\/, pagetile\/, public\//,
+      'it names one directory and leaves the other three unmentioned — that was the bare ENOENT');
+    assert.match(err.message, /retries and is safe/);
+    return true;
+  });
+
+  chmodSync(astroDir, 0o700);
+  await restore();
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
 // ── a signal, which is neither success nor a failed build nor a throw ───────────────────────────
 // 🩸 …AND IT IS NOT THIS MODULE'S SIGNAL TO TAKE. `stageSite` used to install SIGINT/SIGTERM
 // handlers on `process` the moment it was called, and those handlers ended in
