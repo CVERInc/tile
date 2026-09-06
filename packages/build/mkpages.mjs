@@ -62,7 +62,22 @@ export function collectPages(irDir, { includePosts = false } = {}) {
 }
 
 // ── the CLI, unchanged from the original, and only when this file IS the entrypoint ─────────────
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// 🩸 REALPATH BOTH SIDES, and that is the whole of this helper. `pathToFileURL()` only resolves a
+// path; the ESM loader hands `import.meta.url` a REALPATH. So the moment any segment of the
+// invoking path is a symlink — a mount point, macOS's `/tmp` → `/private/tmp`, a vendored link, a
+// runner that drops this file in by path — the two are unequal, the block below never runs, and the
+// CLI becomes a silent no-op: 0 bytes on stdout, exit 0, empty stderr, and a downstream reader
+// holding an empty out.json with nothing to tell it why. Measured 2026-09-07:
+//   ln -s "$PWD/mkpages.mjs" link.mjs && node link.mjs <ir-dir>   → 0 bytes, exit 0
+// How the path is spelled belongs to the CALLER, so this side must not depend on it.
+const isEntrypoint = () => {
+  if (!process.argv[1]) return false;
+  try { return import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href; }
+  catch { return false; }   // an argv[1] that will not resolve is not this file
+};
+
+if (isEntrypoint()) {
   const [, , irDir, outArg] = process.argv;
   const includePosts = process.argv.includes('--include-posts');
   if (!irDir) { console.error('usage: node mkpages.mjs <ir-dir> [out.json] [--include-posts]'); process.exit(2); }
