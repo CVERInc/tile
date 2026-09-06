@@ -760,7 +760,12 @@ function dialogueTurn(buf) {
   const m = RE_TURN_HEAD.exec((buf[0] || '').trim());
   if (!m) return null;
   const body = buf.slice(1);
-  if (!body.some((l) => l.trim())) return null;      // a name with no speech under it is not a turn
+  const firstLine = body.find((l) => l.trim());
+  if (!firstLine) return null;                       // a name with no speech under it is not a turn
+  // A list item under the bold line is never speech — it's the shape of a hand-built series-nav
+  // block (`> **Series: …**` + a numbered link list), which must stay a plain quotation regardless
+  // of how short the bold line happens to be.
+  if (RE_LIST_ITEM.test(firstLine)) return null;
   return { name: m[1].trim(), meta: (m[2] || '').trim(), body };
 }
 

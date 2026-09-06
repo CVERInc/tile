@@ -524,6 +524,25 @@ test('dialogue: a turn and a quotation in the same run keep their own shapes and
   assert.ok(html.includes('st-dialogue') && html.includes('st-quote'), 'both shapes present');
 });
 
+test('dialogue: a bold line at the 24-char cap followed by prose is still a turn', () => {
+  const html = dlg('> **' + 'A'.repeat(24) + '**\n> Right at the limit, and still speech.');
+  assert.ok(html.includes('<div class="st-dialogue">'), 'still trips the dialogue shape');
+  assert.ok(!html.includes('st-quote'), 'not a plain quotation');
+});
+
+test('dialogue: a series-nav block (bold line + numbered link list) is never a turn, at or over the cap', () => {
+  // reef#434: "Series: The PineNote pen" is exactly 24 chars, "...microphone array" is 37 — a
+  // series-nav block must stay a plain quotation regardless of which side of the cap it lands on,
+  // because the list under the bold line is never speech.
+  const atCap = dlg('> **Series: The PineNote pen**\n> 1. [Part 1](/a) *(Current)*\n> 2. [Part 2](/b)');
+  assert.ok(atCap.includes('<blockquote class="st-quote">'), '24-char bold line over a list stays a quote');
+  assert.ok(!atCap.includes('st-dialogue'), 'not a dialogue');
+
+  const overCap = dlg('> **Series: The PineNote microphone array**\n> 1. [Part 1](/a) *(Current)*\n> 2. [Part 2](/b)');
+  assert.ok(overCap.includes('<blockquote class="st-quote">'), '37-char bold line over a list stays a quote');
+  assert.ok(!overCap.includes('st-dialogue'), 'not a dialogue');
+});
+
 
 // ── fenced code highlighting (cssmd/highlight.js) ────────────────────────────────────────────
 // The renderer's job here is narrow: pass a KNOWN language through the highlighter, and leave
