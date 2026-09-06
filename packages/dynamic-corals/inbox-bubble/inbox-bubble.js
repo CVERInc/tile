@@ -1177,7 +1177,28 @@ export function createAiLog(opts) {
 				went = false;
 			}
 			if (!went) return null;
-			state = fresh(now(), state);
+			// 🩸 A QUESTION ASKED DURING THE ROUND TRIP WAS NOT IN THIS SEND (review E5). The report
+			// argued the window was shut because the panel changes after the press — it changes to
+			// a panel with an「ask <assistant> again」button on it, one click from the compose box,
+			// while this `await` is still in flight. It is a narrow window (one fetch, three
+			// actions) and the review agreed it is narrow; what it is not is closed, and the fix is
+			// cheaper than the bet: clear only what this send actually carried.
+			const held = read();
+			if (held && held.sid === state.sid) state = held;
+			const carried = payload.questions.length;
+			const newest = payload.questions[carried - 1];
+			const rows = state.questions;
+			const last = rows[rows.length - 1];
+			// Longer, or ending on a row this send did not carry — the second case is the buffer at
+			// its cap, where a new question drops the oldest and the length never changes.
+			if (rows.length > carried || !last || last.at !== newest.at || last.text !== newest.text) {
+				state.sent = Math.max(0, Math.min(carried, rows.length - 1));
+				// The session is NOT rotated: the question that arrived belongs to the conversation
+				// this handle just opened, and the next `pagehide` carries it under the same
+				// idempotency key — a repeat the endpoint is built for, unlike a lost question.
+			} else {
+				state = fresh(now(), state);
+			}
 			write(state);
 			return payload;
 		}

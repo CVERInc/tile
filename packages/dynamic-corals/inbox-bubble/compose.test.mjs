@@ -2380,3 +2380,86 @@ test('E4: the retry is ended by the idle rotation or a 2xx — never by the age 
 	assert.equal(g.log.flush(), null);
 	assert.equal(posts, settled, 'a session the server took went again');
 });
+
+// ── review E5 (2026-09-08, round 3): the round-trip window the report argued was shut ────────
+//
+// 🩸 The report's「我沒驗證什麼」said a question asked between the press and the server's answer
+// would be cleared by the `fresh()` that follows, and judged the window shut「because the panel
+// changes to the human thread after the press」. It does change — to a panel whose second button
+// is「ask <assistant> again」, one click from the compose box, while the `fetch(keepalive)` is
+// still in flight. The review's probe caught the question there: never sent, never stored.
+
+test('E5: a question asked while the server was answering survives the escalation that cleared', async () => {
+	let answer;
+	const f = logFixture({ send: () => new Promise((r) => { answer = r; }) });
+	f.log.page('/pricing');
+	f.log.question('the escalated question', '/pricing', null, '');
+	await f.settle();
+
+	const press = f.log.escalated('conv-7');
+	await f.settle(); // the press is now waiting on the server
+	const sid = f.log.state().sid;
+
+	// The visitor pressed「ask again」, typed, and sent — three actions inside one round trip.
+	f.log.question('asked while the server was answering', '/pricing', null, '');
+	answer(true);
+	const payload = await press;
+
+	// What went is what was there when it went: one question, and the handle.
+	assert.equal(payload.questions.length, 1);
+	assert.equal(payload.questions[0].text, 'the escalated question');
+	assert.equal(payload.handle, 'conv-7');
+	// 🔴 THE MEASUREMENT. The review's probe read `[]` here, and「DESTROYED — never sent, never
+	// stored」of the second question.
+	assert.deepEqual(f.log.state().questions.map((q) => q.text),
+		['the escalated question', 'asked while the server was answering']);
+	assert.equal(f.log.state().sent, 1, 'the delivered question is queued to go a second time');
+	assert.equal(f.log.state().sid, sid, 'the session rotated out from under the unsent question');
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).questions.length, 2);
+
+	// And the next pagehide carries it — under the same idempotency key, which is what that key
+	// is for. The delivered question rides along; the server is idempotent on the session.
+	const went = f.log.flush();
+	assert.equal(went.session_id, sid);
+	assert.deepEqual(went.questions.map((q) => q.text),
+		['the escalated question', 'asked while the server was answering']);
+	assert.equal(went.handle, 'conv-7');
+	assert.equal(f.log.flush(), null, 'and then it stops');
+});
+
+test('E5: a press with nothing asked behind it still clears, exactly as before', async () => {
+	// The ordinary case is unchanged: nothing arrived during the trip, so the session is done and
+	// the next question opens a new one. This is the D1/ruling-54 behaviour, re-pinned here
+	// because the fix above is the one that could quietly take it away.
+	const f = logFixture({ send: () => Promise.resolve(true) });
+	f.log.question('is anybody there?', '/', null, '');
+	const sid = f.log.state().sid;
+	const payload = await f.log.escalated('conv-7');
+	assert.ok(payload);
+	assert.equal(f.log.state().questions.length, 0);
+	assert.notEqual(f.log.state().sid, sid, 'the press did not start a new session');
+	assert.equal(f.log.state().handle, null, 'the new session inherited the old conversation');
+	assert.equal(f.log.flush(), null);
+
+	// The buffer at its cap is the case a length comparison alone would miss: the new question
+	// drops the oldest, so the count comes back identical to what was carried.
+	let answerAtCap;
+	const g = logFixture({ send: () => new Promise((r) => { answerAtCap = r; }) });
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS; i++) {
+		g.tick(1000);
+		g.log.question(`q${i}`, '/', null, '');
+	}
+	await g.settle();
+	const pressAtCap = g.log.escalated('conv-8');
+	await g.settle();
+	g.tick(1000);
+	g.log.question('the twenty-first, asked mid-flight', '/', null, '');
+	answerAtCap(true);
+	const carried = await pressAtCap;
+	assert.equal(carried.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(g.log.state().questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(g.log.state().questions[AI_LOG_MAX_QUESTIONS - 1].text,
+		'the twenty-first, asked mid-flight', 'the question asked mid-flight was dropped');
+	const late = g.log.flush();
+	assert.equal(late.questions[AI_LOG_MAX_QUESTIONS - 1].text, 'the twenty-first, asked mid-flight');
+});
