@@ -17,6 +17,10 @@ import path from 'node:path';
 
 const exists = async (p) => { try { await stat(p); return true; } catch { return false; } };
 
+// One spelling for the directory this module hides the renderer's own material in — it is named by
+// `.gitignore`, by the leftover check below, and by the tests, and those three must not drift.
+export const STASH_PREFIX = '.tile-build-stash-';
+
 /**
  * Reduce ONE page path to something safe to be a filename, keeping the slashes.
  *
@@ -86,11 +90,26 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   const publicDir = path.join(astroDir, 'public');
   const themesDir = path.join(astroDir, 'src/themes');
 
+  // 🩸 A STASH THAT OUTLIVED ITS BUILD IS THE RENDERER WEARING SOMEBODY ELSE'S CLOTHES, and the
+  // next build here would put that site's leftover pages inside YOURS. `.gitignore` hides the stash
+  // from `git status`, and a site owner working from a tarball has no `git status` at all — so this
+  // is the only place it can be noticed. Refusing rather than auto-restoring is deliberate: what is
+  // in content/ right now may be a half-staged site, and only the person looking knows which of the
+  // two is theirs.
+  const leftovers = (await readdir(astroDir)).filter((n) => n.startsWith(STASH_PREFIX));
+  if (leftovers.length) {
+    throw new Error(`stageSite: a previous build here was killed and left its stash behind — `
+      + `${path.join(astroDir, leftovers[0])}${leftovers.length > 1 ? ` (and ${leftovers.length - 1} more)` : ''}. `
+      + `That directory holds the renderer's OWN ${stagedDirNames.join('/, ')}/, and what is in their `
+      + 'place now belongs to another site. Move the ones inside it back over the renderer\'s, remove '
+      + 'it, and run this again.');
+  }
+
   // 🔴 The stash lives INSIDE the renderer, not in the system temp dir. Two reasons: a rename
   // across devices fails (EXDEV) and the temp dir is routinely on a different one; and none of the
   // renderer's globs are rooted here — they all name ../../content, ../../blog, ../themes — so a
   // directory sitting beside them is invisible to the build.
-  const stash = await mkdtemp(path.join(astroDir, '.tile-build-stash-'));
+  const stash = await mkdtemp(path.join(astroDir, STASH_PREFIX));
   const stashed = new Set();   // moved aside, and owed back
   const touched = new Set();   // emptied or created by US, and therefore ours to undo
   let stagedTheme = null;
@@ -105,9 +124,28 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     touched.add(name);
   }
 
+  // 🩸 `finally` DOES NOT RUN ON A SIGNAL, and Ctrl-C during `astro build` is the single most
+  // likely thing a person does to this module — far likelier than the `kill -9` the notes used to
+  // cover. Measured 2026-09-07: a real SIGINT left the stash in place, the renderer's own blog/ and
+  // pagetile/ inside it, and the previous site's `content/a.md` sitting where the next build would
+  // sweep it up into somebody else's HTML. README promised restore "on success, on a failed build,
+  // and on a throw"; a signal is none of the three.
+  const SIGNALS = ['SIGINT', 'SIGTERM'];
+  const onSignal = (signal) => {
+    const leave = () => process.exit(signal === 'SIGINT' ? 130 : 143);
+    restore().then(leave, (err) => {
+      console.error(`✗ ${signal} during a build and the renderer could not be put back: ${err.message}`);
+      console.error(`  Its own ${stagedDirNames.join('/, ')}/ are in ${stash} — move them back.`);
+      leave();
+    });
+  };
+  const disarm = () => { for (const s of SIGNALS) process.off(s, onSignal); };
+  for (const s of SIGNALS) process.once(s, onSignal);
+
   async function restore() {
     if (restored) return;
     restored = true;
+    disarm();
     // A site's theme belongs to that site's repo, never to the renderer (the renderer ships only
     // the baseline skin). Staged in for the build, removed after — so a site's theme can never
     // accumulate here.

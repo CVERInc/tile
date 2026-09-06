@@ -133,6 +133,13 @@ moves them back — on success, on a failed build, and on a throw. `blog/` and `
 EMPTIED even for a site that has neither, because otherwise the renderer's demo posts and demo book
 build into your site, under your domain, with nothing saying so.
 
+…and on **Ctrl-C**, which is none of those three and is the likeliest of the four. `finally` does
+not run on a signal, so `stageSite` installs `SIGINT`/`SIGTERM` handlers that restore and then exit
+130. A kill nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
+the renderer — `.gitignore` hides it from `git status` and a tarball has no `git status` at all, so
+the NEXT build refuses to start and names the directory rather than building somebody else's
+leftover pages into your site.
+
 🩸 `stage.mjs`'s restore undoes only what a run actually did. The shell it came from armed its
 restore as an EXIT trap before staging began and then removed `blog/` and `pagetile/`
 unconditionally inside it — so an early exit three lines in (a `--blog dir not found`) deleted the
