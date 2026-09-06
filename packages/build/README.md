@@ -199,8 +199,18 @@ delete the renderer's own `content/` for good, silently.
 …and on **Ctrl-C**, which is none of those three and is the likeliest of the four. `finally` does
 not run on a signal, so `cli.mjs` — the program, not the library — installs `SIGINT`/`SIGTERM`
 handlers, aborts the build, and exits 130 / 143 once the renderer is back. A library call does none
-of that: see §"The API" for the `signal` option and why it is the only thing that crosses. A kill
-nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
+of that: see §"The API" for the `signal` option and why it is the only thing that crosses.
+
+**The `astro build` goes first, and the lock goes last.** An abort sends `SIGTERM` to the build's
+whole process group, `SIGKILL` if it is still there after the grace, and waits for it — and only
+then are the four directories put back and `.tile-build-lock` removed. Both halves of that order are
+load-bearing. `docker stop` signals PID 1 and `kill -INT <pid>` signals one process, so a build left
+running outlived the CLI that reported `130`, and three seconds later wrote the RENDERER's own demo
+pages into the site owner's `--outDir` — because restore had already put the renderer's own material
+back underneath it. It had also removed the lock, so for those seconds a build was running that
+nothing was holding the renderer for.
+
+A kill nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
 the renderer — `.gitignore` hides it from `git status` and a tarball has no `git status` at all, so
 the NEXT build refuses to start and names the directory rather than building somebody else's
 leftover pages into your site.
