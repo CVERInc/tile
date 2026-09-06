@@ -1090,6 +1090,14 @@ export function createAiLog(opts) {
 		 *
 		 * Returns the payload that went, or `null` — which is the ordinary case, and the
 		 * reason the second `pagehide` of a page view costs nothing.
+		 *
+		 * 🔴 WHAT ENDS A RETRY, SPELLED OUT (review E4), because the contract delta named the wrong
+		 * thing and reef would have implemented that one: a tenant whose endpoint keeps saying no
+		 * is retried on EVERY `pagehide` that has something unsent, and what stops it is a 2xx or
+		 * the thirty-minute idle rotation in `page()` — which ends the session and takes the unsent
+		 * questions with it. The claim cache takes no part in that decision: the gate below reads
+		 * `claim`, never its age, and `ensureClaim()` is reached from `question()` alone, so a
+		 * visitor who has stopped asking and is only browsing never probes again at all.
 		 */
 		flush() {
 			if (!state || !send) return null;

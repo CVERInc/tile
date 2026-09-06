@@ -2315,3 +2315,68 @@ test('E3: a transport that says no leaves flush()\'s buffer exactly where it was
 	assert.equal(f.log.state().sent, 1);
 	assert.equal(f.log.flush(), null, 'the accepted session went twice');
 });
+
+// ── review E4 (2026-09-08, round 3): the bound the contract delta promised reef ──────────────
+//
+// 🩸 The delta told reef that a tenant answering 404 would be retried「until the browser's own
+// claim cache (≤6 hours) expires」. `flush()` reads `state.claim`, never its age, and
+// `ensureClaim()` is reached from `question()` alone — so a visitor who stopped asking and kept
+// browsing never probes again, and the retries do not stop at six hours. The review measured 288
+// POSTs and ONE probe over 48 hours. Nothing is broken: one request per `pagehide` is what D1
+// intends and it is bounded. What was wrong is the number reef would have built against.
+
+test('E4: the retry is ended by the idle rotation or a 2xx — never by the age of the claim cache', async () => {
+	let probes = 0;
+	let posts = 0;
+	const f = logFixture({
+		probeClaim: async () => (probes++, true),
+		send: () => (posts++, Promise.resolve(false)) // 404 not_claimed, over and over
+	});
+	f.log.page('/');
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1);
+
+	// 48 hours of browsing every ten minutes — under the idle window, so the session never rotates.
+	for (let i = 0; i < 288; i++) {
+		f.tick(10 * 60 * 1000);
+		f.log.page(`/p${i}`);
+		f.log.flush();
+		await f.settle();
+	}
+	// 🔴 THE READING THE DELTA GOT WRONG. Eight times the claim TTL has passed and the retries are
+	// still going, because nothing here consults it — and the probe count is 1, because a visitor
+	// who is only browsing never asks anything.
+	assert.equal(posts, 288, 'a pagehide with something unsent stopped retrying');
+	assert.equal(probes, 1, 'browsing on its own probed the claim endpoint');
+	assert.ok(f.at() - f.log.state().claimAt > AI_LOG_CLAIM_TTL_MS * 7);
+	assert.equal(f.log.state().questions.length, 1, 'the refused question was lost on the way');
+
+	// 🔴 WHAT DOES STOP IT, ONE: the thirty-minute idle. The next `page()` rotates the session and
+	// the unsent question goes with it — `flush()` deliberately does not rotate (D6), so this is
+	// the only door that closes on a visitor who never comes back to the panel.
+	f.tick(AI_LOG_IDLE_MS + 1);
+	f.log.page('/after-a-coffee');
+	assert.equal(f.log.state().questions.length, 0);
+	const before = posts;
+	assert.equal(f.log.flush(), null);
+	assert.equal(posts, before, 'a rotated session was still POSTed');
+
+	// 🔴 AND TWO: a 2xx. Nothing else clears the mark, which is the other half of the same delta.
+	let served = false;
+	const g = logFixture({ send: () => (posts++, Promise.resolve(served)) });
+	g.log.question('is anybody there?', '/', null, '');
+	await g.settle();
+	g.log.flush();
+	await g.settle();
+	assert.equal(g.log.state().sent, 0);
+	served = true;
+	g.log.flush();
+	await g.settle();
+	assert.equal(g.log.state().sent, 1);
+	const settled = posts;
+	g.tick(10 * 60 * 1000);
+	g.log.page('/still-here');
+	assert.equal(g.log.flush(), null);
+	assert.equal(posts, settled, 'a session the server took went again');
+});
