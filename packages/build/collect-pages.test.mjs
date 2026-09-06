@@ -14,7 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +62,27 @@ test('the CLI exits 2 with the original usage line when given no ir-dir', () => 
   })();
   assert.equal(r.status, 2);
   assert.equal(r.stderr, 'usage: node mkpages.mjs <ir-dir> [out.json] [--include-posts]\n');
+});
+
+// 🩸 THE CALLER SPELLS THE PATH, NOT US. Every case above reaches mkpages.mjs by its realpath,
+// because `new URL('./mkpages.mjs', import.meta.url)` can produce nothing else — so all of them
+// were blind to an entrypoint guard that compared an unresolved argv[1] against a resolved
+// `import.meta.url`. Through a symlink the CLI produced 0 bytes and exited 0: no output, no error,
+// no clue, and a deploy step downstream reading an empty out.json. Measured 2026-09-07. A runner
+// that drops this file into a container by path, a mount point, `/tmp` on macOS — any one of them
+// is enough, and none of them is this file's business.
+test('the CLI is still the CLI when it is reached through a symlink', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile-build-symlink-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const link = join(dir, 'link.mjs');
+  symlinkSync(MKPAGES, link);
+
+  assert.deepEqual(execFileSync(process.execPath, [link, IR], { cwd: HERE }), expected,
+    'the CLI produced nothing through a symlinked path — the entrypoint guard did not fire');
+
+  const r = spawnSync(process.execPath, [link], { cwd: HERE });
+  assert.equal(r.status, 2, 'no ir-dir through a symlink must still be exit 2, not a silent exit 0');
+  assert.equal(String(r.stderr), 'usage: node mkpages.mjs <ir-dir> [out.json] [--include-posts]\n');
 });
 
 test('a trailing --include-posts is a flag, never an out.json', () => {
