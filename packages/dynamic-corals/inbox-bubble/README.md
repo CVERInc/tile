@@ -133,7 +133,9 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
 - **Caps are applied on the way in**, so a hostile client cannot bloat a row: 20 questions per
   session, 500 characters each, 40 pages of at most 200 characters, oldest dropped first — and the
   page sequence is bounded in UTF-8 octets as well, because the transport's ~64 KiB budget counts
-  octets while every cap above counts characters, and one CJK character is three of them.
+  octets while every cap above counts characters, and one CJK character is three of them. The
+  conversation handle is bounded too, at 64 characters — the length the contract gives
+  `session_id`, its twin — and a handle that is not a non-empty string is dropped rather than sent.
 - **If storage stops accepting writes** (a full quota, not a disabled store), the session continues
   in memory for the rest of the document, under the same caps. What it loses is the ability to
   outlive that document or be seen by another tab — never the questions already asked, which is

@@ -16,7 +16,7 @@
   ],
   "stores": [
     "browser localStorage — this visitor's own conversation handle (an opaque id minted by the site's backend, never invented client-side) plus which view (KAITO or the human thread) they last chose, per tenant, with a 30-day expiry; the transcript itself lives on the feelreef backend this coral talks to, not in the coral",
-    "browser localStorage — the current session's own questions, the paths they were asked on and a client-minted session id, per tenant, until they are sent once (pagehide or a press for a person) or the session goes 30 minutes idle. Capped at 20 questions of 500 characters and 40 paths of 200, in octets as well as characters. On a tenant with no Inbox this is dropped every time rather than kept, and nothing is ever sent"
+    "browser localStorage — the current session's own questions, the paths they were asked on and a client-minted session id, per tenant, until they are sent once (pagehide or a press for a person) or the session goes 30 minutes idle. Capped at 20 questions of 500 characters, 40 paths of 200 and a conversation handle of 64, in octets as well as characters. On a tenant with no Inbox this is dropped every time rather than kept, and nothing is ever sent"
   ],
   "paid": false,
   "funding": null,

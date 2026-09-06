@@ -512,6 +512,17 @@ export const AI_LOG_MAX_PAGES = 40;
 /** Longest path or locale tag kept, so neither can be used to pad a row. */
 export const AI_LOG_MAX_FIELD = 200;
 /**
+ * Longest conversation id kept — the same length the contract gives `session_id`.
+ *
+ * 🩸 THE FIELD D5's KNIFE MISSED (review E2). `session_id` was sliced twice and `page` four times,
+ * and `handle` — the only other opaque id on this row — went from storage to the wire with a
+ * `typeof` check and nothing else. Under D5's own threat model (a same-origin script writes this
+ * browser's cell) the review planted 200,000 characters there and measured a 200,189-octet body:
+ * three times what the beacon carries, while the README said caps were applied on the way in.
+ * Both ids are minted elsewhere and are opaque here, so they are bounded by the same number.
+ */
+export const AI_LOG_MAX_HANDLE = 64;
+/**
  * What the transport will actually carry, in OCTETS: `sendBeacon` and `fetch(keepalive)` are
  * both budgeted at ~64 KiB per origin, and a body over it is refused rather than truncated.
  */
@@ -621,6 +632,20 @@ function aiHit(raw) {
 }
 
 /**
+ * The conversation id, admitted by SHAPE and bounded in length like every other outbound field.
+ *
+ * 🔴 THE SHAPE `saveHandle` WRITES, AND NOTHING ELSE: a non-empty single-line string, capped. An
+ * id the server minted is all of those; the 200,000-character value the review planted in this
+ * browser's own cell is none of them past the cap, and one that is empty or is not a string at
+ * all is DROPPED rather than sent as `""` — `handle` is the optional sixth key of the body, and
+ * an absent one is the truthful way to say this session never reached a person.
+ */
+export function aiHandle(raw) {
+	if (typeof raw !== 'string') return null;
+	return aiLine(raw, AI_LOG_MAX_HANDLE) || null;
+}
+
+/**
  * The whitelist a question row is BUILT FROM — never a filter applied to something richer.
  *
  * 🔴 EVERY FIELD ON THE WIRE IS NAMED HERE, and a field that is not named here cannot get
@@ -716,7 +741,7 @@ export function parseAiLog(raw) {
 		// somebody hand-wrote, or a cap that dropped an already-counted question — would
 		// permanently convince this browser it had nothing left to flush.
 		sent: Number.isFinite(raw.sent) ? Math.max(0, Math.min(raw.sent, questions.length)) : 0,
-		handle: typeof raw.handle === 'string' && raw.handle ? raw.handle : null,
+		handle: aiHandle(raw.handle),
 		claim: raw.claim === true || raw.claim === false ? raw.claim : null,
 		// 🔴 WHEN WE LEARNED, and separately WHEN WE LAST ASKED (review E1). Both are persisted
 		// because a static site's every navigation is a new document: a backoff kept in a variable
@@ -745,7 +770,11 @@ export function aiSessionPayload(kind, id, state) {
 		pages: capAiPages(held.pages),
 		questions: capAiQuestions(held.questions)
 	};
-	if (typeof held.handle === 'string' && held.handle) body.handle = held.handle;
+	// The same gate as on the way in, for the same reason `pages` has one at both doors: this
+	// function is handed a state object, and the door it was read through is not this one's to
+	// assume (review E2).
+	const handle = aiHandle(held.handle);
+	if (handle) body.handle = handle;
 	return body;
 }
 
@@ -1124,7 +1153,7 @@ export function createAiLog(opts) {
 			if (!state) return null;
 			const at = now();
 			state = current(at);
-			state.handle = typeof conv === 'string' && conv ? conv : null;
+			state.handle = aiHandle(conv);
 			state.claim = true;
 			state.claimAt = at;
 			state.last = at;

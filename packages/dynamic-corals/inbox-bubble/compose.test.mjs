@@ -1250,9 +1250,9 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 const {
 	AI_LOG_CLAIM_RETRY_MS, AI_LOG_CLAIM_TTL_MS, AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS,
 	AI_LOG_MAX_FIELD, AI_LOG_MAX_PAGES, AI_LOG_MAX_PAGE_BYTES, AI_LOG_MAX_TEXT,
-	AI_LOG_MAX_WIRE_BYTES, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiLogKey, aiPagePath,
-	aiSessionPayload, appendAiPage, capAiPages, capAiQuestions, createAiLog, parseAiLog,
-	probeInboxClaim, sendAiSession, utf8Bytes
+	AI_LOG_MAX_WIRE_BYTES, AI_LOG_MAX_HANDLE, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiHandle,
+	aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiPages, capAiQuestions, createAiLog,
+	parseAiLog, probeInboxClaim, sendAiSession, utf8Bytes
 } = await import('./inbox-bubble.js');
 
 function logFixture(over = {}) {
@@ -1606,9 +1606,14 @@ test('D5+D4: the worst session this coral can hold still fits what the transport
 	// assembles it, not by hand: caps in, wire out.
 	let pages = [];
 	for (let i = 0; i < AI_LOG_MAX_PAGES; i++) pages = appendAiPage(pages, `/${i}` + '產品'.repeat(95));
+	// 🩸 THE HANDLE IS A CAP NOW, NOT A CONVENTION (review E2). This specimen used to hand in
+	// `'c'.repeat(64)` — a number no line of code was enforcing, so the gate measured the world it
+	// had chosen rather than the worst session this coral can hold. What goes in is a handle
+	// nobody bounded; what has to come out is the bound.
 	const body = aiSessionPayload('site', 'a-tenant-with-a-long-enough-id', {
-		sid: 'x'.repeat(64), pages, questions: worstCaseQuestions(), handle: 'c'.repeat(64)
+		sid: 'x'.repeat(64), pages, questions: worstCaseQuestions(), handle: 'c'.repeat(200_000)
 	});
+	assert.equal(body.handle.length, AI_LOG_MAX_HANDLE, 'nothing capped the handle');
 	const bytes = utf8Bytes(JSON.stringify(body));
 	assert.ok(bytes < AI_LOG_MAX_WIRE_BYTES,
 		`the worst session this coral can hold is ${bytes} octets — the beacon would refuse it`);
@@ -1832,6 +1837,11 @@ test('D9: the README and the manifest describe the flush the contract describes'
 	assert.match(MANIFEST_STORES, /dropped every time/);
 	assert.match(README, /40 pages of at most 200 characters/);
 	assert.match(README, /bounded in UTF-8 octets/);
+	// E2: the row's last uncapped field, named in both documents now that a line of code enforces it.
+	const handleCap = Number(CORAL_CODE.match(/AI_LOG_MAX_HANDLE = (\d+);/)[1]);
+	assert.equal(handleCap, 64);
+	assert.match(README, new RegExp(`conversation handle is bounded too, at ${handleCap} characters`));
+	assert.match(MANIFEST_STORES, new RegExp(`a conversation handle of ${handleCap}`));
 	assert.match(README, /must parse as an `http\(s\)` URL/);
 	assert.match(README, /\*\*If storage stops accepting writes\*\*/);
 });
@@ -2183,4 +2193,78 @@ test('E1: the two quantities survive a reload, and neither of them reaches the w
 		{ sid: 'sid-1', pages: [], questions: [], probedAt: 12345, claimAt: 12345 });
 	assert.equal(JSON.stringify(body).includes('probedAt'), false);
 	assert.equal(JSON.stringify(body).includes('12345'), false);
+});
+
+// ── review E2 (2026-09-08, round 3): the field D5's knife did not reach ──────────────────────
+//
+// 🩸 `session_id` was sliced to 64 twice, `page` to 200 four times, `text` to 500 — and `handle`,
+// the only other opaque id on the row, went from this browser's storage to the wire on a `typeof`
+// check alone. The threat model is D5's own, and it is the reason D5 was ruled a blocker: a
+// same-origin script writes `reef-inbox:ai:site:acme`. The review planted 200,000 characters in
+// `handle` and measured a 200,189-octet body — three times what the transport carries — while the
+// README said caps are applied on the way in so a hostile client cannot bloat a row.
+
+test('E2: a handle is admitted by shape and bounded in length, or it is dropped', () => {
+	// The shape `saveHandle` writes: a non-empty, single-line string.
+	assert.equal(aiHandle('conv-7'), 'conv-7');
+	assert.equal(aiHandle(''), null);
+	assert.equal(aiHandle('   '), null, 'a handle of whitespace is not a conversation');
+	assert.equal(aiHandle(null), null);
+	assert.equal(aiHandle(undefined), null);
+	assert.equal(aiHandle(7), null);
+	assert.equal(aiHandle({ conv: 'conv-7' }), null, 'an object stringified its way onto the wire');
+	assert.equal(aiHandle(['conv-7']), null);
+	// One line, like every other field — a header cannot be split across one of these.
+	assert.equal(aiHandle('conv-7\r\nx-inbox-conversation: conv-8'),
+		'conv-7 x-inbox-conversation: conv-8');
+	// And the length, which is the half that did not exist at all.
+	assert.equal(aiHandle('c'.repeat(200_000)).length, AI_LOG_MAX_HANDLE);
+	assert.equal(AI_LOG_MAX_HANDLE, 64, 'the contract gives session_id 64 and this is its twin');
+});
+
+test('E2: the planted handle the review measured reaches neither storage nor the wire', () => {
+	const hostile = 'SENTINEL-' + 'c'.repeat(200_000);
+	// Door one: read back out of the cell a same-origin script wrote.
+	const parsed = parseAiLog({ sid: 'x', started: 1, last: 2, handle: hostile, questions: [] });
+	assert.equal(parsed.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(parsed.handle.startsWith('SENTINEL-'), 'the cap kept the wrong end');
+	// Door two: onto the wire, which is the only measurement the endpoint ever makes.
+	const body = aiSessionPayload('site', 'acme',
+		{ sid: 's', pages: ['/'], questions: [{ text: 'q', page: '/', at: 1 }], handle: hostile });
+	assert.equal(body.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(utf8Bytes(JSON.stringify(body)) < 1_000, 'the body is still the review\'s 200,189 octets');
+
+	// And through a real log, exactly as the review's probe drove it: plant the cell, mount on it,
+	// ask, flush, read the bytes that went.
+	const f = logFixture();
+	f.cells.set(aiLogKey('site:acme'), JSON.stringify({
+		sid: 'sid-planted', started: f.at(), last: f.at(), pages: [], questions: [],
+		sent: 0, handle: hostile, claim: true, claimAt: f.at()
+	}));
+	f.log.question('do you ship to Japan?', '/', null, '');
+	const went = f.log.flush();
+	assert.equal(went.handle.length, AI_LOG_MAX_HANDLE);
+	assert.ok(utf8Bytes(JSON.stringify(went)) < AI_LOG_MAX_WIRE_BYTES / 8);
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).handle.length, AI_LOG_MAX_HANDLE,
+		'this browser is still holding the whole thing for the next flush');
+});
+
+test('E2: an escalation carries the id the server minted, capped, and a blank one is no key at all', async () => {
+	const f = logFixture({ send: () => Promise.resolve(true) });
+	f.log.question('is anybody there?', '/', null, '');
+	const went = await f.log.escalated('conv-7');
+	assert.equal(went.handle, 'conv-7', 'an ordinary conversation id was mangled');
+
+	const long = logFixture({ send: () => Promise.resolve(true) });
+	long.log.question('is anybody there?', '/', null, '');
+	const big = await long.log.escalated('c'.repeat(5000));
+	assert.equal(big.handle.length, AI_LOG_MAX_HANDLE);
+
+	// An empty id is not a handle, and the sixth key is absent rather than `""` — the contract's
+	// `handle` means「this row reached a person」, and an empty string would say so untruthfully.
+	const blank = logFixture({ send: () => Promise.resolve(true) });
+	blank.log.question('is anybody there?', '/', null, '');
+	const none = await blank.log.escalated('');
+	assert.equal('handle' in none, false);
+	assert.equal(blank.log.state().handle, null);
 });

@@ -301,13 +301,18 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	assert.equal(windowListeners.has('reef-inbox:handle'), false, 'the hand-off listener is back');
 	assert.equal(storage.get(key), stored, 'a dispatched hand-off rewrote the stored handle');
 
-	// Nor is there an export to hand one to. `parseHandle` is the only export that understands the
-	// shape at all, and it is a pure reader: given the payload it returns a value and adopts nothing.
+	// Nor is there an export to hand one to. `parseHandle` and `aiHandle` (0.7.6, review E2) are the
+	// only exports that understand the shape at all, and both are pure readers: given the payload
+	// they return a value and adopt nothing. The list is spelled out so that a THIRD one has to be
+	// a deliberate act rather than something that arrives with a refactor.
 	assert.deepEqual(Object.keys(api).filter((name) => /hand|adopt/i.test(name)).sort(),
-		['handoffConcluded', 'handoffFormHtml', 'parseHandle', 'refusalNeedsHandoffForm'],
+		['AI_LOG_MAX_HANDLE', 'aiHandle', 'handoffConcluded', 'handoffFormHtml', 'parseHandle',
+			'refusalNeedsHandoffForm'],
 		'an export that takes a handle appeared');
 	assert.equal(api.parseHandle(payload).conv, 'ATTACKER-OWNED-CONV-ID');
 	assert.equal(storage.get(key), stored, 'parseHandle adopted the handle it was shown');
+	assert.equal(api.aiHandle('ATTACKER-OWNED-CONV-ID'), 'ATTACKER-OWNED-CONV-ID');
+	assert.equal(storage.get(key), stored, 'aiHandle adopted the handle it was shown');
 
 	// The measurement the review's own probe made: the next message is filed under the id the
 	// SERVER minted for this visitor.
