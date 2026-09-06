@@ -79,21 +79,36 @@ it is what made one site advertise the wrong `hreflang` for a year.
 `posts/` (and `posts-*`) are the blog corpus, not pages. Copied into `content/` they each become a
 stray top-level route.
 
-## Three sanitisers, one rule
+## Four sanitisers, one rule
 
-A page path is data right up until the moment it becomes a filename. Three implementations of this
-existed before this package; here is where each stood.
+A page path is data right up until the moment it becomes a filename. Four implementations of this
+expression existed before this package; here is where each stood, and what it produces.
 
-| | sanitises | given |
-| --- | --- | --- |
-| the collector (`mkpages.mjs`) | **nothing** | — |
-| the shell orchestrator (private, pre-move) | `p.path.split('/').map(s => s.replace(/[^\p{L}\p{N}_-]/gu,'-')).filter(Boolean)`, `segs.length ? segs.join('/') : 'home'` | a `site_pages.json` from the collector |
-| the ejected builder (private, in progress) | the same expression, ending `.join('/') \|\| 'home'` | its own walk of `ir/` |
+| | sanitises | given | produces |
+| --- | --- | --- | --- |
+| the collector (`mkpages.mjs`) | **nothing** | — | — |
+| the shell orchestrator (private, pre-move) | `p.path.split('/').map(s => s.replace(/[^\p{L}\p{N}_-]/gu,'-')).filter(Boolean)`, `segs.length ? segs.join('/') : 'home'` | a `site_pages.json` from the collector | a **filename** |
+| the ejected builder (private, in progress) | the same expression, ending `.join('/') \|\| 'home'` | its own walk of `ir/` | a **filename** |
+| the same shell's `publicPath` | the same segment expression, ending `segments.length === 1 && segments[0] === 'home' ? '/' : '/' + segments.join('/')` | the same `site_pages.json` | a **route** — the public URL of that page |
 
-**Verdict: the two that sanitise are equivalent, and the third is not a gap.**
+**Verdict: the three that sanitise are equivalent, the collector is not a gap, and the fourth is
+downstream of this one rather than a second opinion about it.**
 
-The two expressions differ only in how they spell "nothing left → `home`", and `filter(Boolean)`
-makes those two spellings the same function: after the filter no segment is empty, so a non-empty
+The fourth is the one a census that says "three" misses, and it is worth being precise about why it
+is not a divergence risk. It computes a URL, not a filename, and
+
+```
+publicPath(p) === (safePagePath(p) === 'home' ? '/' : '/' + safePagePath(p))
+```
+
+for every input — including the empty one, where `filter(Boolean)` leaves no segments and both
+sides land on `/`. So it is a pure function of what `safePagePath()` returns, not a parallel
+implementation of it: change the rule here and the routes move with the filenames, which is exactly
+what has to happen. `stage.test.mjs` transcribes that expression verbatim and proves the identity
+over the same corpus, so the claim is checked rather than asserted.
+
+The two filename expressions differ only in how they spell "nothing left → `home`", and
+`filter(Boolean)` makes those two spellings the same function: after the filter no segment is empty, so a non-empty
 array can never `join('/')` to `''`. `stage.test.mjs` proves it over a corpus rather than asserting
 it — both formulations are transcribed there verbatim and run side by side against every case.
 

@@ -95,6 +95,31 @@ test('safePagePath is exactly the two implementations it replaces', () => {
   }
 });
 
+// 🩸 THE CENSUS SAID THREE AND THERE ARE FOUR. The same shell that owns the canonical filename rule
+// carries a `publicPath` built from the same segment expression with a different tail, and it
+// computes the page's public URL. Nothing was checking that the two stay in step — and once
+// safePagePath lives in a public repo and evolves on its own, the day they diverge is the day the
+// storefront's links point at pages that do not exist, with neither side going red.
+//
+// They cannot diverge by accident, because the route is a FUNCTION of the filename rather than a
+// second opinion about it, and that is what this proves. See README §"Four sanitisers, one rule".
+test('the route rule is downstream of safePagePath, not a fourth opinion', () => {
+  // Transcribed verbatim from the shell that computes storefront URLs.
+  const publicPath = (input) => {
+    const segments = String(input).split('/').map((segment) => segment.replace(/[^\p{L}\p{N}_-]/gu, '-')).filter(Boolean);
+    return segments.length === 1 && segments[0] === 'home' ? '/' : '/' + segments.join('/');
+  };
+  const routeOf = (safe) => (safe === 'home' ? '/' : `/${safe}`);
+
+  const corpus = ['home', '', '/', '//', 'a', 'a/b', '../x', '.', '..', '...', 'a b', 'a&b', 'zh-tw/關於',
+    'ja-jp/はじめに', '한글/소개', 'legal/terms', 'x/', '/x', 'x//y', 'MiXeD/CaSe', '_site', '-', '_',
+    'emoji-🎏-page', 'page.html', 'a\\b', 'a\tb', '2026/01/note', 'home/home', 'a/home', 'our team & friends'];
+  for (const p of corpus) {
+    assert.equal(publicPath(p), routeOf(safePagePath(p)),
+      `the route and the filename disagree on ${JSON.stringify(p)} — a link to a page that is not there`);
+  }
+});
+
 // ── theme name ──────────────────────────────────────────────────────────────────────────────────
 test('themeNameFromPages reads the first page that declares one', () => {
   assert.equal(themeNameFromPages(collectPages(IR)), 'paperkite');
