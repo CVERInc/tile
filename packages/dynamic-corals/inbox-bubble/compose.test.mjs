@@ -2463,3 +2463,35 @@ test('E5: a press with nothing asked behind it still clears, exactly as before',
 	const late = g.log.flush();
 	assert.equal(late.questions[AI_LOG_MAX_QUESTIONS - 1].text, 'the twenty-first, asked mid-flight');
 });
+
+// ── review E6 (2026-09-08, round 3): the specimen that could only pass ───────────────────────
+//
+// 🩸 `utf8Bytes` treated any high surrogate with a character after it as half a pair and ate the
+// next character with it. The suite's specimen was `'\ud800'` — a lone surrogate at the END of the
+// string, the single position where the old `i + 1 < s.length` test is false, so the only
+// arrangement that could pass. The review's: `'\ud800嗎'`, counted 4, actually 6.
+
+test('E6: a lone surrogate costs three octets wherever it stands, and never eats its neighbour', () => {
+	// The review's specimen, and the encoder's own answer to it.
+	assert.equal(utf8Bytes('\ud800嗎'), 6);
+	assert.equal(Buffer.byteLength('\ud800嗎', 'utf8'), 6, 'the ruler and the encoder disagree');
+	// Every arrangement, each against what a real UTF-8 encoder produces.
+	for (const specimen of [
+		'\ud800', '\ud800x', '\ud800嗎', 'x\ud800', 'x\ud800x', '\udc00', '\udc00\ud800',
+		'\ud800𐀀', '😀', '😀\ud800', 'abc', 'é', '嗎', '😀', ''
+	]) {
+		assert.equal(utf8Bytes(specimen), Buffer.byteLength(specimen, 'utf8'),
+			`utf8Bytes disagrees with the encoder on ${JSON.stringify(specimen)}`);
+	}
+	// A real pair is still one character of four octets, and a low surrogate does not start one.
+	assert.equal(utf8Bytes('😀'), 4);
+	assert.equal(utf8Bytes('\udc00\ud800'), 6);
+	assert.equal(utf8Bytes(null), 0);
+
+	// 🔴 AND WHY THIS IS A RULER, NOT A BUDGET FIX. What the wire budget measures is the output of
+	// `JSON.stringify`, which escapes a lone surrogate into six ASCII characters — so the hot path
+	// cannot reach the branch above, and the count there was right before and after.
+	const body = { text: '\ud800嗎' };
+	assert.equal(utf8Bytes(JSON.stringify(body)), Buffer.byteLength(JSON.stringify(body), 'utf8'));
+	assert.equal(JSON.stringify(body).includes('\\ud800'), true);
+});

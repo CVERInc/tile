@@ -584,15 +584,26 @@ function aiLine(raw, max) {
  *
  * Spelled out rather than `new TextEncoder()`: this runs inside a `pagehide` handler, where a
  * global that may not exist is not worth a try/catch for arithmetic this small.
+ *
+ * 🩸 A HIGH SURROGATE IS NOT A PAIR JUST BECAUSE SOMETHING FOLLOWS IT (review E6). The old test
+ * was `i + 1 < s.length`, so `'\ud800嗎'` was counted as one four-octet character and the 嗎 was
+ * swallowed: 4 where the real encoding is 6. The specimen that passed was a lone surrogate at the
+ * END of the string — the one position where that test is false. It is not a live budget defect
+ * (what is measured is `JSON.stringify`'s output, which escapes a lone surrogate to six ASCII
+ * characters, so the hot path never meets one) but this function is exported and says it counts
+ * octets, so it counts them.
  */
 export function utf8Bytes(text) {
 	const s = typeof text === 'string' ? text : '';
 	let n = 0;
 	for (let i = 0; i < s.length; i++) {
 		const c = s.charCodeAt(i);
+		const next = s.charCodeAt(i + 1); // NaN past the end, and NaN fails every comparison below
 		if (c < 0x80) n += 1;
 		else if (c < 0x800) n += 2;
-		else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) { n += 4; i++; }
+		else if (c >= 0xd800 && c <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) { n += 4; i++; }
+		// An unpaired surrogate — high or low — is what a UTF-8 encoder makes of it: the
+		// three-octet replacement character, which is also what `TextEncoder` produces.
 		else n += 3;
 	}
 	return n;
