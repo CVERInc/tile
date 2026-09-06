@@ -59,7 +59,8 @@ a listener to exist.
 
 ## Handing off a conversation from elsewhere
 
-From 0.7.4, a page that mints a hand-off some other way than this file's own escalate/compose
+From 0.7.4 (and from 0.7.5 the event must name its addressee — see below), a page that mints a
+hand-off some other way than this file's own escalate/compose
 forms — reef's own `/report` form, for instance, which writes the same handle shape this file's
 `saveHandle` does — can make an ALREADY-mounted panel switch to it:
 
