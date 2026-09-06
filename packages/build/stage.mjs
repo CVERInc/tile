@@ -192,8 +192,25 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     }
 
     // ── this site's IR pages into content/ ──────────────────────────────────────────────────────
+    // 🩸 `safePagePath` IS MANY-TO-ONE, and until this map existed nothing on the writing side was
+    // looking. `our team & friends` and `our-team---friends` both become `our-team---friends.md`,
+    // so the second write silently replaced the first — and `pageCount` still said two, and the CLI
+    // still printed `✓ 2 page(s) →`, and the site was one page short with nothing anywhere saying
+    // which one. (The fixture already ships `our team & friends.md`; a site owner adding the dashed
+    // spelling is all it takes.) Others measured in the same corpus: `a b` / `a.b` / `a&b` all land
+    // on `a-b`, and `` / `/` / `home` all land on `home`. The private shell this rule came from
+    // refused here too; a package handed to somebody rebuilding their OWN site can do no less.
+    const claimedBy = new Map();
     for (const p of pages) {
-      const outPath = path.join(contentDir, `${safePagePath(p.path)}.md`);
+      const safe = safePagePath(p.path);
+      const first = claimedBy.get(safe);
+      if (first !== undefined) {
+        throw new Error(`stageSite: two pages become the same file — ${JSON.stringify(first)} and `
+          + `${JSON.stringify(p.path)} both sanitise to content/${safe}.md, so one would silently `
+          + 'replace the other while the build still reported both. Rename one in the IR.');
+      }
+      claimedBy.set(safe, p.path);
+      const outPath = path.join(contentDir, `${safe}.md`);
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, p.markdown);
     }
