@@ -167,6 +167,24 @@ const COMPLETE_COPY = {
 	'zh-CN': { paid: '感谢您的订购', receipt: '收据已寄到您的电子邮件。', pending: '正在确认您的付款', pendingBody: '款项处理中', waiting: '仍在确认中，结果会以 email 通知。', canceled: '付款未完成', canceledBody: '购物车内容仍保留。', unknown: '找不到这笔订单', unknownBody: '这一页会在付款完成后显示。', back: '返回商店', order: '订单编号', total: '合计', tax: '含税' }
 };
 
+// What the donor shell DECLARES its language to be — the site's own build-owned
+// answer, not a guess made out here.
+function shellLang(shell) {
+	return ((shell || '').match(/<html\b[^>]*\blang=["']([^"']+)/i) || [])[1] || '';
+}
+
+// Resolve a free-form hint (a shop path, a document's lang, or both) against the
+// locale set COMPLETE_COPY carries. Lifted out of completionLocale unchanged so a
+// site-owned buyer page can resolve ITS locale from the site's own shell instead
+// of picking a platform default.
+function localeFromHint(value) {
+	const hint = String(value || '').toLowerCase();
+	if (/zh(?:-|_)hans|zh-cn/.test(hint)) return 'zh-CN';
+	if (/zh(?:-|_)tw|zh-tw|zh(?:-|_)hant/.test(hint)) return 'zh-TW';
+	if (/(?:^|[\s/_-])ja(?:[\s/_-]|$)|ja-jp/.test(hint)) return 'ja-JP';
+	return 'en-US';
+}
+
 function completionLocale(shop, shell, pathLocale) {
 	if (pathLocale) {
 		if (pathLocale === 'zh-tw' || pathLocale === 'zh-hant') return 'zh-TW';
@@ -174,13 +192,7 @@ function completionLocale(shop, shell, pathLocale) {
 		if (pathLocale === 'ja' || pathLocale === 'ja-jp') return 'ja-JP';
 		return 'en-US';
 	}
-	const path = (shop && shop.shopPath || '').toLowerCase();
-	const lang = ((shell || '').match(/<html\b[^>]*\blang=["']([^"']+)/i) || [])[1] || '';
-	const value = (path + ' ' + lang).toLowerCase();
-	if (/zh(?:-|_)hans|zh-cn/.test(value)) return 'zh-CN';
-	if (/zh(?:-|_)tw|zh-tw|zh(?:-|_)hant/.test(value)) return 'zh-TW';
-	if (/(?:^|[\s/_-])ja(?:[\s/_-]|$)|ja-jp/.test(value)) return 'ja-JP';
-	return 'en-US';
+	return localeFromHint((shop && shop.shopPath || '') + ' ' + shellLang(shell));
 }
 
 function shouldClearCartForOutcome(state) {
@@ -232,6 +244,219 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	body = injectHead(body, `<title>${initialHeading}</title><meta name="robots" content="noindex">`);
 	body = replaceMain(body, completionBody(copy, locale, outcome.pathname + outcome.search, shopPath, cfg.guildId || cfg.siteId || '', hasOutcomeKey));
 	return new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' } });
+}
+
+// ─── SITE-OWNED BUYER PAGES ───────────────────────────────────────────────────
+// The site's own member-facing pages (/membership, /account today) rendered in
+// the site's OWN repository-built shell: its theme, nav, footer and declared
+// language stay, and RSP supplies only the scoped facts over the same-origin
+// binding. Which paths those are, which facts endpoint each reads and which body
+// renderer each selects all come from the contract (CFG.apiTransport
+// .siteOwnedBuyerPages). Nothing below names a page path or a facts path — `kind`
+// is the renderer selector, so this worker never recognises them by path literal.
+//
+// The DONOR SHELL is the site root, deliberately: these pages exist on sites with
+// no shop at all, so the shop-page donor renderCompletion uses is not available
+// here. Every built site has a root document.
+
+const BUYER_PAGE_COPY = {
+	'en-US': { membership: 'Membership', membershipEmpty: 'No membership plans are available right now.', unavailable: 'This page is unavailable right now. Please try again later.', notFound: 'Not found', subscribe: 'Join', authState: 'Checking…', account: 'Account', signIn: 'Sign in', signInIntro: 'Enter your email address and we will send you a sign-in link.', email: 'Email address', sendLink: 'Send sign-in link', newEmail: 'New email address', sendVerification: 'Send verification email', interval: { day: 'day', week: 'week', month: 'month', year: 'year' } },
+	'ja-JP': { membership: 'メンバーシップ', membershipEmpty: '現在ご利用いただけるメンバーシッププランはありません。', unavailable: '現在このページを表示できません。しばらくしてから再度お試しください。', notFound: 'ページが見つかりません', subscribe: '加入する', authState: '確認中...', account: 'アカウント', signIn: 'ログイン', signInIntro: 'メールアドレスを入力すると、ログイン用のリンクをお送りします。', email: 'メールアドレス', sendLink: 'ログインリンクを送る', newEmail: '新しいメールアドレス', sendVerification: '確認メールを送信', interval: { day: '日額', week: '週額', month: '月額', year: '年額' } },
+	'zh-TW': { membership: '會員方案', membershipEmpty: '目前沒有可加入的會員方案。', unavailable: '目前無法顯示這個頁面，請稍後再試。', notFound: '找不到這個頁面', subscribe: '加入', authState: '確認中…', account: '帳戶', signIn: '登入', signInIntro: '輸入你的電子郵件，我們會寄一封登入連結給你。', email: '電子郵件', sendLink: '寄送登入連結', newEmail: '新的電子郵件', sendVerification: '寄送驗證信', interval: { day: '每日', week: '每週', month: '每月', year: '每年' } },
+	'zh-CN': { membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
+};
+
+// Exact path AND method, from the contract entry — the same posture the forward
+// rules take, so a verb the contract did not declare is not claimed here either.
+function matchSiteOwnedBuyerPage(request, routes) {
+	if (!Array.isArray(routes) || routes.length === 0) return null;
+	let pathname;
+	try { pathname = new URL(request.url).pathname; } catch (e) { return null; }
+	for (const route of routes) {
+		if (route.path === pathname && route.method === request.method) return route;
+	}
+	return null;
+}
+
+// `amount` is the plan's own display amount (NOT minor units) — the same value
+// and the same fraction-digit rule the RSP page formats, so the two renderings of
+// one plan cannot disagree about its price.
+function planPriceText(plan, copy, locale) {
+	const label = copy.interval[plan.interval] || plan.interval;
+	const amount = Number(plan.amount);
+	try {
+		return new Intl.NumberFormat(locale, {
+			style: 'currency', currency: plan.currency,
+			maximumFractionDigits: Number.isInteger(amount) ? 0 : 2
+		}).format(amount) + ' / ' + label;
+	} catch (e) {
+		// An unrecognized currency code makes Intl throw — stay honest and plain
+		// rather than losing the whole page over a formatting nicety.
+		return plan.currency + ' ' + plan.amount + ' / ' + label;
+	}
+}
+
+// Bodies are composed INTO the donor's <main>, so none of them opens one of its
+// own — same shape completionBody uses. The data-ejecta-* markers ride on the
+// element that replaces the main's contents.
+function buyerPageUnavailableBody(kind, copy) {
+	const marker = kind === 'account' ? 'account' : 'membership';
+	return `<section data-ejecta-${marker}="" data-ejecta-${marker}-state="unavailable">
+<h1>${escHtml(marker === 'account' ? copy.account : copy.membership)}</h1>
+<p data-ejecta-${marker}-unavailable="" role="status">${escHtml(copy.unavailable)}</p>
+</section>`;
+}
+
+// The ROUTE-level refusal — this page does not exist on this site — which RSP
+// answers with its own distinct marker rather than the state-level "could not
+// read plan state right now". The distinction is kept because the two say
+// different things: a permanent refusal must not promise a later retry.
+function buyerPageNotFoundBody(kind, copy) {
+	const marker = kind === 'account' ? 'account' : 'membership';
+	return `<section data-ejecta-${marker}="" data-ejecta-${marker}-route="unavailable">
+<h1>${escHtml(copy.notFound)}</h1>
+</section>`;
+}
+
+// The subscribe control keeps the island's existing slot contract
+// (data-ejecta-slot="subscribe" + data-ejecta-plan), so the site page reaches the
+// same subscribe path the RSP page does — no second checkout wiring.
+// Returns null when the facts, whatever status they arrived on, do not say
+// anything this page can render. The caller answers that honestly instead of
+// dressing it as a working page.
+function membershipPageBody(facts, copy, locale) {
+	const state = facts && facts.state;
+	if (state === 'empty') {
+		return `<section data-ejecta-membership="" data-ejecta-membership-state="empty">
+<h1>${escHtml(copy.membership)}</h1>
+<p data-ejecta-membership-empty="" role="status">${escHtml(copy.membershipEmpty)}</p>
+</section>`;
+	}
+	const plans = state === 'available' && Array.isArray(facts.plans) ? facts.plans : [];
+	if (plans.length === 0) return null;
+	const cards = plans.map((plan) => `<li class="ejecta-membership-plan">
+<h2>${escHtml(plan.display_name)}</h2>
+<p class="price">${escHtml(planPriceText(plan, copy, locale))}</p>
+<button type="button" data-ejecta-slot="subscribe" data-ejecta-plan="${escHtml(plan.plan_id)}">${escHtml(copy.subscribe)}</button>
+</li>`).join('\n');
+	return `<section data-ejecta-membership="" data-ejecta-membership-state="available">
+<h1>${escHtml(copy.membership)}</h1>
+<p data-ejecta-slot="auth-state" data-ejecta-membership-auth-state="">${escHtml(copy.authState)}</p>
+<ul class="ejecta-membership-plans">
+${cards}
+</ul>
+</section>`;
+}
+
+// Signed out gets the island's auth-request form; signed in gets EXACTLY the
+// section markers the server already gated. The section set is never computed
+// here — this side has no membership/entitlement truth to compute it from.
+function accountPageBody(facts, copy) {
+	if (!facts || typeof facts.signed_in !== 'boolean') return null;
+	if (!facts.signed_in) {
+		return `<section data-ejecta-account="" data-ejecta-account-state="logged-out">
+<h1>${escHtml(copy.signIn)}</h1>
+<p>${escHtml(copy.signInIntro)}</p>
+<form data-ejecta-slot="auth-request" data-ejecta-account-login-form="">
+<label for="ejecta-account-email">${escHtml(copy.email)}</label>
+<input id="ejecta-account-email" name="email" type="email" required autocomplete="email">
+<button type="submit">${escHtml(copy.sendLink)}</button>
+<p data-ejecta-auth-status="" aria-live="polite" role="status"></p>
+</form>
+</section>`;
+	}
+	const sections = (Array.isArray(facts.sections) ? facts.sections : [])
+		.map((section) => `<div data-ejecta-account-section="${escHtml(section)}"></div>`).join('\n');
+	// The change-email entry is NOT one of the gated read sections — it is a submit
+	// slot, unconditional for a signed-in member, exactly as the RSP page emits it.
+	// That is why no facts field declares it and none is asked for.
+	return `<section data-ejecta-account="" data-ejecta-account-state="logged-in">
+<h1>${escHtml(copy.account)}</h1>
+<div data-ejecta-account-sections="">
+${sections}
+</div>
+<form data-ejecta-slot="email-change" data-ejecta-account-email-change-form="">
+<label for="ejecta-account-new-email">${escHtml(copy.newEmail)}</label>
+<input id="ejecta-account-new-email" name="email" type="email" required autocomplete="email">
+<button type="submit">${escHtml(copy.sendVerification)}</button>
+<p data-ejecta-email-change-status="" aria-live="polite" role="status"></p>
+</form>
+</section>`;
+}
+
+function siteOwnedBuyerPageBody(route, facts, copy, locale) {
+	if (route.kind === 'membership') return membershipPageBody(facts, copy, locale);
+	if (route.kind === 'account') return accountPageBody(facts, copy);
+	return null; // the emitter refuses an unknown kind, so this is unreachable
+}
+
+// An honest, deliberately NON-HTML failure. A platform-authored HTML document
+// here would be the fabricated fallback these pages exist to stop, so when the
+// site's own shell cannot be composed into, the buyer gets an error, not a page.
+function buyerPageErrorResponse(status) {
+	return new Response('Page unavailable', {
+		status: status,
+		headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' }
+	});
+}
+
+// The caller's own headers ride along — that is how RSP sees the real viewer's
+// session on an account read. A non-2xx answer keeps ITS status (the module-absent
+// refusal stays a refusal); could-not-ask is 502, the same code the verdict gate
+// uses for the same condition.
+async function readBuyerPageFacts(request, binding, transport, factsUrl) {
+	if (!binding) return { ok: false, status: transport.onBindingMissing.status };
+	let res;
+	try {
+		res = await binding.fetch(new Request(factsUrl, { method: 'GET', headers: request.headers }));
+	} catch (e) {
+		return { ok: false, status: 502 };
+	}
+	if (!res || !res.ok) return { ok: false, status: (res && res.status) || 502 };
+	const data = await res.json().catch(() => null);
+	if (!data || typeof data !== 'object') return { ok: false, status: 502 };
+	return { ok: true, status: 200, data };
+}
+
+async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
+	const transport = cfg.apiTransport;
+	let origin;
+	try { origin = new URL(request.url).origin; } catch (e) { return buyerPageErrorResponse(503); }
+	try {
+		const [facts, shellRes] = await Promise.all([
+			readBuyerPageFacts(request, env[transport.bindingName], transport, origin + route.factsPath),
+			env.ASSETS.fetch(new Request(origin + '/', request))
+		]);
+		if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
+		const shell = await shellRes.text();
+		const locale = localeFromHint(shellLang(shell));
+		const copy = BUYER_PAGE_COPY[locale];
+		const rendered = facts.ok ? siteOwnedBuyerPageBody(route, facts.data, copy, locale) : null;
+		// A 404 from the facts seam is the ROUTE refusal — this page is not on this
+		// site — and that is permanent, so it must not be dressed as the transient
+		// "we could not read state right now".
+		const routeRefused = !facts.ok && facts.status === 404;
+		const bodyHtml = rendered ||
+			(routeRefused ? buyerPageNotFoundBody(route.kind, copy) : buyerPageUnavailableBody(route.kind, copy));
+		// A 2xx answer this page cannot render is still not a working page: the
+		// unavailable body never rides on a 200. 502 is the same "no usable answer"
+		// code the verdict gate already uses for the same condition.
+		const status = rendered ? 200 : (facts.ok ? 502 : facts.status);
+		const title = routeRefused ? copy.notFound : (route.kind === 'account' ? copy.account : copy.membership);
+		const head = injectHead(stripDonorHead(shell),
+			`<title>${escHtml(title)}</title>` +
+			'<script type="module" src="/seam/island.js"></script>');
+		const composed = replaceMain(head, bodyHtml);
+		// The donor had no <main> to compose into. Returning it unchanged would be a
+		// 200 showing the site's ROOT page under this URL — a fabricated success.
+		if (composed === head) return buyerPageErrorResponse(503);
+		return new Response(composed, {
+			status: status,
+			headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' }
+		});
+	} catch (e) {
+		return buyerPageErrorResponse(503);
+	}
 }
 
 // The built /shop page carries the coral's own config on its `[data-dynamic-coral="square-shop"]`
@@ -766,6 +991,14 @@ export default {
 		const nativeCheckoutSuccess = matchNativeCheckoutSuccess(request, shopDescriptors, transport && transport.checkoutResult);
 		if (nativeCheckoutSuccess) return renderCompletion(request, env, CFG, nativeCheckoutSuccess, transport.checkoutResult);
 
+		// The site's OWN buyer pages, claimed BEFORE the generic forward below.
+		// The contract deliberately keeps those same paths in `forward` for the
+		// workers already emitted, so claiming them early is the only thing that
+		// moves who renders them; a contract without siteOwnedBuyerPages forwards
+		// them exactly as before.
+		const siteOwnedBuyerPage = matchSiteOwnedBuyerPage(request, transport && transport.siteOwnedBuyerPages);
+		if (siteOwnedBuyerPage) return renderSiteOwnedBuyerPage(request, env, CFG, siteOwnedBuyerPage);
+
 		// The branches are MUTUALLY EXCLUSIVE and the transport is first:
 		// contract hit → the binding, verdict-required hit → ask then serve
 		// (or, with no binding to ask, fall through as before — see below),
@@ -801,6 +1034,7 @@ export default {
 // Exported for Node unit tests (the deployed bundle just uses the default).
 export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
+	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath
 };

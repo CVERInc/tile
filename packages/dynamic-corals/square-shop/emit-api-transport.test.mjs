@@ -593,8 +593,15 @@ test('the real contract: forwarding follows the contract, verdict follows a gene
 	const worker = await emitWorker([...SHOP_ARGS, '--api-contract', realPath, '--gated-manifest', realManifestPath]);
 	const bindingName = real.bindingName;
 
-	// every forward rule reaches the binding on its own first method
+	// every forward rule reaches the binding on its own first method — EXCEPT the
+	// paths this same contract declares site-owned, which a newly emitted worker
+	// composes into the site's own shell (site.platform: "Checkout result、
+	// /membership and /account are all in this site-owned presentation class").
+	// Their forward entries stay for already-emitted workers; the exemption is read
+	// off the contract under test, never a path list written here.
+	const siteOwnedPaths = new Set((real.siteOwnedBuyerPages || []).map((entry) => entry.path));
 	for (const rule of real.forward) {
+		if (rule.match === 'exact' && siteOwnedPaths.has(rule.value)) continue;
 		const path = rule.match === 'exact' ? rule.value : rule.value + 'probe';
 		const { env, seenByRsp, seenByAssets } = makeEnv({ rsp: echoRsp, bindingName });
 		await worker.mod.default.fetch(new Request('https://s.example' + path, { method: rule.methods[0] }), env);
