@@ -154,12 +154,39 @@ function loadApiTransport(path) {
 		checkoutResult = { path, method: cr.method, orderParam: cr.orderParam, outcomePath };
 	}
 
+	// The pages the contract assigns to the SITE's own presentation: which path,
+	// which facts endpoint behind the binding, and which body renderer serves it.
+	// Absent (an older contract) bakes nothing, so those paths keep the generic
+	// forward behaviour already-emitted workers have.
+	let siteOwnedBuyerPages = [];
+	if (contract.siteOwnedBuyerPages != null) {
+		if (!Array.isArray(contract.siteOwnedBuyerPages)) die('--api-contract siteOwnedBuyerPages must be an array');
+		siteOwnedBuyerPages = contract.siteOwnedBuyerPages.map((entry, i) => {
+			const where = 'siteOwnedBuyerPages[' + i + ']';
+			if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
+			if (entry.method !== 'GET') die(where + ': method must be GET, got ' + JSON.stringify(entry.method));
+			// `kind` names the body renderer this emitter HAS. An unknown one would
+			// ship a page with nothing in it while the build stayed green, so it is
+			// fatal here — a new kind arrives with the renderer that serves it.
+			if (entry.kind !== 'membership' && entry.kind !== 'account') {
+				die(where + ': kind must be a renderer this emitter has (membership|account), got ' + JSON.stringify(entry.kind));
+			}
+			return {
+				path: normalizeSitePath(entry.path, where + '.path'),
+				method: entry.method,
+				kind: entry.kind,
+				factsPath: normalizeSitePath(entry.factsPath, where + '.factsPath')
+			};
+		});
+	}
+
 	return {
 		transport: {
 			bindingName: contract.bindingName,
 			forward,
 			verdictEndpoint,
 			...(checkoutResult ? { checkoutResult } : {}),
+			...(siteOwnedBuyerPages.length > 0 ? { siteOwnedBuyerPages } : {}),
 			...(verdict.length > 0 ? { verdict } : {}),
 			onBindingMissing: { status: obm.status, cacheControl: obm.cacheControl }
 		},
