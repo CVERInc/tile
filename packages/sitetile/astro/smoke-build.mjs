@@ -69,7 +69,7 @@ const customThemeBuilt = readFileSync(join(DIST, 'custom-theme/index.html'), 'ut
 const localeExcept = readFileSync(join(DIST, 'zh-tw/blocks/index.html'), 'utf8');
 // Lingo × Blog category/tag archive fixture (blog/{a-signed,an-unsigned}-post.md carry
 // `categories: ["press"]`; their zh-TW translations, blog/zh-tw/*.md, carry none and inherit it
-// by slug). Proves the gap confirmed live on sodaart.co.jp 2026-09-02: the base-locale-only
+// by slug). Proves the gap confirmed live on a customer's site 2026-09-02: the base-locale-only
 // /category & /tag archives, and the site-wide links that pointed at them regardless of which
 // locale was rendering.
 const devlogIndex = readFileSync(join(DIST, 'devlog/index.html'), 'utf8');
@@ -234,9 +234,9 @@ const checks = [
   ['inbox bubble: locale-agnostic except suppresses /zh-tw/blocks via /blocks', () => occIn(localeExcept, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: explicit page on wins over the site /markers exclusion', () => occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1],
   ['inbox bubble: a hand-mounted embed is not doubled', () => occIn(forms, 'data-dynamic-coral="inbox-bubble"') === 1],
-  // -- sodaart /faq, 2026-09-03: the bubble's panel header is the STORE's stable name, and must
+  // -- a customer's /faq page, 2026-09-03: the bubble's panel header is the STORE's stable name, and must
   // stay that on every page — not each page's own composed <title> (was measured live as
-  // "常見問題 | SODAART【新官網轉移中】", the FAQ page's own title text, on a page whose title has
+  // "常見問題 | HOSHIYA【新官網轉移中】", the FAQ page's own title text, on a page whose title has
   // nothing to do with the home page's). `markers.md` is the fixture's only non-home page with the
   // auto-mounted (not hand-authored) bubble on, and its own title is deliberately unrelated to the
   // site's `brand:` — proving data-site-name tracks the SITE config, not whichever page renders it.
@@ -342,17 +342,17 @@ const checks = [
   // header-actions.js's existing Escape handler (already asserted allowlisted above) sweeps.
   ['nav-mobile: the toggle that drives the backdrop still carries data-ha-toggle (Esc-to-close)', () =>
     /<input type="checkbox" id="rf-nav-toggle" class="rf-nav-check" hidden data-ha-toggle>/.test(html)],
-  // -- nav-mobile open menu vs. an unlayered theme z-index (sodaart.co.jp, live): the dropdown
+  // -- nav-mobile open menu vs. an unlayered theme z-index (a customer's site, live): the dropdown
   // rendered UNDER its own dimmed backdrop because a site's own unlayered CSS (`z-index: 20` on
   // `.rf-header`) beats any layered declaration — including this file's `@layer reef.base` — at
   // equal importance, no matter how specific the selector. Only `!important` (decided BEFORE
   // layer order) survives that. Both live inside the `(width<=64rem)` media block above. --
-  ['nav-mobile: the open header is lifted above an unlayered theme z-index with !important, not just a specific selector (sodaart.co.jp regression)', () => {
+  ['nav-mobile: the open header is lifted above an unlayered theme z-index with !important, not just a specific selector (live-site regression)', () => {
     const css = allCss().replace(/\s+/g, '');
     return css.includes('@media(width<=64rem)')
       && css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked).rf-header{z-index:2147483002!important}');
   }],
-  ['nav-mobile (hamburger): the open panel scrolls itself when taller than the viewport (952px panel vs 720px viewport, sodaart.co.jp — body is scroll-locked above, so without this the tail of the menu is unreachable), and the position/z-index FACTS that keep it a floating panel stay !important', () => {
+  ['nav-mobile (hamburger): the open panel scrolls itself when taller than the viewport (952px panel vs 720px viewport, measured live — body is scroll-locked above, so without this the tail of the menu is unreachable), and the position/z-index FACTS that keep it a floating panel stay !important', () => {
     const css = allCss().replace(/\s+/g, '');
     const m = css.match(/body\[data-nav-mobile=hamburger\]\.rf-nav\{([^}]*)\}/);
     if (!m) return false;
@@ -517,7 +517,7 @@ const checks = [
   // `.st-form-success { display: flex }` in site.css is an AUTHOR rule, which beats the UA
   // sheet's `[hidden]{display:none}` regardless of specificity — so the card showed to every
   // first-time visitor of every `action=inbox` form, above an empty form. Measured live on
-  // sodaart.co.jp/zh-tw/contact/. The markup-level check above can't catch this — `hidden` was
+  // a customer's /zh-tw/contact/ page. The markup-level check above can't catch this — `hidden` was
   // always in the HTML, the CSS silently overrode it — so this asserts the actual rendered CSS
   // carries a `[hidden]` override for every element the script's `.hidden = true/false` toggles
   // (Form.astro: `form.hidden`, `successEl.hidden`, `excerptEl.hidden`). `.st-form-error` is
@@ -673,7 +673,7 @@ const checks = [
   ['fixtures never reference the pkg-runtimes chunk', () =>
     [html, blocks, markers, forms, customTheme].every((h) => !/src="[^"]*SiteLayout\.astro_astro_type_script/.test(h))],
 
-  // -- Lingo × Blog locale category/tag archives (the sodaart gap, 2026-09-02) --
+  // -- Lingo × Blog locale category/tag archives (the gap measured live, 2026-09-02) --
   ['locale category archive exists at /<loc>/category/<slug>/', () => existsSync(distFile('/zh-tw/category/press/index.html'))],
   ['locale tag archive exists at /<loc>/tag/<slug>/', () => existsSync(distFile('/zh-tw/tag/fixture/index.html'))],
   ['locale category archive lists ONLY that locale\'s own (translated) posts', () =>
@@ -686,7 +686,7 @@ const checks = [
   // Taxonomy inheritance: blog/zh-tw/*.md carry NO `categories:` of their own — the base
   // locale's `press` category reaches the archive above only via localeBlogCorpora's
   // inherit-by-slug rule (a translated post carries no categories of its own — see live measured
-  // on feelreef/site-sodaart, 585/585 both zh-tw and en-us).
+  // on one customer's feelreef site, 585/585 both zh-tw and en-us).
   ['locale category heading is resolved for THAT locale (content/zh-tw/_site.md overrides the base name)', () =>
     /<h1>新聞稿<\/h1>/.test(zhCategoryPress) && /<h1>Press<\/h1>/.test(categoryPress)],
   ['locale archive <html lang> is the locale\'s own BCP-47 tag', () => /<html lang="zh-Hant"/.test(zhCategoryPress)],
