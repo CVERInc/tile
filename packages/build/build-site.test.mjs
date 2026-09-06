@@ -67,6 +67,27 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
   });
 }
 
+// 🩸 …and "SKIPPED" only means something if something can make it stop being true. The CI workflow
+// ran `bash scripts/test.sh` and installed nothing at all, while the renderer's node_modules is
+// gitignored — so the case above, the only one in this repo that turns an IR directory into real
+// HTML, had never run there once. A long green scrolled past its own skip line. These two hold the
+// install step and the announcement in place; without them this file goes quiet again and no gate
+// notices. Measured 2026-09-07 on a clean clone.
+test('CI installs the renderer\'s dependencies, so the case above is not skipped there', () => {
+  const workflow = readFileSync(join(ENGINE, '.github/workflows/ci.yml'), 'utf8');
+  assert.match(workflow, /npm ci --prefix packages\/sitetile\/astro/,
+    'the workflow no longer installs the renderer — this file\'s end-to-end case is dead in CI');
+  assert.ok(workflow.indexOf('npm ci --prefix') < workflow.indexOf('bash scripts/test.sh'),
+    'the install must come before the suite that needs it');
+});
+
+test('scripts/test.sh says out loud whether the end-to-end ran', () => {
+  const suite = readFileSync(join(ENGINE, 'scripts/test.sh'), 'utf8');
+  assert.match(suite, /packages\/build END-TO-END SKIPPED/,
+    'nothing announces the skip, so a green run cannot be told from a narrower one');
+  assert.match(suite, /packages\/build\/\*\.test\.mjs/, 'this package is not in SUITE_GLOBS at all');
+});
+
 test('buildSite refuses a directory that is not an engine checkout', async () => {
   await assert.rejects(
     () => buildSite({ irDir: IR, engineDir: tmpdir(), outDir: join(tmpdir(), 'unused') }),
