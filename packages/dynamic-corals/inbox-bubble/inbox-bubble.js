@@ -175,7 +175,7 @@ let stylesInjected = false;
 // 🔴 0.7.3 (owner ruling 2026-09-07): THE ASK PANEL SAYS TWO THINGS FEWER. It used to open with
 // four sentences before the visitor could type — a status line, a body line in the empty log, a
 // placeholder, and a 「站主看得到」 footer under the form — and the owner's word for that was
-// 「太囉唆」. What survives is the status line (now 「<名字>[AI]先回，真人會看」: the same two
+// 「太囉唆」. What survives is the status line (now 「<名字>[AI]先回，轉出去真人會看」: the same two
 // facts, in half the words) and the placeholder. `empty` and `seen` are GONE, not shortened, so
 // there is no key left for a locale to re-grow them from — and `data-empty-label` went with
 // `empty`, because an override for a string nothing renders is a promise this file cannot keep.
@@ -240,7 +240,7 @@ export const COPY = {
 		error: '沒有送出去，請再試一次。',
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closed: '關閉',
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，真人會看`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusHandedOffEmail: '已交給店家，會透過信箱回覆',
 		statusHandedOffNoEmail: '已交給店家，回覆會顯示在這裡',
 		askAgain: (a) => `重新問 ${a}`,
@@ -304,7 +304,7 @@ export const COPY = {
 		error: '没有发送出去，请再试一次。',
 		rate: '消息有点多，请稍等一分钟再试。',
 		closed: '关闭',
-		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，真人会看`,
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusHandedOffEmail: '已交给店家，会通过邮箱回复',
 		statusHandedOffNoEmail: '已交给店家，回复会显示在这里',
 		askAgain: (a) => `重新问 ${a}`,

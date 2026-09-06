@@ -24,7 +24,7 @@ it is for, not a guess and not the visitor's browser preference. Unknown languag
 falls back to English.
 
 From 0.7.3 the ask panel says two things, not four (owner ruling 2026-09-07,
-「太囉唆」): the status line under the site name —「\<名字\>**AI**先回，真人會看」—
+「太囉唆」): the status line under the site name —「\<名字\>**AI**先回，轉出去真人會看」—
 and the box's own placeholder. The body line in the empty log and the
 「站主看得到」 footer under the form are gone in every locale, and
 `data-empty-label` went with the string it overrode.

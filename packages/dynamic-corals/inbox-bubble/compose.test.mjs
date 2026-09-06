@@ -178,7 +178,7 @@ test('resolveSiteName ignores blank data-site-name and blank og:site_name', () =
 test('statusFor shows the default only before a hand-off, and only when KAITO is on', () => {
 	assert.equal(
 		statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }),
-		'KAITO<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>先回，真人會看'
+		'KAITO<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>先回，轉出去真人會看'
 	);
 	assert.equal(statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: false }), '');
 });
@@ -252,7 +252,7 @@ test('a name carrying the chip sentinel cannot eat the rest of the status line',
 	const el = { getAttribute: (n) => (n === 'data-assistant-name' ? `小${AI_CHIP_TOKEN}美` : null) };
 	assert.equal(resolveAssistantName(el), '小美');
 	const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, resolveAssistantName(el));
-	assert.match(html, /先回，真人會看$/);
+	assert.match(html, /先回，轉出去真人會看$/);
 	assert.equal(html.split('<span class="dc-inbox-ai-chip"').length - 1, 1);
 });
 
@@ -446,9 +446,9 @@ test('🔴 the title line still carries the AI marker after data-assistant-name 
 });
 
 test('the shortened title line reads as the owner ruled it, per locale', () => {
-	assert.equal(COPY['zh-tw'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，真人會看`);
+	assert.equal(COPY['zh-tw'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，轉出去真人會看`);
 	assert.equal(COPY.en.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}answers first, a person reads what you send on`);
-	assert.equal(COPY['zh-cn'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，真人会看`);
+	assert.equal(COPY['zh-cn'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，转出去真人会看`);
 	assert.equal(COPY.ja.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`);
 	// Traditional and Simplified are two rows for a reason — see inbox-form-copy.test.mjs.
 	assert.notEqual(COPY['zh-tw'].statusDefault('K'), COPY['zh-cn'].statusDefault('K'));
