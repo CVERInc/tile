@@ -1,6 +1,6 @@
 {
   "name": "@cver/coral-inbox-bubble",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "description": "REEF with Inbox — the visitor message bubble. Hand-written and self-contained (no imports, so nothing to bundle; the build only stamps it), because a dynamic coral has to install byte-for-byte into either substrate. Version covers the client JS + the data-* attribute API + the /api/inbox and /api/kaito request shapes it consumes."
