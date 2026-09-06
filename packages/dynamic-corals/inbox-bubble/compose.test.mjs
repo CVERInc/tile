@@ -902,6 +902,19 @@ function nameFromAttribute(raw) {
 	return resolveAssistantName({ getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) });
 }
 
+// The platform read, cleaned by the same helper — the second intake point, so every payload below
+// is asserted at both. `resolved: true` with nothing left after cleaning means「the owner cleared
+// the name」, which is KAITO, exactly as an absent attribute is.
+async function nameFromPlatform(raw) {
+	const saved = globalThis.fetch;
+	globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, assistantName: raw, resolved: true }) });
+	try {
+		return (await fetchAssistantName('https://feelreef.com', 'site', 'x')) || 'KAITO';
+	} finally {
+		globalThis.fetch = saved;
+	}
+}
+
 test('B1: a bidi control cannot smuggle the chip sentinel past the strip and reassemble it', () => {
 	// The reassembly, spelled out: delete the U+202E from this payload by hand and what is left
 	// IS the sentinel. That is what the old order handed to statusFor.
@@ -944,6 +957,98 @@ test('B1: the platform path shares the helper, so the same payload dies there to
 	});
 	// `resolved: true` with nothing left after cleaning means "the owner cleared the name" - KAITO.
 	assert.equal(await fetchAssistantName('https://feelreef.com', 'site', 'x'), 'KAITO');
+});
+
+// REVIEW B1, ROUND 2 (2026-09-08): the smuggling character was never the point. A single
+// split(T).join('') REASSEMBLES the token out of the remnants it leaves behind, so the payload
+// needs no control character and no second U+2063 at all:
+//
+//   T.slice(0, 3) + T + T.slice(3)   -- remove the middle T, and the two halves ARE T
+//
+// The fix is structural rather than ordinal: the token comes out to a fixed point, and then every
+// character the token cannot exist without comes out unconditionally. These tests assert the
+// STRUCTURE (no sentinel character survives, ever, and cleaning is a fixed point) rather than one
+// more payload, because the review's whole point was that payload-shaped defences are enumerable.
+
+// The sentinel's own private characters, taken from the token rather than retyped - if the token
+// ever changes its wrapper, this follows it, exactly as AI_CHIP_PRIVATE_RE does in the source.
+const SENTINEL_CHARS = [...new Set(AI_CHIP_TOKEN)].filter((ch) => ch.codePointAt(0) > 0x7e);
+const NESTED_TOKEN = AI_CHIP_TOKEN.slice(0, 3) + AI_CHIP_TOKEN + AI_CHIP_TOKEN.slice(3);
+const DOUBLY_NESTED_TOKEN = NESTED_TOKEN.slice(0, 3) + NESTED_TOKEN + NESTED_TOKEN.slice(3);
+
+test('B1 round 2: one split reassembles the sentinel - this is the payload, spelled out', () => {
+	// Not an assertion about the fix: an assertion that the attack is real, so that a future
+	// simplification back to a single split cannot pass by making this test meaningless.
+	assert.equal(NESTED_TOKEN.split(AI_CHIP_TOKEN).join(''), AI_CHIP_TOKEN);
+	assert.equal(DOUBLY_NESTED_TOKEN.split(AI_CHIP_TOKEN).join('').split(AI_CHIP_TOKEN).join(''),
+		AI_CHIP_TOKEN);
+	// And it carries no bidi control at all - the 0.7.5 strip order has nothing to do with it.
+	for (const ctrl of BIDI_TEST_CONTROLS) assert.ok(!NESTED_TOKEN.includes(ctrl));
+});
+
+test('B1 round 2: no sentinel character survives cleaning, from any nesting', async () => {
+	const payloads = [
+		AI_CHIP_TOKEN,
+		NESTED_TOKEN,
+		DOUBLY_NESTED_TOKEN,
+		// Nested AND smuggled, the review's second payload: both weaknesses in one string. The
+		// override is written as an escape, never a literal byte - see BIDI_CONTROL_RE.
+		NESTED_TOKEN.replace('AI_CHIP', 'A\u202EI_CHIP'),
+		// Something real either side, so the KAITO fallback is not what is doing the work.
+		`小${NESTED_TOKEN}美`,
+		`小${DOUBLY_NESTED_TOKEN}美`,
+		// A lone private character that never formed a token at all: still not a thing a name carries.
+		...SENTINEL_CHARS.map((ch) => `小${ch}美`)
+	];
+	for (const payload of payloads) {
+		const label = JSON.stringify(payload);
+		// Both intake points, because they are one helper and this is the assertion that says so.
+		for (const name of [nameFromAttribute(payload), await nameFromPlatform(payload)]) {
+			for (const ch of SENTINEL_CHARS) {
+				assert.ok(!name.includes(ch),
+					`a sentinel character survived cleaning of ${label}: ${JSON.stringify(name)}`);
+			}
+			assert.ok(!name.includes(AI_CHIP_TOKEN), `the whole sentinel survived ${label}`);
+			// 🔴 THE FIXED POINT: cleaning the cleaned name changes nothing. A step that can rebuild
+			// what an earlier step removed shows up here as a name that keeps moving.
+			assert.equal(nameFromAttribute(name), name, `cleaning is not a fixed point for ${label}`);
+			// And the status line keeps both halves: one chip, tail intact.
+			const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+			assert.equal(chipCount(html), 1, label);
+			assert.ok(html.endsWith(ZH_STATUS_TAIL), `${label} lost the tail: ${JSON.stringify(html)}`);
+		}
+	}
+});
+
+test('B1 round 2: a name that is nothing but sentinel is no name at all, nested or not', () => {
+	// The courtesy half of the strip: a pure sentinel cleans to empty and falls back, rather than
+	// leaving the bare letters of the marker behind as somebody's assistant name.
+	assert.equal(nameFromAttribute(NESTED_TOKEN), 'KAITO');
+	assert.equal(nameFromAttribute(DOUBLY_NESTED_TOKEN), 'KAITO');
+	// ...while those letters typed BY THEMSELVES are just letters. The invisible wrapper is what a
+	// name may not carry; "AI_CHIP" as ASCII never was, and stripping it would be censoring text.
+	assert.equal(nameFromAttribute('AI_CHIP'), 'AI_CHIP');
+});
+
+test('B1 round 2: the cap cannot be used to cut a name back into a sentinel', () => {
+	// The cap runs AFTER the strip, so it only ever deletes. This is the payload that would matter
+	// if that were ever reordered: a full 40 clusters of padding with a nested token behind it.
+	const padded = '小'.repeat(40) + NESTED_TOKEN;
+	const name = nameFromAttribute(padded);
+	for (const ch of SENTINEL_CHARS) assert.ok(!name.includes(ch), 'the cap left a sentinel behind');
+	assert.equal(name, '小'.repeat(40));
+});
+
+test('B1 round 2: an enormous nested name is bounded before the fixed point, not after', () => {
+	// Deep nesting is what makes a repeated strip expensive, so the input is bounded first (the
+	// same class as B7, on the cost side rather than the output side). Asserted on the outcome: a
+	// bounded, sentinel-free name, arriving promptly rather than after a quadratic walk.
+	const deep = NESTED_TOKEN.repeat(20000); // ~360k UTF-16 units
+	const started = Date.now();
+	const name = nameFromAttribute(deep);
+	assert.ok(Date.now() - started < 2000, 'cleaning a huge name took seconds');
+	assert.ok(name.length <= 200);
+	for (const ch of SENTINEL_CHARS) assert.ok(!name.includes(ch));
 });
 
 // REVIEW B7 (2026-09-08): counting grapheme clusters removed the LENGTH limit. A cluster has no

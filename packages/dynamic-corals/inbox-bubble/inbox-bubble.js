@@ -517,6 +517,38 @@ const ASSISTANT_NAME_MAX_UNITS = 200;
 const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]/g;
 
 /**
+ * The characters `AI_CHIP_TOKEN` cannot exist without — the U+2063 either side of it — derived
+ * FROM the token rather than retyped, so a sentinel that ever changes its wrapper is covered by
+ * this the day it changes. ASCII is deliberately excluded: "AI_CHIP" as letters is a legal thing
+ * for an owner to call their assistant; it is the invisible wrapper that makes `statusFor`'s
+ * `split` see a marker.
+ *
+ * 🔴 THIS IS WHAT MAKES THE STRIP STRUCTURAL — review B1, round 2, and the reason the old
+ * 「convergent order」claim was not true (see `cleanAssistantName`). Removing the token as a
+ * STRING can hand back the very thing it removed: `T.slice(0, 3) + T + T.slice(3)` is one whole
+ * token with its own prefix in front and its matching suffix behind, so deleting that one
+ * occurrence joins the two remnants into a complete new token. Deleting the characters instead
+ * has no fixed point to miss — afterwards there is no U+2063 anywhere in the name, and every step
+ * that follows only ever deletes characters, so not one of them can put one back.
+ */
+const AI_CHIP_PRIVATE_RE = new RegExp(
+	`[${[...new Set(AI_CHIP_TOKEN)]
+		.filter((ch) => ch.codePointAt(0) > 0x7e)
+		.map((ch) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`)
+		.join('')}]`,
+	'g'
+);
+
+/**
+ * How much of an incoming name is examined at all, and B7's sibling: the fixed-point loop in
+ * `cleanAssistantName` is the one pass there that can run more than once, and a deeply nested
+ * payload could otherwise make it quadratic in the length of an attribute nobody bounded. The
+ * result is capped at `ASSISTANT_NAME_MAX_UNITS` regardless, so twenty times that is far past any
+ * real name in any script and still a ceiling on the work a one-megabyte attribute can ask for.
+ */
+const RAW_NAME_MAX_UNITS = ASSISTANT_NAME_MAX_UNITS * 20;
+
+/**
  * A ZERO WIDTH JOINER left dangling at the end of a truncated name (review B8) — the one format
  * character `BIDI_CONTROL_RE` deliberately does not carry, because U+200D inside a name is
  * meaningful (it is what holds an emoji sequence together) and only a TRAILING one is debris.
@@ -654,10 +686,9 @@ export function resolveAssistantName(el) {
  * of the sentence does, so the token is stripped where names arrive rather than defended
  * against where they render.
  *
- * 🔴 THE ORDER OF THESE FOUR STEPS IS THE WHOLE DEFENCE — review B1, a P1 regression this file
- * shipped in 0.7.4 and this comment now exists to stop coming back. The bidi strip was added
- * AFTER the token strip, so a control character that step 1 could not see and step 2 deleted
- * SMUGGLED the token in and then reassembled it:
+ * 🩸 THE ORDER WAS THE DEFENCE, AND THE ORDER WAS NOT ENOUGH — review B1, twice. 0.7.4 ran the
+ * bidi strip AFTER the token strip, so a control character the token strip could not see and the
+ * bidi strip then deleted smuggled a token in and reassembled it:
  *
  *   data-assistant-name = "\u2063A\u202EI_CHIP\u2063"   (\u202E written as an escape, never
  *      as a literal byte — see BIDI_CONTROL_RE)
@@ -666,19 +697,46 @@ export function resolveAssistantName(el) {
  *     → `statusFor` splits into three, drops the third, and the whole sentence is gone
  *
  * Every one of the twelve stripped controls worked as the smuggling character, at any position.
- * So: DELETE first, CUT second, and only then look for the token — the last step must be the one
- * with nothing left after it that can put back what it removed. That order is convergent rather
- * than merely luckier: deleting bidi controls cannot produce a U+2063, cutting on a cluster
- * boundary cannot produce either, and stripping the token cannot produce a bidi control, so no
- * later step can ever hand an earlier one something it would have rejected.
+ * 0.7.5 put the deletes first and called the resulting order convergent. It was not, and round 2
+ * of the review supplied the eighteen characters that show why — with T for the token:
+ *
+ *   T.slice(0, 3) + T + T.slice(3)
+ *     → ONE split(T).join('') removes the middle T, and the two remnants left either side of the
+ *       hole are exactly T's own first three characters and its own last nine: T again
+ *     → so the LAST step in the chain handed the DOM the token it exists to remove
+ *
+ * Nothing had to invent a U+2063 for that; the string arrived carrying the pieces. The fix is to
+ * stop making「is the token here」a question about a string at all. The token comes out to a
+ * FIXED POINT (which is what the nested payload defeats in a single pass), and then, whatever is
+ * left in whatever arrangement, every character `AI_CHIP_TOKEN` cannot exist without goes — see
+ * `AI_CHIP_PRIVATE_RE`. From that line to the `return` nothing does anything but delete, so the
+ * name that comes back provably carries no sentinel character and has nothing to reassemble from.
  */
 function cleanAssistantName(raw) {
-	// 1. Format controls out first — nothing downstream can be tricked by what is no longer here.
-	const stripped = String(raw || '').replace(BIDI_CONTROL_RE, '');
-	// 2. One line, trimmed.
-	const trimmed = stripped.trim().split('\n')[0].trim();
+	// 1. Bound the input before the one pass below that can repeat (see RAW_NAME_MAX_UNITS), and
+	//    cut on a code point boundary so it cannot leave half a surrogate pair behind.
+	let name = String(raw || '');
+	if (name.length > RAW_NAME_MAX_UNITS) {
+		name = name.slice(0, RAW_NAME_MAX_UNITS).replace(/[\uD800-\uDBFF]$/, '');
+	}
+	// 2. Format controls out — nothing downstream can be tricked by what is no longer here.
+	name = name.replace(BIDI_CONTROL_RE, '');
+	// 3. The token as a string, to a fixed point. This is the courtesy half: it is what makes a
+	//    name that is NOTHING BUT the sentinel come out empty, and so fall back to KAITO, rather
+	//    than leaving the bare letters behind as somebody's name. It is not the guarantee.
+	let previous;
+	do {
+		previous = name;
+		name = name.split(AI_CHIP_TOKEN).join('');
+	} while (name !== previous);
+	// 4. 🔴 THE GUARANTEE, and the whole of round 2's B1: every character the sentinel cannot
+	//    exist without, gone, whatever step 3 left and however it was arranged. No line below
+	//    this one adds a character to the name.
+	name = name.replace(AI_CHIP_PRIVATE_RE, '');
+	// 5. One line, trimmed.
+	const trimmed = name.trim().split('\n')[0].trim();
 	if (!trimmed) return '';
-	// 3. Both halves of the cap, on the same pass and always on a cluster boundary: at most
+	// 6. Both halves of the cap, on the same pass and always on a cluster boundary: at most
 	//    ASSISTANT_NAME_MAX clusters, and at most ASSISTANT_NAME_MAX_UNITS UTF-16 units (B7 — a
 	//    single cluster can be 500 units on its own, and one that does not fit stops the name
 	//    rather than being cut in half).
@@ -689,8 +747,8 @@ function cleanAssistantName(raw) {
 		capped += cluster;
 		count++;
 	}
-	// 4. The token last, then the joiner a cut in step 3 may have left dangling (B8).
-	return capped.split(AI_CHIP_TOKEN).join('').replace(TRAILING_JOINER_RE, '').trim();
+	// 7. The joiner a cut in step 6 may have left dangling (B8). Deletes only — see step 4.
+	return capped.replace(TRAILING_JOINER_RE, '').trim();
 }
 
 /**
