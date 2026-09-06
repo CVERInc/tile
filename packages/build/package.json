@@ -1,0 +1,27 @@
+{
+  "name": "@tile/build",
+  "version": "0.0.0",
+  "description": "The page-generation half of a site build: an IR directory in, a directory of static HTML out. Collect the IR into the site_pages shape, stage it into packages/sitetile/astro, run astro build, put the renderer back. Deployment — uploading, build stamps, redirect merging, canonical-host rewriting, API workers — is not here and is not meant to be.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "//": [
+    "🩸 THERE IS NO `main` HERE, AND THAT IS A GATE, NOT AN OMISSION. With `main: index.mjs`,",
+    "`node --test packages/build/` resolves the DIRECTORY to that one file, runs it as the whole",
+    "suite, finds no tests in it and exits 0. Measured 2026-09-06: the gate reported `# tests 1 /",
+    "# pass 1` while every real test file in this package went unread. `exports` alone resolves",
+    "`import '@tile/build'` identically and leaves the directory searchable, so that is what is",
+    "here — and manifest.test.mjs fails if `main` ever comes back."
+  ],
+  "exports": {
+    ".": "./index.mjs",
+    "./mkpages.mjs": "./mkpages.mjs",
+    "./stage.mjs": "./stage.mjs"
+  },
+  "bin": {
+    "tile-build": "./cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

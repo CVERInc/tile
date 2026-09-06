@@ -109,7 +109,11 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # match it would have dropped the parse/serialize suite the whole package rests on.
              packages/cardtile/*.test.mjs packages/cardtile/*.test.js
              packages/cardtile/cards/*.test.mjs packages/cardtile/serve/*.test.mjs
-             packages/cardtile/w/*.test.mjs)
+             packages/cardtile/w/*.test.mjs
+             # build arrived 2026-09-06 — the page-generation half of a site build. Its end-to-end
+             # test needs packages/sitetile/astro/node_modules and names itself SKIPPED without
+             # them, exactly like the astro smoke further down.
+             packages/build/*.test.mjs)
 # 🩸 …and within a NAMING CONVENTION. The guard below asked the tree for `*.test.*` and nothing else,
 # so hosts/web/modaltile/ could hold TWO browser harnesses that nothing has ever run and the check
 # designed to catch exactly that stayed green — they were invisible to it because of what they are
@@ -136,6 +140,20 @@ if [ -n "$orphans" ]; then
   echo "✗ these test files exist but nothing runs them — add their directory to SUITE_GLOBS:" >&2
   echo "$orphans" | sed 's/^/    /' >&2
   exit 1
+fi
+
+# 🩸 packages/build's end-to-end test is the only one in this repo that proves "an IR directory in,
+# a directory of static HTML out" — the sentence that package exists for. It needs the renderer's
+# dependencies and names ITSELF skipped without them, which is the right shape; what was missing is
+# anywhere that made the skip an actionable fact. It ran inside the loop below among 26 other
+# greens, CI installed nothing, and so every green this gate has ever produced excluded it. The
+# workflow now installs them; this says out loud which of the two runs you are looking at.
+if [ -d packages/sitetile/astro/node_modules ]; then
+  echo "→ packages/build end-to-end: the renderer's deps are here, so it builds real pages"
+else
+  echo "  · packages/build END-TO-END SKIPPED — no packages/sitetile/astro/node_modules"
+  echo "    (this run did NOT prove IR in → static HTML out; run npm install there, or see"
+  echo "     .github/workflows/ci.yml, which installs them)"
 fi
 
 echo "→ site renderer tests"
