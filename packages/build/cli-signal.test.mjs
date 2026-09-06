@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { RENDERER_SUBPATH } from './index.mjs';
+import { buildSite, RENDERER_SUBPATH } from './index.mjs';
 import { listStaged, STASH_PREFIX, LOCK_NAME } from './stage.mjs';
 
 const CLI = fileURLToPath(new URL('./cli.mjs', import.meta.url));
@@ -186,4 +186,105 @@ test('Ctrl-C anywhere across the staging and build windows: 130, and a byte-iden
   // like it was testing a signal mid-build and was testing a signal against a `setInterval`.
   assert.ok(landedInBuild.includes(false), 'no sample landed in the staging window — widen the assets');
   assert.ok(landedInBuild.includes(true), 'no sample reached the build at all — the sleep is too short');
+});
+
+// ── the child, and the order it goes in ─────────────────────────────────────────────────────────
+// 🩸 SIGNALLED ONE PROCESS, NOT A GROUP — which is `docker stop` (SIGTERM to PID 1) and `kill -INT
+// <pid>`, the two ways this actually gets stopped outside a terminal. Measured 2026-09-07: the CLI
+// restored, printed its exit and left, while `astro build` was still running. Three seconds later
+// the orphan wrote into the site owner's --outDir, and what it had by then was the RENDERER's own
+// demo content, because restore had already put that back underneath it. `stage.mjs`'s opening
+// line is that the renderer's demo posts must not build into your site under your domain with
+// nothing saying so; this is that, produced by the signal path meant to prevent it.
+//
+// The lock is the second half. restore() removes `.tile-build-lock`, so those seconds were a build
+// running with no lock held — "one build at a time" broken by its own unwind.
+const REPORTING_NPX = `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--outDir" ]; then out="$2"; fi
+  shift
+done
+mkdir -p "$out"
+echo $$ > "$out/../npx-pid"
+: > "$out/../npx-started"
+trap 'if [ -d "$PWD/${LOCK_NAME}" ]; then echo held > "$out/../lock-at-sigterm"; else echo released > "$out/../lock-at-sigterm"; fi; exit 143' TERM
+i=0
+while [ $i -lt 40 ]; do sleep 0.1; i=$((i+1)); done
+ls "$PWD/content" > "$out/what-astro-saw.txt"
+`;
+
+test('an aborted build takes its astro with it — no orphan writes into the owner\'s --outDir', async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, REPORTING_NPX);
+  const before = await snapshot(astroDir);
+  const outDir = join(root, 'out');
+
+  const run = runCli(t, { root, binDir, outDir, args: ['--assets', ASSETS] });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  const npxPid = Number(readFileSync(join(root, 'npx-pid'), 'utf8').trim());
+  assert.ok(npxPid > 0, 'the build never recorded a pid — this case would prove nothing');
+
+  // ONE process, the way `docker stop` and `kill -INT <pid>` do it. No minus sign, no group.
+  process.kill(run.child.pid, 'SIGINT');
+
+  const { code, stderr } = await run.ended;
+  assert.equal(code, 130, `exit ${code}, not 130. stderr was:\n${stderr}`);
+
+  // 🔴 The child is gone BEFORE the CLI is, not merely asked to go.
+  assert.throws(() => process.kill(npxPid, 0), /ESRCH/,
+    'astro build outlived the CLI that said it had stopped — it is still writing somewhere');
+
+  // Past the point that build would have written, so "it did not" is measured and not assumed.
+  await new Promise((r) => setTimeout(r, 4500));
+  assert.equal(existsSync(join(outDir, 'what-astro-saw.txt')), false,
+    "a build the CLI reported as stopped still wrote into the owner's --outDir");
+  assert.deepEqual(await snapshot(astroDir), before);
+  assert.deepEqual(leftovers(astroDir), [], 'a stash or a lock survived');
+
+  // 🔴 …and the lock was still held at the moment it was told to stop. The other order is the one
+  // where a second build takes the renderer while the first is still writing in it.
+  assert.ok(existsSync(join(root, 'lock-at-sigterm')),
+    'the build was never sent SIGTERM at all — nothing asked it to stop');
+  assert.equal(readFileSync(join(root, 'lock-at-sigterm'), 'utf8').trim(), 'held',
+    'the lock was released before the build it was holding the renderer for had gone');
+});
+
+// 🔴 …and a build that IGNORES SIGTERM does not get to stay. The grace is a grace, not a request.
+const STUBBORN_NPX = `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--outDir" ]; then out="$2"; fi
+  shift
+done
+mkdir -p "$out"
+echo $$ > "$out/../npx-pid"
+: > "$out/../npx-started"
+trap '' TERM
+i=0
+while [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
+ls "$PWD/content" > "$out/what-astro-saw.txt"
+`;
+
+test('a build that ignores SIGTERM is SIGKILLed after the grace, and the restore waits for it', async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, STUBBORN_NPX);
+  const before = await snapshot(astroDir);
+  const outDir = join(root, 'out');
+
+  const stopping = new AbortController();
+  const started = Date.now();
+  const pending = buildSite({
+    irDir: IR, engineDir: root, outDir, npxBin: join(binDir, 'npx'),
+    signal: stopping.signal, killGraceMs: 400,
+  });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  const npxPid = Number(readFileSync(join(root, 'npx-pid'), 'utf8').trim());
+  stopping.abort();
+
+  await assert.rejects(() => pending, (err) => { assert.equal(err.name, 'AbortError'); return true; });
+  // 30 seconds is what that script would have taken. Returning at all means it did not wait for it.
+  assert.ok(Date.now() - started < 15_000, 'the abort waited for a build that was ignoring it');
+  assert.throws(() => process.kill(npxPid, 0), /ESRCH/, 'the build ignored SIGTERM and was allowed to');
+  assert.equal(existsSync(join(outDir, 'what-astro-saw.txt')), false);
+  assert.deepEqual(await snapshot(astroDir), before);
+  assert.deepEqual(leftovers(astroDir), [], 'a stash or a lock survived');
 });
