@@ -28,18 +28,30 @@
 // studied against lets the browser generate the id, and a browser that can
 // choose an id can choose whose conversation to open.
 //
-// 🔴 AND NO SCRIPT ON THE PAGE PICKS IT EITHER — WHICH IS WHY THERE IS NO HAND-OFF EVENT
-// (0.7.5, review B3). 0.7.4 added `reef-inbox:handle` so a page holding an id the server minted
-// by another route could push it into an already-mounted panel. 0.7.5 addressed that event to one
-// mount, and addressing fixed misdelivery, not the invariant above: the address is the mount
-// element, any script on the page can `querySelector` it, so a page script could still choose the
-// conversation a visitor's next message is filed under. The line above would have been false while
-// the event existed, so the EVENT is what went (tile #15, won't do).
+// 🔴 AND THIS FILE OFFERS NO API FOR A PAGE SCRIPT TO PICK ONE — WHICH IS WHY THERE IS NO
+// HAND-OFF EVENT (0.7.5, review B3). 0.7.4 added `reef-inbox:handle` so a page holding an id the
+// server minted by another route could push it into an already-mounted panel. 0.7.5 addressed that
+// event to one mount, and addressing fixed misdelivery, not reach: the address IS the mount
+// element, and any script on the page can `querySelector` it. So the EVENT is what went (tile #15,
+// won't do). No event, no export, no attribute takes a conversation id from the page.
+//
+// 🔴 WHAT THAT DOES NOT BUY, SAID PLAINLY (review B3, round 3 — this header used to claim more).
+// A same-origin script that can write `localStorage['reef-inbox:<kind>:<id>']` and then navigate
+// can still choose the conversation a visitor's next message is filed under: that is the same
+// intake reef's own `/report` form uses, and it belongs to storage access, not to this widget.
+// Removing the event took away the IN-PLACE, INVISIBLE version — switching the thread under a
+// visitor who is mid-sentence in an open panel, with no navigation and nothing on screen to see.
+// It did not take away the capability, and no code in this file can. A site that loads
+// third-party script it does not trust (ads, analytics, a plugin) has given that script this
+// capability the same way it has already given it `localStorage` and the DOM.
 //
 // A hand-off is a FULL NAVIGATION instead, which is what the platform already does: reef's own
 // `/report` form writes the handle to storage and sends the visitor to a page where this coral
 // mounts — and this file reads its handle at mount, from storage, which stays its one intake.
-// A page that wants a mounted panel to switch conversations reloads it.
+// A page that wants a mounted panel to switch conversations reloads it. The thirty days that
+// handle then lives for are counted from the `ts` INSIDE IT — the timestamp whoever wrote the key
+// chose (see `loadHandle`); `saveHandle` only stamps `Date.now()` on the handles this file writes
+// itself.
 //
 // ── Two doors, and the second one has to be pressed ────────────────────────
 //
@@ -413,6 +425,12 @@ export function parseHandle(raw) {
 	return { conv: raw.conv, ts: raw.ts, hasEmail: raw.hasEmail === true, mode: raw.mode === 'ask' ? 'ask' : 'human' };
 }
 
+// 🔴 THE THIRTY DAYS ARE COUNTED FROM THE `ts` IN THE STORED VALUE, which is to say from a
+// timestamp chosen by whoever wrote that key (review B3, round 3 — the header says the same). The
+// handles THIS file writes are stamped `Date.now()` by `saveHandle` and nothing else, but anything
+// same-origin can write the key, and a `ts` in the future never satisfies the `>` below at all.
+// That is a property of the storage intake, not a check this function can make: the value is not
+// signed and there is nothing here to check it against.
 function loadHandle(tenant) {
 	let raw;
 	try {

@@ -90,9 +90,20 @@ globalThis.document = {
 globalThis.location = { hash: '', hostname: 'example.test', href: 'https://example.test/' };
 globalThis.setInterval = (fn) => { timers.set(++timerId, fn); return timerId; };
 globalThis.clearInterval = (id) => timers.delete(id);
-// Nothing under test here needs the network: the assistant-name read is allowed to fail (that is
-// its documented "change nothing" path) and a transcript fetch only happens for a stored handle.
-globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+// Nothing under test here needs the network to SUCCEED: the assistant-name read is allowed to fail
+// (that is its documented "change nothing" path) and a transcript fetch only happens for a stored
+// handle. What the calls carry is the point — which conversation id this browser asks about and
+// sends under is the only place a handle it adopted becomes visible from outside.
+const requests = [];
+globalThis.fetch = async (url, init = {}) => {
+	requests.push({ url, init });
+	return { ok: false, status: 500, json: async () => ({}) };
+};
+
+/** The conversation id on each message POST — what the visitor's message is actually filed under. */
+const postedConvs = (from = 0) =>
+	requests.slice(from).filter((r) => r.init.method === 'POST')
+		.map((r) => JSON.parse(r.init.body).conversation_id);
 
 const { mount } = await import('./inbox-bubble.js');
 
@@ -130,6 +141,13 @@ function composeBox(root) {
 
 const isOpen = (root) => root.innerHTML.includes('role="dialog"');
 const isClosedBubble = (root) => root.innerHTML.includes('dc-inbox-open');
+
+/**
+ * ONE panel's own way in — a click on its closed bubble, which reaches no other mount on the page.
+ * `dispatch('reef-inbox:open')` is a broadcast and every earlier test's panel is still listening,
+ * so anything counting what a single mount did (a poller, a request) has to open it like a visitor.
+ */
+const openBubble = (root) => root.querySelector('.dc-inbox-open').emit('click');
 
 test('B11: reef-inbox:open opens a mounted panel and focuses the compose box', async () => {
 	const { root } = await mountFresh();
@@ -221,4 +239,53 @@ test('B11: a mount whose panel is open still answers the event, and the stored h
 	assert.ok(isOpen(el.children[0]));
 	assert.equal(storage.get(`reef-inbox:site:${el.attrs['data-id']}`), stored,
 		'opening the panel rewrote the visitor\'s handle');
+});
+
+// REVIEW B3 (2026-09-08, round 3). The header sentence about hand-offs was pinned by a source regex
+// in compose.test.mjs — a test that a claim is WRITTEN DOWN, which is the instrument round 2's B11
+// rejected. What the file can actually promise is measured here instead: after a mount the only
+// door on `window` is the one that names no conversation, no export takes a handle, and round 2's
+// payload moves neither the stored handle nor the id the visitor's next message is filed under.
+//
+// 🔴 WHAT THIS DOES NOT MEASURE, and the README now says so out loud: a same-origin script that
+// writes `reef-inbox:<kind>:<id>` and navigates still chooses that conversation. That intake is
+// reachable by any script the site loads, third-party ones included. What removing the event took
+// away is the in-place, invisible version — not the capability.
+
+test('B3: the only window listener names no conversation, and no export takes a handle', async () => {
+	const api = await import('./inbox-bubble.js');
+	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
+	const key = `reef-inbox:site:${el.attrs['data-id']}`;
+	storage.set(key, JSON.stringify({ conv: 'visitor-own', ts: Date.now(), hasEmail: false, mode: 'human' }));
+	await mount(el);
+	const root = el.children[0];
+
+	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open'],
+		'a second window event type exists — the only one there may be names no conversation');
+
+	// Round 2's payload, addressed to this mount and unaddressed, exactly as the review dispatched
+	// it. There is nobody to receive either, and the visitor's own handle does not move.
+	const stored = storage.get(key);
+	const payload = { target: el, conv: 'ATTACKER-OWNED-CONV-ID', ts: Date.now(), mode: 'human' };
+	dispatch('reef-inbox:handle', payload);
+	dispatch('reef-inbox:handle', { ...payload, target: undefined });
+	assert.equal(windowListeners.has('reef-inbox:handle'), false, 'the hand-off listener is back');
+	assert.equal(storage.get(key), stored, 'a dispatched hand-off rewrote the stored handle');
+
+	// Nor is there an export to hand one to. `parseHandle` is the only export that understands the
+	// shape at all, and it is a pure reader: given the payload it returns a value and adopts nothing.
+	assert.deepEqual(Object.keys(api).filter((name) => /hand|adopt/i.test(name)).sort(),
+		['handoffConcluded', 'handoffFormHtml', 'parseHandle', 'refusalNeedsHandoffForm'],
+		'an export that takes a handle appeared');
+	assert.equal(api.parseHandle(payload).conv, 'ATTACKER-OWNED-CONV-ID');
+	assert.equal(storage.get(key), stored, 'parseHandle adopted the handle it was shown');
+
+	// The measurement the review's own probe made: the next message is filed under the id the
+	// SERVER minted for this visitor.
+	const from = requests.length;
+	await openBubble(root);
+	composeBox(root).value = 'my next message';
+	await root.querySelector('.dc-inbox-form').emit('submit');
+	assert.deepEqual(postedConvs(from), ['visitor-own'],
+		'the visitor\'s next message was filed under a conversation a page script chose');
 });

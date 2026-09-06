@@ -68,9 +68,24 @@ handle at mount, so the visitor lands on a page whose panel is already the right
 Why the event went, rather than being tightened further: it was addressed to the mount element to
 stop two corals on a page both adopting a handle meant for one of them, and any script on the page
 can look that element up with one `querySelector`. So the address stopped misdelivery and left a
-page script able to choose which conversation a visitor's next message is filed under — which is
-the one thing [the file header](inbox-bubble.js) says this widget never lets happen. A full
-navigation has no such gap: it is the same storage this browser already owns, read once, at mount.
+page script able to choose which conversation a visitor's next message is filed under, in place,
+with nothing on screen to see.
+
+🔴 **Be exact about what removing it bought, because the recipe above is the same capability.** Any
+same-origin script that can write that key and navigate can choose which conversation a visitor's
+next message is filed under — and **a site that loads third-party script it does not trust (ads,
+analytics, a plugin) has given that script this capability, the same way it has already given it
+`localStorage` and the DOM.** What is gone is the *in-place, invisible* version of it: the thread
+can no longer be switched under a visitor mid-sentence in an open panel, without a navigation. The
+capability itself belongs to storage access, and no code in this coral can take it back. What this
+coral does promise is narrower and checkable: it offers **no API** for it — no event, no export, no
+attribute takes a conversation id from the page, and the one intake is this browser's own storage,
+read once, at mount.
+
+Note what the 30-day expiry is counted from: the `ts` **inside the stored value** — the timestamp
+whoever wrote that key chose. The coral stamps `Date.now()` on the handles it writes itself (a
+visitor's own action in the panel) and cannot vouch for one it reads; a `ts` in the future does not
+expire at all.
 
 There is no in-place switch for an already-mounted panel, on purpose. If you need one, reload.
 

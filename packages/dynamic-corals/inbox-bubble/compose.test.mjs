@@ -595,11 +595,26 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
 });
 
-test('B3: the header states the invariant the code actually keeps', () => {
+// REVIEW B3, ROUND 3: the test that used to sit here asserted that the header SENTENCE existed
+// (`assert.match(CORAL_SOURCE, /WHICH IS WHY THERE IS NO HAND-OFF EVENT/)`), and the sentence it
+// pinned was false — a page script that writes `reef-inbox:<kind>:<id>` and navigates still picks
+// the conversation, which is the recipe the README itself gives. A regex measures wording, not
+// truth. The claim the file can keep — one window listener, of one type, naming no conversation,
+// and no export that takes a handle — is asserted against a real mount() in mount.test.mjs.
+//
+// What is left here is the DOCUMENT half, and it is stated as a limit rather than an absolute: the
+// header has to keep saying that the storage intake is reachable by any same-origin script.
+
+test('B3: the header bounds its own claim to what this file controls', () => {
 	// The sentence the review called a false claim, in the form it took while the event existed.
 	assert.equal(/AND THAT SURVIVES `reef-inbox:handle`/.test(CORAL_SOURCE), false);
 	assert.match(CORAL_SOURCE, /THE CONVERSATION ID COMES FROM THE SERVER/);
-	assert.match(CORAL_SOURCE, /WHICH IS WHY THERE IS NO HAND-OFF EVENT/);
+	// 🩸 An absolute claim about what「no script on the page」can do is the thing that was wrong.
+	// The header may say this file offers no API for it; it may not say nobody can.
+	assert.equal(/NO SCRIPT ON THE PAGE PICKS IT EITHER/.test(CORAL_SOURCE), false,
+		'the header claims a page script cannot pick the conversation — the storage intake means it can');
+	assert.match(CORAL_SOURCE, /can still choose the conversation a visitor's next message is filed under/);
+	assert.match(CORAL_SOURCE, /third-party script it does not trust \(ads, analytics, a plugin\)/);
 });
 
 // REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
@@ -701,6 +716,24 @@ test('B4: the README documents no event this file no longer has', () => {
 	// The event this file DOES have is still documented, and still described as taking no id.
 	assert.match(README, /reef-inbox:open/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+});
+
+test('B3: the README keeps the warning next to the recipe that needs it', () => {
+	// 🩸 Round 2 deleted the storage recipe's own caveat along with the event's, so the README was
+	// left teaching how to write the key on one screen and calling the same move impossible on the
+	// next. The warning belongs BESIDE the recipe: whoever reads「write the key and navigate」is
+	// exactly the reader who has to know who else on the page can do it.
+	const section = README.slice(README.indexOf('reef-inbox:<kind>:<id>'),
+		README.indexOf('## The three things not to break'));
+	assert.ok(section, 'the hand-off section moved — this test is measuring nothing');
+	// Whitespace-tolerant: the README is hard-wrapped, so any of these gaps may be a newline.
+	assert.match(section, /third-party script it does not trust \(ads,\s+analytics, a plugin\)/);
+	assert.match(section, /the same way it has already given it\s+`localStorage` and the DOM/);
+	// And the absolute the review struck down — the same claim the file header no longer makes.
+	assert.equal(/A full navigation has no such gap/.test(README), false,
+		'the README claims the navigation recipe has no gap; it is the same gap, one navigation wide');
+	// The expiry is counted from a ts this file did not choose, and the README has to say whose.
+	assert.match(section, /the timestamp\s+whoever wrote that key chose/);
 });
 
 test('B4: the README quotes the TTL the code actually enforces', () => {
