@@ -620,6 +620,19 @@ export function resolveViewMode({ hasHandoffConv, storedMode, concluded, kaitoOn
 	return storedMode === 'ask' ? 'ask' : 'human';
 }
 
+/**
+ * #13: should a page LOAD, by itself, open the panel? Pure so mount()'s one-line call is the only
+ * place this reads `location.hash`, and this file's tests can drive it without a browser.
+ *
+ * Exactly `#inbox`, not a prefix or substring test — a page's own anchor (`#inbox-pricing`, a
+ * heading id that happens to start the same way) must not trip a widget its author never asked
+ * for. A site that wants this deliberately writes the literal fragment, the same way `data-kind`
+ * is a deliberate attribute rather than an inferred one.
+ */
+export function shouldAutoOpenFromHash(hash) {
+	return hash === '#inbox';
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 
 /**
@@ -1424,6 +1437,25 @@ export async function mount(el) {
 	// One read at mount so a returning visitor sees the reply waiting for them
 	// behind the closed bubble — without opening a panel nobody asked for.
 	if (conv) await refresh();
+
+	/** Opens the panel exactly as the closed bubble's own click does — a no-op while already open. */
+	function openPanel() {
+		if (open) return;
+		open = true;
+		renderOpen();
+	}
+
+	// #13: a programmatic way in. A site's own "report a problem" footer link can open this panel
+	// in place instead of sending the visitor to another page — a `reef-inbox:open` CustomEvent on
+	// `window`, or `#inbox` in the URL the visitor already landed on. Both are wired only here,
+	// inside a successful `mount()`, so either is inert wherever the coral is not mounted: there is
+	// no listener and no hash check running for an element that failed the `data-kind`/`data-id`
+	// guard at the top of this function. `openPanel` reaches `renderOpen()`, which every existing
+	// path into the panel already funnels through — the ask/compose textarea's own `.focus()` call
+	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
+	// to keep in sync.
+	window.addEventListener('reef-inbox:open', openPanel);
+	if (shouldAutoOpenFromHash(location.hash)) openPanel();
 
 	// 🏛 The platform's name, applied AFTER the first paint (CANON 第一條 / ruling #36).
 	//

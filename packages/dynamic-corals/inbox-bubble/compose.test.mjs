@@ -7,7 +7,7 @@ globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
 	refusalNeedsHandoffForm, resolveAssistantName, resolveLocale, resolveSiteName, resolveViewMode,
-	statusFor
+	shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -539,3 +539,24 @@ test('the second-action label switches between "ask <assistant> again" and "star
 		assert.ok(copy.handoffEnded.length > 0, `${locale} handoffEnded is empty`);
 	}
 });
+
+// ── #13: a programmatic way to open the panel ───────────────────────────────
+
+test('shouldAutoOpenFromHash: only the exact #inbox fragment, never a prefix match', () => {
+	assert.equal(shouldAutoOpenFromHash('#inbox'), true);
+	assert.equal(shouldAutoOpenFromHash('#inbox-pricing'), false);
+	assert.equal(shouldAutoOpenFromHash('#other'), false);
+	assert.equal(shouldAutoOpenFromHash(''), false);
+	assert.equal(shouldAutoOpenFromHash(undefined), false);
+});
+
+// NOTE ON COVERAGE: mount() wires window.addEventListener('reef-inbox:open', ...) and calls
+// shouldAutoOpenFromHash(location.hash) itself — both only ever run for an element that already
+// passed the data-kind/data-id guard at the top of mount(), which is what makes each inert
+// wherever the coral is not mounted. mount() builds real DOM (document.createElement,
+// root.querySelector, ...) that this jsdom-free suite has no stand-in for, so the wiring itself —
+// and the "opening focuses the ask input" behaviour, which falls out for free because openPanel
+// calls the same renderOpen() a click already did — is not exercised here. What is checked here
+// is the one pure decision mount() delegates to: shouldAutoOpenFromHash. The DOM-level proof
+// belongs in reef's own inbox-bubble.svelte.test.ts, which already drives this exact artifact in
+// a real browser.

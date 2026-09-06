@@ -29,6 +29,21 @@ and the box's own placeholder. The body line in the empty log and the
 「站主看得到」 footer under the form are gone in every locale, and
 `data-empty-label` went with the string it overrode.
 
+## Opening the panel programmatically
+
+From 0.7.4, two ways in besides a visitor's own click — both inert unless this coral is actually
+mounted on the page, because neither is wired until a `mount()` for a valid `data-kind`/`data-id`
+has already run:
+
+- `window.dispatchEvent(new CustomEvent('reef-inbox:open'))` — a site's own link (a footer "report
+  a problem" anchor, say) can open the panel in place instead of sending the visitor to another
+  page.
+- `#inbox` in the page's URL fragment at load — honoured once, at mount, the same way.
+
+Either reaches exactly what a click on the closed bubble reaches, so it focuses the ask/compose
+input the same way every other way into the panel already does — there is no separate focus path
+to keep in sync.
+
 ## The three things not to break
 
 **It never claims anyone is there.** The panel shows a reply window only when the
