@@ -142,6 +142,20 @@ if [ -n "$orphans" ]; then
   exit 1
 fi
 
+# 🩸 packages/build's end-to-end test is the only one in this repo that proves "an IR directory in,
+# a directory of static HTML out" — the sentence that package exists for. It needs the renderer's
+# dependencies and names ITSELF skipped without them, which is the right shape; what was missing is
+# anywhere that made the skip an actionable fact. It ran inside the loop below among 26 other
+# greens, CI installed nothing, and so every green this gate has ever produced excluded it. The
+# workflow now installs them; this says out loud which of the two runs you are looking at.
+if [ -d packages/sitetile/astro/node_modules ]; then
+  echo "→ packages/build end-to-end: the renderer's deps are here, so it builds real pages"
+else
+  echo "  · packages/build END-TO-END SKIPPED — no packages/sitetile/astro/node_modules"
+  echo "    (this run did NOT prove IR in → static HTML out; run npm install there, or see"
+  echo "     .github/workflows/ci.yml, which installs them)"
+fi
+
 echo "→ site renderer tests"
 shopt -s nullglob
 for t in "${SUITE_GLOBS[@]}"; do

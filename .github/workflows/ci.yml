@@ -15,6 +15,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # 🩸 THE RENDERER'S DEPENDENCIES, without which the two gates that build real pages both skip
+      # themselves and CI's green means less than it looks. This workflow installed nothing, and
+      # packages/sitetile/astro/node_modules is gitignored — so packages/build's end-to-end test
+      # ("an IR directory in, a directory of static HTML out", the sentence that package exists for)
+      # and the astro smoke have never once run here. Both name themselves as skipped, and both
+      # skips scrolled past inside a long green. Measured 2026-09-07 on a clean clone.
+      - name: Install the renderer's dependencies
+        run: npm ci --prefix packages/sitetile/astro
       # build.sh inlines SortableJS + i18n via python3 (preinstalled on ubuntu-latest)
       - name: Build + test
         run: bash scripts/test.sh
