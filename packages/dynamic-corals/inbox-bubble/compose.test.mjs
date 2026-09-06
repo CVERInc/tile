@@ -1788,6 +1788,50 @@ test('D2: a probe that never came back is the same non-answer, bounded the same 
 	assert.equal(probes, 2);
 });
 
+// ── review D9/D8 (2026-09-08, round 2): three public documents said the opposite of the wire ──
+//
+// 🩸 The README and the manifest promised「only ONCE per session」, and the contract's own §一 says
+// the same `session_id` is sent MORE than once — that is why the endpoint has to be idempotent on
+// it, and this suite's own flush-once test asserts a second send under `sid-1`. The manifest is
+// where this coral tells an integrator what it calls; a sentence there that the code contradicts
+// is not a typo, it is the wrong answer to「what does this thing do to my visitors」.
+
+const MANIFEST = JSON.parse(
+	readFileSync(fileURLToPath(new URL('./manifest.json', import.meta.url)), 'utf8'));
+const MANIFEST_CALLS = MANIFEST.calls.join('\n');
+const MANIFEST_STORES = MANIFEST.stores.join('\n');
+
+test('D9: the README and the manifest describe the flush the contract describes', () => {
+	// The claim that was false. It is not once per session — it is once per pagehide, when there
+	// is something new, and the same session id goes again as the session grows.
+	assert.equal(/ONCE per session/.test(MANIFEST_CALLS), false, 'the manifest still says it');
+	// The README may still say the phrase exactly once — to deny it. A second occurrence is a
+	// claim again, which is how the first one got there.
+	assert.deepEqual(README.match(/once per session/gi), ['once per session']);
+	assert.match(README, /\*\*not\*\* once per session/, 'the README asserts it rather than denying it');
+	assert.match(README, /at most once per `pagehide`, and only when there is something new/);
+	assert.match(MANIFEST_CALLS, /idempotent/,
+		'the manifest describes a repeat send without saying why that is safe');
+
+	// D8: the six-hour sentence was true of an answer and false of everything else, and the
+	// failure path is the one an integrator's request count actually sees.
+	const hours = Number(CORAL_CODE.match(/AI_LOG_CLAIM_TTL_MS = (\d+) \* 60 \* 60 \* 1000;/)[1]);
+	const minutes = Number(CORAL_CODE.match(/AI_LOG_CLAIM_RETRY_MS = (\d+) \* 60 \* 1000;/)[1]);
+	assert.equal(hours, 6);
+	assert.equal(minutes, 5);
+	assert.match(MANIFEST_CALLS, /at most once every five minutes while it cannot/);
+	assert.match(README, /retried at most\s+once every five minutes/);
+	assert.match(README, /A definite\s+answer is cached for six hours/);
+
+	// D10, D5, D7 and D3's structural half — each of them changed what these documents may claim.
+	assert.match(README, /dropped\s+every time, not only when the answer first arrives/);
+	assert.match(MANIFEST_STORES, /dropped every time/);
+	assert.match(README, /40 pages of at most 200 characters/);
+	assert.match(README, /bounded in UTF-8 octets/);
+	assert.match(README, /must parse as an `http\(s\)` URL/);
+	assert.match(README, /\*\*If storage stops accepting writes\*\*/);
+});
+
 // ── review D10 (2026-09-08, round 2): the drop was honoured once, not every time ─────────────
 //
 // 🩸 The first `claimed:false` cleared the buffer; after that the six-hour cache took the early

@@ -490,8 +490,13 @@ function saveHandle(tenant, conv, hasEmail, mode = 'human') {
 // it is asked — is the shape this coral exists not to be: it turns a browsing visitor
 // into a request stream, and it makes the owner's own inbox the busiest thing on their
 // site. So the questions live HERE, in this browser, in the same storage the handle
-// lives in, and leave ONCE: on `pagehide` as a beacon, or the moment the visitor presses
-// for a person, whichever comes first.
+// lives in, and leave on the way out: on `pagehide` as a beacon, or the moment the visitor
+// presses for a person, whichever comes first.
+//
+// 🔴 ONCE PER `pagehide`, AND ONLY WITH SOMETHING NEW — not once per session. A visitor who
+// asks again on a second page sends the same `session_id` a second time, carrying the whole
+// session, which is why the endpoint is idempotent on that id (contract §一.2) and why the
+// README and the manifest may not say「once per session」(review D9).
 //
 // 🔴 AND ONLY WHEN THE SITE HAS AN INBOX. A KAITO-only tenant — somebody who bought the
 // ask-the-site half and nothing else — writes nothing, ever. That is not a quota, it is
@@ -645,13 +650,12 @@ export const AI_SESSION_FIELDS = ['kind', 'id', 'session_id', 'pages', 'question
  * that question silently dropped while twenty older ones stayed.
  */
 export function capAiQuestions(list) {
-	const rows = (Array.isArray(list) ? list : []).slice(-AI_LOG_MAX_QUESTIONS).map((q) => {
+	return (Array.isArray(list) ? list : []).slice(-AI_LOG_MAX_QUESTIONS).map((q) => {
 		const src = q && typeof q === 'object' ? q : {};
 		const row = {};
 		for (const field of AI_QUESTION_FIELDS) row[field] = AI_QUESTION_READERS[field](src);
 		return row;
 	});
-	return rows;
 }
 
 /**
@@ -745,9 +749,10 @@ export function aiSessionPayload(kind, id, state) {
  *
  * 🔴 `sendBeacon` FIRST, and with a `Blob` typed `application/json` — a bare string beacon
  * is sent as `text/plain`, which this endpoint refuses (see `readBody` on reef's side: an
- * unlabelled body is a client we do not recognise). `fetch(..., { keepalive: true })` is the
- * fallback for a browser without `sendBeacon`, and it is a fallback rather than the first
- * choice because a `pagehide` handler's ordinary `fetch` is cancelled with the document.
+ * unlabelled body is a client we do not recognise). `fetch(..., { keepalive: true })` is what
+ * a browser without `sendBeacon` gets, what a REFUSED beacon falls through to (D4), and what a
+ * caller asking to be told the outcome gets — and it is second rather than first because a
+ * `pagehide` handler's ordinary `fetch` is cancelled with the document.
  *
  * 🔴 THE ANSWER COMES IN ONE OF THE TWO TENSES A BROWSER HAS, and the caller has to read
  * which one it got (review D1):
@@ -1501,12 +1506,13 @@ export async function fetchAssistantName(apiBase, kind, id) {
  *
  * 🔴 THE ONLY QUESTION THIS ASKS, and it is asked LAZILY: not at mount, but the first time a
  * visitor actually types a question, and then at most once per `AI_LOG_CLAIM_TTL_MS` per
- * browser. A probe at mount would put a request on every page view of every site carrying
- * this coral to answer a question that matters only for the small share of visits where
- * somebody asks something.
+ * browser once it has an answer — once per `AI_LOG_CLAIM_RETRY_MS` while it does not. A probe
+ * at mount would put a request on every page view of every site carrying this coral to answer
+ * a question that matters only for the small share of visits where somebody asks something.
  *
- * `null` (a network failure, a shape we cannot read, a 429) is NOT `false` — it is「we do not
- * know」, and `createAiLog`'s flush treats not-knowing exactly like a no.
+ * `null` (a network failure, a shape we cannot read, a 429, the contract's own `throttled`) is
+ * NOT `false` — it is「we do not know」, and `createAiLog`'s flush treats not-knowing exactly
+ * like a no while refusing to write it down as one.
  */
 export async function probeInboxClaim(apiBase, kind, id) {
 	try {

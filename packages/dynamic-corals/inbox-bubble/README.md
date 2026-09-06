@@ -100,24 +100,42 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
 
 - The questions stay in **this browser**, in the same `localStorage` the conversation handle lives
   in, keyed `reef-inbox:ai:<kind>:<id>`.
-- They leave **once per session** — on `pagehide` as a `navigator.sendBeacon`, or the moment the
-  visitor presses for a person, whichever comes first. Never one request per question. A second
-  `pagehide` with nothing new sends nothing.
+- They leave **at most once per `pagehide`, and only when there is something new** — as a
+  `navigator.sendBeacon`, or the moment the visitor presses for a person, whichever comes first.
+  Never one request per question, and a second `pagehide` with nothing new sends nothing. It is
+  **not** once per session: a visitor who asks something on a second page sends the same
+  `session_id` again, carrying the whole session, which is why the endpoint is idempotent on that
+  id rather than inserting a row per request.
+- **A send that is refused changes nothing.** A beacon the browser will not take, a fetch that
+  never arrives, anything but a 2xx: the questions stay in this browser and the next `pagehide`
+  carries them. Only an accepted send moves the mark, and only the escalation press — which
+  happens with the page still alive — waits to hear what the server said.
 - A session spans **pages**, not documents: on a static site every navigation is a new `mount()`,
   so a per-document buffer would make the page sequence — the whole reason the row exists — always
   one entry long. Thirty idle minutes ends a session instead.
 - **Only when the site has an Inbox.** The coral asks `GET /api/inbox/session?kind=…&id=…` the
   first time a visitor actually types a question (not at mount — that would be a request on every
-  page view of every site to answer a question that matters on a small share of them), caches the
-  answer for six hours, and treats「we could not ask」exactly like「no」. A KAITO-only tenant writes
-  nothing, ever, and an unclaimed answer drops what is already buffered rather than holding it
-  against the day somebody claims the inbox.
-- **The machine's answers are never sent.** What travels is the visitor's own question, the path it
-  was asked on, the cited passage's URL (or `null`), the page's locale, and the time — the same
-  line the platform's own refusal records already hold. Query strings never travel: a page is
-  `/pricing`, not `/pricing?token=…`.
+  page view of every site to answer a question that matters on a small share of them). A definite
+  answer is cached for six hours; a probe that could not answer — no network, or the endpoint's own
+  `throttled` — is **not** an answer, so it is never written down as「no」, and it is retried at most
+  once every five minutes rather than once per question. Not knowing behaves exactly like「no」for
+  sending: nothing leaves until somebody actually says yes. A KAITO-only tenant writes nothing,
+  ever, and while that answer stands an unclaimed site holds nothing either — the buffer is dropped
+  every time, not only when the answer first arrives.
+- **The machine's answers are never sent**, and cannot be: what travels is the visitor's own
+  question, the path it was asked on, the cited passage's URL (or `null`), the page's locale, and
+  the time. The row is assembled from that list of five fields rather than from whatever the buffer
+  holds, and the citation must parse as an `http(s)` URL — so an answer handed in by mistake lands
+  as `null` instead of on the wire. Query strings never travel: a page is `/pricing`, not
+  `/pricing?token=…`.
 - **Caps are applied on the way in**, so a hostile client cannot bloat a row: 20 questions per
-  session, 500 characters each, oldest dropped first.
+  session, 500 characters each, 40 pages of at most 200 characters, oldest dropped first — and the
+  page sequence is bounded in UTF-8 octets as well, because the transport's ~64 KiB budget counts
+  octets while every cap above counts characters, and one CJK character is three of them.
+- **If storage stops accepting writes** (a full quota, not a disabled store), the session continues
+  in memory for the rest of the document, under the same caps. What it loses is the ability to
+  outlive that document or be seen by another tab — never the questions already asked, which is
+  what a stale read would have cost.
 
 The escalation press stays the only thing that notifies the owner. This log does not.
 
