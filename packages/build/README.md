@@ -43,6 +43,33 @@ const { code, outDir, pageCount } = await buildSite({
 });
 ```
 
+**Neither of these touches your process's signals.** `stageSite()` and `buildSite()` install no
+`SIGINT`/`SIGTERM` handler, never call `process.exit()`, and leave your own shutdown, your own
+ordering and your own exit code exactly as they were. An earlier version did the opposite — calling
+`stageSite()` armed handlers that ended in `process.exit(130/143)`, so a host with its own SIGTERM
+drain was killed mid-drain and left with 143 where it had asked for 0.
+
+What crosses the boundary instead is an **`AbortSignal`**, and you own the controller:
+
+```js
+const stopping = new AbortController();
+process.on('SIGINT', () => stopping.abort());     // YOUR handler, YOUR exit code
+
+try {
+  await buildSite({ irDir, engineDir, outDir, signal: stopping.signal });
+} catch (err) {
+  if (err.name === 'AbortError') { /* the renderer is already back; leave how you like */ }
+}
+```
+
+Aborting unwinds the build — the running `astro build` is stopped, all four directories are put
+back, the stash and the lock are removed — and then the call rejects with an `AbortError`. It does
+not exit for you. `restore()` is idempotent and re-entrant, so a `finally { await restore() }` of
+your own is always safe, including while an abort's restore is still in flight.
+
+The 130/143 lives in `cli.mjs`, which is a program and may own the process's signals because it *is*
+the process.
+
 `mkpages.mjs` is also a standalone CLI, and deliberately still the one it always was:
 
 ```
@@ -170,8 +197,10 @@ build is refused in a sentence instead of stashing what the first one just stage
 delete the renderer's own `content/` for good, silently.
 
 …and on **Ctrl-C**, which is none of those three and is the likeliest of the four. `finally` does
-not run on a signal, so `stageSite` installs `SIGINT`/`SIGTERM` handlers that restore and then exit
-130. A kill nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
+not run on a signal, so `cli.mjs` — the program, not the library — installs `SIGINT`/`SIGTERM`
+handlers, aborts the build, and exits 130 / 143 once the renderer is back. A library call does none
+of that: see §"The API" for the `signal` option and why it is the only thing that crosses. A kill
+nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
 the renderer — `.gitignore` hides it from `git status` and a tarball has no `git status` at all, so
 the NEXT build refuses to start and names the directory rather than building somebody else's
 leftover pages into your site.
