@@ -1,9 +1,9 @@
 {
   "name": "inbox-bubble",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/inbox-bubble/0.7.2/inbox-bubble.js",
+  "source": "https://feelreef.com/corals/inbox-bubble/0.7.3/inbox-bubble.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": [],
   "calls": [
