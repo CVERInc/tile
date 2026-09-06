@@ -827,8 +827,22 @@ export function createAiLog(opts) {
 	} = opts;
 	const key = aiLogKey(tenant);
 
+	/**
+	 * Storage took a write and then refused a later one — a full quota, not a disabled store.
+	 *
+	 * 🩸 THE HALF-WRITTEN CASE IS THE BAD ONE (review D7). `write()` swallowed the failure and
+	 * said so in a comment:「this browser just will not be able to tell the owner about them」.
+	 * That was not what happened. Every method re-reads storage, so what came back after a failed
+	 * write was the state from BEFORE the newest question — three questions asked, one recorded,
+	 * and the owner shown a visitor who asked once, which looks exactly like a visitor who did.
+	 * A quiet PARTIAL record is worse than none. So a store that stops accepting writes stops
+	 * being read as well: the session continues in memory, bounded by the same caps as ever, and
+	 * what it cannot do is outlive this document or be seen by another tab — which is the thing
+	 * the comment should have said all along.
+	 */
+	let readOnly = false;
 	function read() {
-		if (!storage) return null;
+		if (!storage || readOnly) return null;
 		try {
 			const raw = storage.getItem(key);
 			return raw ? parseAiLog(JSON.parse(raw)) : null;
@@ -840,10 +854,9 @@ export function createAiLog(opts) {
 		if (!storage) return;
 		try {
 			storage.setItem(key, JSON.stringify(state));
+			readOnly = false;
 		} catch {
-			// Storage disabled or full. The bubble still answers questions; this browser just
-			// will not be able to tell the owner about them. Degrading silently is right —
-			// the visitor came for an answer, not for our bookkeeping.
+			readOnly = true;
 		}
 	}
 	function fresh(at, carry) {

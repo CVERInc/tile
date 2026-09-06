@@ -1788,6 +1788,50 @@ test('D2: a probe that never came back is the same non-answer, bounded the same 
 	assert.equal(probes, 2);
 });
 
+// ── review D7 (2026-09-08, round 2): a storage that stops taking writes ──────────────────────
+//
+// 🩸 The review asked three questions with a full quota and the buffer held ONE — the newest, on
+// its own. Because every method re-reads the cell, a failed write meant the next read came back
+// with the state from before the question that failed, over and over. The owner would have seen
+// a visitor who asked once, which is indistinguishable from a visitor who did.
+
+test('D7: a full quota keeps the session in memory, not the last question on its own', async () => {
+	const cells = new Map();
+	let full = false;
+	const storage = {
+		getItem: (k) => (cells.has(k) ? cells.get(k) : null),
+		setItem: (k, v) => {
+			if (full) throw new Error('QuotaExceededError');
+			cells.set(k, v);
+		}
+	};
+	const f = logFixture({ storage });
+	f.log.page('/');
+	f.log.question('第一題', '/', null, '');
+	await f.settle();
+
+	full = true; // the quota fills — subsequent writes throw, reads still work
+	f.log.question('第二題', '/', null, '');
+	f.log.question('第三題', '/', null, '');
+	assert.deepEqual(f.log.state().questions.map((q) => q.text), ['第一題', '第二題', '第三題'],
+		'the buffer fell back to what storage last accepted');
+	const went = f.log.flush();
+	assert.equal(went.questions.length, 3, 'a partial record went to the owner');
+
+	// The caps still bound what memory holds —「keep the last N」is the same N as ever.
+	for (let i = 0; i < AI_LOG_MAX_QUESTIONS + 5; i++) f.log.question(`q${i}`, '/', null, '');
+	assert.equal(f.log.state().questions.length, AI_LOG_MAX_QUESTIONS);
+	// …and what it cannot do is be shared: storage still holds the last thing it accepted.
+	assert.equal(JSON.parse(cells.get(aiLogKey('site:acme'))).questions.length, 1);
+
+	// When the store starts accepting writes again it is the source of truth again.
+	full = false;
+	f.log.question('後來', '/', null, '');
+	const stored = JSON.parse(cells.get(aiLogKey('site:acme')));
+	assert.equal(stored.questions.length, AI_LOG_MAX_QUESTIONS);
+	assert.equal(stored.questions[stored.questions.length - 1].text, '後來');
+});
+
 // ── review D6 (2026-09-08, round 2): one browser, two tabs, one idempotency key ──────────────
 //
 // 🩸 `flush()` was the only method that did not start by re-reading storage, and the only one
