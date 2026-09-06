@@ -211,7 +211,7 @@ test('resolveAssistantName caps at 40 chars and takes only the first line', () =
 test('statusFor threads a custom assistant name through, and still carries the AI marker', () => {
 	assert.equal(
 		statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: true }, '小美'),
-		'小美<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>answers first, a person reads every message'
+		'小美<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>answers first, a person reads what you send on'
 	);
 	assert.match(
 		statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, '小美'),
@@ -447,9 +447,9 @@ test('🔴 the title line still carries the AI marker after data-assistant-name 
 
 test('the shortened title line reads as the owner ruled it, per locale', () => {
 	assert.equal(COPY['zh-tw'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，真人會看`);
-	assert.equal(COPY.en.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}answers first, a person reads every message`);
+	assert.equal(COPY.en.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}answers first, a person reads what you send on`);
 	assert.equal(COPY['zh-cn'].statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}先回，真人会看`);
-	assert.equal(COPY.ja.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}が先に回答・人も必ず読みます`);
+	assert.equal(COPY.ja.statusDefault('KAITO'), `KAITO${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`);
 	// Traditional and Simplified are two rows for a reason — see inbox-form-copy.test.mjs.
 	assert.notEqual(COPY['zh-tw'].statusDefault('K'), COPY['zh-cn'].statusDefault('K'));
 });
