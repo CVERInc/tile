@@ -1,12 +1,12 @@
 ---
 inbox-bubble-except: /blocks, /markers
-# 🩸 2026-09-03 (atelier-a /faq): `brand` is the SITE's own short name, deliberately DIFFERENT from
+# 🩸 2026-09-03 (a customer's /faq page): `brand` is the SITE's own short name, deliberately DIFFERENT from
 # any page's own `title:` — every fixture page's title is its own composed <title> text (see
 # home.md, forms.md, …), exactly like a real site's pages each carry their own full SEO title.
 # Site-name consumers (og:site_name, the inbox bubble's data-site-name) must resolve to THIS,
 # never to whichever page happens to be rendering — see the /faq check below.
 brand: Yamada Letterpress
-# 🩸 2026-09-03 (atelier-a /category × Lingo gap): the BLOG's own site-wide config lives HERE —
+# 🩸 2026-09-03 (a customer's /category × Lingo gap): the BLOG's own site-wide config lives HERE —
 # pages/[...path].astro's per-locale blog block, and now the locale category/tag archives, read
 # `meta.locales`/`meta.packages` from siteMeta() (this file, when it exists), NOT from home.md's
 # own frontmatter (a content PAGE's `locales:`/`packages:` only govern that page). Home.md has

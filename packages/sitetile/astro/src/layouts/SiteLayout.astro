@@ -650,12 +650,12 @@ const jsonLd = jsonLdScript(pageGraph({
 // page frontmatter merges over the site config, precisely so the head can still see the site's own
 // title.
 //
-// 🩸 2026-09-03 (atelier-a /faq, also feeding the inbox-bubble's data-site-name below): that fix was
+// 🩸 2026-09-03 (a customer's /faq page, also feeding the inbox-bubble's data-site-name below): that fix was
 // incomplete. A site can have `_site.md` — nav/footer/theme all configured — and still never set
 // its OWN `title:` there, because nothing forces it to. `site-title` then stashes as '' and
 // ogSiteName fell all the way through to `headerBrand`, which on any page with no dedicated
 // `brand:` reads `meta.title` — the PAGE's own merged title. Measured: /faq rendered
-// "よくある質問 | atelier-a【新HP移行中】" (the page author's own composed <title> text, "page | site")
+// "よくある質問 | HOSHIYA【新HP移行中】" (the page author's own composed <title> text, "page | site")
 // as the site name — same class of defect the site-title stash was meant to close, one fallback
 // step further down the chain.
 // Fix: prefer the two chrome fields that are already documented as SITE-level, never per-page —
