@@ -57,59 +57,22 @@ Both are wired **before** the panel's first transcript fetch, so a site that dis
 `reef-inbox:open` from its own `DOMContentLoaded` handler is not racing a network round trip for
 a listener to exist.
 
-## Handing off a conversation from elsewhere
+## Handing a conversation over from elsewhere: navigate, do not dispatch
 
-From 0.7.4 (and from 0.7.5 the event must name its addressee — see below), a page that mints a
-hand-off some other way than this file's own escalate/compose
-forms — reef's own `/report` form, for instance, which writes the same handle shape this file's
-`saveHandle` does — can make an ALREADY-mounted panel switch to it:
+0.7.4 added a `reef-inbox:handle` event for this and **0.7.5 removed it again** (tile #15, won't
+do). If a page holds a conversation id the server minted — reef's own `/report` form writes the
+handle this file's `saveHandle` writes — hand it over the way the platform already does: **write
+the handle to `localStorage` under `reef-inbox:<kind>:<id>` and navigate**. The coral reads its
+handle at mount, so the visitor lands on a page whose panel is already the right conversation.
 
-```js
-const coral = document.querySelector('[data-dynamic-coral="inbox-bubble"]');
-window.dispatchEvent(new CustomEvent('reef-inbox:handle', {
-  detail: { target: coral, conv: 'the-conversation-id', ts: Date.now(), hasEmail: true, mode: 'human' }
-}));
-```
+Why the event went, rather than being tightened further: it was addressed to the mount element to
+stop two corals on a page both adopting a handle meant for one of them, and any script on the page
+can look that element up with one `querySelector`. So the address stopped misdelivery and left a
+page script able to choose which conversation a visitor's next message is filed under — which is
+the one thing [the file header](inbox-bubble.js) says this widget never lets happen. A full
+navigation has no such gap: it is the same storage this browser already owns, read once, at mount.
 
-`detail` is the object this file's own `saveHandle` stores, plus an addressee — `target` (the
-coral's own mount element), `conv` (string) and `ts` (number, when the handle was minted) are
-required; `hasEmail` and `mode` (`'human'` or `'ask'`) are optional and default the same way
-`saveHandle` itself defaults them. The gap it closes: a same-document `localStorage.setItem`
-raises no `storage` event, so without this a mounted panel never finds out that another script on
-the same page just gave this visitor a handle. On receipt the panel adopts it, tears down
-whatever poller was running against the previous conversation, and re-renders.
-
-🔴 **The panel DOES write the adopted handle to `localStorage`**, under its own
-`reef-inbox:<kind>:<id>` key — this paragraph said the opposite until 0.7.5 and the code was
-right, not the sentence. It writes because a panel showing one conversation and a storage key
-pointing at another is the worse of the two failures: the next page load would open a different
-thread than the one the visitor was just looking at. Two consequences to design around, since
-that key holds only one handle:
-
-- adopting **replaces** whatever handle this browser held for this tenant, and there is no second
-  copy of it on this machine. That pointer is the visitor's only route back to their own thread —
-  the owner's copy never expires, this one does — so an emitter that hands over a handle is
-  taking that decision on the visitor's behalf.
-- the key it writes is **this mount's** tenant, which is not necessarily the key the emitter
-  wrote under. If the emitter minted the handle for a different `kind`/`id`, both keys now exist
-  and only one of them is what the panel is showing.
-
-The event is **addressed, not broadcast** — four things have to be true or it is silently ignored:
-
-- `detail.target` is that mount's own element. This is a `window` event, so every script on the
-  page can reach it; requiring the element means a sender has to know which coral it is talking
-  to, so two corals on one page do not both adopt a handle meant for one of them, and a script
-  firing blindly at `window` reaches none. 🔴 It is an addressee, not a secret — any script on
-  the page can look the element up, so a site that loads third-party script it does not trust
-  (ads, analytics, a plugin) has given that script this capability, the same way it has already
-  given it `localStorage` and the DOM.
-- `conv` is a string and `ts` a finite number — a malformed `detail` (not an object, missing or
-  wrong-typed) is ignored, never thrown.
-- the handle is inside the same 30-day TTL storage enforces, counted from the `ts` the sender
-  supplied. Adoption keeps that `ts` rather than restamping it, so handing a handle over cannot
-  extend a life the storage path would have let end.
-- it is not older than the handle the panel already holds, so a replayed or stale event cannot
-  rewind a visitor to a conversation they have moved past.
+There is no in-place switch for an already-mounted panel, on purpose. If you need one, reload.
 
 ## The three things not to break
 
@@ -119,10 +82,11 @@ person, and a person is far easier to feel lied to about than a widget.
 
 **The conversation id comes from the SERVER.** This browser stores what the server
 minted and sends it back; it never invents one. A browser that can choose an id
-can choose whose conversation to open — which is why the hand-off event above is
-addressed to a mount and refuses to invent, extend or rewind a handle. The
-handle expires locally after 30 days (`HANDLE_TTL_MS`, bumped from seven on
-2026-09-04; this line still said seven); the owner's copy never expires.
+can choose whose conversation to open — which is why there is exactly one intake
+for a handle (this browser's own storage, read at mount) and why the hand-off
+event that gave page scripts a second one was removed in 0.7.5. The handle
+expires locally after 30 days (`HANDLE_TTL_MS`, bumped from seven on 2026-09-04;
+this line still said seven); the owner's copy never expires.
 
 **A KAITO answer is never stored and never joins the transcript.** It is a machine
 quoting one of the owner's own pages; a message is a person speaking. Only the

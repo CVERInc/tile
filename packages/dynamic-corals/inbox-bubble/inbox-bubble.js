@@ -28,13 +28,18 @@
 // studied against lets the browser generate the id, and a browser that can
 // choose an id can choose whose conversation to open.
 //
-// 🔴 AND THAT SURVIVES `reef-inbox:handle` (0.7.5, review B3). The hand-off event exists so a
-// page that got an id FROM THE SERVER by another route — reef's own `/report` form — can pass it
-// to a panel that is already mounted. What it must never become is a way for a page script to
-// pick the id a visitor's next message is filed under. So the event is not a broadcast any
-// listener answers: `detail.target` has to BE this mount's own element, the handle has to be
-// inside the same 30-day TTL storage enforces, and it may not replace a newer handle with an
-// older one. A sender that cannot name which coral it is talking to is not answered at all.
+// 🔴 AND NO SCRIPT ON THE PAGE PICKS IT EITHER — WHICH IS WHY THERE IS NO HAND-OFF EVENT
+// (0.7.5, review B3). 0.7.4 added `reef-inbox:handle` so a page holding an id the server minted
+// by another route could push it into an already-mounted panel. 0.7.5 addressed that event to one
+// mount, and addressing fixed misdelivery, not the invariant above: the address is the mount
+// element, any script on the page can `querySelector` it, so a page script could still choose the
+// conversation a visitor's next message is filed under. The line above would have been false while
+// the event existed, so the EVENT is what went (tile #15, won't do).
+//
+// A hand-off is a FULL NAVIGATION instead, which is what the platform already does: reef's own
+// `/report` form writes the handle to storage and sends the visitor to a page where this coral
+// mounts — and this file reads its handle at mount, from storage, which stays its one intake.
+// A page that wants a mounted panel to switch conversations reloads it.
 //
 // ── Two doors, and the second one has to be pressed ────────────────────────
 //
@@ -392,85 +397,20 @@ function storeKey(tenant) {
  * asking KAITO or starting over).
  */
 /**
- * Is `raw` a well-formed handle — the shape `saveHandle` writes, whether it arrived by
- * `JSON.parse`-ing this browser's own storage or as a `reef-inbox:handle` CustomEvent's `detail`
- * (#15, minted elsewhere — reef's own `/report` form writes the same format). Pure and exported so
- * both intake points share the one place that decides "well-formed", and so a malformed `detail` —
- * this file did not raise that event, so it cannot trust its shape — is provably ignored rather
- * than thrown into an unhandled listener exception.
+ * Is `raw` a well-formed handle — the shape `saveHandle` writes, read back out of this browser's
+ * own storage by `JSON.parse`. Pure and exported because storage is a place OTHER code writes
+ * (reef's own `/report` form writes this exact shape before navigating the visitor to a page the
+ * coral mounts on), so「well-formed」has to be one decision this file can state and test, and a
+ * malformed entry has to be provably ignored rather than thrown.
  */
 export function parseHandle(raw) {
 	// 🔴 `Number.isFinite`, not `typeof raw.ts === 'number'` — `typeof NaN` is 'number', and a NaN
 	// timestamp passes every comparison a TTL check can make (`now - NaN > TTL` is false), so the
 	// old shape test let through the one value that makes an expiry test silently answer「fresh」.
 	if (!raw || typeof raw !== 'object' || typeof raw.conv !== 'string' || !Number.isFinite(raw.ts)) return null;
-	// `ts` is CARRIED OUT, not dropped (review B6). Both intake points have to answer 「how old is
-	// this handle」 — storage did it by reaching past this function into the raw JSON, and the
-	// event path could not do it at all, which is how it came to accept `{ conv, ts: 0 }`.
+	// `ts` is CARRIED OUT, not dropped (review B6). The reader has to answer 「how old is this
+	// handle」 without reaching past this function into the raw JSON to find out.
 	return { conv: raw.conv, ts: raw.ts, hasEmail: raw.hasEmail === true, mode: raw.mode === 'ask' ? 'ask' : 'human' };
-}
-
-/**
- * #15's intake, and 🔴 the whole of what makes the hand-off event safe to have on `window`
- * (review B3). Pure, so the listener inside `mount()` is three lines and every rule below is
- * testable without a browser. Returns the handle to adopt, or `null` for「ignore this event」.
- *
- * 🩸 IT USED TO BE `parseHandle(detail)` AND NOTHING ELSE, and that broke this file's own opening
- * invariant: any script on the page could name any conversation id and the panel adopted it —
- * overwriting the visitor's own stored handle (the ONLY pointer back to their thread, and it has
- * no second copy on this machine), redirecting every message they typed next into a conversation
- * somebody else chose, and doing all of it with no visible change to the panel. Against a
- * threat model of「the attacker already runs script here」none of that is privilege escalation —
- * such a script can write `localStorage` itself. It is still the file's stated design being
- * false, which is reason enough on a widget that runs on other people's sites.
- *
- * Four rules, cheapest first:
- *   1. it must be an object we can read at all — this file did not raise the event;
- *   2. `detail.target` must be THIS MOUNT'S OWN ELEMENT. Not a nonce, not the tenant key: the
- *      element itself, which the sender can only supply by having looked this coral up. It is
- *      not a secret (any script can `querySelector` it) and does not pretend to be — what it
- *      buys is that an event now has an ADDRESSEE, so a page with two corals on it hands the
- *      handle to one of them, and a script that fires blindly at `window` reaches none;
- *   3. it must be well-formed and inside the same TTL storage enforces — the event path used to
- *      accept `{ ts: 0 }`, then `saveHandle` restamped it with `Date.now()`, so an id expired
- *      years ago came back to life for another thirty days (B6);
- *   4. it may not replace a newer handle with an older one, which is what stops a replayed or
- *      stale event silently rewinding a visitor to a conversation they have moved on from.
- */
-export function acceptHandoff(detail, { target, currentTs = 0, now = Date.now() } = {}) {
-	if (!detail || typeof detail !== 'object') return null;
-	if (!target || detail.target !== target) return null;
-	const next = parseHandle(detail);
-	if (!next) return null;
-	if (now - next.ts > HANDLE_TTL_MS) return null;
-	if (next.ts < currentTs) return null;
-	return next;
-}
-
-/**
- * What the panel becomes once `acceptHandoff` has said yes — the state transition on its own,
- * with the rendering left to the caller (review B11: this listener's body was a state change and
- * a redraw welded together, which is exactly why the race in `refresh()` was invisible).
- *
- * 🔴 `ts` IS CARRIED, NOT RESTAMPED. `saveHandle` defaults it to `Date.now()`, which is right for
- * a visitor's own action — they just used the thread, so the thirty days may start again — and
- * wrong for adoption, where restamping would let the event path extend a TTL the storage path
- * would have let run out (B6).
- */
-export function handoffState(next) {
-	return {
-		handoffConv: next.conv,
-		hasEmail: next.hasEmail,
-		storedMode: next.mode,
-		handleTs: next.ts,
-		// The active view: the adopted thread when it is a human hand-off, nothing when the sender
-		// says the visitor's last choice was to ask instead.
-		conv: next.mode === 'human' ? next.conv : null,
-		messages: [],
-		conversationStatus: null,
-		handoffEndedNote: false,
-		replyWithinHours: null
-	};
 }
 
 function loadHandle(tenant) {
@@ -500,15 +440,15 @@ function loadHandle(tenant) {
 	return handle;
 }
 
-// `ts` defaults to now — a visitor who just did something with this thread has earned another
-// thirty days. It is passed EXPLICITLY on one path only: adopting a handle somebody else minted
-// (`acceptHandoff`), where keeping the sender's `ts` is what stops the event path granting an
-// extension the storage path would not have (review B6).
-function saveHandle(tenant, conv, hasEmail, mode = 'human', ts = Date.now()) {
+// 🔴 `ts` IS `Date.now()` AND NOTHING ELSE MAY SUPPLY IT (review B6). Every caller is a visitor's
+// own action in this panel — they just used the thread, so the thirty days may start again. The
+// fifth parameter that let a value from elsewhere be written here existed for the hand-off event,
+// and went with it (B3, round 2): a TTL counted from a timestamp somebody else chose is not a TTL.
+function saveHandle(tenant, conv, hasEmail, mode = 'human') {
 	try {
 		window.localStorage.setItem(
 			storeKey(tenant),
-			JSON.stringify({ conv, ts, hasEmail: !!hasEmail, mode: mode === 'ask' ? 'ask' : 'human' })
+			JSON.stringify({ conv, ts: Date.now(), hasEmail: !!hasEmail, mode: mode === 'ask' ? 'ask' : 'human' })
 		);
 	} catch {
 		// Storage disabled or full. The message is already stored on OUR side —
@@ -1334,19 +1274,12 @@ export async function mount(el) {
 	/** The visitor's last CHOSEN view — see `loadHandle`'s header comment. */
 	let storedMode = handle ? handle.mode : 'human';
 	/**
-	 * When the handle this panel is holding was minted. Only `acceptHandoff` reads it, to refuse
-	 * an incoming handle older than the one already here (review B3); `0` for a panel with no
-	 * handle at all, which accepts any handle still inside the TTL.
+	 * The one writer, so every path that changes what this panel is showing stamps storage the same
+	 * way — `saveHandle`'s own `ts` default, meaning「the visitor just used this thread」. Nothing
+	 * in `mount()` calls `saveHandle` direct.
 	 */
-	let handleTs = handle ? handle.ts : 0;
-	/**
-	 * Write the handle AND remember when it was stamped, in one move — `handleTs` drifting out of
-	 * step with what is actually in storage is the only way `acceptHandoff`'s「not older than what
-	 * we hold」rule can be wrong, so there is no path in `mount()` that calls `saveHandle` direct.
-	 */
-	function storeHandle(convId, email, mode, ts = Date.now()) {
-		handleTs = ts;
-		saveHandle(tenant, convId, email, mode, ts);
+	function storeHandle(convId, email, mode) {
+		saveHandle(tenant, convId, email, mode);
 	}
 	/**
 	 * The active conversation — `handoffConv` while showing the human thread,
@@ -1825,55 +1758,23 @@ export async function mount(el) {
 	// path into the panel already funnels through — the ask/compose textarea's own `.focus()` call
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
+	//
+	// 🔴 THE ONLY `window` LISTENER THIS FILE INSTALLS, and it is never removed because `mount()`
+	// has no teardown to remove it from (review B9, still open). What that costs is bounded and
+	// worth naming rather than implying otherwise: an SPA that tears the container out leaves this
+	// listener holding `root` and `el`, and `openPanel` on a detached root re-renders into a node
+	// nobody can see. `mountAll`'s `data-dynamic-coral-mounted` guard stops the same element being
+	// mounted twice, so a page accumulates one listener per element it ever mounted, not per
+	// re-render. `reef-inbox:open` is a BROADCAST on purpose —「open the panel」 is a request any
+	// script may honestly make of every panel on the page, and it names no conversation, which is
+	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
 	window.addEventListener('reef-inbox:open', openPanel);
 	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
-
-	// #15: the handle hand-off. The coral reads its handle from localStorage only at mount, so a
-	// page that mints a hand-off another way — reef's own `/report` form writes the exact shape
-	// `saveHandle` does — cannot make an ALREADY-mounted panel switch to it: a same-document
-	// `localStorage.setItem` raises no `storage` event. This is the CustomEvent that closes that
-	// gap. Every rule about WHICH events are answered lives in `acceptHandoff` above, pure and
-	// tested: it must name this mount in `detail.target`, be well-formed, be inside the storage
-	// TTL, and not be older than the handle already here. Anything else — `undefined`, a string,
-	// `{}`, a `conv` that is not a string, an event fired blindly at `window` — resolves to
-	// `null` and is silently ignored, never thrown into an unhandled listener exception over an
-	// event this file did not raise itself.
-	//
-	// 🔴 STOPS THE OLD POLLER FIRST, unconditionally — not left to `renderMessages()`'s own
-	// `stopPolling()` call, because the NEW handle can resolve to ask mode (`resolveViewMode`),
-	// whose `renderAsk()` never touches the poller at all. Without this line a hand-off adopted
-	// while the visitor was mid-poll on the OLD conversation would keep polling it, invisibly,
-	// alongside whatever the new view shows.
-	//
-	// 🔴 ONE LISTENER PER MOUNT, and `mountAll`'s `data-dynamic-coral-mounted` guard is what keeps
-	// it that way — the same element is never mounted twice. There is deliberately no
-	// `removeEventListener` because there is no unmount path to call it from (review B9): a
-	// container an SPA tears out takes its `root` with it, and until `mount()` grows a teardown
-	// the honest fix for the rest of B9 is the addressing above, which is what stopped a second
-	// coral on the same page adopting a handle meant for this one.
-	window.addEventListener('reef-inbox:handle', (event) => {
-		const next = acceptHandoff(event && event.detail, { target: el, currentTs: handleTs });
-		if (!next) return;
-		stopPolling();
-		const adopted = handoffState(next);
-		handoffConv = adopted.handoffConv;
-		hasEmail = adopted.hasEmail;
-		storedMode = adopted.storedMode;
-		handleTs = adopted.handleTs;
-		conv = adopted.conv;
-		messages = adopted.messages;
-		conversationStatus = adopted.conversationStatus;
-		handoffEndedNote = adopted.handoffEndedNote;
-		replyWithinHours = adopted.replyWithinHours;
-		storeHandle(handoffConv, hasEmail, storedMode, handleTs);
-		if (open) renderOpen();
-		else renderClosed();
-	});
 
 	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
 	// bubble — without opening a panel nobody asked for.
 	//
-	// 🔴 AFTER THE LISTENERS, NOT BEFORE (review B5). This is a network round trip, and everything
+	// 🔴 AFTER THE LISTENER, NOT BEFORE (review B5). This is a network round trip, and everything
 	// below it used to be everything above: on a slow connection a site's own `DOMContentLoaded`
 	// handler could dispatch `reef-inbox:open` seconds before there was a listener for it, and the
 	// event went nowhere — an intermittent failure nobody would ever debug. `#inbox` had the same

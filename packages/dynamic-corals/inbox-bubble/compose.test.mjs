@@ -5,10 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
-	acceptHandoff, bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml,
-	handoffState, inboxPayload, parseHandle, pollGeneration, refusalNeedsHandoffForm,
-	resolveAssistantName, resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash,
-	statusFor
+	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
+	parseHandle, pollGeneration, refusalNeedsHandoffForm, resolveAssistantName, resolveLocale,
+	resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -567,18 +566,52 @@ test('B5: #inbox does nothing unless the SITE opted in with data-open-on-hash="1
 	assert.equal(shouldAutoOpenFromHash('#inbox', '1'), true);
 });
 
-test('B5: mount reads the opt-in from the mount element, and wires both entry points before the fetch', () => {
+test('B5: mount reads the opt-in from the mount element, and wires the entry point before the fetch', () => {
 	assert.match(CORAL_CODE,
 		/shouldAutoOpenFromHash\(location\.hash, el\.getAttribute\('data-open-on-hash'\)\)/);
-	// 🔴 Order, not just presence: the listeners used to be registered after `await refresh()`, so
+	// 🔴 Order, not just presence: the listener used to be registered after `await refresh()`, so
 	// a site dispatching reef-inbox:open from its own DOMContentLoaded handler raced a network
 	// round trip for a listener to exist, and #inbox stole focus a round trip late.
 	const listenAt = CORAL_CODE.indexOf("window.addEventListener('reef-inbox:open'");
-	const handleAt = CORAL_CODE.indexOf("window.addEventListener('reef-inbox:handle'");
 	const readAt = CORAL_CODE.indexOf('if (conv && !open) await refresh();');
-	assert.ok(listenAt > 0 && handleAt > 0 && readAt > 0, 'mount no longer has the three lines');
+	assert.ok(listenAt > 0 && readAt > 0, 'mount no longer has the two lines');
 	assert.ok(listenAt < readAt, 'the open listener is registered behind a network round trip again');
-	assert.ok(handleAt < readAt, 'the handle listener is registered behind a network round trip again');
+});
+
+// REVIEW B3 (2026-09-08, round 2): tile #15's `reef-inbox:handle` event is GONE, not narrowed.
+// Addressing it to `detail.target` fixed misdelivery between two corals and left the file header's
+// own invariant false — the address is the mount element, and the README's own snippet showed how
+// to look one up, so any script on the page could still choose which conversation the visitor's
+// next message was filed under. A hand-off is a full navigation now: reef's `/report` form writes
+// storage and the coral re-reads it at mount, which is the one intake this file has.
+
+test('B3: nothing is left of the hand-off event — no listener, no export, no README recipe', async () => {
+	assert.equal(CORAL_CODE.includes('reef-inbox:handle'), false, 'the listener is back');
+	const api = await import('./inbox-bubble.js');
+	assert.equal('acceptHandoff' in api, false, 'acceptHandoff is exported again');
+	assert.equal('handoffState' in api, false, 'handoffState is exported again');
+	// The one window listener that remains names no conversation: it says "open", nothing more.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+});
+
+test('B3: the header states the invariant the code actually keeps', () => {
+	// The sentence the review called a false claim, in the form it took while the event existed.
+	assert.equal(/AND THAT SURVIVES `reef-inbox:handle`/.test(CORAL_SOURCE), false);
+	assert.match(CORAL_SOURCE, /THE CONVERSATION ID COMES FROM THE SERVER/);
+	assert.match(CORAL_SOURCE, /WHICH IS WHY THERE IS NO HAND-OFF EVENT/);
+});
+
+// REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
+// The honest half of the fix is that there is now only ONE of them, and the file says so.
+
+test('B9: one window listener per mount, and mount() documents that nothing removes it', () => {
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 1);
+	assert.equal(CORAL_CODE.includes('removeEventListener'), false,
+		'a teardown appeared — B9 can now be closed properly, and this test should assert it instead');
+	assert.match(CORAL_SOURCE, /no teardown to remove it from \(review B9, still open\)/);
+	// The guard that keeps it one-per-element rather than one-per-render.
+	assert.match(CORAL_CODE, /if \(el\.getAttribute\('data-dynamic-coral-mounted'\) === '1'\) return;/);
 });
 
 // REVIEW B10 (2026-09-08): reef-inbox:open on an already-open panel was a total no-op, so the
@@ -619,7 +652,7 @@ test('parseHandle accepts exactly the shape saveHandle stores, ts included', () 
 		{ conv: 'c4', ts: 1000, hasEmail: false, mode: 'human' });
 });
 
-test('parseHandle ignores a malformed detail — no exception thrown, just null back', () => {
+test('parseHandle ignores a malformed handle — no exception thrown, just null back', () => {
 	assert.equal(parseHandle(undefined), null);
 	assert.equal(parseHandle(null), null);
 	assert.equal(parseHandle('a string'), null);
@@ -635,137 +668,45 @@ test('parseHandle ignores a malformed detail — no exception thrown, just null 
 	assert.equal(parseHandle({ conv: 'c', ts: Infinity }), null);
 });
 
-// REVIEW B3 (2026-09-08): the listener took ANY well-formed detail from ANY script on the page,
-// which meant a page script chose which conversation the visitor's next message was filed under,
-// and overwrote the only pointer this browser had to the visitor's own thread. The rules now live
-// in acceptHandoff, so they are assertable without a DOM.
-//
-// The panel-side transition is handoffState, separately, for the same reason: the listener used
-// to be a state change and a redraw welded together (review B11).
+// REVIEW B6 (2026-09-08): a NaN or long-dead `ts` used to come back to life. The TTL now lives on
+// one path only — the mount-time storage read — because the event path that also had to answer
+// 「how old is this handle」 is gone (B3, round 2).
 
-const DAY = 24 * 60 * 60 * 1000;
-const MOUNT = { nodeName: 'DIV' }; // stands in for the coral's own element - identity is the point
-const OTHER_MOUNT = { nodeName: 'DIV' };
-
-test('B3: a handle addressed to this mount is adopted', () => {
-	const now = 1_000_000_000_000;
-	assert.deepEqual(
-		acceptHandoff({ target: MOUNT, conv: 'c1', ts: now - DAY, hasEmail: true, mode: 'human' },
-			{ target: MOUNT, currentTs: 0, now }),
-		{ conv: 'c1', ts: now - DAY, hasEmail: true, mode: 'human' }
-	);
-});
-
-test('B3: an event that does not name THIS mount is refused', () => {
-	const now = 1_000_000_000_000;
-	const at = { target: MOUNT, currentTs: 0, now };
-	// The review's own payload: a script that just fires at window, naming nobody. This is the one
-	// that used to redirect the visitor's next message into a conversation of the sender's choice.
-	assert.equal(acceptHandoff({ conv: 'ATTACKER-OWNED-CONV-ID', ts: now, mode: 'human' }, at), null);
-	// Naming the wrong coral is no better than naming none.
-	assert.equal(acceptHandoff({ target: OTHER_MOUNT, conv: 'c', ts: now }, at), null);
-	// Lookalikes are not the element: identity is ===, never a shape test.
-	assert.equal(acceptHandoff({ target: { nodeName: 'DIV' }, conv: 'c', ts: now }, at), null);
-	assert.equal(acceptHandoff({ target: 'site:cver', conv: 'c', ts: now }, at), null);
-	// And a mount that somehow has no element cannot be addressed at all, rather than matching
-	// every detail that happens to leave `target` undefined.
-	assert.equal(acceptHandoff({ conv: 'c', ts: now }, { target: null, currentTs: 0, now }), null);
-});
-
-test('B3: a malformed detail is still just ignored, addressed or not', () => {
-	const now = 1_000_000_000_000;
-	const at = { target: MOUNT, currentTs: 0, now };
-	for (const detail of [undefined, null, 'a string', 42, {}, [1, 2, 3]]) {
-		assert.equal(acceptHandoff(detail, at), null);
-	}
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 123, ts: now }, at), null);
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'c' }, at), null);
-	// No options at all — the listener is the only caller, but a null-safe default is what keeps
-	// "this file did not raise the event" true of the helper as well.
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'c', ts: now }), null);
-});
-
-test('B6: the event path honours the same TTL storage does, and cannot restamp its way past it', () => {
-	const now = 1_000_000_000_000;
-	const at = { target: MOUNT, currentTs: 0, now };
-	// The review's payloads: ts values that used to be accepted and then rewritten to Date.now(),
-	// bringing a long-dead conversation id back for another thirty days.
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: 0 }, at), null);
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: -1 }, at), null);
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: NaN }, at), null);
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 31 * DAY }, at), null);
-	// Just inside the window is still inside it, and the boundary itself is not over it.
-	assert.ok(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 29 * DAY }, at));
-	assert.ok(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 30 * DAY }, at));
-	// 🔴 The adopted ts is the SENDER's, never `now` — that is what stops adoption granting an
-	// extension the storage path would have refused.
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'x', ts: now - 29 * DAY }, at).ts, now - 29 * DAY);
-});
-
-test('B3: an older handle never replaces a newer one', () => {
-	const now = 1_000_000_000_000;
-	const held = now - 2 * DAY;
-	const at = { target: MOUNT, currentTs: held, now };
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'older', ts: now - 3 * DAY }, at), null);
-	// Same age is allowed: re-sending the handle the panel already holds, with a different mode,
-	// is a legitimate move and not a rewind.
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'same', ts: held, mode: 'ask' }, at).mode, 'ask');
-	assert.equal(acceptHandoff({ target: MOUNT, conv: 'newer', ts: now - DAY }, at).conv, 'newer');
-});
-
-test('B3: handoffState adopts the thread and clears everything the old conversation owned', () => {
-	const ts = 1_000_000_000_000;
-	assert.deepEqual(handoffState({ conv: 'c9', ts, hasEmail: true, mode: 'human' }), {
-		handoffConv: 'c9',
-		hasEmail: true,
-		storedMode: 'human',
-		handleTs: ts,
-		conv: 'c9',
-		// 🔴 The old conversation's transcript, status, ended-note and reply window all go. A
-		// message from the PREVIOUS thread surviving into the new panel is exactly the bug the
-		// in-flight refresh guard exists to stop; nothing static may reintroduce it either.
-		messages: [],
-		conversationStatus: null,
-		handoffEndedNote: false,
-		replyWithinHours: null
-	});
-});
-
-test('B3: an adopted ask-mode handle keeps the thread but shows no active conversation', () => {
-	const ts = 1_000_000_000_000;
-	const state = handoffState({ conv: 'c9', ts, hasEmail: false, mode: 'ask' });
-	assert.equal(state.handoffConv, 'c9', 'the thread is still reachable behind the quiet link');
-	assert.equal(state.conv, null, 'ask mode has no active conversation to send into or poll');
-	assert.equal(state.storedMode, 'ask');
-});
-
-test('B3: the listener delegates to acceptHandoff, addressed to its own element', () => {
-	// 🔴 The rules above are only worth anything if the listener actually asks them. This is the
-	// structural half, in the same style as the late-rename test: a listener that went back to
-	// calling parseHandle direct would keep every assertion above green while accepting exactly
-	// the events they exist to refuse.
-	const listener = CORAL_SOURCE.match(/window\.addEventListener\('reef-inbox:handle'[\s\S]*?\n\t\}\);/);
-	assert.ok(listener, 'expected the hand-off listener in mount()');
-	assert.match(listener[0], /acceptHandoff\(event && event\.detail, \{ target: el, currentTs: handleTs \}\)/);
-	assert.ok(!/parseHandle\(/.test(listener[0]), 'the listener bypasses acceptHandoff');
-	// And it writes the handle with the ts it adopted, not a fresh one (B6).
-	assert.match(listener[0], /storeHandle\(handoffConv, hasEmail, storedMode, handleTs\)/);
+test('B6: the TTL the storage read enforces is the one this file states, counted from the ts read', () => {
+	const days = Number(CORAL_CODE.match(/const HANDLE_TTL_MS = (\d+) \* 24 \* 60 \* 60 \* 1000;/)[1]);
+	assert.equal(days, 30);
+	// loadHandle is the only TTL comparison left, and it deletes the key rather than just hiding it.
+	const load = CORAL_CODE.match(/function loadHandle\(tenant\) \{[\s\S]*?\n\}/);
+	assert.ok(load, 'expected loadHandle()');
+	assert.match(load[0], /Date\.now\(\) - handle\.ts > HANDLE_TTL_MS/);
+	assert.match(load[0], /removeItem\(storeKey\(tenant\)\)/);
+	assert.equal((CORAL_CODE.match(/HANDLE_TTL_MS/g) || []).length, 2, 'a second TTL check appeared');
+	// 🔴 And nothing but a visitor's own action supplies the ts saveHandle writes: the parameter
+	// that let a caller choose it existed for adoption, which is what B3 removed.
+	assert.match(CORAL_CODE, /function saveHandle\(tenant, conv, hasEmail, mode = 'human'\) \{/);
+	assert.match(CORAL_CODE, /JSON\.stringify\(\{ conv, ts: Date\.now\(\),/);
+	assert.match(CORAL_CODE, /function storeHandle\(convId, email, mode\) \{/);
 });
 
 // REVIEW B4 (2026-09-08): the README told integrators the opposite of what the code does.
 
 const README = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8');
 
-test('B4: the README does not deny the localStorage write the hand-off actually performs', () => {
-	// The code half, so this test measures the two against each other rather than against a
-	// sentence somebody typed: the listener writes the adopted handle.
-	const listener = CORAL_CODE.match(/window\.addEventListener\('reef-inbox:handle'[\s\S]*?\n\t\}\);/);
-	assert.ok(listener && /storeHandle\(/.test(listener[0]), 'the hand-off listener no longer writes');
-	// The README half. An integrator who believed the old sentence ("it assumes the emitter
-	// already has") would design around a write that happens anyway, under a key they did not
-	// choose, over a handle they cannot get back.
-	assert.ok(!/does not write to `localStorage`/.test(README), 'the README denies the write again');
-	assert.match(README, /DOES write the adopted handle to `localStorage`/);
+test('B4: the README documents no event this file no longer has', () => {
+	// 🩸 B4 was the README describing a write the code performs as a write it does not. The whole
+	// section went with the event (B3, round 2), so what this now measures is that the document and
+	// the code agree about what exists at all — an integrator who wires up a recipe the coral has
+	// dropped gets silence, which is the same class of failure the original sentence caused.
+	assert.equal(CORAL_CODE.includes('reef-inbox:handle'), false);
+	// The README may still NAME the event — an integrator who wired it up in 0.7.4 has to be able
+	// to find out what happened to it — but it may not hand anybody a recipe for dispatching one.
+	assert.equal(/dispatchEvent\([^)]*reef-inbox:handle/.test(README), false,
+		'the README still teaches how to dispatch the removed event');
+	assert.match(README, /`reef-inbox:handle`[\s\S]{0,120}removed it again/);
+	assert.equal(/does not write to `localStorage`/.test(README), false);
+	// The event this file DOES have is still documented, and still described as taking no id.
+	assert.match(README, /reef-inbox:open/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
 });
 
 test('B4: the README quotes the TTL the code actually enforces', () => {
@@ -778,21 +719,23 @@ test('B4: the README quotes the TTL the code actually enforces', () => {
 });
 
 // REVIEW B2 (2026-09-08): stopPolling() cleared the interval and nothing else, so a transcript
-// fetch already in the air came back after the hand-off and painted the OLD conversation into
-// the NEW panel — both views render into the same .dc-inbox-log, so it looked like part of it.
+// fetch already in the air came back after the view had moved on and painted the OLD conversation
+// into the new one — every view renders into the same .dc-inbox-log, so it looked like part of it.
+// 🔴 The hand-off event that first exposed this is gone (B3, round 2) and the guard stays: every
+// close, re-render and "start a new conversation" calls the same stopPolling().
 
 test('B2: a result that arrives after invalidate() is dropped, not applied', async () => {
 	const generation = pollGeneration();
 	// The panel, reduced to what the race actually corrupts.
 	const panel = { conv: 'old-conv', messages: [{ text: 'old' }] };
 	let settle;
-	// The delayed fetch: still in flight when the hand-off arrives.
+	// The delayed fetch: still in flight when the visitor starts a new conversation.
 	const inFlight = generation.run(
 		() => new Promise((resolve) => { settle = resolve; }),
 		(got) => { panel.messages = got.messages; return true; }
 	);
 
-	// ...the hand-off. stopPolling() invalidates, then the panel adopts the new conversation.
+	// ...the switch. stopPolling() invalidates, then the panel moves to the new conversation.
 	generation.invalidate();
 	panel.conv = 'new-conv';
 	panel.messages = [];
