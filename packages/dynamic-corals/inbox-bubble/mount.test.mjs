@@ -100,6 +100,11 @@ globalThis.fetch = async (url, init = {}) => {
 	return { ok: false, status: 500, json: async () => ({}) };
 };
 
+/** The conversation id on each transcript GET — the header `fetchTranscript` puts it in. */
+const transcriptConvs = (from = 0) =>
+	requests.slice(from).filter((r) => r.init.headers && r.init.headers['x-inbox-conversation'])
+		.map((r) => r.init.headers['x-inbox-conversation']);
+
 /** The conversation id on each message POST — what the visitor's message is actually filed under. */
 const postedConvs = (from = 0) =>
 	requests.slice(from).filter((r) => r.init.method === 'POST')
@@ -288,4 +293,48 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	await root.querySelector('.dc-inbox-form').emit('submit');
 	assert.deepEqual(postedConvs(from), ['visitor-own'],
 		'the visitor\'s next message was filed under a conversation a page script chose');
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+
+// REVIEW B12 (2026-09-08, round 3): the 30-day handle TTL is what the manifest's `stores` entry and
+// the README promise a visitor, and since B3 removed the event that had the other copy, `loadHandle`
+// is its only enforcement point. It was pinned by a source regex, and the review's mutant —
+// `if (false && Date.now() - handle.ts > HANDLE_TTL_MS)` — left that string in place and the whole
+// suite green. So it is measured: one panel, one markup, one day either side of the line, and what
+// differs is whether the handle is adopted at all.
+
+test('B12: a handle past the 30-day TTL is not adopted at mount, and one inside it is', async () => {
+	// 29 days. Adopted: read at mount, opened as the human thread, polled.
+	const live = new El({ 'data-kind': 'site', 'data-id': `t${++seq}`, 'data-kaito': '1' });
+	const liveKey = `reef-inbox:site:${live.attrs['data-id']}`;
+	storage.set(liveKey, JSON.stringify(
+		{ conv: 'inside-the-ttl', ts: Date.now() - 29 * DAY, hasEmail: false, mode: 'human' }));
+	let from = requests.length;
+	let armed = timers.size;
+	await mount(live);
+	assert.equal(storage.has(liveKey), true, 'a handle inside the TTL was deleted');
+	assert.deepEqual(transcriptConvs(from), ['inside-the-ttl'],
+		'a handle inside the TTL was not read at mount');
+	await openBubble(live.children[0]);
+	assert.match(live.children[0].innerHTML, /name="text"/,
+		'the adopted thread did not open as the human thread');
+	assert.equal(timers.size, armed + 1, 'the adopted thread armed no poller');
+
+	// 31 days. Same markup, same stored shape, only the ts differs: the key is DELETED rather than
+	// hidden, nothing is fetched for it, and the panel opens as if this visitor had never written.
+	const stale = new El({ 'data-kind': 'site', 'data-id': `t${++seq}`, 'data-kaito': '1' });
+	const staleKey = `reef-inbox:site:${stale.attrs['data-id']}`;
+	storage.set(staleKey, JSON.stringify(
+		{ conv: 'past-the-ttl', ts: Date.now() - 31 * DAY, hasEmail: false, mode: 'human' }));
+	from = requests.length;
+	armed = timers.size;
+	await mount(stale);
+	assert.equal(storage.has(staleKey), false, 'the expired handle was left in storage');
+	assert.deepEqual(transcriptConvs(from), [], 'the expired conversation was fetched anyway');
+	await openBubble(stale.children[0]);
+	assert.match(stale.children[0].innerHTML, /name="q"/,
+		'the expired handle still opened the human thread');
+	assert.doesNotMatch(stale.children[0].innerHTML, /name="text"/);
+	assert.equal(timers.size, armed, 'ask mode armed a poller');
 });

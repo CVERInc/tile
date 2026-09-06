@@ -680,21 +680,21 @@ test('parseHandle ignores a malformed handle — no exception thrown, just null 
 // REVIEW B6 (2026-09-08): a NaN or long-dead `ts` used to come back to life. The TTL now lives on
 // one path only — the mount-time storage read — because the event path that also had to answer
 // 「how old is this handle」 is gone (B3, round 2).
+//
+// 🔴 WHERE THE TTL ITSELF IS TESTED: mount.test.mjs, against a real mount() (review B12, round 3).
+// What used to be here was `assert.match(load[0], /Date\.now\(\) - handle\.ts > HANDLE_TTL_MS/)`,
+// and the review's mutant `if (false && Date.now() - handle.ts > HANDLE_TTL_MS)` left that string
+// exactly where it was and the whole suite green — a dead branch reads the same as a live one. The
+// 29-day and 31-day handles over there tell them apart. What stays here is the other half of B6,
+// which is an ABSENCE and so has nowhere else to live: no caller can supply the `ts`.
 
-test('B6: the TTL the storage read enforces is the one this file states, counted from the ts read', () => {
-	const days = Number(CORAL_CODE.match(/const HANDLE_TTL_MS = (\d+) \* 24 \* 60 \* 60 \* 1000;/)[1]);
-	assert.equal(days, 30);
-	// loadHandle is the only TTL comparison left, and it deletes the key rather than just hiding it.
-	const load = CORAL_CODE.match(/function loadHandle\(tenant\) \{[\s\S]*?\n\}/);
-	assert.ok(load, 'expected loadHandle()');
-	assert.match(load[0], /Date\.now\(\) - handle\.ts > HANDLE_TTL_MS/);
-	assert.match(load[0], /removeItem\(storeKey\(tenant\)\)/);
-	assert.equal((CORAL_CODE.match(/HANDLE_TTL_MS/g) || []).length, 2, 'a second TTL check appeared');
-	// 🔴 And nothing but a visitor's own action supplies the ts saveHandle writes: the parameter
-	// that let a caller choose it existed for adoption, which is what B3 removed.
+test('B6: nothing but a visitor\'s own action supplies the ts saveHandle writes', () => {
+	// The parameter that let a caller choose it existed for adoption, which is what B3 removed.
 	assert.match(CORAL_CODE, /function saveHandle\(tenant, conv, hasEmail, mode = 'human'\) \{/);
 	assert.match(CORAL_CODE, /JSON\.stringify\(\{ conv, ts: Date\.now\(\),/);
 	assert.match(CORAL_CODE, /function storeHandle\(convId, email, mode\) \{/);
+	// One comparison, in one place: a second one is a second answer to「how old is this handle」.
+	assert.equal((CORAL_CODE.match(/HANDLE_TTL_MS/g) || []).length, 2, 'a second TTL check appeared');
 });
 
 // REVIEW B4 (2026-09-08): the README told integrators the opposite of what the code does.
