@@ -2,13 +2,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectPages } from './mkpages.mjs';
-import { safePagePath, stageSite, themeNameFromPages, listStaged, STASH_PREFIX } from './stage.mjs';
+import { safePagePath, stageSite, themeNameFromPages, listStaged, STASH_PREFIX, LOCK_NAME } from './stage.mjs';
 
 const IR = fileURLToPath(new URL('./fixtures/ir', import.meta.url));
 const THEME = fileURLToPath(new URL('./fixtures/theme.css', import.meta.url));
@@ -43,8 +43,8 @@ const snapshot = async (dir) => {
   return Object.fromEntries(files.map((f) => [f, readFileSync(join(dir, f), 'utf8')]));
 };
 const noStashLeft = (dir) => assert.deepEqual(
-  readdirSync(dir).filter((n) => n.startsWith(STASH_PREFIX)), [],
-  'a stash directory survived — the renderer is not back to how it was found',
+  readdirSync(dir).filter((n) => n.startsWith(STASH_PREFIX) || n === LOCK_NAME), [],
+  'a stash or a lock survived — the renderer is not back to how it was found',
 );
 
 // ── sanitisation ────────────────────────────────────────────────────────────────────────────────
@@ -197,6 +197,54 @@ test('two page paths that sanitise to one filename are refused, both named', asy
     );
   }
   assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
+// ── one build at a time ─────────────────────────────────────────────────────────────────────────
+// 🩸 Two concurrent stageSites did not merely mix two sites' content: the second stashed what the
+// first had staged, and the renderer's own content/ was gone for good afterwards — measured
+// 2026-09-07, in one process and across two, with nothing printed either time.
+test('a second build is refused while the first is holding the renderer', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const { restore } = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# site A\n' }] });
+
+  await assert.rejects(
+    () => stageSite({ astroDir, pages: [{ path: 'home', markdown: '# site B\n' }] }),
+    /another build is already using this renderer/,
+  );
+  assert.equal(readFileSync(join(astroDir, 'content/home.md'), 'utf8'), '# site A\n',
+    "the refused build still reached in and staged over the first one's page");
+
+  await restore();
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+
+  // …and the renderer is free again, not locked out for good.
+  const second = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# site B\n' }] });
+  await second.restore();
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
+// 🩸 `restored = true` used to be the FIRST statement of restore(), so a restore that threw part
+// way marked itself finished and every later call returned having done nothing. The renderer could
+// then never be put back, and the contract "if stageSite throws, it has already restored" was false
+// on the one path that needed it. Nothing removable inside a directory you cannot write is how that
+// mid-flight failure is reproduced here.
+test('a restore that fails part way can be retried', async (t) => {
+  if (process.getuid?.() === 0) return;   // root may unlink in a directory it cannot write
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const { restore } = await stageSite({ astroDir, pages: [{ path: 'home', markdown: '# a site\n' }] });
+
+  t.after(() => { try { chmodSync(astroDir, 0o700); } catch { /* already back */ } });
+  chmodSync(astroDir, 0o500);
+  await assert.rejects(() => restore(), /EACCES|EPERM/);
+
+  chmodSync(astroDir, 0o700);
+  await restore();   // used to return immediately, leaving the renderer holding the other site
+  assert.deepEqual(await snapshot(astroDir), before, 'the second restore did not finish the job');
   noStashLeft(astroDir);
 });
 
