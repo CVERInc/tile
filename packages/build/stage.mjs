@@ -283,16 +283,32 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     // spelling is all it takes.) Others measured in the same corpus: `a b` / `a.b` / `a&b` all land
     // on `a-b`, and `` / `/` / `home` all land on `home`. The private shell this rule came from
     // refused here too; a package handed to somebody rebuilding their OWN site can do no less.
+    //
+    // 🩸 AND THE KEY IS FOLDED, because the question is "do these two become the same FILE", not
+    // "do these two become the same STRING". `About` and `about` sanitise to two different strings
+    // and are one file on APFS and on NTFS: measured 2026-09-07, `pageCount` said 2, `content/` held
+    // one file named `About.md`, and its body was the second page's. Identical to the failure above,
+    // reached by a different road. Jamo-decomposed `한글` is the same shape in the other direction —
+    // one file on a filesystem that composes, two strings here.
+    //
+    // 🔴 The fold is done HERE, in memory, and never by asking the filesystem: a package that
+    // refused on macOS and accepted on Linux would hand a Linux CI a green run for an IR that
+    // cannot be rebuilt on the owner's laptop. Same input, same refusal, every host.
+    const foldForFs = (safe) => safe.normalize('NFC').toLowerCase();
     const claimedBy = new Map();
     for (const p of pages) {
       const safe = safePagePath(p.path);
-      const first = claimedBy.get(safe);
+      const first = claimedBy.get(foldForFs(safe));
       if (first !== undefined) {
-        throw new Error(`stageSite: two pages become the same file — ${JSON.stringify(first)} and `
-          + `${JSON.stringify(p.path)} both sanitise to content/${safe}.md, so one would silently `
+        const how = first.safe === safe
+          ? `both sanitise to content/${safe}.md`
+          : `sanitise to content/${first.safe}.md and content/${safe}.md, which are ONE file on a `
+            + 'case-insensitive or normalising filesystem (APFS, NTFS)';
+        throw new Error(`stageSite: two pages become the same file — ${JSON.stringify(first.path)} and `
+          + `${JSON.stringify(p.path)} ${how}, so one would silently `
           + 'replace the other while the build still reported both. Rename one in the IR.');
       }
-      claimedBy.set(safe, p.path);
+      claimedBy.set(foldForFs(safe), { path: p.path, safe });
       const outPath = path.join(contentDir, `${safe}.md`);
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, p.markdown);
