@@ -2268,3 +2268,50 @@ test('E2: an escalation carries the id the server minted, capped, and a blank on
 	assert.equal('handle' in none, false);
 	assert.equal(blank.log.state().handle, null);
 });
+
+// ── review E3 (2026-09-08, round 3): the refusal branch that had no ruler ────────────────────
+//
+// 🩸 D1 has two halves — `escalated()`, once per visitor who presses, and `flush()`, once per
+// `pagehide`, which is very nearly all of the traffic — and all three D1 tests entered through the
+// first one. The review mutated `flush()`'s refusal branch twice (mark everything sent, so it
+// never goes again; and reset the session outright, destroying the questions) and both times all
+// 121 tests passed. What follows is the case none of them made: a transport that answers `false`
+// SYNCHRONOUSLY, through the door the beacon uses.
+
+test('E3: a transport that says no leaves flush()\'s buffer exactly where it was', async () => {
+	let accept = false;
+	const f = logFixture({ send: (p) => (accept ? (f.sent.push(p), true) : false) });
+	f.log.page('/pricing');
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.state().claim, true, 'the site never answered, so this measures the wrong gate');
+
+	// 🔴 THE REFUSAL. `sendBeacon` returning false is the browser saying nothing was queued: not a
+	// send, not a failure to report later — nothing moved.
+	assert.equal(f.log.flush(), null, 'a refused beacon was reported as a send');
+	assert.equal(f.sent.length, 0);
+	assert.equal(f.log.state().sent, 0, 'the questions were marked told to a transport that refused');
+	assert.deepEqual(f.log.state().questions.map((q) => q.text), ['do you ship to Japan?']);
+	assert.deepEqual(f.log.state().pages, ['/pricing']);
+	// And in storage, which is where they outlive this document — the mutation that reset the
+	// session wrote the empty one back over them.
+	const cell = JSON.parse(f.cells.get(aiLogKey('site:acme')));
+	assert.equal(cell.questions.length, 1);
+	assert.equal(cell.sent, 0);
+	assert.equal(cell.sid, f.log.state().sid, 'the refusal rotated the session');
+
+	// A second refusal changes nothing either, and neither one costs the session its id.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.log.state().questions.length, 1);
+
+	// 🔴 AND THE NEXT PAGEHIDE REALLY DOES CARRY IT, under the same idempotency key — the half
+	// that goes red when a refusal quietly marks everything as already sent.
+	accept = true;
+	const went = f.log.flush();
+	assert.ok(went, 'the retry sent nothing at all');
+	assert.equal(went.session_id, 'sid-1');
+	assert.deepEqual(went.questions.map((q) => q.text), ['do you ship to Japan?']);
+	assert.deepEqual(went.pages, ['/pricing']);
+	assert.equal(f.log.state().sent, 1);
+	assert.equal(f.log.flush(), null, 'the accepted session went twice');
+});
