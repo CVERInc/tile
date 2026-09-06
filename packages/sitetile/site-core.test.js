@@ -543,6 +543,20 @@ test('dialogue: a series-nav block (bold line + numbered link list) is never a t
   assert.ok(!overCap.includes('st-dialogue'), 'not a dialogue');
 });
 
+test('dialogue: a ・ or • bulleted nav block under a bold line is not a turn either', () => {
+  // `・` (U+30FB) and `•` (U+2022) are the everyday bullets in a CJK locale, and the renderer
+  // already treats them as markers inside a table cell — so they are items here too, written
+  // tight against the text as they usually are.
+  for (const [what, item] of [['tight ・', '・'], ['spaced ・', '・ '], ['•', '• ']]) {
+    const html = dlg('> **Series: The PineNote pen**\n> ' + item + '[Part 1](/a) *(Current)*\n> ' + item + '[Part 2](/b)');
+    assert.ok(html.includes('<blockquote class="st-quote">'), what + ' bullets stay a quote');
+    assert.ok(!html.includes('st-dialogue'), what + ' is not a dialogue');
+  }
+  // …but the marker still has to lead the line: `*emphasis*` opens speech, not a list.
+  const emph = dlg('> **CHOD**\n> *sighs* I do not know what to tell you.');
+  assert.ok(emph.includes('<div class="st-dialogue">'), 'italics at the start are still speech');
+});
+
 test('dialogue: speech that merely OPENS with a number is still speech, not a list', () => {
   // A `1.` / `1)` marker alone cannot tell a numbered list from a sentence that starts with a
   // number, so it only makes a list with corroboration: a link, or a second item under it.

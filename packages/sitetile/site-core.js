@@ -698,12 +698,15 @@ const isHeadlessTableStart = (lines, i) =>
   && !(i + 1 < lines.length && RE_TABLE_SEP.test(lines[i + 1]));
 // One table CELL → HTML. Runs the inline pass (bold/italic/links/images) per fragment; additionally
 // supports (a) `<br>` in-cell line breaks (the GFM-in-cell convention) and (b) a BULLETED LIST inside
-// a cell — a `<br>`-joined run where EVERY segment leads with a list marker (`-`/`*`/`・`) becomes a
-// real `<ul class="st-cell-list">` (a corporate profile's 事業内容 value is such a list). Non-list cells just
+// a cell — a `<br>`-joined run where EVERY segment leads with a list marker (`-`/`*`/`+`/`・`/`•`) becomes
+// a real `<ul class="st-cell-list">` (a corporate profile's 事業内容 value is such a list). Non-list cells just
 // inline each `<br>`-segment. XSS-safe: fragments go through inlineHtml (escapes &<>); the only raw
 // tags emitted are our own <br>/<ul>/<li>.
 const RE_CELL_BR = /<br\s*\/?>/i;
-const RE_CELL_BULLET = /^\s*[-*・]\s+/;
+// The markers a hand-authored item leads with: markdown's own `-`/`*`/`+`, plus the typographic
+// bullets `・` (U+30FB) and `•` (U+2022) that a CJK author reaches for. One definition, because the
+// same characters mean the same thing wherever an item is written by hand (see the dialogue block).
+const RE_CELL_BULLET = /^\s*[-*+・•]\s+/;
 function cellHtml(cell) {
   const parts = String(cell == null ? '' : cell).split(RE_CELL_BR);
   if (parts.length > 1 && parts.every((p) => RE_CELL_BULLET.test(p))) {
@@ -753,24 +756,28 @@ function renderList(items) {
 // keep rendering as a quotation.
 //
 // "A list item" is read as markdown reads one, with a single allowance in the author's favour: a
-// BULLET marker settles it on its own, but a `1.` / `1)` marker does not, because a sentence may
-// simply open with a number (`2026. That was the year we shipped it.`, `1) it was late, and 2)
-// nobody was looking.`) and that is still speech. A numbered marker makes a list only with
-// corroboration — the item's text is a link, or a second item follows it — those being the two
-// shapes a real numbered list takes and a sentence does not.
+// BULLET marker (`-`, `*`, `+`, `・`, `•`) settles it on its own, but a `1.` / `1)` marker does not,
+// because a sentence may simply open with a number (`2026. That was the year we shipped it.`,
+// `1) it was late, and 2) nobody was looking.`) and that is still speech. A numbered marker makes a
+// list only with corroboration — the item's text is a link, or a second item follows it — those
+// being the two shapes a real numbered list takes and a sentence does not.
 const RE_TURN_HEAD = /^\*\*([^*\n]{1,24}?)\*\*(?:\s*[·:]\s*(.+?))?\s*$/;
 // The corroboration a numbered marker needs: the item's text is a link (`1. [Part 1](/a)`).
 const RE_ITEM_LINK = /^(?:\[\[|!?\[[^\]]*\]\()/;
-const isBulletItem = (line) => RE_LIST_ITEM.test(line) && !RE_LIST_ORDERED.test(line);
+// The bullet markers are RE_CELL_BULLET's own set — `・` and `•` are list markers under a name for
+// the same reason they are inside a table cell — with one relaxation: those two may sit tight
+// against the text (`・[Part 1](/a)`), which is how they are written. The ASCII markers keep
+// markdown's required space, so a line opening with *emphasis* is prose, not an item.
+const RE_TURN_BULLET = new RegExp(RE_CELL_BULLET.source + '|^\\s*[・•]\\S');
 
 // The line under a name — a list item, or prose that merely opens with a number?
 function speechIsListItem(body, i) {
-  if (isBulletItem(body[i])) return true;
+  if (RE_TURN_BULLET.test(body[i])) return true;
   if (!RE_LIST_ORDERED.test(body[i])) return false;
   const text = ((RE_LIST_ITEM.exec(body[i]) || [])[3] || '').trim();
   if (RE_ITEM_LINK.test(text)) return true;
   const next = body.slice(i + 1).find((l) => l.trim());
-  return next != null && (isBulletItem(next) || RE_LIST_ORDERED.test(next));
+  return next != null && (RE_TURN_BULLET.test(next) || RE_LIST_ORDERED.test(next));
 }
 
 // Quote lines → paragraphs (a blank `>` line separates them; soft newlines fold to spaces).
