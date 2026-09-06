@@ -164,6 +164,40 @@ test('a site with no posts, no assets and no theme still empties blog/ and paget
   noStashLeft(astroDir);
 });
 
+// ── two pages, one filename ─────────────────────────────────────────────────────────────────────
+// 🩸 The rule above is proved EQUIVALENT to the two it replaces and proved to stop traversal, and
+// neither of those is the same question as whether it is INJECTIVE. It is not. Measured 2026-09-07:
+// the two paths below produced one file, `pageCount` reported 2, the CLI printed `✓ 2 page(s) →`
+// and the surviving page was whichever sorted last. A page disappearing in silence is the one
+// outcome a site owner rebuilding their own site cannot debug.
+test('two page paths that sanitise to one filename are refused, both named', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const pages = [
+    { path: 'our team & friends', markdown: 'PAGE A\n' },
+    { path: 'our-team---friends', markdown: 'PAGE B — a different page entirely\n' },
+  ];
+  await assert.rejects(() => stageSite({ astroDir, pages }), (err) => {
+    assert.match(err.message, /both sanitise to content\/our-team---friends\.md/);
+    assert.match(err.message, /"our team & friends"/, 'the first source path is not named');
+    assert.match(err.message, /"our-team---friends"/, 'the second source path is not named');
+    return true;
+  });
+  assert.deepEqual(await snapshot(astroDir), before, 'the refusal must still hand the renderer back');
+  noStashLeft(astroDir);
+
+  // The other collisions measured in the same corpus, so the refusal is not one hard-coded pair.
+  for (const pair of [['a b', 'a.b'], ['a&b', 'a+b'], ['', 'home'], ['/etc/passwd', '//etc//passwd']]) {
+    await assert.rejects(
+      () => stageSite({ astroDir, pages: pair.map((path) => ({ path, markdown: 'x\n' })) }),
+      /two pages become the same file/,
+      `${JSON.stringify(pair)} collide and were not refused`,
+    );
+  }
+  assert.deepEqual(await snapshot(astroDir), before);
+  noStashLeft(astroDir);
+});
+
 // ── restore on throw ────────────────────────────────────────────────────────────────────────────
 // 🔴 The one that matters. Every early exit below happens AFTER content/ has been emptied and, in
 // the assets case, after a site's theme has already been copied into the renderer. A stageSite that
