@@ -516,8 +516,18 @@ export const AI_LOG_MAX_FIELD = 200;
  * the handle lives, per the ruling) and this is what ends the session instead.
  */
 export const AI_LOG_IDLE_MS = 30 * 60 * 1000;
-/** How long this browser trusts a claim-state answer before asking again. */
+/** How long this browser trusts a DEFINITE claim-state answer before asking again. */
 export const AI_LOG_CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
+/**
+ * How long it waits after a probe that answered「we do not know」.
+ *
+ * 🔴 NOT THE TTL, BECAUSE NOTHING WAS LEARNED. A failure — no network, an unreadable shape, or
+ * the contract's own `throttled` — must not be cached as an answer; but it must not be free
+ * either, or every question re-asks (review D8 measured eight probes for eight questions against
+ * a manifest that promises at most one per six hours). So it is bounded here instead: one probe
+ * per five minutes per browser until somebody actually answers.
+ */
+export const AI_LOG_CLAIM_RETRY_MS = 5 * 60 * 1000;
 const AI_LOG_PREFIX = 'reef-inbox:ai:';
 
 /** The buffer's own key — beside the handle's (`reef-inbox:<tenant>`), never inside it. */
@@ -816,32 +826,49 @@ export function createAiLog(opts) {
 
 	if (enabled) state = current(now());
 
-	/** Ask, at most once per TTL, whether this tenant has an inbox at all. */
+	/**
+	 * 🔴 AN UNCLAIMED ANSWER DROPS WHAT IS ALREADY HELD, rather than merely refusing to send it.
+	 * Keeping a KAITO-only site's visitors' questions in their browsers against the day somebody
+	 * claims the inbox would make the claim retroactive, and nobody asked those questions of a
+	 * person.
+	 */
+	function dropBuffer(held) {
+		held.questions = [];
+		held.pages = [];
+		held.sent = 0;
+	}
+
+	/**
+	 * Ask whether this tenant has an inbox at all — once per TTL for an answer, once per the
+	 * shorter backoff for a non-answer.
+	 *
+	 * 🩸 THE TWO ARE NOT THE SAME EVENT (review D2/D8). The old gate cached whatever came back
+	 * for six hours and, when nothing came back, re-asked on every single question. `claimed`
+	 * false is a fact about the site and is worth six hours; a throttle, a dropped connection or
+	 * a shape we could not read is worth a retry and nothing else — it may never be written down
+	 * as a no, because a no here also empties this visitor's buffer.
+	 */
 	function ensureClaim() {
 		if (!state || probing || !probeClaim) return;
-		if (state.claim !== null && now() - state.claimAt < AI_LOG_CLAIM_TTL_MS) return;
+		const wait = state.claim === null ? AI_LOG_CLAIM_RETRY_MS : AI_LOG_CLAIM_TTL_MS;
+		if (state.claimAt && now() - state.claimAt < wait) return;
 		probing = true;
+		const settle = (claimed) => {
+			probing = false;
+			if (!state) return;
+			// Every answer costs one probe and no more, including「we do not know」— that is what
+			// the backoff is measured from, and what the manifest's sentence was untrue about.
+			state.claimAt = now();
+			if (typeof claimed === 'boolean') {
+				state.claim = claimed;
+				if (!claimed) dropBuffer(state);
+			}
+			write(state);
+		};
 		void Promise.resolve()
 			.then(() => probeClaim())
-			.then((claimed) => {
-				probing = false;
-				if (!state || typeof claimed !== 'boolean') return;
-				state.claim = claimed;
-				state.claimAt = now();
-				// 🔴 AN UNCLAIMED ANSWER DROPS WHAT IS ALREADY HELD, rather than merely refusing to
-				// send it. Keeping a KAITO-only site's visitors' questions in their browsers against
-				// the day somebody claims the inbox would make the claim retroactive, and nobody
-				// asked those questions of a person.
-				if (!claimed) {
-					state.questions = [];
-					state.pages = [];
-					state.sent = 0;
-				}
-				write(state);
-			})
-			.catch(() => {
-				probing = false;
-			});
+			.then(settle)
+			.catch(() => settle(null));
 	}
 
 	return {
@@ -1364,6 +1391,14 @@ export async function probeInboxClaim(apiBase, kind, id) {
 		);
 		if (!res.ok) return null;
 		const body = await res.json();
+		// 🔴 `throttled` IS THE SERVER SAYING「WE DO NOT KNOW」, and it arrives dressed as a no
+		// (contract §一.1: over the read rate limit the endpoint answers 200 `claimed:false,
+		// throttled:true` rather than 429, because a coral that cannot ask must not write). Reading
+		// that field is the entire reason it exists: without it a rate-limited probe — the ordinary
+		// case on a busy site, since the probe shares the `read` bucket with a 15-second transcript
+		// poll — is indistinguishable from「this site has no Inbox」, which drops this browser's
+		// buffer and poisons the answer for six hours (review D2).
+		if (body?.throttled === true) return null;
 		return typeof body?.claimed === 'boolean' ? body.claimed : null;
 	} catch {
 		return null;

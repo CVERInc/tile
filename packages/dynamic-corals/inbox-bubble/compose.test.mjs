@@ -1248,9 +1248,9 @@ test('#17: the platform read (fetchAssistantName) is capped and stripped the sam
 // arithmetic that can only be exercised through a browser is arithmetic nobody exercises.
 
 const {
-	AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS, AI_LOG_MAX_TEXT, AI_QUESTION_FIELDS, AI_SESSION_FIELDS,
-	aiLogKey, aiPagePath, aiSessionPayload, appendAiPage, capAiQuestions, createAiLog, parseAiLog,
-	sendAiSession
+	AI_LOG_CLAIM_RETRY_MS, AI_LOG_CLAIM_TTL_MS, AI_LOG_IDLE_MS, AI_LOG_MAX_QUESTIONS,
+	AI_LOG_MAX_TEXT, AI_QUESTION_FIELDS, AI_SESSION_FIELDS, aiLogKey, aiPagePath, aiSessionPayload,
+	appendAiPage, capAiQuestions, createAiLog, parseAiLog, probeInboxClaim, sendAiSession
 } = await import('./inbox-bubble.js');
 
 function logFixture(over = {}) {
@@ -1552,6 +1552,98 @@ test('D1: a pagehide flush that the server later refuses is un-sent, not left ma
 	await f.settle();
 	assert.equal(f.log.state().sent, 1);
 	assert.equal(f.log.flush(), null, 'a stored session went a third time');
+});
+
+// ── review D2/D8 (2026-09-08, round 2):「we do not know」is not「there is no Inbox」 ──────────
+//
+// 🩸 THE FIELD THAT EXISTS TO SPLIT THOSE TWO WAS NEVER READ. Contract §一.1 answers a
+// rate-limited probe with 200 `{claimed:false, throttled:true}` rather than 429, precisely so a
+// coral that cannot ask does not write — and the coral flattened it back to `false`, which does
+// not merely refuse to send: it EMPTIES this browser's buffer and caches the no for six hours.
+// The probe shares the `read` bucket with a 15-second transcript poll, so on a busy site that is
+// the ordinary path, and nothing anywhere would have gone red.
+
+test('D2: the probe reads all four contract answers, and only two of them are answers', async () => {
+	const saved = globalThis.fetch;
+	try {
+		const probe = async (body, ok = true) => {
+			globalThis.fetch = async () => ({ ok, json: async () => body });
+			return probeInboxClaim('https://feelreef.com', 'site', 'acme');
+		};
+		assert.equal(await probe({ ok: true, claimed: true }), true, 'a claimed site');
+		assert.equal(await probe({ ok: true, claimed: false }), false, 'a KAITO-only site');
+		// 🔴 The one the review found. It arrives DRESSED AS A NO — same `claimed:false` — and the
+		// only thing telling it apart is the field this line reads.
+		assert.equal(await probe({ ok: true, claimed: false, throttled: true }), null,
+			'a throttled probe was read as「this site has no Inbox」');
+		assert.equal(await probe({ ok: true, claimed: true, throttled: true }), null);
+		assert.equal(await probe({ ok: false, reason: 'bad_kind' }, false), null);
+		assert.equal(await probe({ ok: true }), null, 'a shape we cannot read is not a no either');
+		globalThis.fetch = async () => { throw new TypeError('network'); };
+		assert.equal(await probeInboxClaim('https://feelreef.com', 'site', 'acme'), null);
+	} finally {
+		globalThis.fetch = saved;
+	}
+});
+
+test('D2: a throttled probe holds the questions, writes down nothing, and retries on the backoff', async () => {
+	let answer = null; // 「we do not know」
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => (probes++, answer) });
+	f.log.question('do you ship to Japan?', '/', null, '');
+	await f.settle();
+
+	assert.equal(probes, 1);
+	assert.equal(f.log.state().claim, null, 'a non-answer was cached as an answer');
+	assert.equal(f.log.state().questions.length, 1, 'a non-answer emptied the buffer');
+	// Unknown is still not permission: nothing leaves until somebody actually says yes.
+	assert.equal(f.log.flush(), null);
+	assert.equal(f.sent.length, 0);
+
+	// 🔴 AND IT IS BOUNDED (D8). The review measured one probe per question against a manifest
+	// that promises at most one per six hours; eight more questions now cost none.
+	for (let i = 0; i < 8; i++) f.log.question(`q${i}`, '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a non-answer re-asked on every question');
+
+	// A backoff, not a cache: it asks again five minutes later, and nothing was lost meanwhile.
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	answer = true;
+	f.log.question('and to Korea?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2);
+	assert.equal(f.log.state().claim, true);
+	const went = f.log.flush();
+	assert.equal(went.questions.length, 10, 'the questions asked while we did not know were dropped');
+	assert.equal(went.questions[0].text, 'do you ship to Japan?');
+
+	// The shorter window belongs to not-knowing only — a definite answer still gets six hours.
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('one more', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2, 'a definite answer was re-asked inside its TTL');
+	f.tick(AI_LOG_CLAIM_TTL_MS);
+	f.log.question('and another', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 3, 'the six-hour TTL never expired');
+});
+
+test('D2: a probe that never came back is the same non-answer, bounded the same way', async () => {
+	let probes = 0;
+	const f = logFixture({ probeClaim: async () => { probes++; throw new TypeError('network'); } });
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.state().claim, null);
+	assert.equal(f.log.state().questions.length, 1, 'a network failure dropped the buffer');
+	assert.equal(f.log.flush(), null);
+
+	f.log.question('still anyone?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 1, 'a thrown probe re-asked immediately');
+	f.tick(AI_LOG_CLAIM_RETRY_MS + 1);
+	f.log.question('hello?', '/', null, '');
+	await f.settle();
+	assert.equal(probes, 2);
 });
 
 // ── review D3 (2026-09-08, round 2): the loudest rule in this file had no ruler ──────────────
