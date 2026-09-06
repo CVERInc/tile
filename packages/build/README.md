@@ -141,9 +141,20 @@ renderer's own copies with no stash to put back, and every build after it was qu
 ## Tests
 
 ```
-node --test packages/build/
+node --test packages/build/*.test.mjs      # from the repo root
 ```
 
-They run in `scripts/test.sh` with the rest of the suite. The end-to-end one builds the fixture site
-with the real renderer and needs its dependencies (`cd packages/sitetile/astro && npm install`); it
-names itself as skipped when they are absent rather than passing on a check that never ran.
+They also run in `scripts/test.sh` with the rest of the suite, one file at a time.
+
+🩸 **Not `node --test packages/build/`.** On Node 22 a positional argument to the test runner is a
+file or a glob, never a directory to search: given a bare directory the runner resolves it the way
+an import would. With a `main` in this package's manifest that resolved to `index.mjs`, which
+contains no tests — so the command printed `# tests 1 / # pass 1 / # fail 0` having read none of the
+suites beside it. Without a `main` it fails with `MODULE_NOT_FOUND`, which is at least loud. The
+manifest therefore has no `main` (`exports` resolves `import '@tile/build'` identically), and
+`manifest.test.mjs` fails if one comes back. Expand the glob, or `cd packages/build && npm test` —
+with no positional at all the runner does search, from the working directory.
+
+The end-to-end test builds the fixture site with the real renderer and needs its dependencies
+(`cd packages/sitetile/astro && npm install`); it names itself as skipped when they are absent
+rather than passing on a check that never ran.
