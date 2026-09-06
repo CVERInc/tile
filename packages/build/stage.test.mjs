@@ -5,12 +5,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectPages } from './mkpages.mjs';
-import { safePagePath, stageSite, themeNameFromPages, listStaged } from './stage.mjs';
+import { safePagePath, stageSite, themeNameFromPages, listStaged, STASH_PREFIX } from './stage.mjs';
 
 const IR = fileURLToPath(new URL('./fixtures/ir', import.meta.url));
 const THEME = fileURLToPath(new URL('./fixtures/theme.css', import.meta.url));
+const STAGE = fileURLToPath(new URL('./stage.mjs', import.meta.url));
 
 // ── a renderer to stage into: the shipped shape, not the real one ────────────────────────────────
 // The point of these tests is that the four example directories come back exactly as they were, so
@@ -41,7 +43,7 @@ const snapshot = async (dir) => {
   return Object.fromEntries(files.map((f) => [f, readFileSync(join(dir, f), 'utf8')]));
 };
 const noStashLeft = (dir) => assert.deepEqual(
-  readdirSync(dir).filter((n) => n.startsWith('.tile-build-stash-')), [],
+  readdirSync(dir).filter((n) => n.startsWith(STASH_PREFIX)), [],
   'a stash directory survived — the renderer is not back to how it was found',
 );
 
@@ -196,6 +198,69 @@ test('two page paths that sanitise to one filename are refused, both named', asy
   }
   assert.deepEqual(await snapshot(astroDir), before);
   noStashLeft(astroDir);
+});
+
+// ── a signal, which is neither success nor a failed build nor a throw ───────────────────────────
+// 🩸 `finally` does not run on a signal, and Ctrl-C during `astro build` is the likeliest thing a
+// person does to this module. Measured 2026-09-07 with a REAL SIGINT (not kill -9): the stash
+// survived with the renderer's own blog/ and pagetile/ inside it, and the previous site's page sat
+// in content/ waiting for the next build to publish it under somebody else's domain.
+test('a real SIGINT mid-build hands the renderer back and takes the stash with it', async (t) => {
+  const astroDir = makeRenderer(t);
+  const before = await snapshot(astroDir);
+  const dir = mkdtempSync(join(tmpdir(), 'tile-build-signal-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // Staged, then held open the way `astro build` holds it open — a signal is the only way out.
+  const script = join(dir, 'run.mjs');
+  writeFileSync(script, 'import { stageSite } from ' + JSON.stringify(pathToFileURL(STAGE).href) + ';\n'
+    + 'await stageSite({ astroDir: ' + JSON.stringify(astroDir) + ',\n'
+    + "  pages: [{ path: 'home', markdown: '# another site entirely\\n' }] });\n"
+    + "process.stdout.write('STAGED\\n');\n"
+    + 'setInterval(() => {}, 1000);\n');
+
+  const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'inherit'] });
+  t.after(() => child.kill('SIGKILL'));
+  await new Promise((resolve, reject) => {
+    let out = '';
+    const died = (c) => reject(new Error(`the child exited ${c} before it staged anything`));
+    const timer = setTimeout(() => reject(new Error('the child never staged')), 20_000);
+    child.on('exit', died);
+    child.stdout.on('data', (b) => {
+      out += b;
+      if (!out.includes('STAGED')) return;
+      clearTimeout(timer); child.off('exit', died); resolve();
+    });
+  });
+  assert.deepEqual(await listStaged(join(astroDir, 'content')), ['home.md'],
+    'the child is not actually mid-build — this case would prove nothing');
+
+  const code = await new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGINT'); });
+  assert.equal(code, 130, 'a SIGINT during a build must restore and then exit 130');
+  assert.deepEqual(await snapshot(astroDir), before,
+    'after a SIGINT the renderer is still wearing the other site — the next build would ship it');
+  noStashLeft(astroDir);
+});
+
+// …and if a build is killed in a way no handler can catch (SIGKILL, a power cut), the stash it left
+// is the ONLY witness: .gitignore hides it from `git status`, and a tarball has no git at all.
+test('a stash left behind by an uncatchable kill is refused by name, and nothing is touched', async (t) => {
+  const astroDir = makeRenderer(t);
+  const orphan = join(astroDir, `${STASH_PREFIX}030MMv`);
+  mkdirSync(join(orphan, 'content'), { recursive: true });
+  writeFileSync(join(orphan, 'content/demo.md'), "the renderer's own example page\n");
+  const before = await snapshot(astroDir);
+
+  await assert.rejects(
+    () => stageSite({ astroDir, pages: [{ path: 'home', markdown: '# the next site\n' }] }),
+    (err) => {
+      assert.match(err.message, /left its stash behind/);
+      assert.match(err.message, new RegExp(`${STASH_PREFIX}030MMv`), 'the leftover directory is not named');
+      return true;
+    },
+  );
+  assert.deepEqual(await snapshot(astroDir), before,
+    'refusing must not stage, stash or delete anything — the operator has to be able to look');
 });
 
 // ── restore on throw ────────────────────────────────────────────────────────────────────────────
