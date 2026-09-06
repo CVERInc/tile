@@ -182,8 +182,37 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   // every later call returned immediately. That renderer could never be put back, and the contract
   // "if this function throws, it has ALREADY restored" was false on exactly the path that needed it.
   // Every step below is therefore idempotent: a second call finishes what the first one dropped.
-  async function restore() {
-    if (restored) return;
+  //
+  // 🩸 …AND A FLAG SET AT THE END CANNOT SERIALISE ANYTHING. Two restores in flight at once both saw
+  // `restored === false` and both ran the whole body: measured 2026-09-07, 2 concurrent calls → 1
+  // rejected with ENOENT, 3 → 2 rejected, because the second call renamed a directory the first had
+  // already moved. That is not a hypothetical arrangement — it is the documented one. The README
+  // hands a consumer `finally { await restore() }` and a `signal`, and a signal landing inside the
+  // restore window fires both. So a restore in flight IS the answer to a second call: one attempt,
+  // one result, every caller awaiting the same promise.
+  let restoring = null;
+  function restore() {
+    if (restored) return Promise.resolve();
+    if (restoring) return restoring;
+    restoring = doRestore().then(
+      () => { restored = true; restoring = null; },
+      (err) => {
+        // 🔴 A failed restore leaves `restoring` null ON PURPOSE: the next call must be a real
+        // retry, not a replay of the failure. `restored` stays false, so the work is still owed.
+        restoring = null;
+        // 🔴 …and it leaves as a SENTENCE. A bare `ENOENT: rename '<stash>/public' -> '<astro>/public'`
+        // was what a person got here, and it named the one directory that HAD come back while the
+        // two that had not went unmentioned. Say where the renderer's own material is and what to do.
+        throw new Error(`stageSite: the renderer could not be put back — ${err.message}. Its own `
+          + `${stagedDirNames.join('/, ')}/ are in ${stash}: move each one back over the renderer's, `
+          + `then remove that directory and ${lock}. Calling restore() again retries and is safe.`,
+        { cause: err });
+      },
+    );
+    return restoring;
+  }
+
+  async function doRestore() {
     // A site's theme belongs to that site's repo, never to the renderer (the renderer ships only
     // the baseline skin). Staged in for the build, removed after — so a site's theme can never
     // accumulate here.
@@ -212,7 +241,6 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     }
     await rm(stash, { recursive: true, force: true });
     await rm(lock, { recursive: true, force: true });
-    restored = true;
   }
 
   try {
