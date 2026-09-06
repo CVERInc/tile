@@ -263,8 +263,9 @@ test('fetchAssistantName returns the platform name, cleaned the same way the bak
 		seen.push(url);
 		return { ok: true, json: async () => ({ ok: true, assistantName: `  小${AI_CHIP_TOKEN}美\nsecond line ` }) };
 	};
-	assert.equal(await fetchAssistantName('https://feelreef.com', 'site', 'Atelier A'), '小美');
-	assert.equal(seen[0], 'https://feelreef.com/api/inbox/assistant?kind=site&id=soda%20art');
+	// A two-word id on purpose: the space is what proves the id is encoded, not concatenated.
+	assert.equal(await fetchAssistantName('https://feelreef.com', 'site', 'northwind art'), '小美');
+	assert.equal(seen[0], 'https://feelreef.com/api/inbox/assistant?kind=site&id=northwind%20art');
 });
 
 test('fetchAssistantName caps at 40 chars, exactly like the attribute path', async () => {

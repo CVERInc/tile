@@ -77,8 +77,8 @@ const flat = {
 	price_minor: 1400, display_price: '1400', currency: 'JPY',
 	image_url: 'https://x/doodle.jpg'
 };
-const f = renderProductPage(flat, { guildId: 'g1', shopPath: '/shop', siteName: 'soda', labels: {}, locale: 'ja-JP' });
-ok('flat: title falls back to `name`', f.title === 'Doodle Book #1 — soda', f.title);
+const f = renderProductPage(flat, { guildId: 'g1', shopPath: '/shop', siteName: 'northwind', labels: {}, locale: 'ja-JP' });
+ok('flat: title falls back to `name`', f.title === 'Doodle Book #1 — northwind', f.title);
 ok('flat: <h1> is not blank', f.bodyHtml.includes('>Doodle Book #1</h1>'));
 ok('flat: og:title carries the name', f.headMeta.includes('og:title" content="Doodle Book #1"'));
 // 🔴 Asserted on the ELEMENT, not on the class name: bodyHtml carries its own
@@ -122,8 +122,8 @@ const rspRich = {
 	variation_id: 'HGMA66X7IHP4FMUBZLNOGA45', name: 'Doodle Book #1',
 	price_minor: 1400, display_price: '1400', currency: 'JPY', image_url: 'https://x/cover.jpg'
 };
-const rr = renderProductPage(rspRich, { guildId: 'g1', shopPath: '/shop', siteName: 'soda', labels: {}, locale: 'ja-JP' });
-ok('rich: `title` wins over `name`', rr.title === 'Doodle Book #1 — soda');
+const rr = renderProductPage(rspRich, { guildId: 'g1', shopPath: '/shop', siteName: 'northwind', labels: {}, locale: 'ja-JP' });
+ok('rich: `title` wins over `name`', rr.title === 'Doodle Book #1 — northwind');
 ok('rich: BOTH variants rendered — the flat fields added no third',
 	(rr.bodyHtml.match(/<option /g) || []).length === 2, rr.bodyHtml.match(/<option /g) + '');
 ok('rich: variant selector present', rr.bodyHtml.includes('<select data-dc-variant'));

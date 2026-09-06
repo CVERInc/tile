@@ -28,7 +28,7 @@ test('unconfigured locale completion uses the default shop config and path local
 		fetched.push(new URL(request.url).pathname);
 		return new Response('<!doctype html><html lang="ja-JP"><head><title>Shop</title></head><body><main>GRID</main></body></html>');
 	} } };
-	const res = await renderCompletion(new Request('https://soda.example/en-us/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
+	const res = await renderCompletion(new Request('https://shop.example/en-us/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
 	const html = await res.text();
 	assert.deepEqual(fetched, ['/en-us/shop/']);
 	assert.match(html, /Thank you for your order/);
@@ -49,7 +49,7 @@ test('unconfigured locale completion falls back to the default shop path when it
 		if (pathname === '/ja/shop/') return new Response('not found', { status: 404 });
 		return new Response('<!doctype html><html lang="ja-JP"><head><title>Shop</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>');
 	} } };
-	const res = await renderCompletion(new Request('https://soda.example/ja/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
+	const res = await renderCompletion(new Request('https://shop.example/ja/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
 	const html = await res.text();
 	assert.deepEqual(fetched, ['/ja/shop/', '/shop/']);
 	assert.ok(html.includes('NAV') && html.includes('FOOT'), 'falls back to the default shop shell instead of the bare page');
@@ -60,7 +60,7 @@ test('locale completion with no working shell anywhere still renders the bare fa
 	const configured = shops.slice(0, 1);
 	const matched = matchShopComplete('/ja/shop/complete', configured);
 	const env = { ASSETS: { fetch: async () => new Response('not found', { status: 404 }) } };
-	const res = await renderCompletion(new Request('https://soda.example/ja/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
+	const res = await renderCompletion(new Request('https://shop.example/ja/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, matched);
 	const html = await res.text();
 	assert.match(html, /<h1 id="dc-shop-heading">/);
 });
@@ -70,7 +70,7 @@ test('configured locale completion keeps its configured shop', () => {
 });
 
 test('native checkout success selects only a resolved native storefront, preferring /shop', () => {
-	const request = new Request('https://soda.example/checkout/success?order_id=ord-1');
+	const request = new Request('https://shop.example/checkout/success?order_id=ord-1');
 	const route = { path: '/checkout/success', method: 'GET', orderParam: 'order_id', outcomePath: '/api/v2/shop/checkout/outcome' };
 	const mixed = [
 		{ shopPath: '/provider-shop', source: 'provider' },
@@ -85,8 +85,8 @@ test('native checkout success selects only a resolved native storefront, preferr
 	], route)?.shopPath, '/first-native');
 	assert.equal(matchNativeCheckoutSuccess(request, [mixed[0]], route), null);
 	assert.equal(matchNativeCheckoutSuccess(request, mixed, null), null);
-	assert.equal(matchNativeCheckoutSuccess(new Request('https://soda.example/checkout/success'), mixed, route), null);
-	assert.equal(matchNativeCheckoutSuccess(new Request('https://soda.example/checkout/success?order_id=ord-1', { method: 'POST' }), mixed, route), null);
+	assert.equal(matchNativeCheckoutSuccess(new Request('https://shop.example/checkout/success'), mixed, route), null);
+	assert.equal(matchNativeCheckoutSuccess(new Request('https://shop.example/checkout/success?order_id=ord-1', { method: 'POST' }), mixed, route), null);
 });
 
 test('native checkout success reuses its localized site shell and maps order_id to the existing outcome ref', async () => {
@@ -95,7 +95,7 @@ test('native checkout success reuses its localized site shell and maps order_id 
 	const shell = '<!doctype html><html lang="zh-TW" data-theme="reef"><head><title>商店</title></head><body><header>站台導覽</header><main><div data-dynamic-coral="square-shop" data-complete-pending="正在核對訂單"></div></main><footer>站台頁尾</footer></body></html>';
 	const env = { ASSETS: { fetch: async request => { fetched.push(new URL(request.url).pathname); return new Response(shell); } } };
 	const route = { path: '/checkout/success', method: 'GET', orderParam: 'order_id', outcomePath: '/api/v2/shop/checkout/outcome' };
-	const html = await (await renderCompletion(new Request('https://soda.example/checkout/success?order_id=ord%2F1'), env, { siteId: 'site-key' }, shop, route)).text();
+	const html = await (await renderCompletion(new Request('https://shop.example/checkout/success?order_id=ord%2F1'), env, { siteId: 'site-key' }, shop, route)).text();
 	assert.deepEqual(fetched, ['/native-shop/']);
 	assert.match(html, /data-theme="reef"/);
 	assert.match(html, /站台導覽/);
@@ -117,7 +117,7 @@ test('native checkout success fails closed when its site shell is unavailable', 
 			fetched.push(new URL(request.url).pathname);
 			return new Response('not found', { status: 404 });
 		} } };
-		const response = await renderCompletion(new Request('https://soda.example/checkout/success?order_id=ord-1'), env, { siteId: 'site-key' }, shop, route);
+		const response = await renderCompletion(new Request('https://shop.example/checkout/success?order_id=ord-1'), env, { siteId: 'site-key' }, shop, route);
 		const body = await response.text();
 		assert.notEqual(response.status, 200);
 		assert.equal(response.status, 503);
@@ -133,8 +133,8 @@ test('native checkout success fails closed when its site shell is unavailable', 
 test('provider completion bytes ignore a native order_id query and keep ref behavior unchanged', async () => {
 	const shell = '<!doctype html><html lang="en-US"><head><title>Shop</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>';
 	const env = { ASSETS: { fetch: async () => new Response(shell) } };
-	const baseline = await (await renderCompletion(new Request('https://soda.example/shop/complete?ref=provider-ref'), env, { siteId: 'site-key' }, shops[0])).text();
-	const withOrderId = await (await renderCompletion(new Request('https://soda.example/shop/complete?ref=provider-ref&order_id=native-id'), env, { siteId: 'site-key' }, shops[0])).text();
+	const baseline = await (await renderCompletion(new Request('https://shop.example/shop/complete?ref=provider-ref'), env, { siteId: 'site-key' }, shops[0])).text();
+	const withOrderId = await (await renderCompletion(new Request('https://shop.example/shop/complete?ref=provider-ref&order_id=native-id'), env, { siteId: 'site-key' }, shops[0])).text();
 	assert.equal(withOrderId, baseline);
 	assert.match(baseline, /ref=provider-ref/);
 	assert.doesNotMatch(baseline, /order_id=/);
@@ -143,7 +143,7 @@ test('provider completion bytes ignore a native order_id query and keep ref beha
 for (const shop of shops) {
 	test(`completion route renders the ${shop.lang} shop shell and verified outcome URL`, async () => {
 		const env = { ASSETS: { fetch: async () => new Response(`<!doctype html><html lang="${shop.lang}"><head><title>Shop</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>`) } };
-		const req = new Request(`https://soda.example${shop.shopPath}/complete?ref=ref-123`);
+		const req = new Request(`https://shop.example${shop.shopPath}/complete?ref=ref-123`);
 		const res = await renderCompletion(req, env, { siteId: 'site-key' }, shop);
 		const html = await res.text();
 		assert.equal(res.headers.get('cache-control'), 'private, no-store');
@@ -156,7 +156,7 @@ for (const shop of shops) {
 
 test('the h1 sits outside the padded section, full-bleed like the donor page\'s own h1', async () => {
 	const env = { ASSETS: { fetch: async () => new Response('<!doctype html><html lang="ja-JP"><head><title>Shop</title></head><body><main>GRID</main></body></html>') } };
-	const html = await (await renderCompletion(new Request('https://soda.example/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, shops[0])).text();
+	const html = await (await renderCompletion(new Request('https://shop.example/shop/complete?ref=ref-123'), env, { siteId: 'site-key' }, shops[0])).text();
 	const h1Index = html.indexOf('<h1 id="dc-shop-heading">');
 	const sectionIndex = html.indexOf('<section class="dc-shop-complete"');
 	assert.ok(h1Index >= 0 && sectionIndex >= 0 && h1Index < sectionIndex, 'h1 comes before (outside) the padded section');
@@ -205,7 +205,7 @@ test('completionLocale falls back to the shell\'s <html lang> for a genuinely Si
 
 test('a direct completion visit renders unknown immediately and does not poll', async () => {
 	const env = { ASSETS: { fetch: async () => new Response('<!doctype html><html lang="ja-JP"><head><title>Shop</title></head><body><main>GRID</main></body></html>') } };
-	const html = await (await renderCompletion(new Request('https://soda.example/shop/complete'), env, { siteId: 'site-key' }, shops[0])).text();
+	const html = await (await renderCompletion(new Request('https://shop.example/shop/complete'), env, { siteId: 'site-key' }, shops[0])).text();
 	assert.match(html, /<title>ご注文を確認できません<\/title>/);
 	assert.match(html, /<h1 id="dc-shop-heading">ご注文を確認できません<\/h1>/);
 	assert.match(html, /このページはお支払いの後に表示されます。/);
@@ -215,7 +215,7 @@ test('a direct completion visit renders unknown immediately and does not poll', 
 test('completion copy can be overridden by data attributes on the coral mount', async () => {
 	const shell = '<!doctype html><html lang="en-US"><head></head><body><main><div data-dynamic-coral="square-shop" data-complete-pending="Checking now"></div></main></body></html>';
 	const env = { ASSETS: { fetch: async () => new Response(shell) } };
-	const html = await (await renderCompletion(new Request('https://soda.example/en/shop/complete?ref=x'), env, { siteId: 'site-key' }, shops[2])).text();
+	const html = await (await renderCompletion(new Request('https://shop.example/en/shop/complete?ref=x'), env, { siteId: 'site-key' }, shops[2])).text();
 	assert.match(html, /<title>Checking now<\/title>/);
 	assert.match(html, /<h1 id="dc-shop-heading">Checking now<\/h1>/);
 });
@@ -230,13 +230,13 @@ test('cart clearing decision trusts only a paid outcome', () => {
 test('legacy done marker redirects only when it carries a ref and never clears storage', () => {
 	const removed = [];
 	globalThis.window = {
-		location: { href: 'https://soda.example/shop?dc_shop=done&ref=legacy-ref', replace(value) { this.replaced = value; } },
+		location: { href: 'https://shop.example/shop?dc_shop=done&ref=legacy-ref', replace(value) { this.replaced = value; } },
 		localStorage: { removeItem: (key) => removed.push(key) }
 	};
 	consumeCheckoutReturn();
 	assert.equal(window.location.replaced, '/shop/complete?ref=legacy-ref');
 	assert.deepEqual(removed, []);
-	window.location = { href: 'https://soda.example/shop?dc_shop=done', replace(value) { this.replaced = value; } };
+	window.location = { href: 'https://shop.example/shop?dc_shop=done', replace(value) { this.replaced = value; } };
 	consumeCheckoutReturn();
 	assert.equal(window.location.replaced, undefined);
 	delete globalThis.window;
