@@ -543,6 +543,25 @@ test('dialogue: a series-nav block (bold line + numbered link list) is never a t
   assert.ok(!overCap.includes('st-dialogue'), 'not a dialogue');
 });
 
+test('dialogue: speech that merely OPENS with a number is still speech, not a list', () => {
+  // A `1.` / `1)` marker alone cannot tell a numbered list from a sentence that starts with a
+  // number, so it only makes a list with corroboration: a link, or a second item under it.
+  const year = dlg('> **CHOD**\n> 2026. That was the year we finally shipped it.');
+  assert.ok(year.includes('<div class="st-dialogue">'), 'a year + period opens prose, not a list');
+  assert.ok(!year.includes('st-quote'), 'not demoted to a plain quotation');
+
+  const paren = dlg('> **CHOD**\n> 1) it was late, and 2) nobody was looking.');
+  assert.ok(paren.includes('<div class="st-dialogue">'), 'an inline enumeration is still one sentence');
+
+  const link = dlg('> **CHOD**\n> 1. [Part 1](/a)');
+  assert.ok(link.includes('<blockquote class="st-quote">'), 'a numbered LINK is an item, not speech');
+  assert.ok(!link.includes('st-dialogue'), 'not a dialogue');
+
+  const two = dlg('> **CHOD**\n> 1. first thing\n> 2. second thing');
+  assert.ok(two.includes('<blockquote class="st-quote">'), 'a second item corroborates the first');
+  assert.ok(!two.includes('st-dialogue'), 'not a dialogue');
+});
+
 
 // ── fenced code highlighting (cssmd/highlight.js) ────────────────────────────────────────────
 // The renderer's job here is narrow: pass a KNOWN language through the highlighter, and leave

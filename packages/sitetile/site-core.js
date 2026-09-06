@@ -751,7 +751,27 @@ function renderList(items) {
 // a name with nothing under it is not a turn, and the line under the name must be prose — a list
 // item is never speech — because an ordinary quotation that happens to open with a bold word must
 // keep rendering as a quotation.
+//
+// "A list item" is read as markdown reads one, with a single allowance in the author's favour: a
+// BULLET marker settles it on its own, but a `1.` / `1)` marker does not, because a sentence may
+// simply open with a number (`2026. That was the year we shipped it.`, `1) it was late, and 2)
+// nobody was looking.`) and that is still speech. A numbered marker makes a list only with
+// corroboration — the item's text is a link, or a second item follows it — those being the two
+// shapes a real numbered list takes and a sentence does not.
 const RE_TURN_HEAD = /^\*\*([^*\n]{1,24}?)\*\*(?:\s*[·:]\s*(.+?))?\s*$/;
+// The corroboration a numbered marker needs: the item's text is a link (`1. [Part 1](/a)`).
+const RE_ITEM_LINK = /^(?:\[\[|!?\[[^\]]*\]\()/;
+const isBulletItem = (line) => RE_LIST_ITEM.test(line) && !RE_LIST_ORDERED.test(line);
+
+// The line under a name — a list item, or prose that merely opens with a number?
+function speechIsListItem(body, i) {
+  if (isBulletItem(body[i])) return true;
+  if (!RE_LIST_ORDERED.test(body[i])) return false;
+  const text = ((RE_LIST_ITEM.exec(body[i]) || [])[3] || '').trim();
+  if (RE_ITEM_LINK.test(text)) return true;
+  const next = body.slice(i + 1).find((l) => l.trim());
+  return next != null && (isBulletItem(next) || RE_LIST_ORDERED.test(next));
+}
 
 // Quote lines → paragraphs (a blank `>` line separates them; soft newlines fold to spaces).
 const quoteParas = (buf) =>
@@ -761,11 +781,11 @@ function dialogueTurn(buf) {
   const m = RE_TURN_HEAD.exec((buf[0] || '').trim());
   if (!m) return null;
   const body = buf.slice(1);
-  const firstLine = body.find((l) => l.trim());
-  if (!firstLine) return null;                       // a name with no speech under it is not a turn
+  const first = body.findIndex((l) => l.trim());
+  if (first < 0) return null;                        // a name with no speech under it is not a turn
   // The fourth condition of the convention above: a list item under the name is never speech,
   // whatever the bold line happens to say and however short it happens to be.
-  if (RE_LIST_ITEM.test(firstLine)) return null;
+  if (speechIsListItem(body, first)) return null;
   return { name: m[1].trim(), meta: (m[2] || '').trim(), body };
 }
 
