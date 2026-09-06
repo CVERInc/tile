@@ -1,11 +1,11 @@
 // Guard: `blog-unlisted-categories` takes posts out of every LIST while leaving their PAGES alive.
 //   run: node packages/sitetile/blog-unlisted.test.mjs   (wired into scripts/test.sh)
 //
-// WHY THIS EXISTS. atelier-a asked to take eight VTubers' 291 posts out of NEWS (chodaict,
-// 2026-08-19) and picked, out of three offered outcomes, the middle one: gone from every list we
-// generate, URL still answering 200, no 404 and no redirect. Every one of those posts has been
-// published since the Wix era, so the draft-flag answer would have burned 873 indexed URLs
-// (291 × three locales) to satisfy a request about a sidebar.
+// WHY THIS EXISTS. A site owner asked to take eight contributors' 291 posts out of NEWS
+// (2026-08-19) and picked, out of three offered outcomes, the middle one: gone from every list we
+// generate, URL still answering 200, no 404 and no redirect. Every one of those posts had been
+// published for years on a previous platform, so the draft-flag answer would have burned 873
+// indexed URLs (291 × three locales) to satisfy a request about a sidebar.
 //
 // That makes this feature one sentence — "a list must not show it, a router must still build it" —
 // and the sentence has exactly two ways to break, so both are guarded here:
@@ -224,7 +224,7 @@ test('the router still emits a page for EVERY post, unlisted ones included', () 
 });
 
 test('a translated post inherits its categories, or the filter is inert outside the default locale', () => {
-  // 🩸 Measured on feelreef/site-atelier-a, 2026-08-19: `ir/posts/*.md` carries `categories:` on 517
+  // 🩸 Measured on one customer's feelreef site, 2026-08-19: `ir/posts/*.md` carries `categories:` on 517
   // of 585 files; `ir/posts/zh-tw/*.md` and `ir/posts/en-us/*.md` carry it on 0 of 585 each, with
   // identical slugs across all three. Without this inheritance, unlisting would have cleaned the
   // Japanese NEWS and left all 291 posts sitting in /zh-tw/diary and /en-us/diary.

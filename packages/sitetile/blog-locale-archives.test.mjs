@@ -1,7 +1,7 @@
 // Lingo × Blog locale category/tag archives — the "link helper" this feature turns on.
 //   run: node packages/sitetile/blog-locale-archives.test.mjs   (wired into scripts/test.sh)
 //
-// THE GAP (confirmed live on atelier-a.co.jp, 2026-09-02, a Lingo site with translated posts at
+// THE GAP (confirmed live on a customer's site, 2026-09-02, a Lingo site with translated posts at
 // ir/posts/zh-tw/…, ir/posts/en-us/…): category/tag archives existed only at the BASE locale
 // (pages/category/[slug]/, pages/tag/[slug]/), so on a zh-TW or en-US edition every category-rail
 // entry and every tag chip that resolved to a category still pointed at `/category/<slug>/` — the

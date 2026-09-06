@@ -84,7 +84,7 @@ export function blogCategories(meta, listed) {
   const localize = (list) => list.map((e) => ({ ...e, href: localizeArchiveHref(e.href, meta, listed) }));
   if (!hidden.size) return localize(entries);   // every site that unlists nothing leaves here, untouched.
   // 🔴 These counts are AUTHORED (see above) — harvested from live so they match what a reader saw
-  // there. Unlisting falsifies them all at once, and not just the hidden rows: atelier-a's
+  // there. Unlisting falsifies them all at once, and not just the hidden rows: a rail row reading
   // `☆ STAFF|224` would keep promising 224 posts while 14 of them are no longer reachable. An
   // authored number that has stopped measuring what it names is precisely what this site's own
   // _site.md already ruled on (「兩個數字對不上比顯示過期的舊承諾更誠實」). So the moment a site
@@ -253,19 +253,20 @@ export function allPosts(glob, excerptMax) {
 // sitemap, the search index, the category rail, and every corpus-derived sidebar (recent posts /
 // tag cloud / year archive / related).
 //
-// 🔴 IT IS NOT A DRAFT STATE, and that difference is the whole reason it exists. atelier-a asked to
-// take eight VTubers' 291 posts out of NEWS (chodaict, 2026-08-19). Every one of them has been
-// published for years and carries a live, indexed URL from the Wix era, so a draft flag would 404
-// all 291 — the exact cost retirePage's header already names ("removing a live, indexed URL makes
-// a 404 and burns its search weight"). Here the post PAGE still renders and its URL still answers
+// 🔴 IT IS NOT A DRAFT STATE, and that difference is the whole reason it exists. A site owner asked
+// to take eight contributors' 291 posts out of NEWS (2026-08-19). Every one of them has been
+// published for years and carries a live, indexed URL from a previous platform, so a draft flag
+// would 404 all 291 — the exact cost retirePage's header already names ("removing a live, indexed
+// URL makes a 404 and burns its search weight"). Here the post PAGE still renders and it answers
 // 200: a reader holding a link keeps it, search engines fade it out on their own, and deleting the
 // config line brings every post back because no post file was ever touched. A real draft state —
 // for a post that never had a URL — is a different feature and stays unbuilt.
 //
 // 🔴 A post is unlisted when ANY of its categories is unlisted, not only when all of them are.
-// 14 of atelier-a's 291 also carry `staff`, a category being KEPT, and "hide this person's posts" is
-// not satisfied by a rule that leaks them out through the company archive. The per-post escape
-// hatch is the one that already exists: take that category off that post's frontmatter.
+// On the site that asked, 14 of the 291 also carry `staff`, a category being KEPT, and "hide this
+// person's posts" is not satisfied by a rule that leaks them out through the company archive. The
+// per-post escape hatch is the one that already exists: take that category off that post's
+// frontmatter.
 export function unlistedCategories(meta) {
   return new Set(fmList((meta || {})['blog-unlisted-categories']));
 }
@@ -303,7 +304,7 @@ function categoryHrefSlug(href, meta) {
 // localeUrlPrefix / localizeArchiveHref / alternateArchiveLocales are the "link helper" this
 // feature turns on: every category/tag chip and the authored category rail carried a BARE
 // `/category/<slug>/` href regardless of which locale was rendering, so a zh-TW or en-US edition
-// of a Lingo + Blog site (atelier-a.co.jp, confirmed live 2026-09-02) sent readers to the JAPANESE
+// of a Lingo + Blog site (a customer's site, confirmed live 2026-09-02) sent readers to the JAPANESE
 // archive — the base locale's posts, in the base locale's language — no matter which edition they
 // were reading. A third-party AI editing the site could only hide the rail, because the link
 // itself had no way to know it was wrong.
