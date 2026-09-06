@@ -658,6 +658,165 @@ test('#17: an RTL-override payload cannot reach the status line unisolated', () 
 	assert.match(html, /^evil<span class="dc-inbox-ai-chip"/);
 });
 
+// REVIEW B1 (P1, 2026-09-08): the two strips ran in the order that let one UNDO the other.
+//
+// 0.7.4 added the bidi strip AFTER the AI_CHIP_TOKEN strip, so a control character the token
+// strip could not see and the bidi strip then deleted smuggled the token in and reassembled it
+// downstream -- the exact invariant the 0.7.2 test above ('a name carrying the chip sentinel
+// cannot eat the rest of the status line') defends, walked around through the side door.
+//
+// The payload is written with \u escapes, never literal bytes: a literal U+202E in this file
+// would render this test's own source in an order that does not match how it runs, which is the
+// Trojan Source class (CVE-2021-42574) the code under test exists to strip.
+const SMUGGLED_TOKEN = '\u2063A\u202EI_CHIP\u2063';
+
+// The half of the zh-TW status line that follows the chip, taken from COPY rather than retyped:
+// what is being asserted is that the sentence SURVIVES, and hardcoding it here would make this
+// test fail on the day the owner rewords it, for a reason that has nothing to do with B1. It
+// carries no HTML-escapable character, so statusFor's escHtml leaves it byte-for-byte.
+const ZH_STATUS_TAIL = COPY['zh-tw'].statusDefault('').split(AI_CHIP_TOKEN)[1];
+
+function chipCount(html) {
+	return html.split('<span class="dc-inbox-ai-chip"').length - 1;
+}
+
+function nameFromAttribute(raw) {
+	return resolveAssistantName({ getAttribute: (n) => (n === 'data-assistant-name' ? raw : null) });
+}
+
+test('B1: a bidi control cannot smuggle the chip sentinel past the strip and reassemble it', () => {
+	// The reassembly, spelled out: delete the U+202E from this payload by hand and what is left
+	// IS the sentinel. That is what the old order handed to statusFor.
+	assert.equal(SMUGGLED_TOKEN.replace(/\u202E/g, ''), AI_CHIP_TOKEN);
+
+	// Nothing survives the two strips, so the name falls back -- a sentinel is not a name.
+	assert.equal(nameFromAttribute(SMUGGLED_TOKEN), 'KAITO');
+
+	const html = statusFor(
+		COPY['zh-tw'],
+		{ hasConv: false, hasEmail: false, kaitoOn: true },
+		nameFromAttribute(SMUGGLED_TOKEN)
+	);
+	// The two things the smuggled token used to break: the sentence after the chip was eaten
+	// whole, and the name went with it, leaving one lone chip as the entire status line.
+	assert.ok(html.endsWith(ZH_STATUS_TAIL), `the status line lost its tail: ${JSON.stringify(html)}`);
+	assert.equal(chipCount(html), 1, 'chip count');
+	assert.ok(!html.includes(AI_CHIP_TOKEN), 'the sentinel reached the DOM');
+	assert.ok(!html.includes('\u202E'), 'the override reached the DOM');
+});
+
+test('B1: every stripped control works as the smuggling character, at any position - none of them do now', () => {
+	for (const ctrl of BIDI_TEST_CONTROLS) {
+		// Two insertion points, because the review measured that the position does not matter.
+		for (const payload of [`\u2063A${ctrl}I_CHIP\u2063`, `\u2063AI_CH${ctrl}IP\u2063`]) {
+			const label = `U+${ctrl.codePointAt(0).toString(16).toUpperCase()}`;
+			const name = nameFromAttribute(`小${payload}美`);
+			assert.ok(!name.includes(AI_CHIP_TOKEN), `${label} rebuilt the sentinel`);
+			const html = statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }, name);
+			assert.equal(chipCount(html), 1, label);
+			assert.ok(html.endsWith(ZH_STATUS_TAIL), label);
+		}
+	}
+});
+
+test('B1: the platform path shares the helper, so the same payload dies there too', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: SMUGGLED_TOKEN, resolved: true })
+	});
+	// `resolved: true` with nothing left after cleaning means "the owner cleared the name" - KAITO.
+	assert.equal(await fetchAssistantName('https://feelreef.com', 'site', 'x'), 'KAITO');
+});
+
+// REVIEW B7 (2026-09-08): counting grapheme clusters removed the LENGTH limit. A cluster has no
+// upper bound, so 40 clusters can be 20,040 UTF-16 units, and the pre-#17 .slice(0, 40) was the
+// only thing that had been bounding it.
+
+test('B7: the cap is clusters AND code units - a 40-cluster Zalgo wall does not get through', () => {
+	// The review's own payload: exactly 40 clusters, 20,040 units, waved through untouched.
+	const zalgo = ('a' + '\u0301'.repeat(500)).repeat(40);
+	assert.equal(zalgo.length, 20040);
+	// The first cluster alone is 501 units - over the ceiling on its own, so nothing fits and the
+	// name falls back rather than being cut mid-sequence.
+	assert.equal(nameFromAttribute(zalgo), 'KAITO');
+});
+
+test('B7: the ceiling truncates on a cluster boundary, it does not slice UTF-16', () => {
+	// 10-unit clusters ('a' plus nine combining acutes): 40 of them is 400 units, so the UNIT
+	// ceiling bites first, at 20 clusters, and lands exactly on a boundary.
+	const cluster = 'a' + '\u0301'.repeat(9);
+	const name = nameFromAttribute(cluster.repeat(40));
+	assert.equal(name, cluster.repeat(20));
+	assert.ok(name.length <= 200, `${name.length} units got through`);
+	if (typeof name.isWellFormed === 'function') assert.equal(name.isWellFormed(), true);
+	// A plain 60-character name is still capped at 40: the ceiling only ever binds on text that is
+	// long in units without being long in characters.
+	assert.equal(nameFromAttribute('a'.repeat(60)), 'a'.repeat(40));
+});
+
+test('B7: the platform read enforces the ceiling too - it is the same last line of defence', async () => {
+	globalThis.fetch = async () => ({
+		ok: true,
+		json: async () => ({ ok: true, assistantName: ('a' + '\u0301'.repeat(9)).repeat(40) })
+	});
+	const name = await fetchAssistantName('https://feelreef.com', 'site', 'x');
+	assert.ok(name.length <= 200, `the platform path let ${name.length} units through`);
+});
+
+// REVIEW B8 (2026-09-08): with and without Intl.Segmenter, the same name came out different --
+// a ZWJ family x45 capped to 40 families with a Segmenter and 8 without one -- and the fallback
+// left a dangling U+200D where it cut.
+
+test('B8: with and without Intl.Segmenter the cap produces the SAME name', () => {
+	const inputs = {
+		emoji: '\u{1F600}'.repeat(45),
+		zwjFamily: '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'.repeat(45),
+		rainbowFlag: '\u{1F3F3}\uFE0F\u200D\u{1F308}'.repeat(45),
+		regionalFlags: '\u{1F1F9}\u{1F1FC}'.repeat(45),
+		combining: 'e\u0301'.repeat(45),
+		skinTone: '\u{1F44D}\u{1F3FF}'.repeat(45),
+		keycap: '1\uFE0F\u20E3'.repeat(45),
+		hangul: '각'.repeat(45),
+		zalgo: ('a' + '\u0301'.repeat(9)).repeat(40),
+		// A joiner between two things that are NOT both pictographs does not weld them: this is 41
+		// clusters, not 40, and the fallback has to agree with the Segmenter about that too.
+		joinerBetweenNonPictographs: 'a'.repeat(40) + '\u200D\u{1F469}',
+		// The review's own dangling-joiner case: 38 plain characters then one family.
+		reviewDanglingJoiner: 'a'.repeat(38) + '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
+	};
+	const realSegmenter = Intl.Segmenter;
+	for (const [label, raw] of Object.entries(inputs)) {
+		const withSegmenter = nameFromAttribute(raw);
+		let without;
+		delete Intl.Segmenter;
+		try {
+			without = nameFromAttribute(raw);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+		assert.equal(without, withSegmenter, `${label}: the fallback produced a different name`);
+		if (typeof without.isWellFormed === 'function') assert.equal(without.isWellFormed(), true, label);
+	}
+});
+
+test('B8: a name never ends on a dangling joiner, on either path', () => {
+	const realSegmenter = Intl.Segmenter;
+	// A long joiner chain is ONE cluster on both paths, and it ends on a joiner with nothing after
+	// it to join -- exactly the debris the review measured, arriving from the input rather than
+	// from the cut now that clusters are never split.
+	const chain = '\u{1F468}\u200D'.repeat(45);
+	for (const path of ['segmenter', 'fallback']) {
+		if (path === 'fallback') delete Intl.Segmenter;
+		try {
+			assert.ok(!nameFromAttribute(chain).endsWith('\u200D'), `${path} left a dangling U+200D`);
+			// A joiner the OWNER typed at the end of a short name is the same debris.
+			assert.equal(nameFromAttribute('小美\u200D'), '小美', path);
+		} finally {
+			Intl.Segmenter = realSegmenter;
+		}
+	}
+});
+
 test('#17: the platform read (fetchAssistantName) is capped and stripped the same way as the baked attribute', async () => {
 	globalThis.fetch = async () => ({
 		ok: true,

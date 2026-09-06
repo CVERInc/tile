@@ -58,7 +58,9 @@
 //                  instead of "KAITO" (owner ruling, 2026-09-05: the name may
 //                  change, but the panel still marks the reply as AI — see
 //                  statusDefault). Trimmed to a single line, capped at 40
-//                  chars; blank/whitespace falls back to "KAITO".
+//                  grapheme clusters AND 200 UTF-16 units (a cluster has no
+//                  length limit of its own — see ASSISTANT_NAME_MAX_UNITS);
+//                  blank/whitespace falls back to "KAITO".
 //   data-title / data-placeholder / data-send / data-… (optional) — copy
 //
 // Usage:
@@ -460,6 +462,20 @@ export function resolveSiteName(el, doc) {
 
 const DEFAULT_ASSISTANT_NAME = 'KAITO';
 const ASSISTANT_NAME_MAX = 40;
+/**
+ * The second half of the cap, and the reason there are two (review B7, 2026-09-08).
+ *
+ * 🩸 COUNTING GRAPHEMES REMOVED THE LENGTH LIMIT. `.slice(0, 40)` counted UTF-16 units, so it was
+ * a hard ceiling as well as a cap; counting clusters is right for「40 characters」 as a person
+ * means it, but a cluster has no upper bound — `('a' + '́'.repeat(500)).repeat(40)` is
+ * exactly 40 clusters and 20,040 units, and the measured result was that it passed through
+ * untouched into the status line and the second-action button as a page-high wall of Zalgo.
+ *
+ * So the cluster cap says how many characters, and this says how much text. 200 units is five
+ * times the cluster cap — far past any real name in any script, including a fully-decomposed one,
+ * and still a bound. The truncation lands on a cluster boundary either way, never mid-sequence.
+ */
+const ASSISTANT_NAME_MAX_UNITS = 200;
 
 /**
  * Bidi/format controls (issue #17, pre-existing, found by the review of #12 R2/R3 P3): an
@@ -477,17 +493,111 @@ const ASSISTANT_NAME_MAX = 40;
 const BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069\u061C\u200E\u200F]/g;
 
 /**
+ * A ZERO WIDTH JOINER left dangling at the end of a truncated name (review B8) — the one format
+ * character `BIDI_CONTROL_RE` deliberately does not carry, because U+200D inside a name is
+ * meaningful (it is what holds an emoji sequence together) and only a TRAILING one is debris.
+ * Cutting a three-person family emoji straight after its first joiner leaves one figure and a
+ * joiner with nothing left to join, sitting in the DOM. Trimmed at the end of
+ * `cleanAssistantName`, after every cut that could produce one has already been made.
+ */
+const TRAILING_JOINER_RE = /\u200D+$/;
+
+/**
+ * The three Unicode questions `fallbackGraphemes` below asks:
+ *   EXTENDS — does this code point continue the cluster before it (combining marks, variation
+ *             selectors, the enclosing keycap, the Fitzpatrick skin-tone modifiers)?
+ *   PIC_END / PIC_START — is a ZERO WIDTH JOINER sitting between two PICTOGRAPHS? That is the
+ *             one place a joiner actually welds two clusters into one (UAX #29 GB11), which is
+ *             how 「👨‍👩‍👧」 and 「🏳️‍🌈」 count once each. A joiner between anything else does
+ *             not, so `a` + ZWJ + `👩` stays two clusters exactly as `Intl.Segmenter` says.
+ *
+ * 🔴 Built with `new RegExp` inside a `try`, never as regex LITERALS. Unicode property escapes
+ * are younger than some of the engines that reach the fallback at all, and a literal an engine
+ * cannot parse is a SyntaxError for the WHOLE MODULE — the bubble would not render, to make a
+ * name one cluster tidier. `null` means the fallback degrades to counting code points, which is
+ * exactly what it did before this.
+ */
+const [GRAPHEME_EXTEND_RE, PICTOGRAPH_END_RE, PICTOGRAPH_START_RE] = (() => {
+	try {
+		return [
+			new RegExp('^(?:\\p{Grapheme_Extend}|\\p{Emoji_Modifier})$', 'u'),
+			new RegExp('\\p{Extended_Pictographic}(?:\\p{Grapheme_Extend}|\\p{Emoji_Modifier})*$', 'u'),
+			new RegExp('^\\p{Extended_Pictographic}', 'u')
+		];
+	} catch {
+		return [null, null, null];
+	}
+})();
+
+/** U+200D, spelled as an escape for the same reason `BIDI_CONTROL_RE` is — see its comment. */
+const ZWJ = '\u200D';
+
+const REGIONAL_INDICATOR_LO = 0x1f1e6;
+const REGIONAL_INDICATOR_HI = 0x1f1ff;
+
+/**
+ * The `Intl.Segmenter`-free path, and 🔴 it now AGREES with the Segmenter path rather than
+ * merely avoiding lone surrogates (review B8).
+ *
+ * 🩸 `Array.from` alone counts CODE POINTS, so the same name was two different names depending
+ * on the browser: a three-person ZWJ family ×45 capped to 40 whole families with a Segmenter and
+ * to 8 without one, and Firefox only shipped `Intl.Segmenter` in 125 — this is a live split, not
+ * a museum piece. Worse, the cut landed anywhere inside a sequence, which is where the dangling
+ * joiner `TRAILING_JOINER_RE` above exists to clean up came from.
+ *
+ * Three joining rules: an extending code point glues to what precedes it, two regional
+ * indicators pair up into one flag, and a joiner welds two pictographs. That is enough to agree
+ * with `Intl.Segmenter` cluster-for-cluster on every sequence the review measured plus the ones
+ * the tests add (families, flags, keycaps, skin tones, rainbow/kiss ZWJ sequences, Hangul,
+ * combining stacks) — which is what the test asserts, against the real Segmenter, rather than
+ * against a table written here.
+ *
+ * 🔴 IT IS NOT A UAX #29 IMPLEMENTATION and must not be described as one. Indic conjuncts
+ * (virama sequences) still count as more clusters here than a Segmenter says, so a Devanagari
+ * name is capped shorter on an engine without one. That is a display-length difference on a
+ * label, in the same direction the old code already erred, and buying the rest of UAX #29 to
+ * close it would put a segmentation table in a widget that has to stay small.
+ */
+function fallbackGraphemes(str) {
+	const out = [];
+	let joinNext = false;
+	let riOpen = false;
+	for (const cp of str) {
+		const code = cp.codePointAt(0);
+		const isRI = code >= REGIONAL_INDICATOR_LO && code <= REGIONAL_INDICATOR_HI;
+		const pairsWithPrevious = isRI && riOpen;
+		const previous = out.length ? out[out.length - 1] : '';
+		const extendsPrevious = GRAPHEME_EXTEND_RE ? GRAPHEME_EXTEND_RE.test(cp) : false;
+		// GB11: pictograph, joiner, pictograph — the joiner is already part of `previous`, so what
+		// is tested for the left-hand pictograph is `previous` with that trailing joiner removed.
+		const weldedByJoiner =
+			joinNext &&
+			!!PICTOGRAPH_START_RE &&
+			PICTOGRAPH_START_RE.test(cp) &&
+			PICTOGRAPH_END_RE.test(previous.slice(0, -1));
+		if (out.length && (weldedByJoiner || extendsPrevious || cp === ZWJ || pairsWithPrevious)) {
+			out[out.length - 1] += cp;
+		} else {
+			out.push(cp);
+		}
+		joinNext = cp === ZWJ;
+		riOpen = isRI && !pairsWithPrevious;
+	}
+	return out;
+}
+
+/**
  * Splits `str` into user-perceived characters — an emoji or a combining sequence counts once —
- * using `Intl.Segmenter` where it exists and `Array.from` (code points, not UTF-16 units) where
- * it does not. Either is enough to stop the cap producing a lone surrogate (issue #17): a plain
- * `.slice(0, N)` counts UTF-16 units, so a 40-char cap could land inside a surrogate pair and cut
- * an astral character in half.
+ * using `Intl.Segmenter` where it exists and `fallbackGraphemes` where it does not. Either is
+ * enough to stop the cap producing a lone surrogate (issue #17): a plain `.slice(0, N)` counts
+ * UTF-16 units, so a 40-char cap could land inside a surrogate pair and cut an astral character
+ * in half.
  */
 function graphemes(str) {
 	if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
 		return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(str), (s) => s.segment);
 	}
-	return Array.from(str);
+	return fallbackGraphemes(str);
 }
 
 /**
@@ -512,20 +622,51 @@ export function resolveAssistantName(el) {
  * attribute falls back to "KAITO"; the platform read falls back to「change nothing」).
  *
  * 🩸 THE TOKEN STRIP IS NOT HOUSEKEEPING. `AI_CHIP_TOKEN` is U+2063-wrapped text, and U+2063
- * is a format character, not whitespace — so `trim()`, the newline check and the 40-char cap
- * all wave it straight through. An owner who set the name to a string containing the token
- * would make `statusFor`'s `split` yield THREE parts, and `[before, after]` drops the third:
- * 「自動回覆・需要時可轉真人」 disappears from the status line and only the chip is left. The
+ * is a format character, not whitespace — so `trim()`, the newline check and the cap all wave it
+ * straight through. An owner who set the name to a string containing the token would make
+ * `statusFor`'s `split` yield THREE parts, and `[before, after]` drops the third:
+ * 「先回，轉出去真人會看」 disappears from the status line and only the chip is left. The
  * AI disclosure itself never breaks (the chip is still there, by construction), but the rest
  * of the sentence does, so the token is stripped where names arrive rather than defended
  * against where they render.
+ *
+ * 🔴 THE ORDER OF THESE FOUR STEPS IS THE WHOLE DEFENCE — review B1, a P1 regression this file
+ * shipped in 0.7.4 and this comment now exists to stop coming back. The bidi strip was added
+ * AFTER the token strip, so a control character that step 1 could not see and step 2 deleted
+ * SMUGGLED the token in and then reassembled it:
+ *
+ *   data-assistant-name = "\u2063A\u202EI_CHIP\u2063"   (\u202E written as an escape, never
+ *      as a literal byte — see BIDI_CONTROL_RE)
+ *     → split(AI_CHIP_TOKEN) sees no token (the U+202E is in the middle of it) and passes it on
+ *     → replace(BIDI_CONTROL_RE) deletes the U+202E and hands back a COMPLETE AI_CHIP_TOKEN
+ *     → `statusFor` splits into three, drops the third, and the whole sentence is gone
+ *
+ * Every one of the twelve stripped controls worked as the smuggling character, at any position.
+ * So: DELETE first, CUT second, and only then look for the token — the last step must be the one
+ * with nothing left after it that can put back what it removed. That order is convergent rather
+ * than merely luckier: deleting bidi controls cannot produce a U+2063, cutting on a cluster
+ * boundary cannot produce either, and stripping the token cannot produce a bidi control, so no
+ * later step can ever hand an earlier one something it would have rejected.
  */
 function cleanAssistantName(raw) {
-	const stripped = String(raw || '').split(AI_CHIP_TOKEN).join('').replace(BIDI_CONTROL_RE, '');
+	// 1. Format controls out first — nothing downstream can be tricked by what is no longer here.
+	const stripped = String(raw || '').replace(BIDI_CONTROL_RE, '');
+	// 2. One line, trimmed.
 	const trimmed = stripped.trim().split('\n')[0].trim();
 	if (!trimmed) return '';
-	const parts = graphemes(trimmed);
-	return parts.length > ASSISTANT_NAME_MAX ? parts.slice(0, ASSISTANT_NAME_MAX).join('') : trimmed;
+	// 3. Both halves of the cap, on the same pass and always on a cluster boundary: at most
+	//    ASSISTANT_NAME_MAX clusters, and at most ASSISTANT_NAME_MAX_UNITS UTF-16 units (B7 — a
+	//    single cluster can be 500 units on its own, and one that does not fit stops the name
+	//    rather than being cut in half).
+	let capped = '';
+	let count = 0;
+	for (const cluster of graphemes(trimmed)) {
+		if (count >= ASSISTANT_NAME_MAX || capped.length + cluster.length > ASSISTANT_NAME_MAX_UNITS) break;
+		capped += cluster;
+		count++;
+	}
+	// 4. The token last, then the joiner a cut in step 3 may have left dangling (B8).
+	return capped.split(AI_CHIP_TOKEN).join('').replace(TRAILING_JOINER_RE, '').trim();
 }
 
 /**
