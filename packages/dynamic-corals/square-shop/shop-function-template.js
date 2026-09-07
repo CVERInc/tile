@@ -970,6 +970,71 @@ async function serveVerdictGatedPath(request, env, binding, transport, pathname)
 	return env.ASSETS.fetch(request);
 }
 
+// ─── PUBLIC MARKDOWN NEGOTIATION ──────────────────────────────────────────────
+// The same public page, as markdown, on its own URL's terms: an agent asks for
+// `Accept: text/markdown` and gets the build's markdown twin of that page.
+//
+// 🔴 LAST, and only last. Every branch above this one — inbox, checkout return,
+// site-owned buyer page, forward, verdict, shop — runs on the ORIGINAL request
+// before anything here reads Accept, so a private URL is judged by RSP whatever
+// its Accept header says. The map itself is built from the resolved PUBLIC static
+// routes and the emitter refuses a build where one of them is also gated.
+//
+// 🔴 `Vary: Accept` on BOTH variants, not only the markdown one. One URL now
+// answers with two bodies; HTML is the one a shared cache stores first, because
+// that is what people request. Vary only on markdown is the version that looks
+// right and still serves markdown to a browser.
+
+const MARKDOWN_CONTENT_TYPE = 'text/markdown; charset=utf-8';
+
+// Only an EXPLICIT `text/markdown` with a non-zero q selects it. `*/*` and
+// `text/*` do not: a browser sends `text/html,…,*/*;q=0.8` and must keep getting
+// the page, and a wildcard is "I'll take what you have", not "send me markdown".
+function wantsMarkdown(request) {
+	for (const part of (request.headers.get('accept') || '').split(',')) {
+		const [type, ...params] = part.split(';');
+		if (type.trim().toLowerCase() !== 'text/markdown') continue;
+		const q = params.map((p) => p.trim().toLowerCase()).find((p) => p.startsWith('q='));
+		const weight = q === undefined ? 1 : Number(q.slice(2));
+		if (Number.isFinite(weight) && weight > 0) return true;
+	}
+	return false;
+}
+
+// Adds Accept to whatever Vary the response already had and keeps every other
+// header. A fetched Response's headers are immutable, so this rebuilds it; HEAD
+// passes a null body rather than the asset server's, so nothing is manufactured.
+function withVaryAccept(response, request, contentType) {
+	const headers = new Headers(response.headers);
+	const vary = (headers.get('vary') || '').split(',').map((v) => v.trim()).filter(Boolean);
+	if (!vary.some((v) => v === '*' || v.toLowerCase() === 'accept')) vary.push('Accept');
+	headers.set('vary', vary.join(', '));
+	if (contentType) headers.set('content-type', contentType);
+	return new Response(request.method === 'HEAD' ? null : response.body, {
+		status: response.status, statusText: response.statusText, headers
+	});
+}
+
+// Returns null for everything this branch does not own, so the caller falls
+// through to the EXACT static behaviour it had before: no config, a method other
+// than GET/HEAD, an unmapped path, or a mapped twin the asset server does not
+// serve — a missing .md must never 404 a public page that exists.
+async function negotiateMarkdown(request, env, markdown) {
+	const routes = markdown && markdown.routes;
+	if (!routes) return null;
+	if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+	let url;
+	try { url = new URL(request.url); } catch (e) { return null; }
+	// The same normalization the generated set was written in, so /about and
+	// /about/ are one route here exactly as they are one route to the verdict gate.
+	const asset = routes[normalizeVerdictPath(url.pathname)];
+	if (asset === undefined) return null;
+	if (!wantsMarkdown(request)) return withVaryAccept(await env.ASSETS.fetch(request), request);
+	const res = await env.ASSETS.fetch(new Request(url.origin + asset, request));
+	if (!res || !res.ok) return null;
+	return withVaryAccept(res, request, MARKDOWN_CONTENT_TYPE);
+}
+
 export default {
 	async fetch(request, env, ctx) {
 		const CFG = __SHOP_CONFIG__;
@@ -1027,6 +1092,9 @@ export default {
 		const idx = matchShopIndex(pathname, shops);
 		if (idx && idx.source === 'native') return renderNativeGridPage(request, env, CFG, idx);
 		if (idx && idx.source === 'provider') return renderGridPage(request, env, ctx, CFG, idx);
+		// Last, and only for a route the build itself mapped: same page, markdown.
+		const negotiated = await negotiateMarkdown(request, env, CFG.markdown);
+		if (negotiated) return negotiated;
 		return env.ASSETS.fetch(request); // everything else: the static site, untouched
 	}
 };

@@ -9,6 +9,7 @@
 //     [--storefronts '[…]']  ← --api is REQUIRED once any storefront is declared \
 //     [--api-contract <path to site-api-transport.contract.json>] \
 //     [--gated-manifest <path to renderer-generated private URL manifest>] \
+//     [--markdown-manifest <path to renderer-generated public route→markdown map>] \
 //     [--platform-origin <origin>] \
 //     [--canonical-host <host>] \
 //     [--emitter-commit <sha>] \
@@ -96,6 +97,50 @@ function loadGatedManifest(path) {
 	if (!Array.isArray(paths)) die('--gated-manifest needs a paths array');
 	return [...new Set(paths.map((value, i) => normalizeSitePath(value, 'gated-manifest.paths[' + i + ']')))]
 		.map((value) => ({ match: 'exact', value }));
+}
+
+// The build's own public-static-route → markdown-asset map (the renderer writes it;
+// see sitetile's agent-artifacts `buildMarkdownMapping`). Only the bounded
+// `{path: asset}` pairs are baked: the worker looks a path up, it never rebuilds a
+// URL family from them.
+//
+// 🔴 A route that is ALSO in the gated manifest is FATAL, by path, at emit time.
+// A private post whose markdown twin were mapped would hand the paywalled body out
+// on a path the verdict branch never sees, and it would do it with the build green.
+// Both sides go through normalizeSitePath first, so the two sets are compared in one
+// spelling and a trailing slash cannot hide a collision. The gated set is read here
+// rather than taken from the contract, so the refusal does not depend on --api-contract
+// also being present.
+//
+// An empty routes array bakes nothing at all, so a site with the flag but no public
+// page keeps the config a flagless build would have produced.
+function loadMarkdownManifest(path) {
+	if (!path) return null;
+	let raw;
+	try { raw = readFileSync(path); } catch { die('--markdown-manifest not readable: ' + path); }
+	let manifest;
+	try { manifest = JSON.parse(raw.toString('utf8')); } catch { die('--markdown-manifest is not valid JSON: ' + path); }
+	if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) die('--markdown-manifest is not an object: ' + path);
+	if (manifest.schemaVersion !== 1) {
+		die('--markdown-manifest schemaVersion must be 1, got ' + JSON.stringify(manifest.schemaVersion));
+	}
+	if (!Array.isArray(manifest.routes)) die('--markdown-manifest needs a routes array');
+	const gated = new Set(loadGatedManifest(arg('gated-manifest')).map((rule) => rule.value));
+	const routes = {};
+	manifest.routes.forEach((entry, i) => {
+		const where = 'markdown-manifest.routes[' + i + ']';
+		if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
+		const value = normalizeSitePath(entry.path, where + '.path');
+		const asset = normalizeSitePath(entry.asset, where + '.asset');
+		if (gated.has(value)) {
+			die('--markdown-manifest maps the gated path ' + value + ' (also in --gated-manifest); a private route must have no markdown twin');
+		}
+		if (routes[value] !== undefined && routes[value] !== asset) {
+			die(where + ': ' + value + ' is already mapped to ' + routes[value]);
+		}
+		routes[value] = asset;
+	});
+	return Object.keys(routes).length > 0 ? { routes } : null;
 }
 
 // Reduce the contract to exactly the fields the worker executes. The prose
@@ -285,6 +330,8 @@ if (canonicalHostArg) {
 	}
 }
 
+const markdown = loadMarkdownManifest(arg('markdown-manifest'));
+
 const config = {
 	guildId,
 	// Omitted entirely when absent, so a guild-only site's baked config is the
@@ -304,7 +351,10 @@ const config = {
 	verdictTransport: loaded ? loaded.verdictTransport : null,
 	apiTransport: loaded ? loaded.transport : null,
 	platformOrigin,
-	...(canonicalHost ? { canonicalHost } : {})
+	...(canonicalHost ? { canonicalHost } : {}),
+	// Absent flag ⇒ absent key, so a worker emitted without --markdown-manifest is
+	// the same bytes this emitter produced before the flag existed.
+	...(markdown ? { markdown } : {})
 };
 
 // Keep flagless output byte-for-byte unchanged: both placeholders disappear.
@@ -349,5 +399,6 @@ if (!outFile) {
 	console.error('emit-shop-function: wrote ' + outFile +
 		' (site=' + (siteId || 'none') + ', guild=' + (guildId || 'none') +
 		', shops=' + (shops.map((s) => s.shopPath).join(',') || 'none') +
-		', transport=' + (loaded ? loaded.transport.bindingName + ' ' + loaded.transport.forward.length + ' forward/' + (loaded.transport.verdict || []).length + ' verdict' : 'none') + ')');
+		', transport=' + (loaded ? loaded.transport.bindingName + ' ' + loaded.transport.forward.length + ' forward/' + (loaded.transport.verdict || []).length + ' verdict' : 'none') +
+		', markdown=' + (markdown ? Object.keys(markdown.routes).length + ' routes' : 'none') + ')');
 }

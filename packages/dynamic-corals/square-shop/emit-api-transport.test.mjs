@@ -225,9 +225,45 @@ test('fidelity: the response SET-COOKIE comes back untouched', async () => {
 	assert.equal(res.headers.get('x-rsp'), 'yes');
 });
 
-test('the emitted worker injects no headers of its own', async () => {
+test('the emitted worker injects no headers of its own, outside one NAMED exception', async () => {
 	const text = readFileSync(withContract.path, 'utf8');
-	assert.equal(/headers\.(set|append)\s*\(/.test(text), false);
+	// 🔴 The exception is public markdown negotiation, and it is the owner's ruling,
+	// not a loophole: both variants of a negotiated URL must carry `Vary: Accept` or a
+	// shared cache serves markdown to a browser (site-agent-readability, T2). Merging
+	// that into the ASSETS response is the only way to do it, and it is proven — with
+	// its own header assertions — in emit-markdown-negotiation.test.mjs.
+	//
+	// Cut by NAME and fail if the name is gone, so this never quietly stops covering
+	// the file. Everything else — transport, verdict, shop, static — is still held to
+	// the original claim.
+	const at = text.indexOf('function withVaryAccept(');
+	assert.notEqual(at, -1, 'the exception must still be findable, or this test covers nothing');
+	const end = text.indexOf('\n}\n', at);
+	const rest = text.slice(0, at) + text.slice(end);
+	assert.equal(/headers\.(set|append)\s*\(/.test(rest), false);
+});
+
+// The claim the grep above stands for, asserted where it actually matters: a
+// response this worker PASSES THROUGH comes back with the header set it was given
+// and nothing else. Behavioural, so a header added by any means — a rebuilt
+// Headers, a new Response, a helper written next year — fails it too.
+test('a passed-through response keeps EXACTLY the headers it was handed', async () => {
+	const given = { 'x-rsp': 'yes', 'set-cookie': 'a=b; Path=/', 'content-type': 'application/json' };
+	const expected = Object.keys(given).sort();
+	const names = (res) => [...res.headers].map(([name]) => name).sort();
+	const body = () => new Response('BYTES', { status: 200, headers: given });
+
+	const forwarded = makeEnv({ rsp: body });
+	assert.deepEqual(names(await withContract.mod.default.fetch(new Request('https://s.example/zapi/x'), forwarded.env)),
+		expected, 'a forwarded response');
+
+	const allowed = makeEnv({ rsp: verdictRsp({ path: '/vault/post-1', allow: true, reason: 'members_ok' }), assets: body });
+	assert.deepEqual(names(await withContract.mod.default.fetch(new Request('https://s.example/vault/post-1'), allowed.env)),
+		expected, 'a verdict-allowed file');
+
+	const statically = makeEnv({ assets: body });
+	assert.deepEqual(names(await withContract.mod.default.fetch(new Request('https://s.example/faq'), statically.env)),
+		expected, 'the static fall-through');
 });
 
 // ── binding absent: a FORWARDED path ──────────────────────────────────────
