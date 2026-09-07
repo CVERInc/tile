@@ -1453,12 +1453,16 @@ test('54: a malformed buffer somebody else wrote is ignored, not thrown', () => 
 test('54: the beacon carries the JSON string directly, and falls back to keepalive fetch', async () => {
 	const beacons = [];
 	const okBeacon = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
-		navigator: { sendBeacon: (url, body) => (beacons.push({ url, body }), true) }
+		navigator: { sendBeacon: (url, body) => (beacons.push({ url, body }), true) },
+		// 🔴 `fetch: null`, always — without it `pick('fetch')` reaches Node's real global fetch,
+		// and the day this stand-in stops answering `true` a unit test POSTs to production.
+		fetch: null
 	});
 	assert.equal(okBeacon, true);
-	// 🔴 A bare string, not a `Blob` — Safari never runs a CORS preflight for this, so it is
-	// actually delivered (CVERInc/reef#466). The endpoint validates by parsing the body, not
-	// by trusting `Content-Type`, so `text/plain` is not a laxer check, just a different label.
+	// 🔴 A bare string, not a `Blob`: `text/plain;charset=UTF-8` is a CORS simple request, and in
+	// reef#466's Safari measurement that is the beacon that was delivered. The endpoint's
+	// Content-Type whitelist is `application/json` | `text/plain` (reef ship-132, 2026-09-07); the
+	// body is still parsed as strict JSON through the same field whitelist.
 	assert.equal(beacons[0].body, '{"a":1}');
 
 	const calls = [];

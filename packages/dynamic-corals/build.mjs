@@ -185,7 +185,15 @@ for (const [name, cfg] of Object.entries(CORALS)) {
     process.exit(1);
   }
   // package.json owns the release version; the immutable registry copy records that version.
-  const coralManifest = { ...sourceManifest, version };
+  // `source` carries the version too, and it used to be the one field this spread did not
+  // rewrite — a bump that forgot it published `version: X` beside `source: …/X-1/…` with every
+  // check green (tile#25 review P3-3). Rewritten here, and `validateCoralManifest` now refuses a
+  // manifest whose `source` does not live under its own version, so the two cannot drift again.
+  const sourceVersion = String(sourceManifest.version ?? '');
+  const source = typeof sourceManifest.source === 'string' && sourceVersion
+    ? sourceManifest.source.replace(`/${sourceVersion}/`, `/${version}/`)
+    : sourceManifest.source;
+  const coralManifest = { ...sourceManifest, version, source };
   const manifestResult = validateCoralManifest(coralManifest, { name, version });
   if (!manifestResult.ok) {
     if (manifestResult.missing.length) {

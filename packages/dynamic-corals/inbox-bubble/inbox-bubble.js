@@ -799,12 +799,19 @@ export function aiSessionPayload(kind, id, state) {
  * Hand one payload to the network in a way that survives the page going away.
  *
  * 🔴 `sendBeacon` FIRST, and with the JSON **string**, not a `Blob`. Measured on Safari 26
- * (CVERInc/reef#466): a `Blob` typed `application/json` makes this a CORS request that needs
- * a preflight, and `pagehide` is gone before the browser can run one — the beacon reports
- * `true` while the request never leaves. A bare string beacon is sent as `text/plain;charset=
- * UTF-8`, a CORS *simple* request, so no preflight is required and it is actually delivered.
- * The endpoint accepts this: it validates by parsing the body as its strict JSON + whitelist,
- * not by trusting `Content-Type`, so `text/plain` is not a laxer check, just a different label.
+ * (CVERInc/reef#466, 2026-09-07): a `Blob` typed `application/json` makes this a CORS request
+ * that needs a preflight, and what was observed is the OUTCOME — the beacon reports `true` and
+ * nothing reaches the server. Whether WebKit skips the preflight for a beacon or starts one that
+ * loses to the document's unload is not something that measurement can tell apart, and it does
+ * not matter here: the fix is to keep the body a CORS *simple* request, not to flush earlier.
+ * A bare string beacon is sent as `text/plain;charset=UTF-8`, which is simple, so no preflight
+ * is involved — and in the same measurement it was delivered. The endpoint's Content-Type
+ * whitelist is exactly `application/json` and `text/plain` (media type before `;`, trimmed,
+ * case-insensitive; anything else is `400 invalid_body` — so a Blob with NO type, which carries
+ * no Content-Type at all, would be refused). That whitelist has held `text/plain` since reef
+ * ship-132 (2026-09-07); what did not change on the server is the body check — still parsed as
+ * strict JSON through the same field whitelist, so `text/plain` is a different label, not a
+ * laxer check.
  * `fetch(..., { keepalive: true })` is what a browser without `sendBeacon` gets, what a
  * REFUSED beacon falls through to (D4), and what a caller asking to be told the outcome gets
  * — and it is second rather than first because a `pagehide` handler's ordinary `fetch` is
