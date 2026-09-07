@@ -39,6 +39,8 @@ register(
 const blog = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
 const { buildFeedBody, buildReefPostsBody, buildSearchIndexBody } =
   await import(pathToFileURL(join(SRC, 'lib/public-artifacts.mjs')).href);
+const { agentBundle, postDoc } = await import(pathToFileURL(join(SRC, 'lib/agent-artifacts.mjs')).href);
+const { canonicalPath } = await import(pathToFileURL(join(SRC, 'lib/sitemap.mjs')).href);
 const {
   allPosts,
   postUrl,
@@ -335,4 +337,35 @@ test('post sidebar: a private entry carries only its title and href', () => {
 
   assert.deepEqual(recentPrivate, expected, 'recent sidebar entry grew beyond title and href');
   assert.deepEqual(relatedPrivate, expected, 'related sidebar entry grew beyond title and href');
+});
+
+// ---- the agent-readable artifacts -------------------------------------------------------------
+// llms.txt, llms-full.txt and the per-route markdown are the newest doors out of this corpus and
+// the widest one yet: the full dump and the markdown twin are the post BODY, verbatim, at a
+// guessable URL. Same wall, same controls. The shape assertions live in agent-artifacts.test.mjs;
+// what belongs HERE is that they answer to the same privacy verdict as every artifact above.
+test('agent artifacts: a private post keeps a title in llms.txt and a body in nothing', () => {
+  const ORIGIN = 'https://fixture.example';
+  const bundle = (visibility) => agentBundle({
+    site: { name: 'Fixture Site', description: '', origin: ORIGIN },
+    docs: corpus(visibility).map((post) => postDoc({ path: canonicalPath(postUrl(post, META)), post })),
+  }, { gate: { generate: true, manualLlms: false }, origin: ORIGIN });
+
+  const gated = bundle('private');
+  const everything = [gated.llms, gated.llmsFull, JSON.stringify(gated.mapping), ...gated.markdown.values()].join('\n');
+  assert.equal(hits(everything), 0, `an agent artifact leaked the gated post:\n${everything}`);
+  assert.ok(gated.llms.includes('[The Gated One](/journal/gated-one/)'), 'the gated post keeps title and path');
+  assert.equal(gated.markdown.has('/journal/gated-one/'), false, 'a gated URL must have no markdown body asset');
+
+  // positive control -- same posts, same builders, visibility flipped.
+  const open = bundle('public');
+  assert.ok(hits([open.llms, open.llmsFull, ...open.markdown.values()].join('\n')) > 0,
+    'control failed: the public build carries no sentinel either');
+
+  // deliberate-leak control -- the same document built from the RAW post, around the privacy
+  // verdict. Without this, an assertion above would pass just as well against a builder that
+  // emits nothing at all.
+  const raw = corpus('private').find((p) => p.slug === 'gated-one');
+  const leaked = postDoc({ path: '/journal/gated-one/', post: { ...raw, visibility: '' } });
+  assert.ok(hits(leaked.body) > 0, 'control failed: bypassing the privacy verdict still produced no content');
 });
