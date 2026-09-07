@@ -798,12 +798,24 @@ export function aiSessionPayload(kind, id, state) {
 /**
  * Hand one payload to the network in a way that survives the page going away.
  *
- * 🔴 `sendBeacon` FIRST, and with a `Blob` typed `application/json` — a bare string beacon
- * is sent as `text/plain`, which this endpoint refuses (see `readBody` on reef's side: an
- * unlabelled body is a client we do not recognise). `fetch(..., { keepalive: true })` is what
- * a browser without `sendBeacon` gets, what a REFUSED beacon falls through to (D4), and what a
- * caller asking to be told the outcome gets — and it is second rather than first because a
- * `pagehide` handler's ordinary `fetch` is cancelled with the document.
+ * 🔴 `sendBeacon` FIRST, and with the JSON **string**, not a `Blob`. Measured on Safari 26
+ * (CVERInc/reef#466, 2026-09-07): a `Blob` typed `application/json` makes this a CORS request
+ * that needs a preflight, and what was observed is the OUTCOME — the beacon reports `true` and
+ * nothing reaches the server. Whether WebKit skips the preflight for a beacon or starts one that
+ * loses to the document's unload is not something that measurement can tell apart, and it does
+ * not matter here: the fix is to keep the body a CORS *simple* request, not to flush earlier.
+ * A bare string beacon is sent as `text/plain;charset=UTF-8`, which is simple, so no preflight
+ * is involved — and in the same measurement it was delivered. The endpoint's Content-Type
+ * whitelist is exactly `application/json` and `text/plain` (media type before `;`, trimmed,
+ * case-insensitive; anything else is `400 invalid_body` — so a Blob with NO type, which carries
+ * no Content-Type at all, would be refused). That whitelist has held `text/plain` since reef
+ * ship-132 (2026-09-07); what did not change on the server is the body check — still parsed as
+ * strict JSON through the same field whitelist, so `text/plain` is a different label, not a
+ * laxer check.
+ * `fetch(..., { keepalive: true })` is what a browser without `sendBeacon` gets, what a
+ * REFUSED beacon falls through to (D4), and what a caller asking to be told the outcome gets
+ * — and it is second rather than first because a `pagehide` handler's ordinary `fetch` is
+ * cancelled with the document.
  *
  * 🔴 THE ANSWER COMES IN ONE OF THE TWO TENSES A BROWSER HAS, and the caller has to read
  * which one it got (review D1):
@@ -832,13 +844,12 @@ export function sendAiSession(url, body, env = {}, opts = {}) {
 	const overBudget = utf8Bytes(json) > AI_LOG_MAX_WIRE_BYTES;
 	if (!opts.confirm && !overBudget) {
 		try {
-			const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
-			if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
+			if (nav && typeof nav.sendBeacon === 'function') {
 				// 🔴 `false` FALLS THROUGH TO THE FETCH, it does not return (review D4). The spec's
 				// answer to「over the beacon quota」is a `false` return, not a throw — so returning it
 				// here meant the fallback below covered the one case that hardly happens and missed
 				// the exact case its own comment was written for.
-				if (nav.sendBeacon(url, new BlobCtor([json], { type: 'application/json' })) === true) {
+				if (nav.sendBeacon(url, json) === true) {
 					return true;
 				}
 			}
