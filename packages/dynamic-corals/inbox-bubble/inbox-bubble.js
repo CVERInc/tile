@@ -798,12 +798,17 @@ export function aiSessionPayload(kind, id, state) {
 /**
  * Hand one payload to the network in a way that survives the page going away.
  *
- * 🔴 `sendBeacon` FIRST, and with a `Blob` typed `application/json` — a bare string beacon
- * is sent as `text/plain`, which this endpoint refuses (see `readBody` on reef's side: an
- * unlabelled body is a client we do not recognise). `fetch(..., { keepalive: true })` is what
- * a browser without `sendBeacon` gets, what a REFUSED beacon falls through to (D4), and what a
- * caller asking to be told the outcome gets — and it is second rather than first because a
- * `pagehide` handler's ordinary `fetch` is cancelled with the document.
+ * 🔴 `sendBeacon` FIRST, and with the JSON **string**, not a `Blob`. Measured on Safari 26
+ * (CVERInc/reef#466): a `Blob` typed `application/json` makes this a CORS request that needs
+ * a preflight, and `pagehide` is gone before the browser can run one — the beacon reports
+ * `true` while the request never leaves. A bare string beacon is sent as `text/plain;charset=
+ * UTF-8`, a CORS *simple* request, so no preflight is required and it is actually delivered.
+ * The endpoint accepts this: it validates by parsing the body as its strict JSON + whitelist,
+ * not by trusting `Content-Type`, so `text/plain` is not a laxer check, just a different label.
+ * `fetch(..., { keepalive: true })` is what a browser without `sendBeacon` gets, what a
+ * REFUSED beacon falls through to (D4), and what a caller asking to be told the outcome gets
+ * — and it is second rather than first because a `pagehide` handler's ordinary `fetch` is
+ * cancelled with the document.
  *
  * 🔴 THE ANSWER COMES IN ONE OF THE TWO TENSES A BROWSER HAS, and the caller has to read
  * which one it got (review D1):
@@ -832,13 +837,12 @@ export function sendAiSession(url, body, env = {}, opts = {}) {
 	const overBudget = utf8Bytes(json) > AI_LOG_MAX_WIRE_BYTES;
 	if (!opts.confirm && !overBudget) {
 		try {
-			const BlobCtor = pick('Blob', typeof Blob === 'undefined' ? null : Blob);
-			if (nav && typeof nav.sendBeacon === 'function' && BlobCtor) {
+			if (nav && typeof nav.sendBeacon === 'function') {
 				// 🔴 `false` FALLS THROUGH TO THE FETCH, it does not return (review D4). The spec's
 				// answer to「over the beacon quota」is a `false` return, not a throw — so returning it
 				// here meant the fallback below covered the one case that hardly happens and missed
 				// the exact case its own comment was written for.
-				if (nav.sendBeacon(url, new BlobCtor([json], { type: 'application/json' })) === true) {
+				if (nav.sendBeacon(url, json) === true) {
 					return true;
 				}
 			}

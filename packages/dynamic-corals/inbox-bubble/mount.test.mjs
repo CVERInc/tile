@@ -115,10 +115,9 @@ globalThis.fetch = async (url, init = {}) => {
  */
 const beacons = [];
 let beaconResult = true;
-const sendBeacon = (url, blob) => (beacons.push({ url, blob }), beaconResult);
+const sendBeacon = (url, body) => (beacons.push({ url, body }), beaconResult);
 const navStub = { sendBeacon };
 Object.defineProperty(globalThis, 'navigator', { value: navStub, configurable: true, writable: true });
-globalThis.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -442,7 +441,7 @@ const claimedSiteAnswering = () => (url) => {
 
 /** Everything that left this mount, as text: beacon bodies and fetch bodies alike. */
 const bytesSent = (from) => [
-	...beacons.map((b) => b.blob.parts.join('')),
+	...beacons.map((b) => b.body),
 	...requests.slice(from).map((r) => String(r.init.body ?? ''))
 ];
 
@@ -478,8 +477,7 @@ test('D3: the answer is in no byte the beacon sends, and the body has only the c
 	firePagehide();
 
 	assert.equal(beacons.length, 1, 'the questions did not leave as a beacon');
-	assert.equal(beacons[0].blob.type, 'application/json');
-	const body = JSON.parse(beacons[0].blob.parts[0]);
+	const body = JSON.parse(beacons[0].body);
 	assert.deepEqual(Object.keys(body).sort(), ['id', 'kind', 'pages', 'questions', 'session_id'],
 		'the wire body grew a key the contract does not name');
 	assert.equal(body.id, id);

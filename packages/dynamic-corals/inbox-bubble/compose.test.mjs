@@ -1450,17 +1450,16 @@ test('54: a malformed buffer somebody else wrote is ignored, not thrown', () => 
 	assert.ok(f.log.state().sid, 'a corrupt cell starts a new session rather than taking the panel down');
 });
 
-test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', async () => {
+test('54: the beacon carries the JSON string directly, and falls back to keepalive fetch', async () => {
 	const beacons = [];
 	const okBeacon = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
-		navigator: { sendBeacon: (url, blob) => (beacons.push({ url, blob }), true) },
-		Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } }
+		navigator: { sendBeacon: (url, body) => (beacons.push({ url, body }), true) }
 	});
 	assert.equal(okBeacon, true);
-	// 🔴 `application/json`, not the `text/plain` a bare-string beacon sends — the endpoint
-	// refuses an unlabelled body, so this is the difference between sending and appearing to.
-	assert.equal(beacons[0].blob.type, 'application/json');
-	assert.equal(beacons[0].blob.parts[0], '{"a":1}');
+	// 🔴 A bare string, not a `Blob` — Safari never runs a CORS preflight for this, so it is
+	// actually delivered (CVERInc/reef#466). The endpoint validates by parsing the body, not
+	// by trusting `Content-Type`, so `text/plain` is not a laxer check, just a different label.
+	assert.equal(beacons[0].body, '{"a":1}');
 
 	const calls = [];
 	const viaFetch = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
@@ -1485,8 +1484,6 @@ test('54: the beacon carries a JSON Blob, and falls back to keepalive fetch', as
 // happens, and missed the false, which is the documented one. With D1 in place a false is not
 // merely a lost send: it is the answer that decides whether the buffer survives.
 
-const RecordingBlob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
-
 test('D4: a beacon that refuses falls through to the keepalive fetch, and one that throws does too', async () => {
 	for (const [name, sendBeacon] of [
 		['returns false (over quota — the documented answer)', () => false],
@@ -1496,7 +1493,6 @@ test('D4: a beacon that refuses falls through to the keepalive fetch, and one th
 		const calls = [];
 		const out = sendAiSession('https://feelreef.com/api/inbox/session', { a: 1 }, {
 			navigator: { sendBeacon },
-			Blob: RecordingBlob,
 			fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true, status: 200 }))
 		});
 		assert.equal(calls.length, 1, `a beacon that ${name} lost the session`);
@@ -1507,7 +1503,7 @@ test('D4: a beacon that refuses falls through to the keepalive fetch, and one th
 	// With no fetch to fall through TO, a refused beacon is an honest `false` — which is what
 	// keeps the questions in the browser rather than reporting them told.
 	assert.equal(sendAiSession('u', { a: 1 },
-		{ navigator: { sendBeacon: () => false }, Blob: RecordingBlob, fetch: null }), false);
+		{ navigator: { sendBeacon: () => false }, fetch: null }), false);
 });
 
 /** Every field of a question at its character cap, in a script where one character is 3 octets. */
@@ -1545,8 +1541,7 @@ test('D4: a body over the wire budget skips the beacon for the path that can rep
 	const beacons = [];
 	const calls = [];
 	const env = {
-		navigator: { sendBeacon: (url, blob) => (beacons.push(blob), true) },
-		Blob: RecordingBlob,
+		navigator: { sendBeacon: (url, body) => (beacons.push(body), true) },
 		fetch: (url, init) => (calls.push(init), Promise.resolve({ ok: true }))
 	};
 	assert.equal(sendAiSession('u', { q: 'a'.repeat(100) }, env), true);
