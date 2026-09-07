@@ -15,7 +15,7 @@
 // own headers" are both falsifiable rather than incidentally true.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -87,24 +87,32 @@ const noMapping = await emitWorker(BASE_ARGS);
 // the pages. A guessed twin (`/devlog/secret/index.md`) is 404 because nothing
 // generated it.
 const MD_ASSETS = new Set(['/index.md', '/about/index.md']);
-function makeEnv({ rsp = null } = {}) {
+// `etags` opts a run into the conditional behaviour Cloudflare's asset worker really
+// has: it tags what it serves and answers 304 to a matching `If-None-Match` (see
+// miniflare's assets.worker.js `resolveAssetIntentToResponse`). Absent — every test
+// written before this one — the mock is byte-for-byte the unconditional one.
+const MD_ETAG = '"md-v1"';
+const HTML_ETAG = '"html-v1"';
+function makeEnv({ rsp = null, etags = false } = {}) {
 	const seenByAssets = [];
 	const seenByRsp = [];
 	const env = {
 		ASSETS: {
 			fetch: async (req) => {
 				const url = new URL(req.url);
-				seenByAssets.push({ method: req.method, path: url.pathname, accept: req.headers.get('accept') || '' });
-				if (url.pathname.endsWith('.md')) {
-					if (!MD_ASSETS.has(url.pathname)) return new Response('NOT FOUND', { status: 404 });
-					return new Response('MD:' + url.pathname, {
-						status: 200,
-						headers: { 'content-type': 'text/plain; charset=utf-8', 'x-existing': '1' }
-					});
-				}
-				return new Response('HTML:' + url.pathname, {
+				const inm = req.headers.get('if-none-match');
+				seenByAssets.push({ method: req.method, path: url.pathname, accept: req.headers.get('accept') || '', inm: inm || '' });
+				const isMd = url.pathname.endsWith('.md');
+				const etag = isMd ? MD_ETAG : HTML_ETAG;
+				if (isMd && !MD_ASSETS.has(url.pathname)) return new Response('NOT FOUND', { status: 404 });
+				if (etags && inm === etag) return new Response(null, { status: 304, headers: { etag, 'x-existing': '1' } });
+				return new Response((isMd ? 'MD:' : 'HTML:') + url.pathname, {
 					status: 200,
-					headers: { 'content-type': 'text/html; charset=utf-8', 'x-existing': '1' }
+					headers: {
+						'content-type': isMd ? 'text/plain; charset=utf-8' : 'text/html; charset=utf-8',
+						'x-existing': '1',
+						...(etags ? { etag } : {})
+					}
 				});
 			}
 		}
@@ -130,6 +138,8 @@ const MD = 'text/markdown';
 const BROWSER = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 const get = (path, accept, init) => new Request('https://s.example' + path,
 	{ ...(init || {}), headers: accept ? { accept } : {} });
+// Same request, with the conditional headers a revalidating cache actually sends.
+const getWith = (path, headers, init) => new Request('https://s.example' + path, { ...(init || {}), headers });
 const varyList = (res) => (res.headers.get('vary') || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
 
 // ── the markdown variant ─────────────────────────────────────────────────────
@@ -326,4 +336,170 @@ test('the flag name is greppable in the emitter, which is how the build detects 
 	assert.equal(readFileSync(emitter, 'utf8').includes('--markdown-manifest'), true);
 	const stderr = emitStderr([...BASE_ARGS, '--markdown-manifest', join(workDir, 'no-such-file.json')]);
 	assert.equal(String(stderr).includes('--markdown-manifest'), true, stderr);
+});
+
+// ── revalidating a cached variant ────────────────────────────────────────────
+// 🔴 The twin fetch forwards the CALLER's headers, so the second request for a
+// cached markdown body arrives at the twin carrying the twin's own `If-None-Match`
+// and the asset server answers 304. A 304 is not `ok`; reading it as "this route
+// has no twin" is what makes the markdown caller fall through to the HTML page —
+// 200, HTML body, no `Vary: Accept`. That is the cache crossover the whole branch
+// exists to prevent, and it happens on the one request a cache makes most.
+
+test('a markdown revalidation that the asset server answers 304 stays a markdown 304, and never touches the HTML', async () => {
+	const { env, seenByAssets } = makeEnv({ etags: true });
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, 'if-none-match': MD_ETAG }), env);
+	assert.equal(res.status, 304);
+	assert.equal(varyList(res).includes('accept'), true, 'a 304 without Vary: Accept poisons the shared cache');
+	assert.equal(await res.text(), '', 'a 304 carries no body');
+	assert.equal(res.headers.get('etag'), MD_ETAG, "the twin's own validator survives");
+	assert.deepEqual(seenByAssets.map((a) => a.path), ['/about/index.md'],
+		'the HTML page must never be fetched for a caller that asked for markdown');
+});
+
+test('control: the same headers with a validator the twin does not match still serve markdown 200', async () => {
+	const { env, seenByAssets } = makeEnv({ etags: true });
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, 'if-none-match': '"stale-v0"' }), env);
+	assert.equal(res.status, 200);
+	assert.equal(await res.text(), 'MD:/about/index.md');
+	assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
+	assert.equal(varyList(res).includes('accept'), true);
+	assert.deepEqual(seenByAssets.map((a) => a.path), ['/about/index.md']);
+});
+
+test('HEAD revalidation is a bodiless markdown 304 too', async () => {
+	const { env, seenByAssets } = makeEnv({ etags: true });
+	const res = await worker.mod.default.fetch(
+		getWith('/about/', { accept: MD, 'if-none-match': MD_ETAG }, { method: 'HEAD' }), env);
+	assert.equal(res.status, 304);
+	assert.equal(varyList(res).includes('accept'), true);
+	assert.equal(await res.text(), '');
+	assert.deepEqual(seenByAssets.map((a) => a.method + ' ' + a.path), ['HEAD /about/index.md']);
+});
+
+test('the HTML side revalidates exactly as before, and still carries Vary: Accept', async () => {
+	const { env, seenByAssets } = makeEnv({ etags: true });
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: BROWSER, 'if-none-match': HTML_ETAG }), env);
+	assert.equal(res.status, 304);
+	assert.equal(varyList(res).includes('accept'), true);
+	assert.deepEqual(seenByAssets.map((a) => a.path), ['/about/']);
+});
+
+test('a genuinely missing twin still falls through, and the fall-through is still the plain one', async () => {
+	// 404 is the only "no twin" answer. It keeps the pre-existing behaviour: the page,
+	// with no Vary — a URL the build wrote no twin for has exactly one variant.
+	const brokenMapping = join(workDir, 'broken-conditional.markdown.json');
+	writeFileSync(brokenMapping, JSON.stringify({ schemaVersion: 1, routes: [{ path: '/about/', asset: '/about/missing.md' }] }));
+	const broken = await emitWorker([...BASE_ARGS, '--markdown-manifest', brokenMapping]);
+	const { env, seenByAssets } = makeEnv({ etags: true });
+	const res = await broken.mod.default.fetch(getWith('/about/', { accept: MD, 'if-none-match': MD_ETAG }), env);
+	assert.equal(res.status, 200);
+	assert.equal(await res.text(), 'HTML:/about/');
+	assert.equal(res.headers.get('vary'), null);
+	assert.deepEqual(seenByAssets.map((a) => a.path), ['/about/missing.md', '/about/']);
+});
+
+// ── edge-rendered routes never reach the baked mapping ───────────────────────
+// 🔴 The renderer's mapping is every public CONTENT page, and a storefront page is
+// a content page — the build derives the storefront descriptor from the same IR
+// page. So `/shop` arrives in the manifest on every storefront site. The generator
+// cannot know which paths the worker answers itself; the emitter does, from
+// --storefronts and the contract's siteOwnedBuyerPages, so it drops them there.
+
+const STOREFRONT_CONTRACT = {
+	...CONTRACT,
+	siteOwnedBuyerPages: [{ path: '/hub', method: 'GET', kind: 'account', factsPath: '/zapi/hub-facts' }]
+};
+const storefrontContractPath = join(workDir, 'storefront.contract.json');
+writeFileSync(storefrontContractPath, JSON.stringify(STOREFRONT_CONTRACT, null, 2));
+
+const SHOP_MAPPING = {
+	schemaVersion: 1,
+	routes: [
+		{ path: '/', asset: '/index.md' },
+		{ path: '/about/', asset: '/about/index.md' },
+		{ path: '/shop/', asset: '/shop/index.md' },
+		{ path: '/shop/some-slug/', asset: '/shop/some-slug/index.md' },
+		{ path: '/hub', asset: '/hub/index.md' }
+	]
+};
+const shopMappingPath = join(workDir, 'storefront.markdown.json');
+writeFileSync(shopMappingPath, JSON.stringify(SHOP_MAPPING, null, 2));
+
+const STOREFRONT_ARGS = [
+	'--guild', 'site_g1', '--api-contract', storefrontContractPath, '--gated-manifest', gatedPath,
+	'--api', 'https://api.example',
+	'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }])
+];
+
+// execFileSync only hands back stderr on a FAILURE, and this emit succeeds — so the
+// notice has to be read from a spawn that keeps stderr either way.
+function emitWithStderr(args) {
+	const out = join(workDir, 'worker-storefront-' + (++emitted) + '.mjs');
+	const r = spawnSync('node', [emitter, ...args, '--out', out], { encoding: 'utf8' });
+	assert.equal(r.status, 0, r.stderr);
+	return { out, stderr: r.stderr };
+}
+// The whole config is one JSON.stringify on one line; routes are flat string pairs.
+function bakedRoutes(file) {
+	const m = readFileSync(file, 'utf8').match(/"markdown":\{"routes":(\{[^}]*\})\}/);
+	return m ? JSON.parse(m[1]) : null;
+}
+
+test('a storefront path, everything under it, and a site-owned buyer page are dropped from the baked mapping', async () => {
+	const { out, stderr } = emitWithStderr([...STOREFRONT_ARGS, '--markdown-manifest', shopMappingPath]);
+	assert.deepEqual(bakedRoutes(out), { '/': '/index.md', '/about': '/about/index.md' },
+		'only the routes ASSETS really serves may be baked');
+	for (const dropped of ['/shop', '/shop/some-slug', '/hub']) {
+		assert.equal(stderr.includes(dropped), true, 'the notice must name ' + dropped + ': ' + stderr);
+	}
+	assert.equal(stderr.includes('/about'), false, 'a kept route must not be reported as dropped: ' + stderr);
+});
+
+test('the same manifest on a site with NO storefront keeps every route', async () => {
+	// The control for the test above: the drop is a function of the declared
+	// storefront, not of the path spelling `/shop`.
+	const { out, stderr } = emitWithStderr([...BASE_ARGS, '--markdown-manifest', shopMappingPath]);
+	assert.deepEqual(bakedRoutes(out), {
+		'/': '/index.md', '/about': '/about/index.md',
+		'/shop': '/shop/index.md', '/shop/some-slug': '/shop/some-slug/index.md', '/hub': '/hub/index.md'
+	});
+	assert.equal(stderr.includes('dropped'), false, stderr);
+});
+
+test('dropping the route does not take the shop branch away: /shop still renders the storefront', async () => {
+	const { out } = emitWithStderr([...STOREFRONT_ARGS, '--markdown-manifest', shopMappingPath]);
+	const mod = await import(pathToFileURL(out).href);
+	const { env, seenByAssets } = makeEnv();
+	const originalFetch = globalThis.fetch;
+	// The catalog call the grid renderer makes; an empty catalog keeps the donor shell,
+	// which is enough to prove the shop branch — not negotiation — answered.
+	globalThis.fetch = async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+	try {
+		const res = await mod.default.fetch(get('/shop/', MD), env);
+		assert.equal(res.status, 200);
+		assert.equal((res.headers.get('content-type') || '').includes('text/html'), true, 'the shop branch answers HTML');
+		assert.equal(res.headers.get('vary'), null, 'the shop branch is not a negotiated variant');
+		assert.deepEqual(seenByAssets.map((a) => a.path), ['/shop/'], 'the donor shell, never a /shop markdown twin');
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test('a gated path in the manifest is still FATAL, not dropped, on a storefront site', async () => {
+	// The drop must not have turned the gated refusal into a shrug.
+	const collide = join(workDir, 'storefront-collide.markdown.json');
+	writeFileSync(collide, JSON.stringify({
+		schemaVersion: 1, routes: [{ path: GATED_PATH, asset: '/devlog/secret/index.md' }]
+	}));
+	const stderr = emitStderr([...STOREFRONT_ARGS, '--markdown-manifest', collide]);
+	assert.notEqual(stderr, null, 'a gated path must still refuse');
+	assert.equal(stderr.includes('/devlog/secret'), true, stderr);
+});
+
+test('a storefront site whose only mapped routes are edge-rendered bakes no mapping at all', async () => {
+	const onlyShop = join(workDir, 'only-shop.markdown.json');
+	writeFileSync(onlyShop, JSON.stringify({ schemaVersion: 1, routes: [{ path: '/shop/', asset: '/shop/index.md' }] }));
+	const { out } = emitWithStderr([...STOREFRONT_ARGS, '--markdown-manifest', onlyShop]);
+	assert.equal(/"markdown":/.test(readFileSync(out, 'utf8')), false);
 });

@@ -112,9 +112,20 @@ function loadGatedManifest(path) {
 // rather than taken from the contract, so the refusal does not depend on --api-contract
 // also being present.
 //
+// 🔴 An EDGE-RENDERED route is DROPPED here, not refused. The renderer's mapping is
+// built from the build's public content pages, and a storefront page IS a content
+// page — so a storefront site's mapping legitimately arrives carrying `/shop` (and
+// each locale's `/xx/shop`). The generator cannot know which of its pages the worker
+// will answer itself; this emitter is where both facts meet, so this is where the
+// mapping is reduced to the routes ASSETS really serves. Dropping rather than dying
+// is the point: a storefront site must still build, and a stale markdown twin of a
+// shop page would otherwise answer a markdown Accept with build-time HTML the shop
+// branch has since replaced. Every drop is named on stderr — silently shrinking the
+// mapping would make a missing twin look like a renderer bug.
+//
 // An empty routes array bakes nothing at all, so a site with the flag but no public
 // page keeps the config a flagless build would have produced.
-function loadMarkdownManifest(path) {
+function loadMarkdownManifest(path, edgeRendered) {
 	if (!path) return null;
 	let raw;
 	try { raw = readFileSync(path); } catch { die('--markdown-manifest not readable: ' + path); }
@@ -126,7 +137,15 @@ function loadMarkdownManifest(path) {
 	}
 	if (!Array.isArray(manifest.routes)) die('--markdown-manifest needs a routes array');
 	const gated = new Set(loadGatedManifest(arg('gated-manifest')).map((rule) => rule.value));
+	// Both already normalized by the descriptor/contract loaders above, so the shop
+	// path is compared in the one spelling normalizeSitePath produces — `/shop`, never
+	// `/shop/`. `<shopPath>/…` is the same prefix the worker's own shop branch owns.
+	const shopPaths = (edgeRendered && edgeRendered.shopPaths) || [];
+	const buyerPages = new Set((edgeRendered && edgeRendered.buyerPagePaths) || []);
+	const isEdgeRendered = (value) => buyerPages.has(value) ||
+		shopPaths.some((shopPath) => value === shopPath || value.startsWith(shopPath + '/'));
 	const routes = {};
+	const dropped = [];
 	manifest.routes.forEach((entry, i) => {
 		const where = 'markdown-manifest.routes[' + i + ']';
 		if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
@@ -135,11 +154,19 @@ function loadMarkdownManifest(path) {
 		if (gated.has(value)) {
 			die('--markdown-manifest maps the gated path ' + value + ' (also in --gated-manifest); a private route must have no markdown twin');
 		}
+		if (isEdgeRendered(value)) {
+			if (!dropped.includes(value)) dropped.push(value);
+			return;
+		}
 		if (routes[value] !== undefined && routes[value] !== asset) {
 			die(where + ': ' + value + ' is already mapped to ' + routes[value]);
 		}
 		routes[value] = asset;
 	});
+	if (dropped.length) {
+		console.error('emit-shop-function: dropped ' + dropped.length + ' edge-rendered route(s) from --markdown-manifest: ' +
+			dropped.join(', ') + ' (this worker answers them itself; ASSETS has no twin to negotiate)');
+	}
 	return Object.keys(routes).length > 0 ? { routes } : null;
 }
 
@@ -330,7 +357,13 @@ if (canonicalHostArg) {
 	}
 }
 
-const markdown = loadMarkdownManifest(arg('markdown-manifest'));
+// The two sets of paths this worker answers ITSELF, read from what was already
+// resolved above: the storefront descriptors and the contract's site-owned buyer
+// pages. Nothing else reaches the mapping — the gated set is read inside.
+const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
+	shopPaths: shops.map((shop) => shop.shopPath),
+	buyerPagePaths: ((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path)
+});
 
 const config = {
 	guildId,

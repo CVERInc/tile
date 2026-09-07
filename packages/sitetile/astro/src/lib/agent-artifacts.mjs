@@ -203,8 +203,14 @@ export function buildAiCatalog(corpus, { llmsFull, hasRobots }) {
 }
 
 /** The internal public-route → markdown-asset mapping the site worker consumes. It is exactly the
- *  set of public static routes this build emitted a markdown file for — a worker reading it never
- *  reconstructs a URL family, and nothing private, forwarded or edge-rendered can enter it. */
+ *  set of public content routes this build emitted a markdown file for — a worker reading it never
+ *  reconstructs a URL family, and nothing private or forwarded can enter it.
+ *
+ *  🔴 EDGE-RENDERED routes are NOT excluded here, and cannot be: a storefront page is a content
+ *  page like any other (the build derives its descriptor from the same IR page), so `/shop` and
+ *  each locale's `/xx/shop` legitimately appear in this set. Which of them the worker answers
+ *  itself is a fact only the emitter holds — `--storefronts` / the contract's siteOwnedBuyerPages —
+ *  so emit-shop-function.mjs's loadMarkdownManifest is where they are dropped, naming each one. */
 export function buildMarkdownMapping(corpus) {
   return {
     schemaVersion: 1,

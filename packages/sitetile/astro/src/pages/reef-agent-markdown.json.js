@@ -2,9 +2,13 @@
 //
 // Build-internal, following reef-verdict.json.js: the build runner consumes this file and hands it
 // to the site worker emitter, which serves the mapped asset when a caller asks for `text/markdown`.
-// The worker never rebuilds a URL family from it — private gated paths, RSP-forwarded routes,
-// site-owned buyer pages and edge-rendered shop routes are absent because they were never public
-// static routes of this build in the first place.
+// The worker never rebuilds a URL family from it — private gated paths and RSP-forwarded routes are
+// absent because they were never public static routes of this build in the first place.
+//
+// 🔴 Edge-rendered routes are NOT filtered here. A storefront page and a site-owned buyer page are
+// public content pages of this build, so they can appear in this file; only the emitter knows which
+// paths the worker answers itself, and it drops them (naming each) when it bakes the mapping. Read
+// this file as "what this build wrote", not as "what the worker will negotiate".
 import { agentArtifacts } from '../lib/agent-corpus.mjs';
 
 export function GET({ site }) {

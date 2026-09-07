@@ -1019,6 +1019,11 @@ function withVaryAccept(response, request, contentType) {
 // through to the EXACT static behaviour it had before: no config, a method other
 // than GET/HEAD, an unmapped path, or a mapped twin the asset server does not
 // serve — a missing .md must never 404 a public page that exists.
+//
+// 🔴 That fall-through answers HTML WITHOUT `Vary: Accept`, deliberately: a URL
+// whose twin the build never wrote has exactly ONE variant, so there is nothing
+// for a shared cache to get wrong. Vary belongs on the URLs that really do answer
+// two ways, and only the mapped-and-served ones do.
 async function negotiateMarkdown(request, env, markdown) {
 	const routes = markdown && markdown.routes;
 	if (!routes) return null;
@@ -1031,7 +1036,13 @@ async function negotiateMarkdown(request, env, markdown) {
 	if (asset === undefined) return null;
 	if (!wantsMarkdown(request)) return withVaryAccept(await env.ASSETS.fetch(request), request);
 	const res = await env.ASSETS.fetch(new Request(url.origin + asset, request));
-	if (!res || !res.ok) return null;
+	// 🔴 304 IS AN ANSWER, not a missing twin. The twin fetch carries the caller's
+	// own headers, so a revalidation of the cached markdown arrives with the twin's
+	// `If-None-Match` and the asset server answers 304 — which is not `ok`. Reading
+	// that as "no twin" would fall through and hand a caller who asked for markdown
+	// an HTML 200 with no `Vary: Accept`: the exact cache crossover this branch
+	// exists to prevent, on the one request that revalidates a cached variant.
+	if (!res || (!res.ok && res.status !== 304)) return null;
 	return withVaryAccept(res, request, MARKDOWN_CONTENT_TYPE);
 }
 
