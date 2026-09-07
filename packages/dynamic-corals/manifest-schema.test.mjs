@@ -25,9 +25,28 @@ test('validator accepts a complete manifest with matching identity', () => {
     { ok: true, missing: [], mismatches: [] });
 });
 
-test('validator rejects a source that does not live under its own version (the field build.mjs never rewrites)', () => {
+test('validator rejects a source that does not live under its own version', () => {
   const stale = { ...valid, version: '1.2.4', source: 'https://example.test/1.2.3/a.js' };
   const result = validateCoralManifest(stale, { name: 'sample', version: '1.2.4' });
   assert.equal(result.ok, false);
   assert.deepEqual(result.mismatches, ['source: expected a path containing /1.2.4/, got https://example.test/1.2.3/a.js']);
+});
+
+for (const staleCount of [1, 2]) {
+  test(`validator rejects ${staleCount} stale segments beside the published version`, () => {
+    const source = `https://example.test/1.2.4/corals/${'1.2.3/'.repeat(staleCount)}a.js`;
+    const result = validateCoralManifest({ ...valid, version: '1.2.4', source },
+      { version: '1.2.4', sourceVersion: '1.2.3' });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.mismatches,
+      [`source: found ${staleCount} stale /1.2.3/ segment(s), got ${source}`]);
+  });
+}
+
+test('validator accepts all rewritten segments and an unchanged source version', () => {
+  const manifest = { ...valid, source: 'https://example.test/1.2.3/corals/sample/1.2.3/a.js' };
+  for (const sourceVersion of ['1.2.2', '1.2.3']) {
+    assert.deepEqual(validateCoralManifest(manifest, { version: '1.2.3', sourceVersion }),
+      { ok: true, missing: [], mismatches: [] });
+  }
 });

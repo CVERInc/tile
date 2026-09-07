@@ -92,6 +92,29 @@ try {
 	const artifactPath = join(sandboxRegistry, 'versions', CORAL, VERSION, `${CORAL}.js`);
 	const artifact = readFileSync(artifactPath, 'utf8');
 
+	const sourceManifest = JSON.parse(readFileSync(join(sandbox, CORAL, 'manifest.json'), 'utf8'));
+	const emitted = JSON.parse(readFileSync(join(dirname(artifactPath), 'manifest.json'), 'utf8'));
+	ok('the emitted manifest carries the package version', emitted.version === VERSION);
+	ok('the emitted manifest carries the exact rewritten source',
+		emitted.source === sourceManifest.source.split(`/${sourceManifest.version}/`).join(`/${VERSION}/`),
+		String(emitted.source));
+
+	// Separate registries keep these fixtures independent of immutable published copies.
+	for (const middle of ['corals/square-shop/', '']) {
+		const fixture = { ...sourceManifest,
+			source: `https://example.test/${sourceManifest.version}/${middle}${sourceManifest.version}/square-shop.js` };
+		writeFileSync(join(sandbox, CORAL, 'manifest.json'), JSON.stringify(fixture));
+		const registry = join(sandbox, middle ? 'double-version-registry' : 'adjacent-version-registry');
+		execFileSync('node', [join(sandbox, 'build.mjs'), CORAL, '--registry', registry, '--defaults', defaultsPath],
+			{ stdio: 'inherit', env: BUILD_ENV });
+		const manifest = JSON.parse(readFileSync(join(registry, 'versions', CORAL, VERSION, 'manifest.json'), 'utf8'));
+		ok(`the double-version manifest carries the package version (${middle || 'adjacent'})`, manifest.version === VERSION);
+		ok(`the double-version source is rewritten exactly (${middle || 'adjacent'})`,
+			manifest.source === `https://example.test/${VERSION}/${middle}${VERSION}/square-shop.js`, String(manifest.source));
+	}
+	writeFileSync(join(sandbox, CORAL, 'manifest.json'), JSON.stringify(sourceManifest));
+
+
 	// ── the stamp is there, and it is guarded ──────────────────────────────────────────────────
 	// Counted, not merely looked for: `includes` stops at the first hit, and a SECOND unguarded
 	// registration appended somewhere would satisfy an existence check while still throwing.

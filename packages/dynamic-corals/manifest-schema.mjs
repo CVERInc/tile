@@ -17,14 +17,21 @@ export function validateCoralManifest(manifest, expected = {}) {
   if (expected.version !== undefined && manifest.version !== expected.version) {
     mismatches.push(`version: expected ${expected.version}, got ${String(manifest.version)}`);
   }
-  // `source` is the one version-bearing field the registry build does not rewrite
-  // (`build.mjs` spreads the source manifest and overrides `version` only), so a bump that
-  // forgets it publishes a manifest whose `version` and `source` disagree — with every other
-  // check green. The published `source` must point at its own version's directory.
+  // The builder rewrites every original version segment; check both the published
+  // version and the number of stale segments so a partial rewrite cannot pass.
   const version = String(manifest.version ?? '');
   const source = String(manifest.source ?? '');
-  if (version && source && !source.includes(`/${version}/`)) {
+  const segments = source.split('/').slice(1, -1);
+  const count = (value) => segments.filter((segment) => segment === value).length;
+  if (version && source && count(version) === 0) {
     mismatches.push(`source: expected a path containing /${version}/, got ${source}`);
+  }
+  const sourceVersion = String(expected.sourceVersion ?? '');
+  if (sourceVersion && sourceVersion !== version) {
+    const remaining = count(sourceVersion);
+    if (remaining > 0) {
+      mismatches.push(`source: found ${remaining} stale /${sourceVersion}/ segment(s), got ${source}`);
+    }
   }
   return { ok: missing.length === 0 && mismatches.length === 0, missing, mismatches };
 }
