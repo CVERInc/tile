@@ -5,7 +5,7 @@
 // Rendering delegated to the shared ArchiveView.
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../packages/lingo/locale.mjs';
-import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes} from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, tagBase } from '../../../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const allPostsIn = allPosts(
@@ -39,7 +39,7 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, tag, slug, pageNum } = Astro.props;
-const base = String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '');
+const base = tagBase(meta); // round 5 (R4-P1-1): gated
 const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);

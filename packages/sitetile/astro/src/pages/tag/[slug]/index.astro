@@ -19,7 +19,7 @@
 // locale that routes it. `alternates` is that reciprocal hreflang — see category/[slug]/index.astro's
 // header (same mechanism, termLocaleMap/alternateArchiveLocales, kind='tag').
 import ArchiveView from '../../../components/ArchiveView.astro';
-import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, termLocaleMap, alternateArchiveLocales } from '../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, termLocaleMap, alternateArchiveLocales, tagBase } from '../../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const contentFiles = import.meta.glob('../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
@@ -48,7 +48,7 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, tag, slug, alternates } = Astro.props;
-const base = String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '');
+const base = tagBase(meta); // round 5 (R4-P1-1): gated
 const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);

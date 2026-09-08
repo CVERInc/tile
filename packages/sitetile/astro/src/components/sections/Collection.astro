@@ -6,7 +6,7 @@ import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // then `### Category` groups each holding `#### name →href "badge"` item cards.
 // Layout: a HEAD (title + intro + link) on the page field, then a full-bleed BELT
 // (eyebrow + jump-pills + grouped cards) — mirrors a dark projects belt.
-import { parseParams, inlineHtml, bodyHtml, slugify } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, slugify, safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';   // tail-retract hover morph — every live
 // /oss "View on GitHub"/"Learn more" link + the head's link=/GitHub button carries this; a bare "→"
 // text glyph (what this used to render) has no `.signet-arrow__tail` to retract, so hover was inert.
@@ -35,6 +35,11 @@ const isExternal = (h) => /^https?:\/\//.test(h || '');
 // (design 2026-07-13). Internal links (learn pages, anchors) stay in the same tab.
 const tgt = (h) => isExternal(h) ? { target: '_blank', rel: 'noopener' } : {};
 const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Boolean);
+// round 3 (Astro consumers, R2-P3-5 / R2-P1-1): `link.href` (head link), `it.href`/`it.learn`
+// (per-item GitHub/learn destinations) are all author Markdown; site-core.js's own `collection`
+// case gates every one of them on `isSafeHref` (and, per R2-P1-1, gates `it.href` on ITSELF, not
+// on `it.learn`). `safeHref` shares that ONE policy here.
+const linkHrefOk = link ? safeHref(link.href) : null;
 ---
 <section class="st-collection" id={section.id}>
   <div class="st-collection-head">
@@ -46,15 +51,17 @@ const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Bo
     <div class="st-collection-head-inner">
       {section.title && <Title set:html={inlineHtml(section.title)} />}
       {section.body && <Fragment set:html={bodyHtml(section.body)} />}
-      {link && (
-        <a class={`st-collection-link${isGh(link.href) ? ' st-collection-link-gh' : ''}`} href={link.href} {...tgt(link.href)}>
-          {isGh(link.href) && (
+      {link && (linkHrefOk ? (
+        <a class={`st-collection-link${isGh(linkHrefOk) ? ' st-collection-link-gh' : ''}`} href={linkHrefOk} {...tgt(linkHrefOk)}>
+          {isGh(linkHrefOk) && (
             <svg class="st-gh-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
           )}
           <span>{link.label}</span>
-          <Arrow direction={isExternal(link.href) ? 'up-right' : 'right'} size={16} />
+          <Arrow direction={isExternal(linkHrefOk) ? 'up-right' : 'right'} size={16} />
         </a>
-      )}
+      ) : (
+        <span class="st-collection-link"><span>{link.label}</span></span>
+      ))}
     </div>
   </div>
   <div class="st-collection-belt">
@@ -80,9 +87,15 @@ const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Bo
               // any higher than a stray pixel). Primary destination mirrors the real source:
               // learn page if present, else the GitHub URL itself.
               const primaryHref = it.learn || it.href;
+              const primaryHrefOk = primaryHref ? safeHref(primaryHref) : null;
+              // 🩸 round 2, P1-1 / round 3 R2-P1-1: `it.href`'s anchor must gate on ITSELF, not on
+              // `it.learn` — gating it on the OTHER field's safety let a bad it.href go live
+              // whenever it.learn happened to be safe.
+              const ghOk = it.href ? safeHref(it.href) : null;
+              const learnOk = it.learn ? safeHref(it.learn) : null;
               return (
               <div class="st-cell st-item">
-                {primaryHref && <a class="st-item-cover" href={primaryHref} {...tgt(primaryHref)} aria-label={it.title} />}
+                {primaryHrefOk && <a class="st-item-cover" href={primaryHrefOk} {...tgt(primaryHrefOk)} aria-label={it.title} />}
                 <div class="st-item-head">
                   <CardTitle set:html={inlineHtml(it.title)} />
                   {it.badge && <span class="st-item-badges">{badges(it.badge).map((x) => <span class="st-item-badge">{x}</span>)}</span>}
@@ -105,11 +118,11 @@ const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Bo
                           extra anchor-tagged text occurrences recastfid doesn't see on live, which threw
                           off its repeated-text pairing for every card after them. */}
                       {it.updated && it.href && it.learn && <span class="st-item-sep" aria-hidden="true">|</span>}
-                      {it.href && (it.learn
-                        ? <a class="st-item-gh" href={it.href} {...tgt(it.href)}><svg class="st-item-gh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>{UI.gh} <Arrow direction="up-right" size={12} /></a>
+                      {it.href && ((ghOk && learnOk)
+                        ? <a class="st-item-gh" href={ghOk} {...tgt(ghOk)}><svg class="st-item-gh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>{UI.gh} <Arrow direction="up-right" size={12} /></a>
                         : <span class="st-item-gh"><svg class="st-item-gh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>{UI.gh} <Arrow direction="up-right" size={12} /></span>)}
                     </div>
-                    {it.learn && <a class="st-item-learn" href={it.learn}>{UI.learn} <Arrow direction="right" size={12} /></a>}
+                    {learnOk && <a class="st-item-learn" href={learnOk}>{UI.learn} <Arrow direction="right" size={12} /></a>}
                   </div>
                 )}
               </div>

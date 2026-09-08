@@ -5,7 +5,7 @@
 // header (page 1 carries the verified cross-locale hreflang).
 import ArchiveView from '../../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../../packages/lingo/locale.mjs';
-import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, localeBlogCorpora } from '../../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, localeBlogCorpora, tagBase } from '../../../../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const contentFiles = import.meta.glob('../../../../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
@@ -39,7 +39,7 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, tag, slug, pageNum, urlLoc } = Astro.props;
-const base = `/${urlLoc}${String(meta['blog-tag-base'] || '/tag').replace(/\/$/, '')}`;
+const base = `/${urlLoc}${tagBase(meta)}`; // round 5 (R4-P1-1): gated
 const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);

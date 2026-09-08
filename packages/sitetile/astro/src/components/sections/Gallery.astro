@@ -3,7 +3,7 @@
 // renderSection 'gallery' case so the editor live-preview matches the Astro build byte-for-byte.
 // Each cell's leading body image floats to a top <figure>; title + caption below. A cell with an
 // href is a whole-card link. General; theme paints `.st-gallery` / `.st-gal-cell` / `.st-gal-fig`.
-import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, safeHref } from '@sitetile';
 const { section } = Astro.props;
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
@@ -41,8 +41,11 @@ const align = pm.align || undefined;
           {cta}
         </Fragment>
       );
-      return c.href
-        ? <a class="st-gal-cell st-cell-link group" href={c.href}>{inner}</a>
+      // round 3 (Astro consumers, R2-P3-5): `c.href` is author Markdown, gated by site-core.js's
+      // own `gallery` case via `isSafeHref`; `safeHref` shares that ONE policy here.
+      const hrefOk = c.href ? safeHref(c.href) : null;
+      return hrefOk
+        ? <a class="st-gal-cell st-cell-link group" href={hrefOk}>{inner}</a>
         : <div class="st-gal-cell">{inner}</div>;
     })}
   </div>

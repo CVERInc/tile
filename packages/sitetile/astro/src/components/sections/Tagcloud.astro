@@ -6,7 +6,7 @@
 // (site-core.js) so the editor preview matches the build.
 // IR: `## Title` + `%% sitetile: tagcloud %%` + a markdown list of `- [Label](/href)` items.
 // The Label carries its own count baked in (e.g. "comic576"), matching how live themes print it.
-import { parseParams, inlineHtml, tagcloudLinks } from '@sitetile';
+import { parseParams, inlineHtml, tagcloudLinks, safeHref } from '@sitetile';
 const { section, hero } = Astro.props;
 const Title = hero ? 'h1' : 'h2';
 // 🔴 The result was discarded here — the call was kept only to VALIDATE the params.
@@ -23,6 +23,12 @@ const links = tagcloudLinks(section.body);
   {eyebrow && <p class="st-tagcloud-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
   <div class="st-tag-flow">
-    {links.map((l) => <a class="st-tag" href={l.href} set:html={inlineHtml(l.label)} />)}
+    {links.map((l) => {
+      // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+      const hrefOk = safeHref(l.href);
+      return hrefOk
+        ? <a class="st-tag" href={hrefOk} set:html={inlineHtml(l.label)} />
+        : <span class="st-tag" set:html={inlineHtml(l.label)} />;
+    })}
   </div>
 </section>

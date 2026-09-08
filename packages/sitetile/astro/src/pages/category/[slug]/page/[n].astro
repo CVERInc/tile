@@ -11,7 +11,7 @@
 // reaches every other locale's page 2+ from there.
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../packages/lingo/locale.mjs';
-import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes} from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, categoryBase } from '../../../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const allPostsIn = allPosts(
@@ -43,7 +43,7 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, slug, pageNum } = Astro.props;
-const base = String(meta['blog-category-base'] || '/category').replace(/\/$/, '');
+const base = categoryBase(meta); // round 5 (R4-P1-1): gated
 const names = kvMap(meta['blog-category-names']);
 const heading = names[slug] || slug;
 const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
