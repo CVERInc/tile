@@ -910,18 +910,29 @@ test('🔴 #496: a comment INSIDE a fenced code block is preserved verbatim — 
   assert.match(html, /&lt;!-- keep me --&gt;/, 'the fence content is code and must survive, escaped like any code');
 });
 
-test('🔴 #496: an unterminated `<!--` (and the degenerate `<!-->`) does not eat the rest of the PAGE', () => {
-  // "before" and "<!-- oops, no closer" and "STILL HERE" are THREE separate blank-line-separated
-  // paragraphs, so this only ever proved page-level isolation, not what happens to a single unclosed
-  // comment's own fragment — see the round-2 test below for that (it now consumes to end of INPUT,
-  // per the HTML spec, which for a paragraph this short means the rest of that one paragraph).
-  const unterminated = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
-  assert.match(unterminated, /before/);
-  assert.match(unterminated, /STILL HERE/, 'content after an unclosed comment must still render');
-
+test('🔴 #496: the degenerate `<!-->` does not swallow everything until a LATER -->', () => {
+  // `<!-->` (and any run of extra dashes before the `>`: `<!--->`, `<!---->`, …) closes IMMEDIATELY —
+  // the HTML spec's "abrupt closing of an empty comment" — and must not fall through to the
+  // unterminated-runs-to-EOF rule the next test exercises.
   const degenerate = bodyHtml('before <!--> after');
   assert.match(degenerate, /before/);
   assert.match(degenerate, /after/, '`<!-->` must not open a comment that swallows everything until a LATER -->');
+});
+
+// 🩸 round 2 (R2-P2-04 / R2-P1-02): this used to assert the OPPOSITE — that "STILL HERE", a LATER
+// blank-line-separated paragraph, survived an unterminated `<!--` in an earlier one. That was true
+// only because round 1's fix removed comments per FRAGMENT (one paragraph at a time), so an
+// unterminated comment could only ever consume its own fragment. Review round 2 found that the same
+// design let a comment spanning a blank line leak its tail onto the page (R2-P1-02: the fragment
+// split happens BEFORE removal ever sees the comment whole). Fixing that means removal has to run
+// document-wide, ahead of block-splitting — and at document scope, "no closer anywhere" genuinely
+// means no closer anywhere in the rest of the DOCUMENT, per the HTML tokenizer's own comment-end
+// state (there is no such thing as "the rest of this paragraph" until paragraphs exist, and they
+// don't yet at this point in the pipeline). See the round-2 test right below for the same rule.
+test('🔴 #496 round 2 — an unterminated `<!--` with no later closer consumes to end of the DOCUMENT', () => {
+  const html = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
+  assert.equal(html, '<p>before</p>', 'the unterminated comment and everything after it are gone, page-wide');
+  assert.doesNotMatch(html, /STILL HERE/);
 });
 
 test('🔴 #496: stripHtmlComments is fence-aware directly (unit-level, not just through bodyHtml)', () => {
@@ -983,15 +994,19 @@ test('🔴 #496 round 2 — P3-05: the HTML spec\'s alternative comment closer `
   assert.doesNotMatch(html, /note/);
 });
 
-test('🔴 #496 round 2 — an unterminated `<!--` consumes to end of its OWN fragment (HTML spec)', () => {
-  // A deliberate change from round 1: the HTML tokenizer's comment-end state runs to EOF on an
-  // unterminated comment, and doing the same here is what keeps the scan linear (see P1-01 below) —
-  // retrying from every subsequent `<!--` looking for a closer that will never come is exactly the
-  // quadratic behaviour being fixed. "End of input" is the fragment bodyHtml handed to inlineHtml
-  // (one paragraph/list-item/quote-line/heading/cell), not the whole multi-paragraph document — a
-  // blank line still ends a block before inlineHtml ever runs, untouched by this change.
+test('🔴 #496 round 2 — an unterminated `<!--` consumes to end of the DOCUMENT (HTML spec)', () => {
+  // A deliberate change, twice over. Round 1 first made an unterminated comment run to EOF at all
+  // (rather than being left as literal text) — the HTML tokenizer's own comment-end state, and what
+  // keeps the scan linear (P1-01): retrying from every subsequent `<!--` looking for a closer that
+  // will never come is exactly the quadratic behaviour being fixed. Round 2 (R2-P2-04) then moved
+  // "end of input" from the fragment bodyHtml used to hand inlineHtml (one paragraph at a time) to
+  // the true end of the whole raw document — because removal now runs BEFORE block-splitting
+  // (R2-P1-02), where "fragment" and "block" don't exist yet; see removeDocumentComments()'s comment
+  // in site-core.js and the README's escape-hatch note. For a one-paragraph document like this one,
+  // both readings land on the same output — the difference only shows up once a LATER block exists
+  // (see the sibling test just above, and the giant-input perf test right below).
   const html = bodyHtml('before <!-- oops, no closer, and MORE TEXT that must not survive');
-  assert.equal(html, '<p>before </p>');
+  assert.equal(html, '<p>before</p>');
 });
 
 test('🔴 #496 round 2 — P1-01: linear on 1 MiB of unterminated comment openers', () => {
@@ -999,8 +1014,143 @@ test('🔴 #496 round 2 — P1-01: linear on 1 MiB of unterminated comment opene
   const t0 = process.hrtime.bigint();
   const html = bodyHtml(input);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.equal(html, '<p></p>', 'the whole thing is one unterminated comment: nothing renders');
+  // The whole document IS one unterminated comment (R2-P2-04: consumes to true end of document), so
+  // after removal there is no text left at all — not even an empty paragraph (R2-P2-03: a block whose
+  // entire content was a comment never exists, because block-splitting runs on what's left AFTER
+  // removal and there is nothing left here to split).
+  assert.equal(html, '', 'the whole document is one unterminated comment: nothing renders, not even <p></p>');
   assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms — the old regex was quadratic here`);
+});
+
+// ── round 3 — REVIEW-tile28-r2-2026-09-09.md, R2-P1-01 / R2-P1-02 / R2-P2-03 / R2-P2-04 ────────────
+// Round 2 found the round-1 fix itself had two bugs. R2-P1-01: escapeInline's terminator search ran
+// TWO full-suffix `indexOf` calls per comment ('-->' and '--!>'), each bounded by the REST OF THE
+// STRING rather than the comment — quadratic on any real document (1 MiB of 131,072 well-formed
+// `<!--a-->` comments: 5m53s). R2-P1-02: comment removal ran per-fragment, AFTER block-splitting, so
+// a comment spanning a blank line / list-item run / heading→paragraph boundary was cut in half by the
+// splitter before removal ever saw it whole — the opening half vanished, the closing half rendered as
+// visible prose. The fix: commentTerminatorEnd() replaces both terminator searches with one linear
+// scan (used by escapeInline, removeHtmlComments, AND the new removeDocumentComments), and comment
+// removal now runs document-wide, BEFORE block-splitting, in removeDocumentComments() — fence-aware,
+// code-span-aware, and dead-tag(`inTag`)-aware, so it can't repeat round 1's P2-03 mistake. That same
+// move is also what makes R2-P2-03 (an empty block for a comment-only line) and R2-P2-04 (an
+// unterminated comment's true extent) fall out for free: block-splitting never sees a line that
+// removal already emptied.
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of WELL-FORMED comments (the quadratic shape)', () => {
+  // The exact failing input from the review: not the one shape (all-`<!--`, no closer) the round-2
+  // perf test covered, but 131,072 separate, individually well-formed `<!--a-->` comments — the shape
+  // that was 352,756.7ms (5m53s) before this fix, because `indexOf('--!>', …)` alone paid a
+  // full-suffix scan at every one of them (no `--!>` anywhere in the document to find it early).
+  const input = '<!--a-->'.repeat(131072);                    // exactly 1 MiB
+  const t0 = process.hrtime.bigint();
+  const html = bodyHtml(input);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.equal(html, '', 'every comment is well-formed and empty; nothing is left to render');
+  assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms`);
+});
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of ordinary one-comment-per-line prose', () => {
+  const input = '<!-- x -->\n'.repeat(95325);                 // ~1 MiB, one comment per line
+  const t0 = process.hrtime.bigint();
+  bodyHtml(input);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms`);
+});
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of `<!--` and of `<` (no comment ever closes)', () => {
+  for (const input of ['<!--'.repeat(262144), '<'.repeat(1048576)]) {
+    const t0 = process.hrtime.bigint();
+    bodyHtml(input);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 200, `expected < 200ms for ${JSON.stringify(input.slice(0, 8))}…, got ${ms.toFixed(1)}ms`);
+  }
+});
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of backticks (codeSpanRanges must not blow up)', () => {
+  const input = '`'.repeat(1048576);
+  const t0 = process.hrtime.bigint();
+  bodyHtml(input);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms`);
+});
+
+test('🔴 #496 round 3 — R2-P1-01: 256 KiB→1 MiB scales ~linearly (ratio ≤ ~5×, not 16×)', () => {
+  const unit = '<!--a-->';
+  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
+  const time = (input) => {
+    const t0 = process.hrtime.bigint();
+    bodyHtml(input);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  };
+  time(at(262144));                                            // warm up (JIT)
+  const t256 = Math.max(time(at(262144)), 0.001);
+  const t1m = time(at(1048576));
+  const ratio = t1m / t256;
+  assert.ok(ratio <= 6, `expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
+});
+
+test('🔴 #496 round 3 — R2-P1-02: a comment spanning a BLANK LINE is removed whole, not leaked in half', () => {
+  // The review's own failing input. Round 2 (pre-fix): '<p>Hello.</p>\n<p></p>\n<p>more notes --&gt;</p>\n<p>Bye.</p>'
+  // — the opening half silently deleted, "more notes" leaked onto the page. Fixed: byte-identical to
+  // round 1's (correct) answer.
+  const html = bodyHtml('Hello.\n\n<!-- TODO:\nstill thinking\n\nmore notes -->\n\nBye.');
+  assert.equal(html, '<p>Hello.</p>\n<p>Bye.</p>');
+});
+
+test('🔴 #496 round 3 — R2-P1-02: a comment spanning list items is removed whole, not leaked', () => {
+  const html = bodyHtml('- one <!-- note\n- two --> tail\n- three');
+  assert.equal(html, '<ul class="st-list"><li>one  tail</li><li>three</li></ul>');
+});
+
+test('🔴 #496 round 3 — R2-P1-02: a comment spanning heading→paragraph is removed whole, not leaked', () => {
+  const html = bodyHtml('# H <!-- note\n\nvisible --> leak');
+  assert.equal(html, '<h1>H  leak</h1>');
+});
+
+test('🔴 #496 round 3 — R2-P2-03: a comment-only PARAGRAPH leaves no empty <p></p>', () => {
+  assert.equal(bodyHtml('Hello.\n\n<!-- note -->\n\nBye.'), '<p>Hello.</p>\n<p>Bye.</p>');
+  assert.equal(bodyHtml('A\n\n<!-- n1 -->\n\n<!-- n2 -->\n\nB'), '<p>A</p>\n<p>B</p>');
+});
+
+test('🔴 #496 round 3 — R2-P2-03: a comment-only HEADING never becomes an empty <h1></h1>', () => {
+  const html = bodyHtml('# <!-- note -->');
+  assert.doesNotMatch(html, /<h1>\s*<\/h1>/);
+});
+
+test('🔴 #496 round 3 — R2-P2-03: a comment-only LIST ITEM never becomes an empty <li></li>', () => {
+  const html = bodyHtml('- <!-- note -->\n- real');
+  assert.equal(html, '<ul class="st-list"><li>real</li></ul>');
+  assert.doesNotMatch(html, /<li>\s*<\/li>/);
+});
+
+test('🔴 #496 round 3 — R2-P2-03: a comment-only QUOTE LINE never becomes an empty blockquote', () => {
+  const html = bodyHtml('> <!-- note -->');
+  assert.equal(html, '');
+});
+
+test('🔴 #496 round 3 — R2-P2-04: unterminated `<!--` runs to end of DOCUMENT, past later blocks', () => {
+  // Documented behaviour change from round 2: "end of input" is now the whole raw document (removal
+  // runs before block-splitting exists to bound it), not the one block/fragment that held the opener.
+  const html = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
+  assert.equal(html, '<p>before</p>');
+  assert.doesNotMatch(html, /STILL HERE/);
+});
+
+test('🔴 #496 round 3 — differential: byte-identical to pre-#496 `main` on the round-1 attack corpus', () => {
+  // Reproduces the review's three-build harness inline: a hand-maintained "BEFORE" reference — the
+  // literal output this renderer gave every one of these inputs before issue #496's comment logic
+  // existed at all (no comment recognized as a comment; every `<`/`>` just escaped as encountered) —
+  // asserted against the CURRENT bodyHtml(). These are exactly round 1's "holds up under attack" list
+  // plus the round-2 P2-02/03/04 review inputs; every one must still be byte-identical to BEFORE.
+  const cases = [
+    ['`<!-- x -->`', '<p><span class="st-code"><span class="st-mk">`</span>&lt;!-- x --&gt;<span class="st-mk">`</span></span></p>'],
+    ['<sm<!-- -->all>visible</sm<!-- -->all>', '<p>&lt;sm&lt;!-- --&gt;all&gt;visible&lt;/sm&lt;!-- --&gt;all&gt;</p>'],
+    ['<br<!-- -->>after', '<p>&lt;br&lt;!-- --&gt;&gt;after</p>'],
+    ['    <!-- literal indented code -->', '<p>&lt;!-- literal indented code --&gt;</p>'],
+    ['<scr<!-- -->ipt>alert(1)</script>', '<p>&lt;scr&lt;!-- --&gt;ipt&gt;alert(1)&lt;/script&gt;</p>'],
+  ];
+  for (const [input, expected] of cases) assert.equal(bodyHtml(input), expected, JSON.stringify(input));
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
