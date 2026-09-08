@@ -1078,15 +1078,27 @@ function nextCommentCloser(lines) {
 // nothing exotic on this product), em space (U+2003), VT and FF included. A line indented with any of
 // those fell into the same crack the tab used to: not `<4` cleanly counted (so no comment-block
 // consumption) and never reaching the `>=4` literal-indented carve-out either at its true visual width,
-// so its content silently trimmed away to an empty `<p></p>`. Every non-tab whitespace character in
-// that same `\s` class now counts as exactly ONE column, same as an ordinary space — only a tab keeps
-// its tab-stop-4 rule, because only a tab's *visual* width depends on where it starts.
+// so its content silently trimmed away to an empty `<p></p>`. Round 6's fix made every non-tab
+// whitespace character in that same `\s` class count as exactly ONE column, same as an ordinary space.
+//
+// 🩸 round 7 (R6-P2-01): that was wrong. CommonMark §2.2 defines indentation as SPACES AND TABS
+// ONLY — every other `\s` character contributes ZERO columns, not one, to the 4-column decision that
+// gates bodyHtml's `indented` carve-out (the ONE path that deliberately keeps a comment's raw text —
+// see commentBlockCandidate below). Counting it as one column let four columns of ANY such whitespace
+// reach that carve-out and PUBLISH an ordinary author note, escaped but visible, on the page — the
+// review measured it at 24/24 of the BMP's `\s` characters, and a bare byte-order mark (invisible in
+// an editor, added by some Windows tools without asking) ahead of a legal 3-space indent was enough to
+// trigger it. A run of such whitespace still stops the count outright (`else break`, unchanged): it is
+// not indentation, so counting continues nowhere, and the line stays at whatever column a PRECEDING
+// space/tab already put it — 0 if it opens the line, same as before round 6. A comment-only line
+// still reaches isCommentBlockOpen's own `\s*` widening below at that column and is consumed clean;
+// only the 4-column carve-out's population changed.
 function leadingIndentCols(line) {
   let col = 0;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (c === '\t') col += 4 - (col % 4);
-    else if (/\s/.test(c)) col++;
+    else if (c === ' ') col++;
     else break;
   }
   return col;

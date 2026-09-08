@@ -1427,6 +1427,29 @@ test('🔴 #496 round 6 — R5-P2-01: targeted corpus — a document whose LAST 
   }
 });
 
+// R6-P3-01 (round 7): every round-6 R5-P2-01 test above is single-line or has the second comment's
+// closer on the SAME line it opens on, so all seven only ever exercise the `-1` tail of
+// `reattachCommentRemainder`'s `nextCloser[closeIdx] = lineHasCommentCloser(...) ? closeIdx :
+// (closeIdx + 1 < lines.length ? nextCloser[closeIdx + 1] : -1)`. Nothing in the suite locked the
+// OTHER branch — falling forward to `nextCloser[closeIdx + 1]` when the reattached remainder opens a
+// comment that closes on a LATER line. Deleting that fall-forward (keeping only `? closeIdx`) left the
+// full suite green; these four shapes are where it silently regresses to round 5's own bug (the
+// closing line's `nextCloser` entry goes stale at `-1` instead of pointing at the real closer, so the
+// block is treated as unterminated and the middle lines' text, plus a stray leading space off the
+// truncated remainder, leaks onto the page).
+test('🔴 #496 round 7 — R6-P3-01: a reattached remainder that opens a comment closing on a LATER line still finds that closer', () => {
+  assert.equal(bodyHtml('<!-- a --> <!-- b\nend --> tail'), '<p>tail</p>');
+  assert.equal(bodyHtml('<!-- a --> <!-- b\nmid\nend --> tail'), '<p>tail</p>');
+  assert.equal(
+    bodyHtml('- <!-- a --> <!-- b\n- mid\n- end --> tail\n- last'),
+    '<ul class="st-list"><li>tail</li><li>last</li></ul>',
+  );
+  assert.equal(
+    bodyHtml('> <!-- a --> <!-- b\n> end --> tail\n> last'),
+    '<blockquote class="st-quote"><p>tail last</p></blockquote>',
+  );
+});
+
 // R5-P2-02: `leadingIndentCols` only widened the TAB case in round 5 — every OTHER `\s` character
 // (NBSP U+00A0, the ideographic space U+3000, em space U+2003, VT, FF) still counted as zero columns,
 // so a comment-only line indented with one of those fell into neither the comment-block path (which
@@ -1450,15 +1473,43 @@ test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: a comment-only line indented wi
   }
 });
 
-test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: four columns of that same whitespace is literal, escaped \u2014 consistent with the space rule', () => {
-  // Mirrors the pre-existing space/tab carve-out at P2-04: FOUR ideographic spaces reach column 4
-  // (1 column each, per this rule) and take the SAME literal-indented path a 4-space line already does.
-  assert.equal(bodyHtml('\u3000\u3000\u3000\u3000<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+// \ud83e\ude78 round 7 (R6-P2-01): the two tests immediately below asserted the OPPOSITE of the reference
+// implementation \u2014 round 6's "every \s counts as a column" fix made four columns of exotic whitespace
+// reach the space/tab-only indented carve-out and PUBLISH the note. Fixed in leadingIndentCols
+// (only ' ' and '\t' count; every other `\s` contributes 0 columns and stops the count, same as it
+// stopped isCommentBlockOpen's OWN column check all along). Corrected to the reference-correct output.
+
+test('\ud83d\udd34 #496 round 7 \u2014 R6-P2-01: four columns of ideographic space is NOT the 4-space carve-out \u2014 the comment is still removed clean', () => {
+  // Round 6 said this reaches column 4 and takes the literal-indented path (WRONG: CommonMark \u00a72.2 \u2014
+  // only space/tab are indentation, so U+3000 contributes 0 columns at any run length). The comment-only
+  // line still opens a comment block at column 0 and is consumed, same as a single U+3000 already was.
+  assert.equal(bodyHtml('\u3000\u3000\u3000\u3000<!-- n -->'), '');
 });
 
-test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: mixed NBSP+tab reaches column 4 the same way a mixed space+tab already did', () => {
-  assert.equal(bodyHtml('\u00A0\t<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+test('\ud83d\udd34 #496 round 7 \u2014 R6-P2-01: NBSP no longer counts as a column \u2014 NBSP-then-tab stays a comment block, tab-then-NBSP stays literal', () => {
+  // NBSP-first: the loop breaks at column 0 before ever reaching the tab (NBSP is not indentation, so
+  // counting does not resume past it) \u2014 still `< 4`, still a comment-block opener, removed clean.
+  assert.equal(bodyHtml('\u00A0\t<!-- n -->'), '');
+  // Tab-first: the tab alone already reaches column 4 (CommonMark's own tab-stop rule, unchanged since
+  // round 5) regardless of what follows it \u2014 unchanged by this fix; the review named this the sibling
+  // control that was already correct.
   assert.equal(bodyHtml('\t\u00A0<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+});
+
+test('\ud83d\udd34 #496 round 7 \u2014 R6-P2-01: a byte-order mark ahead of a legal 3-space indent does not manufacture a 4th column', () => {
+  // A BOM is invisible in an editor and some Windows tools add it without asking; it must not silently
+  // flip a note from removed to published by turning 3 columns of real indentation into 4.
+  assert.equal(bodyHtml('\ufeff   price <!-- TODO secret --> tbd'), '<p>price  tbd</p>');
+});
+
+test('\ud83d\udd34 #496 round 7 \u2014 R6-P2-01: the 4-column carve-out is space/tab only \u2014 a 4-space note is preserved as indented code, a 4\u00d7U+3000 note is not', () => {
+  // The escape hatch (P2-04) exists so an indented CODE SAMPLE that happens to contain "<!-- ... -->"
+  // is not silently mangled \u2014 CommonMark itself gives an indented code block priority over an HTML
+  // block start at exactly 4 columns of space/tab. Four columns of an unrelated `\s` character is not
+  // that: it is ordinary exotic-whitespace-indented prose, and the note inside it must still be removed
+  // like any other well-formed comment, never published.
+  assert.equal(bodyHtml('    price <!-- TODO secret --> tbd'), '<p>price &lt;!-- TODO secret --&gt; tbd</p>');
+  assert.equal(bodyHtml('\u3000\u3000\u3000\u3000price <!-- TODO secret --> tbd'), '<p>price  tbd</p>');
 });
 
 test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: an ordinary CJK-indented paragraph with no comment at all is unaffected', () => {
