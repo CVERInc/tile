@@ -278,22 +278,31 @@ function matchSiteOwnedBuyerPage(request, routes) {
 	return null;
 }
 
-// `amount` is the plan's own display amount (NOT minor units) — the same value
-// and the same fraction-digit rule the RSP page formats, so the two renderings of
-// one plan cannot disagree about its price.
+// `amount` is the plan's price in the currency's SMALLEST unit (minor units) —
+// the same integer the RSP `/api/membership/plans` contract returns and the same
+// one that goes verbatim into Stripe's `unit_amount` (reef apps/rsp
+// src/currency-units.ts + routes/membership.ts#formatPlanPrice, the reference
+// this rendering must not disagree with). It must be converted to major units
+// before display, and a zero-decimal currency's whole unit IS its smallest unit
+// (JPY 1200 is still ¥1,200, not ¥12.00). Reuses this package's own formatMoney
+// helper (product-page-core.js), the same one already used for product prices
+// below, instead of a second currency table.
 function planPriceText(plan, copy, locale) {
 	const label = copy.interval[plan.interval] || plan.interval;
-	const amount = Number(plan.amount);
+	const currency = String(plan.currency || '');
 	try {
-		return new Intl.NumberFormat(locale, {
-			style: 'currency', currency: plan.currency,
-			maximumFractionDigits: Number.isInteger(amount) ? 0 : 2
-		}).format(amount) + ' / ' + label;
+		// Probe the currency code before trusting formatMoney's own path — an
+		// unrecognized code must not fall through to formatMoney's fallback, which
+		// echoes its `minor` argument literally rather than converting it.
+		new Intl.NumberFormat(locale, { style: 'currency', currency }).format(0);
 	} catch (e) {
-		// An unrecognized currency code makes Intl throw — stay honest and plain
-		// rather than losing the whole page over a formatting nicety.
-		return plan.currency + ' ' + plan.amount + ' / ' + label;
+		// Unrecognized currency code (Intl throws on non-ISO-4217 strings) — still
+		// honest and plain, and still MAJOR units (there is no fraction-digit count
+		// Intl can give us for a code it does not recognize, so the common 2-decimal
+		// case is assumed rather than showing the buyer a hundred times the price).
+		return currency + ' ' + (Number(plan.amount) / 100).toFixed(2) + ' / ' + label;
 	}
+	return formatMoney({ minor: Number(plan.amount), currency, locale }) + ' / ' + label;
 }
 
 // Bodies are composed INTO the donor's <main>, so none of them opens one of its

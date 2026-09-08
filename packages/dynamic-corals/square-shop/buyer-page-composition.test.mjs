@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
+import { formatMoney } from './product-page-core.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workDir = mkdtempSync(join(tmpdir(), 'buyer-page-composition-'));
@@ -171,6 +172,32 @@ test('membership: visible copy follows the SHELL locale, never a platform defaul
 	const enHtml = await (await claimed.default.fetch(get('/tiers'), en.env)).text();
 	assert.equal(enHtml.includes('Membership'), true, 'an en shell gets en copy');
 	assert.equal(enHtml.includes('會員方案'), false);
+});
+
+// `amount` is minor units (the same integer Stripe's `unit_amount` takes), not
+// the plan's own display amount — a USD plan of 500 is $5.00, not $500, and a
+// zero-decimal JPY plan of 1200 stays ¥1,200 rather than being divided again.
+test('membership: plan prices convert minor units to major, zero-decimal currencies included', async () => {
+	const MONEY_PLANS = {
+		state: 'available',
+		plans: [
+			{ plan_id: 'plan_usd', display_name: 'USD Plan', amount: 500, currency: 'USD', interval: 'month' },
+			{ plan_id: 'plan_jpy', display_name: 'JPY Plan', amount: 1200, currency: 'JPY', interval: 'month' }
+		]
+	};
+	// SHELL declares lang="zh-Hant", which localeFromHint resolves to zh-TW.
+	const { env } = makeEnv({ rsp: factsRsp({ '/zapi/tier-facts': MONEY_PLANS }) });
+	const html = await (await claimed.default.fetch(get('/tiers'), env)).text();
+
+	const usdText = formatMoney({ minor: 500, currency: 'USD', locale: 'zh-TW' });
+	const jpyText = formatMoney({ minor: 1200, currency: 'JPY', locale: 'zh-TW' });
+	assert.equal(html.includes(usdText), true, 'the USD plan renders exactly what formatMoney produces for 500 minor units');
+	assert.equal(html.includes(jpyText), true, 'the JPY plan renders exactly what formatMoney produces for 1200 minor units');
+
+	assert.equal(html.includes('5.00'), true, 'USD 500 minor units is $5.00 major units');
+	assert.equal(html.includes('500'), false, '500 must never appear literally — that would be the undivided minor-unit amount');
+	assert.equal(html.includes('1,200'), true, 'JPY 1200 stays 1,200 — a zero-decimal currency is not divided again');
+	assert.equal(html.includes('12'), false, '12 must never appear — that would be 1200 wrongly divided by 100');
 });
 
 test('membership: changing the facts changes ONLY the body', async () => {
