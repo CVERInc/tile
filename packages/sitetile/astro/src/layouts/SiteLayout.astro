@@ -522,7 +522,7 @@ const canonicalRedirectParams = String(meta['blog-canonical-redirects'] || '')
 // full-width overlay whose island lazily fetches /search-index.json and filters it
 // client-side. Absent → zero button, zero overlay, zero script (output stays
 // byte-identical). All copy comes from frontmatter (localizable), no station
-// literals. XSS-safe: every field renders through Astro auto-escaping / the island's
+// literals. script-injection-safe: every field renders through Astro auto-escaping / the island's
 // textContent — no set:html of post data anywhere.
 const blogSearch = blogSearchOn(meta) && hasBlog;
 const searchLabel = (meta['blog-search-label'] ? String(meta['blog-search-label']).trim() : '') || 'Search';
@@ -564,7 +564,7 @@ const themeToggle = colorScheme === 'toggle';
 //     isn't re-prompted across pages (the live Wix `ageConfirmed` behaviour a
 //     pure-CSS gate must otherwise degrade on). No-flash: a HEAD script sets the
 //     reveal attribute before first paint when already confirmed.
-// XSS-SAFE by construction: every field is rendered through Astro's auto-escaping
+// script-injection-safe by construction: every field is rendered through Astro's auto-escaping
 // {expr}/attr interpolation — no set:html of author copy anywhere.
 // OPT-IN: absent → nothing renders and no script ships (every other site/page
 // unaffected). GENERIC: all copy + URLs come from frontmatter, no station literals —
@@ -607,7 +607,13 @@ const ageGateLines = (s) => String(s || '').split('\\n');
 // posted on socials) yet the renderer emitted none of it before — a real gap, not chrome.
 const absUrl = (u) => (u && Astro.site ? new URL(u, Astro.site).href : u);
 const description = meta.description ? String(meta.description).trim() : '';
-const authoredShareImage = String(meta['share-image'] || meta['og-image'] || '').trim();
+// round 5 (R4-P3-1): `share-image:`/`og-image:` is a raw frontmatter destination reaching a live
+// <meta property=og:image>/<meta name=twitter:image> with no gate — `absUrl` only makes a relative
+// path absolute, it does not touch a value that already carries its own scheme (`new URL('javascript:x', base)`
+// resolves to `javascript:x` unchanged), so a disallowed scheme survived straight through. safeSrc
+// shares the same policy every image consumer in this file already uses (site-logo/footer-logo,
+// above) — gated once here, at the source, same as those.
+const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'] || '').trim()) || '';
 // `og-cards: true` in _site.md → every page gets a generated link-preview card at a path derived
 // from its own URL. The PNG does not exist yet at this point: it is rendered from THIS html after
 // the build (packages/sitetile/og/build-og.mjs), which is why the path has to be derivable from the

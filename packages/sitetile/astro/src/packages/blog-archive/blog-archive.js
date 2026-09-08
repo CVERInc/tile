@@ -21,7 +21,7 @@
 // and sit on small corpora, so they're not phantoms; this island only owns the counted,
 // full-history sidebar deep links.
 //
-// XSS-safe by construction: every cell is built with createElement + textContent (never
+// script-injection-safe by construction: every cell is built with createElement + textContent (never
 // innerHTML / set:html), so a post title/tag carrying markup renders as literal text — the
 // same discipline as blog-search.js and the age-gate island.
 (function () {

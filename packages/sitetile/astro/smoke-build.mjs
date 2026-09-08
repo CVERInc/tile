@@ -22,7 +22,10 @@
 // client JS must be added here CONSCIOUSLY, with its doctrine, or the build goes red.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs';
+import {
+  copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
+  cpSync, mkdirSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -260,28 +263,249 @@ function claimedIcons() {
 // the page, and it must NOT trip this check for the check to be honest — see the "prose does not
 // count" test in the checks list).
 const DISALLOWED_SCHEME_RE = /^\s*(javascript:|vbscript:|data:text\/html|data:image\/svg\+xml)/i;
+// round 5 (R4-P3-4): the scan used to test the RAW attribute text — a scheme obfuscated by HTML
+// entities (`javascript&#58;alert(1)`, the fixture's OWN deliberately-carried payload) or by a
+// literal tab/CR/LF inside the scheme name (both defeat a naive substring test and both still
+// parse to `javascript:` per the URL spec — the exact reasoning isSafeHref's own header gives for
+// entity-decoding before its scheme check) survived the scan silently: "under a gate regression
+// the scan would report clean on the very payload the fixture was built to carry." Decoding the
+// SAME handful of entities isSafeHref decodes (numeric + the 5 named ones), and stripping the 3
+// ASCII whitespace bytes a URL parser strips from a scheme, before the prefix test, closes that —
+// this is the SCAN reaching parity with the thing it is scanning FOR, not a new policy.
+function schemeLooksDisallowed(v) {
+  const s = String(v == null ? '' : v)
+    .replace(/&#x([0-9a-fA-F]+);?/g, (m, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return m; } })
+    .replace(/&#(\d+);?/g, (m, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return m; } })
+    .replace(/&(amp|lt|gt|quot|apos);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e]))
+    .replace(/[\t\r\n]/g, '');
+  return DISALLOWED_SCHEME_RE.test(s);
+}
 function disallowedSchemeHits(h) {
   const hits = [];
-  // href=/src=/action=/srcset= — the literal sinks the R3 sweep grepped for — PLUS
-  // data-cart-href, the data attribute R3-P2-1 named as invisible to that literal grep (it is
-  // consumed by header-actions-cart.js's `window.location.href = href`, a script-execution
-  // sink for a `javascript:` value exactly like a live `href`).
+  // href=/src=/action=/data-cart-href — the literal sinks the R3 sweep grepped for.
+  //
+  // round 5 (R4-P3-4): the ORIGINAL scan used `exec` once per tag — only the FIRST matching
+  // attribute was ever tested, so `<a src="/ok" href="javascript:void(0)">` would have been MISSED
+  // (latent: no tag in this renderer's output carries two of these attributes today, but the shape
+  // — "an existence check that stops at the first match" — is exactly this file's own review
+  // vocabulary). Looped with `/g` so every occurrence in a tag is tested, not just the first.
+  const attrRe = /\b(?:href|src|action|data-cart-href)="([^"]*)"/g;
   for (const tag of h.match(/<[a-zA-Z][^>]*>/g) || []) {
-    const m = /\b(?:href|src|action|srcset|data-cart-href)="([^"]*)"/.exec(tag);
-    if (m && DISALLOWED_SCHEME_RE.test(m[1])) hits.push(tag.slice(0, 160));
+    attrRe.lastIndex = 0;
+    let am;
+    while ((am = attrRe.exec(tag))) if (schemeLooksDisallowed(am[1])) hits.push(tag.slice(0, 160));
+    // srcset="…, …" — round 5 (R4-P3-4): a comma-separated list of "<url> <descriptor>"
+    // candidates. The old `^`-anchored whole-value test could only ever see a hostile FIRST
+    // candidate; a later one needs each candidate split out and tested on its own. (No `srcset`
+    // is emitted by this renderer today — latent, same as the /g fix above, closed while here.)
+    const sm = /\bsrcset="([^"]*)"/.exec(tag);
+    if (sm) for (const cand of sm[1].split(',')) if (schemeLooksDisallowed(cand.trim())) hits.push(tag.slice(0, 160));
+    // <meta property=og:image|twitter:image|http-equiv=refresh content="…"> — round 5 (R4-P3-1):
+    // a DIFFERENT attribute name than the href/src/action/data-cart-href set above, so it needed
+    // its own check, not a widened alternation (a `content=` on a non-meta tag is not a sink).
+    if (/^<meta\b/i.test(tag)) {
+      const cm = /\bcontent="([^"]*)"/.exec(tag);
+      if (cm && schemeLooksDisallowed(cm[1])) hits.push(tag.slice(0, 160));
+    }
+    // style="…url(…)…" — round 5 (R4-P3-4/R4-P3-6): the hero `bg=`/`enter` sink. Matches whether
+    // the URL is quoted (this round's own cssUrlString fix) or bare, so the scan survives its own
+    // fix rather than being written to only recognise the pre-fix shape.
+    const stm = /\bstyle="([^"]*)"/.exec(tag);
+    if (stm) {
+      const urlRe = /url\(\s*(['"]?)([^'")]*)/gi;
+      let um;
+      while ((um = urlRe.exec(stm[1]))) if (schemeLooksDisallowed(um[2])) hits.push(tag.slice(0, 160));
+    }
   }
   // Inline <script> assignments to `location`/`location.href`/a bare `.href` — the same DOM-sink
   // class as data-cart-href, checked directly in case a future script reads a different
   // attribute the same unsafe way.
   const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
-  let sm;
-  while ((sm = scriptRe.exec(h))) {
+  let sm2;
+  while ((sm2 = scriptRe.exec(h))) {
     const assignRe = /(?:location(?:\.href)?|\.href)\s*=\s*([`'"])((?:(?!\1)[\s\S])*)\1/g;
     let am;
-    while ((am = assignRe.exec(sm[1]))) if (DISALLOWED_SCHEME_RE.test(am[2])) hits.push('<script> ' + am[0].slice(0, 160));
+    while ((am = assignRe.exec(sm2[1]))) if (schemeLooksDisallowed(am[2])) hits.push('<script> ' + am[0].slice(0, 160));
   }
   return hits;
 }
+
+// round 5 (R4-P2-1): disallowedSchemeHits used to be called on exactly ONE fixture page
+// (scheme-check.md) — the gate that exists to prevent recurrence of R4-P1-1's class was
+// structurally unable to observe it, because R4-P1-1 lived on the BLOG page family the scan never
+// looked at. Runs the same scan over EVERY built HTML page (the same `pages` list auditScripts()
+// already walks — one source of "every page this build produced", not a second one that can drift
+// from it) plus the non-HTML outputs that carry URLs at all: rss.xml/sitemap.xml (text nodes, not
+// HTML attributes — a URL-shaped substring test, not the tag-anchored scan above) and the archive
+// island's own client corpus (search-index.json, reef-posts.json — both plain JSON, parsed and
+// read as data, not scanned as text, since a JSON string value can legitimately CONTAIN the
+// substring "javascript:" — e.g. an excerpt that quotes it — without that being a live sink).
+function siteWideSchemeHits(distDir, allPages, rssBody, sitemapBody) {
+  const hits = [];
+  for (const page of allPages) {
+    for (const hit of disallowedSchemeHits(readFileSync(page, 'utf8'))) hits.push(`${page.slice(distDir.length + 1)}: ${hit}`);
+  }
+  for (const [label, body, tag] of [['rss.xml', rssBody, 'link'], ['sitemap.xml', sitemapBody, 'loc']]) {
+    const re = new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g');
+    let m;
+    while ((m = re.exec(body || ''))) if (/^\s*(javascript:|vbscript:)/i.test(m[1])) hits.push(`${label}: <${tag}>${m[1].slice(0, 160)}`);
+  }
+  for (const file of ['search-index.json', 'reef-posts.json']) {
+    const p = join(distDir, file);
+    if (!existsSync(p)) continue;
+    let rows;
+    try { rows = JSON.parse(readFileSync(p, 'utf8')); } catch { hits.push(`${file}: not valid JSON`); continue; }
+    for (const row of Array.isArray(rows) ? rows : []) {
+      for (const v of [row.u, row.i, row.url]) if (v != null && /^\s*(javascript:|vbscript:)/i.test(String(v))) hits.push(`${file}: ${JSON.stringify(row).slice(0, 160)}`);
+    }
+  }
+  return hits;
+}
+
+// round 5 (R4-P2-1): run the widened, site-wide scan ONCE against the primary build, before the
+// `checks` array below (each check just reads this precomputed result — re-running a full-site
+// regex sweep per assertion would be wasteful, and the failure list should be printed once, not
+// once per assertion that reads it).
+const siteWideHits = siteWideSchemeHits(DIST, pages, rss, sitemapXml);
+
+// round 5 (R4-P1-1/R4-P2-1): a SEPARATE, isolated Astro build proving the fix on the fields
+// R4-P1-1 actually named — `permalink:`, `blog-url-pattern:`, `blog-path:`, plus the term-archive
+// `blog-category-base:`/`blog-tag-base:` this round found were the SAME shape (see blog.mjs's
+// categoryBase()/tagBase()). These are SITE-level (`_site.md`) fields, so they cannot be exercised
+// as a per-page override the way scheme-check.md's other fields are (page frontmatter overrides
+// site frontmatter for THAT page only — these fields apply to the whole blog at once, which is
+// the R4-P1-1 finding's own point: "one hostile post poisons other posts' pages, the feed, the
+// sitemap and the client corpus"). A second astro build, into its own isolated content/blog/
+// fixture and its own outDir, is the only way to exercise that without the hostile config leaking
+// onto the primary build's ~130 other assertions.
+//
+// The fixture directory is rsync'd from THIS `astro/` tree (excluding node_modules/.astro/
+// dist-*/the fixture dir itself) rather than hand-duplicated, so it can never silently drift from
+// the real component tree; node_modules is a SYMLINK (never copied — same install, no second
+// `npm install`, and this build never writes into it) back to the real one.
+function buildHostileBlogFixture() {
+  // A SIBLING of `astro/` (not nested inside it — cpSync refuses to copy a directory into its own
+  // subtree, and the astro.config.mjs aliases are relative to the config file's OWN location, so
+  // this has to sit at the SAME depth under packages/sitetile/ that astro/ itself does for
+  // `../site-core.js` etc. to resolve to the same real files).
+  const HDIR = join(HERE, '..', '.smoke-hostile-blog');
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog)(?:[\\/]|$)/;
+  rmSync(HDIR, { recursive: true, force: true });
+  cpSync(HERE, HDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(HDIR, 'node_modules'), 'dir');
+
+  // A minimal, self-contained site — safe `blog-path` (so a reader can tell "reset to nothing
+  // configured" apart from "kept the site's own real base"), hostile `blog-url-pattern` (poisons
+  // EVERY post, not just the one with its own override — the R4-P1-1 finding's own "one hostile
+  // post poisons other posts' pages" shape, here from the site config instead), hostile
+  // `blog-category-base`/`blog-tag-base` with the term routes turned on, and `blog-search: true`
+  // so search-index.json actually carries content (the primary build's own search stays off,
+  // so this is the one build that exercises that file with real rows).
+  rmSync(join(HDIR, 'content'), { recursive: true, force: true });
+  mkdirSync(join(HDIR, 'content'), { recursive: true });
+  writeFileSync(join(HDIR, 'content', '_site.md'), `---
+sitetile-page: _site
+title: Hostile blog site
+lang: en-US
+blog-path: /diary
+blog-url-pattern: javascript:void(0)#%postname%
+blog-category-routes: true
+blog-tag-routes: true
+blog-category-base: javascript:void(0)
+blog-tag-base: javascript:void(0)
+blog-search: true
+---
+`, 'utf8');
+  writeFileSync(join(HDIR, 'content', 'home.md'), `---
+sitetile-page: home
+title: Hostile blog site — home
+lang: en-US
+---
+
+## Home
+%% sitetile: prose %%
+Home page body.
+`, 'utf8');
+
+  rmSync(join(HDIR, 'blog'), { recursive: true, force: true });
+  mkdirSync(join(HDIR, 'blog'), { recursive: true });
+  // The permalink override — R4-P1-1's "concrete failing input #1".
+  writeFileSync(join(HDIR, 'blog', 'hostile-permalink-post.md'), `---
+title: Hostile permalink post
+pubDate: 2026-01-01
+permalink: javascript:void(0)
+categories: [team]
+tags: [news]
+---
+
+Body text for the hostile-permalink post.
+`, 'utf8');
+  // No permalink of its own — this post's URL comes ENTIRELY from the site's own (hostile)
+  // blog-url-pattern, proving the site-level poisoning reaches a post that did nothing wrong.
+  writeFileSync(join(HDIR, 'blog', 'safe-post.md'), `---
+title: Safe control post
+pubDate: 2026-01-02
+categories: [team]
+tags: [news]
+---
+
+Body text for the safe control post — no permalink override of its own.
+`, 'utf8');
+  // round 5 (R4-P3-2): a post's featured image is its FIRST body image, extracted straight off a
+  // markdown regex with no gate — reached a live blog-card <img src> even though the SAME image,
+  // in the SAME post's body, is refused by imgTag/isSafeImageSrc. Isolated here (rather than the
+  // primary build) because it needs its own post, and this fixture's small, purpose-built corpus
+  // makes "the entry still renders, only the image drops" unambiguous to assert.
+  writeFileSync(join(HDIR, 'blog', 'svg-image-post.md'), `---
+title: SVG featured image post
+pubDate: 2026-01-03
+categories: [team]
+tags: [news]
+---
+
+![SVG featured](data:image/svg+xml;base64,PHN2Zz4=)
+
+Body text for the SVG-featured-image post.
+`, 'utf8');
+
+  const HDIST = join(HDIR, 'dist-hostile-blog');
+  execFileSync('npx', ['astro', 'build', '--outDir', HDIST], {
+    cwd: HDIR, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: 'hostile-blog-smoke', PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  });
+  return HDIST;
+}
+
+console.log('▸ astro build → .smoke-hostile-blog/dist-hostile-blog/ (R4-P1-1: site-level blog-path/blog-url-pattern/category-tag-base poisoning)…');
+const HDIST = buildHostileBlogFixture();
+// round 5: a two-arm counterfactual (identity-swap safeHref/safeSrc) doesn't just make an
+// assertion go red here — it makes postUrl() return the raw hostile permalink VERBATIM, which
+// getStaticPaths() then builds as a literal directory name (`javascript:void(0)/index.html`, the
+// review's own "a directory literally named javascript:void(0)/ is emitted" finding) INSTEAD OF
+// `diary/hostile-permalink-post/`. A plain readFileSync on the expected path then throws ENOENT
+// and crashes the whole process before a single assertion below gets to run — losing the primary
+// build's ~150 assertions' worth of evidence along with it. `readOrEmpty` turns that crash into an
+// empty string, so every check that reads it simply goes red (the intended, legible failure mode
+// for a counterfactual arm), and the checks that don't depend on the hostile build still run.
+const readOrEmpty = (p) => { try { return readFileSync(p, 'utf8'); } catch { return ''; } };
+const hostileIndex = readOrEmpty(join(HDIST, 'diary', 'index.html'));
+const hostilePermalinkPost = readOrEmpty(join(HDIST, 'diary', 'hostile-permalink-post', 'index.html'));
+const hostileSafePost = readOrEmpty(join(HDIST, 'diary', 'safe-post', 'index.html'));
+const hostileCategoryArchive = readOrEmpty(join(HDIST, 'category', 'team', 'index.html'));
+const hostileTagArchive = readOrEmpty(join(HDIST, 'tag', 'news', 'index.html'));
+const hostileRss = readOrEmpty(join(HDIST, 'rss.xml'));
+const hostileSitemap = readOrEmpty(join(HDIST, 'sitemap.xml'));
+function findHostilePages(dir) {
+  const out = [];
+  (function walk(d) {
+    for (const e of readdirSync(d)) {
+      const p = join(d, e);
+      if (statSync(p).isDirectory()) walk(p); else if (e === 'index.html') out.push(p);
+    }
+  })(dir);
+  return out;
+}
+const hostileSiteWideHits = siteWideSchemeHits(HDIST, findHostilePages(HDIST), hostileRss, hostileSitemap);
 
 const checks = [
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
@@ -849,6 +1073,82 @@ const checks = [
     const m = /<section class="st-hero st-full-bleed" id="s9-background-image"[^>]*>/.exec(schemeCheck);
     return !!m && !m[0].includes('style=');
   }],
+  // round 5 (R4-P3-6): a SAFE bg= must still emit a QUOTED, CSS-escaped url() — proves the fix
+  // did not just make disallowed schemes disappear, it changed what a SAFE one looks like too.
+  ['scheme-check: hero bg= with a SAFE destination emits a quoted url() (control for R4-P3-6 — a bare url() is the CSS-declaration-injection shape)', () =>
+    /id="s\d+-safe-background-image-control"[^>]*style="background-image:url\(&quot;\/safe-bg\.jpg&quot;\)"/.test(schemeCheck)],
+  // round 5 (R4-P3-6): the review's own `)`/`;` CSS-declaration-injection payload, reproduced —
+  // the ENTIRE value, `)`/`;` included, must stay inside the one quoted CSS string: the style
+  // attribute's value must be EXACTLY `background-image:url("…")`, nothing after the closing
+  // quote/paren, so no second declaration can have opened.
+  ['🔴 scheme-check: hero bg= cannot inject a CSS declaration via `)`/`;` in an otherwise-safe URL', () => {
+    const m = /<section class="st-hero st-full-bleed" id="s\d+-css-injection-guard"[^>]*\sstyle="([^"]*)"/.exec(schemeCheck);
+    return !!m && m[1] === 'background-image:url(&quot;/safe-bg.jpg);position:fixed;inset:0;background:red&quot;)';
+  }],
+  // round 5 (R4-P3-1): share-image:/og-image: reaching og:image/twitter:image with no gate.
+  ['🔴 scheme-check: share-image with a disallowed scheme emits no og:image/twitter:image meta at all', () =>
+    !/<meta property="og:image"/.test(schemeCheck) && !/<meta name="twitter:image"/.test(schemeCheck)
+    && /<meta name="twitter:card" content="summary">/.test(schemeCheck)],
+  // round 5 (R4-P3-2): a blog card's featured image is gated at parsePost's own declaration —
+  // covered below by the dedicated blog/svg-image-post.md fixture, not here (this page carries no
+  // blog corpus of its own).
+  // round 5 (R4-P1-1 "6 of 14" / R4-P3-5): the coral types scheme-check.md did not yet cover —
+  // cta/social/timeline/faq/prose/embed, closing 8/14 → 14/14.
+  ['scheme-check: cta — the hostile primary button (button=) drops to plain text, the safe secondary (a body link paragraph) stays a live <a> (control)', () =>
+    /<span class="st-cta-btn st-cta-btn-primary">Hostile CTA<\/span>/.test(schemeCheck)
+    && /<a class="st-cta-btn st-cta-btn-secondary" href="\/safe-cta"[^>]*>Safe CTA/.test(schemeCheck)],
+  ['scheme-check: social — the hostile link (first, primary) drops, the safe sibling (second, secondary) stays live (control)', () =>
+    /<span class="st-social-btn st-social-btn-primary">Bad social<\/span>/.test(schemeCheck)
+    && /<a class="st-social-btn st-social-btn-secondary" href="\/safe-social"[^>]*>Safe social/.test(schemeCheck)],
+  ['scheme-check: timeline renders with no gated destination of its own (structural coral — no href/src in its own template)', () =>
+    /<p class="st-tl-year"[^>]*>2026<\/p>/.test(schemeCheck)],
+  ['scheme-check: faq renders (structural coral — no href/src in its own template)', () =>
+    /<summary class="st-faq-q"/.test(schemeCheck)],
+  ['scheme-check: prose — a trailing hostile link-only paragraph drops to plain text, the safe sibling in the SAME paragraph stays a live CTA button (control)', () =>
+    /<span class="st-prose-btn st-prose-btn-primary">Bad prose link<\/span>/.test(schemeCheck)
+    && /<a class="st-prose-btn st-prose-btn-secondary" href="\/safe-prose"[^>]*>Safe prose/.test(schemeCheck)],
+  ['scheme-check: embed — the accepted, documented residual (raw HTML passthrough is embed\'s own doctrine, not a gap this fix closes)', () =>
+    /class="st-embed"/.test(schemeCheck) && /Embed passthrough control\./.test(schemeCheck)],
+  // round 5 (R4-P2-1): the widened scan run over EVERY page the primary build produced, plus
+  // rss.xml/sitemap.xml/search-index.json/reef-posts.json — not just scheme-check.md. This is the
+  // assertion that would have caught R4-P1-1 (the blog family was never on scheme-check.md and
+  // never will be — it needs real posts, which is what the hostile-blog-site build below is for;
+  // this one instead proves the WIDENED SCAN ITSELF doesn't introduce a false positive against the
+  // primary build's own ~30 pages of otherwise-legitimate content).
+  ['🔴 site-wide (primary build): disallowedSchemeHits() finds zero hits across every built page + rss.xml + sitemap.xml + search-index.json + reef-posts.json', () => siteWideHits.length === 0],
+  // -- round 5 (R4-P1-1): the isolated hostile-blog-site build — permalink/blog-url-pattern/
+  // blog-path/blog-category-base/blog-tag-base, the SITE-LEVEL fields a single-page fixture
+  // cannot exercise (see buildHostileBlogFixture's own header for why this needed a second build).
+  ['🔴 hostile-blog-site: zero disallowedSchemeHits across every page + rss.xml + sitemap.xml + search-index.json + reef-posts.json', () => hostileSiteWideHits.length === 0],
+  ['hostile-blog-site: the blog index is reachable at the SAFE configured blog-path (/diary), not reset by the hostile blog-url-pattern', () =>
+    existsSync(join(HDIST, 'diary', 'index.html'))],
+  ['🔴 hostile-blog-site: a post whose OWN permalink is javascript:void(0) gets a real internal URL, not the raw scheme (R4-P1-1 concrete input #1)', () =>
+    /<a class="bl-entry-link" href="\/diary\/hostile-permalink-post">/.test(hostileIndex)
+    && !hostileIndex.includes('javascript:')],
+  ['🔴 hostile-blog-site: a SIBLING post with NO permalink override of its own is ALSO poisoned by the site-wide blog-url-pattern, and ALSO degrades safely (R4-P1-1\'s "poisons every post" claim, reproduced and closed)', () =>
+    /<a class="bl-entry-link" href="\/diary\/safe-post">/.test(hostileIndex)],
+  ['🔴 hostile-blog-site: the poisoned post\'s own page — prev/next nav, breadcrumb/back-link — carries no javascript: scheme anywhere', () =>
+    !hostilePermalinkPost.includes('javascript:') && /href="\/diary\/safe-post"/.test(hostilePermalinkPost)],
+  ['🔴 hostile-blog-site: the sibling post\'s own page is equally clean', () =>
+    !hostileSafePost.includes('javascript:') && /href="\/diary\/hostile-permalink-post"/.test(hostileSafePost)],
+  ['🔴 hostile-blog-site: rss.xml carries no javascript: scheme in any <link> (R4-P1-1\'s exact `https://example.comjavascript:void(0)` failure, reproduced and closed)', () =>
+    !hostileRss.includes('javascript:')],
+  ['🔴 hostile-blog-site: sitemap.xml carries no javascript: scheme in any <loc>', () =>
+    !hostileSitemap.includes('javascript:')],
+  ['🔴 hostile-blog-site: the tag archive/chip built from a disallowed blog-tag-base resolves to the historic /tag default, not the raw scheme ("term-archive URLs")', () =>
+    /href="\/tag\/news\/"/.test(hostileIndex) && !/href="javascript/.test(hostileIndex)],
+  ['hostile-blog-site: the category archive route itself still exists at its own fixed /category/<slug>/ location (the physical route, unaffected by blog-category-base — only LINKS to it read that field)', () =>
+    existsSync(join(HDIST, 'category', 'team', 'index.html')) && /Team|team/.test(hostileCategoryArchive)],
+  ['hostile-blog-site: search-index.json (blog-search: true here) carries a safe `u` for every row', () => {
+    const rows = JSON.parse(readFileSync(join(HDIST, 'search-index.json'), 'utf8'));
+    return rows.length === 3 && rows.every((r) => typeof r.u === 'string' && !r.u.includes('javascript:'));
+  }],
+  // round 5 (R4-P3-2): the SVG-featured-image post's card must render with NO <img> at all (the
+  // gate at parsePost's own declaration means the ENTRY still shows — only the image drops).
+  ['🔴 hostile-blog-site: a post whose first body image is an SVG data: URI drops the card image entirely, everywhere the card renders (the entry itself still shows)', () =>
+    /<a class="bl-entry-link" href="\/diary\/svg-image-post">/.test(hostileIndex)
+    && !/data:image\/svg\+xml/.test(hostileIndex)
+    && !/<img class="bl-entry-img"/.test(hostileIndex)],
   // 🔴 THE CONTROL ARM (R3-P2-2's identity-swap experiment, per the review): this suite cannot
   // prove it is a check rather than a tautology from its own green run alone — round 3 measured
   // the opposite failure (13 files' worth of gates reverted to the identity function and the

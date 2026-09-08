@@ -27,6 +27,10 @@ node_modules/
 packages/sitetile/astro/dist-smoke/
 packages/sitetile/astro/dist/
 packages/sitetile/astro/.astro/
+# the smoke's SECOND, isolated build — a throwaway rsync'd copy of astro/ with its own hostile
+# content/blog fixture (site-level fields a single-page fixture can't exercise; see
+# smoke-build.mjs's buildHostileBlogFixture for why). Rebuilt every smoke run, never committed.
+packages/sitetile/.smoke-hostile-blog/
 # @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
 # somebody's site, and moves them back afterwards — including when the build throws. The directory
 # should never outlive a build; it is ignored because the one time it does (a killed process) the

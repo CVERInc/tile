@@ -143,7 +143,9 @@ test('render: each of the 5 types emits its st- section', () => {
 
 test('render: hero bg → background-image, cta param → anchor', () => {
   const html = renderSiteToHtml(parseSite(CANON));
-  assert.ok(html.includes('background-image:url(cover.jpg)'), 'hero bg');
+  // round 5 (R4-P3-6): bg= now emits a QUOTED, CSS-string-escaped url() — see cssUrlString's own
+  // comment for why an unquoted url() token was a CSS-declaration-injection sink.
+  assert.ok(html.includes('background-image:url(&quot;cover.jpg&quot;)'), 'hero bg');
   assert.ok(html.includes('<a class="st-hero-cta" href="/signup">Get started</a>'), 'hero cta anchor');
   assert.ok(html.includes('<a class="st-cta-btn st-cta-btn-primary" href="/signup">Sign up<span class="st-cta-arrow" aria-hidden="true"><span class="signet-arrow"'), 'cta button anchor carries the interactive signet-arrow (internal → right), not a static ↗ glyph');
 });

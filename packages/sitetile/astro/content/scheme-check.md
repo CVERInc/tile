@@ -14,6 +14,10 @@ header-cta: Buy now=javascript:void(0)
 header-actions: Cart=cart toggle cart
 header-actions-cart-guild: scheme-check-cart
 header-actions-cart-href: javascript:void(0)
+# round 5 (R4-P3-1): share-image:/og-image: reaching a live <meta property=og:image>/
+# <meta name=twitter:image> with no gate — absUrl only makes a relative path absolute, it does
+# not touch a value that already carries its own scheme.
+share-image: javascript:void(0)
 ---
 
 ## Contact — disallowed scheme in the form action
@@ -93,3 +97,55 @@ A disallowed scheme in `bg=` reaching a live CSS `url()` with no gate before rou
 same sink class as `logo=`/`layers=` elsewhere in this coral (found sweeping every `url(` in
 this file, not from the round 3 review). Must degrade to no background image at all, on
 both the reference renderer (site-core.js) and this Astro build.
+
+## Safe background image (control)
+%% sitetile: hero bg=/safe-bg.jpg %%
+round 5 (R4-P3-6): a SAFE `bg=` must still emit a QUOTED, CSS-string-escaped `url()` — the fix
+changed what a SAFE destination renders as too, not only what a disallowed one degrades to.
+
+## CSS injection guard
+%% sitetile: hero bg=/safe-bg.jpg);position:fixed;inset:0;background:red %%
+round 5 (R4-P3-6): the review's own reproduction — an otherwise-ALLOWED destination (a plain
+relative path) reaching an UNQUOTED CSS `url()` token, so its own `)`/`;` closed the declaration
+early and opened new ones: a full-viewport defacement primitive from a page parameter, no script
+involved. The whole value must stay inert inside one quoted CSS string now.
+
+## Call to action
+%% sitetile: cta button="Hostile CTA"→javascript:void(0) %%
+[Safe CTA](/safe-cta)
+
+The primary button (`button=`) is a disallowed scheme and must drop to plain text; the secondary
+— an ordinary body link-only paragraph — is safe (control), proving the coral did not just turn
+every button off.
+
+## Follow us
+%% sitetile: social %%
+[Bad social](javascript:evil) · [Safe social](/safe-social)
+
+Same button-row helper as `cta` (`linkButtonsHtml`), reached through a DIFFERENT coral and body
+convention (a links-only paragraph, not a `button=` param) — proving the gate lives on the shared
+helper, not duplicated per caller.
+
+## Company history
+%% sitetile: timeline %%
+### 2026
+No href/src of its own — a structural coral (heading + prose only), listed here purely to reach
+14/14 KNOWN_TYPES coverage (R4-P3-5).
+
+## Frequently asked questions
+%% sitetile: faq %%
+### Does this coral emit a destination?
+No href/src of its own either — same reason as `timeline`, above.
+
+## Closing thoughts
+%% sitetile: prose %%
+Ordinary prose paragraph, unaffected by any of this.
+
+[Bad prose link](javascript:evil) · [Safe prose](/safe-prose)
+
+## Embed passthrough (accepted residual)
+%% sitetile: embed %%
+Embed passthrough control. `embed` is the ONE documented raw-HTML escape hatch
+(`Embed.astro`'s own `set:html={section.body}`) — `sweep2` reports it "STILL UNSAFE" by
+accepted policy, not by an omission this round closes. Kept as plain text here (never a working
+payload) so this fixture's presence at 14/14 does not itself carry one.

@@ -9,7 +9,7 @@
 // boundaries to guess) and Latin accents fold (café == cafe). Honest scope: substring,
 // not fuzzy / stemming / pinyin — enough for a blog, on par with live Blogger's own search.
 //
-// XSS-safe by construction: results are built with createElement + textContent ONLY —
+// script-injection-safe by construction: results are built with createElement + textContent ONLY —
 // never innerHTML / set:html — so a post title carrying markup renders as literal text
 // (the same discipline as the age-gate island).
 (function () {

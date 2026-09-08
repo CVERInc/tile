@@ -1,16 +1,21 @@
 ---
-import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml, safeSrc } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml, safeSrc, cssUrlString } from '@sitetile';
 const { section } = Astro.props;
 const pm = parseParams(section.params);
 // round 4: `bg=` is an author-controlled background-image destination reaching a live CSS
 // `url()` with no gate — the same sink class as `logo=`/`layers=` below, gated the same way
 // (`safeSrc`, since this is an image destination). A disallowed scheme drops the background
-// entirely rather than reaching `url(javascript:…)`/`url(data:text/html,…)`. (Astro
-// attribute-escapes the `style` value on output, so this closes the scheme; it does not further
-// sanitize `)`/`;` inside an already-safe URL, which stays contained to this one element's own
-// inline style — same residual as the video-poster cross-origin fetch this file already accepts.)
+// entirely rather than reaching `url(javascript:…)`/`url(data:text/html,…)`.
+// round 5 (R4-P3-6): a SAFE destination still isn't a SAFE `url()` token — an unquoted `url()`
+// has no way to escape `)`/`;`, so `/a.png);position:fixed;…` closed the declaration and opened
+// arbitrary new ones in this element's own inline style (a defacement/clickjacking primitive,
+// no script involved). `cssUrlString` quotes it and CSS-escapes exactly the two characters a
+// quoted CSS string treats specially; Astro's own attribute escaping (which the report measured
+// does escape `"`/`&`, only not `>`) still runs on top and is unaffected — the browser decodes
+// HTML entities in the attribute value before the CSS parser ever sees it, so the quotes/escapes
+// built here survive to the CSS parser intact.
 const bgOk = pm.bg ? safeSrc(pm.bg) : null;
-const style = bgOk ? `background-image:url(${bgOk})` : undefined;
+const style = bgOk ? `background-image:url("${cssUrlString(bgOk)}")` : undefined;
 const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image variant (round avatar vs uncropped logo)
 // `layout` (e.g. split) = OPT-IN columned hero (eyebrow + lead + button row + side art). Absent →
 // the legacy hero (h1 + body + single `cta=`), kept byte-identical so an existing logo hero is untouched.
@@ -108,7 +113,7 @@ const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm[
   </section>
 ) : (
   <section class="st-hero st-full-bleed" id={section.id} data-media={media} data-enter={enter ? '' : undefined} style={style}>
-    {enter && bgOk && <div class="st-hero-bg" aria-hidden="true" style={`background-image:url(${bgOk})`} />}
+    {enter && bgOk && <div class="st-hero-bg" aria-hidden="true" style={`background-image:url("${cssUrlString(bgOk)}")`} />}
     <h1 set:html={inlineHtml(section.title)} />
     <Fragment set:html={bodyHtml(section.body)} />
     <Fragment set:html={ctaHtml(pm.cta, 'st-hero-cta')} />

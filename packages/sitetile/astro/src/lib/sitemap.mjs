@@ -47,11 +47,31 @@ export function contentUrls(glob, siteMetaObj = {}, isPage = () => true) {
   return [...new Set(out)].sort();
 }
 
+// round 5 (R4-P1-1, "term-archive URLs"): `blog-tag-base`/`blog-category-base` are documented
+// site-level fields, read verbatim below into a `<loc>` this file emits — the same shape as every
+// other R4-P1-1 finding. This module deliberately imports NO `@sitetile` alias (see the file's own
+// header — plain `node` must be able to test it), so it cannot call site-core.js's safeHref/
+// isSafeHref the way blog.mjs's categoryBase()/tagBase() now do for the SAME two fields. A plain
+// scheme check, no entity-decoding pass, is the right-sized policy for THIS value specifically —
+// unlike a markdown link/image destination, a term-archive base is never author-typed through
+// cssmd's entity pipeline, so there is no entity-obfuscated form of it to catch. Same allowlist as
+// isSafeHref; kept in sync by hand since the two can't share code without breaking this file's own
+// no-alias contract.
+const SITEMAP_SAFE_BASE_URL = 'http://sitetile.invalid/';
+const SITEMAP_SAFE_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:', 'ftp:', 'ftps:']);
+function safeBasePath(raw, fallback) {
+  try {
+    return SITEMAP_SAFE_SCHEMES.has(new URL(raw, SITEMAP_SAFE_BASE_URL).protocol) ? raw : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** Tag archive paths — only when the site turned the routes on, because otherwise they 404. */
 export function tagUrls(postList, siteMetaObj = {}, slugMap = {}) {
   const on = siteMetaObj['blog-tag-routes'] != null && String(siteMetaObj['blog-tag-routes']) !== 'false';
   if (!on) return [];
-  const base = String(siteMetaObj['blog-tag-base'] || '/tag').replace(/\/$/, '');
+  const base = safeBasePath(String(siteMetaObj['blog-tag-base'] || '/tag').replace(/\/$/, ''), '/tag');
   const seen = new Set();
   for (const p of postList) for (const t of p.tags || []) if (t) seen.add(slugMap[t] || t);
   return [...seen].sort().map((slug) => `${base}/${encodeURI(slug)}/`);
@@ -65,7 +85,7 @@ export function tagUrls(postList, siteMetaObj = {}, slugMap = {}) {
 export function categoryUrls(postList, siteMetaObj = {}) {
   const on = siteMetaObj['blog-category-routes'] != null && String(siteMetaObj['blog-category-routes']) !== 'false';
   if (!on) return [];
-  const base = String(siteMetaObj['blog-category-base'] || '/category').replace(/\/$/, '');
+  const base = safeBasePath(String(siteMetaObj['blog-category-base'] || '/category').replace(/\/$/, ''), '/category');
   const seen = new Set();
   for (const p of postList) for (const c of p.categories || []) if (c) seen.add(c);
   return [...seen].sort().map((slug) => `${base}/${encodeURI(slug)}/`);

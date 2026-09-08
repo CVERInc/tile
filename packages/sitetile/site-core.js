@@ -712,6 +712,29 @@ function safeSrc(dest) {
 // isSafeHref/isSafeImageSrc already performed — before escaping, so both renderers agree.
 function escHrefAttr(dest) { return escAttr(decodeEntitiesOnce(dest)); }
 
+// round 5 (R4-P3-6): a scheme-gated `bg=`/background destination still reached CSS as an
+// UNQUOTED `url(…)` token — `escAttr` only makes the value safe as an *HTML attribute*, it does
+// nothing for the *CSS* grammar nested inside that attribute, and an unquoted `url()` token has
+// no way to escape a `)` or `;` at all: `/a.png);position:fixed;inset:0;…` closes the url() and
+// the declaration early, then opens arbitrary new declarations in the same inline style — a
+// full-viewport defacement/clickjacking primitive from a page parameter, with no script involved.
+// Fix: never emit an unquoted url() for an author-controlled destination. Quote it, and CSS-escape
+// ONLY the two characters a quoted CSS string treats specially (backslash, then the quote itself —
+// order matters: escaping backslash first stops the quote-escape's inserted backslash from being
+// re-escaped) plus a raw line break (illegal inside a CSS string; escaped to the CSS char escape
+// `\A` so it can never terminate the string early). Every other byte — `)`, `;`, whitespace — is
+// inert once inside the quotes, so nothing after this string can start a new declaration. The
+// *HTML* attribute escaping (escAttr, applied by every caller after this) still runs on top and
+// is unaffected: a browser decodes HTML entities in an attribute value BEFORE handing it to the
+// CSS parser, so `&quot;` round-trips back to `"` first and the CSS parser sees exactly the
+// quoted string built here.
+function cssUrlString(u) {
+  return String(u == null ? '' : u)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r\n|[\r\n]/g, '\\A ');
+}
+
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
 // <img>. Markdown has no video literal, and sitetile refuses raw-HTML islands (bodyHtml escapes them),
 // so this IS the platform's video primitive — the src extension is the signal. Needed by Wix/Blogger
@@ -730,6 +753,13 @@ const RE_VIDEO_SRC = /\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i;
 // whose escaping state varies by caller (some already cssmd-escaped, some raw markdown text).
 function imgTag(alt, src) {
   if (!isSafeImageSrc(src)) return '';
+  // round 5 (R4-P3-3): every OTHER already-gated href/src emitter in this file switched to
+  // escHrefAttr (decode-once, THEN escape) so this renderer would agree byte-for-byte with the
+  // Astro layer's safeSrc()-fed templates — imgTag was the one left behind, still escaping the
+  // RAW (undecoded) src even though isSafeImageSrc just decoded it once to validate the scheme.
+  // Not a security defect either direction (the raw form is always the LESS decoded one, so it
+  // can never carry a colon the validated form lacked), but it is a real divergence
+  // (`/a&#58;b.png` rendered as literal `&amp;#58;b.png` here, `/a:b.png` on the Astro side).
   if (RE_VIDEO_SRC.test(String(src || ''))) {
     const hasPoster = alt && /^https?:\/\/|^\//.test(alt);
     const poster = hasPoster ? ' poster="' + attrq(alt) + '"' : '';
@@ -739,9 +769,9 @@ function imgTag(alt, src) {
     // settle, for nothing a reader could see. Without a poster, `metadata` still earns its keep —
     // it is what gives the player a first frame instead of a black rectangle.
     const preload = hasPoster ? 'none' : 'metadata';
-    return '<video class="st-video" src="' + attrq(src) + '"' + poster + ' controls playsinline preload="' + preload + '"></video>';
+    return '<video class="st-video" src="' + escHrefAttr(src) + '"' + poster + ' controls playsinline preload="' + preload + '"></video>';
   }
-  return '<img class="st-img" src="' + attrq(src) + '" alt="' + attrq(alt) + '" loading="lazy" decoding="async">';
+  return '<img class="st-img" src="' + escHrefAttr(src) + '" alt="' + attrq(alt) + '" loading="lazy" decoding="async">';
 }
 
 // A code SPAN's [start, end) byte range in a RAW (unescaped) fragment — the same delimiter rule
@@ -957,12 +987,12 @@ function inlineHtml(text, opts) {
   });
   // Allowlisted inline <small> (no attributes) — the one raw tag legacy IRs use for muted fine
   // print (e.g. an "updated on …" stamp). escapeInline escaped it to `&lt;small&gt;`; re-emit
-  // the bare tag so it renders small instead of showing literally. XSS-safe: no attrs, no other tag.
+  // the bare tag so it renders small instead of showing literally. script-injection-safe: no attrs, no other tag.
   s = s.replace(/&lt;(\/?)small&gt;/g, '<$1small>');
   // Allowlisted <br> (no attributes, self-closing or not) — a heading/lead authored with a forced
   // line break (e.g. a hero title that's "Line one,<br>Line two,<br>Line three!" on live). Same
   // escape→re-emit trick as <small>. General: any inlineHtml call site (h1, eyebrow, prose spans)
-  // gets real line breaks for free. XSS-safe: no attrs, no other tag.
+  // gets real line breaks for free. script-injection-safe: no attrs, no other tag.
   s = s.replace(/&lt;br\s*\/?&gt;/g, '<br>');
   return s;
 }
@@ -1026,7 +1056,7 @@ const isHeadlessTableStart = (lines, i) =>
 // supports (a) `<br>` in-cell line breaks (the GFM-in-cell convention) and (b) a BULLETED LIST inside
 // a cell — a `<br>`-joined run where EVERY segment leads with a list marker (`-`/`*`/`+`/`・`/`•`) becomes
 // a real `<ul class="st-cell-list">` (a corporate profile's 事業内容 value is such a list). Non-list cells just
-// inline each `<br>`-segment. XSS-safe: fragments go through inlineHtml (escapes &<>); the only raw
+// inline each `<br>`-segment. script-injection-safe: fragments go through inlineHtml (escapes &<>); the only raw
 // tags emitted are our own <br>/<ul>/<li>.
 const RE_CELL_BR = /<br\s*\/?>/i;
 // The markers a hand-authored item leads with: markdown's own `-`/`*`/`+`, plus the typographic
@@ -1784,7 +1814,9 @@ function renderSection(s) {
       // sink-class list) — the same sink class as `logo=`/`heroParts` images elsewhere in this
       // function, gated the same way (`isSafeImageSrc`, since this is an image destination).
       const bgOk = pm.bg && isSafeImageSrc(pm.bg) ? decodeEntitiesOnce(pm.bg) : null;
-      const style = bgOk ? ' style="background-image:url(' + escAttr(bgOk) + ')"' : '';
+      // round 5 (R4-P3-6): quoted + CSS-string-escaped (cssUrlString), THEN HTML-attribute-escaped
+      // (escAttr) — see cssUrlString's own header for why both layers are required.
+      const style = bgOk ? ' style="' + escAttr('background-image:url("' + cssUrlString(bgOk) + '")') + '"' : '';
       // media variant for a foreground image: avatar (round, default) vs logo (uncropped, not round).
       const media = pm.media === 'logo' ? 'logo' : 'avatar';
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
@@ -2263,4 +2295,7 @@ export {
   takeDropWarnings,
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
+  // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —
+  // see cssUrlString's own comment.
+  cssUrlString,
 };
