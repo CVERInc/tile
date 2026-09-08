@@ -1062,7 +1062,7 @@ function nextCommentCloser(lines) {
   }
   return next;
 }
-// A leading run of spaces/tabs → its CommonMark column width (§2.2): a tab advances to the next
+// A leading run of whitespace → its CommonMark column width (§2.2): a tab advances to the next
 // MULTIPLE OF 4, not a fixed 4 columns per tab — so it always reaches column ≥4 from any starting
 // column 0-3 (round 5, R4-P2-02). Shared by isCommentBlockOpen below and bodyHtml's own indented-
 // paragraph carve-out (the `indented` check, P2-04), so a tab is treated the SAME way in both guards
@@ -1070,12 +1070,23 @@ function nextCommentCloser(lines) {
 // the review found: neither "≤3 spaces" nor "4+ spaces" ever matched a tab, so a tab-indented
 // comment-only line reached neither the comment-block path nor the literal-indented path and fell
 // through to an ordinary, now-empty, paragraph — `<p></p>`).
+//
+// 🩸 round 6 (R5-P2-02): round 5 only widened the tab case — every OTHER whitespace character was
+// still counted as zero (the loop's `else break`), while RE_QUOTE_LINE and RE_LIST_ITEM, right below,
+// already match a comment-only line's leading whitespace with JS `\s` — which is NBSP (U+00A0), the
+// ideographic space (U+3000, an ordinary Chinese/Japanese paragraph indent — `　　<!-- note -->` is
+// nothing exotic on this product), em space (U+2003), VT and FF included. A line indented with any of
+// those fell into the same crack the tab used to: not `<4` cleanly counted (so no comment-block
+// consumption) and never reaching the `>=4` literal-indented carve-out either at its true visual width,
+// so its content silently trimmed away to an empty `<p></p>`. Every non-tab whitespace character in
+// that same `\s` class now counts as exactly ONE column, same as an ordinary space — only a tab keeps
+// its tab-stop-4 rule, because only a tab's *visual* width depends on where it starts.
 function leadingIndentCols(line) {
   let col = 0;
   for (let i = 0; i < line.length; i++) {
-    const c = line.charCodeAt(i);
-    if (c === 32 /* space */) col++;
-    else if (c === 9 /* tab */) col += 4 - (col % 4);
+    const c = line[i];
+    if (c === '\t') col += 4 - (col % 4);
+    else if (/\s/.test(c)) col++;
     else break;
   }
   return col;
@@ -1095,7 +1106,12 @@ function commentBlockCandidate(line) {
 }
 function isCommentBlockOpen(line) {
   const s = commentBlockCandidate(line);
-  return leadingIndentCols(s) < 4 && /^[ \t]*<!--/.test(s);
+  // round 6 (R5-P2-02): was `[ \t]*` — matched leadingIndentCols' OWN column count (see above) only
+  // for space and tab; any other `\s` character in the lead (NBSP, U+3000, em space, VT, FF) made this
+  // regex fail even when leadingIndentCols correctly said "under 4 columns", so the line fell through
+  // to neither this comment-block path nor the `>=4` literal-indented one. `\s*` matches the same class
+  // leadingIndentCols now counts and RE_QUOTE_LINE/RE_LIST_ITEM already match elsewhere in this file.
+  return leadingIndentCols(s) < 4 && /^\s*<!--/.test(s);
 }
 // If lines[i] opens a comment block AND a closer exists at or after it, returns the index of the FIRST
 // line after the consumed block (the caller sets `i` to this and emits nothing for the span). Returns
@@ -1138,10 +1154,29 @@ function commentBlockRemainder(lines, closeIdx) {
 // caller could observe, so mutating one element in place is a plain O(1) assignment — not a per-comment
 // O(document length) copy, which on a document built mostly of such comments would reintroduce exactly
 // the quadratic shape this file's whole review history has been fighting (R2-P1-01, R4-P3-07).
-function reattachCommentRemainder(lines, openIdx, closeIdx, remainder) {
+//
+// 🩸 round 6 (R5-P2-01): `nextCloser` is computed ONCE, over the ORIGINAL lines, before this function
+// ever runs — nextCloser[closeIdx] records that the ORIGINAL lines[closeIdx] contained `-->`/`--!>`.
+// The mutation above can make that false: the remainder text this function writes into lines[closeIdx]
+// is everything AFTER the terminator, so the terminator itself is gone from the line once this returns.
+// If nobody corrects nextCloser[closeIdx], the caller's NEXT lookup of it still says "this line has a
+// closer, right here" — so a remainder that itself opens a fresh, unterminated `<!--` (e.g. the second
+// half of `'<!-- a --> <!-- b'`) gets treated as a TERMINATED comment block closing on its own now-
+// closer-less line: commentBlockEnd trusts the stale fact, commentBlockRemainder finds no terminator on
+// the mutated line and returns '', and the caller consumes the line for a block that (per this same
+// mutation) doesn't end there — the reattached text vanishes with no trace, exactly the silent-deletion
+// family R4-P2-01 was fixed to close. Recomputed here, in the one caller that can invalidate the fact,
+// for exactly the one index that changed — an O(line length) rescan once per reattach, not a second
+// O(document length) backward pass, so this cannot reintroduce the quadratic the comment above rules
+// out. Falling forward to nextCloser[closeIdx + 1] (already correct — untouched by this mutation) keeps
+// the O(1)-amortised argument intact: no line's closer-membership is ever computed more than a constant
+// number of extra times across the whole document.
+function reattachCommentRemainder(lines, nextCloser, openIdx, closeIdx, remainder) {
   const q = RE_QUOTE_LINE.exec(lines[openIdx]);
   const l = !q && RE_LIST_ITEM.exec(lines[openIdx]);
   lines[closeIdx] = q ? '> ' + remainder : l ? l[1] + l[2] + ' ' + remainder : remainder;
+  nextCloser[closeIdx] = lineHasCommentCloser(lines[closeIdx]) ? closeIdx
+    : (closeIdx + 1 < lines.length ? nextCloser[closeIdx + 1] : -1);
 }
 
 // A raw markdown body → HTML. A line-walking block parser: fenced code (verbatim, the `#`/`>`/`|`/`-`
@@ -1167,8 +1202,12 @@ function bodyHtml(body) {
 
     const cEnd = commentBlockEnd(lines, i, nextCloser);                        // HTML-comment block
     if (cEnd !== -1) {                                                        // consumed — except (P2-01)
-      const remainder = commentBlockRemainder(lines, nextCloser[i]);           // any text AFTER the
-      if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // terminator, kept
+      // 🩸 round 6 (R5-P2-01): closeIdx is captured BEFORE reattachCommentRemainder can touch
+      // nextCloser[closeIdx] — the re-dispatch below must land on the ORIGINAL closing line, not
+      // whatever nextCloser[closeIdx] is recomputed to mean once the mutation makes it stale.
+      const closeIdx = nextCloser[i];
+      const remainder = commentBlockRemainder(lines, closeIdx);                // any text AFTER the
+      if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // terminator, kept
       i = cEnd; continue;                                                     // no remainder: emits nothing
     }
 
@@ -1202,8 +1241,9 @@ function bodyHtml(body) {
       while (i < lines.length) {
         const cEnd = commentBlockEnd(lines, i, nextCloser);
         if (cEnd !== -1) {                                                    // block comment mid-quote-run
-          const remainder = commentBlockRemainder(lines, nextCloser[i]);
-          if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01: keep the tail
+          const closeIdx = nextCloser[i];                                     // R5-P2-01: capture first
+          const remainder = commentBlockRemainder(lines, closeIdx);
+          if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01: keep the tail
           i = cEnd; continue;
         }
         if (!RE_QUOTE_LINE.test(lines[i])) {
@@ -1214,8 +1254,9 @@ function bodyHtml(body) {
         while (i < lines.length) {
           const cEnd2 = commentBlockEnd(lines, i, nextCloser);
           if (cEnd2 !== -1) {
-            const remainder = commentBlockRemainder(lines, nextCloser[i]);
-            if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01
+            const closeIdx = nextCloser[i];                                   // R5-P2-01: capture first
+            const remainder = commentBlockRemainder(lines, closeIdx);
+            if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01
             i = cEnd2; continue;
           }
           if (!RE_QUOTE_LINE.test(lines[i])) break;
@@ -1247,8 +1288,9 @@ function bodyHtml(body) {
       while (i < lines.length) {
         const cEnd = commentBlockEnd(lines, i, nextCloser);                    // block comment mid-list-run
         if (cEnd !== -1) {
-          const remainder = commentBlockRemainder(lines, nextCloser[i]);
-          if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01: keep the item's tail
+          const closeIdx = nextCloser[i];                                     // R5-P2-01: capture first
+          const remainder = commentBlockRemainder(lines, closeIdx);
+          if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01: keep the item's tail
           i = cEnd; continue;
         }
         if (!RE_LIST_ITEM.test(lines[i])) break;

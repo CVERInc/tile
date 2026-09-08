@@ -1081,6 +1081,17 @@ test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of backticks (codeSpanRang
 });
 
 test('🔴 #496 round 3 — R2-P1-01: 256 KiB→1 MiB scales ~linearly (ratio ≤ ~5×, not 16×)', () => {
+  // 🩸 round 6 (R5-P3-05 / task item 3): this is the RATIO form of the ONE input shape — 131,072
+  // separate, individually well-formed `<!--a-->` comments, all on ONE line — that reproduces round
+  // 2's real quadratic (5m53s at 1 MiB; see the sibling ABSOLUTE test right above this one, "linear on
+  // 1 MiB of WELL-FORMED comments"). The round-5 review measured this exact shape against a scratch
+  // copy with round-2's pre-fix scanner (two independent full-suffix `indexOf` calls) put back:
+  // ratio 16.19× (this assertion's `<= 6` catches it) and 295,013 ms at 1 MiB (the sibling absolute
+  // test's `< 200` catches it too) — so BOTH forms already guard this shape, and round 6 keeps both:
+  // the review's own note is "do not convert [the absolute one] to ratio-only, do not raise its bound".
+  // The `t1m < 5000` companion below matches every OTHER ratio-form test in this file (round 4/5) —
+  // this was the one ratio test missing it, and a bare `ratio <= 6` alone is not itself a defence
+  // against a true multi-second blow-up if warm-up ever let `t256` land anomalously large.
   const unit = '<!--a-->';
   const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
   const time = (input) => {
@@ -1093,6 +1104,7 @@ test('🔴 #496 round 3 — R2-P1-01: 256 KiB→1 MiB scales ~linearly (ratio �
   const t1m = time(at(1048576));
   const ratio = t1m / t256;
   assert.ok(ratio <= 6, `expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
+  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
 });
 
 test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, and of a mixed corpus', () => {
@@ -1350,6 +1362,107 @@ test('🔴 #496 round 5 — R4-P2-02: a plain 4-space indent still takes the sam
   // Reconfirms the pre-existing space-only carve-out (P2-04) is unchanged now that isCommentBlockOpen
   // and the paragraph `indented` check both route through the shared leadingIndentCols column-counter.
   assert.equal(bodyHtml('    <!-- literal indented code -->'), '<p>&lt;!-- literal indented code --&gt;</p>');
+});
+
+// ── round 6 — REVIEW-tile28-r5-2026-09-09.md, R5-P2-01 / R5-P2-02 ──────────────────────────────────
+// R5-P2-01: `nextCloser` is computed ONCE, over the lines as they were BEFORE round 5's own
+// `reattachCommentRemainder` ever mutates one of them. If a reattached remainder itself opens a fresh,
+// unterminated `<!--` (the second half of `'<!-- a --> <!-- b'`), the stale `nextCloser[closeIdx]`
+// still says the (now-rewritten) line has a closer, so the caller treats the remainder as a TERMINATED
+// comment block on its own — one that yields no further remainder — and it vanishes with no trace: the
+// exact silent-deletion family round 4 was fixed to close, on a shape an author reaches by an ordinary
+// typo (forgetting to close a second, later comment). Fixed by recomputing `nextCloser[closeIdx]` for
+// the one index the mutation touched, immediately after the mutation — see reattachCommentRemainder
+// and its four call sites in site-core.js.
+
+test('🔴 #496 round 6 — R5-P2-01: a bare remainder that itself opens an unterminated `<!--` stays literal, never vanishes', () => {
+  assert.equal(bodyHtml('<!-- a --> <!-- b'), '<p>&lt;!-- b</p>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: the same shape inside a list item — only the malformed opener is literal, the list survives', () => {
+  assert.equal(bodyHtml('- <!-- a --> <!-- b\n- second'), '<ul class="st-list"><li>&lt;!-- b</li><li>second</li></ul>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: the same shape inside a quote — only the malformed opener is literal, the quote survives', () => {
+  assert.equal(bodyHtml('> <!-- a --> <!-- b\n> second'), '<blockquote class="st-quote"><p>&lt;!-- b second</p></blockquote>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: the alternative closer `--!>` hits the same stale-index bug and is fixed the same way', () => {
+  assert.equal(bodyHtml('<!-- a --!> <!-- b'), '<p>&lt;!-- b</p>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: the abrupt-empty-comment form (`<!-->`) also leaves its own unterminated remainder literal', () => {
+  assert.equal(bodyHtml('<!--> <!--'), '<p>&lt;!--</p>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: an ordered-list item hits the same bug and is fixed the same way', () => {
+  assert.equal(bodyHtml('1. <!-- alpha --><!-- delta'), '<ol class="st-list"><li>&lt;!-- delta</li></ol>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: the control — text BEFORE the second opener already survived, and still does', () => {
+  // The review's own proof that this is a mechanism bug, not a policy question: move one word in front
+  // of the second opener and the same text always survived, on both `cur` and round 6. This test is the
+  // one guard in the whole suite that puts two comments on one line (R5-P3-08 named that gap directly).
+  assert.equal(bodyHtml('<!-- a --> b <!-- c'), '<p>b &lt;!-- c</p>');
+});
+
+test('🔴 #496 round 6 — R5-P2-01: targeted corpus — a document whose LAST opener has no closer never loses that opener', () => {
+  // A small deterministic slice of the review's 120,000-input "unterminated-opener" corpus (which
+  // measured badCur: 84,138 / 120,000 = 70.1% before this fix, badMain: 0, badR4: 120,000): every one
+  // of these has a well-formed comment followed by an opener with no closer anywhere in the document.
+  // The fixed behaviour must match `main`'s own invariant — the unterminated opener's own text is never
+  // silently deleted — on every shape a container can start with.
+  const shapes = [
+    '<!-- a --> <!-- b',
+    '<!-- a -->\n\n<!-- b',
+    '- <!-- a --> <!-- b\n- x',
+    '> <!-- a --> <!-- b',
+    '1) <!-- a --> <!-- b',
+    '  - <!-- a --> <!-- b',
+    '<!-- a\nb --> <!-- c',
+  ];
+  for (const s of shapes) {
+    const html = bodyHtml(s);
+    assert.match(html, /&lt;!--/, `the unterminated opener must render literal, escaped, somewhere: ${JSON.stringify(s)} -> ${JSON.stringify(html)}`);
+  }
+});
+
+// R5-P2-02: `leadingIndentCols` only widened the TAB case in round 5 — every OTHER `\s` character
+// (NBSP U+00A0, the ideographic space U+3000, em space U+2003, VT, FF) still counted as zero columns,
+// so a comment-only line indented with one of those fell into neither the comment-block path (which
+// wants `<4` columns) nor the literal-4-space carve-out (which wants `>=4`), and its content trimmed
+// away to a bare, visible `<p></p>`. U+3000 is not exotic here: two full-width spaces are the ordinary
+// Chinese/Japanese paragraph indent, so a `\u3000\u3000<!-- note -->` line is unremarkable prose.
+// Exotic whitespace below is written as its escape, not the literal byte, so every failing input here
+// can be read and copied without ambiguity (the review's own convention).
+
+test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: a comment-only line indented with NBSP, U+3000, em space, VT or FF consumes clean \u2014 no empty <p></p>', () => {
+  const cases = [
+    ['\u00A0<!-- n -->', 'NBSP'],
+    ['\u3000<!-- n -->', 'ideographic space (CJK paragraph indent)'],
+    ['\u2003<!-- n -->', 'em space'],
+    ['\u000B<!-- n -->', 'VT'],
+    ['\u000C<!-- n -->', 'FF'],
+  ];
+  for (const [input, label] of cases) {
+    assert.equal(bodyHtml(input), '', label);
+    assert.doesNotMatch(bodyHtml(input), /^<p>\s*<\/p>$/, label);
+  }
+});
+
+test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: four columns of that same whitespace is literal, escaped \u2014 consistent with the space rule', () => {
+  // Mirrors the pre-existing space/tab carve-out at P2-04: FOUR ideographic spaces reach column 4
+  // (1 column each, per this rule) and take the SAME literal-indented path a 4-space line already does.
+  assert.equal(bodyHtml('\u3000\u3000\u3000\u3000<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+});
+
+test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: mixed NBSP+tab reaches column 4 the same way a mixed space+tab already did', () => {
+  assert.equal(bodyHtml('\u00A0\t<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+  assert.equal(bodyHtml('\t\u00A0<!-- n -->'), '<p>&lt;!-- n --&gt;</p>');
+});
+
+test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: an ordinary CJK-indented paragraph with no comment at all is unaffected', () => {
+  assert.equal(bodyHtml('\u3000\u3000plain text'), '<p>plain text</p>');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
