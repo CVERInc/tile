@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml,
 } from './site-core.js';
 
 let passed = 0;
@@ -634,6 +634,38 @@ test('links: a URL with a matched pair of underscores stays a link (emphasis mus
   assert.ok(!html.includes(']\(http'), 'no literal markdown link syntax left on the page');
 });
 
+test('link destination containing angle brackets is escaped before it is restored', () => {
+  // A destination-shaped `](…)` fragment used to be restored RAW into the page, whether or
+  // not it actually sat inside a real link — letting two unrelated fragments splice a live tag
+  // into otherwise ordinary prose.
+  const input = 'Hi ](<script>alert`1`;//) x ](</script>) bye';
+  const html = inlineHtml(input);
+  assert.ok(!html.includes('<script'), 'no live <script> element in the output');
+  assert.ok(html.includes('&lt;script&gt;'), 'the angle brackets are entity-escaped');
+});
+
+test('a normal link destination keeps its ampersand escaped and is otherwise unchanged', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&w=2)');
+  assert.ok(html.includes('href="https://x/y?z=1&amp;w=2"'), 'the & in the query string is escaped in the href');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('a link destination with a disallowed scheme renders as text, not a live href', () => {
+  const html = inlineHtml('[a](javascript:alert(1))');
+  assert.ok(!html.includes('href='), 'no href attribute at all');
+  assert.ok(!html.includes('<a '), 'no anchor tag at all');
+});
+
+test('an image destination with a disallowed scheme renders no <img>', () => {
+  const html = inlineHtml('![alt text](javascript:alert(1))');
+  assert.ok(!html.includes('<img'), 'no <img> tag');
+  assert.ok(!html.includes('src='), 'no src attribute at all');
+});
+
+test('a normal image destination is unaffected by the scheme check', () => {
+  const html = inlineHtml('![alt](/images/x.png)');
+  assert.equal(html, '<img class="st-img" src="/images/x.png" alt="alt" loading="lazy" decoding="async">');
+});
 
 // ── people coral ───────────────────────────────────────────────────────────────────────────────
 // Grown for a client whose ONE roster shape was hand-rolled on five different pages (collaborating

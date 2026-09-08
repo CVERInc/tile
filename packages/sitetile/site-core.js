@@ -586,6 +586,23 @@ function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
 // Attribute-safe a value that cssmd ALREADY entity-escaped (&<> done) — only quotes remain.
 function attrq(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 
+// isSafeHref: true if `dest` may become a live `href`/`src`. Asks the URL parser, never a prefix
+// test — resolving against a fixed base is what catches "java\nscript:" and a leading space, both
+// of which defeat a naive startsWith even lowercased and both still parse to javascript:. `dest`
+// may already be entity-escaped (&<> as `&amp;`/`&lt;`/`&gt;`) by the time this runs; that never
+// changes the parsed scheme, since a scheme is letters/digits/+/-/. only. No allowlist helper
+// exists elsewhere in this file, so this one keeps the renderer's actual normal cases: http(s),
+// mailto, and scheme-less destinations (relative paths, `#fragment`) — everything else (notably
+// `javascript:`, `data:`) is unsafe and the caller renders the destination as plain text instead.
+const SAFE_HREF_BASE = 'http://sitetile.invalid/';
+function isSafeHref(dest) {
+  const raw = String(dest == null ? '' : dest);
+  if (raw === '') return true;
+  let u;
+  try { u = new URL(raw, SAFE_HREF_BASE); } catch { return false; }
+  return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:';
+}
+
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
 // <img>. Markdown has no video literal, and sitetile refuses raw-HTML islands (bodyHtml escapes them),
 // so this IS the platform's video primitive — the src extension is the signal. Needed by Wix/Blogger
@@ -773,6 +790,19 @@ function inlineHtml(text, opts) {
   // sees it, and the whole link then renders as literal `[X](https://…)` text on the page.
   // Stash destinations, run the inline pass on everything else, restore. (\u0001 cannot appear in
   // authored markdown and the chain leaves it alone, so it is a safe placeholder.)
+  //
+  // 🩸 The stash used to restore each destination RAW — unescaped — straight back into the text
+  // stream, before it was known whether the placeholder even sat inside a real `[label](…)`/
+  // `![alt](…)` construct. The initial stash regex below only requires the `](…)` SHAPE, not a
+  // matching `[`, so two unrelated bracket-fragments elsewhere in ordinary prose can each stash
+  // their bracketed content as a "destination" — one carrying the opening half of a live element,
+  // the other its closing half — and restoring both raw spliced a live, syntactically complete
+  // element into the page: reachable by anyone who can write page Markdown, with no link ever
+  // actually forming. Restoring through `escHtml` (the same escaper cssmd already ran over the
+  // rest of this string) closes that regardless of whether the placeholder ends up inside a tag
+  // or bare in text. A destination that DOES end up forming a link or image is additionally
+  // scheme-checked below (isSafeHref) before it is allowed into an href/src at all — escaping
+  // alone stops a raw element from forming but does nothing about `javascript:`/`data:`.
   const hrefs = [];
   const stashed = String(text == null ? '' : text)
     .replace(/\]\(([^)\s]+)\)/g, (m, href) => { hrefs.push(href); return '](\u0001' + (hrefs.length - 1) + '\u0001)'; });
@@ -782,12 +812,18 @@ function inlineHtml(text, opts) {
   // different escape step — which is this one (escapeInline instead of plain escHtml, so an HTML
   // comment is consumed at the same point the raw text is examined for '<', see escapeInline above).
   let s = markEscapes(markEmphasis(markCode(escapeInline(stashed, opts), 'st'), 'st'), 'st');
-  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => hrefs[+i]);
-  s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => imgTag(inner.split('/').pop(), inner));     // wikilink embed
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => imgTag(alt, src));               // markdown image
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => escHtml(hrefs[+i]));
+  // wikilink embed: `inner` was never stashed (no `](` shape), so cssmd's own escapeInline pass
+  // above already ran over it like any other text — safe to hand straight to imgTag.
+  s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => imgTag(inner.split('/').pop(), inner));
+  // markdown image: `src` here is the (now escaped) restored destination. A disallowed scheme
+  // renders no <img> at all — just the (already-escaped) alt text, same shape as a broken image's
+  // fallback text, per isSafeHref above.
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => (isSafeHref(src) ? imgTag(alt, src) : alt));
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
   // prose at the maintainer's call): an external link is external wherever it appears.
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (mm, lab, href) => {
+    if (!isSafeHref(href)) return lab; // disallowed scheme (e.g. javascript:) → plain text, no href
     const tgt = /^https?:\/\//i.test(href) ? ' target="_blank" rel="noopener"' : '';
     return '<a href="' + attrq(href) + '"' + tgt + '>' + lab + '</a>';
   });
