@@ -63,6 +63,7 @@ Unknown types render as `prose` but round-trip their literal type token.
 - **blockquotes** — `> …` → `<blockquote class="st-quote">`.
 - **fenced code** — ```` ``` ```` → `<pre class="st-code">` **verbatim** (the `#` / `>` / `|` / `-` inside are NOT parsed as blocks).
 - **GFM tables** — `| a | b |` + `| --- | --- |` → `<table class="st-table">`.
+- **raw HTML** — every tag is escaped to visible text (`<script>` → `&lt;script&gt;`), except two allowlisted, attribute-free tags re-emitted live (`<small>`, `<br>`), and **HTML comments** (`` <!-- … --> ``), which are removed rather than shown — a QA/author note in page markdown must never leak onto the public page (issue #496). To show a literal `<!-- … -->`, put it in a code span or fenced block: those are code, not comments.
 
 Lists **nest** by indentation (ul/ol, mixed), blockquotes carry **multiple paragraphs** (blank `>` line splits them), and **single-column** tables work (a bare `---` with no leading pipe stays a paragraph, not a separator). All zero-JS, reef-token styled, round-trip preserved (render-only).
 

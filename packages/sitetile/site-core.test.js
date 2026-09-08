@@ -910,7 +910,11 @@ test('🔴 #496: a comment INSIDE a fenced code block is preserved verbatim — 
   assert.match(html, /&lt;!-- keep me --&gt;/, 'the fence content is code and must survive, escaped like any code');
 });
 
-test('🔴 #496: an unterminated `<!--` (and the degenerate `<!-->`) does not eat the rest of the page', () => {
+test('🔴 #496: an unterminated `<!--` (and the degenerate `<!-->`) does not eat the rest of the PAGE', () => {
+  // "before" and "<!-- oops, no closer" and "STILL HERE" are THREE separate blank-line-separated
+  // paragraphs, so this only ever proved page-level isolation, not what happens to a single unclosed
+  // comment's own fragment — see the round-2 test below for that (it now consumes to end of INPUT,
+  // per the HTML spec, which for a paragraph this short means the rest of that one paragraph).
   const unterminated = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
   assert.match(unterminated, /before/);
   assert.match(unterminated, /STILL HERE/, 'content after an unclosed comment must still render');
@@ -923,6 +927,80 @@ test('🔴 #496: an unterminated `<!--` (and the degenerate `<!-->`) does not ea
 test('🔴 #496: stripHtmlComments is fence-aware directly (unit-level, not just through bodyHtml)', () => {
   assert.equal(stripHtmlComments('a\n<!-- x -->\nb'), 'a\n\nb');
   assert.equal(stripHtmlComments('```\n<!-- x -->\n```'), '```\n<!-- x -->\n```', 'fenced content is untouched');
+});
+
+// ── round 2 — REVIEW-tile28-r1-2026-09-09.md, P1-01 / P2-02 / P2-03 / P2-04 / P3-05 / P3-06 ────────
+// Round 1 found that stripHtmlComments(), run as a textual pre-pass over the WHOLE document ahead of
+// bodyHtml's block/inline passes, (a) was a regex quadratic on an unterminated `<!--` (P1-01), and
+// (b) deleted content it should not have: an inline code span's literal text (P2-02), an escaping
+// invariant — a comment must never help splice two dead half-tags into a live `<small>`/`<br>`
+// (P2-03) — and a 4-space-indented paragraph (P2-04). The fix moves comment removal INSIDE
+// escapeInline(), the same left-to-right pass that decides what a bare `<` becomes (see that
+// function's own comment in site-core.js for the full reasoning). Each of the five inputs below is
+// reproduced from the review with the BEFORE (pre-#496, no comment logic at all) output asserted as
+// the expected value for P2-02/P2-03/P2-04 — the round-1 verdict ("先修 P1-01, P2-02, P2-03, P2-04")
+// requires the fix to behave as if comment-stripping never touched these specific inputs at all.
+
+test('🔴 #496 round 2 — P2-02: an inline code span keeps a literal comment verbatim, escaped', () => {
+  const html = bodyHtml('`<!-- x -->`');
+  assert.equal(html, '<p><span class="st-code"><span class="st-mk">`</span>&lt;!-- x --&gt;<span class="st-mk">`</span></span></p>');
+});
+
+test('🔴 #496 round 2 — P2-03: a comment must not splice a broken tag into a live <small>/<br>', () => {
+  // Before #496 existed, `<sm<!-- -->all>` was never a comment at all — it was just unescaped-`<`
+  // soup, and the ENTIRE thing (comment markers included) rendered as visible, inert, escaped text.
+  // That must still be true: the fix's job is to make comment-stripping never able to CREATE a
+  // `<small>`/`<br>` spelling the author didn't write, not to teach it to recognize this one shape.
+  const small = bodyHtml('<sm<!-- -->all>visible</sm<!-- -->all>');
+  assert.equal(small, '<p>&lt;sm&lt;!-- --&gt;all&gt;visible&lt;/sm&lt;!-- --&gt;all&gt;</p>');
+  assert.doesNotMatch(small, /<small>/, 'no live <small> may ever be synthesized from a split spelling');
+
+  const br = bodyHtml('<br<!-- -->>after');
+  assert.equal(br, '<p>&lt;br&lt;!-- --&gt;&gt;after</p>');
+  assert.doesNotMatch(br, /<br>/, 'no live <br> may ever be synthesized from a split spelling');
+
+  // The review's own negative control: a split `<script>` must stay escaped either way — this was
+  // never broken, and the fix must not break it either.
+  const script = bodyHtml('<scr<!-- -->ipt>alert(1)</script>');
+  assert.doesNotMatch(script, /<script>/);
+  assert.match(script, /&lt;scr&lt;!-- --&gt;ipt&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('🔴 #496 round 2 — P2-04: a 4-space-indented paragraph keeps a literal comment, escaped', () => {
+  const html = bodyHtml('    <!-- literal indented code -->');
+  assert.equal(html, '<p>&lt;!-- literal indented code --&gt;</p>');
+});
+
+test('🔴 #496 round 2 — a comment is still removed from ordinary (non-indented, non-code) prose', () => {
+  // The behaviour P2-02/P2-03/P2-04 above carve OUT of — issue #496's actual, common case.
+  const html = bodyHtml('Hello <!-- editor note --> world.');
+  assert.equal(html, '<p>Hello  world.</p>');
+});
+
+test('🔴 #496 round 2 — P3-05: the HTML spec\'s alternative comment closer `--!>` is recognized', () => {
+  const html = bodyHtml('before <!-- note --!> after');
+  assert.equal(html, '<p>before  after</p>');
+  assert.doesNotMatch(html, /note/);
+});
+
+test('🔴 #496 round 2 — an unterminated `<!--` consumes to end of its OWN fragment (HTML spec)', () => {
+  // A deliberate change from round 1: the HTML tokenizer's comment-end state runs to EOF on an
+  // unterminated comment, and doing the same here is what keeps the scan linear (see P1-01 below) —
+  // retrying from every subsequent `<!--` looking for a closer that will never come is exactly the
+  // quadratic behaviour being fixed. "End of input" is the fragment bodyHtml handed to inlineHtml
+  // (one paragraph/list-item/quote-line/heading/cell), not the whole multi-paragraph document — a
+  // blank line still ends a block before inlineHtml ever runs, untouched by this change.
+  const html = bodyHtml('before <!-- oops, no closer, and MORE TEXT that must not survive');
+  assert.equal(html, '<p>before </p>');
+});
+
+test('🔴 #496 round 2 — P1-01: linear on 1 MiB of unterminated comment openers', () => {
+  const input = '<!--'.repeat(262144);                       // exactly 1 MiB, no closer anywhere
+  const t0 = process.hrtime.bigint();
+  const html = bodyHtml(input);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.equal(html, '<p></p>', 'the whole thing is one unterminated comment: nothing renders');
+  assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms — the old regex was quadratic here`);
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

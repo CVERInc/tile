@@ -38,7 +38,7 @@
 // body passed through VERBATIM, the one portability-debt seam — grow a real marker instead when a
 // shape recurs). Unknown types render as prose but round-trip their literal type token.
 
-import { renderInlineMd, escHtml } from '../cssmd/cssmd.js';
+import { escHtml, markCode, markEmphasis, markEscapes } from '../cssmd/cssmd.js';
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
@@ -609,21 +609,131 @@ function imgTag(alt, src) {
   return '<img class="st-img" src="' + attrq(src) + '" alt="' + attrq(alt) + '" loading="lazy" decoding="async">';
 }
 
+// A code SPAN's [start, end) byte range in a RAW (unescaped) fragment — the same delimiter rule
+// cssmd's markCode() uses (a backtick not preceded by an unescaped backslash, opening a run of 1+
+// non-backtick, non-newline characters, closed by another backtick). Computed here, on raw text, so
+// escapeInline() below can treat a code span's content as OPAQUE to comment-stripping (issue #496
+// P2-02): an inline `` `<!-- x -->` `` must keep showing its comment markers — they are code, not a
+// comment — because the code path that decides that (this file) runs BEFORE markCode ever re-finds
+// the same backticks in the escaped output and wraps them.
+const RE_CODE_SPAN = /(?<!\\)`[^`\n]+`/g;
+function codeSpanRanges(s) {
+  const ranges = [];
+  RE_CODE_SPAN.lastIndex = 0;
+  let m;
+  while ((m = RE_CODE_SPAN.exec(s))) ranges.push([m.index, m.index + m[0].length]);
+  return ranges;
+}
+
+// Escape a raw inline-markdown FRAGMENT for HTML text content — same three entities escHtml always
+// escapes (& < >) — and, unless the caller opts out (`stripComments: false`; the one caller that does
+// is bodyHtml()'s 4-space-indented-paragraph case, P2-04 below), consume an HTML comment (`<!-- … -->`
+// or the alternative closer `--!>`, issue #496 / P3-05) as ITS OWN TOKEN, emitting nothing for it, in
+// the SAME left-to-right pass that decides what a bare `<` becomes. A code span (see codeSpanRanges
+// above) is skipped over verbatim — plain-escaped like the rest, comment markers included — before
+// this pass ever gets to apply its own rules to it: P2-02.
+//
+// WHY THIS REPLACES A TEXTUAL PRE-PASS: the original fix (a whole-document `stripHtmlComments()` call
+// ahead of bodyHtml's block/inline passes, reverted here per review round 1 finding P2-03) deleted the
+// comment FIRST, as pure text — so `<sm<!-- -->all>` had its comment removed while "sm" and "all>"
+// were still adjacent on the SAME line, textually joining them into "small>" before escaping (which
+// happens later, once inlineHtml runs) ever saw the input. The later <small>/<br> allowlist regex
+// matches on the ESCAPED string, so it fired on a spelling the author never actually wrote — a live
+// `<small>` from two dead half-tags a comment happened to sit between.
+//
+// Here, the `<` of `<sm` is examined — and escaped to `&lt;`, because "sm" is not immediately
+// followed by `>` — TWO CHARACTERS BEFORE the comment starting at index 3 is even reached. `inTag`
+// (below) records that this run already failed to be a clean tag, so the `<!--` that follows is NOT
+// treated as a fresh, standalone comment-open either: every character of it is escaped one at a time,
+// exactly like a build of this renderer with no comment logic at all would have escaped it. `inTag`
+// resets on the next escaped `>`, so a comment appearing anywhere else in the SAME fragment — issue
+// #496's actual, common case: a QA note alone on its own line or paragraph — still gets removed.
+//
+// LINEAR: one forward pass, one index `i` that only ever increases. A genuine comment-open (`inTag`
+// false) costs one or two indexOf() calls hunting its terminator; those calls are bounded by the
+// comment's own length, and comments in one fragment never overlap, so their cost can never sum past
+// the fragment's own length. An UNTERMINATED comment can fail that hunt (both indexOf calls return -1)
+// at most ONCE per scan, because failing it means "no closer anywhere in what's left" — so the scan
+// jumps straight to end-of-input (a deliberate divergence from the old behaviour of leaving it as
+// literal text; this matches the HTML tokenizer spec's own comment-end state, which also runs to EOF)
+// and stops, rather than retrying the same suffix from the next `<!--` the way the old
+// `/<!--[\s\S]*?-->/g` regex did — that retry-the-suffix behaviour is what made it quadratic on
+// `'<!--'.repeat(N)` (P1-01).
+function escapeInline(text, opts) {
+  const s = String(text == null ? '' : text);
+  if (opts && opts.stripComments === false) return escHtml(s);   // P2-04: indented paragraph, verbatim
+  const n = s.length;
+  const ranges = codeSpanRanges(s);
+  let ri = 0;
+  let out = '', start = 0, i = 0, inTag = false;
+  while (i < n) {
+    while (ri < ranges.length && ranges[ri][1] <= i) ri++;              // drop ranges already behind us
+    if (ri < ranges.length && i >= ranges[ri][0] && i < ranges[ri][1]) { // inside a code span: verbatim
+      out += escHtml(s.slice(start, i));
+      const end = ranges[ri][1];
+      out += escHtml(s.slice(i, end));
+      i = end; start = i; inTag = false;
+      continue;
+    }
+    const c = s.charCodeAt(i);
+    if (c === 60 /* < */) {
+      if (!inTag && s.startsWith('!--', i + 1)) {
+        out += escHtml(s.slice(start, i));
+        // Comment-start-state's "abrupt closing of an empty comment": `<!-->`, or any run of extra
+        // dashes before the `>` (`<!--->`, `<!---->`, …), closes immediately per the HTML spec —
+        // it must NOT fall through to the unterminated-consumes-to-EOF rule above (P3-05's sibling:
+        // an existing test relies on content AFTER a `<!-->` still rendering).
+        let j = i + 4;
+        while (s[j] === '-') j++;
+        let end;
+        if (s[j] === '>') {
+          end = j + 1;
+        } else {
+          const dash = s.indexOf('-->', i + 4);
+          const bang = s.indexOf('--!>', i + 4);            // the HTML spec's alternative closer, P3-05
+          if (dash < 0 && bang < 0) end = n;                 // unterminated: to end of input
+          else if (dash < 0) end = bang + 4;
+          else if (bang < 0) end = dash + 3;
+          else end = (dash < bang) ? dash + 3 : bang + 4;    // whichever closer comes first
+        }
+        i = end; start = i;
+        continue;
+      }
+      out += escHtml(s.slice(start, i)) + '&lt;';
+      inTag = true; i++; start = i; continue;
+    }
+    if (c === 62 /* > */) {
+      out += escHtml(s.slice(start, i)) + '&gt;';
+      inTag = false; i++; start = i; continue;
+    }
+    i++;
+  }
+  return out + escHtml(s.slice(start));
+}
+
 // One inline-markdown fragment → HTML. Order is load-bearing: cssmd FIRST (escapes &<>, leaves
 // brackets/parens/!/[[ ]]), then IMAGES (before links — `![a](b)` contains `[a](b)`), then links.
 // `![alt](src)` and Obsidian `![[wikilink]]` embeds both become <img>. A `[![img](s)](href)` linked
 // image works too (image resolves first, then the surrounding link).
-function inlineHtml(text) {
-  // 🔴 A link/image DESTINATION must not go through the emphasis pass. renderInlineMd runs first,
+//
+// `opts.stripComments` (default true) is threaded through to escapeInline() — the one caller that
+// passes `false` is bodyHtml()'s indented-paragraph case (P2-04).
+function inlineHtml(text, opts) {
+  // 🔴 A link/image DESTINATION must not go through the emphasis pass. The escape+mark chain below runs first,
   // so a URL that happens to contain a matched pair of `_` — a twitter handle like /_Malachite_,
   // any snake_case path — is shredded into <span class="st-i"> before the link regex below ever
   // sees it, and the whole link then renders as literal `[X](https://…)` text on the page.
   // Stash destinations, run the inline pass on everything else, restore. (\u0001 cannot appear in
-  // authored markdown and renderInlineMd leaves it alone, so it is a safe placeholder.)
+  // authored markdown and the chain leaves it alone, so it is a safe placeholder.)
   const hrefs = [];
   const stashed = String(text == null ? '' : text)
     .replace(/\]\(([^)\s]+)\)/g, (m, href) => { hrefs.push(href); return '](\u0001' + (hrefs.length - 1) + '\u0001)'; });
-  let s = renderInlineMd(stashed, { prefix: 'st' });
+  // Spliced by hand rather than calling renderInlineMd(stashed, {prefix:'st'}) directly: cssmd's own
+  // module comment documents these four pieces (escape step + markCode + markEmphasis + markEscapes)
+  // as exactly what renderInlineMd is built from, meant to be recombined by a caller that needs a
+  // different escape step — which is this one (escapeInline instead of plain escHtml, so an HTML
+  // comment is consumed at the same point the raw text is examined for '<', see escapeInline above).
+  let s = markEscapes(markEmphasis(markCode(escapeInline(stashed, opts), 'st'), 'st'), 'st');
   s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => hrefs[+i]);
   s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => imgTag(inner.split('/').pop(), inner));     // wikilink embed
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => imgTag(alt, src));               // markdown image
@@ -634,7 +744,7 @@ function inlineHtml(text) {
     return '<a href="' + attrq(href) + '"' + tgt + '>' + lab + '</a>';
   });
   // Allowlisted inline <small> (no attributes) — the one raw tag legacy IRs use for muted fine
-  // print (e.g. an "updated on …" stamp). renderInlineMd escaped it to `&lt;small&gt;`; re-emit
+  // print (e.g. an "updated on …" stamp). escapeInline escaped it to `&lt;small&gt;`; re-emit
   // the bare tag so it renders small instead of showing literally. XSS-safe: no attrs, no other tag.
   s = s.replace(/&lt;(\/?)small&gt;/g, '<$1small>');
   // Allowlisted <br> (no attributes, self-closing or not) — a heading/lead authored with a forced
@@ -820,27 +930,61 @@ function renderDialogue(turns) {
   return '<div class="st-dialogue">' + body + '</div>';
 }
 
-// Author-only HTML comments (`<!-- … -->`, possibly multi-line) are dropped from a body BEFORE the
-// block/inline passes ever see them — issue #496. This engine has no concept of an HTML comment as
-// a token (site-core.js's own header note: the section sentinel is `%% sitetile: %% `, "never
-// `<!-- -->`"), so a comment used to fall through the same generic `escHtml` sweep as everything
-// else and come out as VISIBLE text (`&lt;!-- note --&gt;`) — a site owner's or agent's QA/recon
-// note, leaked onto the public page. `<script>…</script>` and every other raw tag must go on being
-// escaped exactly as today; only the comment token itself is special-cased, and only by deletion
-// (never by re-emission the way the `<small>`/`<br>` allowlist re-emits its two tags).
+// The linear core of comment removal (see escapeInline() above for the full reasoning and the same
+// abrupt-close / alternative-closer / unterminated-to-EOF rules): given plain text with NO concept
+// of tags, spans or an allowlist to protect, just find each `<!-- … -->` (or `--!>`, or — unterminated
+// — the rest of the string) and cut it out. One forward pass, no regex over the remaining suffix.
+function removeHtmlComments(s) {
+  const str = String(s == null ? '' : s);
+  const n = str.length;
+  let out = '', start = 0, i = 0;
+  while (i < n) {
+    if (str.charCodeAt(i) === 60 /* < */ && str.startsWith('!--', i + 1)) {
+      out += str.slice(start, i);
+      let j = i + 4;
+      while (str[j] === '-') j++;
+      let end;
+      if (str[j] === '>') {
+        end = j + 1;                                      // abrupt-closing-of-empty-comment
+      } else {
+        const dash = str.indexOf('-->', i + 4);
+        const bang = str.indexOf('--!>', i + 4);
+        if (dash < 0 && bang < 0) end = n;                 // unterminated: to end of input
+        else if (dash < 0) end = bang + 4;
+        else if (bang < 0) end = dash + 3;
+        else end = (dash < bang) ? dash + 3 : bang + 4;
+      }
+      i = end; start = i;
+      continue;
+    }
+    i++;
+  }
+  return out + str.slice(start);
+}
+
+// A whole-document, fence-aware HTML-comment stripper — issue #496's ORIGINAL fix, kept as a public
+// utility (and its own direct tests below) even though bodyHtml() no longer routes through it.
 //
-// Fence-aware: this walks the SAME fence open/close pairing bodyHtml uses below, so a `<!-- -->`
-// written inside a fenced code block is code, not a comment, and survives untouched — only the
-// non-fenced runs are passed through the strip. Non-greedy (`[\s\S]*?`) so an unterminated `<!--`
-// (or the degenerate `<!-->`, which the regex cannot even open) matches nothing and is left as
-// literal text instead of swallowing the rest of the page looking for a `-->` that never comes.
+// It doesn't anymore, per review round 1 finding P2-03: running this as a textual pre-pass over the
+// WHOLE document, ahead of the block/inline passes, deletes a comment before escaping ever runs — so
+// `<sm<!-- -->all>` had its comment cut first, textually joining "sm" and "all>" into "small>" INSIDE
+// the raw markdown, before the code that decides `<small>`/`<br>` allowlisting ever saw the input.
+// That is a spelling the author never wrote, and the later allowlist regex (which matches on the
+// ESCAPED string) can't tell the difference. bodyHtml()'s inline pass now removes a comment inside
+// escapeInline() instead — in the SAME left-to-right pass that decides what a bare `<` becomes, so a
+// comment can never splice two escaped fragments into a tag spelling that didn't exist in the source.
+// See escapeInline()'s own comment for the full reasoning and the linear-scan proof (P1-01).
+//
+// Fence-aware: walks the SAME fence open/close pairing bodyHtml uses below, so a `<!-- -->` written
+// inside a fenced code block is code, not a comment, and survives untouched — only the non-fenced runs
+// are passed through removeHtmlComments().
 function stripHtmlComments(body) {
   const lines = String(body).split('\n');
   const out = [];
   let plain = [];
   const flushPlain = () => {
     if (!plain.length) return;
-    out.push(...plain.join('\n').replace(/<!--[\s\S]*?-->/g, '').split('\n'));
+    out.push(...removeHtmlComments(plain.join('\n')).split('\n'));
     plain = [];
   };
   let i = 0;
@@ -866,9 +1010,12 @@ function stripHtmlComments(body) {
 // inside it are NOT parsed as blocks), blockquote, lists (ul/ol), GFM tables, plus paragraphs and
 // pure-image figures. Inline marks + inline images via inlineHtml. Zero JS; reef-token styled (st-*).
 // 🔴 RENDER-only: parse/serialize store the body verbatim, so the round-trip invariant is untouched.
+// 🔴 Operates on `body` UNCHANGED (no stripHtmlComments() pre-pass) — issue #496 P2-03/P1-01: see
+// stripHtmlComments()'s own comment for why removing comments as a step ahead of block detection was
+// the bug. Comment removal happens per-fragment, inside inlineHtml() → escapeInline(), below.
 function bodyHtml(body) {
   if (!body) return '';
-  const lines = stripHtmlComments(body).split('\n');
+  const lines = String(body).split('\n');
   const out = [];
   let i = 0;
   while (i < lines.length) {
@@ -958,6 +1105,14 @@ function bodyHtml(body) {
 
     const para = [];                                                          // paragraph / figure
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i)) { para.push(lines[i]); i++; }
+    // A paragraph whose EVERY line carries CommonMark's own "this is literal" signal — 4+ leading
+    // spaces — keeps comment-stripping OFF (issue #496 P2-04): this renderer does not implement
+    // indented code blocks (no `<pre>` here, just the ordinary <p> below), but the signal itself is
+    // still honoured for the one thing this round's fix can silently delete. The indentation is
+    // gone by the time `t` exists (the .trim() below removes it, same as before this fix ever
+    // existed — a 4-space and a 0-space one-line paragraph render byte-identical either way), so the
+    // check has to happen here, against `para`'s ORIGINAL lines, before that trim, or not at all.
+    const indented = para.length > 0 && para.every((ln) => /^ {4,}/.test(ln));
     // a line ending in "  " (two trailing spaces, standard markdown hard-break convention) forces
     // a <br> at that point instead of the default soft-wrap-to-space join. General — opt-in per
     // line, so ordinary multi-line source paragraphs (the vast majority) are unaffected. First
@@ -986,7 +1141,7 @@ function bodyHtml(body) {
       joined += gap + next;
     }
     const t = joined.split(BR + ' ').join(BR).trim();
-    const html = inlineHtml(t).split(BR).join('<br>');
+    const html = inlineHtml(t, indented ? { stripComments: false } : undefined).split(BR).join('<br>');
     out.push(isImageOnly(t) ? '<figure class="st-figure">' + html + '</figure>' : '<p>' + html + '</p>');
   }
   return out.join('\n');
