@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
+  safeHref, safeSrc,
 } from './site-core.js';
 
 let passed = 0;
@@ -795,6 +796,97 @@ test('render: a hero standalone image with a disallowed src is dropped, not emit
   const html = renderSiteToHtml(parseSite(src));
   assert.ok(!html.includes('javascript:'));
   assert.ok(!html.includes('<img'));
+});
+
+// ── round 3: R2-P1-1 — collection `it.href` must gate on ITSELF, not on `it.learn` ───────────
+
+test('collection: a bad it.href does not go live just because it.learn is safe (R2-P1-1)', () => {
+  takeDropWarnings();
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →javascript:alert(1)', '',
+    'learn: /safe', '', 'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'), 'the bad it.href never reaches the page');
+  assert.ok(!/<a\b[^>]*st-item-gh/.test(html), 'the GitHub slot is not a live anchor');
+  assert.ok(html.includes('<span class="st-item-gh">'), 'it degrades to the plain (span) shape');
+  assert.ok(html.includes('<a class="st-item-learn" href="/safe"'), 'the OTHER, safe field is unaffected');
+  const warnings = takeDropWarnings();
+  assert.ok(warnings.some((w) => w.scheme === 'javascript:'), 'the drop is recorded in the diagnostics queue');
+});
+
+test('collection: it.href alone (no learn page) still needs isSafeHref to go live', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →javascript:alert(1)', '',
+    'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+});
+
+test('collection: a safe it.href with a safe it.learn still renders both live (no regression)', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Things', '%% sitetile: collection %%', '',
+    '### G', '',
+    '#### Item →https://github.com/x/y', '',
+    'learn: /learn-more', '', 'body text',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(/<a class="st-item-gh" href="https:\/\/github\.com\/x\/y"/.test(html), 'GH anchor is live');
+  assert.ok(html.includes('<a class="st-item-learn" href="/learn-more"'), 'learn anchor is live');
+});
+
+// ── round 3: R2-P2-1 — decodeEntitiesOnce must never throw ────────────────────────────────────
+
+test('decodeEntitiesOnce: an out-of-range numeric entity renders the page and escapes the text, never throws', () => {
+  assert.doesNotThrow(() => inlineHtml('see [a](&#x110000;) here'));
+  const html = inlineHtml('see [a](&#x110000;) here');
+  assert.ok(!html.includes('javascript:'));
+  // the entity could not be decoded to a real code point, so it is left as literal text and
+  // entity-escaped like any other author-typed `&` — never a thrown RangeError, never a live href
+  // built from an undecodable scheme.
+  assert.ok(html.includes('&amp;#x110000;'), 'the undecodable entity is preserved as escaped literal text');
+
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## H', '%% sitetile: prose %%',
+    '[a](&#x110000;) and [b](&#1114112;) and [c](&#99999999999999999999;) and [d](&#xFFFFFF here',
+  ].join('\n') + '\n';
+  assert.doesNotThrow(() => renderSiteToHtml(parseSite(src)), 'a whole page with malformed numeric entities still renders');
+});
+
+test('decodeEntitiesOnce: a lone-surrogate numeric entity is left as-is, not turned into an unpaired surrogate', () => {
+  assert.doesNotThrow(() => inlineHtml('[a](&#xD800;javascript:alert(1))'));
+});
+
+test('safeHref / safeSrc: the Astro-facing helpers return the string or null, matching isSafeHref/isSafeImageSrc', () => {
+  assert.equal(safeHref('/about'), '/about');
+  assert.equal(safeHref('javascript:alert(1)'), null);
+  assert.equal(safeHref(''), null);
+  assert.equal(safeHref(null), null);
+  assert.equal(safeSrc('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=');
+  assert.equal(safeSrc('data:image/svg+xml;base64,PHN2Zz4='), null);
+  assert.doesNotThrow(() => safeHref('&#x110000;'));
+});
+
+// ── round 3: classification consistency — backslash/protocol-relative destinations ────────────
+
+test('linkKind: `\\\\evil`, `/\\evil` and `//evil` all classify the same way (external, cross-origin)', () => {
+  // A browser treats `\` exactly like `/` when resolving a URL, so these three are one
+  // destination spelled three ways and must not disagree about whether the link leaves the site.
+  const variants = ['\\\\evil.example', '/\\evil.example', '//evil.example'];
+  const results = variants.map((href) => linkButtonsHtml([{ label: 'Go', href, primary: true }], 'st-hero'));
+  for (const html of results) {
+    assert.ok(html.includes('target="_blank" rel="noopener"'), 'classified external → opens in a new tab: ' + html);
+    assert.ok(html.includes('signet-arrow--up-right'), 'classified external → up-right arrow: ' + html);
+  }
 });
 
 // ── people coral ───────────────────────────────────────────────────────────────────────────────

@@ -594,11 +594,28 @@ function attrq(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 // already-correct `&amp;` into `&amp;amp;` (round 2, P2-1). Decoding twice would be wrong the
 // other way (a literal `&amp;lt;` some author actually meant to display would unwrap to `<`), so
 // every caller below decodes exactly once, right before it validates or escapes.
+// round 3, R2-P2-1: `String.fromCodePoint` throws RangeError for any code point above 0x10FFFF
+// (and for a lone surrogate half) — an out-of-range or malformed numeric entity must never turn
+// into a render-time crash. `safeCodePoint` returns null for anything it cannot decode, and every
+// replace callback below falls back to `m` (the original entity text, left as-is) rather than
+// letting the exception escape — an undecodable entity cannot become a colon, so leaving it alone
+// does not weaken the scheme check. The outer try/catch is defense in depth: ANY exception here
+// degrades to the raw, un-decoded string rather than throwing out of the caller.
+function safeCodePoint(n) {
+  if (!Number.isFinite(n) || n < 0 || n > 0x10FFFF) return null;
+  if (n >= 0xD800 && n <= 0xDFFF) return null; // lone surrogate half — not a valid scalar value
+  try { return String.fromCodePoint(n); } catch { return null; }
+}
 function decodeEntitiesOnce(s) {
-  return String(s == null ? '' : s)
-    .replace(/&#x([0-9a-fA-F]+);?/g, (m, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);?/g, (m, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&(amp|lt|gt|quot|apos);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e]));
+  const raw = String(s == null ? '' : s);
+  try {
+    return raw
+      .replace(/&#x([0-9a-fA-F]+);?/g, (m, h) => safeCodePoint(parseInt(h, 16)) ?? m)
+      .replace(/&#(\d+);?/g, (m, d) => safeCodePoint(parseInt(d, 10)) ?? m)
+      .replace(/&(amp|lt|gt|quot|apos);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e]));
+  } catch {
+    return raw;
+  }
 }
 
 // isSafeHref: true if `dest` may become a live `href`/`src`. Asks the URL parser, never a prefix
@@ -654,6 +671,26 @@ function isSafeImageSrc(dest) {
   const stripped = raw.replace(/[\u0009\u000a\u000d]/g, '').replace(/^[\u0000-\u0020]+/, '');
   if (SAFE_IMAGE_DATA_RE.test(stripped)) return true;
   return isSafeHref(raw);
+}
+
+// safeHref / safeSrc — the Astro layer's front door to this file's ONE allowlist policy (round 3,
+// Astro consumers). The Astro components build `href=`/`src=` bindings directly in JSX-like
+// template expressions rather than through an HTML-string emitter, so they cannot call `escAttr`
+// or branch on an internal `Ok` flag the way this file's own renderer does — but they CAN call a
+// plain function and use its return value as the presence check. Each returns the entity-decoded,
+// validated destination (Astro attribute-escapes it on output, same job `escAttr` does here) when
+// the corresponding `isSafe*` check admits it, or `null` when it does not — so a component does
+// `{safeHref(x) ? <a href={safeHref(x)}>…</a> : <span>…</span>}`, the same degrade-to-plain-text
+// shape every emitter in this file already uses, and gets a drop recorded in the same diagnostics
+// queue for free (isSafeHref/isSafeImageSrc call recordDrop internally). `null` (not `''`) so a
+// component's own `href && …` truthy check treats "disallowed" the same as "absent".
+function safeHref(dest) {
+  if (dest == null || dest === '') return null;
+  return isSafeHref(dest) ? decodeEntitiesOnce(dest) : null;
+}
+function safeSrc(dest) {
+  if (dest == null || dest === '') return null;
+  return isSafeImageSrc(dest) ? decodeEntitiesOnce(dest) : null;
 }
 
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
@@ -1668,9 +1705,17 @@ function arrowSvg(direction, size) {
 // Decorative marks (heart/envelope) are NEVER the affordance; if a site wants one it lives
 // OUTSIDE the button. This supersedes the old icon=/mailto→envelope glyph rules.
 function linkKind(href, label) {
-  const h = String(href || '');
+  // round 3, classification consistency: a browser treats `\` exactly like `/` when resolving a
+  // URL, so `\\evil.example`, `/\evil.example` and `//evil.example` are three spellings of the
+  // SAME network-path reference (a different origin) — normalise backslashes to slashes FIRST so
+  // all three take the same branch below, then treat a leading `//` (protocol-relative) as
+  // external. Without the normalisation, the raw `startsWith('/')` check used to call
+  // `//evil.example` internal and `\\evil.example` external — two names for one destination
+  // disagreeing about whether it leaves the site.
+  const h = String(href || '').replace(/\\/g, '/');
   if (/^back to /i.test(String(label || '').trim())) return 'back';
   if (/^mailto:/i.test(h)) return 'mailto';
+  if (h.startsWith('//')) return 'external';
   if (h && !h.startsWith('/') && !h.startsWith('#')) return 'external';
   return 'internal';
 }
@@ -1963,10 +2008,14 @@ function renderSection(s) {
           // 🩸 round 2, P1-1: `it.href`/`it.learn` only ever became live hrefs when the OTHER
           // field was also present (see the 2026-07-05 comment above); now both additionally
           // require isSafeHref, degrading to the plain (no-href) shape either branch already has.
+          // (round 3, R2-P1-1: the anchor for `it.href` must gate on isSafeHref(it.href) itself —
+          // gating it on `learnOk` validated the wrong field and let a bad it.href go live
+          // whenever it.learn happened to be safe.)
+          const ghOk = it.href && isSafeHref(it.href);
           const learnOk = it.learn && isSafeHref(it.learn);
-          const ghTag = learnOk ? 'a' : 'span';
+          const ghTag = (ghOk && learnOk) ? 'a' : 'span';
           const meta = (it.href || it.learn) ? '<div class="st-item-meta">' + (it.updated ? '<span class="st-item-updated">Updated ' + escHtml(it.updated) + '</span>' : '') +
-            (it.href ? '<' + ghTag + ' class="st-item-gh"' + (learnOk ? ' href="' + escAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
+            (it.href ? '<' + ghTag + ' class="st-item-gh"' + ((ghOk && learnOk) ? ' href="' + escAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
             (learnOk ? '<a class="st-item-learn" href="' + escAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
           return '<div class="st-cell st-item"><div class="st-item-head"><h4>' + inlineHtml(it.title) + '</h4>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
         }).join('');
@@ -2188,4 +2237,6 @@ export {
   // round 2, P1-2: opt-in diagnostics for destinations dropped by the shared safe-href/safe-src
   // policy — see takeDropWarnings' own comment. Additive; no existing export's shape changed.
   takeDropWarnings,
+  // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
+  safeHref, safeSrc,
 };

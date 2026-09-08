@@ -9,6 +9,7 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import Section from './Section.astro';
 import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy} from '../lib/blog.mjs';
+import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
@@ -135,8 +136,10 @@ const title = isHome
           <div class="bl-side-widget bl-side-categories">
             {meta['blog-category-title'] && <h3>{meta['blog-category-title']}</h3>}
             <ul>{categories.map((c) => (
-              <li>{c.href
-                ? <a href={c.href}>{c.label}{c.count && `（${c.count}）`}</a>
+              // round 3 (Astro consumers, R2-P3-5): `c.href` is `blog-categories:` authored
+              // frontmatter (label|count|href), reaching a live <a href> with no scheme check.
+              <li>{safeHref(c.href)
+                ? <a href={safeHref(c.href)}>{c.label}{c.count && `（${c.count}）`}</a>
                 : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
             ))}</ul>
           </div>

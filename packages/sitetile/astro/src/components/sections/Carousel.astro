@@ -4,7 +4,7 @@
 // `cols=`). For casts/archives too long for a static grid (the slick-carousel shape). Mirrors the
 // reference renderSection 'carousel' case so the editor live-preview matches the Astro build.
 // The hoisted <script> below is emitted ONCE by Astro (deduped) and wires every `.st-carousel`.
-import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, safeHref } from '@sitetile';
 import { postUrl } from '../../lib/blog.mjs';
 const { section, blogPosts = [], meta = {} } = Astro.props;
 const pm = parseParams(section.params);
@@ -35,6 +35,10 @@ const moreRaw = pm.more ? (typeof pm.more === 'object' ? pm.more.label : pm.more
 const more = moreRaw && moreRaw.includes('=')
   ? { label: moreRaw.split('=')[0].trim(), href: moreRaw.split('=').slice(1).join('=').trim() }
   : null;
+// round 3 (Astro consumers, R2-P3-5): `more.href`/`c.href` are author-set (a `more="LABEL=/href"`
+// param, `### Title →href` cells) — site-core.js's own `carousel` case gates both on
+// `isSafeHref`; `safeHref` shares that ONE policy here.
+const moreHrefOk = more ? safeHref(more.href) : null;
 // `start=N` — OPT-IN initial resting card index (0-based). General param, mirrors `cols=`: any
 // carousel whose source (e.g. a JS slick-carousel on the original site) settles on a non-zero
 // slide by default can be matched by setting the recast's initial scroll position to N cards in.
@@ -61,7 +65,9 @@ function arrowSvg(left = false) {
     <div class="st-car-head">
       {eyebrow && <p class="st-carousel-eyebrow" set:html={inlineHtml(eyebrow)} />}
       {section.title && <h2 set:html={inlineHtml(section.title)} />}
-      {more && <a class="st-car-more" href={more.href} set:html={inlineHtml(more.label)} />}
+      {more && (moreHrefOk
+        ? <a class="st-car-more" href={moreHrefOk} set:html={inlineHtml(more.label)} />
+        : <span class="st-car-more" set:html={inlineHtml(more.label)} />)}
     </div>
   )}
   {section.body && <Fragment set:html={bodyHtml(section.body)} />}
@@ -85,8 +91,9 @@ function arrowSvg(left = false) {
           </Fragment>
         );
         const cellClass = 'st-car-cell st-gal-cell' + (isBlogFull ? ' st-car-cell-blogfull' : '');
-        return c.href
-          ? <a class={`${cellClass} st-cell-link group`} href={c.href}>{inner}</a>
+        const hrefOk = c.href ? safeHref(c.href) : null;
+        return hrefOk
+          ? <a class={`${cellClass} st-cell-link group`} href={hrefOk}>{inner}</a>
           : <div class={cellClass}>{inner}</div>;
       })}
     </div>

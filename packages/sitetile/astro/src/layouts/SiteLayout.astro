@@ -141,10 +141,14 @@ const footerCols = String(meta['footer-cols'] || '').split(';;').map((c) => c.tr
   });
   return { head, items };
 });
-const footerLogo = meta['footer-logo'] ? String(meta['footer-logo']).trim() : '';
+// round 3 (Astro consumers, R2-P3-5): `footer-logo`/`site-logo` are raw frontmatter image
+// destinations reaching a live `<img src>` in three places below with no gate of their own;
+// safeSrc shares site-core.js's `isSafeImageSrc` policy — gated once here, at the source, so
+// every consumer of these two variables is covered without repeating the check three times.
+const footerLogo = meta['footer-logo'] ? safeSrc(String(meta['footer-logo']).trim()) : '';
 // The header/hero logo (`site-logo`) — the REAL site logo (an animated gif, say),
 // shared across hero + sub-page header so a `view-transition-name` morphs it page-to-page.
-const siteLogo = meta['site-logo'] ? String(meta['site-logo']).trim() : footerLogo;
+const siteLogo = meta['site-logo'] ? safeSrc(String(meta['site-logo']).trim()) : footerLogo;
 
 // `generator` — machine-readable provenance, DEFAULT ON. See the <meta> in <head> for why this one
 // defaults the opposite way to the visible `Powered by feelreef` footer. `generator: off` (or an
@@ -270,8 +274,13 @@ const breadcrumbHome = meta['breadcrumb-home'] ? String(meta['breadcrumb-home'])
 const breadcrumbTrail = String(meta['breadcrumb-trail'] || '').split(';').map((s) => s.trim()).filter(Boolean)
   .map((s) => { const m = s.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
   .filter(Boolean);
-const copyrightHref = meta['copyright-href'] ? String(meta['copyright-href']).trim() : '';
-const languageHref = meta['language-href'] ? String(meta['language-href']).trim() : '/language';
+// round 3 (Astro consumers, R2-P3-5): `copyright-href` is a raw frontmatter destination; safeHref
+// shares the same policy every other emitter uses (gated once here, at the source).
+const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-href']).trim()) : '';
+// round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
+// verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
+// every other emitter uses, falling back to the safe default rather than going live unfiltered.
+const languageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '/language') : '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
 const fontsUrl = meta.fonts ? String(meta.fonts).trim() : '';
@@ -428,7 +437,7 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { parseSidebarNav } from '../../../site-core.js';
+import { parseSidebarNav, safeHref, safeSrc } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
@@ -564,7 +573,7 @@ const ageGate = ageGateOn ? {
   noteLinks: String(meta['age-gate-note-links'] || '').split(';').map((s) => s.trim()).filter(Boolean)
     .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
     .filter(Boolean),
-  backUrl: String(meta['age-gate-back-url'] || '').trim() || '/',
+  backUrl: safeHref(String(meta['age-gate-back-url'] || '').trim()) || '/',
   // 🩸 the two button labels defaulted to Japanese for every tenant. They are the only words in
   // this dialog the site does not have to write, so they are the only ones that could be wrong
   // in a language nobody chose. Locale table now, override keys unchanged.
@@ -859,9 +868,14 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
           {ageGate.title && <h2 class="st-age-gate-title" id="st-age-gate-title">{ageGate.title}</h2>}
           {ageGate.body && <p class="st-age-gate-body">{ageGateLines(ageGate.body).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
           {ageGate.note && <p class="st-age-gate-note">{ageGateLines(ageGate.note).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
+          {/* round 3 (Astro consumers, R2-P3-5): `age-gate-note-links`/`age-gate-back-url` are raw
+              frontmatter destinations reaching a live `<a href>` with no gate; safeHref shares the
+              same policy every other emitter uses. */}
           {ageGate.noteLinks.length > 0 && (
             <p class="st-age-gate-note-links">
-              {ageGate.noteLinks.map((it) => <a href={it.href} target="_blank" rel="noopener noreferrer">{it.label}</a>)}
+              {ageGate.noteLinks.map((it) => (safeHref(it.href)
+                ? <a href={safeHref(it.href)} target="_blank" rel="noopener noreferrer">{it.label}</a>
+                : <span>{it.label}</span>))}
             </p>
           )}
           <div class="st-age-gate-actions">
@@ -957,13 +971,18 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
           buried, and faking the move with CSS makes the button teleport when the menu
           opens, because one element cannot be in two places.) It sits before .rf-header-actions
           so the header reads logo → nav → CTA → icon actions → hamburger, left to right. */}
-      {headerCta && <a class="rf-header-cta" href={headerCta.href} {...ext(headerCta.href)}>{headerCta.label}</a>}
+      {/* round 3 (Astro consumers, R2-P3-5): `header-cta:` is a raw frontmatter destination;
+          safeHref shares the same policy every other emitter uses — a disallowed scheme degrades
+          to plain text rather than a live href. */}
+      {headerCta && (safeHref(headerCta.href)
+        ? <a class="rf-header-cta" href={safeHref(headerCta.href)} {...ext(safeHref(headerCta.href))}>{headerCta.label}</a>
+        : <span class="rf-header-cta">{headerCta.label}</span>)}
       {/* header-actions (Coral A): icon buttons on the header's right. link → <a>; toggle →
           a hidden checkbox + <label> whose CSS reveal opens the drawer/offcanvas. */}
       {headerActions.length > 0 && (
         <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
           {headerActions.map((a) => a.type === 'link'
-            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={a.target || '#'} aria-label={a.label} set:html={a.icon}></a>
+            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
             : <Fragment>
                 <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
                 <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
@@ -998,7 +1017,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
       <nav class="rf-breadcrumb reef-breadcrumb" aria-label="Breadcrumb">
         <a href="/">{breadcrumbHome}</a>
         {breadcrumbTrail.map((t) => (
-          <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span><a href={t.href}>{t.label}</a></Fragment>
+          <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span>{safeHref(t.href) ? <a href={safeHref(t.href)}>{t.label}</a> : <span>{t.label}</span>}</Fragment>
         ))}
         <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
       </nav>
@@ -1035,7 +1054,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
                   {g.head && <p class="st-sidebar-group-head">{g.head}</p>}
                   <ul class="st-sidebar-list">
                     {g.items.map((it) => (
-                      <li>{it.href ? <a href={it.href} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
+                      <li>{safeHref(it.href) ? <a href={safeHref(it.href)} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
                     ))}
                   </ul>
                 </li>
@@ -1072,8 +1091,8 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
             )}
             {sidebarSocial.length > 0 && (
               <nav class="st-sidebar-social" aria-label="Social">
-                {sidebarSocial.map((it) => (
-                  <a href={it.href} {...ext(it.href)} aria-label={it.label} title={it.label} set:html={it.icon} />
+                {sidebarSocial.map((it) => (safeHref(it.href) &&
+                  <a href={safeHref(it.href)} {...ext(safeHref(it.href))} aria-label={it.label} title={it.label} set:html={it.icon} />
                 ))}
               </nav>
             )}
@@ -1090,7 +1109,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-prose rf-foot-widget rf-foot-popular">
           {footWidgets.popular.heading && <h2>{footWidgets.popular.heading}</h2>}
           <ul class="st-list">
-            {footWidgets.popular.items.map((it) => <li><a href={it.href}>{it.label}</a></li>)}
+            {footWidgets.popular.items.map((it) => <li>{safeHref(it.href) ? <a href={safeHref(it.href)}>{it.label}</a> : <span>{it.label}</span>}</li>)}
           </ul>
         </section>
       )}
@@ -1098,7 +1117,9 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-tagcloud rf-foot-widget rf-foot-tagcloud">
           {footWidgets.categories.heading && <h2>{footWidgets.categories.heading}</h2>}
           <div class="st-tag-flow">
-            {footWidgets.categories.items.map((it) => <a class="st-tag" href={it.href}>{it.label}</a>)}
+            {footWidgets.categories.items.map((it) => (safeHref(it.href)
+              ? <a class="st-tag" href={safeHref(it.href)}>{it.label}</a>
+              : <span class="st-tag">{it.label}</span>))}
           </div>
         </section>
       )}
@@ -1120,8 +1141,8 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
               {footerCols.map((col) => (
                 <div class="rf-foot-col">
                   {col.head && <h4>{col.head}</h4>}
-                  {col.items.map((it) => (it.href
-                    ? <a href={it.href} {...ext(it.href)}>{it.label}</a>
+                  {col.items.map((it) => (safeHref(it.href)
+                    ? <a href={safeHref(it.href)} {...ext(safeHref(it.href))}>{it.label}</a>
                     : <span class="rf-foot-soon">{it.label}</span>))}
                 </div>
               ))}
@@ -1129,13 +1150,15 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
           </div>
         ) : footerSocial.length > 0 ? (
           <nav class="rf-footer-social" aria-label="Social">
-            {footerSocial.map((it) => (
-              <a href={it.href} {...ext(it.href)} aria-label={it.label} set:html={it.icon} />
+            {footerSocial.map((it) => (safeHref(it.href) &&
+              <a href={safeHref(it.href)} {...ext(safeHref(it.href))} aria-label={it.label} set:html={it.icon} />
             ))}
           </nav>
         ) : navLinks.length > 0 && (
           <nav class="rf-footer-nav" aria-label="Footer">
-            {navLinks.map((l) => <a href={l.href} {...ext(l.href)}>{l.label}</a>)}
+            {navLinks.map((l) => (safeHref(l.href)
+              ? <a href={safeHref(l.href)} {...ext(safeHref(l.href))}>{l.label}</a>
+              : <span>{l.label}</span>))}
           </nav>
         )}
         {/* footer logo links home.

@@ -1,5 +1,5 @@
 ---
-import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml, safeSrc } from '@sitetile';
 const { section } = Astro.props;
 const pm = parseParams(section.params);
 const style = pm.bg ? `background-image:url(${pm.bg})` : undefined;
@@ -36,14 +36,20 @@ const enter = pm.enter != null;
 const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
 const layerList = layersRaw ? String(layersRaw).split('|').map((s) => s.trim()).filter(Boolean) : [];
 const parallax = pm.parallax != null;
-const logo = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+// round 3 (Astro consumers, R2-P3-5): `logo=`/`layers=` params and `heroParts`' extracted image
+// are all author-controlled `src` destinations that reach a live `<img>` with no gate of their
+// own in this file (imgTag, which every OTHER caller of these values goes through, is never
+// called here) — site-core.js's own `imgTag` gates every image src on `isSafeImageSrc`; `safeSrc`
+// shares that ONE policy here. `null` degrades to no image, same shape the falsy check already had.
+const logo = logoRaw ? safeSrc(logoRaw) : null;
 const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
 ---
 {layerList.length ? (
   <section class="st-hero st-full-bleed st-hero-layered" id={section.id} data-media={media} data-parallax={parallax ? '' : undefined} data-logo-pos={logoPos} data-enter={enter ? '' : undefined}>
     <div class="st-hero-stage" aria-hidden="true">
-      {layerList.map((src, i) => (
-        <img class="st-hero-layer" src={src} alt="" data-depth={i} loading="eager" decoding="async" />
+      {layerList.map((src, i) => safeSrc(src) && (
+        <img class="st-hero-layer" src={safeSrc(src)} alt="" data-depth={i} loading="eager" decoding="async" />
       ))}
     </div>
     <div class="st-hero-text st-hero-overlay">
@@ -78,8 +84,8 @@ const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm[
     </div>
     {hp.images.length > 0 && (
       <div class="st-hero-art" data-imgs={hp.images.length > 1 ? String(hp.images.length) : undefined}>
-        {hp.images.map((im) => (
-          <img class="st-img" src={im.src} alt={im.alt} loading="eager" decoding="async" />
+        {hp.images.map((im) => safeSrc(im.src) && (
+          <img class="st-img" src={safeSrc(im.src)} alt={im.alt} loading="eager" decoding="async" />
         ))}
       </div>
     )}
