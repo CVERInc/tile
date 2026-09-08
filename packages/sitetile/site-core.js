@@ -586,21 +586,74 @@ function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
 // Attribute-safe a value that cssmd ALREADY entity-escaped (&<> done) — only quotes remain.
 function attrq(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 
+// A destination MAY already carry HTML entities by the time any of the functions below see it
+// (an author who typed `&amp;` literally, or a stash-restored value — see inlineHtml). Decode
+// them ONCE, before either the scheme check or the final escape runs, so both act on the same,
+// real string: checking the DECODED form catches an entity-obfuscated scheme (`javascript&#58;`
+// decodes to a real colon); escaping the DECODED form exactly once avoids turning an author's
+// already-correct `&amp;` into `&amp;amp;` (round 2, P2-1). Decoding twice would be wrong the
+// other way (a literal `&amp;lt;` some author actually meant to display would unwrap to `<`), so
+// every caller below decodes exactly once, right before it validates or escapes.
+function decodeEntitiesOnce(s) {
+  return String(s == null ? '' : s)
+    .replace(/&#x([0-9a-fA-F]+);?/g, (m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (m, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&(amp|lt|gt|quot|apos);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e]));
+}
+
 // isSafeHref: true if `dest` may become a live `href`/`src`. Asks the URL parser, never a prefix
 // test — resolving against a fixed base is what catches "java\nscript:" and a leading space, both
 // of which defeat a naive startsWith even lowercased and both still parse to javascript:. `dest`
-// may already be entity-escaped (&<> as `&amp;`/`&lt;`/`&gt;`) by the time this runs; that never
-// changes the parsed scheme, since a scheme is letters/digits/+/-/. only. No allowlist helper
-// exists elsewhere in this file, so this one keeps the renderer's actual normal cases: http(s),
-// mailto, and scheme-less destinations (relative paths, `#fragment`) — everything else (notably
-// `javascript:`, `data:`) is unsafe and the caller renders the destination as plain text instead.
+// is entity-decoded once (see decodeEntitiesOnce) before the scheme check, so an entity-obfuscated
+// scheme (`javascript&#58;alert(1)`) is caught by the check itself rather than relying on escaping
+// alone. Allowlist (round 2, P1-2): http(s), mailto, tel, sms, ftp(s) — the real schemes ordinary
+// site content uses (a `tel:` contact link, an `ftp:` download) — and scheme-less destinations
+// (relative paths, `#fragment`). Everything else (notably `javascript:`, `data:`, `vbscript:`) is
+// unsafe and the caller renders the destination as plain text instead. `data:` is NEVER safe here
+// even for an otherwise-image-shaped value — see isSafeImageSrc for the one place `data:` is ever
+// allowed, and only for images, and only for a fixed set of raster MIME types.
 const SAFE_HREF_BASE = 'http://sitetile.invalid/';
+const SAFE_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:', 'ftp:', 'ftps:']);
+
+// A disallowed destination degrades to plain text everywhere in this file (never a live link/img
+// left silently blank) — but nothing told the AUTHOR that. `_dropWarnings` is a build-time-only
+// diagnostic queue: renderSiteToHtml (the page-level entry point — every render in this file
+// funnels through isSafeHref/isSafeImageSrc, and both call `record` exactly once per rejected
+// destination, so this is the ONE place that needs to know) stamps each with the page it happened
+// on and hands the batch to `takeDropWarnings` for whatever calls render to log. There is no
+// existing warning channel in this module (grepped) — this is additive and does not change any
+// existing function's return shape, so no caller of isSafeHref/isSafeImageSrc/renderSiteToHtml
+// needs to change to keep working; a caller that wants the diagnostics opts in by calling
+// takeDropWarnings() after render.
+const _dropWarnings = [];
+function recordDrop(rawDest) {
+  let scheme = '(unparseable)';
+  try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
+  _dropWarnings.push({ scheme, dest: String(rawDest == null ? '' : rawDest) });
+}
 function isSafeHref(dest) {
-  const raw = String(dest == null ? '' : dest);
+  const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
   let u;
-  try { u = new URL(raw, SAFE_HREF_BASE); } catch { return false; }
-  return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:';
+  try { u = new URL(raw, SAFE_HREF_BASE); } catch { recordDrop(dest); return false; }
+  const ok = SAFE_HREF_SCHEMES.has(u.protocol);
+  if (!ok) recordDrop(dest);
+  return ok;
+}
+
+// isSafeImageSrc: the `isSafeHref` allowlist, PLUS `data:` for a fixed set of raster image MIME
+// types ONLY (round 2, P1-2) — real recast content (Wix/Blogger imports) embeds photos this way,
+// and unlike `<a href>`, an `<img>`/`<video>` `src` is not a script-execution context in any
+// current browser. `image/svg+xml` is deliberately excluded (an SVG can carry its own `<script>`)
+// — this is an allowlist of raster formats, not "any data: URI whose MIME starts with image/".
+// Never used for `href` — an anchor never gets the `data:` exception, only src does.
+const SAFE_IMAGE_DATA_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,/i;
+function isSafeImageSrc(dest) {
+  const raw = decodeEntitiesOnce(dest);
+  if (raw === '') return true;
+  const stripped = raw.replace(/[\u0009\u000a\u000d]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  if (SAFE_IMAGE_DATA_RE.test(stripped)) return true;
+  return isSafeHref(raw);
 }
 
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
@@ -611,7 +664,16 @@ const RE_VIDEO_SRC = /\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i;
 // One <img> — zero-JS, lazy, responsive (sized by .st-img CSS + reef tokens). alt/src are already
 // cssmd-escaped (&<> done) by the time we build this, so only quote-escape. A video src yields
 // <video controls> instead (poster carried via the alt slot: `![poster-url](clip.mp4)` if present).
+//
+// 🩸 round 2, P1-1/P2-2: `inlineHtml`'s OWN markdown-image and wikilink call sites scheme-check
+// before ever reaching here, but `heroParts`' multi-image extraction and `firstImage` (grid
+// image-cards, gallery, carousel, people figures) build `{alt,src}` straight off a markdown regex
+// and call this directly — a `javascript:`/`data:` src reached a live `<img src>`/`<video src>`
+// through those, unvalidated. Gated here too so no caller of `imgTag` can bypass the policy by
+// existing; a disallowed src renders nothing (empty string) rather than risk re-escaping an `alt`
+// whose escaping state varies by caller (some already cssmd-escaped, some raw markdown text).
 function imgTag(alt, src) {
+  if (!isSafeImageSrc(src)) return '';
   if (RE_VIDEO_SRC.test(String(src || ''))) {
     const hasPoster = alt && /^https?:\/\/|^\//.test(alt);
     const poster = hasPoster ? ' poster="' + attrq(alt) + '"' : '';
@@ -812,14 +874,24 @@ function inlineHtml(text, opts) {
   // different escape step — which is this one (escapeInline instead of plain escHtml, so an HTML
   // comment is consumed at the same point the raw text is examined for '<', see escapeInline above).
   let s = markEscapes(markEmphasis(markCode(escapeInline(stashed, opts), 'st'), 'st'), 'st');
-  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => escHtml(hrefs[+i]));
+  // round 2, P2-1: this used to escHtml the RAW captured href unconditionally. An author whose
+  // destination already carried an entity (`?a=1&amp;b=2` from an HTML-to-Markdown import, or a
+  // hand-typed `&amp;`) got escaped a SECOND time (`&amp;amp;b=2`), corrupting the URL a browser
+  // would request. Decoding once first, then escaping once, normalises both an already-escaped
+  // and a literal-`&` author to the same, correctly-single-escaped output — and, as a side
+  // effect, is what lets the scheme check below see through an entity-obfuscated scheme
+  // (`javascript&#58;`) instead of leaning on escaping alone to neutralise it.
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => escHtml(decodeEntitiesOnce(hrefs[+i])));
   // wikilink embed: `inner` was never stashed (no `](` shape), so cssmd's own escapeInline pass
-  // above already ran over it like any other text — safe to hand straight to imgTag.
-  s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => imgTag(inner.split('/').pop(), inner));
+  // above already ran over it like any other text. round 2, P2-2: that answers the ESCAPING
+  // question only — it never checked the SCHEME, so `![[javascript:alert(1)]]` reached a live
+  // `<img src>` untouched. Same guard as the sibling markdown-image line two rows below.
+  s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => (isSafeImageSrc(inner) ? imgTag(inner.split('/').pop(), inner) : inner.split('/').pop()));
   // markdown image: `src` here is the (now escaped) restored destination. A disallowed scheme
   // renders no <img> at all — just the (already-escaped) alt text, same shape as a broken image's
-  // fallback text, per isSafeHref above.
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => (isSafeHref(src) ? imgTag(alt, src) : alt));
+  // fallback text, per isSafeImageSrc above (round 2, P1-2: images additionally allow a small
+  // raster `data:` allowlist that a plain href never does).
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => (isSafeImageSrc(src) ? imgTag(alt, src) : alt));
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
   // prose at the maintainer's call): an external link is external wherever it appears.
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (mm, lab, href) => {
@@ -1429,7 +1501,14 @@ function ctaHtml(val, cls) {
   if (!val) return '';
   // The single filled hero CTA carries no arrow by design (it's the headline action, not a link
   // in a row); it still follows the shared new-tab rule for external destinations (2026-07-13).
-  if (typeof val === 'object') return '<a class="' + cls + '" href="' + escAttr(val.href || '#') + '"' + targetAttrs(linkKind(val.href, val.label)) + '>' + escHtml(val.label || '') + '</a>';
+  // 🩸 round 2, P1-1: this built `href` with escAttr alone — the same author-controlled Markdown
+  // `cta="…"→href` destination `inlineHtml` scheme-checks, reaching a live href unchecked one
+  // emitter over. A disallowed destination now degrades to the same plain `<span>` the bare-string
+  // branch below already renders, never a live `javascript:`/`data:` href.
+  if (typeof val === 'object') {
+    if (!isSafeHref(val.href || '')) return '<span class="' + cls + '">' + escHtml(val.label || '') + '</span>';
+    return '<a class="' + cls + '" href="' + escAttr(val.href || '#') + '"' + targetAttrs(linkKind(val.href, val.label)) + '>' + escHtml(val.label || '') + '</a>';
+  }
   return '<span class="' + cls + '">' + escHtml(val) + '</span>';
 }
 
@@ -1460,9 +1539,15 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
   // Affordance = a signet-arrow chosen by link kind — see linkKind (design 2026-07-13). The old
   // icon=heart / mailto→envelope glyph rules are gone: decorative marks never sit inside a button.
   // `pmIcon` is intentionally ignored now (kept in the signature for Cta.astro call-site compat).
+  // 🩸 round 2, P1-1: every button here comes from `splitCtaBody`/`RE_CTA_LINK` — the same author
+  // Markdown destination `inlineHtml` scheme-checks — but this loop built `href` with escAttr
+  // alone. A disallowed destination degrades to the button's OWN classes on a `<span>` (no href,
+  // no live link), keeping its label and arrow visible rather than vanishing.
   const row = all.length ? '<div class="st-cta-btns">' + all.map((b, idx) => {
+    const cls = 'st-cta-btn ' + (idx === 0 ? 'st-cta-btn-primary' : 'st-cta-btn-secondary');
+    if (!isSafeHref(b.href || '')) return '<span class="' + cls + '">' + escHtml(b.label) + '</span>';
     const kind = linkKind(b.href, b.label);
-    return '<a class="st-cta-btn ' + (idx === 0 ? 'st-cta-btn-primary' : 'st-cta-btn-secondary') + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
+    return '<a class="' + cls + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
       escHtml(b.label) + '<span class="st-cta-arrow" aria-hidden="true">' + affordanceArrow(kind, 16) + '</span></a>';
   }).join('') + '</div>' : '';
   return { row, caption };
@@ -1544,10 +1629,20 @@ function linkButtonsHtml(buttons, cls) {
   const isGithub = (href) => !!href && /^https?:\/\/(www\.)?github\.com\//i.test(href);
   // `plain:true` entries (e.g. a trailing "Back to X" nav link) render as a bare text link in
   // their natural source position, not button chrome — see heroParts' `singleBackLink` comment.
+  // 🩸 round 2, P1-1: hero/social buttons come from `heroParts`/`socialParts` — the SAME author
+  // Markdown destination as a `cta`, reachable from ordinary page prose via a live production
+  // component (`Hero.astro`) — but this built `href` with escAttr alone. A disallowed destination
+  // degrades to a `<span>` with the button's own classes, never a live href.
   return '<div class="' + cls + '-btns">' + buttons.map((b) => {
-    if (b.plain) return '<a class="' + cls + '-plain" href="' + escAttr(b.href || '#') + '">' + arrowSvg('left', 14) + escHtml(b.label) + '</a>';
+    const safe = isSafeHref(b.href || '');
+    if (b.plain) {
+      if (!safe) return '<span class="' + cls + '-plain">' + arrowSvg('left', 14) + escHtml(b.label) + '</span>';
+      return '<a class="' + cls + '-plain" href="' + escAttr(b.href || '#') + '">' + arrowSvg('left', 14) + escHtml(b.label) + '</a>';
+    }
+    const btnCls = cls + '-btn ' + cls + '-btn-' + (b.primary ? 'primary' : 'secondary');
+    if (!safe) return '<span class="' + btnCls + '">' + (isGithub(b.href) ? githubSvg(16) : '') + escHtml(b.label) + '</span>';
     const kind = linkKind(b.href, b.label);
-    return '<a class="' + cls + '-btn ' + cls + '-btn-' + (b.primary ? 'primary' : 'secondary') + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
+    return '<a class="' + btnCls + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
       (isGithub(b.href) ? githubSvg(16) : '') + escHtml(b.label) + affordanceArrow(kind, 16) + '</a>';
   }).join('') + '</div>';
 }
@@ -1665,13 +1760,20 @@ function renderSection(s) {
       const packMasonry = pm.pack === 'masonry' || (pm.pack && typeof pm.pack === 'object' && pm.pack.label === 'masonry');
       const packCols = Math.max(2, parseInt(pm.cols, 10) || 2);
       const cellsArr = (s.cells || []);
+      // 🩸 round 2, P1-1: `c.href`/`c.badgeHref` come from `### Title →href`/`[Label →href]` —
+      // author Markdown parsed the same way a CTA link is, but every branch below built its href
+      // with escAttr alone (truthy-only, no scheme check). Each `hrefOk`/`badgeHrefOk` folds the
+      // check into the EXISTING truthy branch every cell already has for "no link" — a disallowed
+      // destination degrades to that same plain (non-`<a>`) shape.
       const cells = cellsArr.map((c) => {
+        const hrefOk = !!c.href && isSafeHref(c.href);
+        const badgeHrefOk = !!c.badgeHref && isSafeHref(c.badgeHref);
         if (imageCards) {
           const fi = firstImage(c.body);
           const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
           const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
           const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest);
-          return c.href
+          return hrefOk
             ? '<a class="st-cell st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + inner + '</a>'
             : '<div class="st-cell st-gal-cell">' + inner + '</div>';
         }
@@ -1686,7 +1788,7 @@ function renderSection(s) {
         // `[Label →href]` badge = a SECONDARY card link (its own action). It can't nest inside the
         // whole-cell <a>, so such a cell uses the OVERLAY pattern: a relative container, an absolute
         // full-cell overlay <a> (the primary link), and the action + "Learn more" stacked above it.
-        const hasAction = !!(c.href && c.badgeHref);
+        const hasAction = hrefOk && badgeHrefOk;
         const inner = ((footTag || hasAction) ? '' : badge) + emoji + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(c.body);
         // labeled CTA ("<cta>" on the heading) renders the directional arrow; bare href → a chevron.
         // Cells that carry an emoji/badge (status cards) get NO chevron — the badge is the affordance.
@@ -1702,7 +1804,7 @@ function renderSection(s) {
         }
         const tail = footTag ? '<div class="st-cell-foot">' + badge + cta + '</div>' : cta;
         // a cell with a href is a whole-cell link; the `group` class drives the arrow's hover morph.
-        return c.href
+        return hrefOk
           ? '<a class="st-cell st-cell-link group" href="' + escAttr(c.href) + '"' + (/^https?:\/\//.test(c.href) ? ' target="_blank" rel="noopener"' : '') + '>' + inner + tail + '</a>'
           : '<div class="st-cell">' + inner + tail + '</div>';
       });
@@ -1731,7 +1833,7 @@ function renderSection(s) {
         const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
         const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
-        return c.href
+        return (c.href && isSafeHref(c.href))
           ? '<a class="st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-gal-cell">' + badge + inner + '</div>';
       }).join('');
@@ -1750,7 +1852,7 @@ function renderSection(s) {
         const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
         const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
-        return c.href
+        return (c.href && isSafeHref(c.href))
           ? '<a class="st-car-cell st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-car-cell st-gal-cell">' + badge + inner + '</div>';
       }).join('');
@@ -1759,9 +1861,11 @@ function renderSection(s) {
       const more = moreRaw && String(moreRaw).includes('=')
         ? { label: String(moreRaw).split('=')[0].trim(), href: String(moreRaw).split('=').slice(1).join('=').trim() }
         : null;
+      const moreOk = more && isSafeHref(more.href);
       const head = (s.title || more)
         ? '<div class="st-car-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
-          (more ? '<a class="st-car-more" href="' + escAttr(more.href) + '">' + inlineHtml(more.label) + '</a>' : '') + '</div>'
+          (moreOk ? '<a class="st-car-more" href="' + escAttr(more.href) + '">' + inlineHtml(more.label) + '</a>'
+            : more ? '<span class="st-car-more">' + inlineHtml(more.label) + '</span>' : '') + '</div>'
         : '';
       return '<section class="st-carousel" data-cols="' + escAttr(pm.cols || '') + '">' +
         head + bodyHtml(s.body) +
@@ -1806,14 +1910,18 @@ function renderSection(s) {
         // row the name stays text and every destination is reachable from the row, so a card
         // never has two competing "the" links.
         const nm = inlineHtml(p.title);
-        const name = p.href
+        const name = (p.href && isSafeHref(p.href))
           ? '<h3 class="st-person-name"><a href="' + escAttr(p.href) + '"' + (/^https?:\/\//.test(p.href) ? ' target="_blank" rel="noopener"' : '') + '>' + nm + '</a></h3>'
           : '<h3 class="st-person-name">' + nm + '</h3>';
         const rl = p.badge
           ? '<span class="st-person-roles">' + roles(p.badge).map((x) => '<span class="st-person-role">' + escHtml(x) + '</span>').join('') + '</span>'
           : '';
+        // 🩸 round 2, P1-1: each `l.href` is an author destination (a person's named link row);
+        // a disallowed one degrades to a plain `<span>` instead of a live `<a>`.
         const lk = (p.links && p.links.length)
-          ? '<div class="st-person-links">' + p.links.map((l) => '<a class="st-person-link" href="' + escAttr(l.href) + '"' + (/^https?:\/\//.test(l.href) ? ' target="_blank" rel="noopener"' : '') + '>' + escHtml(l.label) + '</a>').join('') + '</div>'
+          ? '<div class="st-person-links">' + p.links.map((l) => isSafeHref(l.href)
+              ? '<a class="st-person-link" href="' + escAttr(l.href) + '"' + (/^https?:\/\//.test(l.href) ? ' target="_blank" rel="noopener"' : '') + '>' + escHtml(l.label) + '</a>'
+              : '<span class="st-person-link">' + escHtml(l.label) + '</span>').join('') + '</div>'
           : '';
         return '<div class="st-person"' + (p.tone ? ' data-tone="' + escAttr(p.tone) + '"' : '') + '>' +
           fig + name + rl + '<div class="st-person-body">' + bodyHtml(fi.rest) + '</div>' + lk + '</div>';
@@ -1835,8 +1943,10 @@ function renderSection(s) {
       const gid = (t) => 'group-' + slugify(t, 'g');
       const badges = (b) => String(b || '').split('·').map((x) => x.trim()).filter(Boolean);
       const linkIsGh = pm.link && typeof pm.link === 'object' && /github\.com/.test(pm.link.href);
-      const link = pm.link && typeof pm.link === 'object'
-        ? '<a class="st-collection-link' + (linkIsGh ? ' st-collection-link-gh' : '') + '" href="' + escAttr(pm.link.href) + '"' + (/^https?:\/\//.test(pm.link.href) ? ' target="_blank" rel="noopener"' : '') + '><span>' + escHtml(pm.link.label) + '</span>' + arrowSvg(/^https?:\/\//.test(pm.link.href) ? 'up-right' : 'right', 16) + '</a>' : '';
+      const linkOk = pm.link && typeof pm.link === 'object' && isSafeHref(pm.link.href);
+      const link = linkOk
+        ? '<a class="st-collection-link' + (linkIsGh ? ' st-collection-link-gh' : '') + '" href="' + escAttr(pm.link.href) + '"' + (/^https?:\/\//.test(pm.link.href) ? ' target="_blank" rel="noopener"' : '') + '><span>' + escHtml(pm.link.label) + '</span>' + arrowSvg(/^https?:\/\//.test(pm.link.href) ? 'up-right' : 'right', 16) + '</a>'
+        : (pm.link && typeof pm.link === 'object') ? '<span class="st-collection-link"><span>' + escHtml(pm.link.label) + '</span></span>' : '';
       const head = '<div class="st-collection-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + link + '</div>';
       const eyebrow = pm.eyebrow ? '<p class="st-collection-eyebrow">' + escHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       const pills = multi ? '<nav class="st-collection-pills" aria-label="Categories">' +
@@ -1850,10 +1960,14 @@ function renderSection(s) {
           // 🩸 corrected 2026-07-05: live only wraps "View on GitHub" as an <a> when there's ALSO a
           // learn page (the card-wide link then targets learn, so GH needs its own anchor); without
           // one, the whole card already links to GitHub and live renders it as plain text.
-          const ghTag = it.learn ? 'a' : 'span';
+          // 🩸 round 2, P1-1: `it.href`/`it.learn` only ever became live hrefs when the OTHER
+          // field was also present (see the 2026-07-05 comment above); now both additionally
+          // require isSafeHref, degrading to the plain (no-href) shape either branch already has.
+          const learnOk = it.learn && isSafeHref(it.learn);
+          const ghTag = learnOk ? 'a' : 'span';
           const meta = (it.href || it.learn) ? '<div class="st-item-meta">' + (it.updated ? '<span class="st-item-updated">Updated ' + escHtml(it.updated) + '</span>' : '') +
-            (it.href ? '<' + ghTag + ' class="st-item-gh"' + (it.learn ? ' href="' + escAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
-            (it.learn ? '<a class="st-item-learn" href="' + escAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
+            (it.href ? '<' + ghTag + ' class="st-item-gh"' + (learnOk ? ' href="' + escAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
+            (learnOk ? '<a class="st-item-learn" href="' + escAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
           return '<div class="st-cell st-item"><div class="st-item-head"><h4>' + inlineHtml(it.title) + '</h4>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
         }).join('');
         return '<div class="st-collection-group"><p class="st-collection-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p><div class="st-cells">' + cards + '</div></div>';
@@ -1904,7 +2018,11 @@ function renderSection(s) {
       // inline links. Body is a markdown list of `- [Label](/href)`; each becomes an `.st-tag`
       // anchor laid out inline-wrapping. General — any site with a tag/category cloud module.
       const links = tagcloudLinks(s.body);
-      const tags = links.map((l) => '<a class="st-tag" href="' + escAttr(l.href) + '">' + inlineHtml(l.label) + '</a>').join('');
+      // 🩸 round 2, P1-1: each tag is an author `[Label](href)` destination, same class as a CTA
+      // link; a disallowed one degrades to a plain `<span>` tag, never a live href.
+      const tags = links.map((l) => isSafeHref(l.href)
+        ? '<a class="st-tag" href="' + escAttr(l.href) + '">' + inlineHtml(l.label) + '</a>'
+        : '<span class="st-tag">' + inlineHtml(l.label) + '</span>').join('');
       return '<section class="st-tagcloud">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
         '<div class="st-tag-flow">' + tags + '</div></section>';
     }
@@ -1960,7 +2078,16 @@ function withSectionId(html, id) {
   return html.replace(/^(<section class="[^"]*")/, '$1 id="' + escAttr(id) + '"');
 }
 
+// round 2, P1-2: page-level entry point for the drop-warning queue (see `_dropWarnings` above) —
+// stamps whatever isSafeHref/isSafeImageSrc recorded DURING this one render with the page it
+// happened on, so a caller that wants diagnostics doesn't have to guess which page produced them.
+function _stampDropWarnings(site, before) {
+  if (_dropWarnings.length === before) return;
+  const page = String((site.meta || {})[FRONTMATTER_KEY] || (site.meta || {}).title || '(untitled)');
+  for (let i = before; i < _dropWarnings.length; i++) _dropWarnings[i].page = page;
+}
 function renderSiteToHtml(site) {
+  const _before = _dropWarnings.length;
   const sectionsHtml = (site.sections || []).map((s) => withSectionId(renderSection(s), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
@@ -1970,23 +2097,37 @@ function renderSiteToHtml(site) {
       '<div class="st-sidebar-group">' +
       (g.head ? '<p class="st-sidebar-group-head">' + escHtml(g.head) + '</p>' : '') +
       '<ul class="st-sidebar-list">' +
-      g.items.map((it) => '<li>' + (it.href
+      // 🩸 round 2, P1-1: `it.href` is author `sidebar-nav:` frontmatter, the same class of
+      // destination as any other coral link; folded into the EXISTING "no href" fallback branch.
+      g.items.map((it) => '<li>' + ((it.href && isSafeHref(it.href))
         ? '<a href="' + escAttr(it.href) + '">' + escHtml(it.label) + '</a>'
         : '<span>' + escHtml(it.label) + '</span>') + '</li>').join('') +
       '</ul></div>'
     ).join('');
     // The site logo lives at the TOP of the sidebar (WP/Blogger sidebar-theme convention:
     // brand wordmark above the nav), not in a top header band. General for any sidebar site.
-    const sbLogo = (site.meta || {})['site-logo']
-      ? '<a class="st-sidebar-logo" href="/"><img src="' + escAttr(String((site.meta || {})['site-logo']).trim()) + '" alt="' + escAttr((site.meta || {}).title || '') + '" /></a>'
+    // 🩸 round 2, P1-1/P1-2: `site-logo` is an image src built by hand here (not via imgTag), so
+    // it needs its own isSafeImageSrc gate — a disallowed value now drops the whole logo block
+    // rather than reaching a live `<img src>`.
+    const sbLogoSrc = String((site.meta || {})['site-logo'] || '').trim();
+    const sbLogo = (sbLogoSrc && isSafeImageSrc(sbLogoSrc))
+      ? '<a class="st-sidebar-logo" href="/"><img src="' + escAttr(sbLogoSrc) + '" alt="' + escAttr((site.meta || {}).title || '') + '" /></a>'
       : '';
+    _stampDropWarnings(site, _before);
     return '<div class="st-sidebar-layout">' +
       '<aside class="st-sidebar">' + sbLogo + '<nav class="st-sidebar-nav" aria-label="Sidebar">' + navHtml + '</nav></aside>' +
       '<div class="st-sidebar-main">' + sectionsHtml + '</div>' +
       '</div>';
   }
+  _stampDropWarnings(site, _before);
   return sectionsHtml;
 }
+
+// round 2, P1-2: opt-in read of the drop-warning queue — returns every {page, scheme, dest}
+// recorded since the last call and CLEARS it (so warnings are never double-reported across
+// separate takeDropWarnings() calls, e.g. one per build). A build script logs these; nothing in
+// this file requires a caller to read them, so existing callers of renderSiteToHtml are unaffected.
+function takeDropWarnings() { return _dropWarnings.splice(0); }
 
 // ── derived page description ─────────────────────────────────────────────────────────────────────
 // A page with no `description:` in its frontmatter used to emit no <meta description>, no
@@ -2044,4 +2185,7 @@ export {
   parseSidebarNav,
   FRONTMATTER_KEY, KNOWN_TYPES, SITE_LAYER_KEYS,
   deriveDescription, DESC_MAX,
+  // round 2, P1-2: opt-in diagnostics for destinations dropped by the shared safe-href/safe-src
+  // policy — see takeDropWarnings' own comment. Additive; no existing export's shape changed.
+  takeDropWarnings,
 };

