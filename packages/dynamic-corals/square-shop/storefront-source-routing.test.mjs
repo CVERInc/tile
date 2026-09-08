@@ -272,7 +272,7 @@ test('an emitted native Buy now control posts only the projected SKU before the 
   assert.ok(script, 'the actual emitted native page must carry its checkout behavior');
 
   let click;
-  const document = { addEventListener(type, handler) { if (type === 'click') click = handler; } };
+  const document = { documentElement: { lang: '' }, addEventListener(type, handler) { if (type === 'click') click = handler; } };
   const status = { textContent: '' };
   const button = {
     disabled: false,
@@ -297,6 +297,42 @@ test('an emitted native Buy now control posts only the projected SKU before the 
   assert.equal(calls[1].url, '/api/checkout');
   assert.equal(calls[1].init.method, 'POST');
   assert.equal(calls[1].init.body, undefined, 'native checkout identifies the site by same-origin host/session, not a client locator');
+  assert.deepEqual(redirects, ['https://pay.example/session']);
+});
+
+test('a declared page language rides the native checkout POST as a lang hint', async () => {
+  const { load } = emit('native-buy-lang', ['--site-id', 'site-native', '--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }])]);
+  const mod = await load();
+  const response = await mod.default.fetch(new Request('https://site.example/shop/reef-tee'), {
+    ASSETS: { fetch: async () => new Response(shell) },
+    RSP: { fetch: async () => Response.json({ ok: true, source: 'native', item: product }) },
+  });
+  const html = await response.text();
+  assert.match(html, /document\.documentElement/, 'the native checkout script reads the page declared language');
+  assert.match(html, /JSON\.stringify\(\{lang:lang\}\)/, 'the native checkout script can post a lang field');
+  const script = html.match(/<script>([\s\S]*data-native-sku[\s\S]*?)<\/script>/);
+  assert.ok(script);
+
+  let click;
+  const document = { documentElement: { lang: 'zh-Hant' }, addEventListener(type, handler) { if (type === 'click') click = handler; } };
+  const button = {
+    disabled: false,
+    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : null; },
+    parentElement: { querySelector() { return null; } },
+  };
+  const calls = [];
+  const browserFetch = async (url, init) => {
+    calls.push({ url, init });
+    return url === '/api/cart/items' ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] }) : Response.json({ redirect_url: 'https://pay.example/session' });
+  };
+  const redirects = [];
+  new Function('document', 'fetch', 'window', script[1])(document, browserFetch, { location: { assign(url) { redirects.push(url); } } });
+  await click({ target: { closest(selector) { return selector === '[data-native-sku]' ? button : null; } } });
+
+  assert.equal(calls[1].url, '/api/checkout');
+  assert.equal(calls[1].init.method, 'POST');
+  assert.equal(calls[1].init.headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[1].init.body), { lang: 'zh-Hant' });
   assert.deepEqual(redirects, ['https://pay.example/session']);
 });
 
