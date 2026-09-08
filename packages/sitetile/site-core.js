@@ -1022,12 +1022,18 @@ function renderDialogue(turns) {
 // see isCommentBlockOpen) are `<!--` opens an HTML-comment block, mirroring CommonMark HTML block type
 // 2: it continues, consuming WHOLE LINES verbatim, through blank lines, list markers, quote markers,
 // anything, emitting nothing for any of it, until the first line that contains `-->` or `--!>` — that
-// line is consumed too, in full (whatever follows the terminator on that same line is part of the
-// block and never separately parsed — this is what closes R3-P2-03: a comment can no longer leave a
-// same-line remainder for the block parser to re-interpret as something else, because the block eats
-// the WHOLE line, not just up through the terminator character). If no such line exists anywhere in
-// the rest of the document, the opener is UNTERMINATED — round 3, point 3 of the design (a policy
-// change from rounds 1-2's "deletes to end of document", itself R3-P3-04's own complaint: silently
+// line is consumed too, up through and including the terminator. Round 4 stopped there and discarded
+// whatever came AFTER the terminator on that same line along with the rest of it — R4-P2-01 found that
+// this deletes authored, visible text with no trace (19.7% of a well-formed-comments generated corpus)
+// and is inconsistent with the heading path, which was never block-level and always kept its own tail.
+// Round 5: the remainder is re-attached to whichever construct (bare line / list item / quoted line)
+// the block opened inside — see commentBlockRemainder / reattachCommentRemainder below — and re-enters
+// the SAME per-line dispatch this loop already runs on any ordinary line. This is not the R3-P2-01/02/03
+// mistake returning: that pre-pass joined fragments from TWO DIFFERENT lines the block parser had not
+// looked at yet; a remainder is confined to the ONE physical closing line and replaces only that line's
+// own dispatch turn — nothing from an earlier line is ever concatenated onto it. If no closing line
+// exists anywhere in the rest of the document, the opener is UNTERMINATED — round 3, point 3 of the
+// design (a policy change from rounds 1-2's "deletes to end of document", itself R3-P3-04's own complaint: silently
 // deleting the rest of a page on an author's typo is hostile to ordinary site ownership) — and is left
 // alone entirely: not treated as a comment-block open at all, so it falls through to whatever it
 // otherwise is (most often a paragraph line), where escapeInline's own unterminated rule renders it as
@@ -1056,11 +1062,30 @@ function nextCommentCloser(lines) {
   }
   return next;
 }
+// A leading run of spaces/tabs → its CommonMark column width (§2.2): a tab advances to the next
+// MULTIPLE OF 4, not a fixed 4 columns per tab — so it always reaches column ≥4 from any starting
+// column 0-3 (round 5, R4-P2-02). Shared by isCommentBlockOpen below and bodyHtml's own indented-
+// paragraph carve-out (the `indented` check, P2-04), so a tab is treated the SAME way in both guards
+// instead of falling between them (a bare-space check on one side and nothing on the other — the gap
+// the review found: neither "≤3 spaces" nor "4+ spaces" ever matched a tab, so a tab-indented
+// comment-only line reached neither the comment-block path nor the literal-indented path and fell
+// through to an ordinary, now-empty, paragraph — `<p></p>`).
+function leadingIndentCols(line) {
+  let col = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line.charCodeAt(i);
+    if (c === 32 /* space */) col++;
+    else if (c === 9 /* tab */) col += 4 - (col % 4);
+    else break;
+  }
+  return col;
+}
 // The text a comment-block open is judged against: strip ONE leading quote (`> `) or list-item
-// (`- `/`1. `/…) marker — "after any list/quote prefix" — else the raw line. A 4+-space-indented line
-// is deliberately NOT stripped further and NOT recognised here (P2-04's literal-indented-paragraph
-// carve-out survives unchanged: CommonMark itself gives an indented code block priority over an HTML
-// block start, and this renderer's paragraph-level indented carve-out mirrors exactly that).
+// (`- `/`1. `/…) marker — "after any list/quote prefix" — else the raw line. A 4+-COLUMN-indented line
+// (spaces, a tab, or any mix — see leadingIndentCols above) is deliberately NOT stripped further and
+// NOT recognised here (P2-04's literal-indented-paragraph carve-out survives unchanged: CommonMark
+// itself gives an indented code block priority over an HTML block start, and this renderer's
+// paragraph-level indented carve-out mirrors exactly that).
 function commentBlockCandidate(line) {
   const q = RE_QUOTE_LINE.exec(line);
   if (q) return q[1];
@@ -1069,7 +1094,8 @@ function commentBlockCandidate(line) {
   return line;
 }
 function isCommentBlockOpen(line) {
-  return /^ {0,3}<!--/.test(commentBlockCandidate(line));
+  const s = commentBlockCandidate(line);
+  return leadingIndentCols(s) < 4 && /^[ \t]*<!--/.test(s);
 }
 // If lines[i] opens a comment block AND a closer exists at or after it, returns the index of the FIRST
 // line after the consumed block (the caller sets `i` to this and emits nothing for the span). Returns
@@ -1078,6 +1104,44 @@ function commentBlockEnd(lines, i, nextCloser) {
   if (!isCommentBlockOpen(lines[i])) return -1;
   const j = nextCloser[i];
   return j === -1 ? -1 : j + 1;
+}
+
+// round 5 (R4-P2-01): the text AFTER the terminator on a comment-block's closing line. The block still
+// swallows every line it spans WHOLE — an interior line vanishes completely, no exceptions — but
+// whatever the author wrote after the terminator on the LAST one is not comment text: it is the
+// surviving content of whichever construct (a bare line, a list item, a quoted line) the block opened
+// inside, and rounds 3-4 discarded it along with the rest of that line (19.7% content loss on a
+// well-formed-comments generated corpus, per the round-4 review's fuzz). Located with the SAME "first
+// `-->` or `--!>`, whichever comes first" scan commentTerminatorEnd already runs for the inline path —
+// one more call, on the one line the block actually closes on, never the whole document again.
+function commentBlockRemainder(lines, closeIdx) {
+  const line = lines[closeIdx];
+  const end = commentTerminatorEnd(line, 0, line.length);
+  return end === -1 ? '' : line.slice(end);
+}
+// Put that remainder back where it came from: re-arm the SAME marker `lines[openIdx]` opened with — a
+// comment can only open a block when `<!--` is the first non-space content AFTER that marker (see
+// isCommentBlockOpen), so the marker itself was never consumed and is still sitting there, unread, on
+// the OPENING line — then mutate `lines[closeIdx]` IN PLACE to read as an ordinary line of that same
+// construct, so it falls straight back into the SAME per-line dispatch every real line already goes
+// through (fence / quote / list / table / heading / paragraph, all below).
+//
+// This is deliberately NOT a second opinion about the document, the thing R3-P2-01/02/03 killed: it
+// never joins fragments from two DIFFERENT lines the way the round-1/2 document-wide textual pre-pass
+// did. The remainder always comes from exactly ONE physical line — the closing line — and replaces
+// that one line's own dispatch role; nothing from any earlier line is ever concatenated onto it. A bare
+// opener's remainder is handed back completely unmarked, so it is free to become a paragraph, or — if
+// it happens to look like one — a fence/heading/list/table start of its own, exactly as any other
+// ordinary source line would (task item 1's "the fence must still open" case): that is the standard
+// per-line dispatch doing its normal job on a normal line, not a resurrected cross-fragment join.
+// `lines` is bodyHtml's own local array (born from `body.split('\n')`), never shared with anything a
+// caller could observe, so mutating one element in place is a plain O(1) assignment — not a per-comment
+// O(document length) copy, which on a document built mostly of such comments would reintroduce exactly
+// the quadratic shape this file's whole review history has been fighting (R2-P1-01, R4-P3-07).
+function reattachCommentRemainder(lines, openIdx, closeIdx, remainder) {
+  const q = RE_QUOTE_LINE.exec(lines[openIdx]);
+  const l = !q && RE_LIST_ITEM.exec(lines[openIdx]);
+  lines[closeIdx] = q ? '> ' + remainder : l ? l[1] + l[2] + ' ' + remainder : remainder;
 }
 
 // A raw markdown body → HTML. A line-walking block parser: fenced code (verbatim, the `#`/`>`/`|`/`-`
@@ -1102,7 +1166,11 @@ function bodyHtml(body) {
     if (!lines[i].trim()) { i++; continue; }                                  // blank → block boundary
 
     const cEnd = commentBlockEnd(lines, i, nextCloser);                        // HTML-comment block
-    if (cEnd !== -1) { i = cEnd; continue; }                                   // consumed; emits nothing
+    if (cEnd !== -1) {                                                        // consumed — except (P2-01)
+      const remainder = commentBlockRemainder(lines, nextCloser[i]);           // any text AFTER the
+      if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // terminator, kept
+      i = cEnd; continue;                                                     // no remainder: emits nothing
+    }
 
     const f = RE_FENCE_OPEN.exec(lines[i]);                                    // fenced code (verbatim)
     if (f) {
@@ -1133,7 +1201,11 @@ function bodyHtml(body) {
       const blocks = [];
       while (i < lines.length) {
         const cEnd = commentBlockEnd(lines, i, nextCloser);
-        if (cEnd !== -1) { i = cEnd; continue; }                              // block comment mid-quote-run
+        if (cEnd !== -1) {                                                    // block comment mid-quote-run
+          const remainder = commentBlockRemainder(lines, nextCloser[i]);
+          if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01: keep the tail
+          i = cEnd; continue;
+        }
         if (!RE_QUOTE_LINE.test(lines[i])) {
           if (!lines[i].trim() && i + 1 < lines.length && RE_QUOTE_LINE.test(lines[i + 1])) { i++; continue; }
           break;
@@ -1141,7 +1213,11 @@ function bodyHtml(body) {
         const buf = [];
         while (i < lines.length) {
           const cEnd2 = commentBlockEnd(lines, i, nextCloser);
-          if (cEnd2 !== -1) { i = cEnd2; continue; }
+          if (cEnd2 !== -1) {
+            const remainder = commentBlockRemainder(lines, nextCloser[i]);
+            if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01
+            i = cEnd2; continue;
+          }
           if (!RE_QUOTE_LINE.test(lines[i])) break;
           buf.push(RE_QUOTE_LINE.exec(lines[i])[1]); i++;
         }
@@ -1170,7 +1246,11 @@ function bodyHtml(body) {
       const items = [];
       while (i < lines.length) {
         const cEnd = commentBlockEnd(lines, i, nextCloser);                    // block comment mid-list-run
-        if (cEnd !== -1) { i = cEnd; continue; }
+        if (cEnd !== -1) {
+          const remainder = commentBlockRemainder(lines, nextCloser[i]);
+          if (remainder.trim()) { reattachCommentRemainder(lines, i, nextCloser[i], remainder); i = nextCloser[i]; continue; } // P2-01: keep the item's tail
+          i = cEnd; continue;
+        }
         if (!RE_LIST_ITEM.test(lines[i])) break;
         const m = RE_LIST_ITEM.exec(lines[i]);
         items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3] });
@@ -1219,7 +1299,7 @@ function bodyHtml(body) {
     // gone by the time `t` exists (the .trim() below removes it, same as before this fix ever
     // existed — a 4-space and a 0-space one-line paragraph render byte-identical either way), so the
     // check has to happen here, against `para`'s ORIGINAL lines, before that trim, or not at all.
-    const indented = para.length > 0 && para.every((ln) => /^ {4,}/.test(ln));
+    const indented = para.length > 0 && para.every((ln) => leadingIndentCols(ln) >= 4);
     // a line ending in "  " (two trailing spaces, standard markdown hard-break convention) forces
     // a <br> at that point instead of the default soft-wrap-to-space join. General — opt-in per
     // line, so ordinary multi-line source paragraphs (the vast majority) are unaffected. First

@@ -999,15 +999,27 @@ test('🔴 #496 round 3 — an unterminated `<!--` is left literal, whatever com
 
 test('🔴 #496 round 3 — P1-01: linear on 1 MiB of unterminated comment openers (no longer quadratic to escape literally, either)', () => {
   const input = '<!--'.repeat(262144);                       // exactly 1 MiB, no closer anywhere
-  const t0 = process.hrtime.bigint();
   const html = bodyHtml(input);
-  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   // The whole document is ONE unterminated `<!--` (a single line — this input has no `\n`), so it is
   // left as literal, visible, escaped text (R3 point 3) rather than deleted: one `<p>` of `&lt;!--`
   // repeated 262,144 times. The escapeInline `noCloser` cache (see that function's own comment) is
   // what keeps this linear despite every one of those 262,144 opens being individually attempted.
   assert.equal(html, '<p>' + '&lt;!--'.repeat(262144) + '</p>', 'nothing disappears silently, even at this size');
-  assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms — the old regex was quadratic here`);
+  // 🔴 round 5 (R4-P3-07): this used to assert an ABSOLUTE `ms < 200`, which the review caught going red
+  // (360-500ms) under an unrelated parallel lane's CPU load with NO change to the tree — the assertion
+  // was tracking a neighbour's business, not this code. A ratio between two sizes of the SAME shape is
+  // immune to a busy neighbour the way one wall-clock number never is (same form as the 256KiB→1MiB
+  // ratio test above); one generous absolute bound stays, so a genuine quadratic blow-up (minutes, not
+  // milliseconds) still fails even when measured under load.
+  const unit = '<!--';
+  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
+  const time = (inp) => { const t0 = process.hrtime.bigint(); bodyHtml(inp); return Number(process.hrtime.bigint() - t0) / 1e6; };
+  time(at(262144));                                            // warm up (JIT)
+  const t256 = Math.max(time(at(262144)), 0.001);              // 256 KiB
+  const t1m = time(at(1048576));                                // 1 MiB
+  const ratio = t1m / t256;
+  assert.ok(ratio <= 6, `expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
+  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
 });
 
 // ── round 3 — REVIEW-tile28-r2-2026-09-09.md, R2-P1-01 / R2-P1-02 / R2-P2-03 / R2-P2-04 ────────────
@@ -1047,11 +1059,16 @@ test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of ordinary one-comment-pe
 });
 
 test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of `<!--` and of `<` (no comment ever closes)', () => {
-  for (const input of ['<!--'.repeat(262144), '<'.repeat(1048576)]) {
-    const t0 = process.hrtime.bigint();
-    bodyHtml(input);
-    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    assert.ok(ms < 200, `expected < 200ms for ${JSON.stringify(input.slice(0, 8))}…, got ${ms.toFixed(1)}ms`);
+  // 🔴 round 5 (R4-P3-07): ratio form, not an absolute `ms < 200` — see the sibling test above for why.
+  for (const unit of ['<!--', '<']) {
+    const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
+    const time = (inp) => { const t0 = process.hrtime.bigint(); bodyHtml(inp); return Number(process.hrtime.bigint() - t0) / 1e6; };
+    time(at(262144));
+    const t256 = Math.max(time(at(262144)), 0.001);
+    const t1m = time(at(1048576));
+    const ratio = t1m / t256;
+    assert.ok(ratio <= 6, `${JSON.stringify(unit)}: expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
+    assert.ok(t1m < 5000, `${JSON.stringify(unit)}: expected well under 5s, got ${t1m.toFixed(1)}ms — a true blow-up`);
   }
 });
 
@@ -1083,13 +1100,22 @@ test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, a
   // an opener immediately followed by a long dash run (the abrupt-close scan's `while (s[j]==='-')`
   // must not itself be quadratic), and a corpus mixing well-formed comments, prose, fences and stray
   // `<`/`>` (nothing here should make escapeInline's or bodyHtml's line loop re-scan the same ground).
-  const dashRun = '<!--' + '-'.repeat(1048572);                          // ~1 MiB, never closes
-  const mixed = ('Hello <!-- a --> world.\n```\n<!-- code, not a comment -->\n```\n<x <!-- -->y>\n').repeat(12000);
-  for (const input of [dashRun, mixed]) {
-    const t0 = process.hrtime.bigint();
-    bodyHtml(input);
-    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms for a ${input.length}-byte input`);
+  // 🔴 round 5 (R4-P3-07): ratio form, not an absolute `ms < 200` — see the sibling tests above.
+  const shapes = [
+    { name: 'dash-run', at: (bytes) => '<!--' + '-'.repeat(Math.max(0, bytes - 4)) },   // never closes
+    { name: 'mixed corpus', at: (bytes) => {
+        const unit = 'Hello <!-- a --> world.\n```\n<!-- code, not a comment -->\n```\n<x <!-- -->y>\n';
+        return unit.repeat(Math.max(1, Math.round(bytes / unit.length)));
+      } },
+  ];
+  for (const { name, at } of shapes) {
+    const time = (inp) => { const t0 = process.hrtime.bigint(); bodyHtml(inp); return Number(process.hrtime.bigint() - t0) / 1e6; };
+    time(at(262144));
+    const t256 = Math.max(time(at(262144)), 0.001);
+    const t1m = time(at(1048576));
+    const ratio = t1m / t256;
+    assert.ok(ratio <= 6, `${name}: expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
+    assert.ok(t1m < 5000, `${name}: expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
   }
 });
 
@@ -1201,20 +1227,35 @@ test('🔴 #496 round 4 — R3-P2-02: a comment-only heading emits nothing, and 
 });
 
 test('🔴 #496 round 4 — R3-P2-03: comment removal can no longer resurrect a live tag via changed fence recognition', () => {
-  // The review's exact minimized failing input. Before this round: '<p><small></p>' — a live,
-  // unescaped <small> the author never wrote, created because the document-wide pre-pass deleted text
-  // up through an embedded `-->` and left a same-line REMAINDER (" <small>") for the block parser to
-  // re-interpret on its own, unescaped. Round 4 removes the mechanism that remainder depended on: an
-  // HTML-comment block consumes WHOLE LINES (see commentBlockEnd / the "block ends on that line" rule
-  // in site-core.js), never leaving a same-line remainder for anything to reparse. Per that rule, `<!--`
-  // opens a comment block on line 1, and line 2 contains a `-->` (inside the abrupt-closing `<!-->`) —
-  // so line 2 is consumed WHOLE, "<small>" included, exactly as a real CommonMark parser (verified
-  // against the `commonmark` reference implementation) also treats this input: one HTML block, nothing
-  // survives. `<small>` is never live, and — unlike the pre-round-4 bug — never even reaches escaped
-  // text, because it was never outside the comment to begin with.
+  // The review's exact minimized failing input. Before round 4: '<p><small></p>' — via the pre-#496,
+  // comment-UNRELATED `<small>`/`<br>` allowlist (see inlineHtml's own comment: a legacy IR convention,
+  // re-emitting `&lt;small&gt;` back to a bare `<small>` after escapeInline has run) — created here
+  // because the document-wide pre-pass deleted text up through an embedded `-->` and left a same-line
+  // REMAINDER (" <small>") for the block parser to re-interpret ON ITS OWN, as if it were ordinary text
+  // that had always stood alone. Round 4 removed the document-wide pre-pass and, with it, ALSO
+  // discarded that remainder outright (R4-P2-01) — so this test used to assert `''`, nothing surviving.
+  //
+  // 🩸 round 5 (R4-P2-01): discarding the remainder was itself a separate bug — it deletes authored
+  // text with no trace, on a well-formed comment where the author did nothing wrong. The fix keeps the
+  // remainder and re-attaches it as an ordinary line (commentBlockRemainder / reattachCommentRemainder),
+  // which then falls into the SAME per-line + inline dispatch any real line already goes through — here,
+  // a bare paragraph whose only content is the literal text " <small>". `<small>` reaches inlineHtml
+  // exactly as it would if the comment above it had never existed at all (bodyHtml('plain <small>') →
+  // '<p>plain <small></p>' — same allowlist, same result, no comment anywhere), which is BACK to the
+  // pre-round-4 shape and is the CORRECT one: `<small>` here is written CONTIGUOUSLY by the author, on
+  // ONE physical line, entirely OUTSIDE the comment span that closed just before it — it was never split
+  // across the deletion boundary the way R1-P2-03's actual attack shape (`<sm<!-- -->all>`, see the round
+  // 2 test elsewhere in this file, still fully escaped) splices two dead half-tags into one live spelling.
+  // The safety property R3-P2-03 actually cared about — comment removal may never SYNTHESIZE a tag
+  // spelling from fragments that were never adjacent in the source — still holds and is asserted below
+  // directly, rather than by the now-wrong proxy "no live <small> at all".
   const html = bodyHtml('<!--\n````> <!--> <small>');
-  assert.equal(html, '');
-  assert.doesNotMatch(html, /<small>/, 'no live <small> may ever be synthesized from comment removal');
+  assert.equal(html, '<p><small></p>');
+  assert.equal(html, bodyHtml('plain <small>').replace('plain ', ''),
+    'the allowlisted tag here behaves identically to the SAME contiguous text with no comment nearby at all');
+  // The actual R1-P2-03 attack shape (a tag SPLIT by a comment) must still never produce a live tag —
+  // reconfirmed here rather than assumed; the round-2 test elsewhere in this file covers it in full.
+  assert.doesNotMatch(bodyHtml('<sm<!-- -->all>'), /<small>/, 'a comment-SPLIT spelling must never become live');
 });
 
 test('🔴 #496 round 3 — differential: byte-identical to pre-#496 `main` on the round-1 attack corpus', () => {
@@ -1231,6 +1272,84 @@ test('🔴 #496 round 3 — differential: byte-identical to pre-#496 `main` on t
     ['<scr<!-- -->ipt>alert(1)</script>', '<p>&lt;scr&lt;!-- --&gt;ipt&gt;alert(1)&lt;/script&gt;</p>'],
   ];
   for (const [input, expected] of cases) assert.equal(bodyHtml(input), expected, JSON.stringify(input));
+});
+
+// ── round 5 — REVIEW-tile28-r4-2026-09-09.md, R4-P2-01 / R4-P2-02 ──────────────────────────────────
+// R4-P2-01: an HTML-comment block still swallows every line it spans whole, but text AFTER the
+// terminator on its CLOSING line is not comment text — it is the surviving content of whichever
+// construct (bare line / list item / quoted line) the block opened inside, and round 4 discarded it
+// silently (19.7% content loss on a generated well-formed-comments corpus, per the round-4 review's
+// fuzz). The fix re-attaches it — see commentBlockRemainder / reattachCommentRemainder in site-core.js.
+
+test('🔴 #496 round 5 — R4-P2-01: a bare comment-block line keeps the text after its own terminator', () => {
+  assert.equal(bodyHtml('<!-- note --> Visible text'), '<p>Visible text</p>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a list item opened by a comment keeps its own remaining text, and the list stays one list', () => {
+  const html = bodyHtml('- <!-- note --> real item\n- second');
+  assert.equal(html, '<ul class="st-list"><li>real item</li><li>second</li></ul>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a quote line opened by a comment keeps its own remaining text', () => {
+  assert.equal(bodyHtml('> <!-- n --> quoted'), '<blockquote class="st-quote"><p>quoted</p></blockquote>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a multi-line block comment keeps the tail of its closing line', () => {
+  // The review's own exact failing input (`'<!-- a\\n\\n\\n\\n--> tail'` → main gave `''`).
+  assert.equal(bodyHtml('<!-- a\n\n\n\n--> tail'), '<p>tail</p>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a comment interrupting a paragraph leaves its own tail as a fresh, separate paragraph', () => {
+  // The comment-open line is a genuine block start (isBlockStart), so it always ends whatever
+  // paragraph was in progress first — "<div" and its own remainder ("after") are two separate <p>s,
+  // never spliced into one another (that splicing is exactly what R3-P2-01/02/03 forbid).
+  assert.equal(bodyHtml('<div\n<!-- x --> after'), '<p>&lt;div</p>\n<p>after</p>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a block comment closing on a line that also opens a fence — the fence must still open', () => {
+  const html = bodyHtml('<!-- note -->```\ncode\n```');
+  assert.equal(html, '<pre class="st-code"><code>code</code></pre>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: the block detector only fires on `<!--` as the line\'s own first content — mid-line stays inline and keeps its tail', () => {
+  // Contrast case the round-4 review named explicitly (R4-P3-10): a heading is never block-level (its
+  // `#` marker is not one of the stripped prefixes commentBlockCandidate recognises), so `<!--` here
+  // starts mid-line by construction and is handled entirely by escapeInline's own inline comment
+  // consumption — which already kept its tail, verbatim, since round 3. This is the behaviour the
+  // block-level fix (above) had to match, not invent.
+  assert.equal(bodyHtml('# <!-- n --> Heading text'), '<h1> Heading text</h1>');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: representative tightened-fuzz shape — every word outside a comment span survives, whatever the prefix', () => {
+  const html = bodyHtml('alpha\n\n<!-- bravo --> charlie\n\n- <!-- delta --> echo\n- foxtrot\n\n> <!-- golf --> hotel');
+  for (const word of ['alpha', 'charlie', 'echo', 'foxtrot', 'hotel']) assert.match(html, new RegExp(word), word);
+  assert.doesNotMatch(html, /bravo|delta|golf/, 'comment TEXT itself must never survive, only what came after it');
+});
+
+test('🔴 #496 round 5 — R4-P2-01: a fully-consumed comment (no remainder) still leaks nothing — the R2-P2-03 guards are unaffected', () => {
+  // Regression guard: remainder-reattachment must never fire when there IS no remainder (an empty or
+  // all-whitespace tail), or the empty-block fix from round 3 (R2-P2-03) would quietly regress.
+  assert.equal(bodyHtml('- <!-- note -->\n- real'), '<ul class="st-list"><li>real</li></ul>');
+  assert.equal(bodyHtml('> <!-- note -->'), '');
+  assert.doesNotMatch(bodyHtml('- <!-- note -->\n- real'), /<li>\s*<\/li>/);
+});
+
+// R4-P2-02: both comment-block guards now treat a TAB as CommonMark does — up to 4 columns, always
+// reaching column ≥4 from any start column 0-3 — instead of counting spaces only, which let a tab fall
+// through both the "≤3 columns → comment block" and the "4+ columns → literal indented" paths and
+// land on neither, producing a bare `<p></p>` (a real, visible artifact on a public page).
+
+test('🔴 #496 round 5 — R4-P2-02: a TAB-indented comment-only line is literal, escaped — never an empty <p></p>', () => {
+  for (const input of ['\t<!-- note -->', ' \t<!-- note -->', '\t <!-- note -->']) {
+    assert.equal(bodyHtml(input), '<p>&lt;!-- note --&gt;</p>', JSON.stringify(input));
+    assert.doesNotMatch(bodyHtml(input), /^<p>\s*<\/p>$/, JSON.stringify(input));
+  }
+});
+
+test('🔴 #496 round 5 — R4-P2-02: a plain 4-space indent still takes the same literal path as a tab', () => {
+  // Reconfirms the pre-existing space-only carve-out (P2-04) is unchanged now that isCommentBlockOpen
+  // and the paragraph `indented` check both route through the shared leadingIndentCols column-counter.
+  assert.equal(bodyHtml('    <!-- literal indented code -->'), '<p>&lt;!-- literal indented code --&gt;</p>');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
