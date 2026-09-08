@@ -135,13 +135,18 @@ const title = isHome
         {categories.length > 0 && (
           <div class="bl-side-widget bl-side-categories">
             {meta['blog-category-title'] && <h3>{meta['blog-category-title']}</h3>}
-            <ul>{categories.map((c) => (
+            <ul>{categories.map((c) => {
               // round 3 (Astro consumers, R2-P3-5): `c.href` is `blog-categories:` authored
               // frontmatter (label|count|href), reaching a live <a href> with no scheme check.
-              <li>{safeHref(c.href)
-                ? <a href={safeHref(c.href)}>{c.label}{c.count && `（${c.count}）`}</a>
-                : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
-            ))}</ul>
+              // round 4 (R3-P3-2): hoisted to a const — was two calls per item, each a separate
+              // drop-warning queue entry for the same rejected destination.
+              const hrefOk = safeHref(c.href);
+              return (
+                <li>{hrefOk
+                  ? <a href={hrefOk}>{c.label}{c.count && `（${c.count}）`}</a>
+                  : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
+              );
+            })}</ul>
           </div>
         )}
         {/* 🩸 fixed 2026-07-13: was a decorative shell (no name/action — submit did nothing).

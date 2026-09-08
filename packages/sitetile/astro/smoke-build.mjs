@@ -80,6 +80,10 @@ const tagFixture = readFileSync(join(DIST, 'tag/fixture/index.html'), 'utf8');
 const zhTagFixture = readFileSync(join(DIST, 'zh-tw/tag/fixture/index.html'), 'utf8');
 const sitemapXml = readFileSync(join(DIST, 'sitemap.xml'), 'utf8');
 const siteOff = readFileSync(join(DIST, 'ko-kr/index.html'), 'utf8');
+// round 4 (R3-P2-2): scheme-check.md — the hostile fixture the Astro half of the escape-link-
+// destinations fix never had. See its own file header for what each slot exercises; the checks
+// below live near the icon/JS-accounting checks further down, grouped under their own heading.
+const schemeCheck = readFileSync(join(DIST, 'scheme-check/index.html'), 'utf8');
 // Safe negative-control seam: mutate only the HTML held by this test process, never source/output.
 const customTheme = process.env.SITETILE_SMOKE_REMOVE_CUSTOM_MARKER === '1'
   ? customThemeBuilt.replace(/\sdata-theme-custom(?:="")?/, '')
@@ -124,6 +128,20 @@ const ALLOWED_INLINE = [
   // just don't see the submitting-state / success-card / inline-retry-error swap in — see
   // Form.astro's file-header note on this script, 2026-09-03 owner ruling.
   ['form inbox status (action=inbox only, self-gating on ?inbox= + AJAX submit)', '[data-inbox-success]'],
+  // header-actions cart wiring (round 4's scheme-check.md is the first fixture to opt in via
+  // header-actions-cart-guild): strictly opt-in and self-gating (no `.rf-header-actions
+  // [data-cart-guild]` on the page → no-op) — see header-actions-cart.js's own file header.
+  ['header-actions cart wiring (opt-in on header-actions-cart-guild)', 'dc-square-shop-cart:'],
+  // rf-preload guard (round 4's scheme-check.md is the first fixture with ANY toggle-type
+  // header-action, e.g. the cart drawer above): gated on `toggleActions.length > 0`
+  // (SiteLayout.astro), so a page with only `link`-type header-actions never loads it. Removes
+  // the `rf-preload` class after the first paint — a double-rAF, not a `DOMContentLoaded`, so it
+  // fires after the drawer/overlay CSS this class suppresses has had a frame to settle.
+  ['header-actions preload-flash guard (double-rAF rf-preload removal, gated on any toggle header-action)', 'rf-preload'],
+  // carousel scroll-snap wiring (round 4's scheme-check.md is the first fixture to use the
+  // `carousel` coral at all — round 2 already named it as untested). Self-gates per instance
+  // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page.
+  ['carousel prev/next + overflow wiring (per-instance self-gating, zero-op with no .st-carousel)', 'carInit'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
@@ -224,6 +242,45 @@ function claimedIcons() {
     for (const m of h.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]*href="([^"]+)"/g)) claimed.add(m[1]);
   }
   return [...claimed];
+}
+
+// ---- round 4 (R3-P2-2): the disallowed-scheme sweep over a real built page ----
+// The astro smoke builds real pages and audits the emitted HTML/JS — the only gate in this repo
+// that does — but until now it had no assertion about link/image/form destinations at all
+// (grepped: `javascript:|safeHref|safeSrc|scheme` over this file returned nothing). This is
+// that missing assertion, run against content/scheme-check.md (see its own file header for what
+// every slot exercises) — and it scans the WHOLE page, so a regression anywhere else on this
+// page would be caught here too, not just in the fixture's own named slots.
+//
+// Anchored to actual TAGS (`<[a-zA-Z][^>]*>`), never the raw page text — a prose sentence that
+// QUOTES a disallowed destination (this fixture's own explanatory copy does, deliberately, inside
+// a `<span class="st-code">`) sits between `>` and `<`, never inside a tag's attribute list, so
+// it cannot forge a false hit the way a plain `.includes('javascript:')` over the whole string
+// would (verified below: the fixture's own prose is the ONE surviving `javascript:` substring on
+// the page, and it must NOT trip this check for the check to be honest — see the "prose does not
+// count" test in the checks list).
+const DISALLOWED_SCHEME_RE = /^\s*(javascript:|vbscript:|data:text\/html|data:image\/svg\+xml)/i;
+function disallowedSchemeHits(h) {
+  const hits = [];
+  // href=/src=/action=/srcset= — the literal sinks the R3 sweep grepped for — PLUS
+  // data-cart-href, the data attribute R3-P2-1 named as invisible to that literal grep (it is
+  // consumed by header-actions-cart.js's `window.location.href = href`, a script-execution
+  // sink for a `javascript:` value exactly like a live `href`).
+  for (const tag of h.match(/<[a-zA-Z][^>]*>/g) || []) {
+    const m = /\b(?:href|src|action|srcset|data-cart-href)="([^"]*)"/.exec(tag);
+    if (m && DISALLOWED_SCHEME_RE.test(m[1])) hits.push(tag.slice(0, 160));
+  }
+  // Inline <script> assignments to `location`/`location.href`/a bare `.href` — the same DOM-sink
+  // class as data-cart-href, checked directly in case a future script reads a different
+  // attribute the same unsafe way.
+  const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+  let sm;
+  while ((sm = scriptRe.exec(h))) {
+    const assignRe = /(?:location(?:\.href)?|\.href)\s*=\s*([`'"])((?:(?!\1)[\s\S])*)\1/g;
+    let am;
+    while ((am = assignRe.exec(sm[1]))) if (DISALLOWED_SCHEME_RE.test(am[2])) hits.push('<script> ' + am[0].slice(0, 160));
+  }
+  return hits;
 }
 
 const checks = [
@@ -728,6 +785,78 @@ const checks = [
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing
   //    in this feature altered a single non-Lingo, non-archive code path. --
+
+  // -- round 4 (R3-P2-1 / R3-P2-2 / R3-P3-1): scheme-check.md, the fixture this repo never had --
+  ['🔴 scheme-check: no disallowed scheme reaches any href=/src=/action=/srcset=/data-cart-href attribute, or any inline <script> location assignment, anywhere on the page', () =>
+    disallowedSchemeHits(schemeCheck).length === 0],
+  // CONTROL for the check above: the fixture's own explanatory prose deliberately quotes a
+  // disallowed destination inside plain text (`<span class="st-code">…action="javascript:…"…`)
+  // — if the check above were a naive `.includes('javascript:')` instead of a tag-anchored scan,
+  // it would report a false hit on this page's OWN copy and could never go green here. Proves
+  // the negative check just above is not vacuously true because it can't see the page's text.
+  ['🔴 the disallowed-scheme scan is tag-anchored, not a raw-text search (control: the fixture prose itself quotes "javascript:" in plain text)', () =>
+    schemeCheck.includes('action="javascript:') && disallowedSchemeHits(schemeCheck).length === 0],
+  ['scheme-check: form action= with a disallowed scheme emits no action= at all and disables the submit button', () => {
+    const first = schemeCheck.slice(schemeCheck.indexOf('<form class="st-form"'), schemeCheck.indexOf('</form>') + '</form>'.length);
+    return !/action=/.test(first.slice(0, first.indexOf('>')))
+      && /<button class="st-form-submit" type="submit" disabled>Send<\/button>/.test(first);
+  }],
+  ['scheme-check: the safe sibling form still posts to its own action (control — the check above did not just turn every form off)', () =>
+    /<form class="st-form" action="\/safe-contact" method="post">/.test(schemeCheck)],
+  ['scheme-check: header-cta with a disallowed scheme degrades to a plain span, label intact', () =>
+    /<span class="rf-header-cta">Buy now<\/span>/.test(schemeCheck)],
+  ['scheme-check: header-actions-cart-href is gated at its declaration point — never reaches data-cart-href, even though the cart IS wired (data-cart-guild present proves the slot was actually exercised, not skipped)', () =>
+    schemeCheck.includes('data-cart-guild="scheme-check-cart"') && !schemeCheck.includes('data-cart-href=')],
+  ['scheme-check: favicon/apple-touch-icon fall back to the generated paths when the mark is a disallowed scheme', () =>
+    /<link rel="icon"[^>]*href="\/favicon\.ico"/.test(schemeCheck)
+    && /<link rel="icon"[^>]*href="\/favicon\.svg"/.test(schemeCheck)
+    && schemeCheck.includes('<link rel="apple-touch-icon" href="/apple-touch-icon.png">')],
+  ['scheme-check: the fonts stylesheet (and its preconnects) are omitted entirely when fonts: is a disallowed scheme', () =>
+    !schemeCheck.includes('fonts.googleapis') && !schemeCheck.includes('fonts.gstatic')],
+  ['scheme-check: collection — the hostile item\'s card-wide GH link and learn link both drop (span, not <a>), the safe sibling\'s cover/GH/learn anchors all stay live (control)', () =>
+    !/<a class="st-item-gh"[^>]*href="javascript/.test(schemeCheck)
+    && /<h3>Hostile item<\/h3>/.test(schemeCheck)
+    && /<a class="st-item-cover" href="\/safe-learn" aria-label="Safe item"><\/a>/.test(schemeCheck)
+    && /<a class="st-item-gh" href="https:\/\/github\.com\/example\/safe-scheme-check" target="_blank" rel="noopener">/.test(schemeCheck)
+    && /<a class="st-item-learn" href="\/safe-learn">/.test(schemeCheck)],
+  ['scheme-check: grid — the hostile whole-cell link renders no <a> (just the label + chevron), the safe sibling\'s <a> is live (control)', () =>
+    /<div class="st-cell">\s*<h3>Hostile cell<\/h3>/.test(schemeCheck)
+    && /<a class="st-cell st-cell-link group" href="\/safe-grid">/.test(schemeCheck)],
+  ['scheme-check: gallery — same shape, safe sibling live (control)', () =>
+    /<div class="st-gal-cell">\s*<h3>Hostile gallery cell<\/h3>/.test(schemeCheck)
+    && /<a class="st-gal-cell st-cell-link group" href="\/safe-gallery">/.test(schemeCheck)],
+  ['scheme-check: carousel — same shape, safe sibling live (control)', () =>
+    /<div class="st-car-cell st-gal-cell">\s*<h3>Hostile carousel cell<\/h3>/.test(schemeCheck)
+    && /<a class="st-car-cell st-gal-cell st-cell-link group" href="\/safe-carousel">/.test(schemeCheck)],
+  ['scheme-check: people — a disallowed-scheme name link degrades to plain text (no <a> around it), the safe sibling\'s name link is live (control)', () =>
+    /<h3 class="st-person-name">\s*Hostile person\s*<\/h3>/.test(schemeCheck)
+    && /<h3 class="st-person-name">\s*<a href="\/safe-person">Safe person<\/a>\s*<\/h3>/.test(schemeCheck)],
+  ['scheme-check: people — an SVG data: portrait is dropped (no <img> at all), the raster PNG data: sibling still renders (the check must tell the two data: forms apart, not reject every data: URI)', () =>
+    !schemeCheck.includes('data:image/svg+xml')
+    && /<img class="st-img" src="data:image\/png;base64,iVBORw0KGgo=" alt="Safe portrait"/.test(schemeCheck)],
+  ['scheme-check: people links: row — the disallowed entry drops to a plain span, the safe entry stays a live <a> (control)', () =>
+    /<span class="st-person-link">Bad<\/span>/.test(schemeCheck)
+    && /<a class="st-person-link" href="\/safe-person-link">Good<\/a>/.test(schemeCheck)],
+  ['scheme-check: tagcloud — the disallowed tag drops to a span, the safe tag stays a live <a>, and a protocol-relative destination is admitted unchanged (R2-P3-3: an author who can write `//x` can already write `https://x`)', () =>
+    /<span class="st-tag">Bad tag<\/span>/.test(schemeCheck)
+    && /<a class="st-tag" href="\/safe-tag">Good tag<\/a>/.test(schemeCheck)
+    && /<a class="st-tag" href="\/\/example\.test\/x">Protocol-relative tag<\/a>/.test(schemeCheck)],
+  // 🩸 the section's OWN id (slugified from its "Background image" heading) contains the literal
+  // substring "background-image" — a bare `.includes('background-image')` on the tag would pass
+  // by matching the id, not by proving the absence of a live style. Checked for `style="` (what
+  // `bgOk ? ' style="…"' : ''` actually toggles) instead, which the id cannot forge.
+  ['scheme-check: hero bg= with a disallowed scheme renders no background-image at all (no style= attribute on the section)', () => {
+    const m = /<section class="st-hero st-full-bleed" id="s9-background-image"[^>]*>/.exec(schemeCheck);
+    return !!m && !m[0].includes('style=');
+  }],
+  // 🔴 THE CONTROL ARM (R3-P2-2's identity-swap experiment, per the review): this suite cannot
+  // prove it is a check rather than a tautology from its own green run alone — round 3 measured
+  // the opposite failure (13 files' worth of gates reverted to the identity function and the
+  // smoke still said PASS). Run once by hand, not wired into this file (a permanently-committed
+  // "make the app unsafe" switch has no place in a security fix): replace `site-core.js`'s
+  // `safeHref`/`safeSrc` bodies with `(x) => x` in a scratch copy, rebuild, run this smoke against
+  // it, and confirm every scheme-check assertion above goes red. Recorded in REPORT-linkdest.md
+  // (第四輪) with the exact commands and the red output, exactly as round 3 recorded its own.
 ];
 
 let fail = 0;

@@ -604,6 +604,13 @@ function attrq(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
 function safeCodePoint(n) {
   if (!Number.isFinite(n) || n < 0 || n > 0x10FFFF) return null;
   if (n >= 0xD800 && n <= 0xDFFF) return null; // lone surrogate half — not a valid scalar value
+  // round 4 (R3-P3-6): a C0 control other than tab/LF/CR (notably NUL, `&#0;`) used to decode to
+  // a literal control byte in the output stream — inert in a browser today (the tokenizer maps
+  // U+0000 in an attribute value to U+FFFD) but not something this file should ever emit, since a
+  // downstream minifier or proxy that STRIPS rather than replaces a NUL can turn `java\0script:`
+  // back into a live scheme. Reject rather than pass through — the caller's `?? m` fallback then
+  // leaves the original entity text alone, same as any other undecodable entity.
+  if (n < 0x20 && n !== 0x09 && n !== 0x0A && n !== 0x0D) return null;
   try { return String.fromCodePoint(n); } catch { return null; }
 }
 function decodeEntitiesOnce(s) {
@@ -692,6 +699,18 @@ function safeSrc(dest) {
   if (dest == null || dest === '') return null;
   return isSafeImageSrc(dest) ? decodeEntitiesOnce(dest) : null;
 }
+
+// round 4 (R3-P3-3): this file's OWN href/src emitters below used to escAttr() the RAW,
+// undecoded destination even after isSafeHref/isSafeImageSrc had already decoded it once to
+// validate the scheme — while safeHref()/safeSrc() (above) hand the Astro layer the DECODED
+// string, which Astro then attribute-escapes on output. Same input, two different resolved
+// URLs depending on which renderer built the page (`/a&#58;b` → this file emitted the raw
+// `&amp;#58;b`, Astro emitted the decoded `/a:b`) — never a security defect either direction
+// (the raw form is always the LESS decoded one, so it can never carry a colon the validated
+// form lacked), but a parity divergence `site-core-roundtrip.test.mjs` exists to catch. Every
+// caller below that emits an already-gated href/src now decodes once — the same decode
+// isSafeHref/isSafeImageSrc already performed — before escaping, so both renderers agree.
+function escHrefAttr(dest) { return escAttr(decodeEntitiesOnce(dest)); }
 
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
 // <img>. Markdown has no video literal, and sitetile refuses raw-HTML islands (bodyHtml escapes them),
@@ -1544,7 +1563,7 @@ function ctaHtml(val, cls) {
   // branch below already renders, never a live `javascript:`/`data:` href.
   if (typeof val === 'object') {
     if (!isSafeHref(val.href || '')) return '<span class="' + cls + '">' + escHtml(val.label || '') + '</span>';
-    return '<a class="' + cls + '" href="' + escAttr(val.href || '#') + '"' + targetAttrs(linkKind(val.href, val.label)) + '>' + escHtml(val.label || '') + '</a>';
+    return '<a class="' + cls + '" href="' + escHrefAttr(val.href || '#') + '"' + targetAttrs(linkKind(val.href, val.label)) + '>' + escHtml(val.label || '') + '</a>';
   }
   return '<span class="' + cls + '">' + escHtml(val) + '</span>';
 }
@@ -1584,7 +1603,7 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
     const cls = 'st-cta-btn ' + (idx === 0 ? 'st-cta-btn-primary' : 'st-cta-btn-secondary');
     if (!isSafeHref(b.href || '')) return '<span class="' + cls + '">' + escHtml(b.label) + '</span>';
     const kind = linkKind(b.href, b.label);
-    return '<a class="' + cls + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
+    return '<a class="' + cls + '" href="' + escHrefAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
       escHtml(b.label) + '<span class="st-cta-arrow" aria-hidden="true">' + affordanceArrow(kind, 16) + '</span></a>';
   }).join('') + '</div>' : '';
   return { row, caption };
@@ -1674,12 +1693,12 @@ function linkButtonsHtml(buttons, cls) {
     const safe = isSafeHref(b.href || '');
     if (b.plain) {
       if (!safe) return '<span class="' + cls + '-plain">' + arrowSvg('left', 14) + escHtml(b.label) + '</span>';
-      return '<a class="' + cls + '-plain" href="' + escAttr(b.href || '#') + '">' + arrowSvg('left', 14) + escHtml(b.label) + '</a>';
+      return '<a class="' + cls + '-plain" href="' + escHrefAttr(b.href || '#') + '">' + arrowSvg('left', 14) + escHtml(b.label) + '</a>';
     }
     const btnCls = cls + '-btn ' + cls + '-btn-' + (b.primary ? 'primary' : 'secondary');
     if (!safe) return '<span class="' + btnCls + '">' + (isGithub(b.href) ? githubSvg(16) : '') + escHtml(b.label) + '</span>';
     const kind = linkKind(b.href, b.label);
-    return '<a class="' + btnCls + '" href="' + escAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
+    return '<a class="' + btnCls + '" href="' + escHrefAttr(b.href || '#') + '"' + targetAttrs(kind) + '>' +
       (isGithub(b.href) ? githubSvg(16) : '') + escHtml(b.label) + affordanceArrow(kind, 16) + '</a>';
   }).join('') + '</div>';
 }
@@ -1760,7 +1779,12 @@ function renderSection(s) {
   const type = KNOWN_TYPES.indexOf(s.type) >= 0 ? s.type : 'prose';
   switch (type) {
     case 'hero': {
-      const style = pm.bg ? ' style="background-image:url(' + escAttr(pm.bg) + ')"' : '';
+      // round 4: `bg=` is an author-controlled background-image destination reaching a live CSS
+      // `url()` with no gate (found sweeping every `url(` sink in this file per the R3 review's
+      // sink-class list) — the same sink class as `logo=`/`heroParts` images elsewhere in this
+      // function, gated the same way (`isSafeImageSrc`, since this is an image destination).
+      const bgOk = pm.bg && isSafeImageSrc(pm.bg) ? decodeEntitiesOnce(pm.bg) : null;
+      const style = bgOk ? ' style="background-image:url(' + escAttr(bgOk) + ')"' : '';
       // media variant for a foreground image: avatar (round, default) vs logo (uncropped, not round).
       const media = pm.media === 'logo' ? 'logo' : 'avatar';
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
@@ -1819,7 +1843,7 @@ function renderSection(s) {
           const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
           const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest);
           return hrefOk
-            ? '<a class="st-cell st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + inner + '</a>'
+            ? '<a class="st-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + inner + '</a>'
             : '<div class="st-cell st-gal-cell">' + inner + '</div>';
         }
         // optional status badge (`[Soon]`) — a pill the theme colours by data-badge; optional leading
@@ -1841,16 +1865,16 @@ function renderSection(s) {
           ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span>' + arrowSvg(/^https?:\/\//.test(c.href) ? 'up-right' : 'right') + '</span>'
           : (c.badge || c.emoji) ? '' : '<span class="st-cell-cta" aria-hidden="true">›</span>';
         if (hasAction) {
-          const action = '<a class="st-cell-action" href="' + escAttr(c.badgeHref) + '"' + (/^https?:\/\//.test(c.badgeHref) ? ' target="_blank" rel="noopener"' : '') + '>'
+          const action = '<a class="st-cell-action" href="' + escHrefAttr(c.badgeHref) + '"' + (/^https?:\/\//.test(c.badgeHref) ? ' target="_blank" rel="noopener"' : '') + '>'
             + '<span class="st-cta-label">' + inlineHtml(c.badge) + '</span>' + arrowSvg(/^https?:\/\//.test(c.badgeHref) ? 'up-right' : 'right') + '</a>';
           return '<div class="st-cell st-cell-link st-cell-overlaid group">'
-            + '<a class="st-cell-overlay" href="' + escAttr(c.href) + '"' + (/^https?:\/\//.test(c.href) ? ' target="_blank" rel="noopener"' : '') + ' aria-label="' + escAttr(c.title) + '"></a>'
+            + '<a class="st-cell-overlay" href="' + escHrefAttr(c.href) + '"' + (/^https?:\/\//.test(c.href) ? ' target="_blank" rel="noopener"' : '') + ' aria-label="' + escAttr(c.title) + '"></a>'
             + inner + '<div class="st-cell-foot">' + action + cta + '</div></div>';
         }
         const tail = footTag ? '<div class="st-cell-foot">' + badge + cta + '</div>' : cta;
         // a cell with a href is a whole-cell link; the `group` class drives the arrow's hover morph.
         return hrefOk
-          ? '<a class="st-cell st-cell-link group" href="' + escAttr(c.href) + '"' + (/^https?:\/\//.test(c.href) ? ' target="_blank" rel="noopener"' : '') + '>' + inner + tail + '</a>'
+          ? '<a class="st-cell st-cell-link group" href="' + escHrefAttr(c.href) + '"' + (/^https?:\/\//.test(c.href) ? ' target="_blank" rel="noopener"' : '') + '>' + inner + tail + '</a>'
           : '<div class="st-cell">' + inner + tail + '</div>';
       });
       let cellsHtml;
@@ -1879,7 +1903,7 @@ function renderSection(s) {
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
         const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
         return (c.href && isSafeHref(c.href))
-          ? '<a class="st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + badge + inner + '</a>'
+          ? '<a class="st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-gal-cell">' + badge + inner + '</div>';
       }).join('');
       return '<section class="st-gallery" data-cols="' + escAttr(pm.cols || '') + '">' +
@@ -1898,7 +1922,7 @@ function renderSection(s) {
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
         const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
         return (c.href && isSafeHref(c.href))
-          ? '<a class="st-car-cell st-gal-cell st-cell-link group" href="' + escAttr(c.href) + '">' + badge + inner + '</a>'
+          ? '<a class="st-car-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-car-cell st-gal-cell">' + badge + inner + '</div>';
       }).join('');
       // `more="LABEL=/href"` — optional "view all" link top-right of the heading row (mirrors Carousel.astro).
@@ -1909,7 +1933,7 @@ function renderSection(s) {
       const moreOk = more && isSafeHref(more.href);
       const head = (s.title || more)
         ? '<div class="st-car-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
-          (moreOk ? '<a class="st-car-more" href="' + escAttr(more.href) + '">' + inlineHtml(more.label) + '</a>'
+          (moreOk ? '<a class="st-car-more" href="' + escHrefAttr(more.href) + '">' + inlineHtml(more.label) + '</a>'
             : more ? '<span class="st-car-more">' + inlineHtml(more.label) + '</span>' : '') + '</div>'
         : '';
       return '<section class="st-carousel" data-cols="' + escAttr(pm.cols || '') + '">' +
@@ -1956,7 +1980,7 @@ function renderSection(s) {
         // never has two competing "the" links.
         const nm = inlineHtml(p.title);
         const name = (p.href && isSafeHref(p.href))
-          ? '<h3 class="st-person-name"><a href="' + escAttr(p.href) + '"' + (/^https?:\/\//.test(p.href) ? ' target="_blank" rel="noopener"' : '') + '>' + nm + '</a></h3>'
+          ? '<h3 class="st-person-name"><a href="' + escHrefAttr(p.href) + '"' + (/^https?:\/\//.test(p.href) ? ' target="_blank" rel="noopener"' : '') + '>' + nm + '</a></h3>'
           : '<h3 class="st-person-name">' + nm + '</h3>';
         const rl = p.badge
           ? '<span class="st-person-roles">' + roles(p.badge).map((x) => '<span class="st-person-role">' + escHtml(x) + '</span>').join('') + '</span>'
@@ -1965,7 +1989,7 @@ function renderSection(s) {
         // a disallowed one degrades to a plain `<span>` instead of a live `<a>`.
         const lk = (p.links && p.links.length)
           ? '<div class="st-person-links">' + p.links.map((l) => isSafeHref(l.href)
-              ? '<a class="st-person-link" href="' + escAttr(l.href) + '"' + (/^https?:\/\//.test(l.href) ? ' target="_blank" rel="noopener"' : '') + '>' + escHtml(l.label) + '</a>'
+              ? '<a class="st-person-link" href="' + escHrefAttr(l.href) + '"' + (/^https?:\/\//.test(l.href) ? ' target="_blank" rel="noopener"' : '') + '>' + escHtml(l.label) + '</a>'
               : '<span class="st-person-link">' + escHtml(l.label) + '</span>').join('') + '</div>'
           : '';
         return '<div class="st-person"' + (p.tone ? ' data-tone="' + escAttr(p.tone) + '"' : '') + '>' +
@@ -1990,7 +2014,7 @@ function renderSection(s) {
       const linkIsGh = pm.link && typeof pm.link === 'object' && /github\.com/.test(pm.link.href);
       const linkOk = pm.link && typeof pm.link === 'object' && isSafeHref(pm.link.href);
       const link = linkOk
-        ? '<a class="st-collection-link' + (linkIsGh ? ' st-collection-link-gh' : '') + '" href="' + escAttr(pm.link.href) + '"' + (/^https?:\/\//.test(pm.link.href) ? ' target="_blank" rel="noopener"' : '') + '><span>' + escHtml(pm.link.label) + '</span>' + arrowSvg(/^https?:\/\//.test(pm.link.href) ? 'up-right' : 'right', 16) + '</a>'
+        ? '<a class="st-collection-link' + (linkIsGh ? ' st-collection-link-gh' : '') + '" href="' + escHrefAttr(pm.link.href) + '"' + (/^https?:\/\//.test(pm.link.href) ? ' target="_blank" rel="noopener"' : '') + '><span>' + escHtml(pm.link.label) + '</span>' + arrowSvg(/^https?:\/\//.test(pm.link.href) ? 'up-right' : 'right', 16) + '</a>'
         : (pm.link && typeof pm.link === 'object') ? '<span class="st-collection-link"><span>' + escHtml(pm.link.label) + '</span></span>' : '';
       const head = '<div class="st-collection-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + link + '</div>';
       const eyebrow = pm.eyebrow ? '<p class="st-collection-eyebrow">' + escHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
@@ -2015,8 +2039,8 @@ function renderSection(s) {
           const learnOk = it.learn && isSafeHref(it.learn);
           const ghTag = (ghOk && learnOk) ? 'a' : 'span';
           const meta = (it.href || it.learn) ? '<div class="st-item-meta">' + (it.updated ? '<span class="st-item-updated">Updated ' + escHtml(it.updated) + '</span>' : '') +
-            (it.href ? '<' + ghTag + ' class="st-item-gh"' + ((ghOk && learnOk) ? ' href="' + escAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
-            (learnOk ? '<a class="st-item-learn" href="' + escAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
+            (it.href ? '<' + ghTag + ' class="st-item-gh"' + ((ghOk && learnOk) ? ' href="' + escHrefAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
+            (learnOk ? '<a class="st-item-learn" href="' + escHrefAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
           return '<div class="st-cell st-item"><div class="st-item-head"><h4>' + inlineHtml(it.title) + '</h4>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
         }).join('');
         return '<div class="st-collection-group"><p class="st-collection-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p><div class="st-cells">' + cards + '</div></div>';
@@ -2070,7 +2094,7 @@ function renderSection(s) {
       // 🩸 round 2, P1-1: each tag is an author `[Label](href)` destination, same class as a CTA
       // link; a disallowed one degrades to a plain `<span>` tag, never a live href.
       const tags = links.map((l) => isSafeHref(l.href)
-        ? '<a class="st-tag" href="' + escAttr(l.href) + '">' + inlineHtml(l.label) + '</a>'
+        ? '<a class="st-tag" href="' + escHrefAttr(l.href) + '">' + inlineHtml(l.label) + '</a>'
         : '<span class="st-tag">' + inlineHtml(l.label) + '</span>').join('');
       return '<section class="st-tagcloud">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
         '<div class="st-tag-flow">' + tags + '</div></section>';
@@ -2149,7 +2173,7 @@ function renderSiteToHtml(site) {
       // 🩸 round 2, P1-1: `it.href` is author `sidebar-nav:` frontmatter, the same class of
       // destination as any other coral link; folded into the EXISTING "no href" fallback branch.
       g.items.map((it) => '<li>' + ((it.href && isSafeHref(it.href))
-        ? '<a href="' + escAttr(it.href) + '">' + escHtml(it.label) + '</a>'
+        ? '<a href="' + escHrefAttr(it.href) + '">' + escHtml(it.label) + '</a>'
         : '<span>' + escHtml(it.label) + '</span>') + '</li>').join('') +
       '</ul></div>'
     ).join('');
@@ -2160,7 +2184,7 @@ function renderSiteToHtml(site) {
     // rather than reaching a live `<img src>`.
     const sbLogoSrc = String((site.meta || {})['site-logo'] || '').trim();
     const sbLogo = (sbLogoSrc && isSafeImageSrc(sbLogoSrc))
-      ? '<a class="st-sidebar-logo" href="/"><img src="' + escAttr(sbLogoSrc) + '" alt="' + escAttr((site.meta || {}).title || '') + '" /></a>'
+      ? '<a class="st-sidebar-logo" href="/"><img src="' + escHrefAttr(sbLogoSrc) + '" alt="' + escAttr((site.meta || {}).title || '') + '" /></a>'
       : '';
     _stampDropWarnings(site, _before);
     return '<div class="st-sidebar-layout">' +

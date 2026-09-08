@@ -866,6 +866,18 @@ test('decodeEntitiesOnce: a lone-surrogate numeric entity is left as-is, not tur
   assert.doesNotThrow(() => inlineHtml('[a](&#xD800;javascript:alert(1))'));
 });
 
+// round 4: R3-P3-6 — a C0 control other than tab/LF/CR must not reach the output byte stream as a
+// literal control character (a downstream minifier or proxy that STRIPS rather than replaces a
+// NUL can turn `java\0script:` back into a live scheme). `&#0;` now decodes to nothing — it is
+// rejected by safeCodePoint and left as escaped literal text, the same degradation an undecodable
+// entity already gets — never a raw U+0000 in the emitted HTML.
+test('decodeEntitiesOnce: a NUL numeric entity is rejected, never emitted as a literal control byte', () => {
+  const html = inlineHtml('[a](&#0;x)');
+  assert.ok(!html.includes('\u0000'), 'no literal NUL in the output: ' + JSON.stringify(html));
+  const html2 = inlineHtml('[a](java&#0;script:alert(1))');
+  assert.ok(!html2.includes('\u0000'), 'no literal NUL in the output: ' + JSON.stringify(html2));
+});
+
 test('safeHref / safeSrc: the Astro-facing helpers return the string or null, matching isSafeHref/isSafeImageSrc', () => {
   assert.equal(safeHref('/about'), '/about');
   assert.equal(safeHref('javascript:alert(1)'), null);

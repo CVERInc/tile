@@ -11,7 +11,7 @@ import * as lingo from '../packages/lingo/locale.mjs';
 import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
-import { iconHrefs } from '@icons';
+import { iconHrefs, ICON_PATHS } from '@icons';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
@@ -176,6 +176,9 @@ const headerBrand = meta.brand ? String(meta.brand).trim() : (meta.title ? Strin
 // `header-cta: Label=href` — an optional primary action button in the header's right side
 // (e.g. a "Subscribe" pill). General; absent → the header stays as-is.
 const headerCta = (() => { const m = String(meta['header-cta'] || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })();
+// round 4 (R3-P3-2): hoisted alongside the declaration — was three safeHref(headerCta.href)
+// calls in the template below for the same destination, each a separate drop-warning entry.
+const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
 // ── HEADER ACTIONS (Coral A) + NAV-MOBILE HAMBURGER (Coral B) — the interaction wave.
 // Both reuse the age-gate primitive: a hidden checkbox + <label> whose click flips
 // `body:has(#…:checked) …` CSS reveal — ZERO JS for the toggle itself (a tiny gated
@@ -223,7 +226,13 @@ const cartEmpty = (meta['header-actions-cart-empty'] ? String(meta['header-actio
 // off-shop pages route there instead of opening an empty drawer. Absent guild → not wired → the
 // island below is never imported → byte-identical for every non-opted site.
 const cartGuild = (meta['header-actions-cart-guild'] ? String(meta['header-actions-cart-guild']).trim() : '');
-const cartHref = (meta['header-actions-cart-href'] ? String(meta['header-actions-cart-href']).trim() : '');
+// round 4 (R3-P2-1, second instance): `header-actions-cart-href` is a raw frontmatter
+// destination that reaches `window.location.href` unfiltered in header-actions-cart.js — a
+// same-origin script assignment, which is a script-execution context for a `javascript:` value
+// exactly like a live `href`. Gate here, at the value's one declaration point (alongside
+// `siteLogo`/`copyrightHref` above), so the `data-cart-href` attribute below and the client
+// script that reads it can never see anything but a validated destination.
+const cartHref = (meta['header-actions-cart-href'] ? (safeHref(String(meta['header-actions-cart-href']).trim()) || '') : '');
 const cartWired = toggleActions.some((a) => a.target === 'cart') && !!cartGuild;
 // `nav-mobile: hamburger` — responsive nav collapse (the real gap: `.rf-nav` had zero
 // breakpoint collapse). Pure CSS below; here it only flips a body attribute + renders
@@ -283,7 +292,12 @@ const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-h
 const languageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '/language') : '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
-const fontsUrl = meta.fonts ? String(meta.fonts).trim() : '';
+// round 4 (R3-P3-1): `fonts:` is a raw frontmatter destination reaching a live
+// `<link rel=stylesheet href>` below — not a script-execution context (a browser fetches CSS, it
+// does not navigate it), so this is defense-in-depth for the same sink class as the P2 findings,
+// gated the same way: at the declaration point, falling back to "no stylesheet" (the same
+// no-op the field's own absence already produces) rather than a live link with a disallowed scheme.
+const fontsUrl = meta.fonts ? (safeHref(String(meta.fonts).trim()) || '') : '';
 
 // ── PACKAGES (opt-in enhancements) ───────────────────────────────────────────
 // The productized form of the ejecta "enhancements-optin" doctrine: a Recast/native
@@ -612,7 +626,20 @@ const shareImage = absUrl(authoredShareImage
 // /apple-touch-icon.png all answered 404 on live sites — measured. The three routes beside this
 // layout now emit a badge for every build, and the hrefs below come from the SAME model that draws
 // them (packages/sitetile/icon-core.mjs), so a link here can never name a file that isn't emitted.
-const iconLinks = iconHrefs(meta, { hasPwa });
+const iconLinksRaw = iconHrefs(meta, { hasPwa });
+// round 4 (R3-P3-1): iconHrefs() hands back `favicon:`/`site-logo:`/`footer-logo:` (icon-core's
+// siteMark) UNFILTERED as a live `<link>` href when the site set one — the gate that already
+// covers site-logo's three <img src> consumers (safeSrc, above) never touches this path, because
+// iconHrefs() reads `meta` directly rather than the gated variable. Gate here, the one place both
+// `<link>` consumers below read the result, falling back to icon-core's own generated paths — the
+// same fallback the "no mark" branch already emits — rather than a live link with a disallowed
+// scheme. `<link rel=icon>`/`apple-touch-icon` are not a script-execution context (a browser
+// fetches an image, it does not navigate them), so this is defense-in-depth, not the P2 fix.
+const iconMarkSafe = iconLinksRaw.icon.every((l) => safeSrc(l.href));
+const iconLinks = iconMarkSafe ? iconLinksRaw : {
+  icon: [{ href: ICON_PATHS.ico, sizes: '32x32' }, { href: ICON_PATHS.svg, type: 'image/svg+xml' }],
+  appleTouch: ICON_PATHS.apple,
+};
 // Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
 const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
 const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
@@ -873,9 +900,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
               same policy every other emitter uses. */}
           {ageGate.noteLinks.length > 0 && (
             <p class="st-age-gate-note-links">
-              {ageGate.noteLinks.map((it) => (safeHref(it.href)
-                ? <a href={safeHref(it.href)} target="_blank" rel="noopener noreferrer">{it.label}</a>
-                : <span>{it.label}</span>))}
+              {ageGate.noteLinks.map((it) => {
+                // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+                const hrefOk = safeHref(it.href);
+                return hrefOk
+                  ? <a href={hrefOk} target="_blank" rel="noopener noreferrer">{it.label}</a>
+                  : <span>{it.label}</span>;
+              })}
             </p>
           )}
           <div class="st-age-gate-actions">
@@ -974,8 +1005,8 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
       {/* round 3 (Astro consumers, R2-P3-5): `header-cta:` is a raw frontmatter destination;
           safeHref shares the same policy every other emitter uses — a disallowed scheme degrades
           to plain text rather than a live href. */}
-      {headerCta && (safeHref(headerCta.href)
-        ? <a class="rf-header-cta" href={safeHref(headerCta.href)} {...ext(safeHref(headerCta.href))}>{headerCta.label}</a>
+      {headerCta && (headerCtaHrefOk
+        ? <a class="rf-header-cta" href={headerCtaHrefOk} {...ext(headerCtaHrefOk)}>{headerCta.label}</a>
         : <span class="rf-header-cta">{headerCta.label}</span>)}
       {/* header-actions (Coral A): icon buttons on the header's right. link → <a>; toggle →
           a hidden checkbox + <label> whose CSS reveal opens the drawer/offcanvas. */}
@@ -1016,9 +1047,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     {breadcrumbLabel && (
       <nav class="rf-breadcrumb reef-breadcrumb" aria-label="Breadcrumb">
         <a href="/">{breadcrumbHome}</a>
-        {breadcrumbTrail.map((t) => (
-          <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span>{safeHref(t.href) ? <a href={safeHref(t.href)}>{t.label}</a> : <span>{t.label}</span>}</Fragment>
-        ))}
+        {breadcrumbTrail.map((t) => {
+          // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+          const hrefOk = safeHref(t.href);
+          return (
+            <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span>{hrefOk ? <a href={hrefOk}>{t.label}</a> : <span>{t.label}</span>}</Fragment>
+          );
+        })}
         <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
       </nav>
     )}
@@ -1053,9 +1088,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
                 <li class="st-sidebar-group">
                   {g.head && <p class="st-sidebar-group-head">{g.head}</p>}
                   <ul class="st-sidebar-list">
-                    {g.items.map((it) => (
-                      <li>{safeHref(it.href) ? <a href={safeHref(it.href)} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
-                    ))}
+                    {g.items.map((it) => {
+                      // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+                      const hrefOk = safeHref(it.href);
+                      return (
+                        <li>{hrefOk ? <a href={hrefOk} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
+                      );
+                    })}
                   </ul>
                 </li>
               ))}
@@ -1091,9 +1130,12 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
             )}
             {sidebarSocial.length > 0 && (
               <nav class="st-sidebar-social" aria-label="Social">
-                {sidebarSocial.map((it) => (safeHref(it.href) &&
-                  <a href={safeHref(it.href)} {...ext(safeHref(it.href))} aria-label={it.label} title={it.label} set:html={it.icon} />
-                ))}
+                {sidebarSocial.map((it) => {
+                  // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+                  const hrefOk = safeHref(it.href);
+                  return hrefOk &&
+                    <a href={hrefOk} {...ext(hrefOk)} aria-label={it.label} title={it.label} set:html={it.icon} />;
+                })}
               </nav>
             )}
           </aside>
@@ -1109,7 +1151,11 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-prose rf-foot-widget rf-foot-popular">
           {footWidgets.popular.heading && <h2>{footWidgets.popular.heading}</h2>}
           <ul class="st-list">
-            {footWidgets.popular.items.map((it) => <li>{safeHref(it.href) ? <a href={safeHref(it.href)}>{it.label}</a> : <span>{it.label}</span>}</li>)}
+            {footWidgets.popular.items.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+              const hrefOk = safeHref(it.href);
+              return <li>{hrefOk ? <a href={hrefOk}>{it.label}</a> : <span>{it.label}</span>}</li>;
+            })}
           </ul>
         </section>
       )}
@@ -1117,9 +1163,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-tagcloud rf-foot-widget rf-foot-tagcloud">
           {footWidgets.categories.heading && <h2>{footWidgets.categories.heading}</h2>}
           <div class="st-tag-flow">
-            {footWidgets.categories.items.map((it) => (safeHref(it.href)
-              ? <a class="st-tag" href={safeHref(it.href)}>{it.label}</a>
-              : <span class="st-tag">{it.label}</span>))}
+            {footWidgets.categories.items.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+              const hrefOk = safeHref(it.href);
+              return hrefOk
+                ? <a class="st-tag" href={hrefOk}>{it.label}</a>
+                : <span class="st-tag">{it.label}</span>;
+            })}
           </div>
         </section>
       )}
@@ -1141,24 +1191,35 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
               {footerCols.map((col) => (
                 <div class="rf-foot-col">
                   {col.head && <h4>{col.head}</h4>}
-                  {col.items.map((it) => (safeHref(it.href)
-                    ? <a href={safeHref(it.href)} {...ext(safeHref(it.href))}>{it.label}</a>
-                    : <span class="rf-foot-soon">{it.label}</span>))}
+                  {col.items.map((it) => {
+                    // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+                    const hrefOk = safeHref(it.href);
+                    return hrefOk
+                      ? <a href={hrefOk} {...ext(hrefOk)}>{it.label}</a>
+                      : <span class="rf-foot-soon">{it.label}</span>;
+                  })}
                 </div>
               ))}
             </div>
           </div>
         ) : footerSocial.length > 0 ? (
           <nav class="rf-footer-social" aria-label="Social">
-            {footerSocial.map((it) => (safeHref(it.href) &&
-              <a href={safeHref(it.href)} {...ext(safeHref(it.href))} aria-label={it.label} set:html={it.icon} />
-            ))}
+            {footerSocial.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+              const hrefOk = safeHref(it.href);
+              return hrefOk &&
+                <a href={hrefOk} {...ext(hrefOk)} aria-label={it.label} set:html={it.icon} />;
+            })}
           </nav>
         ) : navLinks.length > 0 && (
           <nav class="rf-footer-nav" aria-label="Footer">
-            {navLinks.map((l) => (safeHref(l.href)
-              ? <a href={safeHref(l.href)} {...ext(safeHref(l.href))}>{l.label}</a>
-              : <span>{l.label}</span>))}
+            {navLinks.map((l) => {
+              // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+              const hrefOk = safeHref(l.href);
+              return hrefOk
+                ? <a href={hrefOk} {...ext(hrefOk)}>{l.label}</a>
+                : <span>{l.label}</span>;
+            })}
           </nav>
         )}
         {/* footer logo links home.
