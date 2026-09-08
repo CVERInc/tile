@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml, bodyHtml, stripHtmlComments,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
 } from './site-core.js';
 
 let passed = 0;
@@ -919,25 +919,19 @@ test('🔴 #496: the degenerate `<!-->` does not swallow everything until a LATE
   assert.match(degenerate, /after/, '`<!-->` must not open a comment that swallows everything until a LATER -->');
 });
 
-// 🩸 round 2 (R2-P2-04 / R2-P1-02): this used to assert the OPPOSITE — that "STILL HERE", a LATER
-// blank-line-separated paragraph, survived an unterminated `<!--` in an earlier one. That was true
-// only because round 1's fix removed comments per FRAGMENT (one paragraph at a time), so an
-// unterminated comment could only ever consume its own fragment. Review round 2 found that the same
-// design let a comment spanning a blank line leak its tail onto the page (R2-P1-02: the fragment
-// split happens BEFORE removal ever sees the comment whole). Fixing that means removal has to run
-// document-wide, ahead of block-splitting — and at document scope, "no closer anywhere" genuinely
-// means no closer anywhere in the rest of the DOCUMENT, per the HTML tokenizer's own comment-end
-// state (there is no such thing as "the rest of this paragraph" until paragraphs exist, and they
-// don't yet at this point in the pipeline). See the round-2 test right below for the same rule.
-test('🔴 #496 round 2 — an unterminated `<!--` with no later closer consumes to end of the DOCUMENT', () => {
+// 🩸 round 3 (point 3 of the design, closing R3-P3-04): this used to assert that the unterminated
+// comment and everything after it in the DOCUMENT were gone — round 2's policy, and exactly the
+// complaint R3-P3-04 raised against it: an author's typo (an unclosed `<!--`) silently deleting the
+// rest of a public page, unrelated later sections included, is hostile to ordinary site ownership.
+// Round 3 flips the policy: an unterminated `<!--` is left as literal, VISIBLE, escaped text — nothing
+// disappears silently, and the author sees exactly what to fix. `<!-- oops, no closer` opened no block
+// (bodyHtml's line-initial block-comment check also requires a closer to exist; see commentBlockEnd)
+// and has none within its own paragraph either, so escapeInline renders it literally; the blank-line
+// boundary right after it still ends that paragraph normally, and "STILL HERE" is its own paragraph.
+test('🔴 #496 round 3 — an unterminated `<!--` with no later closer is left literal, not deleted', () => {
   const html = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
-  assert.equal(html, '<p>before</p>', 'the unterminated comment and everything after it are gone, page-wide');
-  assert.doesNotMatch(html, /STILL HERE/);
-});
-
-test('🔴 #496: stripHtmlComments is fence-aware directly (unit-level, not just through bodyHtml)', () => {
-  assert.equal(stripHtmlComments('a\n<!-- x -->\nb'), 'a\n\nb');
-  assert.equal(stripHtmlComments('```\n<!-- x -->\n```'), '```\n<!-- x -->\n```', 'fenced content is untouched');
+  assert.equal(html, '<p>before</p>\n<p>&lt;!-- oops, no closer</p>\n<p>STILL HERE</p>', 'nothing disappears silently');
+  assert.match(html, /STILL HERE/, 'a later, unrelated block must survive an earlier unterminated opener');
 });
 
 // ── round 2 — REVIEW-tile28-r1-2026-09-09.md, P1-01 / P2-02 / P2-03 / P2-04 / P3-05 / P3-06 ────────
@@ -994,31 +988,25 @@ test('🔴 #496 round 2 — P3-05: the HTML spec\'s alternative comment closer `
   assert.doesNotMatch(html, /note/);
 });
 
-test('🔴 #496 round 2 — an unterminated `<!--` consumes to end of the DOCUMENT (HTML spec)', () => {
-  // A deliberate change, twice over. Round 1 first made an unterminated comment run to EOF at all
-  // (rather than being left as literal text) — the HTML tokenizer's own comment-end state, and what
-  // keeps the scan linear (P1-01): retrying from every subsequent `<!--` looking for a closer that
-  // will never come is exactly the quadratic behaviour being fixed. Round 2 (R2-P2-04) then moved
-  // "end of input" from the fragment bodyHtml used to hand inlineHtml (one paragraph at a time) to
-  // the true end of the whole raw document — because removal now runs BEFORE block-splitting
-  // (R2-P1-02), where "fragment" and "block" don't exist yet; see removeDocumentComments()'s comment
-  // in site-core.js and the README's escape-hatch note. For a one-paragraph document like this one,
-  // both readings land on the same output — the difference only shows up once a LATER block exists
-  // (see the sibling test just above, and the giant-input perf test right below).
+test('🔴 #496 round 3 — an unterminated `<!--` is left literal, whatever comes after it on the same line', () => {
+  // Rounds 1-2 made an unterminated comment consume to EOF (round 1: its own fragment; round 2:
+  // the whole document). Round 3 (point 3 of the design, R3-P3-04) leaves it literal instead — see
+  // the sibling test above for the full reasoning. "MORE TEXT that must not survive" now MUST survive,
+  // visibly, escaped, because nothing about an unclosed `<!--` should make later text disappear.
   const html = bodyHtml('before <!-- oops, no closer, and MORE TEXT that must not survive');
-  assert.equal(html, '<p>before</p>');
+  assert.equal(html, '<p>before &lt;!-- oops, no closer, and MORE TEXT that must not survive</p>');
 });
 
-test('🔴 #496 round 2 — P1-01: linear on 1 MiB of unterminated comment openers', () => {
+test('🔴 #496 round 3 — P1-01: linear on 1 MiB of unterminated comment openers (no longer quadratic to escape literally, either)', () => {
   const input = '<!--'.repeat(262144);                       // exactly 1 MiB, no closer anywhere
   const t0 = process.hrtime.bigint();
   const html = bodyHtml(input);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  // The whole document IS one unterminated comment (R2-P2-04: consumes to true end of document), so
-  // after removal there is no text left at all — not even an empty paragraph (R2-P2-03: a block whose
-  // entire content was a comment never exists, because block-splitting runs on what's left AFTER
-  // removal and there is nothing left here to split).
-  assert.equal(html, '', 'the whole document is one unterminated comment: nothing renders, not even <p></p>');
+  // The whole document is ONE unterminated `<!--` (a single line — this input has no `\n`), so it is
+  // left as literal, visible, escaped text (R3 point 3) rather than deleted: one `<p>` of `&lt;!--`
+  // repeated 262,144 times. The escapeInline `noCloser` cache (see that function's own comment) is
+  // what keeps this linear despite every one of those 262,144 opens being individually attempted.
+  assert.equal(html, '<p>' + '&lt;!--'.repeat(262144) + '</p>', 'nothing disappears silently, even at this size');
   assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms — the old regex was quadratic here`);
 });
 
@@ -1090,6 +1078,21 @@ test('🔴 #496 round 3 — R2-P1-01: 256 KiB→1 MiB scales ~linearly (ratio �
   assert.ok(ratio <= 6, `expected ~4× (linear), got ${ratio.toFixed(1)}× (256KiB=${t256.toFixed(2)}ms, 1MiB=${t1m.toFixed(2)}ms)`);
 });
 
+test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, and of a mixed corpus', () => {
+  // Two more adversarial shapes from the round-3 review's own probe list, now exercised post-round-4:
+  // an opener immediately followed by a long dash run (the abrupt-close scan's `while (s[j]==='-')`
+  // must not itself be quadratic), and a corpus mixing well-formed comments, prose, fences and stray
+  // `<`/`>` (nothing here should make escapeInline's or bodyHtml's line loop re-scan the same ground).
+  const dashRun = '<!--' + '-'.repeat(1048572);                          // ~1 MiB, never closes
+  const mixed = ('Hello <!-- a --> world.\n```\n<!-- code, not a comment -->\n```\n<x <!-- -->y>\n').repeat(12000);
+  for (const input of [dashRun, mixed]) {
+    const t0 = process.hrtime.bigint();
+    bodyHtml(input);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 200, `expected < 200ms, got ${ms.toFixed(1)}ms for a ${input.length}-byte input`);
+  }
+});
+
 test('🔴 #496 round 3 — R2-P1-02: a comment spanning a BLANK LINE is removed whole, not leaked in half', () => {
   // The review's own failing input. Round 2 (pre-fix): '<p>Hello.</p>\n<p></p>\n<p>more notes --&gt;</p>\n<p>Bye.</p>'
   // — the opening half silently deleted, "more notes" leaked onto the page. Fixed: byte-identical to
@@ -1098,14 +1101,42 @@ test('🔴 #496 round 3 — R2-P1-02: a comment spanning a BLANK LINE is removed
   assert.equal(html, '<p>Hello.</p>\n<p>Bye.</p>');
 });
 
-test('🔴 #496 round 3 — R2-P1-02: a comment spanning list items is removed whole, not leaked', () => {
+// 🩸 round 4 (PR #28 review round 3's design, eliminating the class rather than patching it): this
+// used to assert that a comment splicing TWO SEPARATE LIST ITEMS together across a source newline —
+// "- one <!-- note" is item 1, "- two --> tail" is item 2 — was removed as one span, merging the two
+// items' surviving text into a single `<li>`. That relied on the now-deleted document-wide textual
+// pre-pass: it is exactly the kind of cross-block splicing round 3 eliminates, because it is what let
+// a document-wide deletion disagree with the block parser about where one list item ends and the next
+// begins (the same family of disagreement as R3-P2-01/02/03). Under the round-3 model, `<!--` here is
+// NOT a block-level open (it doesn't start item 1's text — "one " precedes it), so it is scoped to
+// item 1's OWN text, unterminated THERE (item 1 has no `-->` of its own) — literal, per point 3. Item
+// 2's text has no `<!--` of its own either, so its own stray `-->` is just an ordinary `>` to escape.
+// Three independent items, none of them merged.
+test('🔴 #496 round 4 — a comment opening mid-item does not span into the NEXT list item', () => {
   const html = bodyHtml('- one <!-- note\n- two --> tail\n- three');
-  assert.equal(html, '<ul class="st-list"><li>one  tail</li><li>three</li></ul>');
+  assert.equal(html, '<ul class="st-list"><li>one &lt;!-- note</li><li>two --&gt; tail</li><li>three</li></ul>');
 });
 
-test('🔴 #496 round 3 — R2-P1-02: a comment spanning heading→paragraph is removed whole, not leaked', () => {
+test('🔴 #496 round 4 — a block comment that DOES open at a list item\'s own front still spans items', () => {
+  // Contrast with the test above: here `<!--` IS the first thing after the marker on item 1's own
+  // line, so this genuinely is a round-3 block-level HTML-comment block (case 1 of the design) — it
+  // consumes whole lines, list markers and all, through the line that closes it, same as it would at
+  // the top level. Only "three" survives as an item.
+  const html = bodyHtml('- <!-- hidden\n- still hidden -->\n- three');
+  assert.equal(html, '<ul class="st-list"><li>three</li></ul>');
+});
+
+// 🩸 round 4: this used to assert a comment merging a HEADING and the paragraph after it into one
+// `<h1>` — again the deleted document-wide pre-pass splicing across a block boundary the block parser
+// itself would never have joined. `<!--` here does not start the heading's own body (h[2] is
+// "H <!-- note", not "<!-- note"), so it is scoped to the heading's OWN inline text: unterminated
+// there (no `-->` in "H <!-- note"), left literal (point 3). The heading still emits (its inline
+// result isn't empty — R3-P2-02 only drops a heading whose ENTIRE body was the comment, see the
+// R3-P2-02 test elsewhere in this file), and the paragraph after the blank line is unrelated and
+// unaffected — its own stray `-->` is just an ordinary `>` to escape.
+test('🔴 #496 round 4 — a comment opening mid-heading does not span into the paragraph after it', () => {
   const html = bodyHtml('# H <!-- note\n\nvisible --> leak');
-  assert.equal(html, '<h1>H  leak</h1>');
+  assert.equal(html, '<h1>H &lt;!-- note</h1>\n<p>visible --&gt; leak</p>');
 });
 
 test('🔴 #496 round 3 — R2-P2-03: a comment-only PARAGRAPH leaves no empty <p></p>', () => {
@@ -1129,12 +1160,61 @@ test('🔴 #496 round 3 — R2-P2-03: a comment-only QUOTE LINE never becomes an
   assert.equal(html, '');
 });
 
-test('🔴 #496 round 3 — R2-P2-04: unterminated `<!--` runs to end of DOCUMENT, past later blocks', () => {
-  // Documented behaviour change from round 2: "end of input" is now the whole raw document (removal
-  // runs before block-splitting exists to bound it), not the one block/fragment that held the opener.
-  const html = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
-  assert.equal(html, '<p>before</p>');
-  assert.doesNotMatch(html, /STILL HERE/);
+test('🔴 #496 round 4 — a block comment opened inside a blockquote spans quote lines, like at top level', () => {
+  const html = bodyHtml('> quoted\n> <!-- hidden\n> still hidden -->\n> more quote');
+  assert.equal(html, '<blockquote class="st-quote"><p>quoted more quote</p></blockquote>');
+});
+
+test('🔴 #496 round 4 — a fence-looking line INSIDE a comment block is not a fence', () => {
+  // Design point 1's own invariant: once a comment block is open, its lines are never examined for a
+  // fence start — only for the terminator. A ``` line here must not open a <pre>/<code>; the whole
+  // span (openers, alert(1), all of it) is swallowed by the comment, emitting nothing.
+  const html = bodyHtml('<!--\n```js\nalert(1)\n-->\nafter');
+  assert.doesNotMatch(html, /<pre|<code/);
+  assert.equal(html, '<p>after</p>');
+});
+
+// ── round 4 — REVIEW-tile28-r3-2026-09-09.md, R3-P2-01 / R3-P2-02 / R3-P2-03 ────────────────────────
+// Round 3 found all three of its own P2 findings were ONE bug wearing three faces: the document-wide
+// textual pre-pass (removeDocumentComments) and the later block parser held two independent opinions
+// about where a code span / heading / fence started and ended, and a comment deletion made by the
+// first opinion could silently change what the second one saw. The fix (this round) doesn't patch any
+// of the three individually — it deletes the first opinion. There is no longer a document-wide pass;
+// see the "HTML-comment blocks" section in site-core.js and escapeInline's own comment.
+
+test('🔴 #496 round 4 — R3-P2-01: a code span keeps a comment straddling a soft line break opaque', () => {
+  // The review's exact failing input. Fixed for free by removing the pre-pass: bodyHtml already joins
+  // a paragraph's source lines into one fragment BEFORE inlineHtml() ever runs, so the code span's
+  // delimiters (one backtick on each line) meet on the SAME string codeSpanRanges scans, exactly as
+  // they always did for any other multi-line code span (this is not comment-specific machinery).
+  const html = bodyHtml('`open <!-- x -->\nclose` after');
+  assert.equal(html,
+    '<p><span class="st-code"><span class="st-mk">`</span>open &lt;!-- x --&gt; close<span class="st-mk">`</span></span> after</p>');
+});
+
+test('🔴 #496 round 4 — R3-P2-02: a comment-only heading emits nothing, and a FOLLOWING paragraph is untouched', () => {
+  assert.equal(bodyHtml('# <!-- title -->'), '', 'no <h1></h1>, no bare <p>#</p>');
+  // The structural regression the review called "worse": `next` used to get merged INTO the heading's
+  // paragraph fallback (`<p>#  next</p>`). Now the heading consumes only its own line (dropped
+  // entirely) and `next` is exactly its own paragraph — no cross-block anything.
+  assert.equal(bodyHtml('# <!-- title -->\nnext'), '<p>next</p>');
+});
+
+test('🔴 #496 round 4 — R3-P2-03: comment removal can no longer resurrect a live tag via changed fence recognition', () => {
+  // The review's exact minimized failing input. Before this round: '<p><small></p>' — a live,
+  // unescaped <small> the author never wrote, created because the document-wide pre-pass deleted text
+  // up through an embedded `-->` and left a same-line REMAINDER (" <small>") for the block parser to
+  // re-interpret on its own, unescaped. Round 4 removes the mechanism that remainder depended on: an
+  // HTML-comment block consumes WHOLE LINES (see commentBlockEnd / the "block ends on that line" rule
+  // in site-core.js), never leaving a same-line remainder for anything to reparse. Per that rule, `<!--`
+  // opens a comment block on line 1, and line 2 contains a `-->` (inside the abrupt-closing `<!-->`) —
+  // so line 2 is consumed WHOLE, "<small>" included, exactly as a real CommonMark parser (verified
+  // against the `commonmark` reference implementation) also treats this input: one HTML block, nothing
+  // survives. `<small>` is never live, and — unlike the pre-round-4 bug — never even reaches escaped
+  // text, because it was never outside the comment to begin with.
+  const html = bodyHtml('<!--\n````> <!--> <small>');
+  assert.equal(html, '');
+  assert.doesNotMatch(html, /<small>/, 'no live <small> may ever be synthesized from comment removal');
 });
 
 test('🔴 #496 round 3 — differential: byte-identical to pre-#496 `main` on the round-1 attack corpus', () => {

@@ -641,11 +641,18 @@ function codeSpanRanges(s) {
 // `from` position partition `s.slice(from)` without overlap: total work across all of them is
 // O(n - from), the same bound a single indexOf call has, not multiplied by how many times this
 // terminator-finder is invoked over the whole document.
+//
+// Returns -1, not `n`, when no closer exists in `s.slice(from)` (PR #28 review round 3, R3-P3-04 /
+// point 3 of the round-3 design): an unterminated comment is no longer "consumes to end of input" —
+// the caller now treats -1 as "leave this `<!--` as literal text" (see escapeInline below). -1 is
+// also what makes that decision cheap to CACHE: since every caller of this function only ever grows
+// `from` across a single left-to-right scan, one -1 result means every later call in that same scan
+// would also return -1 — the caller can skip re-scanning entirely once it has seen one.
 function commentTerminatorEnd(s, from, n) {
   let k = from;
   for (;;) {
     const d = s.indexOf('--', k);
-    if (d < 0) return n;                                          // unterminated: to end of input
+    if (d < 0) return -1;                                         // unterminated: no closer anywhere
     if (s.charCodeAt(d + 2) === 62 /* > */) return d + 3;          // '-->'
     if (s.charCodeAt(d + 2) === 33 /* ! */ && s.charCodeAt(d + 3) === 62 /* > */) return d + 4; // '--!>'
     k = d + 1;
@@ -660,48 +667,52 @@ function commentTerminatorEnd(s, from, n) {
 // above) is skipped over verbatim — plain-escaped like the rest, comment markers included — before
 // this pass ever gets to apply its own rules to it: P2-02.
 //
-// WHY THIS ALSO RUNS HERE, NOT ONLY AS A DOCUMENT-LEVEL PRE-PASS: bodyHtml() now removes most
-// comments BEFORE block-splitting (removeDocumentComments(), below — see that function and bodyHtml's
-// own comment for R2-P1-02, the round-2 finding this answers: a comment spanning a blank line, a run
-// of list items, or a heading→paragraph must be removed as ONE span before blocks are even detected,
-// or the two halves land in two different blocks). That pre-pass deliberately leaves a comment
-// UNTOUCHED whenever the `<!--` is not a fresh, standalone open — i.e. whenever some earlier `<` on
-// the same raw line has no `>` since. This is the SAME case escapeInline has always had to handle on
-// its own: round 1's original bug was a pre-pass that deleted a comment as pure text FIRST, so
-// `<sm<!-- -->all>` had its comment removed while "sm" and "all>" were still adjacent on the SAME
-// line, textually joining them into "small>" before escaping ever saw the input — the later
-// <small>/<br> allowlist regex matches on the ESCAPED string, so it fired on a spelling the author
-// never wrote. The fix both passes share: never delete a comment as text ahead of the scan that
-// decides what a bare `<` becomes. escapeInline is that scan for whatever removeDocumentComments()
-// left behind — it is the SECOND line of defence, not a duplicate of the first.
+// PR #28 review round 3: this is now the ONLY place an inline (i.e. mid-text, not line-initial —
+// see bodyHtml()'s own block-level comment recognition for that case) comment is ever consumed.
+// Rounds 1-2 also ran a document-wide TEXTUAL pre-pass ahead of block-splitting
+// (removeDocumentComments()) so a comment spanning a blank line / list run / heading→paragraph
+// boundary would be removed as one span before the block parser ever cut it in two — but that pre-pass
+// and the block parser were two SEPARATE opinions about where a fence/heading/code-span/list-item
+// starts and ends, and round 3 found three ways they could disagree (R3-P2-01/02/03: a pre-pass
+// deletion changing what the block parser sees as a fence, a heading, or a code span's newline-joined
+// content). The fix removes the disagreement by removing the SECOND OPINION: there is no document-wide
+// pre-pass any more. A comment either starts at a block boundary (bodyHtml's own line-by-line loop
+// recognises that, see the top of that function) or it doesn't — and if it doesn't, this function,
+// running on the ALREADY-BLOCK-SPLIT (and, for a paragraph, already soft-line-joined) fragment, is the
+// one and only place that decides what happens to it. A comment spanning a paragraph's own soft line
+// break (an ordinary multi-line paragraph in the source) is handled here for free, because bodyHtml
+// joins the paragraph's lines into one fragment BEFORE calling inlineHtml() → escapeInline() — the
+// same join that makes a code span's delimiters survive a source newline (R3-P2-01) does the same for
+// a comment's.
 //
-// Here, the `<` of `<sm` is examined — and escaped to `&lt;`, because "sm" is not immediately
-// followed by `>` — TWO CHARACTERS BEFORE the comment starting at index 3 is even reached. `inTag`
-// (below) records that this run already failed to be a clean tag, so the `<!--` that follows is NOT
-// treated as a fresh, standalone comment-open either: every character of it is escaped one at a time,
-// exactly like a build of this renderer with no comment logic at all would have escaped it. `inTag`
-// resets on the next escaped `>`, so a comment appearing anywhere else in the SAME fragment — issue
-// #496's actual, common case: a QA note alone on its own line or paragraph — still gets removed (in
-// the ordinary case, already removed by removeDocumentComments() before this function ever runs).
+// `inTag` still guards the round-1 case: `<sm<!-- -->all>` must never let its comment splice "sm" and
+// "all>" into a live `<small>` — the `<` of `<sm` is escaped to `&lt;` (because "sm" isn't immediately
+// followed by `>`) two characters before the comment at index 3 is even reached, `inTag` remembers
+// that this run already failed to be a clean tag, and the `<!--` that follows is escaped one character
+// at a time like any other dead half-tag, exactly as a build with no comment logic at all would.
 //
-// LINEAR: one forward pass, one index `i` that only ever increases. A genuine comment-open (`inTag`
-// false) costs at most one commentTerminatorEnd() call — itself one forward scan, not two independent
-// full-suffix ones (R2-P1-01; see that function's own comment for why the two-`indexOf` version this
-// replaced was quadratic: `indexOf('-->')`/`indexOf('--!>')` are each bounded by the REST OF THE
-// STRING, not by the comment, so a document with no `--!>` anywhere paid a full-suffix scan for it at
-// EVERY comment). commentTerminatorEnd can fail its hunt (return `n`, unterminated) at most ONCE per
-// scan, because failing means "no closer anywhere in what's left" — so the scan jumps straight to
-// end-of-input (a deliberate divergence from the old behaviour of leaving it as literal text; this
-// matches the HTML tokenizer spec's own comment-end state, which also runs to EOF) and stops, rather
-// than retrying the same suffix from the next `<!--` the way the old `/<!--[\s\S]*?-->/g` regex did —
-// that retry-the-suffix behaviour is what made it quadratic on `'<!--'.repeat(N)` (P1-01).
+// R3, point 3 of the round-3 design (a policy change from rounds 1-2, and from R3-P3-04's own
+// complaint: "an unterminated `<!--` deletes the rest of the page" is hostile to ordinary site
+// ownership): an UNTERMINATED `<!--` — no `-->`/`--!>` anywhere in THIS fragment — is no longer
+// consumed at all. It is left as literal, escaped text: nothing disappears silently, and the author
+// sees exactly what to fix. commentTerminatorEnd() signals this by returning -1 instead of running to
+// `n`; on -1 this function just falls through to the ordinary "bare `<`" branch below.
+//
+// LINEAR, still: one forward pass, one index `i` that only ever increases. A genuine comment-open
+// costs at most one commentTerminatorEnd() call PER DISTINCT "no closer anywhere from here on" verdict
+// — `noCloser` caches that verdict the first time it's reached (see commentTerminatorEnd's own comment:
+// every later call in this same left-to-right scan starts at a HIGHER `from`, i.e. a SUBSET of a region
+// already proven empty, so it can only agree). Without the cache, an input built to have many comment
+// opens and no closer anywhere (`<!--`.repeat(N), or an `inTag`-resetting shape like `<!--x>`.repeat(N)
+// where a real `>` periodically re-arms the `!inTag` check) would call commentTerminatorEnd — itself an
+// O(remaining length) scan — at EVERY open, which is exactly R2-P1-01's quadratic shape one level up.
 function escapeInline(text, opts) {
   const s = String(text == null ? '' : text);
   if (opts && opts.stripComments === false) return escHtml(s);   // P2-04: indented paragraph, verbatim
   const n = s.length;
   const ranges = codeSpanRanges(s);
   let ri = 0;
-  let out = '', start = 0, i = 0, inTag = false;
+  let out = '', start = 0, i = 0, inTag = false, noCloser = false;
   while (i < n) {
     while (ri < ranges.length && ranges[ri][1] <= i) ri++;              // drop ranges already behind us
     if (ri < ranges.length && i >= ranges[ri][0] && i < ranges[ri][1]) { // inside a code span: verbatim
@@ -714,16 +725,27 @@ function escapeInline(text, opts) {
     const c = s.charCodeAt(i);
     if (c === 60 /* < */) {
       if (!inTag && s.startsWith('!--', i + 1)) {
-        out += escHtml(s.slice(start, i));
         // Comment-start-state's "abrupt closing of an empty comment": `<!-->`, or any run of extra
-        // dashes before the `>` (`<!--->`, `<!---->`, …), closes immediately per the HTML spec —
-        // it must NOT fall through to the unterminated-consumes-to-EOF rule above (P3-05's sibling:
-        // an existing test relies on content AFTER a `<!-->` still rendering).
+        // dashes before the `>` (`<!--->`, `<!---->`, …), closes immediately per the HTML spec — it
+        // must NOT fall through to the unterminated rule below (P3-05's sibling: an existing test
+        // relies on content AFTER a `<!-->` still rendering).
         let j = i + 4;
         while (s[j] === '-') j++;
-        const end = (s[j] === '>') ? j + 1 : commentTerminatorEnd(s, i + 4, n);
-        i = end; start = i;
-        continue;
+        if (s[j] === '>') {
+          out += escHtml(s.slice(start, i));
+          i = j + 1; start = i;
+          continue;
+        }
+        if (!noCloser) {
+          const end = commentTerminatorEnd(s, i + 4, n);
+          if (end !== -1) {
+            out += escHtml(s.slice(start, i));
+            i = end; start = i;
+            continue;
+          }
+          noCloser = true;   // R3 point 3: no closer anywhere from here on — fall through, stays literal
+        }
+        // unterminated: `<` is just a bare `<`, escaped like any other — nothing consumed as a comment
       }
       out += escHtml(s.slice(start, i)) + '&lt;';
       inTag = true; i++; start = i; continue;
@@ -809,10 +831,9 @@ const RE_FENCE_OPEN = /^(\s*)(```|~~~)(.*)$/;
 const RE_LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;   // [1]=indent (for nesting) [2]=marker [3]=text
 const RE_LIST_ORDERED = /^\s*\d+[.)]\s+/;
 const RE_QUOTE_LINE = /^\s*>\s?(.*)$/;
-// ATX heading (### Section). A named constant (rather than an inline literal at its one call site,
-// as it used to be) so removeDocumentComments() can test the exact same shape bodyHtml uses to decide
-// a line is a heading, not a plain-paragraph line — the two must never disagree about what a
-// "paragraph" is (see removeDocumentComments()'s own comment on the P2-04 indented-paragraph carve-out).
+// ATX heading (### Section). Requires non-whitespace body text — a comment-only heading
+// (`# <!-- title -->`) still matches this (the comment text itself is non-whitespace), and is only
+// dropped afterward, once its inline content resolves empty (R3-P2-02; see bodyHtml's heading branch).
 const RE_HEADING = /^(#{1,6})\s+(.*\S)\s*$/;
 const RE_TABLE_ROW = /^\s*\|.*\|\s*$/;
 // table separator: a LEADING `|` is required (so a bare `---` horizontal rule is NOT a separator);
@@ -855,8 +876,19 @@ function cellHtml(cell) {
   }
   return parts.map((p) => inlineHtml(p)).join('<br>');
 }
-const isBlockStart = (lines, i) =>
+// `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
+// declarations hoist, so this only matters for callers with no `nextCloser` to hand in, which then
+// simply never treat a comment-open as a block start). An HTML-comment block with a real closer
+// somewhere ahead INTERRUPTS a paragraph without needing a blank line first, like any HTML block
+// (CommonMark's own rule) — so a comment-open line ends a paragraph in progress instead of being
+// swallowed into it and soft-joined away. An UNTERMINATED opener must NOT count here: bodyHtml's own
+// top-level dispatch already declines to treat it as a block (R3 point 3 — it falls through to
+// literal text), and if isBlockStart also called it a "block start" with nowhere to go, a paragraph
+// loop whose very first line is such an opener would never collect anything and never advance either
+// — an infinite loop, not just a missed case.
+const isBlockStart = (lines, i, nextCloser) =>
   RE_FENCE_OPEN.test(lines[i]) || RE_QUOTE_LINE.test(lines[i]) || RE_LIST_ITEM.test(lines[i])
+  || (nextCloser && commentBlockEnd(lines, i, nextCloser) !== -1)
   || isTableStart(lines, i) || isHeadlessTableStart(lines, i);
 
 // Render a collected list block (items = [{indent, ordered, text}]) into nested <ul>/<ol>. A deeper
@@ -872,12 +904,14 @@ function renderList(items) {
     let j = i + 1;
     while (j < items.length && items[j].indent > it.indent) j++;   // gather deeper-indented children
     const children = renderList(items.slice(i + 1, j));
-    // R2-P2-03: a list item whose entire text was an HTML comment now removed (bodyHtml's
-    // removeDocumentComments() runs before this list is ever gathered) has NOTHING left to show — and,
-    // with no children to hold either, an `<li></li>` would be exactly the empty-block leak issue #496
-    // and this fix are about. Drop it, the same way a comment-only PARAGRAPH never becomes a block at
-    // all (blank lines are skipped before block detection ever runs). A comment-only item that DOES
-    // have nested children still needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
+    // R2-P2-03: a comment-only item (`- <!-- note -->`) never reaches `items` at all any more — round
+    // 3's block-level comment recognition (bodyHtml's list loop, above) swallows a WHOLE-LINE comment
+    // before it is ever collected as an item, the same way a comment-only PARAGRAPH never becomes a
+    // block (blank lines are skipped before block detection runs). This `it.text.trim()` guard is the
+    // general safety net for an item that is otherwise blank (kept so an empty `<li></li>` still can't
+    // leak through some OTHER route) — with no children to hold either, an `<li></li>` would be exactly
+    // the empty-block leak issue #496 is about. A comment-only item that DOES have nested children still
+    // needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
     if (it.text.trim() || children) html += '<li>' + inlineHtml(it.text) + children + '</li>';
     i = j;
   }
@@ -968,237 +1002,107 @@ function renderDialogue(turns) {
   return '<div class="st-dialogue">' + body + '</div>';
 }
 
-// The linear core of comment removal (see escapeInline() above for the full reasoning and the same
-// abrupt-close / alternative-closer / unterminated-to-EOF rules): given plain text with NO concept
-// of tags, spans or an allowlist to protect, just find each `<!-- … -->` (or `--!>`, or — unterminated
-// — the rest of the string) and cut it out. One forward pass, no regex over the remaining suffix, and
-// (R2-P1-01) the terminator hunt itself is commentTerminatorEnd's single scan, not two independent
-// full-suffix `indexOf` calls — the same fix escapeInline needed, for the same reason.
-function removeHtmlComments(s) {
-  const str = String(s == null ? '' : s);
-  const n = str.length;
-  let out = '', start = 0, i = 0;
-  while (i < n) {
-    if (str.charCodeAt(i) === 60 /* < */ && str.startsWith('!--', i + 1)) {
-      out += str.slice(start, i);
-      let j = i + 4;
-      while (str[j] === '-') j++;
-      const end = (str[j] === '>') ? j + 1 : commentTerminatorEnd(str, i + 4, n);   // '>' = abrupt-closing-of-empty-comment
-      i = end; start = i;
-      continue;
-    }
-    i++;
-  }
-  return out + str.slice(start);
+// ── HTML-comment blocks (CommonMark HTML block type 2), round 3 ────────────────────────────────
+// PR #28 review round 3: rounds 1-2 removed comments with a document-WIDE textual pre-pass ahead of
+// block-splitting, so that a comment spanning a blank line, a run of list items, or a heading→paragraph
+// boundary would be removed as one span before the block parser ever cut it in two. That pre-pass was
+// a SECOND OPINION about where a fence/heading/code-span starts and ends, running character-by-character
+// over raw text the block parser below had not looked at yet — and round 3 found three concrete ways
+// the two opinions disagreed (R3-P2-01: it deleted a comment inside what the block parser would later
+// join into one code span, breaking that span's opacity; R3-P2-02: it deleted a heading's entire body,
+// leaving a bare `#` for the block parser to mis-render as a paragraph; R3-P2-03: deleting a comment
+// changed what raw text was left for the block parser to recognise as a fence, resurrecting a live
+// `<small>` from text the author never wrote as one contiguous tag). The fix removes the disagreement
+// by removing the second opinion: comments are recognised in the SAME line-by-line loop bodyHtml()
+// already uses for fences/headings/lists/quotes (this section), or — failing that — in escapeInline()
+// above, on already-block-split, already-line-joined text. There is no separate pass in between that
+// can see the document differently than either of those two do.
+//
+// A line whose first non-space characters (after any list/quote prefix bodyHtml itself would strip —
+// see isCommentBlockOpen) are `<!--` opens an HTML-comment block, mirroring CommonMark HTML block type
+// 2: it continues, consuming WHOLE LINES verbatim, through blank lines, list markers, quote markers,
+// anything, emitting nothing for any of it, until the first line that contains `-->` or `--!>` — that
+// line is consumed too, in full (whatever follows the terminator on that same line is part of the
+// block and never separately parsed — this is what closes R3-P2-03: a comment can no longer leave a
+// same-line remainder for the block parser to re-interpret as something else, because the block eats
+// the WHOLE line, not just up through the terminator character). If no such line exists anywhere in
+// the rest of the document, the opener is UNTERMINATED — round 3, point 3 of the design (a policy
+// change from rounds 1-2's "deletes to end of document", itself R3-P3-04's own complaint: silently
+// deleting the rest of a page on an author's typo is hostile to ordinary site ownership) — and is left
+// alone entirely: not treated as a comment-block open at all, so it falls through to whatever it
+// otherwise is (most often a paragraph line), where escapeInline's own unterminated rule renders it as
+// literal, visible, escaped text. Once a fence is open, its lines are never examined for a comment
+// open (the fence loop below has its own closing-marker scan and nothing else); once a comment block
+// is open, its lines are never examined for a fence, a heading, anything (this scan only looks for the
+// terminator substring) — the two constructs can never disagree about which one a line belongs to,
+// because only one of them is ever asked.
+//
+// nextCommentCloser(lines)[k] = the smallest line index ≥ k that contains `-->` or `--!>`, or -1 if
+// none exists in lines[k:] — computed ONCE per bodyHtml() call, in one backward pass over `lines`
+// (O(total document length): each line's own substring search is paid once, not once per candidate
+// opener). isCommentBlockOpen(lines[i]) is then an O(line length) check and the lookup is O(1), so a
+// document with N candidate openers costs O(N) lookups + O(total consumed lines) of actual consumption
+// — never re-scanning a line already ruled in or out, the same non-overlap argument commentTerminatorEnd
+// itself relies on (see that function's comment).
+function lineHasCommentCloser(line) {
+  return line.indexOf('-->') !== -1 || line.indexOf('--!>') !== -1;
 }
-
-// A whole-document, fence-aware HTML-comment stripper — issue #496's ORIGINAL fix, kept as a public
-// utility (and its own direct tests below) even though bodyHtml() no longer routes through IT
-// specifically — it routes through removeDocumentComments() below instead, which does the same job
-// with the additional awareness that job turned out to need (see that function's comment). This one
-// stays a simpler, fence-only-aware sibling: it has no importer inside this codebase (review round 2
-// finding R2-P3-08), but it is exported, so its own behaviour is still a promise to whoever calls it
-// directly, and this round's fixes (R2-P1-01's terminator scan) apply to its core the same way.
-//
-// Round 1 finding P2-03 is why this ever stopped being bodyHtml's pre-pass: running THIS FUNCTION
-// (plain fence-awareness, no code-span or dead-tag awareness) as a textual pre-pass over the whole
-// document deleted a comment before escaping ever ran — so `<sm<!-- -->all>` had its comment cut
-// first, textually joining "sm" and "all>" into "small>" INSIDE the raw markdown, before the code
-// that decides `<small>`/`<br>` allowlisting ever saw the input. Round 2's removeDocumentComments()
-// is a document-level pre-pass again, but one that also tracks code spans and the `inTag` dead-tag
-// state — the two things this simpler function still doesn't — so it can't repeat that mistake.
-//
-// Fence-aware: walks the SAME fence open/close pairing bodyHtml uses below, so a `<!-- -->` written
-// inside a fenced code block is code, not a comment, and survives untouched — only the non-fenced runs
-// are passed through removeHtmlComments().
-function stripHtmlComments(body) {
-  const lines = String(body).split('\n');
-  const out = [];
-  let plain = [];
-  const flushPlain = () => {
-    if (!plain.length) return;
-    out.push(...removeHtmlComments(plain.join('\n')).split('\n'));
-    plain = [];
-  };
-  let i = 0;
-  while (i < lines.length) {
-    const f = RE_FENCE_OPEN.exec(lines[i]);
-    if (f) {
-      flushPlain();
-      const close = new RegExp('^\\s*' + f[2]);
-      out.push(lines[i]);
-      i++;
-      while (i < lines.length && !close.test(lines[i])) { out.push(lines[i]); i++; }
-      if (i < lines.length) { out.push(lines[i]); i++; }   // the closing fence itself
-      continue;
-    }
-    plain.push(lines[i]);
-    i++;
+function nextCommentCloser(lines) {
+  const next = new Array(lines.length);
+  let nearest = -1;
+  for (let k = lines.length - 1; k >= 0; k--) {
+    if (lineHasCommentCloser(lines[k])) nearest = k;
+    next[k] = nearest;
   }
-  flushPlain();
-  return out.join('\n');
+  return next;
 }
-
-// Absolute character offset in `s` where each line of `s.split('\n')` begins — so a span that covers
-// several whole lines (a fenced block, an indented-paragraph run, a multi-line removed comment) can
-// jump straight to a character index instead of re-walking or re-joining. `lines` must be exactly
-// `s.split('\n')` for the offsets to line up.
-function lineStartOffsets(lines) {
-  const starts = new Array(lines.length);
-  let pos = 0;
-  for (let k = 0; k < lines.length; k++) { starts[k] = pos; pos += lines[k].length + 1; }
-  return starts;
+// The text a comment-block open is judged against: strip ONE leading quote (`> `) or list-item
+// (`- `/`1. `/…) marker — "after any list/quote prefix" — else the raw line. A 4+-space-indented line
+// is deliberately NOT stripped further and NOT recognised here (P2-04's literal-indented-paragraph
+// carve-out survives unchanged: CommonMark itself gives an indented code block priority over an HTML
+// block start, and this renderer's paragraph-level indented carve-out mirrors exactly that).
+function commentBlockCandidate(line) {
+  const q = RE_QUOTE_LINE.exec(line);
+  if (q) return q[1];
+  const l = RE_LIST_ITEM.exec(line);
+  if (l) return l[3];
+  return line;
 }
-
-// The document-level comment-removal pass bodyHtml() actually runs, BEFORE block-splitting —
-// PR #28 review round 2, R2-P1-02: a comment may span a blank line, a run of list items, or a
-// heading→paragraph boundary (an ordinary way to write a multi-line author note: "<!-- TODO:\n\nstill
-// need to check this -->"). bodyHtml's block splitter runs on individual lines/paragraphs and knows
-// nothing about comments, so if removal happens PER FRAGMENT (as round 2's first attempt did, purely
-// inside escapeInline) a comment that spans a block boundary is cut in half by the splitter before
-// removal ever sees it whole: the opening half silently disappears (it looks, to the fragment holding
-// it, like an unterminated comment running to that fragment's own end) and the CLOSING half — the
-// text after the real `-->`, in a fragment of its own — renders as ordinary visible prose, with its
-// `<!--` long gone, so it no longer even looks like a comment. That is the exact leak issue #496
-// exists to prevent, and it is what this function's document-level (not per-fragment) removal fixes.
-//
-// This is NOT the round-1 mistake (P2-03) of a bare textual pre-pass: that pre-pass had no concept of
-// a code span or of a dead half-tag, so `<sm<!-- -->all>` had its comment deleted as pure text while
-// "sm" and "all>" were still adjacent on the same line, splicing them into "small>" — a spelling the
-// author never wrote — before escaping ever ran. This pass carries the SAME awareness escapeInline
-// has always had, just applied to the whole raw document instead of one fragment at a time:
-//
-//   - a FENCED code block (```/~~~, at any indent — including inside a list item, since RE_FENCE_OPEN
-//     itself is indent-agnostic) is skipped verbatim, using the same open/close pairing bodyHtml's own
-//     fence handling below uses — a comment inside one is code, never touched;
-//   - a CODE SPAN (a single-backtick pair, one line — codeSpanRanges' own rule, which by construction
-//     never crosses a `\n`) is opaque, computed ONCE over the whole raw document up front (P2-02: an
-//     inline `` `<!-- x -->` `` must keep showing its markers);
-//   - a 4-space-indented PARAGRAPH (P2-04) keeps its comment literal: the same `every line in the
-//     paragraph is indented` rule bodyHtml applies below, precomputed ONCE for the whole document by
-//     protectedIndentedLines() (isBlockStart + RE_HEADING pick out where a "plain paragraph" run
-//     starts and ends, exactly as bodyHtml's own block loop does) — precomputed rather than re-derived
-//     per line for the same reason the terminator search had to stop being per-comment: re-walking an
-//     N-line paragraph from each of its N lines is quadratic on an ordinary long paragraph. Checked
-//     against the ORIGINAL lines, because by the time bodyHtml would run this check the comment is
-//     already gone otherwise;
-//   - a comment is left COMPLETELY ALONE — not even attempted — whenever the `<!--` is not a fresh,
-//     standalone open, i.e. some earlier `<` on the SAME raw line has no `>` since (`inTag`, reset at
-//     every line start: the round-1 dead-half-tag case above is exactly this). Left in place,
-//     escapeInline's own scan — unmodified in this regard, see its comment — is the second line of
-//     defence for it, once the fragment holding it reaches inlineHtml().
-//
-// LINEAR: one forward pass over the document, `i` only ever increases (fence/indented-run/comment
-// spans all jump `i` FORWARD by their own length, never back), and the terminator hunt is
-// commentTerminatorEnd's single scan (R2-P1-01). An unterminated `<!--` runs to the true end of the
-// DOCUMENT, per the HTML tokenizer's own comment-end state (R2-P2-04; documented in the README next
-// to the escape hatch) — a deliberate change from treating it as bounded by a markdown block, and the
-// only behaviour a linear, pre-split scan CAN give it: this pass has no concept of "block" yet.
-// Which lines belong to a 4-space-indented "protected" paragraph run (P2-04) — computed ONCE, in one
-// forward pass over `lines`, so removeDocumentComments() below can look this up in O(1) per line
-// instead of re-deriving "does this line's paragraph extend, and is the whole thing indented" by
-// walking forward from EVERY line of it. Re-deriving per line is exactly R2-P1-01's bug shape again,
-// one level up: an ordinary N-line paragraph would cost O(N) of lookahead at each of its N lines —
-// quadratic on a document that is mostly one large paragraph, which is the common case, not an edge
-// case. Walking the document once and jumping `k` to the end of each run it finds (same trick the
-// fence-skip below uses) keeps this pass itself linear: every line is visited by at most one `while`.
-function protectedIndentedLines(lines) {
-  const protectedLine = new Array(lines.length).fill(false);
-  let k = 0;
-  while (k < lines.length) {
-    const raw = lines[k];
-    if (!raw.trim() || isBlockStart(lines, k) || RE_HEADING.test(raw)) { k++; continue; }
-    let j = k;
-    while (j < lines.length && lines[j].trim() && (j === k || !isBlockStart(lines, j))) j++;
-    if (lines.slice(k, j).every((ln) => /^ {4,}/.test(ln))) {
-      for (let m = k; m < j; m++) protectedLine[m] = true;
-    }
-    k = j;
-  }
-  return protectedLine;
+function isCommentBlockOpen(line) {
+  return /^ {0,3}<!--/.test(commentBlockCandidate(line));
 }
-
-function removeDocumentComments(body) {
-  const s = String(body == null ? '' : body);
-  const n = s.length;
-  const lines = s.split('\n');
-  const lineStarts = lineStartOffsets(lines);
-  const protectedLine = protectedIndentedLines(lines);
-  const ranges = codeSpanRanges(s);
-  let ri = 0;
-  let out = '', start = 0, i = 0, inTag = false, lineIdx = 0;
-
-  while (i < n) {
-    if (i === lineStarts[lineIdx]) {
-      inTag = false;
-      const raw = lines[lineIdx];
-
-      const f = RE_FENCE_OPEN.exec(raw);                          // fenced block: skip verbatim
-      if (f) {
-        const closeRe = new RegExp('^\\s*' + f[2]);
-        let j = lineIdx + 1;
-        while (j < lines.length && !closeRe.test(lines[j])) j++;
-        if (j < lines.length) j++;                                // include the closing fence line
-        const end = j < lines.length ? lineStarts[j] : n;
-        out += s.slice(start, end);
-        i = end; start = end; lineIdx = j;
-        while (ri < ranges.length && ranges[ri][0] < i) ri++;
-        continue;
-      }
-
-      if (protectedLine[lineIdx]) {                               // P2-04: whole line kept literal
-        const end = lineIdx + 1 < lines.length ? lineStarts[lineIdx + 1] : n;
-        out += s.slice(start, end);
-        i = end; start = end; lineIdx += 1;
-        while (ri < ranges.length && ranges[ri][0] < i) ri++;
-        continue;
-      }
-    }
-
-    while (ri < ranges.length && ranges[ri][1] <= i) ri++;        // code span: opaque, verbatim
-    if (ri < ranges.length && i >= ranges[ri][0] && i < ranges[ri][1]) {
-      i = ranges[ri][1];
-      continue;
-    }
-
-    const c = s.charCodeAt(i);
-    if (c === 10 /* \n */) { lineIdx++; i++; continue; }
-    if (c === 60 /* < */) {
-      if (!inTag && s.startsWith('!--', i + 1)) {
-        out += s.slice(start, i);
-        let j = i + 4;
-        while (s[j] === '-') j++;
-        const end = (s[j] === '>') ? j + 1 : commentTerminatorEnd(s, i + 4, n);
-        i = end; start = i;
-        while (lineIdx + 1 < lines.length && lineStarts[lineIdx + 1] <= i) lineIdx++;
-        continue;
-      }
-      inTag = true; i++; continue;
-    }
-    if (c === 62 /* > */) { inTag = false; i++; continue; }
-    i++;
-  }
-  return out + s.slice(start);
+// If lines[i] opens a comment block AND a closer exists at or after it, returns the index of the FIRST
+// line after the consumed block (the caller sets `i` to this and emits nothing for the span). Returns
+// -1 otherwise — either lines[i] isn't an opener, or it is but is unterminated (see above: left alone).
+function commentBlockEnd(lines, i, nextCloser) {
+  if (!isCommentBlockOpen(lines[i])) return -1;
+  const j = nextCloser[i];
+  return j === -1 ? -1 : j + 1;
 }
 
 // A raw markdown body → HTML. A line-walking block parser: fenced code (verbatim, the `#`/`>`/`|`/`-`
 // inside it are NOT parsed as blocks), blockquote, lists (ul/ol), GFM tables, plus paragraphs and
 // pure-image figures. Inline marks + inline images via inlineHtml. Zero JS; reef-token styled (st-*).
-// 🔴 RENDER-only: parse/serialize store the body verbatim, so the round-trip invariant is untouched —
-// removeDocumentComments() below runs only on the copy bodyHtml renders from, never on stored body.
-// 🔴 Comments are removed document-wide, BEFORE block-splitting (removeDocumentComments(), R2-P1-02) —
-// so a block whose entire content was a comment never exists in `lines` at all: no empty `<p></p>` /
-// `<h1></h1>` / `<li></li>` is ever produced for it (R2-P2-03), because block-splitting below never
-// sees anything there but a blank line. Whatever that pass deliberately leaves behind (a comment
-// adjacent to a dead half-tag) is still handled per-fragment, inside inlineHtml() → escapeInline() —
-// see removeDocumentComments()'s own comment for why both passes exist and never disagree.
+// 🔴 RENDER-only: parse/serialize store the body verbatim — HTML-comment blocks and escapeInline's own
+// inline comment-consumption both run only on the copy bodyHtml renders from, never on stored body.
+// 🔴 An HTML-comment block (see the section above) is recognised IN THIS LOOP, at the same point fences/
+// quotes/lists/headings are, so a block whose entire content was a comment never enters `lines` as
+// anything to render: no empty `<p></p>`/`<h1></h1>`/`<li></li>` is ever produced for it (R2-P2-03),
+// because this loop never sees it as a blank-content block in the first place. A comment-only HEADING
+// is the one shape that ISN'T caught by the line-open check (its first character is `#`, not `<!--`):
+// it is still recognised as a heading, and dropped afterward when its inline content resolves empty
+// (R3-P2-02, see the heading branch below) — never as a bare `<h1>#</h1>` or a merged paragraph.
 function bodyHtml(body) {
   if (!body) return '';
-  const lines = String(removeDocumentComments(body)).split('\n');
+  const lines = String(body).split('\n');
+  const nextCloser = nextCommentCloser(lines);                                 // see the section above
   const out = [];
   let i = 0;
   while (i < lines.length) {
     if (!lines[i].trim()) { i++; continue; }                                  // blank → block boundary
+
+    const cEnd = commentBlockEnd(lines, i, nextCloser);                        // HTML-comment block
+    if (cEnd !== -1) { i = cEnd; continue; }                                   // consumed; emits nothing
 
     const f = RE_FENCE_OPEN.exec(lines[i]);                                    // fenced code (verbatim)
     if (f) {
@@ -1228,12 +1132,19 @@ function bodyHtml(body) {
       // every body that contains no dialogue.
       const blocks = [];
       while (i < lines.length) {
+        const cEnd = commentBlockEnd(lines, i, nextCloser);
+        if (cEnd !== -1) { i = cEnd; continue; }                              // block comment mid-quote-run
         if (!RE_QUOTE_LINE.test(lines[i])) {
           if (!lines[i].trim() && i + 1 < lines.length && RE_QUOTE_LINE.test(lines[i + 1])) { i++; continue; }
           break;
         }
         const buf = [];
-        while (i < lines.length && RE_QUOTE_LINE.test(lines[i])) { buf.push(RE_QUOTE_LINE.exec(lines[i])[1]); i++; }
+        while (i < lines.length) {
+          const cEnd2 = commentBlockEnd(lines, i, nextCloser);
+          if (cEnd2 !== -1) { i = cEnd2; continue; }
+          if (!RE_QUOTE_LINE.test(lines[i])) break;
+          buf.push(RE_QUOTE_LINE.exec(lines[i])[1]); i++;
+        }
         blocks.push(buf);
       }
       let run = [];
@@ -1244,9 +1155,10 @@ function bodyHtml(body) {
         flushRun();
         // a blank quote line (`>` with no text) separates paragraphs inside the quote.
         const paras = quoteParas(buf);
-        // R2-P2-03: a quote block whose only line was `> <!-- comment -->` has nothing left after
-        // removeDocumentComments() runs (quoteParas' own filter(Boolean) already drops the resulting
-        // empty paragraph) — don't emit an empty `<blockquote>` shell for it either.
+        // R2-P2-03: a quote block whose only line was `> <!-- comment -->` never reaches `buf` at all
+        // (the block-comment check above swallows the whole line before it is collected) — `buf` comes
+        // out empty, quoteParas' own filter(Boolean) already drops the resulting empty paragraph, and
+        // this guard keeps an empty `<blockquote>` shell from being emitted for it either.
         if (!paras.length) continue;
         out.push('<blockquote class="st-quote">' + paras.map((p) => '<p>' + inlineHtml(p) + '</p>').join('') + '</blockquote>');
       }
@@ -1256,7 +1168,10 @@ function bodyHtml(body) {
 
     if (RE_LIST_ITEM.test(lines[i])) {                                         // list (ul/ol, nestable)
       const items = [];
-      while (i < lines.length && RE_LIST_ITEM.test(lines[i])) {
+      while (i < lines.length) {
+        const cEnd = commentBlockEnd(lines, i, nextCloser);                    // block comment mid-list-run
+        if (cEnd !== -1) { i = cEnd; continue; }
+        if (!RE_LIST_ITEM.test(lines[i])) break;
         const m = RE_LIST_ITEM.exec(lines[i]);
         items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3] });
         i++;
@@ -1284,10 +1199,19 @@ function bodyHtml(body) {
     }
 
     const h = RE_HEADING.exec(lines[i]);                                      // ATX heading (### Section)
-    if (h) { const lv = Math.min(h[1].length, 6); out.push('<h' + lv + '>' + inlineHtml(h[2]) + '</h' + lv + '>'); i++; continue; }
+    if (h) {
+      const lv = Math.min(h[1].length, 6);
+      const html = inlineHtml(h[2]);
+      // R3-P2-02: a comment-only heading (`# <!-- title -->`) is not a heading at all once its inline
+      // content is removed — drop it entirely (no `<h1></h1>`, and the line is NOT reprocessed as a
+      // paragraph either: it consumed its own `#` marker as a heading, full stop). A heading with any
+      // other content — including one that merely CONTAINS a comment alongside real text — still emits.
+      if (html.trim()) out.push('<h' + lv + '>' + html + '</h' + lv + '>');
+      i++; continue;
+    }
 
     const para = [];                                                          // paragraph / figure
-    while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i)) { para.push(lines[i]); i++; }
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i, nextCloser)) { para.push(lines[i]); i++; }
     // A paragraph whose EVERY line carries CommonMark's own "this is literal" signal — 4+ leading
     // spaces — keeps comment-stripping OFF (issue #496 P2-04): this renderer does not implement
     // indented code blocks (no `<pre>` here, just the ordinary <p> below), but the signal itself is
@@ -1944,7 +1868,7 @@ export {
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, stripHtmlComments, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks,
   // sidebar layout helpers — exported so the Astro layer can reuse the same parser.
   parseSidebarNav,
