@@ -1784,4 +1784,45 @@ test('\ud83d\udd34 #496 round 6 \u2014 R5-P2-02: an ordinary CJK-indented paragr
   assert.equal(bodyHtml('\u3000\u3000plain text'), '<p>plain text</p>');
 });
 
+// \u2500\u2500 #496 (comment scan) \u00d7 #link-dest (destination escaping): the two interaction cases \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// inlineHtml() stashes every `](\u2026)` destination to a N placeholder BEFORE escapeInline()'s
+// comment scan ever runs (see inlineHtml's own module comment) \u2014 so the two features never see the
+// SAME characters at the SAME time. Composed per CommonMark (a raw HTML comment is not itself part of
+// the link-destination grammar, and a destination's own text is never re-parsed for HTML constructs):
+// a comment-shaped run of characters that ends up INSIDE a destination is just destination text (never
+// recognized as a comment, since escapeInline never sees it \u2014 it is hidden behind the placeholder);
+// a destination-shaped `](\u2026)` run that ends up entirely INSIDE a real HTML comment is deleted along
+// with the rest of that comment (the placeholder is plain text to the comment scan, gone like any
+// other character between `<!--` and `-->`) and never reaches the scheme check at all.
+test('#496 x link-dest: an HTML-comment-shaped run INSIDE a destination is destination text, not a comment \u2014 never stripped, never a live scheme', () => {
+  // No parens in the payload: the destination regex `[^)\s]+` stops at the first `)`, which is not
+  // this test's concern (a pre-existing, unrelated limitation with a literal `)` inside a URL).
+  const link = inlineHtml('[a](<!--evil-->javascript:x)');
+  // Not stripped: escapeInline's comment scan runs BEFORE stashing restores the placeholder to text \u2014
+  // by the time this text is visible again, comment-scanning is long over. The markers survive, escaped.
+  assert.equal(link, '<a href="&lt;!--evil--&gt;javascript:x">a</a>');
+  // Not a live javascript: scheme either: the string does not START with a valid scheme (`<` is not a
+  // legal scheme character), so isSafeHref resolves it as a path relative to the safe base \u2014 the
+  // literal text "javascript:x" sits inertly inside an http: URL's path, never executed by a browser.
+  assert.ok(link.includes('href="'), 'still a real anchor \u2014 the leading comment text does not disallow the whole destination');
+  assert.doesNotMatch(link, /href="javascript:/, 'the comment prefix must not be stripped INTO a bare javascript: scheme');
+
+  const img = inlineHtml('![a](<!--evil-->javascript:x)');
+  assert.equal(img, '<img class="st-img" src="&lt;!--evil--&gt;javascript:x" alt="a" loading="lazy" decoding="async">');
+});
+
+test('#496 x link-dest: a destination sitting entirely INSIDE an HTML comment is removed with the comment \u2014 no link forms, no drop warning fires', () => {
+  takeDropWarnings(); // drain anything left by an earlier test
+  const html = inlineHtml('see <!-- [x](javascript:alert(1)) --> done');
+  assert.equal(html, 'see  done');
+  assert.doesNotMatch(html, /javascript|alert|<a |href=/, 'the fake link never surfaces as text, an href, or anything else');
+  // isSafeHref/isSafeImageSrc (the only place a drop is recorded) never ran on this destination \u2014 the
+  // comment scan deleted the placeholder token along with the rest of the comment before the
+  // stash-restore step ever reintroduced it into the text stream for the link regex to find.
+  assert.equal(takeDropWarnings().length, 0, 'a destination erased by comment-removal is not a "disallowed" destination \u2014 it never reached the check');
+
+  const block = bodyHtml('before <!-- [x](javascript:alert(1)) --> after');
+  assert.equal(block, '<p>before  after</p>');
+});
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
