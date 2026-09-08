@@ -812,6 +812,11 @@ export function aiSessionPayload(kind, id, state) {
  * ship-132 (2026-09-07); what did not change on the server is the body check — still parsed as
  * strict JSON through the same field whitelist, so `text/plain` is a different label, not a
  * laxer check.
+ * 0.7.6 did not fail at a gate: its JSON-Blob beacon simply never left Safari. The gate that
+ * matters is the one the STRING beacon then ran into — SvelteKit's pre-route CSRF check treats
+ * `text/plain` as a form content type and refused it until reef relocated that check into a hook
+ * exempting only `/api/inbox/session` (reef#466 R1-01). That relocation is what this transport
+ * depends on; if it ever comes back in front of the route, the string beacon dies the same way.
  * `fetch(..., { keepalive: true })` is what a browser without `sendBeacon` gets, what a
  * REFUSED beacon falls through to (D4), and what a caller asking to be told the outcome gets
  * — and it is second rather than first because a `pagehide` handler's ordinary `fetch` is

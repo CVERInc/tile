@@ -191,10 +191,12 @@ for (const [name, cfg] of Object.entries(CORALS)) {
   // manifest whose `source` does not live under its own version, so the two cannot drift again.
   const sourceVersion = String(sourceManifest.version ?? '');
   const source = typeof sourceManifest.source === 'string' && sourceVersion
-    ? sourceManifest.source.replace(`/${sourceVersion}/`, `/${version}/`)
+    ? sourceManifest.source.replaceAll(
+      new RegExp(`/${sourceVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/)`, 'g'),
+      () => `/${version}`)
     : sourceManifest.source;
   const coralManifest = { ...sourceManifest, version, source };
-  const manifestResult = validateCoralManifest(coralManifest, { name, version });
+  const manifestResult = validateCoralManifest(coralManifest, { name, version, sourceVersion });
   if (!manifestResult.ok) {
     if (manifestResult.missing.length) {
       console.error(`✗ ${name}@${version} manifest.json is missing: ${manifestResult.missing.join(', ')}`);
