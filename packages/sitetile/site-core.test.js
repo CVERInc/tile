@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
-  ctaButtonsHtml, linkButtonsHtml, bodyHtml,
+  ctaButtonsHtml, linkButtonsHtml, bodyHtml, stripHtmlComments,
 } from './site-core.js';
 
 let passed = 0;
@@ -865,6 +865,64 @@ test('form field: required round-trips through serializeSite for every stated va
     const expected = form([canonical]);
     assert.equal(serializeSite(parseSite(src)), expected, `round-trip of "${input}"`);
   }
+});
+
+// ── HTML comment stripping (issue #496) ─────────────────────────────────────────────────────────
+// A page owner or agent writing `<!-- QA note -->` in page markdown is normal practice; the bug was
+// that bodyHtml() had no concept of a comment token, so it fell through the generic escaper and
+// came out as VISIBLE text (`&lt;!-- QA note --&gt;`) on the public site AND the console preview
+// iframe (same renderer, vendored byte-for-byte into reef/apps/reef-mcp/vendor/sitetile). The fix
+// must keep escaping every OTHER raw tag exactly as before — only the comment token is dropped.
+
+test('🔴 #496: an HTML comment is gone from the rendered output, not shown as text', () => {
+  const html = bodyHtml('Welcome text.\n\n<!-- w54 human-editor recon 2026-08-26T15:45:56.218Z -->\n\nAfter.');
+  assert.doesNotMatch(html, /w54 human-editor recon/, 'the comment body must not reach the page at all');
+  assert.doesNotMatch(html, /&lt;!--/, 'nor its escaped form — that IS the bug (visible as literal text)');
+  assert.match(html, /Welcome text\./);
+  assert.match(html, /After\./);
+});
+
+test('🔴 #496: <script> (and other raw HTML) keeps being escaped — comments are the ONLY exception', () => {
+  const html = bodyHtml('<script>alert(1)</script>');
+  assert.doesNotMatch(html, /<script>/, 'a real tag must never reach the page unescaped');
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/, 'it still renders as inert, visible escaped text');
+});
+
+test('🔴 #496: a multi-line comment is stripped in full', () => {
+  const html = bodyHtml('before\n\n<!-- line one\nline two\nline three -->\n\nafter');
+  assert.doesNotMatch(html, /line one|line two|line three/);
+  assert.match(html, /<p>before<\/p>/);
+  assert.match(html, /<p>after<\/p>/);
+});
+
+test('🔴 #496: a comment inside a list item or a blockquote is stripped too', () => {
+  const list = bodyHtml('- one <!-- hidden --> two\n- three');
+  assert.doesNotMatch(list, /hidden/);
+  assert.match(list, /<li>one\s*two<\/li>/);
+
+  const quote = bodyHtml('> quoted <!-- note --> text');
+  assert.doesNotMatch(quote, /note/);
+  assert.match(quote, /quoted\s*text/);
+});
+
+test('🔴 #496: a comment INSIDE a fenced code block is preserved verbatim — it is code, not a comment', () => {
+  const html = bodyHtml('```\n<!-- keep me -->\n```');
+  assert.match(html, /&lt;!-- keep me --&gt;/, 'the fence content is code and must survive, escaped like any code');
+});
+
+test('🔴 #496: an unterminated `<!--` (and the degenerate `<!-->`) does not eat the rest of the page', () => {
+  const unterminated = bodyHtml('before\n\n<!-- oops, no closer\n\nSTILL HERE');
+  assert.match(unterminated, /before/);
+  assert.match(unterminated, /STILL HERE/, 'content after an unclosed comment must still render');
+
+  const degenerate = bodyHtml('before <!--> after');
+  assert.match(degenerate, /before/);
+  assert.match(degenerate, /after/, '`<!-->` must not open a comment that swallows everything until a LATER -->');
+});
+
+test('🔴 #496: stripHtmlComments is fence-aware directly (unit-level, not just through bodyHtml)', () => {
+  assert.equal(stripHtmlComments('a\n<!-- x -->\nb'), 'a\n\nb');
+  assert.equal(stripHtmlComments('```\n<!-- x -->\n```'), '```\n<!-- x -->\n```', 'fenced content is untouched');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

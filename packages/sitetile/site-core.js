@@ -820,13 +820,55 @@ function renderDialogue(turns) {
   return '<div class="st-dialogue">' + body + '</div>';
 }
 
+// Author-only HTML comments (`<!-- … -->`, possibly multi-line) are dropped from a body BEFORE the
+// block/inline passes ever see them — issue #496. This engine has no concept of an HTML comment as
+// a token (site-core.js's own header note: the section sentinel is `%% sitetile: %% `, "never
+// `<!-- -->`"), so a comment used to fall through the same generic `escHtml` sweep as everything
+// else and come out as VISIBLE text (`&lt;!-- note --&gt;`) — a site owner's or agent's QA/recon
+// note, leaked onto the public page. `<script>…</script>` and every other raw tag must go on being
+// escaped exactly as today; only the comment token itself is special-cased, and only by deletion
+// (never by re-emission the way the `<small>`/`<br>` allowlist re-emits its two tags).
+//
+// Fence-aware: this walks the SAME fence open/close pairing bodyHtml uses below, so a `<!-- -->`
+// written inside a fenced code block is code, not a comment, and survives untouched — only the
+// non-fenced runs are passed through the strip. Non-greedy (`[\s\S]*?`) so an unterminated `<!--`
+// (or the degenerate `<!-->`, which the regex cannot even open) matches nothing and is left as
+// literal text instead of swallowing the rest of the page looking for a `-->` that never comes.
+function stripHtmlComments(body) {
+  const lines = String(body).split('\n');
+  const out = [];
+  let plain = [];
+  const flushPlain = () => {
+    if (!plain.length) return;
+    out.push(...plain.join('\n').replace(/<!--[\s\S]*?-->/g, '').split('\n'));
+    plain = [];
+  };
+  let i = 0;
+  while (i < lines.length) {
+    const f = RE_FENCE_OPEN.exec(lines[i]);
+    if (f) {
+      flushPlain();
+      const close = new RegExp('^\\s*' + f[2]);
+      out.push(lines[i]);
+      i++;
+      while (i < lines.length && !close.test(lines[i])) { out.push(lines[i]); i++; }
+      if (i < lines.length) { out.push(lines[i]); i++; }   // the closing fence itself
+      continue;
+    }
+    plain.push(lines[i]);
+    i++;
+  }
+  flushPlain();
+  return out.join('\n');
+}
+
 // A raw markdown body → HTML. A line-walking block parser: fenced code (verbatim, the `#`/`>`/`|`/`-`
 // inside it are NOT parsed as blocks), blockquote, lists (ul/ol), GFM tables, plus paragraphs and
 // pure-image figures. Inline marks + inline images via inlineHtml. Zero JS; reef-token styled (st-*).
 // 🔴 RENDER-only: parse/serialize store the body verbatim, so the round-trip invariant is untouched.
 function bodyHtml(body) {
   if (!body) return '';
-  const lines = String(body).split('\n');
+  const lines = stripHtmlComments(body).split('\n');
   const out = [];
   let i = 0;
   while (i < lines.length) {
@@ -1564,7 +1606,7 @@ export {
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, stripHtmlComments, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks,
   // sidebar layout helpers — exported so the Astro layer can reuse the same parser.
   parseSidebarNav,
