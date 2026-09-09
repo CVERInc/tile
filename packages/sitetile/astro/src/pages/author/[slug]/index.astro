@@ -5,7 +5,7 @@
 // corpus (post.author). Heading uses the display name from `blog-author-names: slug=名稱 | …`
 // (else the slug). OPT-IN via `blog-author-routes`.
 import ArchiveView from '../../../components/ArchiveView.astro';
-import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes } from '../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, authorBase } from '../../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const allPostsIn = allPosts(
@@ -27,7 +27,7 @@ export function getStaticPaths() {
 }
 
 const { posts, meta, slug } = Astro.props;
-const base = String(meta['blog-author-base'] || '/author').replace(/\/$/, '');
+const base = authorBase(meta); // round 5 (R4-P1-1): gated
 const names = kvMap(meta['blog-author-names']);
 const heading = names[slug] || slug;
 const authorPosts = posts.filter((p) => p.author === slug);

@@ -7,7 +7,7 @@
 // the group wrapper; a grouped roster renders a labelled block per group. Theme paints
 // `.st-people` / `.st-person` / `.st-person-role`; site.css carries the structural defaults so a
 // roster is legible on a site that has never been themed.
-import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, slugify } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, slugify, safeHref } from '@sitetile';
 const { section, hero } = Astro.props;
 // The page's FIRST section carries its primary heading as <h1> — the same seam Prose/Faq/
 // Timeline already honour. A roster that opened a page rendered <h2> and the page had NO h1:
@@ -32,12 +32,18 @@ const ext = (h) => /^https?:\/\//.test(h);
       <div class="st-people-cells">
         {(g.people || []).map((p) => {
           const fi = firstImage(p.body);
+          // round 4 (R3-P3-2): hoisted to a const — was three calls per person for the same
+          // destination, each a separate drop-warning queue entry.
+          const pHrefOk = safeHref(p.href);
           return (
             <div class="st-person" data-tone={p.tone || undefined}>
               {fi.img && <Fragment set:html={`<figure class="st-person-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>`} />}
               <h3 class="st-person-name">
-                {p.href
-                  ? <a href={p.href} target={ext(p.href) ? '_blank' : undefined} rel={ext(p.href) ? 'noopener' : undefined} set:html={inlineHtml(p.title)} />
+                {/* round 3 (Astro consumers, R2-P3-5): `p.href` is author Markdown, gated by
+                    site-core.js's own `people` case via `isSafeHref`; `safeHref` shares that ONE
+                    policy here — a `javascript:`/`data:` name link degrades to plain text. */}
+                {pHrefOk
+                  ? <a href={pHrefOk} target={ext(pHrefOk) ? '_blank' : undefined} rel={ext(pHrefOk) ? 'noopener' : undefined} set:html={inlineHtml(p.title)} />
                   : <Fragment set:html={inlineHtml(p.title)} />}
               </h3>
               {p.badge && (
@@ -48,9 +54,13 @@ const ext = (h) => /^https?:\/\//.test(h);
               <div class="st-person-body" set:html={bodyHtml(fi.rest)} />
               {p.links && p.links.length > 0 && (
                 <div class="st-person-links">
-                  {p.links.map((l) => (
-                    <a class="st-person-link" href={l.href} target={ext(l.href) ? '_blank' : undefined} rel={ext(l.href) ? 'noopener' : undefined}>{l.label}</a>
-                  ))}
+                  {p.links.map((l) => {
+                    // round 4 (R3-P3-2): hoisted to a const — was three calls per link.
+                    const lHrefOk = safeHref(l.href);
+                    return lHrefOk
+                      ? <a class="st-person-link" href={lHrefOk} target={ext(lHrefOk) ? '_blank' : undefined} rel={ext(lHrefOk) ? 'noopener' : undefined}>{l.label}</a>
+                      : <span class="st-person-link">{l.label}</span>;
+                  })}
                 </div>
               )}
             </div>

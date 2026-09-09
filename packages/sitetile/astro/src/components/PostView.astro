@@ -11,6 +11,7 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from './PostArticle.astro';
 import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
+import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null } = Astro.props;
 // Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
@@ -22,8 +23,14 @@ const sideCopy = sidebarCopy(meta);
 // it REPLACES the default hardcoded belt below (a site supplies its own card instead).
 const ctaRaw = String(meta['blog-post-cta'] || '').trim();
 const ctaEq = ctaRaw.indexOf('=');
-const postCta = ctaRaw && ctaEq > 0
+// round 3 (Astro consumers, R2-P3-5): `blog-post-cta` is a raw frontmatter destination; safeHref
+// shares the same policy every other emitter uses — an unsafe href drops the whole custom CTA
+// (postCta becomes null) rather than falling through to the vendor default with a live bad href.
+const postCtaRaw = ctaRaw && ctaEq > 0
   ? { label: ctaRaw.slice(0, ctaEq).trim(), href: ctaRaw.slice(ctaEq + 1).trim() } : null;
+// round 4 (R3-P3-2): hoisted to a const — was two calls for the same destination.
+const postCtaHrefOk = postCtaRaw ? safeHref(postCtaRaw.href) : null;
+const postCta = postCtaHrefOk ? { label: postCtaRaw.label, href: postCtaHrefOk } : null;
 
 // the hardcoded "Notes from the workshop" belt below is the VENDOR's OWN copy (voice + /donate route),
 // not a generic default — it used to render on every site's posts unless they opted into a custom
@@ -67,11 +74,17 @@ const headMeta = {
         {sidebar.categories.length > 0 && (
           <div class="bl-side-widget bl-side-categories">
             {meta['blog-category-title'] && <h3>{meta['blog-category-title']}</h3>}
-            <ul>{sidebar.categories.map((c) => (
-              <li>{c.href
-                ? <a href={c.href}>{c.label}{c.count && `（${c.count}）`}</a>
-                : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
-            ))}</ul>
+            <ul>{sidebar.categories.map((c) => {
+              // round 3 (Astro consumers, R2-P3-5): `c.href` is `blog-categories:` authored
+              // frontmatter (label|count|href), reaching a live <a href> with no scheme check.
+              // round 4 (R3-P3-2): hoisted to a const — see BlogIndexView.astro's identical fix.
+              const hrefOk = safeHref(c.href);
+              return (
+                <li>{hrefOk
+                  ? <a href={hrefOk}>{c.label}{c.count && `（${c.count}）`}</a>
+                  : <span class="bl-cat-nolink">{c.label}{c.count && `（${c.count}）`}</span>}</li>
+              );
+            })}</ul>
           </div>
         )}
         {/* 🩸 fixed 2026-07-13: same real `GET /search?q=` form as the index sidebar (was a

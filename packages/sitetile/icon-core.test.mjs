@@ -249,7 +249,12 @@ test('🔴 the three routes exist and are the paths <head> names', () => {
 });
 
 test('🔴 the icon links are UNCONDITIONAL in the layout', () => {
-  assert.match(layout, /const iconLinks = iconHrefs\(meta, \{ hasPwa \}\)/, 'the rule comes from the model');
+  // round 4 (R3-P3-1): `iconHrefs(meta, …)`'s raw result is gated (`safeSrc`, falling back to
+  // the model's own generated paths) before it becomes `iconLinks`, because `favicon:`/
+  // `site-logo:`/`footer-logo:` (the model's own `siteMark`) is an author-controlled destination
+  // reaching this file's `<link>` hrefs unfiltered — the call to the model is still the ONE,
+  // unconditional source of truth this test protects; only the variable name changed.
+  assert.match(layout, /const iconLinksRaw = iconHrefs\(meta, \{ hasPwa \}\)/, 'the rule comes from the model');
   assert.match(layout, /\{iconLinks\.icon\.map\(\(l\) => <link rel="icon"/, 'rel=icon comes from iconHrefs');
   assert.match(layout, /^\s*<link rel="apple-touch-icon" href=\{iconLinks\.appleTouch\} \/>$/m,
     'apple-touch-icon is emitted on every page, not gated on a site having set `favicon:`');

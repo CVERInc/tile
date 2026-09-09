@@ -11,7 +11,7 @@ import * as lingo from '../packages/lingo/locale.mjs';
 import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
-import { iconHrefs } from '@icons';
+import { iconHrefs, ICON_PATHS } from '@icons';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
@@ -141,10 +141,14 @@ const footerCols = String(meta['footer-cols'] || '').split(';;').map((c) => c.tr
   });
   return { head, items };
 });
-const footerLogo = meta['footer-logo'] ? String(meta['footer-logo']).trim() : '';
+// round 3 (Astro consumers, R2-P3-5): `footer-logo`/`site-logo` are raw frontmatter image
+// destinations reaching a live `<img src>` in three places below with no gate of their own;
+// safeSrc shares site-core.js's `isSafeImageSrc` policy — gated once here, at the source, so
+// every consumer of these two variables is covered without repeating the check three times.
+const footerLogo = meta['footer-logo'] ? safeSrc(String(meta['footer-logo']).trim()) : '';
 // The header/hero logo (`site-logo`) — the REAL site logo (an animated gif, say),
 // shared across hero + sub-page header so a `view-transition-name` morphs it page-to-page.
-const siteLogo = meta['site-logo'] ? String(meta['site-logo']).trim() : footerLogo;
+const siteLogo = meta['site-logo'] ? safeSrc(String(meta['site-logo']).trim()) : footerLogo;
 
 // `generator` — machine-readable provenance, DEFAULT ON. See the <meta> in <head> for why this one
 // defaults the opposite way to the visible `Powered by feelreef` footer. `generator: off` (or an
@@ -172,6 +176,9 @@ const headerBrand = meta.brand ? String(meta.brand).trim() : (meta.title ? Strin
 // `header-cta: Label=href` — an optional primary action button in the header's right side
 // (e.g. a "Subscribe" pill). General; absent → the header stays as-is.
 const headerCta = (() => { const m = String(meta['header-cta'] || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })();
+// round 4 (R3-P3-2): hoisted alongside the declaration — was three safeHref(headerCta.href)
+// calls in the template below for the same destination, each a separate drop-warning entry.
+const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
 // ── HEADER ACTIONS (Coral A) + NAV-MOBILE HAMBURGER (Coral B) — the interaction wave.
 // Both reuse the age-gate primitive: a hidden checkbox + <label> whose click flips
 // `body:has(#…:checked) …` CSS reveal — ZERO JS for the toggle itself (a tiny gated
@@ -219,7 +226,13 @@ const cartEmpty = (meta['header-actions-cart-empty'] ? String(meta['header-actio
 // off-shop pages route there instead of opening an empty drawer. Absent guild → not wired → the
 // island below is never imported → byte-identical for every non-opted site.
 const cartGuild = (meta['header-actions-cart-guild'] ? String(meta['header-actions-cart-guild']).trim() : '');
-const cartHref = (meta['header-actions-cart-href'] ? String(meta['header-actions-cart-href']).trim() : '');
+// round 4 (R3-P2-1, second instance): `header-actions-cart-href` is a raw frontmatter
+// destination that reaches `window.location.href` unfiltered in header-actions-cart.js — a
+// same-origin script assignment, which is a script-execution context for a `javascript:` value
+// exactly like a live `href`. Gate here, at the value's one declaration point (alongside
+// `siteLogo`/`copyrightHref` above), so the `data-cart-href` attribute below and the client
+// script that reads it can never see anything but a validated destination.
+const cartHref = (meta['header-actions-cart-href'] ? (safeHref(String(meta['header-actions-cart-href']).trim()) || '') : '');
 const cartWired = toggleActions.some((a) => a.target === 'cart') && !!cartGuild;
 // `nav-mobile: hamburger` — responsive nav collapse (the real gap: `.rf-nav` had zero
 // breakpoint collapse). Pure CSS below; here it only flips a body attribute + renders
@@ -270,11 +283,21 @@ const breadcrumbHome = meta['breadcrumb-home'] ? String(meta['breadcrumb-home'])
 const breadcrumbTrail = String(meta['breadcrumb-trail'] || '').split(';').map((s) => s.trim()).filter(Boolean)
   .map((s) => { const m = s.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
   .filter(Boolean);
-const copyrightHref = meta['copyright-href'] ? String(meta['copyright-href']).trim() : '';
-const languageHref = meta['language-href'] ? String(meta['language-href']).trim() : '/language';
+// round 3 (Astro consumers, R2-P3-5): `copyright-href` is a raw frontmatter destination; safeHref
+// shares the same policy every other emitter uses (gated once here, at the source).
+const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-href']).trim()) : '';
+// round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
+// verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
+// every other emitter uses, falling back to the safe default rather than going live unfiltered.
+const languageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '/language') : '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
-const fontsUrl = meta.fonts ? String(meta.fonts).trim() : '';
+// round 4 (R3-P3-1): `fonts:` is a raw frontmatter destination reaching a live
+// `<link rel=stylesheet href>` below — not a script-execution context (a browser fetches CSS, it
+// does not navigate it), so this is defense-in-depth for the same sink class as the P2 findings,
+// gated the same way: at the declaration point, falling back to "no stylesheet" (the same
+// no-op the field's own absence already produces) rather than a live link with a disallowed scheme.
+const fontsUrl = meta.fonts ? (safeHref(String(meta.fonts).trim()) || '') : '';
 
 // ── PACKAGES (opt-in enhancements) ───────────────────────────────────────────
 // The productized form of the ejecta "enhancements-optin" doctrine: a Recast/native
@@ -428,7 +451,7 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { parseSidebarNav } from '../../../site-core.js';
+import { parseSidebarNav, safeHref, safeSrc } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
@@ -499,7 +522,7 @@ const canonicalRedirectParams = String(meta['blog-canonical-redirects'] || '')
 // full-width overlay whose island lazily fetches /search-index.json and filters it
 // client-side. Absent → zero button, zero overlay, zero script (output stays
 // byte-identical). All copy comes from frontmatter (localizable), no station
-// literals. XSS-safe: every field renders through Astro auto-escaping / the island's
+// literals. script-injection-safe: every field renders through Astro auto-escaping / the island's
 // textContent — no set:html of post data anywhere.
 const blogSearch = blogSearchOn(meta) && hasBlog;
 const searchLabel = (meta['blog-search-label'] ? String(meta['blog-search-label']).trim() : '') || 'Search';
@@ -541,7 +564,7 @@ const themeToggle = colorScheme === 'toggle';
 //     isn't re-prompted across pages (the live Wix `ageConfirmed` behaviour a
 //     pure-CSS gate must otherwise degrade on). No-flash: a HEAD script sets the
 //     reveal attribute before first paint when already confirmed.
-// XSS-SAFE by construction: every field is rendered through Astro's auto-escaping
+// script-injection-safe by construction: every field is rendered through Astro's auto-escaping
 // {expr}/attr interpolation — no set:html of author copy anywhere.
 // OPT-IN: absent → nothing renders and no script ships (every other site/page
 // unaffected). GENERIC: all copy + URLs come from frontmatter, no station literals —
@@ -564,7 +587,7 @@ const ageGate = ageGateOn ? {
   noteLinks: String(meta['age-gate-note-links'] || '').split(';').map((s) => s.trim()).filter(Boolean)
     .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
     .filter(Boolean),
-  backUrl: String(meta['age-gate-back-url'] || '').trim() || '/',
+  backUrl: safeHref(String(meta['age-gate-back-url'] || '').trim()) || '/',
   // 🩸 the two button labels defaulted to Japanese for every tenant. They are the only words in
   // this dialog the site does not have to write, so they are the only ones that could be wrong
   // in a language nobody chose. Locale table now, override keys unchanged.
@@ -584,7 +607,13 @@ const ageGateLines = (s) => String(s || '').split('\\n');
 // posted on socials) yet the renderer emitted none of it before — a real gap, not chrome.
 const absUrl = (u) => (u && Astro.site ? new URL(u, Astro.site).href : u);
 const description = meta.description ? String(meta.description).trim() : '';
-const authoredShareImage = String(meta['share-image'] || meta['og-image'] || '').trim();
+// round 5 (R4-P3-1): `share-image:`/`og-image:` is a raw frontmatter destination reaching a live
+// <meta property=og:image>/<meta name=twitter:image> with no gate — `absUrl` only makes a relative
+// path absolute, it does not touch a value that already carries its own scheme (`new URL('javascript:x', base)`
+// resolves to `javascript:x` unchanged), so a disallowed scheme survived straight through. safeSrc
+// shares the same policy every image consumer in this file already uses (site-logo/footer-logo,
+// above) — gated once here, at the source, same as those.
+const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'] || '').trim()) || '';
 // `og-cards: true` in _site.md → every page gets a generated link-preview card at a path derived
 // from its own URL. The PNG does not exist yet at this point: it is rendered from THIS html after
 // the build (packages/sitetile/og/build-og.mjs), which is why the path has to be derivable from the
@@ -603,7 +632,20 @@ const shareImage = absUrl(authoredShareImage
 // /apple-touch-icon.png all answered 404 on live sites — measured. The three routes beside this
 // layout now emit a badge for every build, and the hrefs below come from the SAME model that draws
 // them (packages/sitetile/icon-core.mjs), so a link here can never name a file that isn't emitted.
-const iconLinks = iconHrefs(meta, { hasPwa });
+const iconLinksRaw = iconHrefs(meta, { hasPwa });
+// round 4 (R3-P3-1): iconHrefs() hands back `favicon:`/`site-logo:`/`footer-logo:` (icon-core's
+// siteMark) UNFILTERED as a live `<link>` href when the site set one — the gate that already
+// covers site-logo's three <img src> consumers (safeSrc, above) never touches this path, because
+// iconHrefs() reads `meta` directly rather than the gated variable. Gate here, the one place both
+// `<link>` consumers below read the result, falling back to icon-core's own generated paths — the
+// same fallback the "no mark" branch already emits — rather than a live link with a disallowed
+// scheme. `<link rel=icon>`/`apple-touch-icon` are not a script-execution context (a browser
+// fetches an image, it does not navigate them), so this is defense-in-depth, not the P2 fix.
+const iconMarkSafe = iconLinksRaw.icon.every((l) => safeSrc(l.href));
+const iconLinks = iconMarkSafe ? iconLinksRaw : {
+  icon: [{ href: ICON_PATHS.ico, sizes: '32x32' }, { href: ICON_PATHS.svg, type: 'image/svg+xml' }],
+  appleTouch: ICON_PATHS.apple,
+};
 // Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
 const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
 const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
@@ -859,9 +901,18 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
           {ageGate.title && <h2 class="st-age-gate-title" id="st-age-gate-title">{ageGate.title}</h2>}
           {ageGate.body && <p class="st-age-gate-body">{ageGateLines(ageGate.body).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
           {ageGate.note && <p class="st-age-gate-note">{ageGateLines(ageGate.note).map((ln, i) => <Fragment>{i > 0 && <br />}{ln}</Fragment>)}</p>}
+          {/* round 3 (Astro consumers, R2-P3-5): `age-gate-note-links`/`age-gate-back-url` are raw
+              frontmatter destinations reaching a live `<a href>` with no gate; safeHref shares the
+              same policy every other emitter uses. */}
           {ageGate.noteLinks.length > 0 && (
             <p class="st-age-gate-note-links">
-              {ageGate.noteLinks.map((it) => <a href={it.href} target="_blank" rel="noopener noreferrer">{it.label}</a>)}
+              {ageGate.noteLinks.map((it) => {
+                // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+                const hrefOk = safeHref(it.href);
+                return hrefOk
+                  ? <a href={hrefOk} target="_blank" rel="noopener noreferrer">{it.label}</a>
+                  : <span>{it.label}</span>;
+              })}
             </p>
           )}
           <div class="st-age-gate-actions">
@@ -957,13 +1008,18 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
           buried, and faking the move with CSS makes the button teleport when the menu
           opens, because one element cannot be in two places.) It sits before .rf-header-actions
           so the header reads logo → nav → CTA → icon actions → hamburger, left to right. */}
-      {headerCta && <a class="rf-header-cta" href={headerCta.href} {...ext(headerCta.href)}>{headerCta.label}</a>}
+      {/* round 3 (Astro consumers, R2-P3-5): `header-cta:` is a raw frontmatter destination;
+          safeHref shares the same policy every other emitter uses — a disallowed scheme degrades
+          to plain text rather than a live href. */}
+      {headerCta && (headerCtaHrefOk
+        ? <a class="rf-header-cta" href={headerCtaHrefOk} {...ext(headerCtaHrefOk)}>{headerCta.label}</a>
+        : <span class="rf-header-cta">{headerCta.label}</span>)}
       {/* header-actions (Coral A): icon buttons on the header's right. link → <a>; toggle →
           a hidden checkbox + <label> whose CSS reveal opens the drawer/offcanvas. */}
       {headerActions.length > 0 && (
         <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
           {headerActions.map((a) => a.type === 'link'
-            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={a.target || '#'} aria-label={a.label} set:html={a.icon}></a>
+            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
             : <Fragment>
                 <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
                 <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
@@ -997,9 +1053,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     {breadcrumbLabel && (
       <nav class="rf-breadcrumb reef-breadcrumb" aria-label="Breadcrumb">
         <a href="/">{breadcrumbHome}</a>
-        {breadcrumbTrail.map((t) => (
-          <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span><a href={t.href}>{t.label}</a></Fragment>
-        ))}
+        {breadcrumbTrail.map((t) => {
+          // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+          const hrefOk = safeHref(t.href);
+          return (
+            <Fragment><span class="rf-breadcrumb-sep" aria-hidden="true">»</span>{hrefOk ? <a href={hrefOk}>{t.label}</a> : <span>{t.label}</span>}</Fragment>
+          );
+        })}
         <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
       </nav>
     )}
@@ -1034,9 +1094,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
                 <li class="st-sidebar-group">
                   {g.head && <p class="st-sidebar-group-head">{g.head}</p>}
                   <ul class="st-sidebar-list">
-                    {g.items.map((it) => (
-                      <li>{it.href ? <a href={it.href} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
-                    ))}
+                    {g.items.map((it) => {
+                      // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+                      const hrefOk = safeHref(it.href);
+                      return (
+                        <li>{hrefOk ? <a href={hrefOk} style={it.weight ? `font-size:${it.weight}px` : undefined}>{it.label}</a> : <span>{it.label}</span>}</li>
+                      );
+                    })}
                   </ul>
                 </li>
               ))}
@@ -1072,9 +1136,12 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
             )}
             {sidebarSocial.length > 0 && (
               <nav class="st-sidebar-social" aria-label="Social">
-                {sidebarSocial.map((it) => (
-                  <a href={it.href} {...ext(it.href)} aria-label={it.label} title={it.label} set:html={it.icon} />
-                ))}
+                {sidebarSocial.map((it) => {
+                  // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+                  const hrefOk = safeHref(it.href);
+                  return hrefOk &&
+                    <a href={hrefOk} {...ext(hrefOk)} aria-label={it.label} title={it.label} set:html={it.icon} />;
+                })}
               </nav>
             )}
           </aside>
@@ -1090,7 +1157,11 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-prose rf-foot-widget rf-foot-popular">
           {footWidgets.popular.heading && <h2>{footWidgets.popular.heading}</h2>}
           <ul class="st-list">
-            {footWidgets.popular.items.map((it) => <li><a href={it.href}>{it.label}</a></li>)}
+            {footWidgets.popular.items.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+              const hrefOk = safeHref(it.href);
+              return <li>{hrefOk ? <a href={hrefOk}>{it.label}</a> : <span>{it.label}</span>}</li>;
+            })}
           </ul>
         </section>
       )}
@@ -1098,7 +1169,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         <section class="st-tagcloud rf-foot-widget rf-foot-tagcloud">
           {footWidgets.categories.heading && <h2>{footWidgets.categories.heading}</h2>}
           <div class="st-tag-flow">
-            {footWidgets.categories.items.map((it) => <a class="st-tag" href={it.href}>{it.label}</a>)}
+            {footWidgets.categories.items.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
+              const hrefOk = safeHref(it.href);
+              return hrefOk
+                ? <a class="st-tag" href={hrefOk}>{it.label}</a>
+                : <span class="st-tag">{it.label}</span>;
+            })}
           </div>
         </section>
       )}
@@ -1120,22 +1197,35 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
               {footerCols.map((col) => (
                 <div class="rf-foot-col">
                   {col.head && <h4>{col.head}</h4>}
-                  {col.items.map((it) => (it.href
-                    ? <a href={it.href} {...ext(it.href)}>{it.label}</a>
-                    : <span class="rf-foot-soon">{it.label}</span>))}
+                  {col.items.map((it) => {
+                    // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+                    const hrefOk = safeHref(it.href);
+                    return hrefOk
+                      ? <a href={hrefOk} {...ext(hrefOk)}>{it.label}</a>
+                      : <span class="rf-foot-soon">{it.label}</span>;
+                  })}
                 </div>
               ))}
             </div>
           </div>
         ) : footerSocial.length > 0 ? (
           <nav class="rf-footer-social" aria-label="Social">
-            {footerSocial.map((it) => (
-              <a href={it.href} {...ext(it.href)} aria-label={it.label} set:html={it.icon} />
-            ))}
+            {footerSocial.map((it) => {
+              // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+              const hrefOk = safeHref(it.href);
+              return hrefOk &&
+                <a href={hrefOk} {...ext(hrefOk)} aria-label={it.label} set:html={it.icon} />;
+            })}
           </nav>
         ) : navLinks.length > 0 && (
           <nav class="rf-footer-nav" aria-label="Footer">
-            {navLinks.map((l) => <a href={l.href} {...ext(l.href)}>{l.label}</a>)}
+            {navLinks.map((l) => {
+              // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
+              const hrefOk = safeHref(l.href);
+              return hrefOk
+                ? <a href={hrefOk} {...ext(hrefOk)}>{l.label}</a>
+                : <span>{l.label}</span>;
+            })}
           </nav>
         )}
         {/* footer logo links home.

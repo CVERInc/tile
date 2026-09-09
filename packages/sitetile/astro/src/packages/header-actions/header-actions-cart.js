@@ -29,6 +29,11 @@
   if (!actions) return; // not opted in on this page — inert.
   var guild = actions.getAttribute('data-cart-guild') || '';
   if (!guild) return;
+  // round 4 (R3-P2-1, second instance): `data-cart-href` is gated by `safeHref` at SiteLayout's
+  // `cartHref` declaration, before this attribute is ever written — this script never sees a
+  // raw author string, only the validated destination or nothing (see the `else if (href)` use
+  // of it below, a `window.location.href` assignment, which is a script-execution sink for a
+  // `javascript:` value exactly like a live `href`).
   var href = actions.getAttribute('data-cart-href') || '';
   var KEY = 'dc-square-shop-cart:' + guild;
   var CORAL = '[data-dynamic-coral="square-shop"]';

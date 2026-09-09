@@ -12,7 +12,7 @@
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
-import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeHref } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
@@ -62,7 +62,12 @@ const idOf = (i) => 'st-form-f' + (i + 1);
 const action = pm.action || undefined;
 const isInbox = action === 'inbox';
 const method = isInbox ? 'post' : (pm.method || 'post').toLowerCase();
-const formAction = isInbox ? '/__reef/inbox' : action;
+// round 4 (R3-P2-1): `action=` is a raw author-controlled destination reaching a live
+// `<form action>` — gate it here, at the value's one declaration point, the same shape every
+// other Astro consumer of safeHref/safeSrc already uses. A disallowed scheme (e.g.
+// `action="javascript:…"`) degrades to `undefined`, which is `wired`'s existing "no backend"
+// path below — the same disabled-submit degradation an absent `action=` already gets.
+const formAction = isInbox ? '/__reef/inbox' : (safeHref(action) || undefined);
 
 // The forwarder's reserved field names — an owner field must never land on the wire
 // under one of these, or it would be read as routing data instead of message content.
@@ -86,7 +91,10 @@ const returnTo = Astro.url.pathname;
 // URL — which on a static host is a 405 the visitor cannot see: they type, they
 // press, the words vanish, and nothing says so. The header above already claimed
 // "never claims a backend it lacks"; a pressable button was claiming one.
-const wired = Boolean(action);
+// round 4: gated on `formAction`, not the raw `action` — a hostile action must disable the
+// button, not merely swap what it posts to (formAction already degrades to undefined for both
+// "no action=" and "unsafe action=", so this line does not need to know which).
+const wired = Boolean(formAction);
 
 // ── required fields (2026-09-03, cold-read findings #9/#10) ────────────────────────────────────
 // Before this, EVERY field rendered `required=false` — blank was indistinguishable from filled,

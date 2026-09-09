@@ -3,7 +3,7 @@
 // + body) living in the build's `blog/` dir (the reef `blog_posts` store shape).
 // The blog pages wear the SAME SiteLayout shell as the rest of the site, so the
 // site's theme + packages (bleedblend band, lingo head) apply to /devlog too.
-import { splitFrontmatter, bodyHtml, inlineHtml, parseSite } from '@sitetile';
+import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc } from '@sitetile';
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
@@ -130,6 +130,16 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // (a showcase post) renders as <video> in the body, but must never become the archive-card
   // thumbnail (a .mp4 in <img src> is a broken image). Falls through to '' when the post has only video.
   const imgM = [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+  // round 5 (R4-P3-2): `image` is this post's featured-image URL — extracted straight off a
+  // markdown regex, with NO gate of its own, and consumed VERBATIM as a live `<img src>` by every
+  // card renderer that shows it (blog index, both term archives, "Keep reading"/"Recent posts",
+  // the archive island's client corpus). `bodyHtml`'s own in-body image rendering already refuses
+  // an unsafe src via `imgTag`/`isSafeImageSrc` — this is the SAME post, the SAME first image,
+  // reaching a DIFFERENT template with no such gate (measured: an SVG `data:` featured image
+  // rendered nothing in the post body and a live `<img src="data:image/svg+xml…">` on the index).
+  // Gated here, once, at the single field every one of those consumers reads — `safeSrc` shares
+  // the same raster-only `data:` allowlist as the body renderer, so both agree on this post's
+  // image from now on. `''` (not null) so every existing `post.image` falsy check is unaffected.
   // 🩸 corrected 2026-07-07 (devlog excerpt chase): the old logic took only the FIRST
   // surviving line (.find()), then sliced it at 140 chars. Fine for a normal single-line
   // markdown paragraph, but real WP/Blogger posts are often written as many short
@@ -182,7 +192,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
     // enrich per-post category (a plain devlog, or an authored-count model) → no category archive.
     categories: fmList(meta.categories),
     body: b,
-    image: imgM || '',
+    image: safeSrc(imgM) || '',
     author: fmStr(meta.author), // '' when absent → byline stays hidden; a site with authors enriches it
     excerpt,
     excerptText: fullText, // full join for per-site excerpt re-capping in buildIndexView
@@ -291,7 +301,7 @@ export function listedPosts(posts, meta) {
 // the href is not a category archive at all (the rail's own `All Posts|585|/diary` row). Keyed off
 // the site's own `blog-category-base`, so a site publishing archives elsewhere still matches.
 function categoryHrefSlug(href, meta) {
-  const base = String((meta || {})['blog-category-base'] || '/category').replace(/\/+$/, '');
+  const base = categoryBase(meta);
   const path = String(href || '').split(/[?#]/)[0].replace(/\/+$/, '');
   if (!path.startsWith(base + '/')) return null;
   const seg = path.slice(base.length + 1);
@@ -736,11 +746,51 @@ export function blogSearchOn(meta) {
 // blogBase: the blog's mount base. `blog-path` absent → historic `/devlog`. An explicit
 // empty / "/" mounts the blog at the site root (''); any other value is trailing-slash
 // normalised so callers can always append `/…` without doubling the slash.
+//
+// round 5 (R4-P1-1): `blog-path` is a documented site-level frontmatter field this function used
+// to return VERBATIM — every one of its ~10 consumers (the blog index, both term archives, every
+// post's breadcrumb/back-link/prev-next, "Keep reading"/"Recent posts", rss.xml, sitemap.xml, the
+// archive island's client corpus) inherits from THIS one function, so an unvalidated `blog-path`
+// poisoned every post link on the site at once. Gated here, at the declaration point, the same
+// policy every other destination in this renderer already uses (`safeHref` — this is a path
+// prefix, not an image, so `href`'s allowlist is the right one). `safeHref` itself records the
+// drop (isSafeHref → recordDrop) and returns null on a disallowed scheme; this degrades to the
+// historic `/devlog` default — the SAME value an absent `blog-path` already produces — rather
+// than to a blank/broken mount, so a hostile config never becomes a hostile OR a dead blog.
 export function blogBase(meta) {
   if (!meta || meta['blog-path'] == null) return '/devlog';
   const raw = String(meta['blog-path']).trim();
   if (raw === '' || raw === '/') return '';
-  return raw.replace(/\/+$/, '');
+  const path = raw.replace(/\/+$/, '');
+  return safeHref(path) ?? '/devlog';
+}
+
+// categoryBase / tagBase: the same shape as blogBase, for the WP-style term-archive mount points
+// (`/category`, `/tag`). round 5 (R4-P1-1, "term-archive URLs"): `blog-category-base` /
+// `blog-tag-base` are documented site-level fields read VERBATIM, un-gated, in ~10 places —
+// tagHref (every tag/category chip site-wide), sitemap.mjs, categoryHrefSlug, and each of
+// category/tag's own route files (base + [...loc] siblings), where the value becomes the
+// `pageHref()` this archive's own pager Prev/Next links are built from. One hostile value in
+// `_site.md` therefore reached every chip AND every pager link on the site, the exact R4-P1-1
+// shape. Centralised here so every one of those call sites gates through the same function and a
+// disallowed scheme can't be forgotten at a 10th one; degrades to the historic default (byte
+// identical to an absent config), same doctrine as blogBase.
+export function categoryBase(meta) {
+  const raw = String((meta && meta['blog-category-base']) || '/category').replace(/\/+$/, '');
+  return safeHref(raw) ?? '/category';
+}
+export function tagBase(meta) {
+  const raw = String((meta && meta['blog-tag-base']) || '/tag').replace(/\/+$/, '');
+  return safeHref(raw) ?? '/tag';
+}
+// authorBase: the SAME shape again for `blog-author-base` (`/author`) — found while auditing every
+// `pageHref()` in the term-archive family for R4-P1-1, not named by the round-4 review itself.
+// Smaller blast radius than categoryBase/tagBase (nothing links TO an author archive the way
+// tagHref links every tag/category chip site-wide — grepped: pages/author/[slug]/*.astro are its
+// only two readers), but the shape — a site-level base feeding a pager `<a href>` — is identical.
+export function authorBase(meta) {
+  const raw = String((meta && meta['blog-author-base']) || '/author').replace(/\/+$/, '');
+  return safeHref(raw) ?? '/author';
 }
 
 // blog tenancy — whether a site HAS a blog, and whose name is on it. Lives in its own module
@@ -800,14 +850,12 @@ export function tagHref(meta, tag, slugMap, catSet) {
   // fire for slugs that really got a route emitted — same "never link a page that isn't there"
   // rule blogCategories() follows with its empty hrefs.
   if (catSet && catSet.has(tag)) {
-    const base = String((meta && meta['blog-category-base']) || '/category').replace(/\/$/, '');
-    return `${urlLoc}${base}/${tag}/`;
+    return `${urlLoc}${categoryBase(meta)}/${tag}/`;
   }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
-    const base = String((meta && meta['blog-tag-base']) || '/tag').replace(/\/$/, '');
     const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
-    return `${urlLoc}${base}/${slug}/`;
+    return `${urlLoc}${tagBase(meta)}/${slug}/`;
   }
   // Blogger's /search/label/<tag> route is not locale-scoped (a separate, older capability this
   // feature doesn't touch) — left exactly as it always was.
@@ -870,11 +918,31 @@ export function toPath(u) {
   return s === '' ? undefined : s;
 }
 
+// round 5 (R4-P1-1): this function used to return `post.permalink` and the expanded
+// `blog-url-pattern` VERBATIM — both are documented author-controlled frontmatter fields (a
+// per-post override and a site-level routing template, respectively), and this is the ONE
+// function every consumer builds a post's URL through (the blog index, both term archives, every
+// post's own page for its prev/next nav, "Keep reading"/"Recent posts", rss.xml, sitemap.xml, and
+// the archive island's client corpus), so an unvalidated destination here reached all of them —
+// and, via getStaticPaths' `toPath(postUrl(...))`, could even name the BUILD DIRECTORY for the
+// post's own page. Gated at the return (once), the same policy every other destination in this
+// renderer already uses: `safeHref` on the FINAL, already-templated URL — not on the pattern
+// before substitution, since the pattern's tokens (`%postname%` etc.) are inert path text and the
+// scheme, if any, lives in the pattern's own literal prefix either way. A disallowed permalink
+// falls through to the normal pattern-based URL (same as no permalink at all); a disallowed
+// pattern (or `blog-path`, via the already-gated blogBase()) falls through to `canonical` — the
+// historic `${base}/<slug>` default, i.e. exactly what this post's URL would be with nothing
+// configured. `safeHref` records the drop itself (isSafeHref → recordDrop); nothing here needs to.
 export function postUrl(post, meta) {
   const p = post || {};
-  if (p.permalink) return String(p.permalink);
+  const base = blogBase(meta);
+  const canonical = `${base}/${p.slug || ''}`.replace(/\/{2,}/g, '/');
+  if (p.permalink) {
+    const ok = safeHref(String(p.permalink));
+    if (ok != null) return ok;
+  }
   const pattern = (meta && meta['blog-url-pattern'] != null && String(meta['blog-url-pattern']).trim())
-    || `${blogBase(meta)}/%postname%`;
+    || `${base}/%postname%`;
   const dm = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(p.date || ''));
   const hm = /[T ](\d{1,2}):/.exec(String(p.date || ''));
   const year = dm ? dm[1] : '';
@@ -894,9 +962,10 @@ export function postUrl(post, meta) {
     .replace(/%postname%/g, slug)
     .replace(/%post_id%/g, postId)
     .replace(/%category%/g, category)
-    .replace(/%author%/g, author);
-  // collapse any `//` left by an empty token; a real trailing slash survives (single /).
-  return url.replace(/\/{2,}/g, '/');
+    .replace(/%author%/g, author)
+    // collapse any `//` left by an empty token; a real trailing slash survives (single /).
+    .replace(/\/{2,}/g, '/');
+  return safeHref(url) ?? canonical;
 }
 
 // indexUrl: the blog index URL for page `n`. Page 1 = the base itself (root '' → '/');

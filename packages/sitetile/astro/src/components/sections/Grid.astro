@@ -1,5 +1,5 @@
 ---
-import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeHref } from '@sitetile';
 import GridCell from './GridCell.astro';
 const { section, hero } = Astro.props;
 // The page's FIRST section carries its primary heading as <h1> — the same seam Prose/Faq/
@@ -43,6 +43,9 @@ const moreRaw = pm.more ? (typeof pm.more === 'object' ? pm.more.label : pm.more
 const more = moreRaw && moreRaw.includes('=')
   ? { label: moreRaw.split('=')[0].trim(), href: moreRaw.split('=').slice(1).join('=').trim() }
   : null;
+// round 3 (Astro consumers, R2-P3-5): `more.href` is author-set (a `more="LABEL=/href"` param);
+// site-core.js's own `grid` case gates it on `isSafeHref`; `safeHref` shares that ONE policy here.
+const moreHrefOk = more ? safeHref(more.href) : null;
 const packMasonry = pm.pack === 'masonry' || (pm.pack && typeof pm.pack === 'object' && pm.pack.label === 'masonry');
 // `surface=<token>` — OPT-IN per-section background belt (glass/paper/cream/teal). Absent →
 // the theme's default section surface (e.g. a deep-teal grid belt) is untouched. Drives a set of
@@ -70,7 +73,9 @@ const facets = filterLabel ? [...new Set(cells.map((c) => c.badge).filter(Boolea
   <div class="st-cells" data-pack={packMasonry ? 'masonry' : undefined}>
     {cells.map((c) => <GridCell c={c} imageCards={imageCards} />)}
   </div>
-  {more && <a class="st-grid-more" href={more.href} set:html={inlineHtml(more.label)} />}
+  {more && (moreHrefOk
+    ? <a class="st-grid-more" href={moreHrefOk} set:html={inlineHtml(more.label)} />
+    : <span class="st-grid-more" set:html={inlineHtml(more.label)} />)}
 </section>
 {packMasonry && <script>import './grid-masonry.js';</script>}
 {filterLabel && facets.length > 0 && <script>import './grid-filter.js';</script>}

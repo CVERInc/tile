@@ -9,6 +9,7 @@
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase } from '../lib/blog.mjs';
+import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
@@ -68,7 +69,9 @@ const relatedLabel = String(meta['blog-related-label'] || 'Related posts').trim(
 // comments (`blog-comments-url`): live comment threads are dynamic (Blogger/Disqus backend) — a
 // reasonable static degradation here is an opt-in "留言" heading linking out to the real thread,
 // NOT a fake inline widget. Absent → nothing (no comments UI is invented).
-const commentsUrl = String(meta['blog-comments-url'] || '').trim();
+// round 3 (Astro consumers, R2-P3-5): `blog-comments-url` is a raw frontmatter destination;
+// safeHref shares the same policy every other emitter uses (gated once here, at the source).
+const commentsUrl = safeHref(String(meta['blog-comments-url'] || '').trim());
 const commentsLabel = String(meta['blog-comments-label'] || 'Comments').trim();
 
 // breadcrumb (opt-in `blog-breadcrumb: true`): a WP single-post trail "Home » Category » <title>"
