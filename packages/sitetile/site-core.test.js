@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
-  safeHref, safeSrc,
+  safeHref, safeSrc, safeInternalPath,
 } from './site-core.js';
 
 let passed = 0;
@@ -888,6 +888,138 @@ test('safeHref / safeSrc: the Astro-facing helpers return the string or null, ma
   assert.equal(safeSrc('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=');
   assert.equal(safeSrc('data:image/svg+xml;base64,PHN2Zz4='), null);
   assert.doesNotThrow(() => safeHref('&#x110000;'));
+});
+
+// ── form coral `thanks=`: safeInternalPath, a stricter site-internal-only sibling ──
+
+test('safeInternalPath: accepts a plain site-internal path, with or without its own query string', () => {
+  assert.equal(safeInternalPath('/thanks'), '/thanks');
+  assert.equal(safeInternalPath('/thanks?ref=fb'), '/thanks?ref=fb');
+});
+
+test('safeInternalPath: rejects an off-site destination even though safeHref allows it', () => {
+  // Scheme-allowed by isSafeHref's policy (an ordinary link may point off-site) — and exactly
+  // the value safeInternalPath exists to refuse.
+  assert.equal(safeHref('https://example.test/x'), 'https://example.test/x');
+  assert.equal(safeInternalPath('https://example.test/x'), null);
+});
+
+test('safeInternalPath: rejects a network-path reference, spelled with `//` or a normalizing backslash', () => {
+  assert.equal(safeInternalPath('//evil.example'), null);
+  assert.equal(safeInternalPath('/\\evil.example'), null);
+});
+
+test('safeInternalPath: rejects a `..` segment wherever it sits, without resolving it away first', () => {
+  assert.equal(safeInternalPath('../x'), null);
+  assert.equal(safeInternalPath('/a/../b'), null);
+  assert.equal(safeInternalPath('/a/..'), null);
+  assert.equal(safeInternalPath('..'), null);
+});
+
+test('safeInternalPath: a scheme with no leading slash is rejected too, not just an off-site path', () => {
+  assert.equal(safeInternalPath('javascript:void(0)'), null);
+});
+
+test('safeInternalPath: absent/empty degrades to null, same shape as safeHref', () => {
+  assert.equal(safeInternalPath(''), null);
+  assert.equal(safeInternalPath(null), null);
+  assert.equal(safeInternalPath(undefined), null);
+});
+
+test('safeInternalPath: a rejected destination records one drop warning, the same diagnostics queue safeHref uses', () => {
+  takeDropWarnings();
+  assert.equal(safeInternalPath('https://example.test/x'), null);
+  const warnings = takeDropWarnings();
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].dest, 'https://example.test/x');
+  assert.deepEqual(takeDropWarnings(), [], 'the queue is drained after being read');
+});
+
+test('safeInternalPath: an accepted destination records no drop warning', () => {
+  takeDropWarnings();
+  assert.equal(safeInternalPath('/thanks'), '/thanks');
+  assert.deepEqual(takeDropWarnings(), []);
+});
+
+// ── R1-P1-1 / R1-P2-1 (adversarial review, round 1): a leading single-dot path segment, or an
+// ASCII control character, is removed by a URL parser BEFORE it resolves a value — either can
+// turn one literal leading slash into a RESOLVED path that begins with two, which a browser reads
+// as a host. `isSiteRelativePath`'s sibling in shop-function-template.js (the redirect target this
+// value ultimately becomes) closes that with a check on the RESOLVED value; this gate closes the
+// half it CAN see structurally — stripping the same control characters `isSafeImageSrc` already
+// strips, so this gate and that one agree on where a control character sits. The corpus below is
+// reconstructed from the review's description of its own harness (single-dot segments including
+// percent-encoded spellings, control characters, backslashes, percent-encoded slashes, and
+// combinations) rather than typed as a hand-picked list of examples, so a fix that only closes one
+// member of a class cannot look like it closed the whole class.
+function hostileInternalPathCorpus() {
+  const dotSpellings = ['.', '%2e', '%2E', '%2e%2e', '.%2e', '%2e.', './.'];
+  const slashSpellings = ['//', '///', '/\\', '\\/', '\\\\', '%2f%2f', '%2F%2F'];
+  const controlChars = ['\t', '\n', '\r', '\t\r', '\r\n'];
+  const controlSlashSpellings = ['//', '\\\\'];
+  const suffixes = ['dest.example', 'dest.example/path?q=1', 'dest.example#f', 'dest.example?x=1#y'];
+  const dotSegment = [];
+  const controlChar = [];
+  for (const dot of dotSpellings) {
+    for (const slashes of slashSpellings) {
+      for (const suffix of suffixes) dotSegment.push(`/${dot}${slashes}${suffix}`);
+    }
+  }
+  for (const ctrl of controlChars) {
+    for (const slashes of controlSlashSpellings) {
+      for (const suffix of suffixes) {
+        controlChar.push(`/${ctrl}/anything${slashes}${suffix}`);
+        controlChar.push(`/${ctrl}${ctrl}/anything${slashes}${suffix}`);
+      }
+    }
+  }
+  return { dotSegment, controlChar };
+}
+
+test('safeInternalPath: the control-character class the review found (isSiteRelativePath\'s sibling gate) is rejected here too, not just at the forwarder', () => {
+  const { controlChar } = hostileInternalPathCorpus();
+  assert.ok(controlChar.length > 0, 'the corpus must actually generate shapes, or this assertion never runs');
+  takeDropWarnings();
+  let rejected = 0;
+  for (const value of controlChar) {
+    if (safeInternalPath(value) === null) rejected++;
+  }
+  takeDropWarnings();
+  assert.equal(rejected, controlChar.length, `every control-character shape must be rejected; ${controlChar.length - rejected} of ${controlChar.length} were not`);
+});
+
+test('safeInternalPath: the leading single-dot-segment class is NOT closed by this gate — documented, not asserted as fixed here', () => {
+  // This gate has no `//` at position 0 to see and no `..` in the raw string to reject for any of
+  // these — the SAME reason the review gave for why the enforced boundary lives in
+  // shop-function-template.js's `inboxRedirectResponse` (a result-side check on the resolved
+  // Location), not in an input-side gate that would have to keep pace with every URL-parser
+  // normalisation rule. This test exists so a future change to this gate that starts silently
+  // rejecting these does not get read as "the gate closed it" without the result-side check
+  // being re-examined — and so a future regression that makes the RESULT-side check stop
+  // mattering is not masked by this gate happening to also admit these values.
+  const { dotSegment } = hostileInternalPathCorpus();
+  assert.ok(dotSegment.length > 0, 'the corpus must actually generate shapes, or this assertion never runs');
+  takeDropWarnings();
+  const admitted = dotSegment.filter((value) => safeInternalPath(value) !== null).length;
+  takeDropWarnings();
+  assert.ok(admitted > 0, 'at least one leading-dot-segment shape is expected to pass this gate (that is the point being documented)');
+});
+
+// R1-P3-1 (adversarial review, round 1): `isSiteRelativePath` (shop-function-template.js) does
+// NOT run `decodeEntitiesOnce` the way `isSafeInternalPath` (this file) does, so an HTML-entity
+// spelling of a slash or backslash is rejected here but admitted there. Pinned because it is the
+// review's own finding, not because either side is wrong on its own: the forwarder never actually
+// receives HTML-entity-encoded text on the wire (a hidden field's value is whatever
+// `safeInternalPath` already decoded once at build time), so this is a divergence between the two
+// gates as PURE FUNCTIONS, in the safe direction (this gate is the stricter of the two), not a
+// path an actual visitor's browser can exercise.
+test('safeInternalPath vs isSiteRelativePath: three inputs where this gate is stricter (entity-encoded slash/backslash) — pinned, safe direction', () => {
+  const inconsistent = ['/&#47;&#47;evil.example', '/&#x2F;&#x2F;evil.example', '/&#92;&#92;evil.example'];
+  takeDropWarnings();
+  for (const value of inconsistent) {
+    assert.equal(safeInternalPath(value), null, `${JSON.stringify(value)} must still be rejected here (decodes to a network-path reference)`);
+  }
+  takeDropWarnings();
 });
 
 // ── round 3: classification consistency — backslash/protocol-relative destinations ────────────

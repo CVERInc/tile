@@ -736,16 +736,41 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 // flag yet still serves a working route instead of a 404.
 
 const INBOX_RESERVED_FIELDS = new Set([
-	'kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', '_hp',
+	'kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp',
 	'visitor_email', 'email_field'
 ]);
 
-// Trusted as a redirect target only when it is unambiguously a path on THIS
-// site: a leading slash, and not a network-path reference (`//host`, which a
-// browser resolves against its own scheme — the one thing `startsWith('/')`
-// alone would let through).
+// Trusted as a redirect target only when it is unambiguously a path on THIS site: a leading
+// slash, not a network-path reference, and no `..` segment. Shared by `return_to` (posted on
+// every inbox submission) and `thanks_to` (opt-in, the form coral's `thanks=`)
+// — same rule, same function, so hardening it once protects both.
+//
+// This is a DIAGNOSTIC gate on the raw, as-posted string — the actual boundary is the
+// result-side check in `inboxRedirectResponse` below, which looks at what a URL parser
+// resolves the value TO, not at how the value is spelled. Two things this gate strips or
+// rejects up front so it stays roughly in step with that resolved value (same technique as
+// `isSafeImageSrc` in site-core.js):
+//
+// * ASCII tab/LF/CR, wherever they sit — a URL parser drops these before it resolves anything,
+//   so their presence in the raw string tells this gate nothing about the resolved path.
+// * A browser resolves `\` exactly like `/`, so `/\evil.example` is a network-path reference
+//   wearing one slash, not two — normalise backslashes to slashes so a plain `startsWith('//')`
+//   test cannot be dodged by spelling the second slash as a backslash.
+//
+// What this gate CANNOT see: a leading single-dot path segment (`.`, or a percent-encoded
+// spelling of one) is also removed by a URL parser before it resolves, and can turn one literal
+// leading slash into a resolved path that begins with two — this gate has no literal `//` at
+// position 0 to catch, and no `..` in the raw string to reject. That class is why the result-side
+// check exists; it does not depend on this gate anticipating every parser normalisation rule.
+//
+// A `..` segment is rejected on the raw path (before `?`/`#`), not left to a resolver to quietly
+// walk away.
+const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
 function isSiteRelativePath(value) {
-	return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//');
+	if (typeof value !== 'string' || value === '') return false;
+	const v = value.replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
+	if (!v.startsWith('/') || v.startsWith('//')) return false;
+	return !RE_DOTDOT_SEGMENT.test(v.split(/[?#]/, 1)[0]);
 }
 
 // Parses `value` against `origin` and returns the URL only if it resolved to
@@ -775,8 +800,31 @@ function resolveInboxReturnPath(returnTo, referer, origin) {
 
 // 303 back to the site with `?inbox=<outcome>` appended (replacing any the page
 // already carried, so re-submitting never stacks the param).
+//
+// `returnPath` reaches here already passed by `isSiteRelativePath` (directly, or via
+// `resolveInboxReturnPath`) — but that gate reads the RAW string, and a URL parser can resolve a
+// raw string it admitted into a Location that leaves the site. Two ways that happens even with
+// the control-character stripping `isSiteRelativePath` now also does: a leading single-dot path
+// segment (`.`, or a percent-encoded spelling of one) is removed by the parser before it
+// resolves, and any control character the gate's stripping missed would be too — either can turn
+// one literal leading slash into a RESOLVED path that begins with two, and a `Location` beginning
+// with `//` is a network-path reference: a browser reads it as a host, not a path. So this
+// function checks the one thing that actually matters — the RESOLVED value the header will
+// carry — rather than trying to keep pace with every normalisation rule a URL parser has: the
+// origin must still be this placeholder site origin (an absolute URL smuggled past the leading
+// slash resolves to some OTHER origin, caught the same way), and the resolved pathname must not
+// start with `//`. Either failing falls back to the site root, never to the untrusted value.
+const REDIRECT_BASE = 'http://site.invalid';
 function inboxRedirectResponse(returnPath, outcome) {
-	const url = new URL(returnPath, 'http://site.invalid');
+	let url;
+	try {
+		url = new URL(returnPath, REDIRECT_BASE);
+	} catch (e) {
+		url = new URL('/', REDIRECT_BASE);
+	}
+	if (url.origin !== REDIRECT_BASE || url.pathname.startsWith('//')) {
+		url = new URL('/', REDIRECT_BASE);
+	}
 	url.searchParams.set('inbox', outcome);
 	return new Response(null, { status: 303, headers: { location: url.pathname + url.search + url.hash } });
 }
@@ -807,12 +855,21 @@ async function handleInboxForward(request, CFG) {
 	}
 
 	const returnPath = resolveInboxReturnPath(raw.return_to, referer, origin);
+	// `thanks_to` (opt-in): posted by the coral, already validated once at
+	// build time (site-core.js's `safeInternalPath`, when the author wrote `thanks=`) — but a
+	// hidden field is still something a visitor's own browser tooling can edit before the
+	// request leaves it, so that build-time check buys nothing at THIS boundary on its own.
+	// Re-validated here with the same internal-path rule (`isSiteRelativePath`, shared with
+	// `return_to` above) before it is ever allowed to become a redirect target. Absent or
+	// invalid → `null`, and every SUCCESS path below falls back to `returnPath` — the exact
+	// behaviour with no `thanks=` at all.
+	const thanksPath = isSiteRelativePath(raw.thanks_to) ? raw.thanks_to : null;
 
 	// Honeypot: a real visitor never sees or tabs to this field, so it stays
 	// empty; a bot's autofill still finds and fills it. Behave EXACTLY as a
 	// normal successful send — no signal that tells the bot it was caught — and
 	// never spend the platform's inbox call on it.
-	if (raw._hp) return inboxRedirectResponse(returnPath, 'sent');
+	if (raw._hp) return inboxRedirectResponse(thanksPath || returnPath, 'sent');
 
 	const fields = {};
 	for (const key of Object.keys(raw)) {
@@ -852,7 +909,12 @@ async function handleInboxForward(request, CFG) {
 			credentials: 'omit',
 			signal: controller.signal
 		});
-		if (res.ok) return inboxRedirectResponse(returnPath, 'sent');
+		if (res.ok) return inboxRedirectResponse(thanksPath || returnPath, 'sent');
+		// Every FAILURE outcome — a non-2xx reason, a network error, the timeout below — stays on
+		// `returnPath`, never `thanksPath`: `thanks=` names a page that makes sense as the landing
+		// spot for a message that WENT somewhere, not for a retry. This is also what keeps the
+		// inline retry error above the submit button working unchanged with `thanks=` set — it
+		// reads `?inbox=<outcome>` off THIS page, which a failure still returns to.
 		let reason = 'error';
 		try {
 			const body = await res.json();
@@ -1124,5 +1186,5 @@ export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
-	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath
+	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse
 };

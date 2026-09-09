@@ -251,6 +251,13 @@ function parseSite(text) {
       // inputs and submission wiring (action/backend) is a deploy concern, per cutover-structure-
       // before-data. General: any recast contact/inquiry page (no other coral expresses a form).
       //
+      // 🔴 `thanks=<path>` — an `action=inbox` form only, opt-in: an ordinary,
+      // site-internal page the owner writes and edits like any other, shown after a successful
+      // submit instead of the built-in card. Not a field/brace concern (it's a param on the TYPE
+      // line, read generically by `parseParams` like `action=`/`submit=`), so nothing here parses
+      // it — it is validated (`safeInternalPath`, this file) and wired entirely in Form.astro; see
+      // that file's own header note for the full contract.
+      //
       // 🩸 2026-09-03 (cold-read findings #9/#10): the brace also carries an explicit `required`
       // (or `required: false`) modifier now — `### Message {textarea required}`, `### Company
       // {required: false}`, `### Email {email, required: false}`. Backwards compatible: a brace
@@ -698,6 +705,41 @@ function safeHref(dest) {
 function safeSrc(dest) {
   if (dest == null || dest === '') return null;
   return isSafeImageSrc(dest) ? decodeEntitiesOnce(dest) : null;
+}
+
+// isSafeInternalPath / safeInternalPath — a STRICTER sibling of isSafeHref/safeHref, same family
+// (same entity-decode step, same drop-warning queue via recordDrop), for a destination that must
+// stay ON THIS SITE rather than merely off a live script scheme. The form coral's `thanks=` names
+// a page the site's own build serves, so isSafeHref's scheme allowlist is the wrong tool here —
+// `https://example.test/x` is itself scheme-allowed by that policy (an ordinary link may point
+// off-site) and is exactly the value this one must refuse. Same backslash normalisation as
+// `linkKind` (round 3): a browser resolves `\` exactly like `/`, so `/\evil.example` is a
+// network-path reference wearing one slash, not two — a plain `startsWith('//')` test alone
+// would not see it, and the value would resolve off this site.
+//
+// Same control-character stripping as `isSafeImageSrc` above (adversarial review, round 1,
+// R1-P1-1): a URL parser drops ASCII tab/LF/CR from anywhere in a value before it resolves
+// anything, so their presence in the raw string can hide a `//` that the parser WILL see — this
+// keeps that gate and this one looking at the same thing. This gate is still a DIAGNOSTIC one on
+// the raw, as-written string, though, not the enforced boundary: the value this validates goes on
+// to be re-validated at the actual redirect boundary in shop-function-template.js, whose own
+// comment explains why a RESULT-side check lives there rather than every normalisation rule a
+// URL parser has being chased here (a leading single-dot path segment removed by a parser before
+// it resolves is one this gate still cannot see, by construction).
+//
+// A `..` segment is rejected on the raw, pre-normalisation path (before
+// `?`/`#`) rather than left to a resolver to quietly walk away — an author who wrote `/a/../b`
+// gets refused, not silently rewritten to `/b`.
+const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
+function isSafeInternalPath(dest) {
+  const raw = decodeEntitiesOnce(dest).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
+  if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
+  if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
+  return true;
+}
+function safeInternalPath(dest) {
+  if (dest == null || dest === '') return null;
+  return isSafeInternalPath(dest) ? decodeEntitiesOnce(dest) : null;
 }
 
 // round 4 (R3-P3-3): this file's OWN href/src emitters below used to escAttr() the RAW,
@@ -2232,6 +2274,15 @@ function renderSiteToHtml(site) {
 // recorded since the last call and CLEARS it (so warnings are never double-reported across
 // separate takeDropWarnings() calls, e.g. one per build). A build script logs these; nothing in
 // this file requires a caller to read them, so existing callers of renderSiteToHtml are unaffected.
+//
+// R1-P3-2 (adversarial review, round 1): as of this comment, `grep -rn takeDropWarnings` across
+// this repo (excluding tests) turns up no consumer at all — the "a build script logs these"
+// contract above describes an intended caller, not one that exists HERE. If that caller lives in
+// reef (the platform repo that drives this package's build), note it here so the next person
+// does not go looking for it in this repo and conclude the feature is dead: <name the reef
+// build-script path/module once it exists>. Until then, an author who writes an invalid
+// `thanks=` (or any other gated destination) gets silent degradation — the value is dropped and
+// the page renders correctly without it, but nothing tells them why.
 function takeDropWarnings() { return _dropWarnings.splice(0); }
 
 // ── derived page description ─────────────────────────────────────────────────────────────────────
@@ -2295,6 +2346,8 @@ export {
   takeDropWarnings,
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
+  // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
+  safeInternalPath,
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —
   // see cssUrlString's own comment.
   cssUrlString,

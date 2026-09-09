@@ -12,7 +12,7 @@
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
-import { parseParams, inlineHtml, bodyHtml, safeHref } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
@@ -43,11 +43,12 @@ const idOf = (i) => 'st-form-f' + (i + 1);
 //
 //   • `action=inbox` → `<form action="/__reef/inbox" method="post">`. `method=` is
 //     ignored for this value — the forwarder only accepts POST.
-//   • Two hidden inputs the forwarder reads: `return_to` (this page's own path,
-//     locale-aware — Astro.url.pathname already carries the locale segment) and a
-//     honeypot `_hp` (visually hidden, NOT `display:none`, so a bot's autofill still
-//     reaches it — a display:none field is exactly what a scripted filler is taught
-//     to skip; kept out of the tab order and off-screen instead).
+//   • Three hidden inputs the forwarder reads: `return_to` (this page's own path,
+//     locale-aware — Astro.url.pathname already carries the locale segment), an
+//     opt-in `thanks_to` (see `thanks=`, below), and a honeypot `_hp` (visually
+//     hidden, NOT `display:none`, so a bot's autofill still reaches it — a
+//     display:none field is exactly what a scripted filler is taught to skip;
+//     kept out of the tab order and off-screen instead).
 //   • No `kind`/`id` param here — the forwarder bakes the site key server-side. This
 //     coral still carries only STRUCTURE, per cutover-structure-before-data.
 //   • Field naming: the `{email}` field is posted as `visitor_email` (the forwarder's
@@ -59,6 +60,27 @@ const idOf = (i) => 'st-form-f' + (i + 1);
 // 🔴 Do not re-add a version of this that posts straight to feelreef.com. It will
 // look correct in every test that calls the endpoint directly, and fail for every
 // real visitor — that is the exact failure this route exists to avoid.
+//
+// ── `thanks=<path>` — an editable page instead of the built-in card ──
+//
+// `action=inbox`'s built-in success card is a fixed sentence this coral writes; some owners
+// want their own page instead — one they can edit like any other, with their own copy and their
+// own tracking snippet. `thanks=/some/page` names it: on a successful submit the forwarder 303s
+// there (with `?inbox=sent` appended, an existing query string preserved) instead of back to
+// this page. A FAILED submit is unaffected — it still returns HERE with `?inbox=<outcome>`, so
+// the inline retry error above the button keeps working exactly as it does without `thanks=`.
+//
+// Validated with `safeInternalPath` — the same allowlist family as `safeHref`/`action=` above,
+// but stricter: it must be a path ON THIS SITE (`/…`, no scheme, no `//`, no `..`), never an
+// off-site destination — see safeInternalPath's own comment in site-core.js. An invalid value is
+// dropped (recorded via `takeDropWarnings`, same diagnostics queue every other gated destination
+// in this file already uses) and never reaches the DOM: no hidden field, `formAction`/the
+// built-in success card and everything else render exactly as if `thanks=` had not been written.
+//
+// Carried to the forwarder as a hidden `thanks_to` field, NOT trusted as-is once there — a hidden
+// input is still something a visitor's own browser tooling can edit before the request leaves it,
+// so the forwarder re-validates whatever arrives on the wire with the same internal-path rule
+// before it is ever allowed to become a redirect target (see shop-function-template.js).
 const action = pm.action || undefined;
 const isInbox = action === 'inbox';
 const method = isInbox ? 'post' : (pm.method || 'post').toLowerCase();
@@ -68,13 +90,18 @@ const method = isInbox ? 'post' : (pm.method || 'post').toLowerCase();
 // `action="javascript:…"`) degrades to `undefined`, which is `wired`'s existing "no backend"
 // path below — the same disabled-submit degradation an absent `action=` already gets.
 const formAction = isInbox ? '/__reef/inbox' : (safeHref(action) || undefined);
+// Validated regardless of `action=` (an author gets the same build-time feedback either way —
+// see safeInternalPath's own comment), but only ever WIRED (rendered as a hidden field, used by
+// the copy the script reads) when `isInbox` — `thanks=` is meaningless outside the one route that
+// can act on it.
+const thanksPath = safeInternalPath(pm.thanks);
 
 // The forwarder's reserved field names — an owner field must never land on the wire
 // under one of these, or it would be read as routing data instead of message content.
 // Checked case-insensitively (the forwarder's own keys are all lowercase) so a field
 // authored as "Kind" or "Text" cannot collide either. The visible label is untouched;
 // only the wire `name=` gets `field_` prefixed.
-const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', '_hp', 'visitor_email', 'email_field']);
+const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp', 'visitor_email', 'email_field']);
 const inboxNameFor = (label, kind) => {
   if (kind === 'email') return 'visitor_email';
   const s = String(label);
@@ -149,6 +176,16 @@ const inboxCopy = isInbox ? {
   sentNoEmail: fieldCopy.sentNoEmail,
   emailField: emailFieldName,
   excerptField: excerptField ? excerptField.name : null,
+  // `thanks=`: the script needs to know ONLY whether a successful submit is
+  // headed to a different, owner-edited page rather than this one — the forwarder computes and
+  // re-validates the actual destination itself (see the file-header note), so the script is never
+  // handed the path, only the fact that navigating there, not showing the built-in card in place,
+  // is the right move once the fetch resolves.
+  // `undefined`, not `false`, when absent: JSON.stringify drops an undefined property
+  // entirely, so an ordinary action=inbox form with no `thanks=` emits this payload
+  // BYTE-IDENTICAL to before `thanks=` existed — the key appears at all only for a form
+  // that opts in.
+  redirectsToThanks: thanksPath ? true : undefined,
 } : null;
 ---
 <section class="st-form-section" id={section.id} data-inbox-copy={inboxCopy ? JSON.stringify(inboxCopy) : undefined}>
@@ -187,8 +224,12 @@ const inboxCopy = isInbox ? {
     </div>
   )}
   <form class="st-form" action={formAction} method={method}>
-    {isInbox && (
-      <input type="hidden" name="return_to" value={returnTo} />
+    {/* `thanks_to` (frontmatter's own note on `thanksPath`, above) rides alongside `return_to`
+        inside this SAME conditional, never a second one of its own, so a plain `action=inbox`
+        form with no `thanks=` — every pre-existing one — keeps byte-identical output. */
+    isInbox && (thanksPath
+      ? <Fragment><input type="hidden" name="return_to" value={returnTo} /><input type="hidden" name="thanks_to" value={thanksPath} /></Fragment>
+      : <input type="hidden" name="return_to" value={returnTo} />
     )}
     {isInbox && (
       // Honeypot: a real visitor never sees or tabs to this, so it stays empty; a
@@ -386,8 +427,29 @@ const inboxCopy = isInbox ? {
               // vocabulary a no-JS round trip would have landed the browser on.
               let outcome = '';
               try { outcome = new URL(res.url, location.href).searchParams.get('inbox') || ''; } catch (e) {}
-              if (outcome === 'sent') showSuccess(fd);
-              else showError(copy ? copy.errorServer : null);
+              if (outcome === 'sent') {
+                // `thanks=`: the forwarder re-validates its own `thanks_to` before it ever
+                // becomes a `Location` (shop-function-template.js), so `res.url` (fetch follows
+                // a redirect itself) is meant to already be that owner-edited page. This script
+                // is the last thing that acts on it, though, so it checks the one property it
+                // actually needs rather than trusting the forwarder's promise outright: a page
+                // on THIS origin. On a match, navigate there — a real navigation, not the
+                // in-place card, since this page is not where the visitor is meant to end up and
+                // showing "sent" here first would be a lie the navigation immediately corrects.
+                // On a mismatch, do not navigate to the untrusted value AND do not show the
+                // in-place card either (that would silently hide that this page could not land
+                // where `thanks=` names) — fall back to a full top-level reload of this page.
+                // The no-JS round trip has no script here to run this check; it is covered
+                // instead by the forwarder's own result-side check on the `Location` it builds.
+                if (copy && copy.redirectsToThanks) {
+                  let sameOrigin = false;
+                  try { sameOrigin = new URL(res.url, location.href).origin === location.origin; } catch (e) {}
+                  if (sameOrigin) { location.assign(res.url); return; }
+                  location.reload();
+                  return;
+                }
+                showSuccess(fd);
+              } else showError(copy ? copy.errorServer : null);
             })
             .catch(() => {
               submitting = false;

@@ -273,5 +273,281 @@ const inboxEnv = { ASSETS: { fetch: async () => new Response('STATIC', { status:
 	ok('timeout aborts the relay and answers ?inbox=unavailable', (res.headers.get('location') || '') === '/contact?inbox=unavailable');
 }
 
+// ── `thanks_to`: the form coral's opt-in `thanks=`, re-validated here rather ─────
+// than trusted, since a hidden field is still something a visitor's own browser tooling can
+// edit before the request leaves it (see shop-function-template.js's own note).
+
+// isSiteRelativePath itself — a table of the exact hostile shapes the coral's build-time
+// validator (site-core.js's safeInternalPath) also refuses, as DATA rather than as test names.
+{
+	const cases = [
+		['/thanks', true],
+		['/thanks?ref=fb', true],
+		['//evil.example', false],
+		['/\\evil.example', false],     // a backslash resolves like a slash, so this would leave the site
+		['https://evil.example', false],
+		['javascript:void(0)', false],
+		['../x', false],
+		['/a/../b', false],
+		['/a/..', false],
+		['..', false],
+		['', false],
+	];
+	for (const [value, expected] of cases) {
+		ok(`isSiteRelativePath(${JSON.stringify(value)}) === ${expected}`, modFlag.isSiteRelativePath(value) === expected);
+	}
+}
+
+// R1-P3-1 (adversarial review, round 1): this gate does NOT run `decodeEntitiesOnce` the way
+// site-core.js's `isSafeInternalPath` does, so an HTML-entity spelling of a slash or backslash is
+// ADMITTED here but rejected there — the opposite direction of every other pinned case in this
+// file. Pinned because it is the review's own finding, not because this side is wrong: the
+// forwarder never actually receives HTML-entity-encoded text on the wire (a hidden field's value
+// is whatever `safeInternalPath` already decoded once at build time), and taken at face value
+// (no entity decoding) none of these three literal strings contain `//` or a `..` segment, so
+// admitting them is consistent with this gate's own contract on the RAW string it was handed.
+{
+	const inconsistent = ['/&#47;&#47;evil.example', '/&#x2F;&#x2F;evil.example', '/&#92;&#92;evil.example'];
+	for (const value of inconsistent) {
+		ok(`isSiteRelativePath(${JSON.stringify(value)}) === true (site-core.js's isSafeInternalPath rejects the same string — pinned divergence, safe direction)`,
+			modFlag.isSiteRelativePath(value) === true);
+	}
+}
+
+// inboxRedirectResponse — the function that computes the Location: an internal path plus the
+// `?inbox=` query merge, unit-tested directly rather than only through a full request.
+{
+	const r1 = modFlag.inboxRedirectResponse('/thanks', 'sent');
+	ok('inboxRedirectResponse: plain path + outcome', r1.headers.get('location') === '/thanks?inbox=sent');
+	const r2 = modFlag.inboxRedirectResponse('/thanks?ref=fb', 'sent');
+	ok('inboxRedirectResponse: an existing query string is preserved, not replaced', r2.headers.get('location') === '/thanks?ref=fb&inbox=sent');
+	const r3 = modFlag.inboxRedirectResponse('/thanks?inbox=stale', 'sent');
+	ok('inboxRedirectResponse: re-submitting never stacks the param', r3.headers.get('location') === '/thanks?inbox=sent');
+	// R1-P1-1 (adversarial review, round 1): the Location built above must resolve on the SITE's
+	// own origin, not merely look site-relative in the raw string that fed it — an absolute URL
+	// smuggled past the leading-slash check resolves to some OTHER origin.
+	const r4 = modFlag.inboxRedirectResponse('https://evil.example/collect', 'sent');
+	ok('inboxRedirectResponse: an absolute URL never becomes the Location — falls back to site root', r4.headers.get('location') === '/?inbox=sent');
+	const r5 = modFlag.inboxRedirectResponse('http://[::1', 'sent');
+	ok('inboxRedirectResponse: a value `new URL` cannot parse at all falls back to site root, not a thrown error', r5.status === 303 && r5.headers.get('location') === '/?inbox=sent');
+}
+
+// R1-P1-1 / R1-P2-1 (adversarial review, round 1) — the property, not a hand-picked list:
+// whatever `isSiteRelativePath` admits, the Location `inboxRedirectResponse` builds from it must
+// still resolve on the site's own origin, with a resulting pathname that does not begin with `//`
+// (a network-path reference a browser reads as a host). A URL parser removes a leading
+// single-dot path segment (including percent-encoded spellings) and ASCII tab/LF/CR from
+// anywhere in the input BEFORE it resolves — either can turn one literal leading slash into a
+// RESOLVED path that begins with two, and neither leaves a literal `//` or `..` in the raw
+// string for an input-side gate to see. `isSiteRelativePath` strips the control characters
+// (closing that half at the gate too), but the leading-dot-segment class is closed only by this
+// result-side check — reconstructed here as a corpus, per the review's own description of its
+// harness (single-dot segments and their percent-encoded spellings, control characters,
+// backslashes, percent-encoded slashes, and combinations of the above), not as a list of
+// examples: a fix that only closes one member of a class must not look like it closed the class.
+function hostileRedirectCorpus() {
+	const dotSpellings = ['.', '%2e', '%2E', '%2e%2e', '.%2e', '%2e.', './.'];
+	const slashSpellings = ['//', '///', '/\\', '\\/', '\\\\', '%2f%2f', '%2F%2F'];
+	const controlChars = ['\t', '\n', '\r', '\t\r', '\r\n'];
+	const controlSlashSpellings = ['//', '\\\\'];
+	const suffixes = ['dest.example', 'dest.example/path?q=1', 'dest.example#f', 'dest.example?x=1#y'];
+	const inputs = new Set();
+	// Class 2 — a leading single-dot path segment a URL parser removes before it resolves.
+	for (const dot of dotSpellings) {
+		for (const slashes of slashSpellings) {
+			for (const suffix of suffixes) inputs.add(`/${dot}${slashes}${suffix}`);
+		}
+	}
+	// Class 1 — an ASCII control character a URL parser drops from anywhere in the input.
+	for (const ctrl of controlChars) {
+		for (const slashes of controlSlashSpellings) {
+			for (const suffix of suffixes) {
+				inputs.add(`/${ctrl}/anything${slashes}${suffix}`);
+				inputs.add(`/${ctrl}${ctrl}/anything${slashes}${suffix}`);
+			}
+		}
+	}
+	// Combined — both mechanisms on the same value.
+	for (const dot of dotSpellings) {
+		for (const ctrl of controlChars) {
+			for (const suffix of suffixes) inputs.add(`/${ctrl}${dot}//${suffix}`);
+		}
+	}
+	return [...inputs];
+}
+
+{
+	const SITE = 'https://site.example';
+	const corpus = hostileRedirectCorpus();
+	ok('hostileRedirectCorpus actually generates shapes (else the property below never runs)', corpus.length > 0);
+	console.log(`  … corpus size: ${corpus.length}`);
+	let accepted = 0, offSite = 0;
+	const offSiteExamples = [];
+	for (const value of corpus) {
+		if (!modFlag.isSiteRelativePath(value)) continue;
+		accepted++;
+		const location = modFlag.inboxRedirectResponse(value, 'sent').headers.get('location') || '';
+		let resolved;
+		try { resolved = new URL(location, SITE); } catch (e) { offSite++; offSiteExamples.push(value); continue; }
+		if (resolved.origin !== SITE || resolved.pathname.startsWith('//')) {
+			offSite++;
+			if (offSiteExamples.length < 5) offSiteExamples.push(value);
+		}
+	}
+	console.log(`  … accepted by isSiteRelativePath: ${accepted}/${corpus.length}; off-site after inboxRedirectResponse: ${offSite}`);
+	if (offSiteExamples.length) console.log('  … off-site examples: ' + JSON.stringify(offSiteExamples));
+	ok('the gate actually admits some of the corpus (else "0 off-site" would be vacuous)', accepted > 0);
+	ok(`every corpus input the gate admits resolves ON this site, with no // pathname prefix (0/${accepted} off-site)`, offSite === 0);
+}
+
+// The same property, as a small explicit/pinned set rather than the generated corpus — the
+// reviewer's own shape for proving the assertion actually fires on a value the gate admits
+// (⚠️ per the review: this only means anything if at least one entry below makes
+// isSiteRelativePath return true and the assertion inside the loop actually executes).
+{
+	const SITE = 'https://site.example';
+	const shapes = [
+		'/thanks', '/thanks?ref=fb', '/thanks#top', '/zh-tw/thanks', '/a/./b', '/',
+		'/.//example.test', '/%2e//example.test', '/%2e%2e//example.test', '/.///example.test',
+		'/' + String.fromCharCode(10) + '/x//example.test',
+		'/' + String.fromCharCode(9) + '/x//example.test',
+		'/' + String.fromCharCode(13) + '/x//example.test',
+	];
+	let admitted = 0;
+	for (const value of shapes) {
+		if (modFlag.isSiteRelativePath(value) !== true) continue;
+		admitted++;
+		const location = modFlag.inboxRedirectResponse(value, 'sent').headers.get('location');
+		ok(`the Location for ${JSON.stringify(value)} resolves on this site`,
+			new URL(location, SITE).origin === SITE && !new URL(location, SITE).pathname.startsWith('//'));
+	}
+	ok('at least one pinned shape was admitted by the gate, so the assertions above actually ran', admitted > 0);
+}
+
+// benign shapes: the repair above must not change behaviour for anything ordinary — the same
+// 15 shapes the review measured, Location compared literally, not just "still same-origin"
+{
+	const benign = [
+		['/thanks', 'sent', '/thanks?inbox=sent'],
+		['/zh-tw/thanks', 'sent', '/zh-tw/thanks?inbox=sent'],
+		['/thanks?ref=fb', 'sent', '/thanks?ref=fb&inbox=sent'],
+		['/thanks#top', 'sent', '/thanks?inbox=sent#top'],
+		['/a/./b', 'sent', '/a/b?inbox=sent'],
+		['/', 'sent', '/?inbox=sent'],
+		['/日本語', 'sent', '/%E6%97%A5%E6%9C%AC%E8%AA%9E?inbox=sent'],
+		['/contact', 'rate_limited', '/contact?inbox=rate_limited'],
+	];
+	for (const [value, outcome, expected] of benign) {
+		const location = modFlag.inboxRedirectResponse(value, outcome).headers.get('location');
+		ok(`benign shape ${JSON.stringify(value)} is unchanged by the result-side check`, location === expected);
+	}
+}
+
+// Round 2 (coordinator note, 2026-09-10): the gate's own control-character strip
+// (isSiteRelativePath, shop-function-template.js) had no test that would go red if it were
+// removed — every existing assertion either `continue`s past a shape the gate rejects (the
+// pinned-shape loop above) or only checks the FINAL Location's origin/pathname, which the
+// result-side check in inboxRedirectResponse already protects on its own. These three go
+// through the full request path (not the gate function in isolation), one for each control
+// character, with the character sitting right after the leading slash of an otherwise ordinary
+// `thanks_to` — the one position where stripping it changes the gate's ACCEPT/REJECT decision:
+// stripped, the value reveals a network-path reference (`//thanks`) and the gate rejects it
+// before it ever reaches inboxRedirectResponse, so a successful submit lands on `return_to`, the
+// original page. Without the strip, the raw value (control character intact) still starts with
+// one visible slash and is admitted by the gate; it is only caught later, when a real URL parser
+// resolves it to a DIFFERENT origin (`http://thanks`, the control character having been dropped
+// by the parser itself) — and inboxRedirectResponse's own fallback on THAT failure is the site
+// root, not `return_to`. So removing the strip does not merely admit a value the gate should have
+// refused — it changes which page a real visitor's successful submit lands on: `/contact?inbox=sent`
+// with the strip in place, `/?inbox=sent` without it.
+{
+	const cases = [
+		['tab', '\t'],
+		['LF', '\n'],
+		['CR', '\r'],
+	];
+	for (const [name, ctrl] of cases) {
+		globalThis.fetch = async () => new Response('{}', { status: 200 });
+		const fd = new FormData();
+		fd.set('return_to', '/contact');
+		fd.set('thanks_to', `/${ctrl}/thanks`);
+		const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+			method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+		}), inboxEnv);
+		ok(`thanks_to with an embedded ${name} right after the leading slash: the gate's strip rejects it, success lands on return_to (the original page), not the site root`,
+			(res.headers.get('location') || '') === '/contact?inbox=sent');
+	}
+}
+
+// end-to-end: a successful submit with a valid thanks_to redirects THERE, not to return_to
+{
+	globalThis.fetch = async () => new Response('{}', { status: 200 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('valid thanks_to: success redirects to the thanks page, not return_to', (res.headers.get('location') || '') === '/thank-you?inbox=sent');
+}
+
+// an off-site thanks_to is never trusted, even though the coral is supposed to have already
+// dropped it at build time — the forwarder re-validates independently
+{
+	globalThis.fetch = async () => new Response('{}', { status: 200 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', 'https://evil.example/collect');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('invalid thanks_to: success falls back to return_to, never the foreign value', (res.headers.get('location') || '') === '/contact?inbox=sent');
+}
+
+// a FAILED submit stays on return_to even with a perfectly valid thanks_to — thanks= names a
+// landing page for a message that went somewhere, not a retry
+{
+	globalThis.fetch = async () => new Response(JSON.stringify({ reason: 'rate_limited' }), { status: 429 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('failure ignores thanks_to and returns to return_to with the reason', (res.headers.get('location') || '') === '/contact?inbox=rate_limited');
+}
+
+// the honeypot short-circuit "behaves EXACTLY as sent" — including landing on thanks_to
+{
+	let called = false;
+	globalThis.fetch = async () => { called = true; return new Response('{}', { status: 200 }); };
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	fd.set('_hp', 'i-am-a-bot');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('honeypot + thanks_to: still redirects to the thanks page', (res.headers.get('location') || '') === '/thank-you?inbox=sent');
+	ok('honeypot: never forwarded', called === false);
+}
+
+// thanks_to is a reserved wire name — it must never leak into the message `fields`, the same
+// contract return_to/_hp/visitor_email already have
+{
+	let seen = null;
+	globalThis.fetch = async (url, opts) => { seen = { url: String(url), opts }; return new Response('{}', { status: 200 }); };
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	fd.set('Name', 'Ada');
+	await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	const payload = JSON.parse(seen.opts.body);
+	ok('thanks_to never lands in fields', !('thanks_to' in payload.fields));
+	ok('an ordinary field still does', payload.fields.Name === 'Ada');
+}
+
 console.log(`\n=== ${pass}/${pass + fail} PASS ===`);
 process.exit(fail ? 1 : 0);
