@@ -715,13 +715,24 @@ function safeSrc(dest) {
 // off-site) and is exactly the value this one must refuse. Same backslash normalisation as
 // `linkKind` (round 3): a browser resolves `\` exactly like `/`, so `/\evil.example` is a
 // network-path reference wearing one slash, not two — a plain `startsWith('//')` test alone
-// would not see it, and the value would resolve off this site. A `..` segment is rejected on
-// the raw, pre-normalisation path (before
+// would not see it, and the value would resolve off this site.
+//
+// Same control-character stripping as `isSafeImageSrc` above (adversarial review, round 1,
+// R1-P1-1): a URL parser drops ASCII tab/LF/CR from anywhere in a value before it resolves
+// anything, so their presence in the raw string can hide a `//` that the parser WILL see — this
+// keeps that gate and this one looking at the same thing. This gate is still a DIAGNOSTIC one on
+// the raw, as-written string, though, not the enforced boundary: the value this validates goes on
+// to be re-validated at the actual redirect boundary in shop-function-template.js, whose own
+// comment explains why a RESULT-side check lives there rather than every normalisation rule a
+// URL parser has being chased here (a leading single-dot path segment removed by a parser before
+// it resolves is one this gate still cannot see, by construction).
+//
+// A `..` segment is rejected on the raw, pre-normalisation path (before
 // `?`/`#`) rather than left to a resolver to quietly walk away — an author who wrote `/a/../b`
 // gets refused, not silently rewritten to `/b`.
 const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
 function isSafeInternalPath(dest) {
-  const raw = decodeEntitiesOnce(dest).replace(/\\/g, '/');
+  const raw = decodeEntitiesOnce(dest).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
   if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
   if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
   return true;
@@ -2263,6 +2274,15 @@ function renderSiteToHtml(site) {
 // recorded since the last call and CLEARS it (so warnings are never double-reported across
 // separate takeDropWarnings() calls, e.g. one per build). A build script logs these; nothing in
 // this file requires a caller to read them, so existing callers of renderSiteToHtml are unaffected.
+//
+// R1-P3-2 (adversarial review, round 1): as of this comment, `grep -rn takeDropWarnings` across
+// this repo (excluding tests) turns up no consumer at all — the "a build script logs these"
+// contract above describes an intended caller, not one that exists HERE. If that caller lives in
+// reef (the platform repo that drives this package's build), note it here so the next person
+// does not go looking for it in this repo and conclude the feature is dead: <name the reef
+// build-script path/module once it exists>. Until then, an author who writes an invalid
+// `thanks=` (or any other gated destination) gets silent degradation — the value is dropped and
+// the page renders correctly without it, but nothing tells them why.
 function takeDropWarnings() { return _dropWarnings.splice(0); }
 
 // ── derived page description ─────────────────────────────────────────────────────────────────────

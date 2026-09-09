@@ -298,6 +298,22 @@ const inboxEnv = { ASSETS: { fetch: async () => new Response('STATIC', { status:
 	}
 }
 
+// R1-P3-1 (adversarial review, round 1): this gate does NOT run `decodeEntitiesOnce` the way
+// site-core.js's `isSafeInternalPath` does, so an HTML-entity spelling of a slash or backslash is
+// ADMITTED here but rejected there — the opposite direction of every other pinned case in this
+// file. Pinned because it is the review's own finding, not because this side is wrong: the
+// forwarder never actually receives HTML-entity-encoded text on the wire (a hidden field's value
+// is whatever `safeInternalPath` already decoded once at build time), and taken at face value
+// (no entity decoding) none of these three literal strings contain `//` or a `..` segment, so
+// admitting them is consistent with this gate's own contract on the RAW string it was handed.
+{
+	const inconsistent = ['/&#47;&#47;evil.example', '/&#x2F;&#x2F;evil.example', '/&#92;&#92;evil.example'];
+	for (const value of inconsistent) {
+		ok(`isSiteRelativePath(${JSON.stringify(value)}) === true (site-core.js's isSafeInternalPath rejects the same string — pinned divergence, safe direction)`,
+			modFlag.isSiteRelativePath(value) === true);
+	}
+}
+
 // inboxRedirectResponse — the function that computes the Location: an internal path plus the
 // `?inbox=` query merge, unit-tested directly rather than only through a full request.
 {
@@ -307,6 +323,124 @@ const inboxEnv = { ASSETS: { fetch: async () => new Response('STATIC', { status:
 	ok('inboxRedirectResponse: an existing query string is preserved, not replaced', r2.headers.get('location') === '/thanks?ref=fb&inbox=sent');
 	const r3 = modFlag.inboxRedirectResponse('/thanks?inbox=stale', 'sent');
 	ok('inboxRedirectResponse: re-submitting never stacks the param', r3.headers.get('location') === '/thanks?inbox=sent');
+	// R1-P1-1 (adversarial review, round 1): the Location built above must resolve on the SITE's
+	// own origin, not merely look site-relative in the raw string that fed it — an absolute URL
+	// smuggled past the leading-slash check resolves to some OTHER origin.
+	const r4 = modFlag.inboxRedirectResponse('https://evil.example/collect', 'sent');
+	ok('inboxRedirectResponse: an absolute URL never becomes the Location — falls back to site root', r4.headers.get('location') === '/?inbox=sent');
+	const r5 = modFlag.inboxRedirectResponse('http://[::1', 'sent');
+	ok('inboxRedirectResponse: a value `new URL` cannot parse at all falls back to site root, not a thrown error', r5.status === 303 && r5.headers.get('location') === '/?inbox=sent');
+}
+
+// R1-P1-1 / R1-P2-1 (adversarial review, round 1) — the property, not a hand-picked list:
+// whatever `isSiteRelativePath` admits, the Location `inboxRedirectResponse` builds from it must
+// still resolve on the site's own origin, with a resulting pathname that does not begin with `//`
+// (a network-path reference a browser reads as a host). A URL parser removes a leading
+// single-dot path segment (including percent-encoded spellings) and ASCII tab/LF/CR from
+// anywhere in the input BEFORE it resolves — either can turn one literal leading slash into a
+// RESOLVED path that begins with two, and neither leaves a literal `//` or `..` in the raw
+// string for an input-side gate to see. `isSiteRelativePath` strips the control characters
+// (closing that half at the gate too), but the leading-dot-segment class is closed only by this
+// result-side check — reconstructed here as a corpus, per the review's own description of its
+// harness (single-dot segments and their percent-encoded spellings, control characters,
+// backslashes, percent-encoded slashes, and combinations of the above), not as a list of
+// examples: a fix that only closes one member of a class must not look like it closed the class.
+function hostileRedirectCorpus() {
+	const dotSpellings = ['.', '%2e', '%2E', '%2e%2e', '.%2e', '%2e.', './.'];
+	const slashSpellings = ['//', '///', '/\\', '\\/', '\\\\', '%2f%2f', '%2F%2F'];
+	const controlChars = ['\t', '\n', '\r', '\t\r', '\r\n'];
+	const controlSlashSpellings = ['//', '\\\\'];
+	const suffixes = ['dest.example', 'dest.example/path?q=1', 'dest.example#f', 'dest.example?x=1#y'];
+	const inputs = new Set();
+	// Class 2 — a leading single-dot path segment a URL parser removes before it resolves.
+	for (const dot of dotSpellings) {
+		for (const slashes of slashSpellings) {
+			for (const suffix of suffixes) inputs.add(`/${dot}${slashes}${suffix}`);
+		}
+	}
+	// Class 1 — an ASCII control character a URL parser drops from anywhere in the input.
+	for (const ctrl of controlChars) {
+		for (const slashes of controlSlashSpellings) {
+			for (const suffix of suffixes) {
+				inputs.add(`/${ctrl}/anything${slashes}${suffix}`);
+				inputs.add(`/${ctrl}${ctrl}/anything${slashes}${suffix}`);
+			}
+		}
+	}
+	// Combined — both mechanisms on the same value.
+	for (const dot of dotSpellings) {
+		for (const ctrl of controlChars) {
+			for (const suffix of suffixes) inputs.add(`/${ctrl}${dot}//${suffix}`);
+		}
+	}
+	return [...inputs];
+}
+
+{
+	const SITE = 'https://site.example';
+	const corpus = hostileRedirectCorpus();
+	ok('hostileRedirectCorpus actually generates shapes (else the property below never runs)', corpus.length > 0);
+	console.log(`  … corpus size: ${corpus.length}`);
+	let accepted = 0, offSite = 0;
+	const offSiteExamples = [];
+	for (const value of corpus) {
+		if (!modFlag.isSiteRelativePath(value)) continue;
+		accepted++;
+		const location = modFlag.inboxRedirectResponse(value, 'sent').headers.get('location') || '';
+		let resolved;
+		try { resolved = new URL(location, SITE); } catch (e) { offSite++; offSiteExamples.push(value); continue; }
+		if (resolved.origin !== SITE || resolved.pathname.startsWith('//')) {
+			offSite++;
+			if (offSiteExamples.length < 5) offSiteExamples.push(value);
+		}
+	}
+	console.log(`  … accepted by isSiteRelativePath: ${accepted}/${corpus.length}; off-site after inboxRedirectResponse: ${offSite}`);
+	if (offSiteExamples.length) console.log('  … off-site examples: ' + JSON.stringify(offSiteExamples));
+	ok('the gate actually admits some of the corpus (else "0 off-site" would be vacuous)', accepted > 0);
+	ok(`every corpus input the gate admits resolves ON this site, with no // pathname prefix (0/${accepted} off-site)`, offSite === 0);
+}
+
+// The same property, as a small explicit/pinned set rather than the generated corpus — the
+// reviewer's own shape for proving the assertion actually fires on a value the gate admits
+// (⚠️ per the review: this only means anything if at least one entry below makes
+// isSiteRelativePath return true and the assertion inside the loop actually executes).
+{
+	const SITE = 'https://site.example';
+	const shapes = [
+		'/thanks', '/thanks?ref=fb', '/thanks#top', '/zh-tw/thanks', '/a/./b', '/',
+		'/.//example.test', '/%2e//example.test', '/%2e%2e//example.test', '/.///example.test',
+		'/' + String.fromCharCode(10) + '/x//example.test',
+		'/' + String.fromCharCode(9) + '/x//example.test',
+		'/' + String.fromCharCode(13) + '/x//example.test',
+	];
+	let admitted = 0;
+	for (const value of shapes) {
+		if (modFlag.isSiteRelativePath(value) !== true) continue;
+		admitted++;
+		const location = modFlag.inboxRedirectResponse(value, 'sent').headers.get('location');
+		ok(`the Location for ${JSON.stringify(value)} resolves on this site`,
+			new URL(location, SITE).origin === SITE && !new URL(location, SITE).pathname.startsWith('//'));
+	}
+	ok('at least one pinned shape was admitted by the gate, so the assertions above actually ran', admitted > 0);
+}
+
+// benign shapes: the repair above must not change behaviour for anything ordinary — the same
+// 15 shapes the review measured, Location compared literally, not just "still same-origin"
+{
+	const benign = [
+		['/thanks', 'sent', '/thanks?inbox=sent'],
+		['/zh-tw/thanks', 'sent', '/zh-tw/thanks?inbox=sent'],
+		['/thanks?ref=fb', 'sent', '/thanks?ref=fb&inbox=sent'],
+		['/thanks#top', 'sent', '/thanks?inbox=sent#top'],
+		['/a/./b', 'sent', '/a/b?inbox=sent'],
+		['/', 'sent', '/?inbox=sent'],
+		['/日本語', 'sent', '/%E6%97%A5%E6%9C%AC%E8%AA%9E?inbox=sent'],
+		['/contact', 'rate_limited', '/contact?inbox=rate_limited'],
+	];
+	for (const [value, outcome, expected] of benign) {
+		const location = modFlag.inboxRedirectResponse(value, outcome).headers.get('location');
+		ok(`benign shape ${JSON.stringify(value)} is unchanged by the result-side check`, location === expected);
+	}
 }
 
 // end-to-end: a successful submit with a valid thanks_to redirects THERE, not to return_to

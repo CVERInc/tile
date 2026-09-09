@@ -11,6 +11,10 @@ on a successful submit the visitor lands there (`?inbox=sent` appended) instead 
 built-in success card in place. A failed submit still returns HERE, so the inline retry error
 above the button keeps working exactly as it does without `thanks=`.
 
+`thanks=` names one exact page; it is not rewritten per locale — write the locale segment
+yourself (`thanks=/zh-tw/thank-you`) if you want a per-language landing page. This matches
+`action=`'s own existing semantics: also a literal, author-written destination, never rewritten.
+
 ### Your name {required}
 ### Email {email}
 

@@ -58,6 +58,10 @@ const forms = readFileSync(join(DIST, 'forms/index.html'), 'utf8');
 // section there would silently change what those checks are counting. Isolated the same way
 // scheme-check.md is its own page rather than a new section bolted onto an existing fixture.
 const formThanks = readFileSync(join(DIST, 'form-thanks/index.html'), 'utf8');
+// R1-P3-5 (adversarial review, round 1): the `zh-tw` override of this same fixture, SAME
+// `thanks=/form-thanks-landing` as the base-locale page — the one page in this repo whose sole
+// purpose is pinning the return_to/thanks_to locale asymmetry below.
+const formThanksZh = readFileSync(join(DIST, 'zh-tw/form-thanks/index.html'), 'utf8');
 // a built post page by slug — walks DIST itself rather than borrowing the script audit's list,
 // which is built later in the file (and is that function's local).
 const findPost = (slug) => {
@@ -962,15 +966,30 @@ const checks = [
       && !!c2 && !('redirectsToThanks' in c2)
       && !!c3 && !('redirectsToThanks' in c3);
   }],
-  ['form-thanks: a successful submit navigates to the forwarder\'s own final URL instead of showing the in-place card, guarded on redirectsToThanks', () => {
+  ['form-thanks: a successful submit navigates to the forwarder\'s own final URL only once this script has confirmed it for itself (same-origin check ahead of the navigate), instead of showing the in-place card', () => {
     const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s1-thanks-page-configured"')));
-    return /if \(copy && copy\.redirectsToThanks\) \{ location\.assign\(res\.url\); return; \}/.test(s)
+    return /if \(copy && copy\.redirectsToThanks\) \{/.test(s)
+      && /new URL\(res\.url, location\.href\)\.origin === location\.origin/.test(s)
+      && /location\.assign\(res\.url\); return;/.test(s)
+      && /location\.reload\(\);\s*return;/.test(s)
       && /showSuccess\(fd\);/.test(s);
   }],
   ['form-thanks: the SAME script (no redirectsToThanks branch reachable without it) still runs for the control section — one shared script, not a per-section fork', () => {
     const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s2-thanks-page-not-configured-control"')));
-    return /if \(copy && copy\.redirectsToThanks\) \{ location\.assign\(res\.url\); return; \}/.test(s);
+    return /if \(copy && copy\.redirectsToThanks\) \{/.test(s)
+      && /new URL\(res\.url, location\.href\)\.origin === location\.origin/.test(s);
   }],
+  // R1-P3-5 (adversarial review, round 1): `return_to` is locale-aware (`Astro.url.pathname` IS
+  // the built path, already carrying the locale segment) — `thanks=` is a literal, author-written
+  // path and is never rewritten per locale. This is a product-semantics decision, consistent with
+  // `action=`'s own existing semantics (also a literal, author-written destination, never
+  // rewritten), not a defect — pinned here so a future change does not "fix" it as a bug without
+  // that decision being revisited on purpose.
+  ['form-thanks (zh-tw): return_to carries the locale segment this route was built at', () =>
+    /<input type="hidden" name="return_to" value="\/zh-tw\/form-thanks\/">/.test(formThanksZh)],
+  ['form-thanks (zh-tw): thanks_to is the SAME literal path as the base-locale page — NOT rewritten to /zh-tw/…', () =>
+    /<input type="hidden" name="thanks_to" value="\/form-thanks-landing">/.test(formThanksZh)
+      && !formThanksZh.includes('name="thanks_to" value="/zh-tw/')],
   // -- icons: the three well-known paths a browser, a crawler and iOS ask for unprompted --
   ['icons: all three well-known paths are emitted', () =>
     ['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'].every((p) => existsSync(distFile(p)))],

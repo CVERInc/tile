@@ -428,14 +428,26 @@ const inboxCopy = isInbox ? {
               let outcome = '';
               try { outcome = new URL(res.url, location.href).searchParams.get('inbox') || ''; } catch (e) {}
               if (outcome === 'sent') {
-                // `thanks=`: the forwarder already re-validated its own
-                // `thanks_to` and redirected THERE, not here — `res.url` (fetch follows a
-                // redirect itself) IS that owner-edited page, `?inbox=sent` and all. A real
-                // navigation, not the in-place card: this page is not where the visitor is
-                // meant to end up, so showing an in-place "sent" here first would be a lie the
-                // navigation immediately corrects. No-JS behaves identically via the plain
-                // 303 the browser follows on its own.
-                if (copy && copy.redirectsToThanks) { location.assign(res.url); return; }
+                // `thanks=`: the forwarder re-validates its own `thanks_to` before it ever
+                // becomes a `Location` (shop-function-template.js), so `res.url` (fetch follows
+                // a redirect itself) is meant to already be that owner-edited page. This script
+                // is the last thing that acts on it, though, so it checks the one property it
+                // actually needs rather than trusting the forwarder's promise outright: a page
+                // on THIS origin. On a match, navigate there — a real navigation, not the
+                // in-place card, since this page is not where the visitor is meant to end up and
+                // showing "sent" here first would be a lie the navigation immediately corrects.
+                // On a mismatch, do not navigate to the untrusted value AND do not show the
+                // in-place card either (that would silently hide that this page could not land
+                // where `thanks=` names) — fall back to a full top-level reload of this page.
+                // The no-JS round trip has no script here to run this check; it is covered
+                // instead by the forwarder's own result-side check on the `Location` it builds.
+                if (copy && copy.redirectsToThanks) {
+                  let sameOrigin = false;
+                  try { sameOrigin = new URL(res.url, location.href).origin === location.origin; } catch (e) {}
+                  if (sameOrigin) { location.assign(res.url); return; }
+                  location.reload();
+                  return;
+                }
                 showSuccess(fd);
               } else showError(copy ? copy.errorServer : null);
             })

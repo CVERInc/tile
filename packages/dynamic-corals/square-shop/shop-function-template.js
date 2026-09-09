@@ -745,15 +745,30 @@ const INBOX_RESERVED_FIELDS = new Set([
 // every inbox submission) and `thanks_to` (opt-in, the form coral's `thanks=`)
 // — same rule, same function, so hardening it once protects both.
 //
-// A browser resolves `\` exactly like `/`, so `/\evil.example` is a network-path reference
-// wearing one slash, not two — normalise backslashes to slashes FIRST (same fix as sitetile's
-// `linkKind`/`isSafeInternalPath`) so a plain `startsWith('//')` test cannot be dodged by
-// spelling the second slash as a backslash. A `..` segment is rejected on the raw path (before
-// `?`/`#`), not left to a resolver to quietly walk away.
+// This is a DIAGNOSTIC gate on the raw, as-posted string — the actual boundary is the
+// result-side check in `inboxRedirectResponse` below, which looks at what a URL parser
+// resolves the value TO, not at how the value is spelled. Two things this gate strips or
+// rejects up front so it stays roughly in step with that resolved value (same technique as
+// `isSafeImageSrc` in site-core.js):
+//
+// * ASCII tab/LF/CR, wherever they sit — a URL parser drops these before it resolves anything,
+//   so their presence in the raw string tells this gate nothing about the resolved path.
+// * A browser resolves `\` exactly like `/`, so `/\evil.example` is a network-path reference
+//   wearing one slash, not two — normalise backslashes to slashes so a plain `startsWith('//')`
+//   test cannot be dodged by spelling the second slash as a backslash.
+//
+// What this gate CANNOT see: a leading single-dot path segment (`.`, or a percent-encoded
+// spelling of one) is also removed by a URL parser before it resolves, and can turn one literal
+// leading slash into a resolved path that begins with two — this gate has no literal `//` at
+// position 0 to catch, and no `..` in the raw string to reject. That class is why the result-side
+// check exists; it does not depend on this gate anticipating every parser normalisation rule.
+//
+// A `..` segment is rejected on the raw path (before `?`/`#`), not left to a resolver to quietly
+// walk away.
 const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
 function isSiteRelativePath(value) {
 	if (typeof value !== 'string' || value === '') return false;
-	const v = value.replace(/\\/g, '/');
+	const v = value.replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
 	if (!v.startsWith('/') || v.startsWith('//')) return false;
 	return !RE_DOTDOT_SEGMENT.test(v.split(/[?#]/, 1)[0]);
 }
@@ -785,8 +800,31 @@ function resolveInboxReturnPath(returnTo, referer, origin) {
 
 // 303 back to the site with `?inbox=<outcome>` appended (replacing any the page
 // already carried, so re-submitting never stacks the param).
+//
+// `returnPath` reaches here already passed by `isSiteRelativePath` (directly, or via
+// `resolveInboxReturnPath`) — but that gate reads the RAW string, and a URL parser can resolve a
+// raw string it admitted into a Location that leaves the site. Two ways that happens even with
+// the control-character stripping `isSiteRelativePath` now also does: a leading single-dot path
+// segment (`.`, or a percent-encoded spelling of one) is removed by the parser before it
+// resolves, and any control character the gate's stripping missed would be too — either can turn
+// one literal leading slash into a RESOLVED path that begins with two, and a `Location` beginning
+// with `//` is a network-path reference: a browser reads it as a host, not a path. So this
+// function checks the one thing that actually matters — the RESOLVED value the header will
+// carry — rather than trying to keep pace with every normalisation rule a URL parser has: the
+// origin must still be this placeholder site origin (an absolute URL smuggled past the leading
+// slash resolves to some OTHER origin, caught the same way), and the resolved pathname must not
+// start with `//`. Either failing falls back to the site root, never to the untrusted value.
+const REDIRECT_BASE = 'http://site.invalid';
 function inboxRedirectResponse(returnPath, outcome) {
-	const url = new URL(returnPath, 'http://site.invalid');
+	let url;
+	try {
+		url = new URL(returnPath, REDIRECT_BASE);
+	} catch (e) {
+		url = new URL('/', REDIRECT_BASE);
+	}
+	if (url.origin !== REDIRECT_BASE || url.pathname.startsWith('//')) {
+		url = new URL('/', REDIRECT_BASE);
+	}
 	url.searchParams.set('inbox', outcome);
 	return new Response(null, { status: 303, headers: { location: url.pathname + url.search + url.hash } });
 }
