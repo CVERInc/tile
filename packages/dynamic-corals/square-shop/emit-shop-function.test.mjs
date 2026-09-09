@@ -273,5 +273,111 @@ const inboxEnv = { ASSETS: { fetch: async () => new Response('STATIC', { status:
 	ok('timeout aborts the relay and answers ?inbox=unavailable', (res.headers.get('location') || '') === '/contact?inbox=unavailable');
 }
 
+// ── `thanks_to`: the form coral's opt-in `thanks=`, re-validated here rather ─────
+// than trusted, since a hidden field is still something a visitor's own browser tooling can
+// edit before the request leaves it (see shop-function-template.js's own note).
+
+// isSiteRelativePath itself — a table of the exact hostile shapes the coral's build-time
+// validator (site-core.js's safeInternalPath) also refuses, as DATA rather than as test names.
+{
+	const cases = [
+		['/thanks', true],
+		['/thanks?ref=fb', true],
+		['//evil.example', false],
+		['/\\evil.example', false],     // a backslash resolves like a slash, so this would leave the site
+		['https://evil.example', false],
+		['javascript:void(0)', false],
+		['../x', false],
+		['/a/../b', false],
+		['/a/..', false],
+		['..', false],
+		['', false],
+	];
+	for (const [value, expected] of cases) {
+		ok(`isSiteRelativePath(${JSON.stringify(value)}) === ${expected}`, modFlag.isSiteRelativePath(value) === expected);
+	}
+}
+
+// inboxRedirectResponse — the function that computes the Location: an internal path plus the
+// `?inbox=` query merge, unit-tested directly rather than only through a full request.
+{
+	const r1 = modFlag.inboxRedirectResponse('/thanks', 'sent');
+	ok('inboxRedirectResponse: plain path + outcome', r1.headers.get('location') === '/thanks?inbox=sent');
+	const r2 = modFlag.inboxRedirectResponse('/thanks?ref=fb', 'sent');
+	ok('inboxRedirectResponse: an existing query string is preserved, not replaced', r2.headers.get('location') === '/thanks?ref=fb&inbox=sent');
+	const r3 = modFlag.inboxRedirectResponse('/thanks?inbox=stale', 'sent');
+	ok('inboxRedirectResponse: re-submitting never stacks the param', r3.headers.get('location') === '/thanks?inbox=sent');
+}
+
+// end-to-end: a successful submit with a valid thanks_to redirects THERE, not to return_to
+{
+	globalThis.fetch = async () => new Response('{}', { status: 200 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('valid thanks_to: success redirects to the thanks page, not return_to', (res.headers.get('location') || '') === '/thank-you?inbox=sent');
+}
+
+// an off-site thanks_to is never trusted, even though the coral is supposed to have already
+// dropped it at build time — the forwarder re-validates independently
+{
+	globalThis.fetch = async () => new Response('{}', { status: 200 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', 'https://evil.example/collect');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('invalid thanks_to: success falls back to return_to, never the foreign value', (res.headers.get('location') || '') === '/contact?inbox=sent');
+}
+
+// a FAILED submit stays on return_to even with a perfectly valid thanks_to — thanks= names a
+// landing page for a message that went somewhere, not a retry
+{
+	globalThis.fetch = async () => new Response(JSON.stringify({ reason: 'rate_limited' }), { status: 429 });
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('failure ignores thanks_to and returns to return_to with the reason', (res.headers.get('location') || '') === '/contact?inbox=rate_limited');
+}
+
+// the honeypot short-circuit "behaves EXACTLY as sent" — including landing on thanks_to
+{
+	let called = false;
+	globalThis.fetch = async () => { called = true; return new Response('{}', { status: 200 }); };
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	fd.set('_hp', 'i-am-a-bot');
+	const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	ok('honeypot + thanks_to: still redirects to the thanks page', (res.headers.get('location') || '') === '/thank-you?inbox=sent');
+	ok('honeypot: never forwarded', called === false);
+}
+
+// thanks_to is a reserved wire name — it must never leak into the message `fields`, the same
+// contract return_to/_hp/visitor_email already have
+{
+	let seen = null;
+	globalThis.fetch = async (url, opts) => { seen = { url: String(url), opts }; return new Response('{}', { status: 200 }); };
+	const fd = new FormData();
+	fd.set('return_to', '/contact');
+	fd.set('thanks_to', '/thank-you');
+	fd.set('Name', 'Ada');
+	await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+		method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+	}), inboxEnv);
+	const payload = JSON.parse(seen.opts.body);
+	ok('thanks_to never lands in fields', !('thanks_to' in payload.fields));
+	ok('an ordinary field still does', payload.fields.Name === 'Ada');
+}
+
 console.log(`\n=== ${pass}/${pass + fail} PASS ===`);
 process.exit(fail ? 1 : 0);

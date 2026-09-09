@@ -52,6 +52,12 @@ const rss = readFileSync(join(DIST, 'rss.xml'), 'utf8');
 // forms.md — the `form` coral, which until 2026-08-15 had no rendering test of
 // any kind. Two sections: one wired to an inbox, one deliberately not.
 const forms = readFileSync(join(DIST, 'forms/index.html'), 'utf8');
+// form-thanks.md — its own fixture, not folded into forms.md: several of
+// forms.md's own checks count/position-match against an EXACT, fixed number of `<form>`s and
+// `action=inbox` sections on that page (e.g. "exactly once", `lastIndexOf`) — adding a `thanks=`
+// section there would silently change what those checks are counting. Isolated the same way
+// scheme-check.md is its own page rather than a new section bolted onto an existing fixture.
+const formThanks = readFileSync(join(DIST, 'form-thanks/index.html'), 'utf8');
 // a built post page by slug — walks DIST itself rather than borrowing the script audit's list,
 // which is built later in the file (and is that function's local).
 const findPost = (slug) => {
@@ -927,6 +933,43 @@ const checks = [
     const unwired = forms.slice(forms.lastIndexOf('<form class="st-form"'));
     return !/name="return_to"/.test(general) && !/name="_hp"/.test(general)
       && !/name="return_to"/.test(unwired) && !/name="_hp"/.test(unwired);
+  }],
+  // -- form-thanks.md: `thanks=<site-internal path>` on the form coral --
+  // its own fixture — see the file's own header note on why it's isolated from forms.md.
+  ['form-thanks: a valid thanks= emits a thanks_to hidden field, alongside return_to, in the same form', () => {
+    const s1 = formThanks.slice(formThanks.indexOf('id="s1-thanks-page-configured"'), formThanks.indexOf('id="s2-'));
+    return /<input type="hidden" name="return_to" value="\/form-thanks\/">/.test(s1)
+      && /<input type="hidden" name="thanks_to" value="\/form-thanks-landing">/.test(s1);
+  }],
+  ['form-thanks: no thanks= (control) emits no thanks_to field — byte-identical hidden-field shape to a plain action=inbox form', () => {
+    const s2 = formThanks.slice(formThanks.indexOf('id="s2-thanks-page-not-configured-control"'), formThanks.indexOf('id="s3-'));
+    return /<input type="hidden" name="return_to" value="\/form-thanks\/">/.test(s2) && !/name="thanks_to"/.test(s2);
+  }],
+  ['form-thanks: an off-site thanks= is dropped — no thanks_to field, and the foreign value never reaches the page at all', () => {
+    const s3 = formThanks.slice(formThanks.indexOf('id="s3-thanks-page-invalid-destination-dropped"'), formThanks.indexOf('id="s4-'));
+    return /<input type="hidden" name="return_to" value="\/form-thanks\/">/.test(s3) && !/name="thanks_to"/.test(s3)
+      && !s3.includes('example.test');
+  }],
+  ['form-thanks: the inbox-copy payload carries redirectsToThanks only for the form that opts in — absent (not merely false) for the other two', () => {
+    const copyOf = (id) => {
+      const m = new RegExp('id="' + id + '" data-inbox-copy="([^"]+)"').exec(formThanks);
+      return m ? JSON.parse(m[1].replace(/&quot;/g, '"')) : null;
+    };
+    const c1 = copyOf('s1-thanks-page-configured');
+    const c2 = copyOf('s2-thanks-page-not-configured-control');
+    const c3 = copyOf('s3-thanks-page-invalid-destination-dropped');
+    return !!c1 && c1.redirectsToThanks === true
+      && !!c2 && !('redirectsToThanks' in c2)
+      && !!c3 && !('redirectsToThanks' in c3);
+  }],
+  ['form-thanks: a successful submit navigates to the forwarder\'s own final URL instead of showing the in-place card, guarded on redirectsToThanks', () => {
+    const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s1-thanks-page-configured"')));
+    return /if \(copy && copy\.redirectsToThanks\) \{ location\.assign\(res\.url\); return; \}/.test(s)
+      && /showSuccess\(fd\);/.test(s);
+  }],
+  ['form-thanks: the SAME script (no redirectsToThanks branch reachable without it) still runs for the control section — one shared script, not a per-section fork', () => {
+    const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s2-thanks-page-not-configured-control"')));
+    return /if \(copy && copy\.redirectsToThanks\) \{ location\.assign\(res\.url\); return; \}/.test(s);
   }],
   // -- icons: the three well-known paths a browser, a crawler and iOS ask for unprompted --
   ['icons: all three well-known paths are emitted', () =>

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
-  safeHref, safeSrc,
+  safeHref, safeSrc, safeInternalPath,
 } from './site-core.js';
 
 let passed = 0;
@@ -888,6 +888,57 @@ test('safeHref / safeSrc: the Astro-facing helpers return the string or null, ma
   assert.equal(safeSrc('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=');
   assert.equal(safeSrc('data:image/svg+xml;base64,PHN2Zz4='), null);
   assert.doesNotThrow(() => safeHref('&#x110000;'));
+});
+
+// ── form coral `thanks=`: safeInternalPath, a stricter site-internal-only sibling ──
+
+test('safeInternalPath: accepts a plain site-internal path, with or without its own query string', () => {
+  assert.equal(safeInternalPath('/thanks'), '/thanks');
+  assert.equal(safeInternalPath('/thanks?ref=fb'), '/thanks?ref=fb');
+});
+
+test('safeInternalPath: rejects an off-site destination even though safeHref allows it', () => {
+  // Scheme-allowed by isSafeHref's policy (an ordinary link may point off-site) — and exactly
+  // the value safeInternalPath exists to refuse.
+  assert.equal(safeHref('https://example.test/x'), 'https://example.test/x');
+  assert.equal(safeInternalPath('https://example.test/x'), null);
+});
+
+test('safeInternalPath: rejects a network-path reference, spelled with `//` or a normalizing backslash', () => {
+  assert.equal(safeInternalPath('//evil.example'), null);
+  assert.equal(safeInternalPath('/\\evil.example'), null);
+});
+
+test('safeInternalPath: rejects a `..` segment wherever it sits, without resolving it away first', () => {
+  assert.equal(safeInternalPath('../x'), null);
+  assert.equal(safeInternalPath('/a/../b'), null);
+  assert.equal(safeInternalPath('/a/..'), null);
+  assert.equal(safeInternalPath('..'), null);
+});
+
+test('safeInternalPath: a scheme with no leading slash is rejected too, not just an off-site path', () => {
+  assert.equal(safeInternalPath('javascript:void(0)'), null);
+});
+
+test('safeInternalPath: absent/empty degrades to null, same shape as safeHref', () => {
+  assert.equal(safeInternalPath(''), null);
+  assert.equal(safeInternalPath(null), null);
+  assert.equal(safeInternalPath(undefined), null);
+});
+
+test('safeInternalPath: a rejected destination records one drop warning, the same diagnostics queue safeHref uses', () => {
+  takeDropWarnings();
+  assert.equal(safeInternalPath('https://example.test/x'), null);
+  const warnings = takeDropWarnings();
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].dest, 'https://example.test/x');
+  assert.deepEqual(takeDropWarnings(), [], 'the queue is drained after being read');
+});
+
+test('safeInternalPath: an accepted destination records no drop warning', () => {
+  takeDropWarnings();
+  assert.equal(safeInternalPath('/thanks'), '/thanks');
+  assert.deepEqual(takeDropWarnings(), []);
 });
 
 // ── round 3: classification consistency — backslash/protocol-relative destinations ────────────

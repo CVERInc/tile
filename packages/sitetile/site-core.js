@@ -251,6 +251,13 @@ function parseSite(text) {
       // inputs and submission wiring (action/backend) is a deploy concern, per cutover-structure-
       // before-data. General: any recast contact/inquiry page (no other coral expresses a form).
       //
+      // 🔴 `thanks=<path>` — an `action=inbox` form only, opt-in: an ordinary,
+      // site-internal page the owner writes and edits like any other, shown after a successful
+      // submit instead of the built-in card. Not a field/brace concern (it's a param on the TYPE
+      // line, read generically by `parseParams` like `action=`/`submit=`), so nothing here parses
+      // it — it is validated (`safeInternalPath`, this file) and wired entirely in Form.astro; see
+      // that file's own header note for the full contract.
+      //
       // 🩸 2026-09-03 (cold-read findings #9/#10): the brace also carries an explicit `required`
       // (or `required: false`) modifier now — `### Message {textarea required}`, `### Company
       // {required: false}`, `### Email {email, required: false}`. Backwards compatible: a brace
@@ -698,6 +705,30 @@ function safeHref(dest) {
 function safeSrc(dest) {
   if (dest == null || dest === '') return null;
   return isSafeImageSrc(dest) ? decodeEntitiesOnce(dest) : null;
+}
+
+// isSafeInternalPath / safeInternalPath — a STRICTER sibling of isSafeHref/safeHref, same family
+// (same entity-decode step, same drop-warning queue via recordDrop), for a destination that must
+// stay ON THIS SITE rather than merely off a live script scheme. The form coral's `thanks=` names
+// a page the site's own build serves, so isSafeHref's scheme allowlist is the wrong tool here —
+// `https://example.test/x` is itself scheme-allowed by that policy (an ordinary link may point
+// off-site) and is exactly the value this one must refuse. Same backslash normalisation as
+// `linkKind` (round 3): a browser resolves `\` exactly like `/`, so `/\evil.example` is a
+// network-path reference wearing one slash, not two — a plain `startsWith('//')` test alone
+// would not see it, and the value would resolve off this site. A `..` segment is rejected on
+// the raw, pre-normalisation path (before
+// `?`/`#`) rather than left to a resolver to quietly walk away — an author who wrote `/a/../b`
+// gets refused, not silently rewritten to `/b`.
+const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
+function isSafeInternalPath(dest) {
+  const raw = decodeEntitiesOnce(dest).replace(/\\/g, '/');
+  if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
+  if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
+  return true;
+}
+function safeInternalPath(dest) {
+  if (dest == null || dest === '') return null;
+  return isSafeInternalPath(dest) ? decodeEntitiesOnce(dest) : null;
 }
 
 // round 4 (R3-P3-3): this file's OWN href/src emitters below used to escAttr() the RAW,
@@ -2295,6 +2326,8 @@ export {
   takeDropWarnings,
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
+  // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
+  safeInternalPath,
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —
   // see cssUrlString's own comment.
   cssUrlString,
