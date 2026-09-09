@@ -443,6 +443,42 @@ function hostileRedirectCorpus() {
 	}
 }
 
+// Round 2 (coordinator note, 2026-09-10): the gate's own control-character strip
+// (isSiteRelativePath, shop-function-template.js) had no test that would go red if it were
+// removed — every existing assertion either `continue`s past a shape the gate rejects (the
+// pinned-shape loop above) or only checks the FINAL Location's origin/pathname, which the
+// result-side check in inboxRedirectResponse already protects on its own. These three go
+// through the full request path (not the gate function in isolation), one for each control
+// character, with the character sitting right after the leading slash of an otherwise ordinary
+// `thanks_to` — the one position where stripping it changes the gate's ACCEPT/REJECT decision:
+// stripped, the value reveals a network-path reference (`//thanks`) and the gate rejects it
+// before it ever reaches inboxRedirectResponse, so a successful submit lands on `return_to`, the
+// original page. Without the strip, the raw value (control character intact) still starts with
+// one visible slash and is admitted by the gate; it is only caught later, when a real URL parser
+// resolves it to a DIFFERENT origin (`http://thanks`, the control character having been dropped
+// by the parser itself) — and inboxRedirectResponse's own fallback on THAT failure is the site
+// root, not `return_to`. So removing the strip does not merely admit a value the gate should have
+// refused — it changes which page a real visitor's successful submit lands on: `/contact?inbox=sent`
+// with the strip in place, `/?inbox=sent` without it.
+{
+	const cases = [
+		['tab', '\t'],
+		['LF', '\n'],
+		['CR', '\r'],
+	];
+	for (const [name, ctrl] of cases) {
+		globalThis.fetch = async () => new Response('{}', { status: 200 });
+		const fd = new FormData();
+		fd.set('return_to', '/contact');
+		fd.set('thanks_to', `/${ctrl}/thanks`);
+		const res = await modFlag.default.fetch(new Request('https://site.example/__reef/inbox', {
+			method: 'POST', body: fd, headers: { referer: 'https://site.example/contact' }
+		}), inboxEnv);
+		ok(`thanks_to with an embedded ${name} right after the leading slash: the gate's strip rejects it, success lands on return_to (the original page), not the site root`,
+			(res.headers.get('location') || '') === '/contact?inbox=sent');
+	}
+}
+
 // end-to-end: a successful submit with a valid thanks_to redirects THERE, not to return_to
 {
 	globalThis.fetch = async () => new Response('{}', { status: 200 });
