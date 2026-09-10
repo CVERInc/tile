@@ -634,8 +634,12 @@ test('the real contract: forwarding follows the contract, verdict follows a gene
 	// composes into the site's own shell (site.platform: "Checkout result、
 	// /membership and /account are all in this site-owned presentation class").
 	// Their forward entries stay for already-emitted workers; the exemption is read
-	// off the contract under test, never a path list written here.
-	const siteOwnedPaths = new Set((real.siteOwnedBuyerPages || []).map((entry) => entry.path));
+	// off the contract under test, never a path list written here — which is also why
+	// an optional capability the contract does not carry yet exempts nothing.
+	const siteOwnedPaths = new Set([
+		...(real.siteOwnedBuyerPages || []).map((entry) => entry.path),
+		...(real.subscribeResult ? [real.subscribeResult.path] : [])
+	]);
 	for (const rule of real.forward) {
 		if (rule.match === 'exact' && siteOwnedPaths.has(rule.value)) continue;
 		const path = rule.match === 'exact' ? rule.value : rule.value + 'probe';

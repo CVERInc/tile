@@ -260,10 +260,10 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 // here. Every built site has a root document.
 
 const BUYER_PAGE_COPY = {
-	'en-US': { membership: 'Membership', membershipEmpty: 'No membership plans are available right now.', unavailable: 'This page is unavailable right now. Please try again later.', notFound: 'Not found', subscribe: 'Join', authState: 'Checking…', account: 'Account', signIn: 'Sign in', signInIntro: 'Enter your email address and we will send you a sign-in link.', email: 'Email address', sendLink: 'Send sign-in link', newEmail: 'New email address', sendVerification: 'Send verification email', interval: { day: 'day', week: 'week', month: 'month', year: 'year' } },
-	'ja-JP': { membership: 'メンバーシップ', membershipEmpty: '現在ご利用いただけるメンバーシッププランはありません。', unavailable: '現在このページを表示できません。しばらくしてから再度お試しください。', notFound: 'ページが見つかりません', subscribe: '加入する', authState: '確認中...', account: 'アカウント', signIn: 'ログイン', signInIntro: 'メールアドレスを入力すると、ログイン用のリンクをお送りします。', email: 'メールアドレス', sendLink: 'ログインリンクを送る', newEmail: '新しいメールアドレス', sendVerification: '確認メールを送信', interval: { day: '日額', week: '週額', month: '月額', year: '年額' } },
-	'zh-TW': { membership: '會員方案', membershipEmpty: '目前沒有可加入的會員方案。', unavailable: '目前無法顯示這個頁面，請稍後再試。', notFound: '找不到這個頁面', subscribe: '加入', authState: '確認中…', account: '帳戶', signIn: '登入', signInIntro: '輸入你的電子郵件，我們會寄一封登入連結給你。', email: '電子郵件', sendLink: '寄送登入連結', newEmail: '新的電子郵件', sendVerification: '寄送驗證信', interval: { day: '每日', week: '每週', month: '每月', year: '每年' } },
-	'zh-CN': { membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
+	'en-US': { membership: 'Membership', membershipEmpty: 'No membership plans are available right now.', unavailable: 'This page is unavailable right now. Please try again later.', notFound: 'Not found', subscribe: 'Join', authState: 'Checking…', account: 'Account', signIn: 'Sign in', signInIntro: 'Enter your email address and we will send you a sign-in link.', email: 'Email address', sendLink: 'Send sign-in link', newEmail: 'New email address', sendVerification: 'Send verification email', subscribeResultTitle: 'Subscription', subscribeThanks: 'Thank you for subscribing', subscribeActive: 'Your subscription is active.', subscribeConfirming: 'We are confirming your payment. This can take a moment, and we will email you when it is done.', subscribeUnknown: "We couldn't find this subscription", subscribeUnknownBody: 'This page appears after you complete a subscription.', backHome: 'Back to home', interval: { day: 'day', week: 'week', month: 'month', year: 'year' } },
+	'ja-JP': { membership: 'メンバーシップ', membershipEmpty: '現在ご利用いただけるメンバーシッププランはありません。', unavailable: '現在このページを表示できません。しばらくしてから再度お試しください。', notFound: 'ページが見つかりません', subscribe: '加入する', authState: '確認中...', account: 'アカウント', signIn: 'ログイン', signInIntro: 'メールアドレスを入力すると、ログイン用のリンクをお送りします。', email: 'メールアドレス', sendLink: 'ログインリンクを送る', newEmail: '新しいメールアドレス', sendVerification: '確認メールを送信', subscribeResultTitle: 'サブスクリプション', subscribeThanks: 'ご登録ありがとうございます', subscribeActive: 'サブスクリプションは有効です。', subscribeConfirming: 'お支払いを確認しています。少しお時間がかかる場合があり、完了しましたらメールでお知らせします。', subscribeUnknown: 'このサブスクリプションを確認できません', subscribeUnknownBody: 'このページはご登録の完了後に表示されます。', backHome: 'ホームに戻る', interval: { day: '日額', week: '週額', month: '月額', year: '年額' } },
+	'zh-TW': { membership: '會員方案', membershipEmpty: '目前沒有可加入的會員方案。', unavailable: '目前無法顯示這個頁面，請稍後再試。', notFound: '找不到這個頁面', subscribe: '加入', authState: '確認中…', account: '帳戶', signIn: '登入', signInIntro: '輸入你的電子郵件，我們會寄一封登入連結給你。', email: '電子郵件', sendLink: '寄送登入連結', newEmail: '新的電子郵件', sendVerification: '寄送驗證信', subscribeResultTitle: '訂閱', subscribeThanks: '感謝您的訂閱', subscribeActive: '您的訂閱已生效。', subscribeConfirming: '正在確認您的付款，可能需要一點時間，完成後我們會以 email 通知您。', subscribeUnknown: '找不到這筆訂閱', subscribeUnknownBody: '這一頁會在訂閱完成後顯示。', backHome: '返回首頁', interval: { day: '每日', week: '每週', month: '每月', year: '每年' } },
+	'zh-CN': { membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', subscribeResultTitle: '订阅', subscribeThanks: '感谢您的订阅', subscribeActive: '您的订阅已生效。', subscribeConfirming: '正在确认您的付款，可能需要一点时间，完成后我们会以 email 通知您。', subscribeUnknown: '找不到这笔订阅', subscribeUnknownBody: '这一页会在订阅完成后显示。', backHome: '返回首页', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
 };
 
 // Exact path AND method, from the contract entry — the same posture the forward
@@ -458,6 +458,120 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
 		const composed = replaceMain(head, bodyHtml);
 		// The donor had no <main> to compose into. Returning it unchanged would be a
 		// 200 showing the site's ROOT page under this URL — a fabricated success.
+		if (composed === head) return buyerPageErrorResponse(503);
+		return new Response(composed, {
+			status: status,
+			headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' }
+		});
+	} catch (e) {
+		return buyerPageErrorResponse(503);
+	}
+}
+
+// ─── SUBSCRIBE RESULT ─────────────────────────────────────────────────────────
+// The landing a buyer returns to after subscribing, in the SAME site-owned
+// presentation class as the buyer pages above: the site's own shell, and RSP
+// supplies only the scoped facts (state + plan) over the same-origin binding.
+// Which path, which query parameter carries the locator and which facts endpoint
+// answers all come from the contract (CFG.apiTransport.subscribeResult), so
+// nothing below names any of them.
+//
+// The route is claimed whenever the capability is baked — with or without a
+// usable locator. A missing locator is exactly the case this page answers "we
+// couldn't find this subscription" for; handing it back to the generic forward
+// would show the legacy whole-page fallback under a path this worker owns.
+function matchSubscribeResult(request, route) {
+	if (!route || request.method !== route.method) return null;
+	let pathname;
+	try { pathname = new URL(request.url).pathname; } catch (e) { return null; }
+	return pathname === route.path ? route : null;
+}
+
+// `active` and `confirming` are both "the payment happened"; they differ only in
+// whether the plan state has settled yet, so the heading is shared and only the
+// state line moves. `confirming` promises nothing about the outcome.
+function subscribeResultBody(state, plan, copy, locale) {
+	const hasName = plan && typeof plan.display_name === 'string' && plan.display_name;
+	// Price needs all three of the fields planPriceText reads; a partial plan gets
+	// its name and no invented number.
+	const hasPrice = hasName && plan.currency && plan.interval && Number.isFinite(Number(plan.amount));
+	const planLine = hasName
+		? '<p class="ejecta-subscribe-plan" data-ejecta-subscribe-plan="' + escHtml(plan.plan_id || '') + '">' +
+			'<strong>' + escHtml(plan.display_name) + '</strong>' +
+			(hasPrice ? ' — ' + escHtml(planPriceText(plan, copy, locale)) : '') + '</p>\n'
+		: '';
+	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="' + escHtml(state) + '">\n' +
+		'<h1>' + escHtml(copy.subscribeThanks) + '</h1>\n' + planLine +
+		'<p data-ejecta-subscribe-message="" role="status">' +
+		escHtml(state === 'active' ? copy.subscribeActive : copy.subscribeConfirming) + '</p>\n</section>';
+}
+
+// No locator, or a locator RSP does not recognise. It is NOT dressed as a
+// success and NOT dressed as a transient failure: the buyer is told the page
+// found nothing and given the way back.
+function subscribeResultUnknownBody(copy) {
+	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unknown">\n' +
+		'<h1>' + escHtml(copy.subscribeUnknown) + '</h1>\n' +
+		'<p>' + escHtml(copy.subscribeUnknownBody) + '</p>\n' +
+		'<p><a href="/">' + escHtml(copy.backHome) + '</a></p>\n</section>';
+}
+
+// The facts could not be read at all. The heading must not claim a subscription
+// that was never confirmed here, so it is the neutral page title.
+function subscribeResultUnavailableBody(copy) {
+	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unavailable">\n' +
+		'<h1>' + escHtml(copy.subscribeResultTitle) + '</h1>\n' +
+		'<p data-ejecta-subscribe-unavailable="" role="status">' + escHtml(copy.unavailable) + '</p>\n</section>';
+}
+
+async function renderSubscribeResult(request, env, cfg, route) {
+	const transport = cfg.apiTransport;
+	let url;
+	try { url = new URL(request.url); } catch (e) { return buyerPageErrorResponse(503); }
+	const locator = (url.searchParams.get(route.sessionParam) || '').trim();
+	try {
+		const factsUrl = new URL(url.origin + route.factsPath);
+		factsUrl.searchParams.set(route.sessionParam, locator);
+		const [facts, shellRes] = await Promise.all([
+			// No locator means there is nothing to ask about — the answer is already
+			// "we couldn't find this subscription" — so the seam is not called at all.
+			// Only the locator is sent: the plan is RSP's to name, never the query's.
+			locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null,
+			env.ASSETS.fetch(new Request(url.origin + '/', request))
+		]);
+		if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
+		const shell = await shellRes.text();
+		const locale = localeFromHint(shellLang(shell));
+		const copy = BUYER_PAGE_COPY[locale];
+		const state = facts ? (facts.ok ? facts.data.state : '') : 'unknown';
+		let status;
+		let bodyHtml;
+		let title;
+		if (state === 'active' || state === 'confirming') {
+			status = 200;
+			bodyHtml = subscribeResultBody(state, facts.data.plan, copy, locale);
+			title = copy.subscribeThanks;
+		} else if (state === 'unknown') {
+			// Truthful, and a 404 rather than a 200: nothing was found under this URL.
+			status = 404;
+			bodyHtml = subscribeResultUnknownBody(copy);
+			title = copy.subscribeUnknown;
+		} else {
+			// A 2xx carrying a state this page cannot read is no more usable than a
+			// refusal — 502, the same "no usable answer" code the buyer pages use.
+			status = facts.ok ? 502 : facts.status;
+			bodyHtml = subscribeResultUnavailableBody(copy);
+			title = copy.subscribeResultTitle;
+		}
+		// noindex for the same reason renderCompletion sets it: this is one buyer's
+		// per-session payment result, not a page of the site. (/membership and
+		// /account are ordinary site pages, which is why they carry none.) There is
+		// no island slot on this page, so no island script is loaded either.
+		const head = injectHead(stripDonorHead(shell),
+			'<title>' + escHtml(title) + '</title><meta name="robots" content="noindex">');
+		const composed = replaceMain(head, bodyHtml);
+		// The donor had no <main>: returning it unchanged would serve the site's ROOT
+		// page under this URL as a success.
 		if (composed === head) return buyerPageErrorResponse(503);
 		return new Response(composed, {
 			status: status,
@@ -1195,6 +1309,13 @@ export default {
 		const siteOwnedBuyerPage = matchSiteOwnedBuyerPage(request, transport && transport.siteOwnedBuyerPages);
 		if (siteOwnedBuyerPage) return renderSiteOwnedBuyerPage(request, env, CFG, siteOwnedBuyerPage);
 
+		// The subscribe result landing, claimed BEFORE the generic forward for the
+		// same reason and on the same terms: the contract keeps its path in `forward`
+		// so already-emitted workers keep the whole-page fallback, and a contract
+		// without subscribeResult forwards it exactly as before.
+		const subscribeResult = matchSubscribeResult(request, transport && transport.subscribeResult);
+		if (subscribeResult) return renderSubscribeResult(request, env, CFG, subscribeResult);
+
 		// The branches are MUTUALLY EXCLUSIVE and the transport is first:
 		// contract hit → the binding, verdict-required hit → ask then serve
 		// (or, with no binding to ask, fall through as before — see below),
@@ -1234,6 +1355,7 @@ export default {
 export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
+	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse
 };

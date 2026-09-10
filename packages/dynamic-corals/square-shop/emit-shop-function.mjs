@@ -252,6 +252,26 @@ function loadApiTransport(path) {
 		});
 	}
 
+	// The subscribe result landing — the same site-owned presentation class as the
+	// pages above, but one entry rather than a list because there is one such page
+	// and it selects no renderer by `kind`. Absent (every contract before this
+	// capability) bakes nothing, so the path keeps the generic forward.
+	let subscribeResult = null;
+	if (contract.subscribeResult != null) {
+		const sr = contract.subscribeResult;
+		if (!sr || typeof sr !== 'object') die('--api-contract subscribeResult is not an object');
+		const path = normalizeSitePath(sr.path, 'subscribeResult.path');
+		const factsPath = normalizeSitePath(sr.factsPath, 'subscribeResult.factsPath');
+		if (sr.method !== 'GET') die('--api-contract subscribeResult.method must be GET, got ' + JSON.stringify(sr.method));
+		// The worker puts this name straight into the facts query string, so a value
+		// that is not a bare parameter name would be a different request than the
+		// contract declared. Fatal here rather than silently escaped there.
+		if (typeof sr.sessionParam !== 'string' || !/^[A-Za-z0-9_]+$/.test(sr.sessionParam)) {
+			die('--api-contract subscribeResult.sessionParam must be a non-empty query parameter name, got ' + JSON.stringify(sr.sessionParam));
+		}
+		subscribeResult = { path, method: sr.method, sessionParam: sr.sessionParam, factsPath };
+	}
+
 	return {
 		transport: {
 			bindingName: contract.bindingName,
@@ -259,6 +279,7 @@ function loadApiTransport(path) {
 			verdictEndpoint,
 			...(checkoutResult ? { checkoutResult } : {}),
 			...(siteOwnedBuyerPages.length > 0 ? { siteOwnedBuyerPages } : {}),
+			...(subscribeResult ? { subscribeResult } : {}),
 			...(verdict.length > 0 ? { verdict } : {}),
 			onBindingMissing: { status: obm.status, cacheControl: obm.cacheControl }
 		},
@@ -362,7 +383,12 @@ if (canonicalHostArg) {
 // pages. Nothing else reaches the mapping — the gated set is read inside.
 const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
 	shopPaths: shops.map((shop) => shop.shopPath),
-	buyerPagePaths: ((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path)
+	buyerPagePaths: [
+		...((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path),
+		// Claimed unconditionally when the capability is baked, so ASSETS has no twin
+		// to negotiate for it either.
+		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : [])
+	]
 });
 
 const config = {
