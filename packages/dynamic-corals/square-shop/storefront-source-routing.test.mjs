@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { formatMoney } from './product-page-core.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const emitter = path.join(here, 'emit-shop-function.mjs');
@@ -555,4 +556,232 @@ test('native path analogue: still replaces the whole <main>, even with extra aut
   assert.match(html, /NAV/);
   assert.match(html, /FOOT/);
   assert.doesNotMatch(html, /Intro that native still drops today/, 'known gap — native still replaces the whole <main>, unlike the provider path above');
+});
+
+// ── native storefront locale: the site's own donor shell declares the language ─────────────
+// The platform-authored native strings used to be English literals inside the render helpers and
+// native money used to fall back to `shop.locale || 'en-US'`. Both are resolved from the donor
+// shell now, through the SAME localeFromHint/shellLang pair the site-owned buyer pages use.
+//
+// 🔴 `--shops` locale below is deliberately the WRONG answer ('en-US' against a zh-Hant shell).
+// Without that, a green run could still be explained by the old build-metadata fallback.
+const ZH_SHELL = '<!doctype html><html lang="zh-Hant" data-theme="reef"><head><title>商店</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>';
+const JA_SHELL = '<!doctype html><html lang="ja-JP" data-theme="jade"><head><title>ショップ</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>';
+const MISLEADING_BUILD_LOCALE = JSON.stringify([{ shopPath: '/shop', locale: 'en-US' }]);
+const jpyProduct = { ...product, commerce: { ...product.commerce, currency: 'JPY', unit_price: 1900 } };
+
+// One place that emits a native shop, serves a chosen shell and answers the projection however a
+// case needs it — the existing per-test inline env, factored only for the cases added below.
+async function serveNative(name, { shell: donor, path = '/shop', projection, shops }) {
+  const { load } = emit(name, [
+    '--site-id', 'site-native-locale',
+    ...(shops ? ['--shops', shops] : []),
+    '--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }]),
+  ]);
+  const mod = await load();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('a native failure must never reach provider B'); };
+  try {
+    const response = await mod.default.fetch(new Request('https://site.example' + path), {
+      ASSETS: { fetch: async () => (donor === null ? new Response('missing', { status: 404 }) : new Response(donor)) },
+      RSP: { fetch: async (request) => projection(new URL(request.url)) },
+    });
+    return { status: response.status, html: await response.text() };
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+const nativeOk = (body) => async (url) => Response.json(url.searchParams.has('slug') ? { ok: true, source: 'native', item: body } : { ok: true, source: 'native', items: [body] });
+
+test('a zh-Hant donor shell renders every native platform string in zh-TW, inside the site shell', async () => {
+  const grid = await serveNative('native-zh-grid', { shell: ZH_SHELL, projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+  assert.equal(grid.status, 200);
+  assert.match(grid.html, /立即購買/, 'the Buy control is the site language, not the platform default');
+  assert.doesNotMatch(grid.html, /Buy now/);
+  // The owner's shell survives the composition exactly as before.
+  assert.match(grid.html, /NAV/);
+  assert.match(grid.html, /FOOT/);
+  assert.match(grid.html, /data-theme="reef"/);
+  assert.match(grid.html, /lang="zh-Hant"/);
+  // Product copy is the SITE's bytes and is not translated, localized or otherwise touched.
+  assert.match(grid.html, /Reef Tee/);
+
+  const detail = await serveNative('native-zh-detail', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+  assert.equal(detail.status, 200);
+  assert.match(detail.html, />商店<\/a>/, 'the back link label is platform copy and follows the shell');
+  assert.match(detail.html, /立即購買/);
+  assert.match(detail.html, /Reef Tee/);
+  assert.match(detail.html, /Repo-backed copy/, 'owner description rides through untouched');
+
+  const empty = await serveNative('native-zh-empty', { shell: ZH_SHELL, projection: async () => Response.json({ ok: true, source: 'native', items: [] }), shops: MISLEADING_BUILD_LOCALE });
+  assert.equal(empty.status, 200);
+  assert.match(empty.html, /目前沒有可購買的商品。/);
+  assert.doesNotMatch(empty.html, /No products are available/);
+
+  const soldOut = await serveNative('native-zh-sold-out', {
+    shell: ZH_SHELL, path: '/shop/reef-tee', shops: MISLEADING_BUILD_LOCALE,
+    projection: nativeOk({ ...product, commerce: { ...product.commerce, available: 0, status: 'OUT_OF_STOCK' } }),
+  });
+  assert.match(soldOut.html, /class="dc-native-buy" disabled>無法購買/);
+  assert.doesNotMatch(soldOut.html, />Unavailable</);
+
+  const notFound = await serveNative('native-zh-not-found', {
+    shell: ZH_SHELL, path: '/shop/nope', shops: MISLEADING_BUILD_LOCALE,
+    projection: async () => Response.json({ ok: false, error: 'not_found' }, { status: 404 }),
+  });
+  assert.equal(notFound.status, 404);
+  assert.match(notFound.html, /data-storefront-state="not-found"/);
+  assert.match(notFound.html, /找不到這個商品/);
+  assert.doesNotMatch(notFound.html, /Product not found/);
+  assert.match(notFound.html, /NAV/);
+
+  const unavailable = await serveNative('native-zh-unavailable', {
+    shell: ZH_SHELL, shops: MISLEADING_BUILD_LOCALE,
+    projection: async () => Response.json({ ok: false, error: 'native_storefront_unavailable' }, { status: 503 }),
+  });
+  assert.equal(unavailable.status, 503, 'an unavailable projection stays non-success');
+  assert.match(unavailable.html, /data-storefront-state="unavailable"/);
+  assert.match(unavailable.html, /無法顯示商店/);
+  assert.match(unavailable.html, /請稍後再試。/);
+  assert.doesNotMatch(unavailable.html, /Storefront unavailable/);
+  assert.match(unavailable.html, /NAV/, 'the localized unavailable state stays INSIDE the site shell');
+  assert.match(unavailable.html, /FOOT/);
+});
+
+// CONTROL — without this the test above is satisfied by a worker that simply hard-codes zh-TW.
+test('CONTROL: a ja-JP donor shell renders the same native strings in Japanese', async () => {
+  const grid = await serveNative('native-ja-grid', { shell: JA_SHELL, projection: nativeOk(product) });
+  assert.match(grid.html, /今すぐ購入/);
+  assert.doesNotMatch(grid.html, /立即購買/);
+  assert.doesNotMatch(grid.html, /Buy now/);
+
+  const unavailable = await serveNative('native-ja-unavailable', {
+    shell: JA_SHELL,
+    projection: async () => Response.json({ ok: false }, { status: 503 }),
+  });
+  assert.equal(unavailable.status, 503);
+  assert.match(unavailable.html, /ショップを表示できません/);
+  assert.match(unavailable.html, /data-theme="jade"/);
+});
+
+// CONTROL — the shell with no lang at all is the one every pre-existing test above uses, so this
+// pins that the default did not move while the resolver was added.
+test('CONTROL: a shell that declares no language keeps the English native copy', async () => {
+  const grid = await serveNative('native-nolang-grid', { shell, projection: nativeOk(product) });
+  assert.match(grid.html, />Buy now</);
+  const unavailable = await serveNative('native-nolang-unavailable', { shell, projection: async () => Response.json({ ok: false }, { status: 503 }) });
+  assert.match(unavailable.html, /<h1>Storefront unavailable<\/h1><p>Please try again later\.<\/p>/);
+});
+
+// No donor shell at all: there is no site-declared language to read AND nothing of the site's to
+// compose into, so this stays the bare honest 503 it already was rather than becoming a
+// platform-authored page that looks like the site.
+test('a missing donor shell keeps the bare non-success document, not a fabricated site page', async () => {
+  for (const [name, path] of [['grid', '/shop'], ['detail', '/shop/reef-tee']]) {
+    const page = await serveNative('native-no-shell-' + name, { shell: null, path, projection: nativeOk(product) });
+    assert.equal(page.status, 503, name);
+    assert.equal(page.html, '<!doctype html><main><section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section></main>', name);
+    assert.doesNotMatch(page.html, /<header|<nav|<footer|data-theme/, name + ': nothing here may pretend to be the site');
+  }
+});
+
+test('native prices format in the shell locale while the minor amount and currency are unchanged', async () => {
+  const zh = await serveNative('native-price-zh', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(jpyProduct), shops: MISLEADING_BUILD_LOCALE });
+  const ja = await serveNative('native-price-ja', { shell: JA_SHELL, path: '/shop/reef-tee', projection: nativeOk(jpyProduct) });
+  const zhPrice = formatMoney({ minor: 1900, currency: 'JPY', locale: 'zh-TW' });
+  const jaPrice = formatMoney({ minor: 1900, currency: 'JPY', locale: 'ja-JP' });
+  assert.notEqual(zhPrice, jaPrice, 'the chosen currency must actually discriminate the two locales');
+  assert.ok(zh.html.includes('<p>' + zhPrice + '</p>'), 'zh-TW shell renders the zh-TW form, got: ' + zh.html.match(/<p>[^<]*1,?900[^<]*<\/p>/));
+  assert.ok(ja.html.includes('<p>' + jaPrice + '</p>'), 'ja-JP shell renders the ja-JP form');
+  // Same underlying RSP facts on both pages — presentation moved, the money did not.
+  for (const page of [zh, ja]) assert.match(page.html, /1,900/);
+});
+
+// ── native checkout: a deterministic conflict is not a retryable transport failure ─────────
+// RSP refuses a second concurrent attempt with 409 {error:"checkout_attempt_conflict"} and hands
+// back no recovery locator, so this is the one failure the page can name — and the one whose
+// control must not invite an immediately futile repeat.
+function driveNativeCheckout(html, respond, { lang = '' } = {}) {
+  const script = html.match(/<script>([\s\S]*data-native-sku[\s\S]*?)<\/script>/);
+  assert.ok(script, 'the emitted native page must carry its checkout behavior');
+  let click;
+  const document = { documentElement: { lang }, addEventListener(type, handler) { if (type === 'click') click = handler; } };
+  const status = { textContent: '' };
+  const button = {
+    disabled: false,
+    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : null; },
+    parentElement: { querySelector(selector) { return selector === '[data-native-status]' ? status : null; } },
+  };
+  const calls = [];
+  const redirects = [];
+  new Function('document', 'fetch', 'window', script[1])(
+    document,
+    async (url, init) => { calls.push({ url, init }); return respond(url, init); },
+    { location: { assign(url) { redirects.push(url); } } },
+  );
+  return {
+    button, status, calls, redirects,
+    click: () => click({ target: { closest: (selector) => (selector === '[data-native-sku]' ? button : null) } }),
+    countOf: (path) => calls.filter((call) => call.url === path).length,
+  };
+}
+
+const conflictResponder = async (url) => (url === '/api/cart/items'
+  ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] })
+  : Response.json({ error: 'checkout_attempt_conflict' }, { status: 409 }));
+
+test('an exact checkout_attempt_conflict says a checkout is already running, in the shell language', async () => {
+  const { html } = await serveNative('native-conflict-zh', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+  const ui = driveNativeCheckout(html, conflictResponder, { lang: 'zh-Hant' });
+  await ui.click();
+
+  assert.equal(ui.status.textContent, '已經有一筆結帳正在進行中，現在無法再開始新的結帳。');
+  assert.doesNotMatch(ui.status.textContent, /再試/, 'a deterministic conflict must not promise that trying again works');
+  assert.equal(ui.redirects.length, 0);
+  // The request pair itself is untouched — this change is interpretation, not checkout semantics.
+  assert.deepEqual(ui.calls.map((call) => call.url), ['/api/cart/items', '/api/checkout']);
+});
+
+test('CONTROL: the same conflict on an English shell says it in English', async () => {
+  const { html } = await serveNative('native-conflict-en', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  const ui = driveNativeCheckout(html, conflictResponder);
+  await ui.click();
+  assert.equal(ui.status.textContent, 'A checkout is already in progress. Another one cannot be started right now.');
+  assert.doesNotMatch(ui.status.textContent, /try again/i);
+});
+
+test('after a checkout_attempt_conflict the visible control makes ZERO new cart or checkout calls', async () => {
+  const { html } = await serveNative('native-conflict-second-interaction', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+  const ui = driveNativeCheckout(html, conflictResponder, { lang: 'zh-Hant' });
+  await ui.click();
+  assert.equal(ui.countOf('/api/cart/items'), 1);
+  assert.equal(ui.countOf('/api/checkout'), 1);
+  assert.equal(ui.button.disabled, true, 'the control that can only repeat the refused operation stays disabled');
+
+  // Drive the page a second time exactly as a buyer would against the control still on screen.
+  await ui.click();
+  assert.equal(ui.countOf('/api/cart/items'), 1, 'zero NEW /api/cart/items calls after the conflict');
+  assert.equal(ui.countOf('/api/checkout'), 1, 'zero NEW /api/checkout calls after the conflict');
+  assert.equal(ui.calls.length, 2, 'and no other request was invented as a recovery attempt');
+});
+
+test('everything that is not the exact conflict stays the generic localized failure', async () => {
+  const { html } = await serveNative('native-generic-failures', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+  const cartOk = async () => Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] });
+  const cases = {
+    'a different 409': async (url) => (url === '/api/cart/items' ? cartOk() : Response.json({ error: 'cart_empty' }, { status: 409 })),
+    'a 5xx': async (url) => (url === '/api/cart/items' ? cartOk() : Response.json({ error: 'internal' }, { status: 500 })),
+    'a malformed body': async (url) => (url === '/api/cart/items' ? cartOk() : new Response('not json', { status: 409, headers: { 'content-type': 'text/plain' } })),
+    'a dead network': async (url) => { if (url === '/api/cart/items') return cartOk(); throw new TypeError('network down'); },
+    'a failed cart add': async () => Response.json({ error: 'nope' }, { status: 400 }),
+  };
+  for (const [name, respond] of Object.entries(cases)) {
+    const ui = driveNativeCheckout(html, respond, { lang: 'zh-Hant' });
+    await ui.click();
+    assert.equal(ui.status.textContent, '無法開始結帳，請再試一次。', name);
+    assert.doesNotMatch(ui.status.textContent, /結帳正在進行中/, name + ' must not invent the conflict cause');
+    assert.equal(ui.button.disabled, false, name + ': an unknown failure may still be retried');
+    assert.equal(ui.redirects.length, 0, name);
+  }
 });

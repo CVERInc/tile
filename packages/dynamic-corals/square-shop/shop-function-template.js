@@ -589,6 +589,29 @@ async function fetchNativeProjection(request, env, cfg, slug) {
 	}
 }
 
+// Every PLATFORM-authored string the native storefront renders, in the same supported-locale
+// vocabulary COMPLETE_COPY and BUYER_PAGE_COPY already carry. Product names, descriptions,
+// images and the owner's own shell content are deliberately absent: those are the site's bytes
+// and ride through untouched.
+//
+// `checkoutConflict` makes no retry promise on purpose. RSP answers a second concurrent attempt
+// with 409 {error:"checkout_attempt_conflict"} and exposes NO recovery action with it (there is
+// no pending-checkout locator in that body), so the honest sentence is that one is already
+// running — and nativeCheckoutScript leaves the control disabled to match it.
+const NATIVE_COPY = {
+	'en-US': { shop: 'Shop', buy: 'Buy now', soldOut: 'Unavailable', unavailable: 'Storefront unavailable', unavailableBody: 'Please try again later.', notFound: 'Product not found', empty: 'No products are available.', checkoutError: 'Unable to start checkout. Please try again.', checkoutConflict: 'A checkout is already in progress. Another one cannot be started right now.' },
+	'ja-JP': { shop: 'ショップ', buy: '今すぐ購入', soldOut: 'ご購入いただけません', unavailable: 'ショップを表示できません', unavailableBody: 'しばらくしてから再度お試しください。', notFound: '商品が見つかりません', empty: '現在ご購入いただける商品はありません。', checkoutError: 'お支払い手続きを開始できませんでした。もう一度お試しください。', checkoutConflict: 'すでにお支払い手続きが進行中のため、新しい手続きは開始できません。' },
+	'zh-TW': { shop: '商店', buy: '立即購買', soldOut: '無法購買', unavailable: '無法顯示商店', unavailableBody: '請稍後再試。', notFound: '找不到這個商品', empty: '目前沒有可購買的商品。', checkoutError: '無法開始結帳，請再試一次。', checkoutConflict: '已經有一筆結帳正在進行中，現在無法再開始新的結帳。' },
+	'zh-CN': { shop: '商店', buy: '立即购买', soldOut: '无法购买', unavailable: '无法显示商店', unavailableBody: '请稍后再试。', notFound: '找不到这个商品', empty: '目前没有可购买的商品。', checkoutError: '无法开始结账，请再试一次。', checkoutConflict: '已经有一笔结账正在进行中，现在无法再开始新的结账。' }
+};
+
+// ONE resolver, the same one the site-owned buyer pages use: the donor shell the site itself
+// built is what declares the language, so a native render reads the site's own answer instead of
+// falling back to a platform default (or to `--shops` build metadata, which is not the page).
+function nativeLocale(shell) {
+	return localeFromHint(shellLang(shell));
+}
+
 // 🔴 Native still replaces the WHOLE <main>, unlike renderGridPage's coral-preserving mount
 // (above). That is not an oversight carried over from the same bug — it's the ceiling of what's
 // possible today: native has no client-side coral markup at all (no square-shop-shaped div, no
@@ -596,28 +619,50 @@ async function fetchNativeProjection(request, env, cfg, slug) {
 // render to key off and preserve. Closing this the same way the provider path was closed would
 // need a real authored mount point for native shops first — a sitetile/authoring change, out of
 // this fix's scope. Flagging rather than silently declaring native "done" alongside provider.
-function nativeUnavailable(shell) {
-	return replaceMain(shell, '<section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section>');
+function nativeUnavailable(shell, copy) {
+	return replaceMain(shell, nativeUnavailableBody(copy));
+}
+function nativeUnavailableBody(copy) {
+	return `<section data-storefront-source="native" data-storefront-state="unavailable"><h1>${escHtml(copy.unavailable)}</h1><p>${escHtml(copy.unavailableBody)}</p></section>`;
+}
+
+// No donor shell means no site-declared language to resolve AND nothing of the site's to compose
+// into. This stays the honest non-success document rather than a styled page pretending to be
+// the site; 'en-US' is the last resort here precisely BECAUSE the donor that would have answered
+// the language question is the thing that is missing.
+function nativeUnavailableDocument() {
+	return '<!doctype html><main>' + nativeUnavailableBody(NATIVE_COPY['en-US']) + '</main>';
 }
 
 // Native C uses its own cart + checkout contract. The browser submits only the
 // projected inventory SKU and quantity; checkout re-reads cart/inventory and
 // derives the charge server-side, so no displayed price crosses this boundary.
-function nativeBuyControl(item) {
-	if (!item.available || !item.sku) return '<button type="button" class="dc-native-buy" disabled>Unavailable</button>';
-	return `<button type="button" class="dc-native-buy" data-native-sku="${escHtml(item.sku)}">Buy now</button>`;
+function nativeBuyControl(item, copy) {
+	if (!item.available || !item.sku) return `<button type="button" class="dc-native-buy" disabled>${escHtml(copy.soldOut)}</button>`;
+	return `<button type="button" class="dc-native-buy" data-native-sku="${escHtml(item.sku)}">${escHtml(copy.buy)}</button>`;
 }
 
-function nativeCheckoutScript() {
-	return `<script>(function(){document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;button.disabled=true;try{const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed');const lang=(document.documentElement&&document.documentElement.lang||'').trim();const checkout=await fetch('/api/checkout',lang?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({lang:lang})}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok||!result||typeof result.redirect_url!=='string')throw new Error('checkout failed');window.location.assign(result.redirect_url)}catch(error){button.disabled=false;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status)status.textContent='Unable to start checkout. Please try again.'}})})()</script>`;
+// The non-2xx BODY is read BEFORE the failure is classified, because only one exact pair earns
+// the conflict sentence: 409 with {error:"checkout_attempt_conflict"}, the stable code RSP
+// returns when a checkout attempt is already open for this cart. Anything else — a different
+// 409, a 5xx, an unparsable body, a dead network, a failed cart add — stays the generic failure,
+// since inventing a cause the server did not give is the same lie in the other direction.
+//
+// After the exact conflict the control is LEFT disabled. There is no recovery action to hand the
+// buyer (that 409 carries no pending-checkout locator), so re-enabling it would invite a click
+// whose only possible effect is to repeat the operation the server just refused. Nothing else
+// about the request pair changes: same paths, same bodies, no automatic retry.
+function nativeCheckoutScript(copy) {
+	const strings = JSON.stringify({ error: copy.checkoutError, conflict: copy.checkoutConflict }).replace(/</g, '\\u003c');
+	return `<script>(function(){const C=${strings};document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;button.disabled=true;let conflict=false;try{const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed');const lang=(document.documentElement&&document.documentElement.lang||'').trim();const checkout=await fetch('/api/checkout',lang?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({lang:lang})}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';throw new Error('checkout failed')}if(!result||typeof result.redirect_url!=='string')throw new Error('checkout failed');window.location.assign(result.redirect_url)}catch(error){if(!conflict)button.disabled=false;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status)status.textContent=conflict?C.conflict:C.error}})})()</script>`;
 }
 
-function nativeProductBody(item, shop) {
+function nativeProductBody(item, shop, copy, locale) {
 	const mapped = nativeCatalogItem(item);
-	if (!mapped) return '<section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section>';
-	const copy = item.copy || {};
-	const description = String(copy.description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-	return `<article data-storefront-source="native" class="dc-native-product"><p><a href="${escHtml(shop.shopPath)}">Shop</a></p><h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale: shop.locale || 'en-US' }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}${nativeBuyControl(mapped)}<p data-native-status role="status"></p></article>${nativeCheckoutScript()}`;
+	if (!mapped) return nativeUnavailableBody(copy);
+	const itemCopy = item.copy || {};
+	const description = String(itemCopy.description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+	return `<article data-storefront-source="native" class="dc-native-product"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p><h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}${nativeBuyControl(mapped, copy)}<p data-native-status role="status"></p></article>${nativeCheckoutScript(copy)}`;
 }
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note just above: native has no author
@@ -628,13 +673,15 @@ async function renderNativeGridPage(request, env, cfg, shop) {
 		fetchNativeProjection(request, env, cfg),
 		env.ASSETS.fetch(new Request(origin + shop.shopPath + '/', request))
 	]);
-	if (!shellRes.ok) return htmlResponse('<!doctype html><main><section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section></main>', 503);
+	if (!shellRes.ok) return htmlResponse(nativeUnavailableDocument(), 503);
 	const shell = await shellRes.text();
-	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell), 503);
+	const locale = nativeLocale(shell);
+	const copy = NATIVE_COPY[locale];
+	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
 	const items = Array.isArray(projection.body.items) ? projection.body.items.map(nativeCatalogItem).filter(Boolean) : null;
-	if (!items) return htmlResponse(nativeUnavailable(shell), 503);
-	const cards = items.map((item) => `<article><a href="${escHtml(shop.shopPath + '/' + encodeURIComponent(item.slug || ''))}">${item.image_url ? `<img src="${escHtml(item.image_url)}" alt="${escHtml(item.name)}">` : ''}<h2>${escHtml(item.name)}</h2><p>${escHtml(formatMoney({ minor: item.price_minor, currency: item.currency, locale: shop.locale || 'en-US' }))}</p></a>${nativeBuyControl(item)}<p data-native-status role="status"></p></article>`).join('');
-	return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" class="dc-native-grid">${cards || '<p>No products are available.</p>'}</section>${nativeCheckoutScript()}`));
+	if (!items) return htmlResponse(nativeUnavailable(shell, copy), 503);
+	const cards = items.map((item) => `<article><a href="${escHtml(shop.shopPath + '/' + encodeURIComponent(item.slug || ''))}">${item.image_url ? `<img src="${escHtml(item.image_url)}" alt="${escHtml(item.name)}">` : ''}<h2>${escHtml(item.name)}</h2><p>${escHtml(formatMoney({ minor: item.price_minor, currency: item.currency, locale }))}</p></a>${nativeBuyControl(item, copy)}<p data-native-status role="status"></p></article>`).join('');
+	return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" class="dc-native-grid">${cards || `<p>${escHtml(copy.empty)}</p>`}</section>${nativeCheckoutScript(copy)}`));
 }
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note above: native has no author
@@ -645,11 +692,13 @@ async function renderNativeProduct(request, env, cfg, match) {
 		fetchNativeProjection(request, env, cfg, match.slug),
 		env.ASSETS.fetch(new Request(origin + match.shop.shopPath + '/', request))
 	]);
-	if (!shellRes.ok) return htmlResponse('<!doctype html><main><section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section></main>', 503);
+	if (!shellRes.ok) return htmlResponse(nativeUnavailableDocument(), 503);
 	const shell = await shellRes.text();
-	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, '<section data-storefront-source="native" data-storefront-state="not-found"><h1>Product not found</h1></section>'), 404);
-	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell), 503);
-	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop)));
+	const locale = nativeLocale(shell);
+	const copy = NATIVE_COPY[locale];
+	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" data-storefront-state="not-found"><h1>${escHtml(copy.notFound)}</h1></section>`), 404);
+	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
+	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop, copy, locale)));
 }
 
 // Resolve the selected provider's catalog list — same same-origin-first,
