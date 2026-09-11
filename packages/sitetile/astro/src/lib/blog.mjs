@@ -501,6 +501,40 @@ export function groupByArchive(posts) {
 // can quote the exact list rather than a copy of it going stale next to the switch below.
 const KNOWN_DATE_FORMATS = ['ymd-slash', 'cjk', 'cjk-full', 'cjk-badge', 'cjk-md'];
 
+// `cjk-full` / `cjk-badge` / `cjk-md` (and the `cjk` alias) are a script, not a punctuation style —
+// an owner who writes `blog-date-format: cjk` is choosing that layout for the pages that read in a
+// CJK script. Ruling (2026-09-11, github.com/CVERInc/tile#34 round 1): these formats apply to the
+// PAGE's own locale when that locale is Japanese, Korean, or Chinese, and fall back to that page's
+// own Intl default everywhere else — an English page on the same multilingual site keeps reading
+// "July 13, 2024", not "2024 年 7 月 13 日". `ymd-slash` carries no script, so it is exempt from this
+// gate and always applies, on every locale, as before.
+const CJK_DATE_FORMATS = new Set(['cjk-full', 'cjk-badge', 'cjk-md']);
+// Primary BCP-47 subtag test, done on the page's OWN raw `lang:` value (whatever an author wrote —
+// `ja-JP`, `zh-Hant`, `zh-TW`, bare `zh`…) rather than routing it through toBcp47() first, so a
+// tag toBcp47 cannot canonicalise (an unrecognised or malformed value) still gets a straight answer
+// here instead of silently reading as non-CJK.
+function isCJKLang(lang) {
+  const primary = String(lang || '').toLowerCase().split(/[-_]/)[0];
+  return primary === 'ja' || primary === 'ko' || primary === 'zh';
+}
+
+// The shared "no named format" renderer: the page's own locale via Intl, falling back to en-US
+// when no locale is known (byte-identical historic output) AND when the locale IS known but is not
+// a tag Intl accepts — a site's `lang:` is free text (a typo, an underscore instead of a hyphen, a
+// value nobody ever validated against BCP-47), and `new Intl.DateTimeFormat()` throws a RangeError
+// on anything it cannot parse rather than degrading gracefully. Before this guard that RangeError
+// crashed the whole build on the very first date it tried to render (github.com/CVERInc/tile#34
+// review round 1, P1-1) — the safe fallback is worse-looking dates, never a build that cannot ship.
+function localeDefaultDate(d, lang) {
+  const opts = { year: 'numeric', month: 'long', day: 'numeric' };
+  const tag = lang ? toBcp47(lang) : 'en-US';
+  try {
+    return new Intl.DateTimeFormat(tag, opts).format(d);
+  } catch {
+    return new Intl.DateTimeFormat('en-US', opts).format(d);
+  }
+}
+
 // A build renders every post's date once per locale, so an unrecognised `blog-date-format` would
 // otherwise warn hundreds of times for the one config line that is wrong. Keyed by the raw value,
 // not a single flag, so a site that (mis)configures two different bad values still hears about
@@ -517,14 +551,23 @@ function warnUnknownDateFormat(format) {
 // page, the site default elsewhere), never the site's default language on a page rendering a
 // different one. Default (format is undefined/unrecognised) formats with that locale via Intl, so
 // a ja-JP page reads "2024年7月13日" and an en-US one "July 13, 2024" — no locale known (lang
-// absent) keeps the historic literal en-US output byte-identical.
+// absent) keeps the historic literal en-US output byte-identical, and an unparseable lang tag
+// (RangeError from Intl) degrades to that same en-US output rather than crashing the build.
 // `cjk` is accepted as an alias of `cjk-full` (the value people reach for); any other unrecognised
 // value falls to the locale default AND names the allowed values in a build-time warning, once per
 // build per bad value — a site whose config looks right and silently does nothing was the bug.
+// An explicit CJK format (`cjk`/`cjk-full`/`cjk-badge`/`cjk-md`) is scoped to CJK page locales
+// (ja / zh-* / ko, see isCJKLang) — a non-CJK page locale renders ITS OWN locale default instead,
+// same as an unrecognised format would (see CJK_DATE_FORMATS above). `lang` absent keeps the
+// historic behaviour of always rendering the named format, since there is no page locale to gate
+// on. `ymd-slash` has no script and is never gated.
 export function fmtDate(s, format, lang) {
   const d = new Date(s);
   if (isNaN(d)) return s;
   const fmt = format === 'cjk' ? 'cjk-full' : format;
+  if (CJK_DATE_FORMATS.has(fmt) && lang && !isCJKLang(lang)) {
+    return localeDefaultDate(d, lang);
+  }
   switch (fmt) {
     case 'ymd-slash': // 2026/05/20
       return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
@@ -535,7 +578,7 @@ export function fmtDate(s, format, lang) {
       return `${d.getMonth() + 1}月${d.getDate()}日`;
     default:
       warnUnknownDateFormat(fmt);
-      return new Intl.DateTimeFormat(lang ? toBcp47(lang) : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
+      return localeDefaultDate(d, lang);
   }
 }
 
