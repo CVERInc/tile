@@ -1180,6 +1180,29 @@ function renderList(items) {
 // list only with corroboration — the item's text is a link, or a second item follows it — those
 // being the two shapes a real numbered list takes and a sentence does not.
 const RE_TURN_HEAD = /^\*\*([^*\n]{1,24}?)\*\*(?:\s*[·:]\s*(.+?))?\s*$/;
+// 🩸 sodaart, 2026-09-11 — an interview post written as one quote block per question:
+//
+//     > **SODAART：哪一堂課讓你印象最深刻？**
+//     >
+//     > **摩卡麵包：** 第二週吧。……
+//
+// The cap above counts UTF-16 units, and it was calibrated on Latin names: 24 units is a name in
+// English and a whole sentence in Chinese or Japanese. Four of that post's fourteen questions fit
+// under it and became "speakers" — question as the label, answer as the bubble — while the other
+// ten stayed quotations, on the same page. Two things follow.
+//
+// The cap is a DISPLAY WIDTH now: an East Asian wide character is two columns, so the same 24
+// columns hold a name in either script and a sentence in neither. (RE_TURN_HEAD keeps its literal
+// unit cap so the vendored copy of it in reef-mcp stays a plain regex; this is the second gate.)
+const NAME_COLUMNS = 24;
+const RE_WIDE_CHAR = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|[\uD840-\uD87F][\uDC00-\uDFFF]/;
+function displayColumns(s) { let n = 0; for (const ch of String(s)) n += RE_WIDE_CHAR.test(ch) ? 2 : 1; return n; }
+// And a RUN is judged as one: a quote block whose head line is nothing but a bold span — of ANY
+// length — is "bold-headed". When a run holds a bold-headed block that is NOT a turn (over the
+// cap, a list beneath it, nothing beneath it) next to blocks that are, the run is a list of
+// same-shaped items (a Q&A, a series nav), not a conversation, and no block in it is a turn. A
+// turn beside an ordinary quotation is still fine: that shape carries no such repetition.
+const RE_BOLD_HEAD = /^\*\*[^*\n]+\*\*(?:\s*[·:]\s*.+?)?\s*$/;
 // The corroboration a numbered marker needs: the item's text is a link (`1. [Part 1](/a)`).
 const RE_ITEM_LINK = /^(?:\[\[|!?\[[^\]]*\]\()/;
 // The bullet markers are RE_CELL_BULLET's own set — `・` and `•` are list markers under a name for
@@ -1205,6 +1228,7 @@ const quoteParas = (buf) =>
 function dialogueTurn(buf) {
   const m = RE_TURN_HEAD.exec((buf[0] || '').trim());
   if (!m) return null;
+  if (displayColumns(m[1].trim()) > NAME_COLUMNS) return null;   // a sentence in a wide script is not a name
   const body = buf.slice(1);
   const first = body.findIndex((l) => l.trim());
   if (first < 0) return null;                        // a name with no speech under it is not a turn
@@ -1439,6 +1463,81 @@ function reattachCommentRemainder(lines, nextCloser, openIdx, closeIdx, remainde
 // is the one shape that ISN'T caught by the line-open check (its first character is `#`, not `<!--`):
 // it is still recognised as a heading, and dropped afterward when its inline content resolves empty
 // (R3-P2-02, see the heading branch below) — never as a bare `<h1>#</h1>` or a merged paragraph.
+// The RUN of quote blocks starting at `lines[i]` (blank-line separated blocks are one run, because
+// a dialogue is a sequence of them and has to be grouped). Returns the blocks and where the run
+// ends. Block comments inside the run are handled exactly as bodyHtml handles them elsewhere
+// (R5-P2-01 / P2-01), which is why this mutates `lines`/`nextCloser` through the same helpers.
+function collectQuoteRun(lines, i, nextCloser) {
+  const blocks = [];
+  while (i < lines.length) {
+    const cEnd = commentBlockEnd(lines, i, nextCloser);
+    if (cEnd !== -1) {                                                        // block comment mid-quote-run
+      const closeIdx = nextCloser[i];                                         // R5-P2-01: capture first
+      const remainder = commentBlockRemainder(lines, closeIdx);
+      if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01: keep the tail
+      i = cEnd; continue;
+    }
+    if (!RE_QUOTE_LINE.test(lines[i])) {
+      if (!lines[i].trim() && i + 1 < lines.length && RE_QUOTE_LINE.test(lines[i + 1])) { i++; continue; }
+      break;
+    }
+    const buf = [];
+    while (i < lines.length) {
+      const cEnd2 = commentBlockEnd(lines, i, nextCloser);
+      if (cEnd2 !== -1) {
+        const closeIdx = nextCloser[i];                                       // R5-P2-01: capture first
+        const remainder = commentBlockRemainder(lines, closeIdx);
+        if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01
+        i = cEnd2; continue;
+      }
+      if (!RE_QUOTE_LINE.test(lines[i])) break;
+      buf.push(RE_QUOTE_LINE.exec(lines[i])[1]); i++;
+    }
+    blocks.push(buf);
+  }
+  return { blocks, i };
+}
+
+// One verdict for the whole run — see RE_BOLD_HEAD. `turns[b]` is the turn for block b, or null;
+// when the run is demoted every entry is null and `demoted` says why the shape was refused.
+function classifyQuoteRun(blocks) {
+  const turns = blocks.map(dialogueTurn);
+  const boldHeaded = blocks.map((b) => RE_BOLD_HEAD.test((b[0] || '').trim()));
+  const demoted = turns.some(Boolean) && blocks.some((_, b) => boldHeaded[b] && !turns[b]);
+  return { turns: demoted ? blocks.map(() => null) : turns, boldHeaded, demoted };
+}
+
+// What the renderer would make of every quote run in a body — for the editing door, so a warning
+// can say "these blocks would be chat bubbles and these would not" from the renderer's OWN
+// judgment instead of a second copy of the rule. Read-only; the markdown is not rendered.
+function quoteRunReport(body) {
+  const lines = String(body || '').split('\n');
+  const nextCloser = nextCommentCloser(lines);
+  const runs = [];
+  for (let i = 0; i < lines.length;) {
+    if (!RE_QUOTE_LINE.test(lines[i])) { i++; continue; }
+    const start = i;
+    const collected = collectQuoteRun(lines, i, nextCloser);
+    i = collected.i;
+    const blocks = collected.blocks.filter((b) => quoteParas(b).length);
+    if (!blocks.length) continue;
+    const verdict = classifyQuoteRun(blocks);
+    const heads = blocks.map((b) => (b[0] || '').trim());
+    const turnCount = verdict.turns.filter(Boolean).length;
+    runs.push({
+      line: start + 1,
+      blocks: blocks.length,
+      heads,
+      boldHeaded: verdict.boldHeaded.filter(Boolean).length,
+      turns: turnCount,
+      names: verdict.turns.filter(Boolean).map((t) => t.name),
+      dialogue: turnCount > 0,
+      demoted: verdict.demoted,
+    });
+  }
+  return runs;
+}
+
 function bodyHtml(body) {
   if (!body) return '';
   const lines = String(body).split('\n');
@@ -1485,37 +1584,15 @@ function bodyHtml(body) {
       // is a sequence of them and has to be grouped. Blocks that are not turns are emitted as the
       // same `<blockquote class="st-quote">` as before, one per block — byte-identical output for
       // every body that contains no dialogue.
-      const blocks = [];
-      while (i < lines.length) {
-        const cEnd = commentBlockEnd(lines, i, nextCloser);
-        if (cEnd !== -1) {                                                    // block comment mid-quote-run
-          const closeIdx = nextCloser[i];                                     // R5-P2-01: capture first
-          const remainder = commentBlockRemainder(lines, closeIdx);
-          if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01: keep the tail
-          i = cEnd; continue;
-        }
-        if (!RE_QUOTE_LINE.test(lines[i])) {
-          if (!lines[i].trim() && i + 1 < lines.length && RE_QUOTE_LINE.test(lines[i + 1])) { i++; continue; }
-          break;
-        }
-        const buf = [];
-        while (i < lines.length) {
-          const cEnd2 = commentBlockEnd(lines, i, nextCloser);
-          if (cEnd2 !== -1) {
-            const closeIdx = nextCloser[i];                                   // R5-P2-01: capture first
-            const remainder = commentBlockRemainder(lines, closeIdx);
-            if (remainder.trim()) { reattachCommentRemainder(lines, nextCloser, i, closeIdx, remainder); i = closeIdx; continue; } // P2-01
-            i = cEnd2; continue;
-          }
-          if (!RE_QUOTE_LINE.test(lines[i])) break;
-          buf.push(RE_QUOTE_LINE.exec(lines[i])[1]); i++;
-        }
-        blocks.push(buf);
-      }
+      const collected = collectQuoteRun(lines, i, nextCloser);
+      const blocks = collected.blocks;
+      i = collected.i;
+      const verdict = classifyQuoteRun(blocks);
       let run = [];
       const flushRun = () => { if (run.length) { out.push(renderDialogue(run)); run = []; } };
-      for (const buf of blocks) {
-        const turn = dialogueTurn(buf);
+      for (let b = 0; b < blocks.length; b++) {
+        const buf = blocks[b];
+        const turn = verdict.turns[b];
         if (turn) { run.push(turn); continue; }
         flushRun();
         // a blank quote line (`>` with no text) separates paragraphs inside the quote.
@@ -2348,6 +2425,8 @@ export {
   safeHref, safeSrc,
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
+  // the editing door's view of the dialogue convention — see quoteRunReport's own comment.
+  quoteRunReport,
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —
   // see cssUrlString's own comment.
   cssUrlString,
