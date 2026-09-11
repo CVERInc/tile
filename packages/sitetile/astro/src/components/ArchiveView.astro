@@ -76,7 +76,7 @@ const archive = showSidebar ? groupByArchive(corpus) : [];
                 <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
               </time>
             ) : (
-              <time class="bl-date">{fmtDate(p.date, dateFormat)}</time>
+              <time class="bl-date">{fmtDate(p.date, dateFormat, meta.lang)}</time>
             ))}
             <h2 class="bl-title">{p.title}</h2>
             {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}

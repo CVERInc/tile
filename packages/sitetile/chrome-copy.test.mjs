@@ -125,8 +125,8 @@ test('🔴 the whole renderer carries no other CJK UI literal', () => {
   // sits behind a `case` label, and the DEFAULT branch is not one of them.
   const blog = readFileSync(join(SRC, 'lib/blog.mjs'), 'utf8');
   const fmt = blog.slice(blog.indexOf('export function fmtDate('), blog.indexOf('// footerWidgets'));
-  assert.match(fmt, /default:\s*\n\s*return d\.toLocaleDateString\('en-US'/,
-    'the default date format must stay neutral — a CJK default is the defect, a CJK option is not');
+  assert.match(fmt, /default:\s*\n\s*warnUnknownDateFormat\(fmt\);\s*\n\s*return new Intl\.DateTimeFormat\(lang \? toBcp47\(lang\) : 'en-US'/,
+    'the default date format must stay neutral — it follows the PAGE locale (or en-US when none is known), never a CJK literal');
   for (const line of fmt.split('\n')) {
     if (!CJK.test(line) || /^\s*(\/\/|\*)/.test(line)) continue;
     assert.ok(/case '/.test(line) || /case '/.test(fmt.slice(0, fmt.indexOf(line))),

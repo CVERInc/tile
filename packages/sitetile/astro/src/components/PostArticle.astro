@@ -13,7 +13,9 @@ import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
-// the three-span badge layout is index-cards-only (see blog.mjs fmtDate()).
+// the three-span badge layout is index-cards-only (see blog.mjs fmtDate()). Absent/unrecognised
+// (cjk is an alias of cjk-full) falls to fmtDate's own locale default, which is why this page's
+// own `meta.lang` — not the site default — is what gets passed to it below.
 const dateFormat = meta['blog-date-format'];
 // blog-post-linebreaks: br → WP-wpautop mode (single newline inside a paragraph → <br>), for
 // WP-sourced recasts whose live keeps manual line breaks. Default (unset) = CommonMark join.
@@ -93,7 +95,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
     <a class="bl-back" href={blogBase(meta)}><Arrow direction="left" size={14} />All posts</a>
   )}
   <header class="bl-post-head">
-    {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat)}</time>}
+    {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat, meta.lang)}</time>}
     <h1>{post.title}</h1>
     {author && <p class="bl-byline">{bylineLabel} {author}</p>}
     {/* 🩸 added 2026-07-13: top-of-post share pair (see topShareLinks above) — matches live
@@ -122,14 +124,14 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
       {newer ? (
         <a class="bl-post-nav-item bl-post-nav-newer" href={postUrl(newer, meta)}>
           <span class="bl-post-nav-label"><Arrow direction="left" size={12} />{newerLabel}</span>
-          {newer.date && <span class="bl-post-nav-date">{fmtDate(newer.date, dateFormat)}</span>}
+          {newer.date && <span class="bl-post-nav-date">{fmtDate(newer.date, dateFormat, meta.lang)}</span>}
           <span class="bl-post-nav-title">{newer.title}</span>
         </a>
       ) : <span />}
       {older && (
         <a class="bl-post-nav-item bl-post-nav-older" href={postUrl(older, meta)}>
           <span class="bl-post-nav-label">{olderLabel}<Arrow direction="right" size={12} /></span>
-          {older.date && <span class="bl-post-nav-date">{fmtDate(older.date, dateFormat)}</span>}
+          {older.date && <span class="bl-post-nav-date">{fmtDate(older.date, dateFormat, meta.lang)}</span>}
           <span class="bl-post-nav-title">{older.title}</span>
         </a>
       )}
@@ -143,7 +145,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
           <li>
               <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
-              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, meta.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}
             </a>
@@ -160,7 +162,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
           <li>
               <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
-              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat)}</time>}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, meta.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}
             </a>

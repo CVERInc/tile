@@ -8,9 +8,10 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc } 
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-copy.mjs';
-// toUrlLocale is a pure string transform (no @sitetile import), so pulling it in here costs
-// nothing a plain `node` test can't already afford — sitemap.mjs already does the same cross-import.
-import { toUrlLocale } from '../packages/lingo/locale.mjs';
+// toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
+// costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
+// cross-import.
+import { toUrlLocale, toBcp47 } from '../packages/lingo/locale.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
 const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -496,14 +497,35 @@ export function groupByArchive(posts) {
   }));
 }
 
-// fmtDate: format a pubDate string per the `blog-date-format` meta key (home.md
-// frontmatter). Default (format is undefined/unrecognized) = the historic
-// en-US "June 25, 2026" — kept byte-identical to the original inline arrow fn so
-// existing output never changes when the meta key is absent.
-export function fmtDate(s, format) {
+// The `blog-date-format` values fmtDate recognises — named here once so the unknown-value warning
+// can quote the exact list rather than a copy of it going stale next to the switch below.
+const KNOWN_DATE_FORMATS = ['ymd-slash', 'cjk', 'cjk-full', 'cjk-badge', 'cjk-md'];
+
+// A build renders every post's date once per locale, so an unrecognised `blog-date-format` would
+// otherwise warn hundreds of times for the one config line that is wrong. Keyed by the raw value,
+// not a single flag, so a site that (mis)configures two different bad values still hears about
+// both — module-scoped state, reset per build (a fresh process / fresh import).
+const warnedDateFormats = new Set();
+function warnUnknownDateFormat(format) {
+  if (format == null || format === '' || warnedDateFormats.has(format)) return;
+  warnedDateFormats.add(format);
+  console.warn(`[sitetile] Unrecognised blog-date-format "${format}" — expected one of: ${KNOWN_DATE_FORMATS.join(', ')}. Falling back to the page's own language.`);
+}
+
+// fmtDate: format a pubDate string per the `blog-date-format` meta key (home.md frontmatter).
+// `lang` is THIS PAGE's own locale (the Lingo variant being rendered — metaL.lang on a translated
+// page, the site default elsewhere), never the site's default language on a page rendering a
+// different one. Default (format is undefined/unrecognised) formats with that locale via Intl, so
+// a ja-JP page reads "2024年7月13日" and an en-US one "July 13, 2024" — no locale known (lang
+// absent) keeps the historic literal en-US output byte-identical.
+// `cjk` is accepted as an alias of `cjk-full` (the value people reach for); any other unrecognised
+// value falls to the locale default AND names the allowed values in a build-time warning, once per
+// build per bad value — a site whose config looks right and silently does nothing was the bug.
+export function fmtDate(s, format, lang) {
   const d = new Date(s);
   if (isNaN(d)) return s;
-  switch (format) {
+  const fmt = format === 'cjk' ? 'cjk-full' : format;
+  switch (fmt) {
     case 'ymd-slash': // 2026/05/20
       return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
     case 'cjk-full': // 2025 年 11 月 11 日
@@ -512,7 +534,8 @@ export function fmtDate(s, format) {
     case 'cjk-md': // 4月8日
       return `${d.getMonth() + 1}月${d.getDate()}日`;
     default:
-      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      warnUnknownDateFormat(fmt);
+      return new Intl.DateTimeFormat(lang ? toBcp47(lang) : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
   }
 }
 
