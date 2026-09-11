@@ -18,14 +18,28 @@
 // months because a full-width colon carries its own gap.
 
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { uiCopy, dateHeading } from './astro/src/packages/lingo/locale.mjs';
 import { unquote, archivePrefixes, dateBadgeParts } from './astro/src/lib/chrome-copy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, 'astro/src');
+
+// blog.mjs imports the model layer as `@sitetile`, an Astro build alias plain node cannot resolve —
+// same seam blog-date-format.test.mjs already teaches the resolver, needed here only for the
+// fmtDate CJK-locale-gating behavioural check below.
+registerHooks({
+  resolve(spec, ctx, next) {
+    if (spec === '@sitetile') {
+      return { url: pathToFileURL(join(HERE, 'site-core.js')).href, shortCircuit: true };
+    }
+    return next(spec, ctx);
+  },
+});
+const { fmtDate } = await import('./astro/src/lib/blog.mjs');
 
 let passed = 0;
 const test = (name, fn) => {
@@ -125,8 +139,14 @@ test('🔴 the whole renderer carries no other CJK UI literal', () => {
   // sits behind a `case` label, and the DEFAULT branch is not one of them.
   const blog = readFileSync(join(SRC, 'lib/blog.mjs'), 'utf8');
   const fmt = blog.slice(blog.indexOf('export function fmtDate('), blog.indexOf('// footerWidgets'));
-  assert.match(fmt, /default:\s*\n\s*return d\.toLocaleDateString\('en-US'/,
-    'the default date format must stay neutral — a CJK default is the defect, a CJK option is not');
+  // Behavioural, not structural (a P3-4 fix): the default branch, and an explicit CJK format on a
+  // non-CJK page locale, must stay neutral — never a CJK literal — regardless of which expression
+  // renders it. A regex pinned to the exact source text would break on every reshuffle of this
+  // function that changes nothing it guards, which is exactly what P1's RangeError guard did.
+  assert.ok(!CJK.test(fmtDate('2024-07-13', undefined)), 'no format, no lang → must not be CJK');
+  assert.ok(!CJK.test(fmtDate('2024-07-13', undefined, 'en-US')), 'no format, en-US lang → must not be CJK');
+  assert.ok(!CJK.test(fmtDate('2024-07-13', 'cjk-full', 'en-US')), 'explicit CJK format on an en-US page → must not be CJK');
+  assert.ok(CJK.test(fmtDate('2024-07-13', 'cjk-full', 'ja-JP')), 'explicit CJK format on a ja-JP page → must stay CJK');
   for (const line of fmt.split('\n')) {
     if (!CJK.test(line) || /^\s*(\/\/|\*)/.test(line)) continue;
     assert.ok(/case '/.test(line) || /case '/.test(fmt.slice(0, fmt.indexOf(line))),
@@ -191,6 +211,21 @@ test('🔴 every dateBadgeParts call site passes the language', () => {
   for (const f of walk(SRC)) {
     for (const m of stripComments(readFileSync(f, 'utf8')).matchAll(/dateBadgeParts\(([^)]*)\)/g)) {
       if (!/,/.test(m[1]) && !/^s\b|^s,/.test(m[1].trim())) bad.push(`${relative(SRC, f)}: dateBadgeParts(${m[1]})`);
+    }
+  }
+  assert.deepEqual(bad, [], `call sites missing the lang argument:\n${bad.join('\n')}`);
+});
+
+test('🔴 (P3-3) every fmtDate call site passes the language', () => {
+  // Same shape as the dateBadgeParts guard above, for the same reason: fmtDate's third argument
+  // (lang) is what gates a CJK format to CJK page locales (P2-1). A call site that forgets it
+  // silently falls to fmtDate's own "no locale known" default — no error, a regression nobody sees
+  // until a report comes in — so this counts call sites structurally rather than trusting review.
+  const bad = [];
+  for (const f of walk(SRC)) {
+    for (const m of stripComments(readFileSync(f, 'utf8')).matchAll(/fmtDate\(([^)]*)\)/g)) {
+      const args = m[1].split(',');
+      if (args.length < 3 || !args[2].trim()) bad.push(`${relative(SRC, f)}: fmtDate(${m[1]})`);
     }
   }
   assert.deepEqual(bad, [], `call sites missing the lang argument:\n${bad.join('\n')}`);
