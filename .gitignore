@@ -31,6 +31,11 @@ packages/sitetile/astro/.astro/
 # content/blog fixture (site-level fields a single-page fixture can't exercise; see
 # smoke-build.mjs's buildHostileBlogFixture for why). Rebuilt every smoke run, never committed.
 packages/sitetile/.smoke-hostile-blog/
+# the smoke's THIRD, isolated build — same content/src as the primary build, just a different
+# PLATFORM_ORIGIN (Inbox transport regression coverage; see smoke-build.mjs's own comment above
+# this build for why it must be a SIBLING of dist-smoke/, never nested inside it). Rebuilt every
+# smoke run, never committed.
+packages/sitetile/.smoke-nonprod-origin/
 # @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
 # somebody's site, and moves them back afterwards — including when the build throws. The directory
 # should never outlive a build; it is ignored because the one time it does (a killed process) the

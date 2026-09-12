@@ -102,6 +102,37 @@ const customTheme = process.env.SITETILE_SMOKE_REMOVE_CUSTOM_MARKER === '1'
   ? customThemeBuilt.replace(/\sdata-theme-custom(?:="")?/, '')
   : customThemeBuilt;
 
+// -- non-production PLATFORM_ORIGIN: regression coverage for the Inbox transport seam (2026-09-12:
+// a generated site on a non-production deployment rendered its Inbox bubble pointing at PRODUCTION). Every build above
+// supplies PLATFORM_ORIGIN: 'https://feelreef.com' — the renderer's OWN default — so a regression
+// back to that default would be invisible to this file. PLATFORM_ORIGIN is a build-wide env var
+// (SiteLayout.astro reads process.env.PLATFORM_ORIGIN once, not per page), so exercising a
+// different value needs its own build, not a second read of DIST above.
+//
+// Reuses the SAME content/src as the primary build — unlike buildHostileBlogFixture() below, this
+// needs no different SITE-LEVEL frontmatter, so a full rsync'd sibling tree would be wasted cost;
+// only the env differs.
+//
+// MUST NOT nest inside dist-smoke/ (not just a gitignore convenience — a real invariant two other
+// audits in this file depend on): auditScripts() walks DIST recursively to build `pages`, "every
+// page THIS build produced", and siteWideSchemeHits(DIST, pages, …) explicitly reuses that same
+// list as its own comment says, "one source of 'every page this build produced', not a second one
+// that can drift from it". dist-smoke/ must therefore contain EXACTLY one build's output at a
+// time — a second build nested inside it silently doubles `pages`, which happened to still pass
+// today only because the script allowlist below is host-agnostic, but would have wrongly doubled
+// any per-build page-count/uniqueness assertion. So this follows buildHostileBlogFixture()'s own
+// convention below: a SIBLING directory outside dist-smoke/ (own .gitignore entry, next to
+// packages/sitetile/.smoke-hostile-blog/), not a subdirectory of it. SITE_ID stays 'smoke-site' —
+// home.md is on by default (not one of _site.md's inbox-bubble-except pages) — so the bubble
+// actually renders; see the positive-control check below.
+console.log('▸ astro build → .smoke-nonprod-origin/ (PLATFORM_ORIGIN=https://smoke-nonprod.example — Inbox transport regression coverage)…');
+const DIST_NONPROD_ORIGIN = join(HERE, '..', '.smoke-nonprod-origin');
+execFileSync('npx', ['astro', 'build', '--outDir', DIST_NONPROD_ORIGIN], {
+  cwd: HERE, stdio: 'inherit',
+  env: { ...process.env, SITE_ID: 'smoke-site', PLATFORM_ORIGIN: 'https://smoke-nonprod.example' },
+});
+const nonProdHome = readFileSync(join(DIST_NONPROD_ORIGIN, 'index.html'), 'utf8');
+
 const occIn = (s, str) => (s.match(new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
 const occ = (s) => occIn(html, s);
 
@@ -546,6 +577,22 @@ const checks = [
   ['og:site_name: a non-home page still emits the site\'s brand, not its own <title>', () =>
     /<meta property="og:site_name" content="Yamada Letterpress">/.test(markers)
     && !markers.includes('<meta property="og:site_name" content="Marker coverage')],
+  // -- non-production PLATFORM_ORIGIN (regression coverage, 2026-09-12): nonProdHome is the
+  // SEPARATE build defined above with PLATFORM_ORIGIN=https://smoke-nonprod.example, proving a
+  // supplied non-production origin actually reaches both buyer-facing Inbox transport surfaces —
+  // not just the production default every case elsewhere in this file exercises.
+  ['inbox bubble (non-production origin): the bubble element actually renders on this build — positive control, so the attribute assertions below cannot pass vacuously against an empty page', () =>
+    nonProdHome.includes('data-dynamic-coral="inbox-bubble"')],
+  ['inbox bubble (non-production origin): data-api-base is EXACTLY the supplied non-production origin', () =>
+    nonProdHome.includes('data-api-base="https://smoke-nonprod.example"')],
+  ['inbox bubble (non-production origin): the bubble module\'s own <script src> host is the SAME supplied non-production origin', () =>
+    nonProdHome.includes('<script type="module" src="https://smoke-nonprod.example/corals/inbox-bubble/v0/inbox-bubble.js"></script>')],
+  // Targeted, not a blanket feelreef.com ban — unrelated legitimate content (a site's own copy, an
+  // outbound link) can contain that domain without being a defect. Only the two Inbox transport
+  // surfaces this task is about: the bubble module host, and the /__reef/inbox forwarder's relay
+  // target (proven in emit-shop-function.test.mjs; checked here too as the built page's own record).
+  ['inbox bubble (non-production origin): the built output carries NEITHER production Inbox transport URL — not the bubble script host, not the /api/inbox relay target', () =>
+    !nonProdHome.includes('https://feelreef.com/corals/inbox-bubble') && !nonProdHome.includes('https://feelreef.com/api/inbox')],
   // -- home.md: the 5 section types + platform defaults --
   // 🩸 2026-08-28. `class="st-hero"` was an EXACT string match, so it broke the moment the section
   // gained a second class — which every hero variant now does (`.st-full-bleed`, the opt-out from
