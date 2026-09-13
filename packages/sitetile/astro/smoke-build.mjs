@@ -421,6 +421,53 @@ const siteWideHits = siteWideSchemeHits(DIST, pages, rss, sitemapXml);
 // fixture and its own outDir, is the only way to exercise that without the hostile config leaking
 // onto the primary build's ~130 other assertions.
 //
+// ---- the icon badge receipts (see packages/sitetile/icon-core.mjs) ----
+// P3-1 (round 1 review): getStaticPaths() below and `badgeExpected` further down used to be TWO
+// hand-kept lists — the reviewer added two kinds straight to getStaticPaths and the smoke stayed
+// 177/177, silent about both new pages, because nothing tied the two together. ONE array now
+// drives both: it is serialized straight into the generated page's getStaticPaths() (below) AND
+// zipped into `badgeExpected` (further down, where the HTML is actually read) — and the built
+// `badge-receipt-*` directory set is asserted to equal `Object.keys(badgeExpected)` exactly, so a
+// kind that silently failed to build is caught on the OUTPUT side too, not just the source side.
+//   [kind, page-props-meta, [[rel, href, generated-or-null], …] the rendered <head> must equal]
+const BADGE_KINDS = [
+  ['png', { favicon: '/brand/mark.png' },
+    [['icon', '/brand/mark.png', null], ['apple-touch-icon', '/brand/mark.png', null]]],
+  ['svg', { favicon: '/brand/mark.svg' },
+    [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']]],
+  ['none', {},
+    [['icon', '/favicon.ico', 'badge'], ['icon', '/favicon.svg', 'badge'], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']]],
+  // 🔴 P2-2 (round 1 review): this fixture declares `packages: pwa` but never runs
+  // gen-icons.sh — there is no real public/apple-touch-icon.png anywhere in this build — so
+  // tile's own route really did write the badge at /apple-touch-icon.png. Before the fix this
+  // read `null` (hasPwa alone zeroed the flag by path-equality); it must now read `badge`.
+  ['pwa-svg', { favicon: '/brand/mark.svg', packages: 'pwa' },
+    [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']]],
+  // P2-2 companion: no mark AND packages: pwa AND (still) no real file backing it — every one of
+  // the three canonical links is really written by tile this build, so every one carries the badge.
+  ['pwa-without', { packages: 'pwa' },
+    [['icon', '/favicon.ico', 'badge'], ['icon', '/favicon.svg', 'badge'], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']]],
+];
+// The reviewer's collision fixture and the PWA-with-a-real-file fixture BOTH need an actual
+// public/apple-touch-icon.png on disk — and public/ is shared site-WIDE, so they cannot live in
+// the same build as BADGE_KINDS above (that build's 'none'/'pwa-without' cases depend on there
+// being NO real file). They get their own sibling site, buildBadgeCollisionFixture() below.
+const BADGE_COLLISION_KINDS = [
+  // 🔴 P2-1: the owner names their OWN mark `/apple-touch-icon.png` (no PWA at all) — the exact
+  // path our fallback would otherwise occupy. A real file sits there (planted below); neither
+  // link may carry the badge, and the icon route must not have overwritten the owner's bytes.
+  ['collision', { favicon: '/apple-touch-icon.png' },
+    [['icon', '/apple-touch-icon.png', null], ['apple-touch-icon', '/apple-touch-icon.png', null]]],
+  // gen-icons.sh genuinely ran this time: no mark, `packages: pwa`, and a real
+  // public/apple-touch-icon.png on disk. The two generated favicon links still carry the badge —
+  // nothing shadows THOSE paths — but apple-touch-icon must not, and must not be overwritten.
+  ['pwa-with-own-png', { packages: 'pwa' },
+    [['icon', '/favicon.ico', 'badge'], ['icon', '/favicon.svg', 'badge'], ['apple-touch-icon', '/apple-touch-icon.png', null]]],
+];
+/** Bytes distinguishable from anything tile could draw (not a valid PNG — nothing here decodes
+ *  it): proves "the owner's file survived" apart from "tile clobbered it with a badge". */
+const REAL_APPLE_TOUCH_BYTES = 'THIS-IS-THE-OWNERS-REAL-APPLE-TOUCH-ICON-NOT-A-TILE-BADGE\n';
+
 // The fixture directory is rsync'd from THIS `astro/` tree (excluding node_modules/.astro/
 // dist-*/the fixture dir itself) rather than hand-duplicated, so it can never silently drift from
 // the real component tree; node_modules is a SYMLINK (never copied — same install, no second
@@ -431,7 +478,7 @@ function buildHostileBlogFixture() {
   // this has to sit at the SAME depth under packages/sitetile/ that astro/ itself does for
   // `../site-core.js` etc. to resolve to the same real files).
   const HDIR = join(HERE, '..', '.smoke-hostile-blog');
-  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog)(?:[\\/]|$)/;
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision)(?:[\\/]|$)/;
   rmSync(HDIR, { recursive: true, force: true });
   cpSync(HERE, HDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
   symlinkSync(join(HERE, 'node_modules'), join(HDIR, 'node_modules'), 'dir');
@@ -511,15 +558,14 @@ Body text for the SVG-featured-image post.
 `, 'utf8');
 
   // Render the real SiteLayout with explicit page metadata, isolated from site defaults.
+  // P3-1: the getStaticPaths() array below is SERIALIZED from BADGE_KINDS — not hand-copied —
+  // so a kind added to one is, structurally, added to the other; the directory-equality assertion
+  // near `badgeExpected` closes the loop on the output side.
   writeFileSync(join(HDIR, 'src/pages/badge-receipt-[kind].astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
 export function getStaticPaths() {
-  return [
-    ['png', { favicon: '/brand/mark.png' }],
-    ['svg', { favicon: '/brand/mark.svg' }],
-    ['none', {}],
-    ['pwa-svg', { favicon: '/brand/mark.svg', packages: 'pwa' }],
-  ].map(([kind, meta]) => ({ params: { kind }, props: { meta } }));
+  return ${JSON.stringify(BADGE_KINDS.map(([kind, meta]) => [kind, meta]))}
+    .map(([kind, meta]) => ({ params: { kind }, props: { meta } }));
 }
 ---
 <SiteLayout title="Badge receipt" meta={Astro.props.meta}><p>Badge receipt</p></SiteLayout>
@@ -533,8 +579,45 @@ export function getStaticPaths() {
   return HDIST;
 }
 
+// The reviewer's collision fixture (an owner's OWN mark set to `/apple-touch-icon.png`) and the
+// PWA-with-a-real-file fixture — both need an actual public/apple-touch-icon.png on disk, and
+// public/ is shared site-wide, so neither can live in buildHostileBlogFixture()'s build (whose
+// 'none'/'pwa-without' cases depend on there being NO real file at that path). Its own sibling
+// site, built the same way: rsync'd from `astro/` so it can never drift from the real component
+// tree, node_modules SYMLINKED (same install, never written into).
+function buildBadgeCollisionFixture() {
+  const CDIR = join(HERE, '..', '.smoke-badge-collision');
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision)(?:[\\/]|$)/;
+  rmSync(CDIR, { recursive: true, force: true });
+  cpSync(HERE, CDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(CDIR, 'node_modules'), 'dir');
+
+  // The real file, planted BEFORE the build — the whole point is that Astro's own
+  // public/-beats-route rule shadows tile's apple-touch-icon.png route for this entire site.
+  writeFileSync(join(CDIR, 'public/apple-touch-icon.png'), REAL_APPLE_TOUCH_BYTES, 'utf8');
+
+  writeFileSync(join(CDIR, 'src/pages/badge-receipt-[kind].astro'), `---
+import SiteLayout from '../layouts/SiteLayout.astro';
+export function getStaticPaths() {
+  return ${JSON.stringify(BADGE_COLLISION_KINDS.map(([kind, meta]) => [kind, meta]))}
+    .map(([kind, meta]) => ({ params: { kind }, props: { meta } }));
+}
+---
+<SiteLayout title="Badge receipt" meta={Astro.props.meta}><p>Badge receipt</p></SiteLayout>
+`);
+
+  const CDIST = join(CDIR, 'dist-badge-collision');
+  execFileSync('npx', ['astro', 'build', '--outDir', CDIST], {
+    cwd: CDIR, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: 'badge-collision-smoke', PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  });
+  return CDIST;
+}
+
 console.log('▸ astro build → .smoke-hostile-blog/dist-hostile-blog/ (R4-P1-1: site-level blog-path/blog-url-pattern/category-tag-base poisoning)…');
 const HDIST = buildHostileBlogFixture();
+console.log('▸ astro build → .smoke-badge-collision/dist-badge-collision/ (round 1 review P2-1/P2-2: a real public/apple-touch-icon.png shadowing the route)…');
+const CDIST = buildBadgeCollisionFixture();
 // round 5: a two-arm counterfactual (identity-swap safeHref/safeSrc) doesn't just make an
 // assertion go red here — it makes postUrl() return the raw hostile permalink VERBATIM, which
 // getStaticPaths() then builds as a literal directory name (`javascript:void(0)/index.html`, the
@@ -575,26 +658,46 @@ function assertBadgeLinks(html, expected) {
   assert.deepEqual(links.map(({ tag, attrs }) => [attrs.rel, attrs.href,
     /\sdata-generated(?:\s|=|>)/.test(tag) ? attrs['data-generated'] ?? '' : null]), expected);
 }
-const badgeExpected = {
-  png: [['icon', '/brand/mark.png', null], ['apple-touch-icon', '/brand/mark.png', null]],
-  svg: [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']],
-  none: [['icon', '/favicon.ico', 'badge'], ['icon', '/favicon.svg', 'badge'], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']],
-  'pwa-svg': [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', null]],
-};
+// P3-1: derived from BADGE_KINDS, not hand-kept — see its own comment above.
+const badgeExpected = Object.fromEntries(BADGE_KINDS.map(([kind, , expected]) => [kind, expected]));
 const badgeHtml = Object.fromEntries(Object.keys(badgeExpected).map((kind) =>
   [kind, readFileSync(join(HDIST, `badge-receipt-${kind}`, 'index.html'), 'utf8')]));
+// The output-side half of P3-1's fix: a kind that silently failed to build (or one whose
+// directory drifted from BADGE_KINDS some other way) is caught here even if the source-side
+// serialization above somehow stayed in sync.
+const builtBadgeDirs = readdirSync(HDIST).filter((e) => e.startsWith('badge-receipt-')).map((e) => e.slice('badge-receipt-'.length)).sort();
+
+// The collision build (buildBadgeCollisionFixture): same assertBadgeLinks, its own expected
+// table, PLUS the "must not overwrite it" half of P2-1/P2-2 — the owner's real bytes at
+// /apple-touch-icon.png must come through this build's dist untouched.
+const collisionExpected = Object.fromEntries(BADGE_COLLISION_KINDS.map(([kind, , expected]) => [kind, expected]));
+const collisionHtml = Object.fromEntries(Object.keys(collisionExpected).map((kind) =>
+  [kind, readFileSync(join(CDIST, `badge-receipt-${kind}`, 'index.html'), 'utf8')]));
+const builtCollisionDirs = readdirSync(CDIST).filter((e) => e.startsWith('badge-receipt-')).map((e) => e.slice('badge-receipt-'.length)).sort();
+const collisionAppleTouchBytes = readFileSync(join(CDIST, 'apple-touch-icon.png'), 'utf8');
 
 const checks = [
   ...Object.entries(badgeExpected).map(([kind, expected]) => [`icons: rendered ${kind} marks exactly the badges`, () => {
     assertBadgeLinks(badgeHtml[kind], expected);
     return true;
   }]),
+  ['icons: the built badge-receipt-* directories are EXACTLY the BADGE_KINDS list (P3-1 — a kind that silently failed to build, or was added on only one side, shows up here)', () =>
+    JSON.stringify(builtBadgeDirs) === JSON.stringify(BADGE_KINDS.map(([kind]) => kind).slice().sort())],
   ['icons: CONTROL wrongly marking an owner link fails the rendered-head assertion', () => {
     const wrong = badgeHtml.png.replace(/(<link\b[^>]*rel="icon"[^>]*)(>)/, '$1 data-generated="badge"$2');
     assert.notEqual(wrong, badgeHtml.png, 'control actually changed the owner link');
     assert.throws(() => assertBadgeLinks(wrong, badgeExpected.png), assert.AssertionError);
     return true;
   }],
+  // -- round 1 review, P2-1/P2-2: the collision build (a real public/apple-touch-icon.png) --
+  ...Object.entries(collisionExpected).map(([kind, expected]) => [`icons: collision-build ${kind} marks exactly the badges`, () => {
+    assertBadgeLinks(collisionHtml[kind], expected);
+    return true;
+  }]),
+  ['icons: collision-build directories are EXACTLY the BADGE_COLLISION_KINDS list', () =>
+    JSON.stringify(builtCollisionDirs) === JSON.stringify(BADGE_COLLISION_KINDS.map(([kind]) => kind).slice().sort())],
+  ['🔴 icons: the owner\'s real apple-touch-icon.png is NEVER overwritten by the badge route (P2-1/P2-2 — "must not overwrite it")', () =>
+    collisionAppleTouchBytes === REAL_APPLE_TOUCH_BYTES],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
     /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
@@ -1186,9 +1289,13 @@ const checks = [
     /<span class="rf-header-cta">Buy now<\/span>/.test(schemeCheck)],
   ['scheme-check: header-actions-cart-href is gated at its declaration point — never reaches data-cart-href, even though the cart IS wired (data-cart-guild present proves the slot was actually exercised, not skipped)', () =>
     schemeCheck.includes('data-cart-guild="scheme-check-cart"') && !schemeCheck.includes('data-cart-href=')],
-  ['scheme-check: favicon/apple-touch-icon fall back to the generated paths when the mark is a disallowed scheme', () =>
-    /<link rel="icon"[^>]*href="\/favicon\.ico"/.test(schemeCheck)
-    && /<link rel="icon"[^>]*href="\/favicon\.svg"/.test(schemeCheck)
+  // P3-2 (round 1 review): this used to regex the href on the two rel=icon links but only check
+  // the badge ATTRIBUTE on apple-touch-icon — the `none` fixture happened to cover the icon links'
+  // attribute too, so the gap here was invisible without reading which fixture exercises which
+  // assertion. Now every generated link on this page proves both its href AND its attribute.
+  ['scheme-check: favicon/apple-touch-icon fall back to the generated paths when the mark is a disallowed scheme, and every generated link carries data-generated="badge"', () =>
+    /<link rel="icon"[^>]*href="\/favicon\.ico"[^>]*data-generated="badge"/.test(schemeCheck)
+    && /<link rel="icon"[^>]*href="\/favicon\.svg"[^>]*data-generated="badge"/.test(schemeCheck)
     && schemeCheck.includes('<link rel="apple-touch-icon" href="/apple-touch-icon.png" data-generated="badge">')],
   ['scheme-check: the fonts stylesheet (and its preconnects) are omitted entirely when fonts: is a disallowed scheme', () =>
     !schemeCheck.includes('fonts.googleapis') && !schemeCheck.includes('fonts.gstatic')],

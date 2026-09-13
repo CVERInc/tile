@@ -36,6 +36,11 @@ packages/sitetile/.smoke-hostile-blog/
 # this build for why it must be a SIBLING of dist-smoke/, never nested inside it). Rebuilt every
 # smoke run, never committed.
 packages/sitetile/.smoke-nonprod-origin/
+# the smoke's FOURTH, isolated build — badge37-fix1 (round 1 review P2-1/P2-2): a real
+# public/apple-touch-icon.png on disk, so it must be its own site (the primary badge-receipt
+# fixture's 'none'/'pwa-without' cases depend on there being NO real file at that path; see
+# smoke-build.mjs's buildBadgeCollisionFixture). Rebuilt every smoke run, never committed.
+packages/sitetile/.smoke-badge-collision/
 # @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
 # somebody's site, and moves them back afterwards — including when the build throws. The directory
 # should never outlive a build; it is ignored because the one time it does (a killed process) the

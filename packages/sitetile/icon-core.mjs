@@ -136,19 +136,30 @@ export function badgeColors(meta) {
  *     drops — which is how a site with a perfectly good logo ends up with a screenshot on
  *     somebody's home screen.
  * Each entry carries `generated` so consumers can distinguish our fallback badge from the
- * owner's mark. The PWA public/ touch icon is the owner's icon even at the fallback path.
+ * owner's mark. `generated` means the generator ACTUALLY WROTE this build's file at this href —
+ * never merely "the href looks like one of our conventional paths". A user-provided file at the
+ * same path (an owner's `favicon: /apple-touch-icon.png`, or REEF with PWA's own
+ * public/apple-touch-icon.png on disk from gen-icons.sh) shadows the route — Astro skips a route a
+ * public/ file already claims — so the generator never wrote it there, and it must never be
+ * marked. The caller (SiteLayout.astro) is the one place with filesystem access, so it hands in
+ * `opts.written`: the set of canonical paths the build actually produced. No I/O happens here.
  */
 export function iconHrefs(meta, opts) {
   const mark = siteMark(meta);
   const type = markType(mark);
   const raster = /^image\/(png|jpeg|webp)$/.test(type);
+  // Absent an explicit written-set, assume every canonical path was written — the naive answer a
+  // caller with no filesystem access (a unit test, e.g.) gets by default.
+  const written = (opts && opts.written) || new Set(Object.values(ICON_PATHS));
   const icon = mark
-    ? [{ href: mark, type: type || '', generated: false }]
-    : [{ href: ICON_PATHS.ico, sizes: '32x32', generated: true }, { href: ICON_PATHS.svg, type: 'image/svg+xml', generated: true }];
+    ? [{ href: mark, type: type || '', generated: written.has(mark) }]
+    : [{ href: ICON_PATHS.ico, sizes: '32x32', generated: written.has(ICON_PATHS.ico) },
+       { href: ICON_PATHS.svg, type: 'image/svg+xml', generated: written.has(ICON_PATHS.svg) }];
   // REEF with PWA ships its own opaque icon set into public/ (gen-icons.sh); that file wins the
-  // path by Astro's own public/-beats-route rule, so a PWA site keeps pointing at it.
+  // path by Astro's own public/-beats-route rule, so a PWA site keeps pointing at it — this is
+  // about which HREF to link, independent of whether THIS build actually wrote a file there.
   const appleTouch = (opts && opts.hasPwa) || !raster ? ICON_PATHS.apple : mark;
-  return { icon, appleTouch: { href: appleTouch, generated: appleTouch === ICON_PATHS.apple && !opts?.hasPwa } };
+  return { icon, appleTouch: { href: appleTouch, generated: written.has(appleTouch) } };
 }
 
 // ── the SVG badge ────────────────────────────────────────────────────────────────────────────────
