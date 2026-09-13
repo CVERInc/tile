@@ -21,6 +21,7 @@
 // unaccounted script or chunk, or any framework hydration (astro-island), fails the smoke. New
 // client JS must be added here CONSCIOUSLY, with its doctrine, or the build goes red.
 
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
   copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
@@ -509,6 +510,21 @@ tags: [news]
 Body text for the SVG-featured-image post.
 `, 'utf8');
 
+  // Render the real SiteLayout with explicit page metadata, isolated from site defaults.
+  writeFileSync(join(HDIR, 'src/pages/badge-receipt-[kind].astro'), `---
+import SiteLayout from '../layouts/SiteLayout.astro';
+export function getStaticPaths() {
+  return [
+    ['png', { favicon: '/brand/mark.png' }],
+    ['svg', { favicon: '/brand/mark.svg' }],
+    ['none', {}],
+    ['pwa-svg', { favicon: '/brand/mark.svg', packages: 'pwa' }],
+  ].map(([kind, meta]) => ({ params: { kind }, props: { meta } }));
+}
+---
+<SiteLayout title="Badge receipt" meta={Astro.props.meta}><p>Badge receipt</p></SiteLayout>
+`);
+
   const HDIST = join(HDIR, 'dist-hostile-blog');
   execFileSync('npx', ['astro', 'build', '--outDir', HDIST], {
     cwd: HDIR, stdio: 'inherit',
@@ -548,7 +564,37 @@ function findHostilePages(dir) {
 }
 const hostileSiteWideHits = siteWideSchemeHits(HDIST, findHostilePages(HDIST), hostileRss, hostileSitemap);
 
+// Compare every icon tag in the rendered head; absent attributes must really be absent.
+function assertBadgeLinks(html, expected) {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head>/.exec(html);
+  assert.ok(head, 'rendered head exists');
+  const links = [...head[1].matchAll(/<link\b[^>]*>/g)].map(([tag]) => {
+    const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+    return { tag, attrs };
+  }).filter(({ attrs }) => ['icon', 'apple-touch-icon'].includes(attrs.rel));
+  assert.deepEqual(links.map(({ tag, attrs }) => [attrs.rel, attrs.href,
+    /\sdata-generated(?:\s|=|>)/.test(tag) ? attrs['data-generated'] ?? '' : null]), expected);
+}
+const badgeExpected = {
+  png: [['icon', '/brand/mark.png', null], ['apple-touch-icon', '/brand/mark.png', null]],
+  svg: [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']],
+  none: [['icon', '/favicon.ico', 'badge'], ['icon', '/favicon.svg', 'badge'], ['apple-touch-icon', '/apple-touch-icon.png', 'badge']],
+  'pwa-svg': [['icon', '/brand/mark.svg', null], ['apple-touch-icon', '/apple-touch-icon.png', null]],
+};
+const badgeHtml = Object.fromEntries(Object.keys(badgeExpected).map((kind) =>
+  [kind, readFileSync(join(HDIST, `badge-receipt-${kind}`, 'index.html'), 'utf8')]));
+
 const checks = [
+  ...Object.entries(badgeExpected).map(([kind, expected]) => [`icons: rendered ${kind} marks exactly the badges`, () => {
+    assertBadgeLinks(badgeHtml[kind], expected);
+    return true;
+  }]),
+  ['icons: CONTROL wrongly marking an owner link fails the rendered-head assertion', () => {
+    const wrong = badgeHtml.png.replace(/(<link\b[^>]*rel="icon"[^>]*)(>)/, '$1 data-generated="badge"$2');
+    assert.notEqual(wrong, badgeHtml.png, 'control actually changed the owner link');
+    assert.throws(() => assertBadgeLinks(wrong, badgeExpected.png), assert.AssertionError);
+    return true;
+  }],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
     /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
@@ -1143,7 +1189,7 @@ const checks = [
   ['scheme-check: favicon/apple-touch-icon fall back to the generated paths when the mark is a disallowed scheme', () =>
     /<link rel="icon"[^>]*href="\/favicon\.ico"/.test(schemeCheck)
     && /<link rel="icon"[^>]*href="\/favicon\.svg"/.test(schemeCheck)
-    && schemeCheck.includes('<link rel="apple-touch-icon" href="/apple-touch-icon.png">')],
+    && schemeCheck.includes('<link rel="apple-touch-icon" href="/apple-touch-icon.png" data-generated="badge">')],
   ['scheme-check: the fonts stylesheet (and its preconnects) are omitted entirely when fonts: is a disallowed scheme', () =>
     !schemeCheck.includes('fonts.googleapis') && !schemeCheck.includes('fonts.gstatic')],
   ['scheme-check: collection — the hostile item\'s card-wide GH link and learn link both drop (span, not <a>), the safe sibling\'s cover/GH/learn anchors all stay live (control)', () =>

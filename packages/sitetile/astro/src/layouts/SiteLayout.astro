@@ -11,7 +11,7 @@ import * as lingo from '../packages/lingo/locale.mjs';
 import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
-import { iconHrefs, ICON_PATHS } from '@icons';
+import { iconHrefs } from '@icons';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
@@ -642,10 +642,7 @@ const iconLinksRaw = iconHrefs(meta, { hasPwa });
 // scheme. `<link rel=icon>`/`apple-touch-icon` are not a script-execution context (a browser
 // fetches an image, it does not navigate them), so this is defense-in-depth, not the P2 fix.
 const iconMarkSafe = iconLinksRaw.icon.every((l) => safeSrc(l.href));
-const iconLinks = iconMarkSafe ? iconLinksRaw : {
-  icon: [{ href: ICON_PATHS.ico, sizes: '32x32' }, { href: ICON_PATHS.svg, type: 'image/svg+xml' }],
-  appleTouch: ICON_PATHS.apple,
-};
+const iconLinks = iconMarkSafe ? iconLinksRaw : iconHrefs({}, { hasPwa });
 // Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
 const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
 const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
@@ -742,8 +739,8 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         links the two generated files. apple-touch-icon is ALWAYS linked because iOS reads that and
         ignores rel=icon — and it points at the mark only when the mark is a raster, since an SVG
         linked here is an icon iOS silently drops. The rule itself lives in iconHrefs(). */}
-    {iconLinks.icon.map((l) => <link rel="icon" type={l.type || undefined} sizes={l.sizes || undefined} href={l.href} />)}
-    <link rel="apple-touch-icon" href={iconLinks.appleTouch} />
+    {iconLinks.icon.map((l) => <link rel="icon" type={l.type || undefined} sizes={l.sizes || undefined} href={l.href} data-generated={l.generated ? "badge" : undefined} />)}
+    <link rel="apple-touch-icon" href={iconLinks.appleTouch.href} data-generated={iconLinks.appleTouch.generated ? "badge" : undefined} />
     {/* `packages: pwa` also links the installable manifest. */}
     {hasPwa && <link rel="manifest" href="/manifest.webmanifest" />}
     {/* Open Graph + Twitter card — link previews on Patreon / IG / X / Discord. */}

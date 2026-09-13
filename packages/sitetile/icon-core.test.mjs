@@ -208,20 +208,20 @@ test('the SVG cannot be talked into carrying markup', () => {
 test('a site with no mark links both generated files', () => {
   const { icon, appleTouch } = iconHrefs({ title: 'Atlas' }, {});
   assert.deepEqual(icon, [
-    { href: ICON_PATHS.ico, sizes: '32x32' },
-    { href: ICON_PATHS.svg, type: 'image/svg+xml' },
+    { href: ICON_PATHS.ico, sizes: '32x32', generated: true },
+    { href: ICON_PATHS.svg, type: 'image/svg+xml', generated: true },
   ]);
-  assert.equal(appleTouch, ICON_PATHS.apple);
+  assert.deepEqual(appleTouch, { href: ICON_PATHS.apple, generated: true });
 });
 
 test("🔴 an owner's mark wins — and only the mark is linked", () => {
   const svgMark = iconHrefs({ favicon: '/brand/mark.svg' }, {});
-  assert.deepEqual(svgMark.icon, [{ href: '/brand/mark.svg', type: 'image/svg+xml' }]);
+  assert.deepEqual(svgMark.icon, [{ href: '/brand/mark.svg', type: 'image/svg+xml', generated: false }]);
   // iOS ignores SVG, so the apple slot falls to the badge rather than to an icon that never draws.
-  assert.equal(svgMark.appleTouch, ICON_PATHS.apple);
+  assert.deepEqual(svgMark.appleTouch, { href: ICON_PATHS.apple, generated: true });
   const pngMark = iconHrefs({ favicon: '/brand/mark.png' }, {});
-  assert.deepEqual(pngMark.icon, [{ href: '/brand/mark.png', type: 'image/png' }]);
-  assert.equal(pngMark.appleTouch, '/brand/mark.png', 'a raster mark IS the touch icon');
+  assert.deepEqual(pngMark.icon, [{ href: '/brand/mark.png', type: 'image/png', generated: false }]);
+  assert.deepEqual(pngMark.appleTouch, { href: '/brand/mark.png', generated: false }, 'a raster mark IS the touch icon');
   // the older fields SiteLayout has always fallen back to still work, in the same order
   assert.equal(siteMark({ 'site-logo': '/a.png', 'footer-logo': '/b.png' }), '/a.png');
   assert.equal(siteMark({ 'footer-logo': '/b.png' }), '/b.png');
@@ -231,7 +231,12 @@ test("🔴 an owner's mark wins — and only the mark is linked", () => {
 
 test('a PWA site keeps pointing at its own generated icon set', () => {
   // gen-icons.sh writes public/apple-touch-icon.png; Astro skips a route a public/ file claims.
-  assert.equal(iconHrefs({ favicon: '/brand/mark.png' }, { hasPwa: true }).appleTouch, ICON_PATHS.apple);
+  for (const ext of ['png', 'svg']) {
+    const links = iconHrefs({ favicon: `/brand/mark.${ext}` }, { hasPwa: true });
+    assert.equal(links.icon.length, 1);
+    assert.equal(links.icon[0].generated, false);
+    assert.deepEqual(links.appleTouch, { href: ICON_PATHS.apple, generated: false });
+  }
 });
 
 // ── the wiring: a link that names a file nothing emits is the defect we started from ─────────────
@@ -256,7 +261,7 @@ test('🔴 the icon links are UNCONDITIONAL in the layout', () => {
   // unconditional source of truth this test protects; only the variable name changed.
   assert.match(layout, /const iconLinksRaw = iconHrefs\(meta, \{ hasPwa \}\)/, 'the rule comes from the model');
   assert.match(layout, /\{iconLinks\.icon\.map\(\(l\) => <link rel="icon"/, 'rel=icon comes from iconHrefs');
-  assert.match(layout, /^\s*<link rel="apple-touch-icon" href=\{iconLinks\.appleTouch\} \/>$/m,
+  assert.match(layout, /^\s*<link rel="apple-touch-icon" href=\{iconLinks\.appleTouch\.href\} data-generated=\{iconLinks\.appleTouch\.generated \? "badge" : undefined\} \/>$/m,
     'apple-touch-icon is emitted on every page, not gated on a site having set `favicon:`');
   // the shape of the original defect: an icon link that only exists when frontmatter did.
   assert.ok(!/\{favicon && <link rel="icon"/.test(layout), 'no conditional favicon link is left');

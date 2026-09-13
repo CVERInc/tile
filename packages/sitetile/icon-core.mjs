@@ -135,18 +135,20 @@ export function badgeColors(meta) {
  *     the mark only when the mark is a raster; an SVG mark linked here is an icon iOS silently
  *     drops — which is how a site with a perfectly good logo ends up with a screenshot on
  *     somebody's home screen.
+ * Each entry carries `generated` so consumers can distinguish our fallback badge from the
+ * owner's mark. The PWA public/ touch icon is the owner's icon even at the fallback path.
  */
 export function iconHrefs(meta, opts) {
   const mark = siteMark(meta);
   const type = markType(mark);
   const raster = /^image\/(png|jpeg|webp)$/.test(type);
   const icon = mark
-    ? [{ href: mark, type: type || '' }]
-    : [{ href: ICON_PATHS.ico, sizes: '32x32' }, { href: ICON_PATHS.svg, type: 'image/svg+xml' }];
+    ? [{ href: mark, type: type || '', generated: false }]
+    : [{ href: ICON_PATHS.ico, sizes: '32x32', generated: true }, { href: ICON_PATHS.svg, type: 'image/svg+xml', generated: true }];
   // REEF with PWA ships its own opaque icon set into public/ (gen-icons.sh); that file wins the
   // path by Astro's own public/-beats-route rule, so a PWA site keeps pointing at it.
   const appleTouch = (opts && opts.hasPwa) || !raster ? ICON_PATHS.apple : mark;
-  return { icon, appleTouch };
+  return { icon, appleTouch: { href: appleTouch, generated: appleTouch === ICON_PATHS.apple && !opts?.hasPwa } };
 }
 
 // ── the SVG badge ────────────────────────────────────────────────────────────────────────────────
