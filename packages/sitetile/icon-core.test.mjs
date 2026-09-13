@@ -208,20 +208,20 @@ test('the SVG cannot be talked into carrying markup', () => {
 test('a site with no mark links both generated files', () => {
   const { icon, appleTouch } = iconHrefs({ title: 'Atlas' }, {});
   assert.deepEqual(icon, [
-    { href: ICON_PATHS.ico, sizes: '32x32' },
-    { href: ICON_PATHS.svg, type: 'image/svg+xml' },
+    { href: ICON_PATHS.ico, sizes: '32x32', generated: true },
+    { href: ICON_PATHS.svg, type: 'image/svg+xml', generated: true },
   ]);
-  assert.equal(appleTouch, ICON_PATHS.apple);
+  assert.deepEqual(appleTouch, { href: ICON_PATHS.apple, generated: true });
 });
 
 test("🔴 an owner's mark wins — and only the mark is linked", () => {
   const svgMark = iconHrefs({ favicon: '/brand/mark.svg' }, {});
-  assert.deepEqual(svgMark.icon, [{ href: '/brand/mark.svg', type: 'image/svg+xml' }]);
+  assert.deepEqual(svgMark.icon, [{ href: '/brand/mark.svg', type: 'image/svg+xml', generated: false }]);
   // iOS ignores SVG, so the apple slot falls to the badge rather than to an icon that never draws.
-  assert.equal(svgMark.appleTouch, ICON_PATHS.apple);
+  assert.deepEqual(svgMark.appleTouch, { href: ICON_PATHS.apple, generated: true });
   const pngMark = iconHrefs({ favicon: '/brand/mark.png' }, {});
-  assert.deepEqual(pngMark.icon, [{ href: '/brand/mark.png', type: 'image/png' }]);
-  assert.equal(pngMark.appleTouch, '/brand/mark.png', 'a raster mark IS the touch icon');
+  assert.deepEqual(pngMark.icon, [{ href: '/brand/mark.png', type: 'image/png', generated: false }]);
+  assert.deepEqual(pngMark.appleTouch, { href: '/brand/mark.png', generated: false }, 'a raster mark IS the touch icon');
   // the older fields SiteLayout has always fallen back to still work, in the same order
   assert.equal(siteMark({ 'site-logo': '/a.png', 'footer-logo': '/b.png' }), '/a.png');
   assert.equal(siteMark({ 'footer-logo': '/b.png' }), '/b.png');
@@ -229,9 +229,36 @@ test("🔴 an owner's mark wins — and only the mark is linked", () => {
   assert.equal(markType('https://cdn.example/x'), '', 'an untyped mark is linked without a type');
 });
 
-test('a PWA site keeps pointing at its own generated icon set', () => {
-  // gen-icons.sh writes public/apple-touch-icon.png; Astro skips a route a public/ file claims.
-  assert.equal(iconHrefs({ favicon: '/brand/mark.png' }, { hasPwa: true }).appleTouch, ICON_PATHS.apple);
+test('a PWA site that never ran gen-icons.sh gets tile\'s own badge — and it IS generated', () => {
+  // 🔴 P2-2: `hasPwa` alone used to zero the flag by path-equality, regardless of whether
+  // gen-icons.sh had ever actually run. With no `written` set supplied (the caller has no
+  // filesystem opinion), the honest default is "the generator wrote every canonical path" — so a
+  // site that only DECLARED `packages: pwa` gets a correctly-marked badge, not a silently
+  // unmarked one that reef's matcher would then trust as the owner's own file.
+  for (const ext of ['png', 'svg']) {
+    const links = iconHrefs({ favicon: `/brand/mark.${ext}` }, { hasPwa: true });
+    assert.equal(links.icon.length, 1);
+    assert.equal(links.icon[0].generated, false);
+    assert.deepEqual(links.appleTouch, { href: ICON_PATHS.apple, generated: true });
+  }
+});
+
+test('generated means WRITTEN, not path-shaped — a real file at the same path is never marked', () => {
+  // gen-icons.sh (or an owner's own file) really did put a PNG at /apple-touch-icon.png this
+  // build: the caller's `written` set omits it, and `generated` must follow, not the href string.
+  const reallyWritten = new Set([ICON_PATHS.ico, ICON_PATHS.svg]); // apple-touch missing == shadowed
+  const pwaWithOwnFile = iconHrefs({ favicon: '/brand/mark.svg' }, { hasPwa: true, written: reallyWritten });
+  assert.deepEqual(pwaWithOwnFile.appleTouch, { href: ICON_PATHS.apple, generated: false });
+  // 🔴 P2-1: the collision — an owner names their OWN mark `/apple-touch-icon.png` (no PWA at
+  // all). Same href reached two different ways; only `written` may decide `generated`, so a real
+  // file there must silence BOTH the icon link and the apple-touch link, never just one.
+  const collision = iconHrefs({ favicon: '/apple-touch-icon.png' }, { written: reallyWritten });
+  assert.deepEqual(collision.icon, [{ href: '/apple-touch-icon.png', type: 'image/png', generated: false }]);
+  assert.deepEqual(collision.appleTouch, { href: '/apple-touch-icon.png', generated: false });
+  // And the mirror: no real file this build (written includes it) ⇒ the collision path really is
+  // our fallback badge sitting there, and that IS generated.
+  const noRealFile = iconHrefs({ favicon: '/apple-touch-icon.png' }, {});
+  assert.deepEqual(noRealFile.appleTouch, { href: '/apple-touch-icon.png', generated: true });
 });
 
 // ── the wiring: a link that names a file nothing emits is the defect we started from ─────────────
@@ -254,9 +281,13 @@ test('🔴 the icon links are UNCONDITIONAL in the layout', () => {
   // `site-logo:`/`footer-logo:` (the model's own `siteMark`) is an author-controlled destination
   // reaching this file's `<link>` hrefs unfiltered — the call to the model is still the ONE,
   // unconditional source of truth this test protects; only the variable name changed.
-  assert.match(layout, /const iconLinksRaw = iconHrefs\(meta, \{ hasPwa \}\)/, 'the rule comes from the model');
+  assert.match(layout, /const iconLinksRaw = iconHrefs\(meta, \{ hasPwa, written: iconWritten \}\)/, 'the rule comes from the model');
+  // 🔴 P2-1/P2-2: `generated` must be driven by what THIS build actually wrote, not by `hasPwa`
+  // alone or by an href that merely looks like one of the three canonical paths — the layout is
+  // the one place with filesystem access, so it must be the one computing that set.
+  assert.match(layout, /existsSync\(join\(ICON_PUBLIC_DIR, p\)\)/, 'written-paths is computed from a real disk check, not inferred from the href');
   assert.match(layout, /\{iconLinks\.icon\.map\(\(l\) => <link rel="icon"/, 'rel=icon comes from iconHrefs');
-  assert.match(layout, /^\s*<link rel="apple-touch-icon" href=\{iconLinks\.appleTouch\} \/>$/m,
+  assert.match(layout, /^\s*<link rel="apple-touch-icon" href=\{iconLinks\.appleTouch\.href\} data-generated=\{iconLinks\.appleTouch\.generated \? "badge" : undefined\} \/>$/m,
     'apple-touch-icon is emitted on every page, not gated on a site having set `favicon:`');
   // the shape of the original defect: an icon link that only exists when frontmatter did.
   assert.ok(!/\{favicon && <link rel="icon"/.test(layout), 'no conditional favicon link is left');

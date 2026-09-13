@@ -12,6 +12,14 @@ import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
 import { iconHrefs, ICON_PATHS } from '@icons';
+// icon-core.mjs is zero-I/O by design (node-runnable, unit-testable without a renderer) — this is
+// the one place with filesystem access, so THIS file is the "generator" the model asks about: it
+// tells iconHrefs() which canonical paths the build actually wrote, rather than letting `generated`
+// be inferred from what an href merely looks like. Same resolution src/lib/agent-corpus.mjs's
+// assetExists uses: Astro's own publicDir default is <root>/public, root defaulting to cwd — the
+// same rule Astro itself applies when a public/ file shadows one of these three routes.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
@@ -632,7 +640,16 @@ const shareImage = absUrl(authoredShareImage
 // /apple-touch-icon.png all answered 404 on live sites — measured. The three routes beside this
 // layout now emit a badge for every build, and the hrefs below come from the SAME model that draws
 // them (packages/sitetile/icon-core.mjs), so a link here can never name a file that isn't emitted.
-const iconLinksRaw = iconHrefs(meta, { hasPwa });
+// 🔴 P2-1/P2-2: `generated` must mean "tile wrote this file in THIS build", never "the href looks
+// like our conventional path". A site's own file at one of these three exact paths — a hand-placed
+// public/apple-touch-icon.png, an owner who happened to name their OWN mark `/apple-touch-icon.png`,
+// or REEF with PWA's gen-icons.sh output — shadows the route (Astro skips a route a public/ file
+// already claims) and must never be marked as ours, regardless of what `packages:` declares.
+const ICON_PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
+const iconWritten = new Set(Object.values(ICON_PATHS).filter((p) => {
+  try { return !existsSync(join(ICON_PUBLIC_DIR, p)); } catch { return true; }
+}));
+const iconLinksRaw = iconHrefs(meta, { hasPwa, written: iconWritten });
 // round 4 (R3-P3-1): iconHrefs() hands back `favicon:`/`site-logo:`/`footer-logo:` (icon-core's
 // siteMark) UNFILTERED as a live `<link>` href when the site set one — the gate that already
 // covers site-logo's three <img src> consumers (safeSrc, above) never touches this path, because
@@ -642,10 +659,7 @@ const iconLinksRaw = iconHrefs(meta, { hasPwa });
 // scheme. `<link rel=icon>`/`apple-touch-icon` are not a script-execution context (a browser
 // fetches an image, it does not navigate them), so this is defense-in-depth, not the P2 fix.
 const iconMarkSafe = iconLinksRaw.icon.every((l) => safeSrc(l.href));
-const iconLinks = iconMarkSafe ? iconLinksRaw : {
-  icon: [{ href: ICON_PATHS.ico, sizes: '32x32' }, { href: ICON_PATHS.svg, type: 'image/svg+xml' }],
-  appleTouch: ICON_PATHS.apple,
-};
+const iconLinks = iconMarkSafe ? iconLinksRaw : iconHrefs({}, { hasPwa, written: iconWritten });
 // Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
 const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
 const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
@@ -742,8 +756,8 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         links the two generated files. apple-touch-icon is ALWAYS linked because iOS reads that and
         ignores rel=icon — and it points at the mark only when the mark is a raster, since an SVG
         linked here is an icon iOS silently drops. The rule itself lives in iconHrefs(). */}
-    {iconLinks.icon.map((l) => <link rel="icon" type={l.type || undefined} sizes={l.sizes || undefined} href={l.href} />)}
-    <link rel="apple-touch-icon" href={iconLinks.appleTouch} />
+    {iconLinks.icon.map((l) => <link rel="icon" type={l.type || undefined} sizes={l.sizes || undefined} href={l.href} data-generated={l.generated ? "badge" : undefined} />)}
+    <link rel="apple-touch-icon" href={iconLinks.appleTouch.href} data-generated={iconLinks.appleTouch.generated ? "badge" : undefined} />
     {/* `packages: pwa` also links the installable manifest. */}
     {hasPwa && <link rel="manifest" href="/manifest.webmanifest" />}
     {/* Open Graph + Twitter card — link previews on Patreon / IG / X / Discord. */}
