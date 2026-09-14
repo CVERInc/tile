@@ -153,7 +153,7 @@ function click(el, what) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function loadSquareShop({ storage = {}, catalog = null } = {}) {
+function loadSquareShop({ storage = {}, catalog = null, catalogAnswer = null } = {}) {
 	const store = new Map(Object.entries(storage));
 	const fetchCalls = [];
 	// Catalog READS are counted apart from checkout POSTs, because "did this page re-fetch?" is
@@ -185,6 +185,10 @@ function loadSquareShop({ storage = {}, catalog = null } = {}) {
 		const href = String(url);
 		if (!init || !init.body) {
 			catalogCalls.push(href);
+			// `catalogAnswer` is how the failure arms are driven: it stands in for the whole
+			// response, including the ones that are not a response at all (a throw), so a test can
+			// say what the backend did rather than what this shim would like it to have done.
+			if (catalogAnswer) return catalogAnswer(href);
 			if (!catalog) throw new Error('this test did not expect a catalog fetch');
 			return { ok: true, status: 200, json: async () => ({ connected: true, items: catalog }) };
 		}
@@ -765,4 +769,87 @@ test('a storage row this file did not write is carried through, not tidied away'
 	const rows = rowsOf(sb);
 	assert.ok(rows.some((r) => r && r.from === 'somewhere else'), 'the foreign row is still there');
 	assert.equal(rows.length, 3, 'and so is the empty one — nothing was dropped on the way past');
+});
+
+// ── the catalog cannot be read, and the edge already drew the shop ───────────
+// Reviewed 2026-09-14 as round 2's P2-1. Cart mode refuses to hydrate a basket from an SSR grid
+// whose cards claim siblings and name none (the old-worker case above) and falls through to the
+// fetch. When that fetch fails, the previous behaviour replaced a complete, current, edge-rendered
+// storefront with ONE LINE of error text — and an `items: []` 200 replaced it with "Nothing in the
+// shop right now", which is the worst thing this widget can say about a shop that has stock.
+//
+// The window where that happens is exactly the window this branch is for: coral deployed, site
+// worker not yet. So the failure arms are not an edge case here, they are the deploy.
+//
+// What must hold on every arm: the grid stays (browsable, product links intact), there is NO till
+// (a basket that cannot be reconciled must not be sellable), and the shopper's stored cart is not
+// read, written or reasoned about — byte for byte what it was.
+const BROKEN_CATALOG = {
+	'the fetch throws (network down)': () => { throw new Error('network'); },
+	'the backend answers 500': async () => ({ ok: false, status: 500, json: async () => ({}) }),
+	'the body is not JSON': async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('<!doctype html>'); } }),
+	'a 200 with an empty catalog': async () => ({ ok: true, status: 200, json: async () => ({ connected: true, items: [] }) })
+};
+
+for (const [what, catalogAnswer] of Object.entries(BROKEN_CATALOG)) {
+	test(`${what}: the SSR grid stays browsable, with no checkout and an untouched cart`, async () => {
+		const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });
+		const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET }, catalogAnswer });
+		const host = mountHost(sb, { ssr: oldWorkerGrid(gridHtml) });
+
+		await sb.mount(host); await flush();
+
+		assert.equal(sb.catalogCalls.length, 1, 'the fall-through still asks — this is about the answer');
+		assert.ok(byClass(host, `${PREFIX}-card`).length > 0,
+			'the edge rendered this grid from the seller’s own catalog a moment ago; a catalog we ' +
+			'cannot reach now is no reason to take the shop away from the shopper as well');
+		assert.equal(byClass(host, `${PREFIX}-checkout`).length, 0,
+			'and no till: a basket that could not be reconciled must not be sellable');
+		assert.equal(byClass(host, `${PREFIX}-cart`).length, 0, 'no cart panel is rendered at all');
+		assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET,
+			'the shopper’s rows are not read, not rewritten, not marked — untouched');
+
+		const note = byClass(host, `${PREFIX}-cart-offline`);
+		assert.equal(note.length, 1, 'the missing half is named, not left as an absent button');
+		assert.ok(note[0].textContent.length > 0 && !note[0].textContent.includes('{'),
+			`in words, with nothing unfilled in them: ${JSON.stringify(note[0].textContent)}`);
+	});
+}
+
+test('the shop note is the shopper’s own language, not English on a ja-JP page', async () => {
+	const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });
+	const said = {};
+	for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
+		const sb = loadSquareShop({
+			storage: { [CART_KEY]: BUYERS_BASKET },
+			catalogAnswer: () => { throw new Error('network'); }
+		});
+		const host = makeHost({
+			'data-guild-id': GUILD, 'data-api-base': 'https://api.test',
+			'data-cart': '1', 'data-detail-base': '/shop', 'data-locale': locale
+		}, ssrGridStub(oldWorkerGrid(gridHtml)));
+		await sb.mount(host); await flush();
+		said[locale] = byClass(host, `${PREFIX}-cart-offline`)[0].textContent;
+	}
+	assert.equal(new Set(Object.values(said)).size, 4,
+		`four locales, four sentences — got ${JSON.stringify(said, null, 1)}`);
+	assert.match(said['ja-JP'], /カート/);
+	assert.match(said['zh-TW'], /購物車/);
+	assert.match(said['zh-CN'], /购物车/);
+});
+
+test('the happy fall-through is unchanged: one fetch, five lines, a working till', async () => {
+	// The control for the four arms above. The old-worker page that CAN read the catalog must
+	// behave exactly as it did before this fallback existed.
+	const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET }, catalog: CATALOG });
+	const host = mountHost(sb, { ssr: oldWorkerGrid(gridHtml) });
+
+	await sb.mount(host);
+	assert.equal(byClass(host, `${PREFIX}-cart-offline`).length, 0, 'nothing to apologise for');
+	click(checkoutBtn(host), 'checkout'); await flush();
+
+	assert.equal(sb.catalogCalls.length, 1);
+	assert.equal(sb.fetchCalls[0].body.items.length, 5);
+	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET, 'and the rows are still the shopper’s own');
 });

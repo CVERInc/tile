@@ -1570,6 +1570,34 @@ function skeletonHtml(cartMode) {
 	return cartMode ? `<div class="${PREFIX}-layout">${grid}</div>` : grid;
 }
 
+// The store, minus the till. Used when cart mode fell through to the fetch (a worker that predates
+// `data-variants`) and the fetch could not answer — but the edge had ALREADY rendered a complete,
+// current grid into this root a moment ago.
+//
+// 🩸 Reviewed 2026-09-14 as P2-1. Before the fall-through existed, that shop was 0 requests and
+// browsable; after it, a failed request replaced a working storefront with one line of error text,
+// and an `items: []` 200 replaced it with "Nothing in the shop right now". The window in which that
+// happens is precisely the window this branch exists for — coral deployed, worker not yet — so the
+// regression was aimed at exactly the shops the fix was for.
+//
+// What is kept and what is not. The GRID is the edge's own render and is as true as it was a moment
+// ago, so the cards stay, links and all. The BASKET is not: reconciling it needs a catalog, this
+// page has none, and hydrating a cart panel from an SSR set that admits it is incomplete is the
+// defect two commits back. So: no reconcile, no panel, no checkout button, nothing read from or
+// written to storage — and a line that says the cart is the part that is missing, rather than
+// leaving a shopper to work out why the button they expected is not there.
+function renderBrowseOnly(root, items, labels, detailBase) {
+	const note = document.createElement('p');
+	note.className = `${PREFIX}-cart-offline`;
+	note.setAttribute('role', 'status');
+	note.textContent = labels.cartUnavailable;
+	const grid = document.createElement('div');
+	grid.className = `${PREFIX}-grid`;
+	for (const it of items) grid.appendChild(itemCard(it, labels, detailBase));
+	root.innerHTML = '';
+	root.append(note, grid);
+}
+
 async function mount(el) {
 	injectStyles();
 	el.classList.add(PREFIX);
@@ -1603,8 +1631,9 @@ async function mount(el) {
 	// is live immediately. renderCart wipes+rebuilds synchronously, so replacing the identical SSR
 	// grid never paints an empty frame (seamless). If the SSR data can't be parsed, fall through.
 	const ssrGrid = el.querySelector(`.${PREFIX}-grid[data-ssr]`);
+	let ssrItems = [];
 	if (ssrGrid) {
-		const ssrItems = itemsFromSsr(ssrGrid);
+		ssrItems = itemsFromSsr(ssrGrid);
 		// …unless the cards came from a worker that predates `data-variants`, in which case the set
 		// they describe is incomplete and the basket is the half that pays for it. See
 		// ssrCatalogMissesSiblings above: falling through here is what makes a coral-only deploy
@@ -1626,13 +1655,20 @@ async function mount(el) {
 			return;
 		}
 		if (items.length === 0) {
+			// An empty catalog is a legitimate answer for a shop with nothing in it — but not for
+			// one the edge rendered products into a moment ago. There, "Nothing in the shop right
+			// now" is the ugliest lie this widget can tell a seller, so the grid that IS there wins.
+			if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 			el.innerHTML = `<p class="${PREFIX}-empty">${escHtml(labels.empty)}</p>`;
 			return;
 		}
 		if (cartMode) renderCart(el, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 		else renderInstant(el, items, apiBase, guildId, labels, detailBase, checkoutRefs);
 	} catch {
-		// Honest failure — never fabricate products on a network/API error.
+		// Honest failure — never fabricate products on a network/API error. The SSR cards are not
+		// fabricated: the edge rendered them from the seller's own catalog, into this very root,
+		// and a catalog we could not reach is no reason to take that away too.
+		if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 		el.innerHTML = `<p class="${PREFIX}-error">${escHtml(labels.error)}</p>`;
 	}
 }
