@@ -95,18 +95,25 @@ function isZeroDecimal(currency) {
 // The two money fields are each other's fallback, so one missing field never
 // reaches the page as an empty price or a NaN. Neither is computed when the
 // backend sent it — this only fills a hole.
-function variantDisplayPrice(v) {
+//
+// 🩸 `itemCurrency` is the second fallback, and it decides a FACTOR OF 100. A variant
+// inherits its item's currency everywhere it is read, but these two measured `v.currency` alone
+// against the zero-decimal list — so a variant with a price and no currency of its own was judged
+// against an empty string, and ¥2200 became ¥22 (and back the other way, ¥2200 became ¥220000).
+// Same fix as square-shop.js#variantDisplayPrice; the two files answer the same question and must
+// answer it the same way.
+function variantDisplayPrice(v, itemCurrency) {
 	if (!v) return null;
 	if (v.display_price != null && !isNaN(Number(v.display_price))) return Number(v.display_price);
 	if (v.price_minor == null || isNaN(Number(v.price_minor))) return null;
-	return Number(centsToDecimalString(Number(v.price_minor), v.currency));
+	return Number(centsToDecimalString(Number(v.price_minor), v.currency || itemCurrency));
 }
-function variantPriceMinor(v) {
+function variantPriceMinor(v, itemCurrency) {
 	if (!v) return null;
 	if (v.price_minor != null && !isNaN(Number(v.price_minor))) return Number(v.price_minor);
 	if (v.display_price == null || isNaN(Number(v.display_price))) return null;
 	const major = Number(v.display_price);
-	return Math.round(isZeroDecimal(v.currency) ? major : major * 100);
+	return Math.round(isZeroDecimal(v.currency || itemCurrency) ? major : major * 100);
 }
 
 export function normalizeProduct(product) {
@@ -131,8 +138,8 @@ export function normalizeProduct(product) {
 		// reading a missing field as false is how an entire catalog renders sold
 		// out. An explicit `false` is still honoured — that one the backend meant.
 		available: v.available !== false,
-		display_price: variantDisplayPrice(v),
-		price_minor: variantPriceMinor(v)
+		display_price: variantDisplayPrice(v, p.currency),
+		price_minor: variantPriceMinor(v, p.currency)
 	}));
 	return { ...p, title, images, variants };
 }
@@ -327,20 +334,26 @@ export function renderShopGrid(items, config) {
 		// product page instead — whole card is one link (real, keyboard-reachable, no nested buttons),
 		// price shows the variant range so "$5~$12" isn't mistaken for one fixed price.
 		if (variantCount > 1 && href) {
-			const prices = variants.map(variantDisplayPrice).filter((n) => n != null && !isNaN(n));
+			const prices = variants.map((v) => variantDisplayPrice(v, it.currency)).filter((n) => n != null && !isNaN(n));
 			const min = prices.length ? Math.min(...prices) : it.display_price;
 			const max = prices.length ? Math.max(...prices) : it.display_price;
 			const priceText = min == null ? '' : (max === min ? fmtPrice(min, it.currency, locale) : `${fmtPrice(min, it.currency, locale)}~${fmtPrice(max, it.currency, locale)}`);
 			const priceAttr = min == null ? '' : ` data-price="${escAttr(String(min))}" data-price-min="${escAttr(String(min))}"` + (max != null ? ` data-price-max="${escAttr(String(max))}"` : '');
-			// Every SIBLING variation this card stands for, in the same shape the detail page's own
-			// `data-variants` uses. The basket is keyed by the variation the shopper PICKED on that
-			// detail page, and the client rebuilds this grid's catalog from these attributes alone
-			// (square-shop.js#itemsFromSsr) — so a card that named only its default variation left
-			// the hydrated catalog unable to recognise the shopper's own lines, and the cart's
-			// ghost-reconcile deleted them on sight.
+			// Every SIBLING variation this card stands for. The basket is keyed by the variation the
+			// shopper PICKED on the detail page, and the client rebuilds this grid's catalog from
+			// these attributes alone (square-shop.js#itemsFromSsr) — so a card that named only its
+			// default variation left the hydrated catalog unable to recognise the shopper's own
+			// lines, and the cart's ghost-reconcile deleted them on sight.
+			//
+			// 🔴 `display_price` is carried, not left to be re-derived. It is the FIRST field
+			// square-shop.js#variantDisplayPrice reads and `price_minor` is only its fallback, so a
+			// card that sent the fallback alone could quote a different price on this page than the
+			// fetch path quotes for the same variation — and what the shopper reads here is the
+			// basket line and the total they check out against.
 			const variantsAttr = ` data-variants="${escAttr(JSON.stringify(variants.map((v) => ({
 				id: v.id,
 				title: v.title || '',
+				display_price: variantDisplayPrice(v, it.currency),
 				price_minor: v.price_minor,
 				currency: v.currency || it.currency || ''
 			}))))}"`;

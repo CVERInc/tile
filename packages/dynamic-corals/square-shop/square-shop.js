@@ -469,12 +469,20 @@ const ZERO_DECIMAL = ['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF'];
 // A variant's display amount, from whichever field the backend actually sent. `display_price` is
 // what both mixfairy and RSP emit today; `price_minor` is the fallback for a backend that sends
 // only the minor-unit integer, so a price never renders as an empty span or a NaN.
-function variantDisplayPrice(v) {
+//
+// 🩸 `itemCurrency` is the SECOND fallback, and it is why the minor-unit branch is not a
+// hundredfold lie. A variant inherits its item's currency in every caller here (`v.currency ||
+// it.currency` at both of them) — but this function read `v.currency` alone, so a variant that
+// carried a price and no currency of its own was measured against an EMPTY string, which is in no
+// zero-decimal list. A ¥2200 print therefore priced as ¥22. Harmless while this only fed the
+// card's price RANGE; this release wired it to the basket line and the total a shopper reads
+// before paying, which is what makes an old latent asymmetry worth a parameter.
+function variantDisplayPrice(v, itemCurrency) {
 	if (!v) return null;
 	if (v.display_price != null && !isNaN(Number(v.display_price))) return Number(v.display_price);
 	if (v.price_minor == null || isNaN(Number(v.price_minor))) return null;
 	const minor = Number(v.price_minor);
-	return ZERO_DECIMAL.indexOf(String(v.currency || '').toUpperCase()) >= 0 ? minor : minor / 100;
+	return ZERO_DECIMAL.indexOf(String(v.currency || itemCurrency || '').toUpperCase()) >= 0 ? minor : minor / 100;
 }
 
 // What to call this item. `name` is the flat field every backend has always sent; `title` is the
@@ -491,7 +499,7 @@ function itemName(it) {
 function withVariantSummary(it) {
 	const variants = Array.isArray(it.variants) ? it.variants : [];
 	if (variants.length <= 1) return { ...it, variant_count: variants.length || 1 };
-	const prices = variants.map(variantDisplayPrice).filter((n) => n != null && !isNaN(n));
+	const prices = variants.map((v) => variantDisplayPrice(v, it.currency)).filter((n) => n != null && !isNaN(n));
 	return {
 		...it,
 		variant_count: variants.length,
@@ -556,7 +564,7 @@ function cartCatalogByVariation(items) {
 		if (it.variation_id) byVariation.set(it.variation_id, it);
 		for (const v of variants) {
 			if (!siblings) { byVariation.set(v.id, it); continue; }
-			const price = variantDisplayPrice(v);
+			const price = variantDisplayPrice(v, it.currency);
 			byVariation.set(v.id, {
 				...it,
 				variation_id: v.id,

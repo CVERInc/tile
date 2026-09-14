@@ -581,3 +581,57 @@ test('a basket exactly AT the cap checks out normally', async () => {
 	click(btn, 'checkout'); await flush();
 	assert.equal(sb.fetchCalls[0].body.items.length, 50);
 });
+
+// ── what a variant costs, on both paths ──────────────────────────────────────
+// Reviewed 2026-09-14 as P3-1, both axes. Latent before this branch — they only moved the card's
+// price RANGE — and reachable now, because this release wired the same derivation to the basket
+// line and to the total a shopper reads before paying.
+// 🔴 These variants carry `display_price` and NO `price_minor`, which is the shape that tells the
+// two paths apart: `display_price` is the field variantDisplayPrice reads FIRST and the SSR card
+// used to carry only the fallback, so the hydrated basket fell back again — to the CARD's price,
+// which for a multi-variant card is the cheapest variant. A fixture carrying both fields agrees
+// either way and would have measured nothing.
+const PRICED = [{
+	id: 'TEE', slug: 'tee', name: 'Tee', title: 'Tee', variation_id: 'S',
+	display_price: 20, currency: 'USD', image_url: '',
+	variants: [
+		{ id: 'S', title: 'Small', display_price: 20, currency: 'USD', available: true },
+		{ id: 'XL', title: 'XL', display_price: 32, currency: 'USD', available: true }
+	]
+}];
+
+test('the SSR path quotes a variant at ITS price, the same as the fetch path', async () => {
+	const { gridHtml } = renderShopGrid(PRICED, { cart: true, detailBase: '/shop', labels: {} });
+	const basket = JSON.stringify([['XL', 1]]);
+
+	const ssr = loadSquareShop({ storage: { [CART_KEY]: basket } });
+	const ssrRoot = makeEl('div');
+	ssr.renderCart(ssrRoot, ssr.itemsFromSsr(ssrGridStub(gridHtml)), 'https://api.test', GUILD, ssr.readLabels(ssrRoot), false, '/shop', new Map());
+
+	const fetched = loadSquareShop({ storage: { [CART_KEY]: basket } });
+	const fetchedRoot = mountCart(fetched, PRICED);
+
+	const priceOf = (root) => byClass(root, `${PREFIX}-line-price`).map((n) => n._html || n.textContent);
+	assert.deepEqual(priceOf(ssrRoot), priceOf(fetchedRoot),
+		'one variation, two hydrate paths, one price — the SSR card carries display_price so the ' +
+		'basket cannot quote the item’s cheapest variant for the one the shopper picked');
+	assert.ok(String(priceOf(ssrRoot)[0]).includes('32'), `XL costs 32, got ${priceOf(ssrRoot)}`);
+});
+
+test('a variant with no currency of its own is priced in the ITEM’s currency', async () => {
+	// ¥ is zero-decimal: 2200 minor units is ¥2200, not ¥22. Read against an empty currency string
+	// — which is what `v.currency` alone gave — the minor units were divided by 100.
+	const jpy = [{
+		id: 'ZINE', slug: 'zine', name: 'Zine', title: 'Zine', variation_id: 'JA',
+		display_price: 2200, price_minor: 2200, currency: 'JPY', image_url: '',
+		variants: [
+			{ id: 'JA', title: 'A', price_minor: 2200 },
+			{ id: 'JB', title: 'B', price_minor: 2200 }
+		]
+	}];
+	const sb = loadSquareShop({ storage: { [CART_KEY]: JSON.stringify([['JB', 1]]) } });
+	const root = mountCart(sb, jpy);
+	const total = byClass(root, `${PREFIX}-cart-total`).map((n) => n.textContent);
+	assert.ok(String(total[0]).includes('2,200') || String(total[0]).includes('2200'),
+		`a ¥2,200 line must total ¥2,200, not ¥22 — got ${JSON.stringify(total)}`);
+});
