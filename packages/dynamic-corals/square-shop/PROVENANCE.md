@@ -13,6 +13,104 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.15 — 2026-09-14 — the reconcile stops deleting, and a broken catalog stops closing the shop
+
+0.11.14 was reviewed before it was published and did not survive the review. Two of its five
+changes were right in intent and wrong in blast radius; this version is what they should have
+been. The repaired code needs a number of its own either way: the registry is immutable and
+`build.mjs` refuses a version whose content differs from what that version already published, so
+0.11.14 cannot carry this. (Whether 0.11.14 ever reached the real registry was NOT checked from
+this lane — publishing and reading the live registry are both out of bounds here.)
+
+| | |
+|---|---|
+| the rows | the reconcile no longer writes deletions back. A row whose variation the catalog in hand does not confirm is KEPT, shown in the panel with its quantity and its own remove button, left out of the POST, and sellable again — with the same quantity — the moment the catalog names it |
+| the shop | a catalog that cannot be read no longer replaces an edge-rendered storefront with one line of error text (or with "Nothing in the shop right now"): the grid stays browsable, without a till |
+
+### Why the write-back had to go — a premise that arrived exactly when it was needed
+
+0.11.14 wrote the reconciled basket back so that the header badge (raw rows, painted on every page)
+and the checkout POST would stop being two truths. The write was guarded by a sentence in its own
+comment: *"Only safe because the catalog handed in here is WHOLE … the fetch path answers with the
+seller's whole catalog by definition."*
+
+Nothing held that premise up, and it is false on the backend a live shop runs on today.
+`apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` (repo `reef`) POSTs
+Square's `search-catalog-items` **once** and discards the cursor — the string `cursor` does not
+occur anywhere in that file — while RSP's own `fetchSquareCatalogItems`
+(`apps/rsp/src/site-payment.ts`) loops the cursor and says in its comment that stopping early
+"would silently TRUNCATE a catalog". So a seller with more items than one page is answered HTTP
+200, non-empty and **short**, with no error anywhere. Every row off that page then looked exactly
+like a product the seller had deleted.
+
+Measured (review round 2, P1-1): four sibling rows deleted from the shopper's own machine in one
+load, and **not recoverable** — the next load against a whole catalog had nothing to read back.
+`ssrCatalogMissesSiblings` could not catch it either: it asks whether a card names its own
+siblings, not whether a whole item is missing.
+
+**The repair is a different split, not a better threshold.** A short catalog and a real delisting
+are indistinguishable from here, so the question "was this deleted?" cannot be answered on this
+page — and a question that cannot be answered must not be answered by deleting. Storage holds every
+row the shopper put there; the *sendable set* — the rows the catalog confirms — is what the POST,
+the total, the ref key and the line cap are computed from.
+
+The badge still agrees with the POST, and no deletion buys the agreement. An unconfirmed row is
+re-encoded as `[id, 0, qty]`: the two readers that cannot be changed from this file — sitetile's
+`header-actions-cart.js#count` and the product page's own inline script — both sum `e[1]` over the
+rows, so a `0` there counts as nothing while the id and the quantity stay on disk. It is a marker,
+not a tombstone, and the only automatic write is that re-encoding (same ids, same quantities,
+written only when the bytes change, so a clean basket is still not rewritten). Rows this file does
+not understand are carried through verbatim. **Only the shopper deletes a row.**
+
+The same change closes P3-1: RSP's catalog (`apps/rsp/src/commerce/square-catalog.ts`) drops any
+variation whose `sellable` is false and returns nothing for an item left with none, so "out of
+stock until Monday" and "deleted forever" are one answer on the wire. A seller flipping a switch on
+Friday no longer empties a basket over the weekend.
+
+### Why the fall-through needed a floor
+
+Cart mode refuses to hydrate a basket from an SSR grid whose cards claim sibling variations and
+name none — a worker that predates `data-variants` — and falls through to the fetch. 0.11.14 then
+let a failed fetch replace the whole storefront: the `catch` wrote one error line over a grid the
+edge had already rendered, and an `items: []` 200 wrote "Nothing in the shop right now" over it.
+
+Before that fall-through existed, the same page made zero requests and stayed browsable. So the
+change handed a page a failure mode it had never had, in precisely the window this work exists for
+— coral deployed, site worker not yet — which is the only state that takes the path at all.
+
+Now both arms fall back to `renderBrowseOnly`: the edge's own cards, prices and product links, with
+no reconcile, no cart panel, no checkout button, and a localized line naming the missing half.
+Nothing is fabricated (the grid is the seller's catalog, rendered by the edge into this root) and
+nothing is sold from a basket that could not be reconciled. Storage is not touched on any of those
+paths.
+
+### Four new label strings, and what a site can override
+
+`unavailable`, `unavailableNote`, `cartUnavailable` (plus the `remove` label reused for the held
+rows' buttons) in all four dictionaries — en-US, ja-JP, zh-TW, zh-CN — and each overridable like
+every other label here: `data-unavailable-label`, `data-unavailable-note`,
+`data-cart-unavailable-note`.
+
+### Measured while reviewing, and deliberately not acted on
+
+**SSR page weight** (review round 2, P3-3, measuring `renderShopGrid`'s output for one catalog, not
+a real HTTP response). `data-variants` is the only thing that grew, and only on cards that stand
+for more than one variation: a 5-item × 4-variant grid went 2,962 → 6,942 bytes raw (+134%) but
+435 → 649 gzipped (+214 B, +49%), and a **single-variation shop grew by zero bytes**. The raw/gzip
+gap is the JSON living in an HTML attribute, where every `"` becomes `&quot;`. Single-quoting the
+attribute delimiter would cut about a third of the raw size and roughly nothing off the wire, so it
+is recorded here rather than done — the cost lands precisely on the cards that need the fix.
+
+**Two tabs, last writer wins** (P3-4, pre-existing, not introduced here). This file listens for no
+`storage` event; the header island listens but only repaints. So there is no ping-pong — measured —
+but a tab that mounted before another tab's write still holds an older Map, and its next
+`persistCart` writes that Map whole. With the reconcile no longer deleting, this is the last seam
+left in the area: two tabs that saw two different catalogs can still overwrite each other's
+marking. Not repaired here because the repair is a `storage` listener and a merge, which is a
+change of its own size.
+
+---
+
 ## 0.11.14 — 2026-09-14 — the basket of sibling variants, and everything around it that agreed
 
 A buyer on a live shop put one hardcover zine and all FOUR designs of a four-variant art-print item

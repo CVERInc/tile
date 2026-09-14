@@ -1,9 +1,9 @@
 {
   "name": "square-shop",
-  "version": "0.11.14",
+  "version": "0.11.15",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/square-shop/0.11.14/square-shop.js",
+  "source": "https://feelreef.com/corals/square-shop/0.11.15/square-shop.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": ["checkout"],
   "calls": [
@@ -12,7 +12,7 @@
     "POST <data-api-base>/api/v2/shop/cart — mints a checkout link for the whole cart (processor-neutral as of 0.11.6; was /api/v2/square/catalog/cart through 0.11.5). JSON body {guild_id|site_id, items, collect_shipping, redirect_url, client_request_ref} — the locator is spread first under the same one-of rule as the catalog read (new in 0.11.7; through 0.11.6 this body carried guild_id only)"
   ],
   "stores": [
-    "browser localStorage — this visitor's own cart contents (variation ids + quantities), keyed per guild id, or per site id on a site that names no guild (square-shop.js#renderCart: storeId = guildId || siteId — new in 0.11.7; through 0.11.6 the key was the guild id alone); cleared on a successful checkout return or by the visitor; never sent anywhere except inside the cart checkout request itself"
+    "browser localStorage — this visitor's own cart contents (variation ids + quantities), keyed per guild id, or per site id on a site that names no guild (square-shop.js#renderCart: storeId = guildId || siteId — new in 0.11.7; through 0.11.6 the key was the guild id alone); cleared on a successful checkout return or by the visitor, and by nothing else — a row whose variation the live catalog does not confirm is KEPT and re-encoded as [id, 0, qty] so the header badge counts it as nothing while the quantity stays written down, and it becomes sellable again unchanged the moment the catalog names it (new in 0.11.15; 0.11.14 deleted such rows, which on a backend that answers a long catalog truncated meant deleting rows the seller still sells); never sent anywhere except inside the cart checkout request itself"
   ],
   "paid": false,
   "funding": null,
