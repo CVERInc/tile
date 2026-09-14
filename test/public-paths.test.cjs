@@ -84,10 +84,25 @@ if (missing.length) {
 // Either answer is cheap; only the third one — leaving it — costs somebody a day. The check is
 // the TREE, not a list, so it cannot go stale: add a root script and this goes red on the commit
 // that added it.
-const ROOT_SCRIPT = /\.(?:js|cjs|mjs)$/;
-const strays = fs.readdirSync(ROOT, { withFileTypes: true })
+// 🩸 The first version of this guard read `.js|.cjs|.mjs` and stopped there, and review round 3
+// (P3-2) measured what that left through: a stray `.json` or `.ts` at the root went green. The
+// risk is identical — the root is the "somebody outside downloads this by name" shelf, and a
+// consumer fetching a path by name does not care what the extension is — so the set is now every
+// extension a build or a fetch script would plausibly reach for.
+//
+// 🔴 ONE file is exempt, and it is exempt by IDENTITY rather than by name: the manifest this test
+// reads. A ledger cannot be an entry in itself, and the alternative — listing PUBLIC-PATHS.json
+// inside PUBLIC-PATHS.json with a fabricated `namedBy` — would be exactly the "everything except
+// me" list the manifest's own comment spends three paragraphs arguing against. Written as
+// `basename(MANIFEST)` so it cannot become a general skip-list by accretion: there is nowhere to
+// add a second entry.
+const ROOT_SCRIPT = /\.(?:js|cjs|mjs|json|ts|mts|cts)$/;
+const MANIFEST_NAME = path.basename(MANIFEST);
+const rootFiles = fs.readdirSync(ROOT, { withFileTypes: true })
   .filter((d) => d.isFile() && ROOT_SCRIPT.test(d.name))
-  .map((d) => d.name)
+  .map((d) => d.name);
+const strays = rootFiles
+  .filter((name) => name !== MANIFEST_NAME)
   .filter((name) => !Object.prototype.hasOwnProperty.call(doc.paths || {}, name));
 
 if (strays.length) {
@@ -101,5 +116,9 @@ if (strays.length) {
   );
 }
 
+// 🩸 The count used to come from a second, DIFFERENT read of the directory — `readdirSync(ROOT)`
+// with no `withFileTypes`, so a DIRECTORY named `x.js` was (correctly) not a stray but was
+// (incorrectly) counted as a declared root script. Two readings of the tree in one test, one of
+// them not the one being asserted. Same list now, so the number cannot disagree with the check.
 console.log(`  public paths: ${entries.length} declared, all present; root scripts: ${
-  fs.readdirSync(ROOT).filter((n) => ROOT_SCRIPT.test(n)).length} declared, no strays`);
+  rootFiles.length} file(s), no strays`);
