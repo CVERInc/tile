@@ -65,4 +65,41 @@ if (missing.length) {
   );
 }
 
-console.log(`  public paths: ${entries.length} declared, all present`);
+// ── and nothing else at the root is pretending to be one ────────────────────
+//
+// 🩸 2026-09-14: a lane committed an 89 KB stale copy of a coral's source to the REPO ROOT next to
+// its real edit. It was byte-identical to the package file at that moment and rotted from the next
+// commit onwards, and the source carries no version string, so the two copies were tellable apart
+// only by reading them. Nothing here caught it: the manifest test above asserts that every listed
+// path still EXISTS, which says nothing about a path that turned up unlisted, and .gitignore
+// deliberately does not cover root *.js because the root is exactly where the by-name-fetched ones
+// live.
+//
+// That is what makes an unlisted root script worth failing over rather than tidying away later. In
+// this repo the root is the "somebody outside downloads this by name" shelf — PUBLIC-PATHS.json
+// says so about Sortable.min.js in as many words, and one of those consumers is a production
+// deploy. A file arriving there either belongs on that shelf, in which case it needs the entry that
+// says who fetches it and what breaks, or it does not belong at the root at all.
+//
+// Either answer is cheap; only the third one — leaving it — costs somebody a day. The check is
+// the TREE, not a list, so it cannot go stale: add a root script and this goes red on the commit
+// that added it.
+const ROOT_SCRIPT = /\.(?:js|cjs|mjs)$/;
+const strays = fs.readdirSync(ROOT, { withFileTypes: true })
+  .filter((d) => d.isFile() && ROOT_SCRIPT.test(d.name))
+  .map((d) => d.name)
+  .filter((name) => !Object.prototype.hasOwnProperty.call(doc.paths || {}, name));
+
+if (strays.length) {
+  throw new Error(
+    `${strays.length} script(s) sit at the repo root without an entry in PUBLIC-PATHS.json:\n`
+    + strays.map((n) => `  ✗ ${n}`).join('\n')
+    + '\n\n  The root of this repo is where paths OTHER repos fetch by name live, so a file here is\n'
+    + '  read as one of those. If it is: add an entry saying who names it and what breaks without\n'
+    + '  it. If it is not — and a copy of something that already lives under packages/ never is —\n'
+    + '  delete it, before someone vendors the stale one.',
+  );
+}
+
+console.log(`  public paths: ${entries.length} declared, all present; root scripts: ${
+  fs.readdirSync(ROOT).filter((n) => ROOT_SCRIPT.test(n)).length} declared, no strays`);
