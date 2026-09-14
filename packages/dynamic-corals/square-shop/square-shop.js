@@ -157,7 +157,7 @@ function storageAvailabilityNotice(available, labels) {
 // compatible with every reader that came before).
 //
 // The quantity a stored row means. MIRRORED BYTE FOR BYTE from the one implementation in
-// ../shared/cart-badge-count.mjs; ./cart-badge-count-mirror.test.mjs is what stops the two
+// ../shared/cart-badge-count.mjs; ../shared/cart-badge-count.test.mjs is what stops the two
 // drifting. It is a mirror and not an import because this file is published as a RAW artifact
 // (build.mjs stamps it and never bundles it) and is vendored into feelreef unmodified — the same
 // arrangement, for the same reason, as ../shared/close-button.mjs and the QR coral.

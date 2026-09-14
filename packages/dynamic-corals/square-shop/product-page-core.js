@@ -522,7 +522,7 @@ if (root) {
 	// The quantity a stored row means, MIRRORED BYTE FOR BYTE from ../shared/cart-badge-count.mjs.
 	// This script ships AS TEXT inside the built page (and this file is CONCATENATED into every
 	// site's _worker.js by emit-shop-function.mjs, which is why it may never grow an import), so a
-	// mirror pinned by ./cart-badge-count-mirror.test.mjs is what keeps it one implementation.
+	// mirror pinned by ../shared/cart-badge-count.test.mjs is what keeps it one implementation.
 	// A basket that met 0.11.15 can still hold a three-element row; reading slot 1 alone is how a
 	// shopper's 3 became a 1 at the till (review round 3, P2-1).
 	function cartRowQty(e) { if (!Array.isArray(e)) return 0; const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); }
