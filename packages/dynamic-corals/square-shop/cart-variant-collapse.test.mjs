@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderShopGrid } from './product-page-core.js';
+import { cartBadgeCount } from '../shared/cart-badge-count.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(join(here, 'square-shop.js'), 'utf8').replace(
@@ -420,21 +421,15 @@ test('instant mode keeps the old cards: no basket is held against them, so no ex
 // shape (two numbers from two truths, no error in between) with a different cause. Reviewed
 // 2026-09-14 as P2-1.
 //
-// 🔴 The badge is counted here the way header-actions-cart.js counts it: the raw rows on disk,
-// MINUS the rows this page has published as held on its own mount (`data-cart-held`). Nothing on
-// disk says which those are any more — held is derived from the catalog in hand — so the badge and
-// the POST agree by reading the same derived answer, not by a marking the disk had to carry.
+// 🔴 The badge is counted with the FUNCTION THE BADGE USES — imported, not retyped. Round 3's
+// P3-4 was that this assertion's ruler was a copy of the algorithm it measures, so the two could
+// drift together and stay green. The inputs are the two things the header island reads: the raw
+// rows on disk, and the held set square-shop.js publishes on its own mount (`data-cart-held`).
+// Nothing on disk says which rows are held — that is derived from the catalog in hand.
 function badgeCount(sb, root) {
-	const raw = JSON.parse(sb.store.get(CART_KEY) || '[]');
 	let held = [];
 	try { held = JSON.parse((root && root.getAttribute('data-cart-held')) || '[]'); } catch { held = []; }
-	return raw.reduce((n, e) => {
-		if (!Array.isArray(e)) return n;
-		const vid = String(e[0] || '');
-		if (!vid || held.indexOf(vid) >= 0) return n;
-		const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b;
-		return n + (q < 1 ? 1 : (q > 99 ? 99 : q));
-	}, 0);
+	return cartBadgeCount(JSON.parse(sb.store.get(CART_KEY) || '[]'), held);
 }
 
 test('a ghost line leaves the badge and the POST on the SAME number', async () => {

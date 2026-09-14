@@ -526,7 +526,11 @@ if (root) {
 	// A basket that met 0.11.15 can still hold a three-element row; reading slot 1 alone is how a
 	// shopper's 3 became a 1 at the till (review round 3, P2-1).
 	function cartRowQty(e) { if (!Array.isArray(e)) return 0; const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); }
-	function cartCount() { return loadCart().reduce((n, e) => n + cartRowQty(e), 0); }
+	// The badge number, MIRRORED BYTE FOR BYTE from the same module. This page has no catalog, so it
+	// passes no held set and counts every row — see that module for why an over-count here is the
+	// safe direction and the only one available.
+	function cartBadgeCount(entries, held) { if (!Array.isArray(entries)) return 0; const skip = Array.isArray(held) ? held.map(String) : []; let n = 0; for (const e of entries) { if (!Array.isArray(e)) continue; const vid = String(e[0] || ''); if (!vid || skip.indexOf(vid) >= 0) continue; n += cartRowQty(e); } return n; }
+	function cartCount() { return cartBadgeCount(loadCart()); }
 	// A site with the header cart wired (badge + drawer/redirect, site-wide) already gives this page
 	// a cart entry point — this inline link would just be a second, redundant one. Sites WITHOUT the
 	// header cart toggle have no other way off this page to their cart, so keep it working for them.

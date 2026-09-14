@@ -24,6 +24,13 @@
 //              hamburger/sidebar buttons are unaffected).
 //   • place  — on desktop, slots the cart between the nav and its trailing CTA; on mobile it
 //              stays in the always-visible header bar (the nav collapses to a hamburger there).
+//
+// 🔴 The COUNT is not written here. It is imported from the square-shop package, which owns the
+// basket's storage format, because three copies of that sum is how the badge and the checkout can
+// disagree with nothing going red (review round 3, P3-4). This island is bundled by Vite, so it is
+// the one consumer of that module that can have the real function instead of a pinned mirror.
+import { cartBadgeCount } from '../../../../../dynamic-corals/shared/cart-badge-count.mjs';
+
 (function () {
   var actions = document.querySelector('.rf-header-actions[data-cart-guild]');
   if (!actions) return; // not opted in on this page — inert.
@@ -38,12 +45,22 @@
   var KEY = 'dc-square-shop-cart:' + guild;
   var CORAL = '[data-dynamic-coral="square-shop"]';
 
+  // Which rows the shop page currently cannot sell. It is DERIVED state — the answer depends on
+  // the catalog that page load was handed, not on anything the shopper's disk records — so
+  // square-shop.js republishes it on its own mount on every render and this reads it from there.
+  // No coral on this page, an older coral, a mount that failed: no attribute, empty set, every row
+  // counted. That is an over-count while a row is held, and never an under-count.
+  function heldVariations() {
+    try {
+      var root = document.querySelector(CORAL);
+      var raw = root && root.getAttribute('data-cart-held');
+      var a = raw ? JSON.parse(raw) : [];
+      return Array.isArray(a) ? a : [];
+    } catch (e) { return []; }
+  }
   function count() {
     try {
-      var a = JSON.parse(localStorage.getItem(KEY) || '[]');
-      return Array.isArray(a) ? a.reduce(function (n, e) {
-        return n + (Array.isArray(e) ? (parseInt(e[1], 10) || 0) : 0);
-      }, 0) : 0;
+      return cartBadgeCount(JSON.parse(localStorage.getItem(KEY) || '[]'), heldVariations());
     } catch (e) { return 0; }
   }
   function paintBadge() {
