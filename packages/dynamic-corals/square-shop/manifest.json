@@ -1,9 +1,9 @@
 {
   "name": "square-shop",
-  "version": "0.11.13",
+  "version": "0.11.14",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/square-shop/0.11.13/square-shop.js",
+  "source": "https://feelreef.com/corals/square-shop/0.11.14/square-shop.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": ["checkout"],
   "calls": [

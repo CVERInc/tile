@@ -153,9 +153,13 @@ function click(el, what) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function loadSquareShop({ storage = {} } = {}) {
+function loadSquareShop({ storage = {}, catalog = null } = {}) {
 	const store = new Map(Object.entries(storage));
 	const fetchCalls = [];
+	// Catalog READS are counted apart from checkout POSTs, because "did this page re-fetch?" is
+	// itself an assertion here (the SSR fast path exists to avoid exactly one request) and folding
+	// the two into one list would make every POST assertion below depend on whether a GET happened.
+	const catalogCalls = [];
 	const document = {
 		readyState: 'complete',
 		head: makeEl('head'),
@@ -174,18 +178,37 @@ function loadSquareShop({ storage = {} } = {}) {
 		},
 		dispatchEvent: () => true
 	};
-	// Always fails, so the checkout lands on the honest-failure path — what this suite reads is
-	// the REQUEST BODY, which is already written by then.
+	// The checkout POST always fails, so it lands on the honest-failure path — what this suite
+	// reads is the REQUEST BODY, which is already written by then. A catalog GET is answered with
+	// `catalog` when the test supplied one (mount()'s fall-through path needs a real answer).
 	const fetchImpl = async (url, init) => {
-		fetchCalls.push({ url: String(url), body: JSON.parse(init.body) });
+		const href = String(url);
+		if (!init || !init.body) {
+			catalogCalls.push(href);
+			if (!catalog) throw new Error('this test did not expect a catalog fetch');
+			return { ok: true, status: 200, json: async () => ({ connected: true, items: catalog }) };
+		}
+		fetchCalls.push({ url: href, body: JSON.parse(init.body) });
 		return { ok: false, status: 500, json: async () => ({ error: 'nope' }) };
 	};
 	const factory = new Function(
 		'document', 'window', 'crypto', 'fetch', 'CustomEvent',
-		SOURCE + '\nreturn { renderCart, readLabels, withVariantSummary, itemsFromSsr };'
+		SOURCE + '\nreturn { mount, renderCart, readLabels, withVariantSummary, itemsFromSsr };'
 	);
 	const api = factory(document, window, globalThis.crypto, fetchImpl, globalThis.CustomEvent);
-	return { ...api, fetchCalls, store };
+	return { ...api, fetchCalls, catalogCalls, store };
+}
+
+// A mount HOST, i.e. the `<div data-dynamic-coral="square-shop">` on the page. It differs from
+// makeEl in one way that decides these tests: makeEl's querySelector INVENTS the node it is asked
+// for, so a host built with it would report an SSR grid on every page and mount would never take
+// the fetch path at all. This one answers by actually looking.
+function makeHost(attrs, ssrGrid) {
+	const el = makeEl('div');
+	for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+	const generic = el.querySelector;
+	el.querySelector = (sel) => (sel === `.${PREFIX}-grid[data-ssr]` ? (ssrGrid || null) : generic(sel));
+	return el;
 }
 
 function mountCart(sb, items) {
@@ -292,4 +315,93 @@ test('the SSR-hydrated grid carries the sibling variants too', async () => {
 		[ZINE_VID, PRINT_A, PRINT_B, PRINT_C, PRINT_D].sort(),
 		'the SSR page must hand the till the same five lines the fetched page does'
 	);
+});
+
+// ── the two artifacts, out of step ───────────────────────────────────────────
+// `data-variants` is written by product-page-core.js#renderShopGrid, which reaches a live shop
+// inside that site's own `dist/_worker.js` (emit-shop-function.mjs, at SITE BUILD time) — NOT
+// inside this coral. Publishing the coral rebuilds no worker and no version links the two, so the
+// state below is not hypothetical: it is what every shop looks like between the first deploy and
+// the second. Reviewed 2026-09-14 as P1-1 — "publish the coral and the reported basket is still
+// short" — and the mechanism that closes it is square-shop.js#ssrCatalogMissesSiblings.
+function oldWorkerGrid(gridHtml) {
+	// Exactly the same render with `data-variants` taken back out, which is what the previous
+	// worker emitted, character for character.
+	const stripped = gridHtml.replace(/ data-variants="[^"]*"/g, '');
+	assert.ok(stripped !== gridHtml, 'the fixture must actually lose the attribute it is about');
+	assert.ok(!stripped.includes(PRINT_D), 'an old card names no sibling variation');
+	return stripped;
+}
+
+function mountHost(sb, { ssr, cart = '1' }) {
+	const host = makeHost({
+		'data-guild-id': GUILD,
+		'data-api-base': 'https://api.test',
+		'data-cart': cart,
+		'data-detail-base': '/shop'
+	}, ssr ? ssrGridStub(ssr) : null);
+	return host;
+}
+
+test('an SSR grid from an OLD worker is not trusted: mount fetches, and the basket is whole', async () => {
+	const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET }, catalog: CATALOG });
+	const host = mountHost(sb, { ssr: oldWorkerGrid(gridHtml) });
+
+	await sb.mount(host);
+	click(checkoutBtn(host), 'checkout'); await flush();
+
+	assert.equal(sb.catalogCalls.length, 1,
+		'a card that stands for 4 variations and names none of them describes an INCOMPLETE ' +
+		'catalog — hydrating from it is what deleted the shopper lines in the first place');
+	const sent = sb.fetchCalls[0].body.items.map((l) => l.variation_id).sort();
+	assert.deepEqual(
+		sent,
+		[ZINE_VID, PRINT_A, PRINT_B, PRINT_C, PRINT_D].sort(),
+		'with only the CORAL deployed and the site worker still old, the till must still get five lines'
+	);
+});
+
+test('an SSR grid from a NEW worker still hydrates with no fetch at all', async () => {
+	const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
+	const host = mountHost(sb, { ssr: gridHtml });
+
+	await sb.mount(host);
+	click(checkoutBtn(host), 'checkout'); await flush();
+
+	assert.equal(sb.catalogCalls.length, 0,
+		'the SSR fast path exists to save exactly this request; a complete set must still take it');
+	const sent = sb.fetchCalls[0].body.items.map((l) => l.variation_id).sort();
+	assert.deepEqual(sent, [ZINE_VID, PRINT_A, PRINT_B, PRINT_C, PRINT_D].sort());
+});
+
+test('a single-variation SSR card hydrates without a fetch, old worker or new', async () => {
+	// The control for the arm above: the fall-through is keyed on a card that CLAIMS siblings and
+	// names none, not on the attribute being absent. A one-variation shop never emitted it and must
+	// not start paying for a request because of this change.
+	const single = [CATALOG[0]];
+	const { gridHtml } = renderShopGrid(single, { cart: true, detailBase: '/shop', labels: {} });
+	assert.ok(!gridHtml.includes('data-variants='), 'a single-variation card names no siblings');
+
+	const sb = loadSquareShop({ storage: { [CART_KEY]: JSON.stringify([[ZINE_VID, 2]]) } });
+	const host = mountHost(sb, { ssr: gridHtml });
+
+	await sb.mount(host);
+	click(checkoutBtn(host), 'checkout'); await flush();
+
+	assert.equal(sb.catalogCalls.length, 0, 'no sibling claim, no reason to re-fetch');
+	assert.deepEqual(sb.fetchCalls[0].body.items, [{ variation_id: ZINE_VID, quantity: 2 }]);
+});
+
+test('instant mode keeps the old cards: no basket is held against them, so no extra request', async () => {
+	const { gridHtml } = renderShopGrid(CATALOG, { cart: false, detailBase: '/shop', labels: {} });
+	const sb = loadSquareShop({ storage: {} });
+	const host = mountHost(sb, { ssr: oldWorkerGrid(gridHtml), cart: '0' });
+
+	await sb.mount(host);
+
+	assert.equal(sb.catalogCalls.length, 0,
+		'instant mode holds no localStorage line against this catalog — a missing sibling list ' +
+		'costs it nothing, and a fetch here would be a permanent charge for no change on screen');
 });

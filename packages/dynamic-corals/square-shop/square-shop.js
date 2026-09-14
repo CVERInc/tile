@@ -1293,6 +1293,34 @@ function itemsFromSsr(grid) {
 	return out;
 }
 
+// 🩸 THE TWO HALVES OF THIS FIX SHIP DOWN PIPELINES THAT NEVER SHAKE HANDS, and this is the
+// handshake, written in the markup itself.
+//
+// `data-variants` — the attribute the sibling ids above are read out of — is written by the OTHER
+// artifact: ./product-page-core.js#renderShopGrid, concatenated into each site's own
+// `dist/_worker.js` by ./emit-shop-function.mjs at SITE BUILD time. Publishing this coral does not
+// rebuild a single worker, no version links the two, and nothing anywhere notices when only one of
+// them moved. So a shop that takes the fixed coral while its worker is still the old one SSRs cards
+// that each name one variation, and hydrating that half-catalog would read the shopper's other four
+// lines as ghosts and delete them — the exact basket of the 2026-09-14 report, on a shop whose coral
+// was already "fixed" (./cart-variant-collapse.test.mjs, "an SSR grid from an OLD worker").
+//
+// A card that says it stands for MORE THAN ONE variation and then names none of them is that stale
+// worker, stating it in its own markup. Taken for what it is — an INCOMPLETE record of the catalog
+// rather than a complete one — the only safe thing to do with it is not to use it: fall through to
+// the fetch, which answers with every variation the seller sells. That costs one request on that
+// page, and it is correct with only one of the two deploys done.
+//
+// Instant mode is deliberately NOT gated. It holds no basket against this catalog and its
+// multi-variant card is a link to the product page either way, so a missing sibling list costs it
+// nothing — gating it would buy a permanent extra request per page load and change nothing on
+// screen.
+function ssrCatalogMissesSiblings(items) {
+	return (items || []).some((it) =>
+		(it.variant_count || 1) > 1 && !(Array.isArray(it.variants) && it.variants.length > 0)
+	);
+}
+
 // Placeholder cards holding the grid's shape while the catalog loads — reserves space (no layout
 // shift). Only the NON-SSR path uses this (a static build, or a host whose edge worker isn't
 // rendering the grid); an edge-SSR'd page never blanks in the first place.
@@ -1339,7 +1367,11 @@ async function mount(el) {
 	const ssrGrid = el.querySelector(`.${PREFIX}-grid[data-ssr]`);
 	if (ssrGrid) {
 		const ssrItems = itemsFromSsr(ssrGrid);
-		if (ssrItems.length) {
+		// …unless the cards came from a worker that predates `data-variants`, in which case the set
+		// they describe is incomplete and the basket is the half that pays for it. See
+		// ssrCatalogMissesSiblings above: falling through here is what makes a coral-only deploy
+		// correct instead of silently short.
+		if (ssrItems.length && !(cartMode && ssrCatalogMissesSiblings(ssrItems))) {
 			if (cartMode) renderCart(el, ssrItems, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 			else renderInstant(el, ssrItems, apiBase, guildId, labels, detailBase, checkoutRefs);
 			return;
