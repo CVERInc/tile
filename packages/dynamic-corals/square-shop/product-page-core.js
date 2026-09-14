@@ -519,7 +519,14 @@ if (root) {
 	function taxSuffix(cur) { return String(cur).toUpperCase() === 'JPY' ? '<small class="dc-tax-inclusive">' + taxWord(LOCALE) + '</small>' : ''; }
 	function current() { return sel ? byId.get(sel.value) : variants[0]; }
 	function loadCart() { try { const r = localStorage.getItem(key); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch { return []; } }
-	function cartCount() { return loadCart().reduce((n, e) => n + (Array.isArray(e) ? (parseInt(e[1], 10) || 0) : 0), 0); }
+	// The quantity a stored row means, MIRRORED BYTE FOR BYTE from ../shared/cart-badge-count.mjs.
+	// This script ships AS TEXT inside the built page (and this file is CONCATENATED into every
+	// site's _worker.js by emit-shop-function.mjs, which is why it may never grow an import), so a
+	// mirror pinned by ./cart-badge-count-mirror.test.mjs is what keeps it one implementation.
+	// A basket that met 0.11.15 can still hold a three-element row; reading slot 1 alone is how a
+	// shopper's 3 became a 1 at the till (review round 3, P2-1).
+	function cartRowQty(e) { if (!Array.isArray(e)) return 0; const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); }
+	function cartCount() { return loadCart().reduce((n, e) => n + cartRowQty(e), 0); }
 	// A site with the header cart wired (badge + drawer/redirect, site-wide) already gives this page
 	// a cart entry point — this inline link would just be a second, redundant one. Sites WITHOUT the
 	// header cart toggle have no other way off this page to their cart, so keep it working for them.
@@ -565,7 +572,10 @@ if (root) {
 	if (addBtn) addBtn.addEventListener('click', () => {
 		const v = current(); if (!v) return;
 		const cart = loadCart(); const found = cart.find((e) => Array.isArray(e) && e[0] === v.id);
-		if (found) found[1] = Math.min(99, (parseInt(found[1], 10) || 0) + 1); else cart.push([v.id, 1]);
+		// One more of what is already there — read through cartRowQty, and written back as the two
+		// elements every reader of this key understands, so a row that arrived in any other shape
+		// leaves in the canonical one instead of gaining a third slot nobody reads.
+		if (found) { const cur = cartRowQty(found); found.length = 2; found[1] = Math.min(99, cur + 1); } else cart.push([v.id, 1]);
 		try { localStorage.setItem(key, JSON.stringify(cart)); } catch {}
 		// Same-tab localStorage writes don't fire the 'storage' event on THIS window (only other
 		// tabs get that) — this custom event is what lets the header cart badge react on this same

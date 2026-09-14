@@ -420,12 +420,21 @@ test('instant mode keeps the old cards: no basket is held against them, so no ex
 // shape (two numbers from two truths, no error in between) with a different cause. Reviewed
 // 2026-09-14 as P2-1.
 //
-// 🔴 The badge is counted here the way header-actions-cart.js#count counts it — sum of `e[1]` over
-// the raw rows — because that is the algorithm under test. Copied deliberately and kept to one
-// place: that file is an IIFE island with no export, so there is nothing to import.
-function badgeCount(sb) {
+// 🔴 The badge is counted here the way header-actions-cart.js counts it: the raw rows on disk,
+// MINUS the rows this page has published as held on its own mount (`data-cart-held`). Nothing on
+// disk says which those are any more — held is derived from the catalog in hand — so the badge and
+// the POST agree by reading the same derived answer, not by a marking the disk had to carry.
+function badgeCount(sb, root) {
 	const raw = JSON.parse(sb.store.get(CART_KEY) || '[]');
-	return raw.reduce((n, e) => n + (Array.isArray(e) ? (parseInt(e[1], 10) || 0) : 0), 0);
+	let held = [];
+	try { held = JSON.parse((root && root.getAttribute('data-cart-held')) || '[]'); } catch { held = []; }
+	return raw.reduce((n, e) => {
+		if (!Array.isArray(e)) return n;
+		const vid = String(e[0] || '');
+		if (!vid || held.indexOf(vid) >= 0) return n;
+		const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b;
+		return n + (q < 1 ? 1 : (q > 99 ? 99 : q));
+	}, 0);
 }
 
 test('a ghost line leaves the badge and the POST on the SAME number', async () => {
@@ -434,22 +443,22 @@ test('a ghost line leaves the badge and the POST on the SAME number', async () =
 	});
 	const root = mountCart(sb, CATALOG);
 
-	assert.equal(badgeCount(sb), 1,
-		'the badge counts the rows on disk on every page of the site, so an unconfirmed row is ' +
-		'marked there (`[id, 0, qty]`, which that sum reads as nothing) rather than deleted');
+	assert.equal(badgeCount(sb, root), 1,
+		'the badge counts the rows on disk minus the ones this page has derived as held, so an ' +
+		'unconfirmed row is EXCLUDED from the count rather than deleted from the disk');
 
 	click(checkoutBtn(root), 'checkout'); await flush();
 	const postSum = sb.fetchCalls[0].body.items.reduce((n, l) => n + l.quantity, 0);
-	assert.equal(postSum, badgeCount(sb), 'the badge must count what the checkout will carry');
+	assert.equal(postSum, badgeCount(sb, root), 'the badge must count what the checkout will carry');
 	assert.deepEqual(sb.fetchCalls[0].body.items, [{ variation_id: ZINE_VID, quantity: 1 }]);
 });
 
-test('a clean basket is not rewritten — the re-encode happens only when the marking changes', () => {
+test('a clean basket is not rewritten', () => {
 	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
-	mountCart(sb, CATALOG);
+	const root = mountCart(sb, CATALOG);
 	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET,
 		'nothing was dropped, so the shopper’s own rows must come back byte for byte');
-	assert.equal(badgeCount(sb), 5);
+	assert.equal(badgeCount(sb, root), 5);
 });
 
 // ── the index, as one rule ───────────────────────────────────────────────────
@@ -685,9 +694,9 @@ test('a truncated catalog does not delete one row: kept, marked, and out of the 
 		[{ variation_id: ZINE_VID, quantity: 1 }],
 		'only what the catalog in hand actually confirms may be sold'
 	);
-	assert.equal(badgeCount(sb), 1,
-		'and the header badge — raw rows, painted on every page — must count the same one line ' +
-		'the checkout will carry, WITHOUT a row having been deleted to make it agree');
+	assert.equal(badgeCount(sb, root), 1,
+		'and the header badge — raw rows minus this page’s derived held set — must count the same ' +
+		'one line the checkout will carry, WITHOUT a row having been deleted to make it agree');
 });
 
 test('the rows come back, with their quantities, the moment the catalog is whole again', async () => {
@@ -715,7 +724,7 @@ test('the rows come back, with their quantities, the moment the catalog is whole
 		'the QUANTITIES survive the round trip too — a basket that comes back as 1 of each is ' +
 		'still a basket the shopper did not build'
 	);
-	assert.equal(badgeCount(whole), 8, 'and the badge counts all eight items again');
+	assert.equal(badgeCount(whole, root), 8, 'and the badge counts all eight items again');
 });
 
 test('a variation the seller merely made unsellable is held, not deleted', async () => {

@@ -118,29 +118,39 @@ function storageAvailabilityNotice(available, labels) {
 	return available ? '' : ((labels && labels.storageNotice) || '');
 }
 
-// A stored row, as this file reads it back. TWO shapes live under the one key:
+// A stored row, as this file reads it back. ONE shape lives under this key:
 //
-//   [variationId, qty]        an ordinary row — what every writer has always written
-//   [variationId, 0, qty]     a row this file could not confirm against the catalog it was
-//                             handed, KEPT on disk with its quantity intact
+//   [variationId, qty]        what every writer of this basket has always written — this file,
+//                             the product page's own inline script, and the feelreef fork
 //
-// The second shape is not a new storage format so much as an agreement with the two readers that
-// already exist and cannot be changed from here: sitetile's header badge
-// (`header-actions/header-actions-cart.js#count`) and the product page's own inline script both
-// sum `e[1]` over the rows, so a `0` there is a row they count as nothing while the id and the
-// quantity stay written down. That is what lets the badge keep saying what the checkout will
-// carry — the r1 P2-1 property — WITHOUT deleting anything to achieve it.
+// 🔴 HELD IS DERIVED, AND IT IS NEVER WRITTEN DOWN. Whether a row is sellable is a question about
+// the CATALOG IN HAND, which is a fact about this page load; the shopper's disk holds what they
+// put in the basket and nothing else. 0.11.15 tried the other way — it marked an unconfirmed row
+// on disk as `[variationId, 0, qty]` so that two readers it could not change would count it as
+// nothing — and the marking is taken back out here. A marking on disk is a fact that every writer
+// of the key has to agree about, and only one of the three was ever taught it: the product page's
+// Add button read slot 1, added one to the 0, and a shopper's 3 became a 1 at the till; the paid
+// completion page deleted the whole key, including rows that were never in the order. See
+// ./PROVENANCE.md § 0.11.16 for the full account.
 //
-// 🔴 It is a marker, never a tombstone: the next load that sees the id in the catalog writes the
-// row back as `[variationId, qty]`, with the SAME quantity, and the line is sellable again.
+// `cartRowQty` still READS the 0.11.15 shape, so a basket that met that version keeps its
+// quantity, and the next persist writes the row back with two elements (one-time, and byte
+// compatible with every reader that came before).
+//
+// The quantity a stored row means. MIRRORED BYTE FOR BYTE from the one implementation in
+// ../shared/cart-badge-count.mjs; ./cart-badge-count-mirror.test.mjs is what stops the two
+// drifting. It is a mirror and not an import because this file is published as a RAW artifact
+// (build.mjs stamps it and never bundles it) and is vendored into feelreef unmodified — the same
+// arrangement, for the same reason, as ../shared/close-button.mjs and the QR coral.
+function cartRowQty(e) { if (!Array.isArray(e)) return 0; const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); }
+
 function cartRowsFrom(entries) {
 	const rows = [];
 	for (const e of entries) {
 		if (!Array.isArray(e)) { rows.push({ foreign: e }); continue; }
 		const vid = String(e[0] || '');
 		if (!vid) { rows.push({ foreign: e }); continue; }
-		const held = e[1] === 0 && e.length > 2;
-		rows.push({ vid, qty: Math.max(1, Math.min(99, parseInt(held ? e[2] : e[1], 10) || 0)) });
+		rows.push({ vid, qty: cartRowQty(e) });
 	}
 	return rows;
 }
@@ -149,9 +159,14 @@ function cartRowsFrom(entries) {
 // then the kept-unsellable ones, then anything a previous writer left that this file does not
 // understand — carried through byte for byte rather than tidied away. Nothing is ever omitted:
 // this function is the reason a write-back cannot lose a row.
+//
+// 🔴 A held row is written EXACTLY like a sellable one. On disk the two are indistinguishable,
+// which is the point: the difference lives in the catalog this page was handed, and a reader that
+// was handed a different catalog — an older coral, the fork, another tab — must be free to reach
+// its own conclusion about the same bytes rather than inherit ours.
 function cartStorageEntries(cart) {
 	const out = [...cart.entries()].map(([vid, qty]) => [vid, qty]);
-	for (const [vid, qty] of (cart.unavailable || new Map())) out.push([vid, 0, qty]);
+	for (const [vid, qty] of (cart.unavailable || new Map())) out.push([vid, qty]);
 	for (const value of (cart.foreign || [])) out.push(value);
 	return out;
 }
@@ -217,11 +232,11 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		if (catalogByVariation.has(row.vid)) cart.set(row.vid, row.qty);
 		else cart.unavailable.set(row.vid, row.qty);
 	}
-	// The ONE automatic write, and it is a re-encoding: the same ids and the same quantities,
-	// with the confirmed/unconfirmed marking brought up to date so the badge counts what the
-	// checkout will carry. Written only when the bytes actually change, so a basket that needs no
-	// re-marking is not rewritten and fires no `dc-cart-changed` — the clean-basket case stays
-	// byte-identical on disk, as it was before this file wrote anything back at all.
+	// The ONE automatic write, and there is now almost nothing left for it to do: the same ids and
+	// the same quantities, in this file's own order, with any 0.11.15 three-element row collapsed
+	// back to two. Written only when the bytes actually change, so an ordinary basket — held rows
+	// included, since they are written like every other row — is not rewritten at all and fires no
+	// `dc-cart-changed`.
 	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
 	return cart;
 }
@@ -1473,9 +1488,25 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		} catch { /* conflict remains actionable even if refresh fails */ }
 	}
 
+	// The derived held set, published where the ONE reader outside this file can see it.
+	//
+	// sitetile's header badge (`header-actions/header-actions-cart.js`) is painted on every page of
+	// the site and has only the raw rows to count — which is exactly why 0.11.15 marked held rows on
+	// disk, and exactly the mistake this version takes back out. The marking belongs to the page
+	// that has the catalog, so it is published as an attribute of THIS mount, rebuilt on every
+	// render, and never written to the shopper's machine.
+	//
+	// 🔴 A page without this attribute — no coral, an OLDER coral, a failed mount — counts every row.
+	// That is an OVER-count while a row is held, never an under-count, and never a charge: the POST
+	// is built from `cart` alone. See ./PROVENANCE.md § 0.11.16 for the mixed-fleet table.
+	function publishHeld() {
+		try { root.setAttribute('data-cart-held', JSON.stringify([...cart.unavailable.keys()])); } catch {}
+	}
+
 	function render() {
 		renderGrid();
 		renderPanel();
+		publishHeld();
 	}
 
 	render();
