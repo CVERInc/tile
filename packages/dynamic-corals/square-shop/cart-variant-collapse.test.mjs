@@ -792,7 +792,12 @@ const BROKEN_CATALOG = {
 	'the fetch throws (network down)': () => { throw new Error('network'); },
 	'the backend answers 500': async () => ({ ok: false, status: 500, json: async () => ({}) }),
 	'the body is not JSON': async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('<!doctype html>'); } }),
-	'a 200 with an empty catalog': async () => ({ ok: true, status: 200, json: async () => ({ connected: true, items: [] }) })
+	'a 200 with an empty catalog': async () => ({ ok: true, status: 200, json: async () => ({ connected: true, items: [] }) }),
+	// Round 3, P3-1. This arm used to write "No shop connected yet." over the cards — the same
+	// failure the empty-catalog arm was fixed for, with a stronger disproof available on the page
+	// itself: the edge rendered THIS seller's products into THIS root a moment ago, so whatever the
+	// backend means by `connected: false` right now, "there is no shop" is not it.
+	'a 200 that says no shop is connected': async () => ({ ok: true, status: 200, json: async () => ({ connected: false, items: [] }) })
 };
 
 for (const [what, catalogAnswer] of Object.entries(BROKEN_CATALOG)) {
@@ -819,6 +824,23 @@ for (const [what, catalogAnswer] of Object.entries(BROKEN_CATALOG)) {
 			`in words, with nothing unfilled in them: ${JSON.stringify(note[0].textContent)}`);
 	});
 }
+
+test('with NO edge-rendered grid to keep, connected:false still says so', async () => {
+	// The control for the arm above: browse-only is what an SSR grid buys. A page with nothing on
+	// it has no honest alternative to the line, and must still get it.
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: BUYERS_BASKET },
+		catalogAnswer: async () => ({ ok: true, status: 200, json: async () => ({ connected: false, items: [] }) })
+	});
+	const host = makeHost({
+		'data-guild-id': GUILD, 'data-api-base': 'https://api.test', 'data-cart': '1', 'data-detail-base': '/shop'
+	}, null);
+	await sb.mount(host); await flush();
+
+	assert.match(host.innerHTML, /dc-square-shop-empty/, 'the honest empty state is still reachable');
+	assert.equal(byClass(host, `${PREFIX}-cart-offline`).length, 0, 'and it is not the browse-only note');
+	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET, 'the cart is untouched either way');
+});
 
 test('the shop note is the shopper’s own language, not English on a ja-JP page', async () => {
 	const { gridHtml } = renderShopGrid(CATALOG, { cart: true, detailBase: '/shop', labels: {} });

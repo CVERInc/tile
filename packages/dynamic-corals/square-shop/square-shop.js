@@ -1740,6 +1740,12 @@ async function mount(el) {
 		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
 		const items = (Array.isArray(data && data.items) ? data.items : []).map(withVariantSummary);
 		if (!data || data.connected !== true) {
+			// Same rule as the empty-catalog arm below, and for a stronger reason: the edge worker
+			// rendered THIS seller's products into THIS root a moment ago, so "no shop connected yet"
+			// is not merely ugly here, it is disproved by the page it would be written on. Reviewed
+			// round 3 as P3-1 — the failure arm was already safe (no till, disk untouched); what it
+			// was not was honest to the seller.
+			if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 			el.innerHTML = `<p class="${PREFIX}-empty">${escHtml(labels.unconnected)}</p>`;
 			return;
 		}
