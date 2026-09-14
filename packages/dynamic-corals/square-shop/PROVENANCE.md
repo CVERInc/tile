@@ -39,7 +39,7 @@ no version links the two. The cart-mode fall-through above is what makes a coral
 *correct* — one extra request on that page — and it is not a reason to skip the second deploy: until
 the worker is rebuilt, every shopper on `/shop` pays for a round trip the SSR was there to save.
 
-The fork in `reef` is still 0.11.5 and still loses this basket — see § "Still open" 3 and
+The fork in `reef` is still 0.11.5 and still loses this basket — see § "Still open" 1 and
 `CVERInc/reef#592`.
 
 (The per-version log below skips 0.11.7–0.11.13, which were published without entries. This one is
@@ -564,23 +564,25 @@ version number in this registry means the client contract moved.
 
 ### Still open
 
-3. **The fork carries the cart-collapse defect** (2026-09-14, `CVERInc/reef#592`).
+1. **Re-vendor this file into the feelreef fork** (and re-pin its sha256 in
+   `vendor-pristine.test.ts`) — `CVERInc/reef#592`, OPEN.
+
    `apps/feelreef/src/lib/dynamic-corals/square-shop/square-shop.js` in `reef` is this file at
    **0.11.5**, pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`.
-   Its `loadPersistedCart` still holds the ghost-reconcile against a per-ITEM index
-   (`itemsById`), so feelreef's own SPA cart drops every sibling variation the shopper picked — the
-   same defect, on a second live surface, with a buyer's order behind it. Reproduced mechanically
-   against a copy of the fork (md5-identical to the file in `reef`; nothing there was written).
+   Two debts, one repair, which is why they are one entry: the ref contract on both paths, and —
+   found 2026-09-14 — the cart-collapse defect. The fork's `loadPersistedCart` still holds the
+   ghost-reconcile against a per-ITEM index (`itemsById`), so feelreef's own SPA cart drops every
+   sibling variation the shopper picked: the same defect, on a second live surface, with a buyer's
+   order behind it. Reproduced mechanically against a copy of the fork (md5-identical to the file
+   in `reef`; nothing there was written).
 
-   The repair is a **re-vendor of this file at 0.11.14 plus a new sha**, never a hand-patch of the
-   one line: a hand-patched copy makes the pin guard a file no build can reproduce, which is the
-   opposite of what the pin is for. Port `cart-variant-collapse.test.mjs` with it — that basket is
-   what decides the question either way.
+   The repair is a **re-vendor of this file at 0.11.15 or later plus a new sha**, never a
+   hand-patch of the one line: a hand-patched copy makes the pin guard a file no build can
+   reproduce, which is the opposite of what the pin is for. Port `cart-variant-collapse.test.mjs`
+   with it — that basket is what decides the question either way.
 
-2. **Re-vendor** this file into the feelreef fork (and re-pin its sha256 in `vendor-pristine.test.ts`)
-   so both substrates carry the same ref contract on both paths.
-
-   **In progress 2026-08-29** on reef branch `chore/square-shop-vendor-0.11.5`, vendoring **0.11.5**.
+   **In progress 2026-08-29** on reef branch `chore/square-shop-vendor-0.11.5`, vendoring **0.11.5**
+   — which predates every fix above and is no longer the version to land.
 
    🔴 Read the version numbers here carefully, because they moved for two different reasons. The
    reconcile was scoped as "publish 0.11.5, adding the `mount`/`mountAll` exports". Those exports had
@@ -595,3 +597,8 @@ version number in this registry means the client contract moved.
    vendored file tripped feelreef's `raw-nul-byte` lint, and the two literal control bytes behind
    that are a real defect in this file (see the 0.11.5 entry). So the branch name turned out right,
    and the version it names is not the one it was named for.
+
+🩸 This section read **3, 2** — the 2026-09-14 entry was inserted above a `2.` that was already the
+same debt, so one obligation was written down twice, in two places that would drift apart, under a
+numbering that told you the list had been edited and not read. Merged 2026-09-14 (review round 2,
+P3-2). One debt, one entry.
