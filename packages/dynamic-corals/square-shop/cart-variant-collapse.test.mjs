@@ -534,3 +534,50 @@ test('a basket written on either of the two odd shapes is no longer deleted on s
 		'the catalog names both of these ids; a line the catalog names is not a ghost'
 	);
 });
+
+// ── the backend's line cap, said in the panel ────────────────────────────────
+// RSP refuses a cart of more than PROVIDER_CATALOG_CART_MAX_LINES = 50 lines with a 400 that
+// carries no `code`, so checkoutErrorLabelKey has nothing to recognise and the shopper is told
+// "try again" — an instruction that can only ever fail. Reviewed 2026-09-14 as P3-3: this release
+// is what made the cap reachable, because a line is now a VARIATION and no longer an item.
+function manyVariantItem(n) {
+	const variants = Array.from({ length: n }, (_, i) => ({
+		id: `CAP_V${i}`, title: `Design ${i}`, price_minor: 500, currency: 'USD', display_price: 5, available: true
+	}));
+	return [{
+		id: 'CAPITEM', slug: 'many', name: 'Print set', title: 'Print set',
+		variation_id: variants[0].id, price_minor: 500, display_price: 5, currency: 'USD', variants
+	}];
+}
+
+test('a basket over the backend cap says so, with the number, and holds the button shut', async () => {
+	const items = manyVariantItem(51);
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: JSON.stringify(items[0].variants.map((v) => [v.id, 1])) }
+	});
+	const root = mountCart(sb, items);
+
+	const notice = byClass(root, `${PREFIX}-cart-limit`);
+	assert.equal(notice.length, 1, 'the shopper must be told BEFORE the request that cannot succeed');
+	assert.match(notice[0].textContent, /\b50\b/, 'and told how many lines a checkout takes');
+	assert.match(notice[0].textContent, /\b51\b/, 'and how many they have');
+
+	const btn = checkoutBtn(root);
+	assert.equal(btn.disabled, true, 'a checkout that can only be refused is not offered');
+	click(btn, 'checkout'); await flush();
+	assert.equal(sb.fetchCalls.length, 0, 'nothing leaves for a 400 we can already see coming');
+});
+
+test('a basket exactly AT the cap checks out normally', async () => {
+	const items = manyVariantItem(50);
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: JSON.stringify(items[0].variants.map((v) => [v.id, 1])) }
+	});
+	const root = mountCart(sb, items);
+
+	assert.equal(byClass(root, `${PREFIX}-cart-limit`).length, 0, '50 is allowed, not refused');
+	const btn = checkoutBtn(root);
+	assert.equal(btn.disabled, false);
+	click(btn, 'checkout'); await flush();
+	assert.equal(sb.fetchCalls[0].body.items.length, 50);
+});

@@ -292,6 +292,10 @@ function injectStyles() {
 .${PREFIX}-msg { font-size: 12.5px; line-height: 1.45; margin: 10px 0 0; color: var(--gd-muted, rgba(0,0,0,0.6)); }
 .${PREFIX}-msg[hidden] { display: none; }
 .${PREFIX}-storage-notice { font-size: 11.5px; line-height: 1.4; margin: 10px 0 0; color: var(--gd-muted, rgba(0,0,0,0.55)); }
+/* Over the backend's line cap. Unlike the two quiet notices around it this one is standing between
+   the shopper and the checkout, so it carries the page's own accent rather than the muted grey —
+   it is the reason the button below it is disabled, and has to read as connected to it. */
+.${PREFIX}-cart-limit { font-size: 12.5px; line-height: 1.45; margin: 10px 0 0; color: var(--gd-fg, rgba(0,0,0,0.85)); }
 /* "the payment page is Square's, and it's Japanese" (finding #12) — same quiet register as the
    storage notice beside it, not a warning: it is a fact about what happens next, not a problem. */
 .${PREFIX}-checkout-note { font-size: 11.5px; line-height: 1.4; margin: 8px 0 0; color: var(--gd-muted, rgba(0,0,0,0.55)); }
@@ -675,6 +679,21 @@ function checkoutRefFor(refs, key) {
 	return ref;
 }
 
+// 🔴 THE BACKEND'S LINE LIMIT, MIRRORED — `PROVIDER_CATALOG_CART_MAX_LINES` in
+// reef `apps/rsp/src/commerce/provider-orders.ts`. A cart with more lines than this is refused by
+// `shop-endpoints.ts` with a 400 whose body carries `{error:"too many cart lines"}` and NO `code`,
+// so checkoutErrorLabelKey below has nothing to recognise and the shopper is told "try again" — an
+// instruction that can only ever fail, with no hint that the answer is to remove something.
+//
+// The number lives here as well as there deliberately, and being a COPY is the risk it carries: if
+// RSP's cap moves, this one has to move with it. The alternative — say nothing until the server
+// says it — is what the buyer just sat through. A copy that is checked at most one line early is
+// the smaller fault, and the 400 path stays exactly where it was for a cap that has since dropped.
+//
+// This became reachable with this release, not before: one line per ITEM could hardly get near 50,
+// one line per VARIATION can — a print seller with a dozen designs is two armfuls away.
+const MAX_CART_LINES = 50;
+
 // ── buyer-facing failures ────────────────────────────────────────────────
 // RSP answers a refused checkout with `{error, code?}`. `error` is an engineer's
 // sentence ("client_request_ref is required", "square not connected") and must
@@ -860,6 +879,19 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 	if (items.length === 0) return;
 	const surface = btn.parentElement;
 	clearCheckoutMessage(surface);
+	// The cap, at the ONE place the POST is written. The panel already says it and disables the
+	// button, so a shopper on this file's own surface never arrives here — but this function is
+	// exported and driven directly (feelreef's SPA wrapper, and three suites in this directory),
+	// and a refusal we can name should not depend on which surface asked. Said in the shopper's
+	// own language and NOT sent: the 400 it would earn carries no `code`, so the honest-failure
+	// path below could only answer it with "try again".
+	if (items.length > MAX_CART_LINES) {
+		showCheckoutMessage(surface, String(labels && labels.cartTooManyLines || '')
+			.replace('{lines}', String(items.length))
+			.replace('{max}', String(MAX_CART_LINES))
+			.replace('{over}', String(items.length - MAX_CART_LINES)));
+		return;
+	}
 	const settle = beginPending(btn, labels && labels.checkoutPending);
 	// Keyed on the cart's contents, so a double-click on Checkout replays one link
 	// while a basket the shopper edited in between is a new intent with a new ref.
@@ -906,13 +938,13 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 // self-contained for en pages. Per-item `buy_label` from the API (if any) still
 // wins over the page-level default.
 const LABEL_DICTIONARIES = {
-	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
-	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
-	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
+	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
+	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
+	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): Simplified, added alongside zh-TW rather than
 	// derived from it at runtime — the two diverge in wording, not just glyphs (結帳→结算, not a
 	// character-for-character conversion of 結帳's simplified glyphs).
-	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
+	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
 };
 
 // 🩸 0.11.10: only recognised `zh-tw`/`zh-hant(-*)` — every OTHER zh tag (a genuine `zh-Hans`/
@@ -953,6 +985,9 @@ function readLabels(el) {
 		soldOutMessage: el.getAttribute('data-sold-out-message') || defaults.soldOutMessage,
 		priceChangedMessage: el.getAttribute('data-price-changed-message') || defaults.priceChangedMessage,
 		storageNotice: el.getAttribute('data-storage-notice') || defaults.storageNotice,
+		// Says how many lines a checkout takes, BEFORE the POST that would be refused for it.
+		// {lines}/{max}/{over} are filled in by the panel — a site overriding this keeps them.
+		cartTooManyLines: el.getAttribute('data-cart-limit-message') || defaults.cartTooManyLines,
 		// Buyer-facing checkout failures. Plain language on purpose: a shopper can
 		// act on "try again in a moment", never on "client_request_ref is required".
 		checkoutError: el.getAttribute('data-checkout-error-label') || defaults.checkoutError,
@@ -1225,13 +1260,29 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		}
 		panel.append(total, tail);
 
+		// The backend refuses more than MAX_CART_LINES lines with a 400 a shopper cannot read as
+		// anything but "try again" (see the constant above). Said here instead, in the panel, with
+		// the number in it and BEFORE the request that could only be refused — and the button is
+		// held shut, because a checkout that cannot succeed should not be offered. A shopper over
+		// the cap can still edit every line: this is a gate on the till, not on the basket.
+		if (cart.size > MAX_CART_LINES) {
+			const over = document.createElement('p');
+			over.className = `${PREFIX}-cart-limit`;
+			over.setAttribute('role', 'alert');
+			over.textContent = String(labels.cartTooManyLines || '')
+				.replace('{lines}', String(cart.size))
+				.replace('{max}', String(MAX_CART_LINES))
+				.replace('{over}', String(cart.size - MAX_CART_LINES));
+			panel.appendChild(over);
+		}
+
 		const checkout = document.createElement('button');
 		checkout.type = 'button';
 		checkout.className = `${PREFIX}-checkout`;
 		const confirmsPrice = [...lineStates.values()].some((state) => state.reason === 'price_changed');
 		const hasSoldOut = [...lineStates.values()].some((state) => state.reason === 'sold_out');
 		checkout.textContent = confirmsPrice ? labels.confirmPrice : labels.checkout;
-		checkout.disabled = cart.size === 0 || hasSoldOut;
+		checkout.disabled = cart.size === 0 || hasSoldOut || cart.size > MAX_CART_LINES;
 		checkout.addEventListener('click', () => {
 			if (confirmsPrice) lineStates.clear();
 			return startCartCheckout(apiBase, guildId, cart, collectShipping, checkout, labels, checkoutRefs, siteId, handleConflict);
