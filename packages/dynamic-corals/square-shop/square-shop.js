@@ -143,6 +143,16 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		// (it's not in the live catalog), so a stale cart never checks out ghosts.
 		// 🔴 The index this is held against must know EVERY variation the catalog sells, not one
 		// per item — see cartCatalogByVariation() below for what a per-item index silently ate.
+		//
+		// 🩸 THE FORK STILL EATS THEM. `apps/feelreef/src/lib/dynamic-corals/square-shop/
+		// square-shop.js` in the private `reef` repo is a vendored copy of this file at 0.11.5,
+		// pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`,
+		// and it still holds this same line against a per-item index — so feelreef's own SPA cart
+		// loses the shopper's sibling variants exactly as this one did. Tracked as CVERInc/reef#592
+		// and in ./PROVENANCE.md § "Still open". The repair there is a RE-VENDOR of this file plus a
+		// new sha, never a hand-patch of this one line: hand-patching makes the pin guard a file no
+		// build can reproduce. ./cart-variant-collapse.test.mjs is the basket that decides it either
+		// way, and it is the test to port with the file.
 		if (vid && catalogByVariation.has(vid)) cart.set(vid, qty);
 		else dropped = true;
 	}

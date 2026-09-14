@@ -530,6 +530,19 @@ version number in this registry means the client contract moved.
 
 ### Still open
 
+3. **The fork carries the cart-collapse defect** (2026-09-14, `CVERInc/reef#592`).
+   `apps/feelreef/src/lib/dynamic-corals/square-shop/square-shop.js` in `reef` is this file at
+   **0.11.5**, pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`.
+   Its `loadPersistedCart` still holds the ghost-reconcile against a per-ITEM index
+   (`itemsById`), so feelreef's own SPA cart drops every sibling variation the shopper picked — the
+   same defect, on a second live surface, with a buyer's order behind it. Reproduced mechanically
+   against a copy of the fork (md5-identical to the file in `reef`; nothing there was written).
+
+   The repair is a **re-vendor of this file at 0.11.14 plus a new sha**, never a hand-patch of the
+   one line: a hand-patched copy makes the pin guard a file no build can reproduce, which is the
+   opposite of what the pin is for. Port `cart-variant-collapse.test.mjs` with it — that basket is
+   what decides the question either way.
+
 2. **Re-vendor** this file into the feelreef fork (and re-pin its sha256 in `vendor-pristine.test.ts`)
    so both substrates carry the same ref contract on both paths.
 
