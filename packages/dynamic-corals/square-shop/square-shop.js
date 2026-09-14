@@ -96,6 +96,25 @@ const DEFAULT_API_BASE = ''; /*coral-default:apiBase*/
 const SELECTOR = '[data-dynamic-coral="square-shop"]';
 const PREFIX = 'dc-square-shop';
 const CART_STORE_PREFIX = 'dc-square-shop-cart:';
+// The lines ONE checkout attempt actually sent, written under the ref that names that attempt.
+//
+// 🔴 It exists because of what the paid completion page could not otherwise know. That page lives
+// in the SITE's `_worker.js` (shop-function-template.js), not in this coral, and until 0.11.16 it
+// emptied the whole basket on `state === 'paid'`. That was harmless while the basket could only
+// ever hold rows that had just been sold — and stopped being harmless the moment a basket could
+// deliberately keep a row the checkout left behind (a variation the catalog in hand did not
+// confirm). Nothing in the outcome payload can repair it there: `lines` carry `name`/`qty`/
+// `amount_minor` and no variation id at all (reef `apps/rsp/src/commerce/provider-orders.ts`
+// #shopCheckoutOutcomeFromProjection), so the only page that knows which rows went to the till is
+// THIS one, at the moment it sends them.
+//
+// Written only on a checkout that actually redirects, cleared by the completion page it is for,
+// and swept of anything older than a week on the next write — an abandoned attempt leaves one
+// small row behind, not a growing pile. 🔴 A completion page that finds no record removes the
+// whole key, which is exactly what every version before this one did: an OLDER coral writes no
+// record, and its shopper must not end up with a basket that is never cleared.
+const SOLD_STORE_PREFIX = 'dc-square-shop-sold:';
+const SOLD_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RETURN_PARAM = 'dc_shop'; // legacy Square return marker; never proves payment
 
 let stylesInjected = false;
@@ -252,6 +271,42 @@ function persistCart(storeId, cart) {
 	// get that) — this is what lets the header cart badge react on this same page. Single choke
 	// point: every cart mutation in this file (add/±qty/remove) goes through setQty → here.
 	try { window.dispatchEvent(new CustomEvent('dc-cart-changed')); } catch {}
+}
+
+// Sweep the records of attempts that were never completed. Guarded on `length`/`key` rather than
+// assuming them: this file runs against several test doubles and a feelreef wrapper, and a storage
+// object that only implements get/set/remove must lose the sweep, never the record.
+function pruneSoldRecords(now) {
+	try {
+		const ls = window.localStorage;
+		if (!ls || typeof ls.length !== 'number' || typeof ls.key !== 'function') return;
+		const stale = [];
+		for (let i = 0; i < ls.length; i++) {
+			const k = ls.key(i);
+			if (!k || k.indexOf(SOLD_STORE_PREFIX) !== 0) continue;
+			let t = 0;
+			try { t = Number((JSON.parse(ls.getItem(k) || '{}') || {}).t) || 0; } catch { t = 0; }
+			if (!t || now - t > SOLD_RECORD_TTL_MS) stale.push(k);
+		}
+		for (const k of stale) ls.removeItem(k);
+	} catch {
+		// storage disabled — there is nothing to sweep and nothing to report
+	}
+}
+
+// Write down what this attempt is sending, before handing the shopper to the payment page.
+function recordSoldLines(ref, items) {
+	if (!ref) return;
+	try {
+		window.localStorage.setItem(SOLD_STORE_PREFIX + ref, JSON.stringify({
+			t: Date.now(),
+			ids: items.map((line) => String(line.variation_id))
+		}));
+	} catch {
+		// storage disabled/full — the completion page falls back to clearing the whole basket,
+		// which is what it did for every version before this one
+	}
+	pruneSoldRecords(Date.now());
 }
 
 function clearPersistedCart(storeId) {
@@ -1011,6 +1066,9 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 		status = res.status;
 		payload = await res.json().catch(() => null);
 		if (res.ok && payload && payload.url) {
+			// The last thing done on this machine before the shopper leaves it: the ids that are on
+			// the wire, under the ref the completion page will come back carrying.
+			recordSoldLines(clientRequestRef, items);
 			window.location.href = payload.url;
 			return;
 		}
