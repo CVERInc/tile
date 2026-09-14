@@ -59,6 +59,9 @@
 //   data-checkout-closed-label     (optional) — shop not taking orders (404).
 //   data-checkout-again-label      (optional) — that attempt was already started (409).
 //   data-checkout-unavailable-label (optional) — backend not answering (5xx).
+//   data-cart-limit-message (optional) — shown in the cart panel when the basket holds more lines
+//                          than the backend will take, in place of a checkout that could only be
+//                          refused. Keeps the {lines} / {max} / {over} placeholders.
 //   data-checkout-note   (optional) — small localized line under the CART checkout button, saying
 //                          the payment page itself is Square's own and (today) always Japanese —
 //                          finding #12, 2026-09-03 cold-read: a zh-TW/en-US shopper reached the
@@ -93,6 +96,25 @@ const DEFAULT_API_BASE = ''; /*coral-default:apiBase*/
 const SELECTOR = '[data-dynamic-coral="square-shop"]';
 const PREFIX = 'dc-square-shop';
 const CART_STORE_PREFIX = 'dc-square-shop-cart:';
+// The lines ONE checkout attempt actually sent, written under the ref that names that attempt.
+//
+// 🔴 It exists because of what the paid completion page could not otherwise know. That page lives
+// in the SITE's `_worker.js` (shop-function-template.js), not in this coral, and until 0.11.16 it
+// emptied the whole basket on `state === 'paid'`. That was harmless while the basket could only
+// ever hold rows that had just been sold — and stopped being harmless the moment a basket could
+// deliberately keep a row the checkout left behind (a variation the catalog in hand did not
+// confirm). Nothing in the outcome payload can repair it there: `lines` carry `name`/`qty`/
+// `amount_minor` and no variation id at all (reef `apps/rsp/src/commerce/provider-orders.ts`
+// #shopCheckoutOutcomeFromProjection), so the only page that knows which rows went to the till is
+// THIS one, at the moment it sends them.
+//
+// Written only on a checkout that actually redirects, cleared by the completion page it is for,
+// and swept of anything older than a week on the next write — an abandoned attempt leaves one
+// small row behind, not a growing pile. 🔴 A completion page that finds no record removes the
+// whole key, which is exactly what every version before this one did: an OLDER coral writes no
+// record, and its shopper must not end up with a basket that is never cleared.
+const SOLD_STORE_PREFIX = 'dc-square-shop-sold:';
+const SOLD_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RETURN_PARAM = 'dc_shop'; // legacy Square return marker; never proves payment
 
 let stylesInjected = false;
@@ -115,9 +137,89 @@ function storageAvailabilityNotice(available, labels) {
 	return available ? '' : ((labels && labels.storageNotice) || '');
 }
 
-function loadPersistedCart(storeId, itemsById) {
+// A stored row, as this file reads it back. ONE shape lives under this key:
+//
+//   [variationId, qty]        what every writer of this basket has always written — this file,
+//                             the product page's own inline script, and the feelreef fork
+//
+// 🔴 HELD IS DERIVED, AND IT IS NEVER WRITTEN DOWN. Whether a row is sellable is a question about
+// the CATALOG IN HAND, which is a fact about this page load; the shopper's disk holds what they
+// put in the basket and nothing else. 0.11.15 tried the other way — it marked an unconfirmed row
+// on disk as `[variationId, 0, qty]` so that two readers it could not change would count it as
+// nothing — and the marking is taken back out here. A marking on disk is a fact that every writer
+// of the key has to agree about, and only one of the three was ever taught it: the product page's
+// Add button read slot 1, added one to the 0, and a shopper's 3 became a 1 at the till; the paid
+// completion page deleted the whole key, including rows that were never in the order. See
+// ./PROVENANCE.md § 0.11.16 for the full account.
+//
+// `cartRowQty` still READS the 0.11.15 shape, so a basket that met that version keeps its
+// quantity, and the next persist writes the row back with two elements (one-time, and byte
+// compatible with every reader that came before).
+//
+// The quantity a stored row means. MIRRORED BYTE FOR BYTE from the one implementation in
+// ../shared/cart-badge-count.mjs; ../shared/cart-badge-count.test.mjs is what stops the two
+// drifting. It is a mirror and not an import because this file is published as a RAW artifact
+// (build.mjs stamps it and never bundles it) and is vendored into feelreef unmodified — the same
+// arrangement, for the same reason, as ../shared/close-button.mjs and the QR coral.
+function cartRowQty(e) { if (!Array.isArray(e)) return 0; const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); }
+
+function cartRowsFrom(entries) {
+	const rows = [];
+	for (const e of entries) {
+		if (!Array.isArray(e)) { rows.push({ foreign: e }); continue; }
+		const vid = String(e[0] || '');
+		if (!vid) { rows.push({ foreign: e }); continue; }
+		rows.push({ vid, qty: cartRowQty(e) });
+	}
+	return rows;
+}
+
+// The exact array that goes on disk for a given cart: sendable rows first, in the Map's order,
+// then the kept-unsellable ones, then anything a previous writer left that this file does not
+// understand — carried through byte for byte rather than tidied away. Nothing is ever omitted:
+// this function is the reason a write-back cannot lose a row.
+//
+// 🔴 A held row is written EXACTLY like a sellable one. On disk the two are indistinguishable,
+// which is the point: the difference lives in the catalog this page was handed, and a reader that
+// was handed a different catalog — an older coral, the fork, another tab — must be free to reach
+// its own conclusion about the same bytes rather than inherit ours.
+function cartStorageEntries(cart) {
+	const out = [...cart.entries()].map(([vid, qty]) => [vid, qty]);
+	for (const [vid, qty] of (cart.unavailable || new Map())) out.push([vid, qty]);
+	for (const value of (cart.foreign || [])) out.push(value);
+	return out;
+}
+
+// 🩸 RECONCILE IS NOT ALLOWED TO DELETE. The version before this one wrote the reconciled basket
+// back, which closed the badge-vs-POST split and opened something worse: it rested on a premise
+// written in its own comment — "the fetch path answers with the seller's whole catalog by
+// definition" — and that premise is FALSE on the legacy Python backend a live shop runs on today.
+// `apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` calls Square's
+// `search-catalog-items` ONCE and discards the cursor (there is no `cursor` anywhere in that
+// file), so a catalog longer than one page arrives HTTP 200, non-empty and SHORT. That backend
+// defect is tracked as CVERInc/reef#593 — it is the only place it can be repaired; nothing here
+// can fetch back the half of a catalog that was never sent. Reconciling
+// against that and writing the result back is not a stale-row cleanup; it is deleting, from the
+// shopper's own machine, irreversibly, rows the seller still sells. Measured as review round 2's
+// P1-1: four sibling rows gone in one load, and gone for good — the next load with a whole
+// catalog could not bring them back, because the record was no longer there to read.
+//
+// So the split is between STORAGE and the SENDABLE SET, not between a row and the bin:
+//   • every row stays on disk, whatever the catalog in hand says;
+//   • the rows whose variation the catalog CONFIRMS are the cart proper — the POST, the total,
+//     the ref key, the line cap, the badge;
+//   • the rest are `cart.unavailable` — shown in the panel, with their quantity and their own
+//     remove button, excluded from the POST, and restored the moment the catalog names them
+//     again.
+// A truncated catalog therefore costs a shopper a few greyed lines for one load, which is what a
+// display problem should cost. Only the shopper deletes a row.
+function loadPersistedCart(storeId, catalogByVariation) {
 	const cart = new Map();
 	cart.storageAvailable = true;
+	// Rows kept but not sellable against the catalog in hand. Always present, so every caller
+	// (and the fork) can read it without a guard.
+	cart.unavailable = new Map();
+	cart.foreign = [];
 	let raw;
 	try {
 		raw = window.localStorage.getItem(cartStore(storeId));
@@ -134,20 +236,35 @@ function loadPersistedCart(storeId, itemsById) {
 		return cart;
 	}
 	if (!Array.isArray(entries)) { cart.storageAvailable = false; return cart; }
-	for (const e of entries) {
-		if (!Array.isArray(e)) continue;
-		const vid = String(e[0] || '');
-		const qty = Math.max(1, Math.min(99, parseInt(e[1], 10) || 0));
-		// reconcile: drop anything the seller has since removed/hidden in Square
-		// (it's not in the live catalog), so a stale cart never checks out ghosts.
-		if (vid && itemsById.has(vid)) cart.set(vid, qty);
+	for (const row of cartRowsFrom(entries)) {
+		if (!row.vid) { cart.foreign.push(row.foreign); continue; }
+		// The index this is held against must know EVERY variation the catalog sells, not one
+		// per item — see cartCatalogByVariation() below for what a per-item index silently ate.
+		//
+		// 🩸 THE FORK STILL EATS THEM. `apps/feelreef/src/lib/dynamic-corals/square-shop/
+		// square-shop.js` in the private `reef` repo is a vendored copy of this file at 0.11.5,
+		// pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`,
+		// and it still holds this same line against a per-item index — so feelreef's own SPA cart
+		// loses the shopper's sibling variants exactly as this one did. Tracked as CVERInc/reef#592
+		// and in ./PROVENANCE.md § "Still open". The repair there is a RE-VENDOR of this file plus a
+		// new sha, never a hand-patch of this one line: hand-patching makes the pin guard a file no
+		// build can reproduce. ./cart-variant-collapse.test.mjs is the basket that decides it either
+		// way, and it is the test to port with the file.
+		if (catalogByVariation.has(row.vid)) cart.set(row.vid, row.qty);
+		else cart.unavailable.set(row.vid, row.qty);
 	}
+	// The ONE automatic write, and there is now almost nothing left for it to do: the same ids and
+	// the same quantities, in this file's own order, with any 0.11.15 three-element row collapsed
+	// back to two. Written only when the bytes actually change, so an ordinary basket — held rows
+	// included, since they are written like every other row — is not rewritten at all and fires no
+	// `dc-cart-changed`.
+	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
 	return cart;
 }
 
 function persistCart(storeId, cart) {
 	try {
-		window.localStorage.setItem(cartStore(storeId), JSON.stringify([...cart.entries()]));
+		window.localStorage.setItem(cartStore(storeId), JSON.stringify(cartStorageEntries(cart)));
 	} catch {
 		cart.storageAvailable = false;
 		// storage disabled/full — cart still works in-memory this session
@@ -156,6 +273,42 @@ function persistCart(storeId, cart) {
 	// get that) — this is what lets the header cart badge react on this same page. Single choke
 	// point: every cart mutation in this file (add/±qty/remove) goes through setQty → here.
 	try { window.dispatchEvent(new CustomEvent('dc-cart-changed')); } catch {}
+}
+
+// Sweep the records of attempts that were never completed. Guarded on `length`/`key` rather than
+// assuming them: this file runs against several test doubles and a feelreef wrapper, and a storage
+// object that only implements get/set/remove must lose the sweep, never the record.
+function pruneSoldRecords(now) {
+	try {
+		const ls = window.localStorage;
+		if (!ls || typeof ls.length !== 'number' || typeof ls.key !== 'function') return;
+		const stale = [];
+		for (let i = 0; i < ls.length; i++) {
+			const k = ls.key(i);
+			if (!k || k.indexOf(SOLD_STORE_PREFIX) !== 0) continue;
+			let t = 0;
+			try { t = Number((JSON.parse(ls.getItem(k) || '{}') || {}).t) || 0; } catch { t = 0; }
+			if (!t || now - t > SOLD_RECORD_TTL_MS) stale.push(k);
+		}
+		for (const k of stale) ls.removeItem(k);
+	} catch {
+		// storage disabled — there is nothing to sweep and nothing to report
+	}
+}
+
+// Write down what this attempt is sending, before handing the shopper to the payment page.
+function recordSoldLines(ref, items) {
+	if (!ref) return;
+	try {
+		window.localStorage.setItem(SOLD_STORE_PREFIX + ref, JSON.stringify({
+			t: Date.now(),
+			ids: items.map((line) => String(line.variation_id))
+		}));
+	} catch {
+		// storage disabled/full — the completion page falls back to clearing the whole basket,
+		// which is what it did for every version before this one
+	}
+	pruneSoldRecords(Date.now());
 }
 
 function clearPersistedCart(storeId) {
@@ -263,6 +416,10 @@ function injectStyles() {
 .${PREFIX}-msg { font-size: 12.5px; line-height: 1.45; margin: 10px 0 0; color: var(--gd-muted, rgba(0,0,0,0.6)); }
 .${PREFIX}-msg[hidden] { display: none; }
 .${PREFIX}-storage-notice { font-size: 11.5px; line-height: 1.4; margin: 10px 0 0; color: var(--gd-muted, rgba(0,0,0,0.55)); }
+/* Over the backend's line cap. Unlike the two quiet notices around it this one is standing between
+   the shopper and the checkout, so it carries the page's own accent rather than the muted grey —
+   it is the reason the button below it is disabled, and has to read as connected to it. */
+.${PREFIX}-cart-limit { font-size: 12.5px; line-height: 1.45; margin: 10px 0 0; color: var(--gd-fg, rgba(0,0,0,0.85)); }
 /* "the payment page is Square's, and it's Japanese" (finding #12) — same quiet register as the
    storage notice beside it, not a warning: it is a fact about what happens next, not a problem. */
 .${PREFIX}-checkout-note { font-size: 11.5px; line-height: 1.4; margin: 8px 0 0; color: var(--gd-muted, rgba(0,0,0,0.55)); }
@@ -298,6 +455,16 @@ function injectStyles() {
 .${PREFIX}-rm { border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--gd-muted, rgba(0,0,0,0.4)); padding: 0 2px; }
 .${PREFIX}-rm:hover { color: var(--gd-accent, currentColor); }
 .${PREFIX}-cart-hint { font-size: 13px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.55)); margin: 14px 0 0; }
+/* Rows the catalog in hand did not confirm. Muted and set apart from the sellable lines above —
+   still the shopper's, just not part of the total or the checkout below. */
+.${PREFIX}-cart-held { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--gd-border, rgba(0,0,0,0.14)); display: flex; flex-direction: column; gap: 8px; }
+.${PREFIX}-held-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.55)); }
+.${PREFIX}-held-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; opacity: 0.75; }
+.${PREFIX}-held-line .${PREFIX}-line-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.${PREFIX}-line-ref { font-size: 11px; color: var(--gd-muted, rgba(0,0,0,0.45)); word-break: break-all; }
+.${PREFIX}-line-qty { font-size: 12px; color: var(--gd-muted, rgba(0,0,0,0.55)); font-variant-numeric: tabular-nums; }
+/* The catalog is unreachable and the grid is the edge's: say so where the cart would have been. */
+.${PREFIX}-cart-offline { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.6)); }
 .${PREFIX}-checkout { font: inherit; width: 100%; margin-top: 16px; border: none; border-radius: var(--gd-pill, 999px); padding: 12px 16px; font-size: 14px; font-weight: 800; cursor: pointer; background: var(--gd-accent-deep, var(--gd-accent, #0b5f6b)); color: var(--gd-accent-ink, #fff); transition: background .15s, transform .15s; }
 .${PREFIX}-checkout:hover:not(:disabled) { background: var(--gd-accent, #0d7280); transform: translateY(-1px); }
 .${PREFIX}-checkout:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -436,12 +603,20 @@ const ZERO_DECIMAL = ['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF'];
 // A variant's display amount, from whichever field the backend actually sent. `display_price` is
 // what both mixfairy and RSP emit today; `price_minor` is the fallback for a backend that sends
 // only the minor-unit integer, so a price never renders as an empty span or a NaN.
-function variantDisplayPrice(v) {
+//
+// 🩸 `itemCurrency` is the SECOND fallback, and it is why the minor-unit branch is not a
+// hundredfold lie. A variant inherits its item's currency in every caller here (`v.currency ||
+// it.currency` at both of them) — but this function read `v.currency` alone, so a variant that
+// carried a price and no currency of its own was measured against an EMPTY string, which is in no
+// zero-decimal list. A ¥2200 print therefore priced as ¥22. Harmless while this only fed the
+// card's price RANGE; this release wired it to the basket line and the total a shopper reads
+// before paying, which is what makes an old latent asymmetry worth a parameter.
+function variantDisplayPrice(v, itemCurrency) {
 	if (!v) return null;
 	if (v.display_price != null && !isNaN(Number(v.display_price))) return Number(v.display_price);
 	if (v.price_minor == null || isNaN(Number(v.price_minor))) return null;
 	const minor = Number(v.price_minor);
-	return ZERO_DECIMAL.indexOf(String(v.currency || '').toUpperCase()) >= 0 ? minor : minor / 100;
+	return ZERO_DECIMAL.indexOf(String(v.currency || itemCurrency || '').toUpperCase()) >= 0 ? minor : minor / 100;
 }
 
 // What to call this item. `name` is the flat field every backend has always sent; `title` is the
@@ -452,19 +627,96 @@ function itemName(it) {
 }
 
 // Normalize a raw catalog item (which carries its full `variants` array) into the summary fields
-// itemCard() needs: how many variants, and the price span across them. Only items.variants (the
-// direct-fetch path) has this array — itemsFromSsr embeds the equivalent as data-* attrs instead,
-// since the SSR-hydrate path rebuilds from the DOM, not a fresh fetch.
+// itemCard() needs: how many variants, and the price span across them.
+//
+// The FETCH path runs every item through here. The SSR path does not call it at all: itemsFromSsr
+// reads the same summary straight off `data-variant-count` / `data-price-min` / `data-price-max`,
+// which product-page-core.js#renderShopGrid computed from the same variants at the edge, and
+// parses the card's `data-variants` back into a variants array beside them.
+//
+// 🔴 That last part did not exist until 0.11.13 — the SSR path rebuilt a catalog holding one
+// variation per item, which is the hole a basket of siblings fell straight through.
 function withVariantSummary(it) {
 	const variants = Array.isArray(it.variants) ? it.variants : [];
 	if (variants.length <= 1) return { ...it, variant_count: variants.length || 1 };
-	const prices = variants.map(variantDisplayPrice).filter((n) => n != null && !isNaN(n));
+	const prices = variants.map((v) => variantDisplayPrice(v, it.currency)).filter((n) => n != null && !isNaN(n));
 	return {
 		...it,
 		variant_count: variants.length,
 		price_min: prices.length ? Math.min(...prices) : it.display_price,
 		price_max: prices.length ? Math.max(...prices) : it.display_price
 	};
+}
+
+// What a cart LINE for one variant is called. The item's own name alone would print four
+// identical rows for a four-design print set, so the variant's name is appended — the same two
+// facts the product page showed the shopper when they picked it.
+function variantLineName(it, variant) {
+	const base = itemName(it);
+	const label = String((variant && variant.title) || '');
+	return label && label !== base ? `${base} — ${label}` : base;
+}
+
+// 🩸 EVERY VARIATION THE CATALOG SELLS, keyed by variation id — which is the key a BASKET is
+// written in, and is NOT the key the grid is indexed by.
+//
+// A catalog item carries one `variation_id` (its default) plus a `variants` array. The grid only
+// ever needs the default: a multi-variant card is a link to the product page, because adding the
+// default straight from the grid would cart something the shopper never chose. But the product
+// page writes the variation they DID choose into the shared localStorage basket — a sibling id
+// that appears nowhere in a per-item index.
+//
+// Held against such an index, the ghost-reconcile above read four legitimately chosen print
+// designs as four items the seller had deleted and threw three of them away (the fourth survived
+// only because it happened to be that item's default). Reported from a live shop 2026-09-14: the
+// header badge counted 5, Square's hosted page listed 2, and nothing failed anywhere in between —
+// the POST body was already short. ./cart-variant-collapse.test.mjs is that basket.
+//
+// ONE RULE FOR 0, 1 AND MANY VARIANTS: every variation id an item NAMES is a key — its own
+// `variation_id` (which a backend may send without repeating it inside `variants`) and every
+// `variants[*].id`. The item's variant count decides the VALUE, and nothing else.
+//
+// 🩸 It used to decide the KEY as well, and drew the line in two different places: at `<= 1` the
+// index took `variation_id` and ignored the variant, and above it took the variants and ignored
+// `variation_id`. Both halves had a hole a basket could fall into — a single-variant item whose one
+// variant carries a different id than the flat field had that variant read as a ghost and deleted;
+// a multi-variant item whose default is NOT repeated inside `variants` had its default read the
+// same way. Neither is this shop's shape, which is exactly why they would have been found by a
+// buyer rather than by us. ./cart-variant-collapse.test.mjs holds the whole table.
+//
+// The VALUE is the item's own object — never a copy — unless the item sells MORE THAN ONE
+// variation. A sibling set is the only case where a line needs a name and a price of its own, and
+// the identity matters: the conflict path rewrites a line's price in place, and for a single-
+// variation item that one write must reach the grid card as well as the basket line.
+//
+// Where this leaves the server: RSP's findCatalogVariant (reef apps/rsp/src/commerce/
+// square-catalog.ts) matches `variants[]` and only falls back to the flat `variation_id` when the
+// array is empty, so on the two odd shapes above the client now KEEPS a line the server may not
+// know. That is the safe direction and the deliberate one: the server answers 409 `sold_out` and
+// this widget names the line, where the narrower index deleted it without a word — which is the
+// entire defect this file was changed to stop.
+function cartCatalogByVariation(items) {
+	const byVariation = new Map();
+	for (const it of items || []) {
+		if (!it) continue;
+		const variants = (Array.isArray(it.variants) ? it.variants : []).filter((v) => v && v.id);
+		const siblings = variants.length > 1;
+		if (it.variation_id) byVariation.set(it.variation_id, it);
+		for (const v of variants) {
+			if (!siblings) { byVariation.set(v.id, it); continue; }
+			const price = variantDisplayPrice(v, it.currency);
+			byVariation.set(v.id, {
+				...it,
+				variation_id: v.id,
+				name: variantLineName(it, v),
+				title: variantLineName(it, v),
+				display_price: price == null ? it.display_price : price,
+				currency: v.currency || it.currency,
+				variant_count: 1
+			});
+		}
+	}
+	return byVariation;
 }
 
 // The catalog read goes to the PROCESSOR-NEUTRAL shop surface, not the Square-specific one.
@@ -574,6 +826,21 @@ function checkoutRefFor(refs, key) {
 	}
 	return ref;
 }
+
+// 🔴 THE BACKEND'S LINE LIMIT, MIRRORED — `PROVIDER_CATALOG_CART_MAX_LINES` in
+// reef `apps/rsp/src/commerce/provider-orders.ts`. A cart with more lines than this is refused by
+// `shop-endpoints.ts` with a 400 whose body carries `{error:"too many cart lines"}` and NO `code`,
+// so checkoutErrorLabelKey below has nothing to recognise and the shopper is told "try again" — an
+// instruction that can only ever fail, with no hint that the answer is to remove something.
+//
+// The number lives here as well as there deliberately, and being a COPY is the risk it carries: if
+// RSP's cap moves, this one has to move with it. The alternative — say nothing until the server
+// says it — is what the buyer just sat through. A copy that is checked at most one line early is
+// the smaller fault, and the 400 path stays exactly where it was for a cap that has since dropped.
+//
+// This became reachable with this release, not before: one line per ITEM could hardly get near 50,
+// one line per VARIATION can — a print seller with a dozen designs is two armfuls away.
+const MAX_CART_LINES = 50;
 
 // ── buyer-facing failures ────────────────────────────────────────────────
 // RSP answers a refused checkout with `{error, code?}`. `error` is an engineer's
@@ -733,6 +1000,11 @@ async function startCheckout(apiBase, guildId, variationId, btn, refs, labels, s
 		status = res.status;
 		payload = await res.json().catch(() => null);
 		if (res.ok && payload && payload.url) {
+			// Same reason startCartCheckout does this at the cart path below: without a
+			// record, the completion page cannot tell "sold" from "never touched" and
+			// falls back to clearing the whole key — including lines this purchase
+			// never came near. This is the instant-checkout half of that fix.
+			recordSoldLines(clientRequestRef, [{ variation_id: variationId }]);
 			window.location.href = payload.url;
 			return;
 		}
@@ -760,6 +1032,19 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 	if (items.length === 0) return;
 	const surface = btn.parentElement;
 	clearCheckoutMessage(surface);
+	// The cap, at the ONE place the POST is written. The panel already says it and disables the
+	// button, so a shopper on this file's own surface never arrives here — but this function is
+	// exported and driven directly (feelreef's SPA wrapper, and three suites in this directory),
+	// and a refusal we can name should not depend on which surface asked. Said in the shopper's
+	// own language and NOT sent: the 400 it would earn carries no `code`, so the honest-failure
+	// path below could only answer it with "try again".
+	if (items.length > MAX_CART_LINES) {
+		showCheckoutMessage(surface, String(labels && labels.cartTooManyLines || '')
+			.replace('{lines}', String(items.length))
+			.replace('{max}', String(MAX_CART_LINES))
+			.replace('{over}', String(items.length - MAX_CART_LINES)));
+		return;
+	}
 	const settle = beginPending(btn, labels && labels.checkoutPending);
 	// Keyed on the cart's contents, so a double-click on Checkout replays one link
 	// while a basket the shopper edited in between is a new intent with a new ref.
@@ -788,6 +1073,9 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 		status = res.status;
 		payload = await res.json().catch(() => null);
 		if (res.ok && payload && payload.url) {
+			// The last thing done on this machine before the shopper leaves it: the ids that are on
+			// the wire, under the ref the completion page will come back carrying.
+			recordSoldLines(clientRequestRef, items);
 			window.location.href = payload.url;
 			return;
 		}
@@ -806,13 +1094,13 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 // self-contained for en pages. Per-item `buy_label` from the API (if any) still
 // wins over the page-level default.
 const LABEL_DICTIONARIES = {
-	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
-	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
-	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
+	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', unavailable:'Currently unavailable', unavailableNote:'Kept in your cart, but the shop is not listing these right now — they are not part of the checkout below.', cartUnavailable:"The cart can't be reached right now — you can still browse, and nothing in your cart has changed.", soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
+	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', unavailable:'現在お取り扱いがありません', unavailableNote:'カートに残していますが、現在ショップに掲載されていないため、下のお会計には含まれません。', cartUnavailable:'現在カートに接続できません。商品の閲覧は可能で、カートの内容は変わっていません。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
+	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', unavailable:'目前沒有販售', unavailableNote:'已為您留在購物車，但商店目前沒有上架，不會列入下方結帳。', cartUnavailable:'目前無法連上購物車，仍可瀏覽商品；購物車內容沒有任何變動。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): Simplified, added alongside zh-TW rather than
 	// derived from it at runtime — the two diverge in wording, not just glyphs (結帳→结算, not a
 	// character-for-character conversion of 結帳's simplified glyphs).
-	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
+	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', unavailable:'目前没有销售', unavailableNote:'已为您留在购物车，但商店目前没有上架，不会列入下方结算。', cartUnavailable:'目前无法连上购物车，仍可浏览商品；购物车内容没有任何变动。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
 };
 
 // 🩸 0.11.10: only recognised `zh-tw`/`zh-hant(-*)` — every OTHER zh tag (a genuine `zh-Hans`/
@@ -853,6 +1141,18 @@ function readLabels(el) {
 		soldOutMessage: el.getAttribute('data-sold-out-message') || defaults.soldOutMessage,
 		priceChangedMessage: el.getAttribute('data-price-changed-message') || defaults.priceChangedMessage,
 		storageNotice: el.getAttribute('data-storage-notice') || defaults.storageNotice,
+		// A row the catalog in hand does not confirm is KEPT and said out loud — see
+		// loadPersistedCart. Both strings are site-overridable like every other label here,
+		// because a shop with its own word for "we are not selling this at the moment" should
+		// not have to accept ours.
+		unavailable: el.getAttribute('data-unavailable-label') || defaults.unavailable,
+		unavailableNote: el.getAttribute('data-unavailable-note') || defaults.unavailableNote,
+		// Said when the catalog could not be read at all and the page fell back to the grid the
+		// edge had already rendered: browsable, no till. See mount()'s renderBrowseOnly.
+		cartUnavailable: el.getAttribute('data-cart-unavailable-note') || defaults.cartUnavailable,
+		// Says how many lines a checkout takes, BEFORE the POST that would be refused for it.
+		// {lines}/{max}/{over} are filled in by the panel — a site overriding this keeps them.
+		cartTooManyLines: el.getAttribute('data-cart-limit-message') || defaults.cartTooManyLines,
 		// Buyer-facing checkout failures. Plain language on purpose: a shopper can
 		// act on "try again in a moment", never on "client_request_ref is required".
 		checkoutError: el.getAttribute('data-checkout-error-label') || defaults.checkoutError,
@@ -946,7 +1246,12 @@ function renderInstant(root, items, apiBase, guildId, labels, detailBase, checko
 // cart. State is a per-mount Map(variation_id -> qty); the grid and the summary
 // panel both re-render off it.
 function renderCart(root, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs) {
+	// Two indexes, because a GRID row and a CART line are keyed differently: the grid shows one
+	// card per item (its default variation), while the basket holds whichever variation the
+	// shopper actually picked. Everything the cart does — reconcile, line lookup, conflict
+	// naming — goes through the second one.
 	const itemsById = new Map(items.map((it) => [it.variation_id, it]));
+	const cartItemsById = cartCatalogByVariation(items);
 	const lineStates = new Map();
 	// clear the cart if we've just returned from a completed checkout, then
 	// hydrate from localStorage (reconciled against the live catalog).
@@ -962,7 +1267,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	const siteId = root.getAttribute('data-site-id') || '';
 	const storeId = guildId || siteId;
 	consumeCheckoutReturn();
-	const cart = loadPersistedCart(storeId, itemsById);
+	const cart = loadPersistedCart(storeId, cartItemsById);
 
 	// products on the left, sticky cart on the right (feelreef picker layout). With data-cart="header"
 	// the sidebar is suppressed (grid full-width) but the panel is STILL rendered — a header drawer
@@ -983,6 +1288,15 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		const q = Math.max(0, Math.min(99, qty | 0));
 		if (q <= 0) { cart.delete(vid); lineStates.delete(vid); }
 		else cart.set(vid, q);
+		persistCart(storeId, cart);
+		render();
+	}
+
+	// The only way a KEPT-but-unsellable row leaves this machine: the shopper says so. There is
+	// no automatic counterpart — see loadPersistedCart for why a reconcile that deletes is the
+	// defect this release exists to take back out.
+	function removeUnavailable(vid) {
+		cart.unavailable.delete(vid);
 		persistCart(storeId, cart);
 		render();
 	}
@@ -1069,7 +1383,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 			const lines = document.createElement('div');
 			lines.className = `${PREFIX}-cart-lines`;
 			for (const [vid, qty] of cart) {
-				const it = itemsById.get(vid);
+				const it = cartItemsById.get(vid);
 				if (!it) continue;
 				const state = lineStates.get(vid);
 				currency = it.currency || currency;
@@ -1120,13 +1434,69 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		}
 		panel.append(total, tail);
 
+		// The rows the catalog in hand did not confirm. They are NOT lines: no price (this page
+		// has no record of one — the catalog is where a price comes from), no stepper, no part of
+		// the total, and nothing of theirs reaches the POST. What they get is the two things a
+		// shopper needs — to see that their basket still holds them, and to be able to throw one
+		// away on purpose. The variation id is printed because it is the only name this page has
+		// for a product the catalog is not describing; a support conversation can start from it.
+		if (cart.unavailable && cart.unavailable.size) {
+			const held = document.createElement('div');
+			held.className = `${PREFIX}-cart-held`;
+			const heldNote = document.createElement('p');
+			heldNote.className = `${PREFIX}-held-note`;
+			heldNote.textContent = labels.unavailableNote;
+			held.appendChild(heldNote);
+			for (const [vid, qty] of cart.unavailable) {
+				const line = document.createElement('div');
+				line.className = `${PREFIX}-held-line`;
+				const main = document.createElement('div');
+				main.className = `${PREFIX}-line-main`;
+				const name = document.createElement('span');
+				name.className = `${PREFIX}-line-name`;
+				name.textContent = labels.unavailable;
+				const ref = document.createElement('span');
+				ref.className = `${PREFIX}-line-ref`;
+				ref.textContent = vid;
+				const count = document.createElement('span');
+				count.className = `${PREFIX}-line-qty`;
+				count.textContent = `× ${qty}`;
+				main.append(name, ref, count);
+				const rm = document.createElement('button');
+				rm.type = 'button';
+				rm.className = `${PREFIX}-rm`;
+				rm.textContent = '×'; // multiplication sign as remove glyph, same as a live line
+				rm.setAttribute('aria-label', `${labels.remove} ${vid}`);
+				rm.addEventListener('click', () => removeUnavailable(vid));
+				line.append(main, rm);
+				held.appendChild(line);
+			}
+			panel.appendChild(held);
+		}
+
+		// The backend refuses more than MAX_CART_LINES lines with a 400 a shopper cannot read as
+		// anything but "try again" (see the constant above). Said here instead, in the panel, with
+		// the number in it and BEFORE the request that could only be refused — and the button is
+		// held shut, because a checkout that cannot succeed should not be offered. A shopper over
+		// the cap can still edit every line: this is a gate on the till, not on the basket.
+		if (cart.size > MAX_CART_LINES) {
+			const over = document.createElement('p');
+			over.className = `${PREFIX}-cart-limit`;
+			over.setAttribute('role', 'alert');
+			over.textContent = String(labels.cartTooManyLines || '')
+				.replace('{lines}', String(cart.size))
+				.replace('{max}', String(MAX_CART_LINES))
+				.replace('{over}', String(cart.size - MAX_CART_LINES));
+			panel.appendChild(over);
+		}
+
 		const checkout = document.createElement('button');
 		checkout.type = 'button';
 		checkout.className = `${PREFIX}-checkout`;
 		const confirmsPrice = [...lineStates.values()].some((state) => state.reason === 'price_changed');
 		const hasSoldOut = [...lineStates.values()].some((state) => state.reason === 'sold_out');
 		checkout.textContent = confirmsPrice ? labels.confirmPrice : labels.checkout;
-		checkout.disabled = cart.size === 0 || hasSoldOut;
+		checkout.disabled = cart.size === 0 || hasSoldOut || cart.size > MAX_CART_LINES;
 		checkout.addEventListener('click', () => {
 			if (confirmsPrice) lineStates.clear();
 			return startCartCheckout(apiBase, guildId, cart, collectShipping, checkout, labels, checkoutRefs, siteId, handleConflict);
@@ -1157,7 +1527,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		for (const [vid, state] of states) {
 			lineStates.set(vid, state);
 			if (state.reason === 'price_changed' && state.price_minor !== undefined) {
-				const it = itemsById.get(vid);
+				const it = cartItemsById.get(vid);
 				if (it) {
 					const currency = state.currency || it.currency || 'USD';
 					const digits = new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
@@ -1167,7 +1537,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 			}
 		}
 		render();
-		const names = [...states.keys()].map((vid) => itemName(itemsById.get(vid) || { name: vid })).join(', ');
+		const names = [...states.keys()].map((vid) => itemName(cartItemsById.get(vid) || { name: vid })).join(', ');
 		showCheckoutMessage(panel, (reason === 'sold_out' ? labels.soldOutMessage : labels.priceChangedMessage).replace('{items}', names));
 		try {
 			const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
@@ -1175,21 +1545,48 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 				const current = itemsById.get(fresh.variation_id);
 				if (current) Object.assign(current, fresh);
 			}
+			// The cart index holds its own per-variant records for multi-variant items, so a
+			// refreshed catalog has to be re-derived into it or a basket line would keep quoting
+			// the price the conflict was about.
+			for (const [vid, entry] of cartCatalogByVariation(items)) cartItemsById.set(vid, entry);
 			renderGrid();
 		} catch { /* conflict remains actionable even if refresh fails */ }
+	}
+
+	// The derived held set, published where the ONE reader outside this file can see it.
+	//
+	// sitetile's header badge (`header-actions/header-actions-cart.js`) is painted on every page of
+	// the site and has only the raw rows to count — which is exactly why 0.11.15 marked held rows on
+	// disk, and exactly the mistake this version takes back out. The marking belongs to the page
+	// that has the catalog, so it is published as an attribute of THIS mount, rebuilt on every
+	// render, and never written to the shopper's machine.
+	//
+	// 🔴 A page without this attribute — no coral, an OLDER coral, a failed mount — counts every row.
+	// That is an OVER-count while a row is held, never an under-count, and never a charge: the POST
+	// is built from `cart` alone. See ./PROVENANCE.md § 0.11.16 for the mixed-fleet table.
+	function publishHeld() {
+		try { root.setAttribute('data-cart-held', JSON.stringify([...cart.unavailable.keys()])); } catch {}
 	}
 
 	function render() {
 		renderGrid();
 		renderPanel();
+		publishHeld();
 	}
 
 	render();
 }
 
 // Read the item list back off the edge-SSR'd cards, so the client can rebuild the grid with NO
-// network call (variation_id/price/currency/slug from data-attrs, name from the card text). The
-// edge worker keeps the SSR ≤60s fresh, so this needs no reconcile.
+// network call: variation_id / price / currency / slug / the sibling variations from data-attrs,
+// name from the card text. The edge worker keeps the SSR ≤60s fresh, so the GRID needs no
+// re-fetch to be current.
+//
+// That says nothing about the BASKET, which is reconciled against whatever this returns every
+// time (loadPersistedCart) — a basket is the shopper's own machine's memory, arbitrarily old, and
+// the reconcile is what keeps a deleted product from reaching the till. Reading "needs no
+// reconcile" as covering both is what let a card describing 1 of 4 variations be trusted with a
+// basket holding all four; see ssrCatalogMissesSiblings below.
 function itemsFromSsr(grid) {
 	const out = [];
 	grid.querySelectorAll(`.${PREFIX}-card`).forEach((c) => {
@@ -1202,8 +1599,21 @@ function itemsFromSsr(grid) {
 		const countRaw = c.getAttribute('data-variant-count');
 		const minRaw = c.getAttribute('data-price-min');
 		const maxRaw = c.getAttribute('data-price-max');
+		// The card's sibling variations, when it stands for more than one. Without them the
+		// rebuilt catalog knows one id per item and the basket's other lines look like ghosts —
+		// see cartCatalogByVariation above. A card from an older edge render carries no such
+		// attribute, and an item with a single variation never needs one: both stay [].
+		let variants = [];
+		const variantsRaw = c.getAttribute('data-variants');
+		if (variantsRaw) {
+			try {
+				const parsed = JSON.parse(variantsRaw);
+				if (Array.isArray(parsed)) variants = parsed.filter((v) => v && v.id);
+			} catch { /* an unreadable attribute is no worse than the absent one */ }
+		}
 		out.push({
 			variation_id: vid,
+			variants,
 			name: nameEl ? nameEl.textContent : '',
 			image_url: imgEl ? (imgEl.getAttribute('src') || '') : '',
 			display_price: (price != null && !isNaN(price)) ? price : null,
@@ -1217,6 +1627,34 @@ function itemsFromSsr(grid) {
 	return out;
 }
 
+// 🩸 THE TWO HALVES OF THIS FIX SHIP DOWN PIPELINES THAT NEVER SHAKE HANDS, and this is the
+// handshake, written in the markup itself.
+//
+// `data-variants` — the attribute the sibling ids above are read out of — is written by the OTHER
+// artifact: ./product-page-core.js#renderShopGrid, concatenated into each site's own
+// `dist/_worker.js` by ./emit-shop-function.mjs at SITE BUILD time. Publishing this coral does not
+// rebuild a single worker, no version links the two, and nothing anywhere notices when only one of
+// them moved. So a shop that takes the fixed coral while its worker is still the old one SSRs cards
+// that each name one variation, and hydrating that half-catalog would read the shopper's other four
+// lines as ghosts and delete them — the exact basket of the 2026-09-14 report, on a shop whose coral
+// was already "fixed" (./cart-variant-collapse.test.mjs, "an SSR grid from an OLD worker").
+//
+// A card that says it stands for MORE THAN ONE variation and then names none of them is that stale
+// worker, stating it in its own markup. Taken for what it is — an INCOMPLETE record of the catalog
+// rather than a complete one — the only safe thing to do with it is not to use it: fall through to
+// the fetch, which answers with every variation the seller sells. That costs one request on that
+// page, and it is correct with only one of the two deploys done.
+//
+// Instant mode is deliberately NOT gated. It holds no basket against this catalog and its
+// multi-variant card is a link to the product page either way, so a missing sibling list costs it
+// nothing — gating it would buy a permanent extra request per page load and change nothing on
+// screen.
+function ssrCatalogMissesSiblings(items) {
+	return (items || []).some((it) =>
+		(it.variant_count || 1) > 1 && !(Array.isArray(it.variants) && it.variants.length > 0)
+	);
+}
+
 // Placeholder cards holding the grid's shape while the catalog loads — reserves space (no layout
 // shift). Only the NON-SSR path uses this (a static build, or a host whose edge worker isn't
 // rendering the grid); an edge-SSR'd page never blanks in the first place.
@@ -1226,6 +1664,34 @@ function skeletonHtml(cartMode) {
 	).join('');
 	const grid = `<div class="${PREFIX}-grid" aria-hidden="true">${cards}</div>`;
 	return cartMode ? `<div class="${PREFIX}-layout">${grid}</div>` : grid;
+}
+
+// The store, minus the till. Used when cart mode fell through to the fetch (a worker that predates
+// `data-variants`) and the fetch could not answer — but the edge had ALREADY rendered a complete,
+// current grid into this root a moment ago.
+//
+// 🩸 Reviewed 2026-09-14 as P2-1. Before the fall-through existed, that shop was 0 requests and
+// browsable; after it, a failed request replaced a working storefront with one line of error text,
+// and an `items: []` 200 replaced it with "Nothing in the shop right now". The window in which that
+// happens is precisely the window this branch exists for — coral deployed, worker not yet — so the
+// regression was aimed at exactly the shops the fix was for.
+//
+// What is kept and what is not. The GRID is the edge's own render and is as true as it was a moment
+// ago, so the cards stay, links and all. The BASKET is not: reconciling it needs a catalog, this
+// page has none, and hydrating a cart panel from an SSR set that admits it is incomplete is the
+// defect two commits back. So: no reconcile, no panel, no checkout button, nothing read from or
+// written to storage — and a line that says the cart is the part that is missing, rather than
+// leaving a shopper to work out why the button they expected is not there.
+function renderBrowseOnly(root, items, labels, detailBase) {
+	const note = document.createElement('p');
+	note.className = `${PREFIX}-cart-offline`;
+	note.setAttribute('role', 'status');
+	note.textContent = labels.cartUnavailable;
+	const grid = document.createElement('div');
+	grid.className = `${PREFIX}-grid`;
+	for (const it of items) grid.appendChild(itemCard(it, labels, detailBase));
+	root.innerHTML = '';
+	root.append(note, grid);
 }
 
 async function mount(el) {
@@ -1261,9 +1727,14 @@ async function mount(el) {
 	// is live immediately. renderCart wipes+rebuilds synchronously, so replacing the identical SSR
 	// grid never paints an empty frame (seamless). If the SSR data can't be parsed, fall through.
 	const ssrGrid = el.querySelector(`.${PREFIX}-grid[data-ssr]`);
+	let ssrItems = [];
 	if (ssrGrid) {
-		const ssrItems = itemsFromSsr(ssrGrid);
-		if (ssrItems.length) {
+		ssrItems = itemsFromSsr(ssrGrid);
+		// …unless the cards came from a worker that predates `data-variants`, in which case the set
+		// they describe is incomplete and the basket is the half that pays for it. See
+		// ssrCatalogMissesSiblings above: falling through here is what makes a coral-only deploy
+		// correct instead of silently short.
+		if (ssrItems.length && !(cartMode && ssrCatalogMissesSiblings(ssrItems))) {
 			if (cartMode) renderCart(el, ssrItems, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 			else renderInstant(el, ssrItems, apiBase, guildId, labels, detailBase, checkoutRefs);
 			return;
@@ -1276,17 +1747,30 @@ async function mount(el) {
 		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
 		const items = (Array.isArray(data && data.items) ? data.items : []).map(withVariantSummary);
 		if (!data || data.connected !== true) {
+			// Same rule as the empty-catalog arm below, and for a stronger reason: the edge worker
+			// rendered THIS seller's products into THIS root a moment ago, so "no shop connected yet"
+			// is not merely ugly here, it is disproved by the page it would be written on. Reviewed
+			// round 3 as P3-1 — the failure arm was already safe (no till, disk untouched); what it
+			// was not was honest to the seller.
+			if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 			el.innerHTML = `<p class="${PREFIX}-empty">${escHtml(labels.unconnected)}</p>`;
 			return;
 		}
 		if (items.length === 0) {
+			// An empty catalog is a legitimate answer for a shop with nothing in it — but not for
+			// one the edge rendered products into a moment ago. There, "Nothing in the shop right
+			// now" is the ugliest lie this widget can tell a seller, so the grid that IS there wins.
+			if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 			el.innerHTML = `<p class="${PREFIX}-empty">${escHtml(labels.empty)}</p>`;
 			return;
 		}
 		if (cartMode) renderCart(el, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 		else renderInstant(el, items, apiBase, guildId, labels, detailBase, checkoutRefs);
 	} catch {
-		// Honest failure — never fabricate products on a network/API error.
+		// Honest failure — never fabricate products on a network/API error. The SSR cards are not
+		// fabricated: the edge rendered them from the seller's own catalog, into this very root,
+		// and a catalog we could not reach is no reason to take that away too.
+		if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 		el.innerHTML = `<p class="${PREFIX}-error">${escHtml(labels.error)}</p>`;
 	}
 }

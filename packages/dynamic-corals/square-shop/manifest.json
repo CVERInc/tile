@@ -1,9 +1,9 @@
 {
   "name": "square-shop",
-  "version": "0.11.12",
+  "version": "0.11.16",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/square-shop/0.11.12/square-shop.js",
+  "source": "https://feelreef.com/corals/square-shop/0.11.16/square-shop.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": ["checkout"],
   "calls": [
@@ -12,7 +12,7 @@
     "POST <data-api-base>/api/v2/shop/cart — mints a checkout link for the whole cart (processor-neutral as of 0.11.6; was /api/v2/square/catalog/cart through 0.11.5). JSON body {guild_id|site_id, items, collect_shipping, redirect_url, client_request_ref} — the locator is spread first under the same one-of rule as the catalog read (new in 0.11.7; through 0.11.6 this body carried guild_id only)"
   ],
   "stores": [
-    "browser localStorage — this visitor's own cart contents (variation ids + quantities), keyed per guild id, or per site id on a site that names no guild (square-shop.js#renderCart: storeId = guildId || siteId — new in 0.11.7; through 0.11.6 the key was the guild id alone); cleared on a successful checkout return or by the visitor; never sent anywhere except inside the cart checkout request itself"
+    "browser localStorage — this visitor's own cart contents (variation ids + quantities), keyed per guild id, or per site id on a site that names no guild (square-shop.js#renderCart: storeId = guildId || siteId — new in 0.11.7; through 0.11.6 the key was the guild id alone); rows are [variation_id, quantity] pairs and nothing else — a row whose variation the live catalog does not confirm is KEPT, in that same shape, and is simply left out of the checkout until the catalog names it again (“held” is derived per page load from the catalog in hand and is never written to disk — 0.11.16; 0.11.15 briefly marked such a row on disk as [id, 0, qty], and 0.11.14 deleted it, which on a backend that answers a long catalog truncated meant deleting rows the seller still sells). Cleared by the visitor, or on a paid checkout return — which since 0.11.16 removes only the rows that order carried, matched against dc-square-shop-sold:<client_request_ref>, a short-lived second key holding the variation ids one checkout attempt sent (swept after a week). Never sent anywhere except inside the cart checkout request itself"
   ],
   "paid": false,
   "funding": null,

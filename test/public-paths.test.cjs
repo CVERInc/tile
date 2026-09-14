@@ -65,4 +65,60 @@ if (missing.length) {
   );
 }
 
-console.log(`  public paths: ${entries.length} declared, all present`);
+// ── and nothing else at the root is pretending to be one ────────────────────
+//
+// 🩸 2026-09-14: a lane committed an 89 KB stale copy of a coral's source to the REPO ROOT next to
+// its real edit. It was byte-identical to the package file at that moment and rotted from the next
+// commit onwards, and the source carries no version string, so the two copies were tellable apart
+// only by reading them. Nothing here caught it: the manifest test above asserts that every listed
+// path still EXISTS, which says nothing about a path that turned up unlisted, and .gitignore
+// deliberately does not cover root *.js because the root is exactly where the by-name-fetched ones
+// live.
+//
+// That is what makes an unlisted root script worth failing over rather than tidying away later. In
+// this repo the root is the "somebody outside downloads this by name" shelf — PUBLIC-PATHS.json
+// says so about Sortable.min.js in as many words, and one of those consumers is a production
+// deploy. A file arriving there either belongs on that shelf, in which case it needs the entry that
+// says who fetches it and what breaks, or it does not belong at the root at all.
+//
+// Either answer is cheap; only the third one — leaving it — costs somebody a day. The check is
+// the TREE, not a list, so it cannot go stale: add a root script and this goes red on the commit
+// that added it.
+// 🩸 The first version of this guard read `.js|.cjs|.mjs` and stopped there, and review round 3
+// (P3-2) measured what that left through: a stray `.json` or `.ts` at the root went green. The
+// risk is identical — the root is the "somebody outside downloads this by name" shelf, and a
+// consumer fetching a path by name does not care what the extension is — so the set is now every
+// extension a build or a fetch script would plausibly reach for.
+//
+// 🔴 ONE file is exempt, and it is exempt by IDENTITY rather than by name: the manifest this test
+// reads. A ledger cannot be an entry in itself, and the alternative — listing PUBLIC-PATHS.json
+// inside PUBLIC-PATHS.json with a fabricated `namedBy` — would be exactly the "everything except
+// me" list the manifest's own comment spends three paragraphs arguing against. Written as
+// `basename(MANIFEST)` so it cannot become a general skip-list by accretion: there is nowhere to
+// add a second entry.
+const ROOT_SCRIPT = /\.(?:js|cjs|mjs|json|ts|mts|cts)$/;
+const MANIFEST_NAME = path.basename(MANIFEST);
+const rootFiles = fs.readdirSync(ROOT, { withFileTypes: true })
+  .filter((d) => d.isFile() && ROOT_SCRIPT.test(d.name))
+  .map((d) => d.name);
+const strays = rootFiles
+  .filter((name) => name !== MANIFEST_NAME)
+  .filter((name) => !Object.prototype.hasOwnProperty.call(doc.paths || {}, name));
+
+if (strays.length) {
+  throw new Error(
+    `${strays.length} script(s) sit at the repo root without an entry in PUBLIC-PATHS.json:\n`
+    + strays.map((n) => `  ✗ ${n}`).join('\n')
+    + '\n\n  The root of this repo is where paths OTHER repos fetch by name live, so a file here is\n'
+    + '  read as one of those. If it is: add an entry saying who names it and what breaks without\n'
+    + '  it. If it is not — and a copy of something that already lives under packages/ never is —\n'
+    + '  delete it, before someone vendors the stale one.',
+  );
+}
+
+// 🩸 The count used to come from a second, DIFFERENT read of the directory — `readdirSync(ROOT)`
+// with no `withFileTypes`, so a DIRECTORY named `x.js` was (correctly) not a stray but was
+// (incorrectly) counted as a declared root script. Two readings of the tree in one test, one of
+// them not the one being asserted. Same list now, so the number cannot disagree with the check.
+console.log(`  public paths: ${entries.length} declared, all present; root scripts: ${
+  rootFiles.length} file(s), no strays`);

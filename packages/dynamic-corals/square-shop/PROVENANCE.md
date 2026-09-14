@@ -13,6 +13,268 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.16 — 2026-09-14 — the marking comes off the disk, and "held" becomes something this page works out
+
+0.11.15 was reviewed before it was published and, like 0.11.14 before it, did not survive the
+review — and for the same shape of reason: the repair was right and the place it was written down
+was not. Its non-destructive reconcile stays, every word of it. What comes back out is the
+**second on-disk shape** that reconcile invented, `[id, 0, qty]`.
+
+| | |
+|---|---|
+| the format | back to `[id, qty]`, the one shape every writer of this key has ever written — byte compatible with 0.11.5 (the feelreef fork), 0.11.12 (what is on `main`), the product detail page, and anything else holding this key |
+| "held" | DERIVED per page load from the catalog in hand, published on the mount as `data-cart-held`, and never written to the shopper's machine |
+| the badge | reads that derived set, so it still counts exactly what the checkout will carry |
+| a paid order | clears the rows that were IN it, and leaves a row that was not |
+
+### Why a marking on disk could not work from here
+
+The marking existed for a good reason: two readers this file cannot change — sitetile's header
+badge and the product page's own inline script — both summed `e[1]`, so a `0` there was a row they
+counted as nothing while the id and the quantity stayed written down. That bought "the badge says
+what the checkout will carry" without deleting anything.
+
+What it missed is that those two are not only readers. **Three programs write this key**, and the
+new shape was taught to one of them:
+
+| writer | ships with | what it did with `[id, 0, qty]` |
+|---|---|---|
+| `square-shop.js` | the coral, through the registry | wrote it, read it |
+| `product-page-core.js` — the detail page's Add | every site's own `dist/_worker.js` | added 1 to the `0` and wrote `[id, 1, qty]`, a shape NOBODY defines. The next read took slot 1: a shopper who had **3** and pressed Add once reached the till with **1** (round 3, P2-1 — worse than `origin/main`, which answered 4) |
+| `shop-function-template.js` — the paid completion page | the same `dist/_worker.js` | `removeItem` on the whole key: a paid order deleted rows that were never in it (round 3, P2-2), contradicting this file's own "**Only the shopper deletes a row**" |
+
+Both of those files are in this repo, so "cannot be changed from here" was true about DEPLOYMENT
+and false about EDITING — and the deployment half is the part that bites, because they ride a
+different pipeline from the coral and arrive on a different day.
+
+**A fact that every writer of a key has to agree about cannot be established from inside one of
+them.** So the disk goes back to recording what the shopper did — ids and quantities — and the
+question "can this be sold right now?", which is a question about the catalog THIS page load was
+handed, is answered where that catalog is: at render time, thrown away afterwards, and published
+for the badge on the mount (`data-cart-held`) rather than on the shopper's machine.
+
+`cartRowQty` is the one rule for what a stored row means, and it still reads both 0.11.15 shapes —
+`[id, 0, qty]` and the `[id, 1, qty]` that version's own Add could produce — as the LARGER of the
+two slots. A basket that met 0.11.15 keeps its quantity, and the next persist writes it back as
+two elements, once. (0.11.15 was never published from this lane; the migration is there because
+"never published" is not something this file can verify about somebody else's registry.)
+
+### One badge count, and what a mixed fleet does with it
+
+Round 3's P3-4: "sum `e[1]`" had THREE implementations — the header island, the product page's
+inline script, and a copy inside the test asserting the badge equals the POST. The ruler was a
+transcription of the thing it measured, so the two could drift together and stay green.
+
+`packages/dynamic-corals/shared/cart-badge-count.mjs` is now the one implementation. sitetile's
+island imports it (it is bundled by Vite). The two files that CANNOT import — this one, published
+as a raw artifact and vendored into feelreef unmodified, and `product-page-core.js`, concatenated
+into every site's `_worker.js` by a script whose contract is "no imports" — carry a mirror that
+`shared/cart-badge-count.test.mjs` pins to the module's own `toString()`, character for character.
+Same arrangement, same reason, as `shared/close-button.mjs` and the QR coral.
+
+🔴 **The mixed-fleet behaviour, stated so nobody has to discover it.** During a rollout the site's
+`_worker.js` (which carries the header island and the product page) and the coral are independent:
+
+| the page's island | the coral on it | the badge counts | vs. the POST |
+|---|---|---|---|
+| 0.11.16 | 0.11.16 | sendable rows (reads `data-cart-held`) | **equal** |
+| 0.11.16 | older, or none on this page | every row (no attribute to read) | over-counts while a row is held |
+| older | 0.11.16 | every row (sums `e[1]`, which every row now carries) | over-counts while a row is held |
+
+Every disagreement is in the same direction: **the badge can say MORE than the checkout will
+carry, never less, and never a charge.** The POST is built from the confirmed rows alone, and the
+cart panel shows the held ones separately, in words, on the page where the shopper is deciding.
+A badge that said less would be the dangerous one — it would hide a line the shopper is about to
+pay for — and no combination above produces it.
+
+The same table is why P3-5 closes: an older coral reading a 0.11.16 basket sees rows in the shape
+it has always seen, so the "sold at quantity 1" degradation 0.11.15 introduced is gone. It sells
+the row at the quantity the shopper chose, which is what that coral would have done all along.
+
+### What a paid order clears
+
+The completion page could not answer "which rows were in this order?" from the outcome payload:
+its `lines` carry `name`, `qty` and `amount_minor` and no variation id at all (reef
+`apps/rsp/src/commerce/provider-orders.ts#shopCheckoutOutcomeFromProjection`). The only page that
+knows is the one that sent them. So `startCartCheckout` writes
+`dc-square-shop-sold:<client_request_ref>` — the ids on the wire, stamped — as the last thing it
+does before handing the shopper to the payment page, and the completion page reads it back under
+the ref it returns with, keeps every row that is not in it, and deletes the record. Records of
+attempts nobody finished are swept after a week on the next write.
+
+🔴 **No record means clear the whole key**, deliberately: an older coral writes none, and a
+shopper on that coral must get the behaviour they already had rather than a basket that is never
+cleared. A native-checkout return, which names a provider order id instead of our client ref,
+lands in the same place for the same reason.
+
+### Also in this version
+
+- `connected: false` falls back to `renderBrowseOnly` when the edge has already SSR'd a grid into
+  this root, like every other unreadable answer (round 3, P3-1). The arm was already safe — no
+  till, storage untouched; it was not honest to the seller.
+- The backend truncation account now names `CVERInc/reef#593` (round 3, P3-3), which is the only
+  place that defect can actually be repaired.
+- The repo-root guard reads `.json`/`.ts` as well as the `.js` family and counts files rather than
+  directory entries (round 3, P3-2). Not a client change — no bearing on this version number.
+
+### Still true, and still not fixed here
+
+- **Two tabs, last writer wins** (0.11.15's own note). Unchanged, and slightly smaller: there is
+  no marking left for two tabs to disagree about, only quantities.
+- **An instant (single-item) checkout still clears the whole basket** on its paid completion. It
+  writes no sold-lines record, so it takes the no-record path above. Instant mode and cart mode do
+  not coexist on a page today (a cart-mode card has Add, not Buy), so the basket it clears is
+  normally empty — but this is the same defect as P2-2 wearing different clothes, and it is
+  recorded rather than fixed because the fix belongs with whoever decides what an instant buy is
+  supposed to do to a basket it did not sell.
+- **What a truncated catalog costs a shopper is still measured on the client only.** How many
+  items it takes to truncate is `reef#593`'s question, and nobody has answered it in four rounds.
+
+---
+
+## 0.11.15 — 2026-09-14 — the reconcile stops deleting, and a broken catalog stops closing the shop
+
+0.11.14 was reviewed before it was published and did not survive the review. Two of its five
+changes were right in intent and wrong in blast radius; this version is what they should have
+been. The repaired code needs a number of its own either way: the registry is immutable and
+`build.mjs` refuses a version whose content differs from what that version already published, so
+0.11.14 cannot carry this. (Whether 0.11.14 ever reached the real registry was NOT checked from
+this lane — publishing and reading the live registry are both out of bounds here.)
+
+| | |
+|---|---|
+| the rows | the reconcile no longer writes deletions back. A row whose variation the catalog in hand does not confirm is KEPT, shown in the panel with its quantity and its own remove button, left out of the POST, and sellable again — with the same quantity — the moment the catalog names it |
+| the shop | a catalog that cannot be read no longer replaces an edge-rendered storefront with one line of error text (or with "Nothing in the shop right now"): the grid stays browsable, without a till |
+
+### Why the write-back had to go — a premise that arrived exactly when it was needed
+
+0.11.14 wrote the reconciled basket back so that the header badge (raw rows, painted on every page)
+and the checkout POST would stop being two truths. The write was guarded by a sentence in its own
+comment: *"Only safe because the catalog handed in here is WHOLE … the fetch path answers with the
+seller's whole catalog by definition."*
+
+Nothing held that premise up, and it is false on the backend a live shop runs on today.
+`apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` (repo `reef`) POSTs
+Square's `search-catalog-items` **once** and discards the cursor — the string `cursor` does not
+occur anywhere in that file — while RSP's own `fetchSquareCatalogItems`
+(`apps/rsp/src/site-payment.ts`) loops the cursor and says in its comment that stopping early
+"would silently TRUNCATE a catalog". So a seller with more items than one page is answered HTTP
+200, non-empty and **short**, with no error anywhere. Every row off that page then looked exactly
+like a product the seller had deleted.
+
+🔴 **That backend defect has a ticket of its own: `CVERInc/reef#593`, OPEN.** It is the only place
+it can actually be repaired — everything in this file is a client defending itself, and no client
+can fetch back the half of a catalog it was never sent. Whoever reads this section next should
+land there rather than concluding the premise is simply false and unowned. (#593's own text names
+the two sites that take this path, and reports the seller with 81 items as the one most likely to
+be over a page.)
+
+Measured (review round 2, P1-1): four sibling rows deleted from the shopper's own machine in one
+load, and **not recoverable** — the next load against a whole catalog had nothing to read back.
+`ssrCatalogMissesSiblings` could not catch it either: it asks whether a card names its own
+siblings, not whether a whole item is missing.
+
+**The repair is a different split, not a better threshold.** A short catalog and a real delisting
+are indistinguishable from here, so the question "was this deleted?" cannot be answered on this
+page — and a question that cannot be answered must not be answered by deleting. Storage holds every
+row the shopper put there; the *sendable set* — the rows the catalog confirms — is what the POST,
+the total, the ref key and the line cap are computed from.
+
+> ⚠️ **Superseded by 0.11.16.** The `[id, 0, qty]` encoding described in the next paragraph was
+> taken back out; "held" is derived per page load and never written down. The reasoning below is
+> kept because it is the argument 0.11.16 had to answer, not because it still describes the file.
+
+The badge still agrees with the POST, and no deletion buys the agreement. An unconfirmed row is
+re-encoded as `[id, 0, qty]`: the two readers that cannot be changed from this file — sitetile's
+`header-actions-cart.js#count` and the product page's own inline script — both sum `e[1]` over the
+rows, so a `0` there counts as nothing while the id and the quantity stay on disk. It is a marker,
+not a tombstone, and the only automatic write is that re-encoding (same ids, same quantities,
+written only when the bytes change, so a clean basket is still not rewritten). Rows this file does
+not understand are carried through verbatim. **Only the shopper deletes a row.**
+
+The same change closes P3-1: RSP's catalog (`apps/rsp/src/commerce/square-catalog.ts`) drops any
+variation whose `sellable` is false and returns nothing for an item left with none, so "out of
+stock until Monday" and "deleted forever" are one answer on the wire. A seller flipping a switch on
+Friday no longer empties a basket over the weekend.
+
+### Why the fall-through needed a floor
+
+Cart mode refuses to hydrate a basket from an SSR grid whose cards claim sibling variations and
+name none — a worker that predates `data-variants` — and falls through to the fetch. 0.11.14 then
+let a failed fetch replace the whole storefront: the `catch` wrote one error line over a grid the
+edge had already rendered, and an `items: []` 200 wrote "Nothing in the shop right now" over it.
+
+Before that fall-through existed, the same page made zero requests and stayed browsable. So the
+change handed a page a failure mode it had never had, in precisely the window this work exists for
+— coral deployed, site worker not yet — which is the only state that takes the path at all.
+
+Now both arms fall back to `renderBrowseOnly`: the edge's own cards, prices and product links, with
+no reconcile, no cart panel, no checkout button, and a localized line naming the missing half.
+Nothing is fabricated (the grid is the seller's catalog, rendered by the edge into this root) and
+nothing is sold from a basket that could not be reconciled. Storage is not touched on any of those
+paths.
+
+### Four new label strings, and what a site can override
+
+`unavailable`, `unavailableNote`, `cartUnavailable` (plus the `remove` label reused for the held
+rows' buttons) in all four dictionaries — en-US, ja-JP, zh-TW, zh-CN — and each overridable like
+every other label here: `data-unavailable-label`, `data-unavailable-note`,
+`data-cart-unavailable-note`.
+
+### Measured while reviewing, and deliberately not acted on
+
+**SSR page weight** (review round 2, P3-3, measuring `renderShopGrid`'s output for one catalog, not
+a real HTTP response). `data-variants` is the only thing that grew, and only on cards that stand
+for more than one variation: a 5-item × 4-variant grid went 2,962 → 6,942 bytes raw (+134%) but
+435 → 649 gzipped (+214 B, +49%), and a **single-variation shop grew by zero bytes**. The raw/gzip
+gap is the JSON living in an HTML attribute, where every `"` becomes `&quot;`. Single-quoting the
+attribute delimiter would cut about a third of the raw size and roughly nothing off the wire, so it
+is recorded here rather than done — the cost lands precisely on the cards that need the fix.
+
+**Two tabs, last writer wins** (P3-4, pre-existing, not introduced here). This file listens for no
+`storage` event; the header island listens but only repaints. So there is no ping-pong — measured —
+but a tab that mounted before another tab's write still holds an older Map, and its next
+`persistCart` writes that Map whole. With the reconcile no longer deleting, this is the last seam
+left in the area: two tabs that saw two different catalogs can still overwrite each other's
+marking. Not repaired here because the repair is a `storage` listener and a merge, which is a
+change of its own size.
+
+---
+
+## 0.11.14 — 2026-09-14 — the basket of sibling variants, and everything around it that agreed
+
+A buyer on a live shop put one hardcover zine and all FOUR designs of a four-variant art-print item
+in the basket. The header badge said 5; Square's hosted checkout listed 2. Nothing failed anywhere
+in between — the POST body was already short. The cart's catalog index was keyed by each item's
+DEFAULT variation, the product detail page writes the variation the shopper actually PICKED, and
+the ghost-reconcile read the three siblings as products the seller had deleted.
+`cart-variant-collapse.test.mjs` is that basket, and it is the file to port with this one.
+
+What this version carries:
+
+| | |
+|---|---|
+| the index | one rule for 0, 1 and many variants: every variation id an item NAMES is a key. The count decides only the value. Two catalog shapes used to fall between the old `<= 1` split and be deleted on sight |
+| the SSR half | the grid card carries `data-variants`, so the hydrate path knows the siblings too — and cart mode now refuses to hydrate from a card that claims siblings and names none |
+| the rows | the reconcile writes the reconciled basket back, so the header badge (raw rows, painted on every page) and the checkout POST stop being two truths |
+| the cap | RSP's 50-line limit is said in the panel, with the numbers in it, before a request that could only be refused with "try again" |
+| the price | a variant is priced from its own `display_price` on both hydrate paths, and inherits its item's currency — an empty currency read as non-zero-decimal made ¥2,200 render as ¥22 |
+
+🔴 **The fix does not ship in one artifact.** `data-variants` is written by `product-page-core.js`,
+which reaches a live shop inside that site's own `dist/_worker.js` (built by `emit-shop-function.mjs`
+at SITE BUILD time), not inside the published coral. Publishing this version rebuilds no worker, and
+no version links the two. The cart-mode fall-through above is what makes a coral-only deploy
+*correct* — one extra request on that page — and it is not a reason to skip the second deploy: until
+the worker is rebuilt, every shopper on `/shop` pays for a round trip the SSR was there to save.
+
+The fork in `reef` is still 0.11.5 and still loses this basket — see § "Still open" 1 and
+`CVERInc/reef#592`.
+
+(The per-version log below skips 0.11.7–0.11.13, which were published without entries. This one is
+written because the version is about money that was actually lost.)
+
+---
+
 ## 0.11.6 — 2026-08-29 — two of three calls move to the processor-neutral surface
 
 This version publishes drift that had been sitting on `main` unpublished since `012c2d7`
@@ -530,10 +792,25 @@ version number in this registry means the client contract moved.
 
 ### Still open
 
-2. **Re-vendor** this file into the feelreef fork (and re-pin its sha256 in `vendor-pristine.test.ts`)
-   so both substrates carry the same ref contract on both paths.
+1. **Re-vendor this file into the feelreef fork** (and re-pin its sha256 in
+   `vendor-pristine.test.ts`) — `CVERInc/reef#592`, OPEN.
 
-   **In progress 2026-08-29** on reef branch `chore/square-shop-vendor-0.11.5`, vendoring **0.11.5**.
+   `apps/feelreef/src/lib/dynamic-corals/square-shop/square-shop.js` in `reef` is this file at
+   **0.11.5**, pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`.
+   Two debts, one repair, which is why they are one entry: the ref contract on both paths, and —
+   found 2026-09-14 — the cart-collapse defect. The fork's `loadPersistedCart` still holds the
+   ghost-reconcile against a per-ITEM index (`itemsById`), so feelreef's own SPA cart drops every
+   sibling variation the shopper picked: the same defect, on a second live surface, with a buyer's
+   order behind it. Reproduced mechanically against a copy of the fork (md5-identical to the file
+   in `reef`; nothing there was written).
+
+   The repair is a **re-vendor of this file at 0.11.15 or later plus a new sha**, never a
+   hand-patch of the one line: a hand-patched copy makes the pin guard a file no build can
+   reproduce, which is the opposite of what the pin is for. Port `cart-variant-collapse.test.mjs`
+   with it — that basket is what decides the question either way.
+
+   **In progress 2026-08-29** on reef branch `chore/square-shop-vendor-0.11.5`, vendoring **0.11.5**
+   — which predates every fix above and is no longer the version to land.
 
    🔴 Read the version numbers here carefully, because they moved for two different reasons. The
    reconcile was scoped as "publish 0.11.5, adding the `mount`/`mountAll` exports". Those exports had
@@ -548,3 +825,8 @@ version number in this registry means the client contract moved.
    vendored file tripped feelreef's `raw-nul-byte` lint, and the two literal control bytes behind
    that are a real defect in this file (see the 0.11.5 entry). So the branch name turned out right,
    and the version it names is not the one it was named for.
+
+🩸 This section read **3, 2** — the 2026-09-14 entry was inserted above a `2.` that was already the
+same debt, so one obligation was written down twice, in two places that would drift apart, under a
+numbering that told you the list had been edited and not read. Merged 2026-09-14 (review round 2,
+P3-2). One debt, one entry.
