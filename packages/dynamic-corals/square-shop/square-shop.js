@@ -115,7 +115,7 @@ function storageAvailabilityNotice(available, labels) {
 	return available ? '' : ((labels && labels.storageNotice) || '');
 }
 
-function loadPersistedCart(storeId, itemsById) {
+function loadPersistedCart(storeId, catalogByVariation) {
 	const cart = new Map();
 	cart.storageAvailable = true;
 	let raw;
@@ -140,7 +140,9 @@ function loadPersistedCart(storeId, itemsById) {
 		const qty = Math.max(1, Math.min(99, parseInt(e[1], 10) || 0));
 		// reconcile: drop anything the seller has since removed/hidden in Square
 		// (it's not in the live catalog), so a stale cart never checks out ghosts.
-		if (vid && itemsById.has(vid)) cart.set(vid, qty);
+		// 🔴 The index this is held against must know EVERY variation the catalog sells, not one
+		// per item — see cartCatalogByVariation() below for what a per-item index silently ate.
+		if (vid && catalogByVariation.has(vid)) cart.set(vid, qty);
 	}
 	return cart;
 }
@@ -465,6 +467,58 @@ function withVariantSummary(it) {
 		price_min: prices.length ? Math.min(...prices) : it.display_price,
 		price_max: prices.length ? Math.max(...prices) : it.display_price
 	};
+}
+
+// What a cart LINE for one variant is called. The item's own name alone would print four
+// identical rows for a four-design print set, so the variant's name is appended — the same two
+// facts the product page showed the shopper when they picked it.
+function variantLineName(it, variant) {
+	const base = itemName(it);
+	const label = String((variant && variant.title) || '');
+	return label && label !== base ? `${base} — ${label}` : base;
+}
+
+// 🩸 EVERY VARIATION THE CATALOG SELLS, keyed by variation id — which is the key a BASKET is
+// written in, and is NOT the key the grid is indexed by.
+//
+// A catalog item carries one `variation_id` (its default) plus a `variants` array. The grid only
+// ever needs the default: a multi-variant card is a link to the product page, because adding the
+// default straight from the grid would cart something the shopper never chose. But the product
+// page writes the variation they DID choose into the shared localStorage basket — a sibling id
+// that appears nowhere in a per-item index.
+//
+// Held against such an index, the ghost-reconcile above read four legitimately chosen print
+// designs as four items the seller had deleted and threw three of them away (the fourth survived
+// only because it happened to be that item's default). Reported from a live shop 2026-09-14: the
+// header badge counted 5, Square's hosted page listed 2, and nothing failed anywhere in between —
+// the POST body was already short. ./cart-variant-collapse.test.mjs is that basket.
+//
+// Single-variant items map to their OWN object (not a copy), so everything downstream that reads
+// or mutates a line's price for those keeps behaving exactly as it did.
+function cartCatalogByVariation(items) {
+	const byVariation = new Map();
+	for (const it of items || []) {
+		if (!it) continue;
+		const variants = Array.isArray(it.variants) ? it.variants : [];
+		if (variants.length <= 1) {
+			if (it.variation_id) byVariation.set(it.variation_id, it);
+			continue;
+		}
+		for (const v of variants) {
+			if (!v || !v.id) continue;
+			const price = variantDisplayPrice(v);
+			byVariation.set(v.id, {
+				...it,
+				variation_id: v.id,
+				name: variantLineName(it, v),
+				title: variantLineName(it, v),
+				display_price: price == null ? it.display_price : price,
+				currency: v.currency || it.currency,
+				variant_count: 1
+			});
+		}
+	}
+	return byVariation;
 }
 
 // The catalog read goes to the PROCESSOR-NEUTRAL shop surface, not the Square-specific one.
@@ -946,7 +1000,12 @@ function renderInstant(root, items, apiBase, guildId, labels, detailBase, checko
 // cart. State is a per-mount Map(variation_id -> qty); the grid and the summary
 // panel both re-render off it.
 function renderCart(root, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs) {
+	// Two indexes, because a GRID row and a CART line are keyed differently: the grid shows one
+	// card per item (its default variation), while the basket holds whichever variation the
+	// shopper actually picked. Everything the cart does — reconcile, line lookup, conflict
+	// naming — goes through the second one.
 	const itemsById = new Map(items.map((it) => [it.variation_id, it]));
+	const cartItemsById = cartCatalogByVariation(items);
 	const lineStates = new Map();
 	// clear the cart if we've just returned from a completed checkout, then
 	// hydrate from localStorage (reconciled against the live catalog).
@@ -962,7 +1021,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	const siteId = root.getAttribute('data-site-id') || '';
 	const storeId = guildId || siteId;
 	consumeCheckoutReturn();
-	const cart = loadPersistedCart(storeId, itemsById);
+	const cart = loadPersistedCart(storeId, cartItemsById);
 
 	// products on the left, sticky cart on the right (feelreef picker layout). With data-cart="header"
 	// the sidebar is suppressed (grid full-width) but the panel is STILL rendered — a header drawer
@@ -1069,7 +1128,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 			const lines = document.createElement('div');
 			lines.className = `${PREFIX}-cart-lines`;
 			for (const [vid, qty] of cart) {
-				const it = itemsById.get(vid);
+				const it = cartItemsById.get(vid);
 				if (!it) continue;
 				const state = lineStates.get(vid);
 				currency = it.currency || currency;
@@ -1157,7 +1216,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		for (const [vid, state] of states) {
 			lineStates.set(vid, state);
 			if (state.reason === 'price_changed' && state.price_minor !== undefined) {
-				const it = itemsById.get(vid);
+				const it = cartItemsById.get(vid);
 				if (it) {
 					const currency = state.currency || it.currency || 'USD';
 					const digits = new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
@@ -1167,7 +1226,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 			}
 		}
 		render();
-		const names = [...states.keys()].map((vid) => itemName(itemsById.get(vid) || { name: vid })).join(', ');
+		const names = [...states.keys()].map((vid) => itemName(cartItemsById.get(vid) || { name: vid })).join(', ');
 		showCheckoutMessage(panel, (reason === 'sold_out' ? labels.soldOutMessage : labels.priceChangedMessage).replace('{items}', names));
 		try {
 			const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
@@ -1175,6 +1234,10 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 				const current = itemsById.get(fresh.variation_id);
 				if (current) Object.assign(current, fresh);
 			}
+			// The cart index holds its own per-variant records for multi-variant items, so a
+			// refreshed catalog has to be re-derived into it or a basket line would keep quoting
+			// the price the conflict was about.
+			for (const [vid, entry] of cartCatalogByVariation(items)) cartItemsById.set(vid, entry);
 			renderGrid();
 		} catch { /* conflict remains actionable even if refresh fails */ }
 	}
@@ -1202,8 +1265,21 @@ function itemsFromSsr(grid) {
 		const countRaw = c.getAttribute('data-variant-count');
 		const minRaw = c.getAttribute('data-price-min');
 		const maxRaw = c.getAttribute('data-price-max');
+		// The card's sibling variations, when it stands for more than one. Without them the
+		// rebuilt catalog knows one id per item and the basket's other lines look like ghosts —
+		// see cartCatalogByVariation above. A card from an older edge render carries no such
+		// attribute, and an item with a single variation never needs one: both stay [].
+		let variants = [];
+		const variantsRaw = c.getAttribute('data-variants');
+		if (variantsRaw) {
+			try {
+				const parsed = JSON.parse(variantsRaw);
+				if (Array.isArray(parsed)) variants = parsed.filter((v) => v && v.id);
+			} catch { /* an unreadable attribute is no worse than the absent one */ }
+		}
 		out.push({
 			variation_id: vid,
+			variants,
 			name: nameEl ? nameEl.textContent : '',
 			image_url: imgEl ? (imgEl.getAttribute('src') || '') : '',
 			display_price: (price != null && !isNaN(price)) ? price : null,

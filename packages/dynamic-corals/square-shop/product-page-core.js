@@ -332,7 +332,19 @@ export function renderShopGrid(items, config) {
 			const max = prices.length ? Math.max(...prices) : it.display_price;
 			const priceText = min == null ? '' : (max === min ? fmtPrice(min, it.currency, locale) : `${fmtPrice(min, it.currency, locale)}~${fmtPrice(max, it.currency, locale)}`);
 			const priceAttr = min == null ? '' : ` data-price="${escAttr(String(min))}" data-price-min="${escAttr(String(min))}"` + (max != null ? ` data-price-max="${escAttr(String(max))}"` : '');
-			return `<a class="dc-square-shop-card dc-square-shop-card--link" data-variation-id="${escAttr(vid)}" data-variant-count="${variantCount}"${priceAttr}${curAttr}${slugAttr} href="${escHtml(href)}">`
+			// Every SIBLING variation this card stands for, in the same shape the detail page's own
+			// `data-variants` uses. The basket is keyed by the variation the shopper PICKED on that
+			// detail page, and the client rebuilds this grid's catalog from these attributes alone
+			// (square-shop.js#itemsFromSsr) — so a card that named only its default variation left
+			// the hydrated catalog unable to recognise the shopper's own lines, and the cart's
+			// ghost-reconcile deleted them on sight.
+			const variantsAttr = ` data-variants="${escAttr(JSON.stringify(variants.map((v) => ({
+				id: v.id,
+				title: v.title || '',
+				price_minor: v.price_minor,
+				currency: v.currency || it.currency || ''
+			}))))}"`;
+			return `<a class="dc-square-shop-card dc-square-shop-card--link" data-variation-id="${escAttr(vid)}" data-variant-count="${variantCount}"${variantsAttr}${priceAttr}${curAttr}${slugAttr} href="${escHtml(href)}">`
 				+ img
 				+ `<div class="dc-square-shop-body">`
 				+ nameInner
