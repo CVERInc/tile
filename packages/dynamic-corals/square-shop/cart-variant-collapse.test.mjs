@@ -256,9 +256,12 @@ test('the cart panel shows one line per chosen variant, named by its variant', (
 	);
 });
 
-test('a variant the seller has since removed is still dropped', async () => {
+test('a variant the seller has since removed is still kept OUT OF THE POST', async () => {
 	// The reconcile exists for a real reason — a stale basket must not check out ghosts. Widening
 	// it to sibling variants must not widen it to ids the live catalog no longer knows at all.
+	// 🔴 "Dropped" here means dropped from the WIRE, never from the shopper's disk: the row is
+	// held and shown (see the truncated-catalog block at the end of this file), because this page
+	// cannot tell a product the seller deleted from a page of catalog that did not arrive.
 	const sb = loadSquareShop({
 		storage: { [CART_KEY]: JSON.stringify([[ZINE_VID, 1], ['GONE_VARIATION_ID', 3]]) }
 	});
@@ -428,8 +431,8 @@ test('a ghost line leaves the badge and the POST on the SAME number', async () =
 	const root = mountCart(sb, CATALOG);
 
 	assert.equal(badgeCount(sb), 1,
-		'the reconcile threw a row away — the rows on disk, which the header badge counts on ' +
-		'every page of the site, must say so too');
+		'the badge counts the rows on disk on every page of the site, so an unconfirmed row is ' +
+		'marked there (`[id, 0, qty]`, which that sum reads as nothing) rather than deleted');
 
 	click(checkoutBtn(root), 'checkout'); await flush();
 	const postSum = sb.fetchCalls[0].body.items.reduce((n, l) => n + l.quantity, 0);
@@ -437,7 +440,7 @@ test('a ghost line leaves the badge and the POST on the SAME number', async () =
 	assert.deepEqual(sb.fetchCalls[0].body.items, [{ variation_id: ZINE_VID, quantity: 1 }]);
 });
 
-test('a clean basket is not rewritten — the write-back happens only when a row was dropped', () => {
+test('a clean basket is not rewritten — the re-encode happens only when the marking changes', () => {
 	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
 	mountCart(sb, CATALOG);
 	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET,
@@ -634,4 +637,132 @@ test('a variant with no currency of its own is priced in the ITEM’s currency',
 	const total = byClass(root, `${PREFIX}-cart-total`).map((n) => n.textContent);
 	assert.ok(String(total[0]).includes('2,200') || String(total[0]).includes('2200'),
 		`a ¥2,200 line must total ¥2,200, not ¥22 — got ${JSON.stringify(total)}`);
+});
+
+// ── a catalog that is SHORT, and the basket that must survive it ─────────────
+// Reviewed 2026-09-14 as round 2's P1-1. The version before this one reconciled the basket
+// against whatever catalog was in hand and WROTE THE RESULT BACK, on a premise it stated in its
+// own comment: "the fetch path answers with the seller's whole catalog by definition". That is
+// false on the backend a live shop runs on today. `square_catalog.py#fetch_catalog_items` (repo
+// `reef`, apps/mixfairy/services/payments/byo/) POSTs Square's `search-catalog-items` ONCE and
+// drops the cursor — the word `cursor` does not occur in that file — so a seller with more items
+// than one page gets HTTP 200, non-empty, and SHORT. Every row off that page then looked exactly
+// like a product the seller had deleted, and was deleted from the shopper's own machine. Measured
+// irreversible: with the row gone from disk, the next load against a whole catalog had nothing to
+// bring back.
+//
+// What is asserted below is the property that replaces that premise: a catalog this page cannot
+// vouch for costs the shopper a few greyed lines for one load, and never a row.
+const TRUNCATED = [CATALOG[0]]; // page 1 of 2: the zine arrived, the prints item did not
+
+const rowsOf = (sb) => JSON.parse(sb.store.get(CART_KEY) || '[]');
+const idsOnDisk = (sb) => rowsOf(sb).map((r) => r[0]).sort();
+
+test('a truncated catalog does not delete one row: kept, marked, and out of the POST', async () => {
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
+	const root = mountCart(sb, TRUNCATED);
+
+	assert.deepEqual(
+		idsOnDisk(sb),
+		[ZINE_VID, PRINT_A, PRINT_B, PRINT_C, PRINT_D].sort(),
+		'every id the shopper put in the basket must still be on their own machine — a short ' +
+		'catalog page is not the seller deleting four products'
+	);
+
+	const shown = byClass(root, `${PREFIX}-held-line`);
+	assert.equal(shown.length, 4, 'and the panel must SAY the four are being held, not hide them');
+	const noteText = byClass(root, `${PREFIX}-held-note`).map((n) => n.textContent).join(' ');
+	assert.ok(noteText.length > 0 && !noteText.includes('{'),
+		`the shopper is told why, in words, with no placeholder left in them: ${JSON.stringify(noteText)}`);
+
+	click(checkoutBtn(root), 'checkout'); await flush();
+	assert.deepEqual(
+		sb.fetchCalls[0].body.items,
+		[{ variation_id: ZINE_VID, quantity: 1 }],
+		'only what the catalog in hand actually confirms may be sold'
+	);
+	assert.equal(badgeCount(sb), 1,
+		'and the header badge — raw rows, painted on every page — must count the same one line ' +
+		'the checkout will carry, WITHOUT a row having been deleted to make it agree');
+});
+
+test('the rows come back, with their quantities, the moment the catalog is whole again', async () => {
+	const basket = JSON.stringify([[ZINE_VID, 1], [PRINT_A, 2], [PRINT_B, 3], [PRINT_C, 1], [PRINT_D, 1]]);
+	const short = loadSquareShop({ storage: { [CART_KEY]: basket } });
+	mountCart(short, TRUNCATED);
+	const afterShortLoad = short.store.get(CART_KEY);
+
+	// The next page load — same machine, same rows, the whole catalog this time.
+	const whole = loadSquareShop({ storage: { [CART_KEY]: afterShortLoad } });
+	const root = mountCart(whole, CATALOG);
+
+	assert.equal(byClass(root, `${PREFIX}-held-line`).length, 0, 'nothing is being held any more');
+	assert.equal(byClass(root, `${PREFIX}-line`).length, 5, 'all five lines are sellable again');
+	click(checkoutBtn(root), 'checkout'); await flush();
+	assert.deepEqual(
+		whole.fetchCalls[0].body.items.sort((a, b) => a.variation_id.localeCompare(b.variation_id)),
+		[
+			{ variation_id: PRINT_B, quantity: 3 },
+			{ variation_id: PRINT_C, quantity: 1 },
+			{ variation_id: PRINT_A, quantity: 2 },
+			{ variation_id: PRINT_D, quantity: 1 },
+			{ variation_id: ZINE_VID, quantity: 1 }
+		].sort((a, b) => a.variation_id.localeCompare(b.variation_id)),
+		'the QUANTITIES survive the round trip too — a basket that comes back as 1 of each is ' +
+		'still a basket the shopper did not build'
+	);
+	assert.equal(badgeCount(whole), 8, 'and the badge counts all eight items again');
+});
+
+test('a variation the seller merely made unsellable is held, not deleted', async () => {
+	// Reviewed as P3-1. `apps/rsp/src/commerce/square-catalog.ts` drops any variation whose
+	// `sellable` is false (`:294`) and returns NOTHING for an item left with none (`:206-208`),
+	// so "out of stock until Monday" and "deleted forever" are the SAME answer on the wire. With
+	// a reconcile that deleted, a seller flipping a switch on Friday emptied a shopper's basket
+	// over the weekend; with one that holds, they get their basket back when the switch flips.
+	const offForTheWeekend = [
+		CATALOG[0],
+		{ ...CATALOG[1], variants: CATALOG[1].variants.filter((v) => v.id !== PRINT_C) }
+	];
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
+	const root = mountCart(sb, offForTheWeekend);
+
+	assert.ok(idsOnDisk(sb).includes(PRINT_C), 'the row stays on the shopper’s machine');
+	assert.equal(byClass(root, `${PREFIX}-held-line`).length, 1, 'and is shown as held');
+	click(checkoutBtn(root), 'checkout'); await flush();
+	assert.ok(
+		!sb.fetchCalls[0].body.items.some((l) => l.variation_id === PRINT_C),
+		'while a variation the catalog is not offering is not sent to the till'
+	);
+});
+
+test('a held row leaves only when the shopper removes it', async () => {
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: JSON.stringify([[ZINE_VID, 1], ['GONE_VARIATION_ID', 3]]) }
+	});
+	const root = mountCart(sb, CATALOG);
+	assert.deepEqual(idsOnDisk(sb), [ZINE_VID, 'GONE_VARIATION_ID'].sort(),
+		'an id the catalog does not name is still the shopper’s row, not ours to delete');
+
+	const held = byClass(root, `${PREFIX}-held-line`);
+	assert.equal(held.length, 1);
+	const rm = byClass(held[0], `${PREFIX}-rm`);
+	assert.equal(rm.length, 1, 'every held row carries its own remove button');
+	assert.ok(String(rm[0].getAttribute('aria-label')).includes('GONE_VARIATION_ID'),
+		'named, so a screen reader says WHICH row this button throws away');
+
+	click(rm[0], 'remove a held row'); await flush();
+	assert.deepEqual(idsOnDisk(sb), [ZINE_VID], 'and now — and only now — it is gone');
+});
+
+test('a storage row this file did not write is carried through, not tidied away', async () => {
+	// Non-destructive means non-destructive about things we do not understand either. A future
+	// (or foreign) writer's row shape must survive a reconcile it was never designed for.
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: JSON.stringify([[ZINE_VID, 1], { from: 'somewhere else' }, []]) }
+	});
+	mountCart(sb, CATALOG);
+	const rows = rowsOf(sb);
+	assert.ok(rows.some((r) => r && r.from === 'somewhere else'), 'the foreign row is still there');
+	assert.equal(rows.length, 3, 'and so is the empty one — nothing was dropped on the way past');
 });

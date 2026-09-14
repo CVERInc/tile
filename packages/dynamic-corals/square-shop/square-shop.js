@@ -118,9 +118,72 @@ function storageAvailabilityNotice(available, labels) {
 	return available ? '' : ((labels && labels.storageNotice) || '');
 }
 
+// A stored row, as this file reads it back. TWO shapes live under the one key:
+//
+//   [variationId, qty]        an ordinary row — what every writer has always written
+//   [variationId, 0, qty]     a row this file could not confirm against the catalog it was
+//                             handed, KEPT on disk with its quantity intact
+//
+// The second shape is not a new storage format so much as an agreement with the two readers that
+// already exist and cannot be changed from here: sitetile's header badge
+// (`header-actions/header-actions-cart.js#count`) and the product page's own inline script both
+// sum `e[1]` over the rows, so a `0` there is a row they count as nothing while the id and the
+// quantity stay written down. That is what lets the badge keep saying what the checkout will
+// carry — the r1 P2-1 property — WITHOUT deleting anything to achieve it.
+//
+// 🔴 It is a marker, never a tombstone: the next load that sees the id in the catalog writes the
+// row back as `[variationId, qty]`, with the SAME quantity, and the line is sellable again.
+function cartRowsFrom(entries) {
+	const rows = [];
+	for (const e of entries) {
+		if (!Array.isArray(e)) { rows.push({ foreign: e }); continue; }
+		const vid = String(e[0] || '');
+		if (!vid) { rows.push({ foreign: e }); continue; }
+		const held = e[1] === 0 && e.length > 2;
+		rows.push({ vid, qty: Math.max(1, Math.min(99, parseInt(held ? e[2] : e[1], 10) || 0)) });
+	}
+	return rows;
+}
+
+// The exact array that goes on disk for a given cart: sendable rows first, in the Map's order,
+// then the kept-unsellable ones, then anything a previous writer left that this file does not
+// understand — carried through byte for byte rather than tidied away. Nothing is ever omitted:
+// this function is the reason a write-back cannot lose a row.
+function cartStorageEntries(cart) {
+	const out = [...cart.entries()].map(([vid, qty]) => [vid, qty]);
+	for (const [vid, qty] of (cart.unavailable || new Map())) out.push([vid, 0, qty]);
+	for (const value of (cart.foreign || [])) out.push(value);
+	return out;
+}
+
+// 🩸 RECONCILE IS NOT ALLOWED TO DELETE. The version before this one wrote the reconciled basket
+// back, which closed the badge-vs-POST split and opened something worse: it rested on a premise
+// written in its own comment — "the fetch path answers with the seller's whole catalog by
+// definition" — and that premise is FALSE on the legacy Python backend a live shop runs on today.
+// `apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` calls Square's
+// `search-catalog-items` ONCE and discards the cursor (there is no `cursor` anywhere in that
+// file), so a catalog longer than one page arrives HTTP 200, non-empty and SHORT. Reconciling
+// against that and writing the result back is not a stale-row cleanup; it is deleting, from the
+// shopper's own machine, irreversibly, rows the seller still sells. Measured as review round 2's
+// P1-1: four sibling rows gone in one load, and gone for good — the next load with a whole
+// catalog could not bring them back, because the record was no longer there to read.
+//
+// So the split is between STORAGE and the SENDABLE SET, not between a row and the bin:
+//   • every row stays on disk, whatever the catalog in hand says;
+//   • the rows whose variation the catalog CONFIRMS are the cart proper — the POST, the total,
+//     the ref key, the line cap, the badge;
+//   • the rest are `cart.unavailable` — shown in the panel, with their quantity and their own
+//     remove button, excluded from the POST, and restored the moment the catalog names them
+//     again.
+// A truncated catalog therefore costs a shopper a few greyed lines for one load, which is what a
+// display problem should cost. Only the shopper deletes a row.
 function loadPersistedCart(storeId, catalogByVariation) {
 	const cart = new Map();
 	cart.storageAvailable = true;
+	// Rows kept but not sellable against the catalog in hand. Always present, so every caller
+	// (and the fork) can read it without a guard.
+	cart.unavailable = new Map();
+	cart.foreign = [];
 	let raw;
 	try {
 		raw = window.localStorage.getItem(cartStore(storeId));
@@ -137,14 +200,9 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		return cart;
 	}
 	if (!Array.isArray(entries)) { cart.storageAvailable = false; return cart; }
-	let dropped = false;
-	for (const e of entries) {
-		if (!Array.isArray(e)) { dropped = true; continue; }
-		const vid = String(e[0] || '');
-		const qty = Math.max(1, Math.min(99, parseInt(e[1], 10) || 0));
-		// reconcile: drop anything the seller has since removed/hidden in Square
-		// (it's not in the live catalog), so a stale cart never checks out ghosts.
-		// 🔴 The index this is held against must know EVERY variation the catalog sells, not one
+	for (const row of cartRowsFrom(entries)) {
+		if (!row.vid) { cart.foreign.push(row.foreign); continue; }
+		// The index this is held against must know EVERY variation the catalog sells, not one
 		// per item — see cartCatalogByVariation() below for what a per-item index silently ate.
 		//
 		// 🩸 THE FORK STILL EATS THEM. `apps/feelreef/src/lib/dynamic-corals/square-shop/
@@ -156,30 +214,21 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		// new sha, never a hand-patch of this one line: hand-patching makes the pin guard a file no
 		// build can reproduce. ./cart-variant-collapse.test.mjs is the basket that decides it either
 		// way, and it is the test to port with the file.
-		if (vid && catalogByVariation.has(vid)) cart.set(vid, qty);
-		else dropped = true;
+		if (catalogByVariation.has(row.vid)) cart.set(row.vid, row.qty);
+		else cart.unavailable.set(row.vid, row.qty);
 	}
-	// 🩸 WRITE THE RECONCILED BASKET BACK, so the rows on disk ARE the lines that will be sold.
-	// The panel and the checkout POST read this Map; the header badge — which is painted on EVERY
-	// page, while the panel exists only on /shop — counts the RAW rows instead
-	// (packages/sitetile/astro/src/packages/header-actions/header-actions-cart.js#count). While the
-	// reconcile dropped a row in memory only, those were two truths with no error between them: a
-	// badge saying 4 over a checkout that would sell 1, for as long as the shopper kept browsing.
-	// That is the reported bug's shape with a different cause, and one write closes it — persistCart
-	// also fires `dc-cart-changed`, which is what repaints the badge.
-	//
-	// 🔴 Only safe because the catalog handed in here is WHOLE. Reconciling against half a
-	// catalog and writing the result back is not a stale-row cleanup, it is deleting what the
-	// shopper bought. mount() is what guarantees it: an SSR set that admits it is missing sibling
-	// variations is not hydrated from at all (see ssrCatalogMissesSiblings below), and the fetch
-	// path answers with the seller's whole catalog by definition.
-	if (dropped) persistCart(storeId, cart);
+	// The ONE automatic write, and it is a re-encoding: the same ids and the same quantities,
+	// with the confirmed/unconfirmed marking brought up to date so the badge counts what the
+	// checkout will carry. Written only when the bytes actually change, so a basket that needs no
+	// re-marking is not rewritten and fires no `dc-cart-changed` — the clean-basket case stays
+	// byte-identical on disk, as it was before this file wrote anything back at all.
+	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
 	return cart;
 }
 
 function persistCart(storeId, cart) {
 	try {
-		window.localStorage.setItem(cartStore(storeId), JSON.stringify([...cart.entries()]));
+		window.localStorage.setItem(cartStore(storeId), JSON.stringify(cartStorageEntries(cart)));
 	} catch {
 		cart.storageAvailable = false;
 		// storage disabled/full — cart still works in-memory this session
@@ -334,6 +383,16 @@ function injectStyles() {
 .${PREFIX}-rm { border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--gd-muted, rgba(0,0,0,0.4)); padding: 0 2px; }
 .${PREFIX}-rm:hover { color: var(--gd-accent, currentColor); }
 .${PREFIX}-cart-hint { font-size: 13px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.55)); margin: 14px 0 0; }
+/* Rows the catalog in hand did not confirm. Muted and set apart from the sellable lines above —
+   still the shopper's, just not part of the total or the checkout below. */
+.${PREFIX}-cart-held { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--gd-border, rgba(0,0,0,0.14)); display: flex; flex-direction: column; gap: 8px; }
+.${PREFIX}-held-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.55)); }
+.${PREFIX}-held-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; opacity: 0.75; }
+.${PREFIX}-held-line .${PREFIX}-line-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.${PREFIX}-line-ref { font-size: 11px; color: var(--gd-muted, rgba(0,0,0,0.45)); word-break: break-all; }
+.${PREFIX}-line-qty { font-size: 12px; color: var(--gd-muted, rgba(0,0,0,0.55)); font-variant-numeric: tabular-nums; }
+/* The catalog is unreachable and the grid is the edge's: say so where the cart would have been. */
+.${PREFIX}-cart-offline { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--gd-muted, rgba(0,0,0,0.6)); }
 .${PREFIX}-checkout { font: inherit; width: 100%; margin-top: 16px; border: none; border-radius: var(--gd-pill, 999px); padding: 12px 16px; font-size: 14px; font-weight: 800; cursor: pointer; background: var(--gd-accent-deep, var(--gd-accent, #0b5f6b)); color: var(--gd-accent-ink, #fff); transition: background .15s, transform .15s; }
 .${PREFIX}-checkout:hover:not(:disabled) { background: var(--gd-accent, #0d7280); transform: translateY(-1px); }
 .${PREFIX}-checkout:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -955,13 +1014,13 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 // self-contained for en pages. Per-item `buy_label` from the API (if any) still
 // wins over the page-level default.
 const LABEL_DICTIONARIES = {
-	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
-	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
-	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
+	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', unavailable:'Currently unavailable', unavailableNote:'Kept in your cart, but the shop is not listing these right now — they are not part of the checkout below.', cartUnavailable:"The cart can't be reached right now — you can still browse, and nothing in your cart has changed.", soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
+	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', unavailable:'現在お取り扱いがありません', unavailableNote:'カートに残していますが、現在ショップに掲載されていないため、下のお会計には含まれません。', cartUnavailable:'現在カートに接続できません。商品の閲覧は可能で、カートの内容は変わっていません。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
+	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', unavailable:'目前沒有販售', unavailableNote:'已為您留在購物車，但商店目前沒有上架，不會列入下方結帳。', cartUnavailable:'目前無法連上購物車，仍可瀏覽商品；購物車內容沒有任何變動。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): Simplified, added alongside zh-TW rather than
 	// derived from it at runtime — the two diverge in wording, not just glyphs (結帳→结算, not a
 	// character-for-character conversion of 結帳's simplified glyphs).
-	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
+	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', unavailable:'目前没有销售', unavailableNote:'已为您留在购物车，但商店目前没有上架，不会列入下方结算。', cartUnavailable:'目前无法连上购物车，仍可浏览商品；购物车内容没有任何变动。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
 };
 
 // 🩸 0.11.10: only recognised `zh-tw`/`zh-hant(-*)` — every OTHER zh tag (a genuine `zh-Hans`/
@@ -1002,6 +1061,15 @@ function readLabels(el) {
 		soldOutMessage: el.getAttribute('data-sold-out-message') || defaults.soldOutMessage,
 		priceChangedMessage: el.getAttribute('data-price-changed-message') || defaults.priceChangedMessage,
 		storageNotice: el.getAttribute('data-storage-notice') || defaults.storageNotice,
+		// A row the catalog in hand does not confirm is KEPT and said out loud — see
+		// loadPersistedCart. Both strings are site-overridable like every other label here,
+		// because a shop with its own word for "we are not selling this at the moment" should
+		// not have to accept ours.
+		unavailable: el.getAttribute('data-unavailable-label') || defaults.unavailable,
+		unavailableNote: el.getAttribute('data-unavailable-note') || defaults.unavailableNote,
+		// Said when the catalog could not be read at all and the page fell back to the grid the
+		// edge had already rendered: browsable, no till. See mount()'s renderBrowseOnly.
+		cartUnavailable: el.getAttribute('data-cart-unavailable-note') || defaults.cartUnavailable,
 		// Says how many lines a checkout takes, BEFORE the POST that would be refused for it.
 		// {lines}/{max}/{over} are filled in by the panel — a site overriding this keeps them.
 		cartTooManyLines: el.getAttribute('data-cart-limit-message') || defaults.cartTooManyLines,
@@ -1144,6 +1212,15 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		render();
 	}
 
+	// The only way a KEPT-but-unsellable row leaves this machine: the shopper says so. There is
+	// no automatic counterpart — see loadPersistedCart for why a reconcile that deletes is the
+	// defect this release exists to take back out.
+	function removeUnavailable(vid) {
+		cart.unavailable.delete(vid);
+		persistCart(storeId, cart);
+		render();
+	}
+
 	function stepper(vid, disabled = false) {
 		const wrap = document.createElement('div');
 		wrap.className = `${PREFIX}-stepper`;
@@ -1276,6 +1353,46 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 			panel.appendChild(sub);
 		}
 		panel.append(total, tail);
+
+		// The rows the catalog in hand did not confirm. They are NOT lines: no price (this page
+		// has no record of one — the catalog is where a price comes from), no stepper, no part of
+		// the total, and nothing of theirs reaches the POST. What they get is the two things a
+		// shopper needs — to see that their basket still holds them, and to be able to throw one
+		// away on purpose. The variation id is printed because it is the only name this page has
+		// for a product the catalog is not describing; a support conversation can start from it.
+		if (cart.unavailable && cart.unavailable.size) {
+			const held = document.createElement('div');
+			held.className = `${PREFIX}-cart-held`;
+			const heldNote = document.createElement('p');
+			heldNote.className = `${PREFIX}-held-note`;
+			heldNote.textContent = labels.unavailableNote;
+			held.appendChild(heldNote);
+			for (const [vid, qty] of cart.unavailable) {
+				const line = document.createElement('div');
+				line.className = `${PREFIX}-held-line`;
+				const main = document.createElement('div');
+				main.className = `${PREFIX}-line-main`;
+				const name = document.createElement('span');
+				name.className = `${PREFIX}-line-name`;
+				name.textContent = labels.unavailable;
+				const ref = document.createElement('span');
+				ref.className = `${PREFIX}-line-ref`;
+				ref.textContent = vid;
+				const count = document.createElement('span');
+				count.className = `${PREFIX}-line-qty`;
+				count.textContent = `× ${qty}`;
+				main.append(name, ref, count);
+				const rm = document.createElement('button');
+				rm.type = 'button';
+				rm.className = `${PREFIX}-rm`;
+				rm.textContent = '×'; // multiplication sign as remove glyph, same as a live line
+				rm.setAttribute('aria-label', `${labels.remove} ${vid}`);
+				rm.addEventListener('click', () => removeUnavailable(vid));
+				line.append(main, rm);
+				held.appendChild(line);
+			}
+			panel.appendChild(held);
+		}
 
 		// The backend refuses more than MAX_CART_LINES lines with a 400 a shopper cannot read as
 		// anything but "try again" (see the constant above). Said here instead, in the panel, with
