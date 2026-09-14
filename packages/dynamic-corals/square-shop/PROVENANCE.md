@@ -13,6 +13,40 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.14 — 2026-09-14 — the basket of sibling variants, and everything around it that agreed
+
+A buyer on a live shop put one hardcover zine and all FOUR designs of a four-variant art-print item
+in the basket. The header badge said 5; Square's hosted checkout listed 2. Nothing failed anywhere
+in between — the POST body was already short. The cart's catalog index was keyed by each item's
+DEFAULT variation, the product detail page writes the variation the shopper actually PICKED, and
+the ghost-reconcile read the three siblings as products the seller had deleted.
+`cart-variant-collapse.test.mjs` is that basket, and it is the file to port with this one.
+
+What this version carries:
+
+| | |
+|---|---|
+| the index | one rule for 0, 1 and many variants: every variation id an item NAMES is a key. The count decides only the value. Two catalog shapes used to fall between the old `<= 1` split and be deleted on sight |
+| the SSR half | the grid card carries `data-variants`, so the hydrate path knows the siblings too — and cart mode now refuses to hydrate from a card that claims siblings and names none |
+| the rows | the reconcile writes the reconciled basket back, so the header badge (raw rows, painted on every page) and the checkout POST stop being two truths |
+| the cap | RSP's 50-line limit is said in the panel, with the numbers in it, before a request that could only be refused with "try again" |
+| the price | a variant is priced from its own `display_price` on both hydrate paths, and inherits its item's currency — an empty currency read as non-zero-decimal made ¥2,200 render as ¥22 |
+
+🔴 **The fix does not ship in one artifact.** `data-variants` is written by `product-page-core.js`,
+which reaches a live shop inside that site's own `dist/_worker.js` (built by `emit-shop-function.mjs`
+at SITE BUILD time), not inside the published coral. Publishing this version rebuilds no worker, and
+no version links the two. The cart-mode fall-through above is what makes a coral-only deploy
+*correct* — one extra request on that page — and it is not a reason to skip the second deploy: until
+the worker is rebuilt, every shopper on `/shop` pays for a round trip the SSR was there to save.
+
+The fork in `reef` is still 0.11.5 and still loses this basket — see § "Still open" 3 and
+`CVERInc/reef#592`.
+
+(The per-version log below skips 0.11.7–0.11.13, which were published without entries. This one is
+written because the version is about money that was actually lost.)
+
+---
+
 ## 0.11.6 — 2026-08-29 — two of three calls move to the processor-neutral surface
 
 This version publishes drift that had been sitting on `main` unpublished since `012c2d7`
