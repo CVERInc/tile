@@ -193,7 +193,7 @@ function loadSquareShop({ storage = {}, catalog = null } = {}) {
 	};
 	const factory = new Function(
 		'document', 'window', 'crypto', 'fetch', 'CustomEvent',
-		SOURCE + '\nreturn { mount, renderCart, readLabels, withVariantSummary, itemsFromSsr };'
+		SOURCE + '\nreturn { mount, renderCart, readLabels, withVariantSummary, itemsFromSsr, cartCatalogByVariation };'
 	);
 	const api = factory(document, window, globalThis.crypto, fetchImpl, globalThis.CustomEvent);
 	return { ...api, fetchCalls, catalogCalls, store };
@@ -443,4 +443,94 @@ test('a clean basket is not rewritten — the write-back happens only when a row
 	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET,
 		'nothing was dropped, so the shopper’s own rows must come back byte for byte');
 	assert.equal(badgeCount(sb), 5);
+});
+
+// ── the index, as one rule ───────────────────────────────────────────────────
+// Every variation id an item NAMES is a key: its own `variation_id` and every `variants[*].id`.
+// The variant count decides the VALUE and nothing else. Reviewed 2026-09-14 as P3-2: the count
+// used to decide the KEY too, and drew the line in two different places, so two catalog shapes
+// had an id that no index knew — and an id no index knows is a line the ghost-reconcile deletes.
+const ITEM_BASE = { name: 'Thing', title: 'Thing', display_price: 9, currency: 'USD' };
+const INDEX_TABLE = [
+	{
+		what: 'no `variants` key at all — the flat default is still known',
+		item: { ...ITEM_BASE, variation_id: 'FLAT' },
+		keys: ['FLAT'], identity: ['FLAT']
+	},
+	{
+		what: 'an empty `variants` array — same',
+		item: { ...ITEM_BASE, variation_id: 'FLAT', variants: [] },
+		keys: ['FLAT'], identity: ['FLAT']
+	},
+	{
+		what: 'one variant, and it IS the flat default',
+		item: { ...ITEM_BASE, variation_id: 'FLAT', variants: [{ id: 'FLAT', title: 'Regular' }] },
+		keys: ['FLAT'], identity: ['FLAT']
+	},
+	{
+		what: 'one variant whose id DIFFERS from the flat default — both are the same one thing',
+		item: { ...ITEM_BASE, variation_id: 'FLAT', variants: [{ id: 'ODD', title: 'Regular' }] },
+		keys: ['FLAT', 'ODD'], identity: ['FLAT', 'ODD']
+	},
+	{
+		what: 'many variants, the default repeated inside them',
+		item: {
+			...ITEM_BASE, variation_id: 'A',
+			variants: [{ id: 'A', title: 'A' }, { id: 'B', title: 'B' }, { id: 'C', title: 'C' }]
+		},
+		keys: ['A', 'B', 'C'], identity: []
+	},
+	{
+		what: 'many variants and the default NOT among them — the default is still a key',
+		item: { ...ITEM_BASE, variation_id: 'TOP', variants: [{ id: 'O1', title: 'O1' }, { id: 'O2', title: 'O2' }] },
+		keys: ['TOP', 'O1', 'O2'], identity: ['TOP']
+	},
+	{
+		what: 'no flat default, many variants — the variants alone',
+		item: { ...ITEM_BASE, variants: [{ id: 'V1', title: 'V1' }, { id: 'V2', title: 'V2' }] },
+		keys: ['V1', 'V2'], identity: []
+	},
+	{
+		what: 'an item that names no variation at all is not indexed',
+		item: { ...ITEM_BASE },
+		keys: [], identity: []
+	},
+	{
+		what: 'a variant with no id is not a variation',
+		item: { ...ITEM_BASE, variation_id: 'FLAT', variants: [{ title: 'nameless' }, null] },
+		keys: ['FLAT'], identity: ['FLAT']
+	}
+];
+
+test('cartCatalogByVariation indexes every id an item names, whatever the shape', () => {
+	const sb = loadSquareShop();
+	for (const row of INDEX_TABLE) {
+		const index = sb.cartCatalogByVariation([row.item]);
+		assert.deepEqual([...index.keys()].sort(), [...row.keys].sort(), row.what);
+		for (const id of row.identity) {
+			assert.equal(index.get(id), row.item,
+				`${row.what} — this item sells ONE variation, so the index must hold the item's own ` +
+				'object: the conflict path rewrites a price in place and that write has to reach the grid card too');
+		}
+		for (const id of row.keys.filter((k) => !row.identity.includes(k))) {
+			assert.notEqual(index.get(id), row.item, `${row.what} — a sibling needs its own line record`);
+			assert.equal(index.get(id).variation_id, id, `${row.what} — a sibling record is keyed to itself`);
+		}
+	}
+});
+
+test('a basket written on either of the two odd shapes is no longer deleted on sight', async () => {
+	const odd = [
+		{ ...ITEM_BASE, id: 'I1', variation_id: 'FLAT', variants: [{ id: 'ODD', title: 'Regular', price_minor: 900, currency: 'USD' }] },
+		{ ...ITEM_BASE, id: 'I2', variation_id: 'TOP', variants: [{ id: 'O1', title: 'O1', price_minor: 900, currency: 'USD' }, { id: 'O2', title: 'O2', price_minor: 900, currency: 'USD' }] }
+	];
+	const sb = loadSquareShop({ storage: { [CART_KEY]: JSON.stringify([['ODD', 1], ['TOP', 1]]) } });
+	const root = mountCart(sb, odd);
+	click(checkoutBtn(root), 'checkout'); await flush();
+
+	assert.deepEqual(
+		sb.fetchCalls[0].body.items.map((l) => l.variation_id).sort(),
+		['ODD', 'TOP'],
+		'the catalog names both of these ids; a line the catalog names is not a ghost'
+	);
 });

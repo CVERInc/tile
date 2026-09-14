@@ -520,19 +520,38 @@ function variantLineName(it, variant) {
 // header badge counted 5, Square's hosted page listed 2, and nothing failed anywhere in between —
 // the POST body was already short. ./cart-variant-collapse.test.mjs is that basket.
 //
-// Single-variant items map to their OWN object (not a copy), so everything downstream that reads
-// or mutates a line's price for those keeps behaving exactly as it did.
+// ONE RULE FOR 0, 1 AND MANY VARIANTS: every variation id an item NAMES is a key — its own
+// `variation_id` (which a backend may send without repeating it inside `variants`) and every
+// `variants[*].id`. The item's variant count decides the VALUE, and nothing else.
+//
+// 🩸 It used to decide the KEY as well, and drew the line in two different places: at `<= 1` the
+// index took `variation_id` and ignored the variant, and above it took the variants and ignored
+// `variation_id`. Both halves had a hole a basket could fall into — a single-variant item whose one
+// variant carries a different id than the flat field had that variant read as a ghost and deleted;
+// a multi-variant item whose default is NOT repeated inside `variants` had its default read the
+// same way. Neither is this shop's shape, which is exactly why they would have been found by a
+// buyer rather than by us. ./cart-variant-collapse.test.mjs holds the whole table.
+//
+// The VALUE is the item's own object — never a copy — unless the item sells MORE THAN ONE
+// variation. A sibling set is the only case where a line needs a name and a price of its own, and
+// the identity matters: the conflict path rewrites a line's price in place, and for a single-
+// variation item that one write must reach the grid card as well as the basket line.
+//
+// Where this leaves the server: RSP's findCatalogVariant (reef apps/rsp/src/commerce/
+// square-catalog.ts) matches `variants[]` and only falls back to the flat `variation_id` when the
+// array is empty, so on the two odd shapes above the client now KEEPS a line the server may not
+// know. That is the safe direction and the deliberate one: the server answers 409 `sold_out` and
+// this widget names the line, where the narrower index deleted it without a word — which is the
+// entire defect this file was changed to stop.
 function cartCatalogByVariation(items) {
 	const byVariation = new Map();
 	for (const it of items || []) {
 		if (!it) continue;
-		const variants = Array.isArray(it.variants) ? it.variants : [];
-		if (variants.length <= 1) {
-			if (it.variation_id) byVariation.set(it.variation_id, it);
-			continue;
-		}
+		const variants = (Array.isArray(it.variants) ? it.variants : []).filter((v) => v && v.id);
+		const siblings = variants.length > 1;
+		if (it.variation_id) byVariation.set(it.variation_id, it);
 		for (const v of variants) {
-			if (!v || !v.id) continue;
+			if (!siblings) { byVariation.set(v.id, it); continue; }
 			const price = variantDisplayPrice(v);
 			byVariation.set(v.id, {
 				...it,
