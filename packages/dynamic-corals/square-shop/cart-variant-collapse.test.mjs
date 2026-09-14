@@ -405,3 +405,42 @@ test('instant mode keeps the old cards: no basket is held against them, so no ex
 		'instant mode holds no localStorage line against this catalog — a missing sibling list ' +
 		'costs it nothing, and a fetch here would be a permanent charge for no change on screen');
 });
+
+// ── the badge and the till, on one set of rows ───────────────────────────────
+// The header badge is painted on EVERY page of the site and counts the RAW localStorage rows;
+// the cart panel exists only on /shop and shows the RECONCILED ones. While the reconcile dropped
+// a row in memory alone, those two disagreed silently and indefinitely — the reported bug's exact
+// shape (two numbers from two truths, no error in between) with a different cause. Reviewed
+// 2026-09-14 as P2-1.
+//
+// 🔴 The badge is counted here the way header-actions-cart.js#count counts it — sum of `e[1]` over
+// the raw rows — because that is the algorithm under test. Copied deliberately and kept to one
+// place: that file is an IIFE island with no export, so there is nothing to import.
+function badgeCount(sb) {
+	const raw = JSON.parse(sb.store.get(CART_KEY) || '[]');
+	return raw.reduce((n, e) => n + (Array.isArray(e) ? (parseInt(e[1], 10) || 0) : 0), 0);
+}
+
+test('a ghost line leaves the badge and the POST on the SAME number', async () => {
+	const sb = loadSquareShop({
+		storage: { [CART_KEY]: JSON.stringify([[ZINE_VID, 1], ['GONE_VARIATION_ID', 3]]) }
+	});
+	const root = mountCart(sb, CATALOG);
+
+	assert.equal(badgeCount(sb), 1,
+		'the reconcile threw a row away — the rows on disk, which the header badge counts on ' +
+		'every page of the site, must say so too');
+
+	click(checkoutBtn(root), 'checkout'); await flush();
+	const postSum = sb.fetchCalls[0].body.items.reduce((n, l) => n + l.quantity, 0);
+	assert.equal(postSum, badgeCount(sb), 'the badge must count what the checkout will carry');
+	assert.deepEqual(sb.fetchCalls[0].body.items, [{ variation_id: ZINE_VID, quantity: 1 }]);
+});
+
+test('a clean basket is not rewritten — the write-back happens only when a row was dropped', () => {
+	const sb = loadSquareShop({ storage: { [CART_KEY]: BUYERS_BASKET } });
+	mountCart(sb, CATALOG);
+	assert.equal(sb.store.get(CART_KEY), BUYERS_BASKET,
+		'nothing was dropped, so the shopper’s own rows must come back byte for byte');
+	assert.equal(badgeCount(sb), 5);
+});
