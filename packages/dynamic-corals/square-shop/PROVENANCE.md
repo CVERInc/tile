@@ -43,6 +43,13 @@ occur anywhere in that file — while RSP's own `fetchSquareCatalogItems`
 200, non-empty and **short**, with no error anywhere. Every row off that page then looked exactly
 like a product the seller had deleted.
 
+🔴 **That backend defect has a ticket of its own: `CVERInc/reef#593`, OPEN.** It is the only place
+it can actually be repaired — everything in this file is a client defending itself, and no client
+can fetch back the half of a catalog it was never sent. Whoever reads this section next should
+land there rather than concluding the premise is simply false and unowned. (#593's own text names
+the two sites that take this path, and reports the seller with 81 items as the one most likely to
+be over a page.)
+
 Measured (review round 2, P1-1): four sibling rows deleted from the shopper's own machine in one
 load, and **not recoverable** — the next load against a whole catalog had nothing to read back.
 `ssrCatalogMissesSiblings` could not catch it either: it asks whether a card names its own

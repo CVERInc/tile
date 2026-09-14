@@ -196,7 +196,9 @@ function cartStorageEntries(cart) {
 // definition" — and that premise is FALSE on the legacy Python backend a live shop runs on today.
 // `apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` calls Square's
 // `search-catalog-items` ONCE and discards the cursor (there is no `cursor` anywhere in that
-// file), so a catalog longer than one page arrives HTTP 200, non-empty and SHORT. Reconciling
+// file), so a catalog longer than one page arrives HTTP 200, non-empty and SHORT. That backend
+// defect is tracked as CVERInc/reef#593 — it is the only place it can be repaired; nothing here
+// can fetch back the half of a catalog that was never sent. Reconciling
 // against that and writing the result back is not a stale-row cleanup; it is deleting, from the
 // shopper's own machine, irreversibly, rows the seller still sells. Measured as review round 2's
 // P1-1: four sibling rows gone in one load, and gone for good — the next load with a whole
