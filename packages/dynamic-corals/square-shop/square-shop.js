@@ -1000,6 +1000,11 @@ async function startCheckout(apiBase, guildId, variationId, btn, refs, labels, s
 		status = res.status;
 		payload = await res.json().catch(() => null);
 		if (res.ok && payload && payload.url) {
+			// Same reason startCartCheckout does this at the cart path below: without a
+			// record, the completion page cannot tell "sold" from "never touched" and
+			// falls back to clearing the whole key — including lines this purchase
+			// never came near. This is the instant-checkout half of that fix.
+			recordSoldLines(clientRequestRef, [{ variation_id: variationId }]);
 			window.location.href = payload.url;
 			return;
 		}
