@@ -56,12 +56,23 @@ test('the header island imports the real function instead of mirroring it', () =
 
 test('no fourth copy of the sum is loose in the tree', () => {
 	// The mirrors are the only places this expression may appear. Strip them, then look for it.
+	// Review round 5, P3-2: this used to grep one literal shape (`parseInt(e[1]`), so a fourth
+	// copy written as `Number(e[1])`, `+e[1]`, or `e[1] | 0` slipped straight past it — the same
+	// index read, just spelled differently. Widened to catch those too.
 	const mirrors = [String(cartRowQty), String(cartBadgeCount)];
+	const FOURTH_COPY_SHAPES = [
+		/parseInt\(e\[1\]/,
+		/Number\(e\[1\]\)/,
+		/\+e\[1\]/,
+		/e\[1\]\s*\|\s*0/
+	];
 	for (const file of [CORAL, PRODUCT_PAGE, ISLAND]) {
 		let src = read(file);
 		for (const m of mirrors) src = src.split(m).join('');
-		assert.ok(!/parseInt\(e\[1\]/.test(src),
-			`${file} sums e[1] somewhere outside the pinned mirror — that is a fourth copy`);
+		for (const shape of FOURTH_COPY_SHAPES) {
+			assert.ok(!shape.test(src),
+				`${file} sums e[1] somewhere outside the pinned mirror (shape ${shape}) — that is a fourth copy`);
+		}
 	}
 });
 
