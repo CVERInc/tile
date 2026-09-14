@@ -59,6 +59,9 @@
 //   data-checkout-closed-label     (optional) — shop not taking orders (404).
 //   data-checkout-again-label      (optional) — that attempt was already started (409).
 //   data-checkout-unavailable-label (optional) — backend not answering (5xx).
+//   data-cart-limit-message (optional) — shown in the cart panel when the basket holds more lines
+//                          than the backend will take, in place of a checkout that could only be
+//                          refused. Keeps the {lines} / {max} / {over} placeholders.
 //   data-checkout-note   (optional) — small localized line under the CART checkout button, saying
 //                          the payment page itself is Square's own and (today) always Japanese —
 //                          finding #12, 2026-09-03 cold-read: a zh-TW/en-US shopper reached the
@@ -493,9 +496,15 @@ function itemName(it) {
 }
 
 // Normalize a raw catalog item (which carries its full `variants` array) into the summary fields
-// itemCard() needs: how many variants, and the price span across them. Only items.variants (the
-// direct-fetch path) has this array — itemsFromSsr embeds the equivalent as data-* attrs instead,
-// since the SSR-hydrate path rebuilds from the DOM, not a fresh fetch.
+// itemCard() needs: how many variants, and the price span across them.
+//
+// The FETCH path runs every item through here. The SSR path does not call it at all: itemsFromSsr
+// reads the same summary straight off `data-variant-count` / `data-price-min` / `data-price-max`,
+// which product-page-core.js#renderShopGrid computed from the same variants at the edge, and
+// parses the card's `data-variants` back into a variants array beside them.
+//
+// 🔴 That last part did not exist until 0.11.13 — the SSR path rebuilt a catalog holding one
+// variation per item, which is the hole a basket of siblings fell straight through.
 function withVariantSummary(it) {
 	const variants = Array.isArray(it.variants) ? it.variants : [];
 	if (variants.length <= 1) return { ...it, variant_count: variants.length || 1 };
@@ -1356,8 +1365,15 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 }
 
 // Read the item list back off the edge-SSR'd cards, so the client can rebuild the grid with NO
-// network call (variation_id/price/currency/slug from data-attrs, name from the card text). The
-// edge worker keeps the SSR ≤60s fresh, so this needs no reconcile.
+// network call: variation_id / price / currency / slug / the sibling variations from data-attrs,
+// name from the card text. The edge worker keeps the SSR ≤60s fresh, so the GRID needs no
+// re-fetch to be current.
+//
+// That says nothing about the BASKET, which is reconciled against whatever this returns every
+// time (loadPersistedCart) — a basket is the shopper's own machine's memory, arbitrarily old, and
+// the reconcile is what keeps a deleted product from reaching the till. Reading "needs no
+// reconcile" as covering both is what let a card describing 1 of 4 variations be trusted with a
+// basket holding all four; see ssrCatalogMissesSiblings below.
 function itemsFromSsr(grid) {
 	const out = [];
 	grid.querySelectorAll(`.${PREFIX}-card`).forEach((c) => {

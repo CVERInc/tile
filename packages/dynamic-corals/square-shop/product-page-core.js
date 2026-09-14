@@ -345,6 +345,13 @@ export function renderShopGrid(items, config) {
 			// default variation left the hydrated catalog unable to recognise the shopper's own
 			// lines, and the cart's ghost-reconcile deleted them on sight.
 			//
+			// 🔴 NOT the same shape as the DETAIL page's `data-variants` above (:227), and the two
+			// are not each other's subset: that one carries `available` and `image` and no titles,
+			// this one carries `title` and `display_price` and neither of those. They are read by
+			// two different parsers for two different jobs — one drives a <select> on one product,
+			// this one rebuilds a catalog of many — so nothing here should be written on the
+			// assumption that one reader can take both.
+			//
 			// 🔴 `display_price` is carried, not left to be re-derived. It is the FIRST field
 			// square-shop.js#variantDisplayPrice reads and `price_minor` is only its fallback, so a
 			// card that sent the fallback alone could quote a different price on this page than the
