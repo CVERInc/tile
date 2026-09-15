@@ -118,6 +118,26 @@ const DEFAULTS = (() => {
   return parsed;
 })();
 
+// 🔴 square-shop@0.11.16 was published with a --defaults file whose apiBase named the legacy
+// mixfairy backend on Heroku — the one being retired — so every embed with no data-api-base of
+// its own inherited a checkout that stops working the day that backend goes away. Nothing here
+// caught it: a herokuapp default is syntactically fine, substitutes cleanly, and looks exactly
+// like a correct build. This is the guard that mistake needed; it cannot be repeated silently.
+const RSP_SURFACE = 'https://rsp.feelreef.com';
+function namesLegacyHerokuBackend(value) {
+  let hostname;
+  try { hostname = new URL(value).hostname; } catch { hostname = value; }
+  return /(^|\.)herokuapp\.com$/i.test(hostname);
+}
+{
+  const apiBase = DEFAULTS?.['square-shop']?.apiBase;
+  if (apiBase && namesLegacyHerokuBackend(apiBase)) {
+    console.error(`✗ square-shop: --defaults apiBase (${apiBase}) names the legacy Heroku backend`);
+    console.error(`  being retired. Point it at the RSP surface instead: ${RSP_SURFACE}`);
+    process.exit(1);
+  }
+}
+
 const MARKER = /\/\*coral-default:([A-Za-z0-9_]+)\*\//;
 
 /**

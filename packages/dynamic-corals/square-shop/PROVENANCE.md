@@ -13,6 +13,35 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.17 — 2026-09-15 — the default apiBase moves off the backend being retired
+
+**No source change.** `square-shop.js` is byte-identical to 0.11.16 — 0.11.17 exists to carry a
+corrected deployment default under a version number of its own, because the registry is immutable
+and 0.11.16 cannot be edited in place. `manifest.json` and `package.json` moved their version and
+`source` fields; nothing else did.
+
+0.11.16 was published with a deployment `--defaults` file whose `apiBase` named the legacy
+mixfairy backend on Heroku — the one being retired. Every embed with no `data-api-base` of its
+own, the out-of-the-box shape, inherits `DEFAULT_API_BASE` from that file, so the day the legacy
+backend is retired those embeds would silently stop working with no source change anywhere to
+point at. 0.11.17's own `--defaults` sets `apiBase` to the RSP surface, `https://rsp.feelreef.com`;
+an embed naming no `data-api-base` now resolves there.
+
+### The guard this needed
+
+`build.mjs` now refuses to build square-shop at all when `--defaults`' `apiBase` names a
+`*.herokuapp.com` host — checked by hostname (`namesLegacyHerokuBackend`, parsed with `URL`, not a
+substring match, so `https://example.com/herokuapp.com` is not the guarded host), with a one-line
+message naming the RSP surface so the deployment does not have to go looking for it. It is a
+build-time refusal, not a runtime one: the mistake 0.11.16 shipped was a `--defaults` file, and the
+only place that file is ever read is here, before a byte reaches the registry. Tested both ways in
+`legacy-api-base-guard.test.mjs`: red on the herokuapp default (bare host, trailing slash, and mixed
+case), green on the RSP surface with the published artifact asserted to carry
+`DEFAULT_API_BASE = 'https://rsp.feelreef.com'`, and a control confirming a host that merely
+*contains* `herokuapp.com` in its path is not mistaken for the guarded one.
+
+---
+
 ## 0.11.16 — 2026-09-14 — the marking comes off the disk, and "held" becomes something this page works out
 
 0.11.15 was reviewed before it was published and, like 0.11.14 before it, did not survive the
