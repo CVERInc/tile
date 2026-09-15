@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 // pure CSS; the only client JS is the self-gating PE set the smoke's allowlist names — see SiteLayout). The model layer (site-core.js) is aliased as `@sitetile` so the
 // per-type components share ONE source of truth with the reference renderer + the test suite.
 import { reefComponentsLayer } from './reef-components-layer.mjs';
+// The build owns dist/_headers: the site's own rules first, then `/*.svg` as an attachment.
+import { svgAttachmentHeaders } from './svg-attachment-headers.mjs';
 
 export default defineConfig({
+  integrations: [svgAttachmentHeaders()],
   // Absolute-URL base for the site being rendered. Lingo emits ABSOLUTE hreflang/canonical
   // from this (a real <head> uses absolute URLs). Per-build overridable via SITE_URL so the ONE
   // renderer stays general across sites; the fallback is a placeholder, never a real host — a
