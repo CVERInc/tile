@@ -15,7 +15,7 @@
 // `CARD_TRY_REAL_DOOR_CTA` — already-reviewed, already-neutral, already-translated content that had
 // sat unused since commit 3fcfb09ff retired the route they were written for. The five added
 // 2026-09-05 (zh-Hans/de/fr/es/pt) follow the SAME shape and the same neutral premise (a family
-// doctor in Taipei — never a real person) rather than inventing five new, uncoordinated ideas of
+// doctor in a small town — never a real person) rather than inventing five new, uncoordinated ideas of
 // who the persona is.
 
 /**
@@ -27,7 +27,7 @@ export const SANDBOX_LOCALES = {
   en: {
     lang: 'en-US',
     name: 'Sam',
-    bio: 'Family doctor in Taipei. I write about rest, worry, and the small things that help — appointments and notes below.',
+    bio: 'Family doctor in a small town. I write about rest, worry, and the small things that help — appointments and notes below.',
     linkLabel: 'Book an appointment',
     textBody: 'Tap any tile to edit it — everything here is just a demo.',
     imageAlt: 'Sample image',
@@ -43,7 +43,7 @@ export const SANDBOX_LOCALES = {
   zh: {
     lang: 'zh-TW',
     name: '小美',
-    bio: '台北的家庭醫師。我撰寫關於休息、煩惱，以及對生活有所幫助的小事。下方為預約與筆記。',
+    bio: '小鎮的家庭醫師。我撰寫關於休息、煩惱，以及對生活有所幫助的小事。下方為預約與筆記。',
     linkLabel: '預約',
     textBody: '點一下任何一張牌就能編輯。這裡的內容只是示範。',
     imageAlt: '示範圖片',
@@ -59,7 +59,7 @@ export const SANDBOX_LOCALES = {
   ja: {
     lang: 'ja-JP',
     name: 'ゆい',
-    bio: '台北の家庭医です。休息や悩み、そして日々の助けになる小さなことについて綴っています。予約やノートは以下から。',
+    bio: '小さな町の家庭医です。休息や悩み、そして日々の助けになる小さなことについて綴っています。予約やノートは以下から。',
     linkLabel: '予約する',
     textBody: 'どのタイルもタップすれば編集できます。ここにあるのはすべてサンプルです。',
     imageAlt: 'サンプル画像',
@@ -75,7 +75,7 @@ export const SANDBOX_LOCALES = {
   ko: {
     lang: 'ko-KR',
     name: '지우',
-    bio: '타이베이의 가정의학과 전문의예요. 휴식과 걱정, 그리고 도움이 되는 소소한 것들에 관해 글을 써요 — 예약과 노트는 아래에서.',
+    bio: '작은 마을의 가정의학과 전문의예요. 휴식과 걱정, 그리고 도움이 되는 소소한 것들에 관해 글을 써요 — 예약과 노트는 아래에서.',
     linkLabel: '예약하기',
     textBody: '아무 타일이나 눌러서 편집해 보세요. 여기 내용은 전부 예시예요.',
     imageAlt: '예시 이미지',
@@ -92,7 +92,7 @@ export const SANDBOX_LOCALES = {
   'zh-Hans': {
     lang: 'zh-CN',
     name: '小美',
-    bio: '在台北执业的家庭医生。我写一些关于休息、烦恼，以及生活里有帮助的小事。预约与笔记见下方。',
+    bio: '在小镇执业的家庭医生。我写一些关于休息、烦恼，以及生活里有帮助的小事。预约与笔记见下方。',
     linkLabel: '预约',
     textBody: '点一下任意一张牌即可编辑。这里的内容只是示范。',
     imageAlt: '示例图片',
@@ -108,7 +108,7 @@ export const SANDBOX_LOCALES = {
   de: {
     lang: 'de-DE',
     name: 'Lea',
-    bio: 'Hausärztin in Taipeh. Ich schreibe über Erholung, Sorgen und die kleinen Dinge, die helfen — Termine und Notizen unten.',
+    bio: 'Hausärztin in einer Kleinstadt. Ich schreibe über Erholung, Sorgen und die kleinen Dinge, die helfen — Termine und Notizen unten.',
     linkLabel: 'Termin vereinbaren',
     textBody: 'Tippen Sie auf eine Kachel, um sie zu bearbeiten — alles hier ist nur eine Demo.',
     imageAlt: 'Beispielbild',
@@ -124,7 +124,7 @@ export const SANDBOX_LOCALES = {
   fr: {
     lang: 'fr-FR',
     name: 'Camille',
-    bio: 'Médecin de famille à Taipei. J’écris sur le repos, les soucis et les petites choses qui aident — rendez-vous et notes ci-dessous.',
+    bio: 'Médecin de famille dans une petite ville. J’écris sur le repos, les soucis et les petites choses qui aident — rendez-vous et notes ci-dessous.',
     linkLabel: 'Prendre rendez-vous',
     textBody: 'Touchez une tuile pour la modifier — tout ceci n’est qu’une démonstration.',
     imageAlt: 'Image d’exemple',
@@ -140,7 +140,7 @@ export const SANDBOX_LOCALES = {
   es: {
     lang: 'es-ES',
     name: 'Sofía',
-    bio: 'Médica de familia en Taipéi. Escribo sobre el descanso, las preocupaciones y las pequeñas cosas que ayudan — citas y notas abajo.',
+    bio: 'Médica de familia en un pueblo pequeño. Escribo sobre el descanso, las preocupaciones y las pequeñas cosas que ayudan — citas y notas abajo.',
     linkLabel: 'Reservar una cita',
     textBody: 'Toca cualquier ficha para editarla — todo esto es solo una demostración.',
     imageAlt: 'Imagen de ejemplo',
@@ -156,7 +156,7 @@ export const SANDBOX_LOCALES = {
   pt: {
     lang: 'pt-BR',
     name: 'Beatriz',
-    bio: 'Médica de família em Taipé. Escrevo sobre descanso, preocupações e as pequenas coisas que ajudam — consultas e notas abaixo.',
+    bio: 'Médica de família em uma cidade pequena. Escrevo sobre descanso, preocupações e as pequenas coisas que ajudam — consultas e notas abaixo.',
     linkLabel: 'Agendar uma consulta',
     textBody: 'Toque em qualquer peça para editá-la — tudo aqui é só uma demonstração.',
     imageAlt: 'Imagem de exemplo',
