@@ -99,6 +99,10 @@ Three routes emit an icon set on **every** build, no opt-in: `/favicon.ico` (32�
 
 The badge is deterministic: same site → byte-identical files, so a rebuild never churns them.
 
+### `_headers` — the build owns it
+
+Every `*.svg` a built site serves is delivered with `Content-Disposition: attachment`: an uploaded vector file is an image, not a page, so it never opens as a document on the site's origin. `<img>` and CSS `url()` are unaffected; embedding an SVG with `<object>` or `<iframe>` no longer renders it. The build owns `dist/_headers`: put your own rules in `assets/_headers` (it reaches `public/` before the build, like any other asset) and they are kept first, byte for byte, with the platform's `/*.svg` rule appended once after them — rebuilding changes nothing, and a file that already carries the rule is left as it is. The merge runs at `astro:build:done` (`astro/svg-attachment-headers.mjs`), so anything that writes `dist/_headers` after the build replaces it and must merge the same way. A file with 100 rules already (Cloudflare Pages' limit) fails the build rather than shipping without the rule.
+
 ## 🔴 Marker growth policy (dogfood phase)
 
 > The minimal set is 5 **on purpose**. Do **not** pre-build section types for hypothetical needs (shiny-object trap / premature engineering).

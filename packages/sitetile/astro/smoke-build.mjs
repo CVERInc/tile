@@ -29,6 +29,7 @@ import {
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -467,6 +468,8 @@ const BADGE_COLLISION_KINDS = [
 /** Bytes distinguishable from anything tile could draw (not a valid PNG — nothing here decodes
  *  it): proves "the owner's file survived" apart from "tile clobbered it with a badge". */
 const REAL_APPLE_TOUCH_BYTES = 'THIS-IS-THE-OWNERS-REAL-APPLE-TOUCH-ICON-NOT-A-TILE-BADGE\n';
+/** A site's own two `_headers` rules, planted in the collision fixture's public/. */
+const OWNER_HEADERS = '/*\n  X-Frame-Options: DENY\n\n/blog/*\n  Cache-Control: public, max-age=60\n';
 
 // The fixture directory is rsync'd from THIS `astro/` tree (excluding node_modules/.astro/
 // dist-*/the fixture dir itself) rather than hand-duplicated, so it can never silently drift from
@@ -595,6 +598,9 @@ function buildBadgeCollisionFixture() {
   // The real file, planted BEFORE the build — the whole point is that Astro's own
   // public/-beats-route rule shadows tile's apple-touch-icon.png route for this entire site.
   writeFileSync(join(CDIR, 'public/apple-touch-icon.png'), REAL_APPLE_TOUCH_BYTES, 'utf8');
+  // …and a site's own `_headers`, which reaches public/ the same way (a file-level replace). The
+  // build must keep these two rules first, verbatim, and add `/*.svg` exactly once after them.
+  writeFileSync(join(CDIR, 'public/_headers'), OWNER_HEADERS, 'utf8');
 
   writeFileSync(join(CDIR, 'src/pages/badge-receipt-[kind].astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -676,6 +682,16 @@ const collisionHtml = Object.fromEntries(Object.keys(collisionExpected).map((kin
 const builtCollisionDirs = readdirSync(CDIST).filter((e) => e.startsWith('badge-receipt-')).map((e) => e.slice('badge-receipt-'.length)).sort();
 const collisionAppleTouchBytes = readFileSync(join(CDIST, 'apple-touch-icon.png'), 'utf8');
 
+// `_headers` through a real `astro build` — the primary build ships no owner file, the collision
+// build ships two owner rules in public/. Read before anything below re-merges them.
+const readOrNull = (f) => (existsSync(f) ? readFileSync(f, 'utf8') : null);
+const primaryHeaders = readOrNull(join(DIST, '_headers'));
+const collisionHeaders = readOrNull(join(CDIST, '_headers'));
+const svgRuleCount = (text) => parseRules(text || '').filter((r) => r.path === '/*.svg'
+  && r.headers.some((h) => /^content-disposition:\s*attachment$/i.test(h))).length;
+// What an astro rebuild would find if the old output were still there: merging the merged file again.
+const collisionHeadersRemerged = collisionHeaders === null ? null : writeMergedHeaders(CDIST);
+
 const checks = [
   ...Object.entries(badgeExpected).map(([kind, expected]) => [`icons: rendered ${kind} marks exactly the badges`, () => {
     assertBadgeLinks(badgeHtml[kind], expected);
@@ -698,6 +714,18 @@ const checks = [
     JSON.stringify(builtCollisionDirs) === JSON.stringify(BADGE_COLLISION_KINDS.map(([kind]) => kind).slice().sort())],
   ['🔴 icons: the owner\'s real apple-touch-icon.png is NEVER overwritten by the badge route (P2-1/P2-2 — "must not overwrite it")', () =>
     collisionAppleTouchBytes === REAL_APPLE_TOUCH_BYTES],
+  // -- CVERInc/reef#596: every *.svg the site serves is an attachment --
+  ['🔴 _headers: a site with no _headers of its own gets dist/_headers carrying exactly the platform /*.svg attachment rule', () =>
+    primaryHeaders === PLATFORM_RULE && svgRuleCount(primaryHeaders) === 1],
+  ['🔴 _headers: the build\'s own /favicon.svg is one of the files that rule covers (it exists at the root)', () =>
+    existsSync(join(DIST, 'favicon.svg'))],
+  ['🔴 _headers: a site\'s own two rules come through first, byte for byte, and the platform rule is appended once', () =>
+    collisionHeaders === OWNER_HEADERS + '\n' + PLATFORM_RULE
+    && svgRuleCount(collisionHeaders) === 1
+    && JSON.stringify(parseRules(collisionHeaders).map((r) => r.path)) === JSON.stringify(['/*', '/blog/*', '/*.svg'])],
+  ['_headers: merging the built file again leaves identical bytes (rebuild is idempotent)', () =>
+    collisionHeadersRemerged !== null && collisionHeadersRemerged === collisionHeaders
+    && readFileSync(join(CDIST, '_headers'), 'utf8') === collisionHeaders],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
     /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
