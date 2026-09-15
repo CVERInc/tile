@@ -21,7 +21,7 @@ const SAMPLE = [
   'SUMMARY:Comic Con — Northwind booth',
   'DTSTART:20260815T100000Z',
   'DTEND:20260815T180000Z',
-  'LOCATION:Taipei World Trade Center\\, Hall 1',   // escaped comma
+  'LOCATION:Harbor Hall\\, Pier 3',   // escaped comma
   'URL:https://example.com/con',
   'END:VEVENT',
   'BEGIN:VEVENT',
@@ -46,7 +46,7 @@ test('parseICal: two VEVENTs → normalized shape (title/start/end/location/url/
   assert.equal(con.title, 'Comic Con — Northwind booth');
   assert.equal(con.start, '2026-08-15T10:00:00.000Z');
   assert.equal(con.end, '2026-08-15T18:00:00.000Z');
-  assert.equal(con.location, 'Taipei World Trade Center, Hall 1', 'escaped comma unescaped');
+  assert.equal(con.location, 'Harbor Hall, Pier 3', 'escaped comma unescaped');
   assert.equal(con.url, 'https://example.com/con');
   assert.equal(con.allDay, false);
   assert.equal(con.source, 'ical');

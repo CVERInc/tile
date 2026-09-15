@@ -136,8 +136,10 @@ test('config is read entirely from data-* attributes, with honest defaults', () 
   const { el } = container({ 'data-guild-id': 'g1' });
   const cfg = readConfig(el);
   assert.equal(cfg.guildId, 'g1');
-  assert.equal(cfg.currency, 'TWD');
-  assert.equal(cfg.currencyLabel, 'TWD', 'no symbol table is invented for a currency code');
+  assert.equal(cfg.currency, '',
+    'the honest default for "which money" is none — no region\'s currency is invented');
+  assert.equal(readConfig(container({ 'data-guild-id': 'g1', 'data-currency': 'EUR' }).el).currencyLabel,
+    'EUR', 'no symbol table is invented for a currency code');
   assert.deepEqual(cfg.presets, []);
   assert.equal(cfg.amountParam, 'amount');
   assert.equal(cfg.apiBase, '',
