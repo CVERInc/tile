@@ -20,8 +20,8 @@ Content-Type: application/json
 
 {
   "guild_id":           "site_…",                      // data-guild-id — who receives it
-  "amount":             "500",                          // canonical decimal string, MAJOR units
-  "currency":           "TWD",                          // ISO 4217, data-currency
+  "amount":             "5",                            // canonical decimal string, MAJOR units
+  "currency":           "USD",                          // ISO 4217, data-currency (required)
   "redirect_url":       "https://site/page?dc_sponsor=done",   // omitted if the page has no location
   "client_request_ref": "0f1e…"                         // idempotency token, stable per amount
 }
@@ -61,6 +61,16 @@ send whoever built the page to different places. The alternative was a button th
 amount, posts it to a 404, and reads as a backend outage to the visitor while reading as a working
 block to everyone else.
 
+🔴 **`data-currency` is required too, and there is no default.** The currency belongs to the seller,
+which a coral cannot know, and a guessed one does not even fail: the backend would mint a link for the
+right number in the wrong money. So a mount without it refuses the same way, marked
+`data-dc-sponsor-unmounted="data-currency"`:
+
+```html
+<div data-dynamic-coral="sponsor" data-guild-id="site_…" data-api-base="https://…"
+     data-currency="USD" data-presets="5,10,25"></div>
+```
+
 🔴 **`amount` is major units as a string, deliberately.** TWD and JPY have no minor unit, so a
 browser that "helpfully" multiplied by 100 would ask for a hundred times the money the first time a
 zero-decimal currency showed up. The coral does not know the rail or its exponent; the backend does,
@@ -71,7 +81,7 @@ owner connected. Adding a rail must never mean editing this coral.
 
 ## The deep link
 
-`?amount=500` on the page URL starts the field at 500 — that is how "sponsor me NT$500" travels as a
+`?amount=5` on the page URL starts the field at 5 — that is how "sponsor me $5" travels as a
 link (feelreef 金流表面主線 **D23**). `data-amount-param` renames the parameter.
 
 🔴 **The URL prefills the field, and that is the entire extent of its authority.** Anyone can write

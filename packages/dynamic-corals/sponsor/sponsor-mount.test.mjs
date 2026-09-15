@@ -38,6 +38,8 @@ function mount(attrs, opts) {
   // default to fall back to, so a mount that does not name one refuses to mount at all. The tests
   // that assert THAT are below; every other test in this file needs a block that works.
   el.setAttribute('data-api-base', ORIGIN);
+  // Same for the currency: there is no default, and the refusal has its own tests below.
+  el.setAttribute('data-currency', 'USD');
   for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
   const parts = mountSponsor(el, { document, window, fetch });
   return { el, parts, document, window, fetch };
@@ -56,7 +58,7 @@ test('mounting puts an amount field on the page', () => {
   assert.equal(parts.input.getAttribute('inputmode'), 'decimal');
   assert.equal(parts.presets.length, 3);
   assert.ok(el.textContent.includes('請我喝杯咖啡'));
-  assert.ok(el.textContent.includes('TWD 100'), 'the suggested amounts are visible, with a currency');
+  assert.ok(el.textContent.includes('USD 100'), 'the suggested amounts are visible, with a currency');
 });
 
 test('the styles arrive with the block, themed off the host\'s tokens', () => {
@@ -107,8 +109,46 @@ test('🔴 CONTROL: the same fixture mounts and sends once the origin IS named',
   assert.equal(fetch.calls[0].url, ORIGIN + SPONSOR_PATH);
 });
 
-test('the two ways to be unset are told apart, never collapsed into one', () => {
-  // Two guards sharing one marker are one guard as far as a test can see, and they send the owner
+test('🔴 a page without data-currency FAILS LOUDLY: no default currency, no button, no request', () => {
+  // The decision issue #45 asks the test to state: a missing currency is refused, never filled in.
+  // A guessed currency is the one guess here that does not fail — the backend would happily mint a
+  // link for 500 of whatever this file picked — so it is refused up front, like a missing origin.
+  const document = fakeDocument();
+  const el = document.createElement('div');
+  el.setAttribute('data-guild-id', 'g1');
+  el.setAttribute('data-api-base', ORIGIN);
+  el.setAttribute('data-presets', '100,300,500');
+  const fetch = fakeFetch({ json: { url: LINK } });
+  const parts = mountSponsor(el, { document, window: fakeWindow({ search: '?amount=500' }), fetch });
+
+  assert.equal(parts, null, 'nothing is mounted');
+  assert.equal(el.find((n) => n.tagName === 'INPUT'), null, 'no field');
+  assert.equal(el.find((n) => n.tagName === 'BUTTON'), null, 'no preset and no submit button');
+  assert.equal(fetch.calls.length, 0, 'not one request in a currency nobody chose');
+  assert.equal(el.getAttribute(UNMOUNTED_ATTR), 'data-currency', 'the container names the missing attribute');
+  assert.ok(el.textContent.includes('not set up'));
+  assert.ok(!/USD|TWD|JPY|EUR/.test(el.textContent), 'and no currency code was shown in its place');
+});
+
+test('🔴 CONTROL: the same page mounts and sends the currency once data-currency IS named', async () => {
+  const document = fakeDocument();
+  const el = document.createElement('div');
+  el.setAttribute('data-guild-id', 'g1');
+  el.setAttribute('data-api-base', ORIGIN);
+  el.setAttribute('data-presets', '100,300,500');
+  el.setAttribute('data-currency', 'usd');
+  const fetch = fakeFetch({ json: { url: LINK } });
+  const parts = mountSponsor(el, { document, window: fakeWindow({ search: '?amount=500' }), fetch });
+
+  assert.notEqual(parts, null);
+  assert.equal(el.getAttribute(UNMOUNTED_ATTR), null);
+  await press(parts);
+  assert.equal(fetch.calls.length, 1);
+  assert.equal(fetch.calls[0].body.currency, 'USD');
+});
+
+test('the three ways to be unset are told apart, never collapsed into one', () => {
+  // Guards sharing one marker are one guard as far as a test can see, and they send the owner
   // to different attributes, so each has a case that only it can produce.
   const refusalFor = (attrs) => {
     const document = fakeDocument();
@@ -120,6 +160,8 @@ test('the two ways to be unset are told apart, never collapsed into one', () => 
   };
   assert.equal(refusalFor({ 'data-api-base': ORIGIN }), 'data-guild-id', 'a backend and no seller');
   assert.equal(refusalFor({ 'data-guild-id': 'g1' }), 'data-api-base', 'a seller and no backend');
+  assert.equal(refusalFor({ 'data-guild-id': 'g1', 'data-api-base': ORIGIN }), 'data-currency',
+    'a seller and a backend, and no currency');
   assert.equal(refusalFor({}), 'data-guild-id', 'neither: the first thing to fix');
 });
 

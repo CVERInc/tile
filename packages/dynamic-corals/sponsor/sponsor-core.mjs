@@ -25,7 +25,8 @@
 //   data-guild-id        (required) — which seller receives the sponsorship.
 //   data-api-base        (required) — the origin of the feelreef backend this mount asks for a
 //                        link. There is no default; see WHERE IT SENDS IT below.
-//   data-currency        (optional) — ISO 4217 code, default "TWD".
+//   data-currency        (required) — ISO 4217 code: "USD", "EUR", "JPY". There is no default;
+//                        see WHICH CURRENCY below.
 //   data-currency-symbol (optional) — what the visitor SEES beside the field (default: the code).
 //   data-presets         (optional) — suggested amounts, comma separated: "100,300,500".
 //   data-default-amount  (optional) — what the field starts at when the URL says nothing.
@@ -38,7 +39,7 @@
 //                                                     native strings.
 //
 // Usage:
-//   <div data-dynamic-coral="sponsor" data-guild-id="123" data-presets="100,300,500"></div>
+//   <div data-dynamic-coral="sponsor" data-guild-id="123" data-currency="USD" data-presets="5,10,25"></div>
 //   <script type="module" src=".../sponsor.js"></script>
 
 /**
@@ -55,6 +56,13 @@
  * So a fallback buys nothing but a 404 that reads as a backend outage to the visitor and as a
  * working block to whoever shipped the page. A mount with no `data-api-base` has nowhere to send
  * the money, which is the same condition as a mount with no seller — and it degrades the same way.
+ *
+ * ── WHICH CURRENCY ──
+ * 🔴 THERE IS NO DEFAULT CURRENCY either, for the same reason. It used to fall back to one
+ * region's currency. The currency is a fact about the SELLER, which this file cannot know, and a
+ * guessed one is worse than a guessed origin: that request does not 404, it succeeds — for an
+ * amount in money the owner never meant. So a mount with no `data-currency` refuses like the two
+ * above and names the attribute.
  */
 
 /** Names the attribute a mount refused over, for whoever has to fix the page. */
@@ -149,7 +157,7 @@ function boundHundredths(value, fallback) {
 }
 
 /**
- * The amount a shared link asks the field to start at — "sponsor me NT$500" as a URL.
+ * The amount a shared link asks the field to start at — "sponsor me $5" as a URL.
  *
  * 🔴 THIS VALUE IS UNTRUSTED, AND IT PREFILLS THE FIELD. NOTHING ELSE.
  * Anyone can write that URL: the visitor, whoever sent them the link, a page that framed it. So it
@@ -255,7 +263,8 @@ function apiBaseFrom(raw) {
 /** Every knob is a data-* attribute on the container. */
 export function readConfig(el) {
   const attr = (name) => el.getAttribute(name);
-  const currency = (attr('data-currency') || 'TWD').trim().toUpperCase();
+  // No fallback: '' when the page names none, and mountSponsor refuses on it. See WHICH CURRENCY.
+  const currency = (attr('data-currency') || '').trim().toUpperCase();
   const bounds = { min: attr('data-min') || DEFAULT_MIN, max: attr('data-max') || DEFAULT_MAX };
   return {
     guildId: attr('data-guild-id'),
@@ -405,11 +414,14 @@ export function mountSponsor(el, deps) {
 
   injectStyles(doc);
 
-  // Two things have to be present before a button can do anything: somebody to receive the money,
-  // and somewhere to ask for the link. Missing either is the same outcome for the visitor and a
-  // DIFFERENT repair for whoever built the page, so the refusal names which one was absent — one
-  // shared "not set up" would send the owner looking at the wrong attribute.
-  const missing = !cfg.guildId ? 'data-guild-id' : !cfg.apiBase ? 'data-api-base' : '';
+  // Three things have to be present before a button can do anything: somebody to receive the money,
+  // somewhere to ask for the link, and the currency the amount is in. Missing any is the same
+  // outcome for the visitor and a DIFFERENT repair for whoever built the page, so the refusal names
+  // which one was absent — one shared "not set up" would send the owner looking at the wrong attribute.
+  const missing = !cfg.guildId ? 'data-guild-id'
+    : !cfg.apiBase ? 'data-api-base'
+    : !cfg.currency ? 'data-currency'
+    : '';
   if (missing) {
     // Honest degrade: say the block is not set up rather than show a button that cannot work.
     el.setAttribute(UNMOUNTED_ATTR, missing);

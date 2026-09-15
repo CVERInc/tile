@@ -12,6 +12,6 @@
   "stores": ["none"],
   "paid": false,
   "funding": null,
-  "without": "requires `checkout`; RSP enforces this by returning 403 with checkout_module_not_activated, which restores the button and shows the coral's configurable not-activated sentence. Without a valid data-api-base, the bundle performs no request and renders its unconnected message; with no feelreef-compatible sponsor endpoint, submission restores the button and shows its configured generic error instead of navigating.",
+  "without": "requires `checkout`; RSP enforces this by returning 403 with checkout_module_not_activated, which restores the button and shows the coral's configurable not-activated sentence. Without a valid data-api-base or a data-currency, the bundle performs no request and renders its unconnected message; with no feelreef-compatible sponsor endpoint, submission restores the button and shows its configured generic error instead of navigating.",
   "capabilities": ["money"]
 }
