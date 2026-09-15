@@ -816,7 +816,10 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
         ONLY relationship layers change is the one this was always about — theme over renderer.
 
         Unlayered still beats every layer, and that is now reserved for what it should always have
-        meant: the deliberate escape hatch, an `embed` coral's <style>. */}
+        meant: coral-owned stylesheets — the deliberate escape hatch of an `embed` coral's <style>,
+        and a dynamic coral's own package CSS (e.g. square-shop/events' Worker-injected first-paint
+        styles and their published stylesheet), which reaches a site's theme only through the
+        `--gd-*` tokens it reads, never through selector overrides. */}
     <style is:inline>@layer reef.base, reef.theme, reef.responsive;</style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
@@ -844,11 +847,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
     {canonicalRedirectParams.length > 0 && (
       <script is:inline define:vars={{ params: canonicalRedirectParams }}>window.__canonicalRedirect = params;</script>
     )}
-    {/* package CSS (bleedblend's .bleedblend-*, signet's locale banner) — in `reef.components`,
-        which sits BELOW reef.theme. The comment here used to say "before the theme so a theme can
-        still tune package surfaces", and being earlier in <head> is exactly what stopped being
-        enough: once the theme moved into a layer, these unlayered sheets outranked it regardless
-        of order or specificity. The intent was always this; the mechanism now matches it. */}
+    {/* package CSS (bleedblend's .bleedblend-*, signet's locale banner) — in `reef.theme`, ordered
+        before the site's own theme below (not the abandoned `reef.components` layer, tried and
+        reverted — see the note above). The comment here used to say "before the theme so a theme
+        can still tune package surfaces", and being earlier in <head> is exactly what stopped being
+        enough: while these sheets were still unlayered, they outranked the theme regardless of
+        order or specificity once the theme itself moved into a layer. The intent was always this;
+        the mechanism now matches it. */}
     {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}
     {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —

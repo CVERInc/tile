@@ -232,11 +232,17 @@ function cartAfterOrder(rawCart, rawSold) {
 function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref) {
 	const data = JSON.stringify({ copy, locale, outcomeUrl, shopPath, storeId, ref: ref || '' }).replace(/</g, '\\u003c');
 	const initial = hasRef ? { heading: copy.pending, body: copy.pendingBody } : { heading: copy.unknown, body: copy.unknownBody };
-	const backLink = hasRef ? '' : `<p><a href="${shopPath}">${copy.back}</a></p>`;
-	return `<h1 id="dc-shop-heading">${initial.heading}</h1>
+	const backLink = hasRef ? '' : `<p><a class="st-runtime-action" href="${shopPath}">${copy.back}</a></p>`;
+	// 🔴 This page's presentation now lives in site.css's `@layer reef.base` ("runtime:
+	// results" sub-block) instead of this unlayered <style> — unlayered CSS always outranked
+	// the site's layered theme. `<h1>` and `<section class="dc-shop-complete">` stay pinned
+	// exact strings (shop-complete.test.mjs), so the inset comes from wrapping both in a
+	// `.st-runtime` div FROM OUTSIDE rather than adding a class to either pinned element.
+	return `<div class="st-runtime">
+<h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
-<style>.dc-shop-complete{max-width:42rem;margin:3rem auto;padding:1.5rem}.dc-shop-complete ul{padding-left:1.25rem}.dc-shop-complete .dc-shop-total{font-weight:700}</style>
-${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const money=(n,c)=>new Intl.NumberFormat(C.locale,{style:'currency',currency:c||'USD'}).format((Number(n)||0)/100);const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(C.outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{const CK='dc-square-shop-cart:'+C.storeId,SK=C.ref?'dc-square-shop-sold:'+C.ref:'',kept=cartAfterOrder(localStorage.getItem(CK),SK?localStorage.getItem(SK):null);if(kept&&kept.length)localStorage.setItem(CK,JSON.stringify(kept));else localStorage.removeItem(CK);if(SK)localStorage.removeItem(SK);window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}const lines=Array.isArray(d.lines)?d.lines:[];root.innerHTML=(lines.length?'<ul>'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
+</div>
+${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const money=(n,c)=>new Intl.NumberFormat(C.locale,{style:'currency',currency:c||'USD'}).format((Number(n)||0)/100);const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(C.outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{const CK='dc-square-shop-cart:'+C.storeId,SK=C.ref?'dc-square-shop-sold:'+C.ref:'',kept=cartAfterOrder(localStorage.getItem(CK),SK?localStorage.getItem(SK):null);if(kept&&kept.length)localStorage.setItem(CK,JSON.stringify(kept));else localStorage.removeItem(CK);if(SK)localStorage.removeItem(SK);window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}const lines=Array.isArray(d.lines)?d.lines:[];root.innerHTML=(lines.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
 }
 
 async function renderCompletion(request, env, cfg, shop, checkoutResult) {
@@ -343,9 +349,9 @@ function planPriceText(plan, copy, locale) {
 // element that replaces the main's contents.
 function buyerPageUnavailableBody(kind, copy) {
 	const marker = kind === 'account' ? 'account' : 'membership';
-	return `<section data-ejecta-${marker}="" data-ejecta-${marker}-state="unavailable">
+	return `<section class="st-runtime" data-ejecta-${marker}="" data-ejecta-${marker}-state="unavailable">
 <h1>${escHtml(marker === 'account' ? copy.account : copy.membership)}</h1>
-<p data-ejecta-${marker}-unavailable="" role="status">${escHtml(copy.unavailable)}</p>
+<p class="st-runtime-status" data-ejecta-${marker}-unavailable="" role="status">${escHtml(copy.unavailable)}</p>
 </section>`;
 }
 
@@ -355,7 +361,7 @@ function buyerPageUnavailableBody(kind, copy) {
 // different things: a permanent refusal must not promise a later retry.
 function buyerPageNotFoundBody(kind, copy) {
 	const marker = kind === 'account' ? 'account' : 'membership';
-	return `<section data-ejecta-${marker}="" data-ejecta-${marker}-route="unavailable">
+	return `<section class="st-runtime" data-ejecta-${marker}="" data-ejecta-${marker}-route="unavailable">
 <h1>${escHtml(copy.notFound)}</h1>
 </section>`;
 }
@@ -369,22 +375,22 @@ function buyerPageNotFoundBody(kind, copy) {
 function membershipPageBody(facts, copy, locale) {
 	const state = facts && facts.state;
 	if (state === 'empty') {
-		return `<section data-ejecta-membership="" data-ejecta-membership-state="empty">
+		return `<section class="st-runtime" data-ejecta-membership="" data-ejecta-membership-state="empty">
 <h1>${escHtml(copy.membership)}</h1>
-<p data-ejecta-membership-empty="" role="status">${escHtml(copy.membershipEmpty)}</p>
+<p class="st-runtime-status" data-ejecta-membership-empty="" role="status">${escHtml(copy.membershipEmpty)}</p>
 </section>`;
 	}
 	const plans = state === 'available' && Array.isArray(facts.plans) ? facts.plans : [];
 	if (plans.length === 0) return null;
-	const cards = plans.map((plan) => `<li class="ejecta-membership-plan">
+	const cards = plans.map((plan) => `<li class="st-cell ejecta-membership-plan">
 <h2>${escHtml(plan.display_name)}</h2>
 <p class="price">${escHtml(planPriceText(plan, copy, locale))}</p>
-<button type="button" data-ejecta-slot="subscribe" data-ejecta-plan="${escHtml(plan.plan_id)}">${escHtml(copy.subscribe)}</button>
+<button type="button" class="st-runtime-action" data-ejecta-slot="subscribe" data-ejecta-plan="${escHtml(plan.plan_id)}">${escHtml(copy.subscribe)}</button>
 </li>`).join('\n');
-	return `<section data-ejecta-membership="" data-ejecta-membership-state="available">
+	return `<section class="st-runtime" data-ejecta-membership="" data-ejecta-membership-state="available">
 <h1>${escHtml(copy.membership)}</h1>
-<p data-ejecta-slot="auth-state" data-ejecta-membership-auth-state="">${escHtml(copy.authState)}</p>
-<ul class="ejecta-membership-plans">
+<p class="st-runtime-status" data-ejecta-slot="auth-state" data-ejecta-membership-auth-state="">${escHtml(copy.authState)}</p>
+<ul class="st-cells st-runtime-list ejecta-membership-plans">
 ${cards}
 </ul>
 </section>`;
@@ -396,14 +402,18 @@ ${cards}
 function accountPageBody(facts, copy) {
 	if (!facts || typeof facts.signed_in !== 'boolean') return null;
 	if (!facts.signed_in) {
-		return `<section data-ejecta-account="" data-ejecta-account-state="logged-out">
+		return `<section class="st-runtime" data-ejecta-account="" data-ejecta-account-state="logged-out">
+<div class="st-form-head">
 <h1>${escHtml(copy.signIn)}</h1>
 <p>${escHtml(copy.signInIntro)}</p>
-<form data-ejecta-slot="auth-request" data-ejecta-account-login-form="">
-<label for="ejecta-account-email">${escHtml(copy.email)}</label>
-<input id="ejecta-account-email" name="email" type="email" required autocomplete="email">
-<button type="submit">${escHtml(copy.sendLink)}</button>
-<p data-ejecta-auth-status="" aria-live="polite" role="status"></p>
+</div>
+<form class="st-form" data-ejecta-slot="auth-request" data-ejecta-account-login-form="">
+<div class="st-form-field">
+<label class="st-form-label" for="ejecta-account-email">${escHtml(copy.email)}</label>
+<input class="st-form-input" id="ejecta-account-email" name="email" type="email" required autocomplete="email">
+</div>
+<button type="submit" class="st-runtime-action">${escHtml(copy.sendLink)}</button>
+<p class="st-runtime-status" data-ejecta-auth-status="" aria-live="polite" role="status"></p>
 </form>
 </section>`;
 	}
@@ -412,16 +422,18 @@ function accountPageBody(facts, copy) {
 	// The change-email entry is NOT one of the gated read sections — it is a submit
 	// slot, unconditional for a signed-in member, exactly as the RSP page emits it.
 	// That is why no facts field declares it and none is asked for.
-	return `<section data-ejecta-account="" data-ejecta-account-state="logged-in">
+	return `<section class="st-runtime" data-ejecta-account="" data-ejecta-account-state="logged-in">
 <h1>${escHtml(copy.account)}</h1>
-<div data-ejecta-account-sections="">
+<div class="st-account-sections" data-ejecta-account-sections="">
 ${sections}
 </div>
-<form data-ejecta-slot="email-change" data-ejecta-account-email-change-form="">
-<label for="ejecta-account-new-email">${escHtml(copy.newEmail)}</label>
-<input id="ejecta-account-new-email" name="email" type="email" required autocomplete="email">
-<button type="submit">${escHtml(copy.sendVerification)}</button>
-<p data-ejecta-email-change-status="" aria-live="polite" role="status"></p>
+<form class="st-form" data-ejecta-slot="email-change" data-ejecta-account-email-change-form="">
+<div class="st-form-field">
+<label class="st-form-label" for="ejecta-account-new-email">${escHtml(copy.newEmail)}</label>
+<input class="st-form-input" id="ejecta-account-new-email" name="email" type="email" required autocomplete="email">
+</div>
+<button type="submit" class="st-runtime-action">${escHtml(copy.sendVerification)}</button>
+<p class="st-runtime-status" data-ejecta-email-change-status="" aria-live="polite" role="status"></p>
 </form>
 </section>`;
 }
@@ -533,9 +545,9 @@ function subscribeResultBody(state, plan, copy, locale) {
 			'<strong>' + escHtml(plan.display_name) + '</strong>' +
 			(hasPrice ? ' — ' + escHtml(planPriceText(plan, copy, locale)) : '') + '</p>\n'
 		: '';
-	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="' + escHtml(state) + '">\n' +
+	return '<section class="st-runtime" data-ejecta-subscribe-result="" data-ejecta-subscribe-state="' + escHtml(state) + '">\n' +
 		'<h1>' + escHtml(copy.subscribeThanks) + '</h1>\n' + planLine +
-		'<p data-ejecta-subscribe-message="" role="status">' +
+		'<p class="st-runtime-status" data-ejecta-subscribe-message="" role="status">' +
 		escHtml(state === 'active' ? copy.subscribeActive : copy.subscribeConfirming) + '</p>\n</section>';
 }
 
@@ -543,18 +555,18 @@ function subscribeResultBody(state, plan, copy, locale) {
 // success and NOT dressed as a transient failure: the buyer is told the page
 // found nothing and given the way back.
 function subscribeResultUnknownBody(copy) {
-	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unknown">\n' +
+	return '<section class="st-runtime" data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unknown">\n' +
 		'<h1>' + escHtml(copy.subscribeUnknown) + '</h1>\n' +
 		'<p>' + escHtml(copy.subscribeUnknownBody) + '</p>\n' +
-		'<p><a href="/">' + escHtml(copy.backHome) + '</a></p>\n</section>';
+		'<p><a class="st-runtime-action" href="/">' + escHtml(copy.backHome) + '</a></p>\n</section>';
 }
 
 // The facts could not be read at all. The heading must not claim a subscription
 // that was never confirmed here, so it is the neutral page title.
 function subscribeResultUnavailableBody(copy) {
-	return '<section data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unavailable">\n' +
+	return '<section class="st-runtime" data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unavailable">\n' +
 		'<h1>' + escHtml(copy.subscribeResultTitle) + '</h1>\n' +
-		'<p data-ejecta-subscribe-unavailable="" role="status">' + escHtml(copy.unavailable) + '</p>\n</section>';
+		'<p class="st-runtime-status" data-ejecta-subscribe-unavailable="" role="status">' + escHtml(copy.unavailable) + '</p>\n</section>';
 }
 
 async function renderSubscribeResult(request, env, cfg, route) {
@@ -767,7 +779,10 @@ function nativeLocale(shell) {
 // need a real authored mount point for native shops first — a sitetile/authoring change, out of
 // this fix's scope. Flagging rather than silently declaring native "done" alongside provider.
 function nativeUnavailable(shell, copy) {
-	return replaceMain(shell, nativeUnavailableBody(copy));
+	// nativeUnavailableBody() itself stays byte-for-byte (it is also nativeUnavailableDocument()'s
+	// pinned exact output, storefront-source-routing.test.mjs) — the runtime inset is added at this
+	// in-shell call site instead, with a non-section DIV wrapper around the pinned body.
+	return replaceMain(shell, `<div class="st-runtime">${nativeUnavailableBody(copy)}</div>`);
 }
 function nativeUnavailableBody(copy) {
 	return `<section data-storefront-source="native" data-storefront-state="unavailable"><h1>${escHtml(copy.unavailable)}</h1><p>${escHtml(copy.unavailableBody)}</p></section>`;
@@ -806,10 +821,19 @@ function nativeCheckoutScript(copy) {
 
 function nativeProductBody(item, shop, copy, locale) {
 	const mapped = nativeCatalogItem(item);
-	if (!mapped) return nativeUnavailableBody(copy);
+	// Same wrap as nativeUnavailable() above — nativeUnavailableBody() itself is untouched.
+	if (!mapped) return `<div class="st-runtime">${nativeUnavailableBody(copy)}</div>`;
 	const itemCopy = item.copy || {};
 	const description = String(itemCopy.description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-	return `<article data-storefront-source="native" class="dc-native-product"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p><h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}${nativeBuyControl(mapped, copy)}<p data-native-status role="status"></p></article>${nativeCheckoutScript(copy)}`;
+	// Neither `dc-native-product`'s class attribute nor the price `<p>` is pinned by an exact string
+	// anywhere in the suite (storefront-source-routing.test.mjs only pins the Buy control, the
+	// unavailable/not-found bodies and the price paragraph's OWN bytes, not this article's class or
+	// its siblings), so `st-runtime`/`st-native-detail` ride straight on the existing root instead
+	// of an extra wrapper element. The Buy button + status stay each other's siblings inside the new
+	// `.st-native-actions` div, which is what nativeCheckoutScript's
+	// `button.parentElement.querySelector('[data-native-status]')` requires — it does not require
+	// that parent to be the `<article>` itself.
+	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p><h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeBuyControl(mapped, copy)}<p data-native-status role="status" class="st-runtime-status"></p></div></article>${nativeCheckoutScript(copy)}`;
 }
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note just above: native has no author
@@ -827,8 +851,12 @@ async function renderNativeGridPage(request, env, cfg, shop) {
 	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
 	const items = Array.isArray(projection.body.items) ? projection.body.items.map(nativeCatalogItem).filter(Boolean) : null;
 	if (!items) return htmlResponse(nativeUnavailable(shell, copy), 503);
-	const cards = items.map((item) => `<article><a href="${escHtml(shop.shopPath + '/' + encodeURIComponent(item.slug || ''))}">${item.image_url ? `<img src="${escHtml(item.image_url)}" alt="${escHtml(item.name)}">` : ''}<h2>${escHtml(item.name)}</h2><p>${escHtml(formatMoney({ minor: item.price_minor, currency: item.currency, locale }))}</p></a>${nativeBuyControl(item, copy)}<p data-native-status role="status"></p></article>`).join('');
-	return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" class="dc-native-grid">${cards || `<p>${escHtml(copy.empty)}</p>`}</section>${nativeCheckoutScript(copy)}`));
+	// `dc-native-grid`'s class attribute, the card `<article>` and `[data-native-status]`'s own class
+	// are not pinned anywhere in the suite (only `data-storefront-source`, the Buy control and the
+	// unavailable/not-found bodies are), so presentation classes ride straight onto the existing
+	// markup instead of a new wrapper.
+	const cards = items.map((item) => `<article class="st-cell st-native-card"><a href="${escHtml(shop.shopPath + '/' + encodeURIComponent(item.slug || ''))}">${item.image_url ? `<img class="st-img" src="${escHtml(item.image_url)}" alt="${escHtml(item.name)}">` : ''}<h2>${escHtml(item.name)}</h2><p>${escHtml(formatMoney({ minor: item.price_minor, currency: item.currency, locale }))}</p></a>${nativeBuyControl(item, copy)}<p data-native-status role="status" class="st-runtime-status"></p></article>`).join('');
+	return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" class="dc-native-grid st-runtime">${cards ? `<div class="st-cells">${cards}</div>` : `<p class="st-runtime-status">${escHtml(copy.empty)}</p>`}</section>${nativeCheckoutScript(copy)}`));
 }
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note above: native has no author
@@ -843,7 +871,10 @@ async function renderNativeProduct(request, env, cfg, match) {
 	const shell = await shellRes.text();
 	const locale = nativeLocale(shell);
 	const copy = NATIVE_COPY[locale];
-	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, `<section data-storefront-source="native" data-storefront-state="not-found"><h1>${escHtml(copy.notFound)}</h1></section>`), 404);
+	// This body's own bytes are not pinned, but the wrapper stays a DIV per the same convention as
+	// nativeUnavailable() above rather than promoting the section to `st-…`, since the generic
+	// section floor keys off a LEADING `st-` class token this section deliberately keeps clear of.
+	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, `<div class="st-runtime"><section data-storefront-source="native" data-storefront-state="not-found"><h1>${escHtml(copy.notFound)}</h1></section></div>`), 404);
 	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
 	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop, copy, locale)));
 }

@@ -247,6 +247,9 @@ ${renderClientScript(labels, locale)}`.trim();
 // back so it looks right on a host that defines no --gd-* tokens. NOT exported: this file is
 // concatenated into the CF Pages _worker.js, and a module worker rejects a non-function named export
 // (the client widget square-shop.js keeps its own identical copy).
+// Deliberately unlayered, like every dynamic coral's own package CSS (see site.css's header
+// comment): a site theme reaches it only through the --gd-* tokens above, never through a
+// selector override.
 const SHOP_GRID_CSS = `
 .dc-square-shop { font-family: inherit; }
 /* CSS Grid, not flex-wrap: auto-fill + minmax(_,1fr) ALWAYS fills the row edge-to-edge (the column
