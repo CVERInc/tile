@@ -38,9 +38,9 @@ try {
 
 	// ── RED: the exact class of mistake 0.11.16 shipped, in three spellings ─────────────────────
 	for (const legacy of [
-		'https://mixfairy-legacy.herokuapp.com',
-		'https://mixfairy-legacy.herokuapp.com/',
-		'http://Mixfairy-Legacy.HerokuApp.Com',
+		'https://legacy-bot.herokuapp.com',
+		'https://legacy-bot.herokuapp.com/',
+		'http://Legacy-Bot.HerokuApp.Com',
 	]) {
 		const registry = join(sandbox, 'red-registry-' + short(legacy));
 		let refused = null;
