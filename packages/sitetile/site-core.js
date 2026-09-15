@@ -1180,11 +1180,11 @@ function renderList(items) {
 // list only with corroboration — the item's text is a link, or a second item follows it — those
 // being the two shapes a real numbered list takes and a sentence does not.
 const RE_TURN_HEAD = /^\*\*([^*\n]{1,24}?)\*\*(?:\s*[·:]\s*(.+?))?\s*$/;
-// 🩸 sodaart, 2026-09-11 — an interview post written as one quote block per question:
+// 🩸 a customer site, 2026-09-11 — an interview post written as one quote block per question:
 //
-//     > **SODAART：哪一堂課讓你印象最深刻？**
+//     > **SPEAKER：哪一堂課讓你印象最深刻？**
 //     >
-//     > **摩卡麵包：** 第二週吧。……
+//     > **受訪者乙：** 第二週吧。……
 //
 // The cap above counts UTF-16 units, and it was calibrated on Latin names: 24 units is a name in
 // English and a whole sentence in Chinese or Japanese. Four of that post's fourteen questions fit

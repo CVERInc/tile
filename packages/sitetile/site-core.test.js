@@ -526,18 +526,18 @@ test('dialogue: a turn and a quotation in the same run keep their own shapes and
   assert.ok(html.includes('st-dialogue') && html.includes('st-quote'), 'both shapes present');
 });
 
-// 🩸 sodaart 2026-09-11 — an interview written one quote block per question, `**SODAART：question**`
-// over `**摩卡麵包：** answer`. Four of fourteen questions fit under 24 UTF-16 units and became
+// 🩸 a customer site 2026-09-11 — an interview written one quote block per question, `**SPEAKER：question**`
+// over `**受訪者乙：** answer`. Four of fourteen questions fit under 24 UTF-16 units and became
 // "speakers"; the other ten stayed quotations, on the same page. Two rules came out of it.
 test('dialogue: the name cap is a display width — a CJK sentence under 24 units is still not a name', () => {
-  // 20 units, 33 columns: SODAART (7) + 13 wide characters.
-  const q = dlg('> **SODAART：哪一堂課讓你印象最深刻？**\n> 第二週吧。');
+  // 20 units, 33 columns: SPEAKER (7) + 13 wide characters.
+  const q = dlg('> **SPEAKER：哪一堂課讓你印象最深刻？**\n> 第二週吧。');
   assert.ok(q.includes('<blockquote class="st-quote">'), 'a question in a wide script is a quotation');
   assert.ok(!q.includes('st-dialogue'), 'not a dialogue');
   // 8 columns: a real CJK name still speaks.
-  const n = dlg('> **摩卡麵包**\n> 第二週吧。');
+  const n = dlg('> **受訪者乙**\n> 第二週吧。');
   assert.ok(n.includes('<div class="st-dialogue">'), 'a four-character CJK name is a speaker');
-  assert.ok(/st-turn-name">摩卡麵包</.test(n), 'the name is the label');
+  assert.ok(/st-turn-name">受訪者乙</.test(n), 'the name is the label');
   // 12 wide characters = exactly 24 columns: at the limit, still a name.
   const atCap = dlg('> **' + '名'.repeat(12) + '**\n> 台詞。');
   assert.ok(atCap.includes('st-dialogue'), '24 columns of CJK is still under the cap');
@@ -555,7 +555,7 @@ test('dialogue: a run where a bold-headed block is NOT a turn is a Q&A list — 
   assert.equal((html.match(/<blockquote class="st-quote">/g) || []).length, 2, 'both blocks are quotations');
   // The interview itself, in miniature: heads that are questions in a wide script never pass the
   // width cap, so nothing here is a turn to begin with — but the rule must not re-promote them.
-  const iv = dlg('> **SODAART：哪一堂課讓你印象最深刻？**\n>\n> **摩卡麵包：** 第二週吧。\n\n> **SODAART：你最喜歡做哪個部位的建模？**\n>\n> **摩卡麵包：** 五官表情。');
+  const iv = dlg('> **SPEAKER：哪一堂課讓你印象最深刻？**\n>\n> **受訪者乙：** 第二週吧。\n\n> **SPEAKER：你最喜歡做哪個部位的建模？**\n>\n> **受訪者乙：** 五官表情。');
   assert.ok(!iv.includes('st-dialogue'));
   assert.equal((iv.match(/<blockquote class="st-quote">/g) || []).length, 2);
   // …while a turn beside an ORDINARY quotation (no bold head) is still allowed to mix — that shape
@@ -565,14 +565,14 @@ test('dialogue: a run where a bold-headed block is NOT a turn is a Q&A list — 
 });
 
 test('quoteRunReport: says, per run, what would be bubbles and what would not — from the same rule the renderer applies', () => {
-  const body = '## R\n\n> **SODAART**\n> 哪一堂課？\n\n> **摩卡麵包**\n> 第二週吧。\n\nprose\n\n'
+  const body = '## R\n\n> **SPEAKER**\n> 哪一堂課？\n\n> **受訪者乙**\n> 第二週吧。\n\nprose\n\n'
     + '> **Q**\n> short\n\n> **A question that runs well past the twenty-four character cap**\n> answer\n\n'
     + 'more prose\n\n'
     + '> Just a quotation.';
   const runs = quoteRunReport(body);
   assert.equal(runs.length, 3, 'three runs: the exchange, the Q&A list, the lone quotation');
   assert.deepEqual({ blocks: runs[0].blocks, turns: runs[0].turns, dialogue: runs[0].dialogue, demoted: runs[0].demoted, names: runs[0].names },
-    { blocks: 2, turns: 2, dialogue: true, demoted: false, names: ['SODAART', '摩卡麵包'] });
+    { blocks: 2, turns: 2, dialogue: true, demoted: false, names: ['SPEAKER', '受訪者乙'] });
   assert.deepEqual({ blocks: runs[1].blocks, turns: runs[1].turns, boldHeaded: runs[1].boldHeaded, dialogue: runs[1].dialogue, demoted: runs[1].demoted },
     { blocks: 2, turns: 0, boldHeaded: 2, dialogue: false, demoted: true });
   assert.equal(runs[1].line, 11, '1-based line of the run');
