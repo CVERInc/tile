@@ -1269,6 +1269,246 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
    yet (see the required-marker note above), so a plain accessible red carries it alone. */
 .st-form-error { margin: 0; color: #c0392b; font-size: .95rem; }
 
+/* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (CVERInc/reef#47) ──────────
+   A generated site's shell/theme/tokens stay presentation authority for the WHOLE visible page,
+   including runtime-composed bodies — pages assembled at request time, whether server-rendered or
+   filled in by a client-side island, inside that shell — native storefront, /membership, /account,
+   /shop/complete, /checkout/success, /subscribe/success. These runtime surfaces are not a second
+   design system: they reuse the same `--gd-*` tokens and `st-*` primitives the build-time renderer
+   already ships, so a site's theme overrides them exactly the way it overrides any other page — by
+   @layer order (reef.theme is declared after reef.base; see the file header). Behavioral hooks
+   (data-*, dc-*, ejecta-*, and ids a script/island locates elements by) are a SEPARATE
+   responsibility and stay out of this region entirely: it only ever adds a class and, where a hook
+   cannot be touched at all, reads one in a selector — it never renames one to carry a look.
+
+   Placed HERE, before the BORN PAINT divider below, and deliberately NOT gated on
+   [data-theme-custom]: no hand-rolled theme could already style hooks these runtime surfaces are
+   only now starting to carry, so gating would just exempt the sites the gap actually affects — the
+   same reasoning .st-notfound and .st-cta-arrow above already use, and exactly the escape hatch the
+   BORN PAINT header below names ("gate it the same way — or prove no live theme has that DOM").
+   Living before that divider, instead of ungated inside it, is what keeps this section's own
+   "EVERY rule below is gated, no exceptions" pin true without contradicting it — and what
+   runtime-presentation.test.mjs independently pins for four of these selectors already (a reef-side
+   drift guard flagged this whole family as ungated born paint; the fix is where they live, not
+   whether they are gated — see that test's own header for the specificity reasoning).
+
+   Specificity is deliberately mixed here, not uniform. `.st-runtime`, its nested-section reset, and
+   `.st-account-sections` are CONTAINERS — pure box-model floors — and stay `:where()`, zero
+   specificity, same as the generic section floor they mirror: a container must never win a fight,
+   only lose one gracefully. `.st-runtime-action`, `.st-runtime-status` and `.st-runtime-list` are
+   COMPONENTS with real look, and are plain single-class selectors instead, matching
+   `.st-form-submit` / `.st-cta-btn` / `.st-hero-cta` above. This file already carries a bare-element
+   rule one of them must outrank in this same layer — `a { color: var(--gd-accent) }` (this file,
+   near the top) — and a `:where(.foo)` selector collapses to zero specificity, which LOSES to that
+   bare `a` (0,0,1) on an `<a class="st-runtime-action">`, painting it accent-on-accent instead of
+   the intended fill. A plain `.st-runtime-action` is (0,1,0) and beats `a` the ordinary way — the
+   same reason `.st-cta-btn`, which also styles an `<a>`, was never wrapped in `:where()` either.
+   (Grepped reef.base for every bare element rule under a, p, ul, li, button, input, h1, h2, form,
+   label: only `a` and `img` exist; `img` does not intersect anything below.)
+
+   `.st-account-sections` and its descendants (form/label/input/button/[aria-live]) are grouped here
+   too, not split across the divider: two of its rules (`:where(.st-account-sections) button` and
+   `:where(.st-account-sections) button + a`) are pinned EXACT selector strings by
+   runtime-presentation.test.mjs, so this whole subtree stays together, ungated, rather than half
+   inside the born-paint gate and half out. `.st-native-card`, `.st-native-detail`,
+   `.st-native-actions` and the result headings carry no such pin — those live below, inside the
+   BORN PAINT section, gated like every other rule there. */
+
+:where(.st-runtime) {
+  max-width: var(--gd-maxw);
+  margin-inline: auto;
+  padding: 2.5rem clamp(1rem, 4vw, 3rem);
+}
+/* A DIV, not another `st-` section: several runtime roots are pinned exact strings by existing
+   tests (the completion page's `<section class="dc-shop-complete">`, native's
+   `class="dc-native-grid"` / `"dc-native-product"`), so adding an `st-` class to the root itself —
+   or promoting an `<article>` to a `<section>` — would mean editing an assertion this file must
+   not touch. `.st-runtime` wraps such a pinned root from OUTSIDE it instead, giving the runtime
+   surface the same inset the generic section floor above gives every other page without any of
+   its own markup changing. If a runtime body also composes its own `<section class="st-…">`
+   inside a `.st-runtime` wrapper, that inner section would ALSO match the generic floor and double
+   the inset (padded and centered twice) — the reset right below exists for exactly that case, so
+   each runtime surface therefore gets the reset without repeating it in its own markup. */
+:where(.st-runtime section[class^="st-"]) {
+  max-width: none;
+  margin-inline: 0;
+  padding: 0;
+}
+
+/* Neutral status/notice text — native buy status, membership/account/subscribe `role="status"`
+   feedback. Muted, not a warning colour: no new status-color semantics belong in this file (a
+   `.st-form-error`-style red stays reserved for what already uses it). Most of these elements
+   start EMPTY — runtime renders the hook, an island or script fills the text later — so the
+   `:empty` rule cancels the spacing rule's own margin: an unfilled status node reserves no visible
+   box instead of showing as a blank gap before any state exists. */
+.st-runtime-status {
+  color: var(--gd-muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+.st-runtime-status:empty {
+  margin: 0;
+}
+/* Scoped override for the native-storefront actions row (`.st-native-actions`, gated, in the BORN
+   PAINT section below): Buy and its status line sit inline instead of stacking with top margin.
+   Kept here, ungated, beside its base rule — this whole family stays together (see the section
+   header above). */
+.st-native-actions .st-runtime-status { margin: 0; }
+
+/* Primary action for a runtime-composed control, on either a <button> or an <a> — native Buy,
+   membership/account submit, subscribe/manage actions. Composes the exact declarations
+   `.st-form-submit` (button) and `.st-cta-btn` / `.st-hero-cta` (anchor) above already use — same
+   --gd-btn-fill fill, --gd-accent-ink text, --gd-btn-radius shape, inherited font — so a runtime
+   action reads as the SAME primary control a build-time page already has, not a second look.
+   `align-self: flex-start` is the same reason `.st-form-submit` sets it: `.st-form` above is a
+   flex column, so an item with no align-self stretches to the column's full cross-axis width by
+   default. Without this, a `.st-runtime-action` submit placed inside `.st-form` (account sign-in
+   and email-change forms) stretched edge-to-edge instead of sizing to its own label like every
+   other primary control in this file. Harmless where `.st-runtime-action` is not a flex item (the
+   native/membership/results usages below) — align-self only has an effect inside a flex or grid
+   container. */
+.st-runtime-action {
+  align-self: flex-start;
+  display: inline-block; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
+  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
+  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .7rem 1.4rem;
+}
+/* Not wrapped in `:where()` — see the region header: a plain class must outrank this file's own
+   bare `a { color: var(--gd-accent) }` rule so an `<a class="st-runtime-action">` gets the button
+   fill/ink pair above instead of accent text on accent fill. */
+.st-runtime-action:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
+/* `.st-form-submit` has no `:focus-visible` of its own — this rule does not inherit that gap.
+   Token-driven, so the ring reads on every theme instead of falling back to the browser's default
+   focus ring against this control's own fill colour. */
+.st-runtime-action:focus-visible {
+  outline: 2px solid var(--gd-accent); outline-offset: 2px;
+}
+/* `:disabled` covers a real `<button disabled>` (native sold-out / conflict); `[aria-disabled="true"]`
+   covers an `<a>`, which has no native disabled state, for the same visual affordance. */
+.st-runtime-action:disabled, .st-runtime-action[aria-disabled="true"] {
+  opacity: .6; cursor: not-allowed;
+}
+
+/* List reset for a runtime-composed card list (membership plans, and any other list a runtime
+   body wraps in .st-cells) — .st-cells above is a grid+gap floor only; it deliberately does not
+   reset list-style/padding (an <ul class="st-cells"> keeps its markers/padding today, per
+   section-inset.test.mjs), so a runtime list carries this class alongside st-cells/st-cell rather
+   than duplicating the grid rule under a new name. */
+.st-runtime-list {
+  list-style: none; margin: 0; padding: 0;
+}
+
+/* `.dc-native-buy` IS pinned exact-string markup — storefront-source-routing.test.mjs pins both
+   `class="dc-native-buy" data-native-sku="…"` and `class="dc-native-buy" disabled>…` — so no
+   second class token may ride in that attribute; a low-specificity selector reads the existing
+   hook directly instead. Scoped under `.st-runtime` (both the grid section and the product
+   article carry it) so this can never reach an unrelated `.dc-native-buy` outside a runtime
+   surface. Declarations mirror `.st-runtime-action` above rather than adding this selector to
+   that rule's own list, since the two are separate hooks with separate pinning constraints. */
+.st-runtime :where(.dc-native-buy) {
+  display: inline-block; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
+  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
+  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .7rem 1.4rem;
+}
+.st-runtime :where(.dc-native-buy):hover { background: var(--gd-accent-deep, var(--gd-accent)); }
+.st-runtime :where(.dc-native-buy):focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
+/* Sold-out (no data-native-sku, disabled from render) and conflict-disabled (has a sku, disabled by
+   the client script after a 409) deliberately share this ONE disabled look: no new status-color
+   axis belongs here. They are still told apart: the button's own label differs ("Unavailable" vs
+   "Buy now"/re-enabled), and conflict additionally fills the neutral `.st-runtime-status` line the
+   sold-out path never touches. */
+.st-runtime :where(.dc-native-buy):disabled { opacity: .6; cursor: not-allowed; }
+
+/* Account's signed-in sections (orders/membership/profile/contact/discord) are only STAMPED by
+   this repo (accountPageBody, the empty `[data-ejecta-account-section]` divs); their INSIDES are
+   filled by the client-side account island (its renderAccountSection and friends), which builds
+   plain DOM with no class — the island cannot see this repo's `st-*` vocabulary, and giving it one
+   is an island contract change outside this renderer (do not invent a class there).
+   `.st-account-sections` is the one class
+   this repo DOES own on that subtree (the wrapping div this template emits) — a :where()-wrapped
+   CONTAINER, so it never has to fight a theme — and the rules below reach the island's bare
+   elements through it via plain-element/attribute descendant selectors, at the same low
+   specificity a bare element rule would have, so a theme's own `button{}`/`input{}` (or anything
+   more specific) still wins by layer order the ordinary way. */
+:where(.st-account-sections) {
+  display: flex; flex-direction: column; gap: 1.25rem; margin-top: 1rem;
+}
+/* Bounded block per signed-in account section — same
+   surface/border/radius tokens `.st-cell` uses, written directly rather than by reusing that
+   class, because `.st-cell p` (above) would otherwise also catch the island's OWN nested
+   `<p>` elements (the membership summary, the manage/contact status lines) at a HIGHER
+   specificity than a descendant rule scoped under `.st-account-sections` could cleanly beat. */
+:where(.st-account-sections) > [data-ejecta-account-section] {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-surface);
+}
+/* Orders renders as ONE textContent write, `\n`-joined (the account island's renderOrdersSection) — no
+   element per line exists to hang a class on, so the line break itself has to render. */
+:where(.st-account-sections) > [data-ejecta-account-section="orders"] {
+  white-space: pre-line;
+}
+/* The contact form (the account island's buildContactForm) and the membership "Manage Subscription" control
+   are both createElement()'d with no class. */
+:where(.st-account-sections) form {
+  display: flex; flex-direction: column; gap: var(--gd-gap, 1rem); margin-top: .5rem;
+}
+:where(.st-account-sections) label {
+  display: flex; flex-direction: column; gap: .3rem; font-weight: 600; color: var(--gd-head); font-size: .95rem;
+}
+:where(.st-account-sections) input {
+  font: inherit; color: var(--gd-text); background: var(--gd-bg);
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
+  padding: .6rem .8rem; width: 100%; box-sizing: border-box;
+}
+:where(.st-account-sections) input:focus { outline: 2px solid var(--gd-accent); outline-offset: 1px; border-color: var(--gd-accent); }
+/* Same primary-action tokens `.st-runtime-action` uses above (manage-subscription, connect-discord
+   — both plain `<button type="button">`, no class) — includes :focus-visible and :disabled (no new
+   status-color axis); `handleManageSubscriptionClick` sets the native `disabled` attribute while
+   in flight. `align-self: flex-start` for the same reason `.st-runtime-action` above sets it: the
+   contact form's submit button (the account island's buildContactForm) is a direct child of the `form` rule
+   just above, which is a flex column — without this the button stretched to the form's full width
+   instead of sizing to its own label. Harmless on manage-subscription/connect-discord, whose
+   parent `<div>` is not a flex container. */
+:where(.st-account-sections) button {
+  align-self: flex-start;
+  display: inline-block; font: inherit; font-weight: 700; cursor: pointer;
+  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
+  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .6rem 1.3rem; margin-top: .5rem;
+}
+:where(.st-account-sections) button:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
+:where(.st-account-sections) button:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
+:where(.st-account-sections) button:disabled { opacity: .6; cursor: not-allowed; }
+/* Discord section (the account island's renderDiscordSection): the connect button and the "join the
+   server" link are appended as immediate siblings inside one unclassed `<div>`, with no wrapper
+   this repo can put a gap-bearing class on — giving the island one is an island contract
+   change out of scope here (same constraint the region header above already states). A plain
+   adjacency selector reaches the pair without touching the membership section's own unclassed
+   `<div>` (summary paragraph, Manage button, status paragraph — no button-then-anchor pair
+   there), the only other bare `<div>` this container wraps. */
+:where(.st-account-sections) button + a {
+  margin-inline-start: 1rem;
+}
+/* Manage/contact status lines (`[data-ejecta-account-manage-status]`, `[data-ejecta-account-contact-status]`)
+   are the only `[aria-live]` nodes the island puts under this container — reached without naming
+   either one by name, same neutral look `.st-runtime-status` gives this repo's OWN status hooks
+   above, `:empty` included so an unfilled status reserves no box before the island answers. */
+:where(.st-account-sections) [aria-live] {
+  color: var(--gd-muted); font-size: .9rem; margin: .5rem 0 0;
+}
+:where(.st-account-sections) [aria-live]:empty {
+  margin: 0;
+}
+
+/* `.dc-shop-total` is an existing (unrenamed) hook, not pinned by any assertion, but its
+   look is read back in from outside via a :where() selector scoped under the `.st-runtime`
+   wrapper above rather than adding a class to it — the same "read a hook in a selector"
+   shape used above for markup that IS pinned, chosen here too for the smallest
+   possible diff against the completion page's own removed unlayered <style>, which carried
+   this exact declaration. (Its sibling `ul{padding-left:1.25rem}` declaration is dropped
+   instead of ported: the emitted script's purchased-line `<ul>` now carries `class="st-list"`
+   — the existing list primitive, `.st-list` above in this file — which already covers it.) */
+:where(.st-runtime .dc-shop-complete .dc-shop-total) { font-weight: 700; }
+
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    THEME TREATMENT AXES
    ────────────────────────────────────────────────────────────────────────────────────────────
@@ -1489,114 +1729,16 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
 }
 :where(body:not([data-theme-custom])) .st-cell-badge[data-badge="live"] { background: color-mix(in srgb, #2e9b5b 14%, transparent); color: #2e9b5b; }
 
-/* ── runtime-composed presentation (site-owned buyer/member surfaces) ────────────────────────────
-   A generated site's shell/theme/tokens stay presentation authority for the WHOLE visible page,
-   including runtime-composed bodies — pages assembled at request time, whether server-rendered or
-   filled in by a client-side island, inside that shell — native storefront, /membership, /account,
-   /shop/complete, /checkout/success, /subscribe/success. These runtime surfaces are not a second
-   design system: they reuse the same
-   `--gd-*` tokens and `st-*` primitives the build-time renderer already ships, so a site's theme
-   overrides them exactly the way it overrides any other page — by @layer order (reef.theme is
-   declared after reef.base; see the file header). Behavioral hooks (data-*, dc-*, ejecta-*, and
-   ids a script/island locates elements by) are a SEPARATE responsibility and stay out of this
-   region entirely: it only ever adds a class and, where a hook cannot be touched at all, reads one
-   in a selector — it never renames one to carry a look. Nothing below is gated on
-   [data-theme-custom]: no hand-rolled theme could already style hooks these runtime surfaces are
-   only now starting to carry, so gating would just exempt the sites the gap actually affects (the
-   same reasoning .st-notfound and .st-faq above already use).
-
-   Specificity is deliberately mixed here, not uniform. `.st-runtime` and its nested-section reset
-   are CONTAINERS — pure box-model floors — and stay `:where()`, zero specificity, same as the
-   generic section floor they mirror: a container must never win a fight, only lose one gracefully.
-   `.st-runtime-action`, `.st-runtime-status` and `.st-runtime-list` are COMPONENTS with real look,
-   and are plain single-class selectors instead, matching `.st-form-submit` / `.st-cta-btn` /
-   `.st-hero-cta` above. This file already carries a bare-element rule one of them must outrank in
-   this same layer — `a { color: var(--gd-accent) }` (this file, near the top) — and a
-   `:where(.foo)` selector collapses to zero specificity, which LOSES to that bare `a` (0,0,1) on
-   an `<a class="st-runtime-action">`, painting it accent-on-accent instead of the intended fill.
-   A plain `.st-runtime-action` is (0,1,0) and beats `a` the ordinary way — the same reason
-   `.st-cta-btn`, which also styles an `<a>`, was never wrapped in `:where()` either. (Grepped
-   reef.base for every bare element rule under a, p, ul, li, button, input, h1, h2, form, label:
-   only `a` and `img` exist; `img` does not intersect anything below.) */
-
-:where(.st-runtime) {
-  max-width: var(--gd-maxw);
-  margin-inline: auto;
-  padding: 2.5rem clamp(1rem, 4vw, 3rem);
-}
-/* A DIV, not another `st-` section: several runtime roots are pinned exact strings by existing
-   tests (the completion page's `<section class="dc-shop-complete">`, native's
-   `class="dc-native-grid"` / `"dc-native-product"`), so adding an `st-` class to the root itself —
-   or promoting an `<article>` to a `<section>` — would mean editing an assertion this file must
-   not touch. `.st-runtime` wraps such a pinned root from OUTSIDE it instead, giving the runtime
-   surface the same inset the generic section floor above gives every other page without any of
-   its own markup changing. If a runtime body also composes its own `<section class="st-…">`
-   inside a `.st-runtime` wrapper, that inner section would ALSO match the generic floor and double
-   the inset (padded and centered twice) — the reset right below exists for exactly that case, so
-   each runtime surface therefore gets the reset without repeating it in its own markup. */
-:where(.st-runtime section[class^="st-"]) {
-  max-width: none;
-  margin-inline: 0;
-  padding: 0;
-}
-
-/* Neutral status/notice text — native buy status, membership/account/subscribe `role="status"`
-   feedback. Muted, not a warning colour: no new status-color semantics belong in this file (a
-   `.st-form-error`-style red stays reserved for what already uses it). Most of these elements
-   start EMPTY — runtime renders the hook, an island or script fills the text later — so the
-   `:empty` rule cancels the spacing rule's own margin: an unfilled status node reserves no visible
-   box instead of showing as a blank gap before any state exists. */
-.st-runtime-status {
-  color: var(--gd-muted);
-  font-size: 0.9rem;
-  margin: 0.5rem 0 0;
-}
-.st-runtime-status:empty {
-  margin: 0;
-}
-
-/* Primary action for a runtime-composed control, on either a <button> or an <a> — native Buy,
-   membership/account submit, subscribe/manage actions. Composes the exact declarations
-   `.st-form-submit` (button) and `.st-cta-btn` / `.st-hero-cta` (anchor) above already use — same
-   --gd-btn-fill fill, --gd-accent-ink text, --gd-btn-radius shape, inherited font — so a runtime
-   action reads as the SAME primary control a build-time page already has, not a second look.
-   `align-self: flex-start` is the same reason `.st-form-submit` sets it: `.st-form` above is a
-   flex column, so an item with no align-self stretches to the column's full cross-axis width by
-   default. Without this, a `.st-runtime-action` submit placed inside `.st-form` (account sign-in
-   and email-change forms) stretched edge-to-edge instead of sizing to its own label like every
-   other primary control in this file. Harmless where `.st-runtime-action` is not a flex item (the
-   native/membership/results usages below) — align-self only has an effect inside a flex or grid
-   container. */
-.st-runtime-action {
-  align-self: flex-start;
-  display: inline-block; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
-  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
-  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .7rem 1.4rem;
-}
-/* Not wrapped in `:where()` — see the region header: a plain class must outrank this file's own
-   bare `a { color: var(--gd-accent) }` rule so an `<a class="st-runtime-action">` gets the button
-   fill/ink pair above instead of accent text on accent fill. */
-.st-runtime-action:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
-/* `.st-form-submit` has no `:focus-visible` of its own — this rule does not inherit that gap.
-   Token-driven, so the ring reads on every theme instead of falling back to the browser's default
-   focus ring against this control's own fill colour. */
-.st-runtime-action:focus-visible {
-  outline: 2px solid var(--gd-accent); outline-offset: 2px;
-}
-/* `:disabled` covers a real `<button disabled>` (native sold-out / conflict); `[aria-disabled="true"]`
-   covers an `<a>`, which has no native disabled state, for the same visual affordance. */
-.st-runtime-action:disabled, .st-runtime-action[aria-disabled="true"] {
-  opacity: .6; cursor: not-allowed;
-}
-
-/* List reset for a runtime-composed card list (membership plans, and any other list a runtime
-   body wraps in .st-cells) — .st-cells above is a grid+gap floor only; it deliberately does not
-   reset list-style/padding (an <ul class="st-cells"> keeps its markers/padding today, per
-   section-inset.test.mjs), so a runtime list carries this class alongside st-cells/st-cell rather
-   than duplicating the grid rule under a new name. */
-.st-runtime-list {
-  list-style: none; margin: 0; padding: 0;
-}
+/* ── runtime-composed presentation: native storefront + results (site-owned, gated) ───────────────
+   The container/component primitives this markup rests on (.st-runtime, .st-runtime-action/-status/
+   -list, .dc-native-buy, .st-account-sections and its descendants, .dc-shop-total) are deliberately
+   NEVER gated on [data-theme-custom] — see the "NEVER gated" section earlier in this file, before
+   the THEME TREATMENT AXES banner, for why and for the pin that keeps them there.
+   Everything below IS gated, same as every other rule in this BORN PAINT section: real card/detail/
+   heading LOOK, no different in kind from .st-collection-head or .st-item-head above, so it follows
+   this section's ordinary rule rather than the exception those primitives use (CVERInc/reef#47 — a
+   drift guard on this region's first pass found these ungated, which would out-specify a themed
+   site's own CSS). */
 
 /* ── runtime: native storefront ──────────────────────────────────────────────────────────────── */
 
@@ -1609,140 +1751,40 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
 
 /* Listing card: an <article> inside `.st-cells`, so it also carries `.st-cell` (site.css above) for
    the surface/border/radius look every other card grid already has. */
-.st-native-card { display: flex; flex-direction: column; gap: 0.35rem; }
-.st-native-card a { display: block; text-decoration: none; color: inherit; }
-.st-native-card .st-img { aspect-ratio: 1; object-fit: cover; border-radius: var(--gd-radius); margin-bottom: 0.5rem; }
+:where(body:not([data-theme-custom])) .st-native-card { display: flex; flex-direction: column; gap: 0.35rem; }
+:where(body:not([data-theme-custom])) .st-native-card a { display: block; text-decoration: none; color: inherit; }
+:where(body:not([data-theme-custom])) .st-native-card .st-img { aspect-ratio: 1; object-fit: cover; border-radius: var(--gd-radius); margin-bottom: 0.5rem; }
 /* `.st-cell h3` (above) skins a level this template never emits — the card heading here is an
    <h2> — so without this the name would fall through to the bare, unsized UA/heading-weight-only
    rule on a themed site. Mirrors `.st-cell h3` at the same size rather than inventing a new scale. */
-.st-native-card h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+:where(body:not([data-theme-custom])) .st-native-card h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
 /* `.st-cell p` (above) mutes every paragraph in a card — right for a caption, wrong for the number
    a buyer is deciding on. The price is the only bare <p> left inside the card's <a> once the image
    above takes the figure slot (the name is an h2, not a p), so this reaches it without a class ever
    landing on the pinned price element itself. */
-.st-native-card a p { color: var(--gd-text); font-weight: 700; }
+:where(body:not([data-theme-custom])) .st-native-card a p { color: var(--gd-text); font-weight: 700; }
 
 /* Detail: a single reading-width column, the same shape a provider product page's own unlayered
    `.dc-pp-wrap` already uses (product-page-core.js renderStyles()) — bounded media, then info. */
-.st-native-detail { display: flex; flex-direction: column; gap: 0.75rem; }
-.st-native-detail h1 { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem); line-height: 1.15; }
-.st-native-detail .st-img {
+:where(body:not([data-theme-custom])) .st-native-detail { display: flex; flex-direction: column; gap: 0.75rem; }
+:where(body:not([data-theme-custom])) .st-native-detail h1 { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem); line-height: 1.15; }
+:where(body:not([data-theme-custom])) .st-native-detail .st-img {
   max-width: min(100%, 28rem); aspect-ratio: 1; object-fit: contain;
   border-radius: var(--gd-radius); background: var(--gd-surface);
 }
 /* Buy + its status line stay grouped and inline-aligned instead of two full-width stacked blocks;
    they are still direct DOM siblings (nativeCheckoutScript's `button.parentElement.querySelector`
-   still finds status inside this div). */
-.st-native-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
-.st-native-actions .st-runtime-status { margin: 0; }
-
-/* `.dc-native-buy` IS pinned exact-string markup — storefront-source-routing.test.mjs pins both
-   `class="dc-native-buy" data-native-sku="…"` and `class="dc-native-buy" disabled>…` — so no
-   second class token may ride in that attribute; a low-specificity selector reads the existing
-   hook directly instead. Scoped under `.st-runtime` (both the grid section and the product
-   article carry it) so this can never reach an unrelated `.dc-native-buy` outside a runtime
-   surface. Declarations mirror `.st-runtime-action` above rather than adding this selector to
-   that rule's own list, since the two are separate hooks with separate pinning constraints. */
-.st-runtime :where(.dc-native-buy) {
-  display: inline-block; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
-  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
-  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .7rem 1.4rem;
-}
-.st-runtime :where(.dc-native-buy):hover { background: var(--gd-accent-deep, var(--gd-accent)); }
-.st-runtime :where(.dc-native-buy):focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
-/* Sold-out (no data-native-sku, disabled from render) and conflict-disabled (has a sku, disabled by
-   the client script after a 409) deliberately share this ONE disabled look: no new status-color
-   axis belongs here. They are still told apart: the button's own label differs ("Unavailable" vs
-   "Buy now"/re-enabled), and conflict additionally fills the neutral `.st-runtime-status` line the
-   sold-out path never touches. */
-.st-runtime :where(.dc-native-buy):disabled { opacity: .6; cursor: not-allowed; }
+   still finds status inside this div). The `.st-runtime-status` override for this context lives
+   with its own base rule, ungated, in the "NEVER gated" section above. */
+:where(body:not([data-theme-custom])) .st-native-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
 
 /* ── runtime: membership + account ───────────────────────────────────────────────────────────── */
 
-/* Membership plan cards reuse the existing card grid (.st-cells/.st-cell) and the shared
+/* Membership plan cards reuse the existing card grid (.st-cells/.st-cell) and the shared, ungated
    .st-runtime-list reset exactly as those rules' own comments already describe: no new card look
    is declared here. Plan name (bare h2) and price (existing `.price`, unstyled) are left as
-   inherited text — no new token for them. */
-
-/* Account's signed-in sections (orders/membership/profile/contact/discord) are only STAMPED by
-   this repo (accountPageBody, the empty `[data-ejecta-account-section]` divs); their INSIDES are
-   filled by the client-side account island (its renderAccountSection and friends), which builds
-   plain DOM with no class — the island cannot see this repo's `st-*` vocabulary, and giving it one
-   is an island contract change outside this renderer (do not invent a class there).
-   `.st-account-sections` is the one class
-   this repo DOES own on that subtree (the wrapping div this template emits) — a :where()-wrapped
-   CONTAINER, so it never has to fight a theme — and the rules below reach the island's bare
-   elements through it via plain-element/attribute descendant selectors, at the same low
-   specificity a bare element rule would have, so a theme's own `button{}`/`input{}` (or anything
-   more specific) still wins by layer order the ordinary way. */
-:where(.st-account-sections) {
-  display: flex; flex-direction: column; gap: 1.25rem; margin-top: 1rem;
-}
-/* Bounded block per signed-in account section — same
-   surface/border/radius tokens `.st-cell` uses, written directly rather than by reusing that
-   class, because `.st-cell p` (above) would otherwise also catch the island's OWN nested
-   `<p>` elements (the membership summary, the manage/contact status lines) at a HIGHER
-   specificity than a descendant rule scoped under `.st-account-sections` could cleanly beat. */
-:where(.st-account-sections) > [data-ejecta-account-section] {
-  padding: 1rem 1.25rem;
-  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-surface);
-}
-/* Orders renders as ONE textContent write, `\n`-joined (the account island's renderOrdersSection) — no
-   element per line exists to hang a class on, so the line break itself has to render. */
-:where(.st-account-sections) > [data-ejecta-account-section="orders"] {
-  white-space: pre-line;
-}
-/* The contact form (the account island's buildContactForm) and the membership "Manage Subscription" control
-   are both createElement()'d with no class. */
-:where(.st-account-sections) form {
-  display: flex; flex-direction: column; gap: var(--gd-gap, 1rem); margin-top: .5rem;
-}
-:where(.st-account-sections) label {
-  display: flex; flex-direction: column; gap: .3rem; font-weight: 600; color: var(--gd-head); font-size: .95rem;
-}
-:where(.st-account-sections) input {
-  font: inherit; color: var(--gd-text); background: var(--gd-bg);
-  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
-  padding: .6rem .8rem; width: 100%; box-sizing: border-box;
-}
-:where(.st-account-sections) input:focus { outline: 2px solid var(--gd-accent); outline-offset: 1px; border-color: var(--gd-accent); }
-/* Same primary-action tokens `.st-runtime-action` uses above (manage-subscription, connect-discord
-   — both plain `<button type="button">`, no class) — includes :focus-visible and :disabled (no new
-   status-color axis); `handleManageSubscriptionClick` sets the native `disabled` attribute while
-   in flight. `align-self: flex-start` for the same reason `.st-runtime-action` above sets it: the
-   contact form's submit button (the account island's buildContactForm) is a direct child of the `form` rule
-   just above, which is a flex column — without this the button stretched to the form's full width
-   instead of sizing to its own label. Harmless on manage-subscription/connect-discord, whose
-   parent `<div>` is not a flex container. */
-:where(.st-account-sections) button {
-  align-self: flex-start;
-  display: inline-block; font: inherit; font-weight: 700; cursor: pointer;
-  color: var(--gd-accent-ink, #fff); background: var(--gd-btn-fill, var(--gd-accent));
-  border: none; border-radius: var(--gd-btn-radius, var(--gd-radius, 8px)); padding: .6rem 1.3rem; margin-top: .5rem;
-}
-:where(.st-account-sections) button:hover { background: var(--gd-accent-deep, var(--gd-accent)); }
-:where(.st-account-sections) button:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
-:where(.st-account-sections) button:disabled { opacity: .6; cursor: not-allowed; }
-/* Discord section (the account island's renderDiscordSection): the connect button and the "join the
-   server" link are appended as immediate siblings inside one unclassed `<div>`, with no wrapper
-   this repo can put a gap-bearing class on — giving the island one is an island contract
-   change out of scope here (same constraint the region header above already states). A plain
-   adjacency selector reaches the pair without touching the membership section's own unclassed
-   `<div>` (summary paragraph, Manage button, status paragraph — no button-then-anchor pair
-   there), the only other bare `<div>` this container wraps. */
-:where(.st-account-sections) button + a {
-  margin-inline-start: 1rem;
-}
-/* Manage/contact status lines (`[data-ejecta-account-manage-status]`, `[data-ejecta-account-contact-status]`)
-   are the only `[aria-live]` nodes the island puts under this container — reached without naming
-   either one by name, same neutral look `.st-runtime-status` gives this repo's OWN status hooks
-   above, `:empty` included so an unfilled status reserves no box before the island answers. */
-:where(.st-account-sections) [aria-live] {
-  color: var(--gd-muted); font-size: .9rem; margin: .5rem 0 0;
-}
-:where(.st-account-sections) [aria-live]:empty {
-  margin: 0;
-}
+   inherited text — no new token for them. Account's signed-in sections live entirely in the
+   "NEVER gated" section above, grouped with `.st-account-sections`. */
 
 /* ── runtime: results (shop complete, checkout success, subscribe success) ──────────────────────── */
 
@@ -1751,27 +1793,18 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
    result page's heading reads at the site's own scale instead of the UA default (there
    is no general h1 rule anywhere in this file to inherit from). `#dc-shop-heading` is a
    pinned id (shop-complete.test.mjs) — :where() zeroes its otherwise-high ID specificity
-   so a theme can still override it without a fight, the same reason the containers above
-   are :where()-wrapped. `[data-ejecta-subscribe-result] h1` reads the subscribe-result
-   root's own behavioral hook rather than adding a class to an unpinned but still
-   shared-shape element, matching the "reads one in a selector" option this region's
-   header comment describes. */
-:where(#dc-shop-heading),
-:where([data-ejecta-subscribe-result] h1) {
+   so a theme can still override it without a fight. `[data-ejecta-subscribe-result] h1`
+   reads the subscribe-result root's own behavioral hook rather than adding a class to an
+   unpinned but still shared-shape element. `.dc-shop-total` (existing, unrenamed hook) is
+   read back through a :where() selector scoped under `.st-runtime` and lives, ungated, in
+   the "NEVER gated" section above — it is not "look on new DOM", it is a hook this file
+   already had a duty to leave alone. */
+:where(body:not([data-theme-custom])) :where(#dc-shop-heading),
+:where(body:not([data-theme-custom])) :where([data-ejecta-subscribe-result] h1) {
   font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
   line-height: 1.25;
   margin: 0 0 0.75rem;
 }
-
-/* `.dc-shop-total` is an existing (unrenamed) hook, not pinned by any assertion, but its
-   look is read back in from outside via a :where() selector scoped under the `.st-runtime`
-   wrapper above rather than adding a class to it — the same "read a hook in a selector"
-   shape used above for markup that IS pinned, chosen here too for the smallest
-   possible diff against the completion page's own removed unlayered <style>, which carried
-   this exact declaration. (Its sibling `ul{padding-left:1.25rem}` declaration is dropped
-   instead of ported: the emitted script's purchased-line `<ul>` now carries `class="st-list"`
-   — the existing list primitive, `.st-list` above in this file — which already covers it.) */
-:where(.st-runtime .dc-shop-complete .dc-shop-total) { font-weight: 700; }
 
 }
 
