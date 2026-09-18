@@ -1270,49 +1270,28 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 .st-form-error { margin: 0; color: #c0392b; font-size: .95rem; }
 
 /* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (CVERInc/reef#47) ──────────
-   A generated site's shell/theme/tokens stay presentation authority for the WHOLE visible page,
-   including runtime-composed bodies — pages assembled at request time, whether server-rendered or
-   filled in by a client-side island, inside that shell — native storefront, /membership, /account,
-   /shop/complete, /checkout/success, /subscribe/success. These runtime surfaces are not a second
-   design system: they reuse the same `--gd-*` tokens and `st-*` primitives the build-time renderer
-   already ships, so a site's theme overrides them exactly the way it overrides any other page — by
-   @layer order (reef.theme is declared after reef.base; see the file header). Behavioral hooks
-   (data-*, dc-*, ejecta-*, and ids a script/island locates elements by) are a SEPARATE
-   responsibility and stay out of this region entirely: it only ever adds a class and, where a hook
-   cannot be touched at all, reads one in a selector — it never renames one to carry a look.
+   Every rule in this block styles DOM a native storefront / /membership / /account / result page
+   composes at request time (server or client-island), inside a generated site's normal shell —
+   reusing existing `--gd-*` tokens/`st-*` primitives, so a theme overrides it the ordinary way, by
+   @layer order (reef.theme after reef.base). None of it is gated on [data-theme-custom]: no
+   hand-rolled theme has ever styled this DOM — it did not exist before this feature — so gating
+   would only strip the box-model/look this feature exists to give it on exactly the custom-theme
+   sites the gap affects (`.st-notfound`/`.st-cta-arrow` above use the same reasoning; the BORN
+   PAINT header below names the same escape hatch: "gate it the same way — or prove no live theme
+   has that DOM"). Living before that divider — not gated inside it — is what keeps this section's
+   own "EVERY rule below is gated" pin true without contradicting it, and matches what
+   runtime-presentation.test.mjs already pins for four of these selectors by name (plus two exact
+   selector strings under `.st-account-sections`) — moving the rest here rather than gating them
+   keeps the whole family consistent instead of half in the gate and half out.
 
-   Placed HERE, before the BORN PAINT divider below, and deliberately NOT gated on
-   [data-theme-custom]: no hand-rolled theme could already style hooks these runtime surfaces are
-   only now starting to carry, so gating would just exempt the sites the gap actually affects — the
-   same reasoning .st-notfound and .st-cta-arrow above already use, and exactly the escape hatch the
-   BORN PAINT header below names ("gate it the same way — or prove no live theme has that DOM").
-   Living before that divider, instead of ungated inside it, is what keeps this section's own
-   "EVERY rule below is gated, no exceptions" pin true without contradicting it — and what
-   runtime-presentation.test.mjs independently pins for four of these selectors already (a reef-side
-   drift guard flagged this whole family as ungated born paint; the fix is where they live, not
-   whether they are gated — see that test's own header for the specificity reasoning).
-
-   Specificity is deliberately mixed here, not uniform. `.st-runtime`, its nested-section reset, and
-   `.st-account-sections` are CONTAINERS — pure box-model floors — and stay `:where()`, zero
-   specificity, same as the generic section floor they mirror: a container must never win a fight,
-   only lose one gracefully. `.st-runtime-action`, `.st-runtime-status` and `.st-runtime-list` are
-   COMPONENTS with real look, and are plain single-class selectors instead, matching
-   `.st-form-submit` / `.st-cta-btn` / `.st-hero-cta` above. This file already carries a bare-element
-   rule one of them must outrank in this same layer — `a { color: var(--gd-accent) }` (this file,
-   near the top) — and a `:where(.foo)` selector collapses to zero specificity, which LOSES to that
-   bare `a` (0,0,1) on an `<a class="st-runtime-action">`, painting it accent-on-accent instead of
-   the intended fill. A plain `.st-runtime-action` is (0,1,0) and beats `a` the ordinary way — the
-   same reason `.st-cta-btn`, which also styles an `<a>`, was never wrapped in `:where()` either.
-   (Grepped reef.base for every bare element rule under a, p, ul, li, button, input, h1, h2, form,
-   label: only `a` and `img` exist; `img` does not intersect anything below.)
-
-   `.st-account-sections` and its descendants (form/label/input/button/[aria-live]) are grouped here
-   too, not split across the divider: two of its rules (`:where(.st-account-sections) button` and
-   `:where(.st-account-sections) button + a`) are pinned EXACT selector strings by
-   runtime-presentation.test.mjs, so this whole subtree stays together, ungated, rather than half
-   inside the born-paint gate and half out. `.st-native-card`, `.st-native-detail`,
-   `.st-native-actions` and the result headings carry no such pin — those live below, inside the
-   BORN PAINT section, gated like every other rule there. */
+   `.st-runtime`/its nested-section reset/`.st-account-sections` are CONTAINERS — pure box-model
+   floors, `:where()`-wrapped for zero specificity. `.st-runtime-action`/`-status`/`-list` are
+   COMPONENTS with real look and stay plain single-class selectors: this file's own bare
+   `a { color: var(--gd-accent) }` must lose to `.st-runtime-action` on an `<a>`, which only a
+   non-`:where()` class (0,1,0 beats 0,0,1) guarantees — the same reason `.st-cta-btn`/`.st-hero-cta`
+   above were never wrapped either. `.st-native-card`/`.st-native-detail`/`.st-native-actions` and
+   the two result headings are ordinary look on the same kind of brand-new DOM, so they share this
+   treatment rather than the born-paint gate a handful of lines down. */
 
 :where(.st-runtime) {
   max-width: var(--gd-maxw);
@@ -1508,6 +1487,33 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
    instead of ported: the emitted script's purchased-line `<ul>` now carries `class="st-list"`
    — the existing list primitive, `.st-list` above in this file — which already covers it.) */
 :where(.st-runtime .dc-shop-complete .dc-shop-total) { font-weight: 700; }
+
+/* Native storefront card/detail (`.st-native-card` also carries `.st-cell` for surface/border;
+   `.st-native-detail` also carries `.st-runtime` for the shared inset — disjoint properties, no
+   fight either way) and the shared Buy+status action row. */
+.st-native-card { display: flex; flex-direction: column; gap: 0.35rem; }
+.st-native-card a { display: block; text-decoration: none; color: inherit; }
+.st-native-card .st-img { aspect-ratio: 1; object-fit: cover; border-radius: var(--gd-radius); margin-bottom: 0.5rem; }
+.st-native-card h2 { margin: 0 0 0.25rem; font-size: 1.15rem; } /* `.st-cell h3` above skins a level this template never emits (an <h2>) */
+.st-native-card a p { color: var(--gd-text); font-weight: 700; } /* the price — `.st-cell p` above would otherwise mute it like a caption */
+.st-native-detail { display: flex; flex-direction: column; gap: 0.75rem; }
+.st-native-detail h1 { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem); line-height: 1.15; }
+.st-native-detail .st-img {
+  max-width: min(100%, 28rem); aspect-ratio: 1; object-fit: contain;
+  border-radius: var(--gd-radius); background: var(--gd-surface);
+}
+.st-native-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
+
+/* Result headings (shop complete, checkout/subscribe success): same h2 clamp() the build-time
+   section layouts use above, since this file has no general h1 rule to fall back on.
+   `#dc-shop-heading` is a pinned id (shop-complete.test.mjs); `[data-ejecta-subscribe-result] h1`
+   reads the existing behavioral hook instead of adding a class to an unpinned element. */
+:where(#dc-shop-heading),
+:where([data-ejecta-subscribe-result] h1) {
+  font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+  line-height: 1.25;
+  margin: 0 0 0.75rem;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    THEME TREATMENT AXES
@@ -1728,83 +1734,6 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
   background: var(--gd-surface); color: var(--gd-muted);
 }
 :where(body:not([data-theme-custom])) .st-cell-badge[data-badge="live"] { background: color-mix(in srgb, #2e9b5b 14%, transparent); color: #2e9b5b; }
-
-/* ── runtime-composed presentation: native storefront + results (site-owned, gated) ───────────────
-   The container/component primitives this markup rests on (.st-runtime, .st-runtime-action/-status/
-   -list, .dc-native-buy, .st-account-sections and its descendants, .dc-shop-total) are deliberately
-   NEVER gated on [data-theme-custom] — see the "NEVER gated" section earlier in this file, before
-   the THEME TREATMENT AXES banner, for why and for the pin that keeps them there.
-   Everything below IS gated, same as every other rule in this BORN PAINT section: real card/detail/
-   heading LOOK, no different in kind from .st-collection-head or .st-item-head above, so it follows
-   this section's ordinary rule rather than the exception those primitives use (CVERInc/reef#47 — a
-   drift guard on this region's first pass found these ungated, which would out-specify a themed
-   site's own CSS). */
-
-/* ── runtime: native storefront ──────────────────────────────────────────────────────────────── */
-
-/* `class="dc-native-grid"` (listing) and `class="dc-native-product"` (detail), shop-function-
-   template.js, carry `st-runtime`/`st-native-*` directly on the existing root — grepped against
-   storefront-source-routing.test.mjs: neither class string is pinned (only data-storefront-source,
-   the Buy control, the unavailable/not-found bodies and the price <p>'s own bytes are), so
-   no extra wrapper element was needed. Both surfaces get the SAME width/inset every
-   other .st-runtime page in this region gets — one runtime shell, not a native-only one. */
-
-/* Listing card: an <article> inside `.st-cells`, so it also carries `.st-cell` (site.css above) for
-   the surface/border/radius look every other card grid already has. */
-:where(body:not([data-theme-custom])) .st-native-card { display: flex; flex-direction: column; gap: 0.35rem; }
-:where(body:not([data-theme-custom])) .st-native-card a { display: block; text-decoration: none; color: inherit; }
-:where(body:not([data-theme-custom])) .st-native-card .st-img { aspect-ratio: 1; object-fit: cover; border-radius: var(--gd-radius); margin-bottom: 0.5rem; }
-/* `.st-cell h3` (above) skins a level this template never emits — the card heading here is an
-   <h2> — so without this the name would fall through to the bare, unsized UA/heading-weight-only
-   rule on a themed site. Mirrors `.st-cell h3` at the same size rather than inventing a new scale. */
-:where(body:not([data-theme-custom])) .st-native-card h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
-/* `.st-cell p` (above) mutes every paragraph in a card — right for a caption, wrong for the number
-   a buyer is deciding on. The price is the only bare <p> left inside the card's <a> once the image
-   above takes the figure slot (the name is an h2, not a p), so this reaches it without a class ever
-   landing on the pinned price element itself. */
-:where(body:not([data-theme-custom])) .st-native-card a p { color: var(--gd-text); font-weight: 700; }
-
-/* Detail: a single reading-width column, the same shape a provider product page's own unlayered
-   `.dc-pp-wrap` already uses (product-page-core.js renderStyles()) — bounded media, then info. */
-:where(body:not([data-theme-custom])) .st-native-detail { display: flex; flex-direction: column; gap: 0.75rem; }
-:where(body:not([data-theme-custom])) .st-native-detail h1 { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem); line-height: 1.15; }
-:where(body:not([data-theme-custom])) .st-native-detail .st-img {
-  max-width: min(100%, 28rem); aspect-ratio: 1; object-fit: contain;
-  border-radius: var(--gd-radius); background: var(--gd-surface);
-}
-/* Buy + its status line stay grouped and inline-aligned instead of two full-width stacked blocks;
-   they are still direct DOM siblings (nativeCheckoutScript's `button.parentElement.querySelector`
-   still finds status inside this div). The `.st-runtime-status` override for this context lives
-   with its own base rule, ungated, in the "NEVER gated" section above. */
-:where(body:not([data-theme-custom])) .st-native-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
-
-/* ── runtime: membership + account ───────────────────────────────────────────────────────────── */
-
-/* Membership plan cards reuse the existing card grid (.st-cells/.st-cell) and the shared, ungated
-   .st-runtime-list reset exactly as those rules' own comments already describe: no new card look
-   is declared here. Plan name (bare h2) and price (existing `.price`, unstyled) are left as
-   inherited text — no new token for them. Account's signed-in sections live entirely in the
-   "NEVER gated" section above, grouped with `.st-account-sections`. */
-
-/* ── runtime: results (shop complete, checkout success, subscribe success) ──────────────────────── */
-
-/* Heading scale for the two result surfaces' <h1> — the same clamp() the build-time
-   section layouts already use for their h2 (.st-prose h2 / .st-grid h2 / … above), so a
-   result page's heading reads at the site's own scale instead of the UA default (there
-   is no general h1 rule anywhere in this file to inherit from). `#dc-shop-heading` is a
-   pinned id (shop-complete.test.mjs) — :where() zeroes its otherwise-high ID specificity
-   so a theme can still override it without a fight. `[data-ejecta-subscribe-result] h1`
-   reads the subscribe-result root's own behavioral hook rather than adding a class to an
-   unpinned but still shared-shape element. `.dc-shop-total` (existing, unrenamed hook) is
-   read back through a :where() selector scoped under `.st-runtime` and lives, ungated, in
-   the "NEVER gated" section above — it is not "look on new DOM", it is a hook this file
-   already had a duty to leave alone. */
-:where(body:not([data-theme-custom])) :where(#dc-shop-heading),
-:where(body:not([data-theme-custom])) :where([data-ejecta-subscribe-result] h1) {
-  font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
-  line-height: 1.25;
-  margin: 0 0 0.75rem;
-}
 
 }
 
