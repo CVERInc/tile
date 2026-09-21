@@ -65,6 +65,8 @@
  * above and names the attribute.
  */
 
+import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
+
 /** Names the attribute a mount refused over, for whoever has to fix the page. */
 export const UNMOUNTED_ATTR = 'data-dc-sponsor-unmounted';
 
@@ -319,7 +321,9 @@ function injectStyles(doc) {
   stylesInjected = true;
   const style = doc.createElement('style');
   style.setAttribute('data-dc', 'sponsor');
-  style.textContent = SPONSOR_CSS;
+  // Layered only for a site whose document root declares it (absent = legacy, unchanged);
+  // see ../shared/dynamic-coral-css.mjs.
+  style.textContent = withDynamicCoralCssLayer(SPONSOR_CSS, doc);
   doc.head.appendChild(style);
 }
 

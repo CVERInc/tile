@@ -204,6 +204,25 @@ const POLL_MS = 15000;
  */
 const POLL_GIVE_UP_AFTER = 4;
 
+// The document-root attribute a site's `_site.md` declaration stamps (see
+// packages/sitetile/astro/src/lib/dynamic-coral-css.mjs, the renderer/emitter-side definition of
+// the same attribute and token). This file is `bundle:false` — it IS the registry artifact, no
+// build step touches it — so it cannot import that module; the two literals are duplicated here
+// instead of adding a new cross-package dependency to a widget meant to mount on any host page.
+const DYNAMIC_CORAL_CSS_ATTR = 'data-dynamic-coral-css';
+const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
+
+/** Wrap `css` in `@layer reef.base { … }` when the document root declares the layered mode;
+ *  return it byte-for-byte unchanged otherwise. Absent attribute means legacy, and legacy must
+ *  stay exactly what it always was — a site that never rebuilds still gets this widget through
+ *  the fleet-wide channel repoint, and it is mounted site-wide by default. */
+function withDynamicCoralCssLayer(css) {
+	const root = typeof document !== 'undefined' ? document.documentElement : null;
+	const layered = !!root && typeof root.getAttribute === 'function' &&
+		root.getAttribute(DYNAMIC_CORAL_CSS_ATTR) === DYNAMIC_CORAL_CSS_LAYERED;
+	return layered ? `@layer reef.base {\n${css}\n}` : css;
+}
+
 let stylesInjected = false;
 
 // ── copy ────────────────────────────────────────────────────────────────────
@@ -1869,7 +1888,7 @@ function injectStyles() {
 	// Scoped to this coral's prefix, and every value is either a plain colour or
 	// a CSS custom property the SITE may already define — so a site's own theme
 	// wins without this file knowing anything about it.
-	style.textContent = `
+	const css = `
 .${PREFIX}-root{position:fixed;right:1rem;bottom:1rem;z-index:2147483000;font:inherit}
 .${PREFIX}-open{border:0;border-radius:999px;padding:0;cursor:pointer;
   width:3.5rem;height:3.5rem;display:flex;align-items:center;justify-content:center;
@@ -1952,6 +1971,8 @@ function injectStyles() {
 @media (prefers-reduced-motion:no-preference){.${PREFIX}-panel{animation:${PREFIX}-in .16s ease-out}}
 @keyframes ${PREFIX}-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 `;
+	// Layered only for a site whose document root declares it (absent = legacy, unchanged).
+	style.textContent = withDynamicCoralCssLayer(css);
 	document.head.appendChild(style);
 }
 

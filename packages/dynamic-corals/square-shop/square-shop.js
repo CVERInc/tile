@@ -117,6 +117,25 @@ const SOLD_STORE_PREFIX = 'dc-square-shop-sold:';
 const SOLD_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RETURN_PARAM = 'dc_shop'; // legacy Square return marker; never proves payment
 
+// The document-root attribute a site's `_site.md` declaration stamps (see
+// packages/sitetile/astro/src/lib/dynamic-coral-css.mjs, the renderer/emitter-side definition of
+// the same attribute and token). This file is `bundle:false` — it IS the registry artifact, no
+// build step touches it — so it cannot import that module; the two literals are duplicated here
+// instead of adding a new cross-package dependency to a widget meant to mount on any host page.
+const DYNAMIC_CORAL_CSS_ATTR = 'data-dynamic-coral-css';
+const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
+
+/** Wrap `css` in `@layer reef.base { … }` when the document root declares the layered mode;
+ *  return it byte-for-byte unchanged otherwise. Absent attribute means legacy, and legacy must
+ *  stay exactly what it always was — a site that never rebuilds still gets this widget through
+ *  the fleet-wide channel repoint. */
+function withDynamicCoralCssLayer(css) {
+	const root = typeof document !== 'undefined' ? document.documentElement : null;
+	const layered = !!root && typeof root.getAttribute === 'function' &&
+		root.getAttribute(DYNAMIC_CORAL_CSS_ATTR) === DYNAMIC_CORAL_CSS_LAYERED;
+	return layered ? `@layer reef.base {\n${css}\n}` : css;
+}
+
 let stylesInjected = false;
 
 // ── persistent cart ──────────────────────────────────────────────────────
@@ -352,7 +371,7 @@ function injectStyles() {
 	// every value falls back so the widget still looks right on a host that
 	// defines none, e.g. feelreef). This is why the buy button turns purple on
 	// a themed host squares it / teal on a bare host — one widget, fits in.
-	style.textContent = `
+	const css = `
 .${PREFIX} { font-family: inherit; }
 /* CSS Grid, not flex-wrap: auto-fill + minmax(_,1fr) ALWAYS fills the row edge-to-edge (the column
    count it lands on gets stretched to consume 100% of the width) — no dead trailing gap, at ANY
@@ -481,6 +500,8 @@ function injectStyles() {
 @keyframes ${PREFIX}-shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
 @media (prefers-reduced-motion: reduce) { .${PREFIX}-skel-box, .${PREFIX}-skel-line { animation: none; } }
 `;
+	// Layered only for a site whose document root declares it (absent = legacy, unchanged).
+	style.textContent = withDynamicCoralCssLayer(css);
 	document.head.appendChild(style);
 }
 
