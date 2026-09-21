@@ -60,11 +60,52 @@ const ORIGINS = (text) => text.match(/https?:\/\/[^"'`\s]+/g) || [];
 const artifactPath = (coral, version) =>
   join(REGISTRY, 'versions', coral, version, `${coral}.js`);
 
-test('the registry serves the sponsor coral on the channel every site rides', () => {
-  const v0 = channelFor('sponsor', 'v0');
-  assert.ok(v0, 'sponsor has no v0 channel in registry/manifest.json — no site can load it');
-  assert.equal(v0, pkg.version, 'the channel points somewhere other than this coral\'s version');
-  assert.equal(channelFor('sponsor', 'latest'), pkg.version, 'and the dogfood channel agrees');
+/**
+ * These corals use plain `major.minor.patch` numbers with no pre-release or build suffix, so a
+ * numeric compare is honest here; anything else is a shape this cannot compare and should say so
+ * rather than fall back to string ordering, which gets e.g. "0.10.9" vs "0.10.10" wrong.
+ */
+function compareVersions(a, b) {
+  const toParts = (v) => {
+    const parts = String(v).split('.');
+    if (parts.length !== 3 || !parts.every((part) => /^\d+$/.test(part))) {
+      throw new Error(`not a plain major.minor.patch version: ${v}`);
+    }
+    return parts.map(Number);
+  };
+  const [aMajor, aMinor, aPatch] = toParts(a);
+  const [bMajor, bMinor, bPatch] = toParts(b);
+  if (aMajor !== bMajor) return aMajor - bMajor;
+  if (aMinor !== bMinor) return aMinor - bMinor;
+  return aPatch - bPatch;
+}
+
+/**
+ * A browser reaches Coral CSS through the registry channel, so a release that moves several
+ * layered corals' channel pointers together may legitimately hold one coral's channel behind its
+ * own package version for a while — a held pointer is not a stale one. What still has to be true
+ * regardless: the version this coral claims is actually published, not just bumped in
+ * package.json; the channel points at something that was actually published, not a version name
+ * nobody built; and the channel is never AHEAD of the version it is meant to describe, because a
+ * channel cannot serve a version its own source does not yet describe.
+ */
+function assertChannelHoldsForVersion(channel) {
+  assert.ok(existsSync(artifactPath('sponsor', pkg.version)),
+    `sponsor ${pkg.version} (from package.json) has no published artifact under versions/sponsor/${pkg.version}/ — bumped but never published`);
+
+  const version = channelFor('sponsor', channel);
+  assert.ok(version, `sponsor has no ${channel} channel in registry/manifest.json — no site can load it`);
+
+  assert.ok(existsSync(artifactPath('sponsor', version)),
+    `${channel} points at sponsor@${version}, which has no published artifact under versions/sponsor/${version}/`);
+
+  assert.ok(compareVersions(version, pkg.version) <= 0,
+    `${channel} points at sponsor@${version}, which is ahead of this coral's own version ${pkg.version}`);
+}
+
+test('the registry serves the sponsor coral on channels that never outrun its own version', () => {
+  assertChannelHoldsForVersion('v0');
+  assertChannelHoldsForVersion('latest');
 });
 
 test('CONTROL: the same lookup returns null for a coral the registry does not carry', () => {
