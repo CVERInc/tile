@@ -4,7 +4,7 @@
 //
 // WHY THIS EXISTS. A dynamic coral's own package CSS has always been emitted unlayered, so it
 // outranks the site's theme and a theme reaches it only through the `--gd-*` tokens it reads.
-// Sites were themed against exactly that, so moving the CSS into `@layer reef.base` is an OPT-IN:
+// Sites were themed against exactly that, so moving the CSS into `@layer reef.corals` is an OPT-IN:
 // a site declares `dynamic-coral-css: layered` and everything it publishes moves together.
 //
 // "Together" is the whole feature, and it has three ways to break quietly:

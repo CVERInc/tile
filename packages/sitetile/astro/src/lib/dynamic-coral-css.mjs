@@ -7,8 +7,10 @@
 // reads. Sites were themed against that, so it stays the default.
 //
 // A site OPTS IN by declaring `dynamic-coral-css: layered` in its base `content/_site.md`. Then
-// every one of those stylesheets is emitted inside `@layer reef.base`, below `reef.theme`, and the
-// site's own selectors override coral markup through the ordinary cascade.
+// every one of those stylesheets is emitted inside `@layer reef.corals` — a layer of its own,
+// ordered between `reef.base` and `reef.theme` — and the site's own selectors override coral
+// markup through the ordinary cascade while the renderer's base rules keep the relationship to
+// coral markup they already have.
 //
 // 🔴 The declaration is SITE-level and whole. A site is wholly legacy or wholly layered: the
 // renderer and the generated Worker read the same base `_site.md` value, so the document-root

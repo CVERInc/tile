@@ -53,10 +53,13 @@
 //                                       themed before the choice existed depends on it, and those
 //                                       sites are never rewritten, so the default is permanent. A
 //                                       site that declares `dynamic-coral-css: layered` in its
-//                                       `_site.md` gets it in `reef.base` instead, below the
-//                                       theme. Nothing here asserts either way: the key, the
-//                                       stamp and the merge rules are dynamic-coral-css.test.mjs's
-//                                       subject, and where it actually lands on a rendered page is
+//                                       `_site.md` gets it in `reef.corals` instead — a layer of
+//                                       its own between `reef.base` and the theme, so the theme
+//                                       reaches it while the renderer's own base rules keep the
+//                                       relationship to coral markup they already have. Nothing
+//                                       here asserts either way: the key, the stamp and the merge
+//                                       rules are dynamic-coral-css.test.mjs's subject, and where
+//                                       it actually lands on a rendered page is
 //                                       real-render/matrix.smoke.mjs's.
 //
 // And a third layer, `reef.responsive`, AFTER the theme — for the mobile-nav state machine, where
@@ -104,8 +107,15 @@ test('the layer ORDER is declared, and declared before anything can use it', () 
   // For contrast, the change this file exists to make is invisible on that same site: layered vs
   // genuinely layer-free renders identically, 0 of 246 elements. A theme written to win under the
   // old rules keeps winning; layers only decide the ties it used to lose.
+  //
+  // The statement is the SITE's, not the renderer's: the coral layer is declared only on a
+  // declared site. An undeclared site emits the three names it has always emitted, character for
+  // character, so nothing about a site that never opted in can change here — which is why both
+  // spellings are pinned, and why the undeclared one is pinned as an exact string.
+  assert.match(layout, /@layer reef\.base, reef\.corals, reef\.theme, reef\.responsive;/,
+    'a declared site must name reef.corals between reef.base and the theme');
   assert.match(layout, /@layer reef\.base, reef\.theme, reef\.responsive;/,
-    'SiteLayout must declare the three layers in order, earliest in <head>');
+    'an undeclared site must keep the three layers in order, earliest in <head>');
   const order = layout.indexOf('@layer reef.base, reef.theme, reef.responsive;');
   const themeEmit = layout.indexOf('@layer reef.theme {');
   assert.ok(order > -1 && themeEmit > order, 'the declaration comes before the theme block');

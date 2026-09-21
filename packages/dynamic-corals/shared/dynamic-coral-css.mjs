@@ -1,5 +1,5 @@
 // Shared by every BUNDLED dynamic coral that ships its own package CSS: the document-root
-// attribute a site's declaration stamps, and the one `@layer reef.base { … }` wrap every such
+// attribute a site's declaration stamps, and the one `@layer reef.corals { … }` wrap every such
 // coral applies the same way.
 //
 // 🔴 NOT a dependency on sitetile. `packages/sitetile/astro/src/lib/dynamic-coral-css.mjs` is the
@@ -23,7 +23,7 @@ export const DYNAMIC_CORAL_CSS_ATTR = 'data-dynamic-coral-css';
 export const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
 
 /**
- * Wrap `css` in `@layer reef.base { … }` when the document root carries the layered declaration;
+ * Wrap `css` in `@layer reef.corals { … }` when the document root carries the layered declaration;
  * return it byte-for-byte unchanged otherwise. `doc` defaults to the page's own `document` — the
  * same "reads its own document unless a test hands it one" shape every coral here already uses
  * (see sponsor-core.mjs's `mountSponsor(el, deps)`); a `doc` with no `documentElement` (a minimal
@@ -34,5 +34,5 @@ export function withDynamicCoralCssLayer(css, doc) {
   const root = document_ ? document_.documentElement : null;
   const layered = !!root && typeof root.getAttribute === 'function' &&
     root.getAttribute(DYNAMIC_CORAL_CSS_ATTR) === DYNAMIC_CORAL_CSS_LAYERED;
-  return layered ? `@layer reef.base {\n${css}\n}` : css;
+  return layered ? `@layer reef.corals {\n${css}\n}` : css;
 }

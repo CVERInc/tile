@@ -136,9 +136,9 @@ export function readFocus() {
 // in-page: cascade controls. `target` is 'action' (first button-kind action) or 'container'
 // (main's top-level child holding the runtime root). Rules are injected with a harness attribute
 // selector so they reach the element whatever class vocabulary the surface ends up using.
-//   pre  : `@layer harness-pre` inserted as the FIRST <head> child — declared before the renderer's
-//          `@layer reef.base, reef.theme, reef.responsive` statement → lowest-priority layer. It must
-//          NOT win if a reef.base rule sets the property (negative control).
+//   pre  : `@layer harness-pre` inserted as the FIRST <head> child — declared before the page's own
+//          layer-order statement → lowest-priority layer. It must NOT win if a reef.base rule sets
+//          the property (negative control).
 //   theme: the same rule inside `@layer reef.theme` appended at the end of <head> → must win
 //          (positive control: the probe can see a layer win at all).
 //
@@ -252,7 +252,7 @@ export function verdicts({ spec, theme, declared, vp, facts, expectedLang, theme
   //   undeclared  the theme's `h1, h2 { color: … }` cannot reach it and the heading follows
   //               --gd-text. That is what every site built before the declaration existed looks
   //               like, so it is asserted as a LOCKED NEGATIVE CONTROL, not tolerated as a gap.
-  //   declared    the coral CSS is in reef.base, the theme's selector wins, and the heading
+  //   declared    the coral CSS is in reef.corals, the theme's selector wins, and the heading
   //               matches the build-time reference like every other heading on the site.
   if (spec.heading) {
     const h = facts.heading; const r = facts.refs.h1;
@@ -451,7 +451,7 @@ export function verdicts({ spec, theme, declared, vp, facts, expectedLang, theme
 // the exceptions is a stronger statement than any list of properties someone remembered to check.
 //
 // That is also the no-regression arm: the renderer's own package CSS (locale banner, signet,
-// bleedblend) sits in reef.theme, and moving coral CSS into reef.base puts it under all of that
+// bleedblend) sits in reef.theme, and moving coral CSS into reef.corals puts it under all of that
 // for the first time. If any of it starts painting `dc-*` markup, it shows up here as a delta
 // nobody asked for.
 

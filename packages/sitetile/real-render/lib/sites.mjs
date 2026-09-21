@@ -30,7 +30,7 @@
 // turns the whole mode comparison into a guess.
 //
 // There is deliberately no `plain-layered`. What a third pair would add over `tokens-layered` is
-// "coral CSS meeting site.css inside reef.base with no theme selectors in the way", and the
+// "coral CSS in reef.corals meeting site.css with no theme selectors in the way", and the
 // token-only theme declares no selectors at all — so its pair already measures exactly that, at
 // one renderer build per run instead of two.
 import { execFileSync } from 'node:child_process';
@@ -49,6 +49,15 @@ export const ARMS = ['plain', 'tokens', 'custom', 'tokens-layered', 'custom-laye
 export const CORAL_CSS_KEY = 'dynamic-coral-css';
 export const CORAL_CSS_LAYERED = 'layered';
 export const CORAL_CSS_ATTR = 'data-dynamic-coral-css';
+
+/** The layer-order statement each mode's pages carry, stated here independently of the renderer
+ *  for the same reason as the three constants above. Two spellings per mode: the renderer writes
+ *  the spaced form and a minifier may strip the spaces, and the sanity check below only asks
+ *  whether the page says the right thing, not how it is whitespaced. */
+export const LAYER_ORDER_STATEMENTS = {
+  legacy: ['@layer reef.base, reef.theme, reef.responsive', '@layer reef.base,reef.theme,reef.responsive'],
+  declared: ['@layer reef.base, reef.corals, reef.theme, reef.responsive', '@layer reef.base,reef.corals,reef.theme,reef.responsive'],
+};
 
 // Literal token values the theme arms set, so token inheritance can be checked against a known
 // literal and not only against a same-page probe. Keyed by THEME, not by arm: a legacy arm and its
@@ -219,7 +228,10 @@ export async function buildSites(engine, out, arms, log) {
     const home = readFileSync(path.join(outDir, 'index.html'), 'utf8');
     built[arm].themeInReefThemeLayer = css ? /@layer reef\.theme\s*\{[\s\S]*--gd-accent:\s*#/.test(home) : null;
     built[arm].dataThemeCustom = /<body[^>]*\sdata-theme-custom/.test(home);
-    built[arm].layerOrderDeclared = home.includes('@layer reef.base,reef.theme,reef.responsive') || home.includes('@layer reef.base, reef.theme, reef.responsive');
+    // Per ARM: the coral layer is named in the statement only on a site that declared, so the
+    // legacy arms are checked against the three-name statement they have always emitted.
+    built[arm].layerOrderDeclared = LAYER_ORDER_STATEMENTS[isDeclared(arm) ? 'declared' : 'legacy']
+      .some((stmt) => home.includes(stmt));
     // 🔴 And the declaration really reached the document root. Without this the whole declared half
     // of the matrix could be measuring a site that silently built in legacy mode, and every
     // "the override did not reach" reading would look like a renderer finding instead of a fixture

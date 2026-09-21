@@ -81,8 +81,8 @@ for (const [label, path] of [['listing', '/shop/'], ['detail', '/shop/kite']]) {
 
   ok(`${label}: undeclared site emits no @layer anywhere in the composed page`,
     !l.includes('@layer'), l.slice(0, 200));
-  ok(`${label}: declared site's coral <style> is wrapped in @layer reef.base`,
-    /<style>@layer reef\.base \{/.test(d), d.slice(0, 200));
+  ok(`${label}: declared site's coral <style> is wrapped in @layer reef.corals`,
+    /<style>@layer reef\.corals \{/.test(d), d.slice(0, 200));
 
   // The half that composition could silently drop.
   ok(`${label}: undeclared site's <html> tag survives composition byte for byte`,

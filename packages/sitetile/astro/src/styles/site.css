@@ -20,11 +20,20 @@
  *   their published stylesheet)         choice was themed against exactly that, so an absent
  *                                       declaration keeps it, permanently. A site that declares
  *                                       `dynamic-coral-css: layered` in its `_site.md` gets all of
- *                                       it inside `@layer reef.base` instead, below `reef.theme`,
- *                                       and its own selectors then reach coral markup through the
- *                                       ordinary cascade. One answer per SITE, never per page:
- *                                       src/lib/dynamic-coral-css.mjs owns the key and the layout
- *                                       stamps it on the document root.
+ *                                       it inside `@layer reef.corals` instead — a layer of its
+ *                                       own, ordered between this file's `reef.base` and
+ *                                       `reef.theme` — and its own selectors then reach coral
+ *                                       markup through the ordinary cascade. One answer per SITE,
+ *                                       never per page: src/lib/dynamic-coral-css.mjs owns the key
+ *                                       and the layout stamps it on the document root.
+ *
+ * 🔴 `reef.corals`, not this layer. Coral CSS sharing `reef.base` also put it under every rule in
+ * this file, and one of them reaches coral headings: the born-paint
+ * `body:not([data-theme-custom]) :where(h1,h2,h3,h4)` at (0,1,1) beat `.dc-pp-title` at (0,1,0),
+ * dropping a provider-detail heading from font-weight 800 to 700 on every declared site with a
+ * compiled theme. Its own layer leaves coral-vs-renderer exactly where it is today and moves only
+ * coral-vs-theme. The layer is named in the order statement ONLY on a declared site, so nothing
+ * about an undeclared page changes.
  *
  * Renderer-shipped package CSS (locale banner, signet, bleedblend) is in neither set: it is
  * layered, in `reef.theme`, alongside the site's own theme (see SiteLayout).

@@ -99,13 +99,13 @@ for (const [locale, [word, price]] of Object.entries(localeWords)) {
 // ── dynamic-coral-css: SHOP_GRID_CSS follows the site's declared per-site mode, consumed here
 // through `config.dynamicCoralCss` — legacy (absent, the `c` fixture above) stays byte-
 // identical to what `renderShopGrid` always emitted; declared wraps the SAME text in
-// `@layer reef.base` and changes nothing else (gridHtml untouched). ──
+// `@layer reef.corals` and changes nothing else (gridHtml untouched). ──
 {
 	ok('legacy: no dynamic-coral-css declaration → gridCss has no @layer wrapper', !c.gridCss.includes('@layer'));
 
 	const cLayered = renderShopGrid(items, { cart: true, detailBase: '/shop', labels: {}, dynamicCoralCss: 'layered' });
-	ok('declared: gridCss is the SAME CSS text, wrapped in @layer reef.base and nothing else',
-		cLayered.gridCss === `@layer reef.base {\n${c.gridCss}\n}`);
+	ok('declared: gridCss is the SAME CSS text, wrapped in @layer reef.corals and nothing else',
+		cLayered.gridCss === `@layer reef.corals {\n${c.gridCss}\n}`);
 	ok('declared vs legacy: gridHtml is unaffected by the declaration', cLayered.gridHtml === c.gridHtml);
 
 	// Any value other than the one accepted token behaves exactly like absent — this file only

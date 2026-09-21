@@ -1,5 +1,5 @@
 // Guard: every REGISTRY-SERVED coral with its own package CSS wraps that CSS in
-// `@layer reef.base { … }` when the document root declares `data-dynamic-coral-css="layered"`,
+// `@layer reef.corals { … }` when the document root declares `data-dynamic-coral-css="layered"`,
 // and injects it completely unchanged — byte for byte — when the attribute is absent.
 //   run: node packages/dynamic-corals/dynamic-coral-css-registry.test.mjs
 //
@@ -29,7 +29,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 function assertLayeringPair(legacy, layered, label) {
   assert.ok(legacy.length > 0, `${label}: legacy CSS must not be empty`);
   assert.equal(/@layer/.test(legacy), false, `${label}: undeclared CSS must carry no @layer at all`);
-  assert.equal(layered, `@layer reef.base {\n${legacy}\n}`, `${label}: layered CSS must be exactly the legacy text wrapped`);
+  assert.equal(layered, `@layer reef.corals {\n${legacy}\n}`, `${label}: layered CSS must be exactly the legacy text wrapped`);
 }
 
 // ── the shared helper itself ─────────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ test('shared helper: absent/legacy doc → unchanged; layered doc → wrapped; a
   const css = '.x{color:red}';
   assert.equal(withDynamicCoralCssLayer(css, { documentElement: { getAttribute: () => null } }), css);
   assert.equal(withDynamicCoralCssLayer(css, { documentElement: { getAttribute: () => 'layered' } }),
-    '@layer reef.base {\n' + css + '\n}');
+    '@layer reef.corals {\n' + css + '\n}');
   assert.equal(withDynamicCoralCssLayer(css, {}), css, 'no documentElement at all → legacy, no throw');
   assert.equal(withDynamicCoralCssLayer(css, { documentElement: { getAttribute: () => 'LAYERED' } }), css,
     'anything other than the exact token is legacy');

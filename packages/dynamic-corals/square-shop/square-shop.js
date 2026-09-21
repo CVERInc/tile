@@ -125,7 +125,7 @@ const RETURN_PARAM = 'dc_shop'; // legacy Square return marker; never proves pay
 const DYNAMIC_CORAL_CSS_ATTR = 'data-dynamic-coral-css';
 const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
 
-/** Wrap `css` in `@layer reef.base { … }` when the document root declares the layered mode;
+/** Wrap `css` in `@layer reef.corals { … }` when the document root declares the layered mode;
  *  return it byte-for-byte unchanged otherwise. Absent attribute means legacy, and legacy must
  *  stay exactly what it always was — a site that never rebuilds still gets this widget through
  *  the fleet-wide channel repoint. */
@@ -133,7 +133,7 @@ function withDynamicCoralCssLayer(css) {
 	const root = typeof document !== 'undefined' ? document.documentElement : null;
 	const layered = !!root && typeof root.getAttribute === 'function' &&
 		root.getAttribute(DYNAMIC_CORAL_CSS_ATTR) === DYNAMIC_CORAL_CSS_LAYERED;
-	return layered ? `@layer reef.base {\n${css}\n}` : css;
+	return layered ? `@layer reef.corals {\n${css}\n}` : css;
 }
 
 let stylesInjected = false;

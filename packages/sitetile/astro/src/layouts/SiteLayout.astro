@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
-import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
+import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
 // Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
@@ -741,6 +741,13 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
 // means no route can get this wrong, including one written after this comment.
 const dynamicCoralCss = dynamicCoralCssMode(
   (loadSite(contentGlob) || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
+// The cascade order this page declares, chosen by that same value. A declaring site names the
+// coral layer between the renderer's base layer and the theme; every other site gets the exact
+// statement it has always had, character for character — the layer names are the whole of what a
+// page emits about the cascade, so an undeclared site must not be able to tell this line exists.
+const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
+  ? '@layer reef.base, reef.corals, reef.theme, reef.responsive;'
+  : '@layer reef.base, reef.theme, reef.responsive;';
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
@@ -807,6 +814,8 @@ const dynamicCoralCss = dynamicCoralCssMode(
         would become layer ONE and lose its own tokens.
 
           reef.base        site.css — resets, tokens, base paint
+          reef.corals      a dynamic coral's own package CSS, on a site that declares it. Named
+                           only in that site's statement; see the paragraph below.
           reef.theme       the CSS our packages ship (locale banner, signet, bleedblend) AND then
                            the site's own theme, in that order. Both in ONE layer on purpose — see
                            below.
@@ -837,11 +846,23 @@ const dynamicCoralCss = dynamicCoralCssMode(
         deliberate escape hatch. A dynamic coral's own package CSS (square-shop/events'
         Worker-injected first-paint styles and their published stylesheet) is unlayered PER SITE —
         by default, so a site themed before the choice existed keeps reaching coral markup only
-        through the `--gd-*` tokens that CSS reads; inside `@layer reef.base`, below the theme, for
-        a site that declares `dynamic-coral-css: layered`. That declaration is what this layout
-        stamps on <html> further up, and it is the single value the published corals read.
-        src/lib/dynamic-coral-css.mjs owns the key, the token and the attribute. */}
-    <style is:inline>@layer reef.base, reef.theme, reef.responsive;</style>
+        through the `--gd-*` tokens that CSS reads; inside its OWN layer, `reef.corals`, between
+        the renderer's base layer and the theme, for a site that declares
+        `dynamic-coral-css: layered`. That declaration is what this layout stamps on <html>
+        further up, and it is the single value the published corals read.
+        src/lib/dynamic-coral-css.mjs owns the key, the token and the attribute.
+
+        🩸 A layer of its own, not `reef.base`. Putting coral CSS in the renderer's own layer also
+        put it under every renderer rule in that layer, and one of them reaches coral headings:
+        `body:not([data-theme-custom]) :where(h1,h2,h3,h4)` at (0,1,1) beat `.dc-pp-title` at
+        (0,1,0) — measured, provider-detail heading font-weight 800 → 700 on every declared site
+        with a compiled theme. `reef.corals` keeps coral-vs-renderer exactly as it is today and
+        moves only coral-vs-theme, which is the one relationship the declaration is about.
+
+        🔴 Which is why the statement above is the site's, not the renderer's: an undeclared site
+        emits the three-name statement character for character, so declaring is the only thing
+        that can name `reef.corals` on a page. */}
+    <style is:inline set:html={layerOrder}></style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
         <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,

@@ -256,12 +256,12 @@ ${renderClientScript(labels, locale)}`.trim();
 // reason emit-shop-function.mjs keeps its own copy of this constant instead of importing it.
 const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
 
-// Wrap plain CSS text in `@layer reef.base { … }` when the baked mode says so; return it UNCHANGED
+// Wrap plain CSS text in `@layer reef.corals { … }` when the baked mode says so; return it UNCHANGED
 // otherwise (absent/legacy, or any value other than the one accepted token) — so an undeclared
 // site's emitted `<style>` bytes stay exactly what they were before this helper existed. Takes CSS
 // text, not a `<style>` block, so each caller still controls its own surrounding tags.
 function layerDynamicCoralCss(css, mode) {
-	return mode === DYNAMIC_CORAL_CSS_LAYERED ? `@layer reef.base {\n${css}\n}` : css;
+	return mode === DYNAMIC_CORAL_CSS_LAYERED ? `@layer reef.corals {\n${css}\n}` : css;
 }
 
 // The square-shop grid/card/cart CSS — so a server-rendered grid is styled on first paint (no FOUC);
@@ -272,7 +272,7 @@ function layerDynamicCoralCss(css, mode) {
 // Where this text lands in the cascade is the SITE's answer, not this file's — the same rule as
 // every dynamic coral's own package CSS (see site.css's header comment). Unlayered by default, so
 // a site themed before the declaration existed still reaches it only through the --gd-* tokens
-// above and never through a selector override; inside `@layer reef.base` when the baked mode says
+// above and never through a selector override; inside `@layer reef.corals` when the baked mode says
 // layered, where the site's own selectors do reach it. renderShopGrid puts it through
 // layerDynamicCoralCss on the way out; this constant is the unwrapped text in both modes.
 const SHOP_GRID_CSS = `
@@ -458,7 +458,7 @@ function paragraphs(text) {
 
 // The product-detail page's own CSS — SAME shape as SHOP_GRID_CSS above: plain text, wrapped only
 // at emission (renderStyles, below) by layerDynamicCoralCss, so an undeclared site's `<style>`
-// bytes are unchanged and a declared site's are the same text inside `@layer reef.base { … }`.
+// bytes are unchanged and a declared site's are the same text inside `@layer reef.corals { … }`.
 const PRODUCT_PAGE_CSS = `
 /* contain the product page to the site's content rhythm — the Function injects this into the
    shell's full-bleed <main>, so without a wrapper the content glues to the viewport edges while

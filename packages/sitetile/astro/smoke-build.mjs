@@ -689,6 +689,28 @@ function coralCssStamp(root) {
 }
 const declaredStamp = coralCssStamp(DDIST);
 const undeclaredStamp = coralCssStamp(DIST);
+// The layer-order statement is the SITE's answer too, for the same reason the stamp is: the coral
+// layer has to be NAMED in the order statement to sit where it is meant to sit, and naming it on a
+// site that never declared would move that site's cascade. So the statement is emitted per mode
+// and checked, on every page, as an exact string — the undeclared one being, character for
+// character, what it has always been.
+const LAYER_ORDER_LEGACY = '<style>@layer reef.base, reef.theme, reef.responsive;</style>';
+const LAYER_ORDER_DECLARED = '<style>@layer reef.base, reef.corals, reef.theme, reef.responsive;</style>';
+const CORAL_LAYER = 'reef.corals';
+/** Pages split by whether they carry `statement` verbatim; `polluted` lists any page naming the
+ *  coral layer at all, which is how an undeclared arm proves the absence rather than the string. */
+function layerOrder(root, statement) {
+  const withIt = [], without = [], polluted = [];
+  for (const f of allHtmlPages(root)) {
+    const html = readFileSync(f, 'utf8');
+    const rel = f.slice(root.length + 1);
+    (html.includes(statement) ? withIt : without).push(rel);
+    if (html.includes(CORAL_LAYER)) polluted.push(rel);
+  }
+  return { withIt, without, polluted, total: withIt.length + without.length };
+}
+const declaredOrder = layerOrder(DDIST, LAYER_ORDER_DECLARED);
+const undeclaredOrder = layerOrder(DIST, LAYER_ORDER_LEGACY);
 // round 5: a two-arm counterfactual (identity-swap safeHref/safeSrc) doesn't just make an
 // assertion go red here — it makes postUrl() return the raw hostile permalink VERBATIM, which
 // getStaticPaths() then builds as a literal directory name (`javascript:void(0)/index.html`, the
@@ -1529,6 +1551,18 @@ const checks = [
   ['🔴 dynamic-coral-css: an undeclared site\'s <html> is byte-identical to the pre-declaration tag — absent, not empty', () =>
     /<html lang="en" data-lingo-root>/.test(readFileSync(join(DIST, '404.html'), 'utf8'))
     && !readFileSync(join(DIST, '404.html'), 'utf8').includes(CORAL_CSS_ATTR)],
+  ['🔴 dynamic-coral-css: a DECLARED site names reef.corals between reef.base and the theme, on EVERY page', () => {
+    assert.ok(declaredOrder.total > 20, `expected the full fixture route spread, got ${declaredOrder.total} pages`);
+    assert.deepEqual(declaredOrder.without, [], 'these pages carry the wrong layer-order statement');
+    return true;
+  }],
+  ['🔴 dynamic-coral-css: an UNDECLARED site emits the pre-declaration layer-order statement verbatim, on EVERY page', () => {
+    assert.ok(undeclaredOrder.total > 20, `expected the full fixture route spread, got ${undeclaredOrder.total} pages`);
+    assert.deepEqual(undeclaredOrder.without, [], 'these pages no longer emit the statement they always emitted');
+    return true;
+  }],
+  ['🔴 dynamic-coral-css: the coral layer is not named anywhere on an undeclared site — not in the statement, not in any style it emits', () =>
+    undeclaredOrder.polluted.length === 0],
   // 🔴 THE CONTROL ARM (R3-P2-2's identity-swap experiment, per the review): this suite cannot
   // prove it is a check rather than a tautology from its own green run alone — round 3 measured
   // the opposite failure (13 files' worth of gates reverted to the identity function and the
