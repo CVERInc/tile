@@ -96,5 +96,24 @@ for (const [locale, [word, price]] of Object.entries(localeWords)) {
 		(g.gridHtml.match(/<p class="dc-square-shop-price">[\s\S]*?<\/p>/) || [])[0]);
 }
 
+// ── dynamic-coral-css: SHOP_GRID_CSS follows the site's declared per-site mode, consumed here
+// through `config.dynamicCoralCss` — legacy (absent, the `c` fixture above) stays byte-
+// identical to what `renderShopGrid` always emitted; declared wraps the SAME text in
+// `@layer reef.base` and changes nothing else (gridHtml untouched). ──
+{
+	ok('legacy: no dynamic-coral-css declaration → gridCss has no @layer wrapper', !c.gridCss.includes('@layer'));
+
+	const cLayered = renderShopGrid(items, { cart: true, detailBase: '/shop', labels: {}, dynamicCoralCss: 'layered' });
+	ok('declared: gridCss is the SAME CSS text, wrapped in @layer reef.base and nothing else',
+		cLayered.gridCss === `@layer reef.base {\n${c.gridCss}\n}`);
+	ok('declared vs legacy: gridHtml is unaffected by the declaration', cLayered.gridHtml === c.gridHtml);
+
+	// Any value other than the one accepted token behaves exactly like absent — this file only
+	// CONSUMES the baked mode, it does not validate it (that is emit-shop-function.mjs's job).
+	const cBogus = renderShopGrid(items, { cart: true, detailBase: '/shop', labels: {}, dynamicCoralCss: 'legacy' });
+	ok('an unrecognised mode value falls through to unwrapped (validation is not this file\'s job)',
+		cBogus.gridCss === c.gridCss);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -108,7 +108,8 @@ async function renderProduct(request, env, ctx, cfg, match) {
 		const canonical = `${shopUrl}/${match.slug}`;
 		const rendered = renderProductPage(product, {
 			guildId: cfg.guildId, siteId: cfg.siteId, apiBase: cfg.apiBase, siteName: cfg.siteName,
-			shopPath: shopPath, labels: match.shop.labels || {}, canonical: canonical, locale: match.shop.locale || 'en-US'
+			shopPath: shopPath, labels: match.shop.labels || {}, canonical: canonical, locale: match.shop.locale || 'en-US',
+			dynamicCoralCss: cfg.dynamicCoralCss
 		});
 
 		let body;
@@ -935,7 +936,8 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 		if (!coral || !Array.isArray(items) || items.length === 0) return htmlResponse(shell);
 
 		const { gridHtml, gridCss } = renderShopGrid(items, {
-			cart: coral.cart, noSidebar: coral.noSidebar, detailBase: coral.detailBase, labels: coral.labels, locale: coral.locale
+			cart: coral.cart, noSidebar: coral.noSidebar, detailBase: coral.detailBase, labels: coral.labels, locale: coral.locale,
+			dynamicCoralCss: cfg.dynamicCoralCss
 		});
 		let body = injectHead(shell, `<style>${gridCss}</style>`);
 		body = injectCoralGrid(body, coral.tag, gridHtml);

@@ -152,5 +152,25 @@ const soldOut = renderProductPage({
 }, { labels: {} });
 ok('explicit available:false → OutOfStock in JSON-LD', soldOut.headMeta.includes('OutOfStock'));
 
+// ── dynamic-coral-css: the product-detail <style> follows the site's declared per-site mode,
+// consumed here through `config.dynamicCoralCss` — legacy (absent) stays byte-identical to what
+// `renderProductPage` always emitted; declared wraps the SAME text in `@layer reef.base`. ──
+{
+	const legacyStyle = (r.bodyHtml.match(/<style>([\s\S]*?)<\/style>/) || [])[1];
+	ok('legacy: product-page <style> exists', typeof legacyStyle === 'string' && legacyStyle.length > 0);
+	ok('legacy: no dynamic-coral-css declaration → no @layer wrapper', !legacyStyle.includes('@layer'));
+
+	const rLayered = renderProductPage(rich, { ...cfg, dynamicCoralCss: 'layered' });
+	const layeredStyle = (rLayered.bodyHtml.match(/<style>([\s\S]*?)<\/style>/) || [])[1];
+	ok('declared: product-page <style> is the SAME CSS text, wrapped in @layer reef.base and nothing else',
+		layeredStyle === `@layer reef.base {\n${legacyStyle}\n}`);
+
+	// Wrapping must not leak anywhere else in the rendered body — diff the two bodies with their
+	// own <style> blocks blanked out first.
+	const stripStyle = (html) => html.replace(/<style>[\s\S]*?<\/style>/, '<style/>');
+	ok('declared vs legacy: nothing outside the <style> block differs',
+		stripStyle(rLayered.bodyHtml) === stripStyle(r.bodyHtml));
+}
+
 console.log(`\n=== ${pass}/${pass + fail} PASS ===`);
 process.exit(fail ? 1 : 0);

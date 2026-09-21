@@ -15,6 +15,27 @@ const canonicalAt = templateSource.indexOf('__CANONICAL_FETCH__', fetchStart);
 const shopsAt = templateSource.indexOf('const shops =', fetchStart);
 ok('canonical-host hook is first fetch action after baked config', fetchStart >= 0 && cfgAt < canonicalAt && canonicalAt < shopsAt);
 
+// dynamic-coral-css: both Worker-emitted CSS points are wired to the baked per-site mode.
+// product-page-core.js's helper only CONSUMES `config.dynamicCoralCss`/`cfg.dynamicCoralCss`
+// — it cannot read `cfg` itself, so THIS file (which holds `cfg` in scope at both call sites) must
+// be the one passing it through. Asserted on source text, not behavior, because `renderProduct`
+// and `renderGridPage` are not exported (this file concatenates into a module worker — see
+// product-page-core.js's own NOT-exported note) — the wrapping BEHAVIOR itself is covered by the
+// declared/undeclared arms in product-page-core.test.mjs and shop-grid-core.test.mjs.
+const renderProductAt = templateSource.indexOf('async function renderProduct(');
+const renderProductPageCallAt = templateSource.indexOf('renderProductPage(product, {', renderProductAt);
+const renderProductPageCallEnd = templateSource.indexOf('});', renderProductPageCallAt);
+ok('renderProduct passes the baked mode into renderProductPage\'s config',
+	renderProductAt >= 0 && renderProductPageCallAt > renderProductAt &&
+	templateSource.slice(renderProductPageCallAt, renderProductPageCallEnd).includes('dynamicCoralCss: cfg.dynamicCoralCss'));
+
+const renderGridPageAt = templateSource.indexOf('async function renderGridPage(');
+const renderShopGridCallAt = templateSource.indexOf('renderShopGrid(items, {', renderGridPageAt);
+const renderShopGridCallEnd = templateSource.indexOf('});', renderShopGridCallAt);
+ok('renderGridPage passes the baked mode into renderShopGrid\'s config',
+	renderGridPageAt >= 0 && renderShopGridCallAt > renderGridPageAt &&
+	templateSource.slice(renderShopGridCallAt, renderShopGridCallEnd).includes('dynamicCoralCss: cfg.dynamicCoralCss'));
+
 // A shell like sitetile's built /shop page.
 const SHELL = `<!doctype html><html lang="en"><head>` +
 	`<meta charset="utf-8"><title>Shop — Northwind</title>` +

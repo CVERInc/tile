@@ -159,7 +159,9 @@ function defaultLabels(l) {
 
 /**
  * @param product normalized Product { processor, id, slug, title, description, images[], variants[] }
- * @param config  { guildId, siteId, apiBase, shopPath='/shop', canonical, siteName, labels }
+ * @param config  { guildId, siteId, apiBase, shopPath='/shop', canonical, siteName, labels,
+ *                  dynamicCoralCss } — dynamicCoralCss is the baked per-site mode (see
+ *                  layerDynamicCoralCss above); absent means the legacy unlayered default
  * @returns { title, headMeta, bodyHtml }
  */
 export function renderProductPage(product, config) {
@@ -236,10 +238,30 @@ export function renderProductPage(product, config) {
 	</div>
 </div>
 </div>
-${renderStyles()}
+${renderStyles(config.dynamicCoralCss)}
 ${renderClientScript(labels, locale)}`.trim();
 
 	return { title, headMeta, bodyHtml };
+}
+
+// Whether this site's dynamic-coral package CSS moves into the renderer's base layer. This file
+// only CONSUMES the baked mode passed in through `config.dynamicCoralCss` (the caller reads it off
+// the Worker's baked `__SHOP_CONFIG__.dynamicCoralCss` — see shop-function-template.js's two call
+// sites below) — it does not read `_site.md`, validate a value or derive the mode itself; that is
+// `emit-shop-function.mjs` and packages/sitetile/astro/src/lib/dynamic-coral-css.mjs's job.
+//
+// The accepted token is duplicated here rather than imported: this file is concatenated into the
+// generated `_worker.js` (see SHOP_GRID_CSS's own NOT-exported note just below), so it cannot
+// import across packages, and a module worker rejects a non-function named export — the same
+// reason emit-shop-function.mjs keeps its own copy of this constant instead of importing it.
+const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
+
+// Wrap plain CSS text in `@layer reef.base { … }` when the baked mode says so; return it UNCHANGED
+// otherwise (absent/legacy, or any value other than the one accepted token) — so an undeclared
+// site's emitted `<style>` bytes stay exactly what they were before this helper existed. Takes CSS
+// text, not a `<style>` block, so each caller still controls its own surrounding tags.
+function layerDynamicCoralCss(css, mode) {
+	return mode === DYNAMIC_CORAL_CSS_LAYERED ? `@layer reef.base {\n${css}\n}` : css;
 }
 
 // The square-shop grid/card/cart CSS — so a server-rendered grid is styled on first paint (no FOUC);
@@ -305,7 +327,9 @@ const SHOP_GRID_CSS = `
  * Add→stepper for items already in the shopper's localStorage cart. `data-ssr="1"` on the grid is the
  * hydration marker; `data-variation-id` on each card lets the client wire without a re-fetch.
  * @param items  catalog list items { variation_id, name, slug, image_url, display_price, currency, buy_label, add_label }
- * @param config { detailBase='', cart=false, labels:{ add, buy } }
+ * @param config { detailBase='', cart=false, labels:{ add, buy }, dynamicCoralCss } — dynamicCoralCss
+ *                is the baked per-site mode (see layerDynamicCoralCss above); absent means the
+ *                legacy unlayered default
  * @returns { gridHtml, gridCss }  — inject into the coral root; gridCss into the shell so first paint is styled
  */
 export function renderShopGrid(items, config) {
@@ -396,7 +420,7 @@ export function renderShopGrid(items, config) {
 	const gridHtml = cartMode
 		? `<div class="dc-square-shop-layout${noSidebar ? ' dc-square-shop-layout--hosted-cart' : ''}">${grid}<div class="dc-square-shop-cart"></div></div>`
 		: grid;
-	return { gridHtml, gridCss: SHOP_GRID_CSS };
+	return { gridHtml, gridCss: layerDynamicCoralCss(SHOP_GRID_CSS, config.dynamicCoralCss) };
 }
 
 function centsToDecimalString(minor, currency) {
@@ -429,8 +453,10 @@ function paragraphs(text) {
 		.join('');
 }
 
-function renderStyles() {
-	return `<style>
+// The product-detail page's own CSS — SAME shape as SHOP_GRID_CSS above: plain text, wrapped only
+// at emission (renderStyles, below) by layerDynamicCoralCss, so an undeclared site's `<style>`
+// bytes are unchanged and a declared site's are the same text inside `@layer reef.base { … }`.
+const PRODUCT_PAGE_CSS = `
 /* contain the product page to the site's content rhythm — the Function injects this into the
    shell's full-bleed <main>, so without a wrapper the content glues to the viewport edges while
    the site header/footer stay padded. max-width + auto margins + matching side padding = a proper
@@ -485,7 +511,10 @@ function renderStyles() {
 @media (max-width: 640px) {
   .dc-pp-add, .dc-pp-variant select { min-height: 44px; }
 }
-</style>`;
+`;
+
+function renderStyles(mode) {
+	return `<style>${layerDynamicCoralCss(PRODUCT_PAGE_CSS, mode)}</style>`;
 }
 
 function renderClientScript(labels, locale) {

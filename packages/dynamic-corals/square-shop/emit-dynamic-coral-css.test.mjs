@@ -54,10 +54,19 @@ function bakedConfig(source) {
 const legacy = emit([]);
 const layered = emit(['--dynamic-coral-css', 'layered']);
 
-test('absent flag bakes no key at all, and leaves no trace in the worker', () => {
+test('absent flag bakes no key at all, and the baked CONFIG carries no trace of it', () => {
 	assert.equal('dynamicCoralCss' in bakedConfig(legacy), false);
-	assert.equal(legacy.includes('dynamicCoralCss'), false,
-		'an undeclared site must be emitted exactly as it was before this flag existed');
+	// 🔴 Narrowed from a whole-file substring check: the two Worker-emitted CSS points now read
+	// this field AT RUNTIME off the config every emission carries (see
+	// product-page-core.js's `config.dynamicCoralCss` / shop-function-template.js's own
+	// `cfg.dynamicCoralCss`), so that source — concatenated into every generated worker whether or
+	// not this flag was passed — legitimately names the field. What "absent flag ⇒ the flag might
+	// as well not exist" actually promises is that the BAKED CONFIG this emitter writes carries no
+	// trace, which is what the line below still checks exactly; the test right after this one
+	// independently proves declaring changes nothing else in the emitted bytes.
+	const cfgLine = /const CFG = \{.*\};/.exec(legacy)[0];
+	assert.equal(cfgLine.includes('dynamicCoralCss'), false,
+		'an undeclared site\'s baked config must carry no trace of the flag');
 });
 
 test('the declaration is baked under the config key the worker reads', () => {
