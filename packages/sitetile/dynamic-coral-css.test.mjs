@@ -209,6 +209,23 @@ test('🔴 the stamp is resolved from the CONTENT GLOB, never from the meta prop
   assert.equal(/\bmeta\[/.test(stampLine[0]), false, 'the stamp must not read the meta prop');
 });
 
+test('🔴 the layer-order STRING is picked by the branch it claims — a swapped ternary must not pass', () => {
+  // cascade-layers.test.mjs pins that both exact strings occur somewhere in this file — proof a
+  // layer name was not dropped or renamed. It is blind to the two strings trading PLACES on the
+  // ternary that chooses between them: swap the `?`/`:` branches and both literals are still
+  // present, so that test still passes while every undeclared site starts shipping the layered
+  // statement and every declared one starts shipping the legacy one. Parse the condition and both
+  // branches as tokens (not a whole-expression match) so this survives reformatting the same
+  // selection onto one line, and only reds when the mapping itself changes.
+  const ternary = /dynamicCoralCss\s*===\s*DYNAMIC_CORAL_CSS_LAYERED\s*\?\s*'([^']*)'\s*:\s*'([^']*)'/.exec(layout);
+  assert.ok(ternary, 'expected a `dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED ? … : …` selection in SiteLayout.astro');
+  const [, layeredBranch, defaultBranch] = ternary;
+  assert.equal(layeredBranch, '@layer reef.base, reef.corals, reef.theme, reef.responsive;',
+    'when dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED, the chosen string must name reef.corals between reef.base and reef.theme');
+  assert.equal(defaultBranch, '@layer reef.base, reef.theme, reef.responsive;',
+    'the other branch must stay the exact three-name statement every undeclared site has always had');
+});
+
 // ── the stamp and the emitter's baked config agree ────────────────────────────────────────────
 
 const EMITTER = join(HERE, '..', 'dynamic-corals', 'square-shop', 'emit-shop-function.mjs');
