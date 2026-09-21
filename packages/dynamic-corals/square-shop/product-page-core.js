@@ -269,9 +269,12 @@ function layerDynamicCoralCss(css, mode) {
 // back so it looks right on a host that defines no --gd-* tokens. NOT exported: this file is
 // concatenated into the CF Pages _worker.js, and a module worker rejects a non-function named export
 // (the client widget square-shop.js keeps its own identical copy).
-// Deliberately unlayered, like every dynamic coral's own package CSS (see site.css's header
-// comment): a site theme reaches it only through the --gd-* tokens above, never through a
-// selector override.
+// Where this text lands in the cascade is the SITE's answer, not this file's — the same rule as
+// every dynamic coral's own package CSS (see site.css's header comment). Unlayered by default, so
+// a site themed before the declaration existed still reaches it only through the --gd-* tokens
+// above and never through a selector override; inside `@layer reef.base` when the baked mode says
+// layered, where the site's own selectors do reach it. renderShopGrid puts it through
+// layerDynamicCoralCss on the way out; this constant is the unwrapped text in both modes.
 const SHOP_GRID_CSS = `
 .dc-square-shop { font-family: inherit; }
 /* CSS Grid, not flex-wrap: auto-fill + minmax(_,1fr) ALWAYS fills the row edge-to-edge (the column

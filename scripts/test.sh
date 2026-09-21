@@ -113,7 +113,13 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # build arrived 2026-09-06 — the page-generation half of a site build. Its end-to-end
              # test needs packages/sitetile/astro/node_modules and names itself SKIPPED without
              # them, exactly like the astro smoke further down.
-             packages/build/*.test.mjs)
+             packages/build/*.test.mjs
+             # real-render arrived with the per-site dynamic-coral CSS declaration. The matrix
+             # itself needs a browser and is listed in MATRIX_GLOBS below; what is covered HERE is
+             # its pure half — the mode-aware expectations, driven with synthetic facts, so the
+             # rules are checked on every run and not only on the one run somebody does with
+             # Playwright installed.
+             packages/sitetile/real-render/*.test.mjs)
 # 🩸 …and within a NAMING CONVENTION. The guard below asked the tree for `*.test.*` and nothing else,
 # so hosts/web/modaltile/ could hold TWO browser harnesses that nothing has ever run and the check
 # designed to catch exactly that stayed green — they were invisible to it because of what they are
@@ -121,11 +127,19 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
 # one you have without running them: seven harnesses in the sibling repo were found dead the same
 # day, and every one of them had also been "fine" right up until somebody looked.)
 SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs)
+# 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
+# one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
+# static python3 server the block further down starts. The real-render matrix takes no base URL —
+# it builds real sites, emits their Worker and serves its own origin per arm — so putting it in
+# that list would run it with an argument it ignores, from a directory it does not use, and call
+# the result covered. It gets its own gated invocation instead, and it is named here so the orphan
+# guard below still counts it.
+MATRIX_GLOBS=(packages/sitetile/real-render/*.smoke.mjs)
 shopt -u nullglob
 
 echo "→ every test file in the tree is actually run"
 shopt -s nullglob
-covered=$(printf '%s\n' test/*.cjs "${SUITE_GLOBS[@]}" "${SMOKE_GLOBS[@]}" | sort -u)
+covered=$(printf '%s\n' test/*.cjs "${SUITE_GLOBS[@]}" "${SMOKE_GLOBS[@]}" "${MATRIX_GLOBS[@]}" | sort -u)
 shopt -u nullglob
 # `test/*.cjs` is deliberately non-recursive: test/golden/corpus.cjs is a fixture another test
 # requires, not a suite. Anything matching *.test.* IS a suite, wherever it sits.
@@ -206,6 +220,43 @@ if [ -n "${PLAYWRIGHT:-}" ] && [ -f "${PLAYWRIGHT}" ]; then
 else
   echo "  · browser smokes SKIPPED — set PLAYWRIGHT to a playwright index.js to run them"
   echo "    (they are the only gates that drive a real DOM; a green run without them is narrower)"
+fi
+
+# The real-render matrix is the only gate that answers "where does this site's CSS actually land in
+# the cascade" by building real sites, emitting their generated Worker and reading getComputedStyle
+# in a browser. It needs BOTH Playwright and the renderer's dependencies, and it writes its work
+# tree OUTSIDE this checkout — it rsyncs the source into that tree, so an --out inside would copy
+# itself. Override the location with SITETILE_MATRIX_OUT to keep the facts/screenshots afterwards;
+# narrow the run with SITETILE_MATRIX_ARMS (e.g. `custom,custom-layered`) when the full set is more
+# than the machine has.
+#
+# 🩸 It is slow and memory-hungry by construction: one full renderer build per arm. That is why it
+# is behind the same opt-in as the other browser gates rather than in the default run, and why the
+# skip below names it instead of passing quietly.
+if [ -n "${PLAYWRIGHT:-}" ] && [ -f "${PLAYWRIGHT}" ] && [ -d packages/sitetile/astro/node_modules ]; then
+  echo "→ real-render matrix"
+  _matrix_out="${SITETILE_MATRIX_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/sitetile-real-render.XXXXXX")}"
+  shopt -s nullglob
+  for _m in "${MATRIX_GLOBS[@]}"; do
+    echo "  · $_m → $_matrix_out"
+    _matrix_args=(--tile "$PWD" --out "$_matrix_out")
+    if [ -n "${SITETILE_MATRIX_ARMS:-}" ]; then _matrix_args+=(--arms "$SITETILE_MATRIX_ARMS"); fi
+    node "$_m" "${_matrix_args[@]}"
+  done
+  shopt -u nullglob
+  # Green and nobody named a location: the work tree is an engine copy plus a built site per arm,
+  # so leaving it in /tmp on every run is hundreds of MB nobody asked for. A FAILING run never
+  # reaches this line — its facts/, shots/ and summary.md are exactly what the next person needs.
+  if [ -z "${SITETILE_MATRIX_OUT:-}" ]; then rm -rf "$_matrix_out"; fi
+else
+  echo "  · real-render matrix SKIPPED — packages/sitetile/real-render/matrix.smoke.mjs needs BOTH"
+  if [ -z "${PLAYWRIGHT:-}" ] || [ ! -f "${PLAYWRIGHT:-}" ]; then
+    echo "    PLAYWRIGHT pointing at a playwright index.js — not set (or not a file)"
+  fi
+  if [ ! -d packages/sitetile/astro/node_modules ]; then
+    echo "    packages/sitetile/astro/node_modules — absent (run npm install there)"
+  fi
+  echo "    (without it, nothing in this run proves where a site's coral CSS lands in the cascade)"
 fi
 
 echo "✅ ALL GREEN"

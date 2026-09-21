@@ -9,12 +9,25 @@
  * contrast on a live site. The old rule was documented in red in
  * describe_render_css rather than fixed, which is the thing this replaces.
  *
- * Unlayered styles still beat every layer — that is deliberately reserved for coral-owned
- * stylesheets: an `embed` coral's <style>, and a dynamic coral's own package CSS (e.g. square-shop
- * / events' Worker-injected first-paint styles and their published stylesheet). That CSS reaches a
- * site's theme only through the `--gd-*` tokens it reads, never through selector overrides — do
- * not wrap it in a layer. Renderer-shipped package CSS (locale banner, signet, bleedblend) is NOT
- * in that set: it is layered, in `reef.theme`, alongside the site's own theme (see SiteLayout).
+ * Unlayered styles still beat every layer, and that is deliberately reserved for coral-owned
+ * stylesheets. Two of them, and only ONE is unconditional:
+ *
+ *   an `embed` coral's <style>          always unlayered. It is the escape hatch a page opts into
+ *                                       by writing raw CSS, and nothing may take it away.
+ *   a dynamic coral's own package CSS   the SITE's answer. Historically always unlayered, so a
+ *   (square-shop / events' Worker-      theme reached coral markup only through the `--gd-*`
+ *   injected first-paint styles, and    tokens that CSS reads — and every site that predates the
+ *   their published stylesheet)         choice was themed against exactly that, so an absent
+ *                                       declaration keeps it, permanently. A site that declares
+ *                                       `dynamic-coral-css: layered` in its `_site.md` gets all of
+ *                                       it inside `@layer reef.base` instead, below `reef.theme`,
+ *                                       and its own selectors then reach coral markup through the
+ *                                       ordinary cascade. One answer per SITE, never per page:
+ *                                       src/lib/dynamic-coral-css.mjs owns the key and the layout
+ *                                       stamps it on the document root.
+ *
+ * Renderer-shipped package CSS (locale banner, signet, bleedblend) is in neither set: it is
+ * layered, in `reef.theme`, alongside the site's own theme (see SiteLayout).
  */
 @layer reef.base {
 

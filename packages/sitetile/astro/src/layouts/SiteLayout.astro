@@ -832,11 +832,15 @@ const dynamicCoralCss = dynamicCoralCssMode(
         source order breaks ties in the theme's favour. Every case above comes out right, and the
         ONLY relationship layers change is the one this was always about — theme over renderer.
 
-        Unlayered still beats every layer, and that is now reserved for what it should always have
-        meant: coral-owned stylesheets — the deliberate escape hatch of an `embed` coral's <style>,
-        and a dynamic coral's own package CSS (e.g. square-shop/events' Worker-injected first-paint
-        styles and their published stylesheet), which reaches a site's theme only through the
-        `--gd-*` tokens it reads, never through selector overrides. */}
+        Unlayered still beats every layer, and that is reserved for coral-owned stylesheets — but
+        the two kinds answer differently. An `embed` coral's <style> is unlayered ALWAYS: it is the
+        deliberate escape hatch. A dynamic coral's own package CSS (square-shop/events'
+        Worker-injected first-paint styles and their published stylesheet) is unlayered PER SITE —
+        by default, so a site themed before the choice existed keeps reaching coral markup only
+        through the `--gd-*` tokens that CSS reads; inside `@layer reef.base`, below the theme, for
+        a site that declares `dynamic-coral-css: layered`. That declaration is what this layout
+        stamps on <html> further up, and it is the single value the published corals read.
+        src/lib/dynamic-coral-css.mjs owns the key, the token and the attribute. */}
     <style is:inline>@layer reef.base, reef.theme, reef.responsive;</style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real

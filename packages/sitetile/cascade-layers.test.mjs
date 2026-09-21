@@ -39,13 +39,25 @@
 //             so nobody testing their own site in their own language would ever have seen it
 //   another   eight `.signet-arrow` glyphs the theme had hidden came back
 //
-// So package CSS now shares the THEME's layer, emitted first. A separate `reef.components` layer
-// below the theme was tried and overshot: it also handed the theme every contest it used to lose on
-// specificity — a theme's `html a { color: inherit }` (0,0,2) began beating
-// `.locale-banner__continue` (0,1,0), 2.66:1 ink on a purple button. One layer, package CSS first,
-// IS the pre-layer world: specificity decides, source order breaks ties for the theme. Unlayered is
-// now reserved for what it should always have meant: the deliberate escape hatch, an `embed`
-// coral's <style>.
+// So RENDERER package CSS (locale banner, signet, bleedblend) now shares the THEME's layer,
+// emitted first. A separate `reef.components` layer below the theme was tried and overshot: it
+// also handed the theme every contest it used to lose on specificity — a theme's
+// `html a { color: inherit }` (0,0,2) began beating `.locale-banner__continue` (0,1,0), 2.66:1 ink
+// on a purple button. One layer, package CSS first, IS the pre-layer world: specificity decides,
+// source order breaks ties for the theme.
+//
+// Unlayered is reserved for two things, which answer differently:
+//   an `embed` coral's <style>          ALWAYS. The deliberate escape hatch, and the control at
+//                                       the bottom of this file is about this one only.
+//   a DYNAMIC coral's own package CSS   the SITE's answer. Unlayered by default — every site
+//                                       themed before the choice existed depends on it, and those
+//                                       sites are never rewritten, so the default is permanent. A
+//                                       site that declares `dynamic-coral-css: layered` in its
+//                                       `_site.md` gets it in `reef.base` instead, below the
+//                                       theme. Nothing here asserts either way: the key, the
+//                                       stamp and the merge rules are dynamic-coral-css.test.mjs's
+//                                       subject, and where it actually lands on a rendered page is
+//                                       real-render/matrix.smoke.mjs's.
 //
 // And a third layer, `reef.responsive`, AFTER the theme — for the mobile-nav state machine, where
 // `display` means open/closed rather than layout. Two live sites broke there the moment layers
