@@ -14,7 +14,6 @@
 // --gd-* tokens, platform-branched map links, fetch + mount. Framework-agnostic: drop
 // `<div data-dynamic-coral="events" data-src="…">` on any host page, sitetile or not.
 import { countdownText } from './events-core.mjs';
-import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
 (function () {
   var roots = document.querySelectorAll('[data-dynamic-coral="events"]');
@@ -26,7 +25,7 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
     stylesInjected = true;
     var style = document.createElement('style');
     style.setAttribute('data-dc', 'events');
-    var css = [
+    style.textContent = [
       '.dc-ev{display:block}',
       '.dc-ev-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}',
       // Each item is [ square date tile | body ], side by side. The tile's size comes from the
@@ -68,9 +67,6 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       '.dc-ev-add:hover{text-decoration:underline}',
       '.dc-ev--empty{padding:24px;text-align:center;color:var(--gd-muted,rgba(0,0,0,.55));font-style:italic}',
     ].join('');
-    // Layered only for a site whose document root declares it (absent = legacy, unchanged);
-    // see ../shared/dynamic-coral-css.mjs.
-    style.textContent = withDynamicCoralCssLayer(css);
     document.head.appendChild(style);
   }
 

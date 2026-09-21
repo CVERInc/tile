@@ -3,18 +3,18 @@
 // and injects it completely unchanged — byte for byte — when the attribute is absent.
 //   run: node packages/dynamic-corals/dynamic-coral-css-registry.test.mjs
 //
-// Four widgets, two shapes:
+// Three widgets, two shapes:
 //   · square-shop.js / inbox-bubble.js — `bundle:false`, hand-written, ARE their own registry
 //     artifact. They cannot import the shared helper (a widget mounts on any host page, sitetile
 //     or not) and hardcode the same two literals locally instead — see the comment beside each.
-//   · sponsor-core.mjs / events-client.mjs — `bundle:true`, esbuild-bundled by build.mjs. Both
-//     import ../shared/dynamic-coral-css.mjs, the module this file also drives directly.
+//   · sponsor-core.mjs — `bundle:true`, esbuild-bundled by build.mjs. It imports
+//     ../shared/dynamic-coral-css.mjs, the module this file also drives directly.
 //
-// Every arm below is driven through the REAL exported mount path (mount()/mountSponsor()/the
-// events client's own self-mount tail), never a copy of the CSS text, and the "absent" and
-// "layered" captures are compared to EACH OTHER (a differential, the same shape
-// emit-dynamic-coral-css.test.mjs uses) rather than against a stored golden string — a regression
-// in the real source is what turns this red, not a drift between two hand-maintained fixtures.
+// Every arm below is driven through the REAL exported mount path (mount()/mountSponsor()), never
+// a copy of the CSS text, and the "absent" and "layered" captures are compared to EACH OTHER (a
+// differential, the same shape emit-dynamic-coral-css.test.mjs uses) rather than against a stored
+// golden string — a regression in the real source is what turns this red, not a drift between two
+// hand-maintained fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
@@ -157,39 +157,4 @@ test('inbox-bubble: client injectStyles() wraps only when the document root decl
   const layered = await capture(true);
   assertLayeringPair(legacy, layered, 'inbox-bubble');
   assert.match(legacy, /\.dc-inbox-root\{/, 'sanity: this is really the widget CSS');
-});
-
-// ── events (bundle:true, self-mounting IIFE — no exported mount to call) ───────────────────────
-//
-// events-client.mjs has no `mount`/`mountAll` export at all: the whole widget is the IIFE that
-// runs at import time. It bails before injecting anything if it finds no
-// `[data-dynamic-coral="events"]` root, so the fake document below must answer that query with one.
-
-test('events: the client IIFE wraps its injected CSS only when the document root declares layered', async () => {
-  async function capture(layered) {
-    const root = {
-      _attrs: {},
-      classList: { add() {} },
-      getAttribute(k) { return Object.prototype.hasOwnProperty.call(root._attrs, k) ? root._attrs[k] : null; },
-      set innerHTML(v) { root._html = v; },
-      get innerHTML() { return root._html; },
-    };
-    globalThis.document = makeRootDocument(layered, { querySelectorAll: () => [root] });
-    // Node's own `navigator` is a read-only accessor over a read-only `userAgent`; replace the
-    // whole global with a plain object rather than fight either getter.
-    Object.defineProperty(globalThis, 'navigator', { value: { userAgent: '' }, configurable: true });
-    // Never resolves: the CSS capture only needs the synchronous half of the IIFE (injectStyles()
-    // runs before this is ever called), and a pending promise avoids both an unhandled-rejection
-    // warning and any dependency on the fetch/render half this test is not about.
-    globalThis.fetch = () => new Promise(() => {});
-    const url = pathToFileURL(join(HERE, 'events', 'events-client.mjs')).href + '?css-' + (++cacheBust);
-    await import(url);
-    assert.equal(globalThis.document._children.length, 1, 'the IIFE must append exactly one <style>');
-    return globalThis.document._children[0].textContent;
-  }
-
-  const legacy = await capture(false);
-  const layered = await capture(true);
-  assertLayeringPair(legacy, layered, 'events');
-  assert.match(legacy, /\.dc-ev\{/, 'sanity: this is really the widget CSS');
 });
