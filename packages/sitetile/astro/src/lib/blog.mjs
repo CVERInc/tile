@@ -12,6 +12,8 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
 import { toUrlLocale, toBcp47 } from '../packages/lingo/locale.mjs';
+// The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
+import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
 const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -379,6 +381,13 @@ export function alternateArchiveLocales(mapByUrl, slug, urlToLocale) {
 // locale (a Lingo site translates footer/copyright-href/blog-label per locale). Pass the
 // page's rel path (e.g. "ja-jp/about") to pick its locale override. Resolution order:
 // { ...base, ...<pageLocale>/_site }. Returns null when NO _site exists anywhere (legacy fallback).
+//
+// 🔴 ONE key is exempt from that merge: `dynamic-coral-css`. It decides where this site's
+// dynamic-coral package CSS lands in the cascade, and a site is wholly legacy or wholly layered —
+// so it is resolved from the BASE `content/_site.md` alone. A `content/<locale>/_site.md` that
+// sets it is ignored and WARNED (a site-config mistake, not malformed input: failing the build
+// would take down a site over a key it cannot half-apply anyway). A malformed BASE value is fatal.
+// Every other key keeps the merge it has always had.
 export function loadSite(contentGlob, pagePath) {
   let base = null; const locales = {};
   for (const [path, raw] of Object.entries(contentGlob || {})) {
@@ -394,7 +403,26 @@ export function loadSite(contentGlob, pagePath) {
   if (!base && !Object.keys(locales).length) return null;
   const seg = pagePath ? String(pagePath).split('/')[0] : null;
   const loc = seg && locales[seg] ? locales[seg] : null;
-  return { ...(base || {}), ...(loc || {}) };
+  const merged = { ...(base || {}), ...(loc || {}) };
+  // Base-only resolution for the cascade declaration, applied AFTER the merge so no other key
+  // changes shape. Validated here because this is the single read every renderer route shares.
+  const mode = dynamicCoralCssMode((base || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
+  if (loc && Object.prototype.hasOwnProperty.call(loc, DYNAMIC_CORAL_CSS_KEY)) warnLocaleCoralCss(seg, mode);
+  if (mode) merged[DYNAMIC_CORAL_CSS_KEY] = mode; else delete merged[DYNAMIC_CORAL_CSS_KEY];
+  return merged;
+}
+
+// loadSite runs once per page, so the warning is emitted once per offending locale instead of
+// once per page of it — a build log that repeats the same line 600 times is a log nobody reads.
+const warnedCoralCssLocales = new Set();
+function warnLocaleCoralCss(locale, baseMode) {
+  if (warnedCoralCssLocales.has(locale)) return;
+  warnedCoralCssLocales.add(locale);
+  console.warn(
+    `sitetile: ${DYNAMIC_CORAL_CSS_KEY} in content/${locale}/_site.md is IGNORED — it is a ` +
+    `site-level key, so it is read from content/_site.md only (this site is ` +
+    `${baseMode ? baseMode : 'legacy/unlayered'}). Remove it, or set it in content/_site.md.`
+  );
 }
 
 // The site-level frontmatter (theme/packages/locales/footer/…) the blog pages must
@@ -410,10 +438,22 @@ export function siteMeta(contentGlob) {
   for (const [path, raw] of Object.entries(contentGlob)) {
     const { meta } = splitFrontmatter(String(raw || ''));
     if (!meta || !(meta['sitetile-page'] || meta.theme)) continue;
-    if (/(^|\/)home\.md$/.test(path)) return meta;
+    if (/(^|\/)home\.md$/.test(path)) return withoutPageCoralCss(meta);
     if (!Object.keys(fallback).length) fallback = meta;
   }
-  return fallback;
+  return withoutPageCoralCss(fallback);
+}
+
+// `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
+// has no site-config layer, so a page's own frontmatter cannot declare the mode for the site —
+// and must not, because this fallback feeds the blog/archive routes while content pages read
+// their own frontmatter, which is exactly how a site ends up half-layered. Returns the SAME
+// object when the key is absent (the overwhelming case), so no caller sees a new identity.
+function withoutPageCoralCss(meta) {
+  if (!meta || !Object.prototype.hasOwnProperty.call(meta, DYNAMIC_CORAL_CSS_KEY)) return meta;
+  const out = { ...meta };
+  delete out[DYNAMIC_CORAL_CSS_KEY];
+  return out;
 }
 
 // Render a flowing post body to HTML. site-core's bodyHtml owns blocks

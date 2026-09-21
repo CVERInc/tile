@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
+import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
 // Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
@@ -724,9 +725,16 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
   || (meta.brand ? String(meta.brand).trim() : '')
   || (meta['footer-brand'] ? String(meta['footer-brand']).trim() : '')
   || headerBrand;
+// Where this site's dynamic-coral package CSS sits in the cascade — stamped on the DOCUMENT ROOT,
+// not <body>, because a registry-served widget reads it as `document.documentElement` and most
+// coral mounts are authored page markdown this layout never renders, so there is no per-mount
+// stamp to read. Resolved from the base `_site.md` (lib/blog.mjs's loadSite) and re-validated here
+// so no route can reach a render with an unrecognised value. Undeclared → '' → NO attribute at
+// all, which is what the widget's "absent means legacy" rule needs from a site nobody rebuilds.
+const dynamicCoralCss = dynamicCoralCssMode(meta[DYNAMIC_CORAL_CSS_KEY], 'site config');
 ---
 <!doctype html>
-<html lang={htmlLang} data-lingo-root class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
+<html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content={viewportContent} />

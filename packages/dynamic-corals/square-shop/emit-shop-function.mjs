@@ -12,6 +12,7 @@
 //     [--markdown-manifest <path to renderer-generated public route→markdown map>] \
 //     [--platform-origin <origin>] \
 //     [--canonical-host <host>] \
+//     [--dynamic-coral-css layered] \
 //     [--emitter-commit <sha>] \
 //     --out <dist>/_worker.js
 //
@@ -378,6 +379,24 @@ if (canonicalHostArg) {
 	}
 }
 
+// 🔴 Where this site's dynamic-coral package CSS sits in the cascade, baked so the Worker's own
+// emitted <style> blocks land in the same layer the statically-built pages declared. The caller
+// derives it from the site's BASE `_site.md` — the same read the renderer's document-root stamp
+// comes from — so the stamp and this config cannot disagree; a site is wholly legacy or wholly
+// layered. Flag absent ⇒ key absent from the baked config ⇒ today's unlayered bytes, so a site
+// that never declares is emitted exactly as it was before this flag existed.
+//
+// Fatal on an unrecognised value rather than defaulted: the renderer already fails its own build
+// closed on one, and if this side quietly chose legacy instead, a typo would ship a worker whose
+// CSS layer contradicts the very document root it injects into, with the build green.
+const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
+const dynamicCoralCss = arg('dynamic-coral-css');
+if (dynamicCoralCss && dynamicCoralCss !== DYNAMIC_CORAL_CSS_LAYERED) {
+	die('--dynamic-coral-css: invalid value ' + JSON.stringify(dynamicCoralCss) +
+		'. The only accepted value is ' + JSON.stringify(DYNAMIC_CORAL_CSS_LAYERED) +
+		'; omit the flag for the legacy unlayered default.');
+}
+
 // The two sets of paths this worker answers ITSELF, read from what was already
 // resolved above: the storefront descriptors and the contract's site-owned buyer
 // pages. Nothing else reaches the mapping — the gated set is read inside.
@@ -411,6 +430,9 @@ const config = {
 	apiTransport: loaded ? loaded.transport : null,
 	platformOrigin,
 	...(canonicalHost ? { canonicalHost } : {}),
+	// Absent flag ⇒ absent key, so an undeclared site's baked config is the same bytes it was
+	// before this flag existed. Only the coral-CSS emission sites read it.
+	...(dynamicCoralCss ? { dynamicCoralCss } : {}),
 	// Absent flag ⇒ absent key, so a worker emitted without --markdown-manifest is
 	// the same bytes this emitter produced before the flag existed.
 	...(markdown ? { markdown } : {})
