@@ -89,10 +89,12 @@ export function getStaticPaths() {
     // A crawler reading two pages of one site saw three different site names.
     // Reserved key, not authorable: a page setting `site-title:` itself is overwritten here.
     if (siteConfig) site.meta = { ...siteConfig, ...site.meta, 'site-title': siteConfig.title || '' };
-    // Reserved key, not authorable per page — same class as `site-title` above, for a sharper
-    // reason: `dynamic-coral-css` decides where this site's coral package CSS sits in the cascade,
-    // and a page that could override it would give one site two answers. loadSite already resolved
-    // it from the base `_site.md`; the page's own value (if any) is dropped, not merged.
+    // Reserved key, not authorable per page — same class as `site-title` above: a page that could
+    // override `dynamic-coral-css` would give one site two answers about its own cascade. loadSite
+    // already resolved it from the base `_site.md`; the page's own value (if any) is dropped.
+    // Defence in depth, not the document-root stamp's mechanism — SiteLayout reads the site config
+    // directly rather than trusting this `meta`. Kept because this `meta` also reaches every
+    // Section, and one that disagreed with the document root would mislead whatever reads it next.
     if (siteConfig && siteConfig[DYNAMIC_CORAL_CSS_KEY]) site.meta[DYNAMIC_CORAL_CSS_KEY] = siteConfig[DYNAMIC_CORAL_CSS_KEY];
     else delete site.meta[DYNAMIC_CORAL_CSS_KEY];
     paths.push({ params: { path: slug }, props: { kind: 'page', site } });

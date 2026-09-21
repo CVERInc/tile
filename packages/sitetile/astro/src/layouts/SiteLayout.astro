@@ -461,7 +461,7 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
 import { parseSidebarNav, safeHref, safeSrc } from '../../../site-core.js';
-import { groupByArchive, footerWidgets, blogSearchOn, postUrl } from '../lib/blog.mjs';
+import { groupByArchive, footerWidgets, blogSearchOn, postUrl, loadSite } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
 const sidebarNavGroups = isSidebar ? parseSidebarNav(meta['sidebar-nav']) : [];
@@ -728,10 +728,19 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
 // Where this site's dynamic-coral package CSS sits in the cascade — stamped on the DOCUMENT ROOT,
 // not <body>, because a registry-served widget reads it as `document.documentElement` and most
 // coral mounts are authored page markdown this layout never renders, so there is no per-mount
-// stamp to read. Resolved from the base `_site.md` (lib/blog.mjs's loadSite) and re-validated here
-// so no route can reach a render with an unrecognised value. Undeclared → '' → NO attribute at
-// all, which is what the widget's "absent means legacy" rule needs from a site nobody rebuilds.
-const dynamicCoralCss = dynamicCoralCssMode(meta[DYNAMIC_CORAL_CSS_KEY], 'site config');
+// stamp to read. Undeclared → '' → NO attribute at all, which is what the widget's "absent means
+// legacy" rule needs from a site nobody rebuilds.
+//
+// 🔴 Read from the CONTENT GLOB, not from the `meta` prop, and that is the whole guarantee. The
+// owner's rule is that one site is wholly legacy or wholly layered, but `meta` is whatever the
+// route decided to hand down: 18 routes reach this layout, some through ArchiveView/PageView, and
+// the repo's own smoke fixture already renders a route with a hand-built `meta` object that never
+// saw the site config at all. On a declared site every such page would come out unstamped while
+// its neighbours were stamped, and `inbox-bubble` — mounted site-wide by default — would then
+// inject legacy CSS on one page and layered CSS on the next. Asking the content glob directly
+// means no route can get this wrong, including one written after this comment.
+const dynamicCoralCss = dynamicCoralCssMode(
+  (loadSite(contentGlob) || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>

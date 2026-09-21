@@ -160,10 +160,19 @@ test('CONTROL: every other key keeps the locale merge it has always had', () => 
 });
 
 test('a site with no _site.md cannot declare through its home page frontmatter', () => {
-  // siteMeta's legacy fallback feeds the blog/archive routes while content pages read their own
-  // frontmatter — obeying a page key here is precisely how one site gets two cascades.
+  // Reachable ONLY when no `_site.md` exists anywhere: with one present, siteMeta returns
+  // loadSite's result on its first line and never looks at home.md. Defence in depth, not the
+  // stamp's mechanism — `meta` still flows into every Section, and a meta that answers this
+  // question differently from the document root is a trap for whatever reads it next.
   const glob = { '/s/content/home.md': fm(['sitetile-page: home', 'title: Harbour Press', 'dynamic-coral-css: layered']) };
   assert.equal(DYNAMIC_CORAL_CSS_KEY in siteMeta(glob), false);
+  // …and the control for that "only when absent" claim: with a `_site.md`, this branch is dead.
+  const withSite = {
+    '/s/content/_site.md': fm(['brand: Harbour']),
+    '/s/content/home.md': fm(['sitetile-page: home', 'title: Harbour Press', 'dynamic-coral-css: layered']),
+  };
+  assert.equal(siteMeta(withSite).brand, 'Harbour', 'siteMeta returns the site-config layer, not home.md');
+  assert.equal(DYNAMIC_CORAL_CSS_KEY in siteMeta(withSite), false);
 });
 
 // ── the document-root stamp ───────────────────────────────────────────────────────────────────
@@ -187,8 +196,17 @@ test('🔴 undeclared emits NO attribute at all — not an empty one, not a "leg
   assert.equal(/legacy/.test(htmlTag[0]), false, 'there is no legacy token; absence is the mode');
 });
 
-test('the stamped value is the validated one, read from the site-config key', () => {
-  assert.match(layout, new RegExp('dynamicCoralCssMode\\(meta\\[DYNAMIC_CORAL_CSS_KEY\\]'));
+test('🔴 the stamp is resolved from the CONTENT GLOB, never from the meta prop', () => {
+  // This is the guarantee, so it is asserted rather than left to a comment. `meta` is whatever a
+  // route chose to hand down — 18 routes reach this layout, and the repo's own smoke fixtures
+  // already render one with a hand-built meta object that never saw the site config. Reading the
+  // site config directly is what makes the stamp impossible for a route to get wrong. The
+  // build-level proof is in smoke-build.mjs; this keeps the mechanism from quietly reverting to
+  // a prop read in between smoke runs, which is the cheap-looking edit that would do it.
+  assert.match(layout, /dynamicCoralCssMode\(\s*\(loadSite\(contentGlob\) \|\| \{\}\)\[DYNAMIC_CORAL_CSS_KEY\]/);
+  const stampLine = /const dynamicCoralCss = [\s\S]*?;/.exec(layout);
+  assert.ok(stampLine, 'the stamp resolution must still be one statement');
+  assert.equal(/\bmeta\[/.test(stampLine[0]), false, 'the stamp must not read the meta prop');
 });
 
 // ── the stamp and the emitter's baked config agree ────────────────────────────────────────────

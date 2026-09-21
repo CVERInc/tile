@@ -445,10 +445,15 @@ export function siteMeta(contentGlob) {
 }
 
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
-// has no site-config layer, so a page's own frontmatter cannot declare the mode for the site —
-// and must not, because this fallback feeds the blog/archive routes while content pages read
-// their own frontmatter, which is exactly how a site ends up half-layered. Returns the SAME
-// object when the key is absent (the overwhelming case), so no caller sees a new identity.
+// has no site-config layer, so a page's own frontmatter cannot declare the mode for the site.
+//
+// Reachable ONLY on a site with no `_site.md` anywhere: siteMeta returns loadSite's result on its
+// very first line, so on every site that HAS one this function never runs. It is defence in depth
+// and NOT what guarantees the document-root stamp — SiteLayout resolves that from the content
+// glob itself, so no `meta` can misdirect it. What this protects is `meta`, which is handed down
+// to every Section: a meta that answers "is this site layered" differently from the document root
+// is a trap for whatever reads it next. Returns the SAME object when the key is absent (the
+// overwhelming case), so no caller sees a new identity.
 function withoutPageCoralCss(meta) {
   if (!meta || !Object.prototype.hasOwnProperty.call(meta, DYNAMIC_CORAL_CSS_KEY)) return meta;
   const out = { ...meta };

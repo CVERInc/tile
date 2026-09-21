@@ -481,7 +481,7 @@ function buildHostileBlogFixture() {
   // this has to sit at the SAME depth under packages/sitetile/ that astro/ itself does for
   // `../site-core.js` etc. to resolve to the same real files).
   const HDIR = join(HERE, '..', '.smoke-hostile-blog');
-  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision)(?:[\\/]|$)/;
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision|dist-coral-css-declared|\.smoke-coral-css-declared)(?:[\\/]|$)/;
   rmSync(HDIR, { recursive: true, force: true });
   cpSync(HERE, HDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
   symlinkSync(join(HERE, 'node_modules'), join(HDIR, 'node_modules'), 'dir');
@@ -590,7 +590,7 @@ export function getStaticPaths() {
 // tree, node_modules SYMLINKED (same install, never written into).
 function buildBadgeCollisionFixture() {
   const CDIR = join(HERE, '..', '.smoke-badge-collision');
-  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision)(?:[\\/]|$)/;
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision|dist-coral-css-declared|\.smoke-coral-css-declared)(?:[\\/]|$)/;
   rmSync(CDIR, { recursive: true, force: true });
   cpSync(HERE, CDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
   symlinkSync(join(HERE, 'node_modules'), join(CDIR, 'node_modules'), 'dir');
@@ -620,10 +620,75 @@ export function getStaticPaths() {
   return CDIST;
 }
 
+// The declared arm of the dynamic-coral CSS declaration. Same content, same src, same locales as
+// the primary build — the ONLY difference is one line added to content/_site.md — because what is
+// under test is whether the declaration reaches EVERY page the site emits, which needs the real
+// fixture's full route spread (404, tag/category/author archives, search, preview, /language, and
+// all four locales), not a minimal site. The tracked fixture is never edited: the site is rsync'd
+// the way the other isolated fixtures are and the key is written into the COPY.
+//
+// It also plants one route that renders SiteLayout with a HAND-BUILT meta object — the shape the
+// repo's own badge-receipt fixtures already use. That page is the reason the stamp is resolved
+// from the content glob instead of the meta prop: threaded through meta it would come out
+// unstamped on a declared site, and one unstamped page is a half-layered site.
+function buildCoralCssDeclaredFixture() {
+  const DDIR = join(HERE, '..', '.smoke-coral-css-declared');
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision|dist-coral-css-declared|\.smoke-coral-css-declared)(?:[\\/]|$)/;
+  rmSync(DDIR, { recursive: true, force: true });
+  cpSync(HERE, DDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(DDIR, 'node_modules'), 'dir');
+
+  const siteMd = join(DDIR, 'content', '_site.md');
+  const declared = readFileSync(siteMd, 'utf8').replace(/^---\n/, '---\ndynamic-coral-css: layered\n');
+  assert.ok(declared.includes('dynamic-coral-css: layered'), 'the declared fixture must actually declare');
+  writeFileSync(siteMd, declared, 'utf8');
+
+  writeFileSync(join(DDIR, 'src/pages/handbuilt-meta.astro'), `---
+import SiteLayout from '../layouts/SiteLayout.astro';
+// A route whose meta never came from siteMeta()/loadSite() — the future route this gate exists for.
+---
+<SiteLayout title="Hand-built meta" meta={{ lang: 'en-US' }}><p>Hand-built meta</p></SiteLayout>
+`);
+
+  const DDIST = join(DDIR, 'dist-coral-css-declared');
+  execFileSync('npx', ['astro', 'build', '--outDir', DDIST], {
+    cwd: DDIR, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: 'coral-css-declared-smoke', PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  });
+  return DDIST;
+}
+
 console.log('▸ astro build → .smoke-hostile-blog/dist-hostile-blog/ (R4-P1-1: site-level blog-path/blog-url-pattern/category-tag-base poisoning)…');
 const HDIST = buildHostileBlogFixture();
 console.log('▸ astro build → .smoke-badge-collision/dist-badge-collision/ (round 1 review P2-1/P2-2: a real public/apple-touch-icon.png shadowing the route)…');
 const CDIST = buildBadgeCollisionFixture();
+console.log('▸ astro build → .smoke-coral-css-declared/dist-coral-css-declared/ (the same fixture site, declaring dynamic-coral-css)…');
+const DDIST = buildCoralCssDeclaredFixture();
+// Every .html the build emitted — not only index.html, because 404.html is exactly the kind of
+// page a per-route stamp forgets.
+function allHtmlPages(root) {
+  const out = [];
+  (function walk(d) {
+    for (const e of readdirSync(d)) {
+      const f = join(d, e);
+      if (statSync(f).isDirectory()) walk(f); else if (e.endsWith('.html')) out.push(f);
+    }
+  })(root);
+  return out.sort();
+}
+const CORAL_CSS_ATTR = 'data-dynamic-coral-css';
+/** Pages split by whether their <html> tag carries the declaration. */
+function coralCssStamp(root) {
+  const withAttr = [], without = [];
+  for (const f of allHtmlPages(root)) {
+    const tag = /<html\b[^>]*>/.exec(readFileSync(f, 'utf8'));
+    ((tag && tag[0].includes(CORAL_CSS_ATTR + '="layered"')) ? withAttr : without)
+      .push(f.slice(root.length + 1));
+  }
+  return { withAttr, without, total: withAttr.length + without.length };
+}
+const declaredStamp = coralCssStamp(DDIST);
+const undeclaredStamp = coralCssStamp(DIST);
 // round 5: a two-arm counterfactual (identity-swap safeHref/safeSrc) doesn't just make an
 // assertion go red here — it makes postUrl() return the raw hostile permalink VERBATIM, which
 // getStaticPaths() then builds as a literal directory name (`javascript:void(0)/index.html`, the
@@ -1439,6 +1504,31 @@ const checks = [
     /<a class="bl-entry-link" href="\/diary\/svg-image-post">/.test(hostileIndex)
     && !/data:image\/svg\+xml/.test(hostileIndex)
     && !/<img class="bl-entry-img"/.test(hostileIndex)],
+  // -- dynamic-coral CSS: one site, one cascade --------------------------------------------
+  // The owner's rule is that a site is wholly legacy or wholly layered. That is an invariant over
+  // the WHOLE emitted site, so it is checked over every emitted page rather than over a sample:
+  // a stamp that reaches 27 of 28 pages satisfies any spot check and still ships a half-layered
+  // site, where inbox-bubble (mounted site-wide by default) injects legacy CSS on one page and
+  // layered CSS on its neighbour.
+  ['🔴 dynamic-coral-css: a DECLARED site stamps the document root of EVERY page it emits', () => {
+    assert.ok(declaredStamp.total > 20, `expected the full fixture route spread, got ${declaredStamp.total} pages`);
+    assert.deepEqual(declaredStamp.without, [], 'these pages carry no declaration on <html>');
+    return true;
+  }],
+  ['🔴 dynamic-coral-css: the declared arm covers the routes a per-route stamp forgets (404, archives, search, preview, /language, every locale)', () =>
+    ['404.html', 'tag/fixture/index.html', 'category/press/index.html', 'preview/index.html',
+     'language/index.html', 'zh-tw/index.html', 'ja-jp/index.html', 'ko-kr/index.html']
+      .every((page) => declaredStamp.withAttr.includes(page))],
+  ['🔴 dynamic-coral-css: a route rendering SiteLayout with a HAND-BUILT meta is stamped too — the stamp is not threaded through props', () =>
+    declaredStamp.withAttr.includes('handbuilt-meta/index.html')],
+  ['🔴 dynamic-coral-css: an UNDECLARED site stamps nothing, on any page', () => {
+    assert.ok(undeclaredStamp.total > 20, `expected the full fixture route spread, got ${undeclaredStamp.total} pages`);
+    assert.deepEqual(undeclaredStamp.withAttr, [], 'these pages carry a declaration the site never made');
+    return true;
+  }],
+  ['🔴 dynamic-coral-css: an undeclared site\'s <html> is byte-identical to the pre-declaration tag — absent, not empty', () =>
+    /<html lang="en" data-lingo-root>/.test(readFileSync(join(DIST, '404.html'), 'utf8'))
+    && !readFileSync(join(DIST, '404.html'), 'utf8').includes(CORAL_CSS_ATTR)],
   // 🔴 THE CONTROL ARM (R3-P2-2's identity-swap experiment, per the review): this suite cannot
   // prove it is a check rather than a tautology from its own green run alone — round 3 measured
   // the opposite failure (13 files' worth of gates reverted to the identity function and the

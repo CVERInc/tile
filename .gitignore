@@ -41,6 +41,10 @@ packages/sitetile/.smoke-nonprod-origin/
 # fixture's 'none'/'pwa-without' cases depend on there being NO real file at that path; see
 # smoke-build.mjs's buildBadgeCollisionFixture). Rebuilt every smoke run, never committed.
 packages/sitetile/.smoke-badge-collision/
+# the smoke's FIFTH, isolated build — the same fixture site with `dynamic-coral-css: layered`
+# added to its content/_site.md (the tracked fixture is never edited; see smoke-build.mjs's
+# buildCoralCssDeclaredFixture). Rebuilt every smoke run, never committed.
+packages/sitetile/.smoke-coral-css-declared/
 # @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
 # somebody's site, and moves them back afterwards — including when the build throws. The directory
 # should never outlive a build; it is ignored because the one time it does (a killed process) the
