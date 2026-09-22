@@ -1893,7 +1893,7 @@ function injectStyles() {
 .${PREFIX}-open{border:0;border-radius:999px;padding:0;cursor:pointer;
   width:3.5rem;height:3.5rem;display:flex;align-items:center;justify-content:center;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
-  box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
+  box-shadow:0 3px 12px rgba(0,0,0,.2);line-height:0}
 .${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
 .${PREFIX}-panel{width:min(22rem,calc(100vw - 2rem));max-height:min(30rem,70vh);
   display:flex;flex-direction:column;border-radius:.9rem;overflow:hidden;
