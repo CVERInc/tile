@@ -522,6 +522,7 @@ function faceHtml(cell) {
 function loadTable() {
   const w = tableWin();
   if (!w || typeof w.__load !== 'function') return;      // not ready yet; onTableReady will call us
+  if (!S.model) return;                                   // host mode before card:load: nothing to show
   S.syncing = true;
   facesFor = boardSlots(S.model, bridgeCtx());
   w.__load(boardMd(S.model, bridgeCtx()));
@@ -1238,6 +1239,7 @@ function setView(view) {
   const v = view === 'table' ? 'board' : view === 'preview' ? 'card' : view;
   if (!VIEWS.includes(v)) return;
   if (v === 'md') {
+    if (!S.model) return;                   // host mode before card:load: no card to write out
     paintViewSwitch('md');
     writeView('md');
     if (el('mdmodal').hidden) openMdMode();
@@ -1257,7 +1259,7 @@ function setView(view) {
 // from the parent (`card:load`), every commit goes back to it (`card:change`), and Save is a
 // `card:save` the parent answers. All of the message logic is in host-bridge.mjs (node-tested);
 // this is only the DOM around it.
-const HOST_STATUS_KEY = { unsaved: 'board.hostUnsaved', saving: 'board.hostSaving', saved: 'board.hostSaved', failed: 'board.hostFailed' };
+const HOST_STATUS_KEY = { waiting: 'board.hostWaiting', unsaved: 'board.hostUnsaved', saving: 'board.hostSaving', saved: 'board.hostSaved', failed: 'board.hostFailed' };
 
 function paintHostStatus(status, message) {
   const n = el('host-status');
@@ -1410,9 +1412,12 @@ export function boot(opts = {}) {
   // A returning visitor's own edits win; a fresh browser gets the persona. Never a network read.
   const draft = S.sandbox ? readDraft() : '';
   const cells = draft ? (() => { try { return parseCard(draft).cells.length; } catch { return 0; } })() : 0;
-  commit(cells ? draft : buildSandboxCard(localeKey), { undoable: false, reloadTable: false });
+  // 🔴 HOST MODE NEVER BUILDS THE SEED. A real card's editor that shows "Sam, family doctor" for
+  // even a moment — or forever, when the load never lands — is showing somebody else's card. The
+  // canvas stays empty (no srcdoc, no [data-cell]) until card:load; the status says we are waiting.
   if (S.host) bootHost();
-  if (firstView === 'md') setView('md');      // after the card exists: the mode edits S.md
+  else commit(cells ? draft : buildSandboxCard(localeKey), { undoable: false, reloadTable: false });
+  if (firstView === 'md' && S.model) setView('md');      // after the card exists: the mode edits S.md
 
   // the harness drives these; harmless in normal use
   window.__cardtileW2 = {
