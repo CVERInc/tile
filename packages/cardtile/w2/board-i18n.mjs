@@ -8,8 +8,8 @@
 //   · the board's own chrome (fold, search, the view cycle) → the ENGINE's i18n/*.json (FOUR)
 //
 // What is left is this file: the strings that exist because a Card board is not a kanban board —
-// 「＋加一張牌」 at the end of a lane, the phone's two bottom tabs, and the two ends of a
-// 牽線. Nine locales, key-first for the same reason cell-i18n.mjs is: adding a string means touching
+// 「＋加一張牌」 at the end of a lane, the phone's two bottom tabs, and the words that say
+// which tile opens which drawer. Nine locales, key-first for the same reason cell-i18n.mjs is: adding a string means touching
 // nine lines that are adjacent, not nine blocks that are pages apart.
 //
 // 🩸 THE ENGINE SPEAKS FOUR AND THIS SURFACE SPEAKS NINE. That gap is real and it is not papered
@@ -41,7 +41,7 @@ export const BOARD_STRINGS_BY_KEY = {
     zh: '成品', ja: '仕上がり', en: 'The card', ko: '완성본',
     'zh-Hans': '成品', de: 'Die Karte', fr: 'La carte', es: 'La tarjeta', pt: 'O cartão',
   },
-  // ── 牽線: the two ends of the line between a tile and the drawer it opens ──────────────────────
+  // ── the drawer: the preview's chip into it, and the board's words for which tile opens it ──────
   //
   // 🔴 The drawer keeps the word 「抽屜」 (CARD-VOCAB-ADDENDUM-2026-09-06). The THING you touch is a
   // 牌; the LANE is a lane; the second-level card is a 抽屜. Three words, three meanings, no overlap.
@@ -50,10 +50,19 @@ export const BOARD_STRINGS_BY_KEY = {
     'zh-Hans': '牵到抽屉', de: 'Öffnet eine Schublade', fr: 'Ouvre un tiroir',
     es: 'Abre un cajón', pt: 'Abre uma gaveta',
   },
-  'board.openedFrom': {
-    zh: '從這張牌牽過來', ja: 'このカードからつながっています', en: 'Opened from a tile',
-    ko: '이 카드에서 이어져요', 'zh-Hans': '从这张牌牵过来', de: 'Von einer Kachel geöffnet',
-    fr: 'Ouvert depuis une tuile', es: 'Se abre desde una ficha', pt: 'Aberto a partir de uma peça',
+  // ── the drawer relation, said in WORDS (owner ruling 2026-09-24: "a view answers one question";
+  // a one-to-one relation does not need a line, a word does). The dashed 牽線 lines are gone; the
+  // tile says where it goes and the drawer lane says who opens it. `{title}` / `{by}` are slots.
+  'board.opensLabel': {
+    zh: '→ 開啟：{title}', ja: '→ 開く：{title}', en: '→ Opens: {title}', ko: '→ 열기: {title}',
+    'zh-Hans': '→ 打开：{title}', de: '→ Öffnet: {title}', fr: '→ Ouvre : {title}',
+    es: '→ Abre: {title}', pt: '→ Abre: {title}',
+  },
+  'board.drawerOpenedBy': {
+    zh: '{title}（由〈{by}〉打開）', ja: '{title}（〈{by}〉から開く）', en: '{title} (opened by “{by}”)',
+    ko: '{title} (〈{by}〉에서 열림)', 'zh-Hans': '{title}（由〈{by}〉打开）',
+    de: '{title} (geöffnet von „{by}“)', fr: '{title} (ouvert par « {by} »)',
+    es: '{title} (lo abre «{by}»)', pt: '{title} (aberto por “{by}”)',
   },
   // a link that names a drawer nobody made. Reported, not hidden — see board-bridge's drawerLinks.
   'board.danglingDrawer': {

@@ -399,3 +399,54 @@ export function drawerLinks(model, ctx = {}) {
   });
   return { links, dangling };
 }
+
+/**
+ * The drawer relation in WORDS — what the board shows now that the dashed 牽線 lines are gone
+ * (owner ruling 2026-09-24: "a view answers one question"; a one-to-one relation needs a word, not a
+ * line). Derived from `drawerLinks`, the same data the lines were drawn from.
+ *
+ *   tiles  [{ slot, text, bad }]   the label on a tile: `opensLabel` with the drawer's title, or —
+ *                                  for a dangling link — `⚠ <id>` with `danglingDrawer` as its tip.
+ *   lanes  [{ laneKey, heading }]  every drawer's lane heading: `drawerOpenedBy` naming the FIRST
+ *                                  tile that opens it, or the plain title when nothing opens it.
+ *
+ * `strings` is `boardStrings(locale)`; missing keys fall back to readable English so a test (or a
+ * stale locale table) never prints a raw key.
+ */
+export function drawerLabels(model, ctx = {}, strings = {}) {
+  const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  const opens = strings['board.opensLabel'] || '→ Opens: {title}';
+  const openedBy = strings['board.drawerOpenedBy'] || '{title} (opened by “{by}”)';
+  const { links, dangling } = drawerLinks(model, ctx);
+  const slots = boardSlots(model, ctx);
+  const tiles = [];
+  for (const l of links) tiles.push({ slot: l.slot, text: fill(opens, { title: l.drawerTitle }), bad: false });
+  for (const d of dangling) tiles.push({ slot: d.slot, text: `⚠ ${d.drawerId}`, tip: strings['board.danglingDrawer'] || '', bad: true });
+  const firstOpener = new Map();
+  for (const l of links) if (!firstOpener.has(l.drawerId)) firstOpener.set(l.drawerId, l.slot);
+  const lanes = (model.drawers || []).map((d) => {
+    const title = d.title || d.id;
+    const slot = firstOpener.get(d.id);
+    const cell = slot == null ? null : (slots[slot] || {}).cell;
+    const by = cell ? tileFace(cell, ctx).title : '';
+    return { laneKey: `drawer:${d.id}`, heading: by ? fill(openedBy, { title, by }) : title };
+  });
+  return { tiles, lanes };
+}
+
+/**
+ * The board follows the SHELL, not the OS. The engine's tugtile page picks its token set with
+ * `prefers-color-scheme`, so under a dark OS it painted rgb(30,30,30) inside feelreef's fixed-light
+ * shell. The host has no theme parameter, and its files are reused unmodified, so the editor injects
+ * this — the host's OWN light token values, verbatim from hosts/web/tugtile/index.html — into the
+ * iframe's head after the host's style, where equal specificity and later order win under both schemes.
+ */
+export const BOARD_LIGHT_CSS = `
+  :root { color-scheme: light;
+    --background-primary: #ffffff; --background-secondary: #f6f6f6;
+    --background-modifier-border: #e0e0e0; --background-modifier-border-hover: #d4d4d4;
+    --background-modifier-form-field: #ffffff; --background-modifier-hover: rgba(0,0,0,.067);
+    --text-normal: #222222; --text-muted: #5c5c5c; --text-faint: #ababab;
+    --text-accent: hsl(258, 68%, 52%); --text-error: #c0392b; --text-success: #2f9e5e;
+  }
+`;
