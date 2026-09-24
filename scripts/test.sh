@@ -109,7 +109,7 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # match it would have dropped the parse/serialize suite the whole package rests on.
              packages/cardtile/*.test.mjs packages/cardtile/*.test.js
              packages/cardtile/cards/*.test.mjs packages/cardtile/serve/*.test.mjs
-             packages/cardtile/w/*.test.mjs
+             packages/cardtile/w/*.test.mjs packages/cardtile/w2/*.test.mjs
              # build arrived 2026-09-06 — the page-generation half of a site build. Its end-to-end
              # test needs packages/sitetile/astro/node_modules and names itself SKIPPED without
              # them, exactly like the astro smoke further down.

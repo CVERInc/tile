@@ -356,10 +356,14 @@ export default {
         headers: {
           'Content-Type': TABLE_MIME[asset.ext] || 'application/octet-stream',
           'Cache-Control': asset.immutable ? 'public, max-age=31536000, immutable' : 'no-store',
-          // never indexed, and never framed by anybody else: this document is an editing surface
-          // that a parent page reaches into, and the only parent allowed to is our own.
+          // never indexed, and framed only by our own editor page — which in host mode (/edit) is
+          // itself framed by feelreef. 🩸 This used to be `X-Frame-Options: SAMEORIGIN`, and that
+          // header judges the TOP page, so inside a feelreef page the board silently never loaded
+          // (measured 2026-09-24 from a localhost host page: 0 tiles, a cross-origin `__ready`
+          // error). CSP frame-ancestors lists every ancestor, so the chain feelreef → /edit → this
+          // is allowed and anything else is not. Same list as validHostOrigin (w2/host-bridge.mjs).
           'X-Robots-Tag': 'noindex, nofollow',
-          'X-Frame-Options': 'SAMEORIGIN',
+          'Content-Security-Policy': "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*",
         },
       });
     }

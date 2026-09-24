@@ -962,7 +962,10 @@ test('sandbox: the engine table arrives COMPLETE — including the file the engi
 
 test('sandbox: the table is same-origin-framed only, and its assets are immutable except the document', async () => {
   const doc = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/'), NEVER_TOUCHED);
-  assert.equal(doc.headers.get('x-frame-options'), 'SAMEORIGIN');
+  // 🩸 was `X-Frame-Options: SAMEORIGIN`; that header judges the TOP page, so under a feelreef host
+  // page (/edit) the board never loaded. CSP lists every ancestor instead; the list is validHostOrigin's.
+  assert.equal(doc.headers.get('x-frame-options'), null);
+  assert.equal(doc.headers.get('content-security-policy'), "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*");
   assert.match(doc.headers.get('cache-control') || '', /no-store/, 'the table document is cached for a year — it could never be fixed');
   const css = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/tugtile.css'), NEVER_TOUCHED);
   assert.match(css.headers.get('cache-control') || '', /immutable/);

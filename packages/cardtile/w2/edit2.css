@@ -105,6 +105,7 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
   background: rgba(20,20,20,.9); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25);
 }
 .ctw-coach[hidden] { display: none; }
+.ctw-sandbox-banner[hidden] { display: none; }
 .ctw-coach-close {
   flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 50%;
   background: rgba(255,255,255,.14); color: #fff; font: inherit; cursor: pointer;
