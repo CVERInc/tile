@@ -154,7 +154,7 @@ const boardCtx = (src) => ({
   faceLabel: '卡片正面',
   title: cardTitle(src),
   typeName: (t) => t,
-  drawerPrefix: '抽屜：',
+  opensLabel: '→ 開啟：{title}',
   drawerTitle: (id) => id,
 });
 
@@ -276,7 +276,8 @@ test('🔴 every tile kind renders as the ELEMENT: a picture, the words, the gre
   assert.deepEqual(by('social')[0].icons, ['instagram.com', 'x.com']);
   assert.equal(by('embed')[0].sub, '2', 'a slideshow does not say how many pictures it holds');
   // a 牽線 says where it goes instead of a url
-  assert.equal(by('link')[2].sub, '抽屜：更多');
+  assert.equal(by('link')[2].sub, '→ 開啟：更多');
+  assert.ok(!faces.some((f) => /抽屜：|Drawer:/.test(f.sub)), 'the old "Drawer:" prefix is back');
 
   // 🔴 CONTROL: nothing here is empty, and no face fell through to the default branch
   assert.equal(faces.length, 10, 'the fixture did not produce nine face cells plus the one in the drawer');

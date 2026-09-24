@@ -19,7 +19,7 @@
 //   · the card markdown, which is the SSOT (card-core) — the board never writes a byte of it;
 //   · the seven typed sheets (w/cell-form-core.mjs, shared with the retired original editor);
 //   · 「＋加一張牌」, the one-row icon picker at the end of a lane;
-//   · the 牽線 between a tile and the drawer it opens;
+//   · the words saying which tile opens which drawer (labels, not lines — ruling 2026-09-24);
 //   · the live preview, the door, the banner, Markdown mode.
 //
 // ── HOW THE TWO TALK ─────────────────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ import { createHostBridge, validHostOrigin } from './host-bridge.mjs';
 import { boardStrings, colon, addTileLabel } from './board-i18n.mjs';
 import { typeIconSvg } from './type-icons.mjs';
 import {
-  boardLanes, boardSlots, boardMd, applyBoardOrder, drawerLinks, cardTitle, tileFace,
+  boardLanes, boardSlots, boardMd, applyBoardOrder, drawerLinks, drawerLabels, BOARD_LIGHT_CSS, cardTitle, tileFace,
   slotOfRenderedCell, laneKeyForCardAdd, cardDropOrder,
 } from './board-bridge.mjs';
 // the icon ROUTE, and the guard on what may reach it — the same pair the renderer uses, so a mark
@@ -103,10 +103,10 @@ const bridgeCtx = () => ({
   faceLabel: T.faceTabLabel,
   title: cardTitle(S.md),
   typeName: (t) => (TYPES[t] ? say(TYPES[t].title) : t),
-  drawerPrefix: T.targetDrawer,
+  opensLabel: TB['board.opensLabel'],
   drawerTitle: (id) => {
     const d = (S.model.drawers || []).find((x) => x.id === id);
-    return d ? (d.title || d.id) : id;
+    return d ? (d.title || d.id) : '';           // '' → the subtitle reads 「⚠ id」 (dangling)
   },
   // what the RENDERER writes on a tile whose address or picture is not filled in yet. The table
   // says the same sentence, because the tile is a mini-render of that element and not a label for it.
@@ -130,7 +130,7 @@ function commit(nextMd, { undoable = true, reloadTable = true } = {}) {
   if (S.bridge) S.bridge.changed(S.md);        // host mode: every commit is a change the parent hears of
   paintPreview();
   if (reloadTable) loadTable();
-  else decorate();                                  // the 牽線 can change without the order changing
+  else decorate();                                  // the drawer labels can change without the order changing
 }
 
 /** mutate the model through a callback, then serialize. Never build markdown by hand. */
@@ -360,7 +360,7 @@ function wireCard() {
     c.setAttribute('tabindex', '0');
     c.setAttribute('role', 'button');
     // a tile that opens a drawer: the tap edits the tile, and this chip is how you get INTO the
-    // drawer to edit what is inside it. Its words are the table's own 牽線 badge.
+    // drawer to edit what is inside it. Its words are the table's own drawer wording.
     const a = c.matches('a[data-drawer]') ? c : c.querySelector('a[data-drawer]');
     if (a) {
       const chip = doc.createElement('button');
@@ -661,22 +661,6 @@ const BOARD_CSS = `
   @media (max-width: 760px) {
     .tw-header { height: auto; min-height: 44px; flex-wrap: nowrap; gap: 2px; }
   }
-  /* 牽線 — the visible line between a tile and the drawer it opens. A badge on each end, so it
-     survives the phone's vertical stack where the two ends are nowhere near each other, plus a
-     drawn line on the wide layout where they are.
-     🩸 11px and a whole sentence: the ja badge measured 194px at 390 and ran into the lane's edge.
-     The badge NAMES the other end (「↳ 更多」「↰ 預約」) and the sentence moved to its title
-     attribute — shorter in every language, and legible at 12px instead of 11.
-     (Still no backticks in here: this block is one template literal, see the note above.) */
-  .ct2-tug { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; max-width: 100%;
-    font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 8px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-    color: var(--text-accent); }
-  .ct2-tug-bad { background: color-mix(in srgb, var(--text-error) 18%, transparent); color: var(--text-error); }
-  .ct2-tug-lane { margin-left: 6px; }
-  .ct2-wire { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: visible; }
-  .ct2-wire path { fill: none; stroke: var(--text-accent); stroke-width: 2; stroke-dasharray: 4 4; opacity: .75; }
 `;
 
 function wireTable() {
@@ -685,7 +669,8 @@ function wireTable() {
   S.wired = true;
 
   const style = doc.createElement('style');
-  style.textContent = BOARD_CSS;
+  // BOARD_LIGHT_CSS: the board follows the shell's fixed light look, not the OS (see board-bridge)
+  style.textContent = BOARD_CSS + BOARD_LIGHT_CSS;
   doc.head.appendChild(style);
   const root = doc.querySelector('.tugtile');
   if (root) root.classList.add('tugtile--rwd');
@@ -746,9 +731,6 @@ function wireTable() {
   const obs = new doc.defaultView.MutationObserver(() => { if (!S.syncing) syncOrder(); });
   const board = doc.getElementById('board');
   if (board) obs.observe(board, { childList: true, subtree: true });
-
-  doc.defaultView.addEventListener('resize', drawWires);
-  doc.addEventListener('scroll', drawWires, true);
 }
 
 /** the lane key this file stamped on a lane element (`face:0`, `drawer:about`) */
@@ -800,7 +782,12 @@ function syncOrder() {
   S.syncing = false;
 }
 
-// ── decoration: the lane keys and the 牽線 ───────────────────────────────────────────────────────
+// ── decoration: the lane keys, and which tile opens which drawer ─────────────────────────────────
+//
+// Owner ruling 2026-09-24: "a view answers one question" — the board answers what is in the card,
+// in what order, and which link opens which drawer. A one-to-one relation needs a WORD, not a line:
+// the dashed connector lines that used to be drawn here (and re-drawn on every scroll and resize)
+// are gone. The words come from board-bridge's `drawerLabels`, pure, so a test pins them.
 function decorate() {
   const doc = tableDoc();
   if (!doc || !S.model) return;
@@ -808,87 +795,19 @@ function decorate() {
   const els = [...doc.querySelectorAll('.tugtile__lane')];
   els.forEach((lane, i) => { if (lanes[i]) lane.dataset.cardLane = lanes[i].key; });
 
-  for (const old of doc.querySelectorAll('.ct2-tug')) old.remove();
-  const tiles = [...doc.querySelectorAll('.tugtile__list > .tugtile__tile')];
-  const { links, dangling } = drawerLinks(S.model, bridgeCtx());
-
-  // the OUT end: on the tile that opens a drawer.
-  //
-  // 🔴 THE BADGE NAMES THE OTHER END; the sentence is its `title`. A badge that reads 「牽到抽屜：更多」
-  // is 106px in zh and 194px in ja — at 390 the Japanese one ran from x176 into the lane's own edge
-  // (cold read §4). 「↳ 更多」 is the same fact, is the width of the drawer's name in every language,
-  // and leaves room to be legible at 12px rather than 11.
-  const badge = (text, tip, bad) => {
-    const s = doc.createElement('span');
-    s.className = 'ct2-tug' + (bad ? ' ct2-tug-bad' : '');
-    s.textContent = text;
-    if (tip) s.title = tip;
-    return s;
-  };
+  // the tile's side is its SUBTITLE (tileFace → opensText); only the lane heading is set here.
+  const labels = drawerLabels(S.model, bridgeCtx(), TB);
+  // the drawer lane's heading names the tile that opens it. Only the TEXT is swapped: the title
+  // element is the host's own, and a rename still starts from the plain drawer title (renameLane
+  // reads the model, never this DOM).
   const laneOfKey = (key) => els[lanes.findIndex((l) => l.key === key)];
-  for (const l of links) {
-    const tile = tiles[l.slot];
-    if (tile) {
-      tile.appendChild(badge(`↳ ${l.drawerTitle}`, `${TB['board.opensDrawer']}${COLON}${l.drawerTitle}`));
-      tile.dataset.ct2Tug = l.drawerId;
+  for (const h of labels.lanes) {
+    const lane = laneOfKey(h.laneKey);
+    if (!lane) continue;
+    for (const t of lane.querySelectorAll('.tugtile__lane-title, .tugtile__lane-title-v')) {
+      if (!t.children.length && t.textContent !== h.heading) t.textContent = h.heading;
     }
   }
-  for (const d of dangling) {
-    const tile = tiles[d.slot];
-    if (tile) tile.appendChild(badge(`⚠ ${d.drawerId}`, TB['board.danglingDrawer'], true));
-  }
-  // the IN end: on the drawer's own lane head — second-level cards live in the second lane and
-  // link back, so the lane says so rather than leaving the line one-directional. It names the TILE
-  // it is opened from, for the same reason the other end names the drawer.
-  const opened = new Map();
-  for (const l of links) if (!opened.has(l.drawerId)) opened.set(l.drawerId, l.slot);
-  for (const [id, slot] of opened) {
-    const lane = laneOfKey(`drawer:${id}`);
-    const head = lane && lane.querySelector('.tugtile__lane-head');
-    if (!head) continue;
-    const from = (boardSlots(S.model, bridgeCtx())[slot] || {}).cell;
-    const b = badge(`↰ ${from ? tileFace(from, bridgeCtx()).title : TB['board.openedFrom']}`, TB['board.openedFrom']);
-    b.classList.add('ct2-tug-lane');
-    head.appendChild(b);
-  }
-  drawWires();
-}
-
-/**
- * The LINE, on the layouts where both ends are on screen at once. Progressive: the badges above are
- * the guarantee, this is the picture. Redrawn on scroll and resize because both ends move.
- */
-function drawWires() {
-  const doc = tableDoc();
-  if (!doc || !S.model) return;
-  const board = doc.getElementById('board');
-  if (!board) return;
-  let svg = doc.querySelector('.ct2-wire');
-  if (!svg) {
-    svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'ct2-wire');
-    board.appendChild(svg);
-  }
-  const box = board.getBoundingClientRect();
-  svg.setAttribute('viewBox', `0 0 ${Math.max(1, box.width)} ${Math.max(1, box.height)}`);
-  svg.style.width = `${box.width}px`;
-  svg.style.height = `${box.height}px`;
-  svg.style.left = `${board.scrollLeft}px`;
-  svg.style.top = `${board.scrollTop}px`;
-  const paths = [];
-  for (const tile of doc.querySelectorAll('.tugtile__tile[data-ct2-tug]')) {
-    const lane = doc.querySelector(`.tugtile__lane[data-card-lane="drawer:${CSS.escape(tile.dataset.ct2Tug)}"]`);
-    const head = lane && lane.querySelector('.tugtile__lane-head');
-    if (!head) continue;
-    const a = tile.getBoundingClientRect();
-    const b = head.getBoundingClientRect();
-    if (!a.width || !b.width) continue;
-    const x1 = a.right - box.left; const y1 = a.top + a.height / 2 - box.top;
-    const x2 = b.left - box.left; const y2 = b.top + b.height / 2 - box.top;
-    const mid = (x1 + x2) / 2;
-    paths.push(`<path d="M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}"/>`);
-  }
-  svg.innerHTML = paths.join('');
 }
 
 // ── 「＋加一張牌」 — one row, seven icons ────────────────────────────────────────────────────────
@@ -1277,7 +1196,6 @@ function setView(view) {
   document.body.dataset.view = v;
   paintViewSwitch(v);
   writeView(v);
-  if (v === 'board') drawWires();          // the board was display:none; its boxes are new
 }
 
 // ── HOST MODE: feelreef's page embeds this editor on a REAL card ──────────────────────────────────

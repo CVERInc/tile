@@ -157,11 +157,24 @@ const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boo
 const flat = (s) => String(s || '').replace(/[#\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**
+ * The subtitle of a tile that opens drawer `target`: `opensLabel` filled with the drawer's title;
+ * `⚠ <id>` when the drawer does not exist (a dangling link is reported, not hidden); '' for no target.
+ */
+export function opensText(target, ctx = {}) {
+  if (!target) return '';
+  const title = ctx.drawerTitle ? ctx.drawerTitle(target) : target;
+  if (!title) return `⚠ ${target}`;
+  return String(ctx.opensLabel || '→ Opens: {title}').replace('{title}', title);
+}
+
+/**
  * One cell → the tile text the board shows. `ctx` carries the words:
  *   ctx.typeName(type)   the tile kind, in the visitor's language (cell-i18n `type.<t>.title`)
- *   ctx.drawerPrefix     「抽屜：」 and friends (sandbox-i18n `targetDrawer`)
+ *   ctx.opensLabel       「→ 開啟：{title}」 and friends (board-i18n `board.opensLabel`) — the
+ *                        subtitle of a tile that opens a drawer. It IS the board's drawer label
+ *                        (ruling 2026-09-24: words, not lines; one place, not a pill beside it).
  *   ctx.title            the card's frontmatter title — the profile tile's name
- *   ctx.drawerTitle(id)  a drawer's display title, for the 牽線 line
+ *   ctx.drawerTitle(id)  a drawer's display title, or '' when no such drawer exists (→ `⚠ id`)
  */
 export function tileText(cell, ctx = {}) {
   const name = (t) => (ctx.typeName ? ctx.typeName(t) : t);
@@ -173,9 +186,7 @@ export function tileText(cell, ctx = {}) {
   // hashtag on every tile — which reads as a kanban label, and was the cold read's P1-2.
   const head = (s) => `### ${flat(s)}`;
   const target = drawerTargetOf(cell);
-  const opens = target
-    ? `${ctx.drawerPrefix || ''}${(ctx.drawerTitle && ctx.drawerTitle(target)) || target}`
-    : '';
+  const opens = opensText(target, ctx);
 
   switch (cell.type) {
     case 'profile':
@@ -233,9 +244,7 @@ export function tileFace(cell, ctx = {}) {
   const name = (t) => (ctx.typeName ? ctx.typeName(t) : t);
   const p = (cell && cell.params) || {};
   const target = drawerTargetOf(cell);
-  const opens = target
-    ? `${ctx.drawerPrefix || ''}${(ctx.drawerTitle && ctx.drawerTitle(target)) || target}`
-    : '';
+  const opens = opensText(target, ctx);
   const face = { kind: (cell && cell.type) || 'text', title: '', sub: '', img: '', icons: [] };
   const marks = (url) => (url && !url.startsWith('#') && !url.startsWith('mailto:') ? iconDomains(hostOf(url)).slice(0, 1) : []);
 
@@ -399,3 +408,42 @@ export function drawerLinks(model, ctx = {}) {
   });
   return { links, dangling };
 }
+
+/**
+ * The drawer lane's heading, in WORDS (ruling 2026-09-24: a one-to-one relation needs a word, not a
+ * line). The tile's side of the relation is its subtitle — see `opensText`. Each drawer's lane reads
+ * `drawerOpenedBy` naming the FIRST tile that opens it, or its plain title when nothing opens it.
+ * Derived from `drawerLinks`, the data the lines were drawn from.
+ */
+export function drawerLabels(model, ctx = {}, strings = {}) {
+  const openedBy = strings['board.drawerOpenedBy'] || '{title} (opened by “{by}”)';
+  const { links } = drawerLinks(model, ctx);
+  const slots = boardSlots(model, ctx);
+  const firstOpener = new Map();
+  for (const l of links) if (!firstOpener.has(l.drawerId)) firstOpener.set(l.drawerId, l.slot);
+  const lanes = (model.drawers || []).map((d) => {
+    const title = d.title || d.id;
+    const slot = firstOpener.get(d.id);
+    const cell = slot == null ? null : (slots[slot] || {}).cell;
+    const by = cell ? tileFace(cell, ctx).title : '';
+    return { laneKey: `drawer:${d.id}`, heading: by ? openedBy.replace('{title}', title).replace('{by}', by) : title };
+  });
+  return { lanes };
+}
+
+/**
+ * The board follows the SHELL, not the OS. The engine's tugtile page picks its token set with
+ * `prefers-color-scheme`, so under a dark OS it painted rgb(30,30,30) inside feelreef's fixed-light
+ * shell. The host has no theme parameter, and its files are reused unmodified, so the editor injects
+ * this — the host's OWN light token values, verbatim from hosts/web/tugtile/index.html — into the
+ * iframe's head after the host's style, where equal specificity and later order win under both schemes.
+ */
+export const BOARD_LIGHT_CSS = `
+  :root { color-scheme: light;
+    --background-primary: #ffffff; --background-secondary: #f6f6f6;
+    --background-modifier-border: #e0e0e0; --background-modifier-border-hover: #d4d4d4;
+    --background-modifier-form-field: #ffffff; --background-modifier-hover: rgba(0,0,0,.067);
+    --text-normal: #222222; --text-muted: #5c5c5c; --text-faint: #ababab;
+    --text-accent: hsl(258, 68%, 52%); --text-error: #c0392b; --text-success: #2f9e5e;
+  }
+`;
