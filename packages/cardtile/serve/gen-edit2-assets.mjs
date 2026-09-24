@@ -73,9 +73,38 @@ if (bundled.errors?.length) {
 }
 const EDIT2_JS = bundled.outputFiles[0].text;
 
-// the two stylesheets this page links: the shared cardtile-w chrome, then w2's own layer
-const EDIT2_CSS = fs.readFileSync(join(DIR, '../w/editor.css'), 'utf8')
-  + '\n' + fs.readFileSync(join(W2, 'edit2.css'), 'utf8');
+// ── the porch skin's two faces (owner ruling 2026-09-24; w2/fonts/PROVENANCE.md) ─────────────────
+// Served by the Worker from the SAME immutable path as the table files (`/try/edit/t/<loc>/…`) —
+// the locale segment is irrelevant to a font, so the stylesheet names one fixed segment and every
+// visitor shares one cached copy. Base64 in the module because a Worker has no filesystem.
+const FONT_BASE = '/try/edit/t/en/';
+const FONT_NAMES = ['NunitoVariable-latin.woff2', 'NunitoVariable-latin-ext.woff2', 'YoungSerif-latin.woff2', 'YoungSerif-latin-ext.woff2'];
+const FONTS = Object.fromEntries(FONT_NAMES.map((f) => [`fonts/${f}`, fs.readFileSync(join(W2, 'fonts', f)).toString('base64')]));
+const PORCH_FONTS_CSS = fs.readFileSync(join(W2, 'porch-fonts.css'), 'utf8').replaceAll('url(./fonts/', `url(${FONT_BASE}fonts/`);
+if (PORCH_FONTS_CSS.includes('url(./')) throw new Error('gen-edit2-assets: porch-fonts.css has a relative url the rewrite missed');
+
+// ── squircle corners: @cvernet/signet's corners.css, READ from the package, never copied ────────
+// ([[signet-is-the-only-copy]]). It sits in the editor page's own stylesheet, so it squircles the
+// SHELL only — the card and the board are iframes, other documents, and never see it. Resolved from
+// here upward, so a checkout with node_modules at packages/cardtile/ or at the workspace root works.
+// (signet's `exports` map does not list src/corners.css, so walk node_modules up by hand — the same
+// lookup Node would do.)
+let SIGNET_CORNERS;
+for (let d = join(DIR, '..'); ; d = dirname(d)) {
+  const p = join(d, 'node_modules/@cvernet/signet/src/corners.css');
+  if (fs.existsSync(p)) { SIGNET_CORNERS = fs.readFileSync(p, 'utf8'); break; }
+  if (dirname(d) === d) throw new Error('gen-edit2-assets: @cvernet/signet is not installed — run: npm install --prefix packages/cardtile');
+}
+
+// the page's stylesheets, in cascade order: the shared cardtile-w chrome, signet's corners, the
+// porch tokens + faces, then w2's own layer (whose tail is the porch skin)
+const EDIT2_CSS = [
+  fs.readFileSync(join(DIR, '../w/editor.css'), 'utf8'),
+  SIGNET_CORNERS,
+  fs.readFileSync(join(W2, 'porch-tokens.css'), 'utf8'),
+  PORCH_FONTS_CSS,
+  fs.readFileSync(join(W2, 'edit2.css'), 'utf8'),
+].join('\n');
 
 // The served page's markup, MINUS the two things that only make sense loaded from disk: the two
 // stylesheet <link>s (inlined instead) and the `<script type="module">` tail (replaced with a plain
@@ -131,6 +160,8 @@ export const EDIT2_JS = ${JSON.stringify(EDIT2_JS)};
 export const TABLE_FILES = ${JSON.stringify(TABLE)};
 /** the engine's own locale JSON, parsed — four locales; board-i18n.mjs maps our nine onto them */
 export const TABLE_I18N = ${JSON.stringify(ENGINE_I18N)};
+/** the porch skin's woff2 files, base64, keyed by their path under FONT_BASE */
+export const FONT_FILES = ${JSON.stringify(FONTS)};
 /** a hash of the SOURCES this was built from — see edit2-sources.mjs, and the test that recomputes it */
 export const SOURCE_STAMP = ${JSON.stringify(sourceStamp())};
 `;
@@ -138,4 +169,5 @@ fs.writeFileSync(join(DIR, 'edit2-assets.mjs'), out);
 console.log('wrote edit2-assets.mjs — body', BODY.length, '| css', EDIT2_CSS.length,
             '| edit2.js bundle', EDIT2_JS.length, '| table files',
             Object.entries(TABLE).map(([k, v]) => `${k}:${v.length}`).join(' '),
-            '| i18n', Object.keys(ENGINE_I18N).join(','));
+            '| i18n', Object.keys(ENGINE_I18N).join(','),
+            '| fonts', Object.values(FONTS).reduce((n, b) => n + b.length, 0), 'base64 chars');

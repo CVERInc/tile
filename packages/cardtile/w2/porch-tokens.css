@@ -1,0 +1,75 @@
+/* feelreef's PORCH skin, mirrored for the Card editor's shell (owner ruling 2026-09-24: the
+   sandbox visitor stands on our porch, so the shell wears feelreef.com/dashboard's look; the CARD
+   keeps its own theme).
+
+   MIRRORED, NOT IMPORTED — tile never imports reef code. Every literal names the reef line it was
+   copied from (reef/apps/feelreef/…, as of 2026-09-24); w2/porch-tokens.test.mjs pins the ones that
+   carry the look and, when the reef checkout is on the machine, diffs the rest against it live.
+
+   🔴 ONE LOOK, NO DARK COPY — ON PURPOSE. reef has no `prefers-color-scheme` copy of the carrier
+   block to mirror: app.css:468 「There is no second skin」 (chodaict 2026-08-15: feelreef ships ONE
+   look) and reef's own one-look.test.ts forbids asking the OS about colour. The account dashboard
+   (the porch) is therefore the same pale sea-green in both OS schemes, and so is this shell. The
+   only dark-scheme carrier values reef has belong to `.console.owners-home` (console.css:441) —
+   the owner's home, which is the OTHER dashboard, not the porch. `color-scheme: light` below keeps
+   native controls (scrollbars, checkboxes, selects) from turning dark on a light ground.
+   prefers-contrast is honoured, as app.css does (accessibility, not taste). */
+:root {
+  color-scheme: light;
+
+  /* type — app.css:101-106 */
+  --font-body: 'Nunito Variable', Nunito, -apple-system, 'PingFang TC', 'Hiragino Sans', 'Microsoft JhengHei', 'Noto Sans CJK TC', sans-serif;
+  --font-display-cjk: 'Songti TC', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif CJK TC', 'Noto Serif TC', serif;
+  --font-display: 'Young Serif', var(--font-display-cjk);
+
+  /* geometry — app.css:172-173 */
+  --console-radius: 18px;
+  --console-radius-sm: 12px;
+
+  /* the carrier block — app.css:237-289 */
+  --carrier-bg: rgba(255, 255, 255, 0.72);        /* app.css:237 */
+  --carrier-bg-solid: #f4f6f6;                    /* app.css:242 */
+  --carrier-text: #0c3a44;                        /* app.css:243 */
+  --carrier-text-muted: #557077;                  /* app.css:244 */
+  --carrier-heading: #0c3a44;                     /* app.css:245 */
+  --carrier-border: rgba(12, 58, 68, 0.1);        /* app.css:246 */
+  --carrier-shadow: 0 8px 32px rgba(12, 58, 68, 0.1); /* app.css:247 */
+  --carrier-accent: #0f7c89;                      /* app.css:274 */
+  --carrier-accent-ink: #ffffff;                  /* app.css:275 */
+  --carrier-input-bg: rgba(12, 58, 68, 0.04);     /* app.css:276 */
+  --carrier-link: #0f7c89;                        /* app.css:279 */
+  --carrier-outline-border: #0f7c89;              /* app.css:289 */
+
+  /* feedback — app.css:431-438 */
+  --carrier-feedback-success: #1d8b4f;            /* app.css:431 */
+  --carrier-feedback-error: #c54a3a;              /* app.css:432 */
+  --carrier-feedback-warning: #b67a1e;            /* app.css:433 */
+
+  /* derived console surfaces — app.css:450-451 */
+  --console-panel: var(--carrier-bg);
+  --console-tint: color-mix(in srgb, var(--carrier-accent) 9%, transparent);
+
+  /* buttons — app.css:359-428 (only what the shell uses) */
+  --btn-ink: #0c3a44;                             /* app.css:359 */
+  --btn-secondary-ink: #00768a;                   /* app.css:357 */
+  --btn-surface: #ffffff;                         /* app.css:420 */
+  --btn-border: #67858a;                          /* app.css:422 */
+  --btn-border-hover: #0f8e9c;                    /* app.css:423 */
+  --btn-radius: 12px;                             /* app.css:424 */
+  --btn-radius-pill: 999px;                       /* app.css:425 */
+  --btn-weight: 800;                              /* app.css:427 */
+  --btn-ghost-hover: rgba(20, 163, 179, 0.06);    /* app.css:362 */
+  --btn-danger-ink: #b02e28;                      /* app.css:381 */
+  --btn-danger-hover: rgba(220, 38, 38, 0.14);    /* app.css:364 */
+
+  /* motion — Button.svelte's press ("the press answers before the server does") */
+  --porch-press: translateY(1px) scale(0.985);
+
+  /* the porch ground — routes/dashboard/+page.svelte:2217 (`.screen`) */
+  --porch-ground: linear-gradient(180deg, #f1fbfb 0%, #e6f5f3 42%, #f4fcfa 100%);
+}
+
+/* app.css (the @media (prefers-contrast: more) block after 「There is no second skin」) */
+@media (prefers-contrast: more) {
+  :root { --carrier-border: var(--carrier-heading); }
+}

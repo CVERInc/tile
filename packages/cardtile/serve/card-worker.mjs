@@ -16,7 +16,7 @@ import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from 
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
-import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N } from './edit2-assets.mjs';
+import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
 import { validHostOrigin } from '../w2/host-bridge.mjs';
@@ -258,6 +258,7 @@ const TABLE_MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.woff2': 'font/woff2',
 };
 
 /** one file of the engine's web tugtile, or null. Never reads anything but the bundled table. */
@@ -272,6 +273,12 @@ function tableAsset(localeKey, rel) {
     const base = TABLE_I18N[ENGINE_LOCALE_FILE[localeKey] || 'en-US'] || TABLE_I18N['en-US'];
     if (!base) return null;
     return { body: JSON.stringify(boardLocaleJson(base, localeKey, chromeStrings(localeKey))), ext: '.json', immutable: false };
+  }
+  // the editor shell's own faces (the porch skin — w2/porch-fonts.css). Locale-free; binary.
+  if (path.startsWith('fonts/')) {
+    const b64 = FONT_FILES[path];
+    if (b64 == null) return null;
+    return { body: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), ext: '.woff2', immutable: true };
   }
   const body = TABLE_FILES[path];
   if (body == null) return null;
