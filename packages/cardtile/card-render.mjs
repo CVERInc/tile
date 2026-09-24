@@ -418,7 +418,10 @@ function renderCell(cell, place, ctx) {
       const featureImg = resolveAsset(p.img, ctx);
       if (!featureImg && !p.title && !p.cta && !b) {
         if (!ctx.editIndex) return '';
-        return `<div class="st-cell st-gal-cell st-gal-cell-bare st-cell-unset" ${size} data-coral-type="feature"><span class="st-gal-label">${esc(label(ctx, 'imgUnset'))}</span></div>`;
+        // 🔴 SAME GEOMETRY AS A FILLED LABELLED PICTURE: `.st-gal-link` → picture slot → label. The slot
+        // is an empty `<span class="st-gal-img">` (an `<img>` with no src is the current-document
+        // trap above), so the words sit under the frame the picture will fill, not floating in the cell.
+        return `<div class="st-cell st-gal-cell st-gal-cell-bare st-gal-labelled st-cell-unset" ${size} data-coral-type="feature"><div class="st-gal-link"><span class="st-gal-img" aria-hidden="true"></span><span class="st-gal-label">${esc(label(ctx, 'imgUnset'))}</span></div></div>`;
       }
       // 🔴 An image tile with nothing to say stays an IMAGE. The scrim + eyebrow + title + CTA arrow
       // are chrome for a tile that carries copy — painted over a creator's artwork they darken the
@@ -475,7 +478,12 @@ function renderCell(cell, place, ctx) {
       if (!url) {
         if (!ctx.editIndex) return '';
         const unset = label(ctx, 'linkUnset');
-        return `<div class="st-cell st-cell-tile st-cell-unset" ${size} data-coral-type="linktile"><div class="st-cell-body"><div class="st-cell-title">${esc(linkText || unset)}</div><div class="st-cell-sub">${esc(unset)}</div></div></div>`;
+        // 🔴 SAME GEOMETRY AS THE FILLED TILE (ruler: tile-geometry.test.mjs). This used to be a bare
+        // `.st-cell-body` straight inside the cell — no `.st-cell-link`, no `.st-cell-head` — so the
+        // empty link sat rounded with its title at the top while the filled one next to it sat square
+        // with its title at the bottom. Same skeleton now, with the `<a>` swapped for an inert `<div>`
+        // (nothing to navigate to) and the icon omitted (there is no address to derive one from).
+        return `<div class="st-cell st-cell-tile st-cell-unset" ${size} data-coral-type="linktile"><div class="st-cell-link"><div class="st-cell-head">${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText || unset)}</div><div class="st-cell-sub">${esc(unset)}</div></div></div></div>`;
       }
       const a = anchorFor(url, ctx);
       if (!a) return '';
@@ -836,6 +844,24 @@ const NATIVE_CSS = [
   // sits against the label instead of at the right edge.
   `.st-card .st-run > .st-cell-tile{align-self:stretch;width:100%;background:none;border:0;border-radius:0;box-shadow:none;border-top:1px solid var(--cp-line)}`,
   `.st-card .st-run > .st-cell-tile:first-child{border-top:0}`,
+  // ── THE RUN-CORNER RULE (ruler: tile-geometry.test.mjs + verify/tile-geometry.mjs) ───────────────
+  // A run is a grouped list, like an inset-grouped list on iOS: the run's OUTER corners take the
+  // card's tile radius (18px, what `.st-card .st-cell` resolves to), the inner seams are square, and
+  // the dividers stay as they are. A tile alone in its run is therefore fully rounded — it has no
+  // seam to share. `.st-run` is `flex-direction:column`, so a run's ends are its top and bottom:
+  // the first row rounds its two TOP corners, the last row its two BOTTOM corners, a lone row all
+  // four. (All rows used to be `border-radius:0`, so a single link was a square box with nothing to
+  // join, next to its own empty state drawn rounded.)
+  `.st-card .st-run > .st-cell-tile:first-child{border-top-left-radius:18px;border-top-right-radius:18px}`,
+  `.st-card .st-run > .st-cell-tile:last-child{border-bottom-left-radius:18px;border-bottom-right-radius:18px}`,
+  // A link's head (icon + arrow) with nothing to SHOW must not hold the title down: the link is a
+  // `space-between` column, so a zero-height head still pins the body to the bottom. Nothing to show
+  // = no children at all (an unset link, arrows off) OR only children the favicon's onerror hid with
+  // `style.display="none"` (IMG_ICON) — the common case, since every filled link gets a derived
+  // favicon. Either way the head leaves the flow and the title sits at the top. `:has` on the
+  // inline style rather than a new class: live markup must not change for this.
+  `.st-card .st-cell-tile .st-cell-head:not(:has(> :not([style*="display: none"]))){display:none}`,
+  `.st-card .st-cell-tile .st-cell-head:not(:has(> :not([style*="display: none"]))) + .st-cell-body{margin-top:0}`,
   `.st-card .st-run > .st-cell-tile:hover{background:var(--cp-surface-2)}`,
   // a row lifting on hover would break the run apart; the surface change is the feedback instead
   `.st-card [data-w="6"].st-cell-tile:hover{transform:none;background:var(--cp-surface-2)}`,

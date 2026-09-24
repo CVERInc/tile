@@ -435,8 +435,8 @@ const CANVAS_CSS = `
 /* An unfinished tile — no address yet, or no picture yet. It exists ONLY here (a live card renders
    nothing at all in that case, which is why the production stylesheet has never heard of this
    class): a dashed outline you can still tap to finish, rather than a cell you cannot reach. */
-.ctw-editing .st-cell-unset{border-style:dashed;opacity:.72;align-items:center;justify-content:center;text-align:center}
-.ctw-editing .st-cell-unset .st-cell-body{align-items:center;text-align:center}
+.ctw-editing .st-cell-unset{border-style:dashed;opacity:.72}
+.ctw-editing .st-cell-unset .st-gal-img{border:1px dashed var(--cp-line-hi,currentColor)}
 `;
 
 // ── lanes ────────────────────────────────────────────────────────────────────────────────────────
