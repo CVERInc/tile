@@ -91,7 +91,21 @@ const S = {
   addLane: null,         // which lane 「＋加一張牌」 was pressed in
   openSlot: null,        // the tile whose sheet is open
   pendingAssets: {},
+  // the tile `addCell` just created, if its sheet is still the one open and Done has not fired yet.
+  // `{ slot, preMd, undoFloor }` — see `newTileCancelTarget` and `closeModal`. Cleared the moment the
+  // sheet closes any other way (Done, Delete) or a different tile's sheet opens.
+  newTile: null,
 };
+
+/**
+ * Pure: does closing the sheet on `slot` right now (✕/Escape/scrim, never Done) discard a
+ * never-saved tile? `track` is `S.newTile`. Returns the markdown to restore, or null when this is
+ * an ordinary close (an existing tile, or `track` stale/absent) that should just hide the sheet.
+ */
+export function newTileCancelTarget(track, slot) {
+  if (!track || track.slot !== slot) return null;
+  return track.preMd;
+}
 
 const SANDBOX_STORAGE_KEY = 'cardtile:try:draft:v1';
 const readDraft = () => { try { return (typeof window !== 'undefined' && window.localStorage.getItem(SANDBOX_STORAGE_KEY)) || ''; } catch { return ''; } };
@@ -844,6 +858,10 @@ function openPicker(laneKey) {
  * unfinished instead, and the sheet opens on top of them.
  */
 function addCell(type, laneKey) {
+  // snapshot BEFORE the add commits, so a cancel on the sheet that is about to open can put the
+  // card back exactly as it was — same markdown bytes, no orphaned undo entry left behind.
+  const preMd = S.md;
+  const undoFloor = S.undo.length;
   const blank = normalizeCell({ ...blankCell(type, TX), params: {} });
   edit((m) => {
     if (laneKey.startsWith('drawer:')) {
@@ -862,7 +880,12 @@ function addCell(type, laneKey) {
   // the sheet opens on top of the new tile: the LAST slot in the lane it was added to
   let last = -1;
   boardSlots(S.model, bridgeCtx()).forEach((s, i) => { if (s.laneKey === laneKey) last = i; });
-  if (last >= 0) openCell(last);
+  if (last >= 0) {
+    S.newTile = { slot: last, preMd, undoFloor };
+    openCell(last);
+  } else {
+    S.newTile = null;
+  }
 }
 
 function addDrawer() {
@@ -923,6 +946,10 @@ function openCell(slot) {
   const slots = boardSlots(S.model, bridgeCtx());
   const s = slots[slot];
   if (!s) return;
+  // opening any tile other than the one `addCell` just tracked ends that tracking — this is an
+  // existing tile's sheet, or a second sheet on the same new tile reopened after Done, and ✕ on it
+  // is today's behaviour (close, keep).
+  if (S.newTile && S.newTile.slot !== slot) S.newTile = null;
   S.openSlot = slot;
   S.pendingAssets = {};
   const cell = s.cell;
@@ -982,7 +1009,19 @@ function wireForm(def) {
   }
 }
 
-const closeModal = () => { el('modal').hidden = true; S.openSlot = null; S.pendingAssets = {}; };
+// ✕ / Escape / scrim — never Done, never Delete (those call closeModal too, but only after
+// already committing or clearing `S.newTile` themselves, so `newTileCancelTarget` sees nothing).
+const closeModal = () => {
+  const restoreMd = newTileCancelTarget(S.newTile, S.openSlot);
+  if (restoreMd != null) {
+    S.undo.length = S.newTile.undoFloor;          // drop the add (and any reorder since) — no-op undo entry
+    commit(restoreMd, { undoable: false });
+  }
+  S.newTile = null;
+  el('modal').hidden = true;
+  S.openSlot = null;
+  S.pendingAssets = {};
+};
 
 /** where the open tile sits inside its own lane — the sheet's up/down buttons work within a lane */
 function openPlace() {
@@ -1006,6 +1045,7 @@ function moveCell(delta) {
   if (!p) return;
   const to = p.index + delta;
   if (to < 0 || to >= p.count) return;
+  const trackingThis = S.newTile && S.newTile.slot === S.openSlot;
   edit((m) => {
     if (p.laneKey.startsWith('drawer:')) {
       const d = m.drawers.find((x) => `drawer:${x.id}` === p.laneKey);
@@ -1018,6 +1058,7 @@ function moveCell(delta) {
   });
   // the sheet stays open on the SAME tile, which has simply moved
   S.openSlot = boardSlots(S.model, bridgeCtx()).findIndex((s) => s.laneKey === p.laneKey && s.cellIndex === to);
+  if (trackingThis && S.newTile) S.newTile = { ...S.newTile, slot: S.openSlot };  // the new tile followed
   syncMoveButtons();
 }
 
@@ -1064,6 +1105,7 @@ function saveCell() {
     m.cells = m.cells.map((c, i) => (i === at ? next : c));
     return m;
   });
+  S.newTile = null;   // Done keeps it — this tile is no longer "just added, never saved"
   closeModal();
 }
 
@@ -1083,6 +1125,7 @@ function deleteCell() {
     m.blocks = m.blocks.map((b, i) => (i === bi ? { ...b, count: b.count - 1 } : (b.start > at ? { ...b, start: b.start - 1 } : b)));
     return m;
   });
+  S.newTile = null;   // gone either way — nothing left to restore
   closeModal();
 }
 
@@ -1379,6 +1422,7 @@ export function boot(opts = {}) {
     get slots() { return boardSlots(S.model, bridgeCtx()); },
     get tugs() { return drawerLinks(S.model, bridgeCtx()); },
     get ready() { return !!(tableWin() && tableWin().__ready); },
+    get newTile() { return S.newTile; },
     boardMd: () => boardMd(S.model, bridgeCtx()),
     load: (md) => commit(md, { undoable: false }),
     openPicker, addCell, openCell, saveCell, closeModal, deleteCell, undo,
