@@ -24,6 +24,16 @@
 
 /** A channel id is `UC` + 22 url-safe chars. Anything else never reaches a URL. */
 export const CHANNEL_RE = /^UC[\w-]{22}$/;
+/**
+ * A handle is what a creator actually knows about their channel: `@name`, 3–30 of letters, digits,
+ * underscore, period, hyphen — the shape YouTube enforces. Nobody knows their UC id; everybody knows
+ * their handle, and the channel page's share button hands out `youtube.com/@name`. A handle in the
+ * card is resolved to the UC id here, server-side, on its own cache key (condition 2), and the
+ * visitor's browser still never talks to YouTube before pressing play (condition 4).
+ */
+export const HANDLE_RE = /^@[\w.-]{3,30}$/;
+/** A channel reference as a card may write it: a UC id or an @handle. */
+export const isChannelRef = (s) => CHANNEL_RE.test(s) || HANDLE_RE.test(s);
 /** A video id is 11 url-safe chars. */
 export const VIDEO_RE = /^[\w-]{11}$/;
 
@@ -42,8 +52,8 @@ export const posterPath = (videoId) => `/_yt/${videoId}.jpg`;
  */
 export function channelsIn(cardMd) {
   const out = new Set();
-  for (const m of String(cardMd || '').matchAll(/\bchannel\s*=\s*"?([A-Za-z0-9_-]+)"?/g)) {
-    if (CHANNEL_RE.test(m[1])) out.add(m[1]);
+  for (const m of String(cardMd || '').matchAll(/\bchannel\s*=\s*"?(@?[A-Za-z0-9_.-]+)"?/g)) {
+    if (isChannelRef(m[1])) out.add(m[1]);
   }
   return [...out];
 }
@@ -68,19 +78,65 @@ export function latestFromFeed(xml) {
 }
 
 /**
+ * The channel id a handle page names. 🔴 Read from `<meta itemprop="identifier">` (with the canonical
+ * link as the fallback), NOT from the first `"channelId":"UC…"` in the page's JSON — measured on a
+ * real page, that key appears three times before the channel's own id and every one of them is
+ * another channel (a recommended one). The identifier meta is the page saying who it is.
+ */
+export function channelIdFromPage(html) {
+  const s = String(html || '');
+  const meta = /<meta\s+itemprop="identifier"\s+content="(UC[\w-]{22})"/.exec(s)
+    || /<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{22})"/.exec(s);
+  return meta && CHANNEL_RE.test(meta[1]) ? meta[1] : null;
+}
+
+/**
+ * `@handle` → `UC…`, or null. Same shape as resolveChannel: injected fetch, a deadline, never throws.
+ * The handle page is public and keyless (condition 1); it is a few hundred KB to a couple of MB, which
+ * is why the Worker caches it for a day — a handle's id does not change — and why this is one fetch
+ * per handle, not per card or per visitor (condition 2).
+ */
+export async function resolveHandle(handle, doFetch, timeoutMs = TIMEOUT_MS) {
+  if (!HANDLE_RE.test(handle)) return null;
+  let timer;
+  try {
+    const page = doFetch(`https://www.youtube.com/${handle}`)
+      .then(async (r) => (r && r.ok ? channelIdFromPage(await r.text()) : null));
+    return await Promise.race([
+      page,
+      new Promise((ok) => { timer = setTimeout(() => ok(null), timeoutMs); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Resolve one channel. `doFetch` is injected so this is testable without a network and so the Worker
  * can hand in Cloudflare's caching fetch.
+ *
+ * Takes a UC id or an @handle. The answer carries `channelId` either way, so the renderer can play
+ * the uploads playlist for a card that wrote the handle — the card's markdown keeps the handle, which
+ * is the form a person or an agent can read and check.
  *
  * 🔴 Never throws. A live block that cannot resolve must land on the degraded state, which is already
  * designed and already looks like a video you have not opened — not on a 500 that takes the whole
  * card down with it. The creator's card is not allowed to depend on YouTube being up.
  */
-export async function resolveChannel(channelId, doFetch, timeoutMs = TIMEOUT_MS) {
+export async function resolveChannel(ref, doFetch, timeoutMs = TIMEOUT_MS) {
+  let channelId = ref;
+  if (HANDLE_RE.test(ref)) {
+    channelId = await resolveHandle(ref, doFetch, timeoutMs);
+    if (!channelId) return null;
+  }
   if (!CHANNEL_RE.test(channelId)) return null;
   let timer;
   try {
     const feed = doFetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`)
-      .then(async (r) => (r && r.ok ? latestFromFeed(await r.text()) : null));
+      .then(async (r) => (r && r.ok ? latestFromFeed(await r.text()) : null))
+      .then((hit) => (hit ? { ...hit, channelId } : null));
     // 🔴 A DEADLINE, because this now sits on the render path. Without it a slow or hanging YouTube
     // does not degrade the video block — it holds up the creator's entire card, and the four
     // conditions are satisfied right up until the page never arrives. Losing the poster is the
@@ -97,7 +153,10 @@ export async function resolveChannel(channelId, doFetch, timeoutMs = TIMEOUT_MS)
   }
 }
 
-/** Resolve every channel a card mentions, concurrently. Returns { [channelId]: {id, title} }. */
+/**
+ * Resolve every channel a card mentions, concurrently. Returns { [ref]: {id, title, channelId} } —
+ * keyed by what the card WROTE (UC id or @handle), because that is what the renderer looks up.
+ */
 export async function resolveChannels(cardMd, doFetch) {
   const ids = channelsIn(cardMd);
   if (!ids.length) return {};

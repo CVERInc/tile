@@ -101,12 +101,16 @@ test('youtubeRef: what the share button gives a person → the id or channel cod
     [`  ${ID}  `, ID],
     [`https://www.youtube.com/channel/${CH}`, CH],
     [`youtube.com/channel/${CH}/videos`, CH],
+    ['https://www.youtube.com/@Some.Body', '@Some.Body'],           // the channel page's share button
+    ['youtube.com/@some_body/videos?si=abc', '@some_body'],
+    ['https://m.youtube.com/@somebody', '@somebody'],
+    ['@somebody', '@somebody'],
     [CH, CH],
     ['', ''],
   ];
   for (const [input, want] of table) assert.equal(youtubeRef(input), want, input);
   // controls: things that are not a video or channel are left exactly as typed
-  for (const other of ['https://video.example/123456789', 'https://example.com/watch?v=dQw4w9WgXcQ', 'youtube.com/@somebody', 'hello']) {
+  for (const other of ['https://video.example/123456789', 'https://example.com/watch?v=dQw4w9WgXcQ', 'youtube.com/@ab', 'hello']) {
     assert.equal(youtubeRef(other), other, other);
   }
 });
