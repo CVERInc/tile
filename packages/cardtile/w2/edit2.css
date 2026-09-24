@@ -164,3 +164,154 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
 .ctw-host-status{font:500 13px/1.3 system-ui,sans-serif;opacity:.7;margin-right:10px;max-width:40ch;overflow-wrap:anywhere}
 .ctw-host-status[data-status="failed"]{opacity:1;color:#c0392b}
 body[data-host-waiting] .ctw-w2{visibility:hidden}
+
+/* ══ THE PORCH SKIN ═══════════════════════════════════════════════════════════════════════════════
+   Owner ruling 2026-09-24: the shell wears feelreef.com/dashboard's look (w2/porch-tokens.css); the
+   CARD keeps its own theme — nothing below reaches into either iframe. LAST in this file on purpose:
+   it restyles w/editor.css's shared chrome for THIS surface only (w/ keeps its own look).
+
+   Step one is the cheap, total one: w/editor.css paints everything from six --ctw-* tokens, so they
+   are pointed at the carrier tokens here and every rule that reads them follows. Same specificity as
+   editor.css's own :root (incl. its prefers-color-scheme copy) and later, so these win in BOTH OS
+   schemes — one look, as on the porch. Step two restyles what tokens alone cannot say (pill shapes,
+   the segmented switch, Panel shadow, the display face). */
+:root {
+  --ctw-bg: var(--carrier-bg-solid);
+  --ctw-panel: var(--carrier-bg);
+  --ctw-line: var(--carrier-border);
+  --ctw-ink: var(--carrier-text);
+  --ctw-dim: var(--carrier-text-muted);
+  --ctw-go: var(--carrier-accent);
+  --ctw-danger: var(--carrier-feedback-error);
+  accent-color: var(--carrier-accent);
+}
+body {
+  font-family: var(--font-body); color: var(--carrier-text);
+  background: var(--carrier-bg-solid) var(--porch-ground) no-repeat;
+  background-size: 100% 100%;
+}
+::selection { background: rgba(255, 122, 92, 0.25); }   /* dashboard +page.svelte:2220 */
+
+/* the banner and the bar: frosted carrier surfaces over the porch water */
+.ctw-sandbox-banner {
+  background: var(--console-tint); color: var(--carrier-heading);
+  border-bottom: 1px solid var(--carrier-border); font-weight: 700;
+}
+.ctw-bar {
+  background: var(--carrier-bg); border-bottom: 1px solid var(--carrier-border);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.ctw-bar h1, .ctw-bar h1.ctw-brand {
+  font-family: var(--font-display); font-weight: 400; color: var(--carrier-heading);
+  font-size: 1.12rem; letter-spacing: 0; opacity: 1;
+}
+.ctw-brand a { font-weight: 400; letter-spacing: 0; }
+.ctw-brand span { font-family: var(--font-body); font-weight: 700; font-size: .82rem; color: var(--carrier-text-muted); opacity: 1; }
+
+/* buttons — Button.svelte: 1.5px border, weight 800, pill, the press transform */
+.ctw-btn, .ctw-tab {
+  font-family: var(--font-body); font-weight: var(--btn-weight);
+  border: 1.5px solid var(--carrier-outline-border); border-radius: var(--btn-radius-pill);
+  background: var(--btn-surface); color: var(--btn-ink);
+  transition: background .15s, border-color .15s, color .15s, transform 90ms ease;
+}
+.ctw-btn:not(.ctw-btn-go):hover, .ctw-tab:hover { background: var(--btn-ghost-hover); color: var(--btn-secondary-ink); }
+.ctw-btn-go { background: var(--carrier-accent); border-color: var(--carrier-accent); color: var(--carrier-accent-ink); }
+.ctw-btn-go:hover { filter: none; background: color-mix(in srgb, var(--carrier-accent) 86%, #000); }
+.ctw-btn-ghost { background: transparent; border-color: var(--carrier-outline-border); color: var(--carrier-link); }
+.ctw-btn-danger { background: transparent; color: var(--btn-danger-ink); border-color: color-mix(in srgb, var(--btn-danger-ink) 55%, transparent); }
+.ctw-btn-danger:not(.ctw-btn-go):hover { background: var(--btn-danger-hover); color: var(--btn-danger-ink); }
+.ctw-btn[disabled] { opacity: .55; }
+/* "the press answers before the server does" — Button.svelte `.btn:active` */
+.ctw-btn:active:not(:disabled), .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: var(--porch-press); }
+@media (prefers-reduced-motion: reduce) {
+  .ctw-btn:active:not(:disabled), .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: none; }
+}
+:where(.ctw-btn, .ctw-view, .ctw-pick-btn, .ctw-modal-close, .ctw-coach-close, .ctw-field input, .ctw-field select, .ctw-field textarea, .ctw-md):focus-visible {
+  outline: 2px solid var(--btn-secondary-ink); outline-offset: 2px;
+}
+
+/* the view switch: a pill segmented control, accent fill on the chosen segment */
+.ctw-views { border: 1px solid var(--carrier-border); border-radius: var(--btn-radius-pill); background: var(--carrier-input-bg); }
+.ctw-view { border-radius: var(--btn-radius-pill); font-family: var(--font-body); font-weight: 700; color: var(--carrier-text-muted); }
+.ctw-view:hover:not([aria-pressed="true"]) { color: var(--carrier-text); background: var(--btn-ghost-hover); }
+.ctw-view[aria-pressed="true"] { background: var(--carrier-accent); color: var(--carrier-accent-ink); box-shadow: none; }
+
+/* sheets & modals — console Panel: radius 18, carrier border + shadow, on the solid ground */
+.ctw-modal { background: rgba(12, 58, 68, .28); }
+.ctw-modal-panel {
+  background: var(--carrier-bg-solid); color: var(--carrier-text);
+  border: 1px solid var(--carrier-border); border-radius: var(--console-radius); box-shadow: var(--carrier-shadow);
+}
+.ctw-modal-panel h2 { font-family: var(--font-display); font-weight: 400; color: var(--carrier-heading); font-size: 1.2rem; }
+.ctw-modal-close { border: 1.5px solid var(--carrier-border); background: var(--btn-surface); color: var(--carrier-text); corner-shape: round; }
+.ctw-modal-close:hover { border-color: var(--carrier-outline-border); color: var(--carrier-link); }
+.ctw-modal-foot { border-top-color: var(--carrier-border); }
+.ctw-field > span { font-weight: 700; color: var(--carrier-heading); }
+.ctw-field input[type=text], .ctw-field input[type=url], .ctw-field select, .ctw-field textarea,
+.ctw-md, .ctw-raw input, .ctw-url {
+  background: var(--carrier-input-bg); border: 1px solid var(--carrier-border); border-radius: var(--console-radius-sm); color: var(--carrier-text);
+}
+.ctw-group, .ctw-pub-result { border-color: var(--carrier-border); border-radius: var(--console-radius-sm); background: var(--carrier-bg); }
+.ctw-err, .ctw-asset-err { color: var(--carrier-feedback-error); }
+.ctw-md-error { border-radius: var(--console-radius-sm); }
+.ctw-pick-btn { border-radius: var(--console-radius-sm); background: var(--btn-surface); border-color: var(--carrier-border); font-weight: 700; }
+.ctw-pick-btn:hover, .ctw-pick-btn:focus-visible { background: var(--console-tint); border-color: var(--carrier-accent); }
+.ctw-pick-ico { color: var(--carrier-accent); }
+
+/* the card column frames the card on the porch water; the board is a Panel beside it */
+.ctw-w2-preview { background: transparent; border-left-color: var(--carrier-border); }
+.ctw-w2-table { background: var(--carrier-bg); }
+.ctw-w2-panel-title {
+  font-family: var(--font-display); font-weight: 400; font-size: .95rem; letter-spacing: 0;
+  color: var(--carrier-heading); background: var(--carrier-bg); border-bottom-color: var(--carrier-border);
+}
+@media (min-width: 1024px) {
+  .ctw-w2-preview { background: transparent; }
+  .ctw-w2-preview .ctw-w2-frame { border-radius: var(--console-radius) var(--console-radius) 0 0; box-shadow: var(--carrier-shadow); }
+  .ctw-w2-table { border-right-color: var(--carrier-border); }
+}
+
+/* the coach mark: a porch pill, not a black toast */
+.ctw-coach {
+  background: var(--carrier-bg-solid); color: var(--carrier-heading);
+  border: 1.5px solid var(--carrier-outline-border); box-shadow: var(--carrier-shadow); font-weight: 700;
+}
+.ctw-coach-close { background: var(--console-tint); color: var(--carrier-heading); corner-shape: round; }
+
+/* host-mode save status, in the same family */
+.ctw-host-status { font: 600 13px/1.3 var(--font-body); color: var(--carrier-text-muted); opacity: 1; }
+.ctw-host-status[data-status="failed"] { color: var(--carrier-feedback-error); }
+
+/* ── PHONE BAR: two rows at ≤520px (measured 2026-09-24 at 390px: the third view segment clipped
+   to 「Marko…」, the door wrapped to two lines, the banner ellipsised). Row 1 = brand + door (one
+   line, never wraps); row 2 = the view switch, full width, three equal segments that never clip.
+   The banner wraps (≤3 lines) instead of ellipsising. Every target stays ≥44px. */
+@media (max-width: 520px) {
+  .ctw-bar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand actions" "views views";
+    align-items: center; gap: .45rem .6rem; padding: .45rem .75rem .55rem;
+  }
+  .ctw-bar h1, .ctw-bar h1.ctw-brand { display: flex; grid-area: brand; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 1.05rem; }
+  .ctw-bar-spacer { display: none; }
+  .ctw-actions { grid-area: actions; min-width: 0; }
+  .ctw-bar .ctw-btn { white-space: nowrap; font-size: 14px; padding: .4rem .9rem; min-height: 44px; }
+  .ctw-views { grid-area: views; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; box-sizing: border-box; }
+  .ctw-view { min-width: 0; padding: .3rem .25rem; font-size: .8rem; min-height: 44px; white-space: nowrap; overflow: visible; text-overflow: clip; }
+
+  .ctw-sandbox-banner { flex-wrap: wrap; gap: .3rem .6rem; padding: .4rem .75rem; font-size: .78rem; line-height: 1.35; }
+  #sandbox-banner-status { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex: 1 1 14rem;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .ctw-sandbox-banner .ctw-btn { min-height: 44px; }
+}
+
+/* ── the card FLOATS on the porch (≥1024px) — see fitCanvas() in edit2.mjs. The iframe takes the
+   card's own height; the column scrolls. min-height covers the beat before the card has loaded. */
+@media (min-width: 1024px) {
+  .ctw-w2-preview { overflow-y: auto; align-items: flex-start; padding-bottom: 2rem; }
+  .ctw-w2-preview .ctw-w2-frame {
+    flex: 0 1 560px; height: auto; min-height: 320px;
+    border-radius: var(--console-radius); background: transparent;
+  }
+}

@@ -298,9 +298,10 @@ html.ct2-dragging,html.ct2-dragging body{touch-action:none;user-select:none;-web
   font:600 14px/1.3 system-ui,sans-serif;opacity:.75;cursor:pointer;
   background:transparent;border:1.5px dashed currentColor;border-radius:14px}
 .ct2-add:hover,.ct2-add:focus-visible{opacity:1}
-.ct2-opens{position:absolute;top:6px;right:6px;z-index:2;display:inline-flex;align-items:center;min-height:28px;padding:2px 10px;
+.ct2-opens{position:absolute;bottom:6px;right:6px;z-index:2;display:inline-flex;align-items:center;min-height:28px;padding:2px 10px;
   font:600 11px/1.2 system-ui,sans-serif;color:#fff;background:rgba(20,20,20,.78);border:0;border-radius:999px;cursor:pointer}
 html.ct2-edit [data-cell]:has(.ct2-opens){position:relative}
+html.ct2-fit,html.ct2-fit body{min-height:0!important;overflow:hidden!important}
 `;
 
 /** the drawer a rendered element sits in, or null for the face */
@@ -316,6 +317,31 @@ function openPreviewDrawer(doc, id) {
   if (p) p.setAttribute('data-preview-open', '');
 }
 
+// ── the card FLOATS on the porch (desktop, ≥1024px) ─────────────────────────────────────────────
+// 🩸 2026-09-24, Safari 1200 / Chromium 1400: the #canvas iframe filled its column to the footer, so
+// the card document's own dark ground read as a full-height slab with the porch only at the sides.
+// So on a wide screen the iframe is as tall as the card's content and the COLUMN scrolls instead.
+// 🔴 The card's CSS gives html/body `min-height:100vh`, and inside an iframe vh IS the iframe — sized
+// to scrollHeight it could only ever grow. `html.ct2-fit` (editor-injected, never in the card's own
+// output) zeroes that min-height so scrollHeight is the content's. Below 1024 the preview is a full
+// view of its own and keeps scrolling inside the iframe (Sortable's touch autoscroll depends on it).
+const FIT_MQ = '(min-width: 1024px)';
+function fitCanvas(frame, doc, win) {
+  const mq = window.matchMedia(FIT_MQ);
+  const root = doc.documentElement;
+  const size = () => {
+    if (!mq.matches) { root.classList.remove('ct2-fit'); frame.style.height = ''; return; }
+    root.classList.add('ct2-fit');
+    const h = Math.ceil(root.scrollHeight);
+    if (frame.style.height !== `${h}px`) frame.style.height = `${h}px`;
+  };
+  size();
+  if (win && win.ResizeObserver) new win.ResizeObserver(size).observe(doc.body);
+  // images and fonts finishing change the height without resizing body's box on every engine
+  win?.addEventListener('load', size);
+  mq.addEventListener?.('change', size);
+}
+
 function wireCard() {
   const frame = el('canvas');
   const doc = frame && frame.contentDocument;
@@ -326,6 +352,7 @@ function wireCard() {
   const style = doc.createElement('style');
   style.textContent = CARD_EDIT_CSS;
   doc.head.appendChild(style);
+  fitCanvas(frame, doc, win);
 
   for (const c of doc.querySelectorAll('[data-cell]')) {
     // the OUTERMOST cell element only — a cell never nests another, but be exact about it

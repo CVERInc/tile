@@ -22,6 +22,12 @@ const DIR = dirname(fileURLToPath(import.meta.url));
 export const EDIT2_SOURCES = [
   '../w2/index.html',
   '../w2/edit2.css',
+  '../w2/porch-tokens.css',
+  '../w2/porch-fonts.css',
+  '../w2/fonts/NunitoVariable-latin.woff2',
+  '../w2/fonts/NunitoVariable-latin-ext.woff2',
+  '../w2/fonts/YoungSerif-latin.woff2',
+  '../w2/fonts/YoungSerif-latin-ext.woff2',
   '../w2/edit2.mjs',
   '../w2/board-bridge.mjs',
   '../w2/board-i18n.mjs',
