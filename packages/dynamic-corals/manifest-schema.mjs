@@ -3,6 +3,28 @@ export const CORAL_MANIFEST_HARD_FIELDS = [
   'paid', 'funding', 'without', 'capabilities',
 ];
 
+/**
+ * The one rewrite a coral's manifest goes through between its source (checked into this repo, and
+ * free to lag — see the registry/channel contract's lag tolerance) and its immutable published
+ * copy: package.json is release-version authority, so `version` is rewritten to it, and every path
+ * segment in `source` naming the OLD stored version is rewritten to the new one — the two fields a
+ * hand bump used to drift apart (tile#25 review P3-3), which is why `validateCoralManifest` above
+ * refuses a `source` that does not live under its own `version`.
+ *
+ * Shared by build.mjs — the only writer of a published manifest — and by anything that needs to
+ * predict what build.mjs would have written (a registry/channel contract test, say) without
+ * re-deriving the rule as a second implementation that can drift from this one.
+ */
+export function normalizeManifestForVersion(sourceManifest, version) {
+  const sourceVersion = String(sourceManifest.version ?? '');
+  const source = typeof sourceManifest.source === 'string' && sourceVersion
+    ? sourceManifest.source.replaceAll(
+      new RegExp(`/${sourceVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/)`, 'g'),
+      () => `/${version}`)
+    : sourceManifest.source;
+  return { manifest: { ...sourceManifest, version, source }, sourceVersion };
+}
+
 export function validateCoralManifest(manifest, expected = {}) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     return { ok: false, missing: [...CORAL_MANIFEST_HARD_FIELDS], mismatches: [] };

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker, { resolveHandle, renderCardHTML } from './card-worker.mjs';
-import { QR_VERSION, CSS } from './card-assets.mjs';
+import { QR_VERSION, QR_JS, DRAWER_VERSION, DRAWER_JS, CSS } from './card-assets.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -345,6 +345,52 @@ test('the bundled stylesheet is the one on disk — regenerate after editing eit
   ].find((p) => existsSync(p)) || '';
   if (!arrowPath) { console.log('    (partial: @cvernet/signet not installed — byte check skipped)'); return; }
   assert.equal(tail, readFileSync(arrowPath, 'utf8'), 'regenerate: node packages/cardtile/serve/gen-assets.mjs');
+});
+
+test('the bundled qr/drawer coral clients are the ones on disk — regenerate after editing either', () => {
+  // card-assets.mjs embeds qr/qr.js and drawer/drawer.js VERBATIM plus their package.json versions
+  // (see gen-assets.mjs), because the edge Worker cannot read the filesystem. That embed is
+  // generated and a stale one is invisible exactly like a stale stylesheet bundle: the page
+  // renders, every test that only exercises the embedded copy passes, and the change simply is not
+  // there — this is the drift the serving aggregate actually ships, independent of whether the
+  // intermediate coral bundle in packages/dynamic-corals/ itself is current (that question belongs
+  // to generated-bundles.test.mjs).
+  //
+  // 🔴 Read only from COMMITTED files, like the stylesheet check above: this runs with no
+  // node_modules anywhere — no esbuild, no signet — because it also runs from the private
+  // incubator's composite suite and from scripts/test-clean.sh.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const corals = join(here, '../../dynamic-corals');
+  const diskQr = readFileSync(join(corals, 'qr/qr.js'), 'utf8');
+  const diskDrawer = readFileSync(join(corals, 'drawer/drawer.js'), 'utf8');
+  const { version: diskQrVersion } = JSON.parse(readFileSync(join(corals, 'qr/package.json'), 'utf8'));
+  const { version: diskDrawerVersion } = JSON.parse(readFileSync(join(corals, 'drawer/package.json'), 'utf8'));
+
+  // Exact bytes, including the stamp: that is literally what gen-assets.mjs embeds. Anything looser
+  // (e.g. normalizing the build stamp the way the rebuild gate does) stops being the question this
+  // test asks — "is the serving copy what the committed coral bundle actually is" — and starts
+  // answering a different one.
+  const bytesMatch = (embedded, disk) => embedded === disk;
+
+  assert.ok(bytesMatch(QR_JS, diskQr),
+    'QR_JS does not match packages/dynamic-corals/qr/qr.js — run: node packages/cardtile/serve/gen-assets.mjs');
+  assert.equal(QR_VERSION, diskQrVersion,
+    'QR_VERSION does not match qr/package.json — run: node packages/cardtile/serve/gen-assets.mjs');
+  assert.ok(bytesMatch(DRAWER_JS, diskDrawer),
+    'DRAWER_JS does not match packages/dynamic-corals/drawer/drawer.js — run: node packages/cardtile/serve/gen-assets.mjs');
+  assert.equal(DRAWER_VERSION, diskDrawerVersion,
+    'DRAWER_VERSION does not match drawer/package.json — run: node packages/cardtile/serve/gen-assets.mjs');
+});
+
+test('CONTROL: the qr/drawer drift comparison actually distinguishes a mismatched pair', () => {
+  // The assertions above only ever compare the real embed to the real disk file, which proves
+  // nothing about whether the comparison CAN go red — a check exercised only on agreeing inputs is
+  // unfalsifiable. Feed the same comparator a synthetic mismatched pair and show that it does.
+  const bytesMatch = (embedded, disk) => embedded === disk;
+  assert.equal(bytesMatch('a', 'a'), true, 'sanity: identical bytes must compare equal');
+  assert.equal(bytesMatch('a', 'b'), false, 'a one-byte difference must be caught');
+  assert.equal(bytesMatch(QR_JS, QR_JS + ' '), false,
+    'a trailing-byte difference on the real embedded QR_JS must be caught');
 });
 
 test('the stylesheet is the card\'s own, not the Python era\'s 105KB', () => {

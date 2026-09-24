@@ -50,6 +50,12 @@ try {
 	cpSync(SRC, join(sandbox, CORAL, 'square-shop.js'));
 	cpSync(join(HERE, CORAL, 'manifest.json'), join(sandbox, CORAL, 'manifest.json'));
 	cpSync(join(HERE, 'manifest-schema.mjs'), join(sandbox, 'manifest-schema.mjs'));
+	// build.mjs imports its coral table from corals.mjs rather than holding it inline — the sandbox
+	// copy needs that sibling file too, or the copied build.mjs fails to import at all.
+	cpSync(join(HERE, 'corals.mjs'), join(sandbox, 'corals.mjs'));
+	// …and the same for its immutability-comparison ruler, factored out so a freshness gate can
+	// reuse it without importing build.mjs itself (see that module's header for why).
+	cpSync(join(HERE, 'normalize-generated-code.mjs'), join(sandbox, 'normalize-generated-code.mjs'));
 	writeFileSync(join(sandbox, CORAL, 'package.json'), JSON.stringify(
 		{ name: '@cver/coral-square-shop', version: VERSION, private: true, type: 'module' }, null, 2) + '\n');
 

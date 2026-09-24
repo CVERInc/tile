@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Coral build — the single producer of every distributable coral client.
+// Coral build — the single producer of every distributable coral client's LOCAL artifact, and of
+// the immutable registry version for the subset of corals that publish through the registry.
 //   node packages/dynamic-corals/build.mjs            build all corals
 //   node packages/dynamic-corals/build.mjs events     build one
 //
@@ -14,18 +15,29 @@
 // square-shop.js. Neither can be committed to a public MIT repo, and neither is a fact about
 // the coral. So they arrive from the caller, and this file stays the single producer.
 //
+// Which corals are REGISTRY PARTICIPANTS — require a manifest, may write an immutable registry
+// version — versus LOCAL-ONLY, is per-coral data in ./corals.mjs, not inferred from this file.
+//
 // Produces, per coral:
-//   1. <coral>/<coral>.js                      — the bundled artifact at its historical path
-//      (kept as the build output landing spot; nothing serves it — distribution is the registry)
+//   1. <coral>/<coral>.js — the bundled/stamped artifact at its historical path, for EVERY coral.
+//      For a registry participant this is only the build's landing spot — nothing serves it
+//      directly, distribution is the registry version below. For a local-only coral (qr, drawer)
+//      this file IS the distributable: Cardtile's own asset-generation step embeds it into its
+//      committed serving copy (see packages/cardtile/serve/gen-assets.mjs), with no registry
+//      channel involved at all.
 //   2. <registry>/versions/<coral>/<version>/<coral>.js — the IMMUTABLE registry artifact.
+//      Registry participants only; a local-only coral never gets one, not even an empty directory.
 //      🔴 Refuses to overwrite an existing version dir: a published version never changes,
 //      that is the whole point. Ship a fix = bump package.json and build again.
 //   3. (RETIRED 2026-07-17) the astro public/dynamic-corals sync. A fleet-wide audit found ZERO
 //      sites referencing the same-origin /dynamic-corals/ path — two customer sites ride the
 //      registry, the rest embed no corals at all. An unreferenced serving path is the
 //      "de-facto unnamed version" problem wearing a new hat, so the registry is now the ONLY
-//      distribution channel. A future site wanting same-origin vendoring should copy a PINNED
-//      registry artifact into its own assets (the freeze-tier recipe), not lean on a shared dir.
+//      distribution channel for registry participants (see corals.mjs). qr/drawer were never
+//      routed through this sync either — their distribution is, and always was, Cardtile's own
+//      embed step in (1), not a shared same-origin dir. A future site wanting same-origin
+//      vendoring should copy a PINNED registry artifact into its own assets (the freeze-tier
+//      recipe), not lean on a shared dir.
 //
 // Every artifact is stamped with `/*! coral <name>@<version> +<commit> */` and registers
 // itself on window.__coralVersions — "which version is this site running" becomes one look
@@ -39,7 +51,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateCoralManifest } from './manifest-schema.mjs';
+import { validateCoralManifest, normalizeManifestForVersion } from './manifest-schema.mjs';
+import { CORALS } from './corals.mjs';
+import { normalizeGeneratedCode } from './normalize-generated-code.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 // 🩸 Was a single hardcoded `../sitetile/astro/node_modules/.bin/esbuild`. That resolved when this
@@ -169,22 +183,16 @@ function applyDefaults(text, coral) {
   return { text: lines.join('\n'), unfilled };
 }
 
-const CORALS = {
-  'events': { src: 'events-client.mjs', bundle: true },
-  'square-shop': { src: 'square-shop.js', bundle: false },
-  // Self-contained by design, not by accident: a dynamic coral must install
-  // byte-for-byte into feelreef's own pages or a sitetile static build, so it
-  // has no imports to bundle. Stamp only.
-  'inbox-bubble': { src: 'inbox-bubble.js', bundle: false },
-  'qr': { src: 'qr-client.mjs', bundle: true },
-  'drawer': { src: 'drawer-client.mjs', bundle: true },
-  // Same split as events: the client is four lines of mounting and imports the node-tested core,
-  // so the logic that decides what an amount is has exactly one home.
-  'sponsor': { src: 'sponsor-client.mjs', bundle: true },
-};
-
 const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).toString().trim();
 const only = positional;
+
+// 🔴 An unknown/unsupported positional name used to fall through the loop below matching nothing,
+// build nothing, and still print `done.` and exit 0 — a successful-looking no-op for a typo'd
+// coral name. Name the bad input and fail loudly instead, before any build work runs.
+if (only && !Object.prototype.hasOwnProperty.call(CORALS, only)) {
+  console.error(`✗ unknown coral "${only}". Known corals: ${Object.keys(CORALS).join(', ')}`);
+  process.exit(1);
+}
 
 for (const [name, cfg] of Object.entries(CORALS)) {
   if (only && only !== name) continue;
@@ -192,39 +200,39 @@ for (const [name, cfg] of Object.entries(CORALS)) {
   const { version } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   const outName = `${name === 'events' ? 'events' : name}.js`;
 
-  const manifestPath = join(dir, 'manifest.json');
-  if (!existsSync(manifestPath)) {
-    console.error(`✗ ${name}@${version} has no manifest.json — every published version requires one.`);
-    process.exit(1);
-  }
-  let sourceManifest;
-  try {
-    sourceManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  } catch (error) {
-    console.error(`✗ ${name}@${version} manifest.json is not valid JSON: ${error.message}`);
-    process.exit(1);
-  }
-  // package.json owns the release version; the immutable registry copy records that version.
-  // `source` carries the version too, and it used to be the one field this spread did not
-  // rewrite — a bump that forgot it published `version: X` beside `source: …/X-1/…` with every
-  // check green (tile#25 review P3-3). Rewritten here, and `validateCoralManifest` now refuses a
-  // manifest whose `source` does not live under its own version, so the two cannot drift again.
-  const sourceVersion = String(sourceManifest.version ?? '');
-  const source = typeof sourceManifest.source === 'string' && sourceVersion
-    ? sourceManifest.source.replaceAll(
-      new RegExp(`/${sourceVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/)`, 'g'),
-      () => `/${version}`)
-    : sourceManifest.source;
-  const coralManifest = { ...sourceManifest, version, source };
-  const manifestResult = validateCoralManifest(coralManifest, { name, version, sourceVersion });
-  if (!manifestResult.ok) {
-    if (manifestResult.missing.length) {
-      console.error(`✗ ${name}@${version} manifest.json is missing: ${manifestResult.missing.join(', ')}`);
+  // Registry participants publish an immutable, manifest-described version (below); a local-only
+  // coral (qr, drawer — see corals.mjs) builds its generated local artifact with no manifest and
+  // never touches the registry at all.
+  let coralManifest = null;
+  if (cfg.registry) {
+    const manifestPath = join(dir, 'manifest.json');
+    if (!existsSync(manifestPath)) {
+      console.error(`✗ ${name}@${version} has no manifest.json — every published version requires one.`);
+      process.exit(1);
     }
-    if (manifestResult.mismatches.length) {
-      console.error(`✗ ${name}@${version} manifest identity mismatch: ${manifestResult.mismatches.join('; ')}`);
+    let sourceManifest;
+    try {
+      sourceManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    } catch (error) {
+      console.error(`✗ ${name}@${version} manifest.json is not valid JSON: ${error.message}`);
+      process.exit(1);
     }
-    process.exit(1);
+    // package.json owns the release version; the immutable registry copy records that version.
+    // The rewrite itself — and why `source` needs it too — lives in normalizeManifestForVersion
+    // (manifest-schema.mjs), shared with the registry/channel contract test so there is one copy
+    // of the rule, not two implementations that can drift (tile#25 review P3-3).
+    const { manifest: normalizedManifest, sourceVersion } = normalizeManifestForVersion(sourceManifest, version);
+    coralManifest = normalizedManifest;
+    const manifestResult = validateCoralManifest(coralManifest, { name, version, sourceVersion });
+    if (!manifestResult.ok) {
+      if (manifestResult.missing.length) {
+        console.error(`✗ ${name}@${version} manifest.json is missing: ${manifestResult.missing.join(', ')}`);
+      }
+      if (manifestResult.mismatches.length) {
+        console.error(`✗ ${name}@${version} manifest identity mismatch: ${manifestResult.mismatches.join('; ')}`);
+      }
+      process.exit(1);
+    }
   }
 
   let body;
@@ -270,7 +278,14 @@ for (const [name, cfg] of Object.entries(CORALS)) {
   //    so its stamped artifact must NOT overwrite the source file — registry + astro copies only)
   if (cfg.bundle) writeFileSync(join(dir, outName), artifact);
 
-  // 2. immutable registry artifact
+  // 2. immutable registry artifact — registry participants only. A local-only coral (qr, drawer)
+  //    stops here: its generated local artifact above is the whole build, and it must never gain a
+  //    registry version directory, not even an empty one — see corals.mjs.
+  if (!cfg.registry) {
+    console.log(`· ${name}@${version} built (local only, no registry participation)`);
+    continue;
+  }
+
   const verDir = join(REGISTRY, name, version);
   const verFile = join(verDir, outName);
   if (existsSync(verFile)) {
@@ -298,12 +313,11 @@ for (const [name, cfg] of Object.entries(CORALS)) {
     // ruler has to read them as unchanged. The version inside it is pinned to THIS version rather
     // than `[^']*`: a stored trailer naming some other version is a real defect and must still
     // fall through to the error below.
-    const v = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const trailer = new RegExp(
-      "\\n(?:if \\(typeof window !== 'undefined'\\) )?"
-      + '\\(window\\.__coralVersions=window\\.__coralVersions\\|\\|\\{\\}\\)'
-      + `\\['${name}'\\]='${v}';\\n$`);
-    const code = (t) => t.split('\n').slice(1).join('\n').replace(trailer, '');
+    //
+    // The ruler itself lives in normalize-generated-code.mjs — a freshness gate that compares a
+    // rebuild against a committed artifact needs exactly this same normalisation, and cannot get
+    // it by importing this file (see that module's header for why).
+    const code = (t) => normalizeGeneratedCode(t, name, version);
     if (code(prev) !== code(artifact)) {
       console.error(`✗ ${name}@${version} already published and the content differs — a published`);
       console.error(`  version is immutable. Bump the version in ${name}/package.json.`);

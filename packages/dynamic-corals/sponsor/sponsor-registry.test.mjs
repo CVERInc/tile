@@ -1,18 +1,20 @@
-// REEF with Sponsor — is this coral actually DISTRIBUTED, or does it only exist in the tree?
+// REEF with Sponsor — is sponsor's own SHIPPED BYTES the coral this repo's source actually
+// describes, not merely a file that exists?
 //   run: node packages/dynamic-corals/sponsor/sponsor-registry.test.mjs
 //
 // A coral reaches a page through the registry: `/corals/<coral>/v0/<coral>.js` resolves the channel
-// in registry/manifest.json to a version, then serves registry/versions/<coral>/<version>/. Three
-// separate files therefore have to agree — the manifest, the artifact on disk, and the coral's own
-// package.json — and each of them is edited by hand at a different moment.
+// in registry/manifest.json to a version, then serves registry/versions/<coral>/<version>/. The
+// generalised registry/channel CONTRACT that makes that resolution trustworthy — every registry
+// participant's channels resolve to something actually published and never outrun its own package
+// version, and the source manifest agrees with the immutable published one — lives in
+// ../registry-contract.test.mjs now, covering all four registry corals, not sponsor alone.
 //
-// 🩸 The registry has been bitten by exactly this seam twice already, both recorded next door:
-// deploy.sh verified two hard-coded coral names while a third was published unchecked (2026-08-19),
-// and release.mjs exists because a fresh version number was shipped over a stale bundle three times
-// in a row. Both failures pass every check that reads only ONE of the three files.
-//
-// So this reads all three, and the last assertion is the one those stories are about: the artifact
-// the manifest points at must be the CURRENT source, not merely a file that exists.
+// 🩸 What stays here is sponsor's OWN contract on the bytes that channel ends up serving, recorded
+// next to the two incidents that shape it: deploy.sh verified two hard-coded coral names while a
+// third was published unchecked (2026-08-19), and release.mjs exists because a fresh version number
+// was shipped over a stale bundle three times in a row. Both failures pass every check that reads
+// only one of manifest / artifact / package.json — which is exactly why the artifact-freshness
+// assertion below reads the ACTUAL shipped bytes rather than trusting the version directory name.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, existsSync } from 'node:fs';
@@ -22,7 +24,6 @@ import { SPONSOR_PATH, SELECTOR, RETURN_PARAM } from './sponsor-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CORALS = join(HERE, '..');
-const pkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
 
 // 🔴 THE REGISTRY IS A DEPLOYMENT'S, NOT THIS REPO'S. The channel table and the published artifacts
 // are live serving state; they live with the deploy that performs it, and this repo holds the
@@ -30,9 +31,9 @@ const pkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
 // it a registry: `CORAL_REGISTRY=<dir>`, the same variable build.mjs publishes into.
 //
 // 🔴 It SKIPS BY NAME rather than passing, and that distinction is the whole reason this file
-// exists. Every failure it was written for — a channel pointing at an artifact nobody built, a
-// fresh version number over a stale bundle — is invisible to a check that quietly succeeds when it
-// cannot look. "I could not look" and "I looked and it is fine" must never print the same thing.
+// exists. Every failure it was written for — a version number bumped over a stale bundle, a fixture
+// leaking into a published artifact — is invisible to a check that quietly succeeds when it cannot
+// look. "I could not look" and "I looked and it is fine" must never print the same thing.
 const REGISTRY = process.env.CORAL_REGISTRY || join(CORALS, 'registry');
 const MANIFEST_PATH = join(REGISTRY, 'manifest.json');
 if (!existsSync(MANIFEST_PATH)) {
@@ -59,80 +60,6 @@ const ORIGINS = (text) => text.match(/https?:\/\/[^"'`\s]+/g) || [];
 
 const artifactPath = (coral, version) =>
   join(REGISTRY, 'versions', coral, version, `${coral}.js`);
-
-/**
- * These corals use plain `major.minor.patch` numbers with no pre-release or build suffix, so a
- * numeric compare is honest here; anything else is a shape this cannot compare and should say so
- * rather than fall back to string ordering, which gets e.g. "0.10.9" vs "0.10.10" wrong.
- */
-function compareVersions(a, b) {
-  const toParts = (v) => {
-    const parts = String(v).split('.');
-    if (parts.length !== 3 || !parts.every((part) => /^\d+$/.test(part))) {
-      throw new Error(`not a plain major.minor.patch version: ${v}`);
-    }
-    return parts.map(Number);
-  };
-  const [aMajor, aMinor, aPatch] = toParts(a);
-  const [bMajor, bMinor, bPatch] = toParts(b);
-  if (aMajor !== bMajor) return aMajor - bMajor;
-  if (aMinor !== bMinor) return aMinor - bMinor;
-  return aPatch - bPatch;
-}
-
-/**
- * A browser reaches Coral CSS through the registry channel, so a release that moves several
- * layered corals' channel pointers together may legitimately hold one coral's channel behind its
- * own package version for a while — a held pointer is not a stale one. What still has to be true
- * regardless: the version this coral claims is actually published, not just bumped in
- * package.json; the channel points at something that was actually published, not a version name
- * nobody built; and the channel is never AHEAD of the version it is meant to describe, because a
- * channel cannot serve a version its own source does not yet describe.
- */
-function assertChannelHoldsForVersion(channel) {
-  assert.ok(existsSync(artifactPath('sponsor', pkg.version)),
-    `sponsor ${pkg.version} (from package.json) has no published artifact under versions/sponsor/${pkg.version}/ — bumped but never published`);
-
-  const version = channelFor('sponsor', channel);
-  assert.ok(version, `sponsor has no ${channel} channel in registry/manifest.json — no site can load it`);
-
-  assert.ok(existsSync(artifactPath('sponsor', version)),
-    `${channel} points at sponsor@${version}, which has no published artifact under versions/sponsor/${version}/`);
-
-  assert.ok(compareVersions(version, pkg.version) <= 0,
-    `${channel} points at sponsor@${version}, which is ahead of this coral's own version ${pkg.version}`);
-}
-
-test('the registry serves the sponsor coral on channels that never outrun its own version', () => {
-  assertChannelHoldsForVersion('v0');
-  assertChannelHoldsForVersion('latest');
-});
-
-test('CONTROL: the same lookup returns null for a coral the registry does not carry', () => {
-  // Without this, "sponsor is on v0" and "the lookup returns something for anything" read alike.
-  // The live example is `drawer`: built, versioned under versions/, and deliberately on no channel.
-  assert.equal(channelFor('sponsor-not-registered', 'v0'), null);
-  assert.equal(channelFor('sponsor', 'no-such-channel'), null);
-});
-
-test('the version the channel points at is really on disk', () => {
-  const version = channelFor('sponsor', 'v0');
-  assert.ok(existsSync(artifactPath('sponsor', version)),
-    `manifest points at sponsor@${version} and versions/sponsor/${version}/sponsor.js does not exist`);
-});
-
-test('every coral the manifest carries has the artifact it promises', () => {
-  // Not sponsor-specific on purpose: the 2026-08-19 failure was a deploy that checked two names by
-  // hand while a third shipped unverified. Read the manifest, so a coral cannot be added without
-  // being checked.
-  for (const [coral, channels] of Object.entries(manifest)) {
-    if (!channels || typeof channels !== 'object') continue;   // the "//" documentation key
-    for (const [channel, version] of Object.entries(channels)) {
-      assert.ok(existsSync(artifactPath(coral, version)),
-        `${coral}@${channel} points at ${version}, which has no artifact under versions/`);
-    }
-  }
-});
 
 test('the artifact is stamped as the version it is served under', () => {
   const version = channelFor('sponsor', 'v0');
@@ -196,9 +123,11 @@ test('CONTROL: the origin check can still SEE an origin — 0.1.0 is the artifac
     ['https://feelreef.com']);
 });
 
-test('build.mjs is the producer of this artifact — the coral is in its table', () => {
+test('build.mjs is the producer of this artifact — the coral is in its table, as a registry participant', async () => {
   // The other half of "registered": the manifest says where to serve it from, build.mjs is what
   // puts it there. A coral missing here can never be rebuilt, and its channel freezes silently.
-  const build = readFileSync(join(CORALS, 'build.mjs'), 'utf8');
-  assert.match(build, /'sponsor':\s*\{\s*src:\s*'sponsor-client\.mjs',\s*bundle:\s*true\s*\}/);
+  // Read from corals.mjs — the single table build.mjs itself imports — rather than scraping
+  // build.mjs's source text, so this assertion tracks the same data the builder actually runs on.
+  const { CORALS: table } = await import('../corals.mjs');
+  assert.deepEqual(table.sponsor, { src: 'sponsor-client.mjs', bundle: true, registry: true });
 });

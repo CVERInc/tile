@@ -1,0 +1,17 @@
+{
+  "name": "events",
+  "version": "0.9.4",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/events/0.9.4/events.js",
+  "source_note": "原始碼將隨 OSS 化公開",
+  "requires": [],
+  "calls": [
+    "GET <data-src> (defaults to `/events.json` when the host element sets no `data-src`) — the bundle's only network call, one fetch per mounted root, sent once on load; sets no request body and no header other than `Accept: application/json`; the browser's default same-origin credential behaviour applies; a non-ok HTTP response resolves to `null` in place of the body; a network failure is caught the same way; in every one of those cases, and also when the JSON body parses but carries no `.html` string, the root renders the same `<div class=\"dc-ev--empty\">` fallback text as a feed that is genuinely empty (`data-empty` on the root, default \"No upcoming events.\") — a visitor cannot tell a broken feed from an empty one from the rendered page alone; a response that does carry `.html` is assigned to the root's `innerHTML` verbatim, trusting the feed endpoint (not user input) to have produced safe markup; there is no retry, no polling and no second fetch — only the once-per-second local countdown re-render (`events-core.mjs#countdownText`) reads the clock again, never the network"
+  ],
+  "stores": ["none"],
+  "paid": false,
+  "funding": null,
+  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable feed at `data-src` (unset, wrong origin, non-ok status, or a network error): the widget shows the same honest empty-state message a real empty calendar would show, per `data-empty`, and never fabricates an event or leaves the mount area blank. Without feelreef entirely, the fetch simply fails the same way. The countdown badges and platform-specific map links (Apple Maps / Android `geo:`) only ever act on `.html` the fetch already delivered — with no feed, there is nothing for them to enhance.",
+  "capabilities": []
+}
