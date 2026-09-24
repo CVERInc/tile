@@ -67,6 +67,11 @@ export const BOARD_STRINGS_BY_KEY = {
   },
   // ── HOST MODE: the save status beside 「存」 (feelreef embeds the editor on a real card) ──────
   // The Save button itself reuses the chrome's `pubSave`, already in all nine.
+  // shown until the parent page hands the card over (host-bridge re-announces card:ready meanwhile)
+  'board.hostWaiting': {
+    zh: '等待頁面回應…', ja: 'ページの応答を待っています…', en: 'Waiting for the page…', ko: '페이지를 기다리는 중…',
+    'zh-Hans': '等待页面响应…', de: 'Warte auf die Seite…', fr: 'En attente de la page…', es: 'Esperando a la página…', pt: 'Aguardando a página…',
+  },
   'board.hostUnsaved': {
     zh: '尚未儲存', ja: '未保存', en: 'Unsaved', ko: '저장 안 됨',
     'zh-Hans': '尚未保存', de: 'Nicht gespeichert', fr: 'Non enregistré', es: 'Sin guardar', pt: 'Não salvo',

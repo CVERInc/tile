@@ -50,6 +50,38 @@ test('ready → card:ready to the named origin, never *', () => {
   assert.deepEqual(r.sent, [{ msg: { v: 1, type: 'card:ready' }, origin: HOST }]);
 });
 
+test('🔴 card:ready repeats every 500ms until card:load, one message shape, then stops', () => {
+  const r = rig();
+  r.bridge.ready();
+  assert.equal(r.bridge.status, 'waiting');
+  assert.equal([...r.timers.values()][0].ms, 500);
+  r.tick(); r.tick(); r.tick();
+  const readies = r.sent.filter((s) => s.msg.type === 'card:ready');
+  assert.equal(readies.length, 4);
+  for (const x of readies) assert.deepEqual(x, { msg: { v: 1, type: 'card:ready' }, origin: HOST });
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  assert.equal(r.timers.size, 0, 'load cancels the next announcement');
+  r.tick();
+  assert.equal(r.sent.filter((s) => s.msg.type === 'card:ready').length, 4);
+  r.bridge.ready();
+  assert.equal(r.sent.length, 4, 'ready after load is a no-op');
+});
+
+test('card:ready gives up after 60s — and says so (status stays waiting, gaveUp true), never silently', () => {
+  const r = rig();
+  r.bridge.ready();
+  let guard = 0;
+  while (r.timers.size && guard++ < 1000) r.tick();
+  const n = r.sent.filter((s) => s.msg.type === 'card:ready').length;
+  assert.equal(n, 120, '60s / 500ms announcements');
+  assert.equal(r.bridge.gaveUp, true);
+  assert.equal(r.bridge.status, 'waiting');
+  assert.equal(r.statuses.at(-1), 'waiting');
+  // a late load still works
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  assert.equal(r.bridge.loaded, true);
+});
+
 test('messages from any other origin are ignored — even a well-formed card:load', () => {
   const r = rig();
   for (const o of ['https://evil.example', 'null', 'https://staging.feelreef.com', '', 'https://feelreef.com/']) {

@@ -26,6 +26,10 @@ import { referencedAssets } from '../card-save.mjs';
 
 export const HOST_V = 1;
 export const CHANGE_DEBOUNCE_MS = 150;
+/** `card:ready` is re-announced this often until the first `card:load` … */
+export const READY_EVERY_MS = 500;
+/** … for at most this long. After that the status stays 'waiting' — visible, never silent. */
+export const READY_GIVE_UP_MS = 60000;
 
 /**
  * The parent origins the Worker will serve host mode for, or null. Exact origins only: production,
@@ -61,7 +65,8 @@ export function readsAsCard(md) {
 
 /**
  * The bridge's state machine. `status` is one of:
- *   'idle'    — nothing loaded yet, or loaded and untouched
+ *   'waiting' — announcing card:ready, no card:load yet (and, after READY_GIVE_UP_MS, given up)
+ *   'idle'    — loaded and untouched
  *   'unsaved' — a committed change the parent has not saved
  *   'saving'  — a card:save is out, waiting for card:saved / card:save-failed
  *   'saved'   — the parent said it is stored, and nothing has changed since
@@ -70,9 +75,10 @@ export function readsAsCard(md) {
 export function createHostBridge({
   host, post, onLoad, onStatus = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout, debounceMs = CHANGE_DEBOUNCE_MS,
+  readyEveryMs = READY_EVERY_MS, readyGiveUpMs = READY_GIVE_UP_MS,
 }) {
   if (!validHostOrigin(host)) throw new Error('host-bridge: host must be an allowed origin');
-  const st = { status: 'idle', message: '', loaded: false, savedMd: null, pendingMd: null, current: null, timer: null };
+  const st = { status: 'idle', message: '', loaded: false, savedMd: null, pendingMd: null, current: null, timer: null, readyTimer: null, readyStarted: 0, gaveUp: false };
   const send = (msg) => post({ v: HOST_V, ...msg }, host);
   const setStatus = (status, message = '') => { st.status = status; st.message = message; onStatus(status, message); };
   const dirty = () => st.loaded && st.current !== st.savedMd;
@@ -89,7 +95,29 @@ export function createHostBridge({
     get loaded() { return st.loaded; },
     get dirty() { return dirty(); },
 
-    ready() { send({ type: 'card:ready' }); },
+    get gaveUp() { return st.gaveUp; },
+
+    /**
+     * Announce `card:ready`, and KEEP announcing every readyEveryMs until the first card:load.
+     * 🩸 A one-shot ready was lost in production: the parent (a SvelteKit page) attaches its message
+     * listener after hydration, and with a large inline payload the iframe was ready first — the
+     * announcement went to nobody, no load was ever sent, and the editor sat there. The message is
+     * identical every time, so the parent may answer any one of them (a second load just reloads).
+     */
+    ready() {
+      if (st.loaded) return;
+      st.readyStarted = 0;
+      st.gaveUp = false;
+      setStatus('waiting');
+      const tick = (elapsed) => {
+        st.readyTimer = null;
+        if (st.loaded) return;
+        send({ type: 'card:ready' });
+        if (elapsed + readyEveryMs >= readyGiveUpMs) { st.gaveUp = true; setStatus('waiting'); return; }
+        st.readyTimer = setTimer(() => tick(elapsed + readyEveryMs), readyEveryMs);
+      };
+      tick(0);
+    },
 
     /** a MessageEvent (or anything shaped like one). Returns true when it was ours and handled. */
     receive(event) {
@@ -102,6 +130,7 @@ export function createHostBridge({
           return true;
         }
         if (st.timer) { clearTimer(st.timer); st.timer = null; }
+        if (st.readyTimer) { clearTimer(st.readyTimer); st.readyTimer = null; }
         st.loaded = true;
         st.current = d.md;
         st.savedMd = d.md;
