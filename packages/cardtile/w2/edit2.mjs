@@ -44,10 +44,11 @@ import { whatIsWrong } from '../w/md-guard.mjs';
 import { CELL_STRINGS_ZH, cellStrings, text as tx } from '../w/cell-i18n.mjs';
 import { buildSandboxCard, chromeStrings, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 import { sandboxDoorHref, parkSandboxCard } from '../w/sandbox-door.mjs';
-import { boardStrings, colon } from './board-i18n.mjs';
+import { boardStrings, colon, addTileLabel } from './board-i18n.mjs';
 import { typeIconSvg } from './type-icons.mjs';
 import {
   boardLanes, boardSlots, boardMd, applyBoardOrder, drawerLinks, cardTitle, tileFace,
+  slotOfRenderedCell, laneKeyForCardAdd, cardDropOrder,
 } from './board-bridge.mjs';
 // the icon ROUTE, and the guard on what may reach it — the same pair the renderer uses, so a mark
 // on the table and the same mark on the card are one request to one path.
@@ -223,6 +224,9 @@ function paintPreview() {
   frame.srcdoc = renderCardHTML(S.md, {
     handle: S.handle,
     cardUrl: '',
+    // `data-cell` on every cell, so a tap ON THE CARD can open that cell's sheet (wireCard below).
+    // Stripping it reproduces the production bytes — verify/editor.mjs holds that line.
+    editIndex: true,
     // the two EDIT-ONLY placeholders the renderer draws for a tile whose address or picture is not
     // filled in yet — handed in from here because this side speaks nine locales and card-render's
     // own table deliberately speaks four.
@@ -231,7 +235,234 @@ function paintPreview() {
     // the guard's one sentence, in the visitor's language — the same nine-locale string the table's
     // own dangling badge carries, because it is the same fact said in the other pane.
     + `<script>window.__CT2_HINT__=${JSON.stringify({ dangling: TB['board.danglingDrawer'] })}<\/script>`
-    + PREVIEW_GUARD;
+    + PREVIEW_GUARD
+    // the drag engine for reordering ON the card — the SAME vendored Sortable the board's host loads,
+    // from the same Worker path. Editor-only: appended after the renderer's output, never inside it.
+    + `<script src="${esc(sortableSrc())}"><\/script>`;
+}
+
+// ── the card itself is the editing surface ───────────────────────────────────────────────────────
+//
+// Owner ruling 2026-09-06: the experience baseline is an ordinary link-in-bio editor — you tap the
+// thing on the card and change it. The board stays (it is the reorder table and the path from an
+// Obsidian board to a Card), but it is no longer the only door into a sheet.
+//
+// 🔴 HOW A TAP FINDS ITS CELL. The renderer writes `data-cell` (editIndex), whose number is the index
+// into `model.cells` on the face and into THAT drawer's cells inside a drawer panel. So the element's
+// enclosing `[data-drawer-panel]` is read too, and board-bridge's `slotOfRenderedCell` turns the pair
+// into the board slot `openCell` already takes — the same sheet the board opens, not a second one.
+// A cell that renders to NOTHING even while editing has no element to tap; it stays reachable from
+// the board, which lists every cell whether or not it draws.
+//
+// 🔴 WINDOW-capture, not document-capture. PREVIEW_GUARD's own click listener is on the document in
+// the capture phase and was registered first (it parses with the page); on a `#drawer` link it would
+// open the drawer and on an http one let the browser follow it. Window capture runs before any
+// document listener, and stopPropagation there means the guard never sees a tap that meant "edit".
+//
+// Everything added here is DOM added after load — none of it is in renderCardHTML's output, so the
+// production card cannot grow an edit affordance by accident.
+/** the vendored Sortable, from where the board's own host gets it (the Worker's table path) */
+const sortableSrc = () => {
+  try { return new URL('Sortable.min.js', new URL(S.tableBase || './', location.href)).href; } catch { return 'Sortable.min.js'; }
+};
+
+const COACH_KEY = 'cardtile:try:coach:v1';
+const coachSeen = () => { try { return window.localStorage.getItem(COACH_KEY) === '1'; } catch { return false; } };
+const coachDone = () => {
+  try { window.localStorage.setItem(COACH_KEY, '1'); } catch { /* best-effort: it just shows again */ }
+  const n = el('coach');
+  if (n) n.hidden = true;
+};
+
+const CARD_EDIT_CSS = `
+html.ct2-edit [data-cell]{cursor:pointer;outline:2px solid transparent;outline-offset:3px;border-radius:inherit;transition:outline-color .12s}
+html.ct2-edit [data-cell]:hover{outline-color:rgba(64,120,255,.55)}
+html.ct2-edit [data-cell]:focus-visible{outline-color:rgba(64,120,255,.95)}
+html.ct2-edit [data-cell] [data-cell]{outline:none}
+html.ct2-edit,html.ct2-edit body{scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}
+html.ct2-edit ::-webkit-scrollbar{width:8px;height:8px;background:transparent}
+html.ct2-edit ::-webkit-scrollbar-track{background:transparent}
+html.ct2-edit ::-webkit-scrollbar-thumb{background:rgba(128,128,128,.45);border-radius:8px}
+html.ct2-edit .sortable-ghost{opacity:.35}
+html.ct2-edit .sortable-drag,html.ct2-edit .sortable-fallback{opacity:.95;box-shadow:0 12px 30px rgba(0,0,0,.25)}
+html.ct2-dragging,html.ct2-dragging body{touch-action:none;user-select:none;-webkit-user-select:none}
+.ct2-add{color:var(--ct2-ink,currentColor);display:flex;align-items:center;justify-content:center;gap:.4em;width:100%;min-height:48px;margin:12px 0 4px;
+  font:600 14px/1.3 system-ui,sans-serif;opacity:.75;cursor:pointer;
+  background:transparent;border:1.5px dashed currentColor;border-radius:14px}
+.ct2-add:hover,.ct2-add:focus-visible{opacity:1}
+.ct2-opens{position:absolute;top:6px;right:6px;z-index:2;display:inline-flex;align-items:center;min-height:28px;padding:2px 10px;
+  font:600 11px/1.2 system-ui,sans-serif;color:#fff;background:rgba(20,20,20,.78);border:0;border-radius:999px;cursor:pointer}
+html.ct2-edit [data-cell]:has(.ct2-opens){position:relative}
+`;
+
+/** the drawer a rendered element sits in, or null for the face */
+const drawerOfEl = (node) => {
+  const panel = node.closest('[data-drawer-panel]');
+  return panel ? panel.getAttribute('data-drawer-panel') : null;
+};
+
+/** open a drawer inside the preview — the same attribute PREVIEW_GUARD's own `open()` sets */
+function openPreviewDrawer(doc, id) {
+  for (const p of doc.querySelectorAll('[data-drawer-panel]')) p.removeAttribute('data-preview-open');
+  const p = [...doc.querySelectorAll('[data-drawer-panel]')].find((x) => x.getAttribute('data-drawer-panel') === id);
+  if (p) p.setAttribute('data-preview-open', '');
+}
+
+function wireCard() {
+  const frame = el('canvas');
+  const doc = frame && frame.contentDocument;
+  const win = frame && frame.contentWindow;
+  if (!doc || !doc.body || doc.documentElement.classList.contains('ct2-edit')) return;
+  doc.documentElement.classList.add('ct2-edit');
+  const style = doc.createElement('style');
+  style.textContent = CARD_EDIT_CSS;
+  doc.head.appendChild(style);
+
+  for (const c of doc.querySelectorAll('[data-cell]')) {
+    // the OUTERMOST cell element only — a cell never nests another, but be exact about it
+    if (c.parentElement && c.parentElement.closest('[data-cell]')) continue;
+    c.setAttribute('tabindex', '0');
+    c.setAttribute('role', 'button');
+    // a tile that opens a drawer: the tap edits the tile, and this chip is how you get INTO the
+    // drawer to edit what is inside it. Its words are the table's own 牽線 badge.
+    const a = c.matches('a[data-drawer]') ? c : c.querySelector('a[data-drawer]');
+    if (a) {
+      const chip = doc.createElement('button');
+      chip.type = 'button';
+      chip.className = 'ct2-opens';
+      chip.dataset.opens = a.getAttribute('data-drawer');
+      chip.textContent = `${TB['board.opensDrawer']} →`;
+      c.appendChild(chip);
+    }
+  }
+  // 「＋加一張牌」 at the end of the face and of every drawer panel
+  const addBtn = (drawerId) => {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = 'ct2-add';
+    b.dataset.addLane = laneKeyForCardAdd(S.model, drawerId);
+    b.textContent = addTileLabel(S.locale, T);
+    return b;
+  };
+  // 🩸 the add button inherited the PAGE's colour (a pale ink meant for a dark ground) and vanished on
+  // a white card. It takes the card's own text colour: the renderer's `--cp-ink` token if set, else
+  // the computed colour of the hero name / first cell — read once here, set as `--ct2-ink`.
+  const inkFrom = doc.querySelector('.st-hero-name, [data-cell]');
+  const tokenInk = win.getComputedStyle(doc.querySelector('.st-card') || doc.body).getPropertyValue('--cp-ink').trim();
+  const ink = tokenInk || (inkFrom ? win.getComputedStyle(inkFrom).color : '');
+  if (ink) doc.documentElement.style.setProperty('--ct2-ink', ink);
+  const face = doc.querySelector('.st-card');
+  if (face) face.appendChild(addBtn(null));
+  for (const body of doc.querySelectorAll('[data-drawer-panel] .dc-drawer-body')) {
+    body.appendChild(addBtn(drawerOfEl(body)));
+  }
+
+  wireCardDrag(doc, win);
+
+  const act = (e) => {
+    if (S.cardDragging) return true;               // the click that ends a drag is not a tap
+    const t = e.target;
+    if (!t || !t.closest) return false;
+    const chip = t.closest('.ct2-opens');
+    if (chip) { openPreviewDrawer(doc, chip.dataset.opens); return true; }
+    const add = t.closest('.ct2-add');
+    if (add) { openPicker(add.dataset.addLane); return true; }
+    const cell = t.closest('[data-cell]');
+    if (!cell) return false;
+    const slot = slotOfRenderedCell(S.model, drawerOfEl(cell), cell.getAttribute('data-cell'), bridgeCtx());
+    if (slot < 0) return false;                    // stale DOM — do nothing rather than open a wrong sheet
+    coachDone();
+    openCell(slot);
+    return true;
+  };
+  win.addEventListener('click', (e) => {
+    if (act(e)) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  win.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const t = e.target;
+    if (!t || !t.matches || !t.matches('[data-cell], .ct2-add, .ct2-opens')) return;
+    if (act(e)) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+}
+
+// ── reordering ON the card ───────────────────────────────────────────────────────────────────────
+//
+// Same wiring as the retired w/editor.mjs canvas (its drag harness found every trap in it), per lane:
+//   · a tile moves only within its LANE — a face section or one drawer. Each Sortable container is
+//     given the group of the lane its cells belong to, so a drop into another section is refused by
+//     Sortable itself rather than half-applied.
+//   · only the INNERMOST containers (`.st-run` sits inside `.st-cells`; two instances claiming one
+//     child is a reorder that silently does nothing — measured on the retired editor).
+//   · forceFallback: never native HTML5 DnD across a srcdoc boundary; pointer events all the way.
+//   · a 150ms press before a TOUCH drag begins, so a tap still opens the sheet. Mouse is unaffected.
+//
+// 🔴 ONE MUTATION PATH. The drop is read back as the lane's new order of board slots and handed to
+// `cardDropOrder` → `applyBoardOrder` — the function the board's own drag ends in. The card never
+// serialises order its own way.
+function wireCardDrag(doc, win) {
+  const Sortable = win.Sortable;
+  S.cardDragEnabled = !!Sortable;
+  if (!Sortable) {
+    // 🔴 DEGRADE, BUT SAY SO (the retired editor's rule): tapping still edits, the sheet's move
+    // buttons and the board still reorder — but a silent return is how drag went missing for six
+    // days once, so the fact is recorded where a person and a harness can both see it.
+    console.warn(`[cardtile] card drag is OFF — ${sortableSrc()} did not load. Tap-to-edit, the sheet's move buttons and the board still work.`);
+    return;
+  }
+  const laneOfEl = (n) => {
+    const cell = n.matches('[data-cell]') ? n : n.querySelector('[data-cell]');
+    if (!cell) return null;
+    const drawerId = drawerOfEl(cell);
+    const slot = slotOfRenderedCell(S.model, drawerId, cell.getAttribute('data-cell'), bridgeCtx());
+    const s = boardSlots(S.model, bridgeCtx())[slot];
+    return s ? s.laneKey : null;
+  };
+  const containers = [...doc.querySelectorAll('.st-cells, .st-run, .st-bleed')]
+    .filter((c) => [...c.children].some((n) => n.matches('[data-cell]')));
+  S.cardDragContainers = containers.length;
+  for (const c of containers) {
+    const laneKey = laneOfEl(c);
+    if (!laneKey) continue;
+    new Sortable(c, {
+      group: { name: `ct2:${laneKey}`, pull: true, put: true },
+      animation: 120,
+      draggable: '[data-cell]',
+      filter: '.ct2-opens, .ct2-add',
+      preventOnFilter: false,
+      forceFallback: true,
+      fallbackTolerance: 6,
+      delay: 150,
+      delayOnTouchOnly: true,
+      onStart: () => { S.cardDragging = true; doc.documentElement.classList.add('ct2-dragging'); },
+      onEnd: () => {
+        doc.documentElement.classList.remove('ct2-dragging');
+        setTimeout(() => { S.cardDragging = false; }, 0);
+        onCardDrop(doc, laneKey);
+      },
+    });
+  }
+}
+
+/** read the lane's rendered order back and apply it — through the board's own permutation path */
+function onCardDrop(doc, laneKey) {
+  const drawerId = laneKey.startsWith('drawer:') ? laneKey.slice('drawer:'.length) : null;
+  const scope = drawerId
+    ? [...doc.querySelectorAll('[data-drawer-panel]')].find((p) => p.getAttribute('data-drawer-panel') === drawerId)
+    : doc.querySelector('.st-card');
+  if (!scope) return;
+  const slots = boardSlots(S.model, bridgeCtx());
+  const rendered = [...scope.querySelectorAll('[data-cell]')]
+    .filter((n) => !(n.parentElement && n.parentElement.closest('[data-cell]')))
+    .map((n) => slotOfRenderedCell(S.model, drawerId, n.getAttribute('data-cell'), bridgeCtx()))
+    .filter((n) => n >= 0 && slots[n] && slots[n].laneKey === laneKey);
+  const order = cardDropOrder(S.model, laneKey, rendered, bridgeCtx());
+  if (!order) { paintPreview(); return; }           // not a clean permutation: redraw the truth
+  const md = serializeCard(applyBoardOrder(S.model, order, bridgeCtx()));
+  if (md === S.md) { paintPreview(); return; }       // dropped where it started
+  // reloadTable: true — the board re-renders from the new md under S.syncing, so its observer
+  // does not read that re-render back as a second move.
+  commit(md);
 }
 
 // ── the table: the engine's own tugtile, in an iframe ────────────────────────────────────────────
@@ -440,7 +671,7 @@ function wireTable() {
     // the header actions this file owns
     if (t.closest('#undo')) { stop(); undo(); return; }
     if (t.closest('#redo')) { stop(); return; }        // 🔴 see undo(): there is one stack, not two
-    if (t.closest('#md')) { stop(); openMdMode(); return; }
+    if (t.closest('#md')) { stop(); setView('md'); return; }
 
     // a lane title. Collapsed → let the board's own expand-on-click through; otherwise rename.
     const title = t.closest('.tugtile__lane-title');
@@ -960,7 +1191,7 @@ function openMdMode() {
  * stranger at all.
  */
 function closeMdMode(apply) {
-  if (!apply) { el('mdmodal').hidden = true; return; }
+  if (!apply) { el('mdmodal').hidden = true; setView(S.view || 'card'); return; }
   const value = el('md').value;
   const wrong = whatIsWrong(value);
   if (wrong) {
@@ -971,15 +1202,44 @@ function closeMdMode(apply) {
     return;                                   // 🔴 still in the mode, and the card is untouched
   }
   el('mdmodal').hidden = true;
+  setView(S.view || 'card');
   if (value !== S.md) commit(value); else paintPreview();
 }
 
-// ── the phone's two tabs ─────────────────────────────────────────────────────────────────────────
+// ── the view switch: 卡 · 牌桌 · Markdown ─────────────────────────────────────────────────────────
+//
+// Three views over ONE card markdown; switching never changes content. The CARD is the default
+// editing surface (tap to edit, drag to reorder). The board is the engine's tugtile, shown beside
+// the card on a wide screen and in place of it on a phone; it stays loaded and in sync while hidden,
+// so showing it is instant. Markdown is the existing whole-page mode — leaving it still validates
+// first, and a refused leave keeps you in it (closeMdMode).
+const VIEW_KEY = 'cardtile:try:view:v1';
+const VIEWS = ['card', 'board', 'md'];
+const readView = () => { try { const v = window.localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : 'card'; } catch { return 'card'; } };
+const writeView = (v) => { try { window.localStorage.setItem(VIEW_KEY, v); } catch { /* best-effort */ } };
+
+function paintViewSwitch(view) {
+  for (const b of document.querySelectorAll('[data-view-btn]')) {
+    b.setAttribute('aria-pressed', b.dataset.viewBtn === view ? 'true' : 'false');
+  }
+}
+
+/** `table`/`preview` are the old two-tab names, still accepted so a harness that says them works */
 function setView(view) {
-  document.body.dataset.view = view;
-  el('tab-table').setAttribute('aria-selected', view === 'preview' ? 'false' : 'true');
-  el('tab-preview').setAttribute('aria-selected', view === 'preview' ? 'true' : 'false');
-  if (view === 'table') drawWires();          // the board was display:none; its boxes are new
+  const v = view === 'table' ? 'board' : view === 'preview' ? 'card' : view;
+  if (!VIEWS.includes(v)) return;
+  if (v === 'md') {
+    paintViewSwitch('md');
+    writeView('md');
+    if (el('mdmodal').hidden) openMdMode();
+    return;
+  }
+  if (!el('mdmodal').hidden) el('mdmodal').hidden = true;     // switching away = cancel, as ✕ does
+  S.view = v;
+  document.body.dataset.view = v;
+  paintViewSwitch(v);
+  writeView(v);
+  if (v === 'board') drawWires();          // the board was display:none; its boxes are new
 }
 
 // ── boot ─────────────────────────────────────────────────────────────────────────────────────────
@@ -1008,6 +1268,12 @@ export function boot(opts = {}) {
   el('modal-down').textContent = T.moveDown;
   el('table').title = TB['board.tableTitle'];
   el('canvas').title = TB['board.previewTitle'];
+  el('canvas').addEventListener('load', wireCard);
+  el('table-heading').textContent = TB['board.tableTitle'];
+  el('coach-text').textContent = persona.coachMark;
+  el('coach').hidden = !S.sandbox || coachSeen();
+  el('coach-close').setAttribute('aria-label', T.modalCloseAria);
+  el('coach-close').onclick = coachDone;
 
   el('modal-close').onclick = closeModal;
   el('modal-save').onclick = saveCell;
@@ -1028,11 +1294,15 @@ export function boot(opts = {}) {
     else if (!el('doormodal').hidden) el('doormodal').hidden = true;
   });
 
-  el('tab-table').textContent = TB['board.tabEdit'];
-  el('tab-preview').textContent = TB['board.tabCard'];
-  el('tab-table').onclick = () => setView('table');
-  el('tab-preview').onclick = () => setView('preview');
-  setView('table');
+  // the view switch — every word already exists: the card (chrome `canvasTitle`), the board
+  // (`board.viewBoard`), Markdown (`board.viewMd`)
+  el('view-card').textContent = T.canvasTitle;
+  el('view-board').textContent = TB['board.viewBoard'];
+  el('view-md').textContent = TB['board.viewMd'];
+  for (const b of document.querySelectorAll('[data-view-btn]')) b.onclick = () => setView(b.dataset.viewBtn);
+  S.view = 'card';
+  const firstView = readView();
+  setView(firstView === 'md' ? 'card' : firstView);
 
   // ── the banner, and the door ───────────────────────────────────────────────────────────────────
   el('sandbox-banner-text').textContent = persona.bannerText;
@@ -1070,6 +1340,7 @@ export function boot(opts = {}) {
   const draft = S.sandbox ? readDraft() : '';
   const cells = draft ? (() => { try { return parseCard(draft).cells.length; } catch { return 0; } })() : 0;
   commit(cells ? draft : buildSandboxCard(localeKey), { undoable: false, reloadTable: false });
+  if (firstView === 'md') setView('md');      // after the card exists: the mode edits S.md
 
   // the harness drives these; harmless in normal use
   window.__cardtileW2 = {

@@ -26,6 +26,7 @@
 export const SANDBOX_LOCALES = {
   en: {
     lang: 'en-US',
+    coachMark: 'Tap anything on the card to change it.',
     name: 'Sam',
     bio: 'Family doctor in a small town. I write about rest, worry, and the small things that help — appointments and notes below.',
     linkLabel: 'Book an appointment',
@@ -42,6 +43,7 @@ export const SANDBOX_LOCALES = {
   },
   zh: {
     lang: 'zh-TW',
+    coachMark: '點卡片上的任何地方，就能修改它。',
     name: '小美',
     bio: '小鎮的家庭醫師。我撰寫關於休息、煩惱，以及對生活有所幫助的小事。下方為預約與筆記。',
     linkLabel: '預約',
@@ -58,6 +60,7 @@ export const SANDBOX_LOCALES = {
   },
   ja: {
     lang: 'ja-JP',
+    coachMark: 'カードのどこでもタップすると、変更できます。',
     name: 'ゆい',
     bio: '小さな町の家庭医です。休息や悩み、そして日々の助けになる小さなことについて綴っています。予約やノートは以下から。',
     linkLabel: '予約する',
@@ -74,6 +77,7 @@ export const SANDBOX_LOCALES = {
   },
   ko: {
     lang: 'ko-KR',
+    coachMark: '카드의 아무 곳이나 눌러서 바꿔 보세요.',
     name: '지우',
     bio: '작은 마을의 가정의학과 전문의예요. 휴식과 걱정, 그리고 도움이 되는 소소한 것들에 관해 글을 써요 — 예약과 노트는 아래에서.',
     linkLabel: '예약하기',
@@ -91,6 +95,7 @@ export const SANDBOX_LOCALES = {
   // ── added 2026-09-05 (owner ruling: nine console locales, not four) ──────────────────────────
   'zh-Hans': {
     lang: 'zh-CN',
+    coachMark: '点卡片上的任何地方，就能修改它。',
     name: '小美',
     bio: '在小镇执业的家庭医生。我写一些关于休息、烦恼，以及生活里有帮助的小事。预约与笔记见下方。',
     linkLabel: '预约',
@@ -107,6 +112,7 @@ export const SANDBOX_LOCALES = {
   },
   de: {
     lang: 'de-DE',
+    coachMark: 'Tippen Sie auf etwas auf der Karte, um es zu ändern.',
     name: 'Lea',
     bio: 'Hausärztin in einer Kleinstadt. Ich schreibe über Erholung, Sorgen und die kleinen Dinge, die helfen — Termine und Notizen unten.',
     linkLabel: 'Termin vereinbaren',
@@ -123,6 +129,7 @@ export const SANDBOX_LOCALES = {
   },
   fr: {
     lang: 'fr-FR',
+    coachMark: 'Touchez n’importe quel élément de la carte pour le modifier.',
     name: 'Camille',
     bio: 'Médecin de famille dans une petite ville. J’écris sur le repos, les soucis et les petites choses qui aident — rendez-vous et notes ci-dessous.',
     linkLabel: 'Prendre rendez-vous',
@@ -139,6 +146,7 @@ export const SANDBOX_LOCALES = {
   },
   es: {
     lang: 'es-ES',
+    coachMark: 'Toca cualquier parte de la tarjeta para cambiarla.',
     name: 'Sofía',
     bio: 'Médica de familia en un pueblo pequeño. Escribo sobre el descanso, las preocupaciones y las pequeñas cosas que ayudan — citas y notas abajo.',
     linkLabel: 'Reservar una cita',
@@ -155,6 +163,7 @@ export const SANDBOX_LOCALES = {
   },
   pt: {
     lang: 'pt-BR',
+    coachMark: 'Toque em qualquer parte do cartão para alterá-la.',
     name: 'Beatriz',
     bio: 'Médica de família em uma cidade pequena. Escrevo sobre descanso, preocupações e as pequenas coisas que ajudam — consultas e notas abaixo.',
     linkLabel: 'Agendar uma consulta',
@@ -680,8 +689,13 @@ export function chromeStrings(localeKey) {
 
 /**
  * The sandbox's starter card, seeded fresh — a neutral persona, never a real person, same shape as
- * the retired route's `buildSandboxCard` (three cells: a profile with the one-line bio, a link, and
- * a text block explaining "tap to edit").
+ * the retired route's `buildSandboxCard`: a profile with the one-line bio, and one link.
+ *
+ * 🔴 NO "tap to edit" TEXT TILE. It used to be the third cell, and it was an instruction wearing a
+ * tile's clothes — a visitor who claimed the card took a sentence about the editor home with them.
+ * Instructions about the editor live in the EDITOR (`coachMark`, shown once beside the card by
+ * w2/edit2.mjs); the card holds only what a card would hold. `textBody` stays in the table because
+ * the vocabulary tests read the unit word from it, but nothing seeds it any more.
  */
 export function buildSandboxCard(localeKey) {
   const p = SANDBOX_LOCALES[primaryLocale(localeKey)];
@@ -696,6 +710,5 @@ export function buildSandboxCard(localeKey) {
     '',
     `- [ ] %% card: profile w=6 %% ${p.bio}`,
     `- [ ] %% card: link w=3 %% [${p.linkLabel}](https://example.com)`,
-    `- [ ] %% card: text w=3 %% ${p.textBody}`,
   ].join('\n') + '\n';
 }
