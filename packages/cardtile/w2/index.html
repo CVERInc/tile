@@ -70,6 +70,8 @@
        including one that renders to nothing. -->
   <section class="ctw-w2-table">
     <h2 class="ctw-w2-panel-title" id="table-heading"></h2>
+    <!-- what this view is, what you can do in it, and what the other lanes are (owner rule 2) -->
+    <p class="ctw-w2-panel-hint" id="table-hint"></p>
     <iframe id="table" class="ctw-w2-frame" title="editing table"></iframe>
   </section>
   <!-- the card itself — the PRIMARY surface: tap anything on it to edit it (edit2.mjs wireCard) -->
@@ -130,9 +132,9 @@
   <div class="ctw-modal-panel ctw-md-panel" role="dialog" aria-modal="true" aria-labelledby="md-title">
     <button class="ctw-modal-close" id="md-close" aria-label="關閉">✕</button>
     <h2 id="md-title"></h2>
+    <p class="ctw-modal-hint" id="md-note"></p>
     <p class="ctw-md-error" id="md-error" hidden></p>
     <textarea id="md" class="ctw-md" spellcheck="false"></textarea>
-    <p class="ctw-modal-hint" id="md-note"></p>
     <div class="ctw-modal-foot">
       <button class="ctw-btn" id="md-cancel"></button>
       <button class="ctw-btn ctw-btn-go" id="md-done"></button>
