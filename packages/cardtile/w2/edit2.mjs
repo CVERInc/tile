@@ -103,10 +103,10 @@ const bridgeCtx = () => ({
   faceLabel: T.faceTabLabel,
   title: cardTitle(S.md),
   typeName: (t) => (TYPES[t] ? say(TYPES[t].title) : t),
-  drawerPrefix: T.targetDrawer,
+  opensLabel: TB['board.opensLabel'],
   drawerTitle: (id) => {
     const d = (S.model.drawers || []).find((x) => x.id === id);
-    return d ? (d.title || d.id) : id;
+    return d ? (d.title || d.id) : '';           // '' → the subtitle reads 「⚠ id」 (dangling)
   },
   // what the RENDERER writes on a tile whose address or picture is not filled in yet. The table
   // says the same sentence, because the tile is a mini-render of that element and not a label for it.
@@ -661,14 +661,6 @@ const BOARD_CSS = `
   @media (max-width: 760px) {
     .tw-header { height: auto; min-height: 44px; flex-wrap: nowrap; gap: 2px; }
   }
-  /* The drawer label on a tile (→ Opens: …). Words, not lines — ruling 2026-09-24.
-     (No backticks in here: this block is one template literal, see the note above.) */
-  .ct2-tug { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; max-width: 100%;
-    font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 8px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-    color: var(--text-accent); }
-  .ct2-tug-bad { background: color-mix(in srgb, var(--text-error) 18%, transparent); color: var(--text-error); }
 `;
 
 function wireTable() {
@@ -803,19 +795,8 @@ function decorate() {
   const els = [...doc.querySelectorAll('.tugtile__lane')];
   els.forEach((lane, i) => { if (lanes[i]) lane.dataset.cardLane = lanes[i].key; });
 
-  for (const old of doc.querySelectorAll('.ct2-tug')) old.remove();
-  const tiles = [...doc.querySelectorAll('.tugtile__list > .tugtile__tile')];
+  // the tile's side is its SUBTITLE (tileFace → opensText); only the lane heading is set here.
   const labels = drawerLabels(S.model, bridgeCtx(), TB);
-
-  for (const l of labels.tiles) {
-    const tile = tiles[l.slot];
-    if (!tile) continue;
-    const s = doc.createElement('span');
-    s.className = 'ct2-tug' + (l.bad ? ' ct2-tug-bad' : '');
-    s.textContent = l.text;
-    s.title = l.tip || l.text;
-    tile.appendChild(s);
-  }
   // the drawer lane's heading names the tile that opens it. Only the TEXT is swapped: the title
   // element is the host's own, and a rename still starts from the plain drawer title (renameLane
   // reads the model, never this DOM).

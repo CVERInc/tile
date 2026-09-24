@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseCard } from '../card-core.js';
-import { drawerLabels, BOARD_LIGHT_CSS } from './board-bridge.mjs';
+import { drawerLabels, BOARD_LIGHT_CSS, boardSlots, tileFace } from './board-bridge.mjs';
 import { boardStrings, BOARD_STRINGS_BY_KEY } from './board-i18n.mjs';
 import { LOCALE_KEYS } from '../w/sandbox-i18n.mjs';
 
@@ -26,28 +26,32 @@ const MD = card(
 );
 const ctx = { faceLabel: 'F' };
 
-test('a link→drawer pair: the tile says where it goes, the lane says who opens it (en and zh)', () => {
+// the words the editor hands board-bridge (edit2's bridgeCtx): drawerTitle is '' for a missing drawer
+const ctxFor = (m, loc) => ({ faceLabel: 'F', opensLabel: boardStrings(loc)['board.opensLabel'],
+  drawerTitle: (id) => { const d = (m.drawers || []).find((x) => x.id === id); return d ? (d.title || d.id) : ''; } });
+const subs = (m, loc) => boardSlots(m, ctxFor(m, loc)).map((s) => tileFace(s.cell, ctxFor(m, loc)).sub);
+
+test('a link→drawer pair: the tile SUBTITLE says where it goes, the lane says who opens it', () => {
   const m = parseCard(MD);
-  const en = drawerLabels(m, ctx, boardStrings('en'));
-  const good = en.tiles.filter((t) => !t.bad);
-  assert.deepEqual(good.map((t) => [t.slot, t.text]), [[0, '→ Opens: About']]);
-  assert.equal(en.lanes.find((l) => l.laneKey === 'drawer:about').heading, 'About (opened by “About me”)');
-  const zh = drawerLabels(m, ctx, boardStrings('zh'));
-  assert.equal(zh.tiles.find((t) => !t.bad).text, '→ 開啟：About');
-  assert.equal(zh.lanes.find((l) => l.laneKey === 'drawer:about').heading, 'About（由〈About me〉打開）');
+  assert.equal(subs(m, 'en')[0], '→ Opens: About');
+  assert.equal(subs(m, 'zh')[0], '→ 開啟：About');
+  assert.ok(!subs(m, 'en').some((s) => /Drawer:|抽屜：/.test(s)), 'the old "Drawer:" prefix is back');
+  assert.equal(drawerLabels(m, ctxFor(m, 'en'), boardStrings('en')).lanes
+    .find((l) => l.laneKey === 'drawer:about').heading, 'About (opened by “About me”)');
+  assert.equal(drawerLabels(m, ctxFor(m, 'zh'), boardStrings('zh')).lanes
+    .find((l) => l.laneKey === 'drawer:about').heading, 'About（由〈About me〉打開）');
 });
 
 test('a drawer nothing opens: the heading is the plain title', () => {
-  const { lanes } = drawerLabels(parseCard(MD), ctx, boardStrings('en'));
-  assert.equal(lanes.find((l) => l.laneKey === 'drawer:extra').heading, 'Extra');
+  const m = parseCard(MD);
+  assert.equal(drawerLabels(m, ctxFor(m, 'en'), boardStrings('en')).lanes.find((l) => l.laneKey === 'drawer:extra').heading, 'Extra');
 });
 
-test('a dangling link keeps the existing ⚠ handling, and the plain external link gets no label', () => {
-  const { tiles } = drawerLabels(parseCard(MD), ctx, boardStrings('en'));
-  const bad = tiles.filter((t) => t.bad);
-  assert.deepEqual(bad.map((t) => [t.slot, t.text]), [[1, '⚠ stockists']]);
-  assert.equal(bad[0].tip, boardStrings('en')['board.danglingDrawer']);
-  assert.ok(!tiles.some((t) => t.slot === 2), 'an external link was labelled as opening a drawer');
+test('a dangling link reads ⚠ <id> in its subtitle; a plain external link says its domain', () => {
+  const m = parseCard(MD);
+  const s = subs(m, 'en');
+  assert.equal(s[1], '⚠ stockists');
+  assert.equal(s[2], 'example.com');
 });
 
 test('both new strings exist in all nine locales and carry their slots', () => {
@@ -60,10 +64,10 @@ test('both new strings exist in all nine locales and carry their slots', () => {
 
 // 🔴 the connector-line code path is gone. Control: the same needles, run on text that still has
 // the old code, must hit — so a needle typo cannot make this pass vacuously.
-const LINE_NEEDLES = ['drawWires', 'ct2-wire', 'stroke-dasharray'];
+const LINE_NEEDLES = ['drawWires', 'ct2-wire', 'stroke-dasharray', 'ct2-tug'];
 const hits = (src) => LINE_NEEDLES.filter((n) => src.includes(n));
 test('no connector-line code remains in the editor or its generated bundle', () => {
-  const OLD = "function drawWires() {}\n  .ct2-wire path { stroke-dasharray: 4 4; }";
+  const OLD = "function drawWires() {}\n  .ct2-wire path { stroke-dasharray: 4 4; }\n  .ct2-tug { }";
   assert.deepEqual(hits(OLD), LINE_NEEDLES, 'control: the needles no longer detect the old code');
   for (const f of ['edit2.mjs', 'edit2.css', 'index.html', '../serve/edit2-assets.mjs']) {
     assert.deepEqual(hits(fs.readFileSync(join(DIR, f), 'utf8')), [], `${f} still draws lines`);

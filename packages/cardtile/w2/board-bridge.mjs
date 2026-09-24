@@ -157,11 +157,24 @@ const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boo
 const flat = (s) => String(s || '').replace(/[#\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**
+ * The subtitle of a tile that opens drawer `target`: `opensLabel` filled with the drawer's title;
+ * `⚠ <id>` when the drawer does not exist (a dangling link is reported, not hidden); '' for no target.
+ */
+export function opensText(target, ctx = {}) {
+  if (!target) return '';
+  const title = ctx.drawerTitle ? ctx.drawerTitle(target) : target;
+  if (!title) return `⚠ ${target}`;
+  return String(ctx.opensLabel || '→ Opens: {title}').replace('{title}', title);
+}
+
+/**
  * One cell → the tile text the board shows. `ctx` carries the words:
  *   ctx.typeName(type)   the tile kind, in the visitor's language (cell-i18n `type.<t>.title`)
- *   ctx.drawerPrefix     「抽屜：」 and friends (sandbox-i18n `targetDrawer`)
+ *   ctx.opensLabel       「→ 開啟：{title}」 and friends (board-i18n `board.opensLabel`) — the
+ *                        subtitle of a tile that opens a drawer. It IS the board's drawer label
+ *                        (ruling 2026-09-24: words, not lines; one place, not a pill beside it).
  *   ctx.title            the card's frontmatter title — the profile tile's name
- *   ctx.drawerTitle(id)  a drawer's display title, for the 牽線 line
+ *   ctx.drawerTitle(id)  a drawer's display title, or '' when no such drawer exists (→ `⚠ id`)
  */
 export function tileText(cell, ctx = {}) {
   const name = (t) => (ctx.typeName ? ctx.typeName(t) : t);
@@ -173,9 +186,7 @@ export function tileText(cell, ctx = {}) {
   // hashtag on every tile — which reads as a kanban label, and was the cold read's P1-2.
   const head = (s) => `### ${flat(s)}`;
   const target = drawerTargetOf(cell);
-  const opens = target
-    ? `${ctx.drawerPrefix || ''}${(ctx.drawerTitle && ctx.drawerTitle(target)) || target}`
-    : '';
+  const opens = opensText(target, ctx);
 
   switch (cell.type) {
     case 'profile':
@@ -233,9 +244,7 @@ export function tileFace(cell, ctx = {}) {
   const name = (t) => (ctx.typeName ? ctx.typeName(t) : t);
   const p = (cell && cell.params) || {};
   const target = drawerTargetOf(cell);
-  const opens = target
-    ? `${ctx.drawerPrefix || ''}${(ctx.drawerTitle && ctx.drawerTitle(target)) || target}`
-    : '';
+  const opens = opensText(target, ctx);
   const face = { kind: (cell && cell.type) || 'text', title: '', sub: '', img: '', icons: [] };
   const marks = (url) => (url && !url.startsWith('#') && !url.startsWith('mailto:') ? iconDomains(hostOf(url)).slice(0, 1) : []);
 
@@ -401,27 +410,15 @@ export function drawerLinks(model, ctx = {}) {
 }
 
 /**
- * The drawer relation in WORDS — what the board shows now that the dashed 牽線 lines are gone
- * (owner ruling 2026-09-24: "a view answers one question"; a one-to-one relation needs a word, not a
- * line). Derived from `drawerLinks`, the same data the lines were drawn from.
- *
- *   tiles  [{ slot, text, bad }]   the label on a tile: `opensLabel` with the drawer's title, or —
- *                                  for a dangling link — `⚠ <id>` with `danglingDrawer` as its tip.
- *   lanes  [{ laneKey, heading }]  every drawer's lane heading: `drawerOpenedBy` naming the FIRST
- *                                  tile that opens it, or the plain title when nothing opens it.
- *
- * `strings` is `boardStrings(locale)`; missing keys fall back to readable English so a test (or a
- * stale locale table) never prints a raw key.
+ * The drawer lane's heading, in WORDS (ruling 2026-09-24: a one-to-one relation needs a word, not a
+ * line). The tile's side of the relation is its subtitle — see `opensText`. Each drawer's lane reads
+ * `drawerOpenedBy` naming the FIRST tile that opens it, or its plain title when nothing opens it.
+ * Derived from `drawerLinks`, the data the lines were drawn from.
  */
 export function drawerLabels(model, ctx = {}, strings = {}) {
-  const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
-  const opens = strings['board.opensLabel'] || '→ Opens: {title}';
   const openedBy = strings['board.drawerOpenedBy'] || '{title} (opened by “{by}”)';
-  const { links, dangling } = drawerLinks(model, ctx);
+  const { links } = drawerLinks(model, ctx);
   const slots = boardSlots(model, ctx);
-  const tiles = [];
-  for (const l of links) tiles.push({ slot: l.slot, text: fill(opens, { title: l.drawerTitle }), bad: false });
-  for (const d of dangling) tiles.push({ slot: d.slot, text: `⚠ ${d.drawerId}`, tip: strings['board.danglingDrawer'] || '', bad: true });
   const firstOpener = new Map();
   for (const l of links) if (!firstOpener.has(l.drawerId)) firstOpener.set(l.drawerId, l.slot);
   const lanes = (model.drawers || []).map((d) => {
@@ -429,9 +426,9 @@ export function drawerLabels(model, ctx = {}, strings = {}) {
     const slot = firstOpener.get(d.id);
     const cell = slot == null ? null : (slots[slot] || {}).cell;
     const by = cell ? tileFace(cell, ctx).title : '';
-    return { laneKey: `drawer:${d.id}`, heading: by ? fill(openedBy, { title, by }) : title };
+    return { laneKey: `drawer:${d.id}`, heading: by ? openedBy.replace('{title}', title).replace('{by}', by) : title };
   });
-  return { tiles, lanes };
+  return { lanes };
 }
 
 /**
