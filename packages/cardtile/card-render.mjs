@@ -510,6 +510,12 @@ function renderCell(cell, place, ctx) {
       // Absent — no backdrop of a network, YouTube down, a channel with no uploads — `hit` is
       // undefined and everything below falls through to the degraded state, by design.
       const hit = chan && ctx.videos ? ctx.videos[chan] : null;
+      // A card may write the channel as `@handle` (what the share button gives a person). The Worker
+      // resolved it to the UC id alongside the latest video; when it could not (YouTube down, handle
+      // gone), the play button cannot build an uploads playlist from a handle, so it opens the channel
+      // page instead — a door that goes somewhere, not a player that plays nothing.
+      const chanId = hit && hit.channelId ? hit.channelId : chan;
+      const chanIsId = /^UC[\w-]{22}$/.test(chanId);
       // Poster and playback name the SAME video. The alternative was to keep playing the uploads
       // playlist (always truly newest) under a poster from our cache, which shows one video and
       // plays another whenever the cache is a few minutes behind. Consistency wins; the cache TTL
@@ -520,7 +526,9 @@ function renderCell(cell, place, ctx) {
       // exists to prevent, reintroduced through an <img>. The Worker proxies it (see /_yt/ there).
       const poster = p.poster || (vid ? posterPath(vid) : '');
       const label = b || p.title || (hit && hit.title) || 'YouTube';
-      const attrs = vid ? `data-yt="${esc(vid)}"` : `data-yt-channel="${esc(chan)}"`;
+      const attrs = vid ? `data-yt="${esc(vid)}"`
+        : chanIsId ? `data-yt-channel="${esc(chanId)}"`
+        : `data-yt-handle="${esc(chan)}"`;
       return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
     }
     case 'social': {
@@ -1365,7 +1373,9 @@ export function renderPage(model, ctx = {}) {
 // single byte or cookie from YouTube before the click.
 const VIDEO_JS = `(function(){document.addEventListener('click',function(e){
 var b=e.target.closest&&e.target.closest('.st-embed-video-btn');if(!b)return;
-var id=b.getAttribute('data-yt');var ch=b.getAttribute('data-yt-channel');if(!id&&!ch)return;
+var id=b.getAttribute('data-yt');var ch=b.getAttribute('data-yt-channel');var hd=b.getAttribute('data-yt-handle');
+if(hd&&!id&&!ch){window.open('https://www.youtube.com/'+encodeURIComponent(hd)+'/videos','_blank','noopener');return;}
+if(!id&&!ch)return;
 var f=document.createElement('iframe');
 f.src=id?('https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&modestbranding=1&rel=0')
         :('https://www.youtube-nocookie.com/embed/videoseries?list=UU'+encodeURIComponent(ch.replace(/^UC/,''))+'&autoplay=1&modestbranding=1&rel=0');

@@ -154,9 +154,10 @@ export function formBodyHtml(def, cell, ctx) {
  */
 const YT_ID = /^[\w-]{11}$/;
 const YT_CH = /^UC[\w-]{22}$/;
+const YT_HANDLE = /^@[\w.-]{3,30}$/;   // same shape as yt.mjs HANDLE_RE; the Worker resolves it
 export function youtubeRef(input) {
   const s = String(input == null ? '' : input).trim();
-  if (!s || YT_ID.test(s) || YT_CH.test(s)) return s;
+  if (!s || YT_ID.test(s) || YT_CH.test(s) || YT_HANDLE.test(s)) return s;
   let u;
   try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`); } catch { return s; }
   const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
@@ -167,8 +168,9 @@ export function youtubeRef(input) {
     if (seg[0] === 'watch') got = u.searchParams.get('v') || '';
     else if (['shorts', 'embed', 'live', 'v'].includes(seg[0])) got = seg[1] || '';
     else if (seg[0] === 'channel') got = seg[1] || '';
+    else if (seg[0] && seg[0].startsWith('@')) got = decodeURIComponent(seg[0]);   // youtube.com/@name(/videos)
   }
-  return YT_ID.test(got) || YT_CH.test(got) ? got : s;
+  return YT_ID.test(got) || YT_CH.test(got) || YT_HANDLE.test(got) ? got : s;
 }
 
 /**

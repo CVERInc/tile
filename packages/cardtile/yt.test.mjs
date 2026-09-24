@@ -3,7 +3,7 @@
 //   node --test packages/cardtile/yt.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { channelsIn, latestFromFeed, resolveChannel, resolveChannels, posterPath, CHANNEL_RE, VIDEO_RE } from './yt.mjs';
+import { channelsIn, latestFromFeed, resolveChannel, resolveChannels, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE } from './yt.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
 
 const CH = 'UCabcdefghijklmnopqrstuv';          // UC + 22
@@ -89,7 +89,7 @@ test('🔴 a hanging YouTube gives up the poster, not the card', async () => {
   // pass just as well against a resolver that always gives up.
   assert.deepEqual(
     await resolveChannel(CH, async () => ok(FEED('dQw4w9WgXcQ', 'x')), 60),
-    { id: 'dQw4w9WgXcQ', title: 'x' },
+    { id: 'dQw4w9WgXcQ', title: 'x', channelId: CH },
   );
 });
 
@@ -142,4 +142,69 @@ test('an author’s own poster is never overridden by resolution', () => {
 test('VIDEO_RE is what stands between the poster route and an open proxy', () => {
   for (const bad of ['../../secret', 'a'.repeat(50), 'short', '']) assert.equal(VIDEO_RE.test(bad), false, bad);
   assert.equal(VIDEO_RE.test('dQw4w9WgXcQ'), true);
+});
+
+// ---- @handle: what a creator actually knows about their channel ---------------------------------
+
+const HANDLE = '@some.body';
+// Shaped like the real page: three OTHER channels' ids in the JSON before the page names itself.
+const PAGE = (id) => `<!doctype html><html><head>
+<link rel="canonical" href="https://www.youtube.com/channel/${id}">
+<meta itemprop="identifier" content="${id}">
+</head><body><script>var ytInitialData = {"channelId":"UCdecoy00000000000000001","x":{"channelId":"UCdecoy00000000000000002"}}</script></body></html>`;
+
+test('channelsIn reads a handle as well as a UC id, quoted or bare, and nothing else', () => {
+  assert.deepEqual(channelsIn(`- [ ] %% card: video channel=${HANDLE} %% x\n- [ ] %% card: video channel="${CH}" %%`), [HANDLE, CH]);
+  assert.deepEqual(channelsIn('channel=@ab channel=@ channel=@!bang'), []);   // too short, empty, not a handle
+  assert.ok(HANDLE_RE.test('@somebody') && HANDLE_RE.test('@a.b-c_d') && !HANDLE_RE.test('somebody'));
+});
+
+test('🔴 the page’s own id is the identifier meta — the first "channelId" in its JSON is someone else’s', () => {
+  const html = PAGE(CH);
+  assert.equal(channelIdFromPage(html), CH);
+  assert.notEqual(channelIdFromPage(html), 'UCdecoy00000000000000001');
+  // canonical link alone is enough; a page that names nobody resolves to nobody
+  assert.equal(channelIdFromPage(`<link rel="canonical" href="https://www.youtube.com/channel/${CH}">`), CH);
+  assert.equal(channelIdFromPage('<html>nothing here</html>'), null);
+});
+
+test('resolveHandle: the handle page, and only that page; 404 (no such handle) is null, never a throw', async () => {
+  const urls = [];
+  assert.equal(await resolveHandle(HANDLE, async (u) => { urls.push(u); return ok(PAGE(CH)); }), CH);
+  assert.deepEqual(urls, [`https://www.youtube.com/${HANDLE}`]);
+  assert.equal(await resolveHandle(HANDLE, async () => ({ ok: false, text: async () => '' })), null);
+  assert.equal(await resolveHandle(HANDLE, async () => { throw new Error('network'); }), null);
+  let called = false;
+  assert.equal(await resolveHandle('not-a-handle', async () => { called = true; return ok(PAGE(CH)); }), null);
+  assert.equal(called, false, 'a non-handle never reaches a URL');
+});
+
+test('resolveChannel with a handle: page then feed, keyed by the handle the card wrote, carrying the UC id', async () => {
+  const urls = [];
+  const doFetch = async (u) => {
+    urls.push(u);
+    return u.includes('/feeds/') ? ok(FEED('dQw4w9WgXcQ', 'The Newest One')) : ok(PAGE(CH));
+  };
+  assert.deepEqual(await resolveChannel(HANDLE, doFetch), { id: 'dQw4w9WgXcQ', title: 'The Newest One', channelId: CH });
+  assert.deepEqual(urls, [`https://www.youtube.com/${HANDLE}`, `https://www.youtube.com/feeds/videos.xml?channel_id=${CH}`]);
+  // the UC form carries channelId too, so the renderer has one shape to read
+  assert.deepEqual(await resolveChannel(CH, async () => ok(FEED('dQw4w9WgXcQ', 'x'))), { id: 'dQw4w9WgXcQ', title: 'x', channelId: CH });
+  // a handle that does not resolve is the degraded state — the feed is never asked
+  const asked = [];
+  assert.equal(await resolveChannel(HANDLE, async (u) => { asked.push(u); return { ok: false, text: async () => '' }; }), null);
+  assert.equal(asked.length, 1);
+  const all = await resolveChannels(`channel=${HANDLE} channel=${CH}`, doFetch);
+  assert.deepEqual(Object.keys(all).sort(), [HANDLE, CH].sort());
+});
+
+test('render: a handle card plays the resolved uploads playlist; unresolved, its button opens the channel', () => {
+  const md = `- [ ] %% card: video channel=${HANDLE} %% Latest`;
+  const resolved = renderCardHTML(CARD(md), { handle: 't', videos: { [HANDLE]: { id: 'dQw4w9WgXcQ', title: 'T', channelId: CH } } });
+  assert.match(resolved, /data-yt="dQw4w9WgXcQ"/);
+  assert.doesNotMatch(resolved, /data-yt-handle="/);   // the attribute — the inline player script names it too
+  const degraded = renderCardHTML(CARD(md), { handle: 't', videos: {} });
+  assert.ok(degraded.includes(`data-yt-handle="${HANDLE}"`), 'the button carries the handle the card wrote');
+
+  assert.doesNotMatch(degraded, /data-yt-channel="/, 'a handle must never be turned into list=UU…');
+  assert.doesNotMatch(degraded, /i\.ytimg\.com/);
 });

@@ -14,6 +14,13 @@ import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
+
+// One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
+// minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
+// resolved to the UC id) is cached for a day: it is a couple of MB, and a handle's id does not change.
+const ytFetch = (u) => fetch(u, {
+  cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
+});
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
@@ -490,7 +497,7 @@ export default {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
         });
       }
-      const videos = await resolveChannels(draft, (u) => fetch(u, { cf: { cacheTtl: 1800, cacheEverything: true } }));
+      const videos = await resolveChannels(draft, ytFetch);
       return new Response(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
@@ -620,9 +627,7 @@ export default {
     // Failure is not propagated. resolveChannels never throws and returns {} when YouTube is
     // unreachable, which lands the block on its designed degraded state (condition 3). A creator's
     // card must not go down because a video platform did.
-    const videos = await resolveChannels(cardMd, (u) => fetch(u, {
-      cf: { cacheTtl: 1800, cacheEverything: true },
-    }));
+    const videos = await resolveChannels(cardMd, ytFetch);
 
     return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle);
   },
