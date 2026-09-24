@@ -12,7 +12,7 @@ const step = (n) => steps.push(`${n} @${Date.now()-t0}ms`);
 await p.goto(URL_, { waitUntil:'networkidle' }); step('page ready');
 const canvas = p.frameLocator('#canvas');
 await canvas.locator('.ct2-add').first().tap(); step('tap ＋');
-await p.locator('.ctw-modal:visible button', { hasText: /^Link\b/ }).first().tap(); step('tap Link');
+await p.locator('.ctw-modal:visible button[data-type="link"]').first().tap(); step('tap Link');
 const sheet = p.locator('.ctw-modal:visible').first();
 const inputs = await sheet.locator('input').evaluateAll(es => es.map(e => ({ type: e.type, name: e.name || e.dataset.field || '', ph: e.placeholder, val: e.value })));
 await sheet.locator('input').nth(0).fill('My shop'); step('type label');
