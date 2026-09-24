@@ -59,7 +59,7 @@ function bootHost() {
   ctx.window.__cardtileW2Boot({ host: HOST, sandbox: false, locale: 'en', tableBase: '/try/edit/t/en/' });
   const runTimers = () => { const due = timers.splice(0); for (const t of due) if (t.fn) t.fn(); };
   const message = (data, origin = HOST) => { for (const fn of listeners.message || []) fn({ origin, data }); };
-  return { get, body, posted, runTimers, message, timers };
+  return { get, body, document, posted, runTimers, message, timers };
 }
 
 test('🔴 host mode with no card:load: the canvas never receives the seed, and the page says it is waiting', () => {
@@ -88,6 +88,23 @@ test('host mode: card:load renders THE card, and the ready announcements stop', 
   h.runTimers(); h.runTimers();
   assert.equal(h.posted.filter((p) => p.msg.type === 'card:ready').length, 1);
   assert.ok(h.posted.length >= before);
+});
+
+// 🔴 the bug this pair guards: before card:load lands, `/edit?host=…` used to carry the SANDBOX's
+// title ("Try Card · feelreef") even while framed in the owner's dashboard editing a real card —
+// see card-worker.mjs's sandboxEditorHtml() and the `hostPageTitle` it now renders instead.
+test('host mode: document.title is the bare placeholder before card:load, the card\'s own name after', () => {
+  const h = bootHost();
+  assert.equal(h.document.title, 'Card · feelreef');
+  h.message({ type: 'card:load', v: 1, md: REAL, handle: 'mei', cardUrl: 'https://card.feelreef.com/mei' });
+  assert.equal(h.document.title, '小美 · Card · feelreef');
+});
+
+test('host mode: document.title falls back to the handle when the loaded card carries no frontmatter title', () => {
+  const h = bootHost();
+  const noTitle = ['## cards', '', '- [ ] %% card: profile w=6 %% a real bio'].join('\n') + '\n';
+  h.message({ type: 'card:load', v: 1, md: noTitle, handle: 'mei', cardUrl: 'https://card.feelreef.com/mei' });
+  assert.equal(h.document.title, 'mei · Card · feelreef');
 });
 
 test('CONTROL: the stub does record a painted seed (loaded through card:load)', () => {

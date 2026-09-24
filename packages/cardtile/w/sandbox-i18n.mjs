@@ -20,7 +20,7 @@
 
 /**
  * name → persona → { lang, name, bio, linkLabel, textBody, imageAlt, bannerStatus, bannerText,
- * doorCta, reset, pageTitle }. `lang` is the BCP-47 tag written into the sandbox's `<html lang>`
+ * doorCta, reset, pageTitle, hostPageTitle }. `lang` is the BCP-47 tag written into the sandbox's `<html lang>`
  * and the starter card's own frontmatter `lang:` field.
  */
 export const SANDBOX_LOCALES = {
@@ -37,6 +37,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'Make this card real',
     reset: 'Start over',
     pageTitle: 'Try Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'Next you\'ll sign in with your email (first time? your account is made along the way, no password). This card comes with you.',
     doorContinue: 'Continue',
     doorBack: 'Keep editing',
@@ -54,6 +55,7 @@ export const SANDBOX_LOCALES = {
     doorCta: '把這張變成真的',
     reset: '重新開始',
     pageTitle: '試玩 Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: '接下來會請你用 email 登入（第一次會順便建好帳號，不用密碼）。這張卡會跟著你過去。',
     doorContinue: '繼續',
     doorBack: '再改一下',
@@ -71,6 +73,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'これを本物にする',
     reset: 'はじめからやり直す',
     pageTitle: 'Card を試す · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'このあとメールアドレスでログインします（はじめての方はアカウントも一緒に作られます。パスワードは不要）。このカードはそのまま持っていけます。',
     doorContinue: '続ける',
     doorBack: 'もう少し直す',
@@ -88,6 +91,7 @@ export const SANDBOX_LOCALES = {
     doorCta: '이 카드를 진짜로 만들기',
     reset: '처음부터 다시',
     pageTitle: 'Card 체험 · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: '다음에는 이메일로 로그인해요（처음이라면 계정도 함께 만들어져요. 비밀번호는 없어요）. 이 카드는 그대로 가져갈 수 있어요.',
     doorContinue: '계속하기',
     doorBack: '조금 더 고치기',
@@ -106,6 +110,7 @@ export const SANDBOX_LOCALES = {
     doorCta: '把这张卡片变成真的',
     reset: '重新开始',
     pageTitle: '试玩 Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: '接下来会请你用 email 登录（第一次会顺便建好账号，不用密码）。这张卡片会跟着你过去。',
     doorContinue: '继续',
     doorBack: '再改一下',
@@ -123,6 +128,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'Diese Karte echt machen',
     reset: 'Von vorn beginnen',
     pageTitle: 'Card ausprobieren · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'Als Nächstes melden Sie sich mit Ihrer E-Mail-Adresse an (beim ersten Mal wird Ihr Konto gleich mit angelegt, ohne Passwort). Diese Karte kommt mit.',
     doorContinue: 'Weiter',
     doorBack: 'Weiter bearbeiten',
@@ -140,6 +146,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'Rendre cette carte réelle',
     reset: 'Recommencer',
     pageTitle: 'Essayer Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'Ensuite, vous vous connecterez avec votre e-mail (la première fois, votre compte est créé au passage, sans mot de passe). Cette carte vous suit.',
     doorContinue: 'Continuer',
     doorBack: 'Continuer à modifier',
@@ -157,6 +164,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'Hacer real esta tarjeta',
     reset: 'Empezar de nuevo',
     pageTitle: 'Probar Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'A continuación iniciarás sesión con tu correo (la primera vez tu cuenta se crea por el camino, sin contraseña). Esta tarjeta se va contigo.',
     doorContinue: 'Continuar',
     doorBack: 'Seguir editando',
@@ -174,6 +182,7 @@ export const SANDBOX_LOCALES = {
     doorCta: 'Tornar este cartão real',
     reset: 'Começar de novo',
     pageTitle: 'Experimentar Card · feelreef',
+    hostPageTitle: 'Card · feelreef',
     doorNote: 'Em seguida você entra com o seu e-mail (na primeira vez a conta é criada junto, sem senha). Este cartão vai com você.',
     doorContinue: 'Continuar',
     doorBack: 'Continuar editando',
