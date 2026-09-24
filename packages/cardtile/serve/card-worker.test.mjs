@@ -1057,6 +1057,9 @@ test('host mode: /edit?host=feelreef serves the editor with host opts, noindex, 
       assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
       assert.ok(body.includes('id="sandbox-banner" hidden'), 'host mode ships the sandbox banner hidden');
       assert.match(body, /id="host-save"/);
+      // 🔴 host mode never ships the sandbox's "Try Card · feelreef" — before the parent hands over
+      // a real card there is nothing to name yet, so the tab reads the bare product name.
+      assert.match(body, /<title>Card · feelreef<\/title>/, 'host mode ships the placeholder title, not the sandbox\'s');
       assert.deepEqual(touched, []);
     }
   }

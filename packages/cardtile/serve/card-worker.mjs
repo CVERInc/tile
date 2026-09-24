@@ -328,7 +328,7 @@ function sandboxEditorHtml(localeKey, { host = '' } = {}) {
 <html lang="${persona.lang}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escLite(persona.pageTitle)}</title>
+<title>${escLite(host ? persona.hostPageTitle : persona.pageTitle)}</title>
 <style>${EDIT2_CSS}</style>
 </head>
 <body>

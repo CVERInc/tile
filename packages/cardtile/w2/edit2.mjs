@@ -1280,8 +1280,28 @@ function hostSaveKey(doc) {
   }, true);
 }
 
+/** the card's own name — the frontmatter `title:` line `setTitle` writes — or '' if there is none.
+ * Read-only sibling of `setTitle`'s fence-scoped parse: never reads a `title:`-looking sentence
+ * from an author's lead prose, only the frontmatter fence itself. */
+function cardTitleFromMd(md) {
+  const pre = (() => { try { return parseCard(md).pre || ''; } catch { return ''; } })();
+  const fence = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*$/m.exec(pre);
+  const m = fence && /^title:\s*(.*)$/m.exec(fence[1]);
+  return m ? m[1].trim() : '';
+}
+
+/** host mode's `<title>` — "Card · feelreef" until a real card lands, then that card's own name
+ * ahead of it. The sandbox keeps its own localised "Try Card · feelreef" (set server-side, in
+ * card-worker.mjs's `sandboxEditorHtml`, and never touched here). */
+function paintHostTitle(cardTitle) {
+  if (typeof document === 'undefined') return;
+  const brand = SANDBOX_LOCALES[primaryLocale(S.locale)].hostPageTitle;
+  document.title = cardTitle ? `${cardTitle} · ${brand}` : brand;
+}
+
 function bootHost() {
   document.body.dataset.hostWaiting = '1';          // nothing to edit until the parent hands a card over
+  paintHostTitle('');                                // same placeholder the server already rendered
   const saveBtn = el('host-save');
   saveBtn.textContent = T.pubSave;
   saveBtn.hidden = false;
@@ -1295,6 +1315,7 @@ function bootHost() {
       S.undo = [];
       delete document.body.dataset.hostWaiting;
       commit(md, { undoable: false });
+      paintHostTitle(cardTitleFromMd(md) || S.handle || '');
     },
   });
   saveBtn.onclick = () => S.bridge.save();

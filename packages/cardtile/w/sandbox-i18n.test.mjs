@@ -25,7 +25,7 @@ test('SANDBOX_LOCALES: every one of the nine has a complete persona (no missing 
     // the door: its button, the sentence before it, and the two ways out of that sentence. A locale
     // missing any of these is a locale where the door opens onto silence — see bootSandbox().
     'doorCta', 'doorNote', 'doorContinue', 'doorBack',
-    'reset', 'pageTitle', 'coachMark'];
+    'reset', 'pageTitle', 'hostPageTitle', 'coachMark'];
   for (const key of NINE) {
     const p = SANDBOX_LOCALES[key];
     assert.ok(p, `${key}: missing from SANDBOX_LOCALES entirely`);
