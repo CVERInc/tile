@@ -107,11 +107,9 @@
     <h2 id="modal-title"></h2>
     <p class="ctw-modal-hint" id="modal-hint"></p>
     <div id="modal-body"></div>
-    <details class="ctw-raw">
-      <summary id="raw-summary">原始參數</summary>
-      <input id="modal-raw" readonly spellcheck="false">
-      <p id="raw-note">表單只動它認得的參數，其他的原封不動留著。</p>
-    </details>
+    <!-- no "raw parameters" block here (ruler #3, 2026-09-24): it showed a read-only line of the
+         tile's settings that nobody but a developer reads, and the Markdown view already shows the
+         whole card as the file. The internal editor (w/) keeps it, under 「進階」. -->
     <!-- kept from the internal editor, and for the same reason: a reorder path that cannot fail, and the
          CONTROL the drag harness measures against. On this surface the drag is the board's own. -->
     <div class="ctw-move" id="modal-move">

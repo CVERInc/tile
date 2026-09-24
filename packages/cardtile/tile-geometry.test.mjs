@@ -7,9 +7,13 @@
 //     a run is therefore fully rounded. (`.st-run` is a flex COLUMN: first row rounds its top two
 //     corners, last row its bottom two.) The corner half is CSS and is measured in a browser by
 //     verify/tile-geometry.mjs; this file pins that the rules exist and the markup they select on.
-//  2. A tile type's empty (edit-only) state has the same geometry as its filled state: same wrapper
-//     classes (minus `st-cell-unset`), same inner skeleton, same label position — and it is placed in
-//     a run exactly as the filled one would be.
+//  2. A tile type's empty (edit-only) state shares its filled state's SKELETON: same wrapper classes
+//     (minus `st-cell-unset`), same inner skeleton, same label position — and it is placed in a run
+//     exactly as the filled one would be. Its HEIGHT is the filled state's too, EXCEPT where the
+//     filled state's height comes from the picture itself: an empty picture has no picture to be
+//     tall with, so it is one row (dashed outline, small picture glyph, the words) rather than the
+//     blank square the picture will fill (ruler #6, 2026-09-24: empty is never blank). A link's
+//     height comes from its text, so an empty link keeps the filled height.
 //  3. A link's head (icon + arrow) with nothing to show (no children, or only a favicon its onerror
 //     hid) collapses, so the title is not pinned to the bottom under a blank band.
 //
@@ -84,6 +88,22 @@ test('picture: empty state has the filled (labelled) wrapper classes and skeleto
   assert.ok(e.cls.includes('st-cell-unset'), 'cell 5 is the unset picture');
   assert.deepEqual(wrapper(e), wrapper(f));
   assert.deepEqual(skeleton(e), skeleton(f));
+});
+
+test('picture: the empty state is ONE ROW, not the square — its height is the one thing that may differ', () => {
+  // the filled picture's height comes from the picture (`aspect-ratio` on the link); the empty one
+  // has no picture, so the edit-only CSS undoes that ratio and lays the glyph + words out in a row.
+  const edit = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).find((c) => c.includes('.st-cell-unset{'));
+  assert.ok(edit, 'the edit-only stylesheet is in an editIndex render');
+  assert.match(edit, /\.st-gal-labelled\.st-cell-unset \.st-gal-link\{[^}]*flex-direction:row[^}]*aspect-ratio:auto[^}]*min-height:44px/);
+  assert.match(edit, /\.st-gal-labelled\.st-cell-unset\{min-height:var\(--cp-unit\);border:1px dashed/, 'one grid row tall, dashed');
+  assert.match(edit, /\.st-cell-unset\{border-style:dashed/, 'same dashed edit outline as the empty link');
+  assert.match(edit, /\.st-cell-unset \.st-gal-img\{[^}]*width:20px;height:20px[^}]*mask:/, 'the slot is a small picture glyph');
+  // …and the glyph is painted, not a child: the skeleton test above stays the filled picture's
+  assert.deepEqual(cellAt(html, 5).kids[0].kids.map((k) => k.kids.length), [0, 0]);
+  // a live card never carries it (it renders no unset tile at all)
+  const live = renderCardHTML(MD, { handle: 't', cardUrl: '' });
+  assert.ok(!live.includes('st-cell-unset'));
 });
 
 test('an unset link is grouped into the run exactly like a filled one', () => {

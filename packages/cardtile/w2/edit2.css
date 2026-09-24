@@ -223,9 +223,9 @@ body {
 .ctw-btn-danger:not(.ctw-btn-go):hover { background: var(--btn-danger-hover); color: var(--btn-danger-ink); }
 .ctw-btn[disabled] { opacity: .55; }
 /* "the press answers before the server does" — Button.svelte `.btn:active` */
-.ctw-btn:active:not(:disabled), .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: var(--porch-press); }
+.ctw-btn:active:not(:disabled), .ctw-tab:active, .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: var(--porch-press); }
 @media (prefers-reduced-motion: reduce) {
-  .ctw-btn:active:not(:disabled), .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: none; }
+  .ctw-btn:active:not(:disabled), .ctw-tab:active, .ctw-view:active, .ctw-pick-btn:active, .ctw-modal-close:active, .ctw-coach-close:active { transform: none; }
 }
 :where(.ctw-btn, .ctw-view, .ctw-pick-btn, .ctw-modal-close, .ctw-coach-close, .ctw-field input, .ctw-field select, .ctw-field textarea, .ctw-md):focus-visible {
   outline: 2px solid var(--btn-secondary-ink); outline-offset: 2px;
@@ -249,7 +249,7 @@ body {
 .ctw-modal-foot { border-top-color: var(--carrier-border); }
 .ctw-field > span { font-weight: 700; color: var(--carrier-heading); }
 .ctw-field input[type=text], .ctw-field input[type=url], .ctw-field select, .ctw-field textarea,
-.ctw-md, .ctw-raw input, .ctw-url {
+.ctw-md, .ctw-url {
   background: var(--carrier-input-bg); border: 1px solid var(--carrier-border); border-radius: var(--console-radius-sm); color: var(--carrier-text);
 }
 .ctw-group, .ctw-pub-result { border-color: var(--carrier-border); border-radius: var(--console-radius-sm); background: var(--carrier-bg); }
@@ -315,3 +315,12 @@ body {
     border-radius: var(--console-radius); background: transparent;
   }
 }
+
+/* Scrollbars (Safari drew a thick light-grey bar on the board pane and on the card column): the
+   shell's scrolling panes get the same thin translucent bar the card frame already has (edit2.mjs
+   CARD_EDIT_CSS). Editor page only — this stylesheet ships nowhere else. The board's own document
+   gets the same rule through board-bridge's BOARD_LIGHT_CSS. */
+.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.45) transparent; }
+:is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+:is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar-track { background: transparent; }
+:is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar-thumb { background: rgba(128,128,128,.45); border-radius: 8px; }
