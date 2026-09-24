@@ -60,7 +60,10 @@ for (const f of p.frames()) {
         head: !h ? 'missing' : cs(h).display === 'none' ? 'collapsed' : `${Math.round(hr.height)}px`,
         titleTop: t ? Math.round(t.getBoundingClientRect().top - k.getBoundingClientRect().top) : null };
     });
-    return { rows, links };
+    // grid tiles (not in a run): every corner must be the tile radius — the editor once squared them
+    // with a border-radius:inherit on its hover-outline rule (2026-09-25), which no live card has.
+    const grid = [...document.querySelectorAll('.st-card .st-cells > .st-cell-tile')].map((k) => ({ name: name(k), corners: corners(k) }));
+    return { rows, links, grid };
   }).catch(() => null);
   if (data) break;
 }
@@ -82,5 +85,9 @@ for (const u of data.links.filter((l) => l.unset)) {
   if (!peer) { console.log(`note: no filled link with w=${u.w} head=${u.head} to compare "${u.name}" against`); continue; }
   if (peer.titleTop !== u.titleTop) { bad++; console.log(`MISMATCH: title offset unset "${u.name}" ${u.titleTop} vs filled "${peer.name}" ${peer.titleTop}`); }
 }
-if (!data.rows.length) { console.error('no .st-run on the page — nothing to measure'); process.exit(2); }
+for (const g of data.grid || []) {
+  const ok = g.corners.every((c) => c === R); if (!ok) bad++;
+  console.log(`grid tile ${ok ? 'ok      ' : 'MISMATCH'} ${g.corners.join(' ').padEnd(28)} ${g.name}`);
+}
+if (!data.rows.length && !(data.grid || []).length) { console.error('no .st-run and no grid tile on the page — nothing to measure'); process.exit(2); }
 console.log(bad ? `\n${bad} mismatch(es)` : '\nall tiles match the rule'); process.exit(bad ? 1 : 0);

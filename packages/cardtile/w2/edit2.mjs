@@ -283,7 +283,10 @@ const coachDone = () => {
 };
 
 const CARD_EDIT_CSS = `
-html.ct2-edit [data-cell]{cursor:pointer;outline:2px solid transparent;outline-offset:3px;border-radius:inherit;transition:outline-color .12s}
+html.ct2-edit [data-cell]{cursor:pointer;outline:2px solid transparent;outline-offset:3px;transition:outline-color .12s}
+/* 🩸 2026-09-25: this rule used to say border-radius:inherit, so every tile in the grid took the grid's 0px
+   and the editor showed square tiles that the live card never has (measured: live 18px, editor 0px). The
+   outline follows the element's own corners; nothing here may touch the card's geometry. */
 html.ct2-edit [data-cell]:hover{outline-color:rgba(64,120,255,.55)}
 html.ct2-edit [data-cell]:focus-visible{outline-color:rgba(64,120,255,.95)}
 html.ct2-edit [data-cell] [data-cell]{outline:none}
