@@ -121,6 +121,43 @@ export const BOARD_STRINGS_BY_KEY = {
     'zh-Hans': '编辑桌', de: 'Bearbeitungstisch', fr: 'Table d’édition',
     es: 'Mesa de edición', pt: 'Mesa de edição',
   },
+  // ── the three questions (owner rule 2: every screen says what it is, what you can do, what
+  // happens next). One line under each view's heading, and the picker's destination. `{front}` /
+  // `{back}` are the chrome's own faceTabLabel / mdBack, so the sentence names what the screen shows.
+  'board.tableHint': {
+    zh: '整張卡的每一張牌都在這裡。拖動可以換順序，點一下可以修改。「{front}」是訪客先看到的；其他欄是抽屜，由某張牌打開。',
+    ja: 'カードのタイルがすべてここに並びます。ドラッグで並べ替え、タップで編集。「{front}」は最初に見える面、ほかの列はタイルから開く引き出しです。',
+    en: 'Every tile on your card, in order. Drag to reorder; tap one to change it. “{front}” is what visitors see first; the other lanes are drawers a tile opens.',
+    ko: '카드의 모든 타일이 여기 있어요. 끌어서 순서를 바꾸고, 눌러서 고쳐요. 「{front}」은 방문자가 먼저 보는 곳, 다른 줄은 타일이 여는 서랍이에요.',
+    'zh-Hans': '整张卡的每一张牌都在这里。拖动可以换顺序，点一下可以修改。「{front}」是访客先看到的；其他栏是抽屉，由某张牌打开。',
+    de: 'Alle Kacheln Ihrer Karte, der Reihe nach. Ziehen zum Umsortieren, antippen zum Ändern. „{front}“ sehen Besucher zuerst; die anderen Spalten sind Schubladen, die eine Kachel öffnet.',
+    fr: 'Toutes les tuiles de votre carte, dans l’ordre. Glissez pour réordonner, touchez pour modifier. « {front} » est ce que les visiteurs voient d’abord ; les autres colonnes sont des tiroirs qu’une tuile ouvre.',
+    es: 'Todas las fichas de tu tarjeta, en orden. Arrastra para reordenar; toca una para cambiarla. «{front}» es lo que se ve primero; las demás columnas son cajones que abre una ficha.',
+    pt: 'Todas as peças do seu cartão, em ordem. Arraste para reordenar; toque em uma para mudá-la. “{front}” é o que as visitas veem primeiro; as outras colunas são gavetas que uma peça abre.',
+  },
+  'board.mdLead': {
+    zh: '這是你整張卡片寫成文字的樣子。在這裡改字，卡片會跟著變；按「{back}」時會先檢查一遍，看不懂的地方不會套用。',
+    ja: 'カード全体を文字で書いたものです。ここで書き換えるとカードも変わります。「{back}」を押すと先に確認し、読み取れない部分は反映しません。',
+    en: 'This is your whole card, written out as text. Change it here and the card follows; “{back}” checks it first and changes nothing it can’t read.',
+    ko: '카드 전체를 글로 적어 둔 거예요. 여기서 고치면 카드도 따라 바뀌어요. 「{back}」를 누르면 먼저 확인하고, 읽을 수 없는 부분은 적용하지 않아요.',
+    'zh-Hans': '这是你整张卡片写成文字的样子。在这里改字，卡片会跟着变；按「{back}」时会先检查一遍，看不懂的地方不会应用。',
+    de: 'Das ist Ihre ganze Karte als Text. Ändern Sie ihn hier, folgt die Karte; „{back}“ prüft zuerst und ändert nichts, was es nicht lesen kann.',
+    fr: 'Voici toute votre carte, écrite en texte. Modifiez-la ici et la carte suit ; « {back} » vérifie d’abord et ne change rien qu’il ne sait pas lire.',
+    es: 'Esta es toda tu tarjeta escrita como texto. Cámbiala aquí y la tarjeta la sigue; «{back}» lo revisa antes y no cambia nada que no entienda.',
+    pt: 'Este é o seu cartão inteiro, escrito como texto. Mude aqui e o cartão acompanha; “{back}” confere antes e não muda nada que não consiga ler.',
+  },
+  // under 「要加哪一種？」: where the new tile lands, so tapping one is not a leap
+  'board.pickWhere': {
+    zh: '點一種，它會加在「{lane}」的最後面。',
+    ja: '選ぶと「{lane}」のいちばん最後に追加されます。',
+    en: 'Tap one and it goes at the end of “{lane}”.',
+    ko: '하나를 누르면 「{lane}」 맨 끝에 추가돼요.',
+    'zh-Hans': '点一种，它会加在「{lane}」的最后面。',
+    de: 'Tippen Sie eine an – sie kommt ans Ende von „{lane}“.',
+    fr: 'Touchez-en une : elle s’ajoute à la fin de « {lane} ».',
+    es: 'Toca una y se añade al final de «{lane}».',
+    pt: 'Toque em uma e ela entra no fim de “{lane}”.',
+  },
 };
 
 export const BOARD_KEYS = Object.keys(BOARD_STRINGS_BY_KEY);

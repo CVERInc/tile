@@ -96,15 +96,20 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
   .ctw-w2-preview { border-left: 0; }
 }
 
-/* the one-time coach mark, beside the card (on top of its column, never inside the card) */
+/* the one-time coach mark: a strip ABOVE the card frame, in the shell's flow — never over it.
+   🩸 It used to float over the top of the card (absolute, top:14px) and, at 390px in host mode,
+   covered the person's name. In flow it pushes the card down instead, at every width. */
+.ctw-w2-preview { flex-direction: column; }
+.ctw-w2-preview .ctw-w2-frame { min-height: 0; }
 .ctw-coach {
-  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5;
-  display: flex; align-items: center; gap: .5rem; max-width: calc(100% - 32px);
+  order: -1; flex: 0 0 auto; align-self: stretch; margin: .5rem .75rem; max-width: 560px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
   padding: .45rem .5rem .45rem .95rem; border-radius: 999px;
   font-size: .85rem; font-weight: 600; line-height: 1.35;
   background: rgba(20,20,20,.9); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25);
 }
 .ctw-coach[hidden] { display: none; }
+@media (min-width: 600px) { .ctw-coach { margin: .5rem auto; width: calc(100% - 1.5rem); } }
 .ctw-sandbox-banner[hidden] { display: none; }
 .ctw-coach-close {
   flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 50%;
@@ -135,6 +140,16 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
 .ctw-pick-ico { display: block; width: 24px; height: 24px; color: var(--ctw-go); }
 .ctw-pick-ico svg { width: 100%; height: 100%; display: block; }
 .ctw-pick-name { text-align: center; line-height: 1.25; }
+/* each kind says what it is for: the row becomes a two-column list of icon · name · one line */
+.ctw-pick-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); justify-content: stretch; }
+.ctw-pick-btn { width: auto; min-height: 0; display: grid; grid-template-columns: 24px 1fr; column-gap: .6rem; row-gap: .1rem; align-items: start; justify-items: start; text-align: start; padding: .6rem .75rem; }
+.ctw-pick-btn .ctw-pick-ico { grid-row: span 2; }
+.ctw-pick-btn .ctw-pick-name { text-align: start; font-size: .85rem; }
+.ctw-pick-hint { font-weight: 400; font-size: .75rem; line-height: 1.35; color: var(--ctw-dim); }
+.ctw-w2-panel-hint {
+  flex: 0 0 auto; margin: 0; padding: .45rem .9rem; font-size: .8rem; line-height: 1.4;
+  color: var(--ctw-dim); border-bottom: 1px solid var(--ctw-line);
+}
 
 /* ── whole-page Markdown mode ───────────────────────────────────────────────────────────────────
    Opened by the board's OWN `file-text` header action (edit2.mjs intercepts it) — one page, two

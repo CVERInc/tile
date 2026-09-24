@@ -37,7 +37,6 @@ test('🔴 every key carries every one of the nine locales — this is the ship 
 });
 
 test('a key that is not blank in English is not blank anywhere', () => {
-  // (`type.video.channel.hint` is deliberately empty in all nine — the label says everything.)
   for (const key of CELL_KEYS) {
     const row = CELL_STRINGS_BY_KEY[key];
     const enBlank = row.en.trim() === '';

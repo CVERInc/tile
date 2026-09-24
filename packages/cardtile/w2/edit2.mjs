@@ -821,11 +821,13 @@ function openPicker(laneKey) {
   S.addLane = laneKey || 'face:0';
   const lane = boardLanes(S.model, bridgeCtx()).find((l) => l.key === S.addLane);
   el('picker-title').textContent = TB['board.pickTitle'];
-  el('picker-lane').textContent = lane ? lane.title : '';
+  el('picker-lane').textContent = TB['board.pickWhere'].replace('{lane}', lane ? lane.title : T.faceTabLabel);
   el('picker-row').innerHTML = PALETTE.map((t) =>
     `<button class="ctw-pick-btn" type="button" data-type="${esc(t)}" title="${esc(say(TYPES[t].hint))}">`
     + `<span class="ctw-pick-ico">${typeIconSvg(t)}</span>`
-    + `<span class="ctw-pick-name">${esc(say(TYPES[t].title))}</span></button>`).join('');
+    + `<span class="ctw-pick-name">${esc(say(TYPES[t].title))}</span>`
+    // what each kind is FOR, visible (a tooltip never reaches a phone): the sheet's own one-liner
+    + `<span class="ctw-pick-hint">${esc(say(TYPES[t].hint))}</span></button>`).join('');
   for (const b of el('picker-row').querySelectorAll('.ctw-pick-btn')) {
     b.onclick = () => { el('picker').hidden = true; addCell(b.dataset.type, S.addLane); };
   }
@@ -1137,7 +1139,7 @@ function undo() {
 // text in the box is the CARD, not the board, because the card is the file.
 function openMdMode() {
   el('md-title').textContent = T.mdMode;
-  el('md-note').textContent = T.mdNote;
+  el('md-note').textContent = TB['board.mdLead'].replace('{back}', T.mdBack);
   el('md-cancel').textContent = T.pubCancel;
   el('md-done').textContent = T.mdBack;
   el('md-error').hidden = true;
@@ -1291,6 +1293,7 @@ export function boot(opts = {}) {
   el('canvas').title = TB['board.previewTitle'];
   el('canvas').addEventListener('load', wireCard);
   el('table-heading').textContent = TB['board.tableTitle'];
+  el('table-hint').textContent = TB['board.tableHint'].replace('{front}', T.faceTabLabel);
   el('coach-text').textContent = persona.coachMark;
   el('coach').hidden = !(S.sandbox || S.host) || coachSeen();
   el('coach-close').setAttribute('aria-label', T.modalCloseAria);

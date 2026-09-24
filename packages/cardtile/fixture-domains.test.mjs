@@ -30,6 +30,7 @@ const ALLOW = new Set([
   'www.youtube.com', 'youtube.com', 'youtu.be', 'instagram.com', 'www.instagram.com',
   'x.com', 'twitter.com', 'www.facebook.com', 'facebook.com', 'patreon.com', 'www.patreon.com',
   'store.line.me', 'line.me', 'icons.duckduckgo.com', 'goo.gl', 'plausible.io',
+  'm.youtube.com',   // the phone share-link shape the Video sheet accepts (youtubeRef)
   // stand-ins we minted, kept because a card needs to look like a card
   'card.inkbrush.com', 'vip.paperloom.com', 'shop.example.co.uk', 'placehold.co',
   // 🔴 Each of these was surfaced by this gate on its first run, and each is here for a reason that

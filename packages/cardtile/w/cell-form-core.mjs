@@ -147,6 +147,31 @@ export function formBodyHtml(def, cell, ctx) {
 }
 
 /**
+ * A pasted YouTube link → the bare video id (11 chars) or channel code (UC + 22) the card stores.
+ * PURE. Accepts watch?v=, youtu.be/, shorts/, embed/, live/, m./www./music. hosts, any extra query,
+ * with or without a scheme; a bare id or UC code passes through. Anything else is returned AS TYPED
+ * (trimmed) — it is not this function's place to guess, and the renderer's own checks speak.
+ */
+const YT_ID = /^[\w-]{11}$/;
+const YT_CH = /^UC[\w-]{22}$/;
+export function youtubeRef(input) {
+  const s = String(input == null ? '' : input).trim();
+  if (!s || YT_ID.test(s) || YT_CH.test(s)) return s;
+  let u;
+  try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`); } catch { return s; }
+  const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
+  const seg = u.pathname.split('/').filter(Boolean);
+  let got = '';
+  if (host === 'youtu.be') got = seg[0] || '';
+  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    if (seg[0] === 'watch') got = u.searchParams.get('v') || '';
+    else if (['shorts', 'embed', 'live', 'v'].includes(seg[0])) got = seg[1] || '';
+    else if (seg[0] === 'channel') got = seg[1] || '';
+  }
+  return YT_ID.test(got) || YT_CH.test(got) ? got : s;
+}
+
+/**
  * The sheet's values → the cell that will be stored. PURE: it never touches a model and never
  * normalises — the caller runs `normalizeCell` and applies the rename, because only the caller knows
  * which lane the cell is in.
@@ -200,6 +225,8 @@ export function composeCell(cell, def, io, ctx) {
       const target = io.visible('target') ? (io.read('target') || '') : DERIVED_READ['feature.target'](cell, ctx);
       if (target) v = `#${target}`;
     }
+    // a Video's two boxes take what the share button gives a person: the link, turned into its id
+    if (cell.type === 'video' && (row.name === 'yt' || row.name === 'channel')) v = youtubeRef(v);
     // 🔴 setToken/removeToken come from card-core, and so does the quoting. A form holding its own
     // idea of what a param looks like is how it starts writing tokens the parser reads differently.
     rawParams = v === '' ? removeToken(rawParams, row.name) : setToken(rawParams, row.name, quoteParam(v));
