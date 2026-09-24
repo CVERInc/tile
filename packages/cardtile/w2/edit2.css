@@ -158,3 +158,8 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
   #sandbox-banner-text { display: none; }
   #sandbox-banner-status { display: inline; }
 }
+
+/* HOST MODE: the save status beside 「存」. The failure text is the parent's own words, verbatim. */
+.ctw-host-status{font:500 13px/1.3 system-ui,sans-serif;opacity:.7;margin-right:10px;max-width:40ch;overflow-wrap:anywhere}
+.ctw-host-status[data-status="failed"]{opacity:1;color:#c0392b}
+body[data-host-waiting] .ctw-w2{visibility:hidden}
