@@ -54,6 +54,10 @@
          the draft — see editor.mjs's bootSandbox() for the day that button deleted ten minutes of
          somebody's work. -->
     <button id="publish" class="ctw-btn ctw-btn-go" hidden></button>
+    <!-- HOST MODE only (feelreef's own page embeds this on a REAL card): the save status and 「存」.
+         The editor holds no credential — Save is a postMessage to the parent (w2/host-bridge.mjs). -->
+    <span id="host-status" class="ctw-host-status" role="status" aria-live="polite" hidden></span>
+    <button id="host-save" class="ctw-btn ctw-btn-go" type="button" hidden></button>
   </div>
 </header>
 

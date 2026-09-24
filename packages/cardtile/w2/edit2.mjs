@@ -44,6 +44,7 @@ import { whatIsWrong } from '../w/md-guard.mjs';
 import { CELL_STRINGS_ZH, cellStrings, text as tx } from '../w/cell-i18n.mjs';
 import { buildSandboxCard, chromeStrings, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 import { sandboxDoorHref, parkSandboxCard } from '../w/sandbox-door.mjs';
+import { createHostBridge, validHostOrigin } from './host-bridge.mjs';
 import { boardStrings, colon, addTileLabel } from './board-i18n.mjs';
 import { typeIconSvg } from './type-icons.mjs';
 import {
@@ -77,6 +78,9 @@ const S = {
   locale: 'en',
   sandbox: false,
   handle: 'try',
+  cardUrl: '',
+  host: '',             // HOST MODE: the parent origin (feelreef) — see host-bridge.mjs
+  bridge: null,
   tableBase: '',
   undo: [],
   // slot ↔ the board's own `data-tid`. Invariant: immediately after `__load`, tid n is slot n,
@@ -123,6 +127,7 @@ function commit(nextMd, { undoable = true, reloadTable = true } = {}) {
   S.md = nextMd;
   S.model = parseCard(S.md);
   if (S.sandbox) writeDraft(S.md);
+  if (S.bridge) S.bridge.changed(S.md);        // host mode: every commit is a change the parent hears of
   paintPreview();
   if (reloadTable) loadTable();
   else decorate();                                  // the 牽線 can change without the order changing
@@ -223,7 +228,7 @@ function paintPreview() {
   if (!frame) return;
   frame.srcdoc = renderCardHTML(S.md, {
     handle: S.handle,
-    cardUrl: '',
+    cardUrl: S.cardUrl,
     // `data-cell` on every cell, so a tap ON THE CARD can open that cell's sheet (wireCard below).
     // Stripping it reproduces the production bytes — verify/editor.mjs holds that line.
     editIndex: true,
@@ -267,9 +272,12 @@ const sortableSrc = () => {
 };
 
 const COACH_KEY = 'cardtile:try:coach:v1';
-const coachSeen = () => { try { return window.localStorage.getItem(COACH_KEY) === '1'; } catch { return false; } };
+// host mode: once per SESSION (sessionStorage), and never the sandbox's localStorage — a real
+// card's editor must not read or write the practice mode's browser state.
+const coachStore = () => (S.host ? window.sessionStorage : window.localStorage);
+const coachSeen = () => { try { return coachStore().getItem(COACH_KEY) === '1'; } catch { return false; } };
 const coachDone = () => {
-  try { window.localStorage.setItem(COACH_KEY, '1'); } catch { /* best-effort: it just shows again */ }
+  try { coachStore().setItem(COACH_KEY, '1'); } catch { /* best-effort: it just shows again */ }
   const n = el('coach');
   if (n) n.hidden = true;
 };
@@ -314,6 +322,7 @@ function wireCard() {
   const win = frame && frame.contentWindow;
   if (!doc || !doc.body || doc.documentElement.classList.contains('ct2-edit')) return;
   doc.documentElement.classList.add('ct2-edit');
+  hostSaveKey(doc);
   const style = doc.createElement('style');
   style.textContent = CARD_EDIT_CSS;
   doc.head.appendChild(style);
@@ -528,7 +537,7 @@ function onTableFrameLoad() {
   const start = Date.now();
   const tick = () => {
     const w = tableWin();
-    if (w && w.__ready) { wireTable(); loadTable(); el('table').classList.add('is-ready'); return; }
+    if (w && w.__ready) { hostSaveKey(w.document); wireTable(); loadTable(); el('table').classList.add('is-ready'); return; }
     if (Date.now() - start > 10000) return;              // it is not coming; the sheet still works
     setTimeout(tick, 30);
   };
@@ -1242,13 +1251,75 @@ function setView(view) {
   if (v === 'board') drawWires();          // the board was display:none; its boxes are new
 }
 
+// ── HOST MODE: feelreef's page embeds this editor on a REAL card ──────────────────────────────────
+//
+// The editor holds no credential and never reads the sandbox's localStorage draft: the card arrives
+// from the parent (`card:load`), every commit goes back to it (`card:change`), and Save is a
+// `card:save` the parent answers. All of the message logic is in host-bridge.mjs (node-tested);
+// this is only the DOM around it.
+const HOST_STATUS_KEY = { unsaved: 'board.hostUnsaved', saving: 'board.hostSaving', saved: 'board.hostSaved', failed: 'board.hostFailed' };
+
+function paintHostStatus(status, message) {
+  const n = el('host-status');
+  if (!n) return;
+  n.dataset.status = status;
+  n.hidden = status === 'idle';
+  // on failure the parent's message verbatim — it is the owner's own tool's words
+  n.textContent = status === 'failed' && message ? `${TB[HOST_STATUS_KEY.failed]}${COLON}${message}` : (TB[HOST_STATUS_KEY[status]] || '');
+  const btn = el('host-save');
+  if (btn) btn.disabled = status === 'saving';
+}
+
+/** Cmd/Ctrl+S saves — installed on every same-origin document that can hold focus (the page, the
+ * card, the board), because a keydown inside an iframe never reaches the parent document. */
+function hostSaveKey(doc) {
+  if (!S.host || !doc || doc.__ct2HostKeys) return;
+  doc.__ct2HostKeys = true;
+  doc.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      if (S.bridge) S.bridge.save();
+    }
+  }, true);
+}
+
+function bootHost() {
+  document.body.dataset.hostWaiting = '1';          // nothing to edit until the parent hands a card over
+  const saveBtn = el('host-save');
+  saveBtn.textContent = T.pubSave;
+  saveBtn.hidden = false;
+  S.bridge = createHostBridge({
+    host: S.host,
+    post: (msg, origin) => window.parent.postMessage(msg, origin),
+    onStatus: paintHostStatus,
+    onLoad: ({ md, handle, cardUrl }) => {
+      S.handle = handle || S.handle;
+      S.cardUrl = cardUrl || '';
+      S.undo = [];
+      delete document.body.dataset.hostWaiting;
+      commit(md, { undoable: false });
+    },
+  });
+  saveBtn.onclick = () => S.bridge.save();
+  window.addEventListener('message', (e) => S.bridge.receive(e));
+  hostSaveKey(document);
+  window.addEventListener('beforeunload', (e) => {
+    if (!S.bridge.dirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+  S.bridge.ready();
+}
+
 // ── boot ─────────────────────────────────────────────────────────────────────────────────────────
 export function boot(opts = {}) {
   const q = typeof location !== 'undefined' ? new URL(location.href).searchParams : new URLSearchParams();
   const localeKey = primaryLocale(q.get('lang') || q.get('locale') || opts.locale
     || (typeof navigator !== 'undefined' && navigator.language) || 'en');
   S.locale = localeKey;
-  S.sandbox = opts.sandbox !== false;
+  // HOST MODE wins over everything: an allowed parent origin means a real card, never the sandbox.
+  S.host = validHostOrigin(opts.host) || '';
+  S.sandbox = !S.host && opts.sandbox !== false;
   T = chromeStrings(localeKey);
   TX = cellStrings(localeKey);
   TB = boardStrings(localeKey);
@@ -1271,7 +1342,7 @@ export function boot(opts = {}) {
   el('canvas').addEventListener('load', wireCard);
   el('table-heading').textContent = TB['board.tableTitle'];
   el('coach-text').textContent = persona.coachMark;
-  el('coach').hidden = !S.sandbox || coachSeen();
+  el('coach').hidden = !(S.sandbox || S.host) || coachSeen();
   el('coach-close').setAttribute('aria-label', T.modalCloseAria);
   el('coach-close').onclick = coachDone;
 
@@ -1340,6 +1411,7 @@ export function boot(opts = {}) {
   const draft = S.sandbox ? readDraft() : '';
   const cells = draft ? (() => { try { return parseCard(draft).cells.length; } catch { return 0; } })() : 0;
   commit(cells ? draft : buildSandboxCard(localeKey), { undoable: false, reloadTable: false });
+  if (S.host) bootHost();
   if (firstView === 'md') setView('md');      // after the card exists: the mode edits S.md
 
   // the harness drives these; harmless in normal use

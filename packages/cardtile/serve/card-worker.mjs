@@ -19,6 +19,7 @@ import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-ap
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
+import { validHostOrigin } from '../w2/host-bridge.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -280,15 +281,34 @@ function tableAsset(localeKey, rel) {
   return { body, ext, immutable: path !== 'index.html' };
 }
 
-/** the /try/edit page, localised. Never touches the CARDS store — everything it needs is bundled. */
-function sandboxEditorHtml(localeKey) {
+// ── HOST MODE: card.feelreef.com/edit?host=<parent origin> ──────────────────────────────────────
+//
+// The same editor, embedded by feelreef's own page to edit a REAL card. Owner architecture: reef
+// decides WHO may edit (seats in its registry); this Worker owns storage and assembly; the browser
+// never holds a bearer. So this route serves a page with NO card in it and NO credential — the card
+// arrives from the parent over postMessage and goes back the same way (w2/host-bridge.mjs), and the
+// parent does the save through `save_card`. Like /try/edit it never touches the CARDS store.
+//
+// `?host=` must be one of the allowed parent origins (validHostOrigin); it is written into the
+// page's opts, used as the ONLY postMessage target and origin the editor accepts, and as the one
+// ancestor allowed to frame this page (CSP frame-ancestors).
+const HOST_EDIT_PATH = '/edit';
+
+/** the /try/edit page (or, with `host`, the /edit page), localised. Never touches the CARDS store. */
+function sandboxEditorHtml(localeKey, { host = '' } = {}) {
   const persona = SANDBOX_LOCALES[localeKey] || SANDBOX_LOCALES.en;
-  const opts = JSON.stringify({ sandbox: true, locale: localeKey, tableBase: `${SANDBOX_PATH}/t/${encodeURIComponent(localeKey)}/` });
+  const tableBase = `${SANDBOX_PATH}/t/${encodeURIComponent(localeKey)}/`;
+  const opts = JSON.stringify(host
+    ? { host, sandbox: false, locale: localeKey, tableBase }
+    : { sandbox: true, locale: localeKey, tableBase }).replace(/</g, '\\u003c');
   // The banner text is written server-side into the markup, for the same reason a visitor without
   // JavaScript still needs it: a visitor (or a crawler, or `curl`) who never runs the script must
   // still be able to read "nothing here is saved". `boot()` overwrites the same elements with the
   // same strings from the same table, so the two can never disagree.
-  const body = EDIT2_BODY_HTML
+  const body = host ? EDIT2_BODY_HTML
+    .replace('<h1>cardtile-w2</h1>',
+      '<h1 class="ctw-brand"><a href="https://feelreef.com/" target="_top">feelreef</a><span>Card</span></h1>')
+    : EDIT2_BODY_HTML
     .replace('<div class="ctw-sandbox-banner" id="sandbox-banner" hidden>', '<div class="ctw-sandbox-banner" id="sandbox-banner">')
     .replace('<span id="sandbox-banner-text"></span>', `<span id="sandbox-banner-text">${escLite(persona.bannerText)}</span>`)
     .replace('<span id="sandbox-banner-status"></span>', `<span id="sandbox-banner-status">${escLite(persona.bannerStatus)}</span>`)
@@ -336,10 +356,14 @@ export default {
         headers: {
           'Content-Type': TABLE_MIME[asset.ext] || 'application/octet-stream',
           'Cache-Control': asset.immutable ? 'public, max-age=31536000, immutable' : 'no-store',
-          // never indexed, and never framed by anybody else: this document is an editing surface
-          // that a parent page reaches into, and the only parent allowed to is our own.
+          // never indexed, and framed only by our own editor page — which in host mode (/edit) is
+          // itself framed by feelreef. 🩸 This used to be `X-Frame-Options: SAMEORIGIN`, and that
+          // header judges the TOP page, so inside a feelreef page the board silently never loaded
+          // (measured 2026-09-24 from a localhost host page: 0 tiles, a cross-origin `__ready`
+          // error). CSP frame-ancestors lists every ancestor, so the chain feelreef → /edit → this
+          // is allowed and anything else is not. Same list as validHostOrigin (w2/host-bridge.mjs).
           'X-Robots-Tag': 'noindex, nofollow',
-          'X-Frame-Options': 'SAMEORIGIN',
+          'Content-Security-Policy': "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*",
         },
       });
     }
@@ -351,6 +375,29 @@ export default {
     // without breaking whatever already points at the old path.
     if (url.pathname === LEGACY_EDIT2_PATH || url.pathname === `${LEGACY_EDIT2_PATH}/`) {
       return Response.redirect(`${url.origin}${SANDBOX_PATH}${url.search}`, 301);
+    }
+
+    // HOST MODE — see HOST_EDIT_PATH. Refused outright without an allowed `?host=`.
+    if (url.pathname === HOST_EDIT_PATH || url.pathname === `${HOST_EDIT_PATH}/`) {
+      const params = url.searchParams;
+      const host = validHostOrigin(params.get('host'));
+      if (!host) {
+        return new Response('`/edit` needs ?host=<the parent page\'s origin> (feelreef).', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
+        });
+      }
+      const locale = primaryLocale(params.get('lang') || params.get('locale')
+        || localeFromAcceptLanguage(request.headers.get('accept-language')));
+      return new Response(sandboxEditorHtml(locale, { host }), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow',
+          // framed by the named parent and nobody else
+          'Content-Security-Policy': `frame-ancestors ${host}`,
+        },
+      });
     }
 
     // The public sandbox. `/try/edit` and `/try/edit/` only — a bare `/try` (no `/edit`) falls

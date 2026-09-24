@@ -962,7 +962,10 @@ test('sandbox: the engine table arrives COMPLETE — including the file the engi
 
 test('sandbox: the table is same-origin-framed only, and its assets are immutable except the document', async () => {
   const doc = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/'), NEVER_TOUCHED);
-  assert.equal(doc.headers.get('x-frame-options'), 'SAMEORIGIN');
+  // 🩸 was `X-Frame-Options: SAMEORIGIN`; that header judges the TOP page, so under a feelreef host
+  // page (/edit) the board never loaded. CSP lists every ancestor instead; the list is validHostOrigin's.
+  assert.equal(doc.headers.get('x-frame-options'), null);
+  assert.equal(doc.headers.get('content-security-policy'), "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*");
   assert.match(doc.headers.get('cache-control') || '', /no-store/, 'the table document is cached for a year — it could never be fixed');
   const css = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/tugtile.css'), NEVER_TOUCHED);
   assert.match(css.headers.get('cache-control') || '', /immutable/);
@@ -1022,4 +1025,72 @@ test('🔴 the committed /try/edit bundle is the one its sources produce', async
   assert.ok(EDIT2_SOURCES.length >= 10, 'the source list is suspiciously short');
   assert.throws(() => sourceStamp('/tmp/there-is-no-cardtile-here'),
     /is missing/, 'the stamp does not actually read the sources it claims to hash');
+});
+
+// ── HOST MODE: /edit?host=<parent origin> ───────────────────────────────────────────────────────
+//
+// feelreef embeds the editor on a REAL card. The page carries no card and no credential; the card
+// travels over postMessage (w2/host-bridge.test.mjs covers that logic). What a fetch() test can
+// promise: the route resolves only for an allowed parent, it says so in the injected opts, and it
+// never touches the store — proven with a store whose EVERY method throws, bound where the Worker
+// actually looks for it (`env.CARDS`), and an env that records any other binding read.
+
+function untouchableEnv() {
+  const touched = [];
+  const boom = (m) => async () => { touched.push(m); throw new Error(`/edit must never ${m} the CARDS store`); };
+  const CARDS = { get: boom('get'), put: boom('put'), list: boom('list'), delete: boom('delete'), getWithMetadata: boom('getWithMetadata') };
+  return { env: { CARDS }, touched };
+}
+const optsOf = (body) => JSON.parse(/window\.__CARDTILE_W2_OPTS__ = (\{.*?\});/.exec(body)[1]);
+
+test('host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS', async () => {
+  for (const host of ['https://feelreef.com', 'https://staging.feelreef.com', 'http://localhost:5173']) {
+    for (const path of ['/edit', '/edit/']) {
+      const { env, touched } = untouchableEnv();
+      const res = await worker.fetch(new Request(`https://card.feelreef.com${path}?host=${encodeURIComponent(host)}&lang=ja`), env);
+      assert.equal(res.status, 200, `${path} ${host}`);
+      assert.match(res.headers.get('content-type') || '', /text\/html/);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+      assert.equal(res.headers.get('content-security-policy'), `frame-ancestors ${host}`);
+      assert.equal(res.headers.get('x-frame-options'), null, 'a page meant to be framed must not forbid it');
+      const body = await res.text();
+      assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
+      assert.ok(body.includes('id="sandbox-banner" hidden'), 'host mode ships the sandbox banner hidden');
+      assert.match(body, /id="host-save"/);
+      assert.deepEqual(touched, []);
+    }
+  }
+});
+
+test('host mode: a missing or disallowed ?host= is a 400, and still never touches CARDS', async () => {
+  const bad = ['', '?host=', '?host=https%3A%2F%2Fevil.example', '?host=https%3A%2F%2Ffeelreef.com.evil.example',
+    '?host=http%3A%2F%2Ffeelreef.com', '?host=https%3A%2F%2Ffeelreef.com%2Fdashboard', '?host=*', '?host=https%3A%2F%2Flocalhost%3A1',
+    '?host=https%3A%2F%2Fuser%40feelreef.com', '?host=not%20a%20url'];
+  for (const q of bad) {
+    const { env, touched } = untouchableEnv();
+    const res = await worker.fetch(new Request(`https://card.feelreef.com/edit${q}`), env);
+    assert.equal(res.status, 400, q);
+    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+    assert.doesNotMatch(await res.text(), /__CARDTILE_W2_OPTS__/);
+    assert.deepEqual(touched, [], q);
+  }
+});
+
+test('host mode: ?host= on the SANDBOX path does not leak — /try/edit stays the sandbox', async () => {
+  const { env, touched } = untouchableEnv();
+  const res = await worker.fetch(new Request(`https://card.feelreef.com/try/edit?host=${encodeURIComponent('https://feelreef.com')}`), env);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  const opts = optsOf(body);
+  assert.equal(opts.sandbox, true);
+  assert.equal('host' in opts, false, 'the sandbox must never carry a host');
+  assert.equal(res.headers.get('content-security-policy'), null);
+  assert.deepEqual(touched, []);
+});
+
+test('CONTROL: the untouchable store really does throw when the Worker reads a card', async () => {
+  // without this, "touched is empty" could mean the double is never where the Worker looks
+  const { env, touched } = untouchableEnv();
+  await worker.fetch(new Request('https://card.feelreef.com/somebody'), env).catch(() => {});
+  assert.ok(touched.length > 0, 'the store double is not bound where the Worker reads cards');
 });

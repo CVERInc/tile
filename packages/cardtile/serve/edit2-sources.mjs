@@ -26,6 +26,9 @@ export const EDIT2_SOURCES = [
   '../w2/board-bridge.mjs',
   '../w2/board-i18n.mjs',
   '../w2/type-icons.mjs',
+  '../w2/host-bridge.mjs',
+  // host-bridge splits the assets lane with the SAME scan save_card uses
+  '../card-save.mjs',
   '../w/editor.css',
   '../w/cell-form-core.mjs',
   '../w/cell-i18n.mjs',

@@ -65,6 +65,24 @@ export const BOARD_STRINGS_BY_KEY = {
     es: 'Esta ficha apunta a un cajón que no existe',
     pt: 'Esta peça aponta para uma gaveta que não existe',
   },
+  // ── HOST MODE: the save status beside 「存」 (feelreef embeds the editor on a real card) ──────
+  // The Save button itself reuses the chrome's `pubSave`, already in all nine.
+  'board.hostUnsaved': {
+    zh: '尚未儲存', ja: '未保存', en: 'Unsaved', ko: '저장 안 됨',
+    'zh-Hans': '尚未保存', de: 'Nicht gespeichert', fr: 'Non enregistré', es: 'Sin guardar', pt: 'Não salvo',
+  },
+  'board.hostSaving': {
+    zh: '儲存中…', ja: '保存中…', en: 'Saving…', ko: '저장 중…',
+    'zh-Hans': '保存中…', de: 'Wird gespeichert…', fr: 'Enregistrement…', es: 'Guardando…', pt: 'Salvando…',
+  },
+  'board.hostSaved': {
+    zh: '已儲存', ja: '保存しました', en: 'Saved', ko: '저장됨',
+    'zh-Hans': '已保存', de: 'Gespeichert', fr: 'Enregistré', es: 'Guardado', pt: 'Salvo',
+  },
+  'board.hostFailed': {
+    zh: '儲存失敗', ja: '保存できませんでした', en: 'Not saved', ko: '저장 실패',
+    'zh-Hans': '保存失败', de: 'Nicht gespeichert – Fehler', fr: 'Échec de l’enregistrement', es: 'No se pudo guardar', pt: 'Falha ao salvar',
+  },
   // ── the editor bar's view switch: 卡 · board · Markdown ───────────────────────────────────────
   // The board word follows the engine host's own (ja 「ボード」, ko 「보드」 in its viewSwitchAction).
   'board.viewBoard': {
