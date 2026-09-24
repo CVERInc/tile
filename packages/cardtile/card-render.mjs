@@ -1059,6 +1059,26 @@ const NATIVE_CSS = [
 //
 // Which is also why "text on a picture is not themed" does not apply here: it governs text on a RAW
 // picture. A haloed glyph is not on the picture, it is on its own ground.
+// ── EDIT-ONLY: the unfinished tile (ctx.editIndex) ──────────────────────────────────────────────
+// Printed only when the card is rendered for an editor; a live card never has `.st-cell-unset` (it
+// renders nothing at all for an unfinished tile), so the production stylesheet never hears of it.
+// Ruler #6 (2026-09-24): empty is never blank. The empty picture used to take the full square the
+// filled picture would take, with "+ Add a picture" floating in the middle of it — a large blank.
+// Now it is a ROW: the dashed edit outline and corner radius every unset tile has, a small picture
+// glyph (the slot `<span class="st-gal-img">`, painted as a mask — no child element, so the skeleton
+// stays the filled picture's), and the words beside it. Same skeleton, not the same height: a filled
+// picture's height comes FROM the picture, and there is none yet.
+const PICTURE_GLYPH = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='3'/%3E%3Ccircle cx='9' cy='10' r='1.6'/%3E%3Cpath d='m21 16-5-5-9 9'/%3E%3C/svg%3E\")";
+export const EDIT_ONLY_CSS = [
+  `.st-card .st-cell-unset{border-style:dashed;border-color:var(--cp-line-hi,currentColor)}`,
+  // one ROW = one grid unit (`.st-cell`'s own min-height), the same height an empty link takes; the
+  // gallery cell has no border of its own, so the dashed outline is drawn here in full.
+  `.st-card .st-gal-labelled.st-cell-unset{min-height:var(--cp-unit);border:1px dashed var(--cp-line-hi,currentColor);cursor:pointer}`,
+  `.st-card .st-gal-labelled.st-cell-unset .st-gal-link{flex-direction:row;justify-content:center;aspect-ratio:auto;height:auto;min-height:44px;gap:8px;padding:var(--s-3,.75rem) var(--s-4,1rem)}`,
+  `.st-card .st-gal-labelled.st-cell-unset .st-gal-img{position:static;flex:0 0 auto;width:20px;height:20px;aspect-ratio:1;border:0;border-radius:0;background:currentColor;opacity:.75;-webkit-mask:${PICTURE_GLYPH} center/contain no-repeat;mask:${PICTURE_GLYPH} center/contain no-repeat}`,
+  `.st-card .st-gal-labelled.st-cell-unset .st-gal-label{max-width:none;font-size:.85rem}`,
+].join('');
+
 const HALO = 'text-shadow:0 0 4px var(--cp-ground),0 0 9px var(--cp-ground),0 1px 14px var(--cp-ground)';
 const FLOATING_INK = [
   `.st-card .st-hero-name,.st-card .st-hero-tagline{color:var(--cp-ink);${HALO}}`,
@@ -1200,7 +1220,8 @@ export function renderGrid(model, ctx = {}) {
   // `icons: mono` — grey the fetched brand marks. Colour is the default (see card-worker).
   const marks = /^(mono|grey|gray|monochrome)$/.test(String(ctx.iconStyle || '').trim().toLowerCase())
     ? ' st-card-marks-mono' : '';
-  return `<div class="st-card${skin}${head}${marks}"><style>${NATIVE_CSS}</style>${parts.join('')}</div>`;
+  const editCss = ctx.editIndex ? `<style>${EDIT_ONLY_CSS}</style>` : '';
+  return `<div class="st-card${skin}${head}${marks}"><style>${NATIVE_CSS}</style>${editCss}${parts.join('')}</div>`;
 }
 
 /** renderDrawers: model.drawers → the overlay markup. Behaviour comes from the `drawer` coral.

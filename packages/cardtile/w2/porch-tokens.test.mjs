@@ -80,3 +80,21 @@ test('porch tokens: soft live diff against the reef checkout (prints, never fail
   if (diffs.length) return;
   t.diagnostic(`porch-tokens.css matches live reef app.css (${Object.keys(mine).length} tokens checked)`);
 });
+
+// Ruler #6 (2026-09-24): a press answers. Every button the shell's markup ships carries a class that
+// the press rule (`:active` → --porch-press) names; the in-card controls carry their own.
+test('every shell button has the :active press transform', () => {
+  const W2 = new URL('.', import.meta.url);
+  const css = fs.readFileSync(new URL('edit2.css', W2), 'utf8');
+  const html = fs.readFileSync(new URL('index.html', W2), 'utf8');
+  const js = fs.readFileSync(new URL('edit2.mjs', W2), 'utf8');
+  const press = css.match(/^(.*):active[^{]*\{ transform: var\(--porch-press\)/m);
+  assert.ok(press, 'the press rule exists');
+  const pressed = new Set([...press[0].matchAll(/\.(ctw-[\w-]+):active/g)].map((m) => m[1]));
+  const buttons = [...html.matchAll(/<button[^>]*class="([^"]*)"/g)].map((m) => m[1].split(/\s+/));
+  assert.ok(buttons.length > 10, 'sanity: the shell has its buttons');
+  for (const cls of buttons) assert.ok(cls.some((c) => pressed.has(c)), `no press on <button class="${cls.join(' ')}">`);
+  assert.match(js, /\.ct2-add:active,\.ct2-opens:active\{transform:/, 'the in-card add/opens buttons press too');
+  // control: a button class nobody presses is caught
+  assert.ok(!['ctw-unpressed'].some((c) => pressed.has(c)));
+});

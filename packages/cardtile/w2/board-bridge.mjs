@@ -446,4 +446,8 @@ export const BOARD_LIGHT_CSS = `
     --text-normal: #222222; --text-muted: #5c5c5c; --text-faint: #ababab;
     --text-accent: hsl(258, 68%, 52%); --text-error: #c0392b; --text-success: #2f9e5e;
   }
+  * { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.45) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.45); border-radius: 8px; }
 `;

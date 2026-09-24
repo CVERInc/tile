@@ -283,7 +283,10 @@ const coachDone = () => {
 };
 
 const CARD_EDIT_CSS = `
-html.ct2-edit [data-cell]{cursor:pointer;outline:2px solid transparent;outline-offset:3px;border-radius:inherit;transition:outline-color .12s}
+html.ct2-edit [data-cell]{cursor:pointer;outline:2px solid transparent;outline-offset:3px;transition:outline-color .12s}
+/* 🩸 2026-09-25: this rule used to say border-radius:inherit, so every tile in the grid took the grid's 0px
+   and the editor showed square tiles that the live card never has (measured: live 18px, editor 0px). The
+   outline follows the element's own corners; nothing here may touch the card's geometry. */
 html.ct2-edit [data-cell]:hover{outline-color:rgba(64,120,255,.55)}
 html.ct2-edit [data-cell]:focus-visible{outline-color:rgba(64,120,255,.95)}
 html.ct2-edit [data-cell] [data-cell]{outline:none}
@@ -298,6 +301,9 @@ html.ct2-dragging,html.ct2-dragging body{touch-action:none;user-select:none;-web
   font:600 14px/1.3 system-ui,sans-serif;opacity:.75;cursor:pointer;
   background:transparent;border:1.5px dashed currentColor;border-radius:14px}
 .ct2-add:hover,.ct2-add:focus-visible{opacity:1}
+.ct2-add,.ct2-opens{transition:transform 90ms ease}
+.ct2-add:active,.ct2-opens:active{transform:translateY(1px) scale(.985)}
+@media (prefers-reduced-motion:reduce){.ct2-add:active,.ct2-opens:active{transform:none}}
 .ct2-opens{position:absolute;bottom:6px;right:6px;z-index:2;display:inline-flex;align-items:center;min-height:28px;padding:2px 10px;
   font:600 11px/1.2 system-ui,sans-serif;color:#fff;background:rgba(20,20,20,.78);border:0;border-radius:999px;cursor:pointer}
 html.ct2-edit [data-cell]:has(.ct2-opens){position:relative}
@@ -923,7 +929,6 @@ function openCell(slot) {
   el('modal-title').textContent = say(def.title);
   el('modal-hint').textContent = say(def.hint || '');
   el('modal-body').innerHTML = formBodyHtml(def, cell, formCtx());
-  el('modal-raw').value = cell.rawParams || '';
   el('modal').hidden = false;
   syncMoveButtons();
   wireForm(def);
@@ -1278,8 +1283,6 @@ export function boot(opts = {}) {
   el('modal-close').setAttribute('aria-label', T.modalCloseAria);
   el('md-close').setAttribute('aria-label', T.modalCloseAria);
   el('picker-close').setAttribute('aria-label', T.modalCloseAria);
-  el('raw-summary').textContent = T.modalRawSummary;
-  el('raw-note').textContent = T.modalRawNote;
   el('modal-delete').textContent = T.modalDelete;
   el('modal-save').textContent = T.modalSave;
   el('modal-up').textContent = T.moveUp;

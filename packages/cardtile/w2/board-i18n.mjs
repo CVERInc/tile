@@ -108,11 +108,12 @@ export const BOARD_STRINGS_BY_KEY = {
     zh: 'Markdown', ja: 'Markdown', en: 'Markdown', ko: 'Markdown',
     'zh-Hans': 'Markdown', de: 'Markdown', fr: 'Markdown', es: 'Markdown', pt: 'Markdown',
   },
-  // the live preview beside the table (≥1024) — its accessible name
+  // the finished card beside the table (≥1024) — its accessible name. Ruler #3 (2026-09-24): no
+  // "preview" to a person; it is the card, as it will be seen.
   'board.previewTitle': {
-    zh: '成品預覽', ja: '仕上がりプレビュー', en: 'Live preview', ko: '완성본 미리보기',
-    'zh-Hans': '成品预览', de: 'Live-Vorschau', fr: 'Aperçu en direct',
-    es: 'Vista previa en vivo', pt: 'Pré-visualização ao vivo',
+    zh: '完成的卡片', ja: '仕上がったカード', en: 'The finished card', ko: '완성된 카드',
+    'zh-Hans': '完成的卡片', de: 'Die fertige Karte', fr: 'La carte finie',
+    es: 'La tarjeta terminada', pt: 'O cartão pronto',
   },
   // the editing table itself — the iframe's accessible name
   'board.tableTitle': {
