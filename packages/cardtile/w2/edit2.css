@@ -29,39 +29,15 @@
 #table.is-ready, #canvas { opacity: 1; }
 .ctw-w2-preview { border-left: 1px solid var(--ctw-line); background: #fff; }
 
-/* ── the phone's two tabs ───────────────────────────────────────────────────────────────────────
-   🩸 THE FIRST SCREEN HAD NO CARD ON IT. Measured 2026-09-06 at 390×844: banner 59 + masthead 95 +
-   the board's own header 45 put the first tile at y=275 (zh) / 308 (en) / 327 (ja) — a third of the
-   screen was chrome, and `#canvas` was hidden, so the one thing a visitor came to see was neither
-   in front of them nor visibly one tap away.
-   Three rules, in the order they win back pixels: the view control leaves the top bar for the
-   BOTTOM edge (where a phone puts navigation, and where it is also the answer to "where is my
-   card"), the masthead stops wrapping to two rows, and the banner stops wrapping to three. */
-.ctw-w2-tabs { display: none; }
-
 /* ≥44px targets, everywhere a finger lands. Above the phone rules below, so that shrinking a ROW
    can never quietly shrink the target inside it — same specificity, and the last one would win. */
 .ctw-bar .ctw-btn, .ctw-sandbox-banner .ctw-btn { min-height: 44px; }
 
 @media (max-width: 1023px) {
-  body[data-view="table"] .ctw-w2-preview,
-  body[data-view="preview"] .ctw-w2-table { display: none; }
+  /* a phone shows ONE view: the board, when chosen, stands in place of the card */
+  body[data-view="board"] .ctw-w2-preview { display: none; }
   .ctw-w2-preview { border-left: 0; }
   .ctw-w2-preview .ctw-w2-frame { overflow: auto; }
-
-  /* a flex ROW of the page's own column, not a fixed overlay: the panes then end exactly where the
-     bar begins, and no pane needs a padding that has to be kept equal to a height somewhere else. */
-  .ctw-w2-tabs {
-    display: flex; flex: 0 0 auto;
-    background: var(--ctw-panel); border-top: 1px solid var(--ctw-line);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  .ctw-w2-tab {
-    flex: 1; min-height: 46px; font: inherit; font-size: .9rem; font-weight: 600;
-    border: 0; border-top: 2px solid transparent; margin-top: -1px;
-    background: transparent; color: var(--ctw-dim); cursor: pointer;
-  }
-  .ctw-w2-tab[aria-selected="true"] { color: var(--ctw-ink); border-top-color: var(--ctw-go); }
 
   /* the masthead: ONE row. The brand and the door, nothing else — `.ctw-bar` wraps by default
      below 769px (w/editor.css), and with two children that is a second row for no reason. */
@@ -78,8 +54,60 @@
   #sandbox-banner-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ctw-sandbox-banner .ctw-btn { flex: 0 0 auto; padding: .3rem .7rem; font-size: .78rem; white-space: nowrap; }
 }
+/* ── the view switch: 卡 · 牌桌 · Markdown ───────────────────────────────────────────────────────
+   A segmented control; the board pane exists only in the board view. Default (no data-view yet,
+   or "card") hides it. */
+body:not([data-view="board"]) .ctw-w2-table { display: none; }
+.ctw-views {
+  display: inline-flex; flex: 0 1 auto; min-width: 0; padding: 3px; gap: 2px;
+  border: 1px solid var(--ctw-line); border-radius: 12px; background: var(--ctw-bg);
+}
+.ctw-view {
+  min-height: 44px; padding: .3rem .8rem; font: inherit; font-size: .82rem; font-weight: 600;
+  white-space: nowrap; border: 0; border-radius: 9px; background: transparent;
+  color: var(--ctw-dim); cursor: pointer;
+}
+.ctw-view[aria-pressed="true"] { background: var(--ctw-panel); color: var(--ctw-ink); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.ctw-view:focus-visible { outline: 2px solid var(--ctw-go); outline-offset: 1px; }
+@media (max-width: 640px) {
+  .ctw-bar h1 { display: none; }
+  .ctw-view { padding: .3rem .55rem; font-size: .76rem; min-height: 44px; }
+}
+
+/* ── card first, board second ────────────────────────────────────────────────────────────────
+   The card is where editing happens now (tap a tile), so on a wide screen it takes the larger,
+   centre column and the board is the titled panel beside it. The board keeps every behaviour; it is
+   only smaller. The card column's background frames the card so it reads as THE object on screen. */
+.ctw-w2 > section.ctw-w2-table { flex-direction: column; }
+.ctw-w2-panel-title {
+  flex: 0 0 auto; margin: 0; padding: .55rem .9rem;
+  font-size: .78rem; font-weight: 700; letter-spacing: .02em; color: var(--ctw-dim);
+  border-bottom: 1px solid var(--ctw-line); background: var(--ctw-panel);
+}
+.ctw-w2-preview { position: relative; }
 @media (min-width: 1024px) {
-  .ctw-w2 { grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); }
+  body[data-view="board"] .ctw-w2 { grid-template-columns: minmax(300px, 1fr) minmax(0, 1.7fr); }
+  .ctw-w2-preview { background: var(--ctw-bg); padding: 1.2rem 1.5rem 0; justify-content: center; }
+  .ctw-w2-preview .ctw-w2-frame {
+    max-width: 560px; margin: 0 auto; background: #fff;
+    border-radius: 18px 18px 0 0; box-shadow: 0 10px 40px rgba(0,0,0,.14);
+  }
+  .ctw-w2-table { border-right: 1px solid var(--ctw-line); }
+  .ctw-w2-preview { border-left: 0; }
+}
+
+/* the one-time coach mark, beside the card (on top of its column, never inside the card) */
+.ctw-coach {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: .5rem; max-width: calc(100% - 32px);
+  padding: .45rem .5rem .45rem .95rem; border-radius: 999px;
+  font-size: .85rem; font-weight: 600; line-height: 1.35;
+  background: rgba(20,20,20,.9); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+.ctw-coach[hidden] { display: none; }
+.ctw-coach-close {
+  flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 50%;
+  background: rgba(255,255,255,.14); color: #fff; font: inherit; cursor: pointer;
 }
 
 /* ── 「＋加一張牌」: ONE ROW, seven icons ────────────────────────────────────────────────────────

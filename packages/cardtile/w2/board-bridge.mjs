@@ -79,6 +79,63 @@ export function boardSlots(model, ctx = {}) {
   return out;
 }
 
+/**
+ * A RENDERED cell → its board slot. This is what a tap on the card itself resolves through.
+ *
+ * The renderer (editIndex) writes `data-cell` on each cell, and the number means two different
+ * things depending on WHERE the element is:
+ *   on the face        the index into `model.cells` (the absolute one — blocks are ranges into it)
+ *   inside a drawer    the index into THAT drawer's `cells` — renderDrawers renders each drawer as
+ *                      its own one-block grid, so the count restarts at 0 in every panel
+ * So the caller passes the drawer id it found the element under (`null` for the face) and this
+ * finds the slot. -1 when nothing matches (a stale DOM after an edit) — never a guess, because a
+ * guess opens the wrong cell's sheet.
+ */
+export function slotOfRenderedCell(model, drawerId, index, ctx = {}) {
+  const n = Number(index);
+  if (!Number.isInteger(n) || n < 0) return -1;
+  const blocks = (model.blocks && model.blocks.length)
+    ? model.blocks
+    : [{ start: 0, count: (model.cells || []).length }];
+  return boardSlots(model, ctx).findIndex((s) => (drawerId
+    ? s.kind === 'drawer' && s.drawerId === drawerId && s.cellIndex === n
+    : s.kind === 'face' && blocks[s.block] && blocks[s.block].start + s.cellIndex === n));
+}
+
+/**
+ * A drag ON THE CARD → the whole-board order `applyBoardOrder` takes. One mutation path: the card's
+ * drag and the board's drag both end in `applyBoardOrder`, so there is no second serializer.
+ *
+ * `laneKey` is the lane the drag happened in (the card only lets a tile move within its own lane),
+ * `renderedSlots` the board slots of that lane's RENDERED cells, in their new on-screen order.
+ *
+ * 🔴 A cell that renders to nothing has no element, so it is missing from `renderedSlots`. It keeps
+ * its position in the lane and the rendered ones fill the remaining positions in their new order —
+ * rebuilding the lane from the DOM alone would silently delete it from the file.
+ *
+ * Returns null (apply nothing) if the read is not a permutation of that lane's rendered cells: an
+ * unknown slot, a slot from another lane, or a duplicate means the DOM was read mid-repaint.
+ */
+export function cardDropOrder(model, laneKey, renderedSlots, ctx = {}) {
+  const order = identityOrder(model, ctx);
+  const entry = order.find((e) => e.key === laneKey);
+  if (!entry) return null;
+  const inLane = new Set(entry.slots);
+  const moved = (renderedSlots || []).map(Number);
+  const set = new Set(moved);
+  if (set.size !== moved.length || moved.some((n) => !inLane.has(n))) return null;
+  let k = 0;
+  entry.slots = entry.slots.map((n) => (set.has(n) ? moved[k++] : n));
+  return order;
+}
+
+/** the lane an 「＋加一張牌」 drawn ON THE CARD adds to: the face's last section, or that drawer */
+export function laneKeyForCardAdd(model, drawerId) {
+  if (drawerId) return `drawer:${drawerId}`;
+  const n = (model.blocks && model.blocks.length) || 1;
+  return `face:${n - 1}`;
+}
+
 /** the board's own order, unchanged — the CONTROL every permutation test is measured against */
 export function identityOrder(model, ctx = {}) {
   let n = 0;

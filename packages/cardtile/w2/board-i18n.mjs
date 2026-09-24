@@ -65,6 +65,17 @@ export const BOARD_STRINGS_BY_KEY = {
     es: 'Esta ficha apunta a un cajón que no existe',
     pt: 'Esta peça aponta para uma gaveta que não existe',
   },
+  // ── the editor bar's view switch: 卡 · board · Markdown ───────────────────────────────────────
+  // The board word follows the engine host's own (ja 「ボード」, ko 「보드」 in its viewSwitchAction).
+  'board.viewBoard': {
+    zh: '牌桌', ja: 'ボード', en: 'Board', ko: '보드',
+    'zh-Hans': '牌桌', de: 'Board', fr: 'Tableau', es: 'Tablero', pt: 'Quadro',
+  },
+  // plain "Markdown": the segment is a view name; chrome `mdMode` ("Markdown 模式") is the sheet title
+  'board.viewMd': {
+    zh: 'Markdown', ja: 'Markdown', en: 'Markdown', ko: 'Markdown',
+    'zh-Hans': 'Markdown', de: 'Markdown', fr: 'Markdown', es: 'Markdown', pt: 'Markdown',
+  },
   // the live preview beside the table (≥1024) — its accessible name
   'board.previewTitle': {
     zh: '成品預覽', ja: '仕上がりプレビュー', en: 'Live preview', ko: '완성본 미리보기',

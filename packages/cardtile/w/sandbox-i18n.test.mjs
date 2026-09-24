@@ -25,7 +25,7 @@ test('SANDBOX_LOCALES: every one of the nine has a complete persona (no missing 
     // the door: its button, the sentence before it, and the two ways out of that sentence. A locale
     // missing any of these is a locale where the door opens onto silence — see bootSandbox().
     'doorCta', 'doorNote', 'doorContinue', 'doorBack',
-    'reset', 'pageTitle'];
+    'reset', 'pageTitle', 'coachMark'];
   for (const key of NINE) {
     const p = SANDBOX_LOCALES[key];
     assert.ok(p, `${key}: missing from SANDBOX_LOCALES entirely`);
@@ -118,15 +118,37 @@ test('localeFromAcceptLanguage: no header, or nothing recognised, → en', () =>
   assert.equal(localeFromAcceptLanguage('it-IT,ru-RU'), 'en');
 });
 
-test('buildSandboxCard: parses cleanly for all nine locales, three cells, a profile lane', () => {
+test('buildSandboxCard: parses cleanly for all nine locales — a profile and one link, nothing else', () => {
   for (const key of NINE) {
     const md = buildSandboxCard(key);
     const model = parseCard(md);
-    assert.equal(model.cells.length, 3, `${key}: expected 3 cells`);
+    assert.equal(model.cells.length, 2, `${key}: expected 2 cells`);
     assert.equal(model.cells[0].type, 'profile');
     assert.equal(model.cells[1].type, 'link');
-    assert.equal(model.cells[2].type, 'text');
   }
+});
+
+test('🔴 buildSandboxCard: no editor instruction is seeded AS card content (the old third tile)', () => {
+  for (const key of NINE) {
+    const md = buildSandboxCard(key);
+    const p = SANDBOX_LOCALES[key];
+    assert.ok(!md.includes(p.textBody), `${key}: the "tap to edit" sentence is still on the card`);
+    assert.ok(!md.includes(p.coachMark), `${key}: the coach mark leaked onto the card`);
+    assert.doesNotMatch(md, /card: text\b/, `${key}: a text tile is still seeded`);
+    // CONTROL: the check can see the thing it forbids
+    assert.ok((md + `- [ ] %% card: text w=3 %% ${p.textBody}`).includes(p.textBody));
+  }
+});
+
+test('coachMark: present, non-blank and distinct in all nine locales', () => {
+  const seen = new Set();
+  for (const key of NINE) {
+    const c = SANDBOX_LOCALES[key].coachMark;
+    assert.equal(typeof c, 'string', `${key}: coachMark missing`);
+    assert.ok(c.trim().length > 0, `${key}: coachMark blank`);
+    seen.add(c);
+  }
+  assert.equal(seen.size, NINE.length, 'two locales share one coach mark — one was not translated');
 });
 
 test('buildSandboxCard: the persona name in frontmatter matches the locale table, never a real person', () => {

@@ -39,6 +39,14 @@
 
 <header class="ctw-bar">
   <h1>cardtile-w2</h1>
+  <!-- the VIEW switch: three views over the one card markdown; switching never changes content.
+       The card is the default editing surface (tap to edit, drag to reorder); the board is the
+       engine's tugtile; Markdown is whole-page Markdown mode. Same switch on every screen size. -->
+  <div class="ctw-views" role="group" id="viewswitch">
+    <button class="ctw-view" id="view-card" type="button" data-view-btn="card" aria-pressed="true"></button>
+    <button class="ctw-view" id="view-board" type="button" data-view-btn="board" aria-pressed="false"></button>
+    <button class="ctw-view" id="view-md" type="button" data-view-btn="md" aria-pressed="false"></button>
+  </div>
   <div class="ctw-bar-spacer"></div>
   <div class="ctw-actions">
     <!-- 🔴 THE DOOR, and it behaves exactly as it does on the internal editor: it opens a sheet
@@ -50,26 +58,26 @@
 </header>
 
 <main class="ctw-w2">
-  <!-- the editing table: the engine's web tugtile, loaded by edit2.mjs -->
+  <!-- the editing table: the engine's web tugtile, loaded by edit2.mjs. OPTIONAL since the card
+       became the editing surface: hidden until the 「牌桌」 view is chosen, then the titled panel
+       beside the card (wide) or in place of it (phone). Loaded and kept in sync while hidden. It is still the only place to reorder, and it lists every cell,
+       including one that renders to nothing. -->
   <section class="ctw-w2-table">
+    <h2 class="ctw-w2-panel-title" id="table-heading"></h2>
     <iframe id="table" class="ctw-w2-frame" title="editing table"></iframe>
   </section>
-  <!-- the card itself -->
+  <!-- the card itself — the PRIMARY surface: tap anything on it to edit it (edit2.mjs wireCard) -->
   <section class="ctw-w2-preview">
     <iframe id="canvas" class="ctw-w2-frame" title="preview"></iframe>
+    <!-- once per browser: how the card is edited. An instruction about the EDITOR lives in the
+         editor, never as a tile on the card (it used to be the seed's third cell). -->
+    <div class="ctw-coach" id="coach" role="status" hidden>
+      <span id="coach-text"></span>
+      <button class="ctw-coach-close" id="coach-close" type="button" aria-label="Close">✕</button>
+    </div>
   </section>
 </main>
 
-<!-- 🔴 PHONE ONLY, AND ALONG THE BOTTOM EDGE. At 390px the table and the finished card cannot both
-     be on screen and a split showing a sliver of each shows neither — so one is on screen and the
-     other is one thumb-reach away, where a phone puts navigation. It replaces a toggle in the top
-     bar, which cost the first screen a row it could not spare: the cold read measured 275px of
-     chrome above the first tile (390, zh; 327 in ja), on a screen whose whole job is to show the
-     card being edited. At ≥1024 both panes are on screen and this bar is not rendered. -->
-<nav class="ctw-w2-tabs" id="viewtabs">
-  <button class="ctw-w2-tab" id="tab-table" type="button" aria-selected="true"></button>
-  <button class="ctw-w2-tab" id="tab-preview" type="button" aria-selected="false"></button>
-</nav>
 
 <!-- 「＋加一張牌」 → ONE ROW of seven icons. Not a scrolling column of cards with paragraphs of
      explanation: the seven kinds of tile a Card has, side by side, each with its name under it.
