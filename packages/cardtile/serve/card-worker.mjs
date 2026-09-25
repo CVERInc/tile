@@ -14,6 +14,7 @@ import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
+import { iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -76,6 +77,50 @@ export function resolveHandle(host, pathname, vanity = {}) {
 }
 
 /**
+ * cardPath: (pathname, handle, isVanity) → what this path asks of the card it resolved to. Pure.
+ *
+ *   'page'                  the card itself (HTML, or thin markdown by Accept)
+ *   'fat'                   the whole file, assets included (/index.md, /<handle>.md)
+ *   'ico' | 'svg' | 'apple' one of the card's icon files (card-icon.mjs)
+ *   'alias'                 /<handle> on the card's own domain → 301 to its root
+ *   null                    nothing lives here → 404
+ *
+ * 🩸 WHY IT EXISTS (reef#1090). resolveHandle answers "WHICH card", and on a vanity host it answers
+ * without looking at the path at all — correctly, "one domain = one card". But nothing then asked
+ * "is this path the card?", so EVERY path on a creator's domain rendered the whole card:
+ * `/favicon.ico`, `/apple-touch-icon.png`, `/robots.txt`, all 200 and 1.2 MB of HTML. On the
+ * canonical host the same gap was `/<handle>/<anything>`. Nothing in this Worker ever links to a
+ * sub-path of a card: the QR and the canonical→vanity 301 carry the ROOT (plus the query string,
+ * which is not the path), the download link is /index.md or /<handle>.md, and every asset the page
+ * loads (/_coral/, /_icon/, /_yt/) is routed above before a handle is resolved. So the card answers
+ * on its own address and nowhere else.
+ *
+ * 🔴 The one sub-path with a history is /<handle> on the card's own domain: before a domain's
+ * vanity key existed, `<their-domain>/<handle>` was how the card was reached there (CUSTOM-DOMAIN.md,
+ * "the apex 404'd on a working path"). It 301s to the root rather than 404ing, so a link from that
+ * era still lands, and the card still has one address.
+ */
+export function cardPath(pathname, handle, isVanity) {
+  const p = pathname || '/';
+  const h = String(handle || '').toLowerCase();
+  const lower = p.toLowerCase();
+  if (isVanity) {
+    if (p === '/') return 'page';
+    if (p === '/index.md' || lower === `/${h}.md`) return 'fat';
+    const icon = iconKind(p);
+    if (icon) return icon;
+    if (lower === `/${h}` || lower === `/${h}/`) return 'alias';
+    return null;
+  }
+  const m = /^\/([^/]+)(\/.*)?$/.exec(p);
+  if (!m) return null;
+  const seg = m[1].toLowerCase(), rest = (m[2] || '').replace(/\/+$/, '');
+  if (seg === `${h}.md`) return rest ? null : 'fat';
+  if (seg !== h) return null;
+  return rest ? iconKind(rest) : 'page';
+}
+
+/**
  * cardUrlFor: (handle, vanity) → the card's public URL. The INVERSE of resolveHandle, and it lives
  * beside it deliberately: the editor has to know which domain a card answers on, because `social`
  * gives a link to the author's OWN site a drawn house instead of a favicon and "own" means "same
@@ -94,22 +139,27 @@ export const cardUrlFor = (handle, vanity = {}) => {
   return host ? `https://${host}` : `https://${CANON_HOST}/${handle}`;
 };
 
+// OPTIONAL author fields. `since` = the founding year in the footer's "© 2013–2026" (omit → just
+// the current year); `accent` = one hex that themes the whole card.
+// 🩸 STRIP MATCHED QUOTES. Frontmatter looks like YAML, so authors quote things — and
+// `accent: '#b890e8'` used to arrive here WITH the quotes, get spliced straight into
+// `--cp-accent:'#b890e8'`, and be discarded by the browser as an invalid value. The card then
+// wore the platform default and nothing anywhere said why: valid markdown, valid CSS syntax,
+// silently the wrong colour. Found on 2026-08-13 on a live creator's card.
+//
+// 🔴 Only MATCHED outer quotes, and only when they wrap the whole value. A tagline that opens
+// with a quotation mark is a tagline, not a quoted scalar.
+// Module-level because the icon routes read the same two fields (name, accent) the page does — the
+// badge in the tab must be the card's colour by the same reading the card itself uses.
+const unquote = (v) => (/^(['"]).*\1$/.test(v) ? v.slice(1, -1).trim() : v);
+const frontmatter = (cardMd, k) => unquote(new RegExp('^' + k + ':\\s*(.+)$', 'm').exec(cardMd)?.[1]?.trim() || '');
+const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim() || handle || '';
+
 /** renderCardHTML: (cardMd, {handle, cardUrl}) → HTML string. Pure — the shared brain. */
 export function renderCardHTML(cardMd, ctx = {}) {
   const model = parseCard(cardMd);
-  const name = /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim() || ctx.handle || '';
-  // OPTIONAL author fields. `since` = the founding year in the footer's "© 2013–2026" (omit → just
-  // the current year); `accent` = one hex that themes the whole card.
-  // 🩸 STRIP MATCHED QUOTES. Frontmatter looks like YAML, so authors quote things — and
-  // `accent: '#b890e8'` used to arrive here WITH the quotes, get spliced straight into
-  // `--cp-accent:'#b890e8'`, and be discarded by the browser as an invalid value. The card then
-  // wore the platform default and nothing anywhere said why: valid markdown, valid CSS syntax,
-  // silently the wrong colour. Found on 2026-08-13 on a live creator's card.
-  //
-  // 🔴 Only MATCHED outer quotes, and only when they wrap the whole value. A tagline that opens
-  // with a quotation mark is a tagline, not a quoted scalar.
-  const unquote = (v) => (/^(['"]).*\1$/.test(v) ? v.slice(1, -1).trim() : v);
-  const fm = (k) => unquote(new RegExp('^' + k + ':\\s*(.+)$', 'm').exec(cardMd)?.[1]?.trim() || '');
+  const name = cardName(cardMd, ctx.handle);
+  const fm = (k) => frontmatter(cardMd, k);
   return renderPage(model, {
     name,
     handle: ctx.handle || '',              // → the footer's feelreef.com/signup?ref=<handle>
@@ -120,6 +170,8 @@ export function renderCardHTML(cardMd, ctx = {}) {
     // `arrows: on` puts the little arrow back on link rows and CTAs. DEFAULT OFF — see arrowOf.
     arrows: fm('arrows'),
     cardUrl: ctx.cardUrl || '',
+    // favicon + apple-touch-icon — see card-icon.mjs. Addressed off cardUrl, so none without one.
+    iconLinks: iconLinks(model, { cardUrl: ctx.cardUrl || '' }),
     since: fm('since'),
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
@@ -574,7 +626,6 @@ export default {
     // retype. A parameter with a default is a thing somebody forgets; two paths are not.
     const host = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
     const md = /^(.*)\.md$/.exec(url.pathname);
-    const wantFat = !!md;
 
     // CARDS store: handle → card.md, plus the vanity bindings. Missing binding (local/misconfig) is
     // a clear 500, not a crash. Read before routing now, because routing needs it.
@@ -584,9 +635,34 @@ export default {
     // AT MOST ONE extra read per request, and the two branches are mutually exclusive:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
-    const resolved = resolveHandle(host, wantFat ? (md[1] || '/') : url.pathname,
+    const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);
+
+    // Is this path the card at all? Decided BEFORE the card is read — a path that is nothing costs
+    // no store read and no render. See cardPath.
+    const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
+    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle);
+    if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
+
+    // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
+    // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
+    if (want === 'ico' || want === 'svg' || want === 'apple') {
+      const iconMd = await store.get(resolved.handle);
+      if (!iconMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60' } });
+      const file = await iconFile(want, parseCard(iconMd),
+        { name: cardName(iconMd, resolved.handle), accent: frontmatter(iconMd, 'accent') });
+      return new Response(file.body, {
+        headers: {
+          'Content-Type': file.type,
+          // an hour: an icon changes when the avatar does, which is rare, and a stale tab icon for an
+          // hour is not a stale page. The page itself stays at 60s.
+          'Cache-Control': 'public, max-age=3600',
+          // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
 
     // 🔴 A card with its own domain has ONE address. `card.feelreef.com/<handle>` served the same
     // page as the creator's own apex, which is duplicate content competing with them in search —
@@ -595,6 +671,7 @@ export default {
     // 301 (permanent) because it is: the vanity host is where that card lives from the moment it is
     // bound. Only the HTML view redirects — `/_api/` never reaches here, and the `.md` exits keep
     // working on both hosts because a download link somebody already has must not break.
+    const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
     if (ownHost && host !== ownHost) {

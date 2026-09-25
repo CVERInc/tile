@@ -44,6 +44,10 @@ export const EDIT2_SOURCES = [
   '../ai-ops.mjs',
   '../card-core.js',
   '../card-render.mjs',
+  // renderCardHTML's <head> icon links (reef#1090): card-icon.mjs, and the two names it takes from
+  // icon-core (ICON_PATHS, markType) — esbuild keeps only those, but they are bytes in the bundle.
+  '../card-icon.mjs',
+  '../../sitetile/icon-core.mjs',
   // the two the w2 modules import DIRECTLY as of the P1 fixes: the icon route a tile's favicon uses
   // (marks) and the poster path a video tile shows (yt). Both were already in the bundle through
   // card-render — being in it by accident is not the same as being watched for drift.

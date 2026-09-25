@@ -33,7 +33,17 @@
 // files are re-emitted on every build of every site: a badge that churned would show up as a diff
 // in every deploy forever.
 
-import { deflateSync } from 'node:zlib';
+// 🔴 node:zlib is reached LAZILY, never by a static import. REEF with Card's Worker imports this file
+// too (the Card's badge is this badge — one rule, one place), and it runs without nodejs_compat: a
+// static `import … from 'node:zlib'` there is a bundle warning at deploy and a module that does not
+// exist at runtime. process.getBuiltinModule is Node's synchronous door (22.3+), so the node path
+// below keeps its sync API and its exact bytes; a runtime without it takes the *Web functions at
+// the end of this file, which deflate with the platform's own CompressionStream.
+const nodeZlib = () => {
+  const z = globalThis.process?.getBuiltinModule?.('node:zlib');
+  if (!z) throw new Error('icon-core: node:zlib is unavailable here — use appleTouchPngWeb / faviconIcoWeb');
+  return z;
+};
 
 /** The three well-known paths. Client code names these constants, never the strings. */
 export const ICON_PATHS = { ico: '/favicon.ico', svg: '/favicon.svg', apple: '/apple-touch-icon.png' };
@@ -375,6 +385,10 @@ export function badgePixels(meta, size, radius = 0) {
 }
 
 // ── PNG + ICO containers ─────────────────────────────────────────────────────────────────────────
+//
+// Written over Uint8Array + DataView, not Buffer, so the same container code serves Node and a
+// Worker. Only the deflate differs, and it is handed in: node:zlib (sync, level 9) for sitetile's
+// build, CompressionStream (async) for the Card Worker. The node wrappers still return a Buffer.
 
 const CRC_TABLE = (() => {
   const t = new Int32Array(256);
@@ -392,45 +406,72 @@ function crc32(buf) {
   return (c ^ -1) >>> 0;
 }
 
-function chunk(type, data) {
-  const out = Buffer.alloc(12 + data.length);
-  out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, 'latin1');
-  Buffer.from(data).copy(out, 8);
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+function concat(parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
 
-/** RGBA pixels → a PNG (colour type 6, 8-bit). Filter 0 on every row: a flat badge gives the
- *  deflater long runs to eat, and it keeps the encoder something a person can read. */
-export function encodePng(px, size) {
-  const raw = Buffer.alloc(size * (size * 4 + 1));
+function chunk(type, data) {
+  const out = new Uint8Array(12 + data.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+  return out;
+}
+
+/** RGBA pixels → the PNG scanlines, each prefixed with filter 0. Filter 0 on every row: a flat
+ *  badge gives the deflater long runs to eat, and it keeps the encoder something a person can read. */
+function pngScanlines(px, size) {
+  const raw = new Uint8Array(size * (size * 4 + 1));
   for (let y = 0; y < size; y++) {
     raw[y * (size * 4 + 1)] = 0;
-    Buffer.from(px.buffer, px.byteOffset + y * size * 4, size * 4).copy(raw, y * (size * 4 + 1) + 1);
+    raw.set(px.subarray(y * size * 4, (y + 1) * size * 4), y * (size * 4 + 1) + 1);
   }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4);
+  return raw;
+}
+
+/** already-deflated scanlines → a PNG (colour type 6, 8-bit). */
+function pngContainer(idat, size) {
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, size); dv.setUint32(4, size);
   ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  return concat([
+    Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
     chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0)),
+    chunk('IDAT', idat),
+    chunk('IEND', new Uint8Array(0)),
   ]);
 }
 
 /** A one-image .ico wrapping a PNG. Every browser since IE11 reads PNG-in-ICO, and the alternative
  *  is a BMP encoder with a bottom-up upside-down bitmap and a legacy AND mask. */
-export function encodeIco(png, size) {
-  const head = Buffer.alloc(22);
-  head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4);   // reserved, type=icon, count
+function icoContainer(png, size) {
+  const head = new Uint8Array(22);
+  const dv = new DataView(head.buffer);
+  dv.setUint16(0, 0, true); dv.setUint16(2, 1, true); dv.setUint16(4, 1, true);   // reserved, type=icon, count
   head[6] = size >= 256 ? 0 : size; head[7] = size >= 256 ? 0 : size;             // 0 means 256
   head[8] = 0; head[9] = 0;
-  head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12);                          // planes, bpp
-  head.writeUInt32LE(png.length, 14);                                             // bytes of the image
-  head.writeUInt32LE(22, 18);                                                     // offset of the image
-  return Buffer.concat([head, png]);
+  dv.setUint16(10, 1, true); dv.setUint16(12, 32, true);                          // planes, bpp
+  dv.setUint32(14, png.length, true);                                             // bytes of the image
+  dv.setUint32(18, 22, true);                                                     // offset of the image
+  return concat([head, png]);
+}
+
+const asBuffer = (u8) => Buffer.from(u8.buffer, u8.byteOffset, u8.length);
+
+/** RGBA pixels → a PNG Buffer (node:zlib, level 9). */
+export function encodePng(px, size) {
+  return asBuffer(pngContainer(nodeZlib().deflateSync(pngScanlines(px, size), { level: 9 }), size));
+}
+
+/** PNG → a one-image .ico Buffer. */
+export function encodeIco(png, size) {
+  return asBuffer(icoContainer(png, size));
 }
 
 // ── what the routes emit ─────────────────────────────────────────────────────────────────────────
@@ -444,4 +485,30 @@ export function appleTouchPng(meta) {
 export function faviconIco(meta) {
   const png = encodePng(badgePixels(meta, ICO_PX, Math.round(ICO_PX * 0.22)), ICO_PX);
   return encodeIco(png, ICO_PX);
+}
+
+// ── the same files, for a runtime with no node:zlib (REEF with Card's Worker) ────────────────────
+//
+// Same pixels, same containers; the deflate is the platform's CompressionStream('deflate') — a zlib
+// stream, which is what a PNG IDAT is. The bytes differ from the node path's (different compressor
+// settings), and they are stable for a given runtime: nothing here reads a clock or a random source.
+
+async function deflateWeb(raw) {
+  const stream = new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function encodePngWeb(px, size) {
+  return pngContainer(await deflateWeb(pngScanlines(px, size)), size);
+}
+
+/** /apple-touch-icon.png as a Uint8Array, without node:zlib. */
+export async function appleTouchPngWeb(meta) {
+  return encodePngWeb(badgePixels(meta, APPLE_TOUCH_PX, 0), APPLE_TOUCH_PX);
+}
+
+/** /favicon.ico as a Uint8Array, without node:zlib. */
+export async function faviconIcoWeb(meta) {
+  const png = await encodePngWeb(badgePixels(meta, ICO_PX, Math.round(ICO_PX * 0.22)), ICO_PX);
+  return icoContainer(png, ICO_PX);
 }

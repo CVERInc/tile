@@ -1366,7 +1366,11 @@ export function renderPage(model, ctx = {}) {
   const lang = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(langRaw) ? langRaw : 'en';
   const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
   const theme = `<style id="cp-theme">${themeCss(mode, ctx.accent)}</style>`;
-  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title><style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
+  // The icon links (card-icon.mjs decides them — avatar or badge, and where the files live). Built
+  // by the caller because only the caller knows the card's address; absent → no links, never a
+  // link to a file nobody serves.
+  const iconTags = (ctx.iconLinks || []).map((l) => `<link rel="${esc(l.rel)}"${l.type ? ` type="${esc(l.type)}"` : ''}${l.sizes ? ` sizes="${esc(l.sizes)}"` : ''} href="${esc(l.href)}">`).join('');
+  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
 }
 
 // Swap the poster for the real player only once someone presses play — youtube-nocookie, and not a
