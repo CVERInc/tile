@@ -159,6 +159,10 @@ body:not([data-view="board"]) .ctw-w2-table { display: none; }
 .ctw-md {
   width: 100%; min-height: 46vh; resize: vertical;
   font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  /* 🩸 12.5px is what iOS Safari zooms the whole page in on when this box takes focus — measured
+     on the live editor at iPhone width: every sheet field and the board's editor were already
+     16px (editor.css's ≤768px block, tugtile.css), this was the one box left under the line,
+     because this rule lands after that block and won. The phone override is below. */
   padding: .6rem .7rem; border-radius: 10px;
   border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink);
 }
@@ -339,3 +343,10 @@ body {
 :is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
 :is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar-track { background: transparent; }
 :is(.ctw-w2-preview, .ctw-w2-frame, .ctw-modal-panel, .ctw-md)::-webkit-scrollbar-thumb { background: rgba(128,128,128,.45); border-radius: 8px; }
+
+/* Phones: the Markdown box must not be the one field that makes iOS zoom the page on focus.
+   Same breakpoint as editor.css's "text inputs ≥16px" block; this file loads after it, so the
+   override has to be here. Desktop keeps 12.5px — a raw-markdown box reads better dense. */
+@media (max-width: 768px) {
+  .ctw-md { font-size: 16px; }
+}
