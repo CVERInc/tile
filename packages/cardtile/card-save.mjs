@@ -11,7 +11,7 @@
 // functions that have to agree. The algorithm is deliberately identical to reef's page-version.js
 // (SHA-256, first 16 hex, `v1:` prefix) so a Card version and a Page version read alike in a
 // transcript, but that is a shared CONVENTION, not a shared code path across two repos.
-import { parseCard, serializeCard } from './card-core.js';
+import { parseCard, serializeCard, rasterCopyId } from './card-core.js';
 
 /** Bytes → lowercase hex. */
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -61,10 +61,15 @@ const ASSET_REF_RE = /asset:([A-Za-z0-9_.\-]+)/g;
  * in a report, while the cost of under-counting would be a creator told to delete their own picture.
  *
  * Base64 has no colon in its alphabet, so a blob can never spell `asset:` and be mistaken for one.
+ *
+ * 🔴 A referenced picture's RASTER COPY (card-core's rasterCopyId, reef#1092) is referenced too. No
+ * cell names it — it is found by name from the avatar — so a scan of the text alone would report
+ * every copy as an orphan, and an agent tidying orphans would delete the card's share image. Added
+ * for every referenced id, not only avatars: over-counting, in the direction this scan already errs.
  */
 export function referencedAssets(cardText) {
   const out = new Set();
-  for (const m of String(cardText || '').matchAll(ASSET_REF_RE)) out.add(m[1]);
+  for (const m of String(cardText || '').matchAll(ASSET_REF_RE)) { out.add(m[1]); out.add(rasterCopyId(m[1])); }
   return out;
 }
 

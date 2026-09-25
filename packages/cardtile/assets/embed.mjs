@@ -28,25 +28,16 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { parseCard, serializeCard } from '../card-core.js';
+import { parseCard, serializeCard, rasterCopyId } from '../card-core.js';
+import { loadSharp } from './sharp.mjs';
+import { rasterCopy } from './raster-copy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARDS = join(HERE, '../cards');
 
 // sharp lives in the reef app's install — this is a dev-time tool, nothing here ships to the edge.
-// 🔴 TRIED in order, not hardcoded to one absolute path. The single hardcoded path is what turned
-// this from a tool into a thing only this Mac could run — the same defect ingest-full.mjs had.
-const SHARP_CANDIDATES = [
-  'sharp',
-  process.env.SHARP_PATH,
-  join(HERE, '../../../node_modules/sharp/lib/index.js'),
-  `${process.env.HOME}/Developer/reef/apps/feelreef/node_modules/sharp/lib/index.js`,
-].filter(Boolean);
-let sharp = null;
-for (const c of SHARP_CANDIDATES) {
-  try { sharp = (await import(c)).default; break; } catch { /* try the next */ }
-}
-if (!sharp) throw new Error('sharp not found. Tried: ' + SHARP_CANDIDATES.join(', '));
+// Found by assets/sharp.mjs, shared with backfill-raster.mjs.
+const sharp = await loadSharp();
 
 const args = process.argv.slice(2);
 const handle = args.find((a) => !a.startsWith('--'));
@@ -102,6 +93,19 @@ const LADDER = [
 const PER_IMAGE_KB = 220;
 
 const kb = (n) => (n / 1024).toFixed(0) + 'KB';
+
+/**
+ * The avatar also gets its RASTER COPY (reef#1092; see raster-copy.mjs): the PNG a link preview and
+ * an iOS home screen show. Made from the ORIGINAL download, not from the webp it just became, so it
+ * is not a second generation of lossy compression. Skipped when the avatar is itself a PNG — the
+ * Worker serves that one directly. Returns the copy's byte count, or 0.
+ */
+async function addRasterCopy(model, ref, id, raw, enc) {
+  if (ref.what !== 'profile.avatar' || enc.mime === 'image/png') return 0;
+  const png = await rasterCopy(sharp, raw);
+  model.assets[rasterCopyId(id)] = { mime: 'image/png', b64: png.toString('base64') };
+  return png.length;
+}
 
 /** Every place a card can name an image, as {get,set} accessors over the model. */
 function imageRefs(model) {
@@ -254,8 +258,15 @@ export async function embedImages(md, { budgetKB: bkb = 1500, quiet = false } = 
   model.assets = model.assets || {};
   let total = 0;
   const seen = new Map();
+  const rawOf = new Map(), encOf = new Map();          // url → original bytes / encoding, for a reused avatar's copy
   for (const ref of refs) {
-    if (seen.has(ref.url)) { ref.set(`asset:${seen.get(ref.url)}`); say(`  ${ref.what.padEnd(22)} → reuses ${seen.get(ref.url)}`); continue; }
+    if (seen.has(ref.url)) {
+      const [rid, rraw, renc] = [seen.get(ref.url), rawOf.get(ref.url), encOf.get(ref.url)];
+      ref.set(`asset:${rid}`); say(`  ${ref.what.padEnd(22)} → reuses ${rid}`);
+      // the avatar may be a picture the card already used elsewhere: it still needs its copy
+      if (!model.assets[rasterCopyId(rid)]) total += await addRasterCopy(model, ref, rid, rraw, renc);
+      continue;
+    }
     let raw;
     try {
       const res = await fetch(ref.url, { headers: { 'User-Agent': 'cardtile-embed' } });
@@ -271,9 +282,11 @@ export async function embedImages(md, { budgetKB: bkb = 1500, quiet = false } = 
     const enc = await encode(raw);
     const id = 'sha256-' + createHash('sha256').update(enc.buf).digest('hex').slice(0, 16);
     model.assets[id] = { mime: enc.mime, b64: enc.buf.toString('base64') };
-    seen.set(ref.url, id);
+    seen.set(ref.url, id); rawOf.set(ref.url, raw); encOf.set(ref.url, enc);
     ref.set(`asset:${id}`);
     total += enc.buf.length;
+    const copyBytes = await addRasterCopy(model, ref, id, raw, enc);
+    total += copyBytes;
     const how = enc.kept
       ? `kept as-is (${enc.mime.replace('image/', '')}) — nothing beat the original`
       : `${enc.srcWidth}px → ${enc.outWidth}px webp `
@@ -282,6 +295,7 @@ export async function embedImages(md, { budgetKB: bkb = 1500, quiet = false } = 
     say(`  ${ref.what.padEnd(22)} ${kb(enc.original).padStart(7)} → ${kb(enc.buf.length).padStart(7)}  ${how}`
       + (enc.animated ? `  🎞 ${enc.frames} frames KEPT` : '')
       + (enc.overCap ? '  ⚠️ still over the per-image cap' : ''));
+    if (copyBytes) say(`  ${'profile.avatar copy'.padEnd(22)} ${kb(copyBytes).padStart(17)}  256px png — og:image + apple-touch-icon`);
   }
   const out = serializeCard(model);
   say(`images ${kb(total)} · card file ${kb(out.length)} (base64 adds ~33%)`);
@@ -307,9 +321,15 @@ console.log(`${handle}: ${refs.length} remote image(s), budget ${budgetKB}KB\n`)
 model.assets = model.assets || {};
 let total = 0;
 const seen = new Map();                                // url → asset id, so a repeated image is stored once
+const rawOf = new Map(), encOf = new Map();
 
 for (const ref of refs) {
-  if (seen.has(ref.url)) { ref.set(`asset:${seen.get(ref.url)}`); console.log(`  ${ref.what.padEnd(22)} → reuses ${seen.get(ref.url)}`); continue; }
+  if (seen.has(ref.url)) {
+    const [rid, rraw, renc] = [seen.get(ref.url), rawOf.get(ref.url), encOf.get(ref.url)];
+    ref.set(`asset:${rid}`); console.log(`  ${ref.what.padEnd(22)} → reuses ${rid}`);
+    if (!model.assets[rasterCopyId(rid)]) total += await addRasterCopy(model, ref, rid, rraw, renc);
+    continue;
+  }
   let raw;
   try {
     const res = await fetch(ref.url, { headers: { 'User-Agent': 'cardtile-embed' } });
@@ -323,9 +343,11 @@ for (const ref of refs) {
   // content-addressed: the same bytes are the same asset, whoever references them
   const id = 'sha256-' + createHash('sha256').update(enc.buf).digest('hex').slice(0, 16);
   model.assets[id] = { mime: enc.mime, b64: enc.buf.toString('base64') };
-  seen.set(ref.url, id);
+  seen.set(ref.url, id); rawOf.set(ref.url, raw); encOf.set(ref.url, enc);
   ref.set(`asset:${id}`);
   total += enc.buf.length;
+  const copyBytes = await addRasterCopy(model, ref, id, raw, enc);
+  total += copyBytes;
   const how = enc.kept
     ? `kept as-is (${enc.mime.replace('image/', '')}) — nothing beat the original`
     : `${enc.srcWidth}px → ${enc.outWidth}px webp `
@@ -333,6 +355,7 @@ for (const ref of refs) {
       + (enc.outWidth === enc.srcWidth ? ', not resized' : '');
   console.log(`  ${ref.what.padEnd(22)} ${kb(enc.original).padStart(7)} → ${kb(enc.buf.length).padStart(7)}  ${how}`
     + (enc.overCap ? '  ⚠️ still over the per-image cap' : ''));
+  if (copyBytes) console.log(`  ${'profile.avatar copy'.padEnd(22)} ${kb(copyBytes).padStart(17)}  256px png — og:image + apple-touch-icon`);
 }
 
 const out = serializeCard(model);

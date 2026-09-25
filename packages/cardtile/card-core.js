@@ -113,6 +113,25 @@ function cellToRaw(cell) {
 //   - [ ] %% card: asset id=sha256-462fe2371720dccb mime=image/webp %% UklGRg…
 const RE_ASSET_LANE = /^assets$/i;
 
+// The avatar's RASTER COPY (reef#1092). An avatar is almost always webp, and the two places that
+// show a card's picture outside the card — a link preview's og:image and iOS's home-screen icon —
+// want a PNG. The Worker does not transcode (card-icon.mjs says why), so the copy is made where the
+// avatar is encoded anyway (assets/embed.mjs, both editors) and stored beside it as an ordinary
+// asset whose id is the avatar's id plus `.png`:
+//   - [ ] %% card: asset id=sha256-462fe2371720dccb mime=image/webp %% UklGRg…
+//   - [ ] %% card: asset id=sha256-462fe2371720dccb.png mime=image/png %% iVBORw…
+// 🔴 Bound BY NAME to the exact bytes it was made from, not by a param on the profile cell. A new
+// avatar has a new id, so a stale copy cannot outlive the picture it shows — it simply stops being
+// found, and the card falls back to the badge until a new copy is made. No new field in the format,
+// so an old card is already a valid card, and put_asset needs no new argument.
+const RASTER_COPY_SUFFIX = '.png';
+const rasterCopyId = (id) => String(id || '') + RASTER_COPY_SUFFIX;
+/** The avatar id a raster copy belongs to, or null when `id` is not a copy. */
+const rasterCopyOwner = (id) => {
+  const s = String(id || '');
+  return s.length > RASTER_COPY_SUFFIX.length && s.endsWith(RASTER_COPY_SUFFIX) ? s.slice(0, -RASTER_COPY_SUFFIX.length) : null;
+};
+
 const RE_DRAWER_LANE = /^drawer\s*:\s*(.+)$/i;
 const splitDrawer = (title) => {
   const m = RE_DRAWER_LANE.exec(String(title || '').trim());
@@ -342,3 +361,4 @@ export { parseCard, serializeCard, packGrid, reorder, setSpan, extractCell, cell
 // grammar — two implementations of "what a param looks like" is how a form starts writing tokens the
 // parser reads differently, on somebody's only copy of their file.
 export { setToken, removeToken, quoteParam, normalizeCell, setTitle };
+export { rasterCopyId, rasterCopyOwner };

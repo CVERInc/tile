@@ -15,6 +15,7 @@ import { renderPage } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { iconLinks, iconKind, iconFile } from '../card-icon.mjs';
+import { shareTags } from '../card-share.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -172,6 +173,8 @@ export function renderCardHTML(cardMd, ctx = {}) {
     cardUrl: ctx.cardUrl || '',
     // favicon + apple-touch-icon — see card-icon.mjs. Addressed off cardUrl, so none without one.
     iconLinks: iconLinks(model, { cardUrl: ctx.cardUrl || '' }),
+    // og:* / twitter:* / description / canonical — see card-share.mjs. Same rule: none without cardUrl.
+    shareTags: shareTags(model, { name, cardUrl: ctx.cardUrl || '' }),
     since: fm('since'),
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader

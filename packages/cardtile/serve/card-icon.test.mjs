@@ -63,7 +63,8 @@ function png(u8) {
   const at = (x, y) => [...raw.subarray(y * (w * 4 + 1) + 1 + x * 4, y * (w * 4 + 1) + 1 + x * 4 + 4)];
   return { w, h, at };
 }
-const links = (html) => (/<head>(.*?)<\/head>/s.exec(html)[1].match(/<link [^>]*>/g) || []);
+// the ICON links; canonical (reef#1092, card-share.test.mjs) is a <link> too, and not this file's
+const links = (html) => (/<head>(.*?)<\/head>/s.exec(html)[1].match(/<link [^>]*>/g) || []).filter((l) => !/rel="canonical"/.test(l));
 
 // ── <head> ─────────────────────────────────────────────────────────────────────────────────────
 
