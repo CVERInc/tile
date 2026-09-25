@@ -36,7 +36,7 @@
 // `stopPropagation()` decides. That is the whole mechanism — no fork, no patched copy, no build step
 // that rewrites somebody else's file. What it costs is that this list has to be complete, which is
 // why every intercepted control is named here with what it does instead.
-import { parseCard, serializeCard, normalizeCell, reorder, setTitle } from '../card-core.js';
+import { parseCard, serializeCard, normalizeCell, reorder, setTitle, rasterCopyId } from '../card-core.js';
 import { renderCardHTML } from '../serve/card-worker.mjs';
 import { CELL_TYPES, blankCell, PALETTE, CONTROL, DISPOSITION } from '../ai-ops.mjs';
 import { esc, flatRows, formBodyHtml, composeCell } from '../w/cell-form-core.mjs';
@@ -988,6 +988,12 @@ function wireForm(def) {
         const asset = await encodeImage(f);
         if (!asset) { err.textContent = T.assetTooBig; return; }
         S.pendingAssets[asset.id] = { mime: asset.mime, b64: asset.b64 };
+        // the avatar's PNG copy for link previews and the home screen (reef#1092) — not needed when
+        // the avatar already IS a PNG, and a copy that fails to draw only costs the preview its face
+        if (id === 'f-avatar' && asset.mime !== 'image/png') {
+          const copy = await rasterCopy(f).catch(() => null);
+          if (copy) S.pendingAssets[rasterCopyId(asset.id)] = copy;
+        }
         urlIn.value = '';
         show(`asset:${asset.id}`);
       } catch (e) {
@@ -1161,6 +1167,36 @@ async function encodeImage(file) {
     return { id: `sha256-${hex.slice(0, 16)}`, mime: blob.type, b64: btoa(bin) };
   }
   return null;
+}
+
+// The avatar's RASTER COPY (reef#1092): a 256×256 PNG of the picture the person just chose, stored
+// beside the avatar as `<avatar id>.png` (card-core's rasterCopyId). It is what a link preview shows
+// (og:image) and what iOS puts on a home screen (apple-touch-icon) — both want a PNG, the avatar is
+// webp, and the Worker does not transcode. Drawn from the ORIGINAL file, not from the webp we just
+// made, so the copy is not a second generation of lossy compression.
+// Centre-cropped square (the avatar shows round, cropped the same way) on white: iOS fills a
+// transparent home-screen icon with black.
+// 🔴 A PNG straight off the canvas has no palette quantization, unlike the sharp path's: measured in
+// Chromium on two real avatars, 15,039 B and 40,942 B where sharp's is 2,589 B and 9,210 B. Still
+// 1–3% of ASSET_MAX_BYTES.
+const RASTER_COPY_EDGE = 256;
+
+async function rasterCopy(file) {
+  const bmp = await createImageBitmap(file);
+  const side = Math.min(bmp.width, bmp.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = RASTER_COPY_EDGE;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, RASTER_COPY_EDGE, RASTER_COPY_EDGE);
+  g.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, RASTER_COPY_EDGE, RASTER_COPY_EDGE);
+  if (bmp.close) bmp.close();
+  const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
+  if (!blob || blob.type !== 'image/png') return null;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return { mime: 'image/png', b64: btoa(bin) };
 }
 
 // ── undo ─────────────────────────────────────────────────────────────────────────────────────────

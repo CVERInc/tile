@@ -316,7 +316,8 @@ test('an unknown endpoint under /_api/ is a 404 WITH a token — not a silent pa
 // ── the pure half ────────────────────────────────────────────────────────────────────────────────
 
 test('referencedAssets over-counts rather than under-counts, on purpose', () => {
-  assert.deepEqual([...referencedAssets('avatar="asset:a" and prose mentioning asset:b')], ['a', 'b']);
+  // …and each one's raster copy (`<id>.png`, reef#1092) rides along — no cell names a copy
+  assert.deepEqual([...referencedAssets('avatar="asset:a" and prose mentioning asset:b')], ['a', 'a.png', 'b', 'b.png']);
   // base64 has no colon, so a blob can never be mistaken for a reference
   assert.deepEqual([...referencedAssets(GIF)], []);
 });

@@ -1370,7 +1370,12 @@ export function renderPage(model, ctx = {}) {
   // by the caller because only the caller knows the card's address; absent → no links, never a
   // link to a file nobody serves.
   const iconTags = (ctx.iconLinks || []).map((l) => `<link rel="${esc(l.rel)}"${l.type ? ` type="${esc(l.type)}"` : ''}${l.sizes ? ` sizes="${esc(l.sizes)}"` : ''} href="${esc(l.href)}">`).join('');
-  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
+  // What a link preview reads (card-share.mjs): description, og:*, twitter:*, canonical. Built by
+  // the caller for the same reason the icon links are — only it knows the card's address.
+  const share = ctx.shareTags || {};
+  const shareTagsHtml = (share.canonical ? `<link rel="canonical" href="${esc(share.canonical)}">` : '')
+    + (share.meta || []).map((t) => `<meta ${t.attr === 'property' ? 'property' : 'name'}="${esc(t.key)}" content="${esc(t.content)}">`).join('');
+  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
 }
 
 // Swap the poster for the real player only once someone presses play — youtube-nocookie, and not a
