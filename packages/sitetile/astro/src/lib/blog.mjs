@@ -3,7 +3,7 @@
 // + body) living in the build's `blog/` dir (the reef `blog_posts` store shape).
 // The blog pages wear the SAME SiteLayout shell as the rest of the site, so the
 // site's theme + packages (bleedblend band, lingo head) apply to /devlog too.
-import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc } from '@sitetile';
+import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext } from '@sitetile';
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
@@ -197,6 +197,9 @@ export function parsePost(slug, raw, excerptMax = 180) {
     body: b,
     image: safeSrc(imgM) || '',
     author: fmStr(meta.author), // '' when absent → byline stays hidden; a site with authors enriches it
+    // `dialogue: author-right` (#68) — the one value that puts the author's bubbles on the right.
+    // Any other value, or none, keeps the default (first speaker on the page sits left).
+    dialogue: fmStr(meta.dialogue),
     excerpt,
     excerptText: fullText, // full join for per-site excerpt re-capping in buildIndexView
   };
@@ -471,8 +474,13 @@ function withoutPageCoralCss(meta) {
 // hard-break) — so in br mode we inject that hard-break between CONSECUTIVE PLAIN-TEXT lines only
 // (guarded against list/image/quote/heading/code/html/table lines so those block constructs still
 // parse). Opt-in per site (blog-post-linebreaks: br) → every other site keeps the CommonMark join.
+// opts.authorRight → the author name whose turns sit on the right (see dialogueAuthorRight);
+// '' or absent keeps the first-speaker rule. Either way ONE dialogue context is shared by every
+// block this function hands to bodyHtml, so a post's bubble sides are decided per post and not
+// per run or per heading-split block (#68).
 export function flowingHtml(body, opts) {
   const br = !!(opts && opts.br);
+  const dialogue = dialogueContext({ author: opts && opts.authorRight });
   const isText = (ln) => ln != null && ln.trim() !== '' && !/^\s*([-*+>#|]|\d+[.)]\s|!\[|```|~~~|<|\[.*\]:)/.test(ln);
   const lines = String(body || '').split('\n');
   const out = [];
@@ -481,7 +489,7 @@ export function flowingHtml(body, opts) {
     if (!buf.length) return;
     let block = buf;
     if (br) block = buf.map((ln, i) => (isText(ln) && isText(buf[i + 1]) && !/\s\s$/.test(ln) ? ln + '  ' : ln));
-    out.push(bodyHtml(block.join('\n'))); buf = [];
+    out.push(bodyHtml(block.join('\n'), { dialogue })); buf = [];
   };
   let inFence = false;
   for (const line of lines) {
@@ -500,6 +508,16 @@ export function flowingHtml(body, opts) {
   }
   flush();
   return out.join('');
+}
+
+// dialogueAuthorRight: the name flowingHtml should seat on the right for this post, or '' when
+// the post did not opt in. Opt-in is the post's own `dialogue: author-right` (case-insensitive);
+// the name is the post's own `author:`. A post that opts in without an author has nobody to seat,
+// so it gets '' and the default rule — same as an author who never speaks.
+export function dialogueAuthorRight(post) {
+  if (!post) return '';
+  const on = String(post.dialogue || '').trim().toLowerCase() === 'author-right';
+  return on ? String(post.author || '').trim() : '';
 }
 
 // groupByArchive: posts (already newest-first from allPosts()) → a year→month tree for a

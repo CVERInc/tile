@@ -8,7 +8,7 @@
 // touches: a configurable byline label and a breadcrumb trail (both default to the prior output).
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
-import { flowingHtml, fmtDate, postUrl, blogBase } from '../lib/blog.mjs';
+import { flowingHtml, fmtDate, postUrl, blogBase, dialogueAuthorRight } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
@@ -19,7 +19,11 @@ const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props
 const dateFormat = meta['blog-date-format'];
 // blog-post-linebreaks: br → WP-wpautop mode (single newline inside a paragraph → <br>), for
 // WP-sourced recasts whose live keeps manual line breaks. Default (unset) = CommonMark join.
-const html = flowingHtml(post.body, { br: String(meta['blog-post-linebreaks'] || '').trim().toLowerCase() === 'br' });
+// dialogue: author-right (#68) → the post's author sits on the right of every dialogue bubble run.
+const html = flowingHtml(post.body, {
+  br: String(meta['blog-post-linebreaks'] || '').trim().toLowerCase() === 'br',
+  authorRight: dialogueAuthorRight(post),
+});
 
 // byline (By <author>): author from the post's own frontmatter, else the site-wide `blog-author`
 // meta. Empty when a site has no author frontmatter and no blog-author → byline not rendered.
