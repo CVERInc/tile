@@ -1242,11 +1242,34 @@ function dialogueTurn(buf) {
 // on the left and everyone else on the right, so a two-party exchange reads as two sides without
 // the author having to say which is which. A speaker's initial stands in for an avatar: agents do
 // not have faces, and drawing one would be a costume.
-function renderDialogue(turns) {
-  const order = [];
+//
+// "First to appear" is judged on the PAGE, not the run (#68). A post with several runs separated
+// by prose used to rebuild `order` per run, so whoever opened a run took the left — and an article
+// flipped sides mid-way when the other party opened the next run. `ctx` is the page's shared side
+// state: bodyHtml makes a fresh one per call unless its caller hands one in, and the blog layer
+// hands ONE per post through every block it splits the body into. It is an argument, not module
+// state, because the renderer renders many pages in one process.
+//
+// `ctx.author` (opt-in, frontmatter `dialogue: author-right`) is the post's author name, trimmed
+// and lower-cased: a turn by that name sits right, the way a chat app puts *me* on the right, and
+// the author is left OUT of `order`, so the first-speaker rule seats everyone else — the first
+// non-author left, any further non-author right. In the two-party post the option is for, that
+// is "author right, the other party left". It is layered this way rather than "everyone else
+// left" so that an author who never speaks changes nothing: `order` is then exactly A's, with no
+// second pass over the body to find out whether the author appears.
+function dialogueContext(opts) {
+  const author = String((opts && opts.author) || '').trim().toLowerCase();
+  return { order: [], author };
+}
+function dialogueSide(name, ctx) {
+  if (ctx.author && name.trim().toLowerCase() === ctx.author) return 'right';
+  if (!ctx.order.includes(name)) ctx.order.push(name);
+  return ctx.order.indexOf(name) === 0 ? 'left' : 'right';
+}
+function renderDialogue(turns, ctx) {
+  if (!ctx) ctx = dialogueContext();
   const body = turns.map((t, idx) => {
-    if (!order.includes(t.name)) order.push(t.name);
-    const side = order.indexOf(t.name) === 0 ? 'left' : 'right';
+    const side = dialogueSide(t.name, ctx);
     const cont = idx > 0 && turns[idx - 1].name === t.name;   // same speaker again → drop the label
     return '<div class="st-turn" data-side="' + side + '"' + (cont ? ' data-cont="1"' : '') + '>'
       + '<div class="st-turn-who" aria-hidden="true">' + escHtml(t.name.slice(0, 1).toUpperCase()) + '</div>'
@@ -1538,8 +1561,12 @@ function quoteRunReport(body) {
   return runs;
 }
 
-function bodyHtml(body) {
+// opts.dialogue: a dialogueContext() shared across every bodyHtml call that makes up ONE page, so
+// bubble sides are decided per page (#68). Absent → one per call, which is one per page for
+// every caller that renders a body in a single call (all of renderSiteToHtml's sections).
+function bodyHtml(body, opts) {
   if (!body) return '';
+  const dialogue = (opts && opts.dialogue) || dialogueContext();
   const lines = String(body).split('\n');
   const nextCloser = nextCommentCloser(lines);                                 // see the section above
   const out = [];
@@ -1589,7 +1616,7 @@ function bodyHtml(body) {
       i = collected.i;
       const verdict = classifyQuoteRun(blocks);
       let run = [];
-      const flushRun = () => { if (run.length) { out.push(renderDialogue(run)); run = []; } };
+      const flushRun = () => { if (run.length) { out.push(renderDialogue(run, dialogue)); run = []; } };
       for (let b = 0; b < blocks.length; b++) {
         const buf = blocks[b];
         const turn = verdict.turns[b];
@@ -2413,6 +2440,8 @@ export {
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
   inlineHtml, bodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
+  dialogueContext,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks,
   // sidebar layout helpers — exported so the Astro layer can reuse the same parser.
   parseSidebarNav,
