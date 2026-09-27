@@ -128,7 +128,7 @@ test('🔴 every string a person can be shown resolves to a real key — no key 
     push(def.title); push(def.hint);
     if (def.body) { push(def.body.label); push(def.body.hint); }
     for (const [, p] of Object.entries(def.params)) {
-      if (p.disposition !== DISPOSITION.FORM) continue;   // RAW params are never rendered to a person
+      if (p.disposition !== DISPOSITION.FORM) continue;   // RAW params have no field — their own gate is below
       push(p.label); push(p.hint);
       for (const v of Object.values(p.optionLabels || {})) push(v);
     }
@@ -139,6 +139,54 @@ test('🔴 every string a person can be shown resolves to a real key — no key 
   assert.ok(shown.length >= 40, `only ${shown.length} definition strings found — nothing is being scanned`);
   const unresolved = shown.filter((v) => !Object.prototype.hasOwnProperty.call(zh, v));
   assert.deepEqual(unresolved, [], 'definition strings with no entry in the table — these would print as keys');
+});
+
+// 🩸 reef#1081. RAW params were the one place the rule above did not reach: the comment said they are
+// "never rendered to a person", and that was true of the editor and false of the agent door. reef-mcp's
+// describe_card_grammar resolves every param's label/hint through `text(cellStrings('en'), …)`, and a
+// literal is returned as written — so an English answer said `bleed` is 「整行」 and the embed focal
+// point is 「預設 `53% 76%`。」. A literal here is Chinese in all nine locales, whoever reads it.
+/** every RAW param in the definition, as [where, def] — universal ones and each type's own */
+function rawParams() {
+  const out = [];
+  for (const [name, p] of Object.entries(UNIVERSAL)) if (p.disposition === DISPOSITION.RAW) out.push([name, p]);
+  for (const [type, def] of Object.entries(CELL_TYPES)) {
+    for (const [name, p] of Object.entries(def.params)) {
+      if (p.disposition === DISPOSITION.RAW && p !== UNIVERSAL[name]) out.push([`${type}.${name}`, p]);
+    }
+  }
+  return out;
+}
+
+test('🔴 reef#1081: every RAW param\'s label and hint is a key in the table — never a literal', () => {
+  const raw = rawParams();
+  assert.ok(raw.length >= 5, `only ${raw.length} RAW params found — the walk measured nothing`);
+  const literal = [];
+  for (const [where, p] of raw) {
+    for (const field of ['label', 'hint']) {
+      if (!Object.prototype.hasOwnProperty.call(CELL_STRINGS_BY_KEY, p[field])) {
+        literal.push(`${where}.${field} = ${JSON.stringify(p[field])}`);
+      }
+    }
+  }
+  assert.deepEqual(literal, [], 'RAW param words written as literals — they print verbatim in every locale');
+});
+
+test('🔴 reef#1081: no param a door can describe resolves to Chinese in English', () => {
+  const en = cellStrings('en');
+  const HAN = /[\u3400-\u9fff]/;
+  const bad = [];
+  const all = [...Object.entries(UNIVERSAL), ...Object.values(CELL_TYPES).flatMap((d) => Object.entries(d.params))];
+  for (const [name, p] of all) {
+    if (p.disposition === DISPOSITION.RETIRED) continue;   // never offered — describe_card_grammar drops it too
+    for (const field of ['label', 'hint']) {
+      const said = text(en, p[field]);
+      if (HAN.test(said)) bad.push(`${name}.${field}: ${JSON.stringify(said)}`);
+    }
+  }
+  assert.deepEqual(bad, [], 'param words that come out Chinese in an English answer');
+  // CONTROL: the pattern sees the literal this test was written for
+  assert.match(text(en, '整行'), HAN);
 });
 
 test('the universal width control is keyed too — it appears on almost every form', () => {
