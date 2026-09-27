@@ -428,6 +428,88 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Sepáralas con comas.', pt: 'Separe cada uma com vírgula.',
   },
 
+  // ── the knobs with no form field ───────────────────────────────────────────────────────────────
+  //
+  // 🩸 reef#1081. RAW params are edited in the raw param string only, so these never reach the
+  // editor's screen — but they DO reach an agent: describe_card_grammar reads every param's label
+  // and hint through this table, in English. They were Chinese literals in ai-ops.mjs, so an English
+  // answer said `bleed` was 「整行」. Same rules as every other row: nine locales, the ban list.
+  'bleed.label': {
+    zh: '獨佔一整行', ja: '1 行まるごと', en: 'Own full row', ko: '한 줄 전체 차지',
+    'zh-Hans': '独占一整行', de: 'Eigene ganze Zeile', fr: 'Ligne entière à part',
+    es: 'Fila entera propia', pt: 'Linha inteira própria',
+  },
+  'bleed.hint': {
+    zh: '有寫就讓這格離開格線、自己佔滿一整行。文字格本來就是這樣，不必寫。',
+    ja: '書くと、このブロックはマス目を離れて 1 行をまるごと使います。テキストは最初からそうなので不要です。',
+    en: 'When present, this tile leaves the grid and takes a whole row to itself. Text tiles already do, so they never need it.',
+    ko: '쓰면 이 블록이 칸을 벗어나 한 줄을 통째로 써요. 글 블록은 원래 그래서 쓸 필요가 없어요.',
+    'zh-Hans': '有写就让这格离开格线、自己占满一整行。文字格本来就是这样，不必写。',
+    de: 'Wenn gesetzt, verlässt diese Kachel das Raster und belegt eine ganze Zeile. Textkacheln tun das ohnehin.',
+    fr: 'Si présent, cette tuile sort de la grille et occupe toute une ligne. Les tuiles de texte le font déjà.',
+    es: 'Si está, este bloque sale de la cuadrícula y ocupa una fila entera. Los bloques de texto ya lo hacen.',
+    pt: 'Se presente, este bloco sai da grade e ocupa uma linha inteira. Os blocos de texto já fazem isso.',
+  },
+  'type.video.title.label': {
+    zh: '標題（備援）', ja: 'タイトル（予備）', en: 'Title (fallback)', ko: '제목（예비）',
+    'zh-Hans': '标题（备用）', de: 'Titel (Ersatz)', fr: 'Titre (de secours)',
+    es: 'Título (de reserva)', pt: 'Título (reserva)',
+  },
+  'type.video.title.hint': {
+    zh: '影片標題那格有填時它就不生效。表單用那一格，這個只為舊的卡片留著。',
+    ja: '動画のタイトル欄が埋まっていると使われません。フォームはそちらを使い、これは既存のカードのために残しています。',
+    en: 'Ignored whenever the video title field is filled in. The form uses that field; this one is kept for existing cards.',
+    ko: '영상 제목 칸이 채워져 있으면 쓰이지 않아요. 양식은 그 칸을 쓰고, 이건 기존 카드를 위해 남겨 둔 거예요.',
+    'zh-Hans': '视频标题那格有填时它就不生效。表单用那一格，这个只为旧的卡片留着。',
+    de: 'Wird ignoriert, sobald das Feld für den Videotitel ausgefüllt ist. Das Formular nutzt jenes Feld; dieses bleibt für bestehende Karten.',
+    fr: 'Ignoré dès que le champ du titre de la vidéo est rempli. Le formulaire utilise ce champ ; celui-ci reste pour les cartes existantes.',
+    es: 'Se ignora cuando el campo del título del vídeo está lleno. El formulario usa ese campo; este queda para tarjetas existentes.',
+    pt: 'É ignorado quando o campo do título do vídeo está preenchido. O formulário usa esse campo; este fica para cartões existentes.',
+  },
+  'type.embed.origin.label': {
+    zh: '焦點', ja: '注目位置', en: 'Focal point', ko: '초점', 'zh-Hans': '焦点',
+    de: 'Bildmittelpunkt', fr: 'Point focal', es: 'Punto focal', pt: 'Ponto focal',
+  },
+  'type.embed.origin.hint': {
+    zh: '圖片哪個位置保持在畫面裡，預設 53% 76%。',
+    ja: '画像のどこを画面に残すか。初期値は 53% 76%。',
+    en: 'Which part of the picture stays in view. Default 53% 76%.',
+    ko: '사진의 어느 부분을 화면에 남길지. 기본값은 53% 76%.',
+    'zh-Hans': '图片哪个位置保持在画面里，默认 53% 76%。',
+    de: 'Welcher Teil des Bildes sichtbar bleibt. Standard 53% 76%.',
+    fr: 'La partie de l’image qui reste visible. Par défaut 53% 76%.',
+    es: 'Qué parte de la imagen queda a la vista. Por defecto 53% 76%.',
+    pt: 'Que parte da imagem fica à vista. Padrão 53% 76%.',
+  },
+  'type.embed.narrow.label': {
+    zh: '窄螢幕焦點', ja: '狭い画面での注目位置', en: 'Focal point on narrow screens',
+    ko: '좁은 화면의 초점', 'zh-Hans': '窄屏焦点', de: 'Bildmittelpunkt auf schmalen Bildschirmen',
+    fr: 'Point focal sur écran étroit', es: 'Punto focal en pantallas estrechas',
+    pt: 'Ponto focal em telas estreitas',
+  },
+  'type.embed.narrow.hint': {
+    zh: '同上，給手機這類窄螢幕用，預設 53% 33%。',
+    ja: '同じく、スマートフォンなど狭い画面用。初期値は 53% 33%。',
+    en: 'The same, for narrow screens such as phones. Default 53% 33%.',
+    ko: '위와 같지만 휴대폰 같은 좁은 화면용. 기본값은 53% 33%.',
+    'zh-Hans': '同上，给手机这类窄屏用，默认 53% 33%。',
+    de: 'Dasselbe für schmale Bildschirme wie Handys. Standard 53% 33%.',
+    fr: 'Pareil, pour les écrans étroits comme les téléphones. Par défaut 53% 33%.',
+    es: 'Lo mismo, para pantallas estrechas como los móviles. Por defecto 53% 33%.',
+    pt: 'O mesmo, para telas estreitas como celulares. Padrão 53% 33%.',
+  },
+  'type.embed.bg.label': {
+    zh: '背景圖', ja: '背景画像', en: 'Background picture', ko: '배경 사진', 'zh-Hans': '背景图',
+    de: 'Hintergrundbild', fr: 'Image de fond', es: 'Imagen de fondo', pt: 'Imagem de fundo',
+  },
+  'type.embed.bg.hint': {
+    zh: '墊在輪播底下的圖。', ja: 'スライドの下に敷く画像。',
+    en: 'A picture laid underneath the slideshow.',
+    ko: '슬라이드 아래에 까는 사진.', 'zh-Hans': '垫在轮播底下的图。',
+    de: 'Ein Bild unter der Diaschau.', fr: 'Une image posée sous le diaporama.',
+    es: 'Una imagen debajo del pase de imágenes.', pt: 'Uma imagem por baixo da apresentação.',
+  },
+
   // ── width, which every tile has ────────────────────────────────────────────────────────────────
   'width.label': {
     zh: '寬度', ja: '幅', en: 'Width', ko: '너비', 'zh-Hans': '宽度',
@@ -497,8 +579,9 @@ export const CELL_STRINGS_ZH = cellStrings('zh');
  * `text(table, value)` — resolve a definition's string.
  *
  * A definition's `title`/`label`/`hint` is a KEY. Anything not in the table is returned as written,
- * which is what keeps the RAW-disposition params (never rendered to a person, see ai-ops.mjs) and
- * any hand-written literal working unchanged.
+ * which keeps a hand-written literal working unchanged. 🩸 RAW-disposition params used to rely on
+ * that, on the grounds that they are never rendered to a person — but an agent door reads them in
+ * English, so they are keys too now (reef#1081), and sandbox-cells.test.mjs refuses a literal.
  */
 export const text = (table, value) => {
   const v = value == null ? '' : String(value);

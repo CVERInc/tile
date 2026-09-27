@@ -60,8 +60,9 @@ const WIDTH = {
 export const UNIVERSAL = {
   w: WIDTH,
   bleed: {
-    disposition: DISPOSITION.RAW, label: '整行',
-    hint: '存在就讓這格跳出 bento、自己佔滿一整行。散文(text)本來就是這樣,不必寫。',
+    // 🩸 RAW params have no form field, but they are not unseen: reef-mcp's describe_card_grammar
+    // hands every param's label/hint to an agent in English. These were Chinese literals (reef#1081).
+    disposition: DISPOSITION.RAW, label: 'bleed.label', hint: 'bleed.hint',
   },
   // 🔴 There is ONE layout model: height comes from content and the renderer sets `grid-row:auto`.
   // `setSpan` wrote an `h` token as late as 2026-07-29, which made drag-to-resize the one path that
@@ -175,7 +176,7 @@ export const CELL_TYPES = {
       // 🔴 The renderer reads this as a FALLBACK behind the body: `b || p.title || hit.title`. Two
       // form fields that both mean "the label" and silently outrank each other is a worse editor
       // than one. Honoured, editable in the raw string, not offered twice.
-      title: { disposition: DISPOSITION.RAW, label: '標題(備援)', hint: 'body 有東西時它不會生效 — 表單用 body,這個留給既有檔案。' },
+      title: { disposition: DISPOSITION.RAW, label: 'type.video.title.label', hint: 'type.video.title.hint' },
       w: WIDTH,
     },
   },
@@ -204,9 +205,9 @@ export const CELL_TYPES = {
       // Positioning knobs for the slider's focal point. Real, honoured, and the kind of thing an
       // author sets once with a picture in front of them — a form field for a CSS `object-position`
       // pair would be a worse UI than the string itself.
-      origin: { disposition: DISPOSITION.RAW, label: '焦點', hint: '預設 `53% 76%`。' },
-      narrow: { disposition: DISPOSITION.RAW, label: '窄螢幕焦點', hint: '預設 `53% 33%`。' },
-      bg: { disposition: DISPOSITION.RAW, label: '背景圖', hint: '輪播底下墊的圖。' },
+      origin: { disposition: DISPOSITION.RAW, label: 'type.embed.origin.label', hint: 'type.embed.origin.hint' },
+      narrow: { disposition: DISPOSITION.RAW, label: 'type.embed.narrow.label', hint: 'type.embed.narrow.hint' },
+      bg: { disposition: DISPOSITION.RAW, label: 'type.embed.bg.label', hint: 'type.embed.bg.hint' },
       w: WIDTH,
     },
   },
