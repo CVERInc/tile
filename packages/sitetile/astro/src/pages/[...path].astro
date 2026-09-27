@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, listedPosts, siteMeta, loadSite, postUrl, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora } from '../lib/blog.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
 
 
@@ -159,6 +159,8 @@ export function getStaticPaths() {
   const seq = new Map(listed.map((p, i) => [p.slug, i]));
   posts.forEach((post) => {
     if (only && !only.has(post.slug)) return;
+    // #31: an absolute permalink is an external canonical — linked from here, built elsewhere.
+    if (!postHasPage(post, meta)) return;
     const at = seq.has(post.slug) ? seq.get(post.slug) : -1;
     const newer = at >= 0 ? (listed[at - 1] || null) : null;
     const older = at >= 0 ? (listed[at + 1] || null) : null;
@@ -235,6 +237,7 @@ export function getStaticPaths() {
     // Every translated post keeps its page; every link off it stays in this locale's listed set.
     const seqL = new Map(listedL.map((p, i) => [p.slug, i]));
     postsL.forEach((post) => {
+      if (!postHasPage(post, metaL)) return; // #31, as above
       const at = seqL.has(post.slug) ? seqL.get(post.slug) : -1;
       const newer = at >= 0 ? (listedL[at - 1] || null) : null;
       const older = at >= 0 ? (listedL[at + 1] || null) : null;

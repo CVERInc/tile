@@ -20,7 +20,7 @@
 // The list is DERIVED from the same globs the routers use, so it cannot claim a page that was
 // never built. That is the whole point of it: the previous defect on this site was an index
 // (hreflang) that asserted pages into existence, and a sitemap is the same promise at larger scale.
-import { allPosts, listedPosts, siteMeta, postUrl, blogBase, tagSlugMap, localeBlogCorpora } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, postUrl, postHasPage, blogBase, tagSlugMap, localeBlogCorpora } from '../lib/blog.mjs';
 import { contentUrls, tagUrls, categoryUrls, canonicalPath } from '../lib/sitemap.mjs';
 import { isSiteFile } from '@sitetile';
 
@@ -46,7 +46,9 @@ export function GET({ site }) {
   for (const u of contentUrls(contentGlob, meta, isSiteFile)) entries.push({ loc: u });
   if (posts.length) {
     entries.push({ loc: canonicalPath(blogBase(meta) || '/') });
-    for (const p of posts) entries.push({ loc: canonicalPath(postUrl(p, meta)), lastmod: p.date || '' });
+    // #31: a post whose permalink points off this site has no page here, and a sitemap may only
+    // name URLs on its own host — so it is left out, not written as origin + permalink.
+    for (const p of posts) if (postHasPage(p, meta)) entries.push({ loc: canonicalPath(postUrl(p, meta)), lastmod: p.date || '' });
   }
   for (const u of tagUrls(posts, meta, tagSlugMap(meta))) entries.push({ loc: u });
   for (const u of categoryUrls(posts, meta)) entries.push({ loc: u });
@@ -60,7 +62,7 @@ export function GET({ site }) {
   for (const { url, meta: metaL, listed: listedL } of localeCorpora) {
     if (!listedL.length) continue;
     entries.push({ loc: canonicalPath(blogBase(metaL) || `/${url}/`) });
-    for (const p of listedL) entries.push({ loc: canonicalPath(postUrl(p, metaL)), lastmod: p.date || '' });
+    for (const p of listedL) if (postHasPage(p, metaL)) entries.push({ loc: canonicalPath(postUrl(p, metaL)), lastmod: p.date || '' });
     for (const u of tagUrls(listedL, metaL, tagSlugMap(metaL))) entries.push({ loc: `/${url}${u}` });
     for (const u of categoryUrls(listedL, metaL)) entries.push({ loc: `/${url}${u}` });
   }

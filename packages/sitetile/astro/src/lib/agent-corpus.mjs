@@ -19,6 +19,7 @@ import {
   blogInstalled,
   listedPosts,
   localeBlogCorpora,
+  postHasPage,
   postUrl,
   siteMeta,
   toPath,
@@ -74,9 +75,10 @@ function buildCorpus() {
   pages.sort((a, b) => a.path.localeCompare(b.path));
 
   const posts = [];
-  for (const post of listed) posts.push({ path: canonicalPath(postUrl(post, meta)), post });
+  // #31: a post with an absolute permalink has no page (and so no route document) on this site.
+  for (const post of listed) if (postHasPage(post, meta)) posts.push({ path: canonicalPath(postUrl(post, meta)), post });
   for (const corpus of localeCorpora) {
-    for (const post of corpus.listed) posts.push({ path: canonicalPath(postUrl(post, corpus.meta)), post });
+    for (const post of corpus.listed) if (postHasPage(post, corpus.meta)) posts.push({ path: canonicalPath(postUrl(post, corpus.meta)), post });
   }
 
   const home = pages.find((p) => p.path === '/');

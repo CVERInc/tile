@@ -24,7 +24,8 @@ registerHooks({
   },
 });
 
-const { blogBase, postUrl, categoryBase, tagBase, authorBase } = await import('./astro/src/lib/blog.mjs');
+const { blogBase, postUrl, categoryBase, tagBase, authorBase, isExternalUrl, postHasPage, absoluteUrl, gatedPostPaths } = await import('./astro/src/lib/blog.mjs');
+const { buildFeedBody } = await import('./astro/src/lib/public-artifacts.mjs');
 const { takeDropWarnings } = await import('./site-core.js');
 
 let passed = 0;
@@ -110,6 +111,42 @@ test('🔴 categoryBase/tagBase/authorBase: a disallowed scheme degrades to the 
   assert.equal(authorBase({ 'blog-author-base': 'javascript:alert(2)' }), '/author');
   const drops = takeDropWarnings();
   assert.equal(drops.length, 3, 'all three disallowed bases must be recorded as drops');
+});
+
+// ---- #31: an absolute permalink is an external canonical, not a route ----
+// postUrl() rightly returns a safe absolute permalink verbatim (above). What broke was every
+// caller that then treated that value as a path on THIS site: getStaticPaths made a route of it
+// (the build died with NoMatchingStaticPathFound) and the sitemap/feed wrote origin + permalink.
+const MIGRATED = 'https://old-site.example/2019/01/my-post/';
+test('isExternalUrl: a scheme or a network-path reference is external; a site path is not', () => {
+  for (const u of [MIGRATED, 'http://x.example/', 'mailto:a@b.example', '//cdn.example/p', '/\\evil.example/p', ' https://x.example/', 'ht\ttps://x.example/']) {
+    assert.equal(isExternalUrl(u), true, JSON.stringify(u));
+  }
+  for (const u of ['/devlog/my-post', '/2019/01/my-post/', '/', '', 'devlog/my-post', '/a:b']) {
+    assert.equal(isExternalUrl(u), false, JSON.stringify(u));
+  }
+});
+test('🔴 postHasPage: a post with a safe absolute permalink has no page here; every other post does', () => {
+  assert.equal(postHasPage(post({ permalink: MIGRATED }), {}), false);
+  assert.equal(postHasPage(post({ permalink: '//old-site.example/my-post/' }), {}), false);
+  assert.equal(postHasPage(post({}), {}), true);
+  assert.equal(postHasPage(post({ permalink: '/archive/deep/my-post' }), {}), true, 'a site-relative permalink is still a route');
+  assert.equal(postHasPage(post({ permalink: 'javascript:void(0)' }), {}), true, 'a DROPPED permalink falls back to the pattern URL, which is ours');
+});
+test('🔴 absoluteUrl: a path is resolved against the origin, an absolute url is used as written — never glued on', () => {
+  assert.equal(absoluteUrl('https://example.com', '/devlog/my-post'), 'https://example.com/devlog/my-post');
+  assert.equal(absoluteUrl('https://example.com', MIGRATED), MIGRATED);
+  assert.equal(absoluteUrl('', '/devlog/my-post'), '/devlog/my-post');
+});
+test('🔴 buildFeedBody: the item <link> for an absolute permalink is the permalink, not origin + permalink', () => {
+  const xml = buildFeedBody([post({ permalink: MIGRATED }), post({ slug: 'local' })], {}, 'https://example.com');
+  assert.ok(xml.includes(`<link>${MIGRATED}</link>`), 'absolute permalink used verbatim');
+  assert.ok(!xml.includes(`https://example.com${MIGRATED}`), 'no origin-glued URL');
+  assert.ok(xml.includes('<link>https://example.com/devlog/local</link>'), 'a normal post still resolves against the origin');
+});
+test('gatedPostPaths: a private post with an absolute permalink contributes no gated path (it has no page here to gate)', () => {
+  const paths = gatedPostPaths([post({ visibility: 'private', permalink: MIGRATED }), post({ slug: 'p2', visibility: 'private' })], {});
+  assert.deepEqual(paths, ['/devlog/p2']);
 });
 
 console.log(`\nblog-url-gating: ${passed} passed${process.exitCode ? ', SOME FAILED' : ', all green'}`);
