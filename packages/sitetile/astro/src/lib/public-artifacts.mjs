@@ -1,4 +1,5 @@
 import {
+  absoluteUrl,
   blogBase,
   blogSearchOn,
   feedDescription,
@@ -23,7 +24,7 @@ export function buildFeedBody(posts, meta, origin = '') {
   const siteAuthor = String(meta['blog-author'] || '').trim();
   const items = publicPosts.map((p) => ({
     title: p.title,
-    url: origin + postUrl(p, meta),
+    url: absoluteUrl(origin, postUrl(p, meta)), // #31: an absolute permalink is used as written
     description: p.description,
     date: p.date,
     author: String(p.author || '').trim() || siteAuthor,

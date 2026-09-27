@@ -215,7 +215,8 @@ export function isPrivatePost(post) {
 // Exact post paths selected by the same postUrl() builder that emits the page route. The build
 // seam consumes this set; it never reconstructs a permalink from a slug or a URL family.
 export function gatedPostPaths(posts, meta) {
-  return [...new Set((posts || []).filter(isPrivatePost).map((post) => {
+  // An external-canonical post (#31) has no page here, so there is no path of ours to gate.
+  return [...new Set((posts || []).filter((post) => isPrivatePost(post) && postHasPage(post, meta)).map((post) => {
     const path = toPath(postUrl(post, meta));
     return path ? `/${path}` : '/';
   }))];
@@ -1095,6 +1096,36 @@ export function postUrl(post, meta) {
     // collapse any `//` left by an empty token; a real trailing slash survives (single /).
     .replace(/\/{2,}/g, '/');
   return safeHref(url) ?? canonical;
+}
+
+// #31: a SAFE absolute permalink (`https://old-site.example/2019/01/my-post/` — the documented
+// migration case, a post that is still canonical where it used to live) passes postUrl()'s gate
+// verbatim, which is right for a LINK and wrong for everything that treated the result as a path
+// on this site: getStaticPaths turned it into the route `https:/old-site.example/…`, which Astro
+// then could not match (NoMatchingStaticPathFound — the whole build failed), and the sitemap and
+// feed wrote `origin + permalink`, two URLs glued into one invalid one. Such a post is an
+// EXTERNAL CANONICAL: it is listed and linked like any other, but it has no page here, the sitemap
+// (same-host URLs only, by the protocol) leaves it out, and the feed links to it as written.
+//
+// "External" is anything that does not resolve against this site's own path space: a value with
+// a scheme, or a network-path reference (`//host/…`, and `/\host/…`, which a browser resolves the
+// same way — the same normalisation isSafeInternalPath applies). Tab/LF/CR are stripped first
+// because a URL parser drops them before it resolves anything.
+export function isExternalUrl(u) {
+  const s = String(u == null ? '' : u).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/').trimStart();
+  return /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('//');
+}
+
+// Whether this post gets a page of its own on this site — false exactly when postUrl() points
+// off it. Every caller that turns a post into a ROUTE or a same-site URL asks this first.
+export function postHasPage(post, meta) {
+  return !isExternalUrl(postUrl(post, meta));
+}
+
+// An absolute URL for a post-or-site url in a document that needs one (rss.xml): a path is
+// resolved against the site origin, an external url is already absolute and is used as written.
+export function absoluteUrl(origin, u) {
+  return isExternalUrl(u) ? String(u) : `${origin || ''}${u}`;
 }
 
 // indexUrl: the blog index URL for page `n`. Page 1 = the base itself (root '' → '/');

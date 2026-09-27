@@ -388,10 +388,21 @@ function siteWideSchemeHits(distDir, allPages, rssBody, sitemapBody) {
   for (const page of allPages) {
     for (const hit of disallowedSchemeHits(readFileSync(page, 'utf8'))) hits.push(`${page.slice(distDir.length + 1)}: ${hit}`);
   }
+  // #31: these two files write `origin + url`, so a value built from a hostile or absolute url
+  // does not START with its scheme — it starts with the site's origin (`https://example.com` +
+  // `javascript:void(0)`). A scan anchored at `^` could only ever see a value nobody emits, which
+  // is why it needed a separate, hand-written `includes('javascript:')` per file to catch
+  // R4-P1-1. Unanchored now, plus the concatenation shape itself: an authority holding a colon
+  // that is not a port (`https://example.comhttps://old-site.example/…`) is two URLs glued
+  // together, whatever the second one's scheme is.
   for (const [label, body, tag] of [['rss.xml', rssBody, 'link'], ['sitemap.xml', sitemapBody, 'loc']]) {
     const re = new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g');
     let m;
-    while ((m = re.exec(body || ''))) if (/^\s*(javascript:|vbscript:)/i.test(m[1])) hits.push(`${label}: <${tag}>${m[1].slice(0, 160)}`);
+    while ((m = re.exec(body || ''))) {
+      if (/(javascript:|vbscript:)/i.test(m[1]) || /^\s*[a-z][a-z0-9+.-]*:\/\/[^/?#]*:(?!\d)/i.test(m[1])) {
+        hits.push(`${label}: <${tag}>${m[1].slice(0, 160)}`);
+      }
+    }
   }
   for (const file of ['search-index.json', 'reef-posts.json']) {
     const p = join(distDir, file);
@@ -475,6 +486,7 @@ const OWNER_HEADERS = '/*\n  X-Frame-Options: DENY\n\n/blog/*\n  Cache-Control: 
 // dist-*/the fixture dir itself) rather than hand-duplicated, so it can never silently drift from
 // the real component tree; node_modules is a SYMLINK (never copied — same install, no second
 // `npm install`, and this build never writes into it) back to the real one.
+const MIGRATED_PERMALINK = 'https://old-site.example/2019/01/migrated-post/';
 function buildHostileBlogFixture() {
   // A SIBLING of `astro/` (not nested inside it — cpSync refuses to copy a directory into its own
   // subtree, and the astro.config.mjs aliases are relative to the config file's OWN location, so
@@ -542,6 +554,21 @@ tags: [news]
 ---
 
 Body text for the safe control post — no permalink override of its own.
+`, 'utf8');
+  // #31: a SAFE absolute permalink — the documented migration case, a post that still lives on
+  // the old site. It has no page on this one: the build must not try to emit a route for it
+  // (Astro failed the whole build with NoMatchingStaticPathFound), links to it are the URL
+  // verbatim, and the sitemap — same-host URLs only, by the protocol — leaves it out rather than
+  // writing `origin + permalink`.
+  writeFileSync(join(HDIR, 'blog', 'migrated-post.md'), `---
+title: Migrated post
+pubDate: 2026-01-04
+permalink: ${MIGRATED_PERMALINK}
+categories: [team]
+tags: [news]
+---
+
+Body text for the migrated post, which is canonical on the old site.
 `, 'utf8');
   // round 5 (R4-P3-2): a post's featured image is its FIRST body image, extracted straight off a
   // markdown regex with no gate — reached a live blog-card <img src> even though the SAME image,
@@ -1518,7 +1545,31 @@ const checks = [
     existsSync(join(HDIST, 'category', 'team', 'index.html')) && /Team|team/.test(hostileCategoryArchive)],
   ['hostile-blog-site: search-index.json (blog-search: true here) carries a safe `u` for every row', () => {
     const rows = JSON.parse(readFileSync(join(HDIST, 'search-index.json'), 'utf8'));
-    return rows.length === 3 && rows.every((r) => typeof r.u === 'string' && !r.u.includes('javascript:'));
+    return rows.length === 4 && rows.every((r) => typeof r.u === 'string' && !r.u.includes('javascript:'));
+  }],
+  // -- #31: a safe absolute permalink is an external canonical, not a route --------------------
+  ['🔴 hostile-blog-site: a post with an absolute permalink gets NO page of its own — no directory named after its scheme or host, none at its slug', () =>
+    !existsSync(join(HDIST, 'https:')) && !existsSync(join(HDIST, 'https'))
+    && !existsSync(join(HDIST, 'old-site.example')) && !existsSync(join(HDIST, 'diary', 'migrated-post'))],
+  ['🔴 hostile-blog-site: the blog index links the absolute permalink verbatim', () =>
+    hostileIndex.includes(`<a class="bl-entry-link" href="${MIGRATED_PERMALINK}">`)],
+  ['🔴 hostile-blog-site: rss.xml gives the absolute permalink as the item <link> verbatim, not glued onto the origin', () =>
+    hostileRss.includes(`<link>${MIGRATED_PERMALINK}</link>`) && !hostileRss.includes(`https://example.com${MIGRATED_PERMALINK}`)],
+  ['🔴 hostile-blog-site: sitemap.xml omits the absolute permalink, and every <loc> it does emit is on this site\'s own origin', () => {
+    const locs = [...hostileSitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+    assert.ok(locs.length > 0, 'the sitemap lists something');
+    assert.deepEqual(locs.filter((l) => !l.startsWith('https://example.com/')), [], 'these <loc>s are not on the site origin');
+    return !hostileSitemap.includes('old-site.example');
+  }],
+  ['🔴 the feed scan sees an origin-glued URL: siteWideSchemeHits flags `origin + absolute` and `origin + javascript:` in rss/sitemap, and passes a clean pair', () => {
+    const dirty = siteWideSchemeHits(HDIST, [],
+      `<link>https://example.com${MIGRATED_PERMALINK}</link><link>https://example.comjavascript:void(0)</link>`,
+      '<loc>https://example.comhttps://old-site.example/x/</loc>');
+    const clean = siteWideSchemeHits(HDIST, [],
+      `<link>${MIGRATED_PERMALINK}</link><link>https://example.com:8443/diary/</link>`,
+      '<loc>https://example.com/diary/</loc>');
+    return dirty.filter((h) => /^(rss|sitemap)\.xml:/.test(h)).length === 3
+      && clean.filter((h) => /^(rss|sitemap)\.xml:/.test(h)).length === 0;
   }],
   // round 5 (R4-P3-2): the SVG-featured-image post's card must render with NO <img> at all (the
   // gate at parsePost's own declaration means the ENTRY still shows — only the image drops).
