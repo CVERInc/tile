@@ -1749,6 +1749,45 @@ test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, a
   }
 });
 
+test('🔴 tile#30 — linear on 1 MiB of ONE soft-wrapped paragraph (no comment syntax needed)', () => {
+  // 🩸 bodyHtml's paragraph soft-join grew one string with `+=` and asked it `endsWith(BR)` and
+  // `slice(-1)` on every line. `+=` builds a rope; asking a rope for its last character flattens it,
+  // so every line copied the whole paragraph so far — quadratic in the paragraph's size. Measured on
+  // main before the fix: 256 KiB → 1 MiB of plain words went 0.7s → 8.5s, of `--> line` 1.5s → 27s.
+  // Nothing about comments is needed to hit it: one long paragraph of ordinary prose is enough.
+  // One shape per branch of the join rule — the space gap, the CJK no-gap, the hard break (`  `
+  // at line end), and the `--> line` shape the issue names — so no one branch can keep the old cost.
+  // countIndexOfBudget is not used: the cost here never ran through indexOf.
+  const shapes = [
+    { name: 'plain words', unit: 'plain words in one long paragraph\n' },
+    { name: '--> line', unit: '--> line\n' },
+    { name: 'CJK soft wrap', unit: '日本語の文章です\n' },
+    { name: 'hard breaks', unit: 'hard break here  \n' },
+  ];
+  for (const { name, unit } of shapes) {
+    const at = (bytes) => unit.repeat(Math.max(1, Math.floor(bytes / Buffer.byteLength(unit))));
+    const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
+    assert.ok(cpuRatio <= 4, `${name}: expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+    const t0 = process.hrtime.bigint();
+    bodyHtml(at(1048576));
+    const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(t1m < 5000, `${name}: expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
+  }
+});
+
+test('tile#30 — the soft-join answer itself is unchanged: space, CJK no-gap, bullet, hard break', () => {
+  // The join was rewritten for speed; the rule it applies must be byte-identical to before.
+  assert.equal(bodyHtml('one\ntwo\nthree'), '<p>one two three</p>');
+  assert.equal(bodyHtml('制作は、\nあなたの'), '<p>制作は、あなたの</p>');
+  assert.equal(bodyHtml('Brand\nです'), '<p>Brand です</p>');
+  assert.equal(bodyHtml('前文\n・A\n・B'), '<p>前文<br>・A<br>・B</p>');
+  assert.equal(bodyHtml('line one  \nline two\nline three'), '<p>line one<br>line two line three</p>');
+  assert.equal(bodyHtml('ends  \n・bullet'), '<p>ends<br>・bullet</p>');
+  // A hard break on a MIDDLE line, then a bullet: the only place the "already ends in a break" check
+  // is visible — after a plain space gap, the split below would have hidden a missed check anyway.
+  assert.equal(bodyHtml('a  \nb  \n・c'), '<p>a<br>b<br>・c</p>');
+});
+
 test('🔴 #496 round 3 — R2-P1-02: a comment spanning a BLANK LINE is removed whole, not leaked in half', () => {
   // The review's own failing input. Round 2 (pre-fix): '<p>Hello.</p>\n<p></p>\n<p>more notes --&gt;</p>\n<p>Bye.</p>'
   // — the opening half silently deleted, "more notes" leaked onto the page. Fixed: byte-identical to
