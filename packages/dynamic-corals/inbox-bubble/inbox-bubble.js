@@ -371,6 +371,174 @@ export const COPY = {
 		newConversation: '新对话',
 		backToHuman: '回到真人对话',
 		handoffEnded: '上次的对话已结束'
+	},
+	// 🔴 The five below arrived 2026-09-27 (tile #14): a German site set its own title and
+	// placeholder through data-*, and every other word in the panel — Send, the errors, the status
+	// line, the accessible names — came out English beside them, because these keys did not exist
+	// and `resolveLocale` fell through to `en`. They are feelreef's console locales (the same nine
+	// cardtile's sandbox speaks), in the same register cardtile already chose for each: Sie, vous,
+	// tú, você, 해요체. The test that keeps this from recurring asks cardtile's list, not this one.
+	de: {
+		ask: 'Etwas zu dieser Website fragen…',
+		asking: 'Wird gesucht…',
+		source: 'Woher das stammt',
+		refused: 'Dazu liegt mir nichts vor.',
+		toHuman: 'Lieber einen Menschen fragen',
+		toHumanAfterRefusal: 'An einen Menschen weitergeben',
+		sentToHuman: 'An einen Menschen weitergegeben — die Antwort erscheint hier.',
+		name: 'Name (optional)',
+		email: 'E-Mail (optional)',
+		emailNote: 'Hinterlassen Sie Ihre E-Mail-Adresse, um die Antwort des Betreibers per E-Mail zu erhalten. Ohne sie sehen Sie Antworten nur, wenn Sie auf diese Seite zurückkehren.',
+		cancel: 'Abbrechen',
+		open: 'Nachricht senden',
+		title: 'Nachricht hinterlassen',
+		placeholder: 'Ihre Frage…',
+		send: 'Senden',
+		sending: 'Wird gesendet…',
+		stored: 'Angekommen — Ihre Nachricht ist gespeichert.',
+		within: (h) => `Antwort meist innerhalb von ${h} Stunden.`,
+		you: 'Sie',
+		them: 'Antwort',
+		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
+		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
+		closed: 'Schließen',
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
+		statusHandedOffEmail: 'An den Betreiber weitergegeben — die Antwort kommt per E-Mail.',
+		statusHandedOffNoEmail: 'An den Betreiber weitergegeben — die Antwort erscheint hier.',
+		askAgain: (a) => `${a} noch einmal fragen`,
+		newConversation: 'Neues Gespräch beginnen',
+		backToHuman: 'Zurück zu Ihrem Gespräch',
+		handoffEnded: 'Ihr letztes Gespräch ist beendet.'
+	},
+	fr: {
+		ask: 'Une question sur ce site…',
+		asking: 'Je cherche…',
+		source: 'D’où cela vient',
+		refused: 'Je n’ai rien à ce sujet.',
+		toHuman: 'Plutôt demander à une personne',
+		toHumanAfterRefusal: 'Transmettre à une personne',
+		sentToHuman: 'Transmis à une personne — la réponse s’affichera ici.',
+		name: 'Nom (facultatif)',
+		email: 'E-mail (facultatif)',
+		emailNote: 'Laissez votre e-mail pour recevoir la réponse du responsable du site par e-mail. Sans lui, vous ne verrez les réponses qu’en revenant sur cette page.',
+		cancel: 'Annuler',
+		open: 'Nous écrire',
+		title: 'Laisser un message',
+		placeholder: 'Posez votre question…',
+		send: 'Envoyer',
+		sending: 'Envoi…',
+		stored: 'Bien reçu — votre message est enregistré.',
+		within: (h) => `Réponse habituellement sous ${h} heures.`,
+		you: 'Vous',
+		them: 'Réponse',
+		error: 'L’envoi a échoué. Veuillez réessayer.',
+		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
+		closed: 'Fermer',
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
+		statusHandedOffEmail: 'Transmis au responsable du site — la réponse arrivera par e-mail.',
+		statusHandedOffNoEmail: 'Transmis au responsable du site — la réponse s’affichera ici.',
+		askAgain: (a) => `Redemander à ${a}`,
+		newConversation: 'Nouvelle conversation',
+		backToHuman: 'Revenir à votre conversation',
+		handoffEnded: 'Votre dernière conversation est terminée.'
+	},
+	es: {
+		ask: 'Pregunta sobre este sitio…',
+		asking: 'Buscando…',
+		source: 'De dónde sale esto',
+		refused: 'No tengo nada registrado sobre eso.',
+		toHuman: 'Mejor preguntar a una persona',
+		toHumanAfterRefusal: 'Enviar esto a una persona',
+		sentToHuman: 'Enviado a una persona: la respuesta aparecerá aquí.',
+		name: 'Nombre (opcional)',
+		email: 'Correo (opcional)',
+		emailNote: 'Deja tu correo para recibir por email la respuesta del responsable del sitio. Sin él, solo verás las respuestas si vuelves a esta página.',
+		cancel: 'Cancelar',
+		open: 'Escríbenos',
+		title: 'Deja un mensaje',
+		placeholder: 'Escribe tu pregunta…',
+		send: 'Enviar',
+		sending: 'Enviando…',
+		stored: 'Recibido: hemos guardado tu mensaje.',
+		within: (h) => `Suele responder en menos de ${h} horas.`,
+		you: 'Tú',
+		them: 'Respuesta',
+		error: 'No se ha podido enviar. Inténtalo de nuevo.',
+		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
+		closed: 'Cerrar',
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
+		statusHandedOffEmail: 'Enviado al responsable del sitio: te responderá por correo.',
+		statusHandedOffNoEmail: 'Enviado al responsable del sitio: la respuesta aparecerá aquí.',
+		askAgain: (a) => `Volver a preguntar a ${a}`,
+		newConversation: 'Empezar una conversación nueva',
+		backToHuman: 'Volver a tu conversación',
+		handoffEnded: 'Tu última conversación ha terminado.'
+	},
+	'pt-br': {
+		ask: 'Pergunte sobre este site…',
+		asking: 'Procurando…',
+		source: 'De onde vem isto',
+		refused: 'Não tenho registro sobre isso.',
+		toHuman: 'Prefiro perguntar a uma pessoa',
+		toHumanAfterRefusal: 'Enviar para uma pessoa',
+		sentToHuman: 'Enviado para uma pessoa — a resposta vai aparecer aqui.',
+		name: 'Nome (opcional)',
+		email: 'E-mail (opcional)',
+		emailNote: 'Deixe seu e-mail para receber a resposta do responsável pelo site por e-mail. Sem ele, você só vê as respostas voltando a esta página.',
+		cancel: 'Cancelar',
+		open: 'Fale conosco',
+		title: 'Deixe uma mensagem',
+		placeholder: 'Digite sua pergunta…',
+		send: 'Enviar',
+		sending: 'Enviando…',
+		stored: 'Recebido — sua mensagem foi salva.',
+		within: (h) => `Costuma responder em até ${h} horas.`,
+		you: 'Você',
+		them: 'Resposta',
+		error: 'Não foi possível enviar. Tente de novo.',
+		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
+		closed: 'Fechar',
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
+		statusHandedOffEmail: 'Enviado ao responsável pelo site — a resposta chega por e-mail.',
+		statusHandedOffNoEmail: 'Enviado ao responsável pelo site — a resposta vai aparecer aqui.',
+		askAgain: (a) => `Perguntar de novo a ${a}`,
+		newConversation: 'Começar uma nova conversa',
+		backToHuman: 'Voltar para a sua conversa',
+		handoffEnded: 'Sua última conversa foi encerrada.'
+	},
+	ko: {
+		ask: '이 사이트에 대해 물어보세요…',
+		asking: '찾아보는 중…',
+		source: '이 내용의 출처',
+		refused: '그 부분에 대한 기록이 없어요.',
+		toHuman: '사람에게 물어볼래요',
+		toHumanAfterRefusal: '사람에게 전달하기',
+		sentToHuman: '사람에게 전달했어요. 답장은 여기에 표시돼요.',
+		name: '이름 (선택)',
+		email: '이메일 (선택)',
+		emailNote: '이메일을 남기면 운영자의 답장을 이메일로 받을 수 있어요. 남기지 않으면 이 페이지에 다시 와야만 답장을 볼 수 있어요.',
+		cancel: '취소',
+		open: '메시지 보내기',
+		title: '메시지 남기기',
+		placeholder: '궁금한 점을 적어 주세요…',
+		send: '보내기',
+		sending: '보내는 중…',
+		stored: '받았어요. 메시지를 저장했어요.',
+		within: (h) => `보통 ${h}시간 안에 답장해요.`,
+		you: '나',
+		them: '답장',
+		error: '보내지 못했어요. 다시 시도해 주세요.',
+		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
+		closed: '닫기',
+		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
+		// name is owner-chosen at runtime. A label-style sentence without it reads naturally.
+		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}먼저 답하고, 보내면 사람이 읽어요`,
+		statusHandedOffEmail: '운영자에게 전달했어요. 답장은 이메일로 와요.',
+		statusHandedOffNoEmail: '운영자에게 전달했어요. 답장은 여기에 표시돼요.',
+		askAgain: (a) => `${a}에게 다시 묻기`,
+		newConversation: '새 대화 시작하기',
+		backToHuman: '대화로 돌아가기',
+		handoffEnded: '지난 대화는 종료되었어요.'
 	}
 };
 
@@ -390,7 +558,8 @@ export const COPY = {
  *     REEF's own default per the owner's zh-TW-first sites
  *   - `zh-tw`/`zh-hk`/`zh-mo` region without a script subtag → Traditional
  *   - `zh-cn`/`zh-sg` region without a script subtag → Simplified
- *   - otherwise the bare primary subtag (`ja`, `en`, …), then English
+ *   - any `pt` tag (`pt`, `pt-BR`, `pt-PT`) → `pt-br`, the one Portuguese table
+ *   - otherwise the bare primary subtag (`ja`, `de`, `ko`, …), then English
  */
 export function resolveLocale(lang) {
 	const declared = String(lang || 'en').toLowerCase();
@@ -404,6 +573,9 @@ export function resolveLocale(lang) {
 		if (parts.includes('cn') || parts.includes('sg')) return 'zh-cn';
 		return 'zh-tw';
 	}
+	// Portuguese has one table, Brazilian (the one the platform ships). A pt-PT page reads it far
+	// more comfortably than it reads English, so every `pt-*` tag lands there.
+	if (primary === 'pt') return 'pt-br';
 	return COPY[primary] ? primary : 'en';
 }
 

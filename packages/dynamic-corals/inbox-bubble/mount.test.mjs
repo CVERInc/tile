@@ -280,6 +280,24 @@ test('B11: a mount whose panel is open still answers the event, and the stored h
 // reachable by any script the site loads, third-party ones included. What removing the event took
 // away is the in-place, invisible version — not the capability.
 
+test('tile #14: a de-DE page with a German title and placeholder gets German chrome, not English', async () => {
+	// The reported panel: reef's marketing site sets these two through data-*, and until tile #14
+	// everything else in the panel — Send, Close, the bubble's own name — was English beside them.
+	document.documentElement.setAttribute('lang', 'de-DE');
+	try {
+		const { root } = await mountFresh({ 'data-title': 'Schreiben Sie uns', 'data-placeholder': 'Ihre Nachricht…' });
+		assert.match(root.innerHTML, /aria-label="Nachricht senden"/, 'the closed bubble is named in English');
+		openBubble(root);
+		const html = root.innerHTML;
+		assert.match(html, /aria-label="Schreiben Sie uns"/);
+		assert.match(html, />Senden</, 'the Send button is not German');
+		assert.match(html, /aria-label="Schließen"/, 'the close button is not named in German');
+		assert.doesNotMatch(html, />Send<|aria-label="Close"/, 'English chrome beside a German title');
+	} finally {
+		document.documentElement.setAttribute('lang', 'en');
+	}
+});
+
 test('B3: the only window listener names no conversation, and no export takes a handle', async () => {
 	const api = await import('./inbox-bubble.js');
 	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });

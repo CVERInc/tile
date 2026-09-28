@@ -22,8 +22,12 @@ a support department, and nearly every REEF customer is one person.
 | `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides |
 
 Words default from the PAGE's `<html lang>` — the site's own statement about who
-it is for, not a guess and not the visitor's browser preference. Unknown language
-falls back to English.
+it is for, not a guess and not the visitor's browser preference. The panel speaks
+the platform's nine locales — English, Traditional and Simplified Chinese, Japanese,
+Korean, German, French, Spanish and Brazilian Portuguese (any `pt-*` page gets the
+Brazilian table); any other language falls back to English. Before tile #14 only
+the first four existed, so a `de-DE` page that set its own `data-title` got a German
+heading above an English Send button.
 
 From 0.7.3 the ask panel says two things, not four (owner ruling 2026-09-07,
 「太囉唆」): the status line under the site name —「\<名字\>**AI**先回，轉出去真人會看」—
