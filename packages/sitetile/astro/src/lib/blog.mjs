@@ -572,11 +572,20 @@ const KNOWN_DATE_FORMATS = ['ymd-slash', 'cjk', 'cjk-full', 'cjk-badge', 'cjk-md
 // own Intl default everywhere else — an English page on the same multilingual site keeps reading
 // "July 13, 2024", not "2024 年 7 月 13 日". `ymd-slash` carries no script, so it is exempt from this
 // gate and always applies, on every locale, as before.
+// The gate reads the page's DECLARED `lang:`, not its content: a single-language site that declares
+// a non-CJK `lang:` (a template default `lang: en` left in place over Chinese posts) and sets
+// `blog-date-format: cjk-md` renders "August 5, 2026", not "8月5日". Such a site fixes its `lang:`
+// (which is also what its <html lang> should say) — the format alone cannot opt an English page into
+// CJK dates (github.com/CVERInc/tile#36 item 2).
 const CJK_DATE_FORMATS = new Set(['cjk-full', 'cjk-badge', 'cjk-md']);
 // Primary BCP-47 subtag test, done on the page's OWN raw `lang:` value (whatever an author wrote —
 // `ja-JP`, `zh-Hant`, `zh-TW`, bare `zh`…) rather than routing it through toBcp47() first, so a
 // tag toBcp47 cannot canonicalise (an unrecognised or malformed value) still gets a straight answer
 // here instead of silently reading as non-CJK.
+// Known, recorded disagreement (tile#36 item 3): Intl in localeDefaultDate reads toBcp47(lang), so on
+// malformed or ISO 639-2/3 spellings the two can differ — `ja_JP` is CJK here but Intl rejects it
+// (English default), and `jpn`/`zho`/`yue` are not CJK here while Intl's default renders them in
+// CJK. Neither throws nor renders blank; a well-formed BCP-47 `lang:` gets one consistent answer.
 function isCJKLang(lang) {
   const primary = String(lang || '').toLowerCase().split(/[-_]/)[0];
   return primary === 'ja' || primary === 'ko' || primary === 'zh';
