@@ -130,9 +130,77 @@ test('resolveLocale resolves real-world zh BCP-47 tags, not just the exact key',
 });
 
 test('resolveLocale falls back to English only for a genuinely unknown tag', () => {
-	assert.equal(resolveLocale('ko'), 'en');
+	// `ko` stood here until tile #14 — as the example of an unknown tag, which is exactly the
+	// bug: the platform ships Korean. Italian is a language it does not ship.
+	assert.equal(resolveLocale('it'), 'en');
+	assert.equal(resolveLocale('xx-YY'), 'en');
 	assert.equal(resolveLocale(''), 'en');
 	assert.equal(resolveLocale(undefined), 'en');
+});
+
+// ── tile #14: a German page got a German title beside an English Send button ──────────────────
+//
+// 🔴 THE LIST IS ASKED, NOT TYPED. What "the locales the platform ships" means is written down
+// once, in cardtile's sandbox (feelreef's nine console locales, each with the BCP-47 tag a page of
+// that language carries). A hand-typed list here would be a second copy of that fact, and the
+// day a tenth locale lands there it would go on passing while that locale's panel spoke English.
+
+const { SANDBOX_LOCALES } = await import('../../cardtile/w/sandbox-i18n.mjs');
+const PLATFORM_TAGS = Object.values(SANDBOX_LOCALES).map((l) => l.lang);
+
+test('the platform locale list this test reads is really there', () => {
+	// A guard on the guard: if the import ever resolved to an empty or tagless table, every loop
+	// below would pass by iterating nothing. At least the nine of 2026-09-05; more is fine.
+	assert.ok(PLATFORM_TAGS.length >= 9, `only ${PLATFORM_TAGS.length} platform locales`);
+	for (const tag of PLATFORM_TAGS) assert.match(String(tag), /^[a-z]{2,3}(-[A-Za-z0-9]+)*$/);
+});
+
+test('every locale the platform ships resolves to a COPY table in its own language, never English', () => {
+	for (const tag of PLATFORM_TAGS) {
+		const key = resolveLocale(tag);
+		assert.ok(COPY[key], `${tag} → "${key}", which has no COPY table`);
+		// Same primary language subtag: `ko-KR` must not land on `en`, and `zh-Hans` must land on
+		// a `zh` table. (Which zh table is pinned by the zh tests above.)
+		assert.equal(key.split('-')[0], tag.toLowerCase().split('-')[0],
+			`${tag} resolved to "${key}" — the panel would speak a language the page does not`);
+	}
+});
+
+test('the region and the bare language both find the table, not only the exact tag', () => {
+	assert.equal(resolveLocale('de'), 'de');
+	assert.equal(resolveLocale('de-AT'), 'de');
+	assert.equal(resolveLocale('fr-CA'), 'fr');
+	assert.equal(resolveLocale('es-MX'), 'es');
+	assert.equal(resolveLocale('ko'), 'ko');
+	assert.equal(resolveLocale('pt-BR'), 'pt-br');
+	assert.equal(resolveLocale('pt'), 'pt-br');
+	assert.equal(resolveLocale('pt-PT'), 'pt-br');
+});
+
+test('every COPY table carries every string English carries, as the same kind of value', () => {
+	// A missing key is not a crash here — `copy.send` is just `undefined` and the button says
+	// "undefined". So parity is asserted key by key, and every function is called.
+	for (const [locale, table] of Object.entries(COPY)) {
+		for (const [key, value] of Object.entries(COPY.en)) {
+			assert.ok(Object.prototype.hasOwnProperty.call(table, key), `${locale} missing "${key}"`);
+			assert.equal(typeof table[key], typeof value, `${locale}.${key} is a ${typeof table[key]}`);
+			const out = typeof value === 'function' ? table[key]('小美') : table[key];
+			assert.equal(typeof out, 'string', `${locale}.${key}`);
+			assert.ok(out.trim().length > 0, `${locale}.${key} is empty`);
+		}
+		// `statusFor` emits the chip whether or not the token is there (non-removable by
+		// construction), so a table without it would still show "AI" — just glued to the front of
+		// the sentence instead of where its translator put it. Placement is the table's job.
+		assert.equal(table.statusDefault('小美').split(AI_CHIP_TOKEN).length, 2,
+			`${locale}.statusDefault places the AI chip token ${table.statusDefault('小美').split(AI_CHIP_TOKEN).length - 1} times, not once`);
+		assert.deepEqual(Object.keys(table).sort(), Object.keys(COPY.en).sort(),
+			`${locale} carries a key English does not — a string nothing renders`);
+		if (locale !== 'en') {
+			// Not a copy-paste of English under a new key.
+			assert.notEqual(table.send, COPY.en.send, `${locale}.send is still English`);
+			assert.notEqual(table.error, COPY.en.error, `${locale}.error is still English`);
+		}
+	}
 });
 
 test('zh-cn carries every string zh-tw and ja carry, including the refusal and hand-off copy', () => {
@@ -225,7 +293,9 @@ test('statusFor threads a custom assistant name through, and still carries the A
 // by construction. These assert the construction, not the styling. ──────────
 
 test('every locale emits exactly one AI chip, and never the sentinel or a parenthetical', () => {
-	for (const locale of ['en', 'zh-tw', 'zh-cn', 'ja']) {
+	// Every table, not a list of four: a locale added without the token would render its
+	// status line with no AI marker at all (tile #14 added five).
+	for (const locale of Object.keys(COPY)) {
 		const html = statusFor(COPY[locale], { hasConv: false, hasEmail: false, kaitoOn: true }, '小美');
 		// 🔴 COUNT, don't test for presence: a name carrying the sentinel used to split the
 		// sentence into three and silently drop the third part (see the strip test below).
@@ -2540,4 +2610,30 @@ test('E7: the header names both storage keys its concession is about (D12)', () 
 	assert.equal(aiLogKey('site:acme'), 'reef-inbox:ai:site:acme');
 	assert.match(CORAL_CODE, /const STORE_PREFIX = 'reef-inbox:';/);
 	assert.match(CORAL_CODE, /const AI_LOG_PREFIX = 'reef-inbox:ai:';/);
+});
+
+// tile#19. The honeypot was reported visible, with its「Leave this empty」text beside Send. On a
+// legacy host the coral's own `.dc-inbox-hp` rule does hide it — measured in Chromium, and the
+// report's correction says the same. On a site that declares `data-dynamic-coral-css="layered"`
+// it does NOT: that rule then sits inside `@layer reef.corals`, every UNLAYERED host rule beats
+// every layered one whatever its specificity, and a host `label{position:static}` alone put the
+// label back in the panel (measured 2026-09-27: left 939px, on screen). So the hiding has to live
+// where no host stylesheet reaches it — the element's own style attribute.
+//
+// 🔴 What this can see is the markup, not a layout: there is no browser here. The layout half —
+// "a hostile layered host still gets no on-screen box" — is honeypot.smoke.mjs, which runs only
+// with PLAYWRIGHT set.
+test('tile#19: the hand-off honeypot hides itself inline, where a layered host cannot undo it', () => {
+	const html = handoffFormHtml(COPY.en, 'Question');
+	const label = html.match(/<label class="dc-inbox-hp"[^>]*>/)?.[0];
+	assert.ok(label, 'the hand-off form lost its honeypot label');
+	const style = Object.fromEntries((label.match(/style="([^"]*)"/)?.[1] ?? '')
+		.split(';').filter(Boolean).map((d) => d.split(':').map((s) => s.trim())));
+	assert.equal(style.position, 'absolute', `no inline off-screen position on ${label}`);
+	assert.equal(style.left, '-9999px');
+	assert.equal(style.opacity, '0');
+	assert.match(label, /aria-hidden="true"/);
+	const input = html.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
+	assert.match(input, /tabindex="-1"/);
+	assert.match(input, /autocomplete="off"/);
 });

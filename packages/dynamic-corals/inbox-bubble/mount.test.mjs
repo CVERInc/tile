@@ -280,6 +280,24 @@ test('B11: a mount whose panel is open still answers the event, and the stored h
 // reachable by any script the site loads, third-party ones included. What removing the event took
 // away is the in-place, invisible version — not the capability.
 
+test('tile #14: a de-DE page with a German title and placeholder gets German chrome, not English', async () => {
+	// The reported panel: reef's marketing site sets these two through data-*, and until tile #14
+	// everything else in the panel — Send, Close, the bubble's own name — was English beside them.
+	document.documentElement.setAttribute('lang', 'de-DE');
+	try {
+		const { root } = await mountFresh({ 'data-title': 'Schreiben Sie uns', 'data-placeholder': 'Ihre Nachricht…' });
+		assert.match(root.innerHTML, /aria-label="Nachricht senden"/, 'the closed bubble is named in English');
+		openBubble(root);
+		const html = root.innerHTML;
+		assert.match(html, /aria-label="Schreiben Sie uns"/);
+		assert.match(html, />Senden</, 'the Send button is not German');
+		assert.match(html, /aria-label="Schließen"/, 'the close button is not named in German');
+		assert.doesNotMatch(html, />Send<|aria-label="Close"/, 'English chrome beside a German title');
+	} finally {
+		document.documentElement.setAttribute('lang', 'en');
+	}
+});
+
 test('B3: the only window listener names no conversation, and no export takes a handle', async () => {
 	const api = await import('./inbox-bubble.js');
 	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
@@ -516,4 +534,25 @@ test('D3: the same is true of the keepalive fetch path — no browser has a clea
 		navStub.sendBeacon = sendBeacon;
 		respond = null;
 	}
+});
+
+// tile#19 — the compose form's honeypot, as `mount()` actually renders it (compose.test.mjs covers
+// the hand-off form's). Why inline and not only the `.dc-inbox-hp` rule is written there: on a
+// layered site that rule is in `@layer reef.corals` and any unlayered host `label` rule wins.
+// 🔴 Markup only — no layout in this harness; honeypot.smoke.mjs is the browser half.
+test('tile#19: the compose honeypot that mount() renders hides itself inline', async () => {
+	const { root } = await mountFresh();
+	await openBubble(root);
+	assert.ok(isOpen(root));
+	const label = root.innerHTML.match(/<label class="dc-inbox-hp"[^>]*>/)?.[0];
+	assert.ok(label, 'the compose form lost its honeypot label');
+	const style = Object.fromEntries((label.match(/style="([^"]*)"/)?.[1] ?? '')
+		.split(';').filter(Boolean).map((d) => d.split(':').map((s) => s.trim())));
+	assert.equal(style.position, 'absolute', `no inline off-screen position on ${label}`);
+	assert.equal(style.left, '-9999px');
+	assert.equal(style.opacity, '0');
+	assert.match(label, /aria-hidden="true"/);
+	const input = root.innerHTML.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
+	assert.match(input, /tabindex="-1"/);
+	assert.match(input, /autocomplete="off"/);
 });

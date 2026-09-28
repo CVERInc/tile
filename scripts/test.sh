@@ -126,7 +126,10 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
 # called. (Both pass, as of 2026-08-12. Unrun is not the same as broken, and you cannot tell which
 # one you have without running them: seven harnesses in the sibling repo were found dead the same
 # day, and every one of them had also been "fine" right up until somebody looked.)
-SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs)
+SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
+             # tile#19: the inbox honeypot measured in a real layout, on legacy and layered hosts.
+             # It takes the same `<base URL of its directory>` argument as the two above.
+             packages/dynamic-corals/inbox-bubble/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
 # static python3 server the block further down starts. The real-render matrix takes no base URL —
