@@ -7,7 +7,7 @@ globalThis.document = { readyState: 'loading', addEventListener() {} };
 const {
 	bindCompose, COPY, fetchAssistantName, handoffConcluded, handoffFormHtml, inboxPayload,
 	parseHandle, pollGeneration, privateCharsOf, refusalNeedsHandoffForm, resolveAssistantName,
-	resolveLocale, resolveSiteName, resolveViewMode, shouldAutoOpenFromHash, statusFor
+	resolveLocale, resolveSiteName, resolveStatusText, resolveViewMode, shouldAutoOpenFromHash, statusFor
 } = await import('./inbox-bubble.js');
 
 // The sentinel `statusDefault` places and `statusFor` turns into the chip. Written out as escapes
@@ -243,12 +243,56 @@ test('resolveSiteName ignores blank data-site-name and blank og:site_name', () =
 
 // ── status line (finding #8's fix leans on this staying accurate) ──────────
 
-test('statusFor shows the default only before a hand-off, and only when KAITO is on', () => {
+test('statusFor shows the AI default before a hand-off when KAITO is on, and the no-AI line when it is off', () => {
 	assert.equal(
 		statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: true }),
 		'KAITO<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>先回，轉出去真人會看'
 	);
-	assert.equal(statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: false }), '');
+	// tile#20: a mount without KAITO used to get NO status line at all ('' here), so the panel
+	// said nothing about who reads the message.
+	assert.equal(statusFor(COPY['zh-tw'], { hasConv: false, hasEmail: false, kaitoOn: false }), '真人會看');
+	assert.equal(statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: false }), 'A person reads what you send');
+});
+
+test('tile#20: every locale has a no-AI status line, and it claims no AI and carries no chip', () => {
+	for (const locale of Object.keys(COPY)) {
+		const line = COPY[locale].statusNoAi;
+		assert.equal(typeof line, 'string', `${locale} has no statusNoAi`);
+		assert.ok(line.trim().length > 0, `${locale} statusNoAi is blank`);
+		assert.ok(!line.includes(AI_CHIP_TOKEN), `${locale} statusNoAi carries the chip sentinel`);
+		assert.doesNotMatch(line, /\bAI\b|KAITO/, `${locale} statusNoAi mentions an AI that is not there`);
+		const html = statusFor(COPY[locale], { hasConv: false, hasEmail: false, kaitoOn: false }, '小美');
+		assert.ok(!html.includes('dc-inbox-ai-chip'), `${locale} no-KAITO status rendered an AI chip`);
+		assert.ok(!html.includes('小美'), `${locale} no-KAITO status named an assistant that is not there`);
+	}
+});
+
+test('tile#20: statusFor escapes the no-AI line, because data-status puts owner text there', () => {
+	const copy = { ...COPY.en, statusNoAi: '<img src=x onerror=1> & "you"' };
+	assert.equal(
+		statusFor(copy, { hasConv: false, hasEmail: false, kaitoOn: false }),
+		'&lt;img src=x onerror=1&gt; &amp; &quot;you&quot;'
+	);
+	// A hand-off still wins over it, exactly as it wins over the KAITO default.
+	assert.equal(statusFor(copy, { hasConv: true, hasEmail: true, kaitoOn: false }), COPY.en.statusHandedOffEmail);
+});
+
+test('tile#20: resolveStatusText reads data-status as one trimmed line capped at 80 characters', () => {
+	const el = (v) => ({ getAttribute: (n) => (n === 'data-status' ? v : null) });
+	assert.equal(resolveStatusText(el(null)), '');
+	assert.equal(resolveStatusText(el('   ')), '');
+	assert.equal(resolveStatusText(el('  a person reads what you send  ')), 'a person reads what you send');
+	assert.equal(resolveStatusText(el('first line\nsecond line')), 'first line');
+	assert.equal(resolveStatusText(el('a'.repeat(200))), 'a'.repeat(80));
+	// Graphemes, not UTF-16 units: 81 astral characters come back as 80 whole ones.
+	const astral = resolveStatusText(el('😀'.repeat(81)));
+	assert.equal([...astral].length, 80);
+	assert.ok(!/[\uD800-\uDBFF]$/.test(astral), 'the cap cut a surrogate pair in half');
+	// Bidi controls cannot flip the line, and the chip sentinel cannot smuggle a fake chip in.
+	assert.equal(resolveStatusText(el('\u202Eabc')), 'abc');
+	assert.equal(resolveStatusText(el(`x${AI_CHIP_TOKEN}y`)), 'xy');
+	// It is plain TEXT: escaping is statusFor's job, so markup comes back verbatim here.
+	assert.equal(resolveStatusText(el('<b>hi</b>')), '<b>hi</b>');
 });
 
 // ── owner ruling 2026-09-05: the visitor-facing assistant name may change,

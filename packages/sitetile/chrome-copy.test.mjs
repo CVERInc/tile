@@ -41,6 +41,29 @@ registerHooks({
 });
 const { fmtDate } = await import('./astro/src/lib/blog.mjs');
 
+// Every `fmtDate(...)` call in `src` that does not pass a language as its third argument.
+// tile#36: a `[^)]*` regex split on `,` stopped at the first `)` and counted commas inside a nested
+// call as arguments, and any non-empty third argument passed — `undefined` included. So the call is
+// read with its parentheses balanced, split on top-level commas only, and the third argument must
+// actually name a lang (`meta.lang`, `metaL.lang`, `lang`…), not merely exist.
+function fmtDateCallsMissingLang(src) {
+  const bad = [];
+  for (const m of src.matchAll(/\bfmtDate\(/g)) {
+    const args = [];
+    let depth = 0, cur = '', i = m.index + m[0].length;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 0) break; depth--; }
+      else if (c === ',' && depth === 0) { args.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    args.push(cur);
+    if (args.length !== 3 || !/\blang\b/.test(args[2])) bad.push(`fmtDate(${args.join(',')})`);
+  }
+  return bad;
+}
+
 let passed = 0;
 const test = (name, fn) => {
   try { fn(); passed++; console.log('  ✓ ' + name); }
@@ -223,12 +246,22 @@ test('🔴 (P3-3) every fmtDate call site passes the language', () => {
   // until a report comes in — so this counts call sites structurally rather than trusting review.
   const bad = [];
   for (const f of walk(SRC)) {
-    for (const m of stripComments(readFileSync(f, 'utf8')).matchAll(/fmtDate\(([^)]*)\)/g)) {
-      const args = m[1].split(',');
-      if (args.length < 3 || !args[2].trim()) bad.push(`${relative(SRC, f)}: fmtDate(${m[1]})`);
+    for (const call of fmtDateCallsMissingLang(stripComments(readFileSync(f, 'utf8')))) {
+      bad.push(`${relative(SRC, f)}: ${call}`);
     }
   }
   assert.deepEqual(bad, [], `call sites missing the lang argument:\n${bad.join('\n')}`);
+});
+
+test('🔴 (tile#36) the fmtDate call-site guard sees a nested comma and an explicit undefined', () => {
+  // The guard above is only as good as its reading of a call. These are the shapes that must fail it.
+  const missing = (src) => fmtDateCallsMissingLang(src).length;
+  assert.equal(missing('fmtDate(p.date, dateFormat, meta.lang)'), 0, 'the shape all current call sites use');
+  assert.equal(missing('fmtDate(p.date, pick(a, b), meta.lang)'), 0, 'a nested call that DOES pass lang');
+  assert.equal(missing('fmtDate(p.date, dateFormat)'), 1, 'two arguments');
+  assert.equal(missing('fmtDate(p.date, pick(a, b))'), 1, 'a nested comma in the second argument is not a third argument');
+  assert.equal(missing('fmtDate(p.date, dateFormat, undefined)'), 1, 'an explicit undefined passes no language');
+  assert.equal(missing('fmtDate(p.date, dateFormat, )'), 1, 'an empty third argument');
 });
 
 test('🔴 the locale a SITE writes is a BCP-47 tag, not the data code', () => {

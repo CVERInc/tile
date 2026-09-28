@@ -19,7 +19,8 @@ a support department, and nearly every REEF customer is one person.
 | `data-open-on-hash` | `"1"` lets `#inbox` in the URL open the panel at load. Off by default — see "Opening the panel programmatically" |
 | `data-ai-log` | `"0"` opts this mount out of the deferred question log entirely — see "What the visitor asked the machine". Anything else, including the attribute being absent, leaves it on |
 | `data-api-base` | override the feelreef origin (previews) |
-| `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides |
+| `data-status` | the one visible sentence under the site name on a mount **without** KAITO (tile#20) — replaces the locale default「真人會看」/ 'A person reads what you send'. Plain text: HTML-escaped, first line only, trimmed, capped at **80 grapheme clusters** (and 400 UTF-16 units), bidi/format controls removed. **Ignored when `data-kaito="1"`**: that line carries the AI disclosure, and no attribute may replace it |
+| `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides. 🔴 `data-title` is the dialog's `aria-label` **only** (ruling 2026-09-07) — it is never shown; the visible heading is the site name. For a visible sentence, use `data-status` |
 
 Words default from the PAGE's `<html lang>` — the site's own statement about who
 it is for, not a guess and not the visitor's browser preference. The panel speaks
@@ -34,6 +35,11 @@ From 0.7.3 the ask panel says two things, not four (owner ruling 2026-09-07,
 and the box's own placeholder. The body line in the empty log and the
 「站主看得到」 footer under the form are gone in every locale, and
 `data-empty-label` went with the string it overrode.
+
+A mount without KAITO shows a status line too (tile#20): with no machine answering first there is
+no name and no chip, only the fact that is true —「真人會看」/ 'A person reads what you send', in
+each of the nine locales, or the site's own `data-status`. Before tile#20 such a panel showed the
+site name, ×, the form and Send, and said nothing about who reads the message.
 
 ## Opening the panel programmatically
 

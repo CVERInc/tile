@@ -298,6 +298,32 @@ test('tile #14: a de-DE page with a German title and placeholder gets German chr
 	}
 });
 
+test('tile#20: a mount without KAITO shows a status line — the locale default, or data-status', async () => {
+	// The reported panel: kind=ext, no data-kaito. Site name, ×, the form and Send, and nothing
+	// saying who reads what is sent.
+	const plain = await mountFresh({ 'data-kind': 'ext', 'data-title': 'Aria only' });
+	openBubble(plain.root);
+	assert.match(plain.root.innerHTML, /<p class="dc-inbox-status">A person reads what you send<\/p>/,
+		'a no-KAITO panel rendered no status line');
+	// data-title stays the dialog's accessible name and nothing more — it is not the visible line.
+	assert.match(plain.root.innerHTML, /role="dialog" aria-label="Aria only"/);
+	assert.doesNotMatch(plain.root.innerHTML, />Aria only</, 'data-title became visible text');
+
+	const custom = await mountFresh({ 'data-kind': 'ext', 'data-status': '  a person <b>reads</b> it\nnot this  ' });
+	openBubble(custom.root);
+	assert.match(custom.root.innerHTML, /<p class="dc-inbox-status">a person &lt;b&gt;reads&lt;\/b&gt; it<\/p>/,
+		'data-status was not rendered as one escaped line');
+	assert.doesNotMatch(custom.root.innerHTML, /not this/);
+});
+
+test('tile#20: data-status cannot replace the AI disclosure on a KAITO mount', async () => {
+	const { root } = await mountFresh({ 'data-kaito': '1', 'data-status': 'Mei reads every message herself' });
+	openBubble(root);
+	assert.match(root.innerHTML, /<p class="dc-inbox-status">KAITO<span class="dc-inbox-ai-chip"/,
+		'the AI status line was replaced by data-status');
+	assert.doesNotMatch(root.innerHTML, /Mei reads every message herself/);
+});
+
 test('B3: the only window listener names no conversation, and no export takes a handle', async () => {
 	const api = await import('./inbox-bubble.js');
 	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
