@@ -100,7 +100,12 @@
 //                  grapheme clusters AND 200 UTF-16 units (a cluster has no
 //                  length limit of its own — see ASSISTANT_NAME_MAX_UNITS);
 //                  blank/whitespace falls back to "KAITO".
-//   data-title / data-placeholder / data-send / data-… (optional) — copy
+//   data-status    (optional) — the one visible sentence under the site name on a mount WITHOUT
+//                  KAITO (tile#20), replacing the locale's `statusNoAi`. Plain text: escaped, one
+//                  line, capped at 80 grapheme clusters. Ignored when data-kaito="1" — that line
+//                  carries the AI disclosure and no attribute may replace it.
+//   data-title / data-placeholder / data-send / data-… (optional) — copy. 🔴 `data-title` is
+//                  the dialog's aria-label ONLY (ruling 2026-09-07); it is never visible text.
 //
 // Usage:
 //   <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="cver"></div>
@@ -281,6 +286,7 @@ export const COPY = {
 		rate: "That's a lot of messages — please try again in a minute.",
 		closed: 'Close',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
+		statusNoAi: 'A person reads what you send',
 		statusHandedOffEmail: "Passed to the owner — they'll reply by email.",
 		statusHandedOffNoEmail: 'Passed to the owner — the reply will show here.',
 		askAgain: (a) => `Ask ${a} again`,
@@ -313,6 +319,7 @@ export const COPY = {
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closed: '關閉',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
+		statusNoAi: '真人會看',
 		statusHandedOffEmail: '已交給店家，會透過信箱回覆',
 		statusHandedOffNoEmail: '已交給店家，回覆會顯示在這裡',
 		askAgain: (a) => `重新問 ${a}`,
@@ -345,6 +352,7 @@ export const COPY = {
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closed: '閉じる',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
+		statusNoAi: '送った内容は人が読みます',
 		statusHandedOffEmail: '担当者に取り次ぎました。メールで返信します。',
 		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
@@ -377,6 +385,7 @@ export const COPY = {
 		rate: '消息有点多，请稍等一分钟再试。',
 		closed: '关闭',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
+		statusNoAi: '真人会看',
 		statusHandedOffEmail: '已交给店家，会通过邮箱回复',
 		statusHandedOffNoEmail: '已交给店家，回复会显示在这里',
 		askAgain: (a) => `重新问 ${a}`,
@@ -415,6 +424,7 @@ export const COPY = {
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closed: 'Schließen',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
+		statusNoAi: 'Was Sie senden, liest ein Mensch',
 		statusHandedOffEmail: 'An den Betreiber weitergegeben — die Antwort kommt per E-Mail.',
 		statusHandedOffNoEmail: 'An den Betreiber weitergegeben — die Antwort erscheint hier.',
 		askAgain: (a) => `${a} noch einmal fragen`,
@@ -447,6 +457,7 @@ export const COPY = {
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closed: 'Fermer',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
+		statusNoAi: 'Une personne lit ce que vous envoyez',
 		statusHandedOffEmail: 'Transmis au responsable du site — la réponse arrivera par e-mail.',
 		statusHandedOffNoEmail: 'Transmis au responsable du site — la réponse s’affichera ici.',
 		askAgain: (a) => `Redemander à ${a}`,
@@ -479,6 +490,7 @@ export const COPY = {
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closed: 'Cerrar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
+		statusNoAi: 'Lo que envíes lo lee una persona',
 		statusHandedOffEmail: 'Enviado al responsable del sitio: te responderá por correo.',
 		statusHandedOffNoEmail: 'Enviado al responsable del sitio: la respuesta aparecerá aquí.',
 		askAgain: (a) => `Volver a preguntar a ${a}`,
@@ -511,6 +523,7 @@ export const COPY = {
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closed: 'Fechar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
+		statusNoAi: 'Uma pessoa lê o que você envia',
 		statusHandedOffEmail: 'Enviado ao responsável pelo site — a resposta chega por e-mail.',
 		statusHandedOffNoEmail: 'Enviado ao responsável pelo site — a resposta vai aparecer aqui.',
 		askAgain: (a) => `Perguntar de novo a ${a}`,
@@ -545,6 +558,7 @@ export const COPY = {
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
 		// name is owner-chosen at runtime. A label-style sentence without it reads naturally.
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}먼저 답하고, 보내면 사람이 읽어요`,
+		statusNoAi: '보내면 사람이 읽어요',
 		statusHandedOffEmail: '운영자에게 전달했어요. 답장은 이메일로 와요.',
 		statusHandedOffNoEmail: '운영자에게 전달했어요. 답장은 여기에 표시돼요.',
 		askAgain: (a) => `${a}에게 다시 묻기`,
@@ -600,7 +614,10 @@ function copyFor(el) {
 		open: attr('open-label', base.open),
 		title: attr('title', base.title),
 		placeholder: attr('placeholder', base.placeholder),
-		send: attr('send-label', base.send)
+		send: attr('send-label', base.send),
+		// tile#20. Only the no-KAITO line is overridable: `statusFor` never reads it when KAITO is
+		// on, so no attribute can take the AI chip off the panel.
+		statusNoAi: resolveStatusText(el) || base.statusNoAi
 	};
 }
 
@@ -1549,10 +1566,11 @@ const AI_CHIP_PRIVATE_RE = privateCharsOf(AI_CHIP_TOKEN);
  * How much of an incoming name is examined at all, and B7's sibling: the fixed-point loop in
  * `cleanAssistantName` is the one pass there that can run more than once, and a deeply nested
  * payload could otherwise make it quadratic in the length of an attribute nobody bounded. The
- * result is capped at `ASSISTANT_NAME_MAX_UNITS` regardless, so twenty times that is far past any
+ * result is capped at the caller's unit cap regardless (`ASSISTANT_NAME_MAX_UNITS` for a name,
+ * `STATUS_TEXT_MAX_UNITS` for `data-status`), so twenty times that is far past any
  * real name in any script and still a ceiling on the work a one-megabyte attribute can ask for.
  */
-const RAW_NAME_MAX_UNITS = ASSISTANT_NAME_MAX_UNITS * 20;
+const RAW_NAME_MAX_FACTOR = 20;
 
 /**
  * A ZERO WIDTH JOINER left dangling at the end of a truncated name (review B8) — the one format
@@ -1683,6 +1701,25 @@ export function resolveAssistantName(el) {
 	return cleanAssistantName(raw) || DEFAULT_ASSISTANT_NAME;
 }
 
+/** tile#20: the cap on `data-status`, in grapheme clusters and (for the same reason as the name's
+ * two caps — see ASSISTANT_NAME_MAX_UNITS) in UTF-16 units. */
+const STATUS_TEXT_MAX = 80;
+const STATUS_TEXT_MAX_UNITS = 400;
+
+/**
+ * tile#20. `data-status` — the one visible sentence a site without KAITO puts under its name
+ * (「真人會看」, 'a person reads what you send'). `data-title` could not do it: that is the
+ * dialog's aria-label and nothing else (ruling 2026-09-07, bubble-copy lane §一).
+ *
+ * Returns PLAIN TEXT, or `''` for "no usable override". It goes through the same intake as a
+ * name — bidi controls and every sentinel character out, one line, trimmed, capped on a cluster
+ * boundary — because it lands in the same status node; `statusFor` escapes it on the way out.
+ */
+export function resolveStatusText(el) {
+	const raw = el && el.getAttribute && el.getAttribute('data-status');
+	return cleanAssistantName(raw, STATUS_TEXT_MAX, STATUS_TEXT_MAX_UNITS);
+}
+
 /**
  * The one place a name from OUTSIDE this file becomes a name this file will render: single
  * line, trimmed, capped at `ASSISTANT_NAME_MAX`, and with `AI_CHIP_TOKEN` removed. Returns
@@ -1724,12 +1761,13 @@ export function resolveAssistantName(el) {
  * `AI_CHIP_PRIVATE_RE`. From that line to the `return` nothing does anything but delete, so the
  * name that comes back provably carries no sentinel character and has nothing to reassemble from.
  */
-function cleanAssistantName(raw) {
-	// 1. Bound the input before the one pass below that can repeat (see RAW_NAME_MAX_UNITS), and
+function cleanAssistantName(raw, maxClusters = ASSISTANT_NAME_MAX, maxUnits = ASSISTANT_NAME_MAX_UNITS) {
+	// 1. Bound the input before the one pass below that can repeat (see RAW_NAME_MAX_FACTOR), and
 	//    cut on a code point boundary so it cannot leave half a surrogate pair behind.
 	let name = String(raw || '');
-	if (name.length > RAW_NAME_MAX_UNITS) {
-		name = name.slice(0, RAW_NAME_MAX_UNITS).replace(/[\uD800-\uDBFF]$/, '');
+	const rawMax = maxUnits * RAW_NAME_MAX_FACTOR;
+	if (name.length > rawMax) {
+		name = name.slice(0, rawMax).replace(/[\uD800-\uDBFF]$/, '');
 	}
 	// 2. Format controls out — nothing downstream can be tricked by what is no longer here.
 	name = name.replace(BIDI_CONTROL_RE, '');
@@ -1755,7 +1793,7 @@ function cleanAssistantName(raw) {
 	let capped = '';
 	let count = 0;
 	for (const cluster of graphemes(trimmed)) {
-		if (count >= ASSISTANT_NAME_MAX || capped.length + cluster.length > ASSISTANT_NAME_MAX_UNITS) break;
+		if (count >= maxClusters || capped.length + cluster.length > maxUnits) break;
 		capped += cluster;
 		count++;
 	}
@@ -1883,7 +1921,9 @@ export async function probeInboxClaim(apiBase, kind, id) {
  */
 export function statusFor(copy, { hasConv, hasEmail, kaitoOn }, assistantName = DEFAULT_ASSISTANT_NAME) {
 	if (hasConv) return hasEmail ? copy.statusHandedOffEmail : copy.statusHandedOffNoEmail;
-	if (!kaitoOn) return '';
+	// tile#20: without KAITO there is no machine answering, so the line says only that a person
+	// reads what is sent — no name, no chip. It may be the owner's `data-status`, hence escaped.
+	if (!kaitoOn) return escHtml(copy.statusNoAi || '');
 	// `copy.statusDefault(assistantName)` carries exactly one `AI_CHIP_TOKEN` — every locale's
 	// entry places it unconditionally (see the token's own header comment) — splitting on it
 	// yields the two plain-text halves around the chip. `String#split` on a string that never
