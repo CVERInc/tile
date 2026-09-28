@@ -1561,6 +1561,34 @@ function quoteRunReport(body) {
   return runs;
 }
 
+// Join a paragraph's soft-wrapped source lines into one fragment (see bodyHtml's own comment at the
+// call site for the CJK and `・`/`※` rules). `br` is bodyHtml's hard-break placeholder.
+//
+// 🩸 tile#30: this loop used to live inline in bodyHtml, grow ONE string with `+=` and ask it
+// `endsWith(BR)` and `slice(-1)` every line. `+=` makes a rope, and reading a rope's last character
+// flattens it — a copy of the whole paragraph so far, per line: quadratic in the paragraph (plain
+// prose, no comment syntax, went 0.7s → 8.5s from 256 KiB to 1 MiB; 256 KiB of `<\n` took ~7s). The
+// pieces go into an array joined once, and the rule reads `tail` — the last br.length characters
+// joined so far, which is all `endsWith(br)` and `slice(-1)` ever looked at — so each line costs its
+// own length, not the paragraph's. Same rule, same answer; the cost is the only thing that changed.
+// It is its own function so the test beside "linear on 1 MiB of bare `<`" can charge every string
+// method call in here with its receiver's length — the flattening cost — which makes a method call
+// on a growing accumulator show up as a quadratic COUNT, independent of machine speed.
+function softJoin(lines, br, cjk) {
+  const pieces = lines.length ? [lines[0]] : [];
+  let tail = lines.length ? lines[0].slice(-br.length) : '';
+  for (let k = 1; k < lines.length; k++) {
+    const next = lines[k];
+    const gap = tail.endsWith(br) ? ''
+      : /^[・※]/.test(next.trim()) ? br
+      : (cjk.test(tail.slice(-1)) && cjk.test(next.trim().slice(0, 1))) ? ''
+      : ' ';
+    pieces.push(gap, next);
+    tail = (tail + gap + next).slice(-br.length);
+  }
+  return pieces.join('');
+}
+
 // opts.dialogue: a dialogueContext() shared across every bodyHtml call that makes up ONE page, so
 // bubble sides are decided per page (#68). Absent → one per call, which is one per page for
 // every caller that renders a body in a single call (all of renderSiteToHtml's sections).
@@ -1712,26 +1740,7 @@ function bodyHtml(body, opts) {
     // an ASCII wordmark onto the kana beside it.
     const CJK = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
     const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
-    // 🩸 tile#30: this loop used to grow ONE string with `+=` and ask it `endsWith(BR)` and
-    // `slice(-1)` every line. `+=` makes a rope, and reading a rope's last character flattens it —
-    // a copy of the whole paragraph so far, per line: quadratic in the paragraph (plain prose, no
-    // comment syntax, went 0.7s → 8.5s from 256 KiB to 1 MiB). The pieces go into an array joined
-    // once, and the rule reads `tail` — the last BR.length characters joined so far, which is all
-    // `endsWith(BR)` and `slice(-1)` ever looked at — so each line costs its own length, not the
-    // paragraph's. Same rule, same answer; the cost is the only thing that changed.
-    const pieces = marked.length ? [marked[0]] : [];
-    let tail = marked.length ? marked[0].slice(-BR.length) : '';
-    for (let k = 1; k < marked.length; k++) {
-      const next = marked[k];
-      const gap = tail.endsWith(BR) ? ''
-        : /^[・※]/.test(next.trim()) ? BR
-        : (CJK.test(tail.slice(-1)) && CJK.test(next.trim().slice(0, 1))) ? ''
-        : ' ';
-      pieces.push(gap, next);
-      tail = (tail + gap + next).slice(-BR.length);
-    }
-    const joined = pieces.join('');
-    const t = joined.split(BR + ' ').join(BR).trim();
+    const t = softJoin(marked, BR, CJK).split(BR + ' ').join(BR).trim();
     const html = inlineHtml(t, indented ? { stripComments: false } : undefined).split(BR).join('<br>');
     out.push(isImageOnly(t) ? '<figure class="st-figure">' + html + '</figure>' : '<p>' + html + '</p>');
   }
@@ -2469,4 +2478,7 @@ export {
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —
   // see cssUrlString's own comment.
   cssUrlString,
+  // the paragraph soft-line join, exported so its linearity test can count its work directly —
+  // see softJoin's own comment.
+  softJoin,
 };
