@@ -2611,3 +2611,29 @@ test('E7: the header names both storage keys its concession is about (D12)', () 
 	assert.match(CORAL_CODE, /const STORE_PREFIX = 'reef-inbox:';/);
 	assert.match(CORAL_CODE, /const AI_LOG_PREFIX = 'reef-inbox:ai:';/);
 });
+
+// tile#19. The honeypot was reported visible, with its「Leave this empty」text beside Send. On a
+// legacy host the coral's own `.dc-inbox-hp` rule does hide it — measured in Chromium, and the
+// report's correction says the same. On a site that declares `data-dynamic-coral-css="layered"`
+// it does NOT: that rule then sits inside `@layer reef.corals`, every UNLAYERED host rule beats
+// every layered one whatever its specificity, and a host `label{position:static}` alone put the
+// label back in the panel (measured 2026-09-27: left 939px, on screen). So the hiding has to live
+// where no host stylesheet reaches it — the element's own style attribute.
+//
+// 🔴 What this can see is the markup, not a layout: there is no browser here. The layout half —
+// "a hostile layered host still gets no on-screen box" — is honeypot.smoke.mjs, which runs only
+// with PLAYWRIGHT set.
+test('tile#19: the hand-off honeypot hides itself inline, where a layered host cannot undo it', () => {
+	const html = handoffFormHtml(COPY.en, 'Question');
+	const label = html.match(/<label class="dc-inbox-hp"[^>]*>/)?.[0];
+	assert.ok(label, 'the hand-off form lost its honeypot label');
+	const style = Object.fromEntries((label.match(/style="([^"]*)"/)?.[1] ?? '')
+		.split(';').filter(Boolean).map((d) => d.split(':').map((s) => s.trim())));
+	assert.equal(style.position, 'absolute', `no inline off-screen position on ${label}`);
+	assert.equal(style.left, '-9999px');
+	assert.equal(style.opacity, '0');
+	assert.match(label, /aria-hidden="true"/);
+	const input = html.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
+	assert.match(input, /tabindex="-1"/);
+	assert.match(input, /autocomplete="off"/);
+});

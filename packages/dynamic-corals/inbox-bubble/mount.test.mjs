@@ -535,3 +535,24 @@ test('D3: the same is true of the keepalive fetch path — no browser has a clea
 		respond = null;
 	}
 });
+
+// tile#19 — the compose form's honeypot, as `mount()` actually renders it (compose.test.mjs covers
+// the hand-off form's). Why inline and not only the `.dc-inbox-hp` rule is written there: on a
+// layered site that rule is in `@layer reef.corals` and any unlayered host `label` rule wins.
+// 🔴 Markup only — no layout in this harness; honeypot.smoke.mjs is the browser half.
+test('tile#19: the compose honeypot that mount() renders hides itself inline', async () => {
+	const { root } = await mountFresh();
+	await openBubble(root);
+	assert.ok(isOpen(root));
+	const label = root.innerHTML.match(/<label class="dc-inbox-hp"[^>]*>/)?.[0];
+	assert.ok(label, 'the compose form lost its honeypot label');
+	const style = Object.fromEntries((label.match(/style="([^"]*)"/)?.[1] ?? '')
+		.split(';').filter(Boolean).map((d) => d.split(':').map((s) => s.trim())));
+	assert.equal(style.position, 'absolute', `no inline off-screen position on ${label}`);
+	assert.equal(style.left, '-9999px');
+	assert.equal(style.opacity, '0');
+	assert.match(label, /aria-hidden="true"/);
+	const input = root.innerHTML.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
+	assert.match(input, /tabindex="-1"/);
+	assert.match(input, /autocomplete="off"/);
+});

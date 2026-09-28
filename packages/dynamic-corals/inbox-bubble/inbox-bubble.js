@@ -109,6 +109,18 @@
 const DEFAULT_API_BASE = 'https://feelreef.com';
 const SELECTOR = '[data-dynamic-coral="inbox-bubble"]';
 const PREFIX = 'dc-inbox';
+/**
+ * The honeypot label's own `style` attribute, on top of the `.dc-inbox-hp` rule (tile#19).
+ *
+ * 🩸 The rule alone is not enough on a layered site. There the injected stylesheet is inside
+ * `@layer reef.corals`, and ANY unlayered host declaration beats a layered one whatever its
+ * specificity — so a site's ordinary `form label{display:block;position:static}` put the honeypot
+ * and its「Leave this empty」back inside the panel, and a visitor who typed into it had their
+ * message silently dropped as spam. An inline declaration outranks every normal author rule,
+ * layered or not. Off-screen and transparent, deliberately NOT `display:none` — the same posture
+ * as sitetile's Form.astro honeypot, so a bot's DOM-level autofill still finds it.
+ */
+const HP_STYLE = 'position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0';
 
 /**
  * 0.7.2 (owner ruling 2026-09-06 #34). The AI marker used to be the literal characters
@@ -2333,7 +2345,7 @@ export function handoffFormHtml(copy, question) {
   <label>${escHtml(copy.name)}<input name="visitor_name" autocomplete="name"></label>
   <label>${escHtml(copy.email)}<input name="visitor_email" type="email" autocomplete="email"></label>
   <p class="${PREFIX}-email-note">${escHtml(copy.emailNote)}</p>
-  <label class="${PREFIX}-hp" aria-hidden="true"><span>Leave this empty</span><input type="text" name="_hp" tabindex="-1" autocomplete="off"></label>
+  <label class="${PREFIX}-hp" aria-hidden="true" style="${HP_STYLE}"><span>Leave this empty</span><input type="text" name="_hp" tabindex="-1" autocomplete="off"></label>
   <div class="${PREFIX}-handoff-actions"><button type="button" data-cancel>${escHtml(copy.cancel)}</button><button type="submit">${escHtml(copy.send)}</button></div>
 </form>`;
 }
@@ -2822,7 +2834,7 @@ export async function mount(el) {
   <div class="${PREFIX}-log"></div>
   ${replyWithinHours ? `<p class="${PREFIX}-hint">${escHtml(copy.within(replyWithinHours))}</p>` : ''}
   <form class="${PREFIX}-form">
-    <label class="${PREFIX}-hp" aria-hidden="true">
+    <label class="${PREFIX}-hp" aria-hidden="true" style="${HP_STYLE}">
       <span>Leave this empty</span><input type="text" name="_hp" tabindex="-1" autocomplete="off">
     </label>
     <textarea name="text" rows="1" placeholder="${escHtml(copy.placeholder)}"></textarea>
