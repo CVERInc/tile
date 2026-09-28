@@ -56,6 +56,38 @@ test('unconfigured locale completion falls back to the default shop path when it
 	assert.match(html, /ご注文ありがとうございます|お支払いを確認しています/);
 });
 
+test('locale completion uses the base-shell path for its back link and declares its path-copy locale', async () => {
+	const configured = [{ shopPath: '/shop', lang: 'zh-TW' }];
+	const matched = matchShopComplete('/en/shop/complete', configured);
+	const fetched = [];
+	const env = { ASSETS: { fetch: async request => {
+		const pathname = new URL(request.url).pathname;
+		fetched.push(pathname);
+		if (pathname === '/en/shop/') return new Response('not found', { status: 404 });
+		return new Response('<!doctype html><html lang="zh-Hant"><head><title>商店</title></head><body><main>GRID</main></body></html>');
+	} } };
+	const html = await (await renderCompletion(new Request('https://shop.example/en/shop/complete'), env, { siteId: 'site-key' }, matched)).text();
+	assert.deepEqual(fetched, ['/en/shop/', '/shop/']);
+	assert.match(html, /<div class="st-runtime" lang="en-US">/);
+	assert.match(html, /<a class="st-runtime-action" href="\/shop">Back to the shop<\/a>/);
+});
+
+test('locale completion keeps the locale-shell path for its back link when that shell exists', async () => {
+	const configured = [{ shopPath: '/shop', lang: 'en-US' }];
+	const matched = matchShopComplete('/ja/shop/complete', configured);
+	const env = { ASSETS: { fetch: async () => new Response('<!doctype html><html lang="ja-JP"><head><title>ショップ</title></head><body><main>GRID</main></body></html>') } };
+	const html = await (await renderCompletion(new Request('https://shop.example/ja/shop/complete'), env, { siteId: 'site-key' }, matched)).text();
+	assert.match(html, /<div class="st-runtime" lang="ja-JP">/);
+	assert.match(html, /<a class="st-runtime-action" href="\/ja\/shop">ショップに戻る<\/a>/);
+});
+
+test('bare completion path declares the shell-derived copy locale on its body', async () => {
+	const shell = '<!doctype html><html lang="zh-Hant"><head><title>商店</title></head><body><main>GRID</main></body></html>';
+	const env = { ASSETS: { fetch: async () => new Response(shell) } };
+	const html = await (await renderCompletion(new Request('https://shop.example/shop/complete'), env, { siteId: 'site-key' }, { shopPath: '/shop' })).text();
+	assert.match(html, /<div class="st-runtime" lang="zh-TW">/);
+});
+
 test('locale completion with no working shell anywhere still renders the bare fallback', async () => {
 	const configured = shops.slice(0, 1);
 	const matched = matchShopComplete('/ja/shop/complete', configured);

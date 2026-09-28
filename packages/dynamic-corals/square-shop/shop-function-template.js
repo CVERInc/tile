@@ -239,7 +239,7 @@ function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref
 	// the site's layered theme. `<h1>` and `<section class="dc-shop-complete">` stay pinned
 	// exact strings (shop-complete.test.mjs), so the inset comes from wrapping both in a
 	// `.st-runtime` div FROM OUTSIDE rather than adding a class to either pinned element.
-	return `<div class="st-runtime">
+	return `<div class="st-runtime" lang="${locale}">
 <h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
 </div>
@@ -252,6 +252,7 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	const orderId = checkoutResult ? url.searchParams.get(checkoutResult.orderParam) || '' : '';
 	const hasOutcomeKey = Boolean(ref || orderId);
 	const shopPath = shop.completionShopPath || shop.shopPath;
+	let shellShopPath = shopPath;
 	const pathLocale = (url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)\/shop\/complete\/?$/) || [])[1] || '';
 	let shellRes = await env.ASSETS.fetch(new Request(url.origin + shopPath + '/', request));
 	// A locale path (e.g. /ja/shop/complete) can name a shop page that was never built —
@@ -260,6 +261,8 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	// up on site chrome entirely.
 	if (!shellRes.ok && shopPath !== shop.shopPath) {
 		shellRes = await env.ASSETS.fetch(new Request(url.origin + shop.shopPath + '/', request));
+		// A fallback-shell back link must not return buyers to the missing locale page.
+		if (shellRes.ok) shellShopPath = shop.shopPath;
 	}
 	if (!shellRes.ok && checkoutResult) {
 		return new Response('Checkout result unavailable', {
@@ -282,7 +285,7 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	// 🔴 `ref` and NOT `orderId`: the sold-lines record the coral writes is keyed by the
 	// client_request_ref it minted, so a native-checkout return (which names a PROVIDER order id
 	// instead) finds no record and clears the whole basket, as it always has.
-	body = replaceMain(body, completionBody(copy, locale, outcome.pathname + outcome.search, shopPath, cfg.guildId || cfg.siteId || '', hasOutcomeKey, ref));
+	body = replaceMain(body, completionBody(copy, locale, outcome.pathname + outcome.search, shellShopPath, cfg.guildId || cfg.siteId || '', hasOutcomeKey, ref));
 	return new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' } });
 }
 
