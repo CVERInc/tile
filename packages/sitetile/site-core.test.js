@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
-  safeHref, safeSrc, safeInternalPath, quoteRunReport } from './site-core.js';
+  safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin } from './site-core.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -1636,23 +1636,104 @@ test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of `<!--` (no comment ever
   assert.ok(t1m < 5000, `expected well under 5s, got ${t1m.toFixed(1)}ms — a true blow-up`);
 });
 
-test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of bare `<` (no comment ever opens)', () => {
-  // countIndexOfBudget is NOT kept here: a bare `<` never opens a candidate comment, so its cost
-  // comes only from `lineHasCommentCloser`'s per-line `-->`/`--!>` scans in nextCommentCloser — a
-  // fixed, tiny per-line amount that does not depend on what escapeInline or bodyHtml's own dispatch
-  // does with the `<` itself. A regression that made bare-`<` handling quadratic in something OTHER
-  // than indexOf (a round-trip review found exactly this: a `charCodeAt` walk to the next `>` at
-  // every `<`) would leave this proxy's ratio flat at ~4× no matter how slow the real code became —
-  // the earlier version of this test asserted it anyway and the assertion was tautological. cpuScaleRatio
-  // is the only arm here, and it is the one that actually exercises and bounds this shape.
-  const unit = '<';
-  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
-  const t0 = process.hrtime.bigint();
-  bodyHtml(at(1048576));
-  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(t1m < 5000, `expected well under 5s, got ${t1m.toFixed(1)}ms — a true blow-up`);
+// 🩸 The bare-`<` test below was the one that kept going red on an ordinary laptop: first as a
+// wall-clock ratio (`ratio <= 6`, "expected ~4× (linear), got 7.8×" about 3 runs in 7), then as the
+// CPU-time ratio above, which is steadier but is still a stopwatch. And it was watching the wrong
+// input: one single line of `<`, so bodyHtml's paragraph soft-line join never ran — while a
+// paragraph of many `<` LINES really was quadratic (see softJoin's own comment in site-core.js:
+// 64 KiB of `<\n` took ~0.1s, 256 KiB ~7s). Nothing here times anything any more. It COUNTS.
+//
+// chargedWork(fn, model) patches the String/RegExp/Array built-ins for one call of `fn` and charges
+// every call a cost, then returns the total. The total depends only on the input and the algorithm,
+// never on how fast or how loaded the machine is, so the same input always gives the same number
+// and a linear implementation's 4× input gives ~4× the total, exactly, every run.
+//
+// - model 'examined': each call is charged what that built-in actually has to look at — 1 for an
+//   index read (`charCodeAt`, `at`), the needle for `startsWith`/`endsWith`, the scanned distance for
+//   `indexOf`, the result for `slice`, the whole receiver for a scan (`trim`, `split`, `replace`, a
+//   regex `test`/`exec`). Run over a whole bodyHtml() call, it catches any built-in that re-scans
+//   ground already covered — a `charCodeAt`/`indexOf` walk to the next `>` at every `<` included.
+//   It cannot see a pure-JS `s[j]` loop (not a method call), nor V8 flattening a `+=` rope.
+// - model 'receiver': each call is charged its receiver's whole length. That is the price of the
+//   rope flattening 'examined' cannot see, and it is what makes a method call on a GROWING
+//   accumulator — the soft-join's old `joined.endsWith(…)` / `joined.slice(-1)` — add up to n²/2.
+//   It over-charges a legitimate `charCodeAt` walk over one long string, so it is only applied to a
+//   helper whose receivers are the paragraph's individual lines: softJoin.
+const CHARGED_STRING_METHODS = ['at', 'charAt', 'charCodeAt', 'codePointAt', 'concat', 'endsWith',
+  'includes', 'indexOf', 'lastIndexOf', 'match', 'matchAll', 'normalize', 'padEnd', 'padStart',
+  'repeat', 'replace', 'replaceAll', 'search', 'slice', 'split', 'startsWith', 'substr', 'substring',
+  'toLowerCase', 'toUpperCase', 'trim', 'trimEnd', 'trimStart'];
+function examinedCost(name, s, args, result) {
+  switch (name) {
+    case 'at': case 'charAt': case 'charCodeAt': case 'codePointAt': return 1;
+    case 'startsWith': case 'endsWith': return String(args[0]).length;
+    case 'indexOf': { const from = Math.max(0, args[1] | 0); return (result === -1 ? s.length : result) - from; }
+    case 'includes': return s.length - Math.max(0, args[1] | 0);
+    case 'slice': case 'substring': case 'substr': case 'concat': case 'repeat': case 'padEnd': case 'padStart':
+      return result.length;
+    default: return s.length;
+  }
+}
+function chargedWork(fn, model) {
+  let work = 0;
+  const saved = [];
+  const patch = (proto, name, charge) => {
+    const orig = proto[name];
+    saved.push([proto, name, orig]);
+    proto[name] = function charged(...args) {
+      const before = this instanceof RegExp ? this.lastIndex : 0;
+      const result = orig.apply(this, args);
+      work += 1 + charge(this, args, result, before);
+      return result;
+    };
+  };
+  for (const name of CHARGED_STRING_METHODS) {
+    patch(String.prototype, name, (s, args, result) => (model === 'receiver' ? s.length : examinedCost(name, s, args, result)));
+  }
+  for (const name of ['test', 'exec']) {
+    patch(RegExp.prototype, name, (re, args, result, before) => {
+      const len = String(args[0]).length;
+      if (model === 'receiver' || !(re.global || re.sticky)) return len;
+      const m = name === 'exec' ? result : null;
+      return (m ? m.index + m[0].length : (result === true ? re.lastIndex : len)) - before;
+    });
+  }
+  patch(Array.prototype, 'join', (a, args, result) => result.length);
+  try { fn(); } finally { for (const [proto, name, orig] of saved.reverse()) proto[name] = orig; }
+  return work;
+}
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of bare `<` (no comment ever opens), counted, not timed', () => {
+  // Two shapes. One LINE of `<` is what this test used to measure: escapeInline's own bare-`<` branch.
+  // `<` on every line of one paragraph goes through the same branch AND through the soft-line join
+  // that turns those lines into the one fragment escapeInline sees — the half that was quadratic.
+  const shapes = [
+    { name: 'one line of `<`', at: (bytes) => '<'.repeat(bytes), lines: false },
+    { name: '`<` on every line', at: (bytes) => '<\n'.repeat(bytes / 2), lines: true },
+  ];
+  for (const { name, at, lines } of shapes) {
+    if (lines) {
+      // softJoin is what bodyHtml hands a paragraph's lines to (asserted structurally just below, so
+      // this arm cannot drift into measuring a helper bodyHtml no longer calls). 16 → 64 KiB is plenty:
+      // counts are exact, so no input has to be large enough to rise above timer noise.
+      assert.match(String(bodyHtml), /\bsoftJoin\(marked\b/, 'bodyHtml joins a paragraph through softJoin');
+      const paraLines = (bytes) => at(bytes).split('\n').filter(Boolean);
+      const joinWork = (bytes) => { const ls = paraLines(bytes); return chargedWork(() => softJoin(ls, 'ST-BR-TOKEN', /[぀-ヿ]/), 'receiver'); };
+      const j16 = joinWork(16384), j64 = joinWork(65536);
+      const joinRatio = j64 / j16;
+      assert.ok(joinRatio <= 6, `${name}: soft-line join — expected ~4× (linear) for 4× the lines, got ${joinRatio.toFixed(1)}× (16KiB=${j16}, 64KiB=${j64} charged characters)`);
+    }
+    // 4 → 16 KiB, deliberately small: every charged call runs through a JS wrapper, so a genuinely
+    // quadratic regression makes the COUNTING quadratic in time too. At these sizes it still fails in
+    // seconds (15.6× for a `charCodeAt` walk to the next `>` at every `<`) instead of hanging the run.
+    const w4 = chargedWork(() => bodyHtml(at(4096)), 'examined');
+    const w16 = chargedWork(() => bodyHtml(at(16384)), 'examined');
+    const ratio = w16 / w4;
+    assert.ok(ratio <= 6, `${name}: bodyHtml — expected ~4× (linear) for 4× the input, got ${ratio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
+    // And the full 1 MiB still renders, nothing lost: every `<` escaped, soft breaks joined with a space.
+    const n = lines ? 524288 : 1048576;
+    assert.equal(bodyHtml(at(1048576)), '<p>' + new Array(n).fill('&lt;').join(lines ? ' ' : '') + '</p>', `${name}: renders whole at 1 MiB`);
+  }
 });
 
 test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of inline code spans (codeSpanRanges must not blow up)', () => {
