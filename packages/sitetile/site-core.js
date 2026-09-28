@@ -1712,15 +1712,25 @@ function bodyHtml(body, opts) {
     // an ASCII wordmark onto the kana beside it.
     const CJK = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
     const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
-    let joined = marked.length ? marked[0] : '';
+    // 🩸 tile#30: this loop used to grow ONE string with `+=` and ask it `endsWith(BR)` and
+    // `slice(-1)` every line. `+=` makes a rope, and reading a rope's last character flattens it —
+    // a copy of the whole paragraph so far, per line: quadratic in the paragraph (plain prose, no
+    // comment syntax, went 0.7s → 8.5s from 256 KiB to 1 MiB). The pieces go into an array joined
+    // once, and the rule reads `tail` — the last BR.length characters joined so far, which is all
+    // `endsWith(BR)` and `slice(-1)` ever looked at — so each line costs its own length, not the
+    // paragraph's. Same rule, same answer; the cost is the only thing that changed.
+    const pieces = marked.length ? [marked[0]] : [];
+    let tail = marked.length ? marked[0].slice(-BR.length) : '';
     for (let k = 1; k < marked.length; k++) {
       const next = marked[k];
-      const gap = joined.endsWith(BR) ? ''
+      const gap = tail.endsWith(BR) ? ''
         : /^[・※]/.test(next.trim()) ? BR
-        : (CJK.test(joined.slice(-1)) && CJK.test(next.trim().slice(0, 1))) ? ''
+        : (CJK.test(tail.slice(-1)) && CJK.test(next.trim().slice(0, 1))) ? ''
         : ' ';
-      joined += gap + next;
+      pieces.push(gap, next);
+      tail = (tail + gap + next).slice(-BR.length);
     }
+    const joined = pieces.join('');
     const t = joined.split(BR + ' ').join(BR).trim();
     const html = inlineHtml(t, indented ? { stripComments: false } : undefined).split(BR).join('<br>');
     out.push(isImageOnly(t) ? '<figure class="st-figure">' + html + '</figure>' : '<p>' + html + '</p>');
