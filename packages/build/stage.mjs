@@ -25,6 +25,20 @@ export const STASH_PREFIX = '.tile-build-stash-';
 // says EEXIST and never both — which is the entire concurrency argument.
 export const LOCK_NAME = '.tile-build-lock';
 
+// 🩸 ASTRO'S OWN SCRATCH IS BORROWED TOO. With --outDir outside the renderer — the only way this
+// package runs it — astro writes its prerender bundle to `<renderer>/.astro/` (its fallback out dir)
+// and its cache to `node_modules/.astro/`. A build stopped part-way left both behind: measured at
+// 769KB, one copy carrying the owner's page text, in a renderer that had otherwise been "put back",
+// and invisible to the leftover check, which knew only the stash (#16, R3-2). So they are taken over
+// like the four above — the renderer's own copy, if any, waits in the stash, and whatever astro
+// writes during the run is removed with the run. [path inside the renderer, name inside the stash].
+// It also means site A's cache can never feed site B's build.
+export const ASTRO_SCRATCH = [['.astro', '.astro'], ['node_modules/.astro', 'node_modules.astro']];
+
+// The `code` on the error restore() throws when it could not finish, so a program can tell "stopped,
+// renderer back" from "stopped, renderer wrecked" without parsing a sentence (#16, R3-3).
+export const RESTORE_FAILED = 'TILE_RESTORE_FAILED';
+
 /**
  * Reduce ONE page path to something safe to be a filename, keeping the slashes.
  *
@@ -36,7 +50,7 @@ export const LOCK_NAME = '.tile-build-lock';
  * Unicode letters are KEPT on purpose: CJK slugs are live URLs on real sites, and an ASCII-only
  * rule would silently rewrite a working address into a row of dashes.
  *
- * See README §"Three sanitisers, one rule" for the comparison against the two implementations this
+ * See README §"Four sanitisers, one rule" for the comparison against the two implementations this
  * one replaces.
  */
 export function safePagePath(pagePath) {
@@ -72,9 +86,12 @@ export function themeNameFromPages(pages) {
  * @param {string} [o.blogDir]     the site's posts, staged into blog/
  * @param {string} [o.pagetileDir] the site's books (*.book.md), staged into pagetile/
  * @param {string} [o.themeFile]   the site's compiled theme.css
- * @param {AbortSignal} [o.signal] abort staging: the renderer is put back and this rejects with an
- *                                 AbortError. 🔴 It does NOT exit, and NOTHING here listens on the
- *                                 process's signals — see the note above `abortError`.
+ * @param {AbortSignal} [o.signal] abort STAGING: the renderer is put back and this rejects with an
+ *                                 AbortError whose `cause` is `signal.reason`. 🔴 Only while this call
+ *                                 is running: once it has returned, `restore` is the caller's and an
+ *                                 abort does nothing here — unwinding after that is the caller's
+ *                                 `finally { await restore() }`. It does NOT exit, and NOTHING here
+ *                                 listens on the process's signals — see the note above `abortError`.
  * @returns {Promise<{restore: () => Promise<void>, pageCount: number, themeName: string}>}
  *
  * 🔴 If this function throws, it has ALREADY restored. The caller owns `restore` only on success.
@@ -104,7 +121,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   // program that does exactly that, and it is where the 130/143 lives.
   const abortError = () => Object.assign(
     new Error('stageSite: aborted — the renderer has been put back and nothing of this site is left in it.'),
-    { name: 'AbortError', code: 'ABORT_ERR' },
+    { name: 'AbortError', code: 'ABORT_ERR', cause: signal?.reason },
   );
   // 🔴 Checked at the seams rather than mid-copy: an abort that landed inside a `cp` and started a
   // restore beside it is the race this is here to avoid. A long copy finishes, and THEN we unwind.
@@ -116,6 +133,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   const pagetileBuildDir = path.join(astroDir, 'pagetile');
   const publicDir = path.join(astroDir, 'public');
   const themesDir = path.join(astroDir, 'src/themes');
+  const scratchDirs = ASTRO_SCRATCH.map(([rel, name]) => [path.join(astroDir, rel), name]);
 
   const leftovers = async () =>
     (await readdir(astroDir)).filter((n) => n.startsWith(STASH_PREFIX)).map((n) => path.join(astroDir, n));
@@ -153,8 +171,9 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     throw new Error('stageSite: a previous build here was killed and left its stash behind — '
       + `${orphans[0]}${orphans.length > 1 ? ` (and ${orphans.length - 1} more)` : ''}. `
       + `That directory holds the renderer's OWN ${stagedDirNames.join('/, ')}/, and what is in their `
-      + 'place now belongs to another site. Move the ones inside it back over the renderer\'s, remove '
-      + 'it, and run this again.');
+      + 'place now belongs to another site — as do .astro/ and node_modules/.astro/, where astro keeps '
+      + `its own copy of that site's pages. ${SCRATCH_HELP} Move the ones inside it back over the `
+      + 'renderer\'s, remove it, and run this again.');
   }
 
   // 🔴 The stash lives INSIDE the renderer, not in the system temp dir. Two reasons: a rename
@@ -168,12 +187,12 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   let stagedTheme = null;
   let restored = false;
 
-  async function takeOver(dir, name) {
+  async function takeOver(dir, name, { create = true } = {}) {
     if (await exists(dir)) {
       await rename(dir, path.join(stash, name));
       stashed.add(name);
     }
-    await mkdir(dir, { recursive: true });
+    if (create) await mkdir(dir, { recursive: true });
     touched.add(name);
   }
 
@@ -203,10 +222,13 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
         // 🔴 …and it leaves as a SENTENCE. A bare `ENOENT: rename '<stash>/public' -> '<astro>/public'`
         // was what a person got here, and it named the one directory that HAD come back while the
         // two that had not went unmentioned. Say where the renderer's own material is and what to do.
-        throw new Error(`stageSite: the renderer could not be put back — ${err.message}. Its own `
+        const e = new Error(`stageSite: the renderer could not be put back — ${err.message}. Its own `
           + `${stagedDirNames.join('/, ')}/ are in ${stash}: move each one back over the renderer's, `
-          + `then remove that directory and ${lock}. Calling restore() again retries and is safe.`,
+          + `then remove that directory and ${lock}. ${SCRATCH_HELP} Calling restore() again retries `
+          + 'and is safe.',
         { cause: err });
+        e.code = RESTORE_FAILED;
+        throw e;
       },
     );
     return restoring;
@@ -218,7 +240,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
     // accumulate here.
     if (stagedTheme) await rm(stagedTheme, { force: true });
     for (const [dir, name] of [[contentDir, 'content'], [publicDir, 'public'],
-      [blogBuildDir, 'blog'], [pagetileBuildDir, 'pagetile']]) {
+      [blogBuildDir, 'blog'], [pagetileBuildDir, 'pagetile'], ...scratchDirs]) {
       // 🩸 `touched` IS THE POINT. The shell this came from removed blog/ and pagetile/
       // unconditionally in its EXIT trap, and the trap was armed before the staging began — so an
       // early exit (a `--blog dir not found`, three lines in) deleted the renderer's own blog/ and
@@ -244,6 +266,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
   }
 
   try {
+    for (const [dir, name] of scratchDirs) await takeOver(dir, name, { create: false });
     await takeOver(contentDir, 'content');
     checkAborted();
 
@@ -306,7 +329,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
       touched.add('public');
       // 🩸 This overlay is a file-level REPLACE per path. A site shipping its own `_redirects`
       // therefore REPLACES the renderer's rather than merging with it. Merging is a deployment
-      // concern and is deliberately not in this repo — see README §"What is not here".
+      // concern and is deliberately not in this repo — see README §"What is deliberately NOT here".
       await cp(assetsDir, publicDir, { recursive: true, force: true });
     }
     checkAborted();
@@ -364,6 +387,10 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
 
 // Exported for the tests and for anyone auditing what a staged tree looks like without staging one.
 export const stagedDirNames = ['content', 'blog', 'pagetile', 'public'];
+
+// The part of every "put it back by hand" sentence that is about astro's scratch rather than the four.
+const SCRATCH_HELP = 'First remove .astro/ and node_modules/.astro/ from the renderer (a stashed '
+  + '`.astro` or `node_modules.astro` is the renderer\'s own copy of each: move it back afterwards).';
 
 // A tiny helper the tests use to read a staged tree back. Kept here rather than duplicated in the
 // suite so "what stage.mjs wrote" has one reader.

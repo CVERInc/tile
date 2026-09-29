@@ -37,12 +37,20 @@ export const RENDERER_SUBPATH = 'packages/sitetile/astro';
  * @param {string} [o.pagetileDir]    the site's books (*.book.md)
  * @param {string} [o.npxBin='npx']   the runner for `astro build` (a seam for tests)
  * @param {AbortSignal} [o.signal]    unwind the build: the running `astro build` is stopped, the
- *                                    renderer is put back, and this rejects with an AbortError.
+ *                                    renderer is put back, and this rejects with an AbortError whose
+ *                                    `cause` is `signal.reason`. Honoured for the whole call —
+ *                                    staging, the build, and the gap between them.
  *                                    🔴 It does NOT exit and installs NO process-level handler —
  *                                    the program owns its own signals, and `cli.mjs` is the program
  *                                    that turns Ctrl-C into one of these.
  * @param {number} [o.killGraceMs=5000]  how long an aborted `astro build` gets after SIGTERM before
  *                                    it is SIGKILLed. It never gets to outlive this call.
+ *                                    🔴 5000 is HALF of `docker stop`'s default 10s on purpose, not by
+ *                                    accident: that 10s is the budget for everything after SIGTERM —
+ *                                    stopping astro AND putting the renderer back — and a grace equal
+ *                                    to it would spend all of it on astro and have the restore
+ *                                    SIGKILLed half way, leaving the stash and the lock. Under a
+ *                                    supervisor with a different grace, keep this well below it.
  * @returns {Promise<{code: number, outDir: string, pageCount: number}>}
  *
  * The renderer is ALWAYS restored — on success, on a failed build, and on a throw.
@@ -85,7 +93,7 @@ export async function buildSite({
 
   const abortError = () => Object.assign(
     new Error('buildSite: aborted — the build was stopped and the renderer has been put back.'),
-    { name: 'AbortError', code: 'ABORT_ERR' },
+    { name: 'AbortError', code: 'ABORT_ERR', cause: signal?.reason },
   );
 
   const { restore } = await stageSite({
@@ -105,16 +113,25 @@ export async function buildSite({
   // renderer out from under it. "One build at a time" was broken by the thing meant to unwind one.
   let child = null;
   let killTimer = null;
-  const signalChild = (sig) => {
-    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  // 🔴 ONE way to signal the build, with its guard. The group id is the leader's pid, and once the
+  // leader has been reaped AND its group has emptied, that number is free to be handed to somebody
+  // else's process group — so a signal is sent only while the leader is known to be alive, or (the
+  // sweep, `leaderJustExited`) from inside the leader's own `exit` event, the earliest moment after
+  // the reap and before any await has let time pass. It used to be a second, bare `process.kill`
+  // in `finally`, after the awaits, swallowing every error (#16, R3-4).
+  const signalChild = (sig, { leaderJustExited = false } = {}) => {
+    if (!child?.pid) return;
+    if (!leaderJustExited && (child.exitCode !== null || child.signalCode !== null)) return;
     try {
       // 🔴 The GROUP, not the process. `npx` execs `astro`, which spawns more; killing only the
       // first of them is how an orphan is made. The child leads its own group (`detached` below)
       // precisely so this one call reaches all of it.
-      if (process.platform === 'win32') child.kill(sig);
+      if (process.platform === 'win32') { if (!leaderJustExited) child.kill(sig); }
       else process.kill(-child.pid, sig);
     } catch (err) {
-      if (err.code !== 'ESRCH') throw err;   // already gone is the outcome being asked for
+      // Already gone is the outcome being asked for. Anything else (EPERM: that id is not ours) is
+      // not a reason to leave the renderer un-restored, so it is not thrown from an event handler.
+      if (err.code !== 'ESRCH' && !leaderJustExited) throw err;
     }
   };
   const onAbort = () => {
@@ -136,17 +153,17 @@ export async function buildSite({
         detached: true,
         env: { ...process.env, SITE_ID: siteId, SITE_URL: siteUrl },
       });
-      child.on('exit', (c) => resolve(c ?? 1));
+      child.on('exit', (c) => {
+        // 🔴 A last sweep of the group before anything is put back: the child's own `exit` says
+        // nothing about what IT started, and one surviving grandchild is the whole defect.
+        if (signal?.aborted) signalChild('SIGKILL', { leaderJustExited: true });
+        resolve(c ?? 1);
+      });
       child.on('error', () => resolve(1));
     });
   } finally {
     signal?.removeEventListener('abort', onAbort);
     clearTimeout(killTimer);
-    // 🔴 A last sweep of the group before anything is put back: the child's own `exit` says nothing
-    // about what IT started, and one surviving grandchild is the whole defect.
-    if (signal?.aborted && child?.pid && process.platform !== 'win32') {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is empty, which is the point */ }
-    }
     // 🔴 ORDER. restore() is what releases the lock, and it runs only after the `exit` above — so
     // the renderer is put back with nothing left running in it, and the lock outlives the child
     // rather than the other way round.
@@ -158,4 +175,6 @@ export async function buildSite({
 }
 
 export { collectPages } from './mkpages.mjs';
-export { stageSite, safePagePath, themeNameFromPages, THEME_NAME_PATTERN } from './stage.mjs';
+export {
+  stageSite, safePagePath, themeNameFromPages, THEME_NAME_PATTERN, RESTORE_FAILED, ASTRO_SCRATCH,
+} from './stage.mjs';
