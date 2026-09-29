@@ -2350,7 +2350,9 @@ function renderSection(s) {
       const lp = linksParts(s.body);
       const cards = lp.items.map((it) => '<li class="st-link">' +
         (it.href
-          ? '<a class="st-link-name" href="' + escHrefAttr(it.href) + '"' + targetAttrs(it.external ? 'external' : 'internal') + '>' + inlineHtml(it.label) + '</a>'
+          // `it.href` already went through safeHref (one entity decode + scheme gate);
+          // escHrefAttr would decode AGAIN and let `javascript&amp;#58;` through the gate.
+          ? '<a class="st-link-name" href="' + escAttr(it.href) + '"' + targetAttrs(it.external ? 'external' : 'internal') + '>' + inlineHtml(it.label) + '</a>'
           : '<span class="st-link-name">' + inlineHtml(it.label) + '</span>') +
         (it.host ? '<span class="st-link-host">' + escHtml(it.host) + '</span>' : '') +
         (it.note ? '<p class="st-link-note">' + inlineHtml(it.note) + '</p>' : '') + '</li>').join('');

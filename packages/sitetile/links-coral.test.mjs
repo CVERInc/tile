@@ -85,6 +85,22 @@ test('🔴 a javascript: destination never becomes a link — the name degrades 
   assert.ok(takeDropWarnings().length >= 5, 'each rejected destination is reported to the author');
 });
 
+test('🔴 a NESTED entity never becomes a live scheme (double-decode regression)', () => {
+  // `javascript&amp;#58;alert(1)`: one decode gives `javascript&#58;alert(1)` (no scheme, passes the
+  // gate as a relative path); a SECOND decode would give a live `javascript:`. The renderer must
+  // emit the once-decoded value verbatim — escaped, never decoded again — so the browser sees a
+  // literal `&` and resolves a harmless relative URL. Found by an independent re-review of #77.
+  const html = linksHtml(page('links', [
+    '- [Nested](javascript&amp;#58;alert(1))',
+    '- [NestedHex](JaVaScRiPt&amp;#x3a;alert(1))',
+    '- [NestedTab](java&amp;#9;script:alert(1))',
+  ]));
+  assert.doesNotMatch(html, /href="\s*javascript:/i, 'no live javascript: href:\n' + html);
+  assert.doesNotMatch(html, /href="[^"]*\t[^"]*script:/i, 'no TAB-split scheme either');
+  // Whatever the gate let through stays byte-inert: the ampersand is still an entity on output.
+  for (const m of html.matchAll(/href="([^"]*)"/g)) assert.match(m[1], /&amp;#/, 'once-decoded, then escaped: ' + m[1]);
+});
+
 test('🔴 CONTROL: the same shape with an https: destination IS a live link', () => {
   const html = linksHtml(page('links', ['- [Parens](https://example.com/wiki/Foo_(bar)) — ok']));
   assert.match(html, /<a class="st-link-name" href="https:\/\/example\.com\/wiki\/Foo_\(bar\)"/);
