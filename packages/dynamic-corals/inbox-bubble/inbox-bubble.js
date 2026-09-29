@@ -2976,13 +2976,12 @@ export async function mount(el) {
 	// to keep in sync.
 	//
 	// 🔴 ONE OF THE TWO `window` LISTENERS THIS FILE INSTALLS (the other is ruling 54's `pagehide`,
-	// at the bottom of `mount`), and it is never removed because `mount()`
-	// has no teardown to remove it from (review B9, still open). What that costs is bounded and
-	// worth naming rather than implying otherwise: an SPA that tears the container out leaves this
-	// listener holding `root` and `el`, and `openPanel` on a detached root re-renders into a node
-	// nobody can see. `mountAll`'s `data-dynamic-coral-mounted` guard stops the same element being
-	// mounted twice, so a page accumulates one listener per element it ever mounted, not per
-	// re-render. `reef-inbox:open` is a BROADCAST on purpose —「open the panel」 is a request any
+	// at the bottom of `mount`). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
+	// an SPA that tears the container out calls it, and neither listener is left holding `root`
+	// and `el`, nor re-rendering into a node nobody can see. A host that never calls it gets what
+	// every version before 0.7.9 did — `mountAll`'s `data-dynamic-coral-mounted` guard stops the
+	// same element being mounted twice, so a page accumulates one listener per element it ever
+	// mounted, not per re-render. `reef-inbox:open` is a BROADCAST on purpose —「open the panel」 is a request any
 	// script may honestly make of every panel on the page, and it names no conversation, which is
 	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
 	window.addEventListener('reef-inbox:open', openPanel);
@@ -3004,7 +3003,19 @@ export async function mount(el) {
 	// `null` for a session with no unsent questions, for an unclaimed tenant and for a tenant whose
 	// claim state we could not learn — so the ordinary page view, the one where nobody asked
 	// anything, reaches the network exactly as often as it did before this existed: never.
-	if (aiLog.enabled()) window.addEventListener('pagehide', () => aiLog.flush());
+	const onPagehide = () => aiLog.flush();
+	if (aiLog.enabled()) window.addEventListener('pagehide', onPagehide);
+
+	// 🔴 REGISTERED HERE, SYNCHRONOUSLY, BESIDE THE TWO LISTENERS IT UNDOES (review B9). Nothing
+	// above this line in `mount` awaits, so there is no window in which a listener exists and its
+	// removal does not: an `unmount` that races the first transcript read below still finds it.
+	// `stopPolling()` invalidates that read too, so it cannot paint into a detached root.
+	mounted.set(el, () => {
+		window.removeEventListener('reef-inbox:open', openPanel);
+		window.removeEventListener('pagehide', onPagehide);
+		stopPolling();
+		root.remove();
+	});
 
 	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
 	// bubble — without opening a panel nobody asked for.
@@ -3037,6 +3048,28 @@ export async function mount(el) {
 		assistantName = platformName;
 		applyAssistantName();
 	});
+}
+
+/** Each mounted element → the one function that undoes what its `mount()` installed (review B9). */
+const mounted = new WeakMap();
+
+/**
+ * Takes a bubble off an element: removes both `window` listeners its `mount()` added, stops the
+ * transcript poller (and any read already in the air), removes the panel, and clears
+ * `data-dynamic-coral-mounted` so the element may be mounted again. For a host that removes the
+ * container itself (an SPA route change); a plain page never needs it.
+ *
+ * Touches nothing in `localStorage` — the visitor's conversation handle and unsent questions
+ * outlive the panel exactly as they outlive a navigation. Returns `false` for an element this
+ * file did not mount (or already unmounted), and does nothing then.
+ */
+export function unmount(el) {
+	const dispose = mounted.get(el);
+	if (!dispose) return false;
+	mounted.delete(el);
+	dispose();
+	el.removeAttribute('data-dynamic-coral-mounted');
+	return true;
 }
 
 export function mountAll() {

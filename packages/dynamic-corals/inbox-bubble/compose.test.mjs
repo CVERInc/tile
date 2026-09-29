@@ -711,7 +711,8 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	// does take a handle cannot pass by keeping the total the same.
 	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
-	assert.match(CORAL_CODE, /window\.addEventListener\('pagehide', \(\) => aiLog\.flush\(\)\);/);
+	assert.match(CORAL_CODE, /const onPagehide = \(\) => aiLog\.flush\(\);/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('pagehide', onPagehide\);/);
 });
 
 // REVIEW B3, ROUND 3: the test that used to sit here asserted that the header SENTENCE existed
@@ -736,18 +737,19 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 	assert.match(CORAL_SOURCE, /third-party script it does not trust \(ads, analytics, a plugin\)/);
 });
 
-// REVIEW B9 (2026-09-08): there is still no unmount path, so the listener above is never removed.
-// The honest half of the fix is that there is now only ONE of them, and the file says so.
+// REVIEW B9 (2026-09-08; closed in 0.7.9): `unmount(el)` removes both window listeners. The
+// behaviour — N mount/unmount cycles leave the listener count where it started — is measured
+// against a real mount() in mount.test.mjs. What is left here is the count of registrations, so
+// a THIRD listener stays a deliberate act, and a check that each one has a matching removal.
 
-test('B9: the window listeners per mount are bounded, and mount() documents that nothing removes them', () => {
-	// Two since 0.7.6 (`reef-inbox:open` and ruling 54's `pagehide`). B9's cost is unchanged in
-	// kind — a page accumulates a fixed number per element it ever mounted, not per re-render —
-	// and this number is pinned so growing it stays a decision somebody makes on purpose.
+test('B9: every window listener mount() adds has a removal beside it', () => {
 	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
-	assert.equal(CORAL_CODE.includes('removeEventListener'), false,
-		'a teardown appeared — B9 can now be closed properly, and this test should assert it instead');
-	assert.match(CORAL_SOURCE, /no teardown to remove it from \(review B9, still open\)/);
-	// The guard that keeps it one-per-element rather than one-per-render.
+	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 2);
+	assert.match(CORAL_CODE, /window\.removeEventListener\('reef-inbox:open', openPanel\);/);
+	assert.match(CORAL_CODE, /window\.removeEventListener\('pagehide', onPagehide\);/);
+	assert.equal(/no teardown to remove it from/.test(CORAL_SOURCE), false,
+		'the header still says B9 is open');
+	// The guard that keeps it one-per-element rather than one-per-render, for hosts that never unmount.
 	assert.match(CORAL_CODE, /if \(el\.getAttribute\('data-dynamic-coral-mounted'\) === '1'\) return;/);
 });
 
@@ -840,14 +842,28 @@ test('B4: the README documents no event this file no longer has', () => {
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
 });
 
+// 🩸 REVIEW B16 (round 4): this slice used to end at `indexOf('## The three things not to break')`.
+// Rename that heading and indexOf answers -1, `slice(start, -1)` is the whole rest of the README,
+// and every assertion below could pass on a sentence from a different section. The section is now
+// bracketed by marker comments in the README, each required exactly once and in order.
+function markedSection(text, name) {
+	const start = `<!-- ${name}:start`;
+	const end = `<!-- ${name}:end -->`;
+	assert.equal(text.split(start).length - 1, 1, `expected exactly one ${start} marker`);
+	assert.equal(text.split(end).length - 1, 1, `expected exactly one ${end} marker`);
+	const from = text.indexOf(start);
+	const to = text.indexOf(end);
+	assert.ok(from < to, `${name}: the end marker comes before the start marker`);
+	return text.slice(from, to);
+}
+
 test('B3: the README keeps the warning next to the recipe that needs it', () => {
 	// 🩸 Round 2 deleted the storage recipe's own caveat along with the event's, so the README was
 	// left teaching how to write the key on one screen and calling the same move impossible on the
 	// next. The warning belongs BESIDE the recipe: whoever reads「write the key and navigate」is
 	// exactly the reader who has to know who else on the page can do it.
-	const section = README.slice(README.indexOf('reef-inbox:<kind>:<id>'),
-		README.indexOf('## The three things not to break'));
-	assert.ok(section, 'the hand-off section moved — this test is measuring nothing');
+	const section = markedSection(README, 'handoff-section');
+	assert.match(section, /reef-inbox:<kind>:<id>/, 'the markers no longer surround the recipe');
 	// Whitespace-tolerant: the README is hard-wrapped, so any of these gaps may be a newline.
 	assert.match(section, /third-party script it does not trust \(ads,\s+analytics, a plugin\)/);
 	assert.match(section, /the same way it has already given it\s+`localStorage` and the DOM/);
@@ -1918,6 +1934,16 @@ const MANIFEST = JSON.parse(
 	readFileSync(fileURLToPath(new URL('./manifest.json', import.meta.url)), 'utf8'));
 const MANIFEST_CALLS = MANIFEST.calls.join('\n');
 const MANIFEST_STORES = MANIFEST.stores.join('\n');
+
+// REVIEW B17 (round 4): the manifest's `stores` entry was the last public document still saying,
+// unqualified, that the handle is「never invented client-side」— the same absolute the header and
+// README gave up in round 3, since a same-origin script that writes the key and navigates picks it.
+test('B17: the manifest bounds the handle claim to this coral, like the header and README', () => {
+	assert.equal(/never invented client-side/.test(MANIFEST_STORES), false,
+		'the manifest claims no client can choose the handle — the storage intake means one can');
+	assert.match(MANIFEST_STORES, /never invented by this coral, which offers no API for a page script to pick one/);
+	assert.match(MANIFEST_STORES, /any same-origin script that can write this key and navigate still can/);
+});
 
 test('D9: the README and the manifest describe the flush the contract describes', () => {
 	// The claim that was false. It is not once per session — it is once per pagehide, when there

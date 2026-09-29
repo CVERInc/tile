@@ -76,6 +76,13 @@ globalThis.window = {
 	addEventListener: (type, fn) => {
 		if (!windowListeners.has(type)) windowListeners.set(type, []);
 		windowListeners.get(type).push(fn);
+	},
+	// Browser semantics: removes the first registration of that exact function, and a function
+	// that was never registered is a silent no-op. The key stays, so B3's key list is unaffected.
+	removeEventListener: (type, fn) => {
+		const list = windowListeners.get(type);
+		const at = list ? list.indexOf(fn) : -1;
+		if (at >= 0) list.splice(at, 1);
 	}
 };
 globalThis.document = {
@@ -344,18 +351,51 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	assert.equal(windowListeners.has('reef-inbox:handle'), false, 'the hand-off listener is back');
 	assert.equal(storage.get(key), stored, 'a dispatched hand-off rewrote the stored handle');
 
-	// Nor is there an export to hand one to. `parseHandle` and `aiHandle` (0.7.6, review E2) are the
-	// only exports that understand the shape at all, and both are pure readers: given the payload
-	// they return a value and adopt nothing. The list is spelled out so that a THIRD one has to be
-	// a deliberate act rather than something that arrives with a refactor.
-	assert.deepEqual(Object.keys(api).filter((name) => /hand|adopt/i.test(name)).sort(),
-		['AI_LOG_MAX_HANDLE', 'aiHandle', 'handoffConcluded', 'handoffFormHtml', 'parseHandle',
-			'refusalNeedsHandoffForm'],
-		'an export that takes a handle appeared');
-	assert.equal(api.parseHandle(payload).conv, 'ATTACKER-OWNED-CONV-ID');
-	assert.equal(storage.get(key), stored, 'parseHandle adopted the handle it was shown');
-	assert.equal(api.aiHandle('ATTACKER-OWNED-CONV-ID'), 'ATTACKER-OWNED-CONV-ID');
-	assert.equal(storage.get(key), stored, 'aiHandle adopted the handle it was shown');
+	// Nor is there an export to hand one to. 🩸 REVIEW B15 (round 4): this used to be a list of
+	// export NAMES matching /hand|adopt/ — which measures spelling, not capability. An export
+	// called `restore(tenant, conv)` that writes the handle key passes a name filter untouched.
+	// So every exported function is CALLED here, with every shape a conversation id could arrive
+	// in, and one level into whatever object it returns; what is asserted is that the visitor's
+	// stored handle did not move — and, below, that the next message is still filed under it.
+	const tenant = `site:${el.attrs['data-id']}`;
+	const conv = 'ATTACKER-OWNED-CONV-ID';
+	const argShapes = [
+		[payload], [conv], [JSON.stringify(payload)], [tenant, conv], [tenant, payload],
+		[tenant, JSON.stringify(payload)], [tenant, conv, true, 'human'], [key, conv],
+		[{ ...payload, tenant, kind: 'site', id: el.attrs['data-id'], handle: conv, storage: window.localStorage }]
+	];
+	const calls = async (fn, self) => {
+		let n = 0;
+		for (const args of argShapes) {
+			let out;
+			try { out = fn.apply(self, args); n++; } catch { continue; }
+			try { out = await out; } catch { continue; }
+			if (out && typeof out === 'object' && !Array.isArray(out)) {
+				for (const m of Object.values(out)) {
+					if (typeof m !== 'function') continue;
+					for (const inner of argShapes) {
+						try { await m.apply(out, inner); n++; } catch { /* a refusal is the point */ }
+					}
+				}
+			}
+		}
+		return n;
+	};
+	let probed = 0;
+	for (const [name, fn] of Object.entries(api)) {
+		// `mount` is excluded only because the first argument it wants is an element, and handing
+		// it THIS element would be a second mount, not an intake; `mountAll` finds none here.
+		if (typeof fn !== 'function' || name === 'mount') continue;
+		probed += await calls(fn, api);
+		await settle();
+		assert.equal(storage.get(key), stored, `export \`${name}\` adopted the handle it was shown`);
+		// The second key (review D12): the question buffer carries a handle that goes onto the wire.
+		const buffered = storage.get(`reef-inbox:ai:${tenant}`);
+		assert.equal(buffered && buffered.includes(`"handle":"${conv}"`), false,
+			`export \`${name}\` filed the buffered questions under the handle it was shown`);
+	}
+	// A probe that reached no export is measuring nothing — this file has ~30 functions exported.
+	assert.ok(probed > 50, `only ${probed} calls completed — the harness is not reaching the exports`);
 
 	// The measurement the review's own probe made: the next message is filed under the id the
 	// SERVER minted for this visitor.
@@ -365,6 +405,48 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	await root.querySelector('.dc-inbox-form').emit('submit');
 	assert.deepEqual(postedConvs(from), ['visitor-own'],
 		'the visitor\'s next message was filed under a conversation a page script chose');
+	// The probe above filled this tenant's question buffer with junk; take the mount (and its
+	// `pagehide` listener) off the page so later tests' pagehide does not send it.
+	assert.equal(api.unmount(el), true);
+});
+
+// REVIEW B9 (2026-09-08, closed in 0.7.9). Every mount added two `window` listeners and nothing
+// could remove them, so an SPA that mounted and dropped the same kind of container on each route
+// change grew a pair per visit, each holding a detached panel. Measured here as a COUNT across N
+// real mount/unmount cycles — the number of listeners on `window`, and the number of live pollers.
+
+test('B9: mounting and unmounting N times leaves no listener or poller behind', async () => {
+	const { unmount } = await import('./inbox-bubble.js');
+	const count = () => [...windowListeners.values()].reduce((n, list) => n + list.length, 0);
+	const before = count();
+	const pollersBefore = timers.size;
+	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
+	const key = `reef-inbox:site:${el.attrs['data-id']}`;
+	// A stored handle, so the mount also starts a transcript read and — once opened — a poller.
+	storage.set(key, JSON.stringify({ conv: 'visitor-own', ts: Date.now(), hasEmail: false, mode: 'human' }));
+	const stored = storage.get(key);
+	const N = 25;
+	for (let i = 0; i < N; i++) {
+		el.setAttribute('data-dynamic-coral-mounted', '1');
+		await mount(el);
+		assert.ok(count() > before, 'a mount added no window listener — this test is measuring nothing');
+		await openBubble(el.children[el.children.length - 1]);
+		assert.ok(timers.size > pollersBefore, 'an open panel started no poller — nothing to stop');
+		assert.equal(unmount(el), true, 'unmount did not recognise an element mount() set up');
+		assert.equal(el.getAttribute('data-dynamic-coral-mounted'), null, 'the mounted flag was left set');
+	}
+	await settle();
+	assert.equal(count(), before, `${count() - before} window listeners left after ${N} cycles`);
+	assert.equal(timers.size, pollersBefore, 'a poller outlived its unmount');
+	// Unmounting twice, or an element this file never mounted, is a no-op rather than a throw.
+	assert.equal(unmount(el), false);
+	assert.equal(unmount(new El()), false);
+	// The visitor's conversation outlives the panel, as it outlives a navigation.
+	assert.equal(storage.get(key), stored, 'unmount touched the stored handle');
+	// And a dispatch after the last unmount reaches nobody from this element.
+	const rendered = el.children.map((c) => c.innerHTML);
+	dispatch('reef-inbox:open');
+	assert.deepEqual(el.children.map((c) => c.innerHTML), rendered, 'an unmounted panel re-rendered on reef-inbox:open');
 });
 
 const DAY = 24 * 60 * 60 * 1000;
