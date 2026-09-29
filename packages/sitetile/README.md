@@ -117,6 +117,8 @@ Every `*.svg` a built site serves is delivered with `Content-Disposition: attach
 
 - **First graduations:** `grid-cell-CTA` (`### Title →/href`, a whole-cell link) and `hero media variant` (`media=avatar|logo`). Each earned its place by reaching a SECOND independent site: a cell link on one and product cards on another; a round avatar on one and an uncropped wordmark on another — that avatar/logo split is exactly what `media=` resolves. Block-image *rendering* was a base-content fix, not a marker.
 
+- **`links` (blogroll, #76):** `%% sitetile: links %%` + optional caption + `- [Name](https://example.com) — one-line recommendation` items → one static card per site (name, host, recommendation). One-way and curated: no feed, no reciprocity. **Degradation contract:** neither renderer ever fetches the linked site (no title/favicon/preview lookup, no liveness check), so a card renders identically whether that site is up, down or gone. A disallowed destination (`javascript:` …) degrades to a plain-text name; zero items renders the heading and caption with no empty list. External cards get `target="_blank" rel="noopener"` like every other external link — no `nofollow`/`ugc` (the owner wrote the list, so it is an editorial endorsement) and no `noreferrer` (the recommended site seeing the visit is the only reciprocity this coral has). Tests: `links-coral.test.mjs`.
+
 ### Observed candidates (NOT built — watch list, from real marketing-page work)
 
 A basic marketing homepage fits the 5 cleanly. A *fuller* real one recurs these, which the 5 hold awkwardly:

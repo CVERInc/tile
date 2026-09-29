@@ -42,7 +42,7 @@ import { escHtml, markCode, markEmphasis, markEscapes } from '../cssmd/cssmd.js'
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
-const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people'];
+const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
 // Site-layer vocabulary exported beside KNOWN_TYPES so grammar vendors have one renderer-owned
 // source of truth for chrome keys that are otherwise invisible to the section model.
 const SITE_LAYER_KEYS = [
@@ -61,6 +61,41 @@ function tagcloudLinks(body) {
   let m;
   while ((m = RE.exec(body || '')) !== null) out.push({ label: m[1], href: m[2] });
   return out;
+}
+
+// linksParts: a `links` section body (a blogroll — sites the owner recommends) → { caption, items }.
+// Each item is one markdown list line: `- [Name](https://example.com) — one-line recommendation`
+// (the separator after the link may be `—`, `–`, `-`, `:`, `|` or `·`, or omitted). Every other
+// line is caption prose, rendered above the cards.
+//
+// Degradation contract: nothing here, in either renderer, ever fetches the linked site — no
+// title/favicon/OG lookup, no feed, no liveness check, no reciprocal link. The card is exactly what
+// the owner wrote, so it renders identically whether the linked site is up, down or gone. `host`
+// is derived from the URL string alone (the WHATWG URL parser, no network).
+//
+// Each item arrives with its destination already gated through the shared safe-href policy:
+// `href` is the decoded, admitted destination or `null` (a `javascript:` link degrades to a
+// plain-text name, never a live anchor). `external` uses `linkKind` — the same rule every button
+// surface uses — so both renderers agree on which cards open in a new tab.
+// The destination admits one level of balanced parentheses (`/wiki/Foo_(bar)`, and — the case
+// that matters — `javascript:alert(1)`, which must reach the scheme gate whole, not split at
+// its first `)` into a dangling note).
+const RE_LINK_ITEM = /^\s*[-*+]\s+\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)\s*(?:[—–:|·-]\s*)?(.*)$/;
+function linksParts(body) {
+  const items = [];
+  const caption = [];
+  for (const line of String(body || '').split('\n')) {
+    const m = RE_LINK_ITEM.exec(line);
+    if (!m) { caption.push(line); continue; }
+    const href = safeHref(m[2]);
+    const external = !!href && linkKind(href, m[1]) === 'external';
+    let host = '';
+    if (external) {
+      try { host = new URL(href.startsWith('//') ? 'https:' + href : href).hostname.replace(/^www\./, ''); } catch { host = ''; }
+    }
+    items.push({ label: m[1].trim(), href, note: m[3].trim(), host, external });
+  }
+  return { caption: caption.join('\n').trim(), items };
 }
 
 // parseSidebarNav: parse `sidebar-nav:` frontmatter → [{head, items:[{label,href}]}].
@@ -2296,6 +2331,20 @@ function renderSection(s) {
       return '<section class="st-tagcloud">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
         '<div class="st-tag-flow">' + tags + '</div></section>';
     }
+    case 'links': {
+      // A blogroll: heading + optional caption + one static card per recommended site (name, host,
+      // the owner's one-line recommendation). Mirrors Links.astro. Never fetches the linked site —
+      // see linksParts for the degradation contract. Zero items → heading + caption, no empty list.
+      const lp = linksParts(s.body);
+      const cards = lp.items.map((it) => '<li class="st-link">' +
+        (it.href
+          ? '<a class="st-link-name" href="' + escHrefAttr(it.href) + '"' + targetAttrs(it.external ? 'external' : 'internal') + '>' + inlineHtml(it.label) + '</a>'
+          : '<span class="st-link-name">' + inlineHtml(it.label) + '</span>') +
+        (it.host ? '<span class="st-link-host">' + escHtml(it.host) + '</span>' : '') +
+        (it.note ? '<p class="st-link-note">' + inlineHtml(it.note) + '</p>' : '') + '</li>').join('');
+      return '<section class="st-links">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+        (lp.caption ? bodyHtml(lp.caption) : '') + (cards ? '<ul class="st-links-list">' + cards + '</ul>' : '') + '</section>';
+    }
     default: { // prose — omit the heading when headingless; `align=left` opts out of centering.
       const align = pm.align ? ' data-align="' + escAttr(typeof pm.align === 'object' ? pm.align.label : pm.align) + '"' : '';
       const prSurface = pm.surface ? ' data-surface="' + escAttr(typeof pm.surface === 'object' ? pm.surface.label : pm.surface) + '"' : '';
@@ -2461,7 +2510,7 @@ export {
   inlineHtml, bodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
   dialogueContext,
-  heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks,
+  heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks, linksParts,
   // sidebar layout helpers — exported so the Astro layer can reuse the same parser.
   parseSidebarNav,
   FRONTMATTER_KEY, KNOWN_TYPES, SITE_LAYER_KEYS,
