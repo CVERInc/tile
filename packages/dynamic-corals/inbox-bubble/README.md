@@ -70,6 +70,8 @@ a listener to exist.
 
 ## Handing a conversation over from elsewhere: navigate, do not dispatch
 
+<!-- handoff-section:start — compose.test.mjs reads between these two markers; keep them around this section's warnings -->
+
 0.7.4 added a `reef-inbox:handle` event for this and **0.7.5 removed it again** (tile #15, won't
 do). If a page holds a conversation id the server minted — reef's own `/report` form writes the
 handle this file's `saveHandle` writes — hand it over the way the platform already does: **write
@@ -99,6 +101,8 @@ visitor's own action in the panel) and cannot vouch for one it reads; a `ts` in 
 expire at all.
 
 There is no in-place switch for an already-mounted panel, on purpose. If you need one, reload.
+
+<!-- handoff-section:end -->
 
 ## What the visitor asked the machine (0.7.6)
 
@@ -172,6 +176,15 @@ quoting one of the owner's own pages; a message is a person speaking. Only the
 visitor's own question travels when they press the button — and the press is the
 point: a refusal is common, and turning every one into an interruption is the
 bubble this product exists not to be.
+
+## Taking it off the page (0.7.9)
+
+A plain page never needs this. A host that removes the container itself — an SPA changing route —
+calls `unmount(el)` (exported beside `mount`) before or after it does: both `window` listeners the
+mount added (`reef-inbox:open`, `pagehide`) are removed, the transcript poller stops, the panel is
+removed and `data-dynamic-coral-mounted` is cleared so the element can be mounted again. It leaves
+`localStorage` alone — the visitor's handle and unsent questions outlive the panel exactly as they
+outlive a navigation. Without it, a page keeps one pair of listeners per element it ever mounted.
 
 ## Styling
 
