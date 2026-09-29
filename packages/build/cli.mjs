@@ -12,6 +12,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSite } from './index.mjs';
+import { RESTORE_FAILED } from './stage.mjs';
 
 const USAGE = `usage: node packages/build/cli.mjs <ir-dir> <out-dir> [options]
 
@@ -25,7 +26,13 @@ const USAGE = `usage: node packages/build/cli.mjs <ir-dir> <out-dir> [options]
   --pagetile <dir>     this site's books (*.book.md)
   --engine <dir>       an engine checkout (default: the one this file is in)
   --include-posts      treat posts/ as pages rather than as the blog corpus
+
+exit: 0 built · 2 refused (the message says why) · 3 the renderer could not be put back ·
+      129 / 130 / 143 stopped by SIGHUP / SIGINT / SIGTERM, renderer put back · else astro's own code
 `;
+
+const VALUED = ['site-url', 'site-id', 'theme', 'assets', 'blog', 'pagetile', 'engine'];
+const BARE = ['include-posts'];
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -38,12 +45,20 @@ const flag = (name) => {
   }
   return v;
 };
+// 🩸 AN UNKNOWN FLAG IS A TYPO UNTIL PROVEN OTHERWISE. Every `--x` used to be skipped along with
+// the word after it, so `--siteurl https://…` built the whole site against the fallback origin —
+// every canonical wrong — and said nothing (#16, P3-13). Refuse it by name, and name the one meant.
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === '--include-posts') continue;
-  if (a.startsWith('--')) { i++; continue; }   // a valued flag and its value
-  positional.push(a);
+  if (!a.startsWith('--')) { positional.push(a); continue; }
+  const name = a.slice(2);
+  if (BARE.includes(name)) continue;
+  if (VALUED.includes(name)) { i++; continue; }   // a valued flag and its value
+  const squash = (n) => n.replace(/[-_]/g, '').toLowerCase();
+  const meant = [...VALUED, ...BARE].find((k) => squash(k) === squash(name.split('=')[0]));
+  console.error(`✗ unknown option ${a}${meant ? ` — did you mean --${meant}?` : ''}\n\n${USAGE}`);
+  process.exit(2);
 }
 
 const [irDir, outDir] = positional;
@@ -61,7 +76,18 @@ const engineDir = flag('engine') ?? path.resolve(here, '../..');
 // process; a library may not. What crosses the boundary is an AbortSignal, and nothing else.
 const stopping = new AbortController();
 let signalled = '';
-for (const sig of ['SIGINT', 'SIGTERM']) {
+//
+// 🩸 SIGHUP IS ONE OF THEM. The build runs in its own process group so one kill reaches all of it —
+// which also means closing the terminal no longer does: the hang-up goes to the FOREGROUND group,
+// the CLI's, and not astro's. Without a handler the CLI died on the default action, nothing
+// aborted, and astro carried on in a group nobody was signalling, writing into the owner's
+// --outDir (#16, R3-1). Handled, the hang-up unwinds like Ctrl-C and takes astro with it.
+//
+// …and the terminal that sent it is gone, so a write to it can fail (EIO). That must not turn the
+// unwind into a crash; the exit code is what is left to say anything.
+process.stderr.on('error', () => {});
+process.stdout.on('error', () => {});
+for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     if (signalled) {
       // The teardown is already in flight and cannot be hurried: a copy of a site's media is not
@@ -75,7 +101,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 // The shell's own spelling for "died on this signal": 128 + the signal number.
-const signalExit = () => (signalled === 'SIGINT' ? 130 : 143);
+const signalExit = () => ({ SIGHUP: 129, SIGINT: 130, SIGTERM: 143 })[signalled];
 
 let result;
 try {
@@ -93,12 +119,19 @@ try {
     signal: stopping.signal,
   });
 } catch (err) {
+  // 🩸 A RESTORE THAT FAILED IS ITS OWN EXIT CODE. It used to share the signal's 130/143 when a
+  // signal was involved, so "stopped, renderer back" and "stopped, renderer wrecked" read the same
+  // to anything checking `$?` (#16, R3-3). The second one needs a person; it gets 3 either way.
+  if (err.code === RESTORE_FAILED) {
+    console.error(`✗ ${signalled ? `${signalled} during a build, and ` : ''}${err.message}`);
+    process.exit(3);
+  }
   // A signal is not a failure to report as one: buildSite has already put the renderer back, so say
   // which signal stopped it and leave with the code a shell reads as that signal.
   if (signalled) {
     console.error(err.name === 'AbortError'
       ? `✗ ${signalled} — the build was stopped and the renderer put back.`
-      : `✗ ${signalled} during a build and the renderer could not be put back: ${err.message}`);
+      : `✗ ${signalled} during a build: ${err.message}`);
     process.exit(signalExit());
   }
   // Every other throw out of buildSite/stageSite is a sentence about what to do next, not a

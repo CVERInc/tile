@@ -49,7 +49,7 @@ const noStashLeft = (dir) => assert.deepEqual(
 
 // ── sanitisation ────────────────────────────────────────────────────────────────────────────────
 // THE canonical rule for this package, transcribed from the shell that has been doing this in
-// production. See README §"Three sanitisers, one rule".
+// production. See README §"Four sanitisers, one rule".
 test('safePagePath: the rules, one case each', () => {
   const cases = {
     'home': 'home',

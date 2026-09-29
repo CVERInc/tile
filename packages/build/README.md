@@ -62,10 +62,17 @@ try {
 }
 ```
 
-Aborting unwinds the build — the running `astro build` is stopped, all four directories are put
-back, the stash and the lock are removed — and then the call rejects with an `AbortError`. It does
-not exit for you. `restore()` is idempotent and re-entrant, so a `finally { await restore() }` of
-your own is always safe, including while an abort's restore is still in flight.
+Aborting `buildSite()` unwinds the build, whenever the abort lands — the running `astro build` is
+stopped, all four directories are put back, the stash and the lock are removed — and then the call
+rejects with an `AbortError` whose `cause` is `signal.reason`. It does not exit for you.
+
+`stageSite()` takes the same `signal`, and honours it **only while staging**: an abort then puts the
+renderer back and rejects. Once `stageSite()` has returned, the renderer and its `restore` are yours,
+and an abort does nothing on its own — whatever you run next has to see the signal, and your
+`finally { await restore() }` is what unwinds. `restore()` is idempotent and re-entrant, so that
+`finally` is always safe, including while an abort's restore is still in flight. If it cannot finish,
+it throws with `code: 'TILE_RESTORE_FAILED'` (exported as `RESTORE_FAILED`) and a sentence saying where
+the renderer's own material is; calling it again retries.
 
 The 130/143 lives in `cli.mjs`, which is a program and may own the process's signals because it *is*
 the process.
@@ -197,9 +204,16 @@ build is refused in a sentence instead of stashing what the first one just stage
 delete the renderer's own `content/` for good, silently.
 
 …and on **Ctrl-C**, which is none of those three and is the likeliest of the four. `finally` does
-not run on a signal, so `cli.mjs` — the program, not the library — installs `SIGINT`/`SIGTERM`
-handlers, aborts the build, and exits 130 / 143 once the renderer is back. A library call does none
-of that: see §"The API" for the `signal` option and why it is the only thing that crosses.
+not run on a signal, so `cli.mjs` — the program, not the library — installs `SIGHUP`/`SIGINT`/`SIGTERM`
+handlers, aborts the build, and exits 129 / 130 / 143 once the renderer is back. If the renderer could
+NOT be put back it exits **3** instead, signal or not, so `$?` never reads a wreck as a clean stop. A
+library call does none of that: see §"The API" for the `signal` option and why it is the only thing
+that crosses.
+
+`SIGHUP` — closing the terminal — is in that list because the build runs in its own process group
+(below), and the terminal's hang-up reaches only the foreground group, the CLI's. Unhandled, the CLI
+died on it and `astro` kept running and writing into `--outDir`. A program of your own that runs
+`buildSite()` in a terminal needs the same handler, for the same reason.
 
 **The `astro build` goes first, and the lock goes last.** An abort sends `SIGTERM` to the build's
 whole process group, `SIGKILL` if it is still there after the grace, and waits for it — and only
@@ -210,7 +224,21 @@ pages into the site owner's `--outDir` — because restore had already put the r
 back underneath it. It had also removed the lock, so for those seconds a build was running that
 nothing was holding the renderer for.
 
-A kill nothing can catch (`SIGKILL`, a power cut) still leaves a `.tile-build-stash-*/` inside
+The grace between that `SIGTERM` and the `SIGKILL` is `killGraceMs`, 5000 by default — half of
+`docker stop`'s 10 seconds, deliberately. Those 10 seconds are the budget for everything after the
+`SIGTERM`: stopping `astro` *and* putting the renderer back. A grace as long as the supervisor's would
+spend all of it on `astro` and get the restore itself `SIGKILL`ed half way. Under a supervisor with a
+shorter grace, a program calling `buildSite()` passes a smaller one.
+
+`astro`'s own scratch is part of what is borrowed. With `--outDir` outside the renderer, `astro build`
+writes its prerender bundle to `<renderer>/.astro/` and its cache to `node_modules/.astro/`; an aborted
+build was measured leaving 769KB there, one copy carrying the site's page text. Both are taken over like the four directories: the renderer's own copy, if
+it has one, waits in the stash, and whatever the build wrote is removed when the renderer is put back,
+on success and on an abort alike. (So site A's cache never feeds site B's build, either.)
+
+A kill nothing can catch (`SIGKILL` of the CLI itself, a power cut) still leaves a
+`.tile-build-stash-*/` inside the renderer, and `astro`'s scratch beside it — and cannot take `astro`
+with it: a process that is killed outright runs no code. The stash is what makes that loud: it sits in
 the renderer — `.gitignore` hides it from `git status` and a tarball has no `git status` at all, so
 the NEXT build refuses to start and names the directory rather than building somebody else's
 leftover pages into your site.

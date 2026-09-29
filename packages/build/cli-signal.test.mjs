@@ -12,7 +12,7 @@
 
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -287,4 +287,200 @@ test('a build that ignores SIGTERM is SIGKILLed after the grace, and the restore
   assert.equal(existsSync(join(outDir, 'what-astro-saw.txt')), false);
   assert.deepEqual(await snapshot(astroDir), before);
   assert.deepEqual(leftovers(astroDir), [], 'a stash or a lock survived');
+});
+
+// ── #16 round 3 ─────────────────────────────────────────────────────────────────────────────────
+
+// 🩸 R3-1: CLOSING THE TERMINAL. The build runs in its own process group (so one kill reaches all
+// of it), and that same fact means the terminal's hang-up no longer does: the kernel sends SIGHUP to
+// the FOREGROUND group, which holds the CLI and not `astro`. The CLI had no SIGHUP handler, so it
+// died on the default action — no abort, no restore — and `astro` carried on in a group nothing was
+// signalling, writing into the owner's --outDir. Delivered here exactly that way: to the CLI alone.
+test('closing the terminal (SIGHUP to the CLI only) takes astro with it: 129, and nothing written', async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, REPORTING_NPX);
+  const before = await snapshot(astroDir);
+  const outDir = join(root, 'out');
+
+  const run = runCli(t, { root, binDir, outDir });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  const npxPid = Number(readFileSync(join(root, 'npx-pid'), 'utf8').trim());
+  process.kill(run.child.pid, 'SIGHUP');
+
+  const { code, sig, stderr } = await run.ended;
+  assert.equal(sig, null, `the CLI died on ${sig} instead of unwinding — astro is now an orphan`);
+  assert.equal(code, 129, `exit ${code}, not 129. stderr was:\n${stderr}`);
+  assert.throws(() => process.kill(npxPid, 0), /ESRCH/, 'astro outlived the terminal that started it');
+  await new Promise((r) => setTimeout(r, 4500));   // past the point it would have written
+  assert.equal(existsSync(join(outDir, 'what-astro-saw.txt')), false,
+    "an orphaned build wrote into the owner's --outDir after the terminal closed");
+  assert.deepEqual(await snapshot(astroDir), before);
+  assert.deepEqual(leftovers(astroDir), [], 'a stash or a lock survived');
+});
+
+// 🩸 R3-2: ASTRO'S OWN SCRATCH IS PART OF WHAT IS BORROWED. With --outDir outside the renderer (the
+// only way this package runs it), astro writes its prerender bundle to `<renderer>/.astro/`, and its
+// cache to `node_modules/.astro/`. A build stopped part-way leaves them there — measured at 769KB,
+// one copy carrying the owner's page text — and nothing looked: `leftovers()` knew only the stash.
+// This astro writes both, the way a real one does, and is then stopped.
+const SCRATCH_NPX = `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--outDir" ]; then out="$2"; fi
+  shift
+done
+mkdir -p "$out" "$PWD/.astro/chunks" "$PWD/node_modules/.astro"
+cat "$PWD"/content/*.md > "$PWD/.astro/chunks/pages.mjs"
+cat "$PWD"/content/*.md > "$PWD/node_modules/.astro/data-store.json"
+: > "$out/../npx-started"
+if [ "$SCRATCH_EXIT" = "0" ]; then exit 0; fi
+i=0
+while [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+`;
+
+const OWNER_TEXT = "the owner's home page";
+const grepTree = (dir, needle, acc = []) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) grepTree(full, needle, acc);
+    else if (readFileSync(full, 'utf8').includes(needle)) acc.push(full.slice(dir.length + 1));
+  }
+  return acc;
+};
+
+for (const how of ['aborted', 'finished']) {
+  test(`astro's scratch does not outlive a build that ${how} — no copy of the owner's pages stays behind`, async (t) => {
+    const { root, astroDir, binDir } = fakeEngine(t, SCRATCH_NPX);
+    // The renderer may already have a `.astro/` of its own (editor types from `astro dev`); it is
+    // the renderer's, and it comes back exactly as it was.
+    mkdirSync(join(astroDir, '.astro'), { recursive: true });
+    writeFileSync(join(astroDir, '.astro/types.d.ts'), '/// the renderer\'s own types\n');
+    const outDir = join(root, 'out');
+
+    const stopping = new AbortController();
+    process.env.SCRATCH_EXIT = how === 'finished' ? '0' : '';
+    t.after(() => { delete process.env.SCRATCH_EXIT; });
+    const pending = buildSite({ irDir: IR, engineDir: root, outDir, npxBin: join(binDir, 'npx'),
+      signal: stopping.signal, killGraceMs: 400 });
+    if (how === 'aborted') {
+      await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+      stopping.abort();
+      await assert.rejects(() => pending, { name: 'AbortError' });
+    } else {
+      assert.equal((await pending).code, 0);
+    }
+
+    assert.deepEqual(grepTree(astroDir, OWNER_TEXT), [],
+      "the renderer still holds a copy of the owner's pages after the build left");
+    assert.deepEqual(readdirSync(join(astroDir, '.astro')), ['types.d.ts']);
+    assert.equal(readFileSync(join(astroDir, '.astro/types.d.ts'), 'utf8'), '/// the renderer\'s own types\n');
+    assert.equal(existsSync(join(astroDir, 'node_modules/.astro')), false);
+    assert.deepEqual(leftovers(astroDir), []);
+  });
+}
+
+// …and when the build is killed by something nothing can catch, the NEXT build is told about the
+// scratch too, rather than only about the stash beside it.
+test('a stash left by a killed build names astro\'s scratch among what to clean up', async (t) => {
+  const { astroDir } = fakeEngine(t, SLOW_NPX);
+  const { stageSite } = await import('./stage.mjs');
+  await stageSite({ astroDir, pages: [{ path: 'home', markdown: OWNER_TEXT }] });
+  // …astro starts writing, and the process is SIGKILLed: restore never runs.
+  mkdirSync(join(astroDir, '.astro'), { recursive: true });
+  writeFileSync(join(astroDir, '.astro/pages.mjs'), OWNER_TEXT);
+  rmSync(join(astroDir, LOCK_NAME), { recursive: true });   // the lock of a dead build, removed by hand
+  await assert.rejects(() => stageSite({ astroDir, pages: [] }), (err) => {
+    assert.match(err.message, /\.astro\//, 'the refusal does not mention astro\'s scratch at all');
+    return true;
+  });
+});
+
+// 🩸 R3-3: A RESTORE THAT FAILED IS NOT A CLEAN ABORT, and it used to leave with the same 130. A
+// script reading the code could not tell "stopped, renderer back" from "stopped, renderer wrecked".
+// The renderer is made unwritable mid-build so the restore cannot finish.
+const WRECKING_NPX = `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--outDir" ]; then out="$2"; fi
+  shift
+done
+mkdir -p "$out"
+chmod 555 "$PWD"
+: > "$out/../npx-started"
+i=0
+while [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+`;
+
+test('Ctrl-C whose restore then fails leaves with 3, not the 130 of a clean abort', { skip: process.getuid?.() === 0 && 'root ignores the permission this case relies on' }, async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, WRECKING_NPX);
+  t.after(() => { try { chmodSync(astroDir, 0o755); } catch { /* already gone */ } });
+  const outDir = join(root, 'out');
+  const run = runCli(t, { root, binDir, outDir });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  process.kill(run.child.pid, 'SIGINT');
+  const { code, stderr } = await run.ended;
+  chmodSync(astroDir, 0o755);
+  assert.equal(code, 3, `exit ${code}; a wrecked renderer must not read as a clean 130. stderr:\n${stderr}`);
+  assert.match(stderr, /could not be put back/);
+});
+
+// R3-8: the reason travels. `controller.abort(reason)` is how a caller says WHY, and an AbortError
+// that drops it makes every abort look alike.
+test('the AbortError carries signal.reason as its cause — before staging, and mid-build', async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, SLOW_NPX);
+  const { stageSite } = await import('./stage.mjs');
+  const early = new Error('shutting down: deploy superseded');
+  await assert.rejects(() => stageSite({ astroDir, pages: [], signal: AbortSignal.abort(early) }),
+    (err) => { assert.equal(err.name, 'AbortError'); assert.equal(err.cause, early); return true; });
+
+  const late = new Error('shutting down: SIGTERM');
+  const stopping = new AbortController();
+  const pending = buildSite({ irDir: IR, engineDir: root, outDir: join(root, 'out'),
+    npxBin: join(binDir, 'npx'), signal: stopping.signal, killGraceMs: 400 });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  stopping.abort(late);
+  await assert.rejects(() => pending,
+    (err) => { assert.equal(err.name, 'AbortError'); assert.equal(err.cause, late); return true; });
+});
+
+// R3-4: the group sweep after an aborted build's leader exits — a grandchild that ignores SIGTERM
+// while its parent obeys it is exactly what the sweep is for, and it must still be reached.
+const FORKING_NPX = `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--outDir" ]; then out="$2"; fi
+  shift
+done
+mkdir -p "$out"
+( trap '' TERM; i=0; while [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; echo late > "$out/grandchild.txt" ) &
+echo $! > "$out/../grandchild-pid"
+: > "$out/../npx-started"
+trap 'exit 143' TERM
+i=0
+while [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+`;
+
+test('an aborted build\'s grandchild that ignores SIGTERM is still swept', async (t) => {
+  const { root, binDir } = fakeEngine(t, FORKING_NPX);
+  const outDir = join(root, 'out');
+  const stopping = new AbortController();
+  const pending = buildSite({ irDir: IR, engineDir: root, outDir, npxBin: join(binDir, 'npx'),
+    signal: stopping.signal, killGraceMs: 5000 });
+  await until('astro build to start', () => existsSync(join(root, 'npx-started')));
+  const gc = Number(readFileSync(join(root, 'grandchild-pid'), 'utf8').trim());
+  stopping.abort();
+  await assert.rejects(() => pending, { name: 'AbortError' });
+  // The leader obeyed SIGTERM at once; had the sweep not run, the grandchild would be alive now.
+  await until('the grandchild to be gone', () => { try { process.kill(gc, 0); return false; } catch { return true; } }, 2000);
+});
+
+// P3-13: an unknown flag is a typo until proven otherwise. `--siteurl` used to be skipped along with
+// its value, and every canonical on the site came out wrong with no message at all.
+test('an unknown option is refused by name, before anything is staged', async (t) => {
+  const { root, astroDir, binDir } = fakeEngine(t, '#!/bin/sh\nexit 0\n');
+  const run = runCli(t, { root, binDir, outDir: join(root, 'out'), args: ['--siteurl', 'https://example.org'] });
+  const { code, stderr } = await run.ended;
+  assert.equal(code, 2, `exit ${code}; stderr:\n${stderr}`);
+  assert.match(stderr, /unknown option --siteurl/);
+  assert.match(stderr, /--site-url/, 'the refusal does not point at the flag that was meant');
+  assert.deepEqual(leftovers(astroDir), []);
 });
