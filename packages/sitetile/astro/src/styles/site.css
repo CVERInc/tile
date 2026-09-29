@@ -415,6 +415,23 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
 }
 .st-tag:hover { border-color: var(--gd-accent); color: var(--gd-text); }
 
+/* ── links / blogroll ── one static card per recommended site, same token-driven card idiom as
+   .st-cells. Nothing here depends on the linked site (no favicon, no preview image), so the card
+   looks the same whether that site is up or down. */
+.st-links-list {
+  list-style: none; padding: 0; margin: 1.5rem 0 0;
+  display: grid; gap: var(--gd-gap);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+.st-link {
+  display: flex; flex-direction: column; gap: 0.25rem; margin: 0;
+  padding: 1rem 1.1rem; border-radius: var(--gd-radius, 12px);
+  border: 1px solid var(--gd-border); background: var(--gd-surface);
+}
+.st-link-name { font-weight: 700; overflow-wrap: anywhere; }
+.st-link-host { font-size: 0.8rem; color: var(--gd-muted); overflow-wrap: anywhere; }
+.st-link-note { margin: 0.35rem 0 0; color: var(--gd-muted); }
+
 .st-cells {
   display: grid; gap: var(--gd-gap); margin-top: 1.5rem;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));

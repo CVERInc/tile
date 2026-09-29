@@ -1,0 +1,42 @@
+---
+// `links` — a blogroll: sites the owner recommends, each a static card (name, host, the owner's
+// one-line recommendation). One-way and curated: no feed, no algorithm, no reciprocal link, and
+// NOTHING is fetched from the linked site at build or view time — so a card renders the same
+// whether that site is up, down or gone (the degradation contract; see linksParts in
+// site-core.js). Mirrors the reference renderer's `case 'links'` so the editor preview matches
+// the build.
+// IR: `## Title` + `%% sitetile: links %%` + optional caption prose + a markdown list of
+// `- [Name](https://example.com) — one-line recommendation` items.
+// rel: `noopener` only, same as every other external link surface. Not `nofollow`/`ugc`: the
+// owner wrote this list, so it IS an editorial endorsement — withholding it would defeat the
+// coral. Not `noreferrer`: the recommended site seeing where a visitor came from is the only
+// "reciprocity" this coral has, and it costs no fetch.
+import { parseParams, inlineHtml, bodyHtml, linksParts } from '@sitetile';
+const { section, hero } = Astro.props;
+const Title = hero ? 'h1' : 'h2';
+const pm = parseParams(section.params);
+// `eyebrow="…"` — the small label above the heading, the same seam every heading-bearing coral
+// has. Absent → no DOM change.
+const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+// Destinations arrive already gated (href is null for a disallowed scheme) and classified, so
+// this component decides nothing the reference renderer does not.
+const lp = linksParts(section.body);
+---
+<section class="st-links" id={section.id}>
+  {eyebrow && <p class="st-links-eyebrow" set:html={inlineHtml(eyebrow)} />}
+  {section.title && <Title set:html={inlineHtml(section.title)} />}
+  {lp.caption && <Fragment set:html={bodyHtml(lp.caption)} />}
+  {lp.items.length > 0 && (
+    <ul class="st-links-list">
+      {lp.items.map((it) => (
+        <li class="st-link">
+          {it.href
+            ? <a class="st-link-name" href={it.href} target={it.external ? '_blank' : undefined} rel={it.external ? 'noopener' : undefined} set:html={inlineHtml(it.label)} />
+            : <span class="st-link-name" set:html={inlineHtml(it.label)} />}
+          {it.host && <span class="st-link-host">{it.host}</span>}
+          {it.note && <p class="st-link-note" set:html={inlineHtml(it.note)} />}
+        </li>
+      ))}
+    </ul>
+  )}
+</section>
