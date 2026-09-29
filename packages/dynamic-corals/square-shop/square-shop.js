@@ -321,7 +321,12 @@ function recordSoldLines(ref, items) {
 	try {
 		window.localStorage.setItem(SOLD_STORE_PREFIX + ref, JSON.stringify({
 			t: Date.now(),
-			ids: items.map((line) => String(line.variation_id))
+			ids: items.map((line) => String(line.variation_id)),
+			// 0.11.19 (tile#40): how many of each went, so the completion page can take exactly that
+			// many off the row as it stands when the order is confirmed — the row may have grown in
+			// another tab meanwhile. `ids` stays for a completion page from 0.11.16–0.11.18, which
+			// reads only that; this key is ignored by it.
+			lines: items.map((line) => [String(line.variation_id), Math.max(1, parseInt(line.quantity, 10) || 1)])
 		}));
 	} catch {
 		// storage disabled/full — the completion page falls back to clearing the whole basket,

@@ -13,6 +13,43 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.19 — 2026-09-29 — a paid order takes its lines off the basket as it is now (tile#40)
+
+0.11.16 made a paid completion remove only the rows the order carried. It still wrote its answer
+back as the **whole value** of the basket key, and it removed a sold row **whole**. Two writes
+could be lost that way:
+
+| lost write | why |
+|---|---|
+| an add-to-cart another tab lands between the completion page's `getItem` and its `setItem` | the `setItem` carried an array computed without it; localStorage has no compare-and-swap |
+| more of a line that is IN the order, added in another tab while the shopper was on the hosted payment page | the sold record named ids only, so the row went — with the later add inside it. The record is the earlier snapshot: written as the checkout left, while the row kept moving |
+
+Other devices are not in play — the basket is per-browser localStorage.
+
+What changed:
+
+- **the record** (`square-shop.js#recordSoldLines`) now carries `lines: [[variationId, qty], …]`
+  beside `ids`. `ids` stays, so a 0.11.16–0.11.18 completion page reads the new record exactly as
+  it read the old one.
+- **the decision** (`shop-function-template.js#cartAfterOrder`) takes that many off each row as it
+  stands, dropping a row only when it reaches zero. A record without `lines` (or with a malformed
+  one) is read the 0.11.16 way; no record at all still removes the whole key.
+- **the write** (`#settleCartAfterOrder`, new, shipped into the page by its own source text like
+  `cartAfterOrder`) re-reads the key immediately before writing and recomputes if it moved. That
+  shrinks the window to two adjacent synchronous calls; closing it completely would need a lock
+  every writer of the key takes, and those writers ship on three different deploys.
+
+**Still open, not this change:** a second tab that loaded the basket BEFORE the order landed keeps
+it in memory, and its next add/±/remove writes that whole in-memory basket back
+(`persistCart`) — which can resurrect the sold rows. That is the coral's own whole-key write, and
+the repair is for that tab to re-read on the `storage` event — proposed as a follow-up on the PR, not tracked yet.
+
+Deploy needs both halves, as 0.11.16 did: the registry publish of 0.11.19 (the record) and a
+rebuild of each site's `_worker.js` (the completion page). Either order degrades to 0.11.16's
+behaviour.
+
+---
+
 ## 0.11.17 — 2026-09-15 — the default apiBase moves off the backend being retired
 
 **No source change.** `square-shop.js` is byte-identical to 0.11.16 — 0.11.17 exists to carry a
