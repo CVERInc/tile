@@ -1460,12 +1460,24 @@ test('🔴 #496 round 3 — an unterminated `<!--` is left literal, whatever com
 // size^2)" (see commentTerminatorEnd's own comment and escapeInline's own comment in site-core.js
 // for why).
 //
-// NOT every scaling test below carries the same arms. Every one carries cpuScaleRatio (arm 2 below)
-// plus the `t1m < 5000` absolute backstop; countIndexOfBudget (arm 1) is kept only on the tests named
-// below arm 1's own description, where the input's dominant cost genuinely runs through indexOf — it
-// is dropped, not mislabelled, everywhere else. On the well-formed-comments, ordinary-prose and
-// inline-code-span tests, the `t1m < 5000` backstop is NEW: those three used to assert an absolute
-// `ms < 200` instead, which this change replaces along with the ratio form.
+// 🩸 #40 (round-4 P3-4): arm 2 used to be cpuScaleRatio, a `process.cpuUsage()` ratio. CPU time
+// excludes time this process spent descheduled while a neighbour ran, so it was steadier than the
+// original wall-clock ratio — but it was still a stopwatch, and it still went red (1 of 4 full runs)
+// on a 16-core box busy with other lanes' load, with NO change to this file. Arm 2 is now
+// chargedRatioSmall (own comment just below chargedWork, further down this file): it counts built-in
+// calls instead of timing them, the same technique #75 used for the bare-`<` test right after this
+// comment block. A charged-call count depends only on the input and the algorithm, never on how fast
+// or how loaded the machine is, so it is exact and reproducible on every run.
+//
+// NOT every scaling test below carries the same arms. Every one carries chargedRatioSmall (arm 2
+// below) plus the `t1m < 5000` absolute backstop; countIndexOfBudget (arm 1) is kept only on the
+// tests named below arm 1's own description, where the input's dominant cost genuinely runs through
+// indexOf — it is dropped, not mislabelled, everywhere else. The `t1m < 5000` absolute backstop is
+// unconverted: it is a single absolute bound five orders of magnitude above what a correct
+// implementation takes, not a ratio between two measurements, so it needs sustained multi-second
+// starvation of this process to false-positive — orders of magnitude less likely than the ratio form
+// that #40 actually saw flake, and its own comment on tile#30's discovery already gives the human
+// reader the real durations (0.7s vs 8.5s, 1.5s vs 27s) a regression would produce.
 //
 // 1. countIndexOfBudget wraps String.prototype.indexOf(needle, from) for one bodyHtml() call and
 //    sums, per call, the characters actually examined — the found index minus `from`, or the
@@ -1482,16 +1494,28 @@ test('🔴 #496 round 3 — an unterminated `<!--` is left literal, whatever com
 //    regression touched them. Kept below only where the input's own dominant cost genuinely runs
 //    through indexOf; dropped (not mislabelled) everywhere else.
 //
-// 2. cpuScaleRatio (own comment just below) measures `process.cpuUsage()` (user+system CPU time
-//    actually charged to this process), takes the MINIMUM over 5 repeats of an EQUAL-WORK comparison,
-//    and asserts `<= 4`. CPU time excludes time this process spent descheduled while a neighbour ran —
-//    the exact thing that made the old wall-clock ratio flaky under contention — and the minimum-of-k
-//    keeps the least-interrupted sample, which is the one that best represents the algorithm's own
-//    cost rather than a scheduling artefact. Unlike countIndexOfBudget this is a DIRECT measurement of
-//    whatever the code actually does, so it catches any quadratic mechanism, not only an
-//    indexOf-shaped one — it is the primary, universal arm; countIndexOfBudget where kept is an
-//    additional, narrower, fully deterministic guard for the specific indexOf-shaped regression class
-//    round 2 introduced.
+// 2. chargedRatioSmall(at) is chargedWork's 'examined' model (own comment just below), applied at
+//    4 KiB and 16 KiB, and asserts the ratio is `<= 6` (expected ~4x for linear). Unlike
+//    countIndexOfBudget this counts EVERY charged String/RegExp/Array built-in call the code makes,
+//    not only indexOf, so it catches any quadratic mechanism that goes through one of those built-ins
+//    — it is the primary, universal arm; countIndexOfBudget where kept is an additional, narrower,
+//    fully deterministic guard for the specific indexOf-shaped regression class round 2 introduced.
+//    Its own blind spot is the same one chargedWork's comment documents: a hand-rolled loop that
+//    never calls a patched built-in (a raw `s[j]` index walk, say) would not move this count either —
+//    no counted arm in this file can see that shape, only a direct timing measurement could, and
+//    timing measurements are exactly what #40 asks this file to stop depending on. Every regression
+//    this suite has actually caught (round 2's double indexOf scan, tile#30's rope-flattening join)
+//    goes through a charged built-in, so this trade keeps determinism without losing real coverage.
+//
+//    EXCEPTION — two tests below (both on the single shape of many well-formed `<!--a-->` comments
+//    with no newline between them) keep arm 2 as a real CPU-time ratio, robustCpuScaleRatio, instead:
+//    that shape drives bodyHtml's block-comment REATTACHMENT loop, which re-dispatches the same
+//    (shrinking) physical line through `.trim()` and a failed, non-global `RE_QUOTE_LINE.exec()` /
+//    `RE_LIST_ITEM.exec()` once per comment consumed. chargedWork's 'examined' model has no way to
+//    charge a FAILED non-global regex match anything less than the whole receiver length (there is no
+//    built-in signal for how far a failed match actually looked), so it reports a spurious O(n²) on
+//    this one shape — verified false: real CPU time on it is linear. robustCpuScaleRatio's own comment
+//    (further down) has the full account.
 function countIndexOfBudget(fn) {
   const orig = String.prototype.indexOf;
   let budget = 0;
@@ -1504,137 +1528,6 @@ function countIndexOfBudget(fn) {
   try { fn(); } finally { String.prototype.indexOf = orig; }
   return budget;
 }
-function minCpuMs(fn, k) {
-  let min = Infinity;
-  for (let r = 0; r < k; r++) {
-    const before = process.cpuUsage();
-    fn();
-    const after = process.cpuUsage(before);
-    const ms = (after.user + after.system) / 1000;
-    if (ms < min) min = ms;
-  }
-  return min;
-}
-function cpuScaleRatio(at) {
-  // EQUAL WORK, not equal input count: cpuSmall is 16 calls on a 64 KiB input, back to back in one
-  // sample — 1 MiB of total input, the same total work as cpuLarge's one 1 MiB call. A 256 KiB vs
-  // 1 MiB *input-size* ratio (what this used to measure) forced cpuSmall's own baseline down to
-  // ~6-8ms of CPU on some shapes, so ~1ms of unrelated jitter alone could move the ratio 15%; here
-  // both sides do tens of ms of real work, well above the timer/scheduler noise floor either way.
-  const callSmall = () => { for (let c = 0; c < 16; c++) bodyHtml(at(65536)); };
-  const callLarge = () => { bodyHtml(at(1048576)); };
-  minCpuMs(callSmall, 1); minCpuMs(callLarge, 1);                // warm up (JIT), not counted
-  const cpuSmall = Math.max(minCpuMs(callSmall, 5), 0.05);
-  const cpuLarge = minCpuMs(callLarge, 5);
-  return { cpuSmall, cpuLarge, ratio: cpuLarge / cpuSmall };
-}
-
-test('🔴 #496 round 3 — P1-01: linear on 1 MiB of unterminated comment openers (no longer quadratic to escape literally, either)', () => {
-  const input = '<!--'.repeat(262144);                       // exactly 1 MiB, no closer anywhere
-  const html = bodyHtml(input);
-  // The whole document is ONE unterminated `<!--` (a single line — this input has no `\n`), so it is
-  // left as literal, visible, escaped text (R3 point 3) rather than deleted: one `<p>` of `&lt;!--`
-  // repeated 262,144 times. The escapeInline `noCloser` cache (see that function's own comment) is
-  // what keeps this linear despite every one of those 262,144 opens being individually attempted.
-  assert.equal(html, '<p>' + '&lt;!--'.repeat(262144) + '</p>', 'nothing disappears silently, even at this size');
-  // countIndexOfBudget is meaningful here: every one of the 262,144 opens attempts a commentTerminatorEnd
-  // indexOf('--', k) call (until noCloser caches the verdict), which is the dominant cost.
-  const unit = '<!--';
-  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
-  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
-  budgetOf(at(262144));                                         // warm up (JIT)
-  const b256 = Math.max(budgetOf(at(262144)), 1);               // 256 KiB
-  const b1m = budgetOf(at(1048576));                             // 1 MiB
-  const budgetRatio = b1m / b256;
-  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
-  const t0 = process.hrtime.bigint();
-  bodyHtml(at(1048576));
-  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
-});
-
-// ── round 3 — REVIEW-tile28-r2-2026-09-09.md, R2-P1-01 / R2-P1-02 / R2-P2-03 / R2-P2-04 ────────────
-// Round 2 found the round-1 fix itself had two bugs. R2-P1-01: escapeInline's terminator search ran
-// TWO full-suffix `indexOf` calls per comment ('-->' and '--!>'), each bounded by the REST OF THE
-// STRING rather than the comment — quadratic on any real document (1 MiB of 131,072 well-formed
-// `<!--a-->` comments: 5m53s). R2-P1-02: comment removal ran per-fragment, AFTER block-splitting, so
-// a comment spanning a blank line / list-item run / heading→paragraph boundary was cut in half by the
-// splitter before removal ever saw it whole — the opening half vanished, the closing half rendered as
-// visible prose. The fix: commentTerminatorEnd() replaces both terminator searches with one linear
-// scan (used by escapeInline, removeHtmlComments, AND the new removeDocumentComments), and comment
-// removal now runs document-wide, BEFORE block-splitting, in removeDocumentComments() — fence-aware,
-// code-span-aware, and dead-tag(`inTag`)-aware, so it can't repeat round 1's P2-03 mistake. That same
-// move is also what makes R2-P2-03 (an empty block for a comment-only line) and R2-P2-04 (an
-// unterminated comment's true extent) fall out for free: block-splitting never sees a line that
-// removal already emptied.
-
-test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of WELL-FORMED comments (the quadratic shape)', () => {
-  // The exact failing input from the review: not the one shape (all-`<!--`, no closer) the round-2
-  // perf test covered, but 131,072 separate, individually well-formed `<!--a-->` comments — the shape
-  // that was 352,756.7ms (5m53s) before this fix, because `indexOf('--!>', …)` alone paid a
-  // full-suffix scan at every one of them (no `--!>` anywhere in the document to find it early).
-  // countIndexOfBudget is meaningful here — this IS the exact shape the round-2 regression hit, so
-  // its indexOf-scan cost is the dominant one — kept alongside cpuScaleRatio's direct measurement.
-  const at = (bytes) => '<!--a-->'.repeat(Math.floor(bytes / 8));
-  const html = bodyHtml(at(1048576));                          // exactly 1 MiB
-  assert.equal(html, '', 'every comment is well-formed and empty; nothing is left to render');
-  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
-  budgetOf(at(262144));                                         // warm up (JIT)
-  const b256 = Math.max(budgetOf(at(262144)), 1);
-  const b1m = budgetOf(at(1048576));
-  const budgetRatio = b1m / b256;
-  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
-  const t0 = process.hrtime.bigint();
-  bodyHtml(at(1048576));
-  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
-});
-
-test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of ordinary one-comment-per-line prose', () => {
-  // countIndexOfBudget still runs each comment's indexOf-based terminator search, so it is kept as a
-  // narrow guard on that specific mechanism — but it is NOT, on its own, a proof that bodyHtml's
-  // surrounding per-LINE dispatch loop stays linear in the LINE count: a regression that adds
-  // non-indexOf work proportional to `i` inside that loop (for example, an accidental re-scan of every
-  // line already consumed) would leave this budget's ratio at ~4× while wall time and CPU time blow
-  // up. cpuScaleRatio is the arm that actually proves that broader property; it is why it is the
-  // primary arm on every test in this file, not only here.
-  const at = (bytes) => '<!-- x -->\n'.repeat(Math.floor(bytes / 11));
-  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
-  budgetOf(at(262144));
-  const b256 = Math.max(budgetOf(at(262144)), 1);
-  const b1m = budgetOf(at(1048576));
-  const budgetRatio = b1m / b256;
-  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
-  const t0 = process.hrtime.bigint();
-  bodyHtml(at(1048576));
-  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
-});
-
-test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of `<!--` (no comment ever closes)', () => {
-  // countIndexOfBudget is meaningful for this unit: every open pays commentTerminatorEnd's indexOf
-  // scan until the noCloser cache takes over, so indexOf work dominates.
-  const unit = '<!--';
-  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
-  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
-  budgetOf(at(262144));
-  const b256 = Math.max(budgetOf(at(262144)), 1);
-  const b1m = budgetOf(at(1048576));
-  const budgetRatio = b1m / b256;
-  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
-  const t0 = process.hrtime.bigint();
-  bodyHtml(at(1048576));
-  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(t1m < 5000, `expected well under 5s, got ${t1m.toFixed(1)}ms — a true blow-up`);
-});
 
 // 🩸 The bare-`<` test below was the one that kept going red on an ordinary laptop: first as a
 // wall-clock ratio (`ratio <= 6`, "expected ~4× (linear), got 7.8×" about 3 runs in 7), then as the
@@ -1702,6 +1595,175 @@ function chargedWork(fn, model) {
   try { fn(); } finally { for (const [proto, name, orig] of saved.reverse()) proto[name] = orig; }
   return work;
 }
+// 🩸 #40 (round-4 P3-4): replaces cpuScaleRatio, which measured `process.cpuUsage()` and was still a
+// stopwatch — steadier than a wall-clock ratio, but it went red once under other lanes' CPU load on a
+// shared box with no change to this file. chargedRatioSmall applies chargedWork's 'examined' model
+// (above) to a whole bodyHtml() call at two sizes and ratios the counts: fully deterministic, same
+// number every run on every machine. 4 KiB -> 16 KiB is deliberately small, same reasoning as the
+// bare-`<` test below — charging every built-in call through a JS wrapper makes a genuinely quadratic
+// regression quadratic in wall time too, so at these sizes it still fails in seconds instead of
+// hanging the run.
+function chargedRatioSmall(at) {
+  const w4 = chargedWork(() => bodyHtml(at(4096)), 'examined');
+  const w16 = chargedWork(() => bodyHtml(at(16384)), 'examined');
+  return { w4, w16, ratio: w16 / Math.max(w4, 1) };
+}
+
+// 🩸 #40 follow-up: chargedRatioSmall is NOT safe for every shape in this file, and the one place it
+// genuinely lies is kept on real CPU time instead — this is the "timing test that can't be converted"
+// exception, not an oversight. The shape: MANY well-formed `<!--a-->` comments with NO newline between
+// them, one single physical line. bodyHtml's block-comment path treats the whole line as an opener,
+// consumes the first comment, and REATTACHES the remainder — everything after it — back onto that same
+// line (reattachCommentRemainder's own comment argues this is O(1): a plain array-slot assignment, not
+// a copy of the document). The outer loop then re-dispatches that (slightly shorter) remainder through
+// the FULL per-line checks again — isCommentBlockOpen calls RE_QUOTE_LINE.exec/RE_LIST_ITEM.exec on it,
+// bodyHtml calls .trim() on it — once per comment consumed. In REAL execution those calls are O(1):
+// V8's regex engine fails `^\s*>…` and `^\s*[-*+]…` on a string starting with `<` in one step, without
+// scanning to the end, and `.trim()` only walks the (short) leading/trailing whitespace run. But
+// chargedWork's 'examined' model has no way to see that — a failed, non-global regex.test()/.exec() and
+// the default case (which `.trim()` falls into) are charged the FULL RECEIVER LENGTH every call (see
+// chargedWork's own comment above: "the whole receiver for a scan"), because there is no built-in signal
+// for "how far did a FAILED match actually look". Charging the receiver's full (shrinking) length once
+// per comment sums to O(n²) in the counted metric even though the real algorithm is linear — confirmed
+// directly: bodyHtml() on this exact shape measured 4.97ms at 256 KiB and 19.42ms at 1 MiB, matching
+// input growth (checked while writing this fix, on this machine, Node 22). A counting proxy cannot be
+// made to see this without literally re-deriving what the regex engine or String.prototype.trim's C++
+// implementation does internally — so for the two tests using this one shape, arm 2 stays real CPU time,
+// with the robustness #40 asked for: 9 repeats (up from 5) and a looser `<= 6` bound (up from `<= 4`),
+// matching the generous bound already used for the deterministic budget/count ratios elsewhere in this
+// file. Equal-work sizing (16×64KiB vs 1×1MiB) and minimum-of-k are unchanged from the original
+// cpuScaleRatio — minimum, not median, is what the original design argued for: it keeps the LEAST-
+// interrupted sample, which best represents the algorithm's own cost rather than a scheduling artefact,
+// and a median would if anything be MORE exposed to sustained neighbour load, not less.
+function robustCpuScaleRatio(at) {
+  const minCpuMs = (fn, k) => {
+    let min = Infinity;
+    for (let r = 0; r < k; r++) {
+      const before = process.cpuUsage();
+      fn();
+      const after = process.cpuUsage(before);
+      const ms = (after.user + after.system) / 1000;
+      if (ms < min) min = ms;
+    }
+    return min;
+  };
+  const callSmall = () => { for (let c = 0; c < 16; c++) bodyHtml(at(65536)); };
+  const callLarge = () => { bodyHtml(at(1048576)); };
+  minCpuMs(callSmall, 1); minCpuMs(callLarge, 1);                // warm up (JIT), not counted
+  const cpuSmall = Math.max(minCpuMs(callSmall, 9), 0.05);
+  const cpuLarge = minCpuMs(callLarge, 9);
+  return { cpuSmall, cpuLarge, ratio: cpuLarge / cpuSmall };
+}
+
+test('🔴 #496 round 3 — P1-01: linear on 1 MiB of unterminated comment openers (no longer quadratic to escape literally, either)', () => {
+  const input = '<!--'.repeat(262144);                       // exactly 1 MiB, no closer anywhere
+  const html = bodyHtml(input);
+  // The whole document is ONE unterminated `<!--` (a single line — this input has no `\n`), so it is
+  // left as literal, visible, escaped text (R3 point 3) rather than deleted: one `<p>` of `&lt;!--`
+  // repeated 262,144 times. The escapeInline `noCloser` cache (see that function's own comment) is
+  // what keeps this linear despite every one of those 262,144 opens being individually attempted.
+  assert.equal(html, '<p>' + '&lt;!--'.repeat(262144) + '</p>', 'nothing disappears silently, even at this size');
+  // countIndexOfBudget is meaningful here: every one of the 262,144 opens attempts a commentTerminatorEnd
+  // indexOf('--', k) call (until noCloser caches the verdict), which is the dominant cost.
+  const unit = '<!--';
+  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
+  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
+  budgetOf(at(262144));                                         // warm up (JIT)
+  const b256 = Math.max(budgetOf(at(262144)), 1);               // 256 KiB
+  const b1m = budgetOf(at(1048576));                             // 1 MiB
+  const budgetRatio = b1m / b256;
+  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
+  const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+  assert.ok(workRatio <= 6, `expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
+  const t0 = process.hrtime.bigint();
+  bodyHtml(at(1048576));
+  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
+});
+
+// ── round 3 — REVIEW-tile28-r2-2026-09-09.md, R2-P1-01 / R2-P1-02 / R2-P2-03 / R2-P2-04 ────────────
+// Round 2 found the round-1 fix itself had two bugs. R2-P1-01: escapeInline's terminator search ran
+// TWO full-suffix `indexOf` calls per comment ('-->' and '--!>'), each bounded by the REST OF THE
+// STRING rather than the comment — quadratic on any real document (1 MiB of 131,072 well-formed
+// `<!--a-->` comments: 5m53s). R2-P1-02: comment removal ran per-fragment, AFTER block-splitting, so
+// a comment spanning a blank line / list-item run / heading→paragraph boundary was cut in half by the
+// splitter before removal ever saw it whole — the opening half vanished, the closing half rendered as
+// visible prose. The fix: commentTerminatorEnd() replaces both terminator searches with one linear
+// scan (used by escapeInline, removeHtmlComments, AND the new removeDocumentComments), and comment
+// removal now runs document-wide, BEFORE block-splitting, in removeDocumentComments() — fence-aware,
+// code-span-aware, and dead-tag(`inTag`)-aware, so it can't repeat round 1's P2-03 mistake. That same
+// move is also what makes R2-P2-03 (an empty block for a comment-only line) and R2-P2-04 (an
+// unterminated comment's true extent) fall out for free: block-splitting never sees a line that
+// removal already emptied.
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of WELL-FORMED comments (the quadratic shape)', () => {
+  // The exact failing input from the review: not the one shape (all-`<!--`, no closer) the round-2
+  // perf test covered, but 131,072 separate, individually well-formed `<!--a-->` comments — the shape
+  // that was 352,756.7ms (5m53s) before this fix, because `indexOf('--!>', …)` alone paid a
+  // full-suffix scan at every one of them (no `--!>` anywhere in the document to find it early).
+  // countIndexOfBudget is meaningful here — this IS the exact shape the round-2 regression hit, so
+  // its indexOf-scan cost is the dominant one. This is one of the two tests (its sibling ratio-form
+  // test further down is the other) kept on real CPU time — see robustCpuScaleRatio's own comment for
+  // why chargedRatioSmall cannot safely measure THIS specific shape.
+  const at = (bytes) => '<!--a-->'.repeat(Math.floor(bytes / 8));
+  const html = bodyHtml(at(1048576));                          // exactly 1 MiB
+  assert.equal(html, '', 'every comment is well-formed and empty; nothing is left to render');
+  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
+  budgetOf(at(262144));                                         // warm up (JIT)
+  const b256 = Math.max(budgetOf(at(262144)), 1);
+  const b1m = budgetOf(at(1048576));
+  const budgetRatio = b1m / b256;
+  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
+  const { cpuSmall, cpuLarge, ratio: cpuRatio } = robustCpuScaleRatio(at);
+  assert.ok(cpuRatio <= 6, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+  const t0 = process.hrtime.bigint();
+  bodyHtml(at(1048576));
+  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
+});
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of ordinary one-comment-per-line prose', () => {
+  // countIndexOfBudget still runs each comment's indexOf-based terminator search, so it is kept as a
+  // narrow guard on that specific mechanism — but it is NOT, on its own, a proof that bodyHtml's
+  // surrounding per-LINE dispatch loop stays linear in the LINE count: a regression that adds
+  // non-indexOf work proportional to `i` inside that loop (for example, an accidental re-scan of every
+  // line already consumed) would leave this budget's ratio at ~4× while wall time and CPU time blow
+  // up. chargedRatioSmall is the arm that actually proves that broader property; it is why it is the
+  // primary arm on every test in this file, not only here.
+  const at = (bytes) => '<!-- x -->\n'.repeat(Math.floor(bytes / 11));
+  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
+  budgetOf(at(262144));
+  const b256 = Math.max(budgetOf(at(262144)), 1);
+  const b1m = budgetOf(at(1048576));
+  const budgetRatio = b1m / b256;
+  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
+  const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+  assert.ok(workRatio <= 6, `expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
+  const t0 = process.hrtime.bigint();
+  bodyHtml(at(1048576));
+  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(t1m < 5000, `expected well under 5s even under load, got ${t1m.toFixed(1)}ms — a true blow-up`);
+});
+
+test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of `<!--` (no comment ever closes)', () => {
+  // countIndexOfBudget is meaningful for this unit: every open pays commentTerminatorEnd's indexOf
+  // scan until the noCloser cache takes over, so indexOf work dominates.
+  const unit = '<!--';
+  const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
+  const budgetOf = (inp) => countIndexOfBudget(() => { bodyHtml(inp); });
+  budgetOf(at(262144));
+  const b256 = Math.max(budgetOf(at(262144)), 1);
+  const b1m = budgetOf(at(1048576));
+  const budgetRatio = b1m / b256;
+  assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
+  const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+  assert.ok(workRatio <= 6, `expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
+  const t0 = process.hrtime.bigint();
+  bodyHtml(at(1048576));
+  const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(t1m < 5000, `expected well under 5s, got ${t1m.toFixed(1)}ms — a true blow-up`);
+});
+
 
 test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of bare `<` (no comment ever opens), counted, not timed', () => {
   // Two shapes. One LINE of `<` is what this test used to measure: escapeInline's own bare-`<` branch.
@@ -1750,11 +1812,11 @@ test('🔴 #496 round 3 — R2-P1-01: linear on 1 MiB of inline code spans (code
   // test names. One line keeps that join step out of the measurement and isolates the path under test.
   // countIndexOfBudget is NOT kept here either: codeSpanRanges scans with a regex (RE_CODE_SPAN),
   // not indexOf, so a regression confined to that regex's own cost would not move the indexOf budget
-  // at all. cpuScaleRatio is the only arm that actually measures this path.
+  // at all. chargedRatioSmall is the only arm that actually measures this path.
   const unit = 'Some prose text before `a short code span right here` and after it. ';
   const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+  const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+  assert.ok(workRatio <= 6, `expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
   const t0 = process.hrtime.bigint();
   bodyHtml(at(1048576));
   const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -1770,9 +1832,12 @@ test('🔴 #496 round 3 — R2-P1-01: 16×64KiB vs 1×1MiB scales ~linearly (rat
   // 256 KiB→1 MiB budget/wall-time ratio well into double digits and a multi-hundred-second absolute
   // time at 1 MiB (the sibling absolute test's `t1m < 5000` backstop also catches that) — so BOTH
   // forms already guard this shape, and round 6 keeps both. `countIndexOfBudget`'s own arm below is
-  // still a literal 256 KiB→1 MiB comparison (unchanged); `cpuScaleRatio` is the equal-work arm
-  // (16×64KiB vs 1×1MiB — see its own comment), which is what the `t1m < 5000` companion below backs
-  // up, matching every other ratio-form test in this file.
+  // still a literal 256 KiB→1 MiB comparison (unchanged). This is the second (and last) of the two
+  // tests kept on real CPU time rather than chargedRatioSmall — see robustCpuScaleRatio's own comment,
+  // above in this file, for why: this exact shape's per-comment REATTACHMENT re-dispatch is charged as
+  // if every `.trim()`/failed `RE_QUOTE_LINE.exec()` re-scans the whole remaining line, which the real
+  // V8 engine does not do, so chargedWork's 'examined' model reports a false O(n²) here even though
+  // measured real CPU time is linear.
   // countIndexOfBudget is meaningful here — same shape as the WELL-FORMED-comments test above.
   const unit = '<!--a-->';
   const at = (bytes) => unit.repeat(Math.floor(bytes / unit.length));
@@ -1782,8 +1847,8 @@ test('🔴 #496 round 3 — R2-P1-01: 16×64KiB vs 1×1MiB scales ~linearly (rat
   const b1m = budgetOf(at(1048576));
   const budgetRatio = b1m / b256;
   assert.ok(budgetRatio <= 6, `expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
-  const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-  assert.ok(cpuRatio <= 4, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+  const { cpuSmall, cpuLarge, ratio: cpuRatio } = robustCpuScaleRatio(at);
+  assert.ok(cpuRatio <= 6, `expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
   const t0 = process.hrtime.bigint();
   bodyHtml(at(1048576));
   const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -1801,10 +1866,11 @@ test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, a
   // proportional to the number of lines already seen, added inside bodyHtml's own per-line dispatch
   // loop rather than to any indexOf call — passes this proxy at a flat ~1× ratio no matter how much
   // slower the real code gets, because the proxy only ever sees the same small, fixed set of indexOf
-  // calls `lineHasCommentCloser` always makes. cpuScaleRatio is what actually catches it: on this
-  // shape, that probe measured an equal-work CPU ratio (16×64KiB vs 1×1MiB) around 8×, which fails
-  // `<= 4` while staying under the 5000ms absolute backstop — the ratio arm is the one that catches
-  // it, not only the backstop.
+  // calls `lineHasCommentCloser` always makes. chargedRatioSmall is what catches this class of
+  // regression whenever it runs through a charged built-in (see chargedWork's own comment); a probe
+  // that adds cost through neither indexOf nor any other charged built-in — a raw, unwrapped `s[j]`
+  // loop, say — is a residual blind spot shared by every counted arm in this file, and only a direct
+  // timing measurement could catch it, which is exactly what #40 asks this file to stop depending on.
   const shapes = [
     { name: 'dash-run', at: (bytes) => '<!--' + '-'.repeat(Math.max(0, bytes - 4)), budget: true },   // never closes
     { name: 'mixed corpus', at: (bytes) => {
@@ -1821,8 +1887,8 @@ test('🔴 #496 round 4 — linear on 1 MiB of `<!--` followed by many dashes, a
       const budgetRatio = b1m / b256;
       assert.ok(budgetRatio <= 6, `${name}: expected ~4× (linear scan budget), got ${budgetRatio.toFixed(1)}× (256KiB budget=${b256}, 1MiB budget=${b1m})`);
     }
-    const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-    assert.ok(cpuRatio <= 4, `${name}: expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+    const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+    assert.ok(workRatio <= 6, `${name}: expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
     const t0 = process.hrtime.bigint();
     bodyHtml(at(1048576));
     const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -1847,8 +1913,8 @@ test('🔴 tile#30 — linear on 1 MiB of ONE soft-wrapped paragraph (no comment
   ];
   for (const { name, unit } of shapes) {
     const at = (bytes) => unit.repeat(Math.max(1, Math.floor(bytes / Buffer.byteLength(unit))));
-    const { cpuSmall, cpuLarge, ratio: cpuRatio } = cpuScaleRatio(at);
-    assert.ok(cpuRatio <= 4, `${name}: expected ~1× (linear: equal work, equal CPU time), got ${cpuRatio.toFixed(2)}× (16×64KiB=${cpuSmall.toFixed(2)}ms, 1×1MiB=${cpuLarge.toFixed(2)}ms)`);
+    const { w4, w16, ratio: workRatio } = chargedRatioSmall(at);
+    assert.ok(workRatio <= 6, `${name}: expected ~4× (linear, counted not timed), got ${workRatio.toFixed(1)}× (4KiB=${w4}, 16KiB=${w16} charged characters)`);
     const t0 = process.hrtime.bigint();
     bodyHtml(at(1048576));
     const t1m = Number(process.hrtime.bigint() - t0) / 1e6;
