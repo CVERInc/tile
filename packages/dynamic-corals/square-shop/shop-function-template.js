@@ -226,8 +226,65 @@ function cartAfterOrder(rawCart, rawSold) {
 	let rows;
 	try { rows = JSON.parse(rawCart || 'null'); } catch (e) { return null; }
 	if (!Array.isArray(rows)) return null;
+	// 0.11.19 (tile#40): a record that says HOW MANY of each line went to the till takes that many
+	// off the row as it stands NOW, instead of deleting the row. The row may have grown since the
+	// checkout left — another tab added one more of the same variation while the shopper was on the
+	// hosted payment page — and deleting the row deleted that later add with it. `lines` is
+	// [[variationId, qty], ...], written by square-shop.js#recordSoldLines beside `ids`.
+	// Quantity is read exactly as square-shop.js#cartRowQty reads it (mirrored inline: this
+	// function ships as its own source text inside the completion page).
+	const rowQty = function (e) { const a = parseInt(e[1], 10) || 0, b = e.length > 2 ? (parseInt(e[2], 10) || 0) : 0, q = a > b ? a : b; return q < 1 ? 1 : (q > 99 ? 99 : q); };
+	let owed = null;
+	if (Array.isArray(sold.lines)) {
+		owed = {};
+		for (const l of sold.lines) {
+			if (!Array.isArray(l) || !String(l[0] || '')) { owed = null; break; }
+			const n = parseInt(l[1], 10);
+			if (!(n >= 1)) { owed = null; break; }
+			owed[String(l[0])] = (owed[String(l[0])] || 0) + n;
+		}
+	}
+	if (owed) {
+		const out = [];
+		for (const e of rows) {
+			const vid = Array.isArray(e) ? String(e[0] || '') : '';
+			if (!vid || !owed[vid]) { out.push(e); continue; }
+			const q = rowQty(e), take = q < owed[vid] ? q : owed[vid];
+			owed[vid] -= take;
+			if (q - take >= 1) out.push([e[0], q - take]);
+		}
+		return out;
+	}
+	// A record from 0.11.16–0.11.18 carries ids only: the row goes, as it did then.
 	const ids = sold.ids.map(String);
 	return rows.filter(function (e) { return !(Array.isArray(e) && ids.indexOf(String(e[0] || '')) >= 0); });
+}
+
+// Apply cartAfterOrder to the basket as it is at the moment of writing, not as it was when the
+// page read it.
+//
+// 🔴 tile#40. The completion page used to `getItem` the basket, work out what to keep, and
+// `setItem` that answer over the whole key. localStorage has no compare-and-swap, so anything
+// another tab wrote to the key after that read — an add-to-cart in a second tab — was overwritten
+// by an answer computed without it. This re-reads the key immediately before writing and, if it
+// moved, recomputes against the new value (bounded, so a key that never settles still ends in a
+// write rather than a spin). It shrinks the window to two adjacent synchronous calls; closing it
+// completely would need a lock every writer of the key takes, and the writers of this key ship on
+// three different deploys.
+//
+// No record (an older coral, or storage that refused the write) still removes the whole key —
+// the pre-0.11.16 behaviour, kept so that shopper is never left with a basket that never clears.
+function settleCartAfterOrder(ls, cartKey, soldKey) {
+	const rawSold = soldKey ? ls.getItem(soldKey) : null;
+	let kept = null;
+	for (let i = 0; i < 8; i++) {
+		const before = ls.getItem(cartKey);
+		kept = cartAfterOrder(before, rawSold);
+		if (ls.getItem(cartKey) === before) break;
+	}
+	if (kept && kept.length) ls.setItem(cartKey, JSON.stringify(kept));
+	else ls.removeItem(cartKey);
+	if (soldKey) ls.removeItem(soldKey);
 }
 
 function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref) {
@@ -243,7 +300,7 @@ function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref
 <h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
 </div>
-${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const money=(n,c)=>new Intl.NumberFormat(C.locale,{style:'currency',currency:c||'USD'}).format((Number(n)||0)/100);const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(C.outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{const CK='dc-square-shop-cart:'+C.storeId,SK=C.ref?'dc-square-shop-sold:'+C.ref:'',kept=cartAfterOrder(localStorage.getItem(CK),SK?localStorage.getItem(SK):null);if(kept&&kept.length)localStorage.setItem(CK,JSON.stringify(kept));else localStorage.removeItem(CK);if(SK)localStorage.removeItem(SK);window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}const lines=Array.isArray(d.lines)?d.lines:[];root.innerHTML=(lines.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
+${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const money=(n,c)=>new Intl.NumberFormat(C.locale,{style:'currency',currency:c||'USD'}).format((Number(n)||0)/100);const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(C.outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}const lines=Array.isArray(d.lines)?d.lines:[];root.innerHTML=(lines.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
 }
 
 async function renderCompletion(request, env, cfg, shop, checkoutResult) {
@@ -1422,7 +1479,7 @@ export default {
 
 // Exported for Node unit tests (the deployed bundle just uses the default).
 export {
-	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
+	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
