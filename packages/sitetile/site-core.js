@@ -51,13 +51,26 @@ const SITE_LAYER_KEYS = [
   { key: 'assistant-name', syntax: 'assistant-name: 小美', purpose: "What visitors see the site's Q&A assistant called in the inbox bubble (default KAITO). Single line; the bubble still marks it as AI." },
 ];
 
+// A markdown link destination admits ONE level of balanced parentheses — `/wiki/Foo_(bar)`, and —
+// the case that matters — `javascript:alert(1)`, which must reach the scheme gate whole, not split
+// at its first `)` into a dangling fragment that either mangles an honest Wikipedia-style URL or
+// (worse) leaves an attacker's scheme prefix looking like something a naive re-check would pass.
+// Shared source fragment (a string, not a RegExp, so both call sites below can embed it in their
+// own anchors/flags via `new RegExp(...)`) so the two markdown-link parsers in this file — the
+// `tagcloud` list and the `links` blogroll — cannot drift apart on this rule.
+const RE_URL_BALANCED_PARENS_SRC = '(?:[^()\\s]|\\([^()\\s]*\\))+';
+
 // tagcloudLinks: a tagcloud section body (a markdown list of `- [Label](/href)` items) → an
 // ordered [{label, href}]. General — a weighted category/tag cloud is a near-universal WP/Blogger
 // widget (`#tag_cloud-N`, `.wp-tag-cloud`), a flow of inline links no vertical/card coral expresses.
 // Label carries its own count baked in (e.g. "comic576"), matching how live themes print tag+count.
+// `href` is returned raw (not yet safe-href-gated) — both renderers' `case 'tagcloud'` run it
+// through `isSafeHref`/`safeHref` themselves — but it must be the WHOLE destination the author
+// wrote, balanced parens included, or that gate is checking a truncated string instead of the
+// real one (see RE_URL_BALANCED_PARENS_SRC above).
 function tagcloudLinks(body) {
   const out = [];
-  const RE = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const RE = new RegExp('\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)', 'g');
   let m;
   while ((m = RE.exec(body || '')) !== null) out.push({ label: m[1], href: m[2] });
   return out;
@@ -77,10 +90,9 @@ function tagcloudLinks(body) {
 // `href` is the decoded, admitted destination or `null` (a `javascript:` link degrades to a
 // plain-text name, never a live anchor). `external` uses `linkKind` — the same rule every button
 // surface uses — so both renderers agree on which cards open in a new tab.
-// The destination admits one level of balanced parentheses (`/wiki/Foo_(bar)`, and — the case
-// that matters — `javascript:alert(1)`, which must reach the scheme gate whole, not split at
-// its first `)` into a dangling note).
-const RE_LINK_ITEM = /^\s*[-*+]\s+\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)\s*(?:[—–:|·-]\s*)?(.*)$/;
+// The destination admits one level of balanced parentheses — see RE_URL_BALANCED_PARENS_SRC above,
+// shared with tagcloudLinks so this rule lives in exactly one place.
+const RE_LINK_ITEM = new RegExp('^\\s*[-*+]\\s+\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)\\s*(?:[—–:|·-]\\s*)?(.*)$');
 function linksParts(body) {
   const items = [];
   const caption = [];
