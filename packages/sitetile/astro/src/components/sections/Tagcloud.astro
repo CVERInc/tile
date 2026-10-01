@@ -17,7 +17,7 @@ const pm = parseParams(section.params);
 // grammar explaining the split; authors reasonably used it everywhere and it silently
 // did nothing. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
-const links = tagcloudLinks(section.body);
+const links = tagcloudLinks(section.body, { report: true });
 ---
 <section class="st-tagcloud" id={section.id}>
   {eyebrow && <p class="st-tagcloud-eyebrow" set:html={inlineHtml(eyebrow)} />}

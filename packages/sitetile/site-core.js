@@ -68,12 +68,96 @@ const RE_URL_BALANCED_PARENS_SRC = '(?:[^()\\s]|\\([^()\\s]*\\))+';
 // through `isSafeHref`/`safeHref` themselves — but it must be the WHOLE destination the author
 // wrote, balanced parens included, or that gate is checking a truncated string instead of the
 // real one (see RE_URL_BALANCED_PARENS_SRC above).
-function tagcloudLinks(body) {
-  const out = [];
+function tagcloudLinks(body, opts) {
+  const report = !!(opts && opts.report); // only the renderers report; direct callers stay side-effect free
+  const src = body || '';
   const RE = new RegExp('\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)', 'g');
+  const found = []; // { pos, label, href, legacy? } — strict matches plus legacy reads, merged by position
+  const spans = [];
   let m;
-  while ((m = RE.exec(body || '')) !== null) out.push({ label: m[1], href: m[2] });
-  return out;
+  while ((m = RE.exec(src)) !== null) {
+    found.push({ pos: m.index, label: m[1], href: m[2] });
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  // Legacy read: the leading item of a list line that the strict pattern rejected. Old content
+  // carries raw horizontal whitespace inside the address (`- [A](/a b)`); browsers rendered that as
+  // a trimmed href with interior tabs removed and spaces %20-encoded, so read it that way rather than losing the tag. The authoring
+  // grammar itself stays whitespace-free. A link-shaped item that still yields nothing is recorded
+  // (recordDrop, when reporting) instead of vanishing. Other strict matches on the same line stay.
+  const ranges = [];
+  let si = 0;
+  for (let start = 0; start <= src.length;) {
+    let end = src.indexOf('\n', start);
+    if (end < 0) end = src.length;
+    const line = src.slice(start, end);
+    const head = RE_TAGCLOUD_ITEM_HEAD.exec(line);
+    if (head) {
+      const at = start + head[1].length; // position of the leading item's `[`
+      while (si < spans.length && spans[si][1] <= at) si++;
+      if (!(si < spans.length && spans[si][0] <= at)) {
+        const legacy = legacyTagcloudItem(line, head);
+        if (legacy) {
+          found.push({ pos: at, label: legacy.label, href: legacy.href });
+          ranges.push([at, start + legacy.close]);
+        }
+      }
+    }
+    start = end + 1;
+  }
+  // Both lists are position-ordered once sorted: one two-pointer pass drops strict matches that
+  // fall inside a legacy item's range (linear, not tags x legacy items).
+  found.sort((a, b) => a.pos - b.pos);
+  ranges.sort((a, b) => a[0] - b[0]);
+  const kept = [];
+  let ri = 0;
+  for (const f of found) {
+    while (ri < ranges.length && ranges[ri][1] < f.pos) ri++;
+    if (ri < ranges.length && f.pos > ranges[ri][0] && f.pos <= ranges[ri][1]) continue;
+    kept.push(f);
+  }
+  if (report) {
+    // Diagnostics: any `[label](` start that ended up in neither a strict match nor a legacy
+    // range is a lost item — record it (one entry per item). One global scan, two pointers over
+    // the position-ordered spans/ranges. The label excludes `[` so a run of `[` stays linear.
+    const RE_START = /\[[^\[\]\n]+\]\(/g;
+    let sp = 0, rp = 0;
+    while ((m = RE_START.exec(src)) !== null) {
+      const p = m.index;
+      while (sp < spans.length && spans[sp][1] <= p) sp++;
+      while (rp < ranges.length && ranges[rp][1] < p) rp++;
+      if (sp < spans.length && spans[sp][0] <= p) continue;
+      if (rp < ranges.length && ranges[rp][0] <= p) continue;
+      let shown = src.slice(p, p + 201);
+      const nl = shown.indexOf('\n');
+      if (nl >= 0) shown = shown.slice(0, nl);
+      shown = shown.trim();
+      if (shown.length > 200) shown = shown.slice(0, 200) + '…';
+      recordDrop(shown, '(tagcloud-unreadable)');
+    }
+  }
+  return kept.map((f) => ({ label: f.label, href: f.href }));
+}
+const RE_TAGCLOUD_ITEM_HEAD = /^(\s*[-*+]\s+)\[([^\]]+)\]\(/;
+function legacyTagcloudItem(line, head) {
+  // One linear scan: one level of balanced parens, closed by the first unnested `)` on the line.
+  const open = head[0].length;
+  let depth = 0, close = -1;
+  for (let i = open; i < line.length; i++) {
+    const c = line[i];
+    if (c === '(') { if (++depth > 1) return null; }
+    else if (c === ')') { if (depth === 0) { close = i; break; } depth--; }
+  }
+  if (close < 0) return null;
+  const raw = line.slice(open, close);
+  let a = 0, b = raw.length;
+  while (a < b && (raw[a] === ' ' || raw[a] === '\t')) a++;
+  while (b > a && (raw[b - 1] === ' ' || raw[b - 1] === '\t')) b--;
+  const addr = raw.slice(a, b);
+  if (addr === '' || !/[ \t]/.test(addr)) return null;
+  // Browsers (WHATWG URL parser) REMOVE tabs anywhere and percent-encode interior spaces.
+  const enc = addr.replace(/\t/g, '').replace(/ /g, '%20');
+  if (/\s/.test(enc)) return null; // any other whitespace stays unreadable
+  return { label: head[2], href: enc, close };
 }
 
 // linksParts: a `links` section body (a blogroll — sites the owner recommends) → { caption, items }.
@@ -704,9 +788,10 @@ const SAFE_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:',
 // needs to change to keep working; a caller that wants the diagnostics opts in by calling
 // takeDropWarnings() after render.
 const _dropWarnings = [];
-function recordDrop(rawDest) {
+function recordDrop(rawDest, schemeOverride) {
   let scheme = '(unparseable)';
-  try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
+  if (schemeOverride) scheme = schemeOverride;
+  else try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
   _dropWarnings.push({ scheme, dest: String(rawDest == null ? '' : rawDest) });
 }
 function isSafeHref(dest) {
@@ -2334,7 +2419,7 @@ function renderSection(s) {
       // A weighted category/tag cloud (WP/Blogger `#tag_cloud-N` widget): heading + a flow of
       // inline links. Body is a markdown list of `- [Label](/href)`; each becomes an `.st-tag`
       // anchor laid out inline-wrapping. General — any site with a tag/category cloud module.
-      const links = tagcloudLinks(s.body);
+      const links = tagcloudLinks(s.body, { report: true });
       // 🩸 round 2, P1-1: each tag is an author `[Label](href)` destination, same class as a CTA
       // link; a disallowed one degrades to a plain `<span>` tag, never a live href.
       const tags = links.map((l) => isSafeHref(l.href)
