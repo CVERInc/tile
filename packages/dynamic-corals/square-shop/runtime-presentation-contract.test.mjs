@@ -474,7 +474,17 @@ const STATES = [
 		render: () => serveNative('c-native-detail-sold-out', { path: '/shop/sample-tee', projection: detailOk(nativeSoldOut) }).then((r) => r.html),
 		presentation: ['st-runtime', 'st-native-detail', 'st-native-actions', 'st-runtime-status'],
 		pinnedExceptions: ['dc-native-buy'],
-		hooks: [/class="dc-native-buy" disabled>Unavailable/],
+		// Truthful runtime state: OUT_OF_STOCK says "Sold out", not the generic "Unavailable".
+		hooks: [/class="dc-native-buy" disabled>Sold out/],
+		extra: (html) => assert.doesNotMatch(html, /data-native-sku="tee-sku"/),
+	},
+	{
+		id: 'native listing: sold-out (OUT_OF_STOCK)',
+		render: () => serveNative('c-native-listing-sold-out', { projection: listOk([nativeSoldOut]) }).then((r) => r.html),
+		presentation: ['st-runtime', 'st-cells', 'st-cell', 'st-native-card', 'st-img', 'st-runtime-status'],
+		pinnedExceptions: ['dc-native-buy'],
+		// Truthful runtime state: the grid says Sold out for an OUT_OF_STOCK status.
+		hooks: [/class="dc-native-buy" disabled>Sold out/],
 		extra: (html) => assert.doesNotMatch(html, /data-native-sku="tee-sku"/),
 	},
 	{
@@ -679,4 +689,14 @@ test('🔴 CONTROL: the no-donor-shell document stays the bare pinned document, 
 	assert.equal(html, '<!doctype html><main><section data-storefront-source="native" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section></main>',
 		'nativeUnavailableDocument() must stay byte-for-byte — this slice never touches it');
 	assert.doesNotMatch(html, /st-runtime|st-native/, 'no presentation class may leak into the honest no-shell document');
+});
+
+// The in-flight state the native client sets (aria-busy beside disabled) has a presentation hook in
+// the base layer, and the emitted script really sets/clears it.
+test('the dc-native-buy exception carries an aria-busy rule in reef.base and the emitted script sets and clears it', async () => {
+	const css = readFileSync(new URL('../../sitetile/astro/src/styles/site.css', import.meta.url), 'utf8');
+	assert.match(css, /\.dc-native-buy\)\[aria-busy="true"\]\s*\{[^}]*cursor:\s*progress/);
+	const html = await serveNative('c-native-detail-busy-script', { path: '/shop/sample-tee', projection: detailOk(nativeProduct) }).then((r) => r.html);
+	assert.match(html, /setAttribute\('aria-busy','true'\)/);
+	assert.match(html, /removeAttribute\('aria-busy'\)/);
 });

@@ -1353,12 +1353,21 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
   padding: 0;
 }
 
-/* Neutral status/notice text — native buy status, membership/account/subscribe `role="status"`
-   feedback. Muted, not a warning colour: no new status-color semantics belong in this file (a
-   `.st-form-error`-style red stays reserved for what already uses it). Most of these elements
-   start EMPTY — runtime renders the hook, an island or script fills the text later — so the
-   `:empty` rule cancels the spacing rule's own margin: an unfilled status node reserves no visible
-   box instead of showing as a blank gap before any state exists. */
+/* Runtime status/notice text — native buy status, membership/account/subscribe `role="status"`
+   feedback. Neutral by default: muted, no colour semantics. Most of these elements start EMPTY —
+   runtime renders the hook, an island or script fills the text later — so the `:empty` rule
+   cancels the spacing rule's own margin: an unfilled status node reserves no visible box instead
+   of showing as a blank gap before any state exists.
+
+   Truthful runtime states: a buyer-visible runtime state must be distinguishable
+   from its opposite without relying on colour. The runtime island stamps
+   `data-ejecta-status-tone="success"|"error"` on these nodes when it knows the outcome; the two
+   tones are told apart by a glyph prefix and border treatment (solid accent rule vs. heavy
+   full-ink rule with bold text), built only from existing theme tokens (`--gd-accent`,
+   `--gd-text`) so a theme overrides them. No new status-colour axis, and `.st-form-error`'s red
+   stays reserved for what already uses it. The glyph is a redundant cue: the sentence itself
+   carries the meaning for assistive technology. `:not(:empty)`
+   keeps an unfilled node from showing a lone glyph. */
 .st-runtime-status {
   color: var(--gd-muted);
   font-size: 0.9rem;
@@ -1366,6 +1375,25 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 }
 .st-runtime-status:empty {
   margin: 0;
+}
+.st-runtime-status[data-ejecta-status-tone="success"]:not(:empty) {
+  color: var(--gd-text);
+  padding-inline-start: 0.6rem;
+  border-inline-start: 3px solid var(--gd-accent);
+}
+.st-runtime-status[data-ejecta-status-tone="success"]:not(:empty)::before {
+  content: "\2713  ";
+  font-weight: 700;
+}
+.st-runtime-status[data-ejecta-status-tone="error"]:not(:empty) {
+  color: var(--gd-text);
+  font-weight: 600;
+  padding-inline-start: 0.6rem;
+  border-inline-start: 5px double var(--gd-text);
+}
+.st-runtime-status[data-ejecta-status-tone="error"]:not(:empty)::before {
+  content: "\2715  ";
+  font-weight: 700;
 }
 /* Scoped override for the native-storefront actions row (`.st-native-actions`, gated, in the BORN
    PAINT section below): Buy and its status line sit inline instead of stacking with top margin.
@@ -1436,6 +1464,9 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
    "Buy now"/re-enabled), and conflict additionally fills the neutral `.st-runtime-status` line the
    sold-out path never touches. */
 .st-runtime :where(.dc-native-buy):disabled { opacity: .6; cursor: not-allowed; }
+/* In-flight (the client script sets `aria-busy="true"` beside `disabled` while the cart/checkout
+   requests pend): same disabled look, but the cursor says work is in progress, not refusal. */
+.st-runtime :where(.dc-native-buy)[aria-busy="true"] { cursor: progress; }
 
 /* Account's signed-in sections (orders/membership/profile/contact/discord) are only STAMPED by
    this repo (accountPageBody, the empty `[data-ejecta-account-section]` divs); their INSIDES are

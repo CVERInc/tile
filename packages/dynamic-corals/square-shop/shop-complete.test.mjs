@@ -156,7 +156,7 @@ test('native checkout success fails closed when its site shell is unavailable', 
 		assert.equal(response.headers.get('cache-control'), 'private, no-store');
 		assert.deepEqual(fetched, ['/native-shop/']);
 		assert.equal(providerCalls, 0);
-		assert.doesNotMatch(body, /<!doctype|<html|<title>|We couldn't find this order/);
+		assert.doesNotMatch(body, /<!doctype|<html|<title>|We couldn't find this order|We can't confirm this order/);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
@@ -197,17 +197,19 @@ test('the h1 sits outside the padded section, full-bleed like the donor page\'s 
 	assert.ok(outcomeIndex > sectionIndex, 'the outcome div stays inside the padded section');
 });
 
+// Truthful runtime state: `unknown` no longer asserts the order does not exist (it is
+// also the answer for an order the session cannot see), so its heading says "cannot confirm".
 const stateHeadings = {
-	'en-US': { paid: 'Thank you for your order', pending: 'Confirming your payment', canceled: 'Payment not completed', unknown: "We couldn't find this order" },
-	'ja-JP': { paid: 'ご注文ありがとうございます', pending: 'お支払いを確認しています', canceled: 'お支払いは完了していません', unknown: 'ご注文を確認できません' },
-	'zh-TW': { paid: '感謝您的訂購', pending: '正在確認您的付款', canceled: '付款未完成', unknown: '找不到這筆訂單' },
+	'en-US': { paid: 'Thank you for your order', pending: 'Confirming your payment', canceled: 'Payment not completed', unknown: "We can't confirm this order here", refunded: 'This order was refunded' },
+	'ja-JP': { paid: 'ご注文ありがとうございます', pending: 'お支払いを確認しています', canceled: 'お支払いは完了していません', unknown: 'ご注文を確認できません', refunded: 'このご注文は返金されました' },
+	'zh-TW': { paid: '感謝您的訂購', pending: '正在確認您的付款', canceled: '付款未完成', unknown: '在這裡無法確認這筆訂單', refunded: '這筆訂單已退款' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): Simplified, added alongside zh-TW.
-	'zh-CN': { paid: '感谢您的订购', pending: '正在确认您的付款', canceled: '付款未完成', unknown: '找不到这笔订单' }
+	'zh-CN': { paid: '感谢您的订购', pending: '正在确认您的付款', canceled: '付款未完成', unknown: '在这里无法确认这笔订单', refunded: '这笔订单已退款' }
 };
 
 for (const [locale, headings] of Object.entries(stateHeadings)) {
 	test(`completion headings follow every outcome state in ${locale}`, () => {
-		for (const state of ['paid', 'pending', 'canceled', 'unknown']) assert.equal(COMPLETE_COPY[locale][state], headings[state]);
+		for (const state of ['paid', 'pending', 'canceled', 'unknown', 'refunded']) assert.equal(COMPLETE_COPY[locale][state], headings[state]);
 	});
 }
 
@@ -272,4 +274,91 @@ test('legacy done marker redirects only when it carries a ref and never clears s
 	consumeCheckoutReturn();
 	assert.equal(window.location.replaced, undefined);
 	delete globalThis.window;
+});
+
+// ── terminal order result: opt-in `refunded`, and `unknown` that does not claim nonexistence ──────
+// Outcome endpoint shapes, opted-in and legacy. Opted-in refunded
+// carries the same summary as paid; a legacy/older RSP never sends `refunded` (maps it to paid).
+const OUTCOME_SHAPES = {
+	refunded: { ok: true, state: 'refunded', lines: [{ name: 'Reef Tee', qty: 2, amount_minor: 1900 }], total_minor: 3800, currency: 'USD', order_ref: 'ord-ref-1' },
+	legacyPaid: { ok: true, state: 'paid', lines: [{ name: 'Reef Tee', qty: 2, amount_minor: 1900 }], total_minor: 3800, currency: 'USD', order_ref: 'ord-ref-1' },
+	unknown: { ok: true, state: 'unknown' },
+};
+
+async function completionScript(lang, path = '/shop/complete?ref=ref-9') {
+	const env = { ASSETS: { fetch: async () => new Response(`<!doctype html><html lang="${lang}"><head><title>Shop</title></head><body><main>GRID</main></body></html>`) } };
+	const html = await (await renderCompletion(new Request('https://shop.example' + path), env, { siteId: 'site-key' }, { shopPath: '/shop', lang })).text();
+	const m = html.match(/<script>(\(function\(\)\{const C=[\s\S]*?)<\/script>/);
+	assert.ok(m, 'the completion page carries its client script');
+	return { html, script: m[1] };
+}
+
+// Runs the emitted client against one answer of the outcome endpoint; reports what the buyer sees.
+async function runCompletion(lang, answer) {
+	const { script } = await completionScript(lang);
+	const nodes = { 'dc-shop-outcome': { innerHTML: '' }, 'dc-shop-heading': { textContent: '' } };
+	const doc = { title: '', getElementById: (id) => nodes[id], createElement: () => ({ set textContent(v) { this._t = v; }, get innerHTML() { return String(this._t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); } }) };
+	const store = { 'dc-square-shop-cart:site-key': '[["v1",1]]' };
+	const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+	const requested = [];
+	const fetchFn = async (url) => { requested.push(url); if (answer instanceof Error) throw answer; return { ok: true, json: async () => answer }; };
+	const win = { dispatchEvent() {} };
+	new Function('document', 'fetch', 'localStorage', 'window', 'CustomEvent', 'setTimeout', script)(doc, fetchFn, localStorage, win, class { }, () => {});
+	await new Promise((r) => setImmediate(r));
+	return { heading: nodes['dc-shop-heading'].textContent, title: doc.title, body: nodes['dc-shop-outcome'].innerHTML, store, requested };
+}
+
+test('the outcome request opts in to the extended state set for native and provider completion', async () => {
+	for (const path of ['/shop/complete?ref=ref-9', '/checkout/success?order_id=ord-9']) {
+		const env = { ASSETS: { fetch: async () => new Response('<!doctype html><html lang="en-US"><head></head><body><main>G</main></body></html>') } };
+		const route = { path: '/checkout/success', method: 'GET', orderParam: 'order_id', outcomePath: '/api/v2/shop/checkout/outcome' };
+		const shop = { shopPath: '/shop', source: 'native', lang: 'en-US' };
+		const html = await (await renderCompletion(new Request('https://shop.example' + path), env, { siteId: 'site-key' }, shop, path.startsWith('/checkout') ? route : undefined)).text();
+		assert.match(html, /\/api\/v2\/shop\/checkout\/outcome\?site=site-key&(amp;)?ref=[^&"]+&(amp;)?states=extended/, path);
+	}
+});
+
+for (const [locale, refunded] of [['en-US', 'This order was refunded'], ['ja-JP', 'このご注文は返金されました'], ['zh-TW', '這筆訂單已退款'], ['zh-CN', '这笔订单已退款']]) {
+	test(`an opted-in refunded outcome renders truthfully in ${locale}: refunded heading, summary lines, no receipt, cart untouched`, async () => {
+		const r = await runCompletion(locale, OUTCOME_SHAPES.refunded);
+		assert.equal(r.heading, refunded);
+		assert.equal(r.title, refunded);
+		assert.match(r.body, new RegExp(COMPLETE_COPY[locale].refundedBody));
+		assert.match(r.body, /Reef Tee × 2/);
+		assert.match(r.body, /dc-shop-total/);
+		assert.match(r.body, /ord-ref-1/);
+		assert.doesNotMatch(r.body, new RegExp(COMPLETE_COPY[locale].receipt), 'a refunded order must not say a receipt was sent as if newly paid');
+		assert.notEqual(r.heading, COMPLETE_COPY[locale].paid);
+		assert.equal(r.store['dc-square-shop-cart:site-key'], '[["v1",1]]', 'refunded does not clear the cart as newly paid');
+		assert.ok(r.requested[0].includes('states=extended'));
+	});
+}
+
+test('a legacy-only response (older RSP: refunded reported as paid) still renders paid and clears the cart', async () => {
+	const r = await runCompletion('en-US', OUTCOME_SHAPES.legacyPaid);
+	assert.equal(r.heading, COMPLETE_COPY['en-US'].paid);
+	assert.match(r.body, /A receipt was emailed to you\./);
+	assert.equal('dc-square-shop-cart:site-key' in r.store, false);
+});
+
+for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
+	test(`unknown does not claim the order is missing and offers safe next steps in ${locale}`, async () => {
+		for (const answer of [OUTCOME_SHAPES.unknown, new Error('network')]) {
+			const r = await runCompletion(locale, answer);
+			assert.equal(r.heading, COMPLETE_COPY[locale].unknown);
+			assert.doesNotMatch(r.heading + r.body, /couldn't find|找不到/);
+			assert.match(r.body, /href="\/shop"/, 'return-to-shop link');
+			assert.ok(r.body.includes(COMPLETE_COPY[locale].unknownBody.replace(/&/g, '&amp;')));
+			assert.equal(r.store['dc-square-shop-cart:site-key'], '[["v1",1]]');
+		}
+		const body = COMPLETE_COPY[locale].unknownBody;
+		const steps = { 'en-US': /sign in[\s\S]*confirmation email[\s\S]*shop/i, 'ja-JP': /ログイン[\s\S]*確認メール[\s\S]*ショップ/, 'zh-TW': /登入[\s\S]*確認信[\s\S]*商店/, 'zh-CN': /登录[\s\S]*确认信[\s\S]*商店/ };
+		assert.match(body, steps[locale]);
+	});
+}
+
+test('every locale carries refunded copy with heading and body', () => {
+	for (const locale of Object.keys(COMPLETE_COPY)) {
+		assert.ok(COMPLETE_COPY[locale].refunded && COMPLETE_COPY[locale].refundedBody, locale);
+	}
 });

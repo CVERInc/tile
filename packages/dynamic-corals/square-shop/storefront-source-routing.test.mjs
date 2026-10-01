@@ -277,7 +277,11 @@ test('an emitted native Buy now control posts only the projected SKU before the 
   const status = { textContent: '' };
   const button = {
     disabled: false,
-    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : null; },
+    textContent: 'Buy now',
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    removeAttribute(name) { delete this.attrs[name]; },
+    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : (this.attrs[name] ?? null); },
     parentElement: { querySelector(selector) { return selector === '[data-native-status]' ? status : null; } },
   };
   const calls = [];
@@ -318,7 +322,11 @@ test('a declared page language rides the native checkout POST as a lang hint', a
   const document = { documentElement: { lang: 'zh-Hant' }, addEventListener(type, handler) { if (type === 'click') click = handler; } };
   const button = {
     disabled: false,
-    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : null; },
+    textContent: 'Buy now',
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    removeAttribute(name) { delete this.attrs[name]; },
+    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : (this.attrs[name] ?? null); },
     parentElement: { querySelector() { return null; } },
   };
   const calls = [];
@@ -346,7 +354,8 @@ test('an OUT_OF_STOCK native projection disables Buy now and its emitted handler
     RSP: { fetch: async () => Response.json({ ok: true, source: 'native', item: outOfStock }) },
   });
   const html = await response.text();
-  assert.match(html, /class="dc-native-buy" disabled>Unavailable/);
+  // Truthful runtime state: an OUT_OF_STOCK inventory status is stated as sold out, not as generic unavailability.
+  assert.match(html, /class="dc-native-buy" disabled>Sold out/);
   assert.doesNotMatch(html, /data-native-sku="tee-sku"/);
   const script = html.match(/<script>([\s\S]*data-native-sku[\s\S]*?)<\/script>/);
   let click;
@@ -623,7 +632,8 @@ test('a zh-Hant donor shell renders every native platform string in zh-TW, insid
     shell: ZH_SHELL, path: '/shop/reef-tee', shops: MISLEADING_BUILD_LOCALE,
     projection: nativeOk({ ...product, commerce: { ...product.commerce, available: 0, status: 'OUT_OF_STOCK' } }),
   });
-  assert.match(soldOut.html, /class="dc-native-buy" disabled>無法購買/);
+  // Truthful runtime state: OUT_OF_STOCK is stated as sold out (已售完); the generic 無法購買 stays for non-stock causes.
+  assert.match(soldOut.html, /class="dc-native-buy" disabled>已售完/);
   assert.doesNotMatch(soldOut.html, />Unavailable</);
 
   const notFound = await serveNative('native-zh-not-found', {
@@ -710,7 +720,11 @@ function driveNativeCheckout(html, respond, { lang = '' } = {}) {
   const status = { textContent: '' };
   const button = {
     disabled: false,
-    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : null; },
+    textContent: 'Buy now',
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    removeAttribute(name) { delete this.attrs[name]; },
+    getAttribute(name) { return name === 'data-native-sku' ? 'tee-sku' : (this.attrs[name] ?? null); },
     parentElement: { querySelector(selector) { return selector === '[data-native-status]' ? status : null; } },
   };
   const calls = [];
@@ -784,4 +798,78 @@ test('everything that is not the exact conflict stays the generic localized fail
     assert.equal(ui.button.disabled, false, name + ': an unknown failure may still be retried');
     assert.equal(ui.redirects.length, 0, name);
   }
+});
+
+// ── native buy: in-flight state and truthful sold-out ────────────────────────────────────────────
+// Truthful runtime state: while the cart/checkout requests pend the control says so
+// (aria-busy + a localized label); every exit path restores both except the documented 409.
+function deferred() { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; }
+
+test('while the cart and checkout requests pend the Buy control is aria-busy with a localized in-flight label', async () => {
+  for (const [name, donor, lang, busy, idle] of [['zh', ZH_SHELL, 'zh-Hant', '處理中…', '立即購買'], ['ja', JA_SHELL, 'ja-JP', '処理中…', '今すぐ購入'], ['en', shell, '', 'Processing…', 'Buy now']]) {
+    const { html } = await serveNative('native-busy-' + name, { shell: donor, path: '/shop/reef-tee', projection: nativeOk(product), shops: MISLEADING_BUILD_LOCALE });
+    const gate = deferred();
+    const ui = driveNativeCheckout(html, async (url) => {
+      await gate.promise;
+      return url === '/api/cart/items' ? Response.json({ lines: [] }) : Response.json({ error: 'internal' }, { status: 500 });
+    }, { lang });
+    ui.button.textContent = idle;
+    const clicked = ui.click();
+    assert.equal(ui.button.disabled, true, name);
+    assert.equal(ui.button.attrs['aria-busy'], 'true', name + ': aria-busy while pending');
+    assert.equal(ui.button.textContent, busy, name + ': localized in-flight label');
+    gate.resolve();
+    await clicked;
+    assert.equal(ui.button.attrs['aria-busy'], undefined, name + ': aria-busy restored on failure');
+    assert.equal(ui.button.textContent, idle, name + ': label restored on failure');
+    assert.equal(ui.button.disabled, false, name + ': a generic failure re-enables');
+  }
+});
+
+test('a successful checkout leaves the control busy while the browser navigates away', async () => {
+  const { html } = await serveNative('native-busy-success', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  const ui = driveNativeCheckout(html, async (url) => (url === '/api/cart/items' ? Response.json({ lines: [] }) : Response.json({ redirect_url: 'https://pay.example/s' })));
+  await ui.click();
+  assert.deepEqual(ui.redirects, ['https://pay.example/s']);
+  assert.equal(ui.button.attrs['aria-busy'], 'true');
+  assert.equal(ui.button.disabled, true);
+});
+
+test('the documented 409 conflict stays disabled but drops aria-busy and restores the label', async () => {
+  const { html } = await serveNative('native-busy-conflict', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  const ui = driveNativeCheckout(html, conflictResponder);
+  ui.button.textContent = 'Buy now';
+  await ui.click();
+  assert.equal(ui.button.disabled, true);
+  assert.equal(ui.button.attrs['aria-busy'], undefined);
+  assert.equal(ui.button.textContent, 'Buy now');
+});
+
+test('a dead network mid-checkout restores aria-busy, label and enabled state', async () => {
+  const { html } = await serveNative('native-busy-network', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  const ui = driveNativeCheckout(html, async () => { throw new TypeError('network down'); });
+  ui.button.textContent = 'Buy now';
+  await ui.click();
+  assert.equal(ui.button.disabled, false);
+  assert.equal(ui.button.attrs['aria-busy'], undefined);
+  assert.equal(ui.button.textContent, 'Buy now');
+});
+
+test('sold out is driven by the OUT_OF_STOCK inventory status, in the grid and the detail, in every locale', async () => {
+  const oos = { ...product, commerce: { ...product.commerce, available: 0, status: 'OUT_OF_STOCK' } };
+  for (const [donor, sold, generic] of [[ZH_SHELL, '已售完', '無法購買'], [JA_SHELL, '売り切れ', 'ご購入いただけません'], [shell, 'Sold out', 'Unavailable']]) {
+    for (const path of ['/shop', '/shop/reef-tee']) {
+      const r = await serveNative('native-oos-' + sold + path.length, { shell: donor, path, projection: nativeOk(oos), shops: MISLEADING_BUILD_LOCALE });
+      assert.ok(r.html.includes(`class="dc-native-buy" disabled>${sold}<`), `${path}: ${sold}`);
+      assert.ok(!r.html.includes(`>${generic}<`), `${path}: not the generic copy`);
+    }
+  }
+});
+
+test('an unavailable native item that is NOT OUT_OF_STOCK keeps the generic unavailability copy', async () => {
+  // Tracked inventory reporting IN_STOCK with zero available: not an RSP OUT_OF_STOCK status.
+  const zeroLeft = { ...product, commerce: { ...product.commerce, available: 0, status: 'IN_STOCK' } };
+  const r = await serveNative('native-generic-unavailable', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(zeroLeft), shops: MISLEADING_BUILD_LOCALE });
+  assert.match(r.html, /class="dc-native-buy" disabled>無法購買/);
+  assert.doesNotMatch(r.html, /已售完/);
 });

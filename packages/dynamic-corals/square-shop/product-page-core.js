@@ -144,12 +144,22 @@ export function normalizeProduct(product) {
 	return { ...p, title, images, variants };
 }
 
-function defaultLabels(l) {
+// The sold-out label follows the page's declared locale (the declared language, not a
+// hard-coded English string). An author-supplied `labels.soldOut` still wins. Same zh split as
+// square-shop.js's label dictionary: Traditional by default, Simplified on an explicit signal.
+function soldOutLabel(locale) {
+	const n = String(locale || '').toLowerCase();
+	if (n.startsWith('ja')) return '売り切れ';
+	if (n.startsWith('zh')) return (n.includes('hans') || /-(cn|sg)(-|$)/.test(n)) ? '已售罄' : '已售完';
+	return 'Sold out';
+}
+
+function defaultLabels(l, locale) {
 	l = l || {};
 	return {
 		add: l.add || 'Add to cart',
 		added: l.added || 'Added ✓',
-		soldOut: l.soldOut || 'Sold out',
+		soldOut: l.soldOut || soldOutLabel(locale),
 		viewCart: l.viewCart || 'View cart',
 		inCart: l.inCart || 'in cart',
 		shop: l.shop || 'Shop',
@@ -166,7 +176,7 @@ function defaultLabels(l) {
  */
 export function renderProductPage(product, config) {
 	config = config || {};
-	const labels = defaultLabels(config.labels);
+	const labels = defaultLabels(config.labels, config.locale);
 	const shopPath = config.shopPath || '/shop';
 	// Both item-detail shapes enter here as one — see normalizeProduct above.
 	const p = normalizeProduct(product);

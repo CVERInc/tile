@@ -172,5 +172,16 @@ ok('explicit available:false → OutOfStock in JSON-LD', soldOut.headMeta.includ
 		stripStyle(rLayered.bodyHtml) === stripStyle(r.bodyHtml));
 }
 
+// Declared language: the PDP sold-out label follows the page locale; an author label wins.
+{
+	const dead = { processor: 'stripe', id: 'p', slug: 's', title: 'T', images: [], variants: [] };
+	const label = (locale, labels = {}) => renderProductPage(dead, { guildId: 'g1', shopPath: '/shop', labels, locale }).bodyHtml;
+	ok('PDP sold-out: ja-JP localized', label('ja-JP').includes('>売り切れ</button>') && !label('ja-JP').includes('Sold out'));
+	ok('PDP sold-out: zh-TW localized', label('zh-TW').includes('>已售完</button>'));
+	ok('PDP sold-out: zh-CN localized', label('zh-CN').includes('>已售罄</button>'));
+	ok('PDP sold-out: en default unchanged', label('en-US').includes('>Sold out</button>'));
+	ok('PDP sold-out: author label wins over locale default', label('ja-JP', { soldOut: 'Gone' }).includes('>Gone</button>'));
+}
+
 console.log(`\n=== ${pass}/${pass + fail} PASS ===`);
 process.exit(fail ? 1 : 0);

@@ -217,6 +217,36 @@ test('🔴 :empty .st-runtime-status cancels its own spacing so an unfilled stat
     `the :empty rule does not zero the margin the base rule set: ${empty.map((r) => r.css).join(' | ')}`);
 });
 
+// ── truthful runtime state: success / error tones are distinguishable without colour ──────────
+// Truthful runtime states. The attribute is stamped by the runtime island (a script
+// the static-HTML hook scan cannot see), so the stylesheet is where the contract is checked.
+
+test('🔴 [data-ejecta-status-tone] success and error each get a non-colour cue (glyph + border), inside reef.base', () => {
+  const rules = rulesFor('data-ejecta-status-tone');
+  const pick = (tone, pseudo) => rules.filter((r) => r.selector.includes(`"${tone}"`) && (pseudo ? /::before/.test(r.selector) : !/::before/.test(r.selector)));
+  for (const tone of ['success', 'error']) {
+    const box = pick(tone, false), glyph = pick(tone, true);
+    assert.ok(box.length > 0 && glyph.length > 0, `${tone}: needs a box rule and a ::before glyph rule`);
+    assert.ok(box.every((r) => /border-inline-start:\s*\S+/.test(r.css)), `${tone}: no border cue`);
+    assert.ok(glyph.every((r) => /content:\s*"[^"]+"/.test(r.css)), `${tone}: no glyph content`);
+    assert.ok(box.every((r) => /:not\(:empty\)/.test(r.selector)), `${tone}: an unfilled node must not show a lone glyph`);
+  }
+  const glyphOf = (tone) => pick(tone, true)[0].css.match(/content:\s*"([^"]+)"/)[1];
+  assert.notEqual(glyphOf('success'), glyphOf('error'), 'success and error must use different glyphs');
+  const borderOf = (tone) => pick(tone, false)[0].css.match(/border-inline-start:\s*([^;]+)/)[1].trim();
+  assert.notEqual(borderOf('success'), borderOf('error'), 'success and error must use different border treatments');
+  const all = rules.map((r) => r.css).join('\n');
+  assert.doesNotMatch(all, /#[0-9a-f]{3,8}\b|rgb\(/i, 'tones use theme tokens, not literal colours');
+  const body = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = body.indexOf('data-ejecta-status-tone');
+  assert.ok(body.indexOf('@layer reef.base {') < at && at < body.indexOf('@layer reef.responsive {'), 'tone rules sit inside reef.base');
+});
+
+test('a status node with no tone keeps the neutral muted look', () => {
+  const own = exactRule('.st-runtime-status');
+  assert.match(own.css, /color:\s*var\(--gd-muted\)/);
+});
+
 // ── nested-inset guard: a runtime section inside .st-runtime must not double the generic floor ──
 
 test('🔴 a section[class^="st-"] nested inside .st-runtime has its inset reset, so the outer wrapper is not doubled', () => {
