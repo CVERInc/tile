@@ -11,9 +11,9 @@
 //   1. SAME ANSWER — each rewritten piece is compared against the regex it replaced, kept below as
 //      the reference, over generated inputs where both verdicts occur. A fast parser that reads
 //      headings differently is not a fix.
-//   2. LINEAR COST — a 100,000-character run is timed against the same page carrying 100,000
+//   2. LINEAR COST — a 200,000-character run is timed against the same page carrying 200,000
 //      letters. The clock is unavoidable here (a native regex exposes no step count), so the budget
-//      is a ratio to that control with a floor, and the quadratic versions miss it by 3× or more.
+//      is a ratio to that control with a floor, and the replaced versions miss it by 10× or more.
 // Each ruler is shown to fire: the controls at the bottom put the old shapes back and must go red.
 
 import assert from 'node:assert/strict';
@@ -134,9 +134,9 @@ test('a timeline entry title is taken only while the entry has no content — bl
 });
 
 // ── ruler 2: linear cost ───────────────────────────────────────────────────────────────────────
-const N = 100000;
-// The floor under the budget. A loaded machine reads about 45 ms on the heaviest linear shape; the
-// quadratic versions read 10,000 ms and up. 2,000 sits far from both.
+const N = 200000;
+// The floor under the budget. A loaded machine reads under 100 ms on the heaviest linear shape; the
+// quadratic versions read tens of seconds. 2,000 sits far from both.
 const FLOOR_MS = 2000;
 const spent = (fn) => { const t = performance.now(); fn(); return performance.now() - t; };
 // Best of two: a busy machine can only make a run slower, never faster, so the smaller reading is
@@ -153,9 +153,9 @@ function within(make, run, n) {
 const roundTrip = (md) => serializeSite(parseSite(md));
 const grid = (list) => FM + '## Cards\n%% sitetile: grid %%\n### Card\n' + list + '\n';
 // 🔴 The unclosed type line was worse than quadratic under the old regex (three parts competing for
-// one run): at 100,000 it would not finish, and a test that hangs is not a red line. So that one
-// shape runs at 3,000 — about 14 s under the old regex, under a millisecond now.
-const UNCLOSED_N = 3000;
+// one run): at 200,000 it would not finish, and a test that hangs is not a red line. So that one
+// shape runs at 4,000 — tens of seconds under the old regex, under a millisecond now.
+const UNCLOSED_N = 4000;
 const SHAPES = {
   'spaces inside a body line': (f) => grid('- x' + (f || ' '.repeat(N)) + 'y'),
   'full-width spaces inside a body line': (f) => grid('- x' + (f || '　'.repeat(N)) + 'y'),
@@ -178,11 +178,13 @@ for (const [name, make] of Object.entries(SHAPES)) {
 
 // ── controls: both rulers fire ─────────────────────────────────────────────────────────────────
 test('control: the cost ruler goes red on the quadratic shape it was written for', () => {
-  // The old tail trim, on a quarter of the size so a red reading does not take minutes.
-  const md = grid('- x' + ' '.repeat(N / 4) + 'y');
-  const control = spent(() => roundTrip(grid('- x' + 'x'.repeat(N / 4) + 'y')));
+  // The old tail trim, on an eighth of the size so this control itself stays quick. Quadratic cost
+  // at an eighth of the size is a sixty-fourth of the reading, so that is what it is held to.
+  const n = N / 8;
+  const md = grid('- x' + ' '.repeat(n) + 'y');
+  const control = spent(() => roundTrip(grid('- x' + 'x'.repeat(n) + 'y')));
   const ms = spent(() => refTail(roundTrip(md).slice(0, -1)));
-  assert.ok(ms > Math.max(FLOOR_MS, control * 20) / 16, 'the replaced regex is over budget even at N/4, scaled (' + ms.toFixed(0) + ' ms)');
+  assert.ok(ms > Math.max(FLOOR_MS, control * 20) / 64, 'the replaced regex is over budget even at N/8, scaled (' + ms.toFixed(0) + ' ms)');
 });
 test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   // Three plausible wrong rewrites — each must disagree with the reference on SOME generated input.
