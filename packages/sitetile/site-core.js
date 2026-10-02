@@ -1257,50 +1257,92 @@ function cellHtml(cell) {
 // no newline, backtick or comment anywhere), so every cell with a title or a paragraph above its
 // list fell back to the unsplit output. Nothing outside the item being split is consulted any more.
 const RE_ITEM_BR = /<br\s*\/?>/gi;
-const RE_ITEM_BR_MARKER = /^[ \t]*([-*+]|\d+[.)])[ \t]+(\S.*)$/;
+const RE_ITEM_BR_MARKER = /[ \t]*([-*+]|\d+[.)])[ \t]+/y;   // sticky: reads a local prefix, never the suffix
 const RE_ITEM_BR_RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
-// Ranges of an item's text that are opaque to splitting: inline code spans (a backtick run closed by
-// a run of the same length) and HTML comments. An unclosed opener makes the REST of the item opaque
-// — erring towards "do not split", which is the output this item had before.
+// Ranges of an item's text that are opaque to splitting, sorted and merged. This is deliberately a
+// UNION of every reading of "code" and "comment" that could apply, because a break that any of them
+// puts inside a span must not split — a wrong "inside" costs a split the author can get by writing
+// newlines, a wrong "outside" tears a code span in two:
+//   · the inline renderer's own code spans (codeSpanRanges — the rule the page is actually drawn by);
+//   · backtick RUNS paired by equal length (the CommonMark reading), an unpaired run opaque to the end;
+//   · every `<!--` up to its first `-->`, an unclosed one opaque to the end.
+// 🩸 Each scan is a cursor over the string — nothing here builds a pattern out of the input. The
+// first version compiled the delimiter run into a RegExp, so one long run of backticks threw
+// "Regular expression too large" out of the whole page render.
 function itemOpaqueRanges(text) {
-  const ranges = [];
-  const re = /`+|<!--/g;
+  const ranges = codeSpanRanges(text);
+  const runs = [];
+  const reRun = /`+/g;
   let m;
-  while ((m = re.exec(text))) {
-    let end = text.length;
-    if (m[0] === '<!--') {
-      const close = text.indexOf('-->', re.lastIndex);
-      if (close !== -1) end = close + 3;
-    } else {
-      const closer = new RegExp('(^|[^`])' + m[0] + '(?!`)', 'g');
-      closer.lastIndex = re.lastIndex;
-      const c = closer.exec(text);
-      if (c) end = c.index + c[0].length;
-    }
-    ranges.push([m.index, end]);
-    re.lastIndex = end;
+  while ((m = reRun.exec(text))) runs.push([m.index, m[0].length]);
+  for (let i = 0; i < runs.length; i++) {
+    let j = i + 1;
+    while (j < runs.length && runs[j][1] !== runs[i][1]) j++;
+    if (j === runs.length) { ranges.push([runs[i][0], text.length]); break; }
+    ranges.push([runs[i][0], runs[j][0] + runs[j][1]]);
+    i = j;
   }
-  return ranges;
+  for (let at = text.indexOf('<!--'); at !== -1;) {
+    const close = text.indexOf('-->', at + 4);
+    if (close === -1) { ranges.push([at, text.length]); break; }
+    ranges.push([at, close + 3]);
+    at = text.indexOf('<!--', close + 3);
+  }
+  ranges.sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([r[0], r[1]]);
+  }
+  return merged;
+}
+// Whether a segment holds anything besides whitespace and closed HTML comments (cursor scan).
+function hasRealContent(s) {
+  let i = 0;
+  for (;;) {
+    const at = s.indexOf('<!--', i);
+    if (s.slice(i, at === -1 ? s.length : at).trim()) return true;
+    if (at === -1) return false;
+    const close = s.indexOf('-->', at + 4);
+    if (close === -1) return true;
+    i = close + 3;
+  }
 }
 // One list item's text → the texts of the sibling items it stands for ([{ordered, text}], length 1
-// when nothing splits). A backslash-escaped backtick makes code-span boundaries ambiguous, so such
-// an item is left whole.
+// when nothing splits). The text is cut into SEGMENTS at every break outside an opaque range, and
+// each segment is judged on its own extent only:
+//   · marker + whitespace + real content → starts a new sibling;
+//   · no marker → stays in the item before it, with its literal break;
+//   · a marker with nothing real behind it (empty, or only a comment), or a horizontal rule → the
+//     item is ambiguous, so the WHOLE item is left exactly as written.
+// One pass, linear in the item's length: breaks, opaque ranges and segments all advance monotonically.
 function splitItemBreaks(text, ordered) {
   const whole = [{ ordered, text }];
-  if (!/<br/i.test(text) || text.includes('\\`')) return whole;
+  if (!/<br/i.test(text)) return whole;
   const opaque = itemOpaqueRanges(text);
-  const out = [];
-  let start = 0, cur = ordered, m;
+  const cuts = [];                                    // [breakStart, breakEnd] of each usable break
+  let o = 0, m;
   RE_ITEM_BR.lastIndex = 0;
   while ((m = RE_ITEM_BR.exec(text))) {
-    if (opaque.some(([a, b]) => m.index >= a && m.index < b)) continue;
-    const after = text.slice(RE_ITEM_BR.lastIndex);
-    const nextBr = after.search(/<br\s*\/?>/i);
-    const mk = RE_ITEM_BR_MARKER.exec(after);
-    if (!mk || RE_ITEM_BR_RULE.test(nextBr === -1 ? after : after.slice(0, nextBr))) continue;
-    out.push({ ordered: cur, text: text.slice(start, m.index) });
+    while (o < opaque.length && opaque[o][1] <= m.index) o++;
+    if (o < opaque.length && opaque[o][0] <= m.index) continue;
+    cuts.push([m.index, RE_ITEM_BR.lastIndex]);
+  }
+  const out = [];
+  let start = 0, cur = ordered;
+  for (let k = 0; k < cuts.length; k++) {
+    const segStart = cuts[k][1];
+    const segEnd = k + 1 < cuts.length ? cuts[k + 1][0] : text.length;
+    RE_ITEM_BR_MARKER.lastIndex = segStart;
+    const mk = RE_ITEM_BR_MARKER.exec(text);
+    if (!mk || RE_ITEM_BR_MARKER.lastIndex > segEnd) continue;          // marker-less continuation
+    const seg = text.slice(segStart, segEnd);
+    const content = text.slice(RE_ITEM_BR_MARKER.lastIndex, segEnd);
+    if (!hasRealContent(content) || RE_ITEM_BR_RULE.test(seg)) return whole;
+    out.push({ ordered: cur, text: text.slice(start, cuts[k][0]) });
     cur = /^\d/.test(mk[1]);
-    start = RE_ITEM_BR.lastIndex + (after.length - mk[2].length);
+    start = RE_ITEM_BR_MARKER.lastIndex;
   }
   if (!out.length) return whole;
   out.push({ ordered: cur, text: text.slice(start) });

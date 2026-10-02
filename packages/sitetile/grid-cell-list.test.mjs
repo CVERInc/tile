@@ -68,6 +68,12 @@ test('other grid bodies retain the block parser output', () => {
     '- use `a<br>- b` here', '- ``a ` <br>- b`` c', '- a `unclosed <br>- b', '- a \\` b<br>- c `d`',
     '- a <!-- open <br>- b', '- a<br>- ', '- a<br>-b', '- a<br>-', '- a<br>1.b', '- a<br>・ b',
     'a<br>- b', 'Text <br>- b\nmore', '> - a<br>- b', '| Label | - a<br>- b |',
+    // an empty marker or a rule ANYWHERE in the item leaves the whole item as written
+    '- a<br>- b<br>* * *', '- a<br>- b<br>- ', '- a<br>- <br>c', '- a<br>- <br>- b',
+    '- a<br>- <!-- empty -->', '- a<br>- <!-- empty --><br>- b', '- a<br>-  \t<br>- b', '- a<br>- - -<br>- b',
+    // a break the inline renderer draws INSIDE a code span never splits, whatever the run lengths
+    '- `` a ` b ``<br>- c ` tail', '- ``` a ` b ```<br>- c ` tail', '- `` a ` b<br>- c ``',
+    '- `` ` <!-- `` <br>- b -->', '- a <!-- x --!><br>- b',
   ];
   assert.deepEqual(bodies.map((body) => render(body).match(/<h3>Card<\/h3>(.*?)<span class="st-cell-cta"/s)?.[1]),
     bodies.map((body) => bodyHtml(body)));
@@ -109,7 +115,7 @@ test('a multi-block card splits its br-separated list into one item per bullet',
       assert.deepEqual(lis.map(text), ['Label A\u3000first content', 'Label B\u3000second content']);
       for (const li of lis) {
         assert.ok(!/^\s*[-*+]\s/.test(text(li)), params + ': no item begins with a literal marker');
-        assert.ok(!/br/i.test(li), params + ': no break is left inside an item');
+        assert.ok(!/<br\b|&lt;br\b/i.test(li), params + ': no break tag is left inside an item');
       }
     }
     assert.equal((html.match(/<p>One line subtitle<\/p>/g) || []).length, 3, 'the subtitle is still a paragraph');
@@ -147,9 +153,8 @@ test('item-level splits equal the newline-written list, block for block', () => 
     ['1) a<br>2) b', '1) a\n2) b'],
     ['- a<br>continued<br>- b', '- a<br>continued\n- b'],                    // a marker-less segment stays in its item
     ['- `x<br>- y` z<br>- b', '- `x<br>- y` z\n- b'],                        // split outside the code span only
+    ['- `a\\`<br>- b', '- `a\\`\n- b'],                                    // a span the renderer closes at the backslash
     ['- a <!-- n<br>- hidden --> tail<br>- b', '- a <!-- n<br>- hidden --> tail\n- b'],
-    ['- a<br>- b<br>* * *', '- a\n- b<br>* * *'],                            // a trailing rule segment stays literal
-    ['- a<br>- b<br>- ', '- a\n- b<br>- '],                                  // so does a trailing empty item
     ['```text\n- a<br>- b\n```\n\n- c<br>- d', '```text\n- a<br>- b\n```\n\n- c\n- d'],
   ];
   for (const [br, nl] of pairs) {
@@ -171,4 +176,55 @@ test('outside a grid cell the block parser is untouched', () => {
   assert.equal(bodyHtml('- a<br>- b'), '<ul class="st-list"><li>a<br>- b</li></ul>');
   const prose = renderSiteToHtml(parseSite('## Notes\n\nIntro.\n\n- a<br>- b\n'));
   assert.deepEqual(lists(prose).map((l) => l.length), [1]);
+});
+
+test('the card shape also splits with a half-width space after the label and a trailing action', () => {
+  const body = 'One line subtitle\n\nA paragraph of description.\n\n- **Label A** first content<br>- **Label B** second content';
+  const cases = [['', 'Card →/details [More →/more]', ''], ['', 'Card →/details', ''], ['cards=image', 'Card →/details', '![Sample](/sample.png)\n\n']];
+  for (const [params, heading, image] of cases) {
+    const html = render(image + body, params, heading);
+    assert.deepEqual(lists(html).map((l) => l.map(text)), [['Label A first content', 'Label B second content']], heading);
+    assert.equal(html, render(image + body.replace('<br>', '\n'), params, heading), heading);
+  }
+});
+
+test('a break is still split outside a code span the renderer agrees on', () => {
+  assert.deepEqual(items(cellBody('- `x<br>- y` z<br>- b')).length, 2);
+  assert.deepEqual(items(cellBody('- `` a ` b ``<br>- c ` tail')).length, 1);
+  assert.equal(cellBody('- `` a ` b ``<br>- c ` tail'), bodyHtml('- `` a ` b ``<br>- c ` tail'));
+});
+
+// Sizes an author can paste into one cell. None of these may throw, through the real entry point.
+const big = {
+  longTickRun: (n) => '- ' + '`'.repeat(n) + 'a<br>- b',
+  breaks: (n) => '- ' + 'a<br>- '.repeat(n) + 'z',
+  codeRanges: (n) => '- ' + '`x`<br>- a '.repeat(n),
+  unclosedComments: (n) => '- ' + '<!-- <br>- a '.repeat(n),
+  mixedRuns: (n) => '- ' + '`` ` '.repeat(n) + '<br>- b',
+};
+test('very large single-item cells render without throwing', () => {
+  const n = 200 * 1024;
+  assert.equal(render(big.longTickRun(n)).includes('`'.repeat(64)), true);
+  assert.equal(items(render(big.breaks(n / 8))).length, n / 8 + 1);
+  assert.equal(items(render(big.codeRanges(n / 16))).length, n / 16 + 1);
+  assert.equal(items(render(big.unclosedComments(n / 16))).length, 1);
+  assert.equal(items(render(big.mixedRuns(n / 8))).length, 1);
+});
+
+// Scaling gate, not a millisecond budget: 4x the input must cost well under the 16x a quadratic
+// scan would. Best-of-several on each size, so a busy machine cannot fake a slope.
+test('splitting cost grows linearly with the item length', (t) => {
+  const best = (body) => {
+    let min = Infinity;
+    for (let r = 0; r < 5; r++) { const t = process.hrtime.bigint(); gridCellBodyHtml(body); min = Math.min(min, Number(process.hrtime.bigint() - t)); }
+    return min;
+  };
+  const ratios = [];
+  for (const [name, n] of [['breaks', 20000], ['codeRanges', 12000], ['mixedRuns', 20000]]) {
+    gridCellBodyHtml(big[name](n));                                            // warm up
+    const ratio = best(big[name](4 * n)) / best(big[name](n));
+    ratios.push(name + ' ' + ratio.toFixed(2) + 'x');
+    assert.ok(ratio < 10, name + ': 4x input cost ' + ratio.toFixed(2) + 'x');
+  }
+  t.diagnostic('4x input cost: ' + ratios.join(', '));
 });
