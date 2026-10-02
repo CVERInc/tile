@@ -188,3 +188,17 @@ feature verified only by someone who cannot read the output is a feature verifie
 ## Import path (Recast SKU)
 
 `import/mirror-import.js` converts an ejecta **mirror's HTML → clean Markdown IR** — the technical body of the **Recast** SKU and the #5 破釜沈舟 conversion mechanism. 🔴 This is sitetile's **import side**, NOT a parallel transform. Per-source-theme knowledge lives in a `THEMES` table (best-effort; reports per-template manual work; never fabricates structure). See its header for details.
+
+### Generated share cards
+
+`og-cards: true` generates missing preview cards after the HTML build; a rendering
+failure fails the build. `og-cards: false` disables generated cards. Authored
+`share-image` / `og-image` values, then raster `image` values, keep priority.
+
+Omitting `og-cards` currently leaves generation off. The single
+`OG_CARDS_DEFAULT` constant in `astro/src/layouts/SiteLayout.astro` controls the
+future default; it stays `false` pending a large-site card-time benchmark. When
+that constant is enabled, an omitted option permits per-page degradation: a
+failed card is logged with its page and reason, its generated image metadata is
+removed (Open Graph, Twitter and JSON-LD), and the build continues. Explicit
+`true` remains strict regardless of the default.

@@ -13,9 +13,10 @@
 // a path this script has not created yet. If a render silently fails, the page ships a meta tag
 // aimed at a 404 — and a broken share card looks exactly like no share card to everyone except the
 // person who clicked. So: every og:image a page claims must exist on disk when this exits, and if
-// one does not, the build FAILS here rather than deploying a site full of dead cards.
+// one does not, explicit opt-in FAILS the build. Default-enabled cards may degrade only after
+// removing their image metadata, so no surviving claim can point at a missing card.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeCardRenderer, ourCardPath, deadCards } from './og-card.mjs';
@@ -61,7 +62,8 @@ const pages = htmlFiles(DIST).map((file) => {
   // Posts title themselves "<post> — <site>". The card shows the brand on its own line, so leaving
   // the suffix in prints the site's name twice and steals a line from the title.
   if (brand && title.endsWith(` — ${brand}`)) title = title.slice(0, -(brand.length + 3)).trim();
-  return { file, html, img, title, brand, bg: decode(metaOf(html, 'theme-color')) };
+  return { file, html, img, title, brand, bg: decode(metaOf(html, 'theme-color')),
+    optional: metaOf(html, 'sitetile:og-card') === 'optional' };
 }).filter((p) => p.img);
 
 // Only pages whose card WE are supposed to make. A site that authored its own share-image points
@@ -76,24 +78,49 @@ if (!mine.length) { console.log('▸ og cards: none requested'); process.exit(0)
 // installed one directory over.
 const ASTRO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'astro');
 const req = createRequire(join(ASTRO_DIR, 'package.json'));
-let satori, Resvg;
+let renderCard;
 try {
   const mod = await import(pathToFileURL(req.resolve('satori')).href);
   // satori ships dual CJK/ESM; importing the resolved CJS entry by URL can nest the callable one
   // level deeper. Take whichever of the three is actually a function rather than assuming a shape.
-  satori = [mod.default?.default, mod.default, mod.satori].find((f) => typeof f === 'function');
+  const satori = [mod.default?.default, mod.default, mod.satori].find((f) => typeof f === 'function');
   if (!satori) throw Object.assign(new Error('satori export is not callable'), { code: 'BAD_EXPORT' });
-  ({ Resvg } = req('@resvg/resvg-js'));
+  const { Resvg } = req('@resvg/resvg-js');
+  const nodeModulesDir = join(ASTRO_DIR, 'node_modules');
+  renderCard = makeCardRenderer({ satori, Resvg, nodeModulesDir, packages: ['inter', 'noto-sans-tc'] });
 } catch (e) {
-  console.error(`✗ og cards: ${mine.length} page(s) ask for a card but the renderer is not installed (${e.code || 'import failed'}).`);
-  console.error('  Deploying now would ship that many meta tags pointing at 404s. Refusing.');
-  process.exit(1);
+  // Dependency/font setup failures obey the same per-page policy as rendering failures.
+  // Keeping this inside the loop also preserves already-present incremental cards.
+  renderCard = async () => { throw e; };
 }
 
-const nodeModulesDir = join(ASTRO_DIR, 'node_modules');
-const renderCard = makeCardRenderer({ satori, Resvg, nodeModulesDir, packages: ['inter', 'noto-sans-tc'] });
+function omitFailedCard(p) {
+  // Only generated, optional cards reach here. Authored images and unrelated metadata survive.
+  let html = p.html.replace(/<meta\b[^>]*>/gi, (tag) => {
+    if (/name=["']sitetile:og-card["']/i.test(tag)) return '';
+    if (/(?:property|name)=["'](?:og:image|twitter:image)["']/i.test(tag)
+        && decode(/content=["']([^"']*)["']/i.exec(tag)?.[1] || '') === decode(p.img)) return '';
+    if (/name=["']twitter:card["']/i.test(tag)) return tag.replace(/content=["'][^"']*["']/i, 'content="summary"');
+    return tag;
+  });
+  html = html.replace(/(<script\b[^>]*type=["']application\/ld\+json["'][^>]*>)([\s\S]*?)(<\/script>)/gi,
+    (_, open, json, close) => {
+      let graph;
+      try { graph = JSON.parse(json); } catch { return open + json + close; }
+      let changed = false;
+      const removeImage = (node) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.image === decode(p.img)) { delete node.image; changed = true; }
+        for (const value of Object.values(node)) removeImage(value);
+      };
+      removeImage(graph);
+      return changed ? open + JSON.stringify(graph).replace(/</g, '\\u003c') + close : open + json + close;
+    });
+  writeFileSync(p.file, html);
+  p.img = ''; // The final disk gate must inspect only claims still present in the HTML.
+}
 
-let made = 0, skipped = 0;
+let made = 0, skipped = 0, omitted = 0;
 const t0 = Date.now();
 for (const p of mine) {
   const rel = ourCardPath(p.img);
@@ -105,13 +132,21 @@ for (const p of mine) {
   // never leave the gate below unsatisfiable. The first shape of this took a list and would have
   // failed every incremental build it was meant to speed up.
   if (existsSync(outPath)) { skipped++; continue; }
-  mkdirSync(dirname(outPath), { recursive: true });
-  const png = await renderCard({
-    title: p.title || '', brand: BRAND || p.brand || '',
-    bg: BG || p.bg || '#111111', fg: FG || '#ffffff',
-  });
-  writeFileSync(outPath, png);
-  made++;
+  try {
+    mkdirSync(dirname(outPath), { recursive: true });
+    const png = await renderCard({
+      title: p.title || '', brand: BRAND || p.brand || '',
+      bg: BG || p.bg || '#111111', fg: FG || '#ffffff',
+    });
+    writeFileSync(outPath, png);
+    made++;
+  } catch (e) {
+    if (!p.optional) throw e;
+    omitFailedCard(p);
+    omitted++;
+    const reason = String(e?.message || e).replace(/[\r\n]+/g, ' ');
+    console.error(`og cards: omitted ${relative(DIST, p.file)}: ${reason}`);
+  }
 }
 
 // ── the gate ─────────────────────────────────────────────────────────────────────────────────────
@@ -122,4 +157,4 @@ if (dead.length) {
   console.error('  A dead share card is invisible to everyone except the person who clicked. Failing the build.');
   process.exit(1);
 }
-console.log(`▸ og cards: ${made} rendered${skipped ? `, ${skipped} unchanged` : ''} (${Date.now() - t0}ms) — all ${mine.length} og:image target(s) exist`);
+console.log(`▸ og cards: ${made} rendered${skipped ? `, ${skipped} unchanged` : ''}${omitted ? `, ${omitted} omitted` : ''} (${Date.now() - t0}ms) — all ${mine.length - omitted} og:image target(s) exist`);

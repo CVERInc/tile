@@ -634,7 +634,14 @@ const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'
 // the build (packages/sitetile/og/build-og.mjs), which is why the path has to be derivable from the
 // url alone and cannot depend on anything only the renderer knows. An authored share-image always
 // wins — a site that made its own card keeps it.
-const ogCardsOn = String(meta['og-cards'] || '').trim().toLowerCase() === 'true';
+// Rollout switch: enable only after measuring card time on a large site. Explicit true stays
+// strict; cards enabled by this default may be omitted if rendering fails.
+const OG_CARDS_DEFAULT = false;
+const ogCardsOption = String(meta['og-cards'] ?? '').trim().toLowerCase();
+const ogCardsMode = ogCardsOption === 'true' ? 'strict'
+  : (meta['og-cards'] == null && OG_CARDS_DEFAULT ? 'optional' : '');
+const ogCardsOn = !!ogCardsMode;
+const ogCardPolicy = authoredShareImage ? '' : ogCardsMode;
 const ogCardPath = (p) => {
   const clean = String(p || '/').split('?')[0].split('#')[0].replace(/\/+$/, '');
   return `/og${clean === '' ? '/index' : clean}.png`;
@@ -799,6 +806,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     {ogType === 'article' && (meta['article-author'] || meta['blog-author']) && <meta property="article:author" content={String(meta['article-author'] || meta['blog-author'])} />}
     {ogSiteName && <meta property="og:site_name" content={ogSiteName} />}
     {canonicalHref && <meta property="og:url" content={canonicalHref} />}
+    {ogCardPolicy && <meta name="sitetile:og-card" content={ogCardPolicy} />}
     {shareImage && <meta property="og:image" content={shareImage} />}
     <meta name="twitter:card" content={shareImage ? 'summary_large_image' : 'summary'} />
     <meta name="twitter:title" content={title} />
