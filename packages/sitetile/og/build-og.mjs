@@ -78,19 +78,32 @@ if (!mine.length) { console.log('▸ og cards: none requested'); process.exit(0)
 // installed one directory over.
 const ASTRO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'astro');
 const req = createRequire(join(ASTRO_DIR, 'package.json'));
-let renderCard;
+const strict = mine.some((p) => !p.optional);
+let satori, Resvg, setupError;
 try {
   const mod = await import(pathToFileURL(req.resolve('satori')).href);
   // satori ships dual CJK/ESM; importing the resolved CJS entry by URL can nest the callable one
   // level deeper. Take whichever of the three is actually a function rather than assuming a shape.
-  const satori = [mod.default?.default, mod.default, mod.satori].find((f) => typeof f === 'function');
+  satori = [mod.default?.default, mod.default, mod.satori].find((f) => typeof f === 'function');
   if (!satori) throw Object.assign(new Error('satori export is not callable'), { code: 'BAD_EXPORT' });
-  const { Resvg } = req('@resvg/resvg-js');
+  ({ Resvg } = req('@resvg/resvg-js'));
+} catch (e) {
+  if (strict) {
+    console.error(`✗ og cards: ${mine.length} page(s) ask for a card but the renderer is not installed (${e.code || 'import failed'}).`);
+    console.error('  Deploying now would ship that many meta tags pointing at 404s. Refusing.');
+    process.exit(1);
+  }
+  setupError = e;
+}
+
+let renderCard;
+try {
+  if (setupError) throw setupError;
   const nodeModulesDir = join(ASTRO_DIR, 'node_modules');
   renderCard = makeCardRenderer({ satori, Resvg, nodeModulesDir, packages: ['inter', 'noto-sans-tc'] });
 } catch (e) {
-  // Dependency/font setup failures obey the same per-page policy as rendering failures.
-  // Keeping this inside the loop also preserves already-present incremental cards.
+  if (strict) throw e;
+  // Only optional cards defer setup failures, preserving already-present incremental cards.
   renderCard = async () => { throw e; };
 }
 
@@ -120,6 +133,7 @@ function omitFailedCard(p) {
   p.img = ''; // The final disk gate must inspect only claims still present in the HTML.
 }
 
+const omissions = new Map();
 let made = 0, skipped = 0, omitted = 0;
 const t0 = Date.now();
 for (const p of mine) {
@@ -145,8 +159,15 @@ for (const p of mine) {
     omitFailedCard(p);
     omitted++;
     const reason = String(e?.message || e).replace(/[\r\n]+/g, ' ');
-    console.error(`og cards: omitted ${relative(DIST, p.file)}: ${reason}`);
+    const group = omissions.get(reason) || { count: 0, pages: [] };
+    group.count++;
+    if (group.pages.length < 5) group.pages.push(relative(DIST, p.file));
+    omissions.set(reason, group);
   }
+}
+
+for (const [reason, group] of omissions) {
+  console.error(`og cards: omitted ${group.count} page(s) [${group.pages.join(', ')}${group.count > group.pages.length ? ', ...' : ''}]: ${reason}`);
 }
 
 // ── the gate ─────────────────────────────────────────────────────────────────────────────────────

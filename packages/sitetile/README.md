@@ -192,13 +192,15 @@ feature verified only by someone who cannot read the output is a feature verifie
 ### Generated share cards
 
 `og-cards: true` generates missing preview cards after the HTML build; a rendering
-failure fails the build. `og-cards: false` disables generated cards. Authored
+failure fails the build. `og-cards: false` disables generated cards.
+Empty or null-like frontmatter values (`og-cards:`, `og-cards: null`, `og-cards: ~`,
+`og-cards: ""`, or `og-cards: ''`) also explicitly disable generation. Authored
 `share-image` / `og-image` values, then raster `image` values, keep priority.
 
 Omitting `og-cards` currently leaves generation off. The single
 `OG_CARDS_DEFAULT` constant in `astro/src/layouts/SiteLayout.astro` controls the
 future default; it stays `false` pending a large-site card-time benchmark. When
-that constant is enabled, an omitted option permits per-page degradation: a
-failed card is logged with its page and reason, its generated image metadata is
-removed (Open Graph, Twitter and JSON-LD), and the build continues. Explicit
+that constant is enabled, an omitted option permits per-page degradation: failures
+are grouped by reason with a page count and up to five page paths, generated image
+metadata is removed (Open Graph, Twitter and JSON-LD), and the build continues. Explicit
 `true` remains strict regardless of the default.
