@@ -17,7 +17,32 @@ const resolve = new Function('meta', 'Astro', 'safeSrc', layout.slice(start, end
 const site = new URL('https://example.test/base/');
 const url = new URL('https://example.test/about/');
 
+const rasterImageCases = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'].flatMap(ext =>
+  [ext, `${ext.toUpperCase()}?size=large&format=svg`].map(suffix => [
+    `ordinary image accepts ${suffix}`,
+    `image: /cover.${suffix}\nog-cards: true`,
+    `https://example.test/cover.${suffix}`,
+  ]));
+const unsupportedImages = ['/cover.svg', '/cover.mp4', '/cover.pdf', '/cover', '/cover.svg?format=jpg'];
+const unsupportedImageCases = unsupportedImages.flatMap(image =>
+  ['', '\nog-cards: false', '\nog-cards: true'].map(option => [
+    `ordinary image skips ${image} with ${option.trim() || 'no card option'}`,
+    `image: ${image}${option}`,
+    option.endsWith('true') ? 'https://example.test/og/about.png' : '',
+  ]));
+const explicitImageCases = ['share-image', 'og-image'].flatMap(key =>
+  unsupportedImages.map(image => [
+    `${key} preserves ${image}`,
+    `${key}: ${image}\nimage: /cover.jpg\nog-cards: true`,
+    `https://example.test${image}`,
+  ]));
+
 for (const [name, frontmatter, expected, origin = site] of [
+  ...rasterImageCases,
+  ...unsupportedImageCases,
+  ...explicitImageCases,
+  ['unsafe raster-looking image is omitted', 'image: javascript:cover.jpg', ''],
+  ['unsafe raster-looking image allows generated cards', 'image: javascript:cover.jpg\nog-cards: true', 'https://example.test/og/about.png'],
   ['root-relative page image works without og-cards', 'image: /cover.jpg', 'https://example.test/cover.jpg'],
   ['relative page image resolves against Astro.site', 'image: cover.jpg', 'https://example.test/base/cover.jpg'],
   ['absolute page image keeps its origin', 'image: https://images.example.test/cover.jpg', 'https://images.example.test/cover.jpg'],

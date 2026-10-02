@@ -609,7 +609,7 @@ const ageGateLines = (s) => String(s || '').split('\\n');
 
 // ── social/share metadata (general, all opt-in via frontmatter) ──────────────
 // `description:` → <meta description> + og/twitter description. `share-image:` (or
-// `og-image:`, then `image:` as a fallback) → the image for link previews (absolute-ised via Astro.site
+// `og-image:`, then a raster `image:` as a fallback) → the image for link previews (absolute-ised via Astro.site
 // when set, so Patreon/IG/X render it). `favicon:` → the browser-tab icon (falls
 // back to site-logo). Absent → the tag is simply omitted (a site without one is unaffected).
 // This is load-bearing for share-driven sites (a webcomic's whole funnel is a link
@@ -622,7 +622,10 @@ const description = meta.description ? String(meta.description).trim() : '';
 // resolves to `javascript:x` unchanged), so a disallowed scheme survived straight through. safeSrc
 // shares the same policy every image consumer in this file already uses (site-logo/footer-logo,
 // above) — gated once here, at the source, same as those.
-const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'] || meta.image || '').trim()) || '';
+// Ordinary page images can also be SVGs or media files; only raster images are a share fallback.
+const pageImage = String(meta.image || '').trim();
+const rasterPageImage = /\.(?:jpe?g|png|webp|gif|avif)$/i.test(pageImage.split('?')[0]) ? pageImage : '';
+const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'] || rasterPageImage || '').trim()) || '';
 // `og-cards: true` in _site.md → every page gets a generated link-preview card at a path derived
 // from its own URL. The PNG does not exist yet at this point: it is rendered from THIS html after
 // the build (packages/sitetile/og/build-og.mjs), which is why the path has to be derivable from the
