@@ -199,6 +199,19 @@ test('🔴 gallery/carousel images are object-fit: cover inside their figure', (
     `no object-fit: cover reachable from .st-gal-fig; selectors were: ${rules.map((r) => r.selector).join(' | ')}`);
 });
 
+test('gallery figures leave their aspect ratio to content or the theme', () => {
+  // A theme can size only .st-img; that does not override a ratio on its parent.
+  // Inspect declarations, not comments, and keep every matching rule so a later
+  // duplicate cannot silently bring the constraint back. This is a CSS contract,
+  // not a browser layout measurement.
+  const figures = rulesFor('st-gal-fig').filter((r) => r.selector.split(',')
+    .some((selector) => /\.st-gal-fig\s*\)?\s*$/.test(selector)));
+  const ratios = figures.flatMap(({ css }) => css.split(';').map((decl) => decl.split(':').map((s) => s.trim()))
+    .filter(([property, value]) => property === 'aspect-ratio' && value !== 'auto').map(([, value]) => value));
+  assert.deepEqual({ exists: figures.length > 0, ratios }, { exists: true, ratios: [] },
+    'the default figure must exist without imposing an aspect ratio');
+});
+
 test('the tagcloud coral still emits .st-tag-flow / .st-tag', () => {
   const tcSrc = readFileSync(join(SECTIONS_DIR, 'Tagcloud.astro'), 'utf8');
   assert.match(tcSrc, /class="st-tag-flow"/);
