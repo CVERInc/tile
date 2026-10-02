@@ -1247,15 +1247,67 @@ function cellHtml(cell) {
   const parts = String(cell == null ? '' : cell).split(RE_CELL_BR);
   return cellListHtml(parts) ?? parts.map((p) => inlineHtml(p)).join('<br>');
 }
-// Grid cells split a single <br> run of Markdown bullets, retaining the block-list class.
-// Other bodies retain block parsing. Code and comments stay opaque to splitting.
+// Grid cells: the body goes through the ordinary block parser, and the split happens one layer down,
+// on each LIST ITEM's own text — so a list that follows a heading, a subtitle and a paragraph (the
+// shape a real card has) is handled the same as a body that is nothing but the list. An item written
+// `a<br>- b` becomes two sibling items, exactly what the same list written on two lines produces.
+// A break only splits when what follows is a list marker, whitespace and real content; a marker-less
+// continuation, an empty item, `-b`, or a horizontal-rule segment keeps its literal <br>.
+// 🩸 The first version of this decided at the CELL level (the whole body had to be one <br> run with
+// no newline, backtick or comment anywhere), so every cell with a title or a paragraph above its
+// list fell back to the unsplit output. Nothing outside the item being split is consulted any more.
+const RE_ITEM_BR = /<br\s*\/?>/gi;
+const RE_ITEM_BR_MARKER = /^[ \t]*([-*+]|\d+[.)])[ \t]+(\S.*)$/;
+const RE_ITEM_BR_RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+// Ranges of an item's text that are opaque to splitting: inline code spans (a backtick run closed by
+// a run of the same length) and HTML comments. An unclosed opener makes the REST of the item opaque
+// — erring towards "do not split", which is the output this item had before.
+function itemOpaqueRanges(text) {
+  const ranges = [];
+  const re = /`+|<!--/g;
+  let m;
+  while ((m = re.exec(text))) {
+    let end = text.length;
+    if (m[0] === '<!--') {
+      const close = text.indexOf('-->', re.lastIndex);
+      if (close !== -1) end = close + 3;
+    } else {
+      const closer = new RegExp('(^|[^`])' + m[0] + '(?!`)', 'g');
+      closer.lastIndex = re.lastIndex;
+      const c = closer.exec(text);
+      if (c) end = c.index + c[0].length;
+    }
+    ranges.push([m.index, end]);
+    re.lastIndex = end;
+  }
+  return ranges;
+}
+// One list item's text → the texts of the sibling items it stands for ([{ordered, text}], length 1
+// when nothing splits). A backslash-escaped backtick makes code-span boundaries ambiguous, so such
+// an item is left whole.
+function splitItemBreaks(text, ordered) {
+  const whole = [{ ordered, text }];
+  if (!/<br/i.test(text) || text.includes('\\`')) return whole;
+  const opaque = itemOpaqueRanges(text);
+  const out = [];
+  let start = 0, cur = ordered, m;
+  RE_ITEM_BR.lastIndex = 0;
+  while ((m = RE_ITEM_BR.exec(text))) {
+    if (opaque.some(([a, b]) => m.index >= a && m.index < b)) continue;
+    const after = text.slice(RE_ITEM_BR.lastIndex);
+    const nextBr = after.search(/<br\s*\/?>/i);
+    const mk = RE_ITEM_BR_MARKER.exec(after);
+    if (!mk || RE_ITEM_BR_RULE.test(nextBr === -1 ? after : after.slice(0, nextBr))) continue;
+    out.push({ ordered: cur, text: text.slice(start, m.index) });
+    cur = /^\d/.test(mk[1]);
+    start = RE_ITEM_BR.lastIndex + (after.length - mk[2].length);
+  }
+  if (!out.length) return whole;
+  out.push({ ordered: cur, text: text.slice(start) });
+  return out;
+}
 function gridCellBodyHtml(body) {
-  const text = String(body == null ? '' : body).trim();
-  const parts = text.split(RE_CELL_BR);
-  const bullets = parts.every((p) => /^\s*[-*+]\s+/.test(p)
-    && !/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(p));
-  const list = /[\r\n`]|<!--/.test(text) || !bullets ? null : cellListHtml(parts, 'st-list');
-  return list ?? bodyHtml(body);
+  return bodyHtml(body, { splitItemBreaks: true });
 }
 // `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
 // declarations hoist, so this only matters for callers with no `nextCloser` to hand in, which then
@@ -1820,7 +1872,10 @@ function bodyHtml(body, opts) {
         }
         if (!RE_LIST_ITEM.test(lines[i])) break;
         const m = RE_LIST_ITEM.exec(lines[i]);
-        items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3] });
+        const ordered = /^\d+[.)]/.test(m[2]);
+        // grid cells only (opts.splitItemBreaks): `a<br>- b` in one item is two sibling items.
+        const parts = opts && opts.splitItemBreaks ? splitItemBreaks(m[3], ordered) : [{ ordered, text: m[3] }];
+        for (const part of parts) items.push({ indent: m[1].length, ordered: part.ordered, text: part.text });
         i++;
       }
       out.push(renderList(items));
