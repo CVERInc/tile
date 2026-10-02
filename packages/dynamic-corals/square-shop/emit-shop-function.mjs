@@ -308,6 +308,9 @@ const loaded = contractPath ? loadApiTransport(contractPath) : null;
 
 const guildId = arg('guild');
 const siteId = arg('site-id');
+// Build-only input: never put signing keys in argv, logs, or provenance.
+const inboxForwardKey = (process.env.INBOX_FORWARD_SITE_KEY || '').trim();
+if (inboxForwardKey && !arg('out')) die('INBOX_FORWARD_SITE_KEY requires --out to keep the key out of stdout');
 let legacyShops = [];
 try { legacyShops = JSON.parse(arg('shops', '[]')); } catch { legacyShops = []; }
 if (!Array.isArray(legacyShops)) legacyShops = [];
@@ -415,6 +418,7 @@ const config = {
 	// Omitted entirely when absent, so a guild-only site's baked config is the
 	// same bytes it was before site identity reached this emitter.
 	...(siteId ? { siteId } : {}),
+	...(inboxForwardKey ? { inboxForwardKey } : {}),
 	// 🔴 A **SITE** coral — no Card can embed it. See ./README.md before concluding otherwise.
 	// 🔴 Belongs to the SHOP branch only. The forward/verdict branches never read
 	// it: they go over the service binding, whose target is the contract's

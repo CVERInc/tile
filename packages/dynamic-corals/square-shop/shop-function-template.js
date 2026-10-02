@@ -1194,12 +1194,25 @@ async function handleInboxForward(request, CFG) {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), 8000);
 	try {
+		// Start fresh: visitor-supplied forwarding headers and cookies are untrusted.
+		const headers = { 'content-type': 'application/json' };
+		if (CFG.inboxForwardKey) {
+			const ts = String(Math.floor(Date.now() / 1000));
+			const ip = (request.headers.get('cf-connecting-ip') || '').trim();
+			const encoder = new TextEncoder();
+			// The hexadecimal per-site key is UTF-8 text, not decoded key bytes.
+			const key = await crypto.subtle.importKey('raw', encoder.encode(CFG.inboxForwardKey),
+				{ name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			const signature = await crypto.subtle.sign('HMAC', key,
+				encoder.encode('site:' + payload.id + '\n' + ip + '\n' + ts));
+			headers['x-reef-forward-ts'] = ts;
+			headers['x-reef-forward-sig'] = Array.from(new Uint8Array(signature),
+				(byte) => byte.toString(16).padStart(2, '0')).join('');
+			if (ip) headers['x-reef-visitor-ip'] = ip;
+		}
 		const res = await fetch(platformOrigin + '/api/inbox', {
 			method: 'POST',
-			// A fresh header set, deliberately: nothing from the visitor's request
-			// (cookie included) rides along, and credentials: 'omit' means this
-			// fetch sends none of its own either.
-			headers: { 'content-type': 'application/json' },
+			headers,
 			body: JSON.stringify(payload),
 			credentials: 'omit',
 			signal: controller.signal
