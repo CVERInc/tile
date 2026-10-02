@@ -1,7 +1,7 @@
 // Archive month links need their own year, even when their year group is collapsed.
 // Run: node packages/sitetile/archive-month-names.test.mjs
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { sidebarCopy } from './astro/src/lib/chrome-copy.mjs';
 
 const months = [
@@ -28,37 +28,59 @@ const cases = [
   [undefined, english],
 ];
 
-// Evaluate the actual anchor's two copy expressions with real sidebarCopy data. This is a
+// Discover every Astro template containing month links, including nested routes.
+function monthTemplates(directory = new URL('./astro/src/', import.meta.url), prefix = '') {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = new URL(entry.name, directory);
+    const name = `${prefix}${entry.name}`;
+    if (entry.isDirectory()) return monthTemplates(new URL(`${entry.name}/`, directory), `${name}/`);
+    if (!entry.name.endsWith('.astro')) return [];
+    const source = readFileSync(file, 'utf8')
+      .replace(/<!--[^]*?-->/g, '').replace(/\{\/\*[^]*?\*\/\}/g, '');
+    const anchors = [...source.matchAll(/<a\b[^>]*\?ym=[^]*?<\/a>/g)]
+      .map(([anchor]) => anchor);
+    return anchors.length ? [{ name, anchors }] : [];
+  });
+}
+
+// Evaluate each actual anchor's copy expressions with real sidebarCopy data. This is a
 // focused template binding check, not an Astro build or a browser accessibility-tree test.
-function monthCopyExpressions(component) {
-  const source = readFileSync(new URL(`./astro/src/components/${component}.astro`, import.meta.url), 'utf8')
-    .replace(/<!--[^]*?-->/g, '').replace(/\{\/\*[^]*?\*\/\}/g, '');
-  const anchors = [...source.matchAll(/<a\b[^]*?<\/a>/g)]
-    .map(([anchor]) => anchor).filter((anchor) => anchor.includes('?ym='));
-  if (anchors.length !== 1) throw new Error(`${component}: expected one archive month anchor, got ${anchors.length}`);
-  const anchor = anchors[0];
+function monthCopyExpressions(anchor, name) {
   const visible = />\s*\{([^{}]+)\}\s*<\/a>/.exec(anchor)?.[1];
-  if (!visible) throw new Error(`${component}: cannot read the month link's visible expression`);
+  if (!visible) throw new Error(`${name}: cannot read the month link's visible expression`);
   const label = /\baria-label=\{([^{}]+)\}/.exec(anchor)?.[1];
+  assert.ok(label, `${name}: every month link has an explicit aria-label`);
+  assert.ok(anchor.includes('href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}'),
+    `${name}: month links retain their year-month destination`);
   const evaluate = (expression, copy, month) => Function('sideCopy', 'm', `return (${expression});`)(copy, month);
-  return (copy, month) => {
-    const text = evaluate(visible, copy, month);
-    return [label ? evaluate(label, copy, month) : text, text];
-  };
+  return (copy, month) => [evaluate(label, copy, month), evaluate(visible, copy, month)];
 }
 
 let passed = 0;
-for (const component of ['PostView', 'BlogIndexView', 'ArchiveView']) {
-  try {
-    const render = monthCopyExpressions(component);
-    const actual = cases.map(([lang]) => months.map((month) => render(sidebarCopy({ lang }), month)));
-    assert.deepEqual(actual, cases.map(([, expected]) => expected),
-      `${component}: names include the localized year, month and count; visible copy stays unchanged`);
-    passed++;
-    console.log(`  PASS ${component}: archive month names and visible copy`);
-  } catch (error) {
-    console.error(`  FAIL ${component}: ${error.message}`);
-    process.exitCode = 1;
+const templates = monthTemplates();
+console.log(`Discovered ${templates.length} Astro files with archive month links`);
+try {
+  assert.ok(templates.length >= 5, `expected at least 5 archive month templates, got ${templates.length}`);
+  passed++;
+  console.log('  PASS archive month template coverage');
+} catch (error) {
+  console.error(`  FAIL archive month template coverage: ${error.message}`);
+  process.exitCode = 1;
+}
+for (const { name, anchors } of templates) {
+  for (const [index, anchor] of anchors.entries()) {
+    const link = `${name} link ${index + 1}`;
+    try {
+      const render = monthCopyExpressions(anchor, link);
+      const actual = cases.map(([lang]) => months.map((month) => render(sidebarCopy({ lang }), month)));
+      assert.deepEqual(actual, cases.map(([, expected]) => expected),
+        `${link}: names include the localized year, month and count; visible copy stays unchanged`);
+      passed++;
+      console.log(`  PASS ${link}: archive month names, visible copy and destination`);
+    } catch (error) {
+      console.error(`  FAIL ${link}: ${error.message}`);
+      process.exitCode = 1;
+    }
   }
 }
 console.log(`\n${passed} passed`);

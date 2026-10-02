@@ -16,8 +16,8 @@ export function dateBadgeParts(s, lang) {
 }
 
 /** Sidebar/archive chrome copy for a site: the locale defaults, with the site's own overrides on
- *  top. ONE resolver, because the same widget markup is duplicated in BlogIndexView, PostView and
- *  ArchiveView — three copies of the strings meant a fix could land in one of them and look done.
+ *  top. ONE resolver, because the same widget markup is duplicated in BlogIndexView, PostView,
+ *  ArchiveView and two label routes — five copies could let a fix land in one and look done.
  *  Overrides are per-key, so a site can rename one heading without adopting a whole vocabulary. */
 export function sidebarCopy(meta = {}) {
   const base = lingoUiCopy(meta.lang || NEUTRAL_UI_LANG);
