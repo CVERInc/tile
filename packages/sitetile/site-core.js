@@ -1237,12 +1237,22 @@ const RE_CELL_BR = /<br\s*\/?>/i;
 // bullets `・` (U+30FB) and `•` (U+2022) that a CJK author reaches for. One definition, because the
 // same characters mean the same thing wherever an item is written by hand (see the dialogue block).
 const RE_CELL_BULLET = /^\s*[-*+・•]\s+/;
-function cellHtml(cell) {
-  const parts = String(cell == null ? '' : cell).split(RE_CELL_BR);
+function cellListHtml(parts) {
   if (parts.length > 1 && parts.every((p) => RE_CELL_BULLET.test(p))) {
     return '<ul class="st-cell-list">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET, '')) + '</li>').join('') + '</ul>';
   }
-  return parts.map((p) => inlineHtml(p)).join('<br>');
+  return null;
+}
+function cellHtml(cell) {
+  const parts = String(cell == null ? '' : cell).split(RE_CELL_BR);
+  return cellListHtml(parts) ?? parts.map((p) => inlineHtml(p)).join('<br>');
+}
+// Grid cells share the table-cell convention for a single, all-bullet <br> run.
+// Other bodies retain block parsing. Code and comments stay opaque to splitting.
+function gridCellBodyHtml(body) {
+  const text = String(body == null ? '' : body).trim();
+  const list = /[\r\n`]|<!--/.test(text) ? null : cellListHtml(text.split(RE_CELL_BR));
+  return list ?? bodyHtml(body);
 }
 // `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
 // declarations hoist, so this only matters for callers with no `nextCloser` to hand in, which then
@@ -2170,7 +2180,7 @@ function renderSection(s) {
           const fi = firstImage(c.body);
           const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
           const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
-          const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest);
+          const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(fi.rest);
           return hrefOk
             ? '<a class="st-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + inner + '</a>'
             : '<div class="st-cell st-gal-cell">' + inner + '</div>';
@@ -2187,7 +2197,7 @@ function renderSection(s) {
         // whole-cell <a>, so such a cell uses the OVERLAY pattern: a relative container, an absolute
         // full-cell overlay <a> (the primary link), and the action + "Learn more" stacked above it.
         const hasAction = hrefOk && badgeHrefOk;
-        const inner = ((footTag || hasAction) ? '' : badge) + emoji + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(c.body);
+        const inner = ((footTag || hasAction) ? '' : badge) + emoji + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(c.body);
         // labeled CTA ("<cta>" on the heading) renders the directional arrow; bare href → a chevron.
         // Cells that carry an emoji/badge (status cards) get NO chevron — the badge is the affordance.
         const cta = c.cta
@@ -2606,7 +2616,7 @@ export {
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
   dialogueContext,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks, linksParts,
