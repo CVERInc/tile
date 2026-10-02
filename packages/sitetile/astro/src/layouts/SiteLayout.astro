@@ -624,7 +624,10 @@ const description = meta.description ? String(meta.description).trim() : '';
 // above) — gated once here, at the source, same as those.
 // Ordinary page images can also be SVGs or media files; only raster images are a share fallback.
 const pageImage = String(meta.image || '').trim();
-const rasterPageImage = /\.(?:jpe?g|png|webp|gif|avif)$/i.test(pageImage.split('?')[0]) ? pageImage : '';
+// Classify the URL path, excluding hostnames, queries and fragments.
+let pageImagePath = '';
+try { pageImagePath = new URL(pageImage, Astro.url).pathname; } catch { /* Invalid URLs are not fallback images. */ }
+const rasterPageImage = /\.(?:jpe?g|png|webp|gif|avif)$/i.test(pageImagePath) ? pageImage : '';
 const authoredShareImage = safeSrc(String(meta['share-image'] || meta['og-image'] || rasterPageImage || '').trim()) || '';
 // `og-cards: true` in _site.md → every page gets a generated link-preview card at a path derived
 // from its own URL. The PNG does not exist yet at this point: it is rendered from THIS html after
