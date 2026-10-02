@@ -22,9 +22,28 @@ test('plain, linked, action and image grid cells split and strip every bullet', 
   variants.map(() => ['a', 'b']));
 });
 
-test('cell lists accept every existing bullet marker and br spelling', () => {
-  assert.deepEqual(items(render('- a<BR>* b<br/>+ c<br />・ d<br>• e')),
+test('grid lists accept Markdown bullets and every br spelling', () => {
+  assert.deepEqual(items(render('- a<BR>* b<br/>+ c<br />- d<br>* e')),
     ['a', 'b', 'c', 'd', 'e']);
+});
+
+test('br and newline grid lists produce identical HTML in every card shape', () => {
+  assert.deepEqual(variants.map(([params, heading, image]) =>
+    render(image + '- a<br>- b', params, heading)),
+  variants.map(([params, heading, image]) =>
+    render(image + '- a\n- b', params, heading)));
+});
+
+test('typographic bullets in grids retain the base paragraph output', () => {
+  const bodies = ['・ a<br>・ b', '• a<br>• b'];
+  assert.deepEqual(bodies.map((body) => render(body).match(/<h3>Card<\/h3>(.*?)<span class="st-cell-cta"/s)?.[1]),
+    bodies.map((body) => bodyHtml(body)));
+});
+
+test('a horizontal-rule segment retains the base output', () => {
+  const bodies = ['- a<br>* * *', '- a<br>- - -', '- a<br>___'];
+  assert.deepEqual(bodies.map((body) => render(body).match(/<h3>Card<\/h3>(.*?)<span class="st-cell-cta"/s)?.[1]),
+    bodies.map((body) => bodyHtml(body)));
 });
 
 test('each split item still uses the safe inline Markdown renderer', () => {
@@ -34,6 +53,9 @@ test('each split item still uses the safe inline Markdown renderer', () => {
 
 test('table cell lists keep their existing output', () => {
   assert.deepEqual(items(bodyHtml('| Label | - a<br>- b |')), ['a', 'b']);
+  assert.deepEqual(['-', '*', '+', '・', '•'].map((marker) =>
+    bodyHtml(`| Label | ${marker} a<br>${marker} b |`)),
+  Array(5).fill('<table class="st-table" data-headless><tbody><tr><td>Label</td><td><ul class="st-cell-list"><li>a</li><li>b</li></ul></td></tr></tbody></table>'));
 });
 
 test('other grid bodies retain the block parser output', () => {

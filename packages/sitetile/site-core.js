@@ -1237,9 +1237,9 @@ const RE_CELL_BR = /<br\s*\/?>/i;
 // bullets `・` (U+30FB) and `•` (U+2022) that a CJK author reaches for. One definition, because the
 // same characters mean the same thing wherever an item is written by hand (see the dialogue block).
 const RE_CELL_BULLET = /^\s*[-*+・•]\s+/;
-function cellListHtml(parts) {
+function cellListHtml(parts, className = 'st-cell-list') {
   if (parts.length > 1 && parts.every((p) => RE_CELL_BULLET.test(p))) {
-    return '<ul class="st-cell-list">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET, '')) + '</li>').join('') + '</ul>';
+    return '<ul class="' + className + '">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET, '')) + '</li>').join('') + '</ul>';
   }
   return null;
 }
@@ -1247,11 +1247,14 @@ function cellHtml(cell) {
   const parts = String(cell == null ? '' : cell).split(RE_CELL_BR);
   return cellListHtml(parts) ?? parts.map((p) => inlineHtml(p)).join('<br>');
 }
-// Grid cells share the table-cell convention for a single, all-bullet <br> run.
+// Grid cells split a single <br> run of Markdown bullets, retaining the block-list class.
 // Other bodies retain block parsing. Code and comments stay opaque to splitting.
 function gridCellBodyHtml(body) {
   const text = String(body == null ? '' : body).trim();
-  const list = /[\r\n`]|<!--/.test(text) ? null : cellListHtml(text.split(RE_CELL_BR));
+  const parts = text.split(RE_CELL_BR);
+  const bullets = parts.every((p) => /^\s*[-*+]\s+/.test(p)
+    && !/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(p));
+  const list = /[\r\n`]|<!--/.test(text) || !bullets ? null : cellListHtml(parts, 'st-list');
   return list ?? bodyHtml(body);
 }
 // `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
