@@ -2,7 +2,7 @@
 // them. Deliberately imports no build alias — same reason as the sibling sitemap.mjs: a pure
 // function parked behind `@sitetile` is a function no test can reach, and unreachable string
 // resolution is how five copies of the same Chinese literal lived in this renderer for months.
-import { uiCopy as lingoUiCopy, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
+import { uiCopy as lingoUiCopy, dateHeading, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
 
 // dateBadgeParts: split a date into month/day/year strings for the `cjk-badge` index-card
 // layout (three stacked <span>s a theme's CSS can lay out as a badge) — a real
@@ -16,8 +16,8 @@ export function dateBadgeParts(s, lang) {
 }
 
 /** Sidebar/archive chrome copy for a site: the locale defaults, with the site's own overrides on
- *  top. ONE resolver, because the same widget markup is duplicated in BlogIndexView, PostView and
- *  ArchiveView — three copies of the strings meant a fix could land in one of them and look done.
+ *  top. ONE resolver, because the same widget markup is duplicated in BlogIndexView, PostView,
+ *  ArchiveView and two label routes — five copies could let a fix land in one and look done.
  *  Overrides are per-key, so a site can rename one heading without adopting a whole vocabulary. */
 export function sidebarCopy(meta = {}) {
   const base = lingoUiCopy(meta.lang || NEUTRAL_UI_LANG);
@@ -31,6 +31,7 @@ export function sidebarCopy(meta = {}) {
     archive: pick('sidebar-archive', base.archive),
     search: pick('sidebar-search', base.search),
     month: base.month,
+    monthYear: (year, month) => dateHeading(meta.lang || NEUTRAL_UI_LANG, year, month),
     count: base.count,
   };
 }
