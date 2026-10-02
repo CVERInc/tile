@@ -2,7 +2,7 @@
 // Single grid-card renderer, factored out of Grid.astro so `pack=masonry` can call it once per
 // column without duplicating the markup (Astro frontmatter can't return JSX from a plain helper
 // function — only a template/component can — so this got its own tiny component instead).
-import { inlineHtml, bodyHtml, firstImage, imgTag, safeHref } from '@sitetile';
+import { inlineHtml, gridCellBodyHtml, firstImage, imgTag, safeHref } from '@sitetile';
 import { lucideSvg } from '../../lib/lucide.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS — was dropped when Grid.astro's
@@ -34,14 +34,14 @@ const hasAction = !!(hrefOk && badgeHrefOk);
       {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
       {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={bodyHtml(fi.rest)} />
+      <Fragment set:html={gridCellBodyHtml(fi.rest)} />
     </a>
   ) : (
     <div class="st-cell st-gal-cell" data-cat={c.badge || undefined}>
       {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
       {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={bodyHtml(fi.rest)} />
+      <Fragment set:html={gridCellBodyHtml(fi.rest)} />
     </div>
   )
 ) : hasAction ? (
@@ -51,7 +51,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
       ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
       : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
     {c.title && <h3 set:html={inlineHtml(c.title)} />}
-    <Fragment set:html={bodyHtml(c.body)} />
+    <Fragment set:html={gridCellBodyHtml(c.body)} />
     <div class="st-cell-foot">
       <a class="st-cell-action" href={badgeHrefOk} {...tgt(badgeHrefOk)}>
         <span class="st-cta-label" set:html={inlineHtml(c.badge)} />
@@ -73,7 +73,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
         ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
         : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={bodyHtml(c.body)} />
+      <Fragment set:html={gridCellBodyHtml(c.body)} />
       {footTag ? (
         <div class="st-cell-foot">
           <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />
@@ -95,7 +95,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
         ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
         : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={bodyHtml(c.body)} />
+      <Fragment set:html={gridCellBodyHtml(c.body)} />
       {footTag ? (
         <div class="st-cell-foot">
           <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />
