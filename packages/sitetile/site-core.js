@@ -229,7 +229,21 @@ const RE_H2 = /^##(?:\s+(.*))?$/;
 const RE_H3 = /^###(?!#)\s+(.*)$/;
 const RE_H4 = /^####\s+(.*)$/;
 // The type line: `%% sitetile: <type> [params] %%`. Inner is `<type>` then a raw param string.
-const RE_TYPELINE = /^%%\s*sitetile:\s*(.*?)\s*%%\s*$/;
+// The inner of a type line — what /^%%\s*sitetile:\s*(.*?)\s*%%\s*$/ captured — or null.
+//
+// 🩸 It was that regex. `(.*?)\s*%%` re-walks a run of whitespace once for every character in it, so
+// one type line holding 40,000 spaces cost seconds on every parse. Read from both ends instead: the
+// head is anchored, the closing `%%` is the last thing on the line, and what is left is the inner.
+const RE_TYPELINE_HEAD = /^%%\s*sitetile:\s*/;
+const RE_LINE_BREAK = /[\n\r\u2028\u2029]/;
+function typeLineInner(line) {
+  const head = RE_TYPELINE_HEAD.exec(line);
+  if (!head) return null;
+  const end = line.trimEnd().length - 2;
+  if (end < head[0].length || line.charAt(end) !== '%' || line.charAt(end + 1) !== '%') return null;
+  const inner = line.slice(head[0].length, end).trimEnd();
+  return RE_LINE_BREAK.test(inner) ? null : inner;
+}
 
 function slugify(s, fallback) {
   const out = String(s == null ? '' : s).toLowerCase().trim()
@@ -274,8 +288,62 @@ function splitFrontmatter(text) {
 }
 
 // Trim leading/trailing blank lines off a buffer, join to a raw block (matches book-core caption).
+// 🩸 The trailing half was `.replace(/\n+$/, '')`, which restarts at every newline of a run that is
+// not at the end: a body holding 40,000 blank lines cost seconds per parse. Two indexes do the same.
 function blockOf(lines) {
-  return lines.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  const s = lines.join('\n');
+  let from = 0, to = s.length;
+  while (from < to && s.charCodeAt(from) === 10) from++;
+  while (to > from && s.charCodeAt(to - 1) === 10) to--;
+  return s.slice(from, to);
+}
+
+const RE_SPACE = /\s/;
+// Index of the earliest `→` that is followed by optional whitespace and then ONE whitespace-free
+// token ending exactly at `last` — the arrow /^(.*?)\s*→\s*(\S+)…/ settles on. -1 when there is none.
+function arrowBeforeToken(s, last) {
+  let start = last;
+  while (start > 0 && !RE_SPACE.test(s.charAt(start - 1))) start--;
+  let before = start - 1;
+  while (before >= 0 && RE_SPACE.test(s.charAt(before))) before--;
+  if (before >= 0 && s.charAt(before) === '→') return before;
+  const inside = s.indexOf('→', start);
+  return inside !== -1 && inside < last ? inside : -1;
+}
+// /^(.*?)\s*→\s*(\S+?)(?:\s+"([^"]*)")?\s*$/ as [label, href, quoted] — `quoted` only when
+// `withQuoted` — or null. 🩸 It was that regex (and its badge twin without the quoted tail): the lazy
+// label re-walks every run of whitespace once per character, so a heading holding 20,000 spaces cost
+// over a second per parse. The href and the quoted tail are pinned to the END of the string, so they
+// are read from there; the label is whatever precedes the arrow.
+function splitArrow(s, withQuoted) {
+  const len = s.trimEnd().length;
+  if (!len) return null;
+  let arrow = arrowBeforeToken(s, len - 1), hrefEnd = len, quoted;
+  if (withQuoted && s.charAt(len - 1) === '"') {
+    const open = s.lastIndexOf('"', len - 2);
+    let last = open - 1;
+    while (last >= 0 && RE_SPACE.test(s.charAt(last))) last--;
+    if (open > 0 && last >= 0 && last < open - 1) {
+      const at = arrowBeforeToken(s, last);
+      if (at !== -1 && (arrow === -1 || at < arrow)) { arrow = at; hrefEnd = last + 1; quoted = s.slice(open + 1, len - 1); }
+    }
+  }
+  if (arrow === -1) return null;
+  const label = s.slice(0, arrow).trimEnd();
+  if (RE_LINE_BREAK.test(label)) return null;
+  return [label, s.slice(arrow + 1, hrefEnd).trim(), quoted];
+}
+// A trailing `[Badge]` — what /\s*\[([^\]]+)\]\s*$/ found — as { index, inner }, or null. 🩸 Same
+// cost as above, from the unanchored leading `\s*`. The `]` is the last character, the `[` is the
+// first one after the previous `]`, and the match starts where the whitespace before it starts.
+function trailingBadge(s) {
+  const close = s.trimEnd().length - 1;
+  if (close < 2 || s.charAt(close) !== ']') return null;
+  const open = s.indexOf('[', s.lastIndexOf(']', close - 1) + 1);
+  if (open === -1 || open >= close - 1) return null;
+  let index = open;
+  while (index > 0 && RE_SPACE.test(s.charAt(index - 1))) index--;
+  return { index, inner: s.slice(open + 1, close) };
 }
 
 // Split a grid cell heading (`### Products →/products "See products"`) into { emoji, title, href, cta, badge }.
@@ -294,18 +362,18 @@ function splitCellHeading(raw) {
   const em = /^(\p{Extended_Pictographic}️?)\s+/u.exec(s);
   if (em) { emoji = em[1]; s = s.slice(em[0].length).trim(); }
   let badge = '', badgeHref = '';
-  const bm = /\s*\[([^\]]+)\]\s*$/.exec(s);
+  const bm = trailingBadge(s);
   if (bm) {
-    let b = bm[1].trim();
+    let b = bm.inner.trim();
     // `[Label →href]` makes the badge its OWN link — a secondary card action rendered above the
     // whole-card overlay link (a card whose whole surface opens one link). Plain `[Label]` (no `→`)
     // stays a static status pill. General/opt-in: cells without the arrow are byte-unchanged.
-    const bh = /^(.*?)\s*→\s*(\S+)\s*$/.exec(b);
-    if (bh) { badge = bh[1].trim(); badgeHref = bh[2]; } else { badge = b; }
+    const bh = splitArrow(b, false);
+    if (bh) { badge = bh[0].trim(); badgeHref = bh[1]; } else { badge = b; }
     s = s.slice(0, bm.index).trim();
   }
-  const m = /^(.*?)\s*→\s*(\S+?)(?:\s+"([^"]*)")?\s*$/.exec(s);
-  return m ? { icon, emoji, title: m[1].trim(), href: m[2], cta: m[3] || '', badge, badgeHref }
+  const m = splitArrow(s, true);
+  return m ? { icon, emoji, title: m[0].trim(), href: m[1], cta: m[2] || '', badge, badgeHref }
            : { icon, emoji, title: s, href: '', cta: '', badge, badgeHref };
 }
 
@@ -351,8 +419,8 @@ function parseSite(text) {
   const sections = rawSections.map((rs, si) => {
     let type = 'prose', params = '', hasTypeLine = false;
     let rest = rs.lines;
-    const t = rest.length ? RE_TYPELINE.exec(rest[0]) : null;
-    if (t) { const st = splitTypeInner(t[1]); type = st.type; params = st.params; hasTypeLine = true; rest = rest.slice(1); }
+    const t = rest.length ? typeLineInner(rest[0]) : null;
+    if (t !== null) { const st = splitTypeInner(t); type = st.type; params = st.params; hasTypeLine = true; rest = rest.slice(1); }
 
     let body = '', cells = [], groups = [], entries = [], faqs = [], fields = [];
     if (type === 'faq') {
@@ -437,15 +505,18 @@ function parseSite(text) {
       let entry = null, f2 = false;
       for (let j = 0; j < rest.length; j++) {
         const ln = rest[j];
-        if (RE_FENCE.test(ln)) { f2 = !f2; (entry ? entry.lines : lead).push(ln); continue; }
+        if (RE_FENCE.test(ln)) { f2 = !f2; if (entry) entry.bare = false; (entry ? entry.lines : lead).push(ln); continue; }
         const h3 = !f2 && RE_H3.exec(ln);
-        if (h3) { entry = { year: h3[1].trim(), title: '', lines: [] }; entries.push(entry); continue; }
+        if (h3) { entry = { year: h3[1].trim(), title: '', lines: [], bare: true }; entries.push(entry); continue; }
         // A `#### <title>` hugging the year line = the entry's TITLE → renders as an <h3> in the
         // prose column while the number stays in the gutter (a numbered step list). OPT-IN:
         // entries without it (the plain year+prose timelines) are byte-unchanged; only settable as the entry's
         // leading line, before any body content.
-        const h4 = !f2 && entry && !entry.title && !entry.lines.some((l) => l.trim()) && RE_H4.exec(ln);
+        // 🩸 `entry.bare` (no body line with content yet) was `!entry.lines.some((l) => l.trim())`,
+        // asked again on every line: an entry followed by 20,000 blank lines cost seconds per parse.
+        const h4 = !f2 && entry && !entry.title && entry.bare && RE_H4.exec(ln);
         if (h4) { entry.title = h4[1].trim(); continue; }
+        if (entry && ln.trim()) entry.bare = false;
         (entry ? entry.lines : lead).push(ln);
       }
       body = blockOf(lead);
@@ -675,7 +746,10 @@ function serializeSite(site) {
     out.push('');
   });
 
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+  // 🩸 `.trimEnd()` was `.replace(/\s+$/, '')` — the same set of characters, but unanchored on the
+  // left, so every run of whitespace anywhere in the page was re-walked once per character in it:
+  // one line holding 40,000 spaces cost seconds on every save.
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
 // isSiteFile: cheap "is this Markdown a sitetile page?" detector via the frontmatter claim flag, so a
