@@ -10,6 +10,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A full run takes about a minute and a half. Without a ceiling, a test that stops finishing
+    # holds the runner for the default six hours before anyone sees red.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

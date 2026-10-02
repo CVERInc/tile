@@ -13,7 +13,7 @@
 //      headings differently is not a fix.
 //   2. LINEAR COST — a 100,000-character run is timed against the same page carrying 100,000
 //      letters. The clock is unavoidable here (a native regex exposes no step count), so the budget
-//      is a ratio to that control with a floor, and the quadratic versions miss it by 20× or more.
+//      is a ratio to that control with a floor, and the quadratic versions miss it by 3× or more.
 // Each ruler is shown to fire: the controls at the bottom put the old shapes back and must go red.
 
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ function test(name, fn) {
 }
 
 const SAMPLES = Number(process.env.SITETILE_WS_SAMPLES || 20000);
-let seed = 14690001;
+let seed = 271828183;
 const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 const words = (alphabet, max) => { let s = ''; for (let n = Math.floor(rnd() * max); n > 0; n--) s += pick(alphabet); return s; };
@@ -135,14 +135,17 @@ test('a timeline entry title is taken only while the entry has no content — bl
 
 // ── ruler 2: linear cost ───────────────────────────────────────────────────────────────────────
 const N = 100000;
+// The floor under the budget. A loaded machine reads about 45 ms on the heaviest linear shape; the
+// quadratic versions read 10,000 ms and up. 2,000 sits far from both.
+const FLOOR_MS = 2000;
 const spent = (fn) => { const t = performance.now(); fn(); return performance.now() - t; };
 // Best of two: a busy machine can only make a run slower, never faster, so the smaller reading is
 // the closer one. The second run is skipped when the first already fits — or misses by so much
 // (4×) that no amount of load explains it, so a red run does not cost twice.
-function within(make, run) {
-  const control = Math.min(spent(() => run(make('x'.repeat(N)))), spent(() => run(make('x'.repeat(N)))));
-  const budget = Math.max(250, control * 20);
-  const subject = make(null);
+function within(make, run, n) {
+  const control = Math.min(spent(() => run(make('x'.repeat(n), n))), spent(() => run(make('x'.repeat(n), n))));
+  const budget = Math.max(FLOOR_MS, control * 20);
+  const subject = make(null, n);
   let ms = spent(() => run(subject));
   if (ms > budget && ms < budget * 4) ms = Math.min(ms, spent(() => run(subject)));
   return { ms, budget };
@@ -150,7 +153,9 @@ function within(make, run) {
 const roundTrip = (md) => serializeSite(parseSite(md));
 const grid = (list) => FM + '## Cards\n%% sitetile: grid %%\n### Card\n' + list + '\n';
 // 🔴 The unclosed type line was worse than quadratic under the old regex (three parts competing for
-// one run), so a regression there shows up as a run that does not finish, not as a red line.
+// one run): at 100,000 it would not finish, and a test that hangs is not a red line. So that one
+// shape runs at 3,000 — about 14 s under the old regex, under a millisecond now.
+const UNCLOSED_N = 3000;
 const SHAPES = {
   'spaces inside a body line': (f) => grid('- x' + (f || ' '.repeat(N)) + 'y'),
   'full-width spaces inside a body line': (f) => grid('- x' + (f || '　'.repeat(N)) + 'y'),
@@ -159,12 +164,14 @@ const SHAPES = {
   'spaces inside a cell heading': (f) => FM + '## Cards\n%% sitetile: grid %%\n### Ca' + (f || ' '.repeat(N)) + 'rd\nbody\n',
   'spaces inside a cell heading before a badge': (f) => FM + '## Cards\n%% sitetile: grid %%\n### Ca' + (f || ' '.repeat(N)) + 'rd →/x "Go" [Soon →/s]\nbody\n',
   'spaces inside a type line': (f) => FM + '## Cards\n%% sitetile: grid' + (f || ' '.repeat(N)) + 'cols=2 %%\n### Card\nbody\n',
-  'spaces after an unclosed type line': (f) => FM + '## Cards\n%% sitetile:' + (f || ' '.repeat(N)) + 'grid\n### Card\nbody\n',
+  'spaces after an unclosed type line': (f, n) => FM + '## Cards\n%% sitetile:' + (f || ' '.repeat(n)) + 'grid\n### Card\nbody\n',
   'blank lines after a timeline entry': (f) => FM + '## Story\n%% sitetile: timeline %%\n### 2021' + (f || '\n'.repeat(N)) + '#### Founded\nIn a garage.\n',
 };
 for (const [name, make] of Object.entries(SHAPES)) {
-  test('100,000 ' + name + ' cost no more than 100,000 letters would', () => {
-    const { ms, budget } = within(make, roundTrip);
+  const n = name === 'spaces after an unclosed type line' ? UNCLOSED_N : N;
+  const count = n.toLocaleString('en-US');
+  test(count + ' ' + name + ' cost no more than ' + count + ' letters would', () => {
+    const { ms, budget } = within(make, roundTrip, n);
     assert.ok(ms <= budget, ms.toFixed(0) + ' ms against a budget of ' + budget.toFixed(0) + ' ms');
   });
 }
@@ -175,7 +182,7 @@ test('control: the cost ruler goes red on the quadratic shape it was written for
   const md = grid('- x' + ' '.repeat(N / 4) + 'y');
   const control = spent(() => roundTrip(grid('- x' + 'x'.repeat(N / 4) + 'y')));
   const ms = spent(() => refTail(roundTrip(md).slice(0, -1)));
-  assert.ok(ms > Math.max(250, control * 20) / 16, 'the replaced regex is over budget even at N/4, scaled (' + ms.toFixed(0) + ' ms)');
+  assert.ok(ms > Math.max(FLOOR_MS, control * 20) / 16, 'the replaced regex is over budget even at N/4, scaled (' + ms.toFixed(0) + ' ms)');
 });
 test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   // Three plausible wrong rewrites — each must disagree with the reference on SOME generated input.
