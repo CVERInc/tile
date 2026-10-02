@@ -59,7 +59,22 @@ function run(meta, defaultOn, rendererMode = 'render') {
     const dep = join(dir, 'dependency.cjs');
     writeFileSync(dep, 'module.exports = function () {}; module.exports.Resvg = class {};');
     const preload = join(dir, 'loader.mjs');
-    writeFileSync(preload, `import Module, { registerHooks } from 'node:module';
+    const rendererStub = `
+export { ourCardPath, deadCards } from '${original}';
+export function makeCardRenderer() {
+  if (${JSON.stringify(rendererMode)} === 'init') throw new Error('fixture font unavailable');
+  return async ({ title }) => {
+    if (title === 'Broken') throw new Error('fixture render failure');
+    return Buffer.from('fixture image');
+  };
+}`;
+    const hook = `export async function load(url, context, next) {
+  if (url.endsWith('/og/og-card.mjs')) return {
+    format: 'module', shortCircuit: true, source: ${JSON.stringify(rendererStub)}
+  };
+  return next(url, context);
+}`;
+    writeFileSync(preload, `import Module, { register } from 'node:module';
 const originalResolve = Module._resolveFilename;
 Module._resolveFilename = function (s, ...args) {
   if (s === 'satori' || s === '@resvg/resvg-js') {
@@ -68,20 +83,7 @@ Module._resolveFilename = function (s, ...args) {
   }
   return originalResolve.call(this, s, ...args);
 };
-registerHooks({
-  load(url, c, next) {
-    if (url.endsWith('/og/og-card.mjs')) return { format: 'module', shortCircuit: true, source: ${JSON.stringify(`
-      export { ourCardPath, deadCards } from '${original}';
-      export function makeCardRenderer() {
-        if (${JSON.stringify(rendererMode)} === 'init') throw new Error('fixture font unavailable');
-        return async ({ title }) => {
-          if (title === 'Broken') throw new Error('fixture render failure');
-          return Buffer.from('fixture image');
-        };
-      }`)} };
-    return next(url, c);
-  }
-});`);
+register(${JSON.stringify('data:text/javascript,' + encodeURIComponent(hook))}, import.meta.url);`);
     const result = spawnSync(process.execPath, ['--import', preload, fileURLToPath(new URL('./og/build-og.mjs', import.meta.url)), dir], { encoding: 'utf8' });
     return { ...result, broken: readFileSync(join(dir, 'broken.html'), 'utf8'),
       healthy: readFileSync(join(dir, 'healthy.html'), 'utf8'), authored: readFileSync(join(dir, 'authored.html'), 'utf8'),
