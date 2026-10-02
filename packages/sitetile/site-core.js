@@ -1264,7 +1264,10 @@ function firstImage(body) {
   if (md && (!wk || md.index <= wk.index)) { img = { alt: md[1], src: md[2] }; matchStr = md[0]; }
   else if (wk) { const inner = wk[1]; img = { alt: inner.split('/').pop(), src: inner }; matchStr = wk[0]; }
   if (!matchStr) return { img: null, rest: text };
-  const rest = text.replace(matchStr, '').replace(/^\s*\n/, '').replace(/\n\s*\n\s*$/, '\n').trim();
+  // 🩸 This was `.replace(/^\s*\n/, '').replace(/\n\s*\n\s*$/, '\n').trim()`. Both replaces only ever
+  // touched whitespace at the ends, which `.trim()` removes anyway — and the second one walked a run
+  // of blank lines once per pair of characters in it: 2,000 blank lines after an image cost seconds.
+  const rest = text.replace(matchStr, '').trim();
   return { img, rest };
 }
 
@@ -1276,11 +1279,52 @@ const RE_QUOTE_LINE = /^\s*>\s?(.*)$/;
 // ATX heading (### Section). Requires non-whitespace body text — a comment-only heading
 // (`# <!-- title -->`) still matches this (the comment text itself is non-whitespace), and is only
 // dropped afterward, once its inline content resolves empty (R3-P2-02; see bodyHtml's heading branch).
-const RE_HEADING = /^(#{1,6})\s+(.*\S)\s*$/;
+// What /^(#{1,6})\s+(.*\S)\s*$/ captured, as [hashes, text], or null. 🩸 It was that regex: on a
+// line of `#` and nothing but whitespace, `\s+` gave the run back one character at a time and
+// `(.*\S)` re-read the rest each time — 32,000 spaces cost over a second per render.
+function headingParts(line) {
+  let n = 0;
+  while (n < 7 && line.charAt(n) === '#') n++;
+  if (n < 1 || n > 6) return null;
+  let i = n;
+  while (RE_SPACE.test(line.charAt(i))) i++;
+  if (i === n) return null;
+  const text = line.slice(i).trimEnd();
+  return text && !RE_LINE_BREAK.test(text) ? [line.slice(0, n), text] : null;
+}
 const RE_TABLE_ROW = /^\s*\|.*\|\s*$/;
 // table separator: a LEADING `|` is required (so a bare `---` horizontal rule is NOT a separator);
 // `*` allows a single-column table (`| --- |`) as well as multi-column.
-const RE_TABLE_SEP = /^\s*\|\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+//   /^\s*\|\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/ — read left to right, one character once.
+// 🩸 It was that regex: the `\s*` closing a cell and the `\s*` before the end competed for one run of
+// whitespace, so `|-` + 32,000 spaces + `x` cost over a second per render. A `|` followed by a
+// cell is always a cell (taking it as the closing pipe would leave a `-` before the end), so there
+// is nothing to backtrack into.
+function isTableSeparator(line) {
+  const at = (k) => line.charAt(k);
+  let i = 0;
+  while (RE_SPACE.test(at(i))) i++;
+  if (at(i) !== '|') return false;
+  i++;
+  let cells = 0;
+  for (;;) {
+    let j = i;
+    while (RE_SPACE.test(at(j))) j++;
+    if (at(j) === ':') j++;
+    if (at(j) !== '-') break;
+    while (at(j) === '-') j++;
+    if (at(j) === ':') j++;
+    while (RE_SPACE.test(at(j))) j++;
+    cells++;
+    i = j;
+    if (at(i) !== '|') break;
+    i++;
+  }
+  if (!cells) return false;
+  // After the last cell: an optional closing `|` was already stepped over, then whitespace to the end.
+  while (RE_SPACE.test(at(i))) i++;
+  return i === line.length;
+}
 
 // A GFM table row → trimmed cell strings (leading/trailing pipe stripped).
 function splitTableRow(line) {
@@ -1289,7 +1333,7 @@ function splitTableRow(line) {
   if (s.endsWith('|')) s = s.slice(0, -1);
   return s.split('|').map((c) => c.trim());
 }
-const isTableStart = (lines, i) => RE_TABLE_ROW.test(lines[i]) && i + 1 < lines.length && RE_TABLE_SEP.test(lines[i + 1]);
+const isTableStart = (lines, i) => RE_TABLE_ROW.test(lines[i]) && i + 1 < lines.length && isTableSeparator(lines[i + 1]);
 // A HEADERLESS table (2026-07-10): a run of `| a | b |` rows with NO `|---|` separator — the
 // label/value definition-list shape real sites author (a JP corporate profile: 法人名|…, 資本金|…),
 // which GFM's header-mandatory grammar can't express. Trigger is deliberately tight to stay clear of
@@ -1298,8 +1342,8 @@ const isTableStart = (lines, i) => RE_TABLE_ROW.test(lines[i]) && i + 1 < lines.
 // by the branch above and consumed first, so this only fires on genuinely headerless runs → renders
 // an all-`<td>` `<table class="st-table" data-headless>`. Themes distinguish via the attribute.
 const isHeadlessTableStart = (lines, i) =>
-  RE_TABLE_ROW.test(lines[i]) && !RE_TABLE_SEP.test(lines[i]) && splitTableRow(lines[i]).length >= 2
-  && !(i + 1 < lines.length && RE_TABLE_SEP.test(lines[i + 1]));
+  RE_TABLE_ROW.test(lines[i]) && !isTableSeparator(lines[i]) && splitTableRow(lines[i]).length >= 2
+  && !(i + 1 < lines.length && isTableSeparator(lines[i + 1]));
 // One table CELL → HTML. Runs the inline pass (bold/italic/links/images) per fragment; additionally
 // supports (a) `<br>` in-cell line breaks (the GFM-in-cell convention) and (b) a BULLETED LIST inside
 // a cell — a `<br>`-joined run where EVERY segment leads with a list marker (`-`/`*`/`+`/`・`/`•`) becomes
@@ -1913,16 +1957,16 @@ function bodyHtml(body, opts) {
 
     if (isHeadlessTableStart(lines, i)) {                                     // headerless def-list table
       const rows = [];
-      while (i < lines.length && RE_TABLE_ROW.test(lines[i]) && !RE_TABLE_SEP.test(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
+      while (i < lines.length && RE_TABLE_ROW.test(lines[i]) && !isTableSeparator(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
       const tbody = '<tbody>' + rows.map((r) => '<tr>' + r.map((c) => '<td>' + cellHtml(c) + '</td>').join('') + '</tr>').join('') + '</tbody>';
       out.push('<table class="st-table" data-headless>' + tbody + '</table>');
       continue;
     }
 
-    const h = RE_HEADING.exec(lines[i]);                                      // ATX heading (### Section)
+    const h = headingParts(lines[i]);                                         // ATX heading (### Section)
     if (h) {
-      const lv = Math.min(h[1].length, 6);
-      const html = inlineHtml(h[2]);
+      const lv = Math.min(h[0].length, 6);
+      const html = inlineHtml(h[1]);
       // R3-P2-02: a comment-only heading (`# <!-- title -->`) is not a heading at all once its inline
       // content is removed — drop it entirely (no `<h1></h1>`, and the line is NOT reprocessed as a
       // paragraph either: it consumed its own `#` marker as a heading, full stop). A heading with any
