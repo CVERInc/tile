@@ -68,7 +68,7 @@ const pages = htmlFiles(DIST).map((file) => {
 // somewhere else entirely, and that is not ours to overwrite.
 const mine = pages.filter((p) => ourCardPath(p.img));
 
-if (!mine.length) { console.log('▸ og cards: none requested (og-cards not on for this site)'); process.exit(0); }
+if (!mine.length) { console.log('▸ og cards: none requested'); process.exit(0); }
 
 // Resolved from the ASTRO package, not from here. This file lives in og/ and the renderer's deps
 // are installed in astro/node_modules — node resolution walks UP from the importer, never sideways,
