@@ -457,8 +457,9 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
    at the grid case in site-core.js). grid's cells additionally carry `.st-cell` (skinned above);
    gallery's and carousel's do not, so until now neither had a painted card: `.st-gallery` and
    `.st-carousel` matched nothing beyond `* { box-sizing }` (tile-lab#11).
-   STRUCTURE (grid/flex, aspect-ratio, object-fit) is ungated, same split as the people roster
-   below — a themed site restyles a card, it should never have to lay one out from scratch. */
+   STRUCTURE (grid/flex, media sizing, object-fit) is ungated, same split as the people roster
+   below — a themed site restyles a card, it should never have to lay one out from scratch.
+   The default 4:3 frame is gated so custom themes can choose their own media proportions. */
 .st-gal-cells {
   display: grid; gap: var(--gd-gap); margin-top: 1.5rem; align-items: start;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
@@ -468,7 +469,11 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
    the floor above overrides it to natural per-card height, which is what most photo/cast grids want. */
 .st-gallery[data-align="stretch"] .st-gal-cells { align-items: stretch; }
 .st-gal-cell { display: flex; flex-direction: column; min-width: 0; border-radius: var(--gd-radius); overflow: hidden; }
-.st-gal-fig { margin: 0; aspect-ratio: 4 / 3; }
+/* A custom theme that sizes only the image must not inherit a fixed frame.
+   Unthemed sites keep their 4:3 placeholder. Keep percentage media heights for themes
+   that explicitly size the figure; without a definite figure height, they behave as auto. */
+.st-gal-fig { margin: 0; }
+:where(body:not([data-theme-custom])) .st-gal-fig { aspect-ratio: 4 / 3; }
 .st-gal-fig .st-img, .st-gal-fig .st-video { width: 100%; height: 100%; object-fit: cover; }
 .st-gal-cell h3 { margin: 0.75rem 1rem 0.35rem; font-size: 1.1rem; }
 .st-gal-cell p { margin: 0 1rem 1rem; color: var(--gd-muted); }

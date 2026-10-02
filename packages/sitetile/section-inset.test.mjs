@@ -199,6 +199,62 @@ test('🔴 gallery/carousel images are object-fit: cover inside their figure', (
     `no object-fit: cover reachable from .st-gal-fig; selectors were: ${rules.map((r) => r.selector).join(' | ')}`);
 });
 
+// Split only outside functional selectors and attribute values. In particular,
+// :is(..., ...) is one branch and :not(.x) remains part of the figure's compound.
+function selectorParts(selector, delimiter) {
+  let depth = 0, quote = '', start = 0;
+  const parts = [];
+  for (let i = 0; i < selector.length; i++) {
+    const char = selector[i];
+    if (char === '\\') { i++; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '(' || char === '[') depth++;
+    else if (char === ')' || char === ']') depth--;
+    else if (depth === 0 && delimiter.test(char)) {
+      if (selector.slice(start, i).trim()) parts.push(selector.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (selector.slice(start).trim()) parts.push(selector.slice(start).trim());
+  return parts;
+}
+
+function couldTargetGalleryFigure(selector) {
+  // The emitted figure has just .st-gal-fig. Exclude only a positive type/class
+  // on the subject that demonstrably cannot match it. Unknown/functional forms,
+  // attributes and universal selectors remain candidates, rather than escaping
+  // the guard. This is a conservative stylesheet contract, not a cascade engine.
+  if (selector.includes('\\')) return true; // Escaped identifiers stay conservative too.
+  let subject = selectorParts(selector, /[\s>+~]/).at(-1) || '';
+  while (/\([^()]*\)/.test(subject)) subject = subject.replace(/\([^()]*\)/g, '');
+  subject = subject.replace(/\[[^\]]*\]/g, '').replace(/::?[\w-]+/g, '');
+  const type = /^[a-z][\w-]*/i.exec(subject)?.[0].toLowerCase();
+  const classes = [...subject.matchAll(/\.([\w-]+)/g)].map((m) => m[1]);
+  return (!type || type === 'figure') && classes.every((name) => name === 'st-gal-fig');
+}
+
+const figureRatios = rulesFor('').flatMap(({ selector, css }) => {
+  const ratios = [...css.matchAll(/(?:^|;)\s*aspect-ratio\s*:\s*([^;]+)/gi)]
+    .map((m) => m[1].replace(/\s*!important\s*$/i, '').replace(/\s+/g, '').toLowerCase());
+  return selectorParts(selector, /,/).filter(couldTargetGalleryFigure)
+    .flatMap((branch) => ratios.map((ratio) => ({ selector: branch, ratio })));
+});
+const unthemedFigureSelector = ':where(body:not([data-theme-custom])) .st-gal-fig';
+
+test('gallery figure non-auto ratios exclude custom themes', () => {
+  // Checking each branch also catches an ungated selector sharing a gated rule.
+  const ungated = figureRatios.filter(({ selector, ratio }) => ratio !== 'auto'
+    && !selector.startsWith(':where(body:not([data-theme-custom])) '));
+  assert.deepEqual(ungated, [], 'every possible gallery figure ratio must exclude custom themes');
+});
+
+test('unthemed gallery figures retain their 4:3 frame', () => {
+  const ratios = figureRatios.filter(({ selector }) => selector === unthemedFigureSelector)
+    .map(({ ratio }) => ratio);
+  assert.deepEqual(ratios, ['4/3'], 'the unthemed figure must retain exactly one 4:3 default');
+});
+
 test('the tagcloud coral still emits .st-tag-flow / .st-tag', () => {
   const tcSrc = readFileSync(join(SECTIONS_DIR, 'Tagcloud.astro'), 'utf8');
   assert.match(tcSrc, /class="st-tag-flow"/);
