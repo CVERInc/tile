@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { bodyHtml, gridCellBodyHtml, parseSite, renderSiteToHtml } from './site-core.js';
+import { bodyHtml, gridCellBodyHtml, parseSite, renderSiteToHtml, takeDropWarnings } from './site-core.js';
 
 const page = (body, params = '', heading = 'Card') =>
   `## Cards\n%% sitetile: grid ${params} %%\n### ${heading}\n${body}\n`;
@@ -65,15 +65,15 @@ test('other grid bodies retain the block parser output', () => {
     '```text\n- a<br>- b\n```',
     '> a\n> b', '',
     '- `a<br>- b`', '- a <!-- <br>- hidden -->',
-    '- use `a<br>- b` here', '- ``a ` <br>- b`` c', '- a `unclosed <br>- b', '- a \\` b<br>- c `d`',
-    '- a <!-- open <br>- b', '- a<br>- ', '- a<br>-b', '- a<br>-', '- a<br>1.b', '- a<br>・ b',
+    '- use `a<br>- b` here',
+    '- a<br>- ', '- a<br>-b', '- a<br>-', '- a<br>1.b', '- a<br>・ b',
     'a<br>- b', 'Text <br>- b\nmore', '> - a<br>- b', '| Label | - a<br>- b |',
-    // an empty marker or a rule ANYWHERE in the item leaves the whole item as written
-    '- a<br>- b<br>* * *', '- a<br>- b<br>- ', '- a<br>- <br>c', '- a<br>- <br>- b',
-    '- a<br>- <!-- empty -->', '- a<br>- <!-- empty --><br>- b', '- a<br>-  \t<br>- b', '- a<br>- - -<br>- b',
-    // a break the inline renderer draws INSIDE a code span never splits, whatever the run lengths
-    '- `` a ` b ``<br>- c ` tail', '- ``` a ` b ```<br>- c ` tail', '- `` a ` b<br>- c ``',
-    '- `` ` <!-- `` <br>- b -->', '- a <!-- x --!><br>- b',
+    // nothing in these items is a bullet with content after a usable break
+    '- a<br>- <br>c', '- a<br>- <!-- empty -->', '- a<br>- <br>- ', '- a<br>* * *<br>- - -',
+    // a break the inline renderer draws INSIDE a span never splits — code, emphasis, link label
+    '- `` a ` b ``<br>- c ` tail', '- ``` a ` b ```<br>- c ` tail',
+    '- `](/`)<br>- b`', '- `[x](/`)<br>- b`', '- a <!-- ` -->`x<br>- b`',
+    '- *a<br>- b*', '- **a<br>- b**', '- [x<br>- y](/z)', '- <small>a<br>- b</small>',
   ];
   assert.deepEqual(bodies.map((body) => render(body).match(/<h3>Card<\/h3>(.*?)<span class="st-cell-cta"/s)?.[1]),
     bodies.map((body) => bodyHtml(body)));
@@ -153,6 +153,12 @@ test('item-level splits equal the newline-written list, block for block', () => 
     ['1) a<br>2) b', '1) a\n2) b'],
     ['- a<br>continued<br>- b', '- a<br>continued\n- b'],                    // a marker-less segment stays in its item
     ['- `x<br>- y` z<br>- b', '- `x<br>- y` z\n- b'],                        // split outside the code span only
+    // text the renderer shows literally is not a span, so a break after it splits like any other
+    ['- a `unclosed <br>- b', '- a `unclosed \n- b'],
+    ['- a <!-- open <br>- b', '- a <!-- open \n- b'],
+    ['- a \\` b<br>- c `d`', '- a \\` b\n- c `d`'],
+    ['- ``a ` <br>- b`` c', '- ``a ` \n- b`` c'],
+    ['- `` a ` b<br>- c ``', '- `` a ` b\n- c ``'],
     ['- `a\\`<br>- b', '- `a\\`\n- b'],                                    // a span the renderer closes at the backslash
     ['- a <!-- n<br>- hidden --> tail<br>- b', '- a <!-- n<br>- hidden --> tail\n- b'],
     ['```text\n- a<br>- b\n```\n\n- c<br>- d', '```text\n- a<br>- b\n```\n\n- c\n- d'],
@@ -188,10 +194,61 @@ test('the card shape also splits with a half-width space after the label and a t
   }
 });
 
-test('a break is still split outside a code span the renderer agrees on', () => {
-  assert.deepEqual(items(cellBody('- `x<br>- y` z<br>- b')).length, 2);
-  assert.deepEqual(items(cellBody('- `` a ` b ``<br>- c ` tail')).length, 1);
-  assert.equal(cellBody('- `` a ` b ``<br>- c ` tail'), bodyHtml('- `` a ` b ``<br>- c ` tail'));
+// The renderer's own output decides which breaks are usable. Expected values are main's output for
+// these bodies, written out, so the comparison does not lean on the code under test.
+const li = (inner) => '<ul class="st-list"><li>' + inner + '</li></ul>';
+const code = (inner) => '<span class="st-code"><span class="st-mk">`</span>' + inner + '<span class="st-mk">`</span></span>';
+const spanCases = [
+  ['- `](/`)<br>- b`', li(code('](/`)<br>- b'))],                              // a backtick inside a link destination
+  ['- a <!-- ` -->`x<br>- b`', li('a ' + code('x<br>- b'))],                   // a backtick inside a comment
+  ['- `` a ` b ``<br>- c ` tail', li('`' + code(' a ') + ' b `' + code('<br>- c ') + ' tail')],
+  ['- ``` a ` b ```<br>- c ` tail', li('``' + code(' a ') + ' b ``' + code('<br>- c ') + ' tail')],
+];
+test('a break inside a rendered code span never splits, through the real entry point', () => {
+  for (const [body, expected] of spanCases) {
+    for (const [params, image] of shapes) {
+      for (const lead of ['', 'One line subtitle\n\nA paragraph of description.\n\n']) {
+        const html = render(image + lead + body, params);
+        assert.equal(lists(html).length, 1, body);
+        assert.equal(html.match(/<ul class="st-list">.*?<\/ul>/s)[0], expected, JSON.stringify(lead + body) + ' ' + params);
+      }
+    }
+  }
+  assert.deepEqual(items(cellBody('- `x<br>- y` z<br>- b')).length, 2);         // outside the span still splits
+});
+
+// An odd segment is local: it stays, literally, at the tail of the item before it. The bullets
+// around it still split, no empty item appears, and no marker text is dropped.
+const segmentCases = [
+  ['- a<br>- b<br>- ', ['a', 'b<br>- ']],                                     // a trailing empty bullet
+  ['- a<br>- <br>- b', ['a<br>- ', 'b']],                                     // an empty bullet as a spacer
+  ['- a<br>- \t<br>- b', ['a<br>- \t', 'b']],
+  ['- a<br>- <!-- later --><br>- b', ['a<br>- ', 'b']],                       // a commented-out bullet
+  ['- a<br>- b<br>- <!-- later -->', ['a', 'b<br>- ']],
+  ['- a<br>- b<br>* * *', ['a', 'b<br>* * *']],                               // a rule after the list
+  ['- a<br>- - -<br>- b', ['a<br>- - -', 'b']],
+  // controls: none of these was ever a reason to hold back a split
+  ['- a<br>- b<br>', ['a', 'b<br>']],
+  ['- a<br>- b<br><br>', ['a', 'b<br><br>']],
+  ['- a<br><br>- b', ['a<br>', 'b']],
+  ['- a<br> <br>- b', ['a<br> ', 'b']],
+  ['- a<br>- b<br><!-- note -->', ['a', 'b<br>']],
+  ['- a<br>- b<br>-', ['a', 'b<br>-']],
+  ['- a<br>- b<br>---', ['a', 'b<br>---']],
+  ['- a<br>- b<br>___', ['a', 'b<br>___']],
+  ['- a<br>continued<br>- b', ['a<br>continued', 'b']],
+];
+test('an empty, comment-only or rule segment stays local; the bullets around it still split', () => {
+  for (const [body, expected] of segmentCases) {
+    for (const [params, image] of shapes) {
+      for (const lead of ['', 'One line subtitle\n\nA paragraph of description.\n\n']) {
+        const got = lists(render(image + lead + body, params));
+        // (a body's trailing whitespace is trimmed before it reaches the cell — compare without it)
+        assert.deepEqual(got.map((l) => l.map((x) => x.trimEnd())), [expected.map((x) => x.trimEnd())], JSON.stringify(lead + body) + ' ' + params);
+        assert.ok(got[0].every((t) => t.trim() !== ''), 'no empty item: ' + JSON.stringify(body));
+      }
+    }
+  }
 });
 
 // Sizes an author can paste into one cell. None of these may throw, through the real entry point.
@@ -207,24 +264,37 @@ test('very large single-item cells render without throwing', () => {
   assert.equal(render(big.longTickRun(n)).includes('`'.repeat(64)), true);
   assert.equal(items(render(big.breaks(n / 8))).length, n / 8 + 1);
   assert.equal(items(render(big.codeRanges(n / 16))).length, n / 16 + 1);
-  assert.equal(items(render(big.unclosedComments(n / 16))).length, 1);
-  assert.equal(items(render(big.mixedRuns(n / 8))).length, 1);
+  assert.equal(items(render(big.unclosedComments(n / 16))).length, n / 16 + 1);   // unclosed: literal text
+  assert.equal(items(render(big.mixedRuns(n / 8))).length, 2);
 });
 
-// Scaling gate, not a millisecond budget: 4x the input must cost well under the 16x a quadratic
-// scan would. Best-of-several on each size, so a busy machine cannot fake a slope.
-test('splitting cost grows linearly with the item length', (t) => {
-  const best = (body) => {
-    let min = Infinity;
-    for (let r = 0; r < 5; r++) { const t = process.hrtime.bigint(); gridCellBodyHtml(body); min = Math.min(min, Number(process.hrtime.bigint() - t)); }
-    return min;
-  };
-  const ratios = [];
-  for (const [name, n] of [['breaks', 20000], ['codeRanges', 12000], ['mixedRuns', 20000]]) {
-    gridCellBodyHtml(big[name](n));                                            // warm up
-    const ratio = best(big[name](4 * n)) / best(big[name](n));
-    ratios.push(name + ' ' + ratio.toFixed(2) + 'x');
-    assert.ok(ratio < 10, name + ': 4x input cost ' + ratio.toFixed(2) + 'x');
+// Scaling gate by work done, not by the clock: the splitter reports every character it examines
+// (opts.stats), and that total must stay within a fixed multiple of the cell's length at any size.
+// A scan that re-reads the suffix at each break grows with the square and blows through the bound.
+test('the splitter examines a bounded number of characters per input character', (t) => {
+  const seen = [];
+  for (const name of ['breaks', 'codeRanges', 'unclosedComments', 'mixedRuns']) {
+    let per0;
+    for (const n of [2000, 8000, 32000]) {
+      const body = big[name](n);
+      const stats = { scanned: 0 };
+      gridCellBodyHtml(body, { stats });
+      const per = stats.scanned / body.length;
+      per0 ??= per;
+      seen.push(name + '@' + n + ' ' + per.toFixed(2));
+      assert.ok(stats.scanned > 0, name + ': the counter is wired');
+      assert.ok(per < 40, name + '@' + n + ': ' + per.toFixed(2) + ' characters examined per input character');
+      assert.ok(per < per0 * 1.5, name + '@' + n + ': per-character work grew from ' + per0.toFixed(2) + ' to ' + per.toFixed(2));
+    }
   }
-  t.diagnostic('4x input cost: ' + ratios.join(', '));
+  t.diagnostic('characters examined per input character: ' + seen.join(', '));
+});
+
+test('looking for usable breaks leaves no extra dropped-destination warnings', () => {
+  takeDropWarnings();
+  gridCellBodyHtml('- [x](javascript:void) one<br>- [y](javascript:void) two');
+  const split = takeDropWarnings().map((w) => w.dest);
+  gridCellBodyHtml('- [x](javascript:void) one\n- [y](javascript:void) two');
+  assert.deepEqual(split, takeDropWarnings().map((w) => w.dest));
+  assert.equal(split.length, 2);
 });

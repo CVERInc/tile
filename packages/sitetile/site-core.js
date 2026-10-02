@@ -1251,105 +1251,84 @@ function cellHtml(cell) {
 // on each LIST ITEM's own text — so a list that follows a heading, a subtitle and a paragraph (the
 // shape a real card has) is handled the same as a body that is nothing but the list. An item written
 // `a<br>- b` becomes two sibling items, exactly what the same list written on two lines produces.
-// A break only splits when what follows is a list marker, whitespace and real content; a marker-less
-// continuation, an empty item, `-b`, or a horizontal-rule segment keeps its literal <br>.
 // 🩸 The first version of this decided at the CELL level (the whole body had to be one <br> run with
 // no newline, backtick or comment anywhere), so every cell with a title or a paragraph above its
 // list fell back to the unsplit output. Nothing outside the item being split is consulted any more.
-const RE_ITEM_BR = /<br\s*\/?>/gi;
+const RE_ITEM_BR = /<br(\s*\/?>)/gi;
 const RE_ITEM_BR_MARKER = /[ \t]*([-*+]|\d+[.)])[ \t]+/y;   // sticky: reads a local prefix, never the suffix
 const RE_ITEM_BR_RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
-// Ranges of an item's text that are opaque to splitting, sorted and merged. This is deliberately a
-// UNION of every reading of "code" and "comment" that could apply, because a break that any of them
-// puts inside a span must not split — a wrong "inside" costs a split the author can get by writing
-// newlines, a wrong "outside" tears a code span in two:
-//   · the inline renderer's own code spans (codeSpanRanges — the rule the page is actually drawn by);
-//   · backtick RUNS paired by equal length (the CommonMark reading), an unpaired run opaque to the end;
-//   · every `<!--` up to its first `-->`, an unclosed one opaque to the end.
-// 🩸 Each scan is a cursor over the string — nothing here builds a pattern out of the input. The
-// first version compiled the delimiter run into a RegExp, so one long run of backticks threw
-// "Regular expression too large" out of the whole page render.
-function itemOpaqueRanges(text) {
-  const ranges = codeSpanRanges(text);
-  const runs = [];
-  const reRun = /`+/g;
-  let m;
-  while ((m = reRun.exec(text))) runs.push([m.index, m[0].length]);
-  for (let i = 0; i < runs.length; i++) {
-    let j = i + 1;
-    while (j < runs.length && runs[j][1] !== runs[i][1]) j++;
-    if (j === runs.length) { ranges.push([runs[i][0], text.length]); break; }
-    ranges.push([runs[i][0], runs[j][0] + runs[j][1]]);
-    i = j;
-  }
-  for (let at = text.indexOf('<!--'); at !== -1;) {
-    const close = text.indexOf('-->', at + 4);
-    if (close === -1) { ranges.push([at, text.length]); break; }
-    ranges.push([at, close + 3]);
-    at = text.indexOf('<!--', close + 3);
-  }
-  ranges.sort((x, y) => x[0] - y[0]);
-  const merged = [];
-  for (const r of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
-    else merged.push([r[0], r[1]]);
-  }
-  return merged;
+const RE_ITEM_OUT = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>|\u0002(\d+)\u0002/g;
+// Which of an item's breaks may split it: [start, end) of each, in order.
+//
+// The answer is read off the INLINE RENDERER'S OWN OUTPUT, not guessed from the raw text. Each
+// break's letters are swapped for a numbered sentinel (`<br />` → `<\u0002k\u0002 />`: the angle
+// brackets, whitespace and slash the renderer's passes key on all stay put), the item is rendered
+// once, and a break is usable only if its sentinel comes out at the top level of that HTML — not
+// inside a code span, an emphasis span, a link or any attribute, and not swallowed by a comment.
+// 🩸 Two earlier versions scanned the raw text for code spans and comments. The renderer stashes
+// link destinations and removes comments BEFORE it pairs backticks, so every raw reading disagreed
+// with it somewhere (a backtick inside a destination, a backtick inside a comment) and tore a
+// rendered code span across two items. There is no second opinion to drift any more.
+// The splitter renders text only to LOOK at the result; those renders must leave no trace. The one
+// side effect inlineHtml has is the dropped-destination warning queue, so it is rewound — the real
+// render of each resulting item reports its own warnings exactly once.
+function probeInlineHtml(text) {
+  const before = _dropWarnings.length;
+  const html = inlineHtml(text);
+  _dropWarnings.length = before;
+  return html;
 }
-// Whether a segment holds anything besides whitespace and closed HTML comments (cursor scan).
-function hasRealContent(s) {
-  let i = 0;
-  for (;;) {
-    const at = s.indexOf('<!--', i);
-    if (s.slice(i, at === -1 ? s.length : at).trim()) return true;
-    if (at === -1) return false;
-    const close = s.indexOf('-->', at + 4);
-    if (close === -1) return true;
-    i = close + 3;
+function itemBreakCuts(text, stats) {
+  if (text.includes('\u0002')) return [];
+  const at = [];
+  const marked = text.replace(RE_ITEM_BR, (m, tail, i) => { at.push([i, i + m.length]); return '<\u0002' + (at.length - 1) + '\u0002' + tail; });
+  const html = probeInlineHtml(marked);
+  if (stats) stats.scanned += text.length + html.length;
+  const cuts = [];
+  let depth = 0, m;
+  RE_ITEM_OUT.lastIndex = 0;
+  while ((m = RE_ITEM_OUT.exec(html))) {
+    if (m[3] !== undefined) { if (depth === 0) cuts.push(at[+m[3]]); }
+    else if (m[1]) depth--;
+    else if (!/^(img|br)$/i.test(m[2])) depth++;
   }
+  return cuts;
 }
 // One list item's text → the texts of the sibling items it stands for ([{ordered, text}], length 1
-// when nothing splits). The text is cut into SEGMENTS at every break outside an opaque range, and
-// each segment is judged on its own extent only:
-//   · marker + whitespace + real content → starts a new sibling;
-//   · no marker → stays in the item before it, with its literal break;
-//   · a marker with nothing real behind it (empty, or only a comment), or a horizontal rule → the
-//     item is ambiguous, so the WHOLE item is left exactly as written.
-// One pass, linear in the item's length: breaks, opaque ranges and segments all advance monotonically.
-function splitItemBreaks(text, ordered) {
+// when nothing splits). The text is cut into SEGMENTS at every usable break, and each segment is
+// judged on its own extent only:
+//   · marker + whitespace + something that renders → starts a new sibling;
+//   · anything else — no marker, a marker with nothing behind it (empty, or only a comment), `-b`,
+//     a horizontal rule — stays, literal break and all, at the tail of the item before it.
+// An odd segment never undoes the splits around it, never becomes an empty item, and never loses
+// its marker text. One pass: segments do not overlap, so the work is linear in the item's length.
+function splitItemBreaks(text, ordered, stats) {
   const whole = [{ ordered, text }];
   if (!/<br/i.test(text)) return whole;
-  const opaque = itemOpaqueRanges(text);
-  const cuts = [];                                    // [breakStart, breakEnd] of each usable break
-  let o = 0, m;
-  RE_ITEM_BR.lastIndex = 0;
-  while ((m = RE_ITEM_BR.exec(text))) {
-    while (o < opaque.length && opaque[o][1] <= m.index) o++;
-    if (o < opaque.length && opaque[o][0] <= m.index) continue;
-    cuts.push([m.index, RE_ITEM_BR.lastIndex]);
-  }
+  const cuts = itemBreakCuts(text, stats);
   const out = [];
   let start = 0, cur = ordered;
   for (let k = 0; k < cuts.length; k++) {
     const segStart = cuts[k][1];
     const segEnd = k + 1 < cuts.length ? cuts[k + 1][0] : text.length;
+    if (stats) stats.scanned += segEnd - segStart;
     RE_ITEM_BR_MARKER.lastIndex = segStart;
     const mk = RE_ITEM_BR_MARKER.exec(text);
-    if (!mk || RE_ITEM_BR_MARKER.lastIndex > segEnd) continue;          // marker-less continuation
-    const seg = text.slice(segStart, segEnd);
-    const content = text.slice(RE_ITEM_BR_MARKER.lastIndex, segEnd);
-    if (!hasRealContent(content) || RE_ITEM_BR_RULE.test(seg)) return whole;
+    if (!mk || RE_ITEM_BR_MARKER.lastIndex > segEnd) continue;
+    const contentStart = RE_ITEM_BR_MARKER.lastIndex;
+    if (RE_ITEM_BR_RULE.test(text.slice(segStart, segEnd))) continue;
+    if (!probeInlineHtml(text.slice(contentStart, segEnd)).trim()) continue;
     out.push({ ordered: cur, text: text.slice(start, cuts[k][0]) });
     cur = /^\d/.test(mk[1]);
-    start = RE_ITEM_BR_MARKER.lastIndex;
+    start = contentStart;
   }
   if (!out.length) return whole;
   out.push({ ordered: cur, text: text.slice(start) });
   return out;
 }
-function gridCellBodyHtml(body) {
-  return bodyHtml(body, { splitItemBreaks: true });
+// opts.stats ({scanned: 0}) is for the scaling test: the splitter adds every character it examines.
+function gridCellBodyHtml(body, opts) {
+  return bodyHtml(body, { splitItemBreaks: true, splitStats: opts && opts.stats });
 }
 // `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
 // declarations hoist, so this only matters for callers with no `nextCloser` to hand in, which then
@@ -1916,7 +1895,7 @@ function bodyHtml(body, opts) {
         const m = RE_LIST_ITEM.exec(lines[i]);
         const ordered = /^\d+[.)]/.test(m[2]);
         // grid cells only (opts.splitItemBreaks): `a<br>- b` in one item is two sibling items.
-        const parts = opts && opts.splitItemBreaks ? splitItemBreaks(m[3], ordered) : [{ ordered, text: m[3] }];
+        const parts = opts && opts.splitItemBreaks ? splitItemBreaks(m[3], ordered, opts.splitStats) : [{ ordered, text: m[3] }];
         for (const part of parts) items.push({ indent: m[1].length, ordered: part.ordered, text: part.text });
         i++;
       }
