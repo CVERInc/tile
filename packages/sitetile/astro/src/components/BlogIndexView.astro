@@ -192,7 +192,7 @@ const title = isHome
                     <summary>{sideCopy.count(y.year, y.count)}</summary>
                     <ul class="bl-archive-months">
                       {y.months.map((m) => (
-                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
+                        <li><a href={`${blogBase(meta)}?ym=${m.year}-${m.month}`} aria-label={sideCopy.count(sideCopy.monthYear(m.year, m.month), m.count)}>{sideCopy.count(sideCopy.month(m.month), m.count)}</a></li>
                       ))}
                     </ul>
                   </details>

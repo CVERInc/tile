@@ -2,7 +2,7 @@
 // them. Deliberately imports no build alias — same reason as the sibling sitemap.mjs: a pure
 // function parked behind `@sitetile` is a function no test can reach, and unreachable string
 // resolution is how five copies of the same Chinese literal lived in this renderer for months.
-import { uiCopy as lingoUiCopy, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
+import { uiCopy as lingoUiCopy, dateHeading, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
 
 // dateBadgeParts: split a date into month/day/year strings for the `cjk-badge` index-card
 // layout (three stacked <span>s a theme's CSS can lay out as a badge) — a real
@@ -31,6 +31,7 @@ export function sidebarCopy(meta = {}) {
     archive: pick('sidebar-archive', base.archive),
     search: pick('sidebar-search', base.search),
     month: base.month,
+    monthYear: (year, month) => dateHeading(meta.lang || NEUTRAL_UI_LANG, year, month),
     count: base.count,
   };
 }
