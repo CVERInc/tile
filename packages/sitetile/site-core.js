@@ -60,6 +60,83 @@ const SITE_LAYER_KEYS = [
 // `tagcloud` list and the `links` blogroll — cannot drift apart on this rule.
 const RE_URL_BALANCED_PARENS_SRC = '(?:[^()\\s]|\\([^()\\s]*\\))+';
 
+// ── Links and images, each run read once ─────────────────────────────────────────────────────────
+// Every `[label](href)`, `![alt](src)` and `![[path]]` on the render path was found by a regex of one
+// shape: a fixed opener, then runs of "anything but the delimiter that ends me" between fixed
+// delimiters — /!\[([^\]]*)\]\(([^)\s]+)\)/g is `'!['`, `[^\]]*`, `']('`, `[^)\s]+`, `')'`. A shape below
+// is that regex written as such a list, and bracketMatches() returns what its exec loop returned.
+//
+// Each run's class excludes the delimiter after it, so a run can only end where its class first
+// fails: a shorter run is never followed by its delimiter, and an opener has one possible match.
+// 🩸 What cost was FINDING that end. A backtracking engine reads the run again from every opener, so
+// one line of 32,000 `![` with no `]` was read to its end 32,000 times — seconds a render, from a line
+// anyone who can write a page can type, and runs of `[`, `](` and `![[` did the same. Here openers are
+// visited left to right, so a run never starts further left than the last one did, and the end
+// found for one opener is the end for every later run that starts at or before it.
+const untilChar = (ch) => (s, from) => { const i = s.indexOf(ch, from); return i === -1 ? s.length : i; };
+const RE_PAREN_OR_SPACE = /[)\s]/g;
+const untilParenOrSpace = (s, from) => { RE_PAREN_OR_SPACE.lastIndex = from; const m = RE_PAREN_OR_SPACE.exec(s); return m ? m.index : s.length; };
+// The balanced destination is not one class: where it ends depends on where it started (inside a
+// `(…)` it ends at that `)`), so its end is reused only for the same start. That is still linear —
+// two starts whose destinations overlap are an outer one and one inside a `(…)` it skipped whole.
+const RE_BALANCED_DEST = new RegExp(RE_URL_BALANCED_PARENS_SRC, 'y');
+const endOfBalanced = (s, from) => { RE_BALANCED_DEST.lastIndex = from; return RE_BALANCED_DEST.test(s) ? RE_BALANCED_DEST.lastIndex : from; };
+// `min` is the run's quantifier — `*` is 0, `+` is 1.
+const RUN_LABEL = { min: 1, end: untilChar(']'), oneClass: true };            // [^\]]+
+const RUN_ALT = { min: 0, end: untilChar(']'), oneClass: true };              // [^\]]*
+const RUN_DEST = { min: 1, end: untilParenOrSpace, oneClass: true };          // [^)\s]+
+const RUN_PAREN = { min: 1, end: untilChar(')'), oneClass: true };            // [^)]+
+const RUN_PAREN_ANY = { min: 0, end: untilChar(')'), oneClass: true };        // [^)]*
+const RUN_BALANCED = { min: 1, end: endOfBalanced, oneClass: false };         // RE_URL_BALANCED_PARENS_SRC
+const MD_IMAGE = ['![', RUN_ALT, '](', RUN_DEST, ')'];        // /!\[([^\]]*)\]\(([^)\s]+)\)/g
+const WIKI_IMAGE = ['![[', RUN_LABEL, ']]'];                  // /!\[\[([^\]]+)\]\]/g
+const MD_LINK = ['[', RUN_LABEL, '](', RUN_DEST, ')'];        // /\[([^\]]+)\]\(([^)\s]+)\)/g
+const LINK_DEST = ['](', RUN_DEST, ')'];                      // /\]\(([^)\s]+)\)/g
+const CTA_LINK = ['[', RUN_LABEL, '](', RUN_PAREN, ')'];      // /\[([^\]]+)\]\(([^)]+)\)/g
+const TAG_LINK = ['[', RUN_LABEL, '](', RUN_BALANCED, ')'];   // '\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)'
+const DESC_IMAGE = ['![', RUN_ALT, '](', RUN_PAREN_ANY, ')']; // /!\[[^\]]*\]\([^)]*\)/g
+const DESC_LINK = ['[', RUN_ALT, '](', RUN_PAREN_ANY, ')'];   // /\[([^\]]*)\]\([^)]*\)/g
+const BRACKET_SHAPES = { MD_IMAGE, WIKI_IMAGE, MD_LINK, LINK_DEST, CTA_LINK, TAG_LINK, DESC_IMAGE, DESC_LINK };
+// Every match of `shape` in `s`, left to right, as [whole, ...runs] with `.index` — what the global
+// regex's exec loop returned, one array per match (a run is captured whether or not the regex did).
+function bracketMatches(s, shape) {
+  const found = [];
+  const seen = shape.map(() => [-1, -1]);   // per run: the last start asked about, and where it ended
+  const open = shape[0];
+  let p = s.indexOf(open);
+  while (p !== -1) {
+    const cuts = [];
+    let at = p + open.length, k = 1;
+    for (; k < shape.length; k += 2) {
+      const run = shape[k], last = seen[k];
+      // A start asked about before ends where it ended. So does any start inside the last run when the
+      // run is one class: nothing in [last start, last end) ends it.
+      const known = at === last[0] || (run.oneClass && at > last[0] && at <= last[1]);
+      if (!known) { last[0] = at; last[1] = run.end(s, at); }
+      const end = last[1];
+      if (end - at < run.min || !s.startsWith(shape[k + 1], end)) break;
+      cuts.push(at, end);
+      at = end + shape[k + 1].length;
+    }
+    if (k < shape.length) { p = s.indexOf(open, p + 1); continue; }
+    const match = [s.slice(p, at)];
+    for (let c = 0; c < cuts.length; c += 2) match.push(s.slice(cuts[c], cuts[c + 1]));
+    match.index = p;
+    found.push(match);
+    p = s.indexOf(open, at);
+  }
+  return found;
+}
+// `s.replace(<the shape's global regex>, fn)`: the text between matches kept, each match → fn(...match, index, s).
+function replaceMatches(s, shape, fn) {
+  let out = '', from = 0;
+  for (const m of bracketMatches(s, shape)) {
+    out += s.slice(from, m.index) + fn(...m, m.index, s);
+    from = m.index + m[0].length;
+  }
+  return out + s.slice(from);
+}
+
 // tagcloudLinks: a tagcloud section body (a markdown list of `- [Label](/href)` items) → an
 // ordered [{label, href}]. General — a weighted category/tag cloud is a near-universal WP/Blogger
 // widget (`#tag_cloud-N`, `.wp-tag-cloud`), a flow of inline links no vertical/card coral expresses.
@@ -71,14 +148,13 @@ const RE_URL_BALANCED_PARENS_SRC = '(?:[^()\\s]|\\([^()\\s]*\\))+';
 function tagcloudLinks(body, opts) {
   const report = !!(opts && opts.report); // only the renderers report; direct callers stay side-effect free
   const src = body || '';
-  const RE = new RegExp('\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)', 'g');
   const found = []; // { pos, label, href, legacy? } — strict matches plus legacy reads, merged by position
   const spans = [];
-  let m;
-  while ((m = RE.exec(src)) !== null) {
-    found.push({ pos: m.index, label: m[1], href: m[2] });
-    spans.push([m.index, m.index + m[0].length]);
+  for (const t of bracketMatches(src, TAG_LINK)) {
+    found.push({ pos: t.index, label: t[1], href: t[2] });
+    spans.push([t.index, t.index + t[0].length]);
   }
+  let m;
   // Legacy read: the leading item of a list line that the strict pattern rejected. Old content
   // carries raw horizontal whitespace inside the address (`- [A](/a b)`); browsers rendered that as
   // a trimmed href with interior tabs removed and spaces %20-encoded, so read it that way rather than losing the tag. The authoring
@@ -345,6 +421,16 @@ function trailingBadge(s) {
   while (index > 0 && RE_SPACE.test(s.charAt(index - 1))) index--;
   return { index, inner: s.slice(open + 1, close) };
 }
+// A form field's trailing `{kind}` — what /\{([^}]*)\}\s*$/ found — as { index, inner }, or null.
+// 🩸 It was that regex: every `{` re-read the label up to the first `}` after it, so a label of 32,000
+// `{` cost seconds per parse. Located the way trailingBadge is: the `}` is the last character that
+// is not whitespace, the `{` is the first one after the `}` before it.
+function trailingBraces(s) {
+  const close = s.trimEnd().length - 1;
+  if (close < 1 || s.charAt(close) !== '}') return null;
+  const open = s.indexOf('{', s.lastIndexOf('}', close - 1) + 1);
+  return open === -1 || open >= close ? null : { index: open, inner: s.slice(open + 1, close) };
+}
 
 // Split a grid cell heading (`### Products →/products "See products"`) into { emoji, title, href, cta, badge }.
 // `→<href>` makes the whole cell a link; an optional trailing "<label>" is the CTA text rendered next
@@ -477,10 +563,11 @@ function parseSite(text) {
       body = blockOf(lead);
       fields = fields.map((f) => {
         let label = f.label, kind = 'text', required; // required: undefined = "not stated"
-        const km = /\{([^}]*)\}\s*$/.exec(label);
+        const km = trailingBraces(label);
         if (km) {
-          label = label.replace(/\s*\{[^}]*\}\s*$/, '').trim();
-          let content = km[1];
+          // The brace and the whitespace before it go; `.trim()` takes that whitespace either way.
+          label = label.slice(0, km.index).trim();
+          let content = km.inner;
           const reqValue = /required\s*:\s*(true|false)/i.exec(content);
           if (reqValue) {
             required = reqValue[1].toLowerCase() === 'true';
@@ -1200,8 +1287,9 @@ function inlineHtml(text, opts) {
   // scheme-checked below (isSafeHref) before it is allowed into an href/src at all — escaping
   // alone stops a raw element from forming but does nothing about `javascript:`/`data:`.
   const hrefs = [];
-  const stashed = String(text == null ? '' : text)
-    .replace(/\]\(([^)\s]+)\)/g, (m, href) => { hrefs.push(href); return '](\u0001' + (hrefs.length - 1) + '\u0001)'; });
+  // The link and image patterns below are shapes read by bracketMatches, not regexes — see its comment.
+  const stashed = replaceMatches(String(text == null ? '' : text), LINK_DEST,
+    (m, href) => { hrefs.push(href); return '](\u0001' + (hrefs.length - 1) + '\u0001)'; });
   // Spliced by hand rather than calling renderInlineMd(stashed, {prefix:'st'}) directly: cssmd's own
   // module comment documents these four pieces (escape step + markCode + markEmphasis + markEscapes)
   // as exactly what renderInlineMd is built from, meant to be recombined by a caller that needs a
@@ -1220,15 +1308,15 @@ function inlineHtml(text, opts) {
   // above already ran over it like any other text. round 2, P2-2: that answers the ESCAPING
   // question only — it never checked the SCHEME, so `![[javascript:alert(1)]]` reached a live
   // `<img src>` untouched. Same guard as the sibling markdown-image line two rows below.
-  s = s.replace(/!\[\[([^\]]+)\]\]/g, (mm, inner) => (isSafeImageSrc(inner) ? imgTag(inner.split('/').pop(), inner) : inner.split('/').pop()));
+  s = replaceMatches(s, WIKI_IMAGE, (mm, inner) => (isSafeImageSrc(inner) ? imgTag(inner.split('/').pop(), inner) : inner.split('/').pop()));
   // markdown image: `src` here is the (now escaped) restored destination. A disallowed scheme
   // renders no <img> at all — just the (already-escaped) alt text, same shape as a broken image's
   // fallback text, per isSafeImageSrc above (round 2, P1-2: images additionally allow a small
   // raster `data:` allowlist that a plain href never does).
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (mm, alt, src) => (isSafeImageSrc(src) ? imgTag(alt, src) : alt));
+  s = replaceMatches(s, MD_IMAGE, (mm, alt, src) => (isSafeImageSrc(src) ? imgTag(alt, src) : alt));
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
   // prose at the maintainer's call): an external link is external wherever it appears.
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (mm, lab, href) => {
+  s = replaceMatches(s, MD_LINK, (mm, lab, href) => {
     if (!isSafeHref(href)) return lab; // disallowed scheme (e.g. javascript:) → plain text, no href
     const tgt = /^https?:\/\//i.test(href) ? ' target="_blank" rel="noopener"' : '';
     return '<a href="' + attrq(href) + '"' + tgt + '>' + lab + '</a>';
@@ -1248,7 +1336,7 @@ function inlineHtml(text, opts) {
 // True if a block is ONLY image(s) (markdown or wikilink) + whitespace — a block-level figure, not a
 // text paragraph. Used to render standalone images (hero avatar, in-body figures) outside a <p>.
 function isImageOnly(t) {
-  const stripped = t.replace(/!\[\[([^\]]+)\]\]/g, '').replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '').trim();
+  const stripped = replaceMatches(replaceMatches(t, WIKI_IMAGE, () => ''), MD_IMAGE, () => '').trim();
   return t.trim() !== '' && stripped === '';
 }
 
@@ -1258,8 +1346,8 @@ function isImageOnly(t) {
 function firstImage(body) {
   const text = String(body || '');
   let img = null;
-  const md = /!\[([^\]]*)\]\(([^)\s]+)\)/.exec(text);
-  const wk = /!\[\[([^\]]+)\]\]/.exec(text);
+  const md = bracketMatches(text, MD_IMAGE)[0];
+  const wk = bracketMatches(text, WIKI_IMAGE)[0];
   let matchStr = null;
   if (md && (!wk || md.index <= wk.index)) { img = { alt: md[1], src: md[2] }; matchStr = md[0]; }
   else if (wk) { const inner = wk[1]; img = { alt: inner.split('/').pop(), src: inner }; matchStr = wk[0]; }
@@ -2028,14 +2116,15 @@ function ctaHtml(val, cls) {
 
 // cta body → { buttons:[{label,href}], caption }. A paragraph that is ONLY markdown
 // links (separated by `·`/whitespace) becomes BUTTONS (a cta can have N buttons, e.g.
-// donate's Give once + Monthly); everything else stays caption prose.
-const RE_CTA_LINK = /\[([^\]]+)\]\(([^)]+)\)/g;
+// donate's Give once + Monthly); everything else stays caption prose. A link here is CTA_LINK, the
+// shape of /\[([^\]]+)\]\(([^)]+)\)/g (see bracketMatches).
 function splitCtaBody(body) {
   const buttons = [], caption = [];
   String(body || '').split(/\n\s*\n/).forEach((para) => {
     const p = para.trim(); if (!p) return;
-    const onlyLinks = p.match(RE_CTA_LINK) && p.replace(RE_CTA_LINK, '').replace(/[·,\s]+/g, '') === '';
-    if (onlyLinks) { let m; RE_CTA_LINK.lastIndex = 0; while ((m = RE_CTA_LINK.exec(p))) buttons.push({ label: m[1].trim(), href: m[2].trim() }); }
+    const links = bracketMatches(p, CTA_LINK);
+    const onlyLinks = links.length > 0 && replaceMatches(p, CTA_LINK, () => '').replace(/[·,\s]+/g, '') === '';
+    if (onlyLinks) { for (const m of links) buttons.push({ label: m[1].trim(), href: m[2].trim() }); }
     else caption.push(p);
   });
   return { buttons, caption: caption.join('\n\n') };
@@ -2053,7 +2142,7 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
   // Affordance = a signet-arrow chosen by link kind — see linkKind (design 2026-07-13). The old
   // icon=heart / mailto→envelope glyph rules are gone: decorative marks never sit inside a button.
   // `pmIcon` is intentionally ignored now (kept in the signature for Cta.astro call-site compat).
-  // 🩸 round 2, P1-1: every button here comes from `splitCtaBody`/`RE_CTA_LINK` — the same author
+  // 🩸 round 2, P1-1: every button here comes from `splitCtaBody`/`CTA_LINK` — the same author
   // Markdown destination `inlineHtml` scheme-checks — but this loop built `href` with escAttr
   // alone. A disallowed destination degrades to the button's OWN classes on a `<span>` (no href,
   // no live link), keeping its label and arrow visible rather than vanishing.
@@ -2097,14 +2186,12 @@ function heroParts(body) {
       // 🩸 fixed 2026-07-05: was a single `.exec` (no /g), so a paragraph with several images
       // written back-to-back on one line (e.g. a row of team avatars) only ever kept the
       // FIRST — the other 3 silently vanished. Loop both the markdown and wikilink forms.
-      const reMd = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-      let m;
-      while ((m = reMd.exec(p))) images.push({ alt: m[1], src: m[2] });
-      const reWiki = /!\[\[([^\]]+)\]\]/g;
-      while ((m = reWiki.exec(p))) images.push({ alt: (m[1] || '').split('/').pop(), src: m[1] });
+      for (const m of bracketMatches(p, MD_IMAGE)) images.push({ alt: m[1], src: m[2] });
+      for (const m of bracketMatches(p, WIKI_IMAGE)) images.push({ alt: (m[1] || '').split('/').pop(), src: m[1] });
       return;
     }
-    const onlyLinks = p.match(RE_CTA_LINK) && p.replace(RE_CTA_LINK, '').replace(/[·,\s]+/g, '') === '';
+    const links = bracketMatches(p, CTA_LINK);
+    const onlyLinks = links.length > 0 && replaceMatches(p, CTA_LINK, () => '').replace(/[·,\s]+/g, '') === '';
     // 🩸 general (2026-07-05, round 2): a lone "Back to X" link is return-to-listing navigation,
     // not a CTA — rendering it as a filled/outlined button adds real height nothing on live has.
     // Originally pulled it into `text` instead of `buttons`, but `text`/`buttons` render as two
@@ -2114,10 +2201,9 @@ function heroParts(body) {
     // /oss/liquidframe|demodeck|motifmint — DOM order was literally swapped). Keep it IN
     // `buttons` (preserves source order) but flag `plain:true` so the renderer draws it as a
     // plain link instead of button chrome.
-    const singleBackLink = onlyLinks && /^\[Back to /i.test(p) && (p.match(RE_CTA_LINK) || []).length === 1;
+    const singleBackLink = onlyLinks && /^\[Back to /i.test(p) && links.length === 1;
     if (onlyLinks) {
-      let m; RE_CTA_LINK.lastIndex = 0;
-      while ((m = RE_CTA_LINK.exec(p))) buttons.push({ label: m[1].trim(), href: m[2].trim(), primary: buttons.length === 0 && !singleBackLink, plain: singleBackLink });
+      for (const m of links) buttons.push({ label: m[1].trim(), href: m[2].trim(), primary: buttons.length === 0 && !singleBackLink, plain: singleBackLink });
     } else text.push(p);
   });
   // `image` = first (backward-compatible single-image heroes); `images` = ALL (multi-image side, e.g.
@@ -2709,10 +2795,9 @@ function deriveDescription(sections, max = DESC_MAX) {
     if (s && (s.type === 'embed' || s.type === 'gallery' || s.type === 'social')) continue;
     const raw = String((s && s.body) || '').trim();
     if (!raw) continue;
-    const text = raw
-      .replace(/```[\s\S]*?```/g, ' ')            // fenced code
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')      // images
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')    // links → their text
+    const noCode = raw.replace(/```[\s\S]*?```/g, ' ');                          // fenced code
+    const noImages = replaceMatches(noCode, DESC_IMAGE, () => ' ');               // images
+    const text = replaceMatches(noImages, DESC_LINK, (m, label) => label)         // links → their text
       .replace(/[*_`>#|]/g, ' ')                    // inline emphasis / quote / heading marks
       .replace(/\s+/g, ' ')
       // stripping `**bold**` leaves a gap before the punctuation that followed it
@@ -2760,4 +2845,7 @@ export {
   // the paragraph soft-line join, exported so its linearity test can count its work directly —
   // see softJoin's own comment.
   softJoin,
+  // the link/image matcher and its shapes, exported so their test can hold each shape against the
+  // regex it replaced — see bracketMatches' own comment.
+  bracketMatches, replaceMatches, BRACKET_SHAPES,
 };

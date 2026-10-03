@@ -708,9 +708,13 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	// not the count. `reef-inbox:open` says "open", nothing more; `pagehide` (0.7.6, ruling 54) is
 	// the browser's own event and takes no argument at all. The count is asserted so that a THIRD
 	// one has to be a deliberate act, and both are named so that swapping one for a listener that
-	// does take a handle cannot pass by keeping the total the same.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
+	// does take a handle cannot pass by keeping the total the same. The third is the claim gate's
+	// stand-in for `reef-inbox:open` while it waits for an answer: same event, and it only records
+	// that an open was asked for (`openRequested = true`), naming nothing.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 3);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
+	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', heldOpen\);/);
+	assert.match(CORAL_CODE, /const heldOpen = \(\) => \{\s*openRequested = true;\s*\};/);
 	assert.match(CORAL_CODE, /const onPagehide = \(\) => aiLog\.flush\(\);/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('pagehide', onPagehide\);/);
 });
@@ -743,8 +747,11 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 // a THIRD listener stays a deliberate act, and a check that each one has a matching removal.
 
 test('B9: every window listener mount() adds has a removal beside it', () => {
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 2);
-	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 2);
+	// Three registrations, four removals: the claim gate's stand-in is removed on two paths — when
+	// the answer arrives and on an `unmount` before it does (mount.test.mjs measures both).
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 3);
+	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 4);
+	assert.equal((CORAL_CODE.match(/window\.removeEventListener\('reef-inbox:open', heldOpen\);/g) || []).length, 2);
 	assert.match(CORAL_CODE, /window\.removeEventListener\('reef-inbox:open', openPanel\);/);
 	assert.match(CORAL_CODE, /window\.removeEventListener\('pagehide', onPagehide\);/);
 	assert.equal(/no teardown to remove it from/.test(CORAL_SOURCE), false,
