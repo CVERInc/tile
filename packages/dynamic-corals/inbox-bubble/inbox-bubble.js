@@ -1947,6 +1947,16 @@ export async function askInboxClaim(apiBase, kind, id, signal) {
  */
 export const CLAIM_GATE_TTL_MS = AI_LOG_CLAIM_TTL_MS;
 /**
+ * How old a remembered yes may be and still stand in for an answer nobody could give.
+ *
+ * 🔴 ONLY FOR「NOBODY COULD SAY」, NEVER AGAINST A NO. Before the gate existed the bubble was drawn
+ * without asking anything, so on a site that HAS an Inbox the gate must not add a new way to lose
+ * it — a throttled address, a slow minute. Past the six hours a yes is due to be asked again, not
+ * void: when the asking fails, a yes heard within this window is the best answer there is, and the
+ * bubble is drawn. A definite no still wins over it and deletes it.
+ */
+export const CLAIM_GATE_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
  * The waits between attempts when nobody could answer — so at most four requests per mount, over
  * about forty seconds, and then nothing until the next page. Not the log's five-minute backoff: that
  * one guards a buffer that can wait; this one decides whether a visitor sees a way to reach a person
@@ -1969,12 +1979,12 @@ export function claimGateKey(tenant) {
  * shape is ignored rather than trusted — and a stamp from the future is not believed at all, or it
  * would never expire.
  */
-export function rememberedClaim(storage, tenant, now = Date.now()) {
+export function rememberedClaim(storage, tenant, now = Date.now(), maxAge = CLAIM_GATE_TTL_MS) {
 	if (!storage) return false;
 	try {
 		const raw = JSON.parse(storage.getItem(claimGateKey(tenant)));
 		return !!raw && raw.claim === true && Number.isFinite(raw.at) && raw.at <= now &&
-			now - raw.at < CLAIM_GATE_TTL_MS;
+			now - raw.at < maxAge;
 	} catch {
 		return false;
 	}
@@ -2010,11 +2020,14 @@ function probeOnce(apiBase, kind, id) {
  * 4xx — see `askInboxClaim`): `true`/`false` is the answer, `null` is「nobody could say」.
  * `cancelled()` stops it between attempts (an SPA that took the container off while it was asking).
  */
-async function awaitInboxClaim(apiBase, kind, id, cancelled) {
+async function awaitInboxClaim(apiBase, kind, id, cancelled, settleOnUnknown = false) {
 	for (let attempt = 0; ; attempt++) {
 		const { answer, retry } = await probeOnce(apiBase, kind, id);
 		if (typeof answer === 'boolean' || cancelled()) return answer;
-		if (!retry || attempt >= CLAIM_GATE_RETRY_MS.length) return null;
+		// `settleOnUnknown`: the caller already has an answer to fall back on (a remembered yes, see
+		// `CLAIM_GATE_STALE_MS`) and will draw on this `null` — so it must stop asking, or a later no
+		// would arrive with a bubble already on screen and nothing honest to do about it.
+		if (settleOnUnknown || !retry || attempt >= CLAIM_GATE_RETRY_MS.length) return null;
 		await new Promise((resolve) => setTimeout(resolve, CLAIM_GATE_RETRY_MS[attempt]));
 		if (cancelled()) return null;
 	}
@@ -2560,12 +2573,14 @@ export async function mount(el) {
 			cancelled = true;
 			window.removeEventListener('reef-inbox:open', heldOpen);
 		});
-		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled);
+		// An expired yes, still young enough to stand in for an answer nobody could give.
+		const fallback = rememberedClaim(gateStore, tenant, Date.now(), CLAIM_GATE_STALE_MS);
+		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled, fallback);
 		if (cancelled) return;
 		gating.delete(el);
 		window.removeEventListener('reef-inbox:open', heldOpen);
 		rememberClaim(gateStore, tenant, claimed);
-		if (claimed !== true) return;
+		if (claimed === false || (claimed === null && !fallback)) return;
 	}
 
 	injectStyles();

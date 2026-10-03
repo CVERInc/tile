@@ -69,6 +69,13 @@ and after opening one they should see the bubble on the very next page they load
 - **Inbox gone** (a site that leaves the platform) → a browser that heard yes keeps drawing it for
   at most six hours from that answer; the first ask after that takes it away.
 
+**An older yes stands in when nobody can answer.** Past six hours a yes is asked again, not thrown
+away: if that ask cannot be answered — refused, throttled, timed out, unreachable — and this browser
+heard yes within the last **30 days**, the bubble is drawn anyway and nothing more is asked on that
+page. Before this check existed the bubble was drawn without asking anything, so a site with an
+Inbox must not gain a new way to lose it. Only a missing answer is covered this way: a definite no
+still draws nothing and deletes the remembered yes.
+
 The cost: one request per page view on a site without an Inbox, one request per six hours per
 browser on a site with one — up to four per mount only while the endpoint cannot be reached.
 

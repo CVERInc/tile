@@ -976,3 +976,68 @@ test('gate: throttled or refused (4xx) ⇒ not asked again on this page — retr
 	assert.equal(probes(from).length, 2);
 	assert.equal(el.children.length, 1);
 });
+
+test('gate: nobody could say, but this browser once heard yes (within 30 days) ⇒ drawn, without asking further', async () => {
+	// Before the gate the bubble was drawn without asking anything; it must not add a way for a site that
+	// HAS an Inbox to lose its bubble just because the question was throttled or timed out.
+	const DAY = 24 * 60 * 60 * 1000;
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	const stale = (id, age) => storage.set(claimKey('site', id), JSON.stringify({ claim: true, at: Date.now() - age }));
+
+	// throttled + a yes from seven hours ago ⇒ drawn, exactly as before, one request, not re-dated.
+	stale('stale-1', 7 * 60 * 60 * 1000);
+	const kept = storage.get(claimKey('site', 'stale-1'));
+	claimScript.set('stale-1', [ok({ ok: true, claimed: false, throttled: true })]);
+	let from = requests.length;
+	const a = new El({ 'data-kind': 'site', 'data-id': 'stale-1' });
+	await mount(a);
+	await drain();
+	assert.equal(probes(from).length, 1);
+	assert.equal(a.children.length, 1, 'a throttled ask took the bubble off a site that has an Inbox');
+	assert.equal(digest(a.children[0].innerHTML), BEFORE.closed);
+	assert.equal(storage.get(claimKey('site', 'stale-1')), kept, 'a non-answer re-dated the yes');
+
+	// a timeout (could not ask) + a yes from 29 days ago ⇒ drawn at the first non-answer, no retry wait.
+	stale('stale-2', 29 * DAY);
+	claimScript.set('stale-2', [() => new Promise(() => {}), ok({ ok: true, claimed: false })]);
+	const d = longDelays.length;
+	from = requests.length;
+	const b = new El({ 'data-kind': 'site', 'data-id': 'stale-2' });
+	await mount(b);
+	await drain();
+	assert.equal(b.children.length, 1);
+	assert.equal(probes(from).length, 1, 'kept asking after deciding to draw — a later no would have nothing to undo');
+	assert.deepEqual(gaps(d), []);
+
+	// a yes older than 30 days is not a yes any more ⇒ nothing.
+	stale('stale-3', 31 * DAY);
+	claimScript.set('stale-3', [ok({ ok: true, claimed: false, throttled: true })]);
+	const c = new El({ 'data-kind': 'site', 'data-id': 'stale-3' });
+	await mount(c);
+	await drain();
+	assert.ok(nothingRendered(c));
+
+	// no record at all ⇒ nothing (the plain could-not-ask case, pinned again beside its sibling).
+	claimScript.set('stale-4', [ok({ ok: true, claimed: false, throttled: true })]);
+	const e = new El({ 'data-kind': 'site', 'data-id': 'stale-4' });
+	await mount(e);
+	await drain();
+	assert.ok(nothingRendered(e));
+
+	// a definite NO beats any remembered yes ⇒ nothing, and the record is gone.
+	stale('stale-5', 7 * 60 * 60 * 1000);
+	claimScript.set('stale-5', [ok({ ok: true, claimed: false })]);
+	const f = new El({ 'data-kind': 'site', 'data-id': 'stale-5' });
+	await mount(f);
+	await drain();
+	assert.ok(nothingRendered(f));
+	assert.equal(storage.has(claimKey('site', 'stale-5')), false);
+
+	// and a future stamp is no more believed here than it is fresh.
+	storage.set(claimKey('site', 'stale-6'), JSON.stringify({ claim: true, at: Date.now() + DAY }));
+	claimScript.set('stale-6', [ok({ ok: true, claimed: false, throttled: true })]);
+	const g = new El({ 'data-kind': 'site', 'data-id': 'stale-6' });
+	await mount(g);
+	await drain();
+	assert.ok(nothingRendered(g));
+});
