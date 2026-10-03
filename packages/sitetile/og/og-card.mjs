@@ -127,15 +127,6 @@ export function cardKey(rendererId, raw) {
 const KEY_SHAPE = /^v1 [0-9a-f]{64} ([0-9a-f]{64})$/;
 
 /**
- * What turns inputs into pixels, as one digest — or null when that cannot be established.
- *
- * The installed dependency tree is read from the package manager's own record of it, because the
- * renderer's direct dependencies are not the whole story: the layout engine and the font parser
- * arrive transitively, and either can move a glyph without any version named here changing. With
- * no such record there is nothing to show two installs are the same, so the answer is null and
- * nothing is reused. Coarse on purpose — an unrelated dependency bump redraws every card once.
- */
-/**
  * The parts of the machine a card's pixels depend on that no file under node_modules records.
  *
  * Line breaking asks the runtime where words end (so the Node and ICU versions matter), and the
@@ -149,6 +140,15 @@ export function currentRuntime() {
   return { node: process.version, platform: process.platform, arch: process.arch, icu: process.versions.icu || '', glibc };
 }
 
+/**
+ * What turns inputs into pixels, as one digest — or null when that cannot be established.
+ *
+ * The installed dependency tree is read from the package manager's own record of it, because the
+ * renderer's direct dependencies are not the whole story: the layout engine and the font parser
+ * arrive transitively, and either can move a glyph without any version named here changing. With
+ * no such record there is nothing to show two installs are the same, so the answer is null and
+ * nothing is reused. Coarse on purpose — an unrelated dependency bump redraws every card once.
+ */
 export function rendererIdentity({ nodeModulesDir, packages, weight, index, runtime = currentRuntime() }) {
   const lock = [join(nodeModulesDir, '.package-lock.json'), join(nodeModulesDir, '..', 'package-lock.json')]
     .map((p) => { try { return readFileSync(p); } catch { return null; } }).find(Boolean);
