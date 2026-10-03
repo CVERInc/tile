@@ -133,16 +133,18 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 /**
- * Every delay of a second or more that the coral asks for, recorded and then run at once — the
- * claim gate's retry schedule is measured here rather than waited for. Shorter timers (this file's
- * own `settle`) keep their real meaning.
+ * Every delay of a second or more that the coral asks for, recorded and then run almost at once —
+ * the claim gate's retry schedule is measured here rather than waited for. The per-request timeout
+ * (ten seconds) runs after 25 ms instead of 0, so a stubbed reply that is merely a promise away
+ * still wins the race, and only a request that never comes back loses it. Shorter timers (this
+ * file's own `settle`) keep their real meaning.
  */
 const longDelays = [];
 const realSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (fn, ms = 0, ...rest) => {
 	if (ms >= 1000) {
 		longDelays.push(ms);
-		return realSetTimeout(fn, 0, ...rest);
+		return realSetTimeout(fn, ms === 10_000 ? 25 : 0, ...rest);
 	}
 	return realSetTimeout(fn, ms, ...rest);
 };
@@ -562,7 +564,8 @@ test('54: the buffer is beside the handle, never inside it', async () => {
 	assert.deepEqual(buffer.pages, ['/']);
 	assert.equal(buffer.questions.length, 0);
 	assert.ok(buffer.sid);
-	assert.equal(buffer.claim, null, 'a mount asks nobody whether this tenant is claimed');
+	// The claim gate asked before drawing, but under its own key: the log's answer is still its own.
+	assert.equal(buffer.claim, null, 'the gate wrote its answer into the log');
 	assert.equal(storage.has(`reef-inbox:site:${id}`), false, 'a mount minted a handle');
 });
 
@@ -719,7 +722,10 @@ const probes = (from = 0) =>
 	requests.slice(from).filter((r) => r.url.includes('/api/inbox/session') && r.init.method !== 'POST');
 /** Run every queued timer and promise until nothing moves — the retry schedule compressed. */
 async function drain() {
-	for (let i = 0; i < 40; i++) await settle();
+	for (let round = 0; round < 6; round++) {
+		for (let i = 0; i < 20; i++) await settle();
+		await new Promise((r) => realSetTimeout(r, 30)); // past a compressed per-request timeout
+	}
 }
 /** Every long delay except the per-request timeout's own — i.e. the waits between attempts. */
 const PROBE_TIMEOUT_MS = 10_000;
