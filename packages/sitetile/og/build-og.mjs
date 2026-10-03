@@ -2,6 +2,14 @@
 // Render the link-preview cards for a built site, into dist/og/**.png.
 //
 //   node build-og.mjs <distDir> [--brand "ATLAS.DEV"] [--bg "#084a4c"] [--fg "#ffffff"]
+//                                [--reuse <dir>] [--report <file>]
+//
+// --reuse <dir>   cards a previous build drew, laid out like a site root (<dir>/og/….png, each at
+//                 the path its og:image names, untouched). They are CANDIDATES, never trusted for
+//                 being there: one is copied in only when the key inside it equals the key of the
+//                 card this build would draw (og-card.mjs, "reuse"). A caller may hand over a whole
+//                 previous deployment without knowing what changed since.
+// --report <file> the counts below as JSON, for a caller that must not parse a sentence.
 //
 // Runs AFTER astro build and BEFORE deploy. It reads the BUILT html rather than the IR on purpose:
 // the title and description in dist/ are the ones that actually shipped, after every merge and
@@ -15,11 +23,11 @@
 // person who clicked. So: every og:image a page claims must exist on disk when this exits, and if
 // one does not, explicit opt-in FAILS the build. Default-enabled cards may degrade only after
 // removing their image metadata, so no surviving claim can point at a missing card.
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { makeCardRenderer, ourCardPath, deadCards } from './og-card.mjs';
+import { makeCardRenderer, ourCardPath, deadCards, cardInputs, cardMatches, CARD_MAX_BYTES } from './og-card.mjs';
 
 const arg = (n, d = '') => { const i = process.argv.indexOf('--' + n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const DIST = process.argv[2];
@@ -29,6 +37,13 @@ if (!DIST || DIST.startsWith('--')) { console.error('build-og: usage: build-og.m
 const BRAND = arg('brand', '');
 const BG = arg('bg', '');
 const FG = arg('fg', '');
+const REUSE = arg('reuse', '');
+const REPORT = arg('report', '');
+// Never the reason a build fails: the cards are what was asked for, the report is about them.
+const report = (counts) => {
+  if (!REPORT) return;
+  try { writeFileSync(REPORT, JSON.stringify({ v: 1, ...counts }) + '\n'); } catch { /* see above */ }
+};
 
 function htmlFiles(dir, out = []) {
   for (const e of readdirSync(dir)) {
@@ -70,7 +85,11 @@ const pages = htmlFiles(DIST).map((file) => {
 // somewhere else entirely, and that is not ours to overwrite.
 const mine = pages.filter((p) => ourCardPath(p.img));
 
-if (!mine.length) { console.log('▸ og cards: none requested'); process.exit(0); }
+if (!mine.length) {
+  report({ cards: 0, rendered: 0, reused: 0, replaced: 0, omitted: 0 });
+  console.log('▸ og cards: none requested');
+  process.exit(0);
+}
 
 // Resolved from the ASTRO package, not from here. This file lives in og/ and the renderer's deps
 // are installed in astro/node_modules — node resolution walks UP from the importer, never sideways,
@@ -97,15 +116,23 @@ try {
 }
 
 let renderCard;
+// True only when NOTHING can be drawn this run. It changes what a candidate is compared against —
+// see cardMatches — and it is tied to the stand-in below so the two cannot come apart.
+let rendererDown = false;
 try {
   if (setupError) throw setupError;
   const nodeModulesDir = join(ASTRO_DIR, 'node_modules');
   renderCard = makeCardRenderer({ satori, Resvg, nodeModulesDir, packages: ['inter', 'noto-sans-tc'] });
 } catch (e) {
   if (strict) throw e;
-  // Only optional cards defer setup failures, preserving already-present incremental cards.
+  // Only optional cards defer setup failures; a card already here survives if it is this page's.
+  rendererDown = true;
   renderCard = async () => { throw e; };
 }
+
+// Where a previous build's copy of a card would be, if the caller offered one. `rel` has already
+// been through ourCardPath, which is what refuses a path that tries to walk somewhere else.
+const offered = (rel) => (REUSE ? join(resolve(REUSE), rel) : '');
 
 function omitFailedCard(p) {
   // Only generated, optional cards reach here. Authored images and unrelated metadata survive.
@@ -134,26 +161,51 @@ function omitFailedCard(p) {
 }
 
 const omissions = new Map();
-let made = 0, skipped = 0, omitted = 0;
+let made = 0, skipped = 0, omitted = 0, replaced = 0;
 const t0 = Date.now();
 for (const p of mine) {
   const rel = ourCardPath(p.img);
   const outPath = join(DIST, rel);
-  // Incrementality without a second source of truth: an incremental build refills dist/ from the
-  // previous deployment, so an unchanged page arrives with its card already there. Skipping on
-  // presence therefore costs nothing on a full build (dist is empty) and skips everything that did
-  // not change on an incremental one — and, unlike a caller-supplied "only these" list, it can
-  // never leave the gate below unsatisfiable. The first shape of this took a list and would have
-  // failed every incremental build it was meant to speed up.
-  if (existsSync(outPath)) { skipped++; continue; }
+  const inputs = cardInputs({
+    title: p.title || '', brand: BRAND || p.brand || '',
+    bg: BG || p.bg || '#111111', fg: FG || '#ffffff',
+  });
+  // Incrementality without a second source of truth. A card may already be at its path (a caller
+  // refilled dist/ from the previous deployment) or be offered under --reuse; either way it is kept
+  // only if the key inside it is the key of the card THIS page, on THIS site, with THIS renderer
+  // would get. So it costs nothing on a first build (there is nothing to compare), skips everything
+  // that did not change afterwards, and can never leave the gate below unsatisfiable.
+  //
+  // 🩸 This used to be `existsSync(outPath)`, and "it exists" was read as "it is unchanged". That
+  // held only while the caller refilled nothing but pages it had proved untouched; the test knew
+  // nothing about a renamed site, a new colour or a new renderer, and would have kept every card
+  // through all three.
+  const want = rendererDown ? { inputs } : { key: typeof renderCard.keyFor === 'function' ? renderCard.keyFor(inputs) : null };
+  let kept = false, candidates = 0;
+  for (const from of [outPath, offered(rel)]) {
+    if (!from) continue;
+    let bytes;
+    try {
+      // Sized before it is read: a candidate is whatever was put there, and one too large to be a
+      // card is not worth loading to find that out. (cardMatches refuses it by size as well.)
+      bytes = statSync(from).size > CARD_MAX_BYTES ? null : readFileSync(from);
+    } catch { continue; }
+    candidates++;
+    if (!bytes || !cardMatches(bytes, want)) continue;
+    if (from !== outPath) { mkdirSync(dirname(outPath), { recursive: true }); writeFileSync(outPath, bytes); }
+    kept = true;
+    break;
+  }
+  if (kept) { skipped++; continue; }
+  // Whatever sits at the path now is not this page's card. Gone BEFORE the attempt, so a draw that
+  // fails cannot leave the old picture behind to be deployed under the new page.
+  rmSync(outPath, { force: true });
   try {
     mkdirSync(dirname(outPath), { recursive: true });
-    const png = await renderCard({
-      title: p.title || '', brand: BRAND || p.brand || '',
-      bg: BG || p.bg || '#111111', fg: FG || '#ffffff',
-    });
+    const png = await renderCard(inputs);
     writeFileSync(outPath, png);
     made++;
+    if (candidates) replaced++;
   } catch (e) {
     if (!p.optional) throw e;
     omitFailedCard(p);
@@ -178,4 +230,7 @@ if (dead.length) {
   console.error('  A dead share card is invisible to everyone except the person who clicked. Failing the build.');
   process.exit(1);
 }
-console.log(`▸ og cards: ${made} rendered${skipped ? `, ${skipped} unchanged` : ''}${omitted ? `, ${omitted} omitted` : ''} (${Date.now() - t0}ms) — all ${mine.length - omitted} og:image target(s) exist`);
+report({ cards: mine.length - omitted, rendered: made, reused: skipped, replaced, omitted });
+// `replaced` is the number that explains a slow build: cards that came back and were not this
+// build's cards. All of them at once means the site or the renderer changed, not that reuse broke.
+console.log(`▸ og cards: ${made} rendered${replaced ? ` (${replaced} in place of a card that no longer matches)` : ''}${skipped ? `, ${skipped} unchanged` : ''}${omitted ? `, ${omitted} omitted` : ''} (${Date.now() - t0}ms) — all ${mine.length - omitted} og:image target(s) exist`);
