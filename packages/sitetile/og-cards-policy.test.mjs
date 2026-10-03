@@ -6,7 +6,25 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import zlib from 'node:zlib';
 import { parseSite, safeSrc } from './site-core.js';
+import { cardKey, stampCard } from './og/og-card.mjs';
+
+// The stand-in renderer below returns this picture for every card, stamped with the key of the
+// inputs it was asked for — a card is only ever kept for its key, so a stand-in that returned
+// unstamped bytes would make every "already there" case below mean "never kept".
+const STUB_RENDERER = 'ab'.repeat(32);
+const TINY_PNG = (() => {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0); body.copy(out, 4); out.writeUInt32BE(zlib.crc32(body), 8 + data.length);
+    return out;
+  };
+  return Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), chunk('IHDR', Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0])),
+    chunk('IDAT', zlib.deflateSync(Buffer.from([0, 0]))), chunk('IEND', Buffer.alloc(0))]);
+})();
+const cardFor = (title) => stampCard(TINY_PNG, cardKey(STUB_RENDERER, { title }));
 
 const layout = readFileSync(new URL('./astro/src/layouts/SiteLayout.astro', import.meta.url), 'utf8');
 const start = layout.indexOf('const absUrl =');
@@ -58,9 +76,12 @@ function run(meta, defaultOn, rendererMode = 'render', { existing = false, extra
     for (let i = 1; i <= extraPages; i++) {
       writeFileSync(join(dir, `extra-${i}.html`), fixture(ogCardPolicy, 'Broken', `https://example.test/og/extra-${i}.png`));
     }
+    // 'current': the card each page would get now. 'unkeyed': a file that is merely THERE.
     if (existing) {
       mkdirSync(join(dir, 'og'));
-      for (const name of ['sample', 'healthy']) writeFileSync(join(dir, `og/${name}.png`), 'existing card');
+      for (const [name, title] of [['sample', 'Broken'], ['healthy', 'Healthy']]) {
+        writeFileSync(join(dir, `og/${name}.png`), existing === 'unkeyed' ? 'existing card' : cardFor(title));
+      }
     }
     const original = new URL('./og/og-card.mjs?original', import.meta.url).href;
     const dep = join(dir, 'dependency.cjs');
@@ -68,14 +89,18 @@ function run(meta, defaultOn, rendererMode = 'render', { existing = false, extra
       : 'module.exports = function () {}; module.exports.Resvg = class {};');
     const preload = join(dir, 'loader.mjs');
     const rendererStub = `
-export { ourCardPath, deadCards } from '${original}';
+import { cardKey, stampCard } from '${original}';
+export { ourCardPath, deadCards, cardInputs, cardMatches } from '${original}';
 export function makeCardRenderer() {
   if (${JSON.stringify(rendererMode)} === 'init') throw new Error('fixture font unavailable');
-  return async ({ title }) => {
-    if (${JSON.stringify(rendererMode)} === 'mixed' && title === 'Healthy') throw new Error('fixture other failure');
-    if (title === 'Broken' && ${JSON.stringify(rendererMode)} !== 'success') throw new Error('fixture render failure');
-    return Buffer.from('fixture image');
+  const keyFor = (raw) => cardKey(${JSON.stringify(STUB_RENDERER)}, raw);
+  const render = async (raw) => {
+    if (${JSON.stringify(rendererMode)} === 'mixed' && raw.title === 'Healthy') throw new Error('fixture other failure');
+    if (raw.title === 'Broken' && ${JSON.stringify(rendererMode)} !== 'success') throw new Error('fixture render failure');
+    return stampCard(Buffer.from(${JSON.stringify(TINY_PNG.toString('base64'))}, 'base64'), keyFor(raw));
   };
+  render.keyFor = keyFor;
+  return render;
 }`;
     const hook = `export async function load(url, context, next) {
   if (url.endsWith('/og/og-card.mjs')) return {
@@ -96,7 +121,7 @@ register(${JSON.stringify('data:text/javascript,' + encodeURIComponent(hook))}, 
     const result = spawnSync(process.execPath, ['--import', preload, fileURLToPath(new URL('./og/build-og.mjs', import.meta.url)), dir], { encoding: 'utf8' });
     return { ...result, broken: readFileSync(join(dir, 'broken.html'), 'utf8'),
       healthy: readFileSync(join(dir, 'healthy.html'), 'utf8'), authored: readFileSync(join(dir, 'authored.html'), 'utf8'),
-      healthyCard: existsSync(join(dir, 'og/healthy.png')), before: broken };
+      healthyCard: existsSync(join(dir, 'og/healthy.png')), brokenCard: existsSync(join(dir, 'og/sample.png')), before: broken };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 test('explicit true keeps render failures fatal', () => {
@@ -131,7 +156,7 @@ for (const [name, meta, defaultOn] of [
 });
 
 for (const mode of ['init', 'import', 'missing']) {
-  for (const existing of [false, true]) {
+  for (const existing of [false, 'current']) {
     test(`explicit true rejects ${mode} failure with ${existing ? 'existing' : 'missing'} cards`, () => {
       const result = run({ 'og-cards': 'true' }, false, mode, { existing });
       assert.equal(result.status, 1, 'strict setup failures remain fatal before checking cached cards');
@@ -160,7 +185,7 @@ for (const mode of ['render', 'init', 'import']) {
   });
 }
 
-for (const existing of [false, true]) {
+for (const existing of [false, 'current']) {
   test(`successful ${existing ? 'cached' : 'rendered'} cards preserve the summary verbatim`, () => {
     const result = run({ 'og-cards': 'true' }, false, 'success', { existing });
     assert.equal(result.status, 0, result.stderr);
@@ -172,10 +197,26 @@ for (const existing of [false, true]) {
 }
 
 test('optional cached cards survive missing dependencies without degradation', () => {
-  const result = run({}, true, 'missing', { existing: true });
+  const result = run({}, true, 'missing', { existing: 'current' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '', 'cached optional cards need no renderer');
   assert.equal(result.broken, result.before, 'cached optional metadata survives');
+});
+
+// A file at the card's path is not a card for being there. These two are the controls for the two
+// tests above: the same runs, with files that carry no key.
+test('a file that is merely at the card path is redrawn, and the summary says so', () => {
+  const result = run({ 'og-cards': 'true' }, false, 'success', { existing: 'unkeyed' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.replace(/\(\d+ms\)/, '(TIMEms)'),
+    '▸ og cards: 2 rendered (2 in place of a card that no longer matches) (TIMEms) — all 2 og:image target(s) exist\n');
+});
+test('with no renderer, a file that is merely at the card path does not keep the page its image', () => {
+  const result = run({}, true, 'missing', { existing: 'unkeyed' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /^og cards: omitted 2 page\(s\) \[broken\.html, healthy\.html\]: fixture dependency unavailable\n$/);
+  assert.doesNotMatch(result.broken, /og:image|twitter:image/);
+  assert.deepEqual([result.brokenCard, result.healthyCard], [false, false], 'and the unverifiable files do not ship');
 });
 
 for (const value of ['', 'null', '~', '""', "''"]) {
