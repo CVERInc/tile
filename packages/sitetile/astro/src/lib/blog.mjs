@@ -665,6 +665,33 @@ export function fmtDate(s, format, lang) {
 // pages. Returns { popular, categories } of { heading, items:[{label,href}] } — or null when the
 // home page has neither (a site whose home has no such sections is unaffected).
 // General: any site whose real footer repeats a popular-posts list + a tag cloud.
+//
+// footerListItem: one `- [label](href)` list line → { label, href }, or null. GREEDY label so a title
+// carrying its own brackets (a title like "[Series] How to …" — an inner `[…]` that is literal link
+// text) is captured whole rather than truncated at the first `]`.
+// It returns what /^-\s*\[(.+)\]\(([^)]+)\)\s*$/ returned on the trimmed line, read from the end
+// instead. 🩸 That regex tried every `](` in the line as the label's end, and from each one read the
+// rest of the line looking for a `)`: one line of `- [` and thousands of `](` was quadratic, and this
+// runs for every page of every site (SiteLayout reads the home's widgets for its footer). From the
+// end there is one candidate: the line must close with `)`, the href holds no other `)`, so the label
+// ends at the LAST `](` after the line's previous `)` — and the regex's greedy label chose the last
+// one too. `.` stops at a line terminator, so that `](` must also come before the label's first one.
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
+export function footerListItem(line) {
+  const t = String(line).trim();
+  const close = t.length - 1;                          // `\)\s*$` on a trimmed line: the last character
+  if (t[0] !== '-' || t[close] !== ')') return null;
+  let from = 1;
+  while (from < t.length && /\s/.test(t[from])) from++;
+  if (t[from] !== '[') return null;
+  from++;                                              // the label starts here
+  LINE_TERMINATOR.lastIndex = from;
+  const stop = LINE_TERMINATOR.exec(t);
+  // the label is one character or more, the href one character or more (`[^)]+`)
+  const at = t.lastIndexOf('](', Math.min(close - 3, stop ? stop.index : t.length));
+  if (at < from + 1 || at < t.lastIndexOf(')', close - 1)) return null;
+  return { label: t.slice(from, at), href: t.slice(at + 2, close) };
+}
 export function footerWidgets(contentGlob) {
   let homeRaw = null;
   for (const [path, raw] of Object.entries(contentGlob || {})) {
@@ -673,14 +700,7 @@ export function footerWidgets(contentGlob) {
   if (!homeRaw) return null;
   let sections = [];
   try { sections = parseSite(homeRaw).sections || []; } catch { return null; }
-  // Parse one `- [label](href)` list line. GREEDY label so a title carrying its own brackets
-  // (a title like "[Series] How to …" — an inner `[…]` that is literal link text)
-  // is captured whole rather than truncated at the first `]`.
-  const parseLine = (line) => {
-    const m = String(line).trim().match(/^-\s*\[(.+)\]\(([^)]+)\)\s*$/);
-    return m ? { label: m[1], href: m[2] } : null;
-  };
-  const listItems = (body) => String(body || '').split('\n').map((l) => l.trim()).filter(Boolean).map(parseLine);
+  const listItems = (body) => String(body || '').split('\n').map((l) => l.trim()).filter(Boolean).map(footerListItem);
   const asWidget = (s) => {
     const items = listItems(s.body);
     return items.length && items.every(Boolean) ? { heading: s.title || '', items } : null;

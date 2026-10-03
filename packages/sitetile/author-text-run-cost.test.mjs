@@ -10,6 +10,9 @@
 //     each run over the whole line, and `(\w+)=` re-read every long word from each of its letters.
 //     A bare word of about 33,000 letters made the built pattern too large for the engine: a
 //     SyntaxError, and the whole page failed to render.
+//   - footerListItem (blog.mjs), each line of the home page's popular-posts list and tag cloud, which
+//     the layout reads for the footer of every page of every site: `- [` and thousands of `](` was
+//     quadratic, so its cost was multiplied by the number of pages.
 //
 // The same two rulers as the other *-run-cost tests:
 //   1. SAME ANSWER — each replaced implementation is kept below, verbatim, as the reference, and an
@@ -26,9 +29,24 @@
 // hand the same-answer ruler near-miss rewrites; both must go red.
 
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as core from './site-core.js';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+// blog.mjs imports the model layer as `@sitetile`, an Astro alias plain node cannot resolve
+// (same shim as dialogue-sides.test.mjs).
+registerHooks({
+  resolve(spec, ctx, next) {
+    if (spec === '@sitetile') return { url: pathToFileURL(join(HERE, 'site-core.js')).href, shortCircuit: true };
+    return next(spec, ctx);
+  },
+});
+const blog = await import('./astro/src/lib/blog.mjs');
+
 const { parseParams } = core;
+const { footerListItem, footerWidgets } = blog;
 
 let passed = 0;
 function test(name, fn) {
@@ -69,6 +87,36 @@ function refParseParams(raw) {
   return map;
 }
 
+// footerWidgets as it was, with its list-line parser.
+const refFooterListItem = (line) => {
+  const m = String(line).trim().match(/^-\s*\[(.+)\]\(([^)]+)\)\s*$/);
+  return m ? { label: m[1], href: m[2] } : null;
+};
+function refFooterWidgets(contentGlob) {
+  let homeRaw = null;
+  for (const [path, raw] of Object.entries(contentGlob || {})) {
+    if (/(^|\/)home\.md$/.test(path)) { homeRaw = String(raw || ''); break; }
+  }
+  if (!homeRaw) return null;
+  let sections = [];
+  try { sections = core.parseSite(homeRaw).sections || []; } catch { return null; }
+  const parseLine = refFooterListItem;
+  const listItems = (body) => String(body || '').split('\n').map((l) => l.trim()).filter(Boolean).map(parseLine);
+  const asWidget = (s) => {
+    const items = listItems(s.body);
+    return items.length && items.every(Boolean) ? { heading: s.title || '', items } : null;
+  };
+  const popular = (() => {
+    const s = sections.find((x) => x.type === 'prose' && x.title && asWidget(x));
+    return s ? asWidget(s) : null;
+  })();
+  const categories = (() => {
+    const s = sections.find((x) => x.type === 'tagcloud');
+    return s ? asWidget(s) : null;
+  })();
+  return (popular || categories) ? { popular, categories } : null;
+}
+
 // ── inputs ──────────────────────────────────────────────────────────────────────────────────────
 // A param line: keys, values, quoted labels with and without `→href`, bare flags, and everything that
 // can break a word or a value. The prototype's own names are here because the map is a plain object:
@@ -95,6 +143,22 @@ function paramLine() {
     return s;
   }
   return words([...PARAM_TOKEN, ...SPACE], rnd() < 0.9 ? 16 : 120);
+}
+// A list line: an item, nearly one, or none — brackets inside the title, a `)` inside the href, line
+// terminators the label's `.` stops at, and the runs that used to cost the most.
+const LINK_BITS = ['[', ']', '(', ')', '](', '] (', '-', '- ', '-\t', '- [', '\\', '\\]', '*', '#', 'a', 'x y', '中文', '😀', '\ud83d',
+  '[Series] ', '/a', 'https://e.com/(x)y', '?q=1', '&amp;'];
+function listLine() {
+  const r = rnd();
+  if (r < 0.01) return '';
+  if (r < 0.04) return pick(['', '- [', '-[']) + pick(['](', '[', ')', '](x', ']()']).repeat(1 + Math.floor(rnd() * 200)) + pick(['', ')', 'x)', ' )']);
+  if (r < 0.7) {
+    const label = words([...LINK_BITS, ...SPACE], 5) + pick(['', 'Title', '[x] y', 'a](b', '中文']);
+    const href = pick(['/a', '/p/1', 'https://e.com/x', '', 'a b', 'a)b', 'x(y', '#t', words([...LINK_BITS, ...SPACE], 3)]);
+    return pick(['', ' ', '\t', '\u3000']) + pick(['- ', '-', '-  ', '- \t', '* ', '', '-\u00a0']) + pick(['[', '[', '[', '', ' [']) + label +
+      pick(['](', '](', '](', ']', '] (', '](\n', ')(']) + href + pick([')', ')', ')', '', ' )', '))', ') x', ')\u3000', ')\r']);
+  }
+  return words([...LINK_BITS, ...SPACE], rnd() < 0.9 ? 16 : 120);
 }
 // A map's own entries and, when `__proto__=` replaced it, its prototype's: deepEqual alone would
 // compare the two prototypes by identity.
@@ -129,6 +193,23 @@ test('a bare word too long to fit in a pattern is a flag, and the page still ren
   const md = '---\nsitetile-page: home\ntitle: T\n---\n\n## G\n%% sitetile: grid cols=2 ' + 'w'.repeat(40000) + ' %%\n### A\nx\n';
   const html = core.renderSiteToHtml(core.parseSite(md));
   assert.ok(/<section/.test(html), 'renderSiteToHtml returned a page');
+});
+
+const lines = Array.from({ length: SAMPLES }, listLine);
+test("footerWidgets reads each list line exactly as before", () => {
+  let items = 0;
+  for (const l of lines) {
+    const want = refFooterListItem(l);
+    assert.deepEqual(footerListItem(l), want, JSON.stringify(l));
+    if (want) items++;
+  }
+  assert.ok(items > SAMPLES / 10 && items < SAMPLES * 0.9, 'both verdicts are common (' + items + ' of ' + SAMPLES + ' lines are items)');
+  // and through the home page it is read from, against footerWidgets as it was
+  for (let i = 0; i < lines.length; i += 10) {
+    const glob = { 'src/content/home.md': '---\nsitetile-page: home\ntitle: T\n---\n\n## Popular\n\n' + lines[i] + '\n' + lines[i + 1] +
+      '\n\n## Tags\n%% sitetile: tagcloud %%\n' + lines[i + 2] + '\n' };
+    assert.deepEqual(footerWidgets(glob), refFooterWidgets(glob), JSON.stringify(glob));
+  }
 });
 
 // ── ruler 2: linear cost ───────────────────────────────────────────────────────────────────────
@@ -174,8 +255,15 @@ function growth(run, make, n, control) {
 }
 
 const keyedLater = (k, tail) => Array.from({ length: k }, (_, i) => 'w' + (i % 50) + tail).join(' ') + ' ' + Array.from({ length: 50 }, (_, i) => 'w' + i + ' =').join(' ');
+const homeWith = (line) => ({ 'src/content/home.md': '---\nsitetile-page: home\ntitle: T\n---\n\n## Popular\n\n' + line + '\n' });
 const PATHS = [
   // [name, n, (n) → input, what consumes it, (n) → its control: the same path on text it has nothing to re-read in]
+  ['footerWidgets: a home list line of `](`', 2000, (k) => homeWith('- [' + ']('.repeat(k)), footerWidgets, (k) => homeWith('- [' + 'xx'.repeat(k))],
+  ['footerListItem: `- [` and a run of `](`', 2000, (k) => '- [' + ']('.repeat(k), footerListItem, (k) => '- [' + 'xx'.repeat(k)],
+  // Closed with a `)`, the replaced regex was linear too (its greedy label tries the last `](` first);
+  // these two hold the reader that replaced it to the same.
+  ['footerListItem: `- [` and a run of `](x`, closed', 1500, (k) => '- [' + '](x'.repeat(k) + ')', footerListItem, (k) => '- [' + 'xxx'.repeat(k) + ')'],
+  ['footerWidgets: a home list line of `](x`, closed', 1500, (k) => homeWith('- [' + '](x'.repeat(k) + ')'), footerWidgets, (k) => homeWith('- [' + 'xxx'.repeat(k) + ')')],
   ['parseParams: one long bare word', 2000, (k) => 'cols=2 ' + 'w'.repeat(k), parseParams, (k) => 'cols=2 ' + 'w x'.repeat(k / 3)],
   ['parseParams: one long word with no `=`, among keys', 2000, (k) => 'cols=2 ' + 'w'.repeat(k) + '-x', parseParams, (k) => 'cols=2 ' + 'w-'.repeat(k / 2)],
   // Bare words, each written again at the end of the line as a `key =` (with the space, so it is not a
@@ -196,6 +284,8 @@ test('control: the cost ruler goes red on the code it replaced', () => {
   // The replaced parseParams itself, on the inputs above (a long word stays under the size that throws).
   const { grew, said } = growth(refParseParams, (k) => 'cols=2 ' + 'w'.repeat(k), 1500);
   assert.ok(grew > LIMIT, 'the replaced parseParams ' + said);
+  const footer = growth(refFooterListItem, (k) => '- [' + ']('.repeat(k), 1500);
+  assert.ok(footer.grew > LIMIT, 'the replaced list-line regex ' + footer.said);
 });
 test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   // A flag scan that forgets a key may have space before its `=` (`cols =2` is not a flag `cols`).
@@ -215,7 +305,16 @@ test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
     const m = refParseParams(raw.replace(/"/g, ' '));
     if (snapshot(m) !== snapshot(refParseParams(raw))) quoted++;
   }
-  assert.ok(missed && quoted, 'each near-miss is caught (' + [missed, quoted] + ')');
+  // a list-line reader whose label may cross a line terminator, and one whose label is lazy
+  const anyChar = (l) => { const m = String(l).trim().match(/^-\s*\[([\s\S]+)\]\(([^)]+)\)\s*$/); return m ? { label: m[1], href: m[2] } : null; };
+  const lazy = (l) => { const m = String(l).trim().match(/^-\s*\[(.+?)\]\(([^)]+)\)\s*$/); return m ? { label: m[1], href: m[2] } : null; };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  let crossed = 0, early = 0;
+  for (const l of lines) {
+    if (!same(anyChar(l), refFooterListItem(l))) crossed++;
+    if (!same(lazy(l), refFooterListItem(l))) early++;
+  }
+  assert.ok(missed && quoted && crossed && early, 'each near-miss is caught (' + [missed, quoted, crossed, early] + ')');
 });
 
 console.log('\nsitetile author-text run cost: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
