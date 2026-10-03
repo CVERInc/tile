@@ -182,9 +182,13 @@ function omit(p, e) {
 const t0 = Date.now();
 for (const p of mine) {
   const url = ourCardPath(p.img);
-  // (A directory under that name is not a card; leave it.)
-  if (!claimed.has(url)) try { rmSync(join(DIST, url), { force: true }); } catch { /* see above */ }
   const file = cardFile(p.img);
+  // The old encoded copy of THIS card, and nothing else. Only a claim that names a file has one, and
+  // only when the encoded spelling differs from it. That also makes the join below a plain one: every
+  // segment of `url` decodes to a safe, non-empty name, so none is `.`, `..` or empty, and the join
+  // cannot collapse it onto another page's card (`/og/./x.png` joined is og/x.png).
+  // (A directory under that name is not a card; leave it.)
+  if (file && file !== url && !claimed.has(url)) try { rmSync(join(DIST, url), { force: true }); } catch { /* see above */ }
   if (!file) {
     // A claim that names no file — an escape that does not decode, or one that decodes into another
     // directory. Nothing can be written for it. An optional card goes the way of any card that could

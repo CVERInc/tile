@@ -248,3 +248,43 @@ real('a file whose decoded name is a card is not taken for an old copy of anothe
   assert.ok(cardNames(dist).includes('og/notes/%E7%AD%86%E8%A8%98.png'), 'the literal-percent card is there');
   assert.ok(cardNames(dist).includes('og/notes/筆記.png'));
 }));
+
+// ── what the old-name cleanup may delete ─────────────────────────────────────────────────────────
+// Every .html file in dist/ is read, including static pages a site ships as they are, so an
+// og:image reaches the build in shapes the layout never emits. `/og/./x.png` and `/og//x.png` name
+// no file (cardFile refuses them), but a path join collapses both to og/x.png — another page's card.
+real('a claim that names no file never deletes another page\'s card', () => withTemp((root) => {
+  for (const img of ['https://example.test/og/./about.png', 'https://example.test/og//about.png']) {
+    for (const policy of ['optional', 'strict']) {
+      const dist = join(root, `${policy}-${img.includes('/./') ? 'dot' : 'slashes'}`);
+      const odd = { path: '/static', title: 'A static page', policy, img };
+      writeSite(dist, [...ASCII, odd]);
+      const b = build(dist);
+      assert.ok(existsSync(join(dist, 'og/about.png')), `${img} (${policy}): the about page keeps its card`);
+      if (policy === 'optional') {
+        ok(b);
+        assert.equal(b.omitted, 1, b.line);
+        assert.doesNotMatch(readFileSync(join(dist, 'static/index.html'), 'utf8'), /og:image|twitter:image/);
+      } else {
+        assert.equal(b.status, 1, b.stdout);
+        assert.match(b.stderr, /static[/\\]index\.html → /, 'the gate names the page that made the claim');
+        assert.doesNotMatch(b.stderr, /about[/\\]index\.html/, 'and not the page whose card was fine');
+      }
+    }
+  }
+}));
+
+real('files under og/ that no page claims are left alone', () => withTemp((dist) => {
+  // A site's own image that happens to live under og/, a name with a literal percent sign, and a
+  // card left behind by a page that no longer exists: none of them is an old name of a card here.
+  writeSite(dist, SITE);
+  const strangers = { 'og/brand/logo.png': 'a logo', 'og/100%.png': 'a percent', 'og/gone-page.png': 'an old card' };
+  for (const [name, body] of Object.entries(strangers)) {
+    mkdirSync(dirname(join(dist, name)), { recursive: true });
+    writeFileSync(join(dist, name), body);
+  }
+  ok(build(dist));
+  for (const [name, body] of Object.entries(strangers)) {
+    assert.equal(existsSync(join(dist, name)) && readFileSync(join(dist, name), 'utf8'), body, `${name} is untouched`);
+  }
+}));
