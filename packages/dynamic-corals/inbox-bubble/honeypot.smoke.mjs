@@ -57,6 +57,8 @@ async function arm({ label, layered, hostCss }) {
 	await p.route('**/api/**', (r) => {
 		const u = r.request().url();
 		if (u.includes('/api/kaito')) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ kind: 'refused', text: 'no record' }) });
+		// The tenant has an Inbox: without a yes from the claim probe the coral draws no bubble at all.
+		if (u.includes('/api/inbox/session') && r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, claimed: true }) });
 		return r.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
 	});
 	await p.goto(fixtureUrl, { waitUntil: 'load', timeout: 20000 });

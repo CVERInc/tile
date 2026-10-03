@@ -1879,12 +1879,28 @@ export async function fetchAssistantName(apiBase, kind, id) {
  * like a no while refusing to write it down as one.
  */
 export async function probeInboxClaim(apiBase, kind, id) {
+	return (await askInboxClaim(apiBase, kind, id)).answer;
+}
+
+/**
+ * The same request, saying also whether asking again could change the answer — which only the
+ * claim gate below needs. `answer` is exactly what `probeInboxClaim` returns.
+ *
+ * 🔴 `retry` IS TRUE ONLY FOR「COULD NOT ASK」: no network, a 5xx, a body of the wrong shape (and,
+ * in the gate, a timeout). NOT for `throttled` and NOT for a 4xx: the probe's rate limit counts per
+ * address across every site on the platform, so asking a throttled endpoint three more times only
+ * spends that address's allowance on the next site as well; and a 400 (`bad_kind`/`bad_id`) says
+ * the same thing every time it is asked.
+ */
+export async function askInboxClaim(apiBase, kind, id, signal) {
 	try {
 		const res = await fetch(
 			`${apiBase}/api/inbox/session?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`,
-			{ headers: { accept: 'application/json' } }
+			// `signal` only from the claim gate below, which bounds each attempt; the log's own
+			// probe passes none and is exactly the request it always was.
+			signal ? { headers: { accept: 'application/json' }, signal } : { headers: { accept: 'application/json' } }
 		);
-		if (!res.ok) return null;
+		if (!res.ok) return { answer: null, retry: !(res.status >= 400 && res.status < 500) };
 		const body = await res.json();
 		// 🔴 `throttled` IS THE SERVER SAYING「WE DO NOT KNOW」, and it arrives dressed as a no
 		// (contract §一.1: over the read rate limit the endpoint answers 200 `claimed:false,
@@ -1893,12 +1909,133 @@ export async function probeInboxClaim(apiBase, kind, id) {
 		// case on a busy site, since the probe shares the `read` bucket with a 15-second transcript
 		// poll — is indistinguishable from「this site has no Inbox」, which drops this browser's
 		// buffer and poisons the answer for six hours (review D2).
-		if (body?.throttled === true) return null;
-		return typeof body?.claimed === 'boolean' ? body.claimed : null;
+		if (body?.throttled === true) return { answer: null, retry: false };
+		return typeof body?.claimed === 'boolean'
+			? { answer: body.claimed, retry: false }
+			: { answer: null, retry: true };
 	} catch {
-		return null;
+		return { answer: null, retry: true };
 	}
 }
+
+// ── the claim gate: draw a bubble only where a message can actually arrive ─────────────────────
+//
+// 🩸 WHY A MOUNT NOW ASKS FIRST. A site layout may put this coral on every page of a site at build
+// time, and a build cannot know whether that site's owner ever opened the Inbox. The server refuses
+// every message for a tenant without one — on purpose: nothing may switch itself on because a
+// stranger used it. Each half is right, and together they were a button that failed every time it
+// was pressed, on live sites, with the owner never told. A bubble that cannot deliver is worse than
+// no bubble, so the decision moved to the one place that can see both halves: here, at view time.
+//
+// 🔴 THREE OUTCOMES AND NO FOURTH. Yes ⇒ the bubble, exactly as it was drawn before the gate. No ⇒
+// nothing: no node, no listener, no storage, no further request. Could not ask ⇒ also nothing, and
+// ask again on a fixed schedule; draw the moment somebody says yes. There is no「maybe」state on
+// screen — not a greyed button, not a bubble that apologises when opened — because every such state
+// is one a visitor can press and be let down by.
+//
+// 🔴 THE SAME QUESTION THE SERVER ASKS. `GET /api/inbox/session` answers `claimed` from the same
+// settings row whose absence makes a message come back `not_claimed`, for every kind this coral
+// mounts, so the bubble and the send cannot disagree about which tenants have an Inbox.
+
+/**
+ * How long this browser trusts a YES before asking again at mount — the log's own six hours.
+ *
+ * 🔴 ONLY A YES IS REMEMBERED. An Inbox, once opened, is not closed by its owner (a site that leaves
+ * the platform stops answering yes, and the next ask after this window notices). A NO is never
+ * written down: the person most likely to have just seen this site without an Inbox is its owner,
+ * and they must see the bubble on the very next page after opening one — not six hours later.
+ */
+export const CLAIM_GATE_TTL_MS = AI_LOG_CLAIM_TTL_MS;
+/**
+ * How old a remembered yes may be and still stand in for an answer nobody could give.
+ *
+ * 🔴 ONLY FOR「NOBODY COULD SAY」, NEVER AGAINST A NO. Before the gate existed the bubble was drawn
+ * without asking anything, so on a site that HAS an Inbox the gate must not add a new way to lose
+ * it — a throttled address, a slow minute. Past the six hours a yes is due to be asked again, not
+ * void: when the asking fails, a yes heard within this window is the best answer there is, and the
+ * bubble is drawn. A definite no still wins over it and deletes it.
+ */
+export const CLAIM_GATE_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * The waits between attempts when the question could not be asked — so at most four requests per
+ * mount, forty seconds of waiting between them (100 s if every one also times out), and then nothing
+ * until the next page. Not the log's five-minute backoff: that
+ * one guards a buffer that can wait; this one decides whether a visitor sees a way to reach a person
+ * on THIS page.
+ */
+export const CLAIM_GATE_RETRY_MS = Object.freeze([2000, 8000, 30000]);
+/** Each attempt's own ceiling — a request that never comes back is a「could not ask」, not a hang. */
+export const CLAIM_GATE_TIMEOUT_MS = 15_000;
+const CLAIM_GATE_PREFIX = 'reef-inbox:claim:';
+
+/** The remembered yes — beside the handle and the log, never inside either. */
+export function claimGateKey(tenant) {
+	return CLAIM_GATE_PREFIX + tenant;
+}
+
+/**
+ * A yes this browser heard less than `CLAIM_GATE_TTL_MS` ago.
+ *
+ * Same posture as `parseHandle`: storage is a place other code can write, so anything but our own
+ * shape is ignored rather than trusted — and a stamp from the future is not believed at all, or it
+ * would never expire.
+ */
+export function rememberedClaim(storage, tenant, now = Date.now(), maxAge = CLAIM_GATE_TTL_MS) {
+	if (!storage) return false;
+	try {
+		const raw = JSON.parse(storage.getItem(claimGateKey(tenant)));
+		return !!raw && raw.claim === true && Number.isFinite(raw.at) && raw.at <= now &&
+			now - raw.at < maxAge;
+	} catch {
+		return false;
+	}
+}
+
+/** Writes a yes, forgets on a no, and leaves things alone when nobody answered. */
+function rememberClaim(storage, tenant, claimed, now = Date.now()) {
+	if (!storage || typeof claimed !== 'boolean') return;
+	try {
+		if (claimed) storage.setItem(claimGateKey(tenant), JSON.stringify({ claim: true, at: now }));
+		else storage.removeItem(claimGateKey(tenant));
+	} catch {
+		// A store that will not take the write costs this browser one probe per page, nothing more.
+	}
+}
+
+/** One attempt, cut off at `CLAIM_GATE_TIMEOUT_MS`; aborts the request it gave up on. */
+function probeOnce(apiBase, kind, id) {
+	const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+	let timer;
+	const timeout = new Promise((resolve) => {
+		timer = setTimeout(() => {
+			if (ctl) ctl.abort();
+			resolve({ answer: null, retry: true });
+		}, CLAIM_GATE_TIMEOUT_MS);
+	});
+	return Promise.race([askInboxClaim(apiBase, kind, id, ctl ? ctl.signal : undefined), timeout])
+		.finally(() => clearTimeout(timer));
+}
+
+/**
+ * Ask until somebody answers, the schedule runs out, or asking again could not help (`throttled`, a
+ * 4xx — see `askInboxClaim`): `true`/`false` is the answer, `null` is「nobody could say」.
+ * `cancelled()` stops it between attempts (an SPA that took the container off while it was asking).
+ */
+async function awaitInboxClaim(apiBase, kind, id, cancelled, settleOnUnknown = false) {
+	for (let attempt = 0; ; attempt++) {
+		const { answer, retry } = await probeOnce(apiBase, kind, id);
+		if (typeof answer === 'boolean' || cancelled()) return answer;
+		// `settleOnUnknown`: the caller already has an answer to fall back on (a remembered yes, see
+		// `CLAIM_GATE_STALE_MS`) and will draw on this `null` — so it must stop asking, or a later no
+		// would arrive with a bubble already on screen and nothing honest to do about it.
+		if (settleOnUnknown || !retry || attempt >= CLAIM_GATE_RETRY_MS.length) return null;
+		await new Promise((resolve) => setTimeout(resolve, CLAIM_GATE_RETRY_MS[attempt]));
+		if (cancelled()) return null;
+	}
+}
+
+/** Mounts still waiting on their claim answer → the function that tells them to stop. */
+const gating = new WeakMap();
 
 /**
  * The one-line status under the title — the part of the header that actually
@@ -2407,6 +2544,45 @@ export async function mount(el) {
 		el.innerHTML = `<p class="${PREFIX}-error">inbox-bubble: missing data-kind / data-id</p>`;
 		return;
 	}
+	const tenant = `${kind}:${id}`;
+
+	// The claim gate — see its header above `CLAIM_GATE_TTL_MS`. A remembered yes takes no await at
+	// all, so on a site with an Inbox every page after the first draws exactly when it always did.
+	// Otherwise nothing below runs — no style, no node, no listener, no storage — until a yes arrives.
+	const gateStore = (() => {
+		try {
+			return window.localStorage;
+		} catch {
+			return null;
+		}
+	})();
+	/** A `reef-inbox:open` that arrived while the gate was still asking — see `heldOpen` below. */
+	let openRequested = false;
+	if (!rememberedClaim(gateStore, tenant)) {
+		let cancelled = false;
+		// 🩸 AN OPEN ASKED FOR WHILE WE ASK IS HELD, NOT DROPPED. A site's own `DOMContentLoaded`
+		// handler (a footer「report a problem」link, say) may dispatch `reef-inbox:open` a round trip
+		// before there is an answer — the exact race the listener-before-first-fetch rule further
+		// down exists to prevent. So a stand-in listener only remembers that it was asked; it is
+		// removed when the answer arrives, whatever it is, or on `unmount`, and the request is
+		// honoured only on a yes. It opens nothing itself: there is no panel to open yet.
+		const heldOpen = () => {
+			openRequested = true;
+		};
+		window.addEventListener('reef-inbox:open', heldOpen);
+		gating.set(el, () => {
+			cancelled = true;
+			window.removeEventListener('reef-inbox:open', heldOpen);
+		});
+		// An expired yes, still young enough to stand in for an answer nobody could give.
+		const fallback = rememberedClaim(gateStore, tenant, Date.now(), CLAIM_GATE_STALE_MS);
+		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled, fallback);
+		if (cancelled) return;
+		gating.delete(el);
+		window.removeEventListener('reef-inbox:open', heldOpen);
+		rememberClaim(gateStore, tenant, claimed);
+		if (claimed === false || (claimed === null && !fallback)) return;
+	}
 
 	injectStyles();
 	const copy = copyFor(el);
@@ -2416,7 +2592,6 @@ export async function mount(el) {
 	// republish (CANON 第一條). Every reader below already goes through `headHtml()`/`renderClosed()`,
 	// so a re-render after that read is all it takes.
 	let assistantName = resolveAssistantName(el);
-	const tenant = `${kind}:${id}`;
 	const handle = loadHandle(tenant);
 	/**
 	 * The reachable human thread — 🔴 renamed from the old bare `conv` on
@@ -2975,8 +3150,9 @@ export async function mount(el) {
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
 	//
-	// 🔴 ONE OF THE TWO `window` LISTENERS THIS FILE INSTALLS (the other is ruling 54's `pagehide`,
-	// at the bottom of `mount`). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
+	// 🔴 ONE OF THE TWO `window` LISTENERS A DRAWN BUBBLE KEEPS (the other is ruling 54's `pagehide`,
+	// at the bottom of `mount`; the claim gate's `heldOpen` exists only while it asks, and is gone
+	// before this line runs). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
 	// an SPA that tears the container out calls it, and neither listener is left holding `root`
 	// and `el`, nor re-rendering into a node nobody can see. A host that never calls it gets what
 	// every version before 0.7.9 did — `mountAll`'s `data-dynamic-coral-mounted` guard stops the
@@ -2985,7 +3161,7 @@ export async function mount(el) {
 	// script may honestly make of every panel on the page, and it names no conversation, which is
 	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
 	window.addEventListener('reef-inbox:open', openPanel);
-	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
+	if (openRequested || shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
 
 	// ── the deferred write's two lines (ruling 54) ─────────────────────────────────────────
 	//
@@ -3006,9 +3182,12 @@ export async function mount(el) {
 	const onPagehide = () => aiLog.flush();
 	if (aiLog.enabled()) window.addEventListener('pagehide', onPagehide);
 
-	// 🔴 REGISTERED HERE, SYNCHRONOUSLY, BESIDE THE TWO LISTENERS IT UNDOES (review B9). Nothing
-	// above this line in `mount` awaits, so there is no window in which a listener exists and its
-	// removal does not: an `unmount` that races the first transcript read below still finds it.
+	// 🔴 REGISTERED HERE, SYNCHRONOUSLY, BESIDE THE TWO LISTENERS IT UNDOES (review B9). The only
+	// await above this line is the claim gate's, and the one thing installed across it — `heldOpen`
+	// — is removed by the answer or by an `unmount` through `gating`; from here back to the gate's
+	// answer nothing awaits,
+	// so there is no window in which a listener exists and its removal does not: an `unmount` that
+	// races the first transcript read below still finds it.
 	// `stopPolling()` invalidates that read too, so it cannot paint into a detached root.
 	mounted.set(el, () => {
 		window.removeEventListener('reef-inbox:open', openPanel);
@@ -3064,6 +3243,15 @@ const mounted = new WeakMap();
  * file did not mount (or already unmounted), and does nothing then.
  */
 export function unmount(el) {
+	// Still asking whether there is an Inbox: nothing is installed yet, so stopping the ask is all
+	// there is to undo — and the answer, when it lands, draws nothing.
+	const stopAsking = gating.get(el);
+	if (stopAsking) {
+		gating.delete(el);
+		stopAsking();
+		el.removeAttribute('data-dynamic-coral-mounted');
+		return true;
+	}
 	const dispose = mounted.get(el);
 	if (!dispose) return false;
 	mounted.delete(el);
