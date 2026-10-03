@@ -135,7 +135,21 @@ const KEY_SHAPE = /^v1 [0-9a-f]{64} ([0-9a-f]{64})$/;
  * no such record there is nothing to show two installs are the same, so the answer is null and
  * nothing is reused. Coarse on purpose — an unrelated dependency bump redraws every card once.
  */
-export function rendererIdentity({ nodeModulesDir, packages, weight, index }) {
+/**
+ * The parts of the machine a card's pixels depend on that no file under node_modules records.
+ *
+ * Line breaking asks the runtime where words end (so the Node and ICU versions matter), and the
+ * rasteriser is a native binary chosen at load time by platform, architecture AND C library — the
+ * package manager installs the glibc and the musl build side by side, so the install record is
+ * identical on both and cannot tell them apart.
+ */
+export function currentRuntime() {
+  let glibc = '';
+  try { glibc = process.report?.getReport?.().header?.glibcVersionRuntime || ''; } catch { /* not glibc, or no report */ }
+  return { node: process.version, platform: process.platform, arch: process.arch, icu: process.versions.icu || '', glibc };
+}
+
+export function rendererIdentity({ nodeModulesDir, packages, weight, index, runtime = currentRuntime() }) {
   const lock = [join(nodeModulesDir, '.package-lock.json'), join(nodeModulesDir, '..', 'package-lock.json')]
     .map((p) => { try { return readFileSync(p); } catch { return null; } }).find(Boolean);
   if (!lock) return null;
@@ -144,8 +158,8 @@ export function rendererIdentity({ nodeModulesDir, packages, weight, index }) {
   const add = (label, bytes) => { h.update(`${label}\0${bytes.length}\0`); h.update(bytes); };
   add('source', readFileSync(fileURLToPath(import.meta.url)));
   add('shape', Buffer.from(JSON.stringify({ packages, weight, w: CARD_W, h: CARD_H })));
-  // Line breaking asks the runtime where words end, and the rasteriser is a native binary.
-  add('runtime', Buffer.from(JSON.stringify([process.version, process.platform, process.arch, process.versions.icu || ''])));
+  // Every key of it, as pairs — the same shape as the inputs digest, for the same reason.
+  add('runtime', Buffer.from(JSON.stringify(Object.keys(runtime).sort().map((k) => [k, runtime[k]]))));
   add('tree', lock);
   for (const dep of ['satori', '@resvg/resvg-js']) add(`dep ${dep}`, readFileSync(join(nodeModulesDir, dep, 'package.json')));
   for (const pkg of packages) add(`ranges ${pkg}`, readFileSync(join(nodeModulesDir, '@fontsource', pkg, `${weight}.css`)));

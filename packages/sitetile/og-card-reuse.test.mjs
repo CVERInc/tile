@@ -392,6 +392,18 @@ test('🔴 the renderer identity moves when ANY file it is made of moves, and is
     put('@fontsource/alpha/400.css', readFileSync(join(nm, '@fontsource/alpha/700.css')));
     assert.notEqual(og.rendererIdentity({ nodeModulesDir: nm, packages: ['alpha'], weight: 400, index: og.indexFontPackage(nm, 'alpha', 400) }), id, 'weight');
 
+    // 🔴 …and when the MACHINE moves, which no file in the tree records: a newer runtime breaks
+    // lines differently, and the two C-library builds of the rasteriser are installed side by side.
+    // Iterated over what currentRuntime() returns, so a part added later is covered the day it is.
+    const runtime = og.currentRuntime();
+    assert.deepEqual(Object.keys(runtime).sort(), ['arch', 'glibc', 'icu', 'node', 'platform'], 'this list is only here so a change to it is seen');
+    const on = (rt) => og.rendererIdentity({ nodeModulesDir: nm, packages: ['alpha'], weight: 700, index: og.indexFontPackage(nm, 'alpha', 700), runtime: rt });
+    assert.equal(on(runtime), id, 'the default is the machine this is running on');
+    for (const k of Object.keys(runtime)) {
+      assert.notEqual(on({ ...runtime, [k]: `${runtime[k]}+` }), id, `runtime.${k} changed and the identity did not`);
+    }
+    assert.notEqual(on({ ...runtime, node: runtime.platform, platform: runtime.node }), id, 'two parts trading values is a different machine');
+
     rmSync(join(nm, '.package-lock.json'));
     assert.equal(identity(), null, 'no record of what is installed ⇒ no identity ⇒ nothing is reused');
     writeFileSync(join(root, 'astro', 'package-lock.json'), '{"packages":{}}');
