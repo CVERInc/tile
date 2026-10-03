@@ -18,8 +18,11 @@
 //      each side. The control beside each reading (the same path carrying letters) does not move the
 //      limit. Sizes keep the replaced pass's slowest reading under a second, so putting it back is a
 //      red line, not a run that never ends.
-// Each ruler is shown to fire: the controls at the bottom time the replaced pass itself, and hand the
-// same-answer ruler near-miss rewrites; both must go red.
+//   3. FOLD COST — a fold once shifted every node after it, a cost the clock reads erratically (bulk
+//      memory moves), so it is counted: the elements any Array#splice in the call shifts past its cut,
+//      at n and 8n.
+// Each ruler is shown to fire: the controls at the bottom run the replaced pass itself through the
+// cost and fold rulers, and hand the same-answer ruler near-miss rewrites; all must go red.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -99,6 +102,10 @@ function sample() {
   const r = rnd();
   if (r < 0.01) return '';
   if (r < 0.06) return pick(['', 'x', ' ']) + (pick(['a* ', 'a_ ', 'a** ', '*a ', '_a ', 'a*a', '*a* ', '**a* ', 'a*** ', ' * '])).repeat(1 + Math.floor(rnd() * 100));
+  if (r < 0.15) {                                    // one character, runs of different lengths, interleaved
+    const c = pick(['*', '_']);
+    return words([c, c + c, c + c + c, c.repeat(4), c.repeat(5), 'a', 'b', ' ', '.', 'foo'], 30);
+  }
   if (r < 0.75) {
     let s = '';
     for (let n = 1 + Math.floor(rnd() * 8); n > 0; n--) s += rnd() < 0.5 ? pick(DELIM) : words(TEXT, 3);
@@ -125,6 +132,14 @@ await test('markEmphasis renders every sample exactly as the replaced pass did',
   }
   // 🔴 A differential test over inputs that never take a branch proves nothing about it.
   for (const [k, v] of Object.entries({ em, strong, literal })) assert.ok(v > SAMPLES / 20 && v < SAMPLES * 0.95, 'the samples exercise "' + k + '" both ways (' + v + ')');
+});
+
+// The rule of 3 and its neighbours, by name — CommonMark's own examples among them.
+const NAMED = ['*foo**bar**baz*', '*foo**bar*', '**foo*bar*baz**', 'foo***bar***baz', 'foo******bar*********baz', '*foo**bar***',
+  '**foo*bar**', '*foo *bar**', '**foo**bar*', '***foo** bar*', '*a**b**c*', '***both***', '**a *b* c**', '_foo__bar__baz_', '__foo_bar_baz__',
+  '*a **b** c*', '****a****', '*a***b***c*', 'a**b*c**d*', '**a*', '*a**', '***a*', '*a***'];
+await test('the rule of 3, by name, renders exactly as before', () => {
+  for (const s of NAMED) assert.equal(cssmd.renderInlineMd(s), ref.renderInlineMd(s), JSON.stringify(s));
 });
 
 // ── ruler 2: linear cost ───────────────────────────────────────────────────────────────────────
@@ -170,13 +185,16 @@ function growth(run, unit, n) {
 }
 const PATHS = [
   // [repeated unit, n, what consumes it]
-  ['a* ', 1000, cssmd.renderInlineMd],          // closers only: `*` after a letter, before a space
-  ['a_ ', 1000, cssmd.renderInlineMd],
-  ['a** ', 1000, cssmd.renderInlineMd],
-  ['a*** ', 1000, cssmd.renderInlineMd],
-  ['a*a', 1000, cssmd.renderInlineMd],           // intraword: each `*` can open and close
-  ['a* ', 1000, inlineHtml],                     // the site renderer's inline path
-  ['*a* ', 1000, cssmd.renderInlineMd],          // pairs, which already folded as they went
+  ['a* ', 500, cssmd.renderInlineMd],          // closers only: `*` after a letter, before a space
+  ['a_ ', 500, cssmd.renderInlineMd],
+  ['a** ', 500, cssmd.renderInlineMd],
+  ['a*** ', 500, cssmd.renderInlineMd],
+  ['a*a', 500, cssmd.renderInlineMd],           // intraword: each `*` can open and close
+  ['a* ', 500, inlineHtml],                     // the site renderer's inline path
+  ['*a* ', 250, cssmd.renderInlineMd],          // pairs, which already folded as they went
+  // Pairs with a literal `_` inside (intraword, so a delimiter node that never matches): each fold
+  // takes three nodes out and puts one back. What that once cost is counted below, not timed.
+  ['*a_b* ', 250, cssmd.renderInlineMd],
 ];
 for (const [unit, n, run] of PATHS) {
   await test('`' + unit + '` repeated, through ' + run.name + ', grows linearly (n = ' + n.toLocaleString('en-US') + ')', () => {
@@ -185,10 +203,42 @@ for (const [unit, n, run] of PATHS) {
   });
 }
 
+// What a fold moves. 🩸 The fold used to be a splice in the middle of the whole line, which shifted
+// every node after it: quadratic on a line that folds often. Its cost is memory moves, which V8 does
+// in bulk — the same input read 150 ms on one run and 5 s on another, so a clock is no ruler for it.
+// Counted instead: the elements any Array#splice inside the call had to shift past its cut.
+function shiftedBySplice(run) {
+  const splice = Array.prototype.splice;
+  let shifted = 0;
+  Array.prototype.splice = function (start, deleteCount, ...items) {
+    const len = this.length, at = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
+    const cut = arguments.length < 2 ? len - at : Math.min(Math.max(deleteCount, 0), len - at);
+    if (items.length !== cut) shifted += len - at - cut;
+    return splice.apply(this, arguments);
+  };
+  try { run(); } finally { Array.prototype.splice = splice; }
+  return shifted;
+}
+const shiftGrowth = (render, unit, n) => {
+  const [a, b] = [n, 8 * n].map((k) => shiftedBySplice(() => render(unit.repeat(k))));
+  return { grew: b / Math.max(a, 1), said: 'elements shifted at n / 8n: ' + a + ' / ' + b };
+};
+for (const unit of ['*a_b* ', '**a_b** ', '*a *b c* d*']) {
+  await test('a fold of `' + unit + '` repeated moves no more than linear work (n = 500)', () => {
+    const { grew, said } = shiftGrowth(cssmd.renderInlineMd, unit, 500);
+    if (process.env.CSSMD_EMPHASIS_VERBOSE) console.log('    ' + said);
+    assert.ok(grew <= 8, said);
+  });
+}
+
 // ── controls: both rulers fire ─────────────────────────────────────────────────────────────────
 await test('control: the cost ruler goes red on the pass it replaced', () => {
-  const { grew, said } = growth(ref.renderInlineMd, 'a* ', 1000);
+  const { grew, said } = growth(ref.renderInlineMd, 'a* ', 500);
   assert.ok(grew > LIMIT, 'the replaced pass ' + said);
+});
+await test('control: the fold ruler goes red on the pass it replaced', () => {
+  const { grew, said } = shiftGrowth(ref.renderInlineMd, '*a_b* ', 500);
+  assert.ok(grew > 22, 'the replaced pass: ' + said);
 });
 await test('control: the same-answer ruler goes red on a near-miss rewrite', async () => {
   // A floor shared by closers that differ in the rule of 3 (length mod 3), and one shared by closers

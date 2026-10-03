@@ -236,36 +236,46 @@ function scanRuns(s) {
 // the character, whether the closer can also open, and its original length mod 3 (the rule of 3
 // below); an opener only ever loses length, and nodes only ever fold away. So the next closer of
 // that kind stops where the last one gave up.
+//
+// 🩸 The fold was a splice in the middle of the whole line, which moved every node after it: on a
+// line that folds often — `*a_b* *a_b* …`, where each fold takes three nodes out and puts one back —
+// that was quadratic too. The nodes left of the closer are kept as a stack, `out`, instead: a fold
+// only ever cuts the top of it, so each node leaves it at most once.
 function processEmphasis(nodes) {
-  const floor = {};                              // kind → index below which no opener serves it
-  let ci = 0;
-  while (ci < nodes.length) {
-    const closer = nodes[ci];
-    if (closer.t !== 'd' || !closer.canClose || closer.n === 0) { ci++; continue; }
-    const kind = closer.ch + (closer.canOpen ? '1' : '0') + (closer.orig % 3);
-    let oi = -1;
-    for (let k = ci - 1, stop = floor[kind] || 0; k >= stop; k--) {
-      const o = nodes[k];
-      if (o.t !== 'd' || o.n === 0 || o.ch !== closer.ch || !o.canOpen) continue;
-      // The spec's "rule of 3": when either side of the pair could play both parts, a match whose
-      // combined ORIGINAL run lengths is a multiple of 3 is refused — unless both lengths are. It
-      // reads like numerology and is not: it is what makes `*a**b**c*` an italic containing a bold
-      // rather than the other way round.
-      if ((closer.canOpen || o.canClose) && (closer.orig + o.orig) % 3 === 0 &&
-          !(closer.orig % 3 === 0 && o.orig % 3 === 0)) continue;
-      oi = k; break;
+  const floor = {};                              // kind → index in `out` below which no opener serves it
+  const out = [];                                // everything left of the closer, folded as it goes
+  for (const closer of nodes) {
+    if (closer.t === 'd' && closer.canClose) {
+      const kind = closer.ch + (closer.canOpen ? '1' : '0') + (closer.orig % 3);
+      while (closer.n > 0) {                     // after a fold the closer may still have length
+        let oi = -1;
+        for (let k = out.length - 1, stop = floor[kind] || 0; k >= stop; k--) {
+          const o = out[k];
+          if (o.t !== 'd' || o.n === 0 || o.ch !== closer.ch || !o.canOpen) continue;
+          // The spec's "rule of 3": when either side of the pair could play both parts, a match whose
+          // combined ORIGINAL run lengths is a multiple of 3 is refused — unless both lengths are. It
+          // reads like numerology and is not: it is what makes `*a**b**c*` an italic containing a bold
+          // rather than the other way round.
+          if ((closer.canOpen || o.canClose) && (closer.orig + o.orig) % 3 === 0 &&
+              !(closer.orig % 3 === 0 && o.orig % 3 === 0)) continue;
+          oi = k; break;
+        }
+        if (oi < 0) { floor[kind] = out.length; break; }   // the closer will stand at out.length
+        const opener = out[oi];
+        const use = (closer.n >= 2 && opener.n >= 2) ? 2 : 1;   // two delimiters is strong, one is em
+        const kids = out.splice(oi + 1);
+        opener.n -= use; closer.n -= use;
+        out.push({ t: 'e', use: use, mark: closer.ch.repeat(use), kids: kids });
+        // Every floor above the opener stood among the nodes just folded, or where the closer was
+        // to stand: below oi + 2 (the opener, then the emphasis node — never an opener) is all
+        // known now, and the closer stands at oi + 2.
+        for (const k in floor) if (floor[k] > oi + 1) floor[k] = oi + 2;
+      }
     }
-    if (oi < 0) { floor[kind] = ci; ci++; continue; }
-    const opener = nodes[oi];
-    const use = (closer.n >= 2 && opener.n >= 2) ? 2 : 1;   // two delimiters is strong, one is em
-    const kids = nodes.slice(oi + 1, ci);
-    opener.n -= use; closer.n -= use;
-    nodes.splice(oi + 1, ci - oi - 1, { t: 'e', use: use, mark: closer.ch.repeat(use), kids: kids });
-    // The fold moved every later node left by (ci - oi - 2), and left an emphasis node — never an
-    // opener — where the folded ones were. A floor among them now stands just past it.
-    for (const k in floor) if (floor[k] > oi + 1) floor[k] = floor[k] > ci ? floor[k] - (ci - oi - 2) : oi + 2;
-    ci = oi + 2;                                  // the closer moved here; it may still have length
+    out.push(closer);
   }
+  nodes.length = 0;
+  for (const n of out) nodes.push(n);
 }
 
 // Pass 3 — serialize. A delimiter that never matched prints the characters it is made of, so the
