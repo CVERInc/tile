@@ -96,7 +96,10 @@ const CTA_LINK = ['[', RUN_LABEL, '](', RUN_PAREN, ')'];      // /\[([^\]]+)\]\(
 const TAG_LINK = ['[', RUN_LABEL, '](', RUN_BALANCED, ')'];   // '\\[([^\\]]+)\\]\\((' + RE_URL_BALANCED_PARENS_SRC + ')\\)'
 const DESC_IMAGE = ['![', RUN_ALT, '](', RUN_PAREN_ANY, ')']; // /!\[[^\]]*\]\([^)]*\)/g
 const DESC_LINK = ['[', RUN_ALT, '](', RUN_PAREN_ANY, ')'];   // /\[([^\]]*)\]\([^)]*\)/g
-const BRACKET_SHAPES = { MD_IMAGE, WIKI_IMAGE, MD_LINK, LINK_DEST, CTA_LINK, TAG_LINK, DESC_IMAGE, DESC_LINK };
+// An image's opening through its src, closed or not — a blog post's featured image. A shape may end on
+// a run: nothing follows it, so it ends where its class first fails.
+const MD_IMAGE_SRC = ['![', RUN_ALT, '](', RUN_DEST];         // /!\[[^\]]*\]\(([^)\s]+)/g
+const BRACKET_SHAPES = { MD_IMAGE, WIKI_IMAGE, MD_LINK, LINK_DEST, CTA_LINK, TAG_LINK, DESC_IMAGE, DESC_LINK, MD_IMAGE_SRC };
 // Every match of `shape` in `s`, left to right, as [whole, ...runs] with `.index` — what the global
 // regex's exec loop returned, one array per match (a run is captured whether or not the regex did).
 function bracketMatches(s, shape) {
@@ -113,10 +116,10 @@ function bracketMatches(s, shape) {
       // run is one class: nothing in [last start, last end) ends it.
       const known = at === last[0] || (run.oneClass && at > last[0] && at <= last[1]);
       if (!known) { last[0] = at; last[1] = run.end(s, at); }
-      const end = last[1];
-      if (end - at < run.min || !s.startsWith(shape[k + 1], end)) break;
+      const end = last[1], close = k + 1 < shape.length ? shape[k + 1] : '';
+      if (end - at < run.min || !s.startsWith(close, end)) break;
       cuts.push(at, end);
-      at = end + shape[k + 1].length;
+      at = end + close.length;
     }
     if (k < shape.length) { p = s.indexOf(open, p + 1); continue; }
     const match = [s.slice(p, at)];
@@ -852,7 +855,11 @@ function isSiteFile(text) {
 function parseParams(raw) {
   const map = {};
   if (!raw) return map;
-  const re = /(\w+)=("[^"]*"(?:→\S+)?|\S+)/g;
+  // `\b`: a key is a whole word. Without it a word with no `=` after it was re-read from each of its
+  // letters — quadratic in the word. It changes no match: the scan never resumes inside a word (a
+  // value ends at a space, the end, or a closing quote), and a word's later letters reach the same
+  // `=` its first letter did, so where the first letter fails they all fail.
+  const re = /\b(\w+)=("[^"]*"(?:→\S+)?|\S+)/g;
   let m;
   while ((m = re.exec(raw))) {
     const key = m[1]; const val = m[2];
@@ -867,10 +874,17 @@ function parseParams(raw) {
   // `wide` (and `now`, `Go`) out of the quotes and set them as flags — a CTA's wording could switch a
   // layout on. The `key=` re-check below reads the same blanked string, so `wide="…"` still counts.
   const bare = raw.replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
+  // Every whole word written as a `key=` (space allowed before the `=`), read once. 🩸 This used to
+  // build `new RegExp('\\b' + word + '\\s*=')` per bare word and run it over the whole line: quadratic
+  // in the number of words, and a single word of about 33,000 letters made a pattern too large to
+  // compile — a SyntaxError that failed the whole page's render.
+  const keyed = new Set();
+  let km; const kre = /\b(\w+)\s*=/g;
+  while ((km = kre.exec(bare))) keyed.add(km[1]);
   let bm; const bre = /(?:^|\s)([a-zA-Z]\w*)(?=\s|$)/g;
   while ((bm = bre.exec(bare))) {
     const w = bm[1];
-    if (!(w in map) && !new RegExp('\\b' + w + '\\s*=').test(bare)) map[w] = true;
+    if (!(w in map) && !keyed.has(w)) map[w] = true;
   }
   return map;
 }

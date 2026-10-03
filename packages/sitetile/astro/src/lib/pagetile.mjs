@@ -4,6 +4,8 @@
 // projection (prev/next, chapter table of contents, image URL resolution) — it does NOT
 // reimplement parsing, per the family rule (one model, every surface consumes it).
 import { parseBook, flattenPages } from '../../../../../packages/pagetile/book-core.js';
+// Relative, not the `@sitetile` alias, so plain `node` can still import this file (pagetile-blurb.test.mjs).
+import { bracketMatches, BRACKET_SHAPES } from '../../../site-core.js';
 
 // A pagetile image src is repo-relative (`pagetile/ch1/p01.jpg`, matching the family's
 // `![[name]]` convention). The reader serves it from /pagetile/... in public/ (staged there
@@ -89,12 +91,16 @@ export function loadFirstBook(glob) {
 export function parseBlurb(raw) {
   const text = String(raw || '').trim();
   if (!text) return null;
-  const m = /^([\s\S]*?)\[([^\]]+)\]\(([^)\s]+)\)([\s\S]*)$/.exec(text);
+  // The first `[label](href)`: what /^([\s\S]*?)\[([^\]]+)\]\(([^)\s]+)\)([\s\S]*)$/ found, read by
+  // site-core's bracketMatches with MD_LINK (/\[([^\]]+)\]\(([^)\s]+)\)/g), whose first match is the
+  // leftmost. 🩸 The lazy prefix tried every `[` in turn and read each one's label to its end, so a
+  // blurb of thousands of `[` was quadratic; bracketMatches reads each run once.
+  const m = bracketMatches(text, BRACKET_SHAPES.MD_LINK)[0];
   if (!m) return { before: text, link: null, after: '' };
-  const href = m[3];
+  const href = m[2];
   const safe = /^(https?:\/\/|\/|#)/i.test(href);
   if (!safe) return { before: text, link: null, after: '' };
-  return { before: m[1], link: { label: m[2], href }, after: m[4] };
+  return { before: text.slice(0, m.index), link: { label: m[1], href }, after: text.slice(m.index + m[0].length) };
 }
 
 export function loadReaderBook(raw) {

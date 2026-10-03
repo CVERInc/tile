@@ -3,7 +3,7 @@
 // + body) living in the build's `blog/` dir (the reef `blog_posts` store shape).
 // The blog pages wear the SAME SiteLayout shell as the rest of the site, so the
 // site's theme + packages (bleedblend band, lingo head) apply to /devlog too.
-import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext } from '@sitetile';
+import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext, bracketMatches, replaceMatches, BRACKET_SHAPES } from '@sitetile';
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
@@ -132,7 +132,12 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // featured image = first markdown image that is NOT a video file — a `![](clip.mp4)` in-body video
   // (a showcase post) renders as <video> in the body, but must never become the archive-card
   // thumbnail (a .mp4 in <img src> is a broken image). Falls through to '' when the post has only video.
-  const imgM = [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+  // 🩸 Both reads below were regexes that, with no closer in sight, read to the end of the body from
+  // every `![` — one line of thousands of `![` was quadratic, in every post, on every route that lists
+  // posts. They are the same patterns read by site-core's bracketMatches, which reads each run once:
+  // MD_IMAGE_SRC is /!\[[^\]]*\]\(([^)\s]+)/g (its match is [whole, alt, src]), DESC_IMAGE is
+  // /!\[[^\]]*\]\([^)]*\)/g.
+  const imgM = bracketMatches(b, BRACKET_SHAPES.MD_IMAGE_SRC).map((m) => m[2]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
   // round 5 (R4-P3-2): `image` is this post's featured-image URL — extracted straight off a
   // markdown regex, with NO gate of its own, and consumed VERBATIM as a live `<img src>` by every
   // card renderer that shows it (blog index, both term archives, "Keep reading"/"Recent posts",
@@ -157,7 +162,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // capped via capExcerpt(excerptMax) — excerptMax defaults to 180 so this is unchanged, and the
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
-  const fullText = b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
+  const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
     .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
     .join(' ');
   const excerpt = capExcerpt(fullText, excerptMax);
@@ -665,6 +670,33 @@ export function fmtDate(s, format, lang) {
 // pages. Returns { popular, categories } of { heading, items:[{label,href}] } — or null when the
 // home page has neither (a site whose home has no such sections is unaffected).
 // General: any site whose real footer repeats a popular-posts list + a tag cloud.
+//
+// footerListItem: one `- [label](href)` list line → { label, href }, or null. GREEDY label so a title
+// carrying its own brackets (a title like "[Series] How to …" — an inner `[…]` that is literal link
+// text) is captured whole rather than truncated at the first `]`.
+// It returns what /^-\s*\[(.+)\]\(([^)]+)\)\s*$/ returned on the trimmed line, read from the end
+// instead. 🩸 That regex tried every `](` in the line as the label's end, and from each one read the
+// rest of the line looking for a `)`: one line of `- [` and thousands of `](` was quadratic, and this
+// runs for every page of every site (SiteLayout reads the home's widgets for its footer). From the
+// end there is one candidate: the line must close with `)`, the href holds no other `)`, so the label
+// ends at the LAST `](` after the line's previous `)` — and the regex's greedy label chose the last
+// one too. `.` stops at a line terminator, so that `](` must also come before the label's first one.
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
+export function footerListItem(line) {
+  const t = String(line).trim();
+  const close = t.length - 1;                          // `\)\s*$` on a trimmed line: the last character
+  if (t[0] !== '-' || t[close] !== ')') return null;
+  let from = 1;
+  while (from < t.length && /\s/.test(t[from])) from++;
+  if (t[from] !== '[') return null;
+  from++;                                              // the label starts here
+  LINE_TERMINATOR.lastIndex = from;
+  const stop = LINE_TERMINATOR.exec(t);
+  // the label is one character or more, the href one character or more (`[^)]+`)
+  const at = t.lastIndexOf('](', Math.min(close - 3, stop ? stop.index : t.length));
+  if (at < from + 1 || at < t.lastIndexOf(')', close - 1)) return null;
+  return { label: t.slice(from, at), href: t.slice(at + 2, close) };
+}
 export function footerWidgets(contentGlob) {
   let homeRaw = null;
   for (const [path, raw] of Object.entries(contentGlob || {})) {
@@ -673,14 +705,7 @@ export function footerWidgets(contentGlob) {
   if (!homeRaw) return null;
   let sections = [];
   try { sections = parseSite(homeRaw).sections || []; } catch { return null; }
-  // Parse one `- [label](href)` list line. GREEDY label so a title carrying its own brackets
-  // (a title like "[Series] How to …" — an inner `[…]` that is literal link text)
-  // is captured whole rather than truncated at the first `]`.
-  const parseLine = (line) => {
-    const m = String(line).trim().match(/^-\s*\[(.+)\]\(([^)]+)\)\s*$/);
-    return m ? { label: m[1], href: m[2] } : null;
-  };
-  const listItems = (body) => String(body || '').split('\n').map((l) => l.trim()).filter(Boolean).map(parseLine);
+  const listItems = (body) => String(body || '').split('\n').map((l) => l.trim()).filter(Boolean).map(footerListItem);
   const asWidget = (s) => {
     const items = listItems(s.body);
     return items.length && items.every(Boolean) ? { heading: s.title || '', items } : null;
