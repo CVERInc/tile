@@ -172,6 +172,15 @@ export function rendererIdentity({ nodeModulesDir, packages, weight, index, runt
 // cannot disagree with itself.
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const CARD_STAMP_KEYWORD = 'sitetile:card';
+/**
+ * No card is this large — one drawn here is a few tens of kilobytes — so nothing this large is one.
+ *
+ * A key vouches for what a card was DRAWN from, not for everything in the file: a PNG may carry any
+ * number of extra chunks, each with a perfectly good checksum, and still decode to the same picture
+ * with the same key. Without a bound, a previous card padded to any size would be kept, copied in
+ * and shipped by every build after it. Generous on purpose; it only has to be finite.
+ */
+export const CARD_MAX_BYTES = 1024 * 1024;
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -233,6 +242,7 @@ export function stampCard(png, key) {
 /** The key a card carries, or null — for anything that is not one intact PNG with exactly one key.
  *  Two keys is not "take the first": a card that says two things about itself says nothing. */
 export function cardStamp(bytes) {
+  if (!bytes || bytes.length > CARD_MAX_BYTES) return null;
   const buf = Buffer.from(bytes);
   const chunks = pngChunks(buf);
   if (!chunks) return null;

@@ -27,7 +27,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { join, dirname, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { makeCardRenderer, ourCardPath, deadCards, cardInputs, cardMatches } from './og-card.mjs';
+import { makeCardRenderer, ourCardPath, deadCards, cardInputs, cardMatches, CARD_MAX_BYTES } from './og-card.mjs';
 
 const arg = (n, d = '') => { const i = process.argv.indexOf('--' + n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const DIST = process.argv[2];
@@ -185,9 +185,13 @@ for (const p of mine) {
   for (const from of [outPath, offered(rel)]) {
     if (!from) continue;
     let bytes;
-    try { bytes = readFileSync(from); } catch { continue; }
+    try {
+      // Sized before it is read: a candidate is whatever was put there, and one too large to be a
+      // card is not worth loading to find that out. (cardMatches refuses it by size as well.)
+      bytes = statSync(from).size > CARD_MAX_BYTES ? null : readFileSync(from);
+    } catch { continue; }
     candidates++;
-    if (!cardMatches(bytes, want)) continue;
+    if (!bytes || !cardMatches(bytes, want)) continue;
     if (from !== outPath) { mkdirSync(dirname(outPath), { recursive: true }); writeFileSync(outPath, bytes); }
     kept = true;
     break;

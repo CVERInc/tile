@@ -90,7 +90,7 @@ function run(meta, defaultOn, rendererMode = 'render', { existing = false, extra
     const preload = join(dir, 'loader.mjs');
     const rendererStub = `
 import { cardKey, stampCard } from '${original}';
-export { ourCardPath, deadCards, cardInputs, cardMatches } from '${original}';
+export { ourCardPath, deadCards, cardInputs, cardMatches, CARD_MAX_BYTES } from '${original}';
 export function makeCardRenderer() {
   if (${JSON.stringify(rendererMode)} === 'init') throw new Error('fixture font unavailable');
   const keyFor = (raw) => cardKey(${JSON.stringify(STUB_RENDERER)}, raw);

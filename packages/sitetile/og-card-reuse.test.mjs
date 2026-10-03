@@ -184,6 +184,16 @@ function pngChunks(buf) {
 const isKey = (c) => c.type === 'tEXt' && c.data.toString('latin1').startsWith('sitetile:card\0');
 const withoutKey = (buf) => Buffer.concat([buf.subarray(0, 8), ...pngChunks(buf).filter((c) => !isKey(c)).map((c) => c.bytes)]);
 
+/** The same picture and the same key, made `extra` bytes larger by an ancillary chunk whose
+ *  checksum is CORRECT — so nothing but its size is wrong with it. */
+function padded(buf, extra) {
+  const data = Buffer.alloc(extra - 12);
+  const body = Buffer.concat([Buffer.from('prVt', 'latin1'), data]);
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0); body.copy(chunk, 4); chunk.writeUInt32BE(zlib.crc32(body), 8 + data.length);
+  return Buffer.concat([buf.subarray(0, buf.length - 12), chunk, buf.subarray(buf.length - 12)]);
+}
+
 const SUSPECTS = [
   ['none at all — cards were switched on after the last build', (og) => rmSync(og, { recursive: true }), N],
   ['only some — the last build could not draw two', (og) => { rmSync(join(og, 'about.png')); rmSync(join(og, 'index.png')); }, 2],
@@ -193,6 +203,9 @@ const SUSPECTS = [
   ['one cut short', (og) => { const f = join(og, 'about.png'); const b = readFileSync(f); writeFileSync(f, b.subarray(0, b.length - 40)); }, 1],
   ['one with a single byte flipped', (og) => { const f = join(og, 'about.png'); const b = readFileSync(f); b[b.length >> 1] ^= 1; writeFileSync(f, b); }, 1],
   ['one that is not a picture', (og) => writeFileSync(join(og, 'about.png'), '<!doctype html><title>Home</title>'), 1],
+  // Intact, correctly keyed, every checksum right — and two megabytes of nothing. Whoever can write
+  // to where previous cards come from must not be able to make every later build ship that.
+  ['one padded far past the size of any card', (og) => { const f = join(og, 'about.png'); writeFileSync(f, padded(readFileSync(f), 2 * 1024 * 1024)); }, 1],
   ['all drawn before cards carried a key', (og) => everyCard(og, withoutKey), N],
 ];
 for (const how of ['in place', 'offered']) {
@@ -344,6 +357,13 @@ test('🔴 anything short of one intact PNG with exactly one key has no key', ()
     assert.equal(og.cardStamp(bytes), null, name);
     assert.equal(og.cardMatches(bytes, { key }), false, name);
   }
+  // Size is its own reason, checked on its own: one byte over the limit has no key, and the very
+  // same construction AT the limit still does — so it is the size being refused, not the padding.
+  const limit = og.CARD_MAX_BYTES;
+  assert.ok(Number.isInteger(limit) && limit >= 256 * 1024 && limit <= 8 * 1024 * 1024, `a bound, and a generous one: ${limit}`);
+  assert.equal(og.cardStamp(padded(good, limit - good.length)), key, 'exactly at the limit');
+  assert.equal(og.cardStamp(padded(good, limit - good.length + 1)), null, 'one byte over');
+  assert.equal(og.cardMatches(padded(good, limit - good.length + 1), { key }), false);
   // The control: the same checks on the good one, or every line above proves nothing.
   assert.equal(og.cardStamp(good), key);
   assert.equal(og.cardMatches(good, { key }), true);
