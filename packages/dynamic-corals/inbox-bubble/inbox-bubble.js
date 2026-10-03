@@ -1957,14 +1957,15 @@ export const CLAIM_GATE_TTL_MS = AI_LOG_CLAIM_TTL_MS;
  */
 export const CLAIM_GATE_STALE_MS = 30 * 24 * 60 * 60 * 1000;
 /**
- * The waits between attempts when nobody could answer — so at most four requests per mount, over
- * about forty seconds, and then nothing until the next page. Not the log's five-minute backoff: that
+ * The waits between attempts when the question could not be asked — so at most four requests per
+ * mount, forty seconds of waiting between them (100 s if every one also times out), and then nothing
+ * until the next page. Not the log's five-minute backoff: that
  * one guards a buffer that can wait; this one decides whether a visitor sees a way to reach a person
  * on THIS page.
  */
 export const CLAIM_GATE_RETRY_MS = Object.freeze([2000, 8000, 30000]);
 /** Each attempt's own ceiling — a request that never comes back is a「could not ask」, not a hang. */
-export const CLAIM_GATE_TIMEOUT_MS = 10_000;
+export const CLAIM_GATE_TIMEOUT_MS = 15_000;
 const CLAIM_GATE_PREFIX = 'reef-inbox:claim:';
 
 /** The remembered yes — beside the handle and the log, never inside either. */

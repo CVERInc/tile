@@ -135,7 +135,7 @@ globalThis.fetch = async (url, init = {}) => {
 /**
  * Every delay of a second or more that the coral asks for, recorded and then run almost at once —
  * the claim gate's retry schedule is measured here rather than waited for. The per-request timeout
- * (ten seconds) runs after 25 ms instead of 0, so a stubbed reply that is merely a promise away
+ * (fifteen seconds) runs after 25 ms instead of 0, so a stubbed reply that is merely a promise away
  * still wins the race, and only a request that never comes back loses it. Shorter timers (this
  * file's own `settle`) keep their real meaning.
  */
@@ -144,7 +144,7 @@ const realSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (fn, ms = 0, ...rest) => {
 	if (ms >= 1000) {
 		longDelays.push(ms);
-		return realSetTimeout(fn, ms === 10_000 ? 25 : 0, ...rest);
+		return realSetTimeout(fn, ms === 15_000 ? 25 : 0, ...rest);
 	}
 	return realSetTimeout(fn, ms, ...rest);
 };
@@ -728,7 +728,7 @@ async function drain() {
 	}
 }
 /** Every long delay except the per-request timeout's own — i.e. the waits between attempts. */
-const PROBE_TIMEOUT_MS = 10_000;
+const PROBE_TIMEOUT_MS = 15_000;
 const gaps = (from = 0) => longDelays.slice(from).filter((ms) => ms !== PROBE_TIMEOUT_MS);
 const claimKey = (kind, id) => `reef-inbox:claim:${kind}:${id}`;
 const SIX_HOURS = 6 * 60 * 60 * 1000;

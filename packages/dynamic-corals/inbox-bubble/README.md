@@ -54,7 +54,7 @@ has no bubble.
 |---|---|
 | `claimed: true` | the bubble, exactly as it was drawn before this check existed |
 | `claimed: false` | nothing — not a hidden bubble, no bubble — and no further request |
-| could not ask: a network failure, no reply within **10 s**, a 5xx, or a body of the wrong shape | nothing yet; asked again after **2 s, 8 s and 30 s** — at most four requests per mount — and drawn the moment one answers yes |
+| could not ask: a network failure, no reply within **15 s**, a 5xx, or a body of the wrong shape | nothing yet; asked again after **2 s, 8 s and 30 s** — at most four requests per mount — and drawn the moment one answers yes |
 | asked and refused: `throttled`, or a 4xx | nothing, and not asked again on this page — the rate limit counts per address across every site, so asking again would only spend it on the next site too, and a 4xx says the same thing every time |
 
 There is no fourth row on purpose: no greyed-out bubble, no panel that apologises when opened. Any
