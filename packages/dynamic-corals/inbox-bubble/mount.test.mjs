@@ -108,9 +108,43 @@ const requests = [];
  * plant the machine's words in, and a claim probe that says yes so the questions may leave at all.
  */
 let respond = null;
+
+/**
+ * The claim probe's default answer — `GET /api/inbox/session` — so that every test above the claim
+ * gate section is a mount on a tenant that HAS an Inbox, i.e. the control: what such a mount does
+ * must not have changed. Two shapes of tenant are uneven on purpose (an Inbox and none, `site` and
+ * `ext`): an id starting `off-` has no Inbox, and `claimScript` lets one id answer a scripted
+ * sequence — one entry per request — to drive the retry path. An entry is a response object, a
+ * function to call (to throw, or to hang), or `undefined` for the default 500 below.
+ */
+const claimScript = new Map();
+function claimRoute(url, init) {
+	if (!url.includes('/api/inbox/session') || init.method === 'POST') return undefined;
+	const id = new URL(url).searchParams.get('id');
+	if (claimScript.has(id)) {
+		const step = claimScript.get(id).shift();
+		return typeof step === 'function' ? step() : step;
+	}
+	return { ok: true, status: 200, json: async () => ({ ok: true, claimed: !id.startsWith('off-') }) };
+}
 globalThis.fetch = async (url, init = {}) => {
 	requests.push({ url, init });
-	return respond?.(url, init) ?? { ok: false, status: 500, json: async () => ({}) };
+	return respond?.(url, init) ?? claimRoute(url, init) ?? { ok: false, status: 500, json: async () => ({}) };
+};
+
+/**
+ * Every delay of a second or more that the coral asks for, recorded and then run at once — the
+ * claim gate's retry schedule is measured here rather than waited for. Shorter timers (this file's
+ * own `settle`) keep their real meaning.
+ */
+const longDelays = [];
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (fn, ms = 0, ...rest) => {
+	if (ms >= 1000) {
+		longDelays.push(ms);
+		return realSetTimeout(fn, 0, ...rest);
+	}
+	return realSetTimeout(fn, ms, ...rest);
 };
 
 /**
@@ -138,7 +172,8 @@ const postedConvs = (from = 0) =>
 	requests.slice(from).filter((r) => r.init.method === 'POST')
 		.map((r) => JSON.parse(r.init.body).conversation_id);
 
-const { mount } = await import('./inbox-bubble.js');
+const coral = await import('./inbox-bubble.js');
+const { mount } = coral;
 
 /** The broadcast, as a page script makes it — every listener on `window`, in registration order. */
 function dispatch(type, detail) {
@@ -663,4 +698,218 @@ test('tile#19: the compose honeypot that mount() renders hides itself inline', a
 	const input = root.innerHTML.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
 	assert.match(input, /tabindex="-1"/);
 	assert.match(input, /autocomplete="off"/);
+});
+
+// ── the claim gate: a bubble only where a message can actually arrive ──────────────────────────
+//
+// 🩸 THE FAILURE THIS EXISTS FOR. A site layout turned the bubble on for every site at build time,
+// and a build cannot know whether that site's Inbox was ever opened; the server refuses every
+// message for a tenant without one, on purpose (nothing may switch itself on because a stranger
+// used it). Both halves were right and together they were a button that fails every time it is
+// pressed — on live sites, whose owners had no way to know. So the coral asks first.
+//
+// 🔴 THE RULER. No Inbox ⇒ nothing in the DOM (not a hidden node: no node). An Inbox ⇒ exactly
+// what a mount did before the gate — measured against digests taken from the coral as it was
+// before this section existed, not against itself. Cannot ask ⇒ nothing, retried on a fixed
+// schedule up to a cap, and rendered the moment an answer arrives. A reply of the wrong shape is
+// not an answer, and in particular not a yes.
+
+/** Requests to the claim probe, from `from` on. */
+const probes = (from = 0) =>
+	requests.slice(from).filter((r) => r.url.includes('/api/inbox/session') && r.init.method !== 'POST');
+/** Run every queued timer and promise until nothing moves — the retry schedule compressed. */
+async function drain() {
+	for (let i = 0; i < 40; i++) await settle();
+}
+/** Every long delay except the per-request timeout's own — i.e. the waits between attempts. */
+const PROBE_TIMEOUT_MS = 10_000;
+const gaps = (from = 0) => longDelays.slice(from).filter((ms) => ms !== PROBE_TIMEOUT_MS);
+const claimKey = (kind, id) => `reef-inbox:claim:${kind}:${id}`;
+const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+/** What a page holds for this mount: the container's own children and any markup it was given. */
+const nothingRendered = (el) => el.children.length === 0 && el.innerHTML === '';
+
+// Digests of the panel exactly as the coral rendered it BEFORE the gate (taken from the unmodified
+// file with this harness, three uneven tenants): the closed bubble, and the panel after one click.
+const BEFORE = {
+	closed: 'e87af6e900c15525',
+	open: {
+		site_kaito: 'f7b8b561c001101f',
+		site_status: '5be86597072e2e67',
+		ext_plain: 'efd03fa789db6e44'
+	}
+};
+const { createHash } = await import('node:crypto');
+const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
+
+test('gate: a tenant with no Inbox renders nothing — no node, no listener, no other request', async () => {
+	for (const kind of ['site', 'ext']) {
+		const before = listenerCount();
+		const from = requests.length;
+		const el = new El({ 'data-kind': kind, 'data-id': `off-${kind}-1`, 'data-kaito': '1' });
+		await mount(el);
+		await drain();
+		assert.ok(nothingRendered(el), `${kind}: an unclaimed tenant still got a bubble`);
+		assert.equal(listenerCount(), before, `${kind}: an unclaimed mount installed a window listener`);
+		// The probe is the one request, and a definite no is not retried.
+		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
+		// Nothing written to this visitor's storage either: no buffer, no handle, no remembered no.
+		assert.equal([...storage.keys()].some((k) => k.includes(`off-${kind}-1`)), false);
+		// And the two programmatic ways in stay inert, because there is no panel for them to open.
+		dispatch('reef-inbox:open');
+		assert.ok(nothingRendered(el));
+	}
+});
+
+test('gate: two tenants on one page, one with an Inbox and one without — only that one renders', async () => {
+	const on = new El({ 'data-kind': 'ext', 'data-id': 'mixed-on' });
+	const off = new El({ 'data-kind': 'site', 'data-id': 'off-mixed' });
+	await Promise.all([mount(on), mount(off)]);
+	await drain();
+	assert.equal(digest(on.children[0].innerHTML), BEFORE.closed);
+	assert.ok(nothingRendered(off));
+});
+
+test('gate: a tenant with an Inbox gets the bubble the coral rendered before the gate, byte for byte', async () => {
+	const configs = {
+		site_kaito: { 'data-kind': 'site', 'data-id': 'gold-1', 'data-kaito': '1', 'data-site-name': 'Example Shop' },
+		site_status: { 'data-kind': 'site', 'data-id': 'gold-2', 'data-status': 'Hello there' },
+		ext_plain: { 'data-kind': 'ext', 'data-id': 'gold-3' }
+	};
+	for (const [name, attrs] of Object.entries(configs)) {
+		const before = listenerCount();
+		const from = requests.length;
+		const el = new El({ ...attrs });
+		await mount(el);
+		await settle();
+		assert.equal(el.children.length, 1, name);
+		assert.equal(digest(el.children[0].innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
+		assert.equal(listenerCount(), before + 2, `${name}: not the two window listeners a mount had`);
+		// Apart from the probe, the same requests as before: the one assistant-name read.
+		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname),
+			['/api/inbox/session', '/api/inbox/assistant'], name);
+		await el.children[0].querySelector('.dc-inbox-open').emit('click');
+		await settle();
+		assert.equal(digest(el.children[0].innerHTML), BEFORE.open[name], `${name}: open panel changed`);
+	}
+});
+
+test('gate: a yes is remembered for six hours and the next mount draws at once; a no is never kept', async () => {
+	const first = new El({ 'data-kind': 'site', 'data-id': 'memo-1' });
+	await mount(first);
+	const stored = JSON.parse(storage.get(claimKey('site', 'memo-1')));
+	assert.equal(stored.claim, true);
+
+	// Same tenant, the next page: no probe, and the bubble is there before anything is awaited.
+	const from = requests.length;
+	const second = new El({ 'data-kind': 'site', 'data-id': 'memo-1' });
+	const pending = mount(second);
+	assert.equal(second.children.length, 1, 'a remembered yes still waited for something');
+	await pending;
+	assert.equal(probes(from).length, 0);
+
+	// Past six hours it is asked again — and a stamp from the future is not believed at all.
+	for (const at of [Date.now() - SIX_HOURS - 1000, Date.now() + 60_000]) {
+		storage.set(claimKey('site', 'memo-1'), JSON.stringify({ claim: true, at }));
+		const f = requests.length;
+		await mount(new El({ 'data-kind': 'site', 'data-id': 'memo-1' }));
+		assert.equal(probes(f).length, 1, `a stamp of ${at} was trusted`);
+	}
+
+	// A no is never written down: an owner who opens the Inbox sees the bubble on the next page.
+	await mount(new El({ 'data-kind': 'site', 'data-id': 'off-memo' }));
+	assert.equal(storage.has(claimKey('site', 'off-memo')), false);
+	const f = requests.length;
+	await mount(new El({ 'data-kind': 'site', 'data-id': 'off-memo' }));
+	assert.equal(probes(f).length, 1);
+
+	// And a remembered yes that the server now contradicts (a site that left) is dropped.
+	storage.set(claimKey('site', 'off-gone'), JSON.stringify({ claim: true, at: Date.now() - SIX_HOURS - 1 }));
+	const gone = new El({ 'data-kind': 'site', 'data-id': 'off-gone' });
+	await mount(gone);
+	assert.ok(nothingRendered(gone));
+	assert.equal(storage.has(claimKey('site', 'off-gone')), false);
+});
+
+test('gate: cannot ask ⇒ nothing, retried at 2 s, 8 s and 30 s, and drawn when the answer comes', async () => {
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	claimScript.set('retry-1', [
+		{ ok: false, status: 500, json: async () => ({}) },
+		() => { throw new TypeError('Failed to fetch'); },
+		ok({ ok: true, claimed: false, throttled: true }),
+		ok({ ok: true, claimed: true })
+	]);
+	const d = longDelays.length;
+	const from = requests.length;
+	const el = new El({ 'data-kind': 'site', 'data-id': 'retry-1' });
+	const done = mount(el);
+	await settle();
+	assert.ok(nothingRendered(el), 'something was drawn before anybody answered');
+	await done;
+	await drain();
+	assert.equal(probes(from).length, 4);
+	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
+	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
+});
+
+test('gate: never answers ⇒ stops after four requests and draws nothing', async () => {
+	const hang = () => new Promise(() => {});
+	claimScript.set('retry-2', [
+		{ ok: false, status: 503, json: async () => ({}) },
+		hang, // a request that never comes back is cut off by the per-request timeout
+		{ ok: false, status: 429, json: async () => ({ ok: false, reason: 'rate_limited' }) },
+		() => { throw new TypeError('Failed to fetch'); },
+		{ ok: true, status: 200, json: async () => ({ ok: true, claimed: true }) } // never reached
+	]);
+	const d = longDelays.length;
+	const from = requests.length;
+	const el = new El({ 'data-kind': 'ext', 'data-id': 'retry-2' });
+	await mount(el);
+	await drain();
+	assert.equal(probes(from).length, 4, 'not the cap of one request and three retries');
+	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
+	assert.ok(longDelays.slice(d).includes(PROBE_TIMEOUT_MS), 'no per-request timeout was set');
+	assert.ok(nothingRendered(el));
+});
+
+test('gate: a reply of the wrong shape is not an answer — least of all a yes', async () => {
+	const shapes = [
+		{ ok: true, claimed: 'true' },
+		{ ok: true },
+		{ claimed: 1 },
+		{ ok: true, claimed: true, throttled: true }
+	];
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	claimScript.set('shape-1', [...shapes.map(ok)]);
+	const el = new El({ 'data-kind': 'site', 'data-id': 'shape-1' });
+	await mount(el);
+	await drain();
+	assert.ok(nothingRendered(el), 'a malformed reply was taken as a yes');
+	// A body that is not JSON at all, then a real answer: still drawn — it was a retry, not a no.
+	claimScript.set('shape-2', [
+		{ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } },
+		ok({ ok: true, claimed: true })
+	]);
+	const el2 = new El({ 'data-kind': 'site', 'data-id': 'shape-2' });
+	await mount(el2);
+	await drain();
+	assert.equal(el2.children.length, 1);
+});
+
+test('gate: unmount while the probe is in the air leaves nothing behind when it lands', async () => {
+	let release;
+	claimScript.set('late-1', [() => new Promise((r) => { release = r; })]);
+	const before = listenerCount();
+	const el = new El({ 'data-kind': 'site', 'data-id': 'late-1' });
+	el.setAttribute('data-dynamic-coral-mounted', '1');
+	const done = mount(el);
+	await settle();
+	assert.equal(coral.unmount(el), true, 'a mount waiting on its probe could not be taken off');
+	assert.equal(el.getAttribute('data-dynamic-coral-mounted'), null);
+	release({ ok: true, status: 200, json: async () => ({ ok: true, claimed: true }) });
+	await done;
+	await drain();
+	assert.ok(nothingRendered(el));
+	assert.equal(listenerCount(), before);
 });
