@@ -13,6 +13,8 @@
 //   - footerListItem (blog.mjs), each line of the home page's popular-posts list and tag cloud, which
 //     the layout reads for the footer of every page of every site: `- [` and thousands of `](` was
 //     quadratic, so its cost was multiplied by the number of pages.
+//   - parsePost (blog.mjs), a post's featured image and excerpt: two image regexes read to the end of
+//     the body from every `![`, in every post, on every route that lists posts.
 //
 // The same two rulers as the other *-run-cost tests:
 //   1. SAME ANSWER — each replaced implementation is kept below, verbatim, as the reference, and an
@@ -46,7 +48,7 @@ registerHooks({
 const blog = await import('./astro/src/lib/blog.mjs');
 
 const { parseParams } = core;
-const { footerListItem, footerWidgets } = blog;
+const { footerListItem, footerWidgets, parsePost } = blog;
 
 let passed = 0;
 function test(name, fn) {
@@ -117,6 +119,12 @@ function refFooterWidgets(contentGlob) {
   return (popular || categories) ? { popular, categories } : null;
 }
 
+// parsePost's featured image and excerpt, as they were.
+const refFeatured = (b) => [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
+  .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
+  .join(' ');
+
 // ── inputs ──────────────────────────────────────────────────────────────────────────────────────
 // A param line: keys, values, quoted labels with and without `→href`, bare flags, and everything that
 // can break a word or a value. The prototype's own names are here because the map is a plain object:
@@ -159,6 +167,24 @@ function listLine() {
       pick(['](', '](', '](', ']', '] (', '](\n', ')(']) + href + pick([')', ')', ')', '', ' )', '))', ') x', ')\u3000', ')\r']);
   }
   return words([...LINK_BITS, ...SPACE], rnd() < 0.9 ? 16 : 120);
+}
+// A post body: images, nearly images, videos that must be passed over, and prose the excerpt keeps.
+const IMG_BITS = ['![', '![', '[', ']', '(', ')', '](', '![[', ']]', '!', ' ', '\n', '\n\n', '# ', '> ', '- ', 'a', 'Text 中文', '😀', '\\',
+  '/i.jpg', 'clip.mp4', 'clip.webm?x=1', 'v.MOV#t', 'x.mp4.jpg', 'data:image/png;base64,AA', 'data:image/svg+xml,<svg>', 'javascript:alert(1)', 'a b'];
+function postBody() {
+  const r = rnd();
+  if (r < 0.01) return '';
+  if (r < 0.04) return pick(['', 'x ']) + pick(['![', '![a](', '](', '![](', '![[']).repeat(1 + Math.floor(rnd() * 200)) + pick(['', ')', ']', ' ', '\n']);
+  if (r < 0.75) {
+    let out = '';
+    for (let n = 1 + Math.floor(rnd() * 5); n > 0; n--) {
+      out += pick(['', ' ', '\n', '\n\n', 'Some words ', '# H\n', '> q\n', '[a](/b) ']) + pick(['![', '![', '!', '[', '']) + words([...IMG_BITS, ...SPACE], 3) +
+        pick(['](', '](', ']', '] (', '](\n']) + pick(['/i.jpg', 'clip.mp4', 'v.webm', '', 'a b', 'x(y', 'https://e.com/p.png?mp4', 'data:image/png;base64,AA', words(IMG_BITS, 2)]) +
+        pick([')', ')', '', ' )', ')x', '\n']);
+    }
+    return out;
+  }
+  return words([...IMG_BITS, ...SPACE], rnd() < 0.9 ? 24 : 200);
 }
 // A map's own entries and, when `__proto__=` replaced it, its prototype's: deepEqual alone would
 // compare the two prototypes by identity.
@@ -212,6 +238,23 @@ test("footerWidgets reads each list line exactly as before", () => {
   }
 });
 
+const bodies = Array.from({ length: SAMPLES }, postBody);
+test("parsePost finds a post's featured image and excerpt exactly as before", () => {
+  let images = 0, videos = 0, text = 0;
+  for (const b of bodies) {
+    const raw = '---\ntitle: T\n---\n' + b;
+    const body = core.splitFrontmatter(raw).body || '';
+    const post = parsePost('p', raw);
+    const img = refFeatured(body);
+    assert.equal(post.image, core.safeSrc(img) || '', 'image of ' + JSON.stringify(b));
+    assert.equal(post.excerptText, refExcerptText(body), 'excerpt of ' + JSON.stringify(b));
+    if (img) images++;
+    if (/!\[[^\]]*\]\([^)\s]+\.(mp4|webm|mov)/i.test(body)) videos++;
+    if (post.excerptText) text++;
+  }
+  for (const [k, v] of Object.entries({ images, videos, text })) assert.ok(v > SAMPLES / 50 && v < SAMPLES * 0.95, 'the samples exercise "' + k + '" both ways (' + v + ')');
+});
+
 // ── ruler 2: linear cost ───────────────────────────────────────────────────────────────────────
 // CPU milliseconds this process has used, not the wall clock: on a busy machine a wall-clock reading
 // counts the time spent waiting for a core.
@@ -256,8 +299,11 @@ function growth(run, make, n, control) {
 
 const keyedLater = (k, tail) => Array.from({ length: k }, (_, i) => 'w' + (i % 50) + tail).join(' ') + ' ' + Array.from({ length: 50 }, (_, i) => 'w' + i + ' =').join(' ');
 const homeWith = (line) => ({ 'src/content/home.md': '---\nsitetile-page: home\ntitle: T\n---\n\n## Popular\n\n' + line + '\n' });
+const post = (b) => parsePost('p', '---\ntitle: T\n---\n' + b);
 const PATHS = [
   // [name, n, (n) → input, what consumes it, (n) → its control: the same path on text it has nothing to re-read in]
+  ['parsePost: a body of `![`', 2000, (k) => '!['.repeat(k), post, (k) => 'xx'.repeat(k)],
+  ['parsePost: a body of `![a](`', 1500, (k) => '![a]('.repeat(k), post, (k) => 'xxxxx'.repeat(k)],
   ['footerWidgets: a home list line of `](`', 2000, (k) => homeWith('- [' + ']('.repeat(k)), footerWidgets, (k) => homeWith('- [' + 'xx'.repeat(k))],
   ['footerListItem: `- [` and a run of `](`', 2000, (k) => '- [' + ']('.repeat(k), footerListItem, (k) => '- [' + 'xx'.repeat(k)],
   // Closed with a `)`, the replaced regex was linear too (its greedy label tries the last `](` first);
@@ -286,6 +332,10 @@ test('control: the cost ruler goes red on the code it replaced', () => {
   assert.ok(grew > LIMIT, 'the replaced parseParams ' + said);
   const footer = growth(refFooterListItem, (k) => '- [' + ']('.repeat(k), 1500);
   assert.ok(footer.grew > LIMIT, 'the replaced list-line regex ' + footer.said);
+  const image = growth(refFeatured, (k) => '!['.repeat(k), 1500);
+  assert.ok(image.grew > LIMIT, 'the replaced featured-image regex ' + image.said);
+  const excerpt = growth(refExcerptText, (k) => '![a]('.repeat(k), 1000);
+  assert.ok(excerpt.grew > LIMIT, 'the replaced excerpt regex ' + excerpt.said);
 });
 test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   // A flag scan that forgets a key may have space before its `=` (`cols =2` is not a flag `cols`).
@@ -309,12 +359,18 @@ test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   const anyChar = (l) => { const m = String(l).trim().match(/^-\s*\[([\s\S]+)\]\(([^)]+)\)\s*$/); return m ? { label: m[1], href: m[2] } : null; };
   const lazy = (l) => { const m = String(l).trim().match(/^-\s*\[(.+?)\]\(([^)]+)\)\s*$/); return m ? { label: m[1], href: m[2] } : null; };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // a featured image that does not skip videos, and an excerpt that keeps an unclosed image's alt
+  let video = 0, unclosed = 0;
+  for (const b of bodies) {
+    if ([...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1])[0] !== refFeatured(b)) video++;
+    if (b.replace(/!\[[^\]]*\]\([^)]*\)?/g, '') !== b.replace(/!\[[^\]]*\]\([^)]*\)/g, '')) unclosed++;
+  }
   let crossed = 0, early = 0;
   for (const l of lines) {
     if (!same(anyChar(l), refFooterListItem(l))) crossed++;
     if (!same(lazy(l), refFooterListItem(l))) early++;
   }
-  assert.ok(missed && quoted && crossed && early, 'each near-miss is caught (' + [missed, quoted, crossed, early] + ')');
+  assert.ok(missed && quoted && crossed && early && video && unclosed, 'each near-miss is caught (' + [missed, quoted, crossed, early, video, unclosed] + ')');
 });
 
 console.log('\nsitetile author-text run cost: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

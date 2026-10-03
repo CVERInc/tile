@@ -3,7 +3,7 @@
 // + body) living in the build's `blog/` dir (the reef `blog_posts` store shape).
 // The blog pages wear the SAME SiteLayout shell as the rest of the site, so the
 // site's theme + packages (bleedblend band, lingo head) apply to /devlog too.
-import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext } from '@sitetile';
+import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext, bracketMatches, replaceMatches, BRACKET_SHAPES } from '@sitetile';
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
@@ -132,7 +132,12 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // featured image = first markdown image that is NOT a video file — a `![](clip.mp4)` in-body video
   // (a showcase post) renders as <video> in the body, but must never become the archive-card
   // thumbnail (a .mp4 in <img src> is a broken image). Falls through to '' when the post has only video.
-  const imgM = [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+  // 🩸 Both reads below were regexes that, with no closer in sight, read to the end of the body from
+  // every `![` — one line of thousands of `![` was quadratic, in every post, on every route that lists
+  // posts. They are the same patterns read by site-core's bracketMatches, which reads each run once:
+  // MD_IMAGE_SRC is /!\[[^\]]*\]\(([^)\s]+)/g (its match is [whole, alt, src]), DESC_IMAGE is
+  // /!\[[^\]]*\]\([^)]*\)/g.
+  const imgM = bracketMatches(b, BRACKET_SHAPES.MD_IMAGE_SRC).map((m) => m[2]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
   // round 5 (R4-P3-2): `image` is this post's featured-image URL — extracted straight off a
   // markdown regex, with NO gate of its own, and consumed VERBATIM as a live `<img src>` by every
   // card renderer that shows it (blog index, both term archives, "Keep reading"/"Recent posts",
@@ -157,7 +162,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // capped via capExcerpt(excerptMax) — excerptMax defaults to 180 so this is unchanged, and the
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
-  const fullText = b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
+  const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
     .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
     .join(' ');
   const excerpt = capExcerpt(fullText, excerptMax);

@@ -51,6 +51,9 @@ const REF = {
   TAG_LINK: new RegExp('\\[([^\\]]+)\\]\\((' + '(?:[^()\\s]|\\([^()\\s]*\\))+' + ')\\)', 'g'),
   DESC_IMAGE: /!\[[^\]]*\]\([^)]*\)/g,
   DESC_LINK: /\[([^\]]*)\]\([^)]*\)/g,
+  // blog.mjs's featured image, /!\[[^\]]*\]\(([^)\s]+)/g: a shape that ends on a run. Written here with
+  // its alt captured too, because a shape captures every run; a capture group moves no match.
+  MD_IMAGE_SRC: /!\[([^\]]*)\]\(([^)\s]+)/g,
 };
 const RE_CTA_LINK = REF.CTA_LINK;
 function refIsImageOnly(t) {
