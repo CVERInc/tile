@@ -129,7 +129,7 @@ test('square-shop: client injectStyles() wraps only when the document root decla
 test('inbox-bubble: client injectStyles() wraps only when the document root declares layered', async () => {
   async function capture(layered) {
     globalThis.document = makeRootDocument(layered, { readyState: 'loading' });
-    globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } };
+    globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, addEventListener() {}, removeEventListener() {} };
     globalThis.location = { hash: '', hostname: 'example.test', href: 'https://example.test/' };
     // The tenant has an Inbox — mount() draws nothing (and injects no style) until the claim
     // probe says so. Every other request fails, as before.

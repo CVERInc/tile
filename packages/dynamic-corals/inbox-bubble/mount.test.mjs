@@ -919,3 +919,28 @@ test('gate: unmount while the probe is in the air leaves nothing behind when it 
 	assert.ok(nothingRendered(el));
 	assert.equal(listenerCount(), before);
 });
+
+test('gate: a reef-inbox:open sent while the probe is still out is held, and opens the panel on yes', async () => {
+	// A site's own DOMContentLoaded handler dispatches right after the module's mountAll: on a page
+	// with no remembered yes the answer is a round trip away, and the request must not be lost in it.
+	const before = listenerCount();
+	const el = new El({ 'data-kind': 'site', 'data-id': 'held-1', 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+	const done = mount(el);
+	dispatch('reef-inbox:open');
+	await done;
+	await drain();
+	assert.equal(el.children.length, 1);
+	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_kaito,
+		'the open asked for before the answer was dropped (panel still closed)');
+	assert.equal(listenerCount(), before + 2, 'the holding listener outlived the answer');
+
+	// On a no the held request goes nowhere, and the holding listener is gone with the answer.
+	const before2 = listenerCount();
+	const off = new El({ 'data-kind': 'site', 'data-id': 'off-held' });
+	const doneOff = mount(off);
+	dispatch('reef-inbox:open');
+	await doneOff;
+	await drain();
+	assert.ok(nothingRendered(off));
+	assert.equal(listenerCount(), before2);
+});

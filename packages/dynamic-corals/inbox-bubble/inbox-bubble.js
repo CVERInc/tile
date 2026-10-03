@@ -2526,14 +2526,28 @@ export async function mount(el) {
 			return null;
 		}
 	})();
+	/** A `reef-inbox:open` that arrived while the gate was still asking — see `heldOpen` below. */
+	let openRequested = false;
 	if (!rememberedClaim(gateStore, tenant)) {
 		let cancelled = false;
+		// 🩸 AN OPEN ASKED FOR WHILE WE ASK IS HELD, NOT DROPPED. A site's own `DOMContentLoaded`
+		// handler (a footer「report a problem」link, say) may dispatch `reef-inbox:open` a round trip
+		// before there is an answer — the exact race the listener-before-first-fetch rule further
+		// down exists to prevent. So a stand-in listener only remembers that it was asked; it is
+		// removed when the answer arrives, whatever it is, or on `unmount`, and the request is
+		// honoured only on a yes. It opens nothing itself: there is no panel to open yet.
+		const heldOpen = () => {
+			openRequested = true;
+		};
+		window.addEventListener('reef-inbox:open', heldOpen);
 		gating.set(el, () => {
 			cancelled = true;
+			window.removeEventListener('reef-inbox:open', heldOpen);
 		});
 		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled);
 		if (cancelled) return;
 		gating.delete(el);
+		window.removeEventListener('reef-inbox:open', heldOpen);
 		rememberClaim(gateStore, tenant, claimed);
 		if (claimed !== true) return;
 	}
@@ -3104,8 +3118,9 @@ export async function mount(el) {
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
 	//
-	// 🔴 ONE OF THE TWO `window` LISTENERS THIS FILE INSTALLS (the other is ruling 54's `pagehide`,
-	// at the bottom of `mount`). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
+	// 🔴 ONE OF THE TWO `window` LISTENERS A DRAWN BUBBLE KEEPS (the other is ruling 54's `pagehide`,
+	// at the bottom of `mount`; the claim gate's `heldOpen` exists only while it asks, and is gone
+	// before this line runs). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
 	// an SPA that tears the container out calls it, and neither listener is left holding `root`
 	// and `el`, nor re-rendering into a node nobody can see. A host that never calls it gets what
 	// every version before 0.7.9 did — `mountAll`'s `data-dynamic-coral-mounted` guard stops the
@@ -3114,7 +3129,7 @@ export async function mount(el) {
 	// script may honestly make of every panel on the page, and it names no conversation, which is
 	// the whole difference between it and the hand-off event 0.7.5 removed (review B3).
 	window.addEventListener('reef-inbox:open', openPanel);
-	if (shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
+	if (openRequested || shouldAutoOpenFromHash(location.hash, el.getAttribute('data-open-on-hash'))) openPanel();
 
 	// ── the deferred write's two lines (ruling 54) ─────────────────────────────────────────
 	//
@@ -3136,8 +3151,9 @@ export async function mount(el) {
 	if (aiLog.enabled()) window.addEventListener('pagehide', onPagehide);
 
 	// 🔴 REGISTERED HERE, SYNCHRONOUSLY, BESIDE THE TWO LISTENERS IT UNDOES (review B9). The only
-	// await above this line is the claim gate's, and it comes before anything is installed (an
-	// `unmount` during it is answered by `gating`); from the first listener to here nothing awaits,
+	// await above this line is the claim gate's, and the one thing installed across it — `heldOpen`
+	// — is removed by the answer or by an `unmount` through `gating`; from here back to the gate's
+	// answer nothing awaits,
 	// so there is no window in which a listener exists and its removal does not: an `unmount` that
 	// races the first transcript read below still finds it.
 	// `stopPolling()` invalidates that read too, so it cannot paint into a detached root.

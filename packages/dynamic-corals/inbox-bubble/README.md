@@ -96,7 +96,11 @@ to keep in sync.
 
 Both are wired **before** the panel's first transcript fetch, so a site that dispatches
 `reef-inbox:open` from its own `DOMContentLoaded` handler is not racing a network round trip for
-a listener to exist.
+a listener to exist. On a page where the coral is still asking whether the tenant has an Inbox (see
+"Only where a message can arrive"), the event is **held**: it is honoured the moment the answer is
+yes, and dropped if it is anything else — so it is not lost to that round trip either, and on a site
+without an Inbox it still opens nothing. `#inbox` is checked once, when the bubble is drawn, so on
+such a page it moves focus one round trip later than the page load.
 
 ## Handing a conversation over from elsewhere: navigate, do not dispatch
 
