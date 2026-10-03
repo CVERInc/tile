@@ -41,6 +41,36 @@ no name and no chip, only the fact that is true —「真人會看」/ 'A person
 each of the nine locales, or the site's own `data-status`. Before tile#20 such a panel showed the
 site name, ×, the form and Send, and said nothing about who reads the message.
 
+## Only where a message can arrive
+
+A bubble is drawn only for a tenant that has an Inbox. Before anything else — no style, no node, no
+listener, nothing in storage — a mount asks `GET /api/inbox/session?kind=…&id=…`, the same question
+the server answers when a message arrives (a tenant without an Inbox refuses every message, on
+purpose: nothing switches itself on because a stranger used it). A layout that puts this coral on
+every page of every site is therefore safe: where the owner never opened the Inbox, the page simply
+has no bubble.
+
+| the answer | what the page gets |
+|---|---|
+| `claimed: true` | the bubble, exactly as it was drawn before this check existed |
+| `claimed: false` | nothing — not a hidden bubble, no bubble — and no further request |
+| no answer: a network failure, no reply within **10 s**, a non-2xx, a body of the wrong shape, or `throttled` | nothing yet; asked again after **2 s, 8 s and 30 s** — at most four requests per mount — and drawn the moment one answers yes |
+
+There is no fourth row on purpose: no greyed-out bubble, no panel that apologises when opened. Any
+such state is one a visitor can press and be let down by.
+
+**Only a yes is remembered**, in this browser, for six hours (`reef-inbox:claim:<kind>:<id>`), so on
+a site with an Inbox every page after the first draws without waiting for anything. A no is never
+remembered: the person most likely to have just looked at a site without an Inbox is its owner,
+and after opening one they should see the bubble on the very next page they load. So:
+
+- **Inbox opened** → a visitor sees the bubble on their next page load (the endpoint is not cached).
+- **Inbox gone** (a site that leaves the platform) → a browser that heard yes keeps drawing it for
+  at most six hours from that answer; the first ask after that takes it away.
+
+The cost: one request per page view on a site without an Inbox, one request per six hours per
+browser on a site with one — up to four per mount only while the endpoint cannot answer.
+
 ## Opening the panel programmatically
 
 From 0.7.4, two ways in besides a visitor's own click — both inert unless this coral is actually
@@ -127,9 +157,10 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
 - A session spans **pages**, not documents: on a static site every navigation is a new `mount()`,
   so a per-document buffer would make the page sequence — the whole reason the row exists — always
   one entry long. Thirty idle minutes ends a session instead.
-- **Only when the site has an Inbox.** The coral asks `GET /api/inbox/session?kind=…&id=…` the
-  first time a visitor actually types a question (not at mount — that would be a request on every
-  page view of every site to answer a question that matters on a small share of them). A definite
+- **Only when the site has an Inbox.** The log asks `GET /api/inbox/session?kind=…&id=…` for itself
+  the first time a visitor actually types a question. That is a separate ask from the one the mount
+  makes before drawing (see "Only where a message can arrive"): each keeps its own answer, so the
+  rules below are exactly what they were before the mount started asking. A definite
   answer is cached for six hours; a probe that could not answer — no network, or the endpoint's own
   `throttled` — is **not** an answer, so it is never written down as「no」, and it is retried at most
   once every five minutes rather than once per question. The six hours are counted from the answer

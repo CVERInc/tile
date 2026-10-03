@@ -131,7 +131,11 @@ test('inbox-bubble: client injectStyles() wraps only when the document root decl
     globalThis.document = makeRootDocument(layered, { readyState: 'loading' });
     globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } };
     globalThis.location = { hash: '', hostname: 'example.test', href: 'https://example.test/' };
-    globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+    // The tenant has an Inbox — mount() draws nothing (and injects no style) until the claim
+    // probe says so. Every other request fails, as before.
+    globalThis.fetch = async (url) => (String(url).includes('/api/inbox/session')
+      ? { ok: true, status: 200, json: async () => ({ ok: true, claimed: true }) }
+      : { ok: false, status: 500, json: async () => ({}) });
     const url = pathToFileURL(join(HERE, 'inbox-bubble', 'inbox-bubble.js')).href + '?css-' + (++cacheBust);
     const mod = await import(url);
     const el = {
@@ -145,7 +149,7 @@ test('inbox-bubble: client injectStyles() wraps only when the document root decl
       querySelectorAll: () => [],
       addEventListener() {},
     };
-    // mount() calls injectStyles() right after the data-kind/data-id check, before anything that
+    // mount() calls injectStyles() right after the claim answer, before anything that
     // needs a fuller DOM — whatever happens afterward (this `el` is deliberately minimal) surfaces
     // only as a rejected promise, which the caller below discards.
     await mod.mount(el).catch(() => {});
