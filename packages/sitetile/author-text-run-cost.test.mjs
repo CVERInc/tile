@@ -15,6 +15,8 @@
 //     quadratic, so its cost was multiplied by the number of pages.
 //   - parsePost (blog.mjs), a post's featured image and excerpt: two image regexes read to the end of
 //     the body from every `![`, in every post, on every route that lists posts.
+//   - parseBlurb (pagetile.mjs), a book's one-line blurb: a lazy prefix tried every `[` in turn and
+//     read each one's label to its end.
 //
 // The same two rulers as the other *-run-cost tests:
 //   1. SAME ANSWER — each replaced implementation is kept below, verbatim, as the reference, and an
@@ -49,6 +51,7 @@ const blog = await import('./astro/src/lib/blog.mjs');
 
 const { parseParams } = core;
 const { footerListItem, footerWidgets, parsePost } = blog;
+const { parseBlurb } = await import('./astro/src/lib/pagetile.mjs');
 
 let passed = 0;
 function test(name, fn) {
@@ -124,6 +127,18 @@ const refFeatured = (b) => [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) =>
 const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
   .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
   .join(' ');
+
+// parseBlurb, as it was.
+function refParseBlurb(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const m = /^([\s\S]*?)\[([^\]]+)\]\(([^)\s]+)\)([\s\S]*)$/.exec(text);
+  if (!m) return { before: text, link: null, after: '' };
+  const href = m[3];
+  const safe = /^(https?:\/\/|\/|#)/i.test(href);
+  if (!safe) return { before: text, link: null, after: '' };
+  return { before: m[1], link: { label: m[2], href }, after: m[4] };
+}
 
 // ── inputs ──────────────────────────────────────────────────────────────────────────────────────
 // A param line: keys, values, quoted labels with and without `→href`, bare flags, and everything that
@@ -238,6 +253,18 @@ test("footerWidgets reads each list line exactly as before", () => {
   }
 });
 
+const blurbs = Array.from({ length: SAMPLES }, () => (rnd() < 0.5 ? postBody() : listLine()).replace(/!\[/g, () => pick(['![', '[', 'Read [', ''])));
+test('parseBlurb splits a blurb exactly as before', () => {
+  let links = 0, refused = 0;
+  for (const b of blurbs) {
+    const want = refParseBlurb(b);
+    assert.deepEqual(parseBlurb(b), want, JSON.stringify(b));
+    if (want && want.link) links++;
+    else if (want && /\[[^\]]+\]\([^)\s]+\)/.test(b)) refused++;     // a link whose href is not allowed
+  }
+  assert.ok(links > SAMPLES / 20 && refused > SAMPLES / 50 && links + refused < SAMPLES * 0.9, 'the samples exercise a link (' + links + '), a refused link (' + refused + ') and none');
+});
+
 const bodies = Array.from({ length: SAMPLES }, postBody);
 test("parsePost finds a post's featured image and excerpt exactly as before", () => {
   let images = 0, videos = 0, text = 0;
@@ -302,6 +329,8 @@ const homeWith = (line) => ({ 'src/content/home.md': '---\nsitetile-page: home\n
 const post = (b) => parsePost('p', '---\ntitle: T\n---\n' + b);
 const PATHS = [
   // [name, n, (n) → input, what consumes it, (n) → its control: the same path on text it has nothing to re-read in]
+  ['parseBlurb: a blurb of `[`', 2000, (k) => '['.repeat(k), parseBlurb, (k) => 'x'.repeat(k)],
+  ['parseBlurb: a blurb of `[a](`', 1000, (k) => '[a]('.repeat(k), parseBlurb, (k) => 'xxxx'.repeat(k)],
   ['parsePost: a body of `![`', 2000, (k) => '!['.repeat(k), post, (k) => 'xx'.repeat(k)],
   ['parsePost: a body of `![a](`', 1500, (k) => '![a]('.repeat(k), post, (k) => 'xxxxx'.repeat(k)],
   ['footerWidgets: a home list line of `](`', 2000, (k) => homeWith('- [' + ']('.repeat(k)), footerWidgets, (k) => homeWith('- [' + 'xx'.repeat(k))],
@@ -336,6 +365,8 @@ test('control: the cost ruler goes red on the code it replaced', () => {
   assert.ok(image.grew > LIMIT, 'the replaced featured-image regex ' + image.said);
   const excerpt = growth(refExcerptText, (k) => '![a]('.repeat(k), 1000);
   assert.ok(excerpt.grew > LIMIT, 'the replaced excerpt regex ' + excerpt.said);
+  const blurb = growth(refParseBlurb, (k) => '['.repeat(k), 2000);
+  assert.ok(blurb.grew > LIMIT, 'the replaced blurb regex ' + blurb.said);
 });
 test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
   // A flag scan that forgets a key may have space before its `=` (`cols =2` is not a flag `cols`).
@@ -365,12 +396,21 @@ test('control: the same-answer ruler goes red on a near-miss rewrite', () => {
     if ([...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1])[0] !== refFeatured(b)) video++;
     if (b.replace(/!\[[^\]]*\]\([^)]*\)?/g, '') !== b.replace(/!\[[^\]]*\]\([^)]*\)/g, '')) unclosed++;
   }
+  // a blurb reader that takes the LAST link rather than the first
+  let last = 0;
+  for (const b of blurbs) {
+    const t = b.trim(), all = [...t.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)], m = all[all.length - 1];
+    const got = !t ? null : !m || !/^(https?:\/\/|\/|#)/i.test(m[2]) ? { before: t, link: null, after: '' }
+      : { before: t.slice(0, m.index), link: { label: m[1], href: m[2] }, after: t.slice(m.index + m[0].length) };
+    if (JSON.stringify(got) !== JSON.stringify(refParseBlurb(b))) last++;
+  }
   let crossed = 0, early = 0;
   for (const l of lines) {
     if (!same(anyChar(l), refFooterListItem(l))) crossed++;
     if (!same(lazy(l), refFooterListItem(l))) early++;
   }
-  assert.ok(missed && quoted && crossed && early && video && unclosed, 'each near-miss is caught (' + [missed, quoted, crossed, early, video, unclosed] + ')');
+  if (process.env.SITETILE_AUTHOR_TEXT_VERBOSE) console.log('    near-misses differ on ' + [missed, quoted, crossed, early, video, unclosed, last].join(' / ') + ' of ' + SAMPLES + ' samples');
+  assert.ok(missed && quoted && crossed && early && video && unclosed && last, 'each near-miss is caught (' + [missed, quoted, crossed, early, video, unclosed, last] + ')');
 });
 
 console.log('\nsitetile author-text run cost: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
