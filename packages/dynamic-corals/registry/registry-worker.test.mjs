@@ -60,3 +60,87 @@ test('worker leaves exact and channel JavaScript routes unchanged', async () => 
   assert.equal(channel.headers.get('x-coral-resolved'), '1.0.0');
   assert.equal(await channel.text(), 'console.log("sample")');
 });
+
+// ── The answer is a function of the path alone ───────────────────────────────────────────────────
+// A deployment may bind this worker to more than one hostname: production, and a pre-release host
+// that exists so the thing can be measured before production serves it. That measures the right
+// thing only if the worker answers the same on every host — no channel override, no cache key, no
+// origin allowlist, no "not production" Cache-Control. A pre-release check that is handed a
+// different file from the one production will be handed is measuring a fiction.
+//
+// So: the same request on each host must get the same status, the same headers and the same body,
+// and the worker must ask the asset store for the same key. Bodies are derived from the key on
+// purpose — a store that returned one fixed string for every version would let a host that
+// resolved a different channel pass on the body alone.
+//
+// What this cannot show: the store below stands in for the platform's ASSETS binding, which the
+// worker hands the request's own origin. Whether the real binding also ignores the host it is
+// handed is checked by fetching the same path from each live host after a deploy.
+const HOSTS = ['https://feelreef.com', 'https://staging.feelreef.com', 'http://localhost:8787'];
+const PATHS = [
+  '/corals/sample/latest/sample.js',     // channel: short TTL, X-Coral-Resolved
+  '/corals/sample/legacy/sample.js',     // a second channel, a second version
+  '/corals/sample/1.0.0/sample.js',      // exact: immutable
+  '/corals/sample/1.0.0/manifest.json',  // a version's own manifest
+  '/corals/manifest.json',               // the channel table
+  '/corals/sample/0.9.0/manifest.json',  // the specified JSON 404
+  '/corals/sample/latest/missing.js',    // no such artifact
+  '/corals/sample/nochannel/sample.js',  // unknown channel
+  '/corals/nobody/latest/sample.js',     // unknown coral
+  '/corals/sample',                      // wrong shape
+];
+const STORED = new Set(['/sample/1.0.0/sample.js', '/sample/0.9.0/sample.js', '/sample/1.0.0/manifest.json']);
+
+// What one host says to one path, and which asset keys the worker asked for to say it.
+async function observe(candidate, host, path) {
+  const asked = [];
+  const assets = {
+    async fetch(url) {
+      const key = new URL(url).pathname;
+      asked.push(key);
+      return STORED.has(key) ? new Response(`bytes of ${key}`) : new Response('missing', { status: 404 });
+    },
+  };
+  const response = await candidate.fetch(new Request(host + path), { ASSETS: assets });
+  return { status: response.status, headers: [...response.headers], body: await response.text(), asked };
+}
+
+// Every host + path whose answer differs from what the first host answers to the same path.
+async function hostDifferences(candidate) {
+  const differing = [];
+  for (const path of PATHS) {
+    const baseline = JSON.stringify(await observe(candidate, HOSTS[0], path));
+    for (const host of HOSTS.slice(1)) {
+      if (JSON.stringify(await observe(candidate, host, path)) !== baseline) differing.push(host + path);
+    }
+  }
+  return differing;
+}
+
+test('worker answers every host the same: status, headers, body and asset key', async () => {
+  assert.deepEqual(await hostDifferences(worker), []);
+});
+
+test('the host sweep covers served, missing and refused answers, and notices a worker that answers by host', async () => {
+  // CONTROL for the sweep: it must be comparing real answers, not a row of identical 404s.
+  const seen = await Promise.all(PATHS.map((path) => observe(worker, HOSTS[0], path)));
+  assert.ok(seen.some((s) => s.status === 200 && s.asked.length === 1), 'no served artifact in the sweep');
+  assert.ok(seen.some((s) => s.status === 404 && s.asked.length === 1), 'no missing artifact in the sweep');
+  assert.ok(seen.some((s) => s.status === 404 && s.asked.length === 0), 'no refusal before the store in the sweep');
+  const [latest, legacy] = await Promise.all(['latest', 'legacy']
+    .map((channel) => observe(worker, HOSTS[0], `/corals/sample/${channel}/sample.js`)));
+  assert.notEqual(latest.body, legacy.body, 'two channels serve the same bytes: a host that swapped them would pass');
+
+  // CONTROL for the verdict: a worker that treats any host but the first differently must be
+  // reported on every path for every other host, or the sweep above would pass on nothing.
+  const staged = {
+    async fetch(request, assets) {
+      const answer = await worker.fetch(request, assets);
+      if (new URL(request.url).host === new URL(HOSTS[0]).host) return answer;
+      const headers = new Headers(answer.headers);
+      headers.set('cache-control', 'no-store');
+      return new Response(answer.body, { status: answer.status, headers });
+    },
+  };
+  assert.equal((await hostDifferences(staged)).length, PATHS.length * (HOSTS.length - 1));
+});
