@@ -843,7 +843,7 @@ test('gate: cannot ask ⇒ nothing, retried at 2 s, 8 s and 30 s, and drawn when
 	claimScript.set('retry-1', [
 		{ ok: false, status: 500, json: async () => ({}) },
 		() => { throw new TypeError('Failed to fetch'); },
-		ok({ ok: true, claimed: false, throttled: true }),
+		ok({ ok: true, claimed: 'yes' }), // a body of the wrong shape: could not ask, so asked again
 		ok({ ok: true, claimed: true })
 	]);
 	const d = longDelays.length;
@@ -864,7 +864,7 @@ test('gate: never answers ⇒ stops after four requests and draws nothing', asyn
 	claimScript.set('retry-2', [
 		{ ok: false, status: 503, json: async () => ({}) },
 		hang, // a request that never comes back is cut off by the per-request timeout
-		{ ok: false, status: 429, json: async () => ({ ok: false, reason: 'rate_limited' }) },
+		{ ok: false, status: 502, json: async () => ({}) },
 		() => { throw new TypeError('Failed to fetch'); },
 		{ ok: true, status: 200, json: async () => ({ ok: true, claimed: true }) } // never reached
 	]);
@@ -884,7 +884,7 @@ test('gate: a reply of the wrong shape is not an answer — least of all a yes',
 		{ ok: true, claimed: 'true' },
 		{ ok: true },
 		{ claimed: 1 },
-		{ ok: true, claimed: true, throttled: true }
+		{ ok: true, claimed: true, throttled: true } // `throttled` wins: not an answer, and not retried
 	];
 	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 	claimScript.set('shape-1', [...shapes.map(ok)]);
@@ -943,4 +943,36 @@ test('gate: a reef-inbox:open sent while the probe is still out is held, and ope
 	await drain();
 	assert.ok(nothingRendered(off));
 	assert.equal(listenerCount(), before2);
+});
+
+test('gate: throttled or refused (4xx) ⇒ not asked again on this page — retries are for could-not-ask only', async () => {
+	// The probe's rate limit counts per address across every site on the platform: three more asks
+	// from a throttled visitor only spend that address's allowance on the next site too. And a 400
+	// (`bad_kind`/`bad_id`) says the same thing every time it is asked.
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	const cases = {
+		'thr-1': ok({ ok: true, claimed: false, throttled: true }),
+		'bad-1': { ok: false, status: 400, json: async () => ({ ok: false, reason: 'bad_kind' }) },
+		'bad-2': { ok: false, status: 400, json: async () => ({ ok: false, reason: 'bad_id' }) },
+		'lim-1': { ok: false, status: 429, json: async () => ({ ok: false, reason: 'rate_limited' }) }
+	};
+	for (const [id, first] of Object.entries(cases)) {
+		claimScript.set(id, [first, ok({ ok: true, claimed: true })]); // the yes must never be reached
+		const d = longDelays.length;
+		const from = requests.length;
+		const el = new El({ 'data-kind': 'site', 'data-id': id });
+		await mount(el);
+		await drain();
+		assert.equal(probes(from).length, 1, `${id}: asked again`);
+		assert.deepEqual(gaps(d), [], `${id}: waited to ask again`);
+		assert.ok(nothingRendered(el), `${id}: drew without an answer`);
+	}
+	// A 5xx is still a could-not-ask, and still retried (the other tests pin the whole schedule).
+	claimScript.set('srv-1', [{ ok: false, status: 500, json: async () => ({}) }, ok({ ok: true, claimed: true })]);
+	const from = requests.length;
+	const el = new El({ 'data-kind': 'site', 'data-id': 'srv-1' });
+	await mount(el);
+	await drain();
+	assert.equal(probes(from).length, 2);
+	assert.equal(el.children.length, 1);
 });

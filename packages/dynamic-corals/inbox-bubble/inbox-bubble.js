@@ -1878,7 +1878,21 @@ export async function fetchAssistantName(apiBase, kind, id) {
  * NOT `false` — it is「we do not know」, and `createAiLog`'s flush treats not-knowing exactly
  * like a no while refusing to write it down as one.
  */
-export async function probeInboxClaim(apiBase, kind, id, signal) {
+export async function probeInboxClaim(apiBase, kind, id) {
+	return (await askInboxClaim(apiBase, kind, id)).answer;
+}
+
+/**
+ * The same request, saying also whether asking again could change the answer — which only the
+ * claim gate below needs. `answer` is exactly what `probeInboxClaim` returns.
+ *
+ * 🔴 `retry` IS TRUE ONLY FOR「COULD NOT ASK」: no network, a 5xx, a body of the wrong shape (and,
+ * in the gate, a timeout). NOT for `throttled` and NOT for a 4xx: the probe's rate limit counts per
+ * address across every site on the platform, so asking a throttled endpoint three more times only
+ * spends that address's allowance on the next site as well; and a 400 (`bad_kind`/`bad_id`) says
+ * the same thing every time it is asked.
+ */
+export async function askInboxClaim(apiBase, kind, id, signal) {
 	try {
 		const res = await fetch(
 			`${apiBase}/api/inbox/session?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`,
@@ -1886,7 +1900,7 @@ export async function probeInboxClaim(apiBase, kind, id, signal) {
 			// probe passes none and is exactly the request it always was.
 			signal ? { headers: { accept: 'application/json' }, signal } : { headers: { accept: 'application/json' } }
 		);
-		if (!res.ok) return null;
+		if (!res.ok) return { answer: null, retry: !(res.status >= 400 && res.status < 500) };
 		const body = await res.json();
 		// 🔴 `throttled` IS THE SERVER SAYING「WE DO NOT KNOW」, and it arrives dressed as a no
 		// (contract §一.1: over the read rate limit the endpoint answers 200 `claimed:false,
@@ -1895,10 +1909,12 @@ export async function probeInboxClaim(apiBase, kind, id, signal) {
 		// case on a busy site, since the probe shares the `read` bucket with a 15-second transcript
 		// poll — is indistinguishable from「this site has no Inbox」, which drops this browser's
 		// buffer and poisons the answer for six hours (review D2).
-		if (body?.throttled === true) return null;
-		return typeof body?.claimed === 'boolean' ? body.claimed : null;
+		if (body?.throttled === true) return { answer: null, retry: false };
+		return typeof body?.claimed === 'boolean'
+			? { answer: body.claimed, retry: false }
+			: { answer: null, retry: true };
 	} catch {
-		return null;
+		return { answer: null, retry: true };
 	}
 }
 
@@ -1982,23 +1998,23 @@ function probeOnce(apiBase, kind, id) {
 	const timeout = new Promise((resolve) => {
 		timer = setTimeout(() => {
 			if (ctl) ctl.abort();
-			resolve(null);
+			resolve({ answer: null, retry: true });
 		}, CLAIM_GATE_TIMEOUT_MS);
 	});
-	return Promise.race([probeInboxClaim(apiBase, kind, id, ctl ? ctl.signal : undefined), timeout])
+	return Promise.race([askInboxClaim(apiBase, kind, id, ctl ? ctl.signal : undefined), timeout])
 		.finally(() => clearTimeout(timer));
 }
 
 /**
- * Ask until somebody answers or the schedule runs out: `true`/`false` is the answer, `null` is
- * 「nobody could say」after the last attempt. `cancelled()` stops it between attempts (an SPA that
- * took the container off while it was asking).
+ * Ask until somebody answers, the schedule runs out, or asking again could not help (`throttled`, a
+ * 4xx — see `askInboxClaim`): `true`/`false` is the answer, `null` is「nobody could say」.
+ * `cancelled()` stops it between attempts (an SPA that took the container off while it was asking).
  */
 async function awaitInboxClaim(apiBase, kind, id, cancelled) {
 	for (let attempt = 0; ; attempt++) {
-		const answer = await probeOnce(apiBase, kind, id);
+		const { answer, retry } = await probeOnce(apiBase, kind, id);
 		if (typeof answer === 'boolean' || cancelled()) return answer;
-		if (attempt >= CLAIM_GATE_RETRY_MS.length) return null;
+		if (!retry || attempt >= CLAIM_GATE_RETRY_MS.length) return null;
 		await new Promise((resolve) => setTimeout(resolve, CLAIM_GATE_RETRY_MS[attempt]));
 		if (cancelled()) return null;
 	}
