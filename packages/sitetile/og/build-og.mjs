@@ -5,7 +5,8 @@
 //                                [--reuse <dir>] [--report <file>]
 //
 // --reuse <dir>   cards a previous build drew, laid out like a site root (<dir>/og/….png, each at
-//                 the path its og:image names, untouched). They are CANDIDATES, never trusted for
+//                 the file a request for its og:image is answered from — the URL path decoded
+//                 once, see cardFile in og-card.mjs — untouched). They are CANDIDATES, never trusted for
 //                 being there: one is copied in only when the key inside it equals the key of the
 //                 card this build would draw (og-card.mjs, "reuse"). A caller may hand over a whole
 //                 previous deployment without knowing what changed since.
@@ -27,7 +28,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { join, dirname, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { makeCardRenderer, ourCardPath, deadCards, cardInputs, cardMatches, CARD_MAX_BYTES } from './og-card.mjs';
+import { makeCardRenderer, ourCardPath, cardFile, deadCards, cardInputs, cardMatches, CARD_MAX_BYTES } from './og-card.mjs';
 
 const arg = (n, d = '') => { const i = process.argv.indexOf('--' + n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const DIST = process.argv[2];
@@ -130,9 +131,16 @@ try {
   renderCard = async () => { throw e; };
 }
 
-// Where a previous build's copy of a card would be, if the caller offered one. `rel` has already
-// been through ourCardPath, which is what refuses a path that tries to walk somewhere else.
-const offered = (rel) => (REUSE ? join(resolve(REUSE), rel) : '');
+// Where a previous build's copy of a card would be, if the caller offered one. `file` has already
+// been through cardFile, which is what refuses a path that tries to walk somewhere else.
+const offered = (file) => (REUSE ? join(resolve(REUSE), file) : '');
+
+// Every file a page here claims. Before card files were decoded, a card for a non-ASCII path was
+// written under its ENCODED name (og/notes/%E7%AD%86%E8%A8%98.png), which no request reaches. A
+// dist/ refilled from such a build still holds one; it is removed below, so the card does not ship
+// twice — unless that exact name is also the decoded name of some page's card, which is then a
+// real card and not an old copy.
+const claimed = new Set(mine.map((p) => cardFile(p.img)).filter(Boolean));
 
 function omitFailedCard(p) {
   // Only generated, optional cards reach here. Authored images and unrelated metadata survive.
@@ -162,10 +170,29 @@ function omitFailedCard(p) {
 
 const omissions = new Map();
 let made = 0, skipped = 0, omitted = 0, replaced = 0;
+function omit(p, e) {
+  omitFailedCard(p);
+  omitted++;
+  const reason = String(e?.message || e).replace(/[\r\n]+/g, ' ');
+  const group = omissions.get(reason) || { count: 0, pages: [] };
+  group.count++;
+  if (group.pages.length < 5) group.pages.push(relative(DIST, p.file));
+  omissions.set(reason, group);
+}
 const t0 = Date.now();
 for (const p of mine) {
-  const rel = ourCardPath(p.img);
-  const outPath = join(DIST, rel);
+  const url = ourCardPath(p.img);
+  // (A directory under that name is not a card; leave it.)
+  if (!claimed.has(url)) try { rmSync(join(DIST, url), { force: true }); } catch { /* see above */ }
+  const file = cardFile(p.img);
+  if (!file) {
+    // A claim that names no file — an escape that does not decode, or one that decodes into another
+    // directory. Nothing can be written for it. An optional card goes the way of any card that could
+    // not be drawn; a required one is left for the gate below, which names it and fails the build.
+    if (p.optional) omit(p, new Error('the og:image path does not name a file a card can be written to'));
+    continue;
+  }
+  const outPath = join(DIST, file);
   const inputs = cardInputs({
     title: p.title || '', brand: BRAND || p.brand || '',
     bg: BG || p.bg || '#111111', fg: FG || '#ffffff',
@@ -182,7 +209,7 @@ for (const p of mine) {
   // through all three.
   const want = rendererDown ? { inputs } : { key: typeof renderCard.keyFor === 'function' ? renderCard.keyFor(inputs) : null };
   let kept = false, candidates = 0;
-  for (const from of [outPath, offered(rel)]) {
+  for (const from of [outPath, offered(file)]) {
     if (!from) continue;
     let bytes;
     try {
@@ -208,13 +235,7 @@ for (const p of mine) {
     if (candidates) replaced++;
   } catch (e) {
     if (!p.optional) throw e;
-    omitFailedCard(p);
-    omitted++;
-    const reason = String(e?.message || e).replace(/[\r\n]+/g, ' ');
-    const group = omissions.get(reason) || { count: 0, pages: [] };
-    group.count++;
-    if (group.pages.length < 5) group.pages.push(relative(DIST, p.file));
-    omissions.set(reason, group);
+    omit(p, e);
   }
 }
 
@@ -223,7 +244,7 @@ for (const [reason, group] of omissions) {
 }
 
 // ── the gate ─────────────────────────────────────────────────────────────────────────────────────
-const dead = deadCards(mine, (rel) => existsSync(join(DIST, rel)));
+const dead = deadCards(mine, (file) => existsSync(join(DIST, file)));
 if (dead.length) {
   console.error(`✗ og cards: ${dead.length} page(s) claim an og:image that does not exist on disk:`);
   for (const d of dead.slice(0, 5)) console.error(`    ${d.file} → ${d.img}`);

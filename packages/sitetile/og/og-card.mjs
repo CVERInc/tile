@@ -304,10 +304,38 @@ export function ourCardPath(ogImage) {
   return path.startsWith('/og/') && path.endsWith('.png') && !path.split('/').includes('..') ? path : '';
 }
 
-/** the cards a page claims but disk does not have. `exists` is injected so this is testable. */
+/**
+ * The file a request for this og:image is answered from, as a site-root-relative path — or '' when
+ * it is not one of our cards or names no file that can be written safely.
+ *
+ * An og:image is a URL, so a card for /notes/筆記/ is named /og/notes/%E7%AD%86%E8%A8%98.png. A
+ * static host decodes the request path once and then looks for the file, so the card must be on
+ * disk as og/notes/筆記.png. 🔴 Every place that turns a card URL into a file goes through here —
+ * writing, reading a previous card, and the gate — because two conversions are free to disagree,
+ * and when they did the card was written under the encoded name while the gate, comparing that same
+ * undecoded string with the disk, reported it present.
+ *
+ * Decoded once, segment by segment, and otherwise byte for byte: no Unicode normalisation and no
+ * case folding, because a host does neither and a file renamed by either is a file it never finds.
+ * Refused, rather than guessed at: an escape that is not valid UTF-8, and any segment that decodes
+ * to empty, `.`, `..`, or something holding `/` (an encoded slash — a host splits on it, so it would
+ * move the card into another directory), a backslash or NUL.
+ */
+export function cardFile(ogImage) {
+  const path = ourCardPath(ogImage);
+  if (!path) return '';
+  let segments;
+  try { segments = path.slice(1).split('/').map(decodeURIComponent); } catch { return ''; }
+  const unsafe = (s) => s === '' || s === '.' || s === '..' || /[/\\\0]/.test(s);
+  return segments.some(unsafe) ? '' : `/${segments.join('/')}`;
+}
+
+/** the cards a page claims but disk does not have — including a claim that names no file at all.
+ *  `exists` is injected so this is testable; it is asked about the decoded file (see cardFile). */
 export function deadCards(pages, exists) {
   return pages.filter((p) => {
-    const rel = ourCardPath(p.img);
-    return rel && !exists(rel);
+    if (!ourCardPath(p.img)) return false;
+    const file = cardFile(p.img);
+    return !file || !exists(file);
   });
 }
