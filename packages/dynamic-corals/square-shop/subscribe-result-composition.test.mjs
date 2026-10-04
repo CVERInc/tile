@@ -252,7 +252,10 @@ test('a missing or empty locator is answered here, without asking RSP anything',
 		assert.equal(keepsShell(html), true, label + ': still the site\'s own page');
 		assert.equal(html.includes(RSP_PAGE), false, label + ': never forwarded to the legacy page');
 		assert.equal(html.includes('data-ejecta-subscribe-state="unknown"'), true, label);
-		assert.equal(html.includes('找不到這筆訂閱'), true, label + ': it says what is actually true');
+		// Buyer runtime states are named truthfully: the page presents the state the
+		// runtime actually knows, and unknown wording is for what it cannot resolve. RSP's `unknown`
+		// does not know the subscription is absent, so the old nonexistence heading pinned a defect.
+		assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, label + ': it says what is actually true');
 		assert.equal(html.includes('感謝您的訂閱'), false, label + ': nothing is thanked for');
 		assert.equal(html.includes('href="/"'), true, label + ': and the buyer is given the way back');
 		assert.equal(seenByAssets.length, 1, label);
@@ -268,8 +271,42 @@ test('facts that say unknown are a 404 in the site shell, not a fabricated succe
 	assert.equal(res.status, 404);
 	assert.equal(keepsShell(html), true);
 	assert.equal(html.includes('data-ejecta-subscribe-state="unknown"'), true);
-	assert.equal(html.includes('找不到這筆訂閱'), true);
+	// Same ledgered change as above: cannot-confirm wording, not a nonexistence claim.
+	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true);
 	assert.equal(html.includes('金級會員'), false, 'no plan is invented for an unknown result');
+});
+
+test('the unknown page says it cannot confirm here and names the next steps, on every locale and both unknown arms', async () => {
+	const cases = [
+		['en-US', "We can't confirm this subscription here", /sign in to your account/, /subscription confirmation email/, /Back to home/],
+		['ja-JP', 'このサブスクリプションを確認できません', /アカウントにログイン/, /確認メール/, /ホームに戻る/],
+		['zh-Hant', '在這裡無法確認這筆訂閱', /登入帳戶/, /訂閱確認信/, /返回首頁/],
+		['zh-Hans', '在这里无法确认这笔订阅', /登录账户/, /订阅确认信/, /返回首页/]
+	];
+	const nonexistence = [/couldn.t find/i, /not found/i, '找不到這筆訂閱', '找不到这笔订阅', '見つかりません'];
+	const arms = [
+		['no locator', { rsp: factsRsp({ [FACTS]: ACTIVE }) }, PAGE],
+		['RSP says unknown', { rsp: factsRsp({ [FACTS]: UNKNOWN }) }, PAGE + '?' + PARAM + '=cs_stale']
+	];
+	for (const [lang, heading, signIn, email, back] of cases) {
+		for (const [arm, rspOptions, path] of arms) {
+			const label = lang + ' / ' + arm;
+			const { env } = makeEnv({ ...rspOptions, shell: SHELL.replace('lang="zh-Hant"', 'lang="' + lang + '"') });
+			const res = await claimed.default.fetch(get(path), env);
+			const html = await res.text();
+			const section = html.slice(html.indexOf('data-ejecta-subscribe-result'));
+			assert.equal(res.status, 404, label);
+			assert.equal(html.includes('data-ejecta-subscribe-state="unknown"'), true, label);
+			assert.equal(section.includes('<h1>' + heading + '</h1>'), true, label + ': heading');
+			assert.match(section, signIn, label + ': sign in');
+			assert.match(section, email, label + ': confirmation email');
+			assert.match(section, back, label + ': back link text');
+			assert.equal(section.includes('href="/"'), true, label + ': back link');
+			for (const gone of nonexistence) {
+				assert.equal(typeof gone === 'string' ? html.includes(gone) : gone.test(html), false, label + ': no nonexistence wording ' + gone);
+			}
+		}
+	}
 });
 
 // ── 4. honest failure, with the passing control in the same test ─────────────

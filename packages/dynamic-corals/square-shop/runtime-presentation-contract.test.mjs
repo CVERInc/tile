@@ -723,6 +723,19 @@ test('🔴 CONTROL: the no-donor-shell document stays the bare pinned document, 
 	assert.doesNotMatch(html, /st-runtime|st-native/, 'no presentation class may leak into the honest no-shell document');
 });
 
+// The error tone the native client stamps on a failed buy's status line is the exact value a
+// reef.base selector matches, so renaming either side fails here rather than silently dropping
+// the cue.
+test('the native-buy failure tone value the emitted script writes is matched by a reef.base selector', async () => {
+	const html = await serveNative('c-native-detail-tone-script', { path: '/shop/sample-tee', projection: detailOk(nativeProduct) }).then((r) => r.html);
+	const written = [...html.matchAll(/setAttribute\('data-ejecta-status-tone','([^']+)'\)/g)].map((m) => m[1]);
+	assert.ok(written.length > 0, 'the emitted script sets the status tone');
+	for (const tone of new Set(written)) {
+		const matched = REEF_BASE_RULES.filter((r) => r.selector.includes(`[data-ejecta-status-tone="${tone}"]`));
+		assert.ok(matched.length > 0, `no reef.base selector matches data-ejecta-status-tone="${tone}"`);
+	}
+});
+
 // The in-flight state the native client sets (aria-busy beside disabled) has a presentation hook in
 // the base layer, and the emitted script really sets/clears it.
 test('the dc-native-buy exception carries an aria-busy rule in reef.base and the emitted script sets and clears it', async () => {
