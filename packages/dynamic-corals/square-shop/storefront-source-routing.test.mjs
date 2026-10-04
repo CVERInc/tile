@@ -717,7 +717,7 @@ function driveNativeCheckout(html, respond, { lang = '' } = {}) {
   assert.ok(script, 'the emitted native page must carry its checkout behavior');
   let click;
   const document = { documentElement: { lang }, addEventListener(type, handler) { if (type === 'click') click = handler; } };
-  const status = { textContent: '' };
+  const status = { textContent: '', attrs: {}, setAttribute(name, value) { this.attrs[name] = String(value); } };
   const button = {
     disabled: false,
     textContent: 'Buy now',
@@ -872,4 +872,103 @@ test('an unavailable native item that is NOT OUT_OF_STOCK keeps the generic unav
   const r = await serveNative('native-generic-unavailable', { shell: ZH_SHELL, path: '/shop/reef-tee', projection: nativeOk(zeroLeft), shops: MISLEADING_BUILD_LOCALE });
   assert.match(r.html, /class="dc-native-buy" disabled>無法購買/);
   assert.doesNotMatch(r.html, /已售完/);
+});
+
+// ── preview checkout presentation ───────────────────────────────────────────────────────────
+// RSP adds a top-level `preview_checkout` to the native projection only for the Site's own
+// preview host. "live_refused" means every checkout there is refused, so Buy renders disabled with
+// the reason on the status node; "test" gets one neutral notice line. No field is today's page.
+const withPreview = (mode, body) => async (url) => Response.json(url.searchParams.has('slug')
+  ? { ok: true, source: 'native', item: body, preview_checkout: mode }
+  : { ok: true, source: 'native', items: [body], preview_checkout: mode });
+const PREVIEW_SHELLS = {
+  'en-US': { shell, refused: "This is a preview. It can't take real payments, so purchases open when the site goes live.", notice: 'Preview — checkout runs in test mode; no real money moves.', buy: 'Buy now' },
+  'ja-JP': { shell: JA_SHELL, refused: 'これはプレビューです。実際のお支払いは受け付けられないため、サイトの公開後にご購入いただけます。', notice: 'プレビュー：決済はテストモードで動作し、実際に請求されることはありません。', buy: '今すぐ購入' },
+  'zh-TW': { shell: ZH_SHELL, refused: '這是預覽，無法收取真實款項；網站上線後才能購買。', notice: '預覽：結帳為測試模式，不會實際扣款。', buy: '立即購買' },
+  'zh-CN': { shell: ZH_SHELL.replace('lang="zh-Hant"', 'lang="zh-CN"'), refused: '这是预览，无法收取真实款项；网站上线后才能购买。', notice: '预览：结账为测试模式，不会实际扣款。', buy: '立即购买' },
+};
+
+for (const [locale, copy] of Object.entries(PREVIEW_SHELLS)) {
+  test(`preview live_refused renders a disabled Buy and the error-toned refusal line in ${locale}, grid and detail`, async () => {
+    for (const [name, path] of [['grid', '/shop'], ['detail', '/shop/reef-tee']]) {
+      const page = await serveNative(`native-preview-refused-${locale}-${name}`, { shell: copy.shell, path, projection: withPreview('live_refused', product) });
+      assert.equal(page.status, 200);
+      assert.ok(page.html.includes(`<button type="button" class="dc-native-buy" disabled>${copy.buy}</button>`), `${locale} ${name}: disabled Buy`);
+      assert.doesNotMatch(page.html, /data-native-sku="tee-sku"/, `${locale} ${name}: no actionable control`);
+      assert.ok(page.html.includes(`<p data-native-status role="status" class="st-runtime-status" data-ejecta-status-tone="error">${copy.refused}</p>`), `${locale} ${name}: refusal line with error tone`);
+      assert.doesNotMatch(page.html.split('<script>')[0], /try again|再試|もう一度|再试/i, `${locale} ${name}: no retry promise`);
+    }
+  });
+
+  test(`preview test mode renders one neutral notice and a live Buy in ${locale}, grid and detail`, async () => {
+    for (const [name, path] of [['grid', '/shop'], ['detail', '/shop/reef-tee']]) {
+      const page = await serveNative(`native-preview-test-${locale}-${name}`, { shell: copy.shell, path, projection: withPreview('test', product) });
+      assert.equal(page.status, 200);
+      assert.equal(page.html.split(`<p class="st-runtime-status">${copy.notice}</p>`).length, 2, `${locale} ${name}: exactly one notice line`);
+      assert.match(page.html, /data-native-sku="tee-sku"/, `${locale} ${name}: Buy stays actionable`);
+      assert.doesNotMatch(page.html.split('<script>')[0], /data-ejecta-status-tone/, `${locale} ${name}: the notice is neutral`);
+    }
+  });
+}
+
+test('a sold-out item on a live_refused preview keeps its own unavailable label and no refusal line', async () => {
+  const soldOut = { ...product, commerce: { ...product.commerce, available: 0, status: 'OUT_OF_STOCK' } };
+  const page = await serveNative('native-preview-refused-sold-out', { shell, path: '/shop/reef-tee', projection: withPreview('live_refused', soldOut) });
+  assert.match(page.html, /class="dc-native-buy" disabled>Sold out</);
+  assert.doesNotMatch(page.html.split('<script>')[0], /This is a preview/);
+});
+
+const previewRefusalResponder = async (url) => (url === '/api/cart/items'
+  ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] })
+  : Response.json({ error: 'preview_checkout_live_mode', checkout_available: false, reason: 'preview_checkout_live_mode' }, { status: 409 }));
+
+for (const [locale, copy] of Object.entries(PREVIEW_SHELLS)) {
+  test(`a 409 preview_checkout_live_mode shows the refusal line with error tone and leaves Buy disabled in ${locale}`, async () => {
+    const { html } = await serveNative(`native-preview-409-${locale}`, { shell: copy.shell, path: '/shop/reef-tee', projection: withPreview('test', product) });
+    const ui = driveNativeCheckout(html, previewRefusalResponder);
+    await ui.click();
+    assert.equal(ui.status.textContent, copy.refused);
+    assert.equal(ui.status.attrs['data-ejecta-status-tone'], 'error');
+    assert.equal(ui.button.disabled, true, 'a refused preview control must not invite a repeat');
+    assert.equal(ui.redirects.length, 0);
+    assert.doesNotMatch(ui.status.textContent, /try again|再試|もう一度|再试/i);
+    await ui.click();
+    assert.equal(ui.countOf('/api/checkout'), 1, 'zero new checkout calls after the refusal');
+  });
+}
+
+test('on a preview page other failures keep their own lines and the control stays retryable', async () => {
+  const { html } = await serveNative('native-preview-other-failure', { shell, path: '/shop/reef-tee', projection: withPreview('test', product) });
+  const other = driveNativeCheckout(html, async (url) => (url === '/api/cart/items'
+    ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] })
+    : Response.json({ error: 'cart_empty' }, { status: 409 })));
+  await other.click();
+  assert.equal(other.status.textContent, 'Unable to start checkout. Please try again.');
+  assert.equal(other.button.disabled, false);
+  assert.equal(other.status.attrs['data-ejecta-status-tone'], undefined);
+  const conflict = driveNativeCheckout(html, conflictResponder);
+  await conflict.click();
+  assert.equal(conflict.status.textContent, 'A checkout is already in progress. Another one cannot be started right now.');
+  assert.equal(conflict.button.disabled, true);
+});
+
+// Old shape: a projection body without the field — or with a value this consumer does not know —
+// is today's page, byte for byte, script included. The snapshots were taken from the emitter
+// before preview_checkout existed.
+const OLD_SHAPE_GRID = "<!doctype html><html data-theme=\"reef\"><head><title>Donor</title></head><body><header>NAV</header><main>\n<section data-storefront-source=\"native\" class=\"dc-native-grid st-runtime\"><div class=\"st-cells\"><article class=\"st-cell st-native-card\"><a href=\"/shop/reef-tee\"><img class=\"st-img\" src=\"/tee.jpg\" alt=\"Reef Tee\"><h2>Reef Tee</h2><p>USD 19.00</p></a><button type=\"button\" class=\"dc-native-buy\" data-native-sku=\"tee-sku\">Buy now</button><p data-native-status role=\"status\" class=\"st-runtime-status\"></p></article></div></section><script>(function(){const C={\"error\":\"Unable to start checkout. Please try again.\",\"conflict\":\"A checkout is already in progress. Another one cannot be started right now.\",\"busy\":\"Processing…\"};document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;let conflict=false;try{const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed');const lang=(document.documentElement&&document.documentElement.lang||'').trim();const checkout=await fetch('/api/checkout',lang?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({lang:lang})}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';throw new Error('checkout failed')}if(!result||typeof result.redirect_url!=='string')throw new Error('checkout failed');window.location.assign(result.redirect_url)}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;if(!conflict)button.disabled=false;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status)status.textContent=conflict?C.conflict:C.error}})})()</script>\n</main><footer>FOOT</footer></body></html>";
+const OLD_SHAPE_DETAIL = "<!doctype html><html data-theme=\"reef\"><head><title>Donor</title></head><body><header>NAV</header><main>\n<article data-storefront-source=\"native\" class=\"dc-native-product st-runtime st-native-detail\"><p><a href=\"/shop\">Shop</a></p><h1>Reef Tee</h1><img class=\"st-img\" src=\"/tee.jpg\" alt=\"Reef Tee\"><p>USD 19.00</p><p>Repo-backed copy</p><div class=\"st-native-actions\"><button type=\"button\" class=\"dc-native-buy\" data-native-sku=\"tee-sku\">Buy now</button><p data-native-status role=\"status\" class=\"st-runtime-status\"></p></div></article><script>(function(){const C={\"error\":\"Unable to start checkout. Please try again.\",\"conflict\":\"A checkout is already in progress. Another one cannot be started right now.\",\"busy\":\"Processing…\"};document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;let conflict=false;try{const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed');const lang=(document.documentElement&&document.documentElement.lang||'').trim();const checkout=await fetch('/api/checkout',lang?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({lang:lang})}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';throw new Error('checkout failed')}if(!result||typeof result.redirect_url!=='string')throw new Error('checkout failed');window.location.assign(result.redirect_url)}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;if(!conflict)button.disabled=false;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status)status.textContent=conflict?C.conflict:C.error}})})()</script>\n</main><footer>FOOT</footer></body></html>";
+test('a projection body without preview_checkout renders exactly the pre-preview bytes', async () => {
+  const grid = await serveNative('native-old-shape-grid', { shell, path: '/shop', projection: nativeOk(product) });
+  const detail = await serveNative('native-old-shape-detail', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  assert.equal(grid.html, OLD_SHAPE_GRID);
+  assert.equal(detail.html, OLD_SHAPE_DETAIL);
+});
+
+test('an unknown preview_checkout value renders exactly the pre-preview bytes', async () => {
+  for (const value of ['available', '', null, 7, 'LIVE_REFUSED']) {
+    const grid = await serveNative('native-unknown-preview-grid', { shell, path: '/shop', projection: withPreview(value, product) });
+    const detail = await serveNative('native-unknown-preview-detail', { shell, path: '/shop/reef-tee', projection: withPreview(value, product) });
+    assert.equal(grid.html, OLD_SHAPE_GRID, String(value));
+    assert.equal(detail.html, OLD_SHAPE_DETAIL, String(value));
+  }
 });
