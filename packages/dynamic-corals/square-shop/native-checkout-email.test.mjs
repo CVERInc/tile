@@ -96,7 +96,7 @@ function drive(html, respond, { lang = '' } = {}) {
   };
   new Function('document', 'fetch', 'window', script[1])(
     document,
-    async (url, init) => { calls.push({ url, init }); return respond(url, init, calls); },
+    async (url, init) => { if (url === '/api/cart') return Response.json({ lines: [] }); calls.push({ url, init }); return respond(url, init, calls); },
     { location: { assign(u) { redirects.push(u); } } },
   );
   return {

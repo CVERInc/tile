@@ -4,7 +4,7 @@
 //                                        (paid | pending | canceled; anything else → 404 unknown)
 //   /api/v2/shop/catalog              → the provider catalog the PUBLISHED widget reads when it
 //                                        mounts with no server-rendered grid to hydrate
-//   POST /api/cart/items → 200; POST /api/checkout → 409 checkout_attempt_conflict (native conflict)
+//   GET /api/cart → {lines:[]}; POST /api/cart/items → 200; POST /api/checkout → 409 checkout_attempt_conflict (native conflict)
 //   /seam/island.js                   → empty module (the site-runtime island is NOT run; fixtures
 //                                        instead)
 //   /dc/square-shop.js                → this checkout's published coral artifact, byte for byte
@@ -44,6 +44,7 @@ export function startServer({ dist, composedDir, composed, coralArtifact }) {
     // `connected: true` is required, not decoration: the widget treats anything else as "no shop
     // connected yet" and renders a one-line notice instead of a grid.
     if (u.pathname === '/api/v2/shop/catalog') return send(200, 'application/json', JSON.stringify({ connected: true, items: PROVIDER_ITEMS }));
+    if (u.pathname === '/api/cart' && req.method === 'GET') return send(200, 'application/json', '{"lines":[]}');
     if (u.pathname === '/api/cart/items' && req.method === 'POST') return send(200, 'application/json', '{"ok":true}');
     if (u.pathname === '/api/checkout' && req.method === 'POST') return send(409, 'application/json', '{"error":"checkout_attempt_conflict"}');
     if (u.pathname === '/seam/island.js') return send(200, 'text/javascript', 'export {};');
