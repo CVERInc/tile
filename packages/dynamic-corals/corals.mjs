@@ -26,6 +26,8 @@ export const CORALS = {
   // Same split as events: the client is four lines of mounting and imports the node-tested core,
   // so the logic that decides what an amount is has exactly one home.
   'sponsor': { src: 'sponsor-client.mjs', bundle: true, registry: true },
+  // And again: a few lines of mounting over a core that node drives against a real saved page.
+  'repo-facts': { src: 'repo-facts-client.mjs', bundle: true, registry: true },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);

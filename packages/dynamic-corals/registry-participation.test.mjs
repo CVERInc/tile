@@ -41,8 +41,8 @@ const strippedEnv = (extra = {}) => {
 // REGISTRY_CORALS / LOCAL_ONLY_CORALS are themselves DERIVED from CORALS (see corals.mjs) rather
 // than a second hand-kept list, so the per-coral loop below is what actually proves they cannot
 // silently diverge from the table an added coral would be entered into.
-ok('REGISTRY_CORALS names exactly the four corals that publish through the registry',
-  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['events', 'inbox-bubble', 'sponsor', 'square-shop']),
+ok('REGISTRY_CORALS names exactly the five corals that publish through the registry',
+  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']),
   REGISTRY_CORALS.join(', '));
 ok('LOCAL_ONLY_CORALS names exactly the two Cardtile-served, non-registry corals',
   JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['drawer', 'qr']),

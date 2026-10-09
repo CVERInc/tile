@@ -86,3 +86,6 @@ no host-side wiring beyond dropping the container + script tag:
 
 - `square-shop/` — REEF with Checkout's live Square Catalog widget (first dynamic
   coral, ships the pattern).
+- `repo-facts/` — fills the repository cards a page already has with the latest
+  release, its date and an archived badge. The one coral that renders nothing of its
+  own on failure: the page is left exactly as it was built. See its README.
