@@ -259,11 +259,11 @@ test('a normalised source manifest that disagrees with the immutable version man
   });
 });
 
-test('CONTROL: the participant set really is the four from the table, derived, not hand-listed', () => {
+test('CONTROL: the participant set really is the five from the table, derived, not hand-listed', () => {
   // Without this, a guard that iterated an accidentally-wrong list would look correct. Derived from
   // corals.mjs — the same table build.mjs itself reads — never hand-listed here, so a fifth
   // registry participant is covered automatically and qr/drawer cannot silently drift in.
-  assert.deepEqual([...REGISTRY_CORALS].sort(), ['events', 'inbox-bubble', 'sponsor', 'square-shop']);
+  assert.deepEqual([...REGISTRY_CORALS].sort(), ['events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']);
 });
 
 // ── against a REAL handed registry — SKIP BY NAME when none is given ────────────────────────────

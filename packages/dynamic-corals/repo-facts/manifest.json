@@ -1,0 +1,19 @@
+{
+  "name": "repo-facts",
+  "version": "0.1.0",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/repo-facts/0.1.0/repo-facts.js",
+  "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/repo-facts",
+  "requires": [],
+  "calls": [
+    "GET <data-api-base>/v0/repo-facts?repos=<owner/repo,…> — the bundle's only network call, one per mounted root, sent once on load with no cookies (`credentials: 'omit'`), no request body and no header of its own, and with `redirect: 'error'` so a redirect is a failure and never a second request to another origin; the list is the `owner/repo` of each repository link already inside a `.st-item` card within `data-scope` (default: the whole page), de-duplicated, sorted, at most 30 — it never lists an owner's repositories and never contacts the forge from the visitor's browser; there is no default origin, so a root without an https `data-api-base` makes no request; the request is abandoned after 3 seconds; there is no retry, no polling and no second fetch; each repo's entry is validated field by field (tag, releasedAt, pushedAt, license, archived, fullName) against the same table the endpoint uses and written with textContent only; a response that is late, redirected, not ok or not JSON changes nothing in the document, and an entry with one field of the wrong shape leaves that one card as it was"
+  ],
+  "stores": [
+    "none"
+  ],
+  "paid": false,
+  "funding": null,
+  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable endpoint at `data-api-base` (unset, not https, wrong origin, a redirect, a non-ok status, a timeout, a network error, or a body that is not a JSON object): the page stays exactly as it was rendered — no placeholder, no spinner, no error text, no empty element. The cards, their descriptions, licences and links are static HTML and do not depend on this coral; only a release tag with its date, or an archived badge, is added by it. A card whose repository is missing from the answer, has no release, or has an invalid entry is left untouched while the others are filled.",
+  "capabilities": []
+}
