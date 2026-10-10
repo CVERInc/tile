@@ -193,6 +193,13 @@ test('every COPY table carries every string English carries, as the same kind of
 		// the sentence instead of where its translator put it. Placement is the table's job.
 		assert.equal(table.statusDefault('小美').split(AI_CHIP_TOKEN).length, 2,
 			`${locale}.statusDefault places the AI chip token ${table.statusDefault('小美').split(AI_CHIP_TOKEN).length - 1} times, not once`);
+		// The KAITO-only line (CVERInc/reef#1866) is held to the same placement rule, and may not
+		// promise a reader: it is shown exactly where there is no Inbox for anyone to read in.
+		assert.equal(table.statusAiOnly('小美').split(AI_CHIP_TOKEN).length, 2,
+			`${locale}.statusAiOnly places the AI chip token ${table.statusAiOnly('小美').split(AI_CHIP_TOKEN).length - 1} times, not once`);
+		assert.ok(table.statusAiOnly('小美').startsWith(`小美${AI_CHIP_TOKEN}`), `${locale}.statusAiOnly does not open with the name and the chip`);
+		assert.notEqual(table.statusAiOnly('小美'), table.statusDefault('小美'), `${locale}.statusAiOnly is the has-an-Inbox line`);
+		if (locale !== 'en') assert.notEqual(table.statusAiOnly(''), COPY.en.statusAiOnly(''), `${locale}.statusAiOnly is still English`);
 		assert.deepEqual(Object.keys(table).sort(), Object.keys(COPY.en).sort(),
 			`${locale} carries a key English does not — a string nothing renders`);
 		if (locale !== 'en') {
@@ -2713,4 +2720,26 @@ test('tile#19: the hand-off honeypot hides itself inline, where a layered host c
 	const input = html.match(/<input[^>]*name="_hp"[^>]*>/)?.[0];
 	assert.match(input, /tabindex="-1"/);
 	assert.match(input, /autocomplete="off"/);
+});
+
+// ── CVERInc/reef#1866: the status line of KAITO without an Inbox ─────────────────────────────
+
+test('#1866: statusFor picks the KAITO-only line only for askOnly, and never loses the chip or the escaping', () => {
+	const chip = '<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>';
+	const base = { hasConv: false, hasEmail: false, kaitoOn: true };
+	// Owner ruling 54's second sentence, verbatim.
+	assert.equal(statusFor(COPY['zh-tw'], { ...base, askOnly: true }), `KAITO${chip}用這個站的內容回答`);
+	assert.equal(statusFor(COPY.en, { ...base, askOnly: true }), `KAITO${chip}answers from this site&#39;s content`);
+	// Without the flag — absent or false — every existing caller gets exactly what it got.
+	for (const askOnly of [undefined, false]) {
+		assert.equal(statusFor(COPY['zh-tw'], { ...base, askOnly }), `KAITO${chip}先回，轉出去真人會看`);
+	}
+	// The flag is about a KAITO mount: it cannot put a chip on a mount with no machine behind it.
+	assert.equal(statusFor(COPY.en, { hasConv: false, hasEmail: false, kaitoOn: false, askOnly: true }), 'A person reads what you send');
+	for (const locale of Object.keys(COPY)) {
+		const html = statusFor(COPY[locale], { ...base, askOnly: true }, '<b>小美</b>');
+		assert.equal(html.split(chip).length, 2, `${locale}: not exactly one chip`);
+		assert.ok(html.startsWith('&lt;b&gt;小美&lt;/b&gt;' + chip), `${locale}: the name was not escaped`);
+		assert.equal(html.includes(AI_CHIP_TOKEN), false, `${locale}: the sentinel reached the DOM`);
+	}
 });

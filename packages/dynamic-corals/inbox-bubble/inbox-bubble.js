@@ -287,6 +287,7 @@ export const COPY = {
 		closed: 'Close',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
 		statusNoAi: 'A person reads what you send',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}answers from this site's content`,
 		statusHandedOffEmail: "Passed to the owner — they'll reply by email.",
 		statusHandedOffNoEmail: 'Passed to the owner — the reply will show here.',
 		askAgain: (a) => `Ask ${a} again`,
@@ -320,6 +321,7 @@ export const COPY = {
 		closed: '關閉',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusNoAi: '真人會看',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用這個站的內容回答`,
 		statusHandedOffEmail: '已交給店家，會透過信箱回覆',
 		statusHandedOffNoEmail: '已交給店家，回覆會顯示在這裡',
 		askAgain: (a) => `重新問 ${a}`,
@@ -353,6 +355,7 @@ export const COPY = {
 		closed: '閉じる',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
 		statusHandedOffEmail: '担当者に取り次ぎました。メールで返信します。',
 		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
@@ -386,6 +389,7 @@ export const COPY = {
 		closed: '关闭',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusNoAi: '真人会看',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用这个网站的内容回答`,
 		statusHandedOffEmail: '已交给店家，会通过邮箱回复',
 		statusHandedOffNoEmail: '已交给店家，回复会显示在这里',
 		askAgain: (a) => `重新问 ${a}`,
@@ -425,6 +429,7 @@ export const COPY = {
 		closed: 'Schließen',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
 		statusNoAi: 'Was Sie senden, liest ein Mensch',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}antwortet mit den Inhalten dieser Website`,
 		statusHandedOffEmail: 'An den Betreiber weitergegeben — die Antwort kommt per E-Mail.',
 		statusHandedOffNoEmail: 'An den Betreiber weitergegeben — die Antwort erscheint hier.',
 		askAgain: (a) => `${a} noch einmal fragen`,
@@ -458,6 +463,7 @@ export const COPY = {
 		closed: 'Fermer',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
 		statusNoAi: 'Une personne lit ce que vous envoyez',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}répond à partir du contenu de ce site`,
 		statusHandedOffEmail: 'Transmis au responsable du site — la réponse arrivera par e-mail.',
 		statusHandedOffNoEmail: 'Transmis au responsable du site — la réponse s’affichera ici.',
 		askAgain: (a) => `Redemander à ${a}`,
@@ -491,6 +497,7 @@ export const COPY = {
 		closed: 'Cerrar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
 		statusNoAi: 'Lo que envíes lo lee una persona',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde con el contenido de este sitio`,
 		statusHandedOffEmail: 'Enviado al responsable del sitio: te responderá por correo.',
 		statusHandedOffNoEmail: 'Enviado al responsable del sitio: la respuesta aparecerá aquí.',
 		askAgain: (a) => `Volver a preguntar a ${a}`,
@@ -524,6 +531,7 @@ export const COPY = {
 		closed: 'Fechar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
 		statusNoAi: 'Uma pessoa lê o que você envia',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde com o conteúdo deste site`,
 		statusHandedOffEmail: 'Enviado ao responsável pelo site — a resposta chega por e-mail.',
 		statusHandedOffNoEmail: 'Enviado ao responsável pelo site — a resposta vai aparecer aqui.',
 		askAgain: (a) => `Perguntar de novo a ${a}`,
@@ -559,6 +567,7 @@ export const COPY = {
 		// name is owner-chosen at runtime. A label-style sentence without it reads naturally.
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}먼저 답하고, 보내면 사람이 읽어요`,
 		statusNoAi: '보내면 사람이 읽어요',
+		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}이 사이트의 내용으로 답해요`,
 		statusHandedOffEmail: '운영자에게 전달했어요. 답장은 이메일로 와요.',
 		statusHandedOffNoEmail: '운영자에게 전달했어요. 답장은 여기에 표시돼요.',
 		askAgain: (a) => `${a}에게 다시 묻기`,
@@ -1936,6 +1945,24 @@ export async function askInboxClaim(apiBase, kind, id, signal) {
 // 🔴 THE SAME QUESTION THE SERVER ASKS. `GET /api/inbox/session` answers `claimed` from the same
 // settings row whose absence makes a message come back `not_claimed`, for every kind this coral
 // mounts, so the bubble and the send cannot disagree about which tenants have an Inbox.
+//
+// 🩸 THE GATE DECIDES WHICH BUBBLE, NOT ONLY WHETHER (0.7.11, CVERInc/reef#1866). As first written
+// it returned on every no — and `data-kaito="1"` on a tenant without an Inbox is not a broken
+// install, it is the state owner ruling 54 describes by name: the ask-the-site half, bought on its
+// own. That half needs nobody to receive anything, so the gate was hiding a working product behind
+// a question about a different one. The three outcomes above are unchanged for a mount WITHOUT
+// KAITO. With KAITO, a no and a「could not ask」both draw the ASK-ONLY bubble (`askOnly` in
+// `mount`): the ask view and nothing else — no way to a person on screen, no conversation handle
+// read or written, no question log, no `pagehide` listener, and the status line that says what is
+// true there. It is still not a「maybe」state: everything it shows works, because everything that
+// needs an Inbox is absent rather than greyed.
+//
+// 🔴「COULD NOT ASK」WITH KAITO IS ASK-ONLY, AT THE FIRST NON-ANSWER. The two ways to be wrong are
+// not the same size: ask-only on a site that has an Inbox costs one page view without the route to
+// a person; the full bubble on a site that has none is the button that fails every time, which is
+// what the gate exists to end. And once something is drawn the asking stops (see `settleOnUnknown`),
+// so the upgrade is the next page's — where a no was never remembered, and the question is asked
+// again.
 
 /**
  * How long this browser trusts a YES before asking again at mount — the log's own six hours.
@@ -2056,7 +2083,7 @@ const gating = new WeakMap();
  * fixed translated strings with no interpolation and need none. The caller
  * inserts what comes back exactly as an HTML fragment, not as text content.
  */
-export function statusFor(copy, { hasConv, hasEmail, kaitoOn }, assistantName = DEFAULT_ASSISTANT_NAME) {
+export function statusFor(copy, { hasConv, hasEmail, kaitoOn, askOnly }, assistantName = DEFAULT_ASSISTANT_NAME) {
 	if (hasConv) return hasEmail ? copy.statusHandedOffEmail : copy.statusHandedOffNoEmail;
 	// tile#20: without KAITO there is no machine answering, so the line says only that a person
 	// reads what is sent — no name, no chip. It may be the owner's `data-status`, hence escaped.
@@ -2066,7 +2093,11 @@ export function statusFor(copy, { hasConv, hasEmail, kaitoOn }, assistantName = 
 	// yields the two plain-text halves around the chip. `String#split` on a string that never
 	// contains the token would hand back a one-element array; `after` defaults to '' for that
 	// case rather than rendering "undefined", though in practice every locale carries the token.
-	const raw = copy.statusDefault(assistantName);
+	//
+	// `askOnly` — KAITO on a tenant with no Inbox (ruling 54's second line,「KAITO [AI] 用這個站的內容
+	// 回答」). `statusDefault` promises that a person reads what is sent on, and there nobody does,
+	// so it may not be shown. Same name slot, same one token, same chip.
+	const raw = (askOnly && copy.statusAiOnly ? copy.statusAiOnly : copy.statusDefault)(assistantName);
 	const [before, after = ''] = raw.split(AI_CHIP_TOKEN);
 	return `${escHtml(before)}${AI_CHIP_HTML}${escHtml(after)}`;
 }
@@ -2548,7 +2579,8 @@ export async function mount(el) {
 
 	// The claim gate — see its header above `CLAIM_GATE_TTL_MS`. A remembered yes takes no await at
 	// all, so on a site with an Inbox every page after the first draws exactly when it always did.
-	// Otherwise nothing below runs — no style, no node, no listener, no storage — until a yes arrives.
+	// Otherwise nothing below runs — no style, no node, no listener, no storage — until a yes arrives,
+	// or, with KAITO, until the gate settles on the ask-only bubble.
 	const gateStore = (() => {
 		try {
 			return window.localStorage;
@@ -2558,6 +2590,11 @@ export async function mount(el) {
 	})();
 	/** A `reef-inbox:open` that arrived while the gate was still asking — see `heldOpen` below. */
 	let openRequested = false;
+	/**
+	 * KAITO on a tenant the gate did not hear a yes for: the ask view and nothing that needs an
+	 * Inbox — see the gate's header. Decided once, here, and never revised by this mount.
+	 */
+	let askOnly = false;
 	if (!rememberedClaim(gateStore, tenant)) {
 		let cancelled = false;
 		// 🩸 AN OPEN ASKED FOR WHILE WE ASK IS HELD, NOT DROPPED. A site's own `DOMContentLoaded`
@@ -2565,7 +2602,7 @@ export async function mount(el) {
 		// before there is an answer — the exact race the listener-before-first-fetch rule further
 		// down exists to prevent. So a stand-in listener only remembers that it was asked; it is
 		// removed when the answer arrives, whatever it is, or on `unmount`, and the request is
-		// honoured only on a yes. It opens nothing itself: there is no panel to open yet.
+		// honoured only when a bubble is drawn. It opens nothing itself: there is no panel to open yet.
 		const heldOpen = () => {
 			openRequested = true;
 		};
@@ -2576,12 +2613,16 @@ export async function mount(el) {
 		});
 		// An expired yes, still young enough to stand in for an answer nobody could give.
 		const fallback = rememberedClaim(gateStore, tenant, Date.now(), CLAIM_GATE_STALE_MS);
-		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled, fallback);
+		// `|| kaitoOn`: a KAITO mount draws on a non-answer too (ask-only), so it stops at the first.
+		const claimed = await awaitInboxClaim(apiBase, kind, id, () => cancelled, fallback || kaitoOn);
 		if (cancelled) return;
 		gating.delete(el);
 		window.removeEventListener('reef-inbox:open', heldOpen);
 		rememberClaim(gateStore, tenant, claimed);
-		if (claimed === false || (claimed === null && !fallback)) return;
+		if (claimed === false || (claimed === null && !fallback)) {
+			if (!kaitoOn) return;
+			askOnly = true;
+		}
 	}
 
 	injectStyles();
@@ -2592,7 +2633,11 @@ export async function mount(el) {
 	// republish (CANON 第一條). Every reader below already goes through `headHtml()`/`renderClosed()`,
 	// so a re-render after that read is all it takes.
 	let assistantName = resolveAssistantName(el);
-	const handle = loadHandle(tenant);
+	// 🔴 ASK-ONLY READS NO HANDLE. A handle is a conversation with a person; adopting one here would
+	// put the human thread, its poller and its compose box back on a tenant we were just told (or
+	// could not confirm) has nobody to read them. It is left in storage untouched — if the next page
+	// hears a yes, the thread is where the visitor left it.
+	const handle = askOnly ? null : loadHandle(tenant);
 	/**
 	 * The reachable human thread — 🔴 renamed from the old bare `conv` on
 	 * purpose. This one only ever changes when a message actually reaches a
@@ -2637,7 +2682,10 @@ export async function mount(el) {
 		tenant,
 		kind,
 		id,
-		enabled: el.getAttribute('data-ai-log') !== '0',
+		// 🔴 ASK-ONLY KEEPS NO LOG AT ALL (ruling 54: a KAITO-only tenant writes nothing, ever). Off
+		// here means no buffer in storage, no probe on the first question and no `pagehide`
+		// listener — the same switch `data-ai-log="0"` throws, so there is no second path to audit.
+		enabled: !askOnly && el.getAttribute('data-ai-log') !== '0',
 		storage: (() => {
 			try {
 				return window.localStorage;
@@ -2677,7 +2725,7 @@ export async function mount(el) {
 		// itself escapes the dynamic parts and splices in the AI chip's real markup, so it must be
 		// inserted BELOW as an HTML fragment, never re-escaped. Re-`escHtml`ing it here (the way this
 		// line used to) would print the chip's own `<span>` as literal text instead of rendering it.
-		const status = statusFor(copy, { hasConv: !!conv, hasEmail, kaitoOn }, assistantName);
+		const status = statusFor(copy, { hasConv: !!conv, hasEmail, kaitoOn, askOnly }, assistantName);
 		// 🔑 The escape hatch bug #1 (2026-09-04) exists to add: once a hand-off
 		// happens the panel used to show the human thread FOREVER, with no way
 		// back to KAITO or a fresh question. `conv` truthy → viewing the human
@@ -2735,7 +2783,7 @@ export async function mount(el) {
 	 */
 	function applyAssistantName() {
 		const status = root.querySelector(`.${PREFIX}-status`);
-		if (status) status.innerHTML = statusFor(copy, { hasConv: !!conv, hasEmail, kaitoOn }, assistantName);
+		if (status) status.innerHTML = statusFor(copy, { hasConv: !!conv, hasEmail, kaitoOn, askOnly }, assistantName);
 		const second = root.querySelector(`.${PREFIX}-second`);
 		if (second && conv && kaitoOn) second.textContent = copy.askAgain(assistantName);
 	}
@@ -2760,6 +2808,22 @@ export async function mount(el) {
 		handoffEndedNote = false;
 		renderMessages();
 	}
+
+	// What the closed button and the dialog are CALLED. With an Inbox: `copy.open` / `copy.title`,
+	// as ever — nothing on that path reads the lines below.
+	//
+	// Ask-only: the locale defaults (「Message us」/「Leave a message」) name a place to leave a
+	// message, and a screen reader told that by a panel that takes none has been told something
+	// untrue. So they are replaced by the ask box's own words, without the trailing ellipsis a
+	// placeholder carries and a name should not (it is read aloud).
+	//
+	// 🔴 BUT A `data-title` SOMEBODY SET STANDS, for the dialog. It is whatever the host calls this
+	// panel — a site layout passes the site's own name — and it is the heading a sighted visitor
+	// reads; the accessible name agrees with it. `data-open-label` does not get the same pass: it is
+	// the override for「Message us」specifically, so on a mount that takes no messages it is ignored.
+	const askName = String(copy.ask || '').replace(/\s*(?:…|\.{3})\s*$/, '');
+	const openLabel = askOnly ? askName : copy.open;
+	const panelLabel = askOnly ? (el.getAttribute('data-title') || askName) : copy.title;
 
 	const root = document.createElement('div');
 	root.className = `${PREFIX}-root`;
@@ -2844,7 +2908,7 @@ export async function mount(el) {
 		// accessible name, so a screen reader says exactly what it said before
 		// while the corner shows a glyph.
 		root.innerHTML =
-			`<button type="button" class="${PREFIX}-open" aria-label="${escHtml(copy.open)}">${OPEN_ICON}</button>`;
+			`<button type="button" class="${PREFIX}-open" aria-label="${escHtml(openLabel)}">${OPEN_ICON}</button>`;
 		root.querySelector(`.${PREFIX}-open`).addEventListener('click', () => {
 			open = true;
 			renderOpen();
@@ -2973,7 +3037,7 @@ export async function mount(el) {
 	 */
 	function renderAsk() {
 		root.innerHTML = `
-<div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(copy.title)}">
+<div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(panelLabel)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
   <form class="${PREFIX}-form">
@@ -3009,13 +3073,16 @@ export async function mount(el) {
 			log.innerHTML =
 				`<div class="${PREFIX}-msg ${PREFIX}-msg-visitor">${escHtml(question)}</div>`;
 
+			// 🔴 ASK-ONLY OFFERS NO PERSON. Both buttons below POST to `/api/inbox`, which refuses every
+			// message for a tenant without an Inbox — they are the button the claim gate exists to keep
+			// off the screen. So there the answer (or the refusal) is the whole exchange.
 			const src = answer && answer.kind === 'grounded' ? safeHref(answer.source_url) : null;
 			if (answer && answer.kind === 'grounded' && src) {
 				log.insertAdjacentHTML(
 					'beforeend',
 					`<div class="${PREFIX}-msg ${PREFIX}-msg-owner">${escHtml(answer.text)}` +
 						`<a class="${PREFIX}-src" href="${escHtml(src)}" rel="noopener noreferrer">${escHtml(copy.source)}</a></div>` +
-						`<button type="button" class="${PREFIX}-tohuman ${PREFIX}-quiet">${escHtml(copy.toHuman)}</button>`
+						(askOnly ? '' : `<button type="button" class="${PREFIX}-tohuman ${PREFIX}-quiet">${escHtml(copy.toHuman)}</button>`)
 				);
 			} else {
 				// A refusal, an uncited answer, and an engine we could not reach all
@@ -3028,10 +3095,11 @@ export async function mount(el) {
 				log.insertAdjacentHTML(
 					'beforeend',
 					`<div class="${PREFIX}-msg ${PREFIX}-msg-owner">${escHtml(said)}</div>` +
-						`<button type="button" class="${PREFIX}-tohuman">${escHtml(copy.toHumanAfterRefusal)}</button>`
+						(askOnly ? '' : `<button type="button" class="${PREFIX}-tohuman">${escHtml(copy.toHumanAfterRefusal)}</button>`)
 				);
 			}
 			log.scrollTop = log.scrollHeight;
+			if (askOnly) return true;
 
 			const toHuman = log.querySelector(`.${PREFIX}-tohuman`);
 			toHuman.addEventListener('click', () => {
