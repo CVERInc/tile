@@ -1052,6 +1052,54 @@ const checks = [
       && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
       && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
   }],
+  // 🔴 The banner on a blog route is the ONLY thing `bannerLocales` may touch. Feeding the same
+  // set to hreflang and to the footer link's `?has=` is a change to the <head> of every blog page
+  // on every existing site — worth doing, and its own decision. Until it is made, a translated
+  // post says so in exactly one place. (Wiring bannerLocales into altLocales left every suite and
+  // this smoke green before this check existed.) The banner and the footer link are asserted
+  // PRESENT first, so "no hreflang, no has=" cannot pass on a page that simply has neither.
+  ['🔴 blog route: a translated post carries the banner — and still no hreflang, and no `has=` on the footer link', () => {
+    const post = readFileSync(join(DIST, 'devlog/a-signed-post/index.html'), 'utf8');
+    const foot = (post.match(/<a class="rf-lang" href="([^"]*)"/) || [])[1];
+    const c = bannerConfig(post);
+    return !!c && c.options.map((o) => o.id).join() === 'zh-tw'
+      && typeof foot === 'string' && foot.startsWith('/language?return=')
+      && !/[?&;]has=/.test(foot)
+      && !/<link\b[^>]*rel="alternate"[^>]*hreflang=/.test(post)
+      && !/<link\b[^>]*hreflang=/.test(post);
+  }],
+  // 🔴 The other direction of "every option leads to a page that exists". That check counts
+  // options with no page behind them; this one counts pages with no option in front of them — an
+  // edition that IS built, under the locale prefix the banner would swap in, and is not offered.
+  // A banner that offers nothing has zero dead options, so the first check alone is satisfied by
+  // deleting every banner. Swept over every page, with or without a banner. Not swept: 404 and
+  // /preview/ (one per site, served for any path) and the /language chooser (the banner excludes
+  // itself there), which is why those are named and counted rather than quietly skipped.
+  ['🔴 banner, the other direction: no built page has another edition that its banner fails to offer', () => {
+    const declared = (readFileSync(new URL('./content/home.md', import.meta.url), 'utf8').match(/^locales:\s*(.+)$/m) || [])[1] || '';
+    const locs = declared.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const def = locs[0];
+    const missed = [];
+    let swept = 0, skipped = 0;
+    for (const f of builtHtmlFiles(DIST)) {
+      const rel = f.slice(DIST.length + 1);
+      if (!/(^|\/)index\.html$/.test(rel)) { skipped++; continue; }                     // 404.html
+      const segs = rel.replace(/(^|\/)index\.html$/, '').split('/').filter(Boolean);
+      const cur = segs.length && locs.includes(segs[0]) && segs[0] !== def ? segs[0] : def;
+      const bare = cur === def ? segs : segs.slice(1);
+      if (bare[0] === 'preview' || bare[0] === 'language') { skipped++; continue; }
+      swept++;
+      const c = bannerConfig(readFileSync(f, 'utf8'));
+      const offered = c ? c.options.map((o) => o.id) : [];
+      for (const L of locs) {
+        if (L === cur || offered.includes(L)) continue;
+        const target = [L === def ? '' : L, ...bare].filter(Boolean).join('/');
+        if (existsSync(join(DIST, target, 'index.html'))) missed.push(`/${segs.join('/')} has /${target}/ and does not offer ${L}`);
+      }
+    }
+    if (missed.length) console.error('    editions built but not offered:\n      ' + missed.slice(0, 8).join('\n      '));
+    return locs.length === 4 && swept >= 20 && skipped >= 3 && missed.length === 0;
+  }],
   // The control for the next check: the specimen really is a built post with no other edition.
   ['banner specimen: /devlog/a-base-only-post/ is built, and has no zh-TW source and no zh-TW page', () =>
     existsSync(new URL('./blog/a-base-only-post.md', import.meta.url))

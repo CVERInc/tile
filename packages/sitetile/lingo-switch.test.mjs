@@ -149,10 +149,42 @@ test('🔴 the page\'s own locale is resolved through `locales`, so `lang: zh-Ha
   assert.deepEqual(ids(b), ['en-us'], 'the page being read is not an option');
 });
 
-test('🔴 SiteLayout builds the banner from the measured set — the one hreflang and ?has= read', () => {
-  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales: bannerSet \}\)\s*:\s*null;/);
-  // …where bannerSet is that measured set, unless a generated blog route measured its own.
-  assert.match(layout, /const bannerSet = Array\.isArray\(bannerLocales\) \? bannerLocales\.filter\(Boolean\) : altLocales;/);
+// 🩸 2026-10-11. A generated blog route measures its own other editions (which locales build this
+// url) and hands them over as `routeLocales`. SiteLayout let that answer REPLACE the one measured
+// from content files. On a root-mounted blog `/` is the blog index, and a second language with no
+// posts yet but a home page of its own (content/<loc>.md) was known to the content measurement —
+// the same page emitted hreflang to it — and unknown to the route's. Replaced, the home page of
+// such a site lost its banner while its other edition existed. Two measurements of "this page
+// exists there" are both true: the answer is their union.
+test('🔴 a route\'s own measurement ADDS to the content one — neither replaces the other', () => {
+  const two = ['zh-TW', 'en-US'];
+  // root-mounted blog index: the route found no other edition, content found /en-us/ (a home page).
+  const fromContent = banner({ locales: two, lang: 'zh-Hant', defaultLocale: 'zh-TW', altLocales: two, routeLocales: ['zh-TW'] });
+  assert.ok(fromContent, 'the content measurement still counts when the route also answered');
+  assert.deepEqual(ids(fromContent), ['en-us']);
+  // an ordinary blog post: no content file anywhere, the route found the translation.
+  const fromRoute = banner({ locales: two, lang: 'zh-Hant', defaultLocale: 'zh-TW', altLocales: [], routeLocales: two });
+  assert.ok(fromRoute, 'the route measurement counts when content found nothing');
+  assert.deepEqual(ids(fromRoute), ['en-us']);
+  // neither found another edition → still no banner; a union must not invent one.
+  assert.equal(banner({ locales: two, lang: 'zh-Hant', defaultLocale: 'zh-TW', altLocales: [], routeLocales: ['zh-TW'] }), null);
+  assert.equal(banner({ locales: two, lang: 'zh-Hant', defaultLocale: 'zh-TW', altLocales: ['zh-TW'], routeLocales: [] }), null);
+});
+
+test('the union keeps `locales` order and lists a locale once, whichever measurement found it', () => {
+  const b = banner({ locales: FOUR, lang: 'en-US', defaultLocale: 'en-US', altLocales: ['en-US', 'ko-KR', 'zh-TW'], routeLocales: ['ja-JP', 'zh-TW'] });
+  assert.deepEqual(ids(b), ['zh-tw', 'ja-jp', 'ko-kr']);
+});
+
+test('no route measurement (every non-blog page) → the content set, untouched, in the order given', () => {
+  const b = banner({ locales: FOUR, lang: 'en-US', defaultLocale: 'en-US', altLocales: ['ko-KR', 'zh-TW'] });
+  assert.deepEqual(ids(b), ['ko-kr', 'zh-tw'], 'an archive route hands its own list as altLocales; it is not re-sorted');
+});
+
+test('🔴 SiteLayout hands the banner BOTH measurements — content (altLocales) and the route\'s own', () => {
+  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales \}\)\s*:\s*null;/);
+  // …and does not pick between them itself: the choice that lost a banner was made right here.
+  assert.doesNotMatch(layout, /Array\.isArray\(bannerLocales\)/);
 });
 
 // ── wiring ──────────────────────────────────────────────────────────────────────────────────

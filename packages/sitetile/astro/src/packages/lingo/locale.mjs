@@ -126,11 +126,28 @@ export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_
  *  already knew better — two lines above, hreflang and `?has=` read the measured set. Third
  *  consumer of one fact, and the only one still guessing.
  *
+ *  `routeLocales` is a SECOND measurement of the same fact, from a generated blog route: the
+ *  locales whose build emits this same url (lib/blog.mjs → blogSwitchLocales). It is added to
+ *  the content one, never used instead of it.
+ *
+ *  🩸 2026-10-11, the same day. The layout let the route's answer REPLACE the content one. On a
+ *  root-mounted blog `/` is the blog index; a second language with no posts yet but a home page
+ *  of its own was known to the content measurement (the page emitted hreflang to it) and not to
+ *  the route's — so that site's home page lost its banner while its other edition existed. Each
+ *  measurement says "this page exists there" and each is true, so the answer is the union.
+ *
  *  No options → null, so the page ships neither the banner markup nor its script. */
-export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [] } = {}) {
-  if (_list(locales).length < 2) return null;
+export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null } = {}) {
+  const declared = _list(locales);
+  if (declared.length < 2) return null;
   const pageLocale = localeOf(locales, lang);
-  const options = _list(altLocales).filter((l) => !sameLocale(l, pageLocale))
+  const fromContent = _list(altLocales);
+  // No route measurement → the content set exactly as given (an archive route hands its own list
+  // there, in its own order). With one → the union, in `locales` order, each locale once.
+  const exists = Array.isArray(routeLocales)
+    ? declared.filter((l) => routeLocales.includes(l) || fromContent.includes(l))
+    : fromContent;
+  const options = exists.filter((l) => !sameLocale(l, pageLocale))
     .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l) }));
   if (!options.length) return null;
   return {

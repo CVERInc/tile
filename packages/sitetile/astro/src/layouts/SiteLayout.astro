@@ -454,9 +454,10 @@ const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LIN
 // Options come from altLocales — the measured set hreflang and `?has=` read above — never from
 // `locales`: a declared language this page has no version in is a 404, not a suggestion. null
 // (no markup, no script) when the page exists in this language only. See suggestionBanner().
-// A blog route brings its own measurement (`bannerLocales`); every other page uses altLocales.
-const bannerSet = Array.isArray(bannerLocales) ? bannerLocales.filter(Boolean) : altLocales;
-const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales: bannerSet }) : null;
+// A blog route brings a second measurement (`bannerLocales`). Both go in and suggestionBanner()
+// takes their union — choosing between them HERE is what once took the banner off the home page
+// of a root-mounted blog. Every other page passes null and gets altLocales as before.
+const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales }) : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
 const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');
 const viewportFit = active.some((p) => p.viewportFit);
