@@ -1,6 +1,6 @@
 {
   "name": "@cver/coral-repo-facts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "REEF with Repo Facts — keeps the repository cards a page already has honest: each card's \"Updated …\" line is recomputed from the repo's last push, and an archived repo gets an archived pill. Client (repo-facts.js) is BUILT from repo-facts-client.mjs + repo-facts-core.mjs; the edge worker (repo-facts-worker.mjs) reads one hard-coded owner's public listing once a day and returns four checked fields per repo (name, pushed_at, archived, stars) and no free text. Version covers the UNIT: client JS + worker contract + the data-* attribute API + the renderer class names it reads.",
