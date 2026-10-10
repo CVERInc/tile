@@ -1014,12 +1014,12 @@ const checks = [
   }],
   ['🔴 banner: every option on every built page leads to a page that exists', () => {
     const dead = [];
-    let seen = 0;
+    const seen = new Set();
     for (const f of builtHtmlFiles(DIST)) {
       const c = bannerConfig(readFileSync(f, 'utf8'));
       if (!c) continue;
-      seen++;
       const route = '/' + f.slice(DIST.length + 1).replace(/(^|\/)index\.html$/, '').replace(/\.html$/, '');
+      seen.add(route);
       const segs = route.split('/').filter(Boolean);
       const sub = (segs[0] === c.current && c.current !== c.defaultLocale ? segs.slice(1) : segs).join('/');
       for (const o of c.options) {
@@ -1028,8 +1028,41 @@ const checks = [
       }
     }
     if (dead.length) console.error('    dead banner options:\n      ' + dead.slice(0, 8).join('\n      '));
-    return seen >= 5 && dead.length === 0;
+    // The sweep must have REACHED the blog routes — an index and a post, both editions. A walk
+    // that finds no banner there has nothing to say about them and would report zero dead options.
+    const reached = ['/devlog', '/zh-tw/devlog', '/devlog/a-signed-post', '/zh-tw/devlog/a-signed-post'].every((r) => seen.has(r));
+    return seen.size >= 5 && reached && dead.length === 0;
   }],
+  // -- the banner on generated blog routes --
+  // 🩸 2026-10-11. Reading the banner's options from the measured set took the banner off every
+  // blog route, because a generated route has no content file and so measured as "exists nowhere
+  // else" — including /devlog/, whose zh-TW edition is built two lines away. The route knows what
+  // it builds: [...path].astro now hands SiteLayout the locales whose build emits THIS url under
+  // their own prefix (lib/blog.mjs → blogSwitchLocales), which is the url the banner links to.
+  ['🔴 banner on the blog index: /devlog/ and /zh-tw/devlog/ each offer the other, and only the other', () => {
+    const a = bannerConfig(devlogIndex), b = bannerConfig(zhDevlogIndex);
+    return !!a && !!b
+      && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
+      && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
+  }],
+  ['🔴 banner on a post: a post translated at the same url offers its other edition, both ways', () => {
+    const a = bannerConfig(readFileSync(join(DIST, 'devlog/a-signed-post/index.html'), 'utf8'));
+    const b = bannerConfig(readFileSync(join(DIST, 'zh-tw/devlog/a-signed-post/index.html'), 'utf8'));
+    return !!a && !!b
+      && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
+      && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
+  }],
+  // The control for the next check: the specimen really is a built post with no other edition.
+  ['banner specimen: /devlog/a-base-only-post/ is built, and has no zh-TW source and no zh-TW page', () =>
+    existsSync(new URL('./blog/a-base-only-post.md', import.meta.url))
+    && !existsSync(new URL('./blog/zh-tw/a-base-only-post.md', import.meta.url))
+    && existsSync(join(DIST, 'devlog/a-base-only-post/index.html'))
+    && !existsSync(join(DIST, 'zh-tw/devlog/a-base-only-post/index.html'))],
+  ['🔴 banner on a post: a post that exists in one language offers no switch at all', () =>
+    bannerConfig(readFileSync(join(DIST, 'devlog/a-base-only-post/index.html'), 'utf8')) === null],
+  ['banner: 404 and /preview/ exist once per site, not once per language — no banner', () =>
+    bannerConfig(readFileSync(join(DIST, '404.html'), 'utf8')) === null
+    && bannerConfig(readFileSync(join(DIST, 'preview/index.html'), 'utf8')) === null],
   // -- nav: arbitrary-depth submenus (indented-list syntax → recursive NavNode) --
   ['nav: top-level dropdown group', () => /class="rf-nav-group">\s*<a class="rf-nav-link rf-nav-parent" href="\/products"/.test(html)],
   ['nav: 1st-level submenu link', () => /class="rf-nav-sub">[\s\S]*?class="rf-nav-link rf-nav-sublink" href="\/apps"/.test(html)],

@@ -150,7 +150,9 @@ test('🔴 the page\'s own locale is resolved through `locales`, so `lang: zh-Ha
 });
 
 test('🔴 SiteLayout builds the banner from the measured set — the one hreflang and ?has= read', () => {
-  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales \}\)\s*:\s*null;/);
+  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales: bannerSet \}\)\s*:\s*null;/);
+  // …where bannerSet is that measured set, unless a generated blog route measured its own.
+  assert.match(layout, /const bannerSet = Array\.isArray\(bannerLocales\) \? bannerLocales\.filter\(Boolean\) : altLocales;/);
 });
 
 // ── wiring ──────────────────────────────────────────────────────────────────────────────────

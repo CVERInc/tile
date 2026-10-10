@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
-import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
 
 
@@ -111,8 +111,17 @@ export function getStaticPaths() {
   // deliberately empty _site.md — keeps every one of its URLs.
   if (!blogInstalled(meta, posts)) return paths;
 
+  // Which other editions of each blog url exist — resolved ONCE, before any route is pushed, from
+  // every locale's whole corpus (so both directions agree, and an incremental build that emits a
+  // subset still knows what is deployed). Handed to SiteLayout as `bannerLocales`: the language
+  // banner on a generated route can only be measured by the route that generates it.
+  // See lib/blog.mjs → blogSwitchLocales(). The glob is the per-locale block's own, hoisted.
+  const localeBlogFiles = import.meta.glob('../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
+  const localeCorpora = localeBlogCorpora(files, localeBlogFiles, meta, posts);
+  const switchable = blogSwitchLocales(meta, posts, localeCorpora);
+
   // index page 1 at the blog base (default /devlog → "devlog"; root mount → undefined).
-  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: 1 } });
+  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: 1, bannerLocales: switchable(indexUrl(meta, 1)) } });
 
   // pager pages 2..N — only when blog-page-size is set; else zero extra routes (as before).
   // 🔴 Counted over `listed`, not `posts`: buildIndexView paginates what it will actually show, so
@@ -122,7 +131,7 @@ export function getStaticPaths() {
   if (pageSize) {
     const totalPages = Math.ceil(listed.length / pageSize) || 1;
     for (let n = 2; n <= totalPages; n++) {
-      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: n } });
+      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: n, bannerLocales: switchable(indexUrl(meta, n)) } });
     }
   }
 
@@ -176,7 +185,7 @@ export function getStaticPaths() {
     const sidebar = buildPostSidebar(listed, meta, post);
     paths.push({
       params: { path: toPath(postUrl(post, meta)) },
-      props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar },
+      props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, meta)) },
     });
   });
 
@@ -226,13 +235,13 @@ export function getStaticPaths() {
   // Resolution (translated-post glob → per-locale meta/corpus) is `localeBlogCorpora()` in
   // lib/blog.mjs — shared with the locale category/tag archives and the sitemap, so a locale's
   // corpus can't drift between what this route builds and what those list/advertise.
-  const localeBlogFiles = import.meta.glob('../../blog/*/*.md', { query: '?raw', import: 'default', eager: true });
-  for (const { meta: metaL, posts: postsL, listed: listedL } of localeBlogCorpora(files, localeBlogFiles, meta, posts)) {
-    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1 } });
+  // (`localeBlogFiles` / `localeCorpora` are resolved above, next to `switchable`, which needs them.)
+  for (const { url: urlL, meta: metaL, posts: postsL, listed: listedL } of localeCorpora) {
+    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1, bannerLocales: switchable(indexUrl(metaL, 1), urlL) } });
     const psL = Number(metaL['blog-page-size']) || 0;
     if (psL) {
       const tpL = Math.ceil(listedL.length / psL) || 1;
-      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: n } });
+      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: n, bannerLocales: switchable(indexUrl(metaL, n), urlL) } });
     }
     // Every translated post keeps its page; every link off it stays in this locale's listed set.
     const seqL = new Map(listedL.map((p, i) => [p.slug, i]));
@@ -248,7 +257,7 @@ export function getStaticPaths() {
       const keepReadingCards = postCards(keepReading, metaL);
       const relatedCards = postCards(related, metaL);
       const sidebar = buildPostSidebar(listedL, metaL, post);
-      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar } });
+      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, metaL), urlL) } });
     });
   }
 

@@ -1226,6 +1226,62 @@ export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts
   return out;
 }
 
+// blogSwitchLocales: for a blog index / pager / post url, the locales (DATA codes, in `locales`
+// order) whose own build emits that SAME url under their own prefix — the answer to "which other
+// editions of this page exist", for the route that is about to render it.
+//
+// 🩸 2026-10-11. The language banner offers only locales a page exists in, and SiteLayout measures
+// that from content files. A blog route has none, so it measured as existing nowhere else: the
+// banner left /devlog/ while /zh-tw/devlog/ was being built by the same getStaticPaths. Same shape
+// as alternateArchiveLocales above — only the route knows what it builds, so the route says.
+//
+// The pairing is the URL, on purpose. The banner switches by swapping the locale prefix on the
+// current path, so the only honest "it exists" is "that locale builds this path". A translation is
+// a file at blog/<loc>/<same slug>.md (localeBlogCorpora), and a locale's urls are the base
+// pattern with /<loc> in front — so the same slug normally lands on the same path, and whenever it
+// does not (a dated pattern and a re-dated translation, a `permalink:` of its own, an external
+// canonical with no page here), the two are not offered to each other.
+//
+// Computed from each corpus as a whole, never from the paths one build happens to emit: an
+// incremental build (REEF_ONLY_POSTS) renders a subset and takes the rest from the previous
+// deployment, where they still exist.
+//   meta      — the site's DEFAULT meta (siteMeta())
+//   basePosts — the default locale's FULL corpus (unlisted posts keep their page, so they count)
+//   corpora   — localeBlogCorpora()'s result
+// Returns at(url, urlLocale = '') — `urlLocale` is the prefix the asking page lives under.
+export function blogSwitchLocales(meta, basePosts, corpora) {
+  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const bare = (u) => String(u == null ? '' : u).replace(/^\/+|\/+$/g, '');
+  // a url → its path with the locale prefix removed; null when it is not under that prefix at all.
+  const keyOf = (u, urlLocale) => {
+    const k = bare(u);
+    if (!urlLocale) return k;
+    if (k === urlLocale) return '';
+    return k.startsWith(`${urlLocale}/`) ? k.slice(urlLocale.length + 1) : null;
+  };
+  const builtIn = new Map();   // key → Set<DATA locale>
+  const walk = (L, m, posts, listed, urlLocale) => {
+    const add = (u) => {
+      const k = keyOf(u, urlLocale);
+      if (k == null) return;
+      if (!builtIn.has(k)) builtIn.set(k, new Set());
+      builtIn.get(k).add(L);
+    };
+    add(indexUrl(m, 1));
+    const size = Number(m && m['blog-page-size']) || 0;
+    const pages = size ? (Math.ceil((listed || []).length / size) || 1) : 1;
+    for (let n = 2; n <= pages; n++) add(indexUrl(m, n));
+    for (const p of posts || []) if (postHasPage(p, m)) add(postUrl(p, m));
+  };
+  if (locales[0]) walk(locales[0], meta, basePosts, listedPosts(basePosts || [], meta), '');
+  for (const c of corpora || []) walk(c.locale, c.meta, c.posts, c.listed, c.url);
+  return (url, urlLocale = '') => {
+    const k = keyOf(url, urlLocale);
+    const hit = k == null ? null : builtIn.get(k);
+    return hit ? locales.filter((l) => hit.has(l)) : [];
+  };
+}
+
 // termLocaleMap: everything a category/tag archive route (base OR locale) needs to compute its own
 // hreflang — the per-locale "which slugs does THIS locale route" map (`mapByUrl`, keyed '' for the
 // default locale and '<url-locale>' for each translated one), a `urlToLocale` lookup back to DATA

@@ -13,7 +13,7 @@ import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
-const { posts, meta, pageNum } = Astro.props;
+const { posts, meta, pageNum, bannerLocales = null } = Astro.props;
 // 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
 // one destination, two affordances, and the chip was the one readers actually reach for
 // (chodaict: 「貼文tag點了沒有反應」). They're anchors now, to whichever archive really exists.
@@ -57,7 +57,7 @@ const title = isHome
   ? (meta.title || meta['blog-title'] || 'Blog')
   : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
 ---
-<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta} bannerLocales={bannerLocales}>
   <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
     <div class="bl-main">
     {!isHome && (

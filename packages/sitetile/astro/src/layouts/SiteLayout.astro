@@ -38,7 +38,11 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // (unlike /language) is not "every configured locale": a category/tag archive page exists per
 // SLUG, not per site, so its hreflang set is "which locales route an archive for THIS slug"
 // (blog.mjs's alternateArchiveLocales) — computed by the route, since only it knows the slug.
-const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', robots = '' } = Astro.props;
+// `bannerLocales: [...]` — for a generated BLOG route (index, pager, post): the locales whose build
+// emits this same url, measured by the route (lib/blog.mjs → blogSwitchLocales). It feeds the
+// language banner ONLY. It is deliberately not `alternates`: that would also start emitting
+// hreflang and `?has=` on every blog page of every existing site, which is a change of its own.
+const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '' } = Astro.props;
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
 // the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
 const renderedPageBody = await Astro.slots.render('default');
@@ -450,7 +454,9 @@ const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LIN
 // Options come from altLocales — the measured set hreflang and `?has=` read above — never from
 // `locales`: a declared language this page has no version in is a 404, not a suggestion. null
 // (no markup, no script) when the page exists in this language only. See suggestionBanner().
-const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales }) : null;
+// A blog route brings its own measurement (`bannerLocales`); every other page uses altLocales.
+const bannerSet = Array.isArray(bannerLocales) ? bannerLocales.filter(Boolean) : altLocales;
+const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales: bannerSet }) : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
 const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');
 const viewportFit = active.some((p) => p.viewportFit);
