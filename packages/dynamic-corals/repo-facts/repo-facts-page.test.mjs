@@ -190,9 +190,8 @@ test('🔴 no line on the card ⇒ the coral writes one, first in the meta row: 
     const left = c.querySelector('.st-item-meta-left'), spans = c.querySelectorAll('.st-item-updated');
     assert.equal(spans.length, 1);
     assert.ok(left.children[0] === spans[0], 'the line is the first thing in .st-item-meta-left');
-    // the renderer's own `|` exactly where Collection.astro puts one: before a separate GitHub link
-    const own = c.querySelector('a.st-item-gh') !== null;
-    assert.deepEqual(left.children.map((e) => e.className), own ? ['st-item-updated', 'st-item-sep', 'st-item-gh'] : ['st-item-updated', 'st-item-gh']);
+    // only the line: a separator is presentation, the theme's to draw
+    assert.deepEqual(left.children.map((e) => e.className), ['st-item-updated', 'st-item-gh']);
   }
   assert.equal(updated(p.doc, 'clikae'), 'Updated 3 days ago');
   assert.equal(updated(p.doc, 'marktile'), 'Updated yesterday');
@@ -200,7 +199,7 @@ test('🔴 no line on the card ⇒ the coral writes one, first in the meta row: 
   assert.deepEqual(await p.run(), { filled: 16, skipped: 0 });
   assert.ok(p.doc.serialize() === once, 'a second run builds nothing new');
   assert.equal(p.doc.querySelectorAll('.st-item-updated').length, 16);
-  assert.equal(p.doc.querySelectorAll('.st-item-sep').length, 14);
+  assert.equal(p.doc.querySelectorAll('.st-item-sep').length, 0);
 });
 
 test('🔴 the built line is the renderer\'s markup: undo what the coral added and the page is the original', async () => {
@@ -208,7 +207,6 @@ test('🔴 the built line is the renderer\'s markup: undo what the coral added a
   await p.run();
   const out = p.doc.serialize()
     .replace(/<span class="st-item-updated" data-dc-repo-facts="[^"]*">[^<]*<\/span>/g, '')
-    .replace(/<span class="st-item-sep" aria-hidden="true" data-dc-repo-facts="[^"]*">\|<\/span>/g, '')
     .replace(/<span class="st-item-badge" data-dc-repo-facts="seikyusho">Archived<\/span>/, '');
   assert.ok(out === p.before);
 });

@@ -10,8 +10,8 @@
 // (`.st-item-updated`, which the renderer wrote from a phrase somebody typed once) recomputed from
 // the last push, and — when the repo is archived — an archived pill among its badges. A page that
 // typed no date has no such line, so the coral writes one where Collection.astro would have (first
-// in `.st-item-meta-left`, with the renderer's `|` before a separate GitHub link), and a page
-// without JS shows no date at all. A card the answer does not cover is left exactly as it was. On
+// in `.st-item-meta-left`; any separator is the theme's business), and a page without JS shows no
+// date at all. A card the answer does not cover is left exactly as it was. On
 // any failure nothing is written at all. Text only: the few elements created carry fixed class
 // names, and everything from the answer goes in through textContent.
 export const SELECTOR = '[data-dynamic-coral="repo-facts"]';
@@ -64,21 +64,11 @@ export function fillCards(doc, data, owner, tag, now) {
     if (!span && phrase) {
       // The renderer writes the line only when the page typed a date. Same element, same place,
       // so the theme's own `.st-item-updated` rule applies. Found next time ⇒ never built twice.
-      const left = card.querySelector('.st-item-meta-left'), box = left || card.querySelector('.st-item-meta');
+      const box = card.querySelector('.st-item-meta-left') || card.querySelector('.st-item-meta');
       if (!box) { skipped++; continue; }
-      const first = box.firstChild;
       span = doc.createElement('span');
       span.className = 'st-item-updated';
-      box.insertBefore(span, first);
-      // Collection.astro's `|` sits before a GitHub link that is its own anchor (the card has a learn page).
-      if (left && card.querySelector('a.st-item-gh')) {
-        const sep = doc.createElement('span');
-        sep.className = 'st-item-sep';
-        sep.setAttribute('aria-hidden', 'true');
-        sep.setAttribute(MARK, name);
-        sep.textContent = '|';
-        box.insertBefore(sep, first);
-      }
+      box.insertBefore(span, box.firstChild);
     }
     if (span && phrase) {
       span.textContent = UPDATED[lang](phrase);
