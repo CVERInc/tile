@@ -16,11 +16,15 @@
 // noindex, because a 404 that gets indexed is a search result that wastes somebody's click. It is
 // passed as a prop rather than written into <head> here — a page cannot reach the layout's head.
 import SiteLayout from '../layouts/SiteLayout.astro';
-import { siteMeta } from '../lib/blog.mjs';
+import { siteMeta, siteDefaultLang } from '../lib/blog.mjs';
 import { uiCopy, DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 
-const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
-const lang = meta.lang || DEFAULT_LANG;
+const files = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
+const meta = siteMeta(files);
+// This route has no page behind it, so it speaks the SITE's language — see siteDefaultLang. Passed
+// to the layout as `lang`, which is what makes the footer Language link the default-locale chooser
+// (`/language`) through the same code every other page uses.
+const lang = siteDefaultLang(meta, files) || DEFAULT_LANG;
 const copy = uiCopy(lang);
 ---
 <SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex">
