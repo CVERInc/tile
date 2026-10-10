@@ -459,10 +459,12 @@ export function siteMeta(contentGlob) {
 // 🩸 CVERInc/reef#1886, #1868. siteMeta() used to answer this by accident: with no `_site.md` it
 // returns the HOME page's frontmatter, `lang` included. Once a site has a `_site.md` it returns
 // that instead, and `_site.md` carries `locales:` but usually no `lang:` — `lang` lives on each
-// page, because it is that page's <html lang>. So the 404 got no answer, took DEFAULT_LANG, and on
-// a two-locale English-default site became a zh-Hant document reading 找不到頁面, with a
-// Language link to `/zh-hant/language` (the layout prefixing the chooser for what it took to be a
-// non-default locale, using an attribute tag where a URL locale goes — a route nobody emits).
+// page, because it is that page's <html lang>. So the 404 got no answer and took DEFAULT_LANG: on
+// a two-locale site whose default is not the engine default, the 404 was rendered in the wrong
+// language (document language, copy), and the layout, seeing a language that is not the site's
+// default, built its footer Language link as a locale-prefixed chooser for that language. The
+// rule to keep: the 404 is rendered in the SITE's default language, so it is ON the default
+// locale by the layout's own comparison and its chooser link is the unprefixed `/language`.
 //
 // No new key. Three sources, all already written by every site that has an answer:
 //   1. the site config's own `lang`, when it says one;

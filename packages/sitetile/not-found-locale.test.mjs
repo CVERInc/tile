@@ -2,16 +2,16 @@
 //   run: node packages/sitetile/not-found-locale.test.mjs   (globbed into scripts/test.sh)
 //
 // 🩸 CVERInc/reef#1886, CVERInc/reef#1868. Measured on a two-locale site whose default is English:
-// the 404 page was `<html lang="zh-Hant">`, read 找不到頁面, and its footer Language link pointed at
-// `/zh-hant/language` — an address no build has ever emitted. Every ordinary page on the same site
-// was correct.
+// the 404 page was `<html lang="zh-Hant">` and read 找不到頁面 — the engine default, not the site's —
+// and its footer Language link was built for that wrong language instead of opening the site's
+// default-locale chooser. Every ordinary page on the same site was correct.
 //
-// One cause for all three. A site's `_site.md` carries `locales:` but usually no `lang:` — `lang`
-// is written on each PAGE, because it is what goes in that page's <html lang>. The 404 has no page
-// behind it, so it asked the site-config layer for `lang`, got nothing, and took DEFAULT_LANG. The
-// layout then did exactly what it does for any non-default locale: prefixed the chooser with the
-// URL form of that language. `zh-Hant` is a BCP-47 attribute tag, never a URL locale, so the prefix
-// named a route that does not exist. The link was built correctly from a wrong answer.
+// One cause. A site's `_site.md` carries `locales:` but usually no `lang:` — `lang` is written on
+// each PAGE, because it is what goes in that page's <html lang>. The 404 has no page behind it, so
+// it asked the site-config layer for `lang`, got nothing, and took DEFAULT_LANG. The layout then
+// did exactly what it does for any non-default locale: prefixed the chooser link with that
+// language. The link was built correctly from a wrong answer. The rule this file holds: the 404 is
+// rendered in the site's default language, and its Language link is the unprefixed `/language`.
 //
 // So this file does not test the link builder (it was never wrong, and it is the SAME one every
 // page uses). It tests the answer: real IR in, real HTML out, and the href resolved against the
@@ -71,11 +71,19 @@ await test('🔴 a multi-locale site: the FIRST declared locale, not the alphabe
 await test('🔴 a single-language site: the HOME page\'s `lang`, not whichever page sorts first', () => {
   const files = {
     '_site.md': 'brand: Tsuru Paper',
+    // A locale home is not THE home. It is listed FIRST so an implementation that accepts any
+    // `*/home.md` would take it; the root home below is the only right answer.
+    'ko-kr/home.md': 'sitetile-page: home\nlang: ko-KR',
     'about.md': 'sitetile-page: about\nlang: en',      // sorts before home, and disagrees with it
     'home.md': 'sitetile-page: home\nlang: ja',
-    'ko-kr/home.md': 'sitetile-page: home\nlang: ko-KR', // a locale home is not THE home
   };
   assert.equal(sdl({ brand: 'Tsuru Paper' }, files), 'ja');
+});
+
+await test('🔴 a declared locale beats the root home\'s `lang`: locales[0] is ranked above it', () => {
+  // The root home says `ja`; the site declares `en` first. Same order SiteLayout and the language
+  // chooser page use, so the 404 and the rest of the site agree on what "the default" is.
+  assert.equal(sdl({ locales: 'en, zh-TW' }, { 'home.md': 'sitetile-page: home\nlang: ja' }), 'en');
 });
 
 await test('a site that declares no language anywhere answers nothing', () => {
@@ -161,8 +169,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(/zh-hant/i.test(links.join(' ')), false, `an attribute tag leaked into a URL: ${links.join(' ')}`);
     });
 
-    await test('🔴 CONTROL: the address the defect produced really is a 404 in this build', () => {
+    await test('🔴 CONTROL: `resolves` can tell a missing chooser from a present one', () => {
       // Without this the `resolves` check above could be passing because it resolves everything.
+      // `/zh-hant/language` is an attribute tag where a URL locale goes — no build emits it — and
+      // `/zh-tw/language` is the real non-default chooser on this site.
       const { outDir } = built.multiEn;
       assert.equal(resolves(outDir, '/zh-hant/language?return=%2F404%2F'), false);
       assert.equal(resolves(outDir, '/zh-tw/language?return=%2F404%2F'), true, 'the non-default chooser should exist');
