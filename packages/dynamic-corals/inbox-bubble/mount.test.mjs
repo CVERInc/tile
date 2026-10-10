@@ -749,11 +749,14 @@ const BEFORE = {
 const { createHash } = await import('node:crypto');
 const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
-test('gate: a tenant with no Inbox renders nothing — no node, no listener, no other request', async () => {
+test('gate: a tenant with no Inbox and no KAITO renders nothing — no node, no listener, no other request', async () => {
+	// 🩸 Until 0.7.11 this mount carried `data-kaito="1"`, so the test pinned the regression it was
+	// written beside: the ask-the-site half disappearing with the Inbox. That mount now has its own
+	// section at the bottom of this file; this one is the tenant with neither.
 	for (const kind of ['site', 'ext']) {
 		const before = listenerCount();
 		const from = requests.length;
-		const el = new El({ 'data-kind': kind, 'data-id': `off-${kind}-1`, 'data-kaito': '1' });
+		const el = new El({ 'data-kind': kind, 'data-id': `off-${kind}-1` });
 		await mount(el);
 		await drain();
 		assert.ok(nothingRendered(el), `${kind}: an unclaimed tenant still got a bubble`);
@@ -1040,4 +1043,286 @@ test('gate: nobody could say, but this browser once heard yes (within 30 days) �
 	await mount(g);
 	await drain();
 	assert.ok(nothingRendered(g));
+});
+
+// ── KAITO without an Inbox: the ask-only bubble (CVERInc/reef#1866, owner ruling 54) ────────────
+//
+// 🩸 THE FAILURE THIS EXISTS FOR. The claim gate returned on every no, and a tenant that has the
+// ask-the-site half and no Inbox — the state ruling 54 names and gives its own status line — got an
+// empty container: script loaded, mount flagged, nothing drawn, no error anywhere.
+//
+// 🔴 THE RULER IS THE TABLE, one test per row:
+//
+//   data-kaito | Inbox    | bubble | a way to a person | deferred write | status line
+//   1          | yes      | drawn  | yes               | yes            | 「answers first, a person reads…」
+//   1          | no       | drawn  | NO                | NONE           | 「answers from this site's content」
+//   1          | unknown  | drawn  | NO                | NONE           | 「answers from this site's content」
+//   —          | yes      | drawn  | yes               | —              | 「A person reads what you send」
+//   —          | no       | nothing
+//   —          | unknown  | nothing, retried on the gate's schedule
+//
+// Rows 1, 4, 5 and 6 are measured against what the coral did BEFORE this section existed (the
+// `BEFORE` digests above and the gate's own request lists), not against themselves.
+
+const KAITO_ANSWER = 'We ship within three working days.';
+const answering = (answer) => (url) => {
+	if (url.includes('/api/kaito')) return { ok: true, status: 200, json: async () => answer };
+	return undefined;
+};
+const GROUNDED = { kind: 'grounded', text: KAITO_ANSWER, source_url: 'https://example.com/faq#shipping' };
+const REFUSED = { kind: 'refused', text: 'Nothing on this site covers that.' };
+/** What the panel shows for any refusal — the locale's own sentence, never the server's. */
+const REFUSAL_SHOWN = 'I don&#39;t have a record of that.';
+
+/** Everything that left, in order: `METHOD path` for each fetch, then each beacon as a POST. */
+const wire = (from) => [
+	...requests.slice(from).map((r) => `${r.init.method || 'GET'} ${new URL(r.url).pathname}`),
+	...beacons.map((b) => `BEACON ${new URL(b.url).pathname}`)
+];
+
+/**
+ * One visit, start to finish, against the real `mount()`: mount → open the bubble → ask one
+ * question → read the answer → leave the page. Returns what the page held and everything that left.
+ *
+ * 🔴 `pagehide` IS FIRED AT THIS MOUNT'S LISTENERS ONLY. Every earlier test's panel is still on
+ * this file's one `window`, and some of them hold questions of their own; firing theirs would
+ * measure them. How many this mount ADDED is returned too — zero is itself a claim.
+ */
+async function visit(attrs, answer = GROUNDED) {
+	const el = new El({ 'data-kind': 'site', 'data-site-name': 'Example Shop', ...attrs });
+	const id = el.attrs['data-id'];
+	const from = requests.length;
+	const listenersBefore = listenerCount();
+	const hidersBefore = new Set(windowListeners.get('pagehide') ?? []);
+	beacons.length = 0;
+	beaconResult = true;
+	respond = answering(answer);
+	try {
+		await mount(el);
+		await drain();
+		const root = el.children[0];
+		if (!root) return { el, id, drawn: false, wire: wire(from), listeners: listenerCount() - listenersBefore };
+		const closed = root.innerHTML;
+		await openBubble(root);
+		const panel = root.innerHTML;
+		composeBox(root).value = 'do you ship to Japan?';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await drain(); // the answer, and the log's own claim probe where there is a log
+		const exchange = root.querySelector('.dc-inbox-log').innerHTML;
+		const hiders = (windowListeners.get('pagehide') ?? []).filter((fn) => !hidersBefore.has(fn));
+		for (const fn of hiders) fn({});
+		await drain();
+		return {
+			el, id, root, drawn: true, closed, panel, exchange, hiders: hiders.length,
+			wire: wire(from), listeners: listenerCount() - listenersBefore,
+			keys: [...storage.keys()].filter((k) => k.endsWith(`:site:${id}`)).sort()
+		};
+	} finally {
+		respond = null;
+	}
+}
+
+const HAS_INBOX_LINE = 'answers first, a person reads what you send on';
+const ASK_ONLY_LINE = 'answers from this site&#39;s content';
+const CHIP = '<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>';
+
+/** What every ask-only visit must look like, whichever way the gate got there. */
+function assertAskOnly(v, why) {
+	assert.equal(v.drawn, true, `${why}: no bubble was drawn`);
+	assert.match(v.closed, /class="dc-inbox-open"/, `${why}: no closed bubble`);
+	// The ask view: KAITO's own box, the AI chip, and the line that is true without an Inbox.
+	assert.match(v.panel, /name="q"/, `${why}: the panel did not open on the ask view`);
+	assert.ok(v.panel.includes(`KAITO${CHIP}${ASK_ONLY_LINE}`), `${why}: not the KAITO-only status line: ${v.panel}`);
+	assert.equal(v.panel.includes('a person reads'), false, `${why}: the panel promises a person`);
+	// No way to a person anywhere: no compose form, no honeypot, no hand-off button, no second action.
+	assert.doesNotMatch(v.panel, /name="text"|dc-inbox-hp|dc-inbox-second|dc-inbox-handoff/, `${why}: a compose half was drawn`);
+	assert.ok(v.exchange.includes(KAITO_ANSWER) || v.exchange.includes(REFUSAL_SHOWN), `${why}: the answer was not shown`);
+	assert.equal(v.exchange.includes('dc-inbox-tohuman'), false, `${why}: the answer offers a person: ${v.exchange}`);
+	// Nothing named as a place to leave a message, for a screen reader either.
+	assert.doesNotMatch(v.closed + v.panel, /Message us|Leave a message/, `${why}: an accessible name still says「message」`);
+	// 🔴 ZERO WRITES, AS A LIST. The gate's one question, the assistant's name (a read of the
+	// platform's own setting — nothing about the visitor travels) and the question itself, which is
+	// the product. No second claim probe (there is no log to ask for), no POST to /api/inbox, no
+	// session POST, no beacon.
+	assert.deepEqual(v.wire, ['GET /api/inbox/session', 'GET /api/inbox/assistant', 'POST /api/kaito'], why);
+	assert.deepEqual(beacons, [], `${why}: a beacon left`);
+	assert.equal(v.hiders, 0, `${why}: a pagehide listener was installed`);
+	assert.equal(v.listeners, 1, `${why}: not exactly the one reef-inbox:open listener`);
+	// And nothing held in this browser that a later page could send: no log buffer, no handle, no
+	// remembered claim.
+	assert.deepEqual(v.keys, [], `${why}: wrote to storage`);
+}
+
+test('#1866 row 1 — KAITO + an Inbox: the full bubble, unchanged, and the questions DO leave (the control)', async () => {
+	const v = await visit({ 'data-id': 'r1-on', 'data-kaito': '1' });
+	assert.equal(digest(v.closed), BEFORE.closed, 'closed bubble changed');
+	assert.equal(digest(v.panel), BEFORE.open.site_kaito, 'open panel changed');
+	assert.ok(v.panel.includes(`KAITO${CHIP}${HAS_INBOX_LINE}`), 'not the has-an-Inbox status line');
+	assert.equal(v.panel.includes(ASK_ONLY_LINE), false, 'a site with an Inbox got the KAITO-only line');
+	assert.match(v.exchange, /dc-inbox-tohuman/, 'the answer lost its way to a person');
+	// 🔴 THE CONTROL FOR ROWS 2 AND 3: the same visit, on a site with an Inbox, does write — so the
+	// empty lists below are measured by a ruler that can read something.
+	assert.deepEqual(v.wire, [
+		'GET /api/inbox/session', 'GET /api/inbox/assistant', 'POST /api/kaito',
+		'GET /api/inbox/session', 'BEACON /api/inbox/session'
+	]);
+	assert.equal(JSON.parse(beacons[0].body).questions.at(-1).text, 'do you ship to Japan?');
+	assert.equal(v.hiders, 1);
+	assert.equal(v.listeners, 2);
+	assert.deepEqual(v.keys, ['reef-inbox:ai:site:r1-on', 'reef-inbox:claim:site:r1-on']);
+});
+
+test('#1866 row 2 — KAITO, no Inbox: the ask-only bubble is drawn, offers no person, writes nothing', async () => {
+	assertAskOnly(await visit({ 'data-id': 'off-r2-a', 'data-kaito': '1' }), 'answered');
+	// A refusal is where the full bubble offers「Send this to a person」; here it is the whole reply.
+	const refused = await visit({ 'data-id': 'off-r2-b', 'data-kaito': '1' }, REFUSED);
+	assertAskOnly(refused, 'refused');
+	assert.ok(refused.exchange.includes(REFUSAL_SHOWN), refused.exchange);
+});
+
+test('#1866 row 2 — a zh-TW page gets the ruled sentence, under the owner\'s own name for the assistant', async () => {
+	const lang = document.documentElement.attrs.lang;
+	document.documentElement.attrs.lang = 'zh-TW';
+	try {
+		const v = await visit({ 'data-id': 'off-r2-zh', 'data-kaito': '1', 'data-assistant-name': '小美' });
+		assert.equal(v.drawn, true, 'no bubble was drawn');
+		assert.ok(v.panel.includes(`小美${CHIP}用這個站的內容回答`), v.panel);
+		assert.equal(v.panel.includes('真人會看'), false);
+		assert.doesNotMatch(v.closed + v.panel, /傳訊息|留言給我們/);
+	} finally {
+		document.documentElement.attrs.lang = lang;
+	}
+});
+
+test('#1866 row 2 — a stored handle is not adopted, an open asked for early is honoured, and the Inbox opening upgrades the next page', async () => {
+	// A handle from some earlier day: left exactly where it is, never fetched, never shown.
+	const handleKey = 'reef-inbox:site:off-r2-h';
+	const handle = JSON.stringify({ conv: 'an-old-thread', ts: Date.now() - 1000, hasEmail: false, mode: 'human' });
+	storage.set(handleKey, handle);
+	const el = new El({ 'data-kind': 'site', 'data-id': 'off-r2-h', 'data-kaito': '1' });
+	const done = mount(el);
+	dispatch('reef-inbox:open'); // a site's own DOMContentLoaded handler, before the gate answers
+	// Counted from here: the broadcast also reached every earlier test's panel, synchronously, and
+	// what those fetched and armed is theirs. This mount has drawn nothing yet — its answer is a
+	// round trip away.
+	const from = requests.length;
+	const armed = timers.size;
+	await done;
+	await drain();
+	assert.equal(el.children.length, 1, 'no bubble was drawn');
+	assert.match(el.children[0].innerHTML, /name="q"/, 'the held open did not open the ask view');
+	assert.doesNotMatch(el.children[0].innerHTML, /name="text"|dc-inbox-second/);
+	assert.deepEqual(transcriptConvs(from), [], 'the stored conversation was fetched');
+	assert.equal(timers.size, armed, 'a transcript poller was armed');
+	assert.equal(storage.get(handleKey), handle, 'the stored handle was rewritten');
+	storage.delete(handleKey);
+
+	// 🔴 NOT STUCK. A no is never remembered, so the page after the owner opens the Inbox asks
+	// again, hears yes, and draws the full bubble — the same bytes any site with an Inbox gets.
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	claimScript.set('up-1', [ok({ ok: true, claimed: false }), ok({ ok: true, claimed: true })]);
+	const attrs = { 'data-kind': 'site', 'data-id': 'up-1', 'data-kaito': '1', 'data-site-name': 'Example Shop' };
+	const first = new El({ ...attrs });
+	await mount(first);
+	await drain();
+	await openBubble(first.children[0]);
+	assert.ok(first.children[0].innerHTML.includes(ASK_ONLY_LINE), 'the first page was not ask-only');
+	assert.equal(storage.has(claimKey('site', 'up-1')), false, 'a no was remembered');
+	const f = requests.length;
+	const second = new El({ ...attrs });
+	await mount(second);
+	await drain();
+	assert.equal(probes(f).length, 1, 'the next page did not ask again');
+	assert.equal(digest(second.children[0].innerHTML), BEFORE.closed);
+	await openBubble(second.children[0]);
+	assert.equal(digest(second.children[0].innerHTML), BEFORE.open.site_kaito, 'the next page is not the full bubble');
+});
+
+test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, and nothing leaves even if the site does have an Inbox', async () => {
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	const yes = ok({ ok: true, claimed: true });
+	// 🔴 EVERY SCRIPT ENDS IN A YES THAT MUST NOT BE REACHED. The site may well have an Inbox — that
+	// is what「unknown」means — and a second ask (the gate retrying, or a question log probing for
+	// itself) would hear so and send. Ask-only was decided without that answer and stays decided.
+	const cases = {
+		'unk-throttled': ok({ ok: true, claimed: false, throttled: true }),
+		'unk-429': { ok: false, status: 429, json: async () => ({ ok: false, reason: 'rate_limited' }) },
+		'unk-500': { ok: false, status: 500, json: async () => ({}) },
+		'unk-offline': () => { throw new TypeError('Failed to fetch'); },
+		'unk-hang': () => new Promise(() => {}),
+		'unk-shape': ok({ ok: true, claimed: 'yes' })
+	};
+	for (const [id, first] of Object.entries(cases)) {
+		claimScript.set(id, [first, yes, yes, yes]);
+		const d = longDelays.length;
+		const v = await visit({ 'data-id': id, 'data-kaito': '1' });
+		assertAskOnly(v, id);
+		assert.deepEqual(gaps(d), [], `${id}: kept asking after deciding to draw`);
+		assert.equal(claimScript.get(id).length, 3, `${id}: the yes was reached`);
+	}
+	// A yes this browser heard within 30 days still stands in for the missing answer, as it always
+	// has: that mount is the full bubble, not ask-only.
+	storage.set(claimKey('site', 'unk-stale'), JSON.stringify({ claim: true, at: Date.now() - 7 * 60 * 60 * 1000 }));
+	claimScript.set('unk-stale', [ok({ ok: true, claimed: false, throttled: true })]);
+	const el = new El({ 'data-kind': 'site', 'data-id': 'unk-stale', 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+	await mount(el);
+	await drain();
+	await openBubble(el.children[0]);
+	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_kaito);
+});
+
+test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async () => {
+	const el = new El({ 'data-kind': 'site', 'data-id': 'r4-on', 'data-status': 'Hello there' });
+	const from = requests.length;
+	const before = listenerCount();
+	await mount(el);
+	await drain();
+	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
+	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session', '/api/inbox/assistant']);
+	assert.equal(listenerCount(), before + 2);
+	await openBubble(el.children[0]);
+	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_status);
+	assert.match(el.children[0].innerHTML, /name="text"/);
+	assert.equal(el.children[0].innerHTML.includes(ASK_ONLY_LINE), false);
+});
+
+test('#1866 row 5 — no KAITO, no Inbox: still nothing', async () => {
+	// `data-kaito` must be exactly "1": anything else is a mount without KAITO, and gets no bubble.
+	for (const kaito of [undefined, '0', 'true', '']) {
+		const before = listenerCount();
+		const from = requests.length;
+		const el = new El({ 'data-kind': 'site', 'data-id': `off-r5-${kaito ?? 'none'}` });
+		if (kaito !== undefined) el.attrs['data-kaito'] = kaito;
+		await mount(el);
+		await drain();
+		assert.ok(nothingRendered(el), `data-kaito=${kaito}: a tenant with neither half got a bubble`);
+		assert.equal(listenerCount(), before);
+		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
+		assert.equal([...storage.keys()].some((k) => k.includes('off-r5-')), false);
+	}
+});
+
+test('#1866 row 6 — no KAITO, could not ask: nothing, and the gate\'s own retry schedule', async () => {
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+	// Throttled: not an answer, not retried, nothing drawn.
+	claimScript.set('r6-thr', [ok({ ok: true, claimed: false, throttled: true }), ok({ ok: true, claimed: true })]);
+	let d = longDelays.length;
+	let from = requests.length;
+	const a = new El({ 'data-kind': 'site', 'data-id': 'r6-thr' });
+	await mount(a);
+	await drain();
+	assert.ok(nothingRendered(a));
+	assert.equal(probes(from).length, 1);
+	assert.deepEqual(gaps(d), []);
+	// Unreachable: four requests at 2 s, 8 s and 30 s, and still nothing.
+	const down = { ok: false, status: 503, json: async () => ({}) };
+	claimScript.set('r6-down', [down, down, down, down, ok({ ok: true, claimed: true })]);
+	d = longDelays.length;
+	from = requests.length;
+	const b = new El({ 'data-kind': 'site', 'data-id': 'r6-down' });
+	await mount(b);
+	await drain();
+	assert.ok(nothingRendered(b));
+	assert.equal(probes(from).length, 4);
+	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
 });

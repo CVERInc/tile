@@ -43,12 +43,15 @@ site name, ×, the form and Send, and said nothing about who reads the message.
 
 ## Only where a message can arrive
 
-A bubble is drawn only for a tenant that has an Inbox. Before anything else — no style, no node, no
+A bubble that takes messages is drawn only for a tenant that has an Inbox. Before anything else — no style, no node, no
 listener, nothing in storage — a mount asks `GET /api/inbox/session?kind=…&id=…`, the same question
 the server answers when a message arrives (a tenant without an Inbox refuses every message, on
 purpose: nothing switches itself on because a stranger used it). A layout that puts this coral on
-every page of every site is therefore safe: where the owner never opened the Inbox, the page simply
-has no bubble.
+every page of every site is therefore safe: where the owner never opened the Inbox, the page has no
+bubble — or, with `data-kaito="1"`, only the half that needs nobody to receive anything (see
+"KAITO without an Inbox" below).
+
+The table is for a mount **without** `data-kaito="1"`:
 
 | the answer | what the page gets |
 |---|---|
@@ -78,6 +81,53 @@ still draws nothing and deletes the remembered yes.
 
 The cost: one request per page view on a site without an Inbox, one request per six hours per
 browser on a site with one — up to four per mount only while the endpoint cannot be reached.
+
+### KAITO without an Inbox (0.7.11)
+
+The ask-the-site half can be had on its own, and it needs no Inbox: the question goes to
+`/api/kaito` and the answer comes back from the site's own published content. From 0.7.10's
+gate until 0.7.11 such a mount drew **nothing** — the gate returned on every no, so a tenant with KAITO
+and no Inbox got an empty container and no error (CVERInc/reef#1866). The gate now decides
+**which** bubble to draw, not only whether:
+
+| `data-kaito` | the answer | the bubble | a way to a person | the question log | status line |
+|---|---|---|---|---|---|
+| `1` | `claimed: true` | drawn — exactly as before | yes | yes | 「\<名字\>**AI**先回，轉出去真人會看」 |
+| `1` | `claimed: false` | **drawn, ask-only** | **none** | **none** | 「\<名字\>**AI**用這個站的內容回答」 |
+| `1` | could not ask, or asked and refused | **drawn, ask-only** | **none** | **none** | 「\<名字\>**AI**用這個站的內容回答」 |
+| — | `claimed: true` | drawn — exactly as before | yes | — | 「真人會看」 or `data-status` |
+| — | `claimed: false` | nothing | | | |
+| — | could not ask, or asked and refused | nothing — the table above | | | |
+
+**Ask-only is the ask view and nothing that needs an Inbox** (owner ruling 54: a KAITO-only tenant
+writes nothing, ever):
+
+- No「Ask a person instead」under an answer and no「Send this to a person」under a refusal — both
+  post to `/api/inbox`, which refuses every message for a tenant without an Inbox. The answer, or
+  the refusal, is the whole exchange.
+- No compose form, no hand-off form, no second action in the header.
+- **No conversation handle is read or written.** One left in this browser from another day stays
+  where it is, unfetched and unshown; if a later page hears yes, the thread is where it was.
+- **No question log**: no `reef-inbox:ai:…` buffer, no second ask of `/api/inbox/session`, no
+  `pagehide` listener, no beacon — the switch `data-ai-log="0"` throws, thrown for the mount.
+- The one `window` listener is `reef-inbox:open`, and it opens the ask view.
+- The closed button and the dialog are named by the ask box's own words (`Ask about this site…`),
+  not `data-open-label`/`data-title` — those name a place to leave a message, and here there is
+  none.
+
+So a whole visit — mount, open, ask, read the answer, leave — sends exactly three requests and no
+beacon: `GET /api/inbox/session` (the gate's one question), `GET /api/inbox/assistant` (the name
+the owner gave the assistant) and `POST /api/kaito` (the question, which is the product).
+
+**Could not ask ⇒ ask-only, at the first non-answer.** The two ways to be wrong are not the same
+size: ask-only on a site that does have an Inbox costs that page view its route to a person; the
+full bubble on a site that has none is the button that fails every time it is pressed. A KAITO
+mount therefore does not retry on the 2 s / 8 s / 30 s schedule — something is on screen already,
+and a later answer would have nothing honest to do about it. A yes heard within 30 days still
+stands in for a missing answer exactly as above, and that mount is the full bubble.
+
+**It is never stuck.** A no is not remembered and neither is ask-only, so the next page asks again:
+the first page load after the owner opens the Inbox draws the full bubble.
 
 ## Opening the panel programmatically
 
@@ -180,7 +230,8 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
   schedule however many failed probes there have been since. Not knowing behaves exactly like「no」for
   sending: nothing leaves until somebody actually says yes. A KAITO-only tenant writes nothing,
   ever, and while that answer stands an unclaimed site holds nothing either — the buffer is dropped
-  every time, not only when the answer first arrives.
+  every time, not only when the answer first arrives. From 0.7.11 the ask-only bubble (see "KAITO
+  without an Inbox") does not create this log at all, so on such a mount none of the above runs.
 - **The machine's answers are never sent**, and cannot be: what travels is the visitor's own
   question, the path it was asked on, the cited passage's URL (or `null`), the page's locale, and
   the time. The row is assembled from that list of five fields rather than from whatever the buffer
