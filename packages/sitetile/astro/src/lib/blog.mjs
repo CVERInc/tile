@@ -453,6 +453,38 @@ export function siteMeta(contentGlob) {
   return withoutPageCoralCss(fallback);
 }
 
+// The language of the SITE — for a route with no page behind it (the 404), which therefore has no
+// page `lang` to read.
+//
+// 🩸 CVERInc/reef#1886, #1868. siteMeta() used to answer this by accident: with no `_site.md` it
+// returns the HOME page's frontmatter, `lang` included. Once a site has a `_site.md` it returns
+// that instead, and `_site.md` carries `locales:` but usually no `lang:` — `lang` lives on each
+// page, because it is that page's <html lang>. So the 404 got no answer, took DEFAULT_LANG, and on
+// a two-locale English-default site became a zh-Hant document reading 找不到頁面, with a
+// Language link to `/zh-hant/language` (the layout prefixing the chooser for what it took to be a
+// non-default locale, using an attribute tag where a URL locale goes — a route nobody emits).
+//
+// No new key. Three sources, all already written by every site that has an answer:
+//   1. the site config's own `lang`, when it says one;
+//   2. `locales[0]` — SiteLayout's own "main language at root" rule, so a route rendered with this
+//      value is ON the default locale by the layout's own comparison and gets unprefixed links;
+//   3. the root home page's `lang` — a single-language site declares no `locales`, and its home is
+//      what siteMeta() read before `_site.md` existed. The ROOT home only (content/home.md): a
+//      locale home, or whichever page sorts first, is some other page's language.
+// Returns '' when none of them says anything, so the caller still takes the one shared
+// DEFAULT_LANG rather than this function becoming a tenth place a default lives.
+export function siteDefaultLang(meta, contentGlob) {
+  const own = String((meta && meta.lang) || '').trim();
+  if (own) return own;
+  const first = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean)[0];
+  if (first) return first;
+  for (const [path, raw] of Object.entries(contentGlob || {})) {
+    if ((path.split('/content/')[1] || '') !== 'home.md') continue;
+    return String(splitFrontmatter(String(raw || '')).meta?.lang || '').trim();
+  }
+  return '';
+}
+
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
 // has no site-config layer, so a page's own frontmatter cannot declare the mode for the site.
 //
