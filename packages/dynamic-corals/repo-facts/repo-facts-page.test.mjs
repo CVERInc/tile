@@ -60,8 +60,8 @@ test('one request, for the owner, with no cookies and no redirect', async () => 
 
 test(`it fills ${FILLED} of the 16 cards — the number, not "some"`, async () => {
   const p = page();
-  assert.deepEqual(await p.run(), { filled: FILLED });
-  assert.deepEqual(globalThis.window[DIAGNOSTICS]['repo-facts'], { filled: FILLED });
+  assert.deepEqual(await p.run(), { filled: FILLED, skipped: 0 });
+  assert.deepEqual(globalThis.window[DIAGNOSTICS]['repo-facts'], { filled: FILLED, skipped: 0 });
 });
 
 test('en: the "Updated …" line is recomputed from the last push, in the words the page already uses', async () => {
@@ -162,7 +162,70 @@ test('no https data-api-base, or no owner ⇒ nobody is asked and nothing change
 test('an entry of the wrong shape costs its card and no other; values are written as text', async () => {
   const p = page({ response: { json: { ...FACTS, clikae: '<b>x</b>', tile: { pushed_at: '<img src=x>', archived: 'yes' } } } });
   const keep = ['clikae', 'tile'].map((n) => card(p.doc, n).serialize());
-  assert.deepEqual(await p.run(), { filled: FILLED - 2 });
+  assert.deepEqual(await p.run(), { filled: FILLED - 2, skipped: 0 });
   assert.deepEqual(['clikae', 'tile'].map((n) => card(p.doc, n).serialize()), keep);
   assert.equal(updated(p.doc, 'bleedblend'), 'Updated yesterday');
+});
+
+// ── 0.1.1: a page that typed no date ─────────────────────────────────────────────────────────────
+// fixtures/collection-page-no-updated.html is the same section as cver.net builds it now, with the
+// typed `updated:` lines removed from the page: saved verbatim from the preview of /oss/ on
+// 2026-10-11. The renderer writes no `.st-item-updated` at all, and the two renamed links are fixed
+// (`obsidian-marktile`, `obsidian-tugtile`), so an answer that covers all sixteen fills sixteen.
+const BARE = readFileSync(join(HERE, 'fixtures/collection-page-no-updated.html'), 'utf8');
+const ALL = { ...FACTS, liquidframe: f('2026-10-09'), 'obsidian-marktile': f('2026-10-09'), 'obsidian-tugtile': f('2026-10-07') };
+
+test('the dateless fixture is the page as built now: 16 cards, not one "Updated" line', () => {
+  const doc = parsePage(BARE);
+  assert.ok(doc.serialize() === BARE);
+  assert.equal(doc.querySelectorAll('.st-item').length, 16);
+  assert.equal(doc.querySelectorAll('.st-item-updated').length, 0);
+  assert.equal(doc.querySelectorAll('.st-item-meta-left').length, 16);
+});
+
+test('🔴 no line on the card ⇒ the coral writes one, first in the meta row: filled is 16, and twice is still once', async () => {
+  const p = page({ html: BARE, response: { json: ALL } });
+  assert.deepEqual(await p.run(), { filled: 16, skipped: 0 });
+  for (const c of p.doc.querySelectorAll('.st-item')) {
+    const left = c.querySelector('.st-item-meta-left'), spans = c.querySelectorAll('.st-item-updated');
+    assert.equal(spans.length, 1);
+    assert.ok(left.children[0] === spans[0], 'the line is the first thing in .st-item-meta-left');
+    // the renderer's own `|` exactly where Collection.astro puts one: before a separate GitHub link
+    const own = c.querySelector('a.st-item-gh') !== null;
+    assert.deepEqual(left.children.map((e) => e.className), own ? ['st-item-updated', 'st-item-sep', 'st-item-gh'] : ['st-item-updated', 'st-item-gh']);
+  }
+  assert.equal(updated(p.doc, 'clikae'), 'Updated 3 days ago');
+  assert.equal(updated(p.doc, 'marktile'), 'Updated yesterday');
+  const once = p.doc.serialize();
+  assert.deepEqual(await p.run(), { filled: 16, skipped: 0 });
+  assert.ok(p.doc.serialize() === once, 'a second run builds nothing new');
+  assert.equal(p.doc.querySelectorAll('.st-item-updated').length, 16);
+  assert.equal(p.doc.querySelectorAll('.st-item-sep').length, 14);
+});
+
+test('🔴 the built line is the renderer\'s markup: undo what the coral added and the page is the original', async () => {
+  const p = page({ html: BARE, response: { json: ALL } });
+  await p.run();
+  const out = p.doc.serialize()
+    .replace(/<span class="st-item-updated" data-dc-repo-facts="[^"]*">[^<]*<\/span>/g, '')
+    .replace(/<span class="st-item-sep" aria-hidden="true" data-dc-repo-facts="[^"]*">\|<\/span>/g, '')
+    .replace(/<span class="st-item-badge" data-dc-repo-facts="seikyusho">Archived<\/span>/, '');
+  assert.ok(out === p.before);
+});
+
+test('a card the answer does not cover, or whose day is malformed, gets no line built', async () => {
+  const p = page({ html: BARE, response: { json: { ...ALL, liquidframe: f('yesterday'), 'obsidian-tugtile': undefined } } });
+  const keep = ['liquidframe', 'tugtile'].map((n) => card(p.doc, n).serialize());
+  assert.deepEqual(await p.run(), { filled: 14, skipped: 0 });
+  assert.deepEqual(['liquidframe', 'tugtile'].map((n) => card(p.doc, n).serialize()), keep);
+});
+
+test('a card with a fact but no meta row at all is skipped, and counted', async () => {
+  // `tile` links GitHub with the card-wide link, so it still has a fact once its meta row is gone.
+  const doc = parsePage(BARE);
+  doc.createElement('div').appendChild(card(doc, 'tile').querySelector('.st-item-meta'));
+  const p = page({ html: doc.serialize(), response: { json: ALL } });
+  const keep = card(p.doc, 'tile').serialize();
+  assert.deepEqual(await p.run(), { filled: 15, skipped: 1 });
+  assert.ok(card(p.doc, 'tile').serialize() === keep);
 });

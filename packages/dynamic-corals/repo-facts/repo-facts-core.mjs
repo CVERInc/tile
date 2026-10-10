@@ -8,9 +8,12 @@
 // It asks the edge once for the owner's facts, then walks the page's sitetile `collection` cards
 // (`.st-item`). A card whose GitHub link names a repo of that owner gets its "Updated …" text
 // (`.st-item-updated`, which the renderer wrote from a phrase somebody typed once) recomputed from
-// the last push, and — when the repo is archived — an archived pill among its badges. A card the
-// answer does not cover is left exactly as it was. On any failure nothing is written at all.
-// Text only: there is no markup-building path in this file.
+// the last push, and — when the repo is archived — an archived pill among its badges. A page that
+// typed no date has no such line, so the coral writes one where Collection.astro would have (first
+// in `.st-item-meta-left`, with the renderer's `|` before a separate GitHub link), and a page
+// without JS shows no date at all. A card the answer does not cover is left exactly as it was. On
+// any failure nothing is written at all. Text only: the few elements created carry fixed class
+// names, and everything from the answer goes in through textContent.
 export const SELECTOR = '[data-dynamic-coral="repo-facts"]';
 export const PATH = '/v0/repo-facts';
 export const TIMEOUT_MS = 3000;
@@ -47,14 +50,36 @@ export function repoOf(href, owner) {
   } catch { return ''; }
 }
 
-/** Write the facts into the cards. Returns how many cards on the page now carry a fact. */
+/** Write the facts into the cards. Returns how many cards on the page now carry a fact, and how
+ *  many it had a fact for but no meta row to write the line into. */
 export function fillCards(doc, data, owner, tag, now) {
   const lang = langOf(tag);
+  let skipped = 0;
   for (const card of doc.querySelectorAll('.st-item')) {
     const name = [...card.querySelectorAll('a[href]')].map((a) => repoOf(a.href, owner)).find(Boolean);
     const f = name && Object.hasOwn(data, name) && data[name];
     if (!f || typeof f !== 'object') continue;
-    const span = card.querySelector('.st-item-updated'), phrase = relative(f.pushed_at, now, tag);
+    let span = card.querySelector('.st-item-updated');
+    const phrase = relative(f.pushed_at, now, tag);
+    if (!span && phrase) {
+      // The renderer writes the line only when the page typed a date. Same element, same place,
+      // so the theme's own `.st-item-updated` rule applies. Found next time ⇒ never built twice.
+      const left = card.querySelector('.st-item-meta-left'), box = left || card.querySelector('.st-item-meta');
+      if (!box) { skipped++; continue; }
+      const first = box.firstChild;
+      span = doc.createElement('span');
+      span.className = 'st-item-updated';
+      box.insertBefore(span, first);
+      // Collection.astro's `|` sits before a GitHub link that is its own anchor (the card has a learn page).
+      if (left && card.querySelector('a.st-item-gh')) {
+        const sep = doc.createElement('span');
+        sep.className = 'st-item-sep';
+        sep.setAttribute('aria-hidden', 'true');
+        sep.setAttribute(MARK, name);
+        sep.textContent = '|';
+        box.insertBefore(sep, first);
+      }
+    }
     if (span && phrase) {
       span.textContent = UPDATED[lang](phrase);
       span.setAttribute(MARK, name);
@@ -72,7 +97,7 @@ export function fillCards(doc, data, owner, tag, now) {
       box.appendChild(badge);
     }
   }
-  return [...doc.querySelectorAll('.st-item')].filter((c) => c.querySelector(`[${MARK}]`)).length;
+  return { filled: [...doc.querySelectorAll('.st-item')].filter((c) => c.querySelector(`[${MARK}]`)).length, skipped };
 }
 
 /** Mount one embed. Never rejects; on any failure the document is untouched. */
@@ -90,7 +115,7 @@ export async function mountRepoFacts(root, opts = {}) {
     const data = await r.json();
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw 0;
     const tag = root.getAttribute('data-locale') || document.documentElement.lang || 'en';
-    return (all['repo-facts'] = { filled: fillCards(document, data, owner, tag, opts.now || Date.now()) });
+    return (all['repo-facts'] = fillCards(document, data, owner, tag, opts.now || Date.now()));
   } catch {
     return (all['repo-facts'] ||= { error: 1 });
   }

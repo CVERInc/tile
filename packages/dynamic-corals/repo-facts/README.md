@@ -22,7 +22,11 @@ It asks the edge once, then for every card (`.st-item`) whose GitHub link is
 `https://github.com/<data-owner>/<repo>`:
 
 - the card's `.st-item-updated` line is rewritten from the repo's last push, in the renderer's own
-  wording and the browser's own relative phrase;
+  wording and the browser's own relative phrase. A page that typed no `updated:` has no such line
+  (the renderer writes it only from a typed date), so the coral creates it where Collection.astro
+  would have — first in `.st-item-meta-left` (or `.st-item-meta`), with the renderer's `|`
+  separator before a separate GitHub link — and finds it next time, so it is never built twice.
+  Without JS such a page shows no date at all;
 - an archived repo gets one archived pill in `.st-item-badges` (not added twice, also not when the
   author already typed one in any of the four languages).
 
@@ -41,7 +45,8 @@ under 30, then months (days ÷ 30), then years (days ÷ 365) — which is how th
 phrased to begin with. A language other than the four reads English, like the renderer.
 
 ```js
-window.__coralDiagnostics['repo-facts']   // { filled: 13 } — cards carrying a fact; or { error: 1 }
+window.__coralDiagnostics['repo-facts']   // { filled: 13, skipped: 0 } — cards carrying a fact, and cards
+                                          // with a fact but no meta row to write it into; or { error: 1 }
 ```
 
 ## The edge: `repo-facts-worker.mjs`

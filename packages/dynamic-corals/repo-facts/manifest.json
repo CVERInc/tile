@@ -1,19 +1,19 @@
 {
   "name": "repo-facts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/repo-facts/0.1.0/repo-facts.js",
+  "source": "https://feelreef.com/corals/repo-facts/0.1.1/repo-facts.js",
   "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/repo-facts",
   "requires": [],
   "calls": [
-    "GET <data-api-base>/v0/repo-facts?owner=<data-owner> — the bundle's only network call, one per mounted root, sent once on load with no cookies (`credentials: 'omit'`), no request body and no header of its own, and with `redirect: 'error'` so a redirect is a failure and never a second request to another origin; there is no default origin, so a root without an https `data-api-base` (or without a plain `data-owner`) makes no request; the request is abandoned after 3 seconds; there is no retry, no polling and no second fetch; the forge is never contacted from the visitor's browser. The answer is matched against the GitHub links of the owner that are ALREADY inside `.st-item` cards — it never adds a card — and written with textContent only: each such card's `.st-item-updated` line is recomputed from the repo's last push (a UTC day, phrased by the browser's Intl.RelativeTimeFormat in the page's language), and an archived repo gets one archived pill in `.st-item-badges`"
+    "GET <data-api-base>/v0/repo-facts?owner=<data-owner> — the bundle's only network call, one per mounted root, sent once on load with no cookies (`credentials: 'omit'`), no request body and no header of its own, and with `redirect: 'error'` so a redirect is a failure and never a second request to another origin; there is no default origin, so a root without an https `data-api-base` (or without a plain `data-owner`) makes no request; the request is abandoned after 3 seconds; there is no retry, no polling and no second fetch; the forge is never contacted from the visitor's browser. The answer is matched against the GitHub links of the owner that are ALREADY inside `.st-item` cards — it never adds a card — and written with textContent only: each such card's `.st-item-updated` line is recomputed from the repo's last push (a UTC day, phrased by the browser's Intl.RelativeTimeFormat in the page's language) — and when the page typed no date, so the renderer wrote no such line, one `<span class=\"st-item-updated\">` is created first in the card's `.st-item-meta-left` (or `.st-item-meta`), with the renderer's `.st-item-sep` before a separate GitHub link, never twice; a card with neither is skipped — and an archived repo gets one archived pill in `.st-item-badges`"
   ],
   "stores": [
     "none"
   ],
   "paid": false,
   "funding": null,
-  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable endpoint at `data-api-base` (unset, not https, a redirect, a non-ok status, a timeout, a network error, or a body that is not a JSON object): the page stays exactly as it was rendered — no placeholder, no spinner, no error text. The cards, their descriptions, badges, links and their typed \"Updated …\" line are static HTML and do not depend on this coral; it only recomputes that line and adds an archived pill. A card whose repository is missing from the answer, or whose entry is malformed, is left untouched while the others are filled.",
+  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable endpoint at `data-api-base` (unset, not https, a redirect, a non-ok status, a timeout, a network error, or a body that is not a JSON object): the page stays exactly as it was rendered — no placeholder, no spinner, no error text. The cards, their descriptions, badges, links and any typed \"Updated …\" line are static HTML and do not depend on this coral; it only recomputes that line (writing it where the page typed none) and adds an archived pill. A page that typed no date shows no date without it. A card whose repository is missing from the answer, or whose entry is malformed, is left untouched while the others are filled.",
   "capabilities": []
 }
