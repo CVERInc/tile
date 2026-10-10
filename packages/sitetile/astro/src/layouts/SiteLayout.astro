@@ -348,7 +348,9 @@ const PKG_REGISTRY = {
 // install (lowercase URL paths /zh-tw/, BCP-47 hreflang zh-Hant, x-default). The
 // switching UI + persistence are the platform's; this package owns the wire shape
 // the <head> + links must emit so a Recast site carries a real i18n head.
-const hasLingo = packages.includes('lingo');
+// ON when the owner declares a second language (`locales` ≥ 2) or carries `packages: lingo` —
+// one definition, lingo/locale.mjs → lingoEnabled(); never re-derive it inline here.
+const hasLingo = lingo.lingoEnabled({ packages, locales });
 // REEF with PWA — `packages: pwa` makes the site installable: <link> a manifest + serve the
 // opaque icon set (gen-icons.sh output, which lands in public/ and therefore wins the icon paths
 // over the generated badge). Off → the ordinary icon set below, which every site now gets.
@@ -405,7 +407,11 @@ const htmlLang = hasLingo && lang ? lingo.toBcp47(lang) : lang;
 // locale-prefixed chooser + ?return=<current path> (so the chooser returns you to THIS page in the
 // chosen locale) + a localized link label. Absent Lingo → the static
 // `language-href:` frontmatter (default /language). General — every Lingo site gets correct per-page returns.
-const langUrlPrefix = hasLingo && lingo.toUrlLocale(lang) !== defaultUrlLocale ? `/${lingo.toUrlLocale(lang)}` : '';
+// The page's locale AS LISTED in `locales` (lang: en → en-US, lang: zh-Hant → zh-TW). Comparing the
+// raw `lang:` against the default's URL form put `/en/language` (404) on every root page of a site
+// that wrote `locales: en-US` + `lang: en` — two correct spellings of one locale.
+const pageLocale = lingo.localeOf(locales, lang);
+const langUrlPrefix = hasLingo && !lingo.sameLocale(pageLocale, defaultLocale) ? `/${lingo.toUrlLocale(pageLocale)}` : '';
 const currentPath = String(Astro.url?.pathname || '/');
 // 🩸 2026-08-06: `?has=` was never populated by anybody. The chooser's inline script has always
 // supported it — a row whose locale is NOT listed falls back to that locale's home instead of the
@@ -442,11 +448,11 @@ const languageLabel = 'Language';
 const LINGO_BAR_POSITION = '\n.locale-banner.bleedblend-top{position:sticky!important;top:0!important;z-index:50!important}\n';
 const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
 const localeBanner = (hasLingo && locales.length > 1) ? {
-  current: lingo.toUrlLocale(lang),
+  current: lingo.toUrlLocale(pageLocale),
   defaultLocale: lingo.toUrlLocale(defaultLocale),
   hrefStrategy: 'prefix',
   excludePath: '/language',
-  options: locales.filter((l) => l !== lang).map((l) => ({ id: lingo.toUrlLocale(l), match: lingo.prefixes(l), ...lingo.bannerCopy(l) })),
+  options: locales.filter((l) => l !== pageLocale).map((l) => ({ id: lingo.toUrlLocale(l), match: lingo.prefixes(l), ...lingo.bannerCopy(l) })),
 } : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
 const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');

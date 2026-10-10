@@ -52,6 +52,44 @@ export function toBcp47(code) { const f = _canon(code); return f ? LINGO_BCP47[f
 /** human label for the locale picker. */
 export function label(locale) { const f = _canon(locale); return f ? LINGO_LABELS[f] : String(locale); }
 
+/** A frontmatter list (`a, b , c`) or an array → trimmed, non-empty entries. */
+const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
+  .map((s) => String(s).trim()).filter(Boolean);
+
+/** Is the Lingo install on for this site? — the ONE definition; every gate calls this.
+ *
+ *  🩸 2026-10-11. This was `packages.includes('lingo')`, copied into SiteLayout and the /language
+ *  route, while the platform's own docs told owners "the second language is free, no Lingo module
+ *  needed" and nothing on the platform ever wrote `packages: lingo`. A site that declared
+ *  `locales: en, zh-TW` exactly as told got the un-installed path: hreflang to /en/ and /zh-TW/
+ *  (both 404), no footer Language link, no /language page — worse than staying monolingual.
+ *
+ *  Owner ruling 2026-10-10: the switch is the owner DECLARING a second language — `locales` with
+ *  two or more entries. Free, but never forced on a one-language site. `packages: lingo` is still
+ *  honoured (sites that already carry it keep working) but is no longer required. */
+export function lingoEnabled({ packages = [], locales = [] } = {}) {
+  return _list(packages).includes('lingo') || _list(locales).length > 1;
+}
+
+/** Do two locale spellings name the same locale? `en` / `en-US` / `en-us` all do; so do `zh-Hant`
+ *  and `zh-TW`. Unknown codes fall back to a case-insensitive comparison.
+ *
+ *  🩸 2026-10-11. The /language route compared the root home's `lang:` to `locales[0]` with `===`,
+ *  and SiteLayout compared `toUrlLocale(lang)` to the default's URL form — an unwritten rule that
+ *  the two must be spelled identically. `locales: en-US` + `lang: en` (both correct) produced a
+ *  chooser at /en-us/language and a footer link to /en/language, both 404. */
+export function sameLocale(a, b) {
+  const ca = _canon(a), cb = _canon(b);
+  if (ca && cb) return ca === cb;
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+/** The entry of `locales` that a page's `lang:` means (so `lang: zh-Hant` → `zh-TW`), or `lang`
+ *  itself when none does. URL prefixes must be derived from THIS, never from the raw `lang:`. */
+export function localeOf(locales, lang) {
+  return _list(locales).find((l) => sameLocale(l, lang)) || lang;
+}
+
 /** navigator.language prefixes that map to each locale (for the suggestion banner). */
 const LINGO_PREFIXES = { 'en-US': ['en'], 'ja-JP': ['ja'], 'zh-TW': ['zh'], 'ko-KR': ['ko'] };
 export function prefixes(locale) { const f = _canon(locale); return f ? LINGO_PREFIXES[f] : []; }
