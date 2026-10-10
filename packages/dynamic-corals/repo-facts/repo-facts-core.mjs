@@ -1,155 +1,97 @@
-// REEF with Repo Facts — the brain of the dynamic coral, in a form `node --test` can drive.
-// The distributable `repo-facts.js` is BUILT from repo-facts-client.mjs, which imports this.
+// REEF with Repo Facts — the page half, in a form `node --test` can drive. The distributable
+// `repo-facts.js` is BUILT from repo-facts-client.mjs, which imports this.
 //
-// What it does: a page already lists some repositories — written by a person, as cards, each with
-// a link to the repo. This adds the facts a person should never have to retype: the latest release
-// with its date, or — for an archived repo — a badge saying so and nothing else. A repo with no
-// release and no badge gets nothing: an unlabelled date would be read as a release date.
+// One embed per page:
 //
-//   <div data-dynamic-coral="repo-facts"
-//        data-api-base="https://…"          REQUIRED — the origin serving /v0/repo-facts
-//        data-scope=".st-collection"        where to look for repo links (default: the whole page)
-//        data-forge="github"></div>         the only forge there is today (default: github)
+//   <div data-dynamic-coral="repo-facts" data-owner="CVERInc" data-api-base="https://feelreef.com"></div>
 //
-// 🔴 THE LIST IS THE PAGE. It reads repo links that are ALREADY in the document and asks about
-// exactly those. It never lists an owner's repositories, so nothing appears on a page that a
-// person did not put there.
-//
-// 🔴 THE ANSWER IS UNTRUSTED. Every value is validated here again, against the same field table
-// the edge used (repo-facts-fields.mjs), and written with textContent — there is no
-// markup-building path in this file. A response that is late, redirected, not ok or not JSON
-// changes nothing at all: the page stays what it was before this script ran. A repo whose entry
-// has ONE field of the wrong shape is left alone like a repo that was never answered for, and the
-// other cards are still filled. No spinner, no "loading", no error text.
-//
-// 🔴 THE CONTRACT WITH THE RENDERER, which nothing else writes down. A "card" is `.st-item`; its
-// facts go into `.st-item-meta-left`, before `.st-item-gh` when there is one; and the fragment
-// borrows two of the renderer's own classes for its looks — `st-item-updated` (the muted meta
-// text) and `st-item-badge` (the pill) — so it injects no stylesheet. A link outside a card is not
-// asked about. See README.md for what should replace this (a `data-repo` on the card).
-import { FIELDS, REPO } from './repo-facts-fields.mjs';
-
+// It asks the edge once for the owner's facts, then walks the page's sitetile `collection` cards
+// (`.st-item`). A card whose GitHub link names a repo of that owner gets its "Updated …" text
+// (`.st-item-updated`, which the renderer wrote from a phrase somebody typed once) recomputed from
+// the last push, and — when the repo is archived — an archived pill among its badges. A card the
+// answer does not cover is left exactly as it was. On any failure nothing is written at all.
+// Text only: there is no markup-building path in this file.
 export const SELECTOR = '[data-dynamic-coral="repo-facts"]';
 export const PATH = '/v0/repo-facts';
-export const MAX_REPOS = 30;
 export const TIMEOUT_MS = 3000;
-// Where a rename (and the count of filled cards) is left for whoever is checking the page. A
-// sibling of window.__coralVersions and shaped like it: one key per coral.
 export const DIAGNOSTICS = '__coralDiagnostics';
 export const MARK = 'data-dc-repo-facts';
+const DAY = 864e5;
 
-const HOSTS = { github: 'github.com' };
-// The only words this coral ever shows, by the PRIMARY language subtag of <html lang> — the whole
-// of it, so `jam` is not Japanese and `kok` is not Korean. Anything else reads the English one.
-const ARCHIVED = { zh: '已封存', ja: 'アーカイブ済み', ko: '보관됨' };
+// The card's own wording, as sitetile's Collection.astro writes it per language (a test holds the
+// two together). The phrase itself comes from the browser's Intl, which is what the live pages
+// already read like: "yesterday", "前天", "先月", "지난달".
+export const UPDATED = { en: (x) => `Updated ${x}`, zh: (x) => `${x} 更新`, ja: (x) => `${x} 更新`, ko: (x) => `업데이트 날짜: ${x}` };
+export const ARCHIVED = { en: 'Archived', zh: '已封存', ja: 'アーカイブ済み', ko: '보관됨' };
 
-/** `owner/repo` for a link straight to a repository, or '' for anything else. */
-export function repoOf(href, host) {
+/** The language to write in, by the PRIMARY subtag (whole: `jam` is not `ja`). Anything else: en. */
+export const langOf = (tag) => { const p = String(tag || '').split('-')[0].toLowerCase(); return UPDATED[p] ? p : 'en'; };
+
+/** "3 days ago" in the page's language, from a UTC day `YYYY-MM-DD`; '' when the day is not one. */
+export function relative(day, now, tag) {
+  if (!/^\d{4}-\d\d-\d\d$/.test(day) || Number.isNaN(Date.parse(day))) return '';
+  // Whole UTC days between that day and today; a push "tomorrow" (a skewed clock) reads as today.
+  const days = Math.max(0, Math.round((Math.floor(now / DAY) * DAY - Date.parse(day)) / DAY));
+  const [n, unit] = days < 30 ? [days, 'day'] : days < 365 ? [Math.floor(days / 30), 'month'] : [Math.floor(days / 365), 'year'];
+  const lang = langOf(tag);
+  let fmt;
+  try { fmt = new Intl.RelativeTimeFormat(lang === 'en' ? 'en' : tag, { numeric: 'auto' }); } catch { fmt = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }); }
+  return fmt.format(-n, unit);
+}
+
+/** The lower-case repo name of a link straight to a repository of `owner`, or ''. */
+export function repoOf(href, owner) {
   try {
-    const u = new URL(href);
-    // Deeper paths (issues, releases, a file) are not "the repo link" of a card and are not
-    // guessed at. Dot segments never get this far: the URL parser has already resolved them.
-    const name = u.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
-    return u.hostname === host && REPO.test(name) ? name : '';
-  } catch {
-    return '';
-  }
+    const u = new URL(href), m = /^\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(u.pathname);
+    return u.hostname === 'github.com' && m && m[1].toLowerCase() === owner.toLowerCase() ? m[2].toLowerCase() : '';
+  } catch { return ''; }
 }
 
-/** Every card in `scope` with a repo link, as a Map of card → `owner/repo`. Capped by distinct repo. */
-export function findCards(scope, host) {
-  const cards = new Map();
-  for (const a of scope.querySelectorAll('a[href]')) {
-    const name = repoOf(a.href, host), card = name && a.closest('.st-item');
-    // One answer per card (its first repo link), and no more than MAX_REPOS questions per page.
-    if (card && !cards.has(card) && new Set(cards.values()).add(name).size <= MAX_REPOS) cards.set(card, name);
-  }
-  return cards;
-}
-
-/**
- * The response, narrowed to the repos that were asked about. A repo that is absent, or whose
- * entry has any field of the wrong shape, reads as `{}` — nothing to say — so one bad entry costs
- * one card and not the page. (A body that is not an object at all throws here; the caller writes
- * nothing.)
- */
-export function checkResponse(data, names) {
-  const out = {};
-  for (const n of names) {
-    const f = Object.hasOwn(data, n) && data[n];
-    out[n] = f && typeof f === 'object' && Object.keys(FIELDS).every((k) => f[k] == null || FIELDS[k](f[k])) ? f : {};
-  }
-  return out;
-}
-
-/**
- * Write the facts into the cards: one fragment per card, text nodes only, and a card with nothing
- * to say is left alone. Returns the linked names the forge now answers to differently. Never
- * rewrites a link.
- */
-export function fillCards(cards, facts, lang) {
-  const renamed = {};
-  for (const [card, name] of cards) {
-    const f = facts[name], slot = card.querySelector('.st-item-meta-left');
-    // Already filled — this script ran twice, or two copies of it are on the page.
-    if (!slot || card.querySelector(`[${MARK}]`)) continue;
-    if (f.fullName && f.fullName.toLowerCase() !== name.toLowerCase()) renamed[name] = f.fullName;
-    const el = document.createElement('span');
-    el.className = 'st-item-updated';
-    el.setAttribute(MARK, name);
-    if (f.archived) {
-      // The badge and nothing after it: a date beside "archived" reads as the day it was archived,
-      // and no field here says when that was.
-      const badge = document.createElement('span');
+/** Write the facts into the cards. Returns how many cards on the page now carry a fact. */
+export function fillCards(doc, data, owner, tag, now) {
+  const lang = langOf(tag);
+  for (const card of doc.querySelectorAll('.st-item')) {
+    const name = [...card.querySelectorAll('a[href]')].map((a) => repoOf(a.href, owner)).find(Boolean);
+    const f = name && Object.hasOwn(data, name) && data[name];
+    if (!f || typeof f !== 'object') continue;
+    const span = card.querySelector('.st-item-updated'), phrase = relative(f.pushed_at, now, tag);
+    if (span && phrase) {
+      span.textContent = UPDATED[lang](phrase);
+      span.setAttribute(MARK, name);
+    }
+    const head = card.querySelector('.st-item-head');
+    // Already there — this ran twice, or the author typed the pill — in any of the four languages.
+    const has = [...card.querySelectorAll('.st-item-badge')].some((b) => Object.values(ARCHIVED).includes(b.textContent.trim()));
+    if (f.archived === true && head && !has) {
+      let box = card.querySelector('.st-item-badges');
+      if (!box) { box = doc.createElement('span'); box.className = 'st-item-badges'; head.appendChild(box); }
+      const badge = doc.createElement('span');
       badge.className = 'st-item-badge';
-      badge.textContent = ARCHIVED[lang.split('-')[0].toLowerCase()] || 'Archived';
-      el.append(badge);
-    } else if (f.tag && f.releasedAt) {
-      // The ONLY date this coral shows is a release date, next to its tag, and it is ABSOLUTE. A
-      // relative one ("yesterday") is true for a day and then sits in a cache.
-      const day = (l) => new Date(f.releasedAt).toLocaleDateString(l, { dateStyle: 'long', timeZone: 'UTC' });
-      const time = document.createElement('time');
-      time.dateTime = f.releasedAt;
-      // A page whose <html lang> is not a language tag still gets a date, in the fallback locale.
-      try { time.textContent = day(lang); } catch { time.textContent = day('en'); }
-      el.append(f.tag + ' · ', time);
-    } else continue;
-    slot.insertBefore(el, slot.querySelector('.st-item-gh'));
+      badge.setAttribute(MARK, name);
+      badge.textContent = ARCHIVED[lang];
+      box.appendChild(badge);
+    }
   }
-  return renamed;
+  return [...doc.querySelectorAll('.st-item')].filter((c) => c.querySelector(`[${MARK}]`)).length;
 }
 
-/**
- * Mount one container. Resolves to the diagnostics it recorded; never rejects, and on any failure
- * resolves having touched nothing in the document.
- */
-export async function mountRepoFacts(root, timeoutMs = TIMEOUT_MS) {
+/** Mount one embed. Never rejects; on any failure the document is untouched. */
+export async function mountRepoFacts(root, opts = {}) {
   const all = (window[DIAGNOSTICS] ||= {});
-  const attr = (k) => root.getAttribute(k) || '';
   try {
-    // No default origin, on purpose: an endpoint nobody chose is a 404 that looks like an outage.
-    const base = /^https:\/\/[^/]+/.exec(attr('data-api-base'))[0];
-    const scope = attr('data-scope') ? document.querySelector(attr('data-scope')) : document;
-    const cards = findCards(scope, HOSTS[attr('data-forge') || 'github']);
-    const names = [...new Set(cards.values())].sort();
-    // A page with no repo cards asks nothing.
-    if (!names.length) throw 0;
-    // credentials: 'omit' — this asks a question about public repos; nobody's cookies go with it.
-    // redirect: 'error' — the visitor's browser talks to the origin the page named and to no other,
-    // whatever that origin (or a rule in front of it) would like to send it on to.
-    const r = await fetch(`${base}${PATH}?repos=${names}`,
-      { signal: AbortSignal.timeout(timeoutMs), credentials: 'omit', redirect: 'error' });
+    // No default origin: an endpoint nobody chose is a 404 that looks like an outage.
+    const base = /^https:\/\/[^/]+/.exec(root.getAttribute('data-api-base') || '')[0];
+    const owner = root.getAttribute('data-owner') || '';
+    if (!/^[\w.-]{1,100}$/.test(owner)) throw 0;
+    // No cookies, and no second origin: a redirect is a failure.
+    const r = await fetch(`${base}${PATH}?owner=${owner}`,
+      { signal: AbortSignal.timeout(opts.timeoutMs || TIMEOUT_MS), credentials: 'omit', redirect: 'error' });
     if (!r.ok) throw 0;
-    const renamed = fillCards(cards, checkResponse(await r.json(), names), document.documentElement.lang || 'en');
-    // `filled` is counted off the page, not off this run: with two mounts, or the script loaded
-    // twice, the last writer would otherwise report the cards it skipped as cards nobody filled.
-    return (all['repo-facts'] = {
-      filled: document.querySelectorAll(`[${MARK}]`).length,
-      renamed: { ...all['repo-facts']?.renamed, ...renamed },
-    });
+    const data = await r.json();
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw 0;
+    const tag = root.getAttribute('data-locale') || document.documentElement.lang || 'en';
+    return (all['repo-facts'] = { filled: fillCards(document, data, owner, tag, opts.now || Date.now()) });
   } catch {
-    // Late, redirected, not ok, not JSON, or misconfigured: all one outcome. Nothing was written —
-    // and nothing an earlier, successful run recorded is overwritten.
     return (all['repo-facts'] ||= { error: 1 });
   }
 }

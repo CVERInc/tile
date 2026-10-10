@@ -50,8 +50,8 @@ test('build.mjs is the producer of this artifact — the coral is in its table, 
 });
 
 test('the bundle is the current source: it carries the literals esbuild cannot rename', () => {
-  for (const literal of [PATH, SELECTOR, MARK, DIAGNOSTICS, 'data-api-base', 'data-scope', 'data-forge',
-    '.st-item', '.st-item-meta-left', '.st-item-gh', 'st-item-updated', 'st-item-badge']) {
+  for (const literal of [PATH, SELECTOR, MARK, DIAGNOSTICS, 'data-api-base', 'data-owner', 'data-locale',
+    '.st-item', '.st-item-head', '.st-item-updated', '.st-item-badges', 'st-item-badge', 'Archived', 'RelativeTimeFormat']) {
     assert.ok(bundle.includes(literal), `the bundle is missing ${literal} — it is STALE`);
   }
 });
