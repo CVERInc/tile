@@ -447,13 +447,10 @@ const languageLabel = 'Language';
 // bottom edge; a translucent/blur bar would still show it through and needs a clip, not a cover.
 const LINGO_BAR_POSITION = '\n.locale-banner.bleedblend-top{position:sticky!important;top:0!important;z-index:50!important}\n';
 const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
-const localeBanner = (hasLingo && locales.length > 1) ? {
-  current: lingo.toUrlLocale(pageLocale),
-  defaultLocale: lingo.toUrlLocale(defaultLocale),
-  hrefStrategy: 'prefix',
-  excludePath: '/language',
-  options: locales.filter((l) => l !== pageLocale).map((l) => ({ id: lingo.toUrlLocale(l), match: lingo.prefixes(l), ...lingo.bannerCopy(l) })),
-} : null;
+// Options come from altLocales — the measured set hreflang and `?has=` read above — never from
+// `locales`: a declared language this page has no version in is a 404, not a suggestion. null
+// (no markup, no script) when the page exists in this language only. See suggestionBanner().
+const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales }) : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
 const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');
 const viewportFit = active.some((p) => p.viewportFit);

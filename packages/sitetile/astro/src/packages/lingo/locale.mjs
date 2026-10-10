@@ -68,7 +68,7 @@ const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
  *  two or more entries. Free, but never forced on a one-language site. `packages: lingo` is still
  *  honoured (sites that already carry it keep working) but is no longer required. */
 export function lingoEnabled({ packages = [], locales = [] } = {}) {
-  return _list(packages).includes('lingo') || _list(locales).length > 1;
+  return _list(packages).includes('lingo') || _distinct(_list(locales)).length > 1;
 }
 
 /** Do two locale spellings name the same locale? `en` / `en-US` / `en-us` all do; so do `zh-Hant`
@@ -82,6 +82,17 @@ export function sameLocale(a, b) {
   const ca = _canon(a), cb = _canon(b);
   if (ca && cb) return ca === cb;
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+/** A locale list with each LOCALE kept once — first spelling wins. `zh-TW, zh-TW` and
+ *  `zh-TW, zh-tw` are one language written twice, not a second one; counting entries instead
+ *  switched the install on for a one-language site and built it a chooser with two identical rows
+ *  and a hreflang pointing at /zh-tw/zh-tw/. (A function declaration: lingoEnabled, above, calls
+ *  it, and sameLocale is hoisted the same way.) */
+function _distinct(list) {
+  const out = [];
+  for (const l of list) if (!out.some((seen) => sameLocale(seen, l))) out.push(l);
+  return out;
 }
 
 /** The entry of `locales` that a page's `lang:` means (so `lang: zh-Hant` → `zh-TW`), or `lang`
@@ -102,6 +113,34 @@ const LINGO_BANNER = {
   'ko-KR': { prompt: '영어 웹사이트가 더 편하신가요?', continue: '네', dismiss: '괜찮습니다' },
 };
 export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
+
+/** The suggestion banner's config for ONE page, or null when the page has nothing to suggest.
+ *
+ *  `altLocales` is the MEASURED set — the locales this page really exists in, the same list its
+ *  hreflang tags and the footer link's `?has=` are built from. The options are that set minus the
+ *  page being read.
+ *
+ *  🩸 2026-10-11. Options were `locales` minus the current one: every DECLARED language, existing
+ *  or not. A page written only in the default language still asked a visitor whose browser spoke
+ *  the other one whether they would rather read it there, and the button went to a 404. The page
+ *  already knew better — two lines above, hreflang and `?has=` read the measured set. Third
+ *  consumer of one fact, and the only one still guessing.
+ *
+ *  No options → null, so the page ships neither the banner markup nor its script. */
+export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [] } = {}) {
+  if (_list(locales).length < 2) return null;
+  const pageLocale = localeOf(locales, lang);
+  const options = _list(altLocales).filter((l) => !sameLocale(l, pageLocale))
+    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l) }));
+  if (!options.length) return null;
+  return {
+    current: toUrlLocale(pageLocale),
+    defaultLocale: toUrlLocale(defaultLocale),
+    hrefStrategy: 'prefix',
+    excludePath: '/language',
+    options,
+  };
+}
 
 /** Copy for the `/language` chooser page — each locale in ITS OWN language:
  *  word = the page title / heading; prompt = the lead sentence; current/switch = the per-row action. */

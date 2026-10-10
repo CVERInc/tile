@@ -806,6 +806,19 @@ const svgRuleCount = (text) => parseRules(text || '').filter((r) => r.path === '
 // What an astro rebuild would find if the old output were still there: merging the merged file again.
 const collisionHeadersRemerged = collisionHeaders === null ? null : writeMergedHeaders(CDIST);
 
+// The locale-suggestion banner's config, as the built page carries it (null = no banner).
+// Parsed, not pattern-matched: the claims below are about which locales it OFFERS, and a regex
+// over an HTML-escaped JSON blob cannot tell "ja-jp is not an option" from "ja-jp is spelled
+// differently this week".
+const bannerConfig = (h) => {
+  const m = h.match(/<div\b[^>]*\bid="signet-locale-banner"[^>]*\bdata-config="([^"]*)"/);
+  if (!m) return null;
+  return JSON.parse(m[1].replace(/&quot;|&#34;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+};
+const builtHtmlFiles = (d) => readdirSync(d).flatMap((n) => {
+  const p = join(d, n);
+  return statSync(p).isDirectory() ? builtHtmlFiles(p) : n.endsWith('.html') ? [p] : [];
+});
 const checks = [
   ...Object.entries(badgeExpected).map(([kind, expected]) => [`icons: rendered ${kind} marks exactly the badges`, () => {
     assertBadgeLinks(badgeHtml[kind], expected);
@@ -950,6 +963,73 @@ const checks = [
     && /hreflang="zh-Hant" href="[^"]*\/zh-tw\/blocks\/"/.test(blocks)
     && !/hreflang="ja"/.test(blocks) && !/hreflang="ko"/.test(blocks)],
   ['reef tokens (inline or external css)', () => allCss().includes('--gd-accent')],
+  // -- Lingo switched on by `locales` alone, measured on the built page --
+  // 🩸 2026-10-11. Every Lingo fixture carried `packages: lingo` — its own line, or the site
+  // layer's by inheritance — so the smoke only ever built the LEGACY switch. Putting the old
+  // `packages.includes('lingo')` gate back in SiteLayout left it 200/200: the derivation was held
+  // by a regex over source text and by nothing that looked at a page. content/ko-kr.md and
+  // content/_site.md now carry no `packages:` at all, so /ko-kr/ is on only if two declared
+  // locales turn it on. The first check is the control: if either file regains the line, the
+  // three below it would pass for the wrong reason, so it fails instead.
+  ['🔴 Lingo from `locales` alone — the specimen: /ko-kr/ declares ≥2 locales and NO `packages:`, on the page or the site layer', () => {
+    const fm = (rel) => readFileSync(new URL(`./content/${rel}`, import.meta.url), 'utf8').split(/^---$/m)[1] || '';
+    const key = (text, k) => text.split('\n').filter((l) => new RegExp(`^${k}\\s*:`).test(l));
+    const page = fm('ko-kr.md'), site = fm('_site.md'), locSite = fm('ko-kr/_site.md');
+    const declared = (key(page, 'locales')[0] || '').replace(/^locales\s*:/, '').split(',').map((x) => x.trim()).filter(Boolean);
+    return declared.length >= 2
+      && key(page, 'packages').length === 0 && key(site, 'packages').length === 0 && key(locSite, 'packages').length === 0;
+  }],
+  // The page writes `lang: ko-KR`; only the install maps that to the BCP-47 tag. (The fixture is
+  // read too: were its `lang:` already `ko`, the tag would say "ko" with Lingo off as well.)
+  ['🔴 Lingo from `locales` alone: `lang: ko-KR` reaches <html lang> as the BCP-47 tag, ko', () =>
+    /^lang:\s*ko-KR\s*$/m.test(readFileSync(new URL('./content/ko-kr.md', import.meta.url), 'utf8'))
+    && /<html lang="ko"[\s>]/.test(siteOff)],
+  ['🔴 Lingo from `locales` alone: hreflang is BCP-47 → the lowercase locale URL, with x-default', () =>
+    /<link rel="alternate" hreflang="ko" href="https:\/\/example\.com\/ko-kr\/"/.test(siteOff)
+    && /<link rel="alternate" hreflang="x-default" href="https:\/\/example\.com\/"/.test(siteOff)
+    && !/hreflang="ko-KR"/.test(siteOff)],
+  ['🔴 Lingo from `locales` alone: the footer Language link is this locale\'s chooser, and the chooser was built', () =>
+    /<a class="rf-lang" href="\/ko-kr\/language\?return=%2Fko-kr%2F&amp;has=/.test(siteOff)
+    && existsSync(join(DIST, 'ko-kr/language/index.html'))],
+  // -- the suggestion banner offers only what exists --
+  // 🩸 2026-10-11. Its options came from `locales` (every DECLARED language) while the hreflang
+  // set and `?has=` on the same page came from the measured set. markers.md exists in one
+  // language on a two-locale site: the banner offered the other one, and the switch was a 404.
+  // The first check is the control — the page really is a Lingo page with nothing to switch to —
+  // so "no banner" below cannot be satisfied by Lingo simply being off there.
+  ['banner specimen: /markers/ is a Lingo page that exists in ONE language (its only alternate is itself)', () =>
+    /<html lang="en" data-lingo-root>/.test(markers)
+    && (markers.match(/<link rel="alternate" hreflang="(?!x-default)[^"]*"/g) || []).length === 1
+    && /<a class="rf-lang" href="\/language\?return=%2Fmarkers%2F&amp;has=en-us"/.test(markers)
+    && !existsSync(join(DIST, 'zh-tw/markers/index.html'))],
+  ['🔴 banner: a page with no other language version ships no banner (and no switch to a 404)', () =>
+    bannerConfig(markers) === null && !markers.includes('signet-locale-banner')],
+  ['🔴 banner: four locales declared, two built → the only option is the one that exists', () => {
+    const c = bannerConfig(blocks);
+    return !!c && c.current === 'en-us' && c.options.map((o) => o.id).join() === 'zh-tw';
+  }],
+  ['🔴 banner: on the `lang: zh-Hant` edition, current is the URL locale (zh-tw) and it never offers itself', () => {
+    const c = bannerConfig(localeExcept);
+    return !!c && c.current === 'zh-tw' && c.defaultLocale === 'en-us' && c.options.map((o) => o.id).join() === 'en-us';
+  }],
+  ['🔴 banner: every option on every built page leads to a page that exists', () => {
+    const dead = [];
+    let seen = 0;
+    for (const f of builtHtmlFiles(DIST)) {
+      const c = bannerConfig(readFileSync(f, 'utf8'));
+      if (!c) continue;
+      seen++;
+      const route = '/' + f.slice(DIST.length + 1).replace(/(^|\/)index\.html$/, '').replace(/\.html$/, '');
+      const segs = route.split('/').filter(Boolean);
+      const sub = (segs[0] === c.current && c.current !== c.defaultLocale ? segs.slice(1) : segs).join('/');
+      for (const o of c.options) {
+        const target = [o.id === c.defaultLocale ? '' : o.id, sub].filter(Boolean).join('/');
+        if (!existsSync(join(DIST, target, 'index.html'))) dead.push(`${route} → /${target}/`);
+      }
+    }
+    if (dead.length) console.error('    dead banner options:\n      ' + dead.slice(0, 8).join('\n      '));
+    return seen >= 5 && dead.length === 0;
+  }],
   // -- nav: arbitrary-depth submenus (indented-list syntax → recursive NavNode) --
   ['nav: top-level dropdown group', () => /class="rf-nav-group">\s*<a class="rf-nav-link rf-nav-parent" href="\/products"/.test(html)],
   ['nav: 1st-level submenu link', () => /class="rf-nav-sub">[\s\S]*?class="rf-nav-link rf-nav-sublink" href="\/apps"/.test(html)],

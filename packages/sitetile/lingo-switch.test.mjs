@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as lingoMod from './astro/src/packages/lingo/locale.mjs';
 import { lingoEnabled, sameLocale, localeOf, toUrlLocale } from './astro/src/packages/lingo/locale.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -92,6 +93,64 @@ test('🔴 localeOf: a page\'s lang resolves to the entry in locales, so URL pre
   assert.equal(toUrlLocale(localeOf(['en-US', 'zh-TW'], 'en')), 'en-us');
   assert.equal(localeOf(['en-US', 'zh-TW'], 'zh-Hant'), 'zh-TW', 'not zh-hant — there is no /zh-hant/');
   assert.equal(localeOf(['en', 'zh-TW'], 'fr'), 'fr', 'no match → the lang itself');
+});
+
+test('🔴 a locale listed twice is one language, not two', () => {
+  assert.equal(lingoEnabled({ locales: 'zh-TW, zh-TW' }), false, 'exact duplicate');
+  assert.equal(lingoEnabled({ locales: 'zh-TW, zh-tw' }), false, 'same locale, different case');
+  assert.equal(lingoEnabled({ locales: ['en', 'en-US'] }), false, 'two spellings of one locale');
+  assert.equal(lingoEnabled({ locales: 'fr, FR' }), false, 'unknown codes dedupe case-insensitively');
+  // the control: a real second language among the duplicates still counts.
+  assert.equal(lingoEnabled({ locales: 'zh-TW, zh-tw, en-US' }), true);
+});
+
+test('🔴 packages is matched by exact entry — a name that merely contains "lingo" is not Lingo', () => {
+  assert.equal(lingoEnabled({ packages: 'bilingo' }), false);
+  assert.equal(lingoEnabled({ packages: 'pwa, lingo-extras' }), false);
+  assert.equal(lingoEnabled({ packages: ['bilingo'], locales: ['en'] }), false);
+  assert.equal(lingoEnabled({ packages: 'bilingo, lingo' }), true, 'the control: the exact entry still switches it');
+});
+
+// ── the suggestion banner offers only what exists ───────────────────────────────────────────
+// 🩸 2026-10-11. The banner's options were built from `locales` — every DECLARED language — while
+// the hreflang set and the footer link's `?has=` on the same page were built from the measured
+// set (the locales this page really exists in). So a page that existed only in the default
+// language still asked an English-browser visitor "Easier to read in English?", and the answer
+// was a 404. Deriving the switch from `locales` put that banner on every site the moment it
+// declared a second language, which is exactly when most of its pages are not translated yet.
+const banner = (o) => {
+  assert.equal(typeof lingoMod.suggestionBanner, 'function', 'locale.mjs exports suggestionBanner()');
+  return lingoMod.suggestionBanner(o);
+};
+const ids = (b) => b.options.map((o) => o.id);
+const FOUR = ['en-US', 'zh-TW', 'ja-JP', 'ko-KR'];
+
+test('🔴 banner options are the locales this page EXISTS in, minus the one being read', () => {
+  // four declared, the page exists in two (the realistic "home everywhere, inner pages partly").
+  const b = banner({ locales: FOUR, lang: 'en-US', defaultLocale: 'en-US', altLocales: ['en-US', 'zh-TW'] });
+  assert.deepEqual(ids(b), ['zh-tw'], 'ja-jp and ko-kr are declared but have no such page');
+  assert.equal(b.current, 'en-us');
+  assert.equal(b.defaultLocale, 'en-us');
+  assert.equal(b.hrefStrategy, 'prefix');
+  assert.deepEqual(b.options[0].match, ['zh']);
+  assert.ok(b.options[0].prompt && b.options[0].continue && b.options[0].dismiss, 'each option carries its own copy');
+});
+
+test('🔴 a page that exists in one language only gets no banner at all', () => {
+  assert.equal(banner({ locales: FOUR, lang: 'en-US', defaultLocale: 'en-US', altLocales: ['en-US'] }), null);
+  assert.equal(banner({ locales: FOUR, lang: 'ja', defaultLocale: 'en-US', altLocales: ['ja-JP'] }), null, 'a locale-only page, lang in BCP-47');
+  assert.equal(banner({ locales: FOUR, lang: 'en-US', defaultLocale: 'en-US', altLocales: [] }), null, 'a generated route: nothing measured');
+  assert.equal(banner({ locales: ['en-US'], lang: 'en-US', defaultLocale: 'en-US', altLocales: ['en-US'] }), null, 'one declared locale');
+});
+
+test('🔴 the page\'s own locale is resolved through `locales`, so `lang: zh-Hant` is zh-tw and never offers itself', () => {
+  const b = banner({ locales: FOUR, lang: 'zh-Hant', defaultLocale: 'en-US', altLocales: ['en-US', 'zh-TW'] });
+  assert.equal(b.current, 'zh-tw', 'not zh-hant — there is no /zh-hant/');
+  assert.deepEqual(ids(b), ['en-us'], 'the page being read is not an option');
+});
+
+test('🔴 SiteLayout builds the banner from the measured set — the one hreflang and ?has= read', () => {
+  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales \}\)\s*:\s*null;/);
 });
 
 // ── wiring ──────────────────────────────────────────────────────────────────────────────────
