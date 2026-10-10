@@ -10,9 +10,14 @@
 // was handed back to it in another.
 //
 // The rule this file holds: "Back to homepage" is the home of the locale the page's own URL sits
-// under — the same answer the header logo has always given — and ONLY when that home is a page this
-// build wrote. A language with a contact page and no home page yet keeps `/`: a link to the other
-// language's home is a detour, a link to a 404 is a dead end.
+// under, and the locale prefix is used only when that locale's home CONTENT FILE exists. A language
+// with a contact page and no home file yet keeps `/`: a link to the other language's home is a
+// detour, a link to a missing page is a dead end. The measurement is "the content file is there" —
+// the same one hreflang uses — so a content file that exists but is never built into a page (for
+// instance a `home.md` with no `sitetile-page:`) is outside what this file checks.
+//
+// The header logo is deliberately NOT measured: it keeps the prefix alone, because changing that
+// would move the logo on every page of every multi-language site. Its answer is pinned below.
 //
 // It needs the renderer's dependencies and SAYS SO when they are absent — same shape as
 // not-found-locale.test.mjs. The pure half below runs regardless.
@@ -57,7 +62,7 @@ await test('a default-locale page → /', () => {
   assert.equal(home('/ko-kr/help/', { contentRels: new Set([...RELS, 'ko-kr']) }), '/');
 });
 
-await test('🔴 a locale with pages but NO home page → /, never a link to a 404', () => {
+await test('🔴 a locale with pages but NO home content file → /, not the prefix', () => {
   assert.equal(home('/en/help/contact/'), '/');
 });
 
@@ -160,7 +165,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(one(backLinks(html), '"back to homepage" link'), '/');
     });
 
-    await test('🔴 a locale with a form page but no home → /, and /en/ really is not there', () => {
+    await test('🔴 a locale with a form page but no home file → /, and /en/ really is not there', () => {
       const { outDir, read } = built.multi;
       const html = read('en/help/contact');
       assert.equal(one(againLinks(html), '"send another" link'), '/en/help/contact/');
@@ -170,6 +175,21 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       // CONTROL: without this, "/" could be passing on a fixture that grew an /en/ home.
       assert.equal(resolves(outDir, '/en/'), false, 'the fixture has an /en/ home now — this case no longer tests the fallback');
       assert.equal(resolves(outDir, '/zh-tw/'), true, '`resolves` cannot see a home that is there');
+    });
+
+    // The logo is NOT the same rule as the card, on purpose. The card measures that the locale's home
+    // content exists (this PR, measured); the logo has always used the URL prefix alone and this PR
+    // leaves it alone, because measuring it would change the logo on every page of every
+    // multi-language site. So on `en/help/contact` (an `en` with no home) the two answers differ:
+    // logo `/en/` (a 404 today, unchanged), card `/`. These three pin the logo's side of that.
+    await test('🔴 the header logo is the URL prefix alone: /en/ where en has no home, / on the default locale', () => {
+      const { read } = built.multi;
+      const en = read('en/help/contact');
+      assert.equal(one(logoLinks(en), 'header logo'), '/en/', 'the logo now measures the home (or got hard-coded): its output changed');
+      assert.equal(one(backLinks(en), '"back to homepage" link'), '/', 'the card should have stayed measured');
+      const def = read('help/contact');
+      assert.equal(one(logoLinks(def), 'header logo'), '/');
+      assert.equal(one(backLinks(def), '"back to homepage" link'), '/');
     });
 
     await test('one language, no locales → / on every form page, locale-looking folder included', () => {

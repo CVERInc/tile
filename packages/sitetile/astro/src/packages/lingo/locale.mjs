@@ -214,8 +214,11 @@ export function alternateLocales({ locales = [], defaultLocale = '', subPath = '
  *  It reads the BUILT PATH, not the page's `lang:` — the prefix a visitor is standing under is the
  *  one fact that cannot disagree with the URL they came from.
  *
- *  `contentRels` (contentRelsOf's set) makes it MEASURED: the locale home is returned only when it
- *  is a page this build has, `/` otherwise. Leave it out and the prefix alone decides.
+ *  `contentRels` (contentRelsOf's set) makes it MEASURED: the locale prefix is used only when that
+ *  locale's home CONTENT FILE exists in the set, `/` otherwise. It is a measurement of content
+ *  files, not of built pages: a file that exists but is never built into a page (a `home.md` with
+ *  no `sitetile-page:`) still counts, exactly as it does for hreflang. Leave `contentRels` out and
+ *  the prefix alone decides.
  *
  *  🩸 CVERInc/reef#1891. The success card's "Back to homepage" was a literal `/` one line below a
  *  "Send another" link that carried the locale, so a visitor who had just written in one language

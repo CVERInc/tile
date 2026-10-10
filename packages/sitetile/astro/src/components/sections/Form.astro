@@ -116,7 +116,8 @@ const returnTo = Astro.url.pathname;
 // same built path and through the same function the header logo uses (lingo/locale.mjs →
 // localeHomePath). 🩸 CVERInc/reef#1891: it was a literal `/`, one line below a link that carried
 // the locale, so a zh-TW visitor was handed back to the English home. MEASURED against the content
-// files: a locale with a contact page and no home page yet keeps `/` rather than a link to a 404.
+// files: a locale with a contact page and no home content file yet keeps `/` rather than a prefix
+// whose home was never written (content file present = counted, as hreflang counts it).
 // No `meta` (a caller that renders this coral without the site config) → no locales → `/`.
 const homeHref = isInbox ? localeHomePath({
   locales: meta && meta.locales,
