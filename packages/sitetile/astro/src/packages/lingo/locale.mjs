@@ -206,6 +206,36 @@ export function alternateLocales({ locales = [], defaultLocale = '', subPath = '
   });
 }
 
+/** "Home", for a page at `pathname`: the home of the locale that page's URL sits under. `/` for a
+ *  default-locale page (and for every page of a site that declares no locales), `/<url-locale>/`
+ *  under any other declared locale. The header logo, the sidebar logo and the footer mark all read
+ *  this; so does the inbox form's success card.
+ *
+ *  It reads the BUILT PATH, not the page's `lang:` — the prefix a visitor is standing under is the
+ *  one fact that cannot disagree with the URL they came from.
+ *
+ *  `contentRels` (contentRelsOf's set) makes it MEASURED: the locale prefix is used only when that
+ *  locale's home CONTENT FILE exists in the set, `/` otherwise. It is a measurement of content
+ *  files, not of built pages: a file that exists but is never built into a page (a `home.md` with
+ *  no `sitetile-page:`) still counts, exactly as it does for hreflang. Leave `contentRels` out and
+ *  the prefix alone decides.
+ *
+ *  🩸 CVERInc/reef#1891. The success card's "Back to homepage" was a literal `/` one line below a
+ *  "Send another" link that carried the locale, so a visitor who had just written in one language
+ *  was sent to the other one's home. The logo already had the right answer, inline in the layout
+ *  where the card could not reach it — the fix is that there is one of it now, not a second. */
+export function localeHomePath({ locales = [], pathname = '/', contentRels = null } = {}) {
+  const list = _list(locales);
+  const defaultLocale = list[0] || '';
+  const first = String(pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0];
+  if (!first || first === toUrlLocale(defaultLocale)) return '/';
+  if (!list.some((l) => toUrlLocale(l) === first)) return '/';
+  // Same measurement as hreflang, `?has=` and the suggestion banner: does this locale have a home?
+  if (contentRels != null && !alternateLocales({ locales: list, defaultLocale, contentRels })
+    .some((l) => toUrlLocale(l) === first)) return '/';
+  return `/${first}/`;
+}
+
 /** content/**\/*.md glob keys → the rel paths alternateLocales() matches against
  *  ("home", "about", "ja-jp/about", "legal/terms"). `_site`/`_theme` are site DATA, not pages —
  *  the router skips them, so this must too, or a config file would vouch for a locale. */

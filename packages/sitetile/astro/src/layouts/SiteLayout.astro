@@ -389,8 +389,9 @@ const localePath = (l) => {
 // Logo "home" href must stay IN the current locale — on /zh-tw/… the logo goes to /zh-tw/,
 // not / (which drops the visitor back to the default locale). Verified on a live site (
 // 2026-07-12 cold-read: live /zh-tw/ header logo → /zh-tw/, recast wrongly hard-coded href="/").
-// Reuses firstIsLocale/pathSegs[0] already computed above; default-locale pages → "/".
-const localeHome = firstIsLocale ? `/${pathSegs[0]}/` : '/';
+// Default-locale pages → "/".
+// One definition, lingo/locale.mjs → localeHomePath(); the inbox form's success card reads it too.
+const localeHome = lingo.localeHomePath({ locales, pathname: Astro.url?.pathname });
 const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
 // hreflang set — MEASURED, not assumed. A locale is advertised only when this page really exists
 // in it; generated routes (blog index/posts, tag & date archives, search) have no content file in

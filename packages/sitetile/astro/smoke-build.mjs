@@ -1486,6 +1486,13 @@ const checks = [
   // that decision being revisited on purpose.
   ['form-thanks (zh-tw): return_to carries the locale segment this route was built at', () =>
     /<input type="hidden" name="return_to" value="\/zh-tw\/form-thanks\/">/.test(formThanksZh)],
+  // 🩸 CVERInc/reef#1891: the card's "back to homepage" was a literal `/` on every locale — one
+  // line below a "send another" link that already carried the locale. Counted, not merely found:
+  // a second card pointing somewhere else would be the one a visitor clicks.
+  ['form-thanks (zh-tw): the success card\'s home link is this locale\'s home, which this build wrote', () => {
+    const backs = [...formThanksZh.matchAll(/<p class="st-form-success-back"><a href="([^"]*)"/g)].map((m) => m[1]);
+    return backs.length === 1 && backs[0] === '/zh-tw/' && existsSync(join(DIST, 'zh-tw/index.html'));
+  }],
   ['form-thanks (zh-tw): thanks_to is the SAME literal path as the base-locale page — NOT rewritten to /zh-tw/…', () =>
     /<input type="hidden" name="thanks_to" value="\/form-thanks-landing">/.test(formThanksZh)
       && !formThanksZh.includes('name="thanks_to" value="/zh-tw/')],

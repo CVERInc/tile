@@ -13,8 +13,8 @@
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath } from '@sitetile';
-import { inboxFormCopy, DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
-const { section, hero, lang } = Astro.props;
+import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
+const { section, hero, lang, meta } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every other
@@ -112,6 +112,18 @@ const nameFor = (f) => (isInbox ? inboxNameFor(f.label, f.kind) : f.label);
 // already carries the locale segment for every non-default-locale page (the router
 // bakes it in via toUrlLocale; see lib routing). Read once, per page render.
 const returnTo = Astro.url.pathname;
+// "Back to homepage" on the success card — the home of the locale `returnTo` sits under, from the
+// same built path and through the same function the header logo uses (lingo/locale.mjs →
+// localeHomePath). 🩸 CVERInc/reef#1891: it was a literal `/`, one line below a link that carried
+// the locale, so a zh-TW visitor was handed back to the English home. MEASURED against the content
+// files: a locale with a contact page and no home content file yet keeps `/` rather than a prefix
+// whose home was never written (content file present = counted, as hreflang counts it).
+// No `meta` (a caller that renders this coral without the site config) → no locales → `/`.
+const homeHref = isInbox ? localeHomePath({
+  locales: meta && meta.locales,
+  pathname: returnTo,
+  contentRels: contentRelsOf(import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true })),
+}) : '/';
 
 // 🔴 A form with nowhere to send is not a form with a working button. Before
 // this, an unwired coral rendered a live submit that posted to the page's own
@@ -220,7 +232,7 @@ const inboxCopy = isInbox ? {
           script below intercepts the same click to reset and re-show the form in place
           instead of navigating — see the `data-inbox-again` handler. */}
       <p class="st-form-success-again"><a href={returnTo} data-inbox-again>{fieldCopy.sendAnother}</a></p>
-      <p class="st-form-success-back"><a href="/">{fieldCopy.backHome}</a></p>
+      <p class="st-form-success-back"><a href={homeHref}>{fieldCopy.backHome}</a></p>
     </div>
   )}
   <form class="st-form" action={formAction} method={method}>
