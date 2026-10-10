@@ -37,7 +37,7 @@ test('validHostOrigin: exact allowed origins only', () => {
   assert.equal(validHostOrigin('http://localhost:8788'), 'http://localhost:8788');
   assert.equal(validHostOrigin('http://localhost'), 'http://localhost');
   for (const bad of [undefined, '', '*', 'null', 'feelreef.com', 'http://feelreef.com', 'https://feelreef.com.evil.example',
-    'https://evil.example', 'https://feelreef.com/dashboard', 'https://feelreef.com?x', 'https://a@feelreef.com',
+    'https://evil.example', 'https://feelreef.com/dashboard', 'https://feelreef.com?x', 'https://a@example.test',
     'https://localhost:3000', 'http://127.0.0.1:3000', 'https://FEELREEF.com:443/x']) {
     assert.equal(validHostOrigin(bad), null, String(bad));
   }

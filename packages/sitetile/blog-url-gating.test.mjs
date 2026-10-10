@@ -119,7 +119,7 @@ test('🔴 categoryBase/tagBase/authorBase: a disallowed scheme degrades to the 
 // (the build died with NoMatchingStaticPathFound) and the sitemap/feed wrote origin + permalink.
 const MIGRATED = 'https://old-site.example/2019/01/my-post/';
 test('isExternalUrl: a scheme or a network-path reference is external; a site path is not', () => {
-  for (const u of [MIGRATED, 'http://x.example/', 'mailto:a@b.example', '//cdn.example/p', '/\\evil.example/p', ' https://x.example/', 'ht\ttps://x.example/']) {
+  for (const u of [MIGRATED, 'http://x.example/', 'mailto:someone@example.org', '//cdn.example/p', '/\\evil.example/p', ' https://x.example/', 'ht\ttps://x.example/']) {
     assert.equal(isExternalUrl(u), true, JSON.stringify(u));
   }
   for (const u of ['/devlog/my-post', '/2019/01/my-post/', '/', '', 'devlog/my-post', '/a:b']) {

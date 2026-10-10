@@ -18,7 +18,7 @@ import { splitCard } from '../w2/host-bridge.mjs';
 import { planBackfill } from '../assets/backfill-raster.mjs';
 import { encodePng } from '../../sitetile/icon-core.mjs';
 
-const HOST = 'links.maple-example.test';       // a made-up creator domain
+const HOST = 'links.creator-example.test';       // a made-up creator domain
 const HANDLE = 'maple';
 const AV = 'sha256-aaaaaaaaaaaaaaaa';
 
