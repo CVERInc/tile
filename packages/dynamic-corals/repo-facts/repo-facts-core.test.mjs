@@ -1,107 +1,59 @@
-// REEF with Repo Facts — the small decisions, on their own (plain node, zero framework).
+// REEF with Repo Facts — the page half's small pure parts.
 //   run: node packages/dynamic-corals/repo-facts/repo-facts-core.test.mjs
-//
-// Which link is a repository link, and what a usable answer looks like. The behaviour that
-// matters most — what happens to a real page — is in repo-facts-page.test.mjs.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { repoOf, checkResponse, SELECTOR, PATH, MAX_REPOS, TIMEOUT_MS, DIAGNOSTICS } from './repo-facts-core.mjs';
-import { FIELDS } from './repo-facts-fields.mjs';
-import { releaseFields, repoFields } from './repo-facts-worker.mjs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { repoOf, langOf, relative, UPDATED, ARCHIVED } from './repo-facts-core.mjs';
 
-const GH = 'github.com';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const NOW = Date.parse('2026-10-10T12:00:00Z');
 
-test('a repository link is exactly https://github.com/<owner>/<repo>', () => {
-  assert.equal(repoOf('https://github.com/CVERInc/clikae', GH), 'CVERInc/clikae');
-  assert.equal(repoOf('https://github.com/CVERInc/clikae/', GH), 'CVERInc/clikae', 'a trailing slash is typing');
-  assert.equal(repoOf('https://github.com/CVERInc/clikae.git', GH), 'CVERInc/clikae');
-  assert.equal(repoOf('https://github.com/CVERInc/clikae.git/', GH), 'CVERInc/clikae');
-  assert.equal(repoOf('https://github.com/CVERInc/obsidian-marktile?tab=readme#install', GH), 'CVERInc/obsidian-marktile');
-  assert.equal(repoOf('https://github.com/CVERInc/.github', GH), 'CVERInc/.github');
-  assert.equal(repoOf('http://github.com/CVERInc/clikae', GH), 'CVERInc/clikae');
-});
-
-test('everything else is not: an owner, a deeper path, another host, a lookalike host', () => {
-  for (const href of [
-    'https://github.com/CVERInc',
-    'https://github.com/',
-    'https://github.com/CVERInc/clikae/issues/12',
-    'https://github.com/CVERInc/clikae/releases/tag/v0.40.0',
-    'https://github.com/CVERInc/clikae/blob/main/README.md',
-    'https://gist.github.com/CVERInc/abc123',
-    'https://api.github.com/repos/CVERInc',
-    'https://github.com.example.net/CVERInc/clikae',
-    'https://example.net/github.com/CVERInc/clikae',
-    'https://notgithub.com/CVERInc/clikae',
-    'https://github.com/CVERInc/cli%20kae',
-    'https://github.com/CVERInc/..',
-    'https://github.com/CVERInc/%2e%2e',
-    'mailto:hi@example.net',
-    '/oss/clikae',
-    '',
-  ]) {
-    assert.equal(repoOf(href, GH), '', href);
+test('a repository link is exactly https://github.com/<owner>/<repo>, of the owner asked about', () => {
+  for (const href of ['https://github.com/CVERInc/clikae', 'https://github.com/cverinc/Clikae/', 'https://github.com/CVERInc/clikae.git']) {
+    assert.equal(repoOf(href, 'CVERInc'), 'clikae', href);
+  }
+  for (const href of ['https://github.com/CVERInc', 'https://github.com/CVERInc/clikae/issues', 'https://github.com/other/clikae',
+    'https://github.com.evil.example/CVERInc/clikae', 'https://gist.github.com/CVERInc/clikae', 'https://site.example/oss/clikae', 'not a url']) {
+    assert.equal(repoOf(href, 'CVERInc'), '', href);
   }
 });
 
-test('with no known forge, nothing is a repository link', () => {
-  assert.equal(repoOf('https://github.com/CVERInc/clikae', undefined), '');
-  assert.equal(repoOf('https://gitlab.com/acme/tool', GH), '');
+test('the language is the primary subtag, whole; anything without words reads English', () => {
+  assert.deepEqual(['en', 'zh-Hant', 'zh-tw', 'ja', 'ja-JP', 'ko', 'jam', 'kok', 'fr', '', undefined].map(langOf),
+    ['en', 'zh', 'zh', 'ja', 'ja', 'ko', 'en', 'en', 'en', 'en', 'en']);
 });
 
-test('an answer is narrowed to the repos that were asked about; absent ones read as empty', () => {
-  const data = { 'a/b': { tag: 'v1.0.0', releasedAt: '2026-01-02' }, 'x/y': { tag: '<b>' } };
-  assert.deepEqual(checkResponse(data, ['a/b', 'c/d']), { 'a/b': { tag: 'v1.0.0', releasedAt: '2026-01-02' }, 'c/d': {} });
+test('day buckets: today, yesterday, N days (<30), N months (days/30), N years (days/365)', () => {
+  const at = (d) => relative(d, NOW, 'en');
+  assert.deepEqual(['2026-10-10', '2026-10-09', '2026-09-11', '2026-09-10', '2026-08-11', '2025-10-11', '2025-10-10', '2023-10-10'].map(at),
+    ['today', 'yesterday', '29 days ago', 'last month', '2 months ago', '12 months ago', 'last year', '3 years ago']);
+  assert.equal(at('2026-10-12'), 'today', 'a push "in the future" (a skewed clock) is today, never "in 2 days"');
+  for (const bad of ['yesterday', '2026-10-07T00:00:00Z', '', undefined, '2026-13-01']) assert.equal(at(bad), '', String(bad));
 });
 
-test('null and absent both mean "none", for every field', () => {
-  const none = { tag: null, releasedAt: null, pushedAt: null, license: null, archived: null, fullName: null };
-  assert.deepEqual(checkResponse({ 'a/b': none }, ['a/b']), { 'a/b': none });
-  assert.deepEqual(checkResponse({ 'a/b': {} }, ['a/b']), { 'a/b': {} });
+test('🔴 a push dated the 9th is "yesterday" on the 10th in every zone — UTC days, not the visitor\'s', () => {
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { relative } from ${JSON.stringify(join(HERE, 'repo-facts-core.mjs'))}; console.log(relative('2026-10-09', ${NOW}, 'en'))`],
+    { env: { ...process.env, TZ: 'America/Los_Angeles' }, encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), 'yesterday');
 });
 
-test('the shapes that are accepted', () => {
-  const kept = (f) => assert.deepEqual(checkResponse({ 'a/b': f }, ['a/b']), { 'a/b': f }, JSON.stringify(f));
-  for (const tag of ['v0.40.0', '0.3.3', 'v1.2', '1.2.3.4', 'v2.0.0-rc.1', 'v1.0.0+build.5', '2026.10.07']) kept({ tag });
-  for (const license of ['MIT', 'Apache-2.0', 'GPL-3.0-or-later', 'BSD-3-Clause', '0BSD', 'GPL-2.0+']) kept({ license });
-  kept({ releasedAt: '2024-02-29', pushedAt: '1999-12-31', archived: true, fullName: 'A_b.c-d/e.f' });
+test('the browser\'s phrasing is the live pages\' phrasing (they were written the same way)', () => {
+  assert.deepEqual(['zh-Hant', 'ja', 'ko'].map((t) => [relative('2026-10-08', NOW, t), relative('2026-09-01', NOW, t)]),
+    [['前天', '上個月'], ['一昨日', '先月'], ['그저께', '지난달']]);
 });
 
-test('one wrong field empties ITS repo, whole, and leaves the others as they were', () => {
-  const good = { tag: 'v1.0.0', releasedAt: '2026-01-02' };
-  for (const bad of [{ ...good, pushedAt: 'recently' }, { ...good, tag: '<b>' }, { ...good, archived: 'yes' }, 'v1.0.0', null, 7, true]) {
-    assert.deepEqual(checkResponse({ 'a/b': good, 'c/d': bad }, ['a/b', 'c/d']), { 'a/b': good, 'c/d': {} }, JSON.stringify(bad));
+test('🔴 the wording around the phrase is the renderer\'s own, in all four languages', () => {
+  // Collection.astro writes "Updated {x}" etc. when it renders the card; the coral rewrites the
+  // same span. If the renderer's wording changes, this goes red rather than the two drifting apart.
+  const astro = readFileSync(join(HERE, '../../sitetile/astro/src/components/sections/Collection.astro'), 'utf8');
+  const forms = { en: '`Updated ${x}`', zh: "'zh-tw': { updated: (x) => `${x} 更新`", ja: "'ja-jp': { updated: (x) => `${x} 更新`", ko: "'ko-kr': { updated: (x) => `업데이트 날짜: ${x}`" };
+  for (const [lang, form] of Object.entries(forms)) {
+    assert.ok(astro.includes(form), `Collection.astro no longer says ${form}`);
+    assert.equal(UPDATED[lang]('X'), form.replace(/.*`(.*)`$/, '$1').replace('${x}', 'X'));
   }
-});
-
-test('a repo name is looked up as an own key, never through the prototype', () => {
-  const data = Object.create({ 'a/b': { tag: 'v9.9.9' } });
-  assert.deepEqual(checkResponse(data, ['a/b']), { 'a/b': {} });
-});
-
-test('🔴 one field table for both halves: the edge and the browser cannot disagree about a date', () => {
-  // The day the two had a validator each, the edge passed `2026-02-30` and the browser refused it.
-  // Now there is one, and this asks each half about the same values through its own front door.
-  const days = { '2026-10-07': true, '2024-02-29': true, '2026-02-30': false, '2026-13-01': false, '2026-10-7': false, '2025-02-29': false };
-  for (const [day, valid] of Object.entries(days)) {
-    assert.equal(FIELDS.releasedAt(day), valid, day);
-    const browser = checkResponse({ 'a/b': { tag: 'v1.0.0', releasedAt: day } }, ['a/b'])['a/b'];
-    const edge = releaseFields({ tag_name: 'v1.0.0', published_at: `${day}T12:00:00Z` });
-    assert.equal('releasedAt' in browser, valid, `browser: ${day}`);
-    assert.equal('releasedAt' in edge, valid, `edge: ${day}`);
-    assert.equal('pushedAt' in repoFields({ pushed_at: `${day}T12:00:00Z` }), valid, `edge, pushed: ${day}`);
-  }
-  for (const tag of ['v1.0.0', 'nightly', '1', 'v1.2.3_beta', `v1.0.0-${'a'.repeat(40)}`]) {
-    const browser = 'tag' in checkResponse({ 'a/b': { tag } }, ['a/b'])['a/b'];
-    assert.equal(browser, 'tag' in releaseFields({ tag_name: tag }), tag);
-    assert.equal(browser, FIELDS.tag(tag), tag);
-  }
-});
-
-test('the constants a page author or a checker can rely on', () => {
-  assert.equal(SELECTOR, '[data-dynamic-coral="repo-facts"]');
-  assert.equal(PATH, '/v0/repo-facts');
-  assert.equal(MAX_REPOS, 30);
-  assert.equal(TIMEOUT_MS, 3000);
-  assert.equal(DIAGNOSTICS, '__coralDiagnostics');
+  assert.deepEqual(Object.keys(ARCHIVED).sort(), Object.keys(UPDATED).sort());
 });

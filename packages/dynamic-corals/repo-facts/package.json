@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "REEF with Repo Facts — fills the repository cards a page already has with the facts nobody should retype: the latest release and its date, or an archived badge. Client (repo-facts.js) is BUILT from repo-facts-client.mjs + repo-facts-core.mjs; the edge worker (repo-facts-worker.mjs) asks the forge for an allow-listed owner and returns six validated fields per repo and no free text. Both check fields against repo-facts-fields.mjs. Version covers the UNIT: client JS + worker contract + the data-* attribute API + the renderer class names it reads.",
+  "description": "REEF with Repo Facts — keeps the repository cards a page already has honest: each card's \"Updated …\" line is recomputed from the repo's last push, and an archived repo gets an archived pill. Client (repo-facts.js) is BUILT from repo-facts-client.mjs + repo-facts-core.mjs; the edge worker (repo-facts-worker.mjs) reads one hard-coded owner's public listing once a day and returns four checked fields per repo (name, pushed_at, archived, stars) and no free text. Version covers the UNIT: client JS + worker contract + the data-* attribute API + the renderer class names it reads.",
   "scripts": {
     "build": "node ../build.mjs repo-facts",
     "test": "node --test repo-facts-core.test.mjs repo-facts-page.test.mjs repo-facts-worker.test.mjs repo-facts-manifest.test.mjs"
