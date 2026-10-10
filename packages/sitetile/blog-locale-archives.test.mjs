@@ -38,6 +38,7 @@ registerHooks({
 const {
   allPosts, listedPosts, blogCategories, tagHref, routedCategories, routedTags,
   localeUrlPrefix, localizeArchiveHref, alternateArchiveLocales, localeBlogCorpora, termLocaleMap,
+  blogSwitchLocales, postUrl, indexUrl,
 } = await import('./astro/src/lib/blog.mjs');
 
 let passed = 0;
@@ -221,6 +222,66 @@ test('termLocaleMap: kind=\'tag\' reads the tag flag/slugs, never the category o
   const baseListed = listedPosts(BASE_POSTS, SITE_META);
   const { mapByUrl } = termLocaleMap('tag', CONTENT_FILES, LOCALE_BLOG_FILES, SITE_META, BASE_POSTS, baseListed);
   assert.deepEqual([...mapByUrl['']].sort(), ['diary', 'press']);
+});
+
+// ── blogSwitchLocales: which locales build THIS blog url ───────────────────────────────────────
+// 🩸 2026-10-11. The language banner reads the locales a page exists in. A blog route has no
+// content file, so it measured as existing nowhere else and lost its banner — on /devlog/, whose
+// translated edition is built by the same route. The banner switches by swapping the locale
+// prefix on the current path, so "the other edition exists" is exactly "that locale's build emits
+// the same url under its own prefix". No pairing rule of its own: a translation is a file at
+// blog/<loc>/<same slug>.md, and the url is whatever postUrl() makes of it.
+const switchOf = (meta = SITE_META, files = LOCALE_BLOG_FILES, base = BASE_POSTS) => {
+  assert.equal(typeof blogSwitchLocales, 'function', 'lib/blog.mjs exports blogSwitchLocales()');
+  const corpora = localeBlogCorpora(CONTENT_FILES, files, meta, base);
+  return { at: blogSwitchLocales(meta, base, corpora), corpora };
+};
+const postBySlug = (list, slug) => list.find((p) => p.slug === slug);
+
+test('🔴 blogSwitchLocales: the index is switchable to every locale that builds an index', () => {
+  const { at, corpora } = switchOf();
+  assert.deepEqual(at(indexUrl(SITE_META, 1)), ['en-US', 'zh-TW']);
+  assert.deepEqual(at(indexUrl(corpora[0].meta, 1), 'zh-tw'), ['en-US', 'zh-TW'], 'asked from the locale edition: same answer');
+});
+
+test('🔴 blogSwitchLocales: a post is switchable only where the same url is built', () => {
+  const { at, corpora } = switchOf();
+  // press-1 and diary-1 are translated (blog/zh-tw/<same slug>.md); press-2 is not.
+  assert.deepEqual(at(postUrl(postBySlug(BASE_POSTS, 'press-1'), SITE_META)), ['en-US', 'zh-TW']);
+  assert.deepEqual(at(postUrl(postBySlug(BASE_POSTS, 'press-2'), SITE_META)), ['en-US'], 'no zh-TW file with this slug');
+  assert.deepEqual(at(postUrl(postBySlug(corpora[0].posts, 'press-1'), corpora[0].meta), 'zh-tw'), ['en-US', 'zh-TW']);
+});
+
+test('🔴 blogSwitchLocales: a translation with no base post is alone in its own locale', () => {
+  const files = { ...LOCALE_BLOG_FILES, '/s/blog/zh-tw/only-here.md': md('只有這裡', '2024-01-02') };
+  const { at, corpora } = switchOf(SITE_META, files);
+  assert.deepEqual(at(postUrl(postBySlug(corpora[0].posts, 'only-here'), corpora[0].meta), 'zh-tw'), ['zh-TW']);
+});
+
+test('🔴 blogSwitchLocales: no translated posts → the index has no other edition either', () => {
+  const { at } = switchOf(SITE_META, {});
+  assert.deepEqual(at(indexUrl(SITE_META, 1)), ['en-US'], 'a locale with zero posts builds no index');
+});
+
+test('🔴 blogSwitchLocales: it is the URL that pairs, not the slug — a dated pattern splits a re-dated translation', () => {
+  // Same slug, different day. Under /%year%/%monthnum%/%postname% the two editions do not share a
+  // path, so swapping the prefix would land on a 404: they must not be offered to each other.
+  const meta = { ...SITE_META, 'blog-url-pattern': '/%year%/%monthnum%/%postname%' };
+  const files = {
+    '/s/blog/zh-tw/press-1.md': md('新聞一', '2024-01-05'),   // same date as the base → same path
+    '/s/blog/zh-tw/diary-1.md': md('日記一', '2024-02-09'),   // re-dated → /2024/02/… vs /2024/01/…
+  };
+  const { at } = switchOf(meta, files);
+  assert.deepEqual(at(postUrl(postBySlug(BASE_POSTS, 'press-1'), meta)), ['en-US', 'zh-TW']);
+  assert.deepEqual(at(postUrl(postBySlug(BASE_POSTS, 'diary-1'), meta)), ['en-US']);
+});
+
+test('blogSwitchLocales: a url the blog does not build, and a one-locale site, answer with nothing to switch to', () => {
+  const { at } = switchOf();
+  assert.deepEqual(at('/devlog/no-such-post'), []);
+  const one = { ...SITE_META, locales: 'en-US' };
+  const solo = blogSwitchLocales(one, BASE_POSTS, localeBlogCorpora(CONTENT_FILES, LOCALE_BLOG_FILES, one, BASE_POSTS));
+  assert.deepEqual(solo(indexUrl(one, 1)), ['en-US']);
 });
 
 console.log(`\n${passed} passed`);

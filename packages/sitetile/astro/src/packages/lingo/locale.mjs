@@ -52,6 +52,55 @@ export function toBcp47(code) { const f = _canon(code); return f ? LINGO_BCP47[f
 /** human label for the locale picker. */
 export function label(locale) { const f = _canon(locale); return f ? LINGO_LABELS[f] : String(locale); }
 
+/** A frontmatter list (`a, b , c`) or an array → trimmed, non-empty entries. */
+const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
+  .map((s) => String(s).trim()).filter(Boolean);
+
+/** Is the Lingo install on for this site? — the ONE definition; every gate calls this.
+ *
+ *  🩸 2026-10-11. This was `packages.includes('lingo')`, copied into SiteLayout and the /language
+ *  route, while the platform's own docs told owners "the second language is free, no Lingo module
+ *  needed" and nothing on the platform ever wrote `packages: lingo`. A site that declared
+ *  `locales: en, zh-TW` exactly as told got the un-installed path: hreflang to /en/ and /zh-TW/
+ *  (both 404), no footer Language link, no /language page — worse than staying monolingual.
+ *
+ *  Owner ruling 2026-10-10: the switch is the owner DECLARING a second language — `locales` with
+ *  two or more entries. Free, but never forced on a one-language site. `packages: lingo` is still
+ *  honoured (sites that already carry it keep working) but is no longer required. */
+export function lingoEnabled({ packages = [], locales = [] } = {}) {
+  return _list(packages).includes('lingo') || _distinct(_list(locales)).length > 1;
+}
+
+/** Do two locale spellings name the same locale? `en` / `en-US` / `en-us` all do; so do `zh-Hant`
+ *  and `zh-TW`. Unknown codes fall back to a case-insensitive comparison.
+ *
+ *  🩸 2026-10-11. The /language route compared the root home's `lang:` to `locales[0]` with `===`,
+ *  and SiteLayout compared `toUrlLocale(lang)` to the default's URL form — an unwritten rule that
+ *  the two must be spelled identically. `locales: en-US` + `lang: en` (both correct) produced a
+ *  chooser at /en-us/language and a footer link to /en/language, both 404. */
+export function sameLocale(a, b) {
+  const ca = _canon(a), cb = _canon(b);
+  if (ca && cb) return ca === cb;
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+/** A locale list with each LOCALE kept once — first spelling wins. `zh-TW, zh-TW` and
+ *  `zh-TW, zh-tw` are one language written twice, not a second one; counting entries instead
+ *  switched the install on for a one-language site and built it a chooser with two identical rows
+ *  and a hreflang pointing at /zh-tw/zh-tw/. (A function declaration: lingoEnabled, above, calls
+ *  it, and sameLocale is hoisted the same way.) */
+function _distinct(list) {
+  const out = [];
+  for (const l of list) if (!out.some((seen) => sameLocale(seen, l))) out.push(l);
+  return out;
+}
+
+/** The entry of `locales` that a page's `lang:` means (so `lang: zh-Hant` → `zh-TW`), or `lang`
+ *  itself when none does. URL prefixes must be derived from THIS, never from the raw `lang:`. */
+export function localeOf(locales, lang) {
+  return _list(locales).find((l) => sameLocale(l, lang)) || lang;
+}
+
 /** navigator.language prefixes that map to each locale (for the suggestion banner). */
 const LINGO_PREFIXES = { 'en-US': ['en'], 'ja-JP': ['ja'], 'zh-TW': ['zh'], 'ko-KR': ['ko'] };
 export function prefixes(locale) { const f = _canon(locale); return f ? LINGO_PREFIXES[f] : []; }
@@ -64,6 +113,51 @@ const LINGO_BANNER = {
   'ko-KR': { prompt: '영어 웹사이트가 더 편하신가요?', continue: '네', dismiss: '괜찮습니다' },
 };
 export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
+
+/** The suggestion banner's config for ONE page, or null when the page has nothing to suggest.
+ *
+ *  `altLocales` is the MEASURED set — the locales this page really exists in, the same list its
+ *  hreflang tags and the footer link's `?has=` are built from. The options are that set minus the
+ *  page being read.
+ *
+ *  🩸 2026-10-11. Options were `locales` minus the current one: every DECLARED language, existing
+ *  or not. A page written only in the default language still asked a visitor whose browser spoke
+ *  the other one whether they would rather read it there, and the button went to a 404. The page
+ *  already knew better — two lines above, hreflang and `?has=` read the measured set. Third
+ *  consumer of one fact, and the only one still guessing.
+ *
+ *  `routeLocales` is a SECOND measurement of the same fact, from a generated blog route: the
+ *  locales whose build emits this same url (lib/blog.mjs → blogSwitchLocales). It is added to
+ *  the content one, never used instead of it.
+ *
+ *  🩸 2026-10-11, the same day. The layout let the route's answer REPLACE the content one. On a
+ *  root-mounted blog `/` is the blog index; a second language with no posts yet but a home page
+ *  of its own was known to the content measurement (the page emitted hreflang to it) and not to
+ *  the route's — so that site's home page lost its banner while its other edition existed. Each
+ *  measurement says "this page exists there" and each is true, so the answer is the union.
+ *
+ *  No options → null, so the page ships neither the banner markup nor its script. */
+export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null } = {}) {
+  const declared = _list(locales);
+  if (declared.length < 2) return null;
+  const pageLocale = localeOf(locales, lang);
+  const fromContent = _list(altLocales);
+  // No route measurement → the content set exactly as given (an archive route hands its own list
+  // there, in its own order). With one → the union, in `locales` order, each locale once.
+  const exists = Array.isArray(routeLocales)
+    ? declared.filter((l) => routeLocales.includes(l) || fromContent.includes(l))
+    : fromContent;
+  const options = exists.filter((l) => !sameLocale(l, pageLocale))
+    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l) }));
+  if (!options.length) return null;
+  return {
+    current: toUrlLocale(pageLocale),
+    defaultLocale: toUrlLocale(defaultLocale),
+    hrefStrategy: 'prefix',
+    excludePath: '/language',
+    options,
+  };
+}
 
 /** Copy for the `/language` chooser page — each locale in ITS OWN language:
  *  word = the page title / heading; prompt = the lead sentence; current/switch = the per-row action. */

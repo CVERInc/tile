@@ -806,6 +806,19 @@ const svgRuleCount = (text) => parseRules(text || '').filter((r) => r.path === '
 // What an astro rebuild would find if the old output were still there: merging the merged file again.
 const collisionHeadersRemerged = collisionHeaders === null ? null : writeMergedHeaders(CDIST);
 
+// The locale-suggestion banner's config, as the built page carries it (null = no banner).
+// Parsed, not pattern-matched: the claims below are about which locales it OFFERS, and a regex
+// over an HTML-escaped JSON blob cannot tell "ja-jp is not an option" from "ja-jp is spelled
+// differently this week".
+const bannerConfig = (h) => {
+  const m = h.match(/<div\b[^>]*\bid="signet-locale-banner"[^>]*\bdata-config="([^"]*)"/);
+  if (!m) return null;
+  return JSON.parse(m[1].replace(/&quot;|&#34;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+};
+const builtHtmlFiles = (d) => readdirSync(d).flatMap((n) => {
+  const p = join(d, n);
+  return statSync(p).isDirectory() ? builtHtmlFiles(p) : n.endsWith('.html') ? [p] : [];
+});
 const checks = [
   ...Object.entries(badgeExpected).map(([kind, expected]) => [`icons: rendered ${kind} marks exactly the badges`, () => {
     assertBadgeLinks(badgeHtml[kind], expected);
@@ -950,6 +963,154 @@ const checks = [
     && /hreflang="zh-Hant" href="[^"]*\/zh-tw\/blocks\/"/.test(blocks)
     && !/hreflang="ja"/.test(blocks) && !/hreflang="ko"/.test(blocks)],
   ['reef tokens (inline or external css)', () => allCss().includes('--gd-accent')],
+  // -- Lingo switched on by `locales` alone, measured on the built page --
+  // 🩸 2026-10-11. Every Lingo fixture carried `packages: lingo` — its own line, or the site
+  // layer's by inheritance — so the smoke only ever built the LEGACY switch. Putting the old
+  // `packages.includes('lingo')` gate back in SiteLayout left it 200/200: the derivation was held
+  // by a regex over source text and by nothing that looked at a page. content/ko-kr.md and
+  // content/_site.md now carry no `packages:` at all, so /ko-kr/ is on only if two declared
+  // locales turn it on. The first check is the control: if either file regains the line, the
+  // three below it would pass for the wrong reason, so it fails instead.
+  ['🔴 Lingo from `locales` alone — the specimen: /ko-kr/ declares ≥2 locales and NO `packages:`, on the page or the site layer', () => {
+    const fm = (rel) => readFileSync(new URL(`./content/${rel}`, import.meta.url), 'utf8').split(/^---$/m)[1] || '';
+    const key = (text, k) => text.split('\n').filter((l) => new RegExp(`^${k}\\s*:`).test(l));
+    const page = fm('ko-kr.md'), site = fm('_site.md'), locSite = fm('ko-kr/_site.md');
+    const declared = (key(page, 'locales')[0] || '').replace(/^locales\s*:/, '').split(',').map((x) => x.trim()).filter(Boolean);
+    return declared.length >= 2
+      && key(page, 'packages').length === 0 && key(site, 'packages').length === 0 && key(locSite, 'packages').length === 0;
+  }],
+  // The page writes `lang: ko-KR`; only the install maps that to the BCP-47 tag. (The fixture is
+  // read too: were its `lang:` already `ko`, the tag would say "ko" with Lingo off as well.)
+  ['🔴 Lingo from `locales` alone: `lang: ko-KR` reaches <html lang> as the BCP-47 tag, ko', () =>
+    /^lang:\s*ko-KR\s*$/m.test(readFileSync(new URL('./content/ko-kr.md', import.meta.url), 'utf8'))
+    && /<html lang="ko"[\s>]/.test(siteOff)],
+  ['🔴 Lingo from `locales` alone: hreflang is BCP-47 → the lowercase locale URL, with x-default', () =>
+    /<link rel="alternate" hreflang="ko" href="https:\/\/example\.com\/ko-kr\/"/.test(siteOff)
+    && /<link rel="alternate" hreflang="x-default" href="https:\/\/example\.com\/"/.test(siteOff)
+    && !/hreflang="ko-KR"/.test(siteOff)],
+  ['🔴 Lingo from `locales` alone: the footer Language link is this locale\'s chooser, and the chooser was built', () =>
+    /<a class="rf-lang" href="\/ko-kr\/language\?return=%2Fko-kr%2F&amp;has=/.test(siteOff)
+    && existsSync(join(DIST, 'ko-kr/language/index.html'))],
+  // -- the suggestion banner offers only what exists --
+  // 🩸 2026-10-11. Its options came from `locales` (every DECLARED language) while the hreflang
+  // set and `?has=` on the same page came from the measured set. markers.md exists in one
+  // language on a two-locale site: the banner offered the other one, and the switch was a 404.
+  // The first check is the control — the page really is a Lingo page with nothing to switch to —
+  // so "no banner" below cannot be satisfied by Lingo simply being off there.
+  ['banner specimen: /markers/ is a Lingo page that exists in ONE language (its only alternate is itself)', () =>
+    /<html lang="en" data-lingo-root>/.test(markers)
+    && (markers.match(/<link rel="alternate" hreflang="(?!x-default)[^"]*"/g) || []).length === 1
+    && /<a class="rf-lang" href="\/language\?return=%2Fmarkers%2F&amp;has=en-us"/.test(markers)
+    && !existsSync(join(DIST, 'zh-tw/markers/index.html'))],
+  ['🔴 banner: a page with no other language version ships no banner (and no switch to a 404)', () =>
+    bannerConfig(markers) === null && !markers.includes('signet-locale-banner')],
+  ['🔴 banner: four locales declared, two built → the only option is the one that exists', () => {
+    const c = bannerConfig(blocks);
+    return !!c && c.current === 'en-us' && c.options.map((o) => o.id).join() === 'zh-tw';
+  }],
+  ['🔴 banner: on the `lang: zh-Hant` edition, current is the URL locale (zh-tw) and it never offers itself', () => {
+    const c = bannerConfig(localeExcept);
+    return !!c && c.current === 'zh-tw' && c.defaultLocale === 'en-us' && c.options.map((o) => o.id).join() === 'en-us';
+  }],
+  ['🔴 banner: every option on every built page leads to a page that exists', () => {
+    const dead = [];
+    const seen = new Set();
+    for (const f of builtHtmlFiles(DIST)) {
+      const c = bannerConfig(readFileSync(f, 'utf8'));
+      if (!c) continue;
+      const route = '/' + f.slice(DIST.length + 1).replace(/(^|\/)index\.html$/, '').replace(/\.html$/, '');
+      seen.add(route);
+      const segs = route.split('/').filter(Boolean);
+      const sub = (segs[0] === c.current && c.current !== c.defaultLocale ? segs.slice(1) : segs).join('/');
+      for (const o of c.options) {
+        const target = [o.id === c.defaultLocale ? '' : o.id, sub].filter(Boolean).join('/');
+        if (!existsSync(join(DIST, target, 'index.html'))) dead.push(`${route} → /${target}/`);
+      }
+    }
+    if (dead.length) console.error('    dead banner options:\n      ' + dead.slice(0, 8).join('\n      '));
+    // The sweep must have REACHED the blog routes — an index and a post, both editions. A walk
+    // that finds no banner there has nothing to say about them and would report zero dead options.
+    const reached = ['/devlog', '/zh-tw/devlog', '/devlog/a-signed-post', '/zh-tw/devlog/a-signed-post'].every((r) => seen.has(r));
+    return seen.size >= 5 && reached && dead.length === 0;
+  }],
+  // -- the banner on generated blog routes --
+  // 🩸 2026-10-11. Reading the banner's options from the measured set took the banner off every
+  // blog route, because a generated route has no content file and so measured as "exists nowhere
+  // else" — including /devlog/, whose zh-TW edition is built two lines away. The route knows what
+  // it builds: [...path].astro now hands SiteLayout the locales whose build emits THIS url under
+  // their own prefix (lib/blog.mjs → blogSwitchLocales), which is the url the banner links to.
+  ['🔴 banner on the blog index: /devlog/ and /zh-tw/devlog/ each offer the other, and only the other', () => {
+    const a = bannerConfig(devlogIndex), b = bannerConfig(zhDevlogIndex);
+    return !!a && !!b
+      && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
+      && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
+  }],
+  ['🔴 banner on a post: a post translated at the same url offers its other edition, both ways', () => {
+    const a = bannerConfig(readFileSync(join(DIST, 'devlog/a-signed-post/index.html'), 'utf8'));
+    const b = bannerConfig(readFileSync(join(DIST, 'zh-tw/devlog/a-signed-post/index.html'), 'utf8'));
+    return !!a && !!b
+      && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
+      && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
+  }],
+  // 🔴 The banner on a blog route is the ONLY thing `bannerLocales` may touch. Feeding the same
+  // set to hreflang and to the footer link's `?has=` is a change to the <head> of every blog page
+  // on every existing site — worth doing, and its own decision. Until it is made, a translated
+  // post says so in exactly one place. (Wiring bannerLocales into altLocales left every suite and
+  // this smoke green before this check existed.) The banner and the footer link are asserted
+  // PRESENT first, so "no hreflang, no has=" cannot pass on a page that simply has neither.
+  ['🔴 blog route: a translated post carries the banner — and still no hreflang, and no `has=` on the footer link', () => {
+    const post = readFileSync(join(DIST, 'devlog/a-signed-post/index.html'), 'utf8');
+    const foot = (post.match(/<a class="rf-lang" href="([^"]*)"/) || [])[1];
+    const c = bannerConfig(post);
+    return !!c && c.options.map((o) => o.id).join() === 'zh-tw'
+      && typeof foot === 'string' && foot.startsWith('/language?return=')
+      && !/[?&;]has=/.test(foot)
+      && !/<link\b[^>]*rel="alternate"[^>]*hreflang=/.test(post)
+      && !/<link\b[^>]*hreflang=/.test(post);
+  }],
+  // 🔴 The other direction of "every option leads to a page that exists". That check counts
+  // options with no page behind them; this one counts pages with no option in front of them — an
+  // edition that IS built, under the locale prefix the banner would swap in, and is not offered.
+  // A banner that offers nothing has zero dead options, so the first check alone is satisfied by
+  // deleting every banner. Swept over every page, with or without a banner. Not swept: 404 and
+  // /preview/ (one per site, served for any path) and the /language chooser (the banner excludes
+  // itself there), which is why those are named and counted rather than quietly skipped.
+  ['🔴 banner, the other direction: no built page has another edition that its banner fails to offer', () => {
+    const declared = (readFileSync(new URL('./content/home.md', import.meta.url), 'utf8').match(/^locales:\s*(.+)$/m) || [])[1] || '';
+    const locs = declared.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const def = locs[0];
+    const missed = [];
+    let swept = 0, skipped = 0;
+    for (const f of builtHtmlFiles(DIST)) {
+      const rel = f.slice(DIST.length + 1);
+      if (!/(^|\/)index\.html$/.test(rel)) { skipped++; continue; }                     // 404.html
+      const segs = rel.replace(/(^|\/)index\.html$/, '').split('/').filter(Boolean);
+      const cur = segs.length && locs.includes(segs[0]) && segs[0] !== def ? segs[0] : def;
+      const bare = cur === def ? segs : segs.slice(1);
+      if (bare[0] === 'preview' || bare[0] === 'language') { skipped++; continue; }
+      swept++;
+      const c = bannerConfig(readFileSync(f, 'utf8'));
+      const offered = c ? c.options.map((o) => o.id) : [];
+      for (const L of locs) {
+        if (L === cur || offered.includes(L)) continue;
+        const target = [L === def ? '' : L, ...bare].filter(Boolean).join('/');
+        if (existsSync(join(DIST, target, 'index.html'))) missed.push(`/${segs.join('/')} has /${target}/ and does not offer ${L}`);
+      }
+    }
+    if (missed.length) console.error('    editions built but not offered:\n      ' + missed.slice(0, 8).join('\n      '));
+    return locs.length === 4 && swept >= 20 && skipped >= 3 && missed.length === 0;
+  }],
+  // The control for the next check: the specimen really is a built post with no other edition.
+  ['banner specimen: /devlog/a-base-only-post/ is built, and has no zh-TW source and no zh-TW page', () =>
+    existsSync(new URL('./blog/a-base-only-post.md', import.meta.url))
+    && !existsSync(new URL('./blog/zh-tw/a-base-only-post.md', import.meta.url))
+    && existsSync(join(DIST, 'devlog/a-base-only-post/index.html'))
+    && !existsSync(join(DIST, 'zh-tw/devlog/a-base-only-post/index.html'))],
+  ['🔴 banner on a post: a post that exists in one language offers no switch at all', () =>
+    bannerConfig(readFileSync(join(DIST, 'devlog/a-base-only-post/index.html'), 'utf8')) === null],
+  ['banner: 404 and /preview/ exist once per site, not once per language — no banner', () =>
+    bannerConfig(readFileSync(join(DIST, '404.html'), 'utf8')) === null
+    && bannerConfig(readFileSync(join(DIST, 'preview/index.html'), 'utf8')) === null],
   // -- nav: arbitrary-depth submenus (indented-list syntax → recursive NavNode) --
   ['nav: top-level dropdown group', () => /class="rf-nav-group">\s*<a class="rf-nav-link rf-nav-parent" href="\/products"/.test(html)],
   ['nav: 1st-level submenu link', () => /class="rf-nav-sub">[\s\S]*?class="rf-nav-link rf-nav-sublink" href="\/apps"/.test(html)],
