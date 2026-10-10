@@ -1,7 +1,7 @@
 ---
 sitetile-page: home
 title: 야마다 활판소 — 한 글자, 한 조각의 납
-lang: ko
+lang: ko-KR
 locales: en-US, zh-TW, ja-JP, ko-KR
 # 🔴 Only the FIRST line is quoted from 훈민정음 (1443), and only in the modern-spelling
 # transcription that reepub's cjk-specimen already vetted. The rest is ordinary modern Korean
@@ -9,7 +9,16 @@ locales: en-US, zh-TW, ja-JP, ko-KR
 # it from memory would put a mangled classical text in a public repo under its real name.
 # What this fixture is here for is the property the other two scripts do not have: Hangul carries
 # word spaces, so a line-setting rule that has only ever seen gapless text gets asked the question.
-packages: lingo
+#
+# 🔴 No `packages:` line here, on purpose (and none in content/_site.md, which this page inherits
+# from). This is the fixture's one page whose Lingo install is DERIVED — on because `locales`
+# names a second language, with nothing else asking for it. Every other Lingo fixture page also
+# carries the legacy `packages: lingo`, so without this page the smoke never built the derived
+# path at all. Adding the line back here turns the "Lingo from `locales` alone" checks into a
+# test of the legacy switch; smoke-build.mjs reads this file to refuse that.
+# `lang:` is the data code (ko-KR) rather than the BCP-47 tag the other two locale homes write
+# (zh-Hant, ja), for the same reason: `<html lang="ko">` then exists only if the install mapped it.
+# With `lang: ko` the tag reads "ko" whether Lingo is on or off, and the check could not fail.
 nav: |
   - 홈 /
   - 제품 /products

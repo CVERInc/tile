@@ -13,7 +13,7 @@
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from '../../lib/blog.mjs';
-import { toUrlLocale, label, languageCopy } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, label, languageCopy, lingoEnabled } from '../../packages/lingo/locale.mjs';
 import '../../packages/lingo/language-page.css';
 
 export function getStaticPaths() {
@@ -22,33 +22,37 @@ export function getStaticPaths() {
   const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   // The build maps each locale HOME to a single-segment path: the default → content/home.md,
   // every other locale → content/<loc>.md (mkpages' `<loc>/home.md → <loc>` collapse). So a
-  // file is a locale-home iff its rel is "home" (default) or equals its own url-locale code.
-  const homesByLang = {};        // lang (e.g. en-US) → meta
-  let rootHome = null;           // the site-default home (content/home.md)
+  // file is a locale-home iff its rel is "home" (default) or equals a declared locale's url form.
+  // Keyed by the home's REL (home / zh-tw), not by its `lang:` — a locale home that writes
+  // `lang: zh-Hant` lives at content/zh-tw.md and must still be found; matching on the raw `lang:`
+  // silently fell back to the root home's chrome.
+  const homesByRel = {};         // rel ("home" | url-locale) → meta
   for (const [path, raw] of Object.entries(files)) {
     if (!isSiteFile(raw)) continue;
     const rel = path.split('/content/')[1].replace(/\.md$/, '');
+    if (rel.includes('/')) continue;   // only single-segment rels can be a home
     const site = parseSite(raw);
     // resolve site-config layer (_site + <locale>/_site) UNDER the home's own frontmatter, so a
     // slimmed home (chrome moved to _site) still exposes packages/lang/locales here.
     const cfg = loadSite(files, rel);
     if (cfg) site.meta = { ...cfg, ...site.meta };
-    if (!String(site.meta.packages || '').includes('lingo')) continue;
-    const lang = String(site.meta.lang || '').trim();
-    if (!lang) continue;
-    const isRoot = rel === 'home';
-    const isLocaleHome = rel === toUrlLocale(lang);
-    if (!isRoot && !isLocaleHome) continue;
-    homesByLang[lang] = site.meta;
-    if (isRoot) rootHome = site.meta;
+    homesByRel[rel] = site.meta;
   }
-  if (!rootHome) return [];       // no lingo home → no chooser (site isn't multi-lingual)
+  const rootHome = homesByRel.home;
+  // Same gate as SiteLayout — lingo/locale.mjs → lingoEnabled(): a second declared locale, or
+  // `packages: lingo`. One-language sites get no chooser.
+  if (!rootHome || !lingoEnabled(rootHome)) return [];
 
-  const defaultLocale = String(rootHome.lang || '').trim();
   const locales = String(rootHome.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+  // 🩸 2026-10-11: this was the root home's raw `lang:`, compared with `L === defaultLocale` — an
+  // unwritten rule that `lang:` be spelled exactly like `locales[0]`. `locales: en-US` + `lang: en`
+  // (both correct) matched nothing: the DEFAULT locale's chooser went to /en-us/language and
+  // /language 404'd. The default is now SiteLayout's own rule, `locales[0] || lang`, so the chooser
+  // and the layout's hreflang / footer link can never disagree about which locale lives at `/`.
+  const defaultLocale = locales[0] || String(rootHome.lang || '').trim();
 
   return locales.map((L) => {
-    const meta = homesByLang[L] || rootHome;
+    const meta = (L === defaultLocale ? rootHome : homesByRel[toUrlLocale(L)]) || rootHome;
     const url = toUrlLocale(L);
     return {
       params: { loc: L === defaultLocale ? undefined : url },

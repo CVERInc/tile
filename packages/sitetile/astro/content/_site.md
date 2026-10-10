@@ -24,7 +24,10 @@ brand: Yamada Letterpress
 # on DEFAULT_LANG vs NEUTRAL_UI_LANG — this is exactly the class of drift that doctrine warns of).
 lang: en-US
 locales: en-US, zh-TW
-packages: lingo
+# No `packages: lingo` at the site layer: two declared locales ARE the Lingo install
+# (lingo/locale.mjs → lingoEnabled). Pages inherit this layer, so a `packages: lingo` here would
+# reach every page that does not set its own — and no fixture page would be left building the
+# derived path. The pages that still carry the line themselves keep the legacy switch covered.
 # blog/{a-signed,an-unsigned}-post.md both carry `categories: ["press"]`; their zh-TW translations
 # carry none and inherit it by slug (see lib/blog.mjs's localizeArchiveHref/localeBlogCorpora
 # header for why taxonomy is a property of the POST, not of one locale's rendering of it).
