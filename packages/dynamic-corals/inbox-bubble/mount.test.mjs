@@ -1109,11 +1109,19 @@ async function visit(attrs, answer = GROUNDED) {
 		await root.querySelector('.dc-inbox-form').emit('submit');
 		await drain(); // the answer, and the log's own claim probe where there is a log
 		const exchange = root.querySelector('.dc-inbox-log').innerHTML;
+		// What the two requests that are NOT the gate's carried — the key sets, not only the paths.
+		const sent = requests.slice(from);
+		const kaitoPost = sent.find((r) => new URL(r.url).pathname === '/api/kaito');
+		const nameRead = sent.find((r) => new URL(r.url).pathname === '/api/inbox/assistant');
+		const kaitoBody = kaitoPost ? JSON.parse(kaitoPost.init.body) : null;
+		const nameQuery = nameRead ? [...new URL(nameRead.url).searchParams.keys()] : null;
 		const hiders = (windowListeners.get('pagehide') ?? []).filter((fn) => !hidersBefore.has(fn));
 		for (const fn of hiders) fn({});
 		await drain();
 		return {
-			el, id, root, drawn: true, closed, panel, exchange, hiders: hiders.length,
+			el, id, root, drawn: true, closed, panel, exchange, hiders: hiders.length, kaitoBody, nameQuery,
+			kaitoQuery: kaitoPost ? new URL(kaitoPost.url).search : null,
+			nameInit: nameRead ? nameRead.init : null,
 			wire: wire(from), listeners: listenerCount() - listenersBefore,
 			keys: [...storage.keys()].filter((k) => k.endsWith(`:site:${id}`)).sort()
 		};
@@ -1140,6 +1148,16 @@ function assertAskOnly(v, why) {
 	assert.equal(v.exchange.includes('dc-inbox-tohuman'), false, `${why}: the answer offers a person: ${v.exchange}`);
 	// Nothing named as a place to leave a message, for a screen reader either.
 	assert.doesNotMatch(v.closed + v.panel, /Message us|Leave a message/, `${why}: an accessible name still says「message」`);
+	// 🔴 AND WHAT THOSE REQUESTS CARRY, NOT ONLY WHERE THEY GO.「Nothing about the visitor travels」
+	// is a claim about bodies: the question is sent with the tenant, the sentence and the page's
+	// locale — no page URL, no session, no handle — and the name read with the tenant alone.
+	assert.deepEqual(Object.keys(v.kaitoBody).sort(), ['id', 'kind', 'locale', 'query'], `${why}: the question's body grew a key`);
+	assert.deepEqual([v.kaitoBody.kind, v.kaitoBody.id, v.kaitoBody.query], ['site', v.id, 'do you ship to Japan?'], why);
+	assert.equal(v.kaitoQuery, '', `${why}: the question's URL grew a query string`);
+	assert.deepEqual(v.nameQuery, ['kind', 'id'], `${why}: the name read's query grew a key`);
+	assert.equal(v.nameInit.method, undefined, `${why}: the name read is not a GET`);
+	assert.equal(v.nameInit.body, undefined, `${why}: the name read has a body`);
+	assert.deepEqual(Object.keys(v.nameInit.headers), ['accept'], `${why}: the name read grew a header`);
 	// 🔴 ZERO WRITES, AS A LIST. The gate's one question, the assistant's name (a read of the
 	// platform's own setting — nothing about the visitor travels) and the question itself, which is
 	// the product. No second claim probe (there is no log to ask for), no POST to /api/inbox, no
@@ -1325,4 +1343,121 @@ test('#1866 row 6 — no KAITO, could not ask: nothing, and the gate\'s own retr
 	assert.ok(nothingRendered(b));
 	assert.equal(probes(from).length, 4);
 	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
+});
+
+test('#1866 row 2 — when the engine cannot answer, ask-only still offers no person', async () => {
+	// 🩸 THE THIRD WAY AN ANSWER COMES BACK, and the one the first version of this section did not
+	// drive: a 429, a 5xx or no network leaves `answer` null, and the full bubble's reply to that is
+	// the error line with「Send this to a person」under it. Ask-only shows the error line alone.
+	const failures = {
+		'off-err-429': () => ({ ok: false, status: 429, json: async () => ({ reason: 'rate_limited' }) }),
+		'off-err-500': () => ({ ok: false, status: 500, json: async () => ({}) }),
+		'off-err-offline': () => { throw new TypeError('Failed to fetch'); },
+		'off-err-shape': () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } })
+	};
+	const ERROR_SHOWN = 'That didn&#39;t go through. Please try again.';
+	const drive = async (id, fail) => {
+		const el = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		respond = (url) => (url.includes('/api/kaito') ? fail() : undefined);
+		try {
+			await mount(el);
+			await drain();
+			const root = el.children[0];
+			assert.ok(root, `${id}: no bubble was drawn`);
+			await openBubble(root);
+			composeBox(root).value = 'do you ship to Japan?';
+			await root.querySelector('.dc-inbox-form').emit('submit');
+			await drain();
+			return root.querySelector('.dc-inbox-log').innerHTML + root.innerHTML;
+		} finally {
+			respond = null;
+		}
+	};
+	for (const [id, fail] of Object.entries(failures)) {
+		const shown = await drive(id, fail);
+		assert.ok(shown.includes(ERROR_SHOWN), `${id}: the error line was not shown: ${shown}`);
+		// Nothing a visitor could press or type into to reach a person: no hand-off button, no
+		// hand-off form, no compose box, no honeypot, no second action.
+		assert.doesNotMatch(shown, /dc-inbox-tohuman|dc-inbox-handoff|dc-inbox-second|dc-inbox-hp|name="text"|name="visitor_/,
+			`${id}: an engine error offered a person: ${shown}`);
+		assert.doesNotMatch(shown, /Send this to a person|Ask a person instead/, id);
+	}
+	// The control — the same failure on a site WITH an Inbox does offer the person, so the absence
+	// above is read by a ruler that can see the button.
+	const control = await drive('err-on-500', failures['off-err-500']);
+	assert.ok(control.includes(ERROR_SHOWN));
+	assert.match(control, /dc-inbox-tohuman[^>]*>Send this to a person/);
+});
+
+test('#1866 row 2 — a late rename from the platform repaints the KAITO-only line, not the has-an-Inbox one', async () => {
+	// The name read lands AFTER the first paint and patches the status node in place. That patch
+	// is a second call to `statusFor`, and it has to say what the first one said.
+	const run = async (id) => {
+		let release;
+		const el = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		respond = (url) => (url.includes('/api/inbox/assistant') ? new Promise((r) => { release = r; }) : undefined);
+		try {
+			await mount(el);
+			await drain();
+			const root = el.children[0];
+			assert.ok(root, `${id}: no bubble was drawn`);
+			await openBubble(root);
+			const before = root.innerHTML;
+			// The stand-in hands out the status node the patch will write to; it is empty until then.
+			const status = root.querySelector('.dc-inbox-status');
+			assert.equal(status.innerHTML, '', 'the status node was patched before the name arrived');
+			release({ ok: true, status: 200, json: async () => ({ ok: true, assistantName: 'Mika', resolved: true }) });
+			await drain();
+			assert.equal(root.innerHTML, before, `${id}: the rename re-rendered the panel instead of patching it`);
+			return { before, patched: status.innerHTML };
+		} finally {
+			respond = null;
+		}
+	};
+	const askOnly = await run('off-rename-1');
+	assert.ok(askOnly.before.includes(`KAITO${CHIP}${ASK_ONLY_LINE}`));
+	assert.equal(askOnly.patched, `Mika${CHIP}${ASK_ONLY_LINE}`);
+	// The control: with an Inbox the same patch writes the other line.
+	const full = await run('rename-on-1');
+	assert.equal(full.patched, `Mika${CHIP}${HAS_INBOX_LINE}`);
+});
+
+test('#1866 row 2 — what the ask-only bubble is CALLED: the ask box\'s words, or the host\'s own data-title for the dialog', async () => {
+	const names = (html) => [...html.matchAll(/aria-label="([^"]*)"/g)].map((m) => m[1]);
+	const labels = async (attrs) => {
+		const el = new El({ 'data-kind': 'site', ...attrs });
+		await mount(el);
+		await drain();
+		const root = el.children[0];
+		const closed = names(root.innerHTML)[0];
+		await openBubble(root);
+		return { closed, dialog: root.innerHTML.match(/role="dialog" aria-label="([^"]*)"/)[1] };
+	};
+	// 1. Ask-only, nothing set: the locale's ask placeholder WITHOUT its ellipsis — a name is read
+	//    aloud. Never「Message us」/「Leave a message」.
+	assert.deepEqual(await labels({ 'data-id': 'off-name-1', 'data-kaito': '1' }),
+		{ closed: 'Ask about this site', dialog: 'Ask about this site' });
+	// 2. Ask-only, the host set data-title (a site layout passes the site's name): it names the
+	//    dialog. data-open-label is the override for「Message us」and is ignored here.
+	assert.deepEqual(await labels({ 'data-id': 'off-name-2', 'data-kaito': '1', 'data-title': 'Example Shop', 'data-open-label': 'Write to us' }),
+		{ closed: 'Ask about this site', dialog: 'Example Shop' });
+	// 3. With an Inbox: both attributes, and both defaults, exactly as they have always been.
+	assert.deepEqual(await labels({ 'data-id': 'name-on-1', 'data-kaito': '1' }),
+		{ closed: 'Message us', dialog: 'Leave a message' });
+	assert.deepEqual(await labels({ 'data-id': 'name-on-2', 'data-kaito': '1', 'data-title': 'Example Shop', 'data-open-label': 'Write to us' }),
+		{ closed: 'Write to us', dialog: 'Example Shop' });
+	// And no locale's ask-only name ends in an ellipsis, of either spelling.
+	const lang = document.documentElement.attrs.lang;
+	try {
+		for (const locale of Object.keys(coral.COPY)) {
+			document.documentElement.attrs.lang = locale;
+			const got = await labels({ 'data-id': `off-name-${locale}`, 'data-kaito': '1' });
+			assert.equal(got.closed, got.dialog);
+			assert.ok(got.closed.length > 0, `${locale}: an empty accessible name`);
+			assert.doesNotMatch(got.closed, /(…|\.\.\.)\s*$/, `${locale}: the name ends in an ellipsis`);
+			assert.ok(coral.COPY[locale].ask.startsWith(got.closed), `${locale}: not the ask box's own words`);
+		}
+	} finally {
+		document.documentElement.attrs.lang = lang;
+	}
 });

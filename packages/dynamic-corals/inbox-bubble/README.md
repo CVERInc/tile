@@ -111,9 +111,12 @@ writes nothing, ever):
 - **No question log**: no `reef-inbox:ai:…` buffer, no second ask of `/api/inbox/session`, no
   `pagehide` listener, no beacon — the switch `data-ai-log="0"` throws, thrown for the mount.
 - The one `window` listener is `reef-inbox:open`, and it opens the ask view.
-- The closed button and the dialog are named by the ask box's own words (`Ask about this site…`),
-  not `data-open-label`/`data-title` — those name a place to leave a message, and here there is
-  none.
+- **Accessible names.** The locale defaults (`Message us` / `Leave a message`) name a place to
+  leave a message, and here there is none, so they are replaced by the ask box's own words without
+  the placeholder's ellipsis (`Ask about this site`). A `data-title` the host set still names the
+  dialog — it is what the host calls the panel (a site layout passes the site's name), and the
+  accessible name agrees with it. `data-open-label` is ignored on an ask-only mount: it is the
+  override for「Message us」specifically.
 
 So a whole visit — mount, open, ask, read the answer, leave — sends exactly three requests and no
 beacon: `GET /api/inbox/session` (the gate's one question), `GET /api/inbox/assistant` (the name
@@ -128,6 +131,12 @@ stands in for a missing answer exactly as above, and that mount is the full bubb
 
 **It is never stuck.** A no is not remembered and neither is ask-only, so the next page asks again:
 the first page load after the owner opens the Inbox draws the full bubble.
+
+**If you embed this without a compatible backend.** A host that sets `data-kaito="1"` and has
+nothing answering at `data-api-base` drew nothing in 0.7.10 (the gate could not be asked). From
+0.7.11 it draws the ask-only bubble, and every question gets the existing error line (`That didn't
+go through. Please try again.`) — the gate cannot tell「no backend」from「could not ask this time」.
+If you do not want that, do not set `data-kaito`.
 
 ## Opening the panel programmatically
 

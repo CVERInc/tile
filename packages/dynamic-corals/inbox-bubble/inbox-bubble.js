@@ -2809,11 +2809,21 @@ export async function mount(el) {
 		renderMessages();
 	}
 
-	// What the closed button and the dialog are CALLED. With an Inbox:「Message us」/「Leave a
-	// message」, as ever. Ask-only: the ask box's own words, because a screen reader told「Leave a
-	// message」by a panel that takes none has been told something untrue.
-	const openLabel = askOnly ? copy.ask : copy.open;
-	const panelLabel = askOnly ? copy.ask : copy.title;
+	// What the closed button and the dialog are CALLED. With an Inbox: `copy.open` / `copy.title`,
+	// as ever — nothing on that path reads the lines below.
+	//
+	// Ask-only: the locale defaults (「Message us」/「Leave a message」) name a place to leave a
+	// message, and a screen reader told that by a panel that takes none has been told something
+	// untrue. So they are replaced by the ask box's own words, without the trailing ellipsis a
+	// placeholder carries and a name should not (it is read aloud).
+	//
+	// 🔴 BUT A `data-title` SOMEBODY SET STANDS, for the dialog. It is whatever the host calls this
+	// panel — a site layout passes the site's own name — and it is the heading a sighted visitor
+	// reads; the accessible name agrees with it. `data-open-label` does not get the same pass: it is
+	// the override for「Message us」specifically, so on a mount that takes no messages it is ignored.
+	const askName = String(copy.ask || '').replace(/\s*(?:…|\.{3})\s*$/, '');
+	const openLabel = askOnly ? askName : copy.open;
+	const panelLabel = askOnly ? (el.getAttribute('data-title') || askName) : copy.title;
 
 	const root = document.createElement('div');
 	root.className = `${PREFIX}-root`;
