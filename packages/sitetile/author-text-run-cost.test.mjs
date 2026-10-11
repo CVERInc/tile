@@ -91,6 +91,35 @@ function refParseParams(raw) {
   }
   return map;
 }
+// The same function with ONE thing changed: what a NAME is. Since CVERInc/reef#1915 a name may carry
+// hyphens after its first word character (`logo-pos=top` is the key `logo-pos`; it used to be read
+// from its last hyphen on, as `pos`). Written the way the replaced code was written — a pattern
+// per question, re-read from every start — and NOT the way site-core.js reads it, so the two are
+// two derivations of one rule rather than one derivation run twice. NAME_START is where a name
+// may begin: at a word character with nothing but hyphens between it and the last non-name
+// character, which is exactly where a scan that takes each name whole can come to rest.
+const NAME_START = '(?<=(?:^|[^\\w-])-*)(?<!\\w)';
+function refParseParamsNames(raw) {
+  const map = {};
+  if (!raw) return map;
+  const re = new RegExp(NAME_START + '(\\w[\\w-]*)=("[^"]*"(?:→\\S+)?|\\S+)', 'g');
+  let m;
+  while ((m = re.exec(raw))) {
+    const key = m[1]; const val = m[2];
+    if (val.charAt(0) === '"') {
+      const lm = /^"([^"]*)"(?:→(\S+))?$/.exec(val);
+      if (lm) map[key] = lm[2] !== undefined ? { label: lm[1], href: lm[2] } : lm[1];
+      else map[key] = val;
+    } else map[key] = val;
+  }
+  const bare = raw.replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
+  let bm; const bre = /(?:^|\s)([a-zA-Z]\w*)(?=\s|$)/g;
+  while ((bm = bre.exec(bare))) {
+    const w = bm[1];
+    if (!(w in map) && !new RegExp(NAME_START + w + '\\s*=').test(bare)) map[w] = true;
+  }
+  return map;
+}
 
 // footerWidgets as it was, with its list-line parser.
 const refFooterListItem = (line) => {
@@ -145,7 +174,7 @@ function refParseBlurb(raw) {
 // can break a word or a value. The prototype's own names are here because the map is a plain object:
 // `x in map` is true for `constructor` before anyone sets it, and `__proto__=` writes the prototype.
 const PARAM_WORD = ['cols', 'wide', 'ordered', 'layout', 'a', 'A1', '_x', 'x_y', '9', '9a', 'w0', 'cta', 'button',
-  'constructor', 'toString', '__proto__', 'hasOwnProperty', '中文', 'é', 'wide2', 'Wide'];
+  'constructor', 'toString', '__proto__', 'hasOwnProperty', '中文', 'é', 'wide2', 'Wide', 'logo-pos', 'a-b_c', 'x-'];
 const PARAM_TOKEN = [...PARAM_WORD, '=', '=', '=', '"', '"', '→', '-', ',', '.', '/x', '#y', 'https://e.com/a?b=c', '"Go wide now"',
   '"a b"→/x', '""', '"→', '\\"', '==', '=3', '"x"y'];
 function paramLine() {
@@ -212,15 +241,23 @@ const snapshot = (m) => {
 const params = Array.from({ length: SAMPLES }, paramLine);
 
 test('parseParams reads a param line exactly as before', () => {
-  let flags = 0, keys = 0;
+  // "Before" is the replaced code for every line with no hyphen in it, and the replaced code with
+  // hyphenated names read whole (refParseParamsNames) for all of them.
+  let flags = 0, keys = 0, plain = 0, hyphenated = 0, moved = 0;
   for (const raw of params) {
-    assert.equal(snapshot(parseParams(raw)), snapshot(refParseParams(raw)), JSON.stringify(raw));
-    const want = refParseParams(raw);
+    const want = refParseParamsNames(raw);
+    assert.equal(snapshot(parseParams(raw)), snapshot(want), JSON.stringify(raw));
+    if (!raw.includes('-')) { plain++; assert.equal(snapshot(parseParams(raw)), snapshot(refParseParams(raw)), 'no hyphen on the line: ' + JSON.stringify(raw)); }
     if (Object.values(want).includes(true)) flags++;
     if (Object.values(want).some((v) => v !== true)) keys++;
+    if (Object.keys(want).some((k) => k.includes('-'))) hyphenated++;
+    if (snapshot(want) !== snapshot(refParseParams(raw))) moved++;
   }
   // 🔴 A differential test over inputs that never take a branch proves nothing about it.
   assert.ok(flags > SAMPLES / 10 && keys > SAMPLES / 10, 'the samples carry both flags (' + flags + ') and keys (' + keys + ')');
+  assert.ok(plain > SAMPLES / 10 && hyphenated > SAMPLES / 20, 'the samples carry lines with no hyphen (' + plain + ') and hyphenated names (' + hyphenated + ')');
+  // …and the two references are not one: on these lines the name rule is the whole difference.
+  assert.ok(moved > SAMPLES / 20, 'only ' + moved + ' lines read differently once a name keeps its hyphens');
 });
 
 test('a bare word too long to fit in a pattern is a flag, and the page still renders', () => {
@@ -346,6 +383,10 @@ const PATHS = [
   // every one of them, each reading the line up to that word's last appearance. Fifty names in turn,
   // so the reading is the scan rather than a set of thousands of different strings outgrowing a cache.
   ['parseParams: many bare words, each a key later on the line', 1000, (k) => keyedLater(k, ''), parseParams, (k) => keyedLater(k, '-')],
+  // A name may carry hyphens, so `w-w-w-…` is ONE candidate name. Read as `\b(\w[\w-]*)=`, it is
+  // re-read from every hyphen when no `=` follows (see the control below).
+  ['parseParams: one long hyphenated word with no `=`', 2000, (k) => 'cols=2 ' + 'w-'.repeat(k) + 'w', parseParams, (k) => 'cols=2 ' + 'w '.repeat(k) + 'w'],
+  ['parseParams: one long hyphenated word, a space, then `=`', 2000, (k) => 'cols=2 ' + 'w-'.repeat(k) + 'w =', parseParams, (k) => 'cols=2 ' + 'w '.repeat(k) + 'w ='],
 ];
 for (const [name, n, make, run, control] of PATHS) {
   test(name + ' grows linearly (n = ' + n.toLocaleString('en-US') + ')', () => {
@@ -359,6 +400,9 @@ test('control: the cost ruler goes red on the code it replaced', () => {
   // The replaced parseParams itself, on the inputs above (a long word stays under the size that throws).
   const { grew, said } = growth(refParseParams, (k) => 'cols=2 ' + 'w'.repeat(k), 1500);
   assert.ok(grew > LIMIT, 'the replaced parseParams ' + said);
+  // A hyphenated name read by the pattern one would write first.
+  const naive = growth((raw) => { const re = /\b(\w[\w-]*)=(\S+)/g; while (re.exec(raw)); }, (k) => 'w-'.repeat(k) + 'w', 1000);
+  assert.ok(naive.grew > LIMIT, 'a hyphenated name read as `\\b(\\w[\\w-]*)=` ' + naive.said);
   const footer = growth(refFooterListItem, (k) => '- [' + ']('.repeat(k), 1500);
   assert.ok(footer.grew > LIMIT, 'the replaced list-line regex ' + footer.said);
   const image = growth(refFeatured, (k) => '!['.repeat(k), 1500);

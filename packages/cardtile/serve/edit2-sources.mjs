@@ -43,6 +43,10 @@ export const EDIT2_SOURCES = [
   '../w/sandbox-door.mjs',
   '../ai-ops.mjs',
   '../card-core.js',
+  // card-core's param parser (parseParams) lives here, and the bundle carries a COPY of it. It was
+  // not on this list, so the committed bundle went on reading `a-b=x` the old way after the source
+  // stopped: the stamp below had nothing to say about a file it never opened.
+  '../../sitetile/site-core.js',
   '../card-render.mjs',
   // renderCardHTML's <head> icon links (reef#1090): card-icon.mjs, and the two names it takes from
   // icon-core (ICON_PATHS, markType) — esbuild keeps only those, but they are bytes in the bundle.
