@@ -10,6 +10,12 @@
 // that no token on the site had asked for, and a theme rule on `.rf-lang-list` lost to the
 // platform's identical selector because the platform's sheet came later in the document.
 //
+// 🩸 The first cut of the fix then took a page away from an owner who HAD looked at it: a real theme
+// laid the rows out as a three-column grid, and the lifted box turned them back into one stacked
+// column. A layer cannot tell that rule from a blanket one. What can is that the deliberate rule
+// names the part, so each part the theme names gets its box as a default below the theme instead
+// (astro/src/packages/lingo/language-page-css.mjs).
+//
 // Three halves, and they do not prove the same thing:
 //
 //   pure      reads the stylesheet's STRUCTURE — which declarations sit in which layer. Runs in a
@@ -27,6 +33,7 @@ import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
+import { chooserCss, namedChooserParts, CHOOSER_PARTS } from './astro/src/packages/lingo/language-page-css.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
@@ -161,18 +168,136 @@ await test('🔴 the route hands its sheet to the layout as text; it does not im
   const imports = [...route.matchAll(/import[^\n;]*language-page\.css[^\n;]*/g)].map((m) => m[0]);
   assert.equal(imports.length, 1, `expected one import of the sheet, found ${imports.length}`);
   assert.match(imports[0], /language-page\.css\?raw/, 'a plain import lands in Astro\'s <style>, after the theme');
-  assert.match(route, /<SiteLayout[^>]*\brouteCss=\{languagePageCss\}/);
+  // …through the one function that decides the layers, called by the layout with the theme's text.
+  assert.ok(route.includes('routeCss={(themeCss) => chooserCss(languagePageCss, themeCss)}'), 'the route no longer passes chooserCss over its sheet');
+  assert.ok(layout.includes("typeof routeCss === 'function' ? routeCss(themeCss)"), 'the layout no longer hands the theme to routeCss');
   const emit = layout.indexOf('{routeCss && <style');
   assert.ok(emit > -1, 'the layout does not emit routeCss');
   assert.ok(emit < layout.indexOf('{themeCss && <style'), 'routeCss must be emitted before the theme');
 });
 
+// ── pure: name it and you own it ─────────────────────────────────────────────────────────────
+// A theme of the ordinary kind: tokens, and site-wide rules that name nothing on this page.
+const BLANKET = 'html:root { --gd-accent: #7a3fb0; }\nhtml main * { max-width: 18rem; }\nhtml .rf-main > * > * { width: 12rem; }\n.rf-footer .rf-lang { padding-block: 9px; }';
+const PART_SELECTORS = {
+  '.rf-lang-page': ['.rf-lang-page'],
+  '.rf-lang-head': ['.rf-lang-head', '.rf-lang-head h1', '.rf-lang-head p'],
+  '.rf-lang-list': ['.rf-lang-list', '.rf-lang-list > li', '.rf-lang-list a'],
+};
+// Top-level block names of an emitted sheet, in order, and any text outside them.
+const topLevel = (text) => {
+  const top = []; let depth = 0; let head = '';
+  for (const ch of text) {
+    if (ch === '{') { if (depth === 0) { top.push(head.trim().replace(/\s+/g, ' ')); head = ''; } depth++; }
+    else if (ch === '}') { depth--; if (depth === 0) continue; }
+    else if (depth === 0) head += ch;
+  }
+  return { top, stray: head.trim(), depth };
+};
+// Where each pinned box declaration of `out` ended up: every one of the 41 must be in exactly one
+// of the two layers, with the value the file gives it. `owned` is the parts expected below the theme.
+const assertSplit = (out, owned, why) => {
+  const got = readLayers(out);
+  const lifted = got.layers['reef.responsive'] || new Map();
+  const defaults = got.layers['reef.theme'] || new Map();
+  assert.equal(got.outside, '', `${why}: text outside every layer`);
+  let seen = 0;
+  for (const [part, sels] of Object.entries(PART_SELECTORS)) {
+    for (const sel of sels) {
+      const [here, notHere, where] = owned.includes(part) ? [defaults, lifted, 'reef.theme'] : [lifted, defaults, 'reef.responsive'];
+      for (const [prop, value] of box.get(sel)) {
+        seen++;
+        assert.equal(here.get(sel)?.get(prop), value, `${why}: \`${sel} { ${prop} }\` should be in ${where}`);
+        // The look and the box share no property, so the other layer must not hold this one at all.
+        assert.equal(notHere.get(sel)?.has(prop) || false, false, `${why}: \`${sel} { ${prop} }\` is ALSO in the other layer`);
+      }
+    }
+    if (owned.includes(part)) for (const sel of sels) assert.equal(lifted.has(sel), false, `${why}: \`${sel}\` still has a rule above the theme`);
+  }
+  assert.equal(seen, 41, 'the pinned box is 41 declarations');
+  // The look is never touched by any of this.
+  for (const sel of LOOK) for (const [prop, value] of look.get(sel)) assert.equal(defaults.get(sel)?.get(prop), value, `${why}: the look lost \`${sel} { ${prop} }\``);
+  return { lifted, defaults };
+};
+
+await test('the three parts are the page, the heading block and the list — and cover all seven lifted selectors', () => {
+  assert.deepEqual(CHOOSER_PARTS, Object.keys(PART_SELECTORS));
+  assert.deepEqual(Object.values(PART_SELECTORS).flat().sort(), Object.keys(BOX).sort());
+});
+
+await test('🔴 a theme that names no part gets the sheet exactly as the file has it', () => {
+  // Byte for byte, not "equivalent": this is every site that existed before the rule did.
+  for (const theme of ['', undefined, BLANKET]) assert.equal(chooserCss(cssRaw, theme), css, `theme: ${JSON.stringify(theme)}`);
+  assert.deepEqual(namedChooserParts(BLANKET), []);
+});
+
+await test('🔴 a theme that names the list owns the list\'s box; the page and the heading stay above the theme', () => {
+  const theme = BLANKET + '\n.rf-lang-list { display: grid; grid-template-columns: 5fr 4fr 3fr; }';
+  assert.deepEqual(namedChooserParts(theme), ['.rf-lang-list']);
+  const out = chooserCss(cssRaw, theme);
+  const { lifted } = assertSplit(out, ['.rf-lang-list'], 'list named');
+  assert.deepEqual([...lifted.keys()].sort(), [...PART_SELECTORS['.rf-lang-page'], ...PART_SELECTORS['.rf-lang-head']].sort());
+  // Two default blocks then the lifted one: the moved box must not land after `reef.responsive`
+  // textually un-layered, nor inside it.
+  assert.deepEqual(topLevel(out), { top: ['@layer reef.theme', '@layer reef.theme', '@layer reef.responsive'], stray: '', depth: 0 });
+});
+
+await test('🔴 each part alone, every pair, and all three: only the named parts move', () => {
+  const rules = { '.rf-lang-page': 'html .rf-lang-page { max-width: 44rem; }', '.rf-lang-head': '.rf-lang-head::before { content: "•"; }', '.rf-lang-list': '.rf-lang-list > li { flex: 1; }' };
+  for (let mask = 1; mask < 8; mask++) {
+    const owned = CHOOSER_PARTS.filter((_, i) => mask & (1 << i));
+    const out = chooserCss(cssRaw, BLANKET + '\n' + owned.map((p) => rules[p]).join('\n'));
+    assertSplit(out, owned, `named ${owned.join(' + ')}`);
+    // With all three named nothing is left above the theme, and no empty block is emitted for it.
+    const expected = owned.length === 3 ? ['@layer reef.theme', '@layer reef.theme'] : ['@layer reef.theme', '@layer reef.theme', '@layer reef.responsive'];
+    assert.deepEqual(topLevel(out), { top: expected, stray: '', depth: 0 }, `named ${owned.join(' + ')}`);
+  }
+});
+
+await test('🔴 what counts as naming a part: the class as a whole token, in a rule, in its dot form', () => {
+  const names = (theme) => namedChooserParts(theme);
+  // A comment is not a rule. A theme that explains why it leaves the chooser alone must not, by
+  // explaining, give up the protection. (The layout strips comments too; the function does not rely on it.)
+  assert.deepEqual(names('/* .rf-lang-list is left as the platform draws it */\nhtml main * { max-width: 18rem; }'), []);
+  assert.deepEqual(names('main{color:red}/* .rf-lang-page\n.rf-lang-head { x } */.rf-lang-list{gap:2px}'), ['.rf-lang-list']);
+  // A longer class that merely starts the same way is another class.
+  for (const other of ['.rf-lang-listing { gap: 1px; }', '.rf-lang-list-item { gap: 1px; }', '.rf-lang-list_alt { gap: 1px; }', '.rf-lang-pages, .rf-lang-header, .rf-lang { gap: 1px; }']) {
+    assert.deepEqual(names(other), [], other);
+  }
+  // …and every way the class ends in a real selector is the class.
+  for (const same of ['.rf-lang-list{gap:1px}', '.rf-lang-list:hover { gap: 1px; }', '.rf-lang-list>li { gap: 1px; }', '.rf-lang-list, .x { gap: 1px; }', 'ul.rf-lang-list.wide { gap: 1px; }', '.rf-lang-list\n{ gap: 1px; }', '.rf-lang-list[aria-label] { gap: 1px; }']) {
+    assert.deepEqual(names(same), ['.rf-lang-list'], same);
+  }
+  // PINNED: a mention anywhere in a selector counts, including as an ancestor, inside :has() and
+  // inside :not(). The rule's question is "did whoever wrote this theme have the chooser in front
+  // of them", and all of these answer yes. Telling a subject from a scope would take a selector
+  // parser, and getting it wrong in the other direction is the defect this rule exists for.
+  assert.deepEqual(names('.rf-lang-page .rf-lang-list a { color: teal; }'), ['.rf-lang-page', '.rf-lang-list']);
+  assert.deepEqual(names('html body:has(.rf-lang-page) .rf-main { padding: 0; }'), ['.rf-lang-page']);
+  assert.deepEqual(names('main ul:not(.rf-lang-list) { columns: 2; }'), ['.rf-lang-list']);
+  // PINNED: an attribute selector does not count — it has no dot form. Missing a spelling leaves
+  // the part protected (the documented default, with the tokens and !important as ways out);
+  // matching the bare substring instead would also match `rf-lang-list` in a url or a string.
+  assert.deepEqual(names('[class~="rf-lang-list"] { display: grid; } [class*="rf-lang-head"] { margin: 0; }'), []);
+  assert.equal(chooserCss(cssRaw, '[class~="rf-lang-list"] { display: grid; }'), css);
+});
+
+await test('the function refuses a lifted block it cannot attribute to a part', () => {
+  // The split is by selector prefix. A rule added above the theme for anything else would be
+  // silently unmovable, so it is a build error instead.
+  const stray = cssRaw.replace('.rf-lang-list a { display: flex;', '.rf-lang-name { display: flex;');
+  assert.notEqual(stray, cssRaw);
+  assert.throws(() => chooserCss(stray, ''), /does not start with one of/);
+  assert.throws(() => chooserCss(cssRaw.replace('@layer reef.responsive', '@layer reef.other'), ''), /no @layer reef\.responsive/);
+});
+
 // ── built ────────────────────────────────────────────────────────────────────────────────────
 const page = (fm, heading) => `---\n${fm}\n---\n\n## ${heading}\n%% sitetile: prose %%\n\nA fixture page.\n`;
-const ir = (siteFm) => ({
-  '_site.md': `---\nbrand: Tsuru Paper\nlocales: en, zh-TW\n${siteFm}---\n`,
+const ir = (siteFm, third = false) => ({
+  '_site.md': `---\nbrand: Tsuru Paper\nlocales: en, zh-TW${third ? ', ja' : ''}\n${siteFm}---\n`,
   'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
   'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+  ...(third ? { 'ja/home.md': page('sitetile-page: home\ntitle: 折り鶴の紙\nlang: ja', '折り鶴') } : {}),
 });
 // The sentinel is where each site-wide rule is swapped in for the measured half: inside the theme's
 // own <style>, at the position a site's custom CSS really occupies.
@@ -186,7 +311,30 @@ const THEME = [
   '/* reef:has-custom-css */',
   SLOT,
 ].join('\n');
-const SITES = { plain: { files: ir('') }, themed: { files: ir('theme: fx\n'), theme: THEME } };
+// A theme whose owner DID look at the chooser: the rows are a three-column grid of unequal tracks
+// (so "side by side" cannot be satisfied by three equal anythings), and the same file carries a
+// blanket rule that names nothing. It names the list only — the heading block is mentioned in a
+// comment, which must not count — so the list is the owner's and the heading is still protected.
+// 🔴 The blanket rule is one that out-scores the platform's bare `.rf-lang-head` (0,1,1 against
+// 0,1,0). A weaker one (`html main *`) loses on specificity in any layer, and a test built on it
+// stays green with the heading's protection gone. The owner's list rule says `html` for the same
+// reason any owner's would: the blanket rule reaches the list too.
+const GRID = '5fr 4fr 3fr';
+const THEME_GRID = [
+  '/* Compiled from ir/_theme.md — do not hand-edit. Theme: fxgrid. */',
+  'html:root { --gd-bg: #f4f8f3; --gd-surface: #dfeadb; --gd-text: #1d2a22; --gd-accent: #2f7d5b; }',
+  '/* reef:has-custom-css */',
+  '/* Language page: three tiles in a row. .rf-lang-head keeps the platform\'s layout. */',
+  'html .rf-main > * > * { max-width: 18rem; }',
+  `html .rf-lang-list { display: grid; grid-template-columns: ${GRID}; gap: 14px; width: auto; max-width: none; margin-inline: 0; padding: 28px 20px; }`,
+  '.rf-lang-list > li { max-width: none; }',
+  '.rf-lang-list a { justify-content: center; }',
+].join('\n');
+const SITES = {
+  plain: { files: ir('') },
+  themed: { files: ir('theme: fx\n'), theme: THEME },
+  grid: { files: ir('theme: fxgrid\n', true), theme: THEME_GRID },
+};
 
 const chooserStyles = (html) => [...html.matchAll(/<style>([^<]*\.rf-lang-page[^<]*)<\/style>/g)];
 
@@ -234,13 +382,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       // that. So the emitted text itself is read: top level is `reef.theme` then `reef.responsive`.
       for (const name of ['plain', 'themed']) {
         const text = chooserStyles(built[name].chooser)[0][1];
-        const top = []; let depth = 0; let head = ''; let stray = '';
-        for (const ch of text) {
-          if (ch === '{') { if (depth === 0) { top.push(head.trim().replace(/\s+/g, ' ')); head = ''; } depth++; }
-          else if (ch === '}') { depth--; if (depth === 0) continue; }
-          else if (depth === 0) head += ch;
-        }
-        stray = head.trim();
+        const { top, stray, depth } = topLevel(text);
         assert.equal(depth, 0, `${name}: unbalanced braces in the chooser's sheet`);
         assert.deepEqual(top, ['@layer reef.theme', '@layer reef.responsive'], `${name}: top level of the chooser's sheet`);
         assert.equal(stray, '', `${name}: text outside every layer block`);
@@ -248,8 +390,25 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
+    await test('🔴 built with a theme that names the list: the list\'s box is below the theme, the rest above it', () => {
+      const html = built.grid.chooser;
+      assert.ok(html.includes(`grid-template-columns: ${GRID}`), 'the grid theme did not reach the chooser');
+      const sheets = chooserStyles(html);
+      assert.equal(sheets.length, 1, `${sheets.length} <style> blocks carry the chooser's rules`);
+      const text = sheets[0][1];
+      assert.ok(sheets[0].index < html.indexOf(`grid-template-columns: ${GRID}`), 'the chooser\'s sheet comes after the theme');
+      // The layout handed the function THIS site's theme: the emitted text is what the function
+      // returns for it, and it is not what a theme naming nothing gets.
+      assert.equal(text, chooserCss(cssRaw, THEME_GRID));
+      assert.notEqual(text, css);
+      const { lifted } = assertSplit(text, ['.rf-lang-list'], 'built grid site');
+      assert.deepEqual([...lifted.keys()].sort(), [...PART_SELECTORS['.rf-lang-page'], ...PART_SELECTORS['.rf-lang-head']].sort());
+      // …and the two fixtures that name nothing are untouched by any of it (also read above).
+      for (const name of ['plain', 'themed']) assert.equal(chooserStyles(built[name].chooser)[0][1], css, name);
+    });
+
     await test('no other page carries it', () => {
-      for (const name of ['plain', 'themed']) assert.equal(chooserStyles(built[name].home).length, 0, `${name}: the home page carries the chooser's sheet`);
+      for (const name of ['plain', 'themed', 'grid']) assert.equal(chooserStyles(built[name].home).length, 0, `${name}: the home page carries the chooser's sheet`);
     });
 
     // ── measured ─────────────────────────────────────────────────────────────────────────────
@@ -312,7 +471,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
               return out;
             });
           };
-          return { read, close: () => ctx.close() };
+          return { read, evaluate: (fn) => pg.evaluate(fn), close: () => ctx.close() };
         };
 
         // Site-wide rules an owner writes for their OWN pages. `min` is the least width the heading
@@ -369,9 +528,12 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         await test('the box has two doors: the tokens, and an !important rule that names the page', async () => {
           const t = await pages[1280].read('.rf-lang-page { --rf-lang-width: 20rem; --rf-lang-band: rgb(10, 20, 30); --rf-lang-band-ink: rgb(250, 240, 230); }');
           assert.deepEqual([t.h1.w, t.rows.map((r) => r.w), t.band, t.ink], [320, [320, 320], 'rgb(10, 20, 30)', 'rgb(250, 240, 230)']);
+          // 🔴 The slot is swapped in AFTER the build, so the build never saw these rules name the
+          // list and its box is still above the theme. That is the case `!important` is for.
           const i = await pages[1280].read('.rf-lang-list > li { max-width: 15rem !important; }');
           assert.deepEqual(i.rows.map((r) => r.w), [240, 240]);
-          // …and the same property WITHOUT it does nothing, which is the protection, not a bug.
+          // …and the same property WITHOUT it does nothing on a part the theme did not name at
+          // build time, which is the protection, not a bug.
           const n = await pages[1280].read('.rf-lang-list > li { max-width: 15rem; }');
           assert.deepEqual(n.rows.map((r) => r.w), [512, 512]);
         });
@@ -387,6 +549,30 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
           assert.equal(m.band, 'rgb(20, 30, 40)');
         });
         for (const W of WIDTHS_PX) await pages[W].close();
+
+        await test('🔴 a theme that lays the list out as a grid gets its grid; the heading it did not name is still protected', async () => {
+          const pg = await open('grid', 1280);
+          const m = await pg.read();
+          const g = await pg.evaluate(() => {
+            const list = document.querySelector('.rf-lang-list');
+            const box = (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width) }; };
+            return { display: getComputedStyle(list).display, list: box(list), items: [...list.children].map(box), headMax: getComputedStyle(document.querySelector('.rf-lang-head')).maxWidth };
+          });
+          await pg.close();
+          // The owner's list: a grid inside the column (512 wide), 20px padding and two 14px gaps
+          // leave 444px, split 5:4:3 — three tiles on one row, each narrower than the one before.
+          assert.equal(g.display, 'grid', 'the theme\'s `display: grid` lost to the platform\'s box');
+          assert.deepEqual([g.list.x, g.list.w], [384, 512], 'the list is not the box the theme gave it');
+          assert.equal(g.items.length, 3);
+          assert.deepEqual(g.items.map((i) => i.w), [185, 148, 111], `tiles: ${JSON.stringify(g.items)}`);
+          assert.deepEqual(g.items.map((i) => i.x), [404, 603, 765]);
+          assert.equal(new Set(g.items.map((i) => i.y)).size, 1, `the tiles are not on one row: ${JSON.stringify(g.items)}`);
+          assert.ok(m.rows.every((r) => r.hit), 'a tile is not clickable at its centre');
+          // The same theme says `html .rf-main > * > * { max-width: 18rem }`. It names nothing, and
+          // the heading block is a part this theme did not name: still 512px, on one line.
+          assert.equal(g.headMax, 'none', 'the blanket max-width reached the heading block');
+          assert.deepEqual([m.h1.lines, m.h1.w, m.h1.fits], [1, 512, true]);
+        });
 
         await test('🔴 with no theme at all the band is the renderer\'s neutral surface, not a brand colour', async () => {
           const pg = await open('plain', 1280);

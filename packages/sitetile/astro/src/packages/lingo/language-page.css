@@ -18,7 +18,16 @@
  *    `display` and the width properties of the page's parts, plus the side padding of the heading
  *    block and the side margins of the band. Those are what a blanket rule (`main * { max-width }`,
  *    `main div { padding-inline }`, `section { display: flex }`, `h1 { max-width: 12ch }`) breaks
- *    without meaning to, and none of them is how anyone restyles this page.
+ *    without meaning to.
+ *
+ *    🔴 NAME IT AND YOU OWN IT, per part. A layer cannot tell a blanket rule from an owner who laid
+ *    this page out on purpose (a theme's three-column `.rf-lang-list { display: grid }` came out as
+ *    one stacked column). The deliberate rule is the one that NAMES the part, so at build time
+ *    language-page-css.mjs reads the site's theme: for each of `.rf-lang-page`, `.rf-lang-head`
+ *    and `.rf-lang-list` the theme mentions, that part's rules below (its descendants' too) are
+ *    emitted in `reef.theme` instead, ahead of the theme, as plain defaults. Parts it does not
+ *    mention stay here. That file relies on this block's shape: the last block in the file, flat
+ *    rules only, every selector starting with one of the three classes.
  *
  * HOW A SITE RESTYLES IT
  *    look           ordinary rules on `.rf-lang-page`, `.rf-lang-head`, `.rf-lang-list`,
@@ -28,8 +37,8 @@
  *                     --rf-lang-gutter     kept clear at each viewport edge 1.5rem
  *                     --rf-lang-band       the band behind the rows         the theme's surface
  *                     --rf-lang-band-ink   text on the band                 the theme's text
- *    anything in 3  a rule that names this page and says `!important`. That is a deliberate act;
- *                   a site-wide rule landing here is not.
+ *    anything in 3  name the part (`.rf-lang-page` / `.rf-lang-head` / `.rf-lang-list`) anywhere in
+ *                   the theme and its box is yours, by ordinary rules. `!important` also works.
  *
  * Measurements kept from the page this was matched to: the column is 32rem, and a row is 62px —
  * the 20px name on a 1.4 line (28px), 1rem of padding above and below, and the 1px border. Do not

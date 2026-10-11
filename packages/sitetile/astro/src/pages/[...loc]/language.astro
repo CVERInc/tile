@@ -17,6 +17,8 @@ import { toUrlLocale, label, languageCopy, lingoEnabled } from '../../packages/l
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
+// …and as a function of that theme: a part of this page the theme names is the owner's to lay out.
+import { chooserCss } from '../../packages/lingo/language-page-css.mjs';
 
 export function getStaticPaths() {
   // Discover the site's locale set + per-locale chrome from the HOME pages authored in content/.
@@ -85,7 +87,7 @@ const rows = locales.map((L) => {
   };
 });
 ---
-<SiteLayout title={copy.word} lang={pageLocale} meta={meta} alternates="all" routeCss={languagePageCss}>
+<SiteLayout title={copy.word} lang={pageLocale} meta={meta} alternates="all" routeCss={(themeCss) => chooserCss(languagePageCss, themeCss)}>
   <section class="rf-lang-page">
     <div class="rf-lang-head">
       <h1>{copy.word}</h1>
