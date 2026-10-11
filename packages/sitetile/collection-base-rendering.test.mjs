@@ -62,9 +62,15 @@ test('secondary links stack above the full-card cover for every theme', () => {
   assert.ok(!/data-theme-custom/.test(links.selector), 'secondary-link stacking cannot be theme-gated');
 });
 
+// The collection's inset floor — `:where(.st-collection-…)` — is universal on purpose: it is the
+// generic section floor moved onto the collection's own boxes (collection-band.test.mjs owns what
+// it may contain). Custom themes always received that box; what they must never receive is PAINT,
+// which is what the tests below keep gated.
+const isInsetFloor = (r) => /^:where\(\.st-collection\b[^)]*\)$/.test(r.selector);
+
 test('universal collection rules carry structure only', () => {
   const allowed = new Set(['position', 'inset', 'z-index', 'border-radius']);
-  const collectionRules = RULES.filter((r) => /st-(?:collection|item)/.test(r.selector));
+  const collectionRules = RULES.filter((r) => /st-(?:collection|item)/.test(r.selector) && !isInsetFloor(r));
   const universal = collectionRules.filter((r) => !/data-theme-custom/.test(r.selector));
   assert.equal(universal.length, 3, `expected exactly three universal rules, found: ${universal.map((r) => r.selector).join(' | ')}`);
   for (const rule of universal) {
@@ -82,7 +88,7 @@ test('born presentation covers each collection family and is entirely custom-the
     'st-item-meta', 'st-item-meta-left', 'st-item-updated', 'st-item-gh', 'st-item-learn',
   ];
   for (const family of families) {
-    const rules = rulesFor(family).filter((r) => !r.selector.includes('st-item-cover'));
+    const rules = rulesFor(family).filter((r) => !r.selector.includes('st-item-cover') && !isInsetFloor(r));
     assert.ok(rules.length > 0, `no born-paint rule covers .${family}`);
     assert.ok(rules.every((r) => /body:not\(\[data-theme-custom\]\)/.test(r.selector)),
       `.${family} presentation escaped the compatibility gate: ${rules.map((r) => r.selector).join(' | ')}`);
@@ -102,6 +108,7 @@ test('the existing hand-authored theme keeps its card paint and receives no born
   assert.match(LAYOUT, /const customTheme = !!themeRaw\.trim\(\) && \(!compiled \|\| hasResidue\);/,
     'the established hand-authored-theme marker must remain unchanged');
   const leaked = RULES.filter((r) => /st-(?:collection|item)/.test(r.selector)
+    && !isInsetFloor(r)
     && !/data-theme-custom/.test(r.selector)
     && properties(r.css).some((p) => !['position', 'inset', 'z-index', 'border-radius'].includes(p)));
   assert.deepEqual(leaked, [], `custom themes would receive collection presentation: ${leaked.map((r) => r.selector).join(' | ')}`);
