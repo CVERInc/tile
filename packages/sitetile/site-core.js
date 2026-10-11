@@ -2341,6 +2341,29 @@ function orderedProseHtml(body) {
   return leadHtml + (lis ? '<ol class="st-ordered">' + lis + '</ol>' : '');
 }
 
+// The body of a `prose` section, for BOTH renderers: `Prose.astro` (what a built site ships) and
+// renderSection's prose branch below call this and nothing else, so the two cannot disagree about
+// where an image lands.
+//
+// A paragraph that is ONLY images leaves its place and joins one trailing `.st-prose-imgs` group;
+// a paragraph that is ONLY links becomes the `.st-prose-btns` row before it (the same `heroParts`
+// split a hero uses). What is left renders in source order. A body with neither is plain
+// bodyHtml — and so is an `ordered` one, whose clauses orderedProseHtml numbers.
+//
+// 🩸 The split used to be written out in `Prose.astro` alone, while renderSection kept calling
+// bodyHtml on the whole body: the same Markdown gave a built page `div.st-prose-imgs > img` and
+// gave this file's reader `figure.st-figure > img`, in a different order. Anything derived from
+// the string render — a count of what a CSS selector matches, a description of the grammar —
+// described a page no visitor was served, and no test fed one body to both.
+function proseBodyHtml(body, ordered) {
+  if (ordered) return orderedProseHtml(body);
+  const hp = heroParts(body);
+  if (!hp.buttons.length && !hp.images.length) return bodyHtml(body);
+  return bodyHtml(hp.text)
+    + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-prose') : '')
+    + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '');
+}
+
 function renderSection(s) {
   const pm = parseParams(s.params);
   const type = KNOWN_TYPES.indexOf(s.type) >= 0 ? s.type : 'prose';
@@ -2692,8 +2715,9 @@ function renderSection(s) {
       // `ordered` (bare flag) — a numbered-sections prose (legal/policy): the `### ` clauses render as
       // an <ol> of gutter-numbered <h2> clauses (orderedProseHtml). Absent → plain prose body.
       const ordered = pm.ordered != null;
-      const bodyOut = ordered ? orderedProseHtml(s.body) : bodyHtml(s.body);
-      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyOut + '</section>';
+      // `eyebrow="…"` — the small label above the heading, as in the hero branch above.
+      const prEyebrow = pm.eyebrow ? '<p class="st-prose-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
+      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + proseBodyHtml(s.body, ordered) + '</section>';
     }
   }
 }
@@ -2847,7 +2871,7 @@ export {
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, proseBodyHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
   dialogueContext,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks, linksParts,
