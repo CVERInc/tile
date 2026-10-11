@@ -882,6 +882,21 @@ test('🔴 a stored forward value outside the handle grammar is no binding — n
   assert.equal((await visit(ok, 'https://creator.example/', asBrowser)).headers.get('x-card-handle'), 'maple');
 });
 
+test('🔴 an invalid stored host is flagged whatever its forward key says — absent, or another card\'s', async () => {
+  for (const extra of [{}, { 'vanity:xn--a.example': 'other' }, { 'vanity:127.0x1': 'other' }]) {
+    const host = Object.keys(extra)[0]?.slice(7) || 'xn--a.example';
+    const store = kv({ maple: CARD, other: OTHER, 'vanityhost:maple': host, ...extra });
+    assert.deepEqual(await call(store, 'GET', 'maple'),
+      { status: 200, body: { handle: 'maple', host: null, redirect: false, invalid_host: true } }, JSON.stringify(extra));
+    // and a plain DELETE clears maple's record without touching another card's key
+    assert.equal((await call(store, 'DELETE', 'maple', { expect: { host: null, redirect: false } })).status, 200);
+    assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, other: OTHER, ...extra }, JSON.stringify(extra));
+  }
+  // CONTROL: a VALID record whose forward key is gone stays a plain unbound — no invalid_host
+  const store = kv({ maple: CARD, 'vanityhost:maple': 'creator.example' });
+  assert.deepEqual((await call(store, 'GET', 'maple')).body, { handle: 'maple', host: null, redirect: false });
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.

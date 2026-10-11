@@ -209,8 +209,12 @@ export async function handleVanity({ method, handle, store, readJson }) {
   // a DELETE, or a PUT to a valid host, removes it. `expect` compares against this same view.
   const current = async () => {
     const host = await recorded();
-    if (!host || (await store.get(vanityKey(host))) !== handle) return { host: null, redirect: false };
+    if (!host) return { host: null, redirect: false };
+    // the record is judged FIRST, whatever its forward key says: an invalid stored host is something
+    // to clean whether its key is ours, gone, or another card's (cleaning never touches another
+    // card's key — DELETE removes `vanity:<host>` only while it names this card).
     if (!vanityHost(host)) return { host: null, redirect: false, invalid_host: true };
+    if ((await store.get(vanityKey(host))) !== handle) return { host: null, redirect: false };
     return { host, redirect: (await store.get(vanityOfKey(handle))) === host };
   };
   // `expect` given and no longer true ⇒ the caller decided on a state that has since changed.
