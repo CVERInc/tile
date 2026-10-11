@@ -49,7 +49,8 @@ which is how the whole path was proven before anyone's DNS moved.
 5. **Wait for the hostname's `status: active`.** That is Cloudflare saying their DNS now reaches us.
    **`X-Card-Handle: <handle>` on `GET /` of their domain is what reef's tool takes as "connected".**
    The worker sends it only on a card served through that domain's binding, with or without the
-   redirect, and never on the canonical host, the directory or a 404. Public DNS can't show it: their
+   redirect, and never on the canonical host, the directory, a 404, or a host the API could not have
+   bound (anything under `feelreef.com`, such as the SaaS fallback origin, or an IP). Public DNS can't show it: their
    apex is a proxied CNAME, so resolvers see Cloudflare addresses either way.
 6. **Turn the redirect on:** the same call with `"redirect": true`. It writes only the redirect, and
    from now on `card.feelreef.com/<handle>` 301s to their domain, which gives the card one address.
@@ -80,7 +81,7 @@ The API, for reference:
   - `409 {"error": "vanity_state_changed"}`: see `expect`; nothing was written.
 - `GET` → `{handle, host, redirect}`. `host` is `null` unless a visitor *at the location that
   answered* would get this card. A stored host the API would refuse today (one written by hand
-  before the validator, such as an invalid punycode name or a hex-spelled IPv4) is reported as
+  before the validator, such as an invalid punycode name, a hex-spelled IPv4, or an empty value) is reported as
   `host: null` with `invalid_host: true`; `DELETE`, or a `PUT` to a valid host, cleans it up.
 - `DELETE {expect?}` → removes the binding in either mode → `{handle, host: null, changed}`.
 - `DELETE {host, expect?}` → removes `vanity:<host>` **by name**, and only while it still names this
