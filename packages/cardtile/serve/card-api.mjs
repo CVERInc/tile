@@ -108,6 +108,16 @@ async function authorize(request, env) {
   return null;
 }
 
+/**
+ * A path segment, percent-decoded — or null when its escapes are broken (`%`, `%zz`, a cut UTF-8
+ * sequence), where decodeURIComponent would throw URIError out of the Worker. Callers answer
+ * 400 {error: "bad_path_encoding"}. (The vanity routes fold the same failure into handle_invalid.)
+ */
+const decodeSegment = (seg) => {
+  try { return decodeURIComponent(seg); } catch { return null; }
+};
+const badPathEncoding = () => json({ error: 'bad_path_encoding' }, 400);
+
 const readJson = async (request) => {
   try {
     return await request.json();
@@ -229,7 +239,8 @@ export async function handleApi(request, env, url) {
   const parked = /^try\/(.+)$/.exec(rest);
   if (parked) {
     if (method !== 'GET') return json({ error: 'A parked draft is read-only.' }, 405);
-    const id = decodeURIComponent(parked[1]);
+    const id = decodeSegment(parked[1]);
+    if (id === null) return badPathEncoding();
     if (!TRY_ID_RE.test(id)) return json({ error: 'Bad draft id.' }, 400);
     const draft = await store.get(tryKey(id));
     if (draft == null) return json({ error: 'That draft has expired.' }, 404);
@@ -257,8 +268,10 @@ export async function handleApi(request, env, url) {
 
   // ── put_asset / delete_asset ───────────────────────────────────────────────────────────────────
   if (asset) {
-    const handle = decodeURIComponent(asset[1]).toLowerCase();
-    const id = decodeURIComponent(asset[2]);
+    const rawHandle = decodeSegment(asset[1]);
+    const id = decodeSegment(asset[2]);
+    if (rawHandle === null || id === null) return badPathEncoding();
+    const handle = rawHandle.toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(asset[1])}.` }, 400);
     if (!VALID_ASSET_ID.test(id)) return json({ error: `Bad asset id ${JSON.stringify(asset[2])}.` }, 400);
     const current = await readCard(store, handle);
@@ -302,7 +315,9 @@ export async function handleApi(request, env, url) {
   }
 
   if (card) {
-    const handle = decodeURIComponent(card[1]).toLowerCase();
+    const rawHandle = decodeSegment(card[1]);
+    if (rawHandle === null) return badPathEncoding();
+    const handle = rawHandle.toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(card[1])}.` }, 400);
 
     // ── get_card ─────────────────────────────────────────────────────────────────────────────────
