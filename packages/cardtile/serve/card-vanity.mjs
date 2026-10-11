@@ -172,6 +172,7 @@ function parseExpect(obj) {
  *   2. delete vanity:OLD           only if it still says h — OLD lets go before NEW serves: I1
  *   3. put    vanityhost:h = NEW   the record moves before the key it describes exists
  *   4. put    vanity:NEW = h       then read it back; lost a race ⇒ drop the record, 409, stop
+ *                                  (unlike the up-front 409, steps 1–3 have run: the caller re-reads)
  *   5. put    vanityof:h = NEW     only if redirect, and only once NEW verifiably serves h: I2
  *
  * Every step is skipped when it is already true, so turning the redirect on is step 5 alone and

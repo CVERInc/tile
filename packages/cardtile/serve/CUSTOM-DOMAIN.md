@@ -65,7 +65,10 @@ The API, for reference:
   its old redirect too.
   - `200 {handle, host, redirect, changed}`
   - `409 {"error": "vanity_taken", "held_by": "<handle>"}`: that host already serves another card,
-    named in `held_by` (the raw holder of `vanity:<host>`); nothing was written. Only bearer holders
+    named in `held_by` (the raw holder of `vanity:<host>`). Nothing was written **if the host was
+    already taken when the call began**. If instead it was lost *during* the call (the read-back after
+    writing `vanity:<host>` found another card), some changes may already have happened: an old
+    binding released, the redirect withdrawn, the record dropped. Re-read `GET` and reconcile. Only bearer holders
     see this, and they can already read every binding. It lets the caller converge when its own
     record says the host belongs here: `GET` the holder, then `DELETE` it with that `expect`. If the
     holder's GET does not report this host, its key is a forward-only stray: `DELETE` the holder
