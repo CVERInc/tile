@@ -852,16 +852,24 @@ function isSiteFile(text) {
 // parseParams: raw param string → map. Bare `cols=3` → {cols:'3'}. Link form `cta="Label"→/href` →
 // {cta:{label:'Label', href:'/href'}}. Plain quoted `x="Label"` → {x:'Label'}. Best-effort, for the
 // renderer only — round-trip fidelity rides on the raw `params` string, never on this map.
+//
+// A NAME is a word character followed by word characters and hyphens: `logo-pos=top` is the key
+// `logo-pos`. 🩸 It used to be `\w+`, which has no hyphen in it, so the name was read from its last
+// hyphen on: `logo-pos=top` set `pos`, the hero read `pm['logo-pos']`, and the documented param did
+// nothing on any page while every check stayed quiet. A hyphen BEFORE the first word character is
+// not part of the name (`--wide=1` is `wide`), and a hyphen in a VALUE was never in question
+// (`align=top-left`).
 function parseParams(raw) {
   const map = {};
   if (!raw) return map;
-  // `\b`: a key is a whole word. Without it a word with no `=` after it was re-read from each of its
-  // letters — quadratic in the word. It changes no match: the scan never resumes inside a word (a
-  // value ends at a space, the end, or a closing quote), and a word's later letters reach the same
-  // `=` its first letter did, so where the first letter fails they all fail.
-  const re = /\b(\w+)=("[^"]*"(?:→\S+)?|\S+)/g;
+  // The scan takes each name WHOLE and only then looks for its `=`, so a name with no `=` after it
+  // is passed once and the scan never resumes inside it. 🩸 Read as `\b(\w[\w-]*)=`, a long
+  // `a-b-c-…` with no `=` is re-read from every hyphen — quadratic in the word, on a line any page
+  // author can type. A value ends at a space, the end, or a closing quote.
+  const re = /\b(\w[\w-]*)(?:=("[^"]*"(?:→\S+)?|\S+))?/g;
   let m;
   while ((m = re.exec(raw))) {
+    if (m[2] === undefined) continue;
     const key = m[1]; const val = m[2];
     if (val.charAt(0) === '"') {
       const lm = /^"([^"]*)"(?:→(\S+))?$/.exec(val);
@@ -878,9 +886,10 @@ function parseParams(raw) {
   // build `new RegExp('\\b' + word + '\\s*=')` per bare word and run it over the whole line: quadratic
   // in the number of words, and a single word of about 33,000 letters made a pattern too large to
   // compile — a SyntaxError that failed the whole page's render.
+  // The same whole-name scan as above, so `pos` beside `logo-pos = top` is still its own word.
   const keyed = new Set();
-  let km; const kre = /\b(\w+)\s*=/g;
-  while ((km = kre.exec(bare))) keyed.add(km[1]);
+  let km; const kre = /\b(\w[\w-]*)(\s*=)?/g;
+  while ((km = kre.exec(bare))) if (km[2] !== undefined) keyed.add(km[1]);
   let bm; const bre = /(?:^|\s)([a-zA-Z]\w*)(?=\s|$)/g;
   while ((bm = bre.exec(bare))) {
     const w = bm[1];

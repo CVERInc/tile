@@ -259,10 +259,13 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 //   origin=  the bubble's tail anchor, % of the frame (default 53% 76% = the ancestor's)
 //   narrow=  the same anchor for narrow screens (the ancestor retargets to 53% 33%)
 //
-// 🔴 PARAM NAMES MUST NOT CONTAIN HYPHENS. parseParams truncates `a-b=x` to the key `b`, silently.
-// This was written as `origin-narrow=` and read as `p['origin-narrow']` — always undefined, always
-// falling back to the default, which happened to be the right value, so nothing ever looked wrong.
-// A default that masks a broken lookup is a gate you never see fail ([[a-gate-you-never-saw-fail]]).
+// 🩸 parseParams used to read a hyphenated name from its last hyphen on: `a-b=x` set the key `b`,
+// silently. This was written as `origin-narrow=` and read as `p['origin-narrow']` — always
+// undefined, always falling back to the default, which happened to be the right value, so nothing
+// ever looked wrong. A default that masks a broken lookup is a gate you never see fail
+// ([[a-gate-you-never-saw-fail]]). The read moved to `narrow`, and from then on a card that still
+// said `origin-narrow=` worked — through the truncation. Names are read whole now, so that spelling
+// is read by its own name below, and the cards that carry it keep the anchor they were given.
 //   bg=      static backdrop the bubbles rotate over (the characters the tails point at)
 function renderEmbed(p, body, size, ctx = {}) {
   // 🔴 `slider` is the COMMON one — a horizontal carousel you swipe, with prev/next. `bubbles` is
@@ -323,7 +326,7 @@ function renderEmbed(p, body, size, ctx = {}) {
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
     const cycle = n * hold;
     const origin = p.origin || '53% 76%';
-    const originNarrow = p.narrow || '53% 33%';
+    const originNarrow = p.narrow || p['origin-narrow'] || '53% 33%';
     // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
     // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
     const slot = 100 / n;
@@ -503,7 +506,7 @@ function renderCell(cell, place, ctx) {
       // yt= a single video id, OR channel= a channel id (UC…) whose UPLOADS playlist is embedded
       // so the card always shows that creator's latest video — no API key, nothing to go stale.
       const id = String(p.yt || '').trim();
-      const chan = String(p.channel || '').trim();   // NB: no hyphen — see the parseParams note above
+      const chan = String(p.channel || '').trim();
       if (!id && !chan) return '';
       // 🔴 The channel's latest video, resolved by the WORKER before this ran (serve/yt.mjs). This
       // function stays pure and synchronous: it receives an answer, it does not go and get one.

@@ -182,6 +182,22 @@ test('bubbles: the ancestor 表演 is carried verbatim — pops from the tail or
   assert.match(html, /max-width:888px\).*transform-origin:53% 33%/, 'the narrow-screen retarget');
 });
 
+test('bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as', () => {
+  // 🩸 CVERInc/reef#1915. parseParams read a hyphenated name from its last hyphen on, so
+  // `origin-narrow=` set `narrow` and a card carrying the older spelling got its anchor through the
+  // truncation. Names are read whole now; this holds that card where it was.
+  const card = (params) => ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
+    `- [ ] %% card: embed bleed kind=bubbles images="https://i.example/1.png,https://i.example/2.png" ${params} %%`,
+  ].join('\n') + '\n';
+  const narrowOf = (params) => (/max-width:888px\)\{\.st-carousel figure\{transform-origin:([^}]*)\}/.exec(renderCardHTML(card(params), { handle: 'x' })) || [])[1];
+  assert.equal(narrowOf(''), '53% 33%', 'CONTROL: the default, so the two below are seen to move it');
+  assert.equal(narrowOf('narrow="40% 20%"'), '40% 20%');
+  assert.equal(narrowOf('origin-narrow="40% 20%"'), '40% 20%');
+  assert.equal(narrowOf('origin-narrow="40% 20%" narrow="10% 10%"'), '10% 10%', '`narrow=` is the name; it wins when both are written');
+  // …and `origin-narrow=` is not `origin=`: the wide-screen anchor stays the default.
+  assert.match(renderCardHTML(card('origin-narrow="40% 20%"'), { handle: 'x' }), /opacity:0;transform-origin:53% 76%/);
+});
+
 test('🔴 slider is the COMMON carousel — swipeable, with prev/next, and no JS', () => {
   const md = ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
     '- [ ] %% card: embed w=6 kind=slider images="https://i.example/1.png,https://i.example/2.png,https://i.example/3.png" %%',
@@ -243,19 +259,22 @@ test('a card with no drawers ships no overlay markup or client', () => {
   assert.ok(!html.includes('dc-drawer-layer'), 'zero cost when unused');
 });
 
-test('🔴 param names must not contain hyphens — parseParams truncates `a-b=x` to the key `b`', () => {
-  // This is a trap for the whole cell vocabulary, not one widget: a hyphenated param silently
-  // resolves to undefined, the code falls back to its default, and nothing ever looks broken.
-  // Locked here so the next cell type that wants `foo-bar=` finds out at test time.
+test('🔴 a hyphenated param name is its own name — `yt-channel=` is not `channel=`', () => {
+  // 🩸 This test used to lock the opposite: parseParams read `a-b=x` as the key `b`, so a
+  // hyphenated param resolved to undefined, the code fell back to its default, and nothing ever
+  // looked broken — "keep names hyphen-free" was the rule, and `yt-channel=` reaching `channel`
+  // through the truncation was the warning. Names are read whole now (CVERInc/reef#1915), so the
+  // trap is gone and so is the accident: a name means what it says.
   const md = ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
     '- [ ] %% card: video w=6 h=4 channel="UCabcdefghijklmnopqrstuv" %% Latest',
   ].join('\n') + '\n';
   const html = renderCardHTML(md, { handle: 'x' });
-  assert.match(html, /data-yt-channel="UCabcdefghijklmnopqrstuv"/, 'hyphen-free `channel=` resolves');
+  assert.match(html, /data-yt-channel="UCabcdefghijklmnopqrstuv"/, '`channel=` resolves');
 
   const hyphened = md.replace('channel="UC', 'yt-channel="UC');
-  assert.match(renderCardHTML(hyphened, { handle: 'x' }), /data-yt-channel="UCabcdefghijklmnopqrstuv"/,
-    'and `yt-channel=` happens to truncate to the same key — but never rely on that: keep names hyphen-free');
+  assert.notEqual(hyphened, md, 'the replace did not land — the assertion below would be about `channel=`');
+  assert.ok(!/data-yt-channel=/.test(renderCardHTML(hyphened, { handle: 'x' })),
+    '`yt-channel=` was read as `channel=` — the name is being read from its last hyphen again');
 });
 
 test('video: click-to-load — the poster ships, the YouTube iframe does NOT until someone presses play', () => {
