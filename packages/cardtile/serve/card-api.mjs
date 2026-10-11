@@ -23,6 +23,7 @@
 // held only by the hosted Worker.
 import { parseCard, serializeCard } from '../card-core.js';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
+import { handleVanity } from './card-vanity.mjs';
 
 const API_PREFIX = '/_api/';
 
@@ -156,6 +157,9 @@ async function writeCard(store, handle, md) {
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
+ *   GET    /_api/vanity/<handle>             —             the card's own domain, or null
+ *   PUT    /_api/vanity/<handle>             —             { host } → bind it (card-vanity.mjs)
+ *   DELETE /_api/vanity/<handle>             —             unbind it
  */
 export async function handleApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;
@@ -232,6 +236,20 @@ export async function handleApi(request, env, url) {
     return new Response(draft, {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' },
     });
+  }
+
+  // ── vanity bindings: a creator's own domain ────────────────────────────────────────────────────
+  //
+  // Same bearer, same handle grammar; the keys and their write order live in card-vanity.mjs. Error
+  // bodies here are CODES (`{error: "vanity_taken"}`), not sentences, because the caller is a tool that
+  // turns them into the owner's language — that is the contract the MCP side was written against.
+  const vanity = /^vanity\/([^/]+)$/.exec(rest);
+  if (vanity) {
+    let handle = null;
+    try { handle = decodeURIComponent(vanity[1]).toLowerCase(); } catch { handle = null; }
+    if (!handle || !VALID_HANDLE.test(handle)) return json({ error: 'handle_invalid' }, 400);
+    const r = await handleVanity({ method, handle, store, readJson: () => readJson(request) });
+    return json(r.body, r.status);
   }
 
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
