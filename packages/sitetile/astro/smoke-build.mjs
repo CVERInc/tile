@@ -1176,6 +1176,18 @@ const checks = [
     return css.includes(':where(.st-collection-head,.st-collection-belt){padding-inline:clamp(1rem,4vw,3rem)}')
       && /:where\(\.st-collection-head-inner,\.st-collection-belt-inner\)\{max-width:calc\(var\(--gd-maxw\)-2\*clamp\(1rem,4vw,3rem\)\);?margin-inline:auto;?\}/.test(css);
   }],
+  // The five floor rules live in `reef.base`; "a theme wins without a fight" holds only while the
+  // built layer-order statement puts base BEFORE theme (and before responsive, which beats both).
+  ['built css: the layer order declares reef.base before reef.theme, ahead of the first layer block', () => {
+    const css = allCss();
+    const stmt = /@layer\s+([\w.\s,-]+);/.exec(css);
+    if (!stmt) return false;
+    const order = stmt[1].split(',').map((x) => x.trim());
+    const block = css.search(/@layer\s+reef\.base\s*\{/);
+    return order.includes('reef.base') && order.includes('reef.theme')
+      && order.indexOf('reef.base') < order.indexOf('reef.theme')
+      && block > stmt.index; // a statement that comes after the first block does not set the order
+  }],
   ['markers: collection cover targets the learn page across the full card', () =>
     /<a class="st-item-cover" href="\/tools\/compose" aria-label="Compose"><\/a>/.test(markers)],
   ['markers: collection secondary GitHub link remains an independent anchor', () =>

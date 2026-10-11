@@ -24,8 +24,45 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro/src/styles/site.css'), 'utf8');
 const COMPONENT = readFileSync(join(HERE, 'astro/src/components/sections/Collection.astro'), 'utf8');
 
-const RULES = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-  .map((m) => ({ selector: m[1].trim().replace(/\s+/g, ' '), css: m[2].trim().replace(/\s+/g, ' ') }));
+/** Strip comments, then walk the source by brace depth. Every LEAF block (one with no block inside
+ *  it) comes back as `{ selector, css, context }`, where `context` is the list of enclosing
+ *  preludes, outermost first — `['@layer reef.base']` for a rule written straight in the base
+ *  layer. A regex that flattens "selector + declarations" drops exactly this, so a rule wrapped in
+ *  `@media`, `@supports`, a nested `@layer`, or moved into another layer looked identical to one
+ *  that was never touched. Strings are skipped (a `{` inside one is not a block). */
+function walkCss(source) {
+  const src = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const stack = [];
+  const leaves = [];
+  let buf = '';
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== ch) j += src[j] === '\\' ? 2 : 1;
+      buf += src.slice(i, j + 1); i = j; continue;
+    }
+    if (ch === '{') {
+      if (stack.length) stack[stack.length - 1].hasChild = true;
+      stack.push({ prelude: buf.trim().replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', '), decl: '', hasChild: false });
+      buf = '';
+    } else if (ch === '}') {
+      const top = stack.pop();
+      if (!top) throw new Error('unbalanced "}" in the stylesheet');
+      top.decl += buf; buf = '';
+      if (!top.hasChild) {
+        leaves.push({ selector: top.prelude, css: top.decl.trim().replace(/\s+/g, ' '), context: stack.map((f) => f.prelude) });
+      }
+    } else if (ch === ';' && (stack.length === 0 || /^\s*@/.test(buf))) {
+      buf = ''; // a statement at-rule (`@layer a, b;`, `@import …;`), top level or nested
+    } else {
+      buf += ch;
+    }
+  }
+  if (stack.length) throw new Error(`unbalanced "{" in the stylesheet: ${stack.length} block(s) never closed`);
+  return leaves;
+}
+const RULES = walkCss(CSS);
 const decl = (css, prop) => {
   const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(css);
   return m ? m[1].trim() : null;
@@ -112,6 +149,54 @@ test('🔴 the inner boxes are the floor\'s CONTENT box: --gd-maxw minus both si
       `${cls}: a bare --gd-maxw here is wider than every other section's text by two paddings`);
     assert.equal(decl(rules[0].css, 'margin-inline'), 'auto', `${cls} is not centred`);
   }
+});
+
+// ── where the five rules live: the at-rule context, not just the declarations ───────────────────
+// 🩸 The tests above read "selector + declarations". A rule wrapped in `@media (min-width: …)`,
+// `@supports`, a nested `@layer`, or moved to `@layer reef.responsive` (which sorts AFTER the theme,
+// so no theme could override it) reads exactly the same there — and each of those breaks the
+// promise this PR makes: that a theme's own rule on these boxes wins without a fight, at every
+// viewport, in every browser. So pin the context too: directly in `@layer reef.base`, nothing else.
+
+const FIVE = [
+  ':where(.st-collection)',
+  ':where(.st-collection-head, .st-collection-belt)',
+  ':where(.st-collection-head)',
+  ':where(.st-collection-belt)',
+  ':where(.st-collection-head-inner, .st-collection-belt-inner)',
+];
+const BASE_LAYER = '@layer reef.base';
+
+test('CONTROL: the walker reports the enclosing at-rules (it can see what the regex could not)', () => {
+  const [a, b, c, d] = walkCss('@layer a { @media (min-width: 48rem) { .x { color: red; } } .y { top: 0; } } .z { left: 0; } @layer q, r; .w { right: 0 }');
+  assert.deepEqual(a.context, ['@layer a', '@media (min-width: 48rem)']);
+  assert.deepEqual([b.selector, b.context], ['.y', ['@layer a']]);
+  assert.deepEqual([c.selector, c.context], ['.z', []]);
+  assert.deepEqual([d.selector, d.css, d.context], ['.w', 'right: 0', []]);
+  assert.throws(() => walkCss('@layer a { .x { color: red; }'), /never closed/);
+  assert.throws(() => walkCss('.x { color: red; } }'), /unbalanced/);
+});
+
+test('🔴 each of the five rules sits directly in `@layer reef.base` — no @media, @supports, nested or other layer', () => {
+  for (const sel of FIVE) {
+    const found = RULES.filter((r) => r.selector === sel);
+    assert.equal(found.length, 1, `expected the rule ${sel} to be found once, found ${found.length}`);
+    assert.deepEqual(found[0].context, [BASE_LAYER],
+      `${sel} is written inside [${found[0].context.join(' > ')}] — it must be exactly [${BASE_LAYER}]`);
+  }
+});
+
+test('🔴 each of the five selectors is declared exactly once, and nothing else is a zero-specificity rule on these boxes', () => {
+  // Count, not existence: a second `:where(.st-collection-belt-inner) { max-width: … }` later in the
+  // file would out-rank the first by source order and rewrite the width, while every "is there a
+  // rule" check kept passing.
+  for (const sel of FIVE) {
+    const n = RULES.filter((r) => r.selector === sel).length;
+    assert.equal(n, 1, `${sel} is declared ${n} times`);
+  }
+  const zeroSpec = RULES.filter((r) => /^:where\(\.st-collection\b[^)]*\)$/.test(r.selector));
+  assert.deepEqual(zeroSpec.map((r) => r.selector).sort(), [...FIVE].sort(),
+    'a zero-specificity :where(.st-collection…) rule other than the five exists');
 });
 
 test('the floor\'s block padding lands on the outside edges only (head top, belt bottom)', () => {

@@ -351,7 +351,12 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
    pulled out with negative side margins, sized against a section that used to have padding. With
    the padding gone that belt is wider than the viewport; clipped, it is simply the band they were
    after, and the page does not start scrolling sideways on a phone. `clip`, not `hidden`: no
-   scroll container, so nothing sticky or anchored inside changes behaviour. */
+   scroll container, so nothing sticky or anchored inside changes behaviour.
+   It clips for everyone, though, not only for those owners: content that genuinely overflows the
+   section (a long unbroken URL in the head, a pill row wider than the viewport) is cut off at the
+   section's edge instead of making the page scroll sideways. `hidden` is deliberately not used —
+   it would make the section a scroll container and break `position: sticky` inside it. A browser
+   without `clip` ignores the declaration and behaves as it did before this rule existed. */
 :where(.st-collection) { overflow-x: clip; }
 :where(.st-collection-head, .st-collection-belt) { padding-inline: clamp(1rem, 4vw, 3rem); }
 :where(.st-collection-head) { padding-block-start: 2.5rem; }
