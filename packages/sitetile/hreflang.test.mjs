@@ -98,7 +98,7 @@ test('🔴 the language chooser is told the SAME measured set', () => {
   // The chooser's inline script has always supported `?has=` — a locale not listed falls back to
   // that locale's home instead of the return path — and nothing ever populated it, so from /devlog
   // it offered three 404s. Both consumers now read altLocales; neither may drift back to `locales`.
-  assert.match(layout, /const hasParam = hasLingo && altLocales\.length/, 'has= is built from the measured set');
+  assert.match(layout, /const hasParam = multilingual && altLocales\.length/, 'has= is built from the measured set');
   assert.match(layout, /\$\{hasParam\}/, 'and actually appended to the chooser href');
 });
 

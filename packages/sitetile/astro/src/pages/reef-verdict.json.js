@@ -12,7 +12,7 @@ import {
   inheritLocalePrivacy,
   siteMeta,
 } from '../lib/blog.mjs';
-import { toUrlLocale } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, parseLocales, defaultLocaleOf, localesSourceOf } from '../packages/lingo/locale.mjs';
 
 export function getGatedPaths() {
   const meta = siteMeta(
@@ -28,8 +28,8 @@ export function getGatedPaths() {
     import: 'default',
     eager: true,
   });
-  const locales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const defaultLocale = locales[0] || '';
+  const locales = parseLocales(meta.locales, localesSourceOf(meta));
+  const defaultLocale = defaultLocaleOf(locales);
   const baseBySlug = new Map(posts.map((post) => [post.slug, post]));
 
   for (const locale of locales) {
