@@ -121,6 +121,9 @@ const MIXED = [
   'Closing paragraph.',
 ].join('\n\n');
 
+const ESC_TITLE = 'Salt & <pepper> "twice"，全形。';
+const ESC_EYEBROW = 'Tea & <milk> > sugar，全形。';
+
 const SECTIONS = [
   // First, so that no section under test is the page's primary heading: the built page gives the
   // first section an <h1>, the string renderer has no notion of position. Not this file's subject.
@@ -133,6 +136,12 @@ const SECTIONS = [
   ['Dressed', '%% sitetile: prose eyebrow="A label" surface=cream align=left %%', 'Text.\n\n![Dressed image](/img/dressed.png)'],
   // `ordered` numbers its clauses and takes no split: its image stays a figure, in place, in both.
   ['Ordered', '%% sitetile: prose ordered %%', 'Lead.\n\n### First clause\nBody.\n\n![Clause figure](/img/clause.png)'],
+  // 🔴 Escaping. After the split the only markup a renderer still writes for itself is the section
+  // tag, the eyebrow and the title, and every title and eyebrow above is plain letters — so a
+  // renderer that stopped escaping either would have stayed green. These two carry `&`, `<`, `>`
+  // and full-width punctuation (and the title a `"` too; the eyebrow cannot, its value is quoted).
+  [ESC_TITLE, '', 'Body.'],
+  ['Eyebrow escaping', `%% sitetile: prose eyebrow="${ESC_EYEBROW}" %%`, 'Body.'],
 ];
 const MD = '---\nsitetile-page: home\ntitle: Prose parity\nlang: en-US\n---\n\n'
   + SECTIONS.map(([title, marker, body]) => `## ${title}\n${marker ? marker + '\n' : ''}${body}\n`).join('\n');
@@ -193,7 +202,38 @@ const EXPECTED = {
     buttons: null,
     counts: { 'st-prose-imgs': 0, 'st-figure': 1, 'st-ord-item': 1 },
   },
+  [ESC_TITLE]: { children: ['h2', 'p'], images: [], buttons: null, counts: { 'st-prose-eyebrow': 0 } },
+  'Eyebrow escaping': { children: ['p.st-prose-eyebrow', 'h2', 'p'], images: [], buttons: null, counts: { 'st-prose-eyebrow': 1 } },
 };
+
+// 🔴 The escaped text, as the markup both renderers must write — typed out here, not read from
+// either of them, so a mistake they share (both writing the raw string) is still red. `"` stays
+// literal in element text; `&`, `<`, `>` become entities; the full-width marks pass through.
+const ESCAPED_INNER = {
+  [ESC_TITLE]: '<h2>Salt &amp; &lt;pepper&gt; "twice"，全形。</h2><p>Body.</p>',
+  'Eyebrow escaping': '<p class="st-prose-eyebrow">Tea &amp; &lt;milk&gt; &gt; sugar，全形。</p><h2>Eyebrow escaping</h2><p>Body.</p>',
+};
+function assertEscaped(where, html) {
+  for (const [title, want] of Object.entries(ESCAPED_INNER)) {
+    assert.equal(innerHtml(html, idOf(title)), want, `${where}, section ${JSON.stringify(title)}: escaped title / eyebrow`);
+  }
+}
+
+// The opening `<section …>` tag as a sorted list of name=value. Read off the parsed tree, so the
+// order an attribute was written in and the whitespace around it do not count.
+const tagAttrs = (n) => Object.entries(n.attrs).map(([k, v]) => `${k}=${v}`).sort();
+// What the tag of each section carrying params must be, written out by hand (the id is the
+// parser's, the rest is the section's params).
+const EXPECTED_TAG = {
+  Dressed: (id) => ['class=st-prose', 'data-align=left', 'data-surface=cream', `id=${id}`],
+  Ordered: (id) => ['class=st-prose', 'data-ordered=', `id=${id}`],
+  Plain: (id) => ['class=st-prose', `id=${id}`],
+};
+function assertTags(where, byId) {
+  for (const [title, want] of Object.entries(EXPECTED_TAG)) {
+    assert.deepEqual(tagAttrs(byId.get(idOf(title))), want(idOf(title)), `${where}, section ${JSON.stringify(title)}: the <section> tag's attributes`);
+  }
+}
 
 function assertExpected(where, byId) {
   for (const [title, want] of Object.entries(EXPECTED)) {
@@ -227,6 +267,14 @@ await test('string renderer: a titled image is not in the grammar, and is not re
   const mixed = stringById.get(idOf('Mixed'));
   assert.ok(!all(mixed).some((n) => n.tag === 'img' && n.attrs.src === '/img/titled.png'), 'the titled image became an <img>');
   assert.ok(textOf(mixed).includes('"A title"'), 'the titled image\'s source text is gone from the page altogether');
+});
+
+await test('🔴 string renderer: a title and an eyebrow are escaped', () => {
+  assertEscaped('string renderer', stringHtml);
+});
+
+await test('string renderer: the <section> tag carries the section\'s params, attribute by attribute', () => {
+  assertTags('string renderer', stringById);
 });
 
 await test('the section\'s own attributes are untouched by the split', () => {
@@ -298,11 +346,36 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
+    await test('🔴 built page: a title and an eyebrow are escaped', () => {
+      assertEscaped('built page', astroHtml);
+    });
+
+    // The opening tag, name by name. The inner markup above stops at the tag, so a dropped
+    // `data-surface` or `data-align` was invisible to it.
+    // KNOWN DIFFERENCES, by name — none among the attributes: both renderers write the same set for
+    // every section under test. The one accepted difference between the two pages is not a tag
+    // attribute: the first section's heading is an <h1> on the built page and an <h2> in the
+    // string render. That section ("Lead") is left out of `under` for exactly that reason.
+    const KNOWN_TAG_DIFFERENCES = {};
+    await test('🔴 the two renderers write the same <section> tag: the same attributes, name and value', () => {
+      for (const title of under) {
+        const a = tagAttrs(astroById.get(idOf(title))), s = tagAttrs(stringById.get(idOf(title)));
+        const skip = new Set(KNOWN_TAG_DIFFERENCES[title] || []);
+        const keep = (list) => list.filter((nv) => !skip.has(nv.split('=')[0]));
+        assert.deepEqual(keep(a), keep(s), `section ${JSON.stringify(title)}: <section> attributes (built page vs string renderer)`);
+      }
+    });
+
+    await test('🔴 built page: the <section> tag carries the section\'s params, attribute by attribute', () => {
+      assertTags('built page', astroById);
+    });
+
     await test('CONTROL: the comparison can tell two sections apart', () => {
       const mixed = facts(astroById.get(idOf('Mixed'))), plain = facts(stringById.get(idOf('Plain')));
       assert.notDeepEqual(mixed.children, plain.children);
       assert.notDeepEqual(mixed.images, plain.images);
       assert.notEqual(innerHtml(astroHtml, idOf('Mixed')), innerHtml(stringHtml, idOf('Plain')));
+      assert.notDeepEqual(tagAttrs(astroById.get(idOf('Dressed'))), tagAttrs(stringById.get(idOf('Plain'))));
     });
   } finally {
     rmSync(ir, { recursive: true, force: true });
