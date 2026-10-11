@@ -345,3 +345,80 @@ test('thinCard is idempotent and assetManifest counts decoded bytes', () => {
   assert.equal(thinCard(thinCard(CARD)), thinCard(CARD));
   assert.equal(assetManifest(thinCard(CARD)).length, 0);
 });
+
+// ── broken percent-encoding in a path segment ───────────────────────────────────────────────────
+//
+// decodeURIComponent throws URIError on `%`, `%zz` or a cut UTF-8 sequence. A path is caller input,
+// so it must be a 400 with a code, never an exception that escapes the Worker.
+
+const BAD_ENCODINGS = ['%', '%E0%A4', '%zz'];
+const badEncoding = async (env, method, path, label) => {
+  let res;
+  await assert.doesNotReject(async () => { res = await call(env, method, path); }, label);
+  assert.equal(res.status, 400, label);
+  assert.deepEqual(await res.json(), { error: 'bad_path_encoding' }, label);
+};
+
+test('🔴 GET /_api/try/<id>: a broken escape in the id is 400 bad_path_encoding', async () => {
+  for (const bad of BAD_ENCODINGS) await badEncoding(envWith({}), 'GET', `/_api/try/${bad}`, bad);
+});
+
+test('🔴 /_api/card/<handle>/asset/<id>: a broken escape in either segment is 400 bad_path_encoding, nothing written', async () => {
+  for (const bad of BAD_ENCODINGS) {
+    const env = envWith({ t: CARD });
+    await badEncoding(env, 'PUT', `/_api/card/${bad}/asset/pic`, `handle ${bad}`);
+    await badEncoding(env, 'DELETE', `/_api/card/t/asset/${bad}`, `id ${bad}`);
+    assert.equal(env.CARDS._m.get('t'), CARD, bad);
+  }
+});
+
+test('🔴 /_api/card/<handle>: a broken escape in the handle is 400 bad_path_encoding', async () => {
+  for (const bad of BAD_ENCODINGS) {
+    await badEncoding(envWith({ t: CARD }), 'GET', `/_api/card/${bad}`, `GET ${bad}`);
+    await badEncoding(envWith({ t: CARD }), 'PUT', `/_api/card/${bad}`, `PUT ${bad}`);
+  }
+  // CONTROL: a well-formed escape still decodes — `%74` is `t`
+  assert.equal((await call(envWith({ t: CARD }), 'GET', '/_api/card/%74')).status, 200);
+});
+
+// ── caller values that are not strings ──────────────────────────────────────────────────────────
+//
+// String(x) calls x.toString — and JSON can deliver an object whose toString is null, so String()
+// threw TypeError out of the Worker. Each caller value is now checked with typeof before it is used.
+
+const HOSTILE = { toString: null };
+
+test('🔴 list_cards: a non-string entry in `handles` is skipped like any other invalid handle', async () => {
+  const res = await call(envWith({ t: CARD }), 'POST', '/_api/cards', { handles: [HOSTILE, 7, null, 't'] });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).cards.map((c) => c.handle), ['t']);
+});
+
+test('🔴 preview_card: a non-string `handle` is a 400, not an exception', async () => {
+  let res;
+  await assert.doesNotReject(async () => { res = await call(envWith({ t: CARD }), 'POST', '/_api/preview', { handle: HOSTILE, markdown: thinCard(CARD) }); });
+  assert.equal(res.status, 400);
+});
+
+test('🔴 put_asset: a non-string `base64` or `mime` is a 400, and the card is untouched', async () => {
+  for (const body of [{ base64: HOSTILE }, { base64: GIF, mime: HOSTILE }]) {
+    const env = envWith({ t: CARD });
+    let res;
+    await assert.doesNotReject(async () => { res = await call(env, 'PUT', '/_api/card/t/asset/newpic', body); }, JSON.stringify(Object.keys(body)));
+    assert.equal(res.status, 400, JSON.stringify(Object.keys(body)));
+    assert.equal(env.CARDS._m.get('t'), CARD);
+  }
+  // CONTROL: string base64 and mime still work, and an absent mime still defaults
+  assert.equal((await call(envWith({ t: CARD }), 'PUT', '/_api/card/t/asset/newpic', { base64: GIF })).status, 200);
+});
+
+test('🔴 save_card: a non-string `base_version` is a 400, on an existing card and on a new one', async () => {
+  for (const handle of ['t', 'fresh']) {
+    const env = envWith({ t: CARD });
+    let res;
+    await assert.doesNotReject(async () => { res = await call(env, 'PUT', `/_api/card/${handle}`, { markdown: thinCard(CARD), base_version: HOSTILE }); }, handle);
+    assert.equal(res.status, 400, handle);
+    assert.equal(env.CARDS._m.get('t'), CARD);
+    assert.equal(env.CARDS._m.has('fresh'), false);
+  }
+});

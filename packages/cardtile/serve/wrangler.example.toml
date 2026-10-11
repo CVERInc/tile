@@ -40,9 +40,9 @@ binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
 
 # ── production ─────────────────────────────────────────────────────────────────────────────────
-# The native replacement for the legacy Python renderer. A creator's own host is a VANITY host (see the
-# worker's VANITY map) — the canonical form is card.feelreef.com/<handle>, added once that hostname
-# is pointed here. Rollback is a DNS change: the Python renderer stays frozen, not deleted.
+# The native replacement for the legacy Python renderer. A creator's own host is a VANITY host (bound
+# in the CARDS store by PUT /_api/vanity/<handle>; see CUSTOM-DOMAIN.md) — the canonical form is
+# card.feelreef.com/<handle>, added once that hostname is pointed here. Rollback is a DNS change: the Python renderer stays frozen, not deleted.
 [env.production]
 name = "cardtile"
 workers_dev = true

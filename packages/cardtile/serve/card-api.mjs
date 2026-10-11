@@ -23,11 +23,12 @@
 // held only by the hosted Worker.
 import { parseCard, serializeCard } from '../card-core.js';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
+import { handleVanity } from './card-vanity.mjs';
 
 const API_PREFIX = '/_api/';
 
 /** the same grammar the store keys on: a handle IS the KV key and the URL path segment. */
-const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** asset ids are content-addressed (`sha256-…`) but authors may name their own; keep it URL-safe. */
 const VALID_ASSET_ID = /^[A-Za-z0-9_.\-]{1,128}$/;
 
@@ -107,6 +108,16 @@ async function authorize(request, env) {
   return null;
 }
 
+/**
+ * A path segment, percent-decoded — or null when its escapes are broken (`%`, `%zz`, a cut UTF-8
+ * sequence), where decodeURIComponent would throw URIError out of the Worker. Callers answer
+ * 400 {error: "bad_path_encoding"}. (The vanity routes fold the same failure into handle_invalid.)
+ */
+const decodeSegment = (seg) => {
+  try { return decodeURIComponent(seg); } catch { return null; }
+};
+const badPathEncoding = () => json({ error: 'bad_path_encoding' }, 400);
+
 const readJson = async (request) => {
   try {
     return await request.json();
@@ -156,6 +167,9 @@ async function writeCard(store, handle, md) {
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
+ *   GET    /_api/vanity/<handle>             —             { host|null, redirect } — the card's own domain
+ *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
+ *   DELETE /_api/vanity/<handle>             —             { expect? } → unbind it
  */
 export async function handleApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;
@@ -179,7 +193,11 @@ export async function handleApi(request, env, url) {
     const handles = Array.isArray(body.handles) ? body.handles.slice(0, 200) : [];
     const out = [];
     for (const h of handles) {
-      const handle = String(h || '').trim().toLowerCase();
+      // 🔴 typeof first: String(x) calls x.toString, and JSON can deliver `{"toString":null}`, which
+      // makes String() throw. A non-string entry is skipped, like any other entry that is not a
+      // handle — this endpoint has always answered for the valid part of a list rather than failing it.
+      if (typeof h !== 'string') continue;
+      const handle = h.trim().toLowerCase();
       if (!VALID_HANDLE.test(handle)) continue;
       const row = await readCard(store, handle);
       if (!row) continue;
@@ -201,7 +219,7 @@ export async function handleApi(request, env, url) {
   // its pictures would be answering a different question than the one the agent asked.
   if (rest === 'preview' && method === 'POST') {
     const body = (await readJson(request)) || {};
-    const handle = String(body.handle || '').trim().toLowerCase();
+    const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(body.handle)}.` }, 400);
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
     const current = await readCard(store, handle);
@@ -225,7 +243,8 @@ export async function handleApi(request, env, url) {
   const parked = /^try\/(.+)$/.exec(rest);
   if (parked) {
     if (method !== 'GET') return json({ error: 'A parked draft is read-only.' }, 405);
-    const id = decodeURIComponent(parked[1]);
+    const id = decodeSegment(parked[1]);
+    if (id === null) return badPathEncoding();
     if (!TRY_ID_RE.test(id)) return json({ error: 'Bad draft id.' }, 400);
     const draft = await store.get(tryKey(id));
     if (draft == null) return json({ error: 'That draft has expired.' }, 404);
@@ -234,13 +253,29 @@ export async function handleApi(request, env, url) {
     });
   }
 
+  // ── vanity bindings: a creator's own domain ────────────────────────────────────────────────────
+  //
+  // Same bearer, same handle grammar; the keys and their write order live in card-vanity.mjs. Error
+  // bodies here are CODES (`{error: "vanity_taken"}`), not sentences, because the caller is a tool that
+  // turns them into the owner's language — that is the contract the MCP side was written against.
+  const vanity = /^vanity\/([^/]+)$/.exec(rest);
+  if (vanity) {
+    let handle = null;
+    try { handle = decodeURIComponent(vanity[1]).toLowerCase(); } catch { handle = null; }
+    if (!handle || !VALID_HANDLE.test(handle)) return json({ error: 'handle_invalid' }, 400);
+    const r = await handleVanity({ method, handle, store, readJson: () => readJson(request) });
+    return json(r.body, r.status);
+  }
+
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
   const card = /^card\/([^/]+)$/.exec(rest);
 
   // ── put_asset / delete_asset ───────────────────────────────────────────────────────────────────
   if (asset) {
-    const handle = decodeURIComponent(asset[1]).toLowerCase();
-    const id = decodeURIComponent(asset[2]);
+    const rawHandle = decodeSegment(asset[1]);
+    const id = decodeSegment(asset[2]);
+    if (rawHandle === null || id === null) return badPathEncoding();
+    const handle = rawHandle.toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(asset[1])}.` }, 400);
     if (!VALID_ASSET_ID.test(id)) return json({ error: `Bad asset id ${JSON.stringify(asset[2])}.` }, 400);
     const current = await readCard(store, handle);
@@ -249,10 +284,13 @@ export async function handleApi(request, env, url) {
 
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
-      const b64 = String(body.base64 || '').replace(/\s+/g, '');
+      // typeof, never String(): see list_cards. A present but non-string value is refused, not coerced.
+      if (body.base64 != null && typeof body.base64 !== 'string') return json({ error: '`base64` is not base64.' }, 400);
+      if (body.mime != null && typeof body.mime !== 'string') return json({ error: '`mime` must be a string.' }, 400);
+      const b64 = (body.base64 || '').replace(/\s+/g, '');
       if (!b64) return json({ error: 'put_asset needs `base64`.' }, 400);
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return json({ error: '`base64` is not base64.' }, 400);
-      model.assets = { ...model.assets, [id]: { mime: String(body.mime || 'image/webp'), b64 } };
+      model.assets = { ...model.assets, [id]: { mime: body.mime || 'image/webp', b64 } };
       const md = serializeCard(model);
       if (md.length > KV_MAX_BYTES) {
         return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
@@ -284,7 +322,9 @@ export async function handleApi(request, env, url) {
   }
 
   if (card) {
-    const handle = decodeURIComponent(card[1]).toLowerCase();
+    const rawHandle = decodeSegment(card[1]);
+    if (rawHandle === null) return badPathEncoding();
+    const handle = rawHandle.toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(card[1])}.` }, 400);
 
     // ── get_card ─────────────────────────────────────────────────────────────────────────────────
@@ -309,6 +349,10 @@ export async function handleApi(request, env, url) {
       const body = (await readJson(request)) || {};
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
         return json({ error: 'save_card needs `markdown` — refusing to write an empty card.' }, 400);
+      }
+      // typeof, never String(): see list_cards. checkBaseVersion stringifies what it is given.
+      if (body.base_version != null && body.base_version !== '' && typeof body.base_version !== 'string') {
+        return json({ error: '`base_version` must be a string — the version you read.' }, 400);
       }
       const current = await readCard(store, handle);
 
