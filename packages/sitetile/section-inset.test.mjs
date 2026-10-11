@@ -117,17 +117,31 @@ function matchesFloor(classTokens) {
   return attr.startsWith('st-') && !classTokens.includes('st-full-bleed');
 }
 
-test('🔴 REGRESSION PIN: gallery / carousel / collection / timeline are reached by the floor selector', () => {
-  // The exact four corals probe_render found at x=0. Pinned individually so a future refactor of
-  // the generic rule that happens to stop covering one of them fails on the coral, not in the
-  // abstract.
+test('🔴 REGRESSION PIN: gallery / carousel / timeline are reached by the floor selector', () => {
+  // Three of the exact four corals probe_render found at x=0. Pinned individually so a future
+  // refactor of the generic rule that happens to stop covering one of them fails on the coral, not
+  // in the abstract. The fourth, collection, is pinned in the next test: it gets the same inset
+  // from its own inner boxes instead, because its belt is a band (collection-band.test.mjs).
   for (const [file, cls] of [['Gallery.astro', 'st-gallery'], ['Carousel.astro', 'st-carousel'],
-                              ['Collection.astro', 'st-collection'], ['Timeline.astro', 'st-timeline']]) {
+                              ['Timeline.astro', 'st-timeline']]) {
     const sets = emitted.get(file);
     const set = sets.find((s) => s.includes(cls));
     assert.ok(set, `${file} no longer emits <section class="${cls}">`);
     assert.ok(matchesFloor(set), `${cls} (${JSON.stringify(set)}) is not reached by [class^="st-"]:not(.st-full-bleed)`);
   }
+});
+
+test('🔴 REGRESSION PIN: collection opts out of the floor AND still insets its heading (the x=0 defect stays fixed)', () => {
+  // Opting a section out is only safe if something else carries the page margin. For the hero that
+  // is its overlay; for the collection it is an un-gated floor on its head/belt boxes. Either half
+  // alone is a defect: no opt-out cages the belt, no inner floor puts the heading back at x=0 on a
+  // custom-theme site (the born rules for these boxes are gated OFF there).
+  const set = emitted.get('Collection.astro').find((s) => s.includes('st-collection'));
+  assert.ok(set, 'Collection.astro no longer emits <section class="st-collection …">');
+  assert.ok(!matchesFloor(set), `st-collection (${JSON.stringify(set)}) is caged by the section floor again`);
+  const ungated = rulesFor('.st-collection-head').filter((r) => !/data-theme-custom/.test(r.selector) && /padding-inline/.test(r.css));
+  assert.equal(ungated.length, 1, `expected exactly one un-gated side-padding rule for .st-collection-head, found ${ungated.length}`);
+  assert.match(ungated[0].selector, /^:where\(/, 'the head inset must stay zero-specificity so a theme outranks it');
 });
 
 test('🔴 no coral in sections/ emits a section the floor cannot reach, unless it opts out on purpose', () => {
@@ -141,7 +155,7 @@ test('🔴 no coral in sections/ emits a section the floor cannot reach, unless 
       if (!matchesFloor(classTokens)) unreached.push(`${file}: ${classTokens.join(' ')}`);
     }
   }
-  // Hero is the one intentional exemption, and it is asserted explicitly below — everything else
+  // Hero and collection are the intentional exemptions, each asserted explicitly — everything else
   // unreached here is either a bug or missing its own container rule (also checked below).
   const unexplained = unreached.filter((u) => !/st-full-bleed/.test(u));
   assert.deepEqual(unexplained, [], `section(s) the floor cannot reach and that did not opt out on purpose:\n    ${unexplained.join('\n    ')}`);

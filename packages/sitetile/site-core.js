@@ -2585,7 +2585,9 @@ function renderSection(s) {
       const link = linkOk
         ? '<a class="st-collection-link' + (linkIsGh ? ' st-collection-link-gh' : '') + '" href="' + escHrefAttr(pm.link.href) + '"' + (/^https?:\/\//.test(pm.link.href) ? ' target="_blank" rel="noopener"' : '') + '><span>' + escHtml(pm.link.label) + '</span>' + arrowSvg(/^https?:\/\//.test(pm.link.href) ? 'up-right' : 'right', 16) + '</a>'
         : (pm.link && typeof pm.link === 'object') ? '<span class="st-collection-link"><span>' + escHtml(pm.link.label) + '</span></span>' : '';
-      const head = '<div class="st-collection-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + link + '</div>';
+      // head carries the same outer/inner split as the belt (and as Collection.astro): the section
+      // is `st-full-bleed`, so the INNER box is what keeps the head text at the page's content width.
+      const head = '<div class="st-collection-head"><div class="st-collection-head-inner">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + link + '</div></div>';
       const eyebrow = pm.eyebrow ? '<p class="st-collection-eyebrow">' + escHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       const pills = multi ? '<nav class="st-collection-pills" aria-label="Categories">' +
         groups.map((g) => '<a class="st-collection-pill" href="#' + gid(g.title) + '">' + inlineHtml(g.title) + '</a>').join('') + '</nav>' : '';
@@ -2614,7 +2616,7 @@ function renderSection(s) {
         }).join('');
         return '<div class="st-collection-group"><p class="st-collection-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p><div class="st-cells">' + cards + '</div></div>';
       }).join('');
-      return '<section class="st-collection">' + head +
+      return '<section class="st-collection st-full-bleed">' + head +
         '<div class="st-collection-belt"><div class="st-collection-belt-inner">' + eyebrow + pills + groupsHtml + '</div></div></section>';
     }
     case 'faq': {

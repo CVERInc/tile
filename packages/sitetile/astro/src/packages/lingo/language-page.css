@@ -1,43 +1,106 @@
 /* REEF with Lingo — the `/language` chooser page (the PRIMARY locale switcher).
- * Theme-agnostic, token-driven (reads the site's --gd-* / reef tokens so it inherits
- * whatever skin the page wears). Mirrors a centered card list.
- * corrected 2026-07-06 (task #79, v2 gate): real value is Tailwind's max-w-lg = 32rem
- * (512px), not 34rem (544px) — the 32px-wider column pushed the row's right-aligned "Switch"
- * link 21px right of live's real position (row uses justify-content:space-between, so any
- * width difference pushes the far-right item). General package file — this fixes the
- * language page for every site using Lingo, not just the first one. */
-/* corrected 2026-07-06 (task #96, honest-stop pass): the 1.5rem horizontal padding shrank
-   the heading column to 512-48=464px, so the centered <h1>/subtitle sat in a narrower box than
-   live's `max-w-lg mx-auto` (full 512, no padding) → x+24px. width:min(32rem,100%-3rem) gives
-   exactly 512 on desktop (matches live) while keeping a 1.5rem gutter on <560px viewports
-   (mobile-safe without a media query). The list escapes this via its own full-bleed rule. */
-.rf-lang-page { width: min(32rem, 100% - 3rem); max-width: none; margin: 0 auto; padding: 5.5rem 0 0; }
+ *
+ * This is a page the PLATFORM draws: no content file stands behind it, so a site owner is not
+ * looking at it while they write their theme (CVERInc/reef#1887). Three decisions follow from that.
+ *
+ * 1. THE COLUMN IS PADDING, NOT A WIDTH. The page used to be a 32rem-wide box. A site-wide gutter
+ *    such as `html .rf-main > * { padding-inline: max(1.5rem, calc(50vw - 30rem)) }` is a good rule
+ *    for full-width sections, and on a 32rem border-box the same padding left nothing: measured at
+ *    a 1440px viewport the heading had 32px and wrapped one character per line. The page is now a
+ *    full-width block whose own side padding makes the column, i.e. the same idiom. A site's
+ *    gutter rule replaces that padding and the page gets what the site's own sections get.
+ *
+ * 2. THE LOOK is in `reef.theme`, emitted BEFORE the site's theme (SiteLayout's `routeCss`).
+ *    Colour, type, spacing, borders. Same layer as the theme, so specificity decides and a tie
+ *    goes to the theme: `.rf-lang-list { background: … }` in a theme works as written.
+ *
+ * 3. THE BOX is in `reef.responsive`, the layer AFTER the theme, and it is short on purpose:
+ *    `display` and the width properties of the page's parts, plus the side padding of the heading
+ *    block and the side margins of the band. Those are what a blanket rule (`main * { max-width }`,
+ *    `main div { padding-inline }`, `section { display: flex }`, `h1 { max-width: 12ch }`) breaks
+ *    without meaning to.
+ *
+ *    🔴 NAME IT AND YOU OWN IT, for the heading block and the list. A layer cannot tell a blanket
+ *    rule from an owner who laid this page out on purpose (a theme's three-column `.rf-lang-list
+ *    { display: grid }` came out as one stacked column). The deliberate rule is the one that NAMES
+ *    the part, so at build time language-page-css.mjs reads the site's theme: if it mentions
+ *    `.rf-lang-head`, the heading block's rules below (its descendants' too) are emitted in
+ *    `reef.theme` instead, ahead of the theme, as plain defaults; the same for `.rf-lang-list`; and
+ *    mentioning `.rf-lang-page` counts as mentioning both, since a rule that starts from the page
+ *    (`.rf-lang-page ul { … }`) is reaching inside it. Parts it does not mention stay here.
+ *
+ *    🔴 THE PAGE'S OWN BOX STAYS HERE, ALWAYS. Decision 1 only holds while the page is as wide as
+ *    its container: with its `max-width: none; width: auto` below the theme, a theme that named the
+ *    page and also capped its sections (`.rf-main > section { max-width: 60rem }`) left the heading
+ *    192px at a 1280px viewport and nothing at 1920.
+ *
+ *    That file relies on this block's shape: the last block in the file, flat rules only, every
+ *    selector starting with one of the three classes.
+ *
+ * HOW A SITE RESTYLES IT
+ *    look           ordinary rules on `.rf-lang-page`, `.rf-lang-head`, `.rf-lang-list`,
+ *                   `.rf-lang-name`, `.rf-lang-action` — including the page's own padding.
+ *    column / band  tokens, set on `.rf-lang-page` or on `html:root`:
+ *                     --rf-lang-width      the column, and each row         32rem
+ *                     --rf-lang-gutter     kept clear at each viewport edge 1.5rem
+ *                     --rf-lang-band       the band behind the rows         the theme's surface
+ *                     --rf-lang-band-ink   text on the band                 the theme's text
+ *    anything in 3  for the heading block and the list: name the part (`.rf-lang-head` /
+ *                   `.rf-lang-list`, or `.rf-lang-page` for both) anywhere in the theme and its box
+ *                   is yours, by ordinary rules. The cost: it is then also within reach of the
+ *                   same theme's site-wide rules. For the page itself, or without naming:
+ *                   `!important`. The column is the page's side padding, so a page narrowed with
+ *                   `max-width` alone starves the heading: change `padding-inline` with it, or
+ *                   set `--rf-lang-width` instead.
+ *
+ * Measurements kept from the page this was matched to: the column is 32rem, and a row is 62px —
+ * the 20px name on a 1.4 line (28px), 1rem of padding above and below, and the 1px border. Do not
+ * pin a line-height on the row link: it clamps the flex line and starves the name. */
+@layer reef.theme {
+.rf-lang-page {
+  margin: 0;
+  padding: 5.5rem max(var(--rf-lang-gutter, 1.5rem), calc(50% - var(--rf-lang-width, 32rem) / 2)) 0;
+}
 .rf-lang-head { text-align: center; margin-bottom: 3.2rem; }
 .rf-lang-head h1 { font-size: clamp(1.8rem, 4vw, 2.4rem); line-height: 1.1; margin: 0 0 .6rem; }
 .rf-lang-head p { margin: 0; opacity: .75; font-weight: 300; line-height: 1.6; }
-/* live wraps the list in a full-bleed dark band (measured: bg rgb(8,74,76) = --gd-bg-dark,
-   full viewport width, py-16/px-6 = 64px/24px padding) — not just a light-background card list. */
+/* The band is the theme's surface carrying the theme's text. It used to be
+   `var(--gd-bg-dark, #084a4c)`. Nothing in the renderer and no compiled theme sets `--gd-bg-dark`,
+   so every site got the fallback: a dark teal that reads as a brand colour and is nobody's, under
+   the site's inherited body text (about 1.5:1 with the default text colour). A theme that does
+   define `--gd-bg-dark` keeps the band it has. */
 .rf-lang-list {
-  list-style: none; margin: 0; padding: 4rem 1.5rem; display: flex; flex-direction: column; gap: .75rem;
-  width: 100vw; margin-left: calc(-50vw + 50%); margin-right: calc(-50vw + 50%);
-  max-width: 100vw; box-sizing: border-box;
-  background: var(--gd-bg-dark, #084a4c);
+  list-style: none; margin-block: 0; padding: 4rem var(--rf-lang-gutter, 1.5rem); gap: .75rem;
+  background: var(--rf-lang-band, var(--gd-bg-dark, var(--gd-surface)));
+  color: var(--rf-lang-band-ink, inherit);
 }
-.rf-lang-list > li { max-width: 32rem; margin: 0 auto; width: 100%; }
 .rf-lang-list a {
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  /* corrected 2026-07-06 (task #96): live row h=62, driven by the 20px name span (28px line
-     box) + 16px vertical padding + 1px border. Match live's 1rem(16px) padding; do NOT pin
-     line-height on the <a> (that clamps the flex line box and starves the 20px name → h=58). */
+  align-items: center; justify-content: space-between; gap: 1rem;
   padding: 1rem 1.5rem; border-radius: 1rem; text-decoration: none; color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   transition: border-color .15s ease, background-color .15s ease, transform .15s ease;
 }
 .rf-lang-list a:hover { border-color: color-mix(in srgb, currentColor 45%, transparent); transform: translateY(-1px); }
 .rf-lang-list a[aria-current="true"] { border-color: color-mix(in srgb, currentColor 55%, transparent); }
-/* 2026-07-06 (task #96): live name span = 20px (1.25rem, drives row height to 62);
-   action = 14px (.875rem). recast had 1.15rem(18.4px)/.85rem(13.6px) → row 58, the 4px/row
-   deficit accumulated down the list. These are the row-height driver (name is the tallest child). */
-.rf-lang-name { font-size: 1.25rem; line-height: 1.4; font-weight: 600; }  /* live name box = 28px (20px×1.4) → row h=62 */
+.rf-lang-name { font-size: 1.25rem; line-height: 1.4; font-weight: 600; }
 .rf-lang-action { font-size: .875rem; font-weight: 600; opacity: .7; display: inline-flex; align-items: center; gap: .4rem; }
 .rf-lang-action .rf-lang-arrow { width: .8em; height: .8em; }
+}
+/* 🔴 Not wrapped in a guard such as `body:not([data-theme-custom])`. The sites carrying hand-written
+   CSS are exactly the ones this is for; a guard that excuses them protects nobody. */
+@layer reef.responsive {
+.rf-lang-page, .rf-lang-head, .rf-lang-head h1, .rf-lang-head p {
+  display: block; box-sizing: border-box; width: auto; min-width: 0; max-width: none;
+}
+.rf-lang-head, .rf-lang-head h1, .rf-lang-head p { padding-inline: 0; }
+/* Full-bleed from inside the column: 50% is half the column, 50vw half the viewport. */
+.rf-lang-list {
+  display: flex; flex-direction: column; box-sizing: border-box;
+  width: 100vw; min-width: 0; max-width: 100vw; margin-inline: calc(50% - 50vw);
+}
+.rf-lang-list > li {
+  display: block; box-sizing: border-box; width: 100%; min-width: 0;
+  max-width: var(--rf-lang-width, 32rem); margin-inline: auto;
+}
+.rf-lang-list a { display: flex; box-sizing: border-box; width: auto; min-width: 0; max-width: none; }
+}
