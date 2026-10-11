@@ -72,26 +72,105 @@ const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
  *    2. what is left must be letters, digits and single hyphens — anything else THROWS a
  *       LocaleListError naming the entry, rather than becoming a path;
  *    3. an entry whose URL form is already listed (`zh-TW, zh-tw`, or the same code twice) is one
- *       directory written twice — the first spelling is kept. */
+ *       directory written twice — the first spelling is kept.
+ *
+ *  What an author types without seeing it is not a mistake to fail a build over:
+ *    • `，` (U+FF0C) and `、` (U+3001) separate entries exactly like `,` — they are what a Chinese
+ *      or Japanese keyboard produces for a comma, and neither can be part of a code;
+ *    • whitespace of every kind (no-break and ideographic space included) and invisible format
+ *      characters (zero-width space, BOM, joiners, direction marks) AROUND an entry are dropped
+ *      with the list punctuation. INSIDE an entry they are still refused: `zh<U+200B>-TW` is not
+ *      a spelling of zh-TW anybody meant to write.
+ *  Still refused, with a hint: `zh_TW` (the message offers `zh-TW`), and a trailing `# comment` —
+ *  this frontmatter has no comments for any key, so stripping one here alone would teach a rule
+ *  that is false on the next line.
+ *
+ *  `source` is the file the value was written in (`content/_site.md`, `content/about.md`), for the
+ *  error message — see localesSourceOf. */
 const _LOCALE_CODE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+const _LOCALE_SEPARATORS = /[,，、]/;
+const _LOCALE_PADDING = /^[\s\p{Cf}\["']+|[\s\p{Cf}\]"']+$/gu;
+/** An entry as the message shows it: quoted, with every character that is not printable ASCII
+ *  written as `\u{…}` — the character that broke the build is often one nobody can see. */
+const _visible = (s) => `"${[...String(s)].map((ch) => {
+  const cp = ch.codePointAt(0);
+  if (ch === '\\' || ch === '"') return `\\${ch}`;
+  return cp >= 0x20 && cp <= 0x7e ? ch : `\\u{${cp.toString(16).toUpperCase().padStart(4, '0')}}`;
+}).join('')}"`;
+const _localeHint = (entry) => {
+  if (entry.includes('#')) return ' This frontmatter has no comments: remove the `#` and what follows it.';
+  const hyphenated = entry.replace(/_/g, '-');
+  if (hyphenated !== entry && _LOCALE_CODE.test(hyphenated)) return ` Did you mean ${_visible(hyphenated)}?`;
+  return '';
+};
 export class LocaleListError extends Error {
-  constructor(entry) {
-    super(`sitetile: locales entry ${JSON.stringify(entry)} is not a locale code — a code is letters, `
-      + 'digits and hyphens only (en-US, zh-TW), because each one becomes a URL path segment. '
-      + 'Fix the `locales:` line in the site config.');
+  constructor(entry, source = '') {
+    super(`sitetile: locales entry ${_visible(entry)} is not a locale code — a code is letters, `
+      + `digits and hyphens only (en-US, zh-TW), because each one becomes a URL path segment.${_localeHint(entry)} `
+      + (source ? `Fix the \`locales:\` line in ${source}.`
+        : 'Fix the `locales:` line where it is written (the site config, or the page\'s own frontmatter).'));
     this.name = 'LocaleListError';
     this.entry = entry;
+    this.source = source;
   }
 }
-export function parseLocales(v) {
+export function parseLocales(v, source = '') {
   const out = [];
-  for (const item of (Array.isArray(v) ? v : String(v ?? '').split(','))) {
-    const s = String(item ?? '').replace(/^[\s\["']+|[\s\]"']+$/g, '');
+  for (const item of (Array.isArray(v) ? v : String(v ?? '').split(_LOCALE_SEPARATORS))) {
+    const s = String(item ?? '').replace(_LOCALE_PADDING, '');
     if (!s) continue;
-    if (!_LOCALE_CODE.test(s)) throw new LocaleListError(s);
+    if (!_LOCALE_CODE.test(s)) throw new LocaleListError(s, source);
     if (!out.some((seen) => seen.toLowerCase() === s.toLowerCase())) out.push(s);
   }
   return out;
+}
+
+/** Which file a meta object's `locales` was written in — carried ON the object, because by the time
+ *  anything parses it the object is `{ ...siteConfig, ...pageFrontmatter }` and the value alone no
+ *  longer says whose it is.
+ *
+ *  🩸 CVERInc/reef#1910. A page may write its own `locales:`, and it reaches the same parser. The
+ *  error said "fix the site config" for a line that was in `content/about.md`.
+ *
+ *  A symbol key, so it is no frontmatter key (nothing lists, renders or serialises it) and an
+ *  object spread carries it exactly as it carries `locales` itself: the later object's wins, and
+ *  an object that has no `locales` of its own has no tag to overwrite the earlier one with. */
+const _LOCALES_SOURCE = Symbol('sitetile.localesSource');
+export function tagLocalesSource(meta, file) {
+  if (meta && Object.prototype.hasOwnProperty.call(meta, 'locales')) meta[_LOCALES_SOURCE] = String(file || '');
+  return meta;
+}
+export function localesSourceOf(meta) { return (meta && meta[_LOCALES_SOURCE]) || ''; }
+
+/** A PAGE's own frontmatter, before it is merged over the site config: tag its `locales` with the
+ *  page's file — or, when that value is not a locale list, WARN and drop it, so the page reads the
+ *  site's list as if it had written none. Returns the warning (or null), for tests.
+ *
+ *  An illegal `locales` in the SITE layer fails the build (parseLocales throws); the same value on
+ *  one page does not. A page's `locales` only ever steers that page's own head and footer links —
+ *  one odd line in one page is not a reason to take the whole site's build down, and dropped here
+ *  it never reaches anything that makes a path of it. `site` is the site-config meta the page
+ *  merges over (or null), only to say what the page falls back to.
+ *
+ *  Once per file: the chooser route reads the home pages too, and a log that says a thing twice
+ *  reads as two problems. */
+const _warnedPageLocales = new Set();
+export function pageLocalesOrWarn(meta, file, site = null) {
+  if (!meta || !Object.prototype.hasOwnProperty.call(meta, 'locales')) return null;
+  try {
+    parseLocales(meta.locales, file);
+    tagLocalesSource(meta, file);
+    return null;
+  } catch (e) {
+    if (!(e instanceof LocaleListError)) throw e;
+    delete meta.locales;
+    const siteFile = localesSourceOf(site);
+    const msg = `sitetile: locales entry ${_visible(e.entry)} in ${file} is not a locale code — a code is `
+      + `letters, digits and hyphens only (en-US, zh-TW).${_localeHint(e.entry)} This page's own \`locales:\` line is IGNORED: `
+      + (siteFile ? `the page uses the site's list from ${siteFile}.` : 'the page is treated as declaring none.');
+    if (!_warnedPageLocales.has(file)) { _warnedPageLocales.add(file); console.warn(msg); }
+    return msg;
+  }
 }
 
 /** The site's DEFAULT locale — the one that lives at `/`. THE one definition:

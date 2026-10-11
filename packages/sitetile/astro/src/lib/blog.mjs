@@ -11,7 +11,7 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
-import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
 
@@ -402,10 +402,10 @@ export function loadSite(contentGlob, pagePath) {
     const rel = (path.split('/content/')[1] || '');
     if (rel === '_site.md') {
       const { meta } = splitFrontmatter(String(raw || ''));
-      if (meta && Object.keys(meta).length) base = meta;
+      if (meta && Object.keys(meta).length) base = tagLocalesSource(meta, 'content/_site.md');
     } else {
       const m = rel.match(/^([^/]+)\/_site\.md$/);
-      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = meta; }
+      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
     }
   }
   if (!base && !Object.keys(locales).length) return null;
@@ -446,6 +446,7 @@ export function siteMeta(contentGlob) {
   for (const [path, raw] of Object.entries(contentGlob)) {
     const { meta } = splitFrontmatter(String(raw || ''));
     if (!meta || !(meta['sitetile-page'] || meta.theme)) continue;
+    tagLocalesSource(meta, `content/${path.split('/content/')[1] || path}`);
     if (/(^|\/)home\.md$/.test(path)) return withoutPageCoralCss(meta);
     if (!Object.keys(fallback).length) fallback = meta;
   }
@@ -1231,7 +1232,7 @@ export function indexUrl(meta, n = 1) {
 // A locale with zero translated posts contributes nothing — no empty locale index, no dangling
 // hreflang, no locale category/tag archive with nothing in it.
 export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts) {
-  const blogLocales = parseLocales(meta && meta.locales);
+  const blogLocales = parseLocales(meta && meta.locales, localesSourceOf(meta));
   const defaultBlogLocale = defaultLocaleOf(blogLocales);
   const baseBySlug = new Map((basePosts || []).map((p) => [p.slug, p]));
   const out = [];
@@ -1290,7 +1291,7 @@ export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts
 //   corpora   — localeBlogCorpora()'s result
 // Returns at(url, urlLocale = '') — `urlLocale` is the prefix the asking page lives under.
 export function blogSwitchLocales(meta, basePosts, corpora) {
-  const locales = parseLocales(meta && meta.locales);
+  const locales = parseLocales(meta && meta.locales, localesSourceOf(meta));
   const bare = (u) => String(u == null ? '' : u).replace(/^\/+|\/+$/g, '');
   // a url → its path with the locale prefix removed; null when it is not under that prefix at all.
   const keyOf = (u, urlLocale) => {

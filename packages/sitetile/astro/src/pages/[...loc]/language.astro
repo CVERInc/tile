@@ -13,7 +13,7 @@
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from '../../lib/blog.mjs';
-import { toUrlLocale, label, languageCopy, lingoEnabled, parseLocales, defaultLocaleOf, rootLangMismatch } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, label, languageCopy, lingoEnabled, parseLocales, defaultLocaleOf, rootLangMismatch, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -39,6 +39,9 @@ export function getStaticPaths() {
     // resolve site-config layer (_site + <locale>/_site) UNDER the home's own frontmatter, so a
     // slimmed home (chrome moved to _site) still exposes packages/lang/locales here.
     const cfg = loadSite(files, rel);
+    // Same rule as the page route: a home page's own `locales` is a page's line under a site config.
+    if (cfg || rel !== 'home') pageLocalesOrWarn(site.meta, `content/${rel}.md`, cfg);
+    else tagLocalesSource(site.meta, `content/${rel}.md`);
     if (cfg) site.meta = { ...cfg, ...site.meta };
     homesByRel[rel] = site.meta;
   }
@@ -47,7 +50,7 @@ export function getStaticPaths() {
   // `packages: lingo`. One-language sites get no chooser.
   if (!rootHome || !lingoEnabled(rootHome)) return [];
 
-  const locales = parseLocales(rootHome.locales);
+  const locales = parseLocales(rootHome.locales, localesSourceOf(rootHome));
   // A chooser is a choice between editions. `packages: lingo` over ONE declared locale used to
   // build a page with a single row on it, and a footer link on every page leading there.
   if (locales.length < 2) return [];

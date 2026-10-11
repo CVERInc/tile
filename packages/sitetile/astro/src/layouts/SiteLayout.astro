@@ -56,7 +56,7 @@ const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates =
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
 // the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
 const renderedPageBody = await Astro.slots.render('default');
-const locales = lingo.parseLocales(meta.locales);
+const locales = lingo.parseLocales(meta.locales, lingo.localesSourceOf(meta));
 const themeName = meta.theme ? String(meta.theme).trim() : '';
 // The `?raw` + `set:html` inline path bypasses Vite's CSS minifier, so without this every theme's
 // verbose authoring commentary would ship verbatim in the page's <style> source. Strip the CSS
@@ -313,7 +313,11 @@ const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-h
 // round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
 // verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
 // every other emitter uses, falling back to the safe default rather than going live unfiltered.
-const languageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '/language') : '/language';
+// 🩸 CVERInc/reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
+// key having a value: a refused value fell back to `/language`, and on a one-locale site (which
+// builds no chooser) that put a dead link on every page while reading as the owner's own.
+const ownLanguageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '') : '';
+const languageHref = ownLanguageHref || '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
 // round 4 (R3-P3-1): `fonts:` is a raw frontmatter destination reaching a live
@@ -446,9 +450,9 @@ const computedLanguageHref = multilingual
   ? `${langUrlPrefix}/language?return=${encodeURIComponent(currentPath)}${hasParam}`
   : languageHref;
 // The plain footer's Language link: the chooser on a multilingual site; on a one-locale site only
-// a `language-href:` the owner wrote themselves — the engine's own default there is a page it
-// never builds.
-const showLanguageLink = multilingual || (locales.length > 0 && !!meta['language-href']);
+// a `language-href:` the owner wrote themselves and safeHref accepted — the engine's own default
+// there is a page it never builds.
+const showLanguageLink = multilingual || (locales.length > 0 && !!ownLanguageHref);
 // 🩸 corrected: verified against three live locale paths (/ja-jp, /ko-kr, /zh-tw) — the footer
 // "Language" link label stays in English on EVERY locale (a deliberate, consistent choice,
 // not a translation gap), unlike the /language chooser PAGE's own title which IS localized.

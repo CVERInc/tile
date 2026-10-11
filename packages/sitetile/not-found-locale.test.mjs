@@ -176,6 +176,33 @@ const SITES = {
     'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
     'ja-jp/home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
   },
+  // One locale and a `language-href:` the link policy refuses. The fallback was `/language`, which
+  // a one-locale site never builds.
+  oneLocaleUnsafeHref: {
+    '_site.md': '---\nbrand: 紙鶴工坊\nlocales: zh-TW\ncopyright: © 紙鶴工坊\nlanguage-href: javascript:alert(1)\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+  },
+  // One locale and a `language-href:` of the owner's own that is an ordinary link. Kept as written.
+  oneLocaleOwnHref: {
+    '_site.md': '---\nbrand: 折り鶴\nlocales: ja-JP\ncopyright: © 折り鶴\nlanguage-href: https://example.com/other-editions\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+    'about.md': page('sitetile-page: about\ntitle: 紹介\nlang: ja-JP', '紹介'),
+  },
+  // Two locales and the same refused `language-href:`. The chooser exists here, so it is the link.
+  multiUnsafeHref: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, ko-KR\ncopyright: © Tsuru Paper\nlanguage-href: javascript:alert(1)\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'ko-kr/home.md': page('sitetile-page: home\ntitle: 종이학\nlang: ko-KR', '종이학'),
+  },
+  // The SITE's `locales` is fine; one PAGE writes its own, and that one is not.
+  pageLocales: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, zh-TW\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'about.md': page('sitetile-page: about\ntitle: About\nlang: en-US\nlocales: en-US, ko/kr', 'About'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW\nlocales: zh-TW, ../kiln', '紙鶴'),
+    'zh-tw/about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+  },
   // Says nothing at all. Must keep getting exactly what it got before.
   undeclared: {
     '_site.md': '---\nbrand: Nobody\n---\n',
@@ -372,6 +399,72 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.match(log, /sitetile: locales entry "\.\.\/kiln" is not a locale code/);
       assert.equal(existsSync(join(outDir, 'index.html')), false, 'pages were written anyway');
       assert.deepEqual(readdirSync(join(work, 'unsafe')).sort().filter((n) => n !== 'out'), ['ir'], 'something was written beside the output directory');
+    });
+
+    await test('🔴 unsafe: the message names the file the line is in', () => {
+      assert.ok(built.unsafe.log.includes('Fix the `locales:` line in content/_site.md.'), built.unsafe.log.slice(-600));
+    });
+
+    await test('🔴 pageLocales: a PAGE\'s own bad `locales` does not fail the build — one warning per page, naming it', () => {
+      const { log } = site('pageLocales');
+      const lines = log.split('\n').filter((l) => l.includes('locales entry'));
+      assert.equal(lines.length, 2, `expected one warning for each of the two pages, got ${lines.length}:\n${lines.join('\n')}`);
+      const about = lines.filter((l) => l.includes('sitetile: locales entry "ko/kr" in content/about.md is not a locale code'));
+      // A locale home is `content/zh-tw.md` to the renderer (the build collapses `<locale>/home.md`).
+      const home = lines.filter((l) => l.includes('sitetile: locales entry "../kiln" in content/zh-tw.md is not a locale code'));
+      assert.equal(about.length, 1, lines.join('\n'));
+      assert.equal(home.length, 1, 'a locale home is read by the chooser route too — it must still be warned about once');
+      for (const l of lines) assert.ok(l.endsWith('This page\'s own `locales:` line is IGNORED: the page uses the site\'s list from content/_site.md.'), l);
+      assert.equal(log.includes('Fix the `locales:` line'), false, 'the build-failing message was printed for a page\'s line');
+    });
+
+    await test('🔴 pageLocales: the ignored value reaches no directory and no link, and the page gets the site\'s list', () => {
+      const { outDir, pages } = site('pageLocales');
+      assert.deepEqual(topDirs(outDir).filter((d) => !['_astro', 'preview', 'language', 'about'].includes(d)), ['zh-tw']);
+      assert.deepEqual(walk(outDir).map((p) => relative(outDir, p)).filter((rel) => /ko|kr|kiln|\.\./i.test(rel)), [], 'a path was made from the ignored value');
+      const hrefs = [...allOf('pageLocales', alternates).map(([, a]) => a.href), ...allOf('pageLocales', langLinks).map(([, h]) => h)];
+      assert.ok(hrefs.length >= 8, 'too few links to mean anything');
+      assert.deepEqual(hrefs.filter((h) => /ko|kr|kiln|\.\.|%2F%2E|%2e%2e/i.test(h.replace('https://example.com', ''))), [], 'the ignored value reached a URL');
+      // The page that wrote the bad line advertises exactly what its sibling pages do.
+      assert.deepEqual(alternates(pages['about/index.html']).map((a) => a.tag), ['en', 'zh-Hant', 'x-default']);
+      assert.deepEqual(langLinks(pages['about/index.html']).map((h) => h.split('?')[0]), ['/language']);
+      assert.equal(existsSync(join(outDir, 'zh-tw', 'language', 'index.html')), true, 'the zh-tw chooser was not built');
+    });
+
+    await test('🔴 CONTROL: no other fixture is warned about a page\'s `locales`', () => {
+      for (const name of ['multiEn', 'oneLocale', 'bracketed', 'quoted', 'monoJa', 'undeclared']) {
+        assert.equal(site(name).log.includes('locales entry'), false, `${name} was warned`);
+      }
+    });
+
+    // ── 1, again: a `language-href:` the link policy refuses is not the owner's link ───────────
+    await test('🔴 oneLocaleUnsafeHref: a refused `language-href:` leaves NO Language link — not a fallback to a chooser nobody built', () => {
+      const { outDir, pages } = site('oneLocaleUnsafeHref');
+      assert.ok(Object.keys(pages).length >= 3, `only ${Object.keys(pages).length} pages built — the fixture shrank`);
+      assert.deepEqual(allOf('oneLocaleUnsafeHref', langLinks), []);
+      assert.equal(existsSync(join(outDir, 'language')), false, 'a chooser was built for one language');
+      assert.deepEqual(Object.keys(pages).filter((rel) => /javascript:/i.test(pages[rel])), [], 'the refused value reached a page');
+    });
+
+    await test('oneLocaleOwnHref: an ordinary `language-href:` on a one-locale site is kept exactly as written', () => {
+      const { outDir, pages } = site('oneLocaleOwnHref');
+      const links = allOf('oneLocaleOwnHref', langLinks);
+      assert.equal(links.length, Object.keys(pages).length, 'not one Language link per page');
+      assert.deepEqual([...new Set(links.map(([, href]) => href))], ['https://example.com/other-editions']);
+      assert.equal(existsSync(join(outDir, 'language')), false, 'a chooser was built for one language');
+    });
+
+    await test('multiUnsafeHref: two locales and a refused `language-href:` → the built chooser, which exists', () => {
+      const { outDir, pages } = site('multiUnsafeHref');
+      // `/preview/` is the engine's own route and takes the engine's language, not this site's (a
+      // known gap, the same on a site with no `language-href:` at all) — not what is measured here.
+      const links = allOf('multiUnsafeHref', langLinks).filter(([rel]) => !rel.startsWith('preview/'));
+      assert.ok(links.length >= 3, 'too few Language links to mean anything');
+      for (const [rel, href] of links) {
+        assert.match(href, /^(\/ko-kr)?\/language\?return=/, `${rel}: ${href}`);
+        assert.ok(resolves(outDir, href), `${rel}: the Language link points at a page the build never wrote: ${href}`);
+      }
+      assert.deepEqual(Object.keys(pages).filter((rel) => /javascript:/i.test(pages[rel])), [], 'the refused value reached a page');
     });
 
     // ── 4: the way back from the 404's chooser ───────────────────────────────────────────────

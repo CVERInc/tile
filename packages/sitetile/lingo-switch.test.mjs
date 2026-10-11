@@ -21,7 +21,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lingoMod from './astro/src/packages/lingo/locale.mjs';
-import { lingoEnabled, sameLocale, localeOf, toUrlLocale, parseLocales, defaultLocaleOf, rootLangMismatch, LocaleListError } from './astro/src/packages/lingo/locale.mjs';
+import { lingoEnabled, sameLocale, localeOf, toUrlLocale, parseLocales, defaultLocaleOf, rootLangMismatch, LocaleListError, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from './astro/src/packages/lingo/locale.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, 'astro/src');
@@ -250,6 +250,17 @@ test('🔴 parseLocales: an empty entry is skipped and a repeated one is kept on
   for (const empty of ['', '  ', ',', '[]', '""', undefined, null]) assert.deepEqual(parseLocales(empty), [], JSON.stringify(empty));
 });
 
+// An entry as an error message shows it: JSON's quoting for printable ASCII, `\u{…}` for the rest.
+const shown = (s) => `"${[...s].map((ch) => {
+  const cp = ch.codePointAt(0);
+  if (ch === '\\' || ch === '"') return `\\${ch}`;
+  return cp >= 0x20 && cp <= 0x7e ? ch : `\\u{${cp.toString(16).toUpperCase().padStart(4, '0')}}`;
+}).join('')}"`;
+const refusal = (value, source) => {
+  try { parseLocales(value, source); } catch (e) { assert.ok(e instanceof LocaleListError, String(e)); return e.message; }
+  assert.fail(`${JSON.stringify(value)} was accepted`);
+};
+
 test('🔴 parseLocales: anything that is not a locale code is refused BY NAME, never made a path', () => {
   const refused = ['../kiln', 'ko/kr', '..', 'en-US/', '/ja-JP', 'zh_TW', 'en US', 'zh"TW', 'en-', '-en', 'en--US',
     'zh-TW;ja-JP', 'en.US', 'ja\\JP', '%2e%2e', 'en-US?x', 'zh-TW#', '日本語'];
@@ -257,13 +268,124 @@ test('🔴 parseLocales: anything that is not a locale code is refused BY NAME, 
     assert.throws(() => parseLocales(`zh-TW, ${bad}`), (e) => {
       assert.ok(e instanceof LocaleListError, `${bad}: not a LocaleListError`);
       assert.equal(e.name, 'LocaleListError');
-      assert.ok(e.message.includes(JSON.stringify(bad)), `${bad}: the message does not name the entry — ${e.message}`);
+      assert.ok(e.message.includes(shown(bad)), `${bad}: the message does not name the entry — ${e.message}`);
       return true;
     }, bad);
   }
   // The control: the same call with a real code in that position does not throw.
   assert.deepEqual(parseLocales('zh-TW, ko-KR'), ['zh-TW', 'ko-KR']);
   assert.deepEqual(parseLocales('zh-Hant-TW, es-419, en'), ['zh-Hant-TW', 'es-419', 'en']);
+});
+
+test('🔴 parseLocales: what a keyboard puts AROUND a code is not a reason to fail a build', () => {
+  const want = ['en-US', 'zh-TW'];
+  // Invisible or whitespace-class characters beside an entry: dropped, like an ordinary space.
+  for (const [name, pad] of [['zero-width space', '​'], ['BOM', '﻿'], ['no-break space', ' '],
+    ['ideographic space', '　'], ['zero-width joiner', '‍'], ['left-to-right mark', '‎'], ['word joiner', '⁠']]) {
+    assert.deepEqual(parseLocales(`en-US,${pad}zh-TW`), want, `${name} after the comma`);
+    assert.deepEqual(parseLocales(`${pad}en-US${pad}, zh-TW${pad}`), want, `${name} around an entry`);
+  }
+  // The two commas a Chinese or Japanese keyboard types: separators, exactly like `,`.
+  assert.deepEqual(parseLocales('en-US，zh-TW'), want, 'full-width comma');
+  assert.deepEqual(parseLocales('en-US、zh-TW'), want, 'ideographic comma');
+  assert.deepEqual(parseLocales('ja-JP、　en-US，​zh-TW, ko-KR'), ['ja-JP', 'en-US', 'zh-TW', 'ko-KR'], 'mixed');
+  assert.deepEqual(parseLocales('[zh-TW，"en-US"]'), ['zh-TW', 'en-US'], 'with list punctuation too');
+  assert.deepEqual(parseLocales('zh-TW，zh-tw、en'), ['zh-TW', 'en'], 'a repeat is still one locale');
+});
+
+test('🔴 parseLocales: the same characters INSIDE a code are refused, and the message makes them visible', () => {
+  for (const [bad, escape] of [['zh​-TW', '\\u{200B}'], ['en US', '\\u{00A0}'], ['ja﻿JP', '\\u{FEFF}'], ['zh　TW', '\\u{3000}']]) {
+    const msg = refusal(`en-US, ${bad}`);
+    assert.ok(msg.includes(shown(bad)) && msg.includes(escape), `${escape}: not shown — ${msg}`);
+    // The entry is shown ONLY escaped: the raw character is nowhere in the message.
+    assert.equal(msg.includes(bad), false, `${escape}: the invisible character itself is in the message`);
+  }
+  // The control: an ASCII entry is quoted as written, with nothing escaped.
+  assert.ok(refusal('en-US, ko/kr').includes('locales entry "ko/kr" is not a locale code'));
+  assert.equal(refusal('en-US, ko/kr').includes('\\u{'), false);
+});
+
+test('🔴 parseLocales: an underscore is refused with the hyphen form offered; a comment, with the `#` named', () => {
+  assert.ok(refusal('zh_TW').includes('Did you mean "zh-TW"?'));
+  assert.ok(refusal('en-US，zh_Hant_TW').includes('Did you mean "zh-Hant-TW"?'), 'after a full-width comma, too');
+  // …but only when the hyphen form IS a code: nothing is offered for these.
+  for (const bad of ['zh_', '_en', 'ko/kr', 'en US']) assert.equal(refusal(bad).includes('Did you mean'), false, bad);
+  // This frontmatter has no comments on any key, so one is not stripped here either.
+  for (const line of ['en-US, zh-TW  # two languages', 'en-US # default, zh-TW', 'en-US, zh-TW #']) {
+    const msg = refusal(line);
+    assert.ok(msg.includes('remove the `#`'), `${line}: the message does not name the # — ${msg}`);
+    assert.equal(msg.includes('Did you mean'), false);
+  }
+  assert.equal(refusal('ko/kr').includes('#'), false, 'the # hint is on every refusal');
+});
+
+test('🔴 parseLocales: the message names the FILE the line is in — the tag travels with `locales` through a merge', () => {
+  assert.ok(refusal('zh-TW, ko/kr', 'content/_site.md').endsWith('Fix the `locales:` line in content/_site.md.'));
+  assert.ok(refusal('zh-TW, ko/kr', 'content/about.md').endsWith('Fix the `locales:` line in content/about.md.'));
+  // No source known: it does not guess the site config.
+  assert.equal(/_site\.md|in the site config/.test(refusal('zh-TW, ko/kr')), false);
+  const siteLayer = () => tagLocalesSource({ locales: 'zh-TW, en-US', brand: 'A' }, 'content/_site.md');
+  // A page that writes its own `locales` owns the merged value; one that does not leaves the site's.
+  const own = { ...siteLayer(), ...tagLocalesSource({ title: 'About', locales: 'zh-TW, ko/kr' }, 'content/about.md') };
+  const plain = { ...siteLayer(), ...tagLocalesSource({ title: 'About' }, 'content/about.md') };
+  assert.equal(localesSourceOf(own), 'content/about.md');
+  assert.equal(localesSourceOf(plain), 'content/_site.md');
+  assert.ok(refusal(own.locales, localesSourceOf(own)).includes('content/about.md'));
+  // …and the tag is not a frontmatter key: nothing that lists or serialises meta sees it.
+  assert.deepEqual(Object.keys(own).sort(), ['brand', 'locales', 'title']);
+  assert.equal(JSON.stringify(own).includes('about.md'), false);
+  assert.equal(localesSourceOf({}), '');
+  assert.equal(localesSourceOf(undefined), '');
+});
+
+test('🔴 a PAGE\'s own bad `locales` is warned about and dropped — it never throws, and never survives the merge', () => {
+  const warned = [];
+  const realWarn = console.warn;
+  console.warn = (m) => warned.push(String(m));
+  try {
+    const site = tagLocalesSource({ locales: 'en-US, zh-TW', brand: 'A' }, 'content/_site.md');
+    const page = { title: 'About', locales: 'en-US, zh​_TW' };
+    const msg = pageLocalesOrWarn(page, 'content/warn-a.md', site);
+    assert.equal(Object.prototype.hasOwnProperty.call(page, 'locales'), false, 'the bad value is still on the page');
+    const merged = { ...site, ...page };
+    assert.deepEqual(parseLocales(merged.locales, localesSourceOf(merged)), ['en-US', 'zh-TW'], 'the page does not fall back to the site\'s list');
+    assert.equal(localesSourceOf(merged), 'content/_site.md');
+    assert.ok(msg.startsWith('sitetile: locales entry "zh\\u{200B}_TW" in content/warn-a.md is not a locale code'), msg);
+    assert.ok(msg.endsWith('This page\'s own `locales:` line is IGNORED: the page uses the site\'s list from content/_site.md.'), msg);
+    assert.equal(msg.includes('​'), false, 'the invisible character itself is in the warning');
+    // Said once per file, however many routes read that file.
+    pageLocalesOrWarn({ locales: 'en-US, zh​_TW' }, 'content/warn-a.md', site);
+    assert.deepEqual(warned, [msg]);
+    // No site list to fall back to: it says that instead, and offers the hyphen form where there is one.
+    const alone = pageLocalesOrWarn({ locales: 'zh_TW' }, 'content/warn-b.md', null);
+    assert.ok(alone.includes('Did you mean "zh-TW"?') && alone.endsWith('the page is treated as declaring none.'), alone);
+    // The control: a good page-level value is kept, tagged with the page, and says nothing.
+    const good = { locales: 'ja-JP、en-US' };
+    assert.equal(pageLocalesOrWarn(good, 'content/warn-c.md', site), null);
+    assert.equal(localesSourceOf({ ...site, ...good }), 'content/warn-c.md');
+    assert.equal(pageLocalesOrWarn({ title: 'x' }, 'content/warn-d.md', site), null);
+    assert.equal(warned.length, 2);
+  } finally { console.warn = realWarn; }
+});
+
+test('🔴 every reader of a meta object\'s `locales` hands the parser that object\'s source', () => {
+  const calls = walk(SRC).filter((p) => !p.endsWith('lingo/locale.mjs')).flatMap((p) =>
+    [...readFileSync(p, 'utf8').matchAll(/parseLocales\(([^()]*(?:\([^()]*\))?[^()]*)\)/g)].map((m) => [relative(SRC, p), m[1]]));
+  assert.ok(calls.length >= 7, `only ${calls.length} parseLocales calls found — the pattern stopped matching`);
+  const bare = calls.filter(([, args]) => !/^\s*(\w+)(?: && \1)?\.locales, localesSourceOf\(\1\)\s*$/.test(args.replace(/lingo\./g, '')));
+  assert.deepEqual(bare, [], 'a parseLocales call that does not pass localesSourceOf(<the same object>)');
+  // The files that READ frontmatter are the ones that know the path, so they are the ones that tag.
+  const page = readFileSync(join(SRC, 'pages/[...path].astro'), 'utf8');
+  for (const [name, text, cfg] of [['[...path].astro', page, 'siteConfig'], ['language.astro', language, 'cfg']]) {
+    assert.ok(text.includes(`if (${cfg} || rel !== 'home') pageLocalesOrWarn(site.meta, \`content/\${rel}.md\`, ${cfg});`), `${name}: a page's own locales is not checked as a page's`);
+    assert.ok(text.includes('else tagLocalesSource(site.meta, `content/${rel}.md`);'), `${name}: the legacy root home is not tagged`);
+  }
+  assert.match(readFileSync(join(SRC, 'lib/blog.mjs'), 'utf8'), /base = tagLocalesSource\(meta, 'content\/_site\.md'\)/);
+});
+
+test('🔴 SiteLayout: "the owner wrote a Language link" is decided on what safeHref accepted', () => {
+  assert.match(layout, /const showLanguageLink = multilingual \|\| \(locales\.length > 0 && !!ownLanguageHref\);/);
+  assert.match(layout, /const ownLanguageHref = meta\['language-href'\] \? \(safeHref\([^\n]*\) \|\| ''\) : '';/);
 });
 
 test('🔴 defaultLocaleOf: the first declared locale, else the caller\'s own fallback', () => {
