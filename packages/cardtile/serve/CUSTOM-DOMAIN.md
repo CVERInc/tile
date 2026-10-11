@@ -52,7 +52,7 @@ which is how the whole path was proven before anyone's DNS moved.
 
 The API, for reference:
 
-- `PUT {host, redirect?}`: `redirect` defaults to `true`. The body says what the binding should be,
+- `PUT {host, redirect?, expect?}`: `redirect` defaults to `true`. The body says what the binding should be,
   so `false` on a redirecting binding turns the redirect off again. Sending the same body twice is
   `changed: false`. Binding a card to a new host releases its old one (one card, one domain), and
   its old redirect too.
@@ -62,14 +62,29 @@ The API, for reference:
     punycode for non-ASCII names, nothing under `feelreef.com`.
   - `400 {"error": "vanity_redirect_invalid"}`: `redirect` must be `true` or `false`.
   - `404 {"error": "card_not_found"}`: bind after the card exists.
-- `GET` → `{handle, host, redirect}`. `host` is `null` unless a visitor to that host would get this card.
-- `DELETE` → removes the binding in either mode.
+  - `409 {"error": "vanity_state_changed"}`: see `expect`; nothing was written.
+- `GET` → `{handle, host, redirect}`. `host` is `null` unless a visitor *at the location that
+  answered* would get this card.
+- `DELETE {expect?}` → removes the binding in either mode.
+- `expect: {host: string|null, redirect: boolean}` (optional, on PUT and DELETE) is the state the
+  caller last read from GET. If the binding no longer looks like that, the call writes nothing and
+  answers `409 vanity_state_changed`. A malformed `expect` is `400 vanity_expect_invalid`.
+
+🔴 **The caller must serialise changes to one host and to one handle.** Cloudflare KV has no atomic
+operation, and a write can take 60 seconds or more to reach other locations. So this API cannot
+decide who owns a domain, and two un-serialised calls can silently take a domain from its card or
+leave a card on two domains. reef's `connect_card_domain` serialises against its own authoritative
+record and sends `expect`; this API is the store-side projection of that decision. GET reflects only
+the reads of the location that answered it, and none of this says whether the domain's DNS reaches us.
 - The store keys and the write order, including why there are three keys, are in `card-vanity.mjs`.
 
 ⚠️ **Superseded:** step 3 used to be "add the host to `VANITY` in card-worker.mjs and deploy". That
 map left the code on 2026-08-12 for store keys (`vanity:<host>`, `vanityof:<handle>`), which were
 then written by hand until this API existed. Neither is needed now. A binding written that way still
-works, and gets the API's record key the next time the API changes it.
+works, and gets the API's record key the next time the API changes it, but **only in the two-key
+shape** (`vanity:<host>` + `vanityof:<handle>`). A hand-written forward key with no reverse key
+cannot be found from the handle: GET reports the card unbound, DELETE cannot remove it, and binding
+the card elsewhere leaves it serving too. Remove such keys by hand before using the API on that card.
 
 ## 🔴 Three things that went wrong the first time
 

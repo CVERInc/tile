@@ -678,13 +678,13 @@ export default {
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     //
-    // 🔴 …and only to a domain that SERVES this card. `vanityof:` alone is not enough. The API's write
-    // order keeps the two halves in step (card-vanity.mjs), but this reader also serves bindings
-    // written by hand before the API existed, and KV propagates each key to each location on its
-    // own clock — so somewhere, for a while, `vanityof:` can name a host whose `vanity:` key is gone.
-    // Following it would 301 every visitor — and every printed QR — to the directory page or to
-    // another creator's card. So the reader checks both halves; the extra read happens only on the
-    // path that was about to redirect.
+    // 🔴 …and only to a domain that SERVES this card, as far as THIS location can tell. `vanityof:`
+    // alone is not enough: bindings written by hand before the API never went through its order, and
+    // a half-finished change leaves `vanityof:` naming a host whose `vanity:` key is gone. Following it
+    // would 301 every visitor — and every printed QR — to the directory page or to another creator's
+    // card. So the reader checks both halves; the extra read happens only on the path that was about to
+    // redirect. 🔴 This is a LOCAL check: KV propagates each key on its own schedule, so the domain's
+    // own location may not serve the card yet even when both keys agree here (card-vanity.mjs).
     const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
     // The name itself is checked too: a hand-written key never went through the API's validator, and
     // an invalid A-label throws inside Response.redirect while a hex-spelled IPv4 redirects to loopback.

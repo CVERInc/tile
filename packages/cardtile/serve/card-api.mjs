@@ -158,8 +158,8 @@ async function writeCard(store, handle, md) {
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
  *   GET    /_api/vanity/<handle>             —             { host|null, redirect } — the card's own domain
- *   PUT    /_api/vanity/<handle>             —             { host, redirect? } → bind it (card-vanity.mjs)
- *   DELETE /_api/vanity/<handle>             —             unbind it
+ *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
+ *   DELETE /_api/vanity/<handle>             —             { expect? } → unbind it
  */
 export async function handleApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;

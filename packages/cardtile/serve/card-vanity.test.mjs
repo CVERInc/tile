@@ -176,9 +176,11 @@ const hostsOf = (store, handle) => [...store._m].filter(([k, v]) => k.startsWith
  *   I2  card.feelreef.com/<h> never sends anyone to a host that does not serve <h>.
  *
  * I2 is checked TWICE, on purpose: in the store (`vanityof:h = X` ⇒ `vanity:X = h`, which the write
- * order now guarantees on its own) and through the worker (which refuses the 301 unless both halves
- * agree — the guard for hand-written and pre-API bindings and for KV's cross-location lag). Either
- * check alone would let the other mechanism rot unnoticed.
+ * order guarantees for ONE serialised caller on a store that shows it its own writes — the only
+ * setting these tests model) and through the worker (which refuses the 301 unless both halves agree
+ * locally — the guard for hand-written bindings). Either check alone would let the other mechanism
+ * rot unnoticed. Concurrency and cross-location staleness are NOT modelled here and NOT claimed: the
+ * caller serialises (card-vanity.mjs, file header).
  */
 const assertInvariants = async (store, handle, label) => {
   assert.ok(hostsOf(store, handle).length <= 1, `${label}: two hosts serve "${handle}": ${hostsOf(store, handle)}`);
@@ -532,6 +534,53 @@ test('🔴 a hand-written vanityof: the API would refuse is never followed — n
     const res = await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' });
     assert.equal(res.status, 200, h);
   }
+});
+
+// ── expect: the caller's view of the binding, checked before anything is written ──
+
+test('🔴 PUT/DELETE with a matching `expect` go ahead; without `expect` they behave as before', async () => {
+  const store = kv({ maple: CARD });
+  let r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect: false, expect: { host: null, redirect: false } });
+  assert.deepEqual(r.body, { handle: 'maple', host: 'creator.example', redirect: false, changed: true });
+  r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect: true, expect: { host: 'creator.example', redirect: false } });
+  assert.equal(r.status, 200);
+  r = await call(store, 'DELETE', 'maple', { expect: { host: 'creator.example', redirect: true } });
+  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: null, changed: true } });
+});
+
+test('🔴 PUT/DELETE whose `expect` no longer matches → 409 vanity_state_changed, nothing written', async () => {
+  const seed = { maple: CARD, ...bound('maple', 'creator.example', { redirect: false }) };
+  const stale = [{ host: null, redirect: false }, { host: 'creator.example', redirect: true }, { host: 'old.example', redirect: false }];
+  for (const expect of stale) {
+    const store = kv(seed);
+    assert.deepEqual(await call(store, 'PUT', 'maple', { host: 'new.example', expect }), { status: 409, body: { error: 'vanity_state_changed' } }, JSON.stringify(expect));
+    assert.deepEqual(await call(store, 'DELETE', 'maple', { expect }), { status: 409, body: { error: 'vanity_state_changed' } }, JSON.stringify(expect));
+    assert.deepEqual(store.ops, []);
+    assert.deepEqual(Object.fromEntries(store._m), seed);
+  }
+});
+
+test('🔴 `expect` is compared with what GET reports — a dangling record is "unbound"', async () => {
+  // A record whose host does not serve the card reads as host:null on GET, so that is what a caller
+  // who just read GET will send.
+  const store = kv({ maple: CARD, 'vanityhost:maple': 'creator.example' });
+  assert.equal((await call(store, 'PUT', 'maple', { host: 'new.example', expect: { host: null, redirect: false } })).status, 200);
+});
+
+test('🔴 a malformed `expect` → 400 vanity_expect_invalid, nothing written', async () => {
+  const store = kv({ maple: CARD });
+  for (const expect of [null, 'creator.example', {}, { host: 'creator.example' }, { redirect: false },
+    { host: 7, redirect: false }, { host: 'creator.example', redirect: 'no' }]) {
+    assert.deepEqual(await call(store, 'PUT', 'maple', { host: 'creator.example', expect }), { status: 400, body: { error: 'vanity_expect_invalid' } }, JSON.stringify(expect));
+    assert.deepEqual(await call(store, 'DELETE', 'maple', { expect }), { status: 400, body: { error: 'vanity_expect_invalid' } }, JSON.stringify(expect));
+  }
+  assert.deepEqual(store.ops, []);
+});
+
+test('🔴 a DELETE with no body, or a body without `expect`, still works', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'creator.example') });
+  assert.equal((await call(store, 'DELETE', 'maple', {})).status, 200);
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD });
 });
 
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
