@@ -663,7 +663,12 @@ export default {
     // by hand never went through the API: `bad\nhandle` or a 楓葉 handle is not a header value, and
     // putting it in X-Card-Handle made `new Response` throw on the creator's own domain. A value
     // outside the grammar is no binding — the host answers as an unbound host does.
-    const storedVanity = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // And the HOST must be one the API could have bound (vanityHost): a hand-written key for
+    // saas.feelreef.com — the SaaS fallback origin every creator domain arrives through — or for an IP
+    // would otherwise turn platform plumbing into one creator's page. Such a host is never looked up;
+    // it keeps its ordinary behaviour (a card by its path), without the header. (CANON_HOST is under
+    // feelreef.com, so vanityHost already refuses it; the explicit test stays as the cheaper read.)
+    const storedVanity = host && host !== CANON_HOST && vanityHost(host) ? await store.get(VANITY_KEY(host)) : null;
     const vanityHandle = storedVanity && VALID_HANDLE.test(storedVanity) ? storedVanity : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});

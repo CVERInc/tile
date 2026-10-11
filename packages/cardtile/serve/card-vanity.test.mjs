@@ -897,6 +897,27 @@ test('🔴 an invalid stored host is flagged whatever its forward key says — a
   assert.deepEqual((await call(store, 'GET', 'maple')).body, { handle: 'maple', host: null, redirect: false });
 });
 
+test('🔴 a forward key for a host the API would refuse is never read — saas.feelreef.com is platform plumbing', async () => {
+  // a hand-written `vanity:saas.feelreef.com` (the SaaS fallback origin) must not turn that host into
+  // one creator's domain: it keeps its ordinary fallback behaviour — any card by its path, no header.
+  const store = kv({ maple: CARD, 'vanity:saas.feelreef.com': 'maple', 'vanity:127.0.0.1': 'maple' });
+  const cases = [
+    ['https://saas.feelreef.com/', 404],
+    ['https://saas.feelreef.com/index.md', 404],
+    ['https://saas.feelreef.com/maple', 200],     // the fallback origin serves a card by path, as before
+    ['https://saas.feelreef.com/maple.md', 200],
+    ['https://127.0.0.1/', 404],
+  ];
+  for (const [href, status] of cases) {
+    const res = await visit(store, href, asBrowser);
+    assert.equal(res.status, status, href);
+    assert.equal(res.headers.get('x-card-handle'), null, href);
+  }
+  // CONTROL: the same card on a valid creator host is bound and named
+  const ok = kv({ maple: CARD, 'vanity:creator.example': 'maple' });
+  assert.equal((await visit(ok, 'https://creator.example/index.md')).headers.get('x-card-handle'), 'maple');
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
