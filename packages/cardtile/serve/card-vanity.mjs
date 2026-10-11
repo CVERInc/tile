@@ -194,7 +194,11 @@ function parseExpect(obj) {
  * destination will answer.
  */
 export async function handleVanity({ method, handle, store, readJson }) {
+  // 🔴 A card EXISTS exactly when the worker would serve it: a non-empty stored value. The worker reads
+  // `if (!cardMd)` — an empty string is "no card" there — so an empty value here must not let the API
+  // bind a domain, or report one, that every visitor gets a 404 on.
   const card = await store.get(handle);
+  const cardExists = typeof card === 'string' && card.length > 0;
 
   // which host this card is bound to, if any, and whether that host actually serves it.
   // The record first; a binding made before the record existed has only vanityof:.
@@ -219,6 +223,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
   // reported as unbound, with `invalid_host: true` so the caller knows there is something to clean —
   // a DELETE, or a PUT to a valid host, removes it. `expect` compares against this same view.
   const current = async () => {
+    if (!cardExists) return { host: null, redirect: false };   // nothing is served for a card that is not there
     const host = await recorded();
     if (host === null) return { host: null, redirect: false };
     // the record is judged FIRST, whatever its forward key says: an invalid stored host is something
@@ -236,7 +241,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
   };
 
   if (method === 'GET') {
-    if (card == null) return out(404, { error: 'card_not_found' });
+    if (!cardExists) return out(404, { error: 'card_not_found' });
     return out(200, { handle, ...(await current()) });
   }
 
@@ -249,7 +254,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
     const redirect = obj.redirect !== false;
     const expect = parseExpect(obj);
     if (expect === INVALID) return out(400, { error: 'vanity_expect_invalid' });
-    if (card == null) return out(404, { error: 'card_not_found' });
+    if (!cardExists) return out(404, { error: 'card_not_found' });
     if (await stale(expect)) return out(409, { error: 'vanity_state_changed' });
 
     const holder = await store.get(vanityKey(host));

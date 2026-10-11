@@ -937,6 +937,30 @@ test('🔴 an EMPTY stored record is an invalid host, not a missing one — GET 
   assert.deepEqual((await call(none, 'DELETE', 'maple')).body, { handle: 'maple', host: null, changed: false });
 });
 
+// ── stored data that contradicts itself ──
+
+test('🔴 an EMPTY card value is no card — the worker\'s meaning: PUT 404s, GET 404s, nothing claims a binding', async () => {
+  const store = kv({ sample: '' });
+  assert.deepEqual(await call(store, 'PUT', 'sample', { host: 'creator.example', redirect: false }), { status: 404, body: { error: 'card_not_found' } });
+  assert.deepEqual(await call(store, 'GET', 'sample'), { status: 404, body: { error: 'card_not_found' } });
+  assert.deepEqual(store.ops, []);
+  assert.equal((await visit(store, 'https://creator.example/')).status, 404);
+});
+
+test('🔴 DELETE {host} for a card that is gone: a stray still goes, and the answer never claims a binding', async () => {
+  // a stray naming a vanished card is exactly what a 409 held_by points the caller at — so cleaning it
+  // must not need the card, as the plain DELETE never has. What the answer must not do is call the
+  // card's recorded host "bound": no visitor can get a card that does not exist.
+  const live = { 'vanityhost:sample': 'real.example', 'vanity:real.example': 'sample' };
+  const store = kv({ ...live, 'vanity:stray.example': 'sample' });
+  assert.deepEqual(await call(store, 'DELETE', 'sample', { host: 'stray.example' }),
+    { status: 200, body: { handle: 'sample', host: null, changed: true, orphan_removed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), live);
+  const empty = kv({ sample: '', ...live });
+  assert.deepEqual(await call(empty, 'DELETE', 'sample', { host: 'nothing.example' }),
+    { status: 200, body: { handle: 'sample', host: null, changed: false, orphan_removed: false } });
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
