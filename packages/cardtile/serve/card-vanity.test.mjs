@@ -362,8 +362,8 @@ test('🔴 held_by is the raw holder of vanity:<host> — even when that card\'s
   const store = kv({ alpha: CARD, beta: OTHER, 'vanity:stray.example': 'alpha' });
   assert.deepEqual((await call(store, 'GET', 'alpha')).body, { handle: 'alpha', host: null, redirect: false });
   assert.deepEqual(await call(store, 'PUT', 'beta', { host: 'stray.example' }), { status: 409, body: { error: 'vanity_taken', held_by: 'alpha' } });
-  // 🔴 …and DELETE alpha cannot remove it: DELETE finds a card's host through the card's own record,
-  // and there is none. That is the documented forward-only limit, asserted so it cannot change quietly.
+  // 🔴 …and the PLAIN DELETE alpha cannot remove it: it finds a card's host through the card's own
+  // record, and there is none. Asserted so it cannot change quietly; `DELETE {host}` is the way (below).
   assert.deepEqual(await call(store, 'DELETE', 'alpha', { expect: { host: null, redirect: false } }),
     { status: 200, body: { handle: 'alpha', host: null, changed: false } });
   assert.equal(store._m.get('vanity:stray.example'), 'alpha');
@@ -494,6 +494,83 @@ test('🔴 DELETE: `vanity:<host>` is removed only while it still points at this
   assert.equal(store._m.get('vanity:old.example'), 'other');
   assert.equal(store._m.has('vanityof:maple'), false);
   assert.equal(store._m.has('vanityhost:maple'), false);
+});
+
+// ── DELETE {host}: the orphan forward key ──
+
+test('🔴 DELETE {host}: a forward-only stray (hand-written) is removed, and the host is then free for another card', async () => {
+  const store = kv({ alpha: CARD, beta: OTHER, 'vanity:stray.example': 'alpha' });
+  const r = await call(store, 'DELETE', 'alpha', { host: 'stray.example', expect: { host: null, redirect: false } });
+  assert.deepEqual(r, { status: 200, body: { handle: 'alpha', host: null, changed: true, orphan_removed: true } });
+  assert.deepEqual(store.ops, ['delete vanity:stray.example']);
+  assert.deepEqual(await call(store, 'PUT', 'beta', { host: 'stray.example' }),
+    { status: 200, body: { handle: 'beta', host: 'stray.example', redirect: true, changed: true } });
+});
+
+test('🔴 DELETE {host}: a stray left behind when the card was rebound elsewhere goes; the card\'s real binding stays', async () => {
+  const live = bound('alpha', 'home.example');
+  const store = kv({ alpha: CARD, ...live, 'vanity:stray.example': 'alpha' });
+  const r = await call(store, 'DELETE', 'alpha', { host: 'stray.example', expect: { host: 'home.example', redirect: true } });
+  assert.deepEqual(r, { status: 200, body: { handle: 'alpha', host: 'home.example', changed: true, orphan_removed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), { alpha: CARD, ...live });
+  assert.equal((await visit(store, 'https://home.example/')).status, 200);
+  assert.equal((await visit(store, 'https://stray.example/')).status, 404);
+});
+
+test('🔴 DELETE {host}: the card\'s OWN host removes the whole binding in the usual order — not an orphan', async () => {
+  for (const redirect of [true, false]) {
+    const store = kv({ alpha: CARD, ...bound('alpha', 'home.example', { redirect }) });
+    const r = await call(store, 'DELETE', 'alpha', { host: 'home.example' });
+    assert.deepEqual(r, { status: 200, body: { handle: 'alpha', host: null, changed: true, orphan_removed: false } });
+    assert.deepEqual(Object.fromEntries(store._m), { alpha: CARD });
+  }
+});
+
+test('🔴 DELETE {host}: a host held by ANOTHER card → 409 vanity_taken + held_by, nothing deleted', async () => {
+  const seed = { alpha: CARD, beta: OTHER, ...bound('alpha', 'home.example'), ...bound('beta', 'b.example') };
+  const store = kv(seed);
+  assert.deepEqual(await call(store, 'DELETE', 'alpha', { host: 'b.example' }),
+    { status: 409, body: { error: 'vanity_taken', held_by: 'beta' } });
+  assert.deepEqual(store.ops, []);
+  assert.deepEqual(Object.fromEntries(store._m), seed);
+});
+
+test('DELETE {host}: nothing at that host → changed:false, orphan_removed:false, zero writes', async () => {
+  const store = kv({ alpha: CARD, ...bound('alpha', 'home.example') });
+  assert.deepEqual(await call(store, 'DELETE', 'alpha', { host: 'empty.example' }),
+    { status: 200, body: { handle: 'alpha', host: 'home.example', changed: false, orphan_removed: false } });
+  assert.deepEqual(store.ops, []);
+});
+
+test('🔴 DELETE {host}: a bad host → 400 vanity_host_invalid; a stale expect → 409; nothing deleted either way', async () => {
+  const seed = { alpha: CARD, 'vanity:stray.example': 'alpha' };
+  for (const host of ['Stray.example', 'stray.example:443', 'card.feelreef.com', '127.0x1', 'xn--a.example', 7, null, '']) {
+    const store = kv(seed);
+    assert.deepEqual(await call(store, 'DELETE', 'alpha', { host }), { status: 400, body: { error: 'vanity_host_invalid' } }, JSON.stringify(host));
+    assert.deepEqual(store.ops, []);
+  }
+  const store = kv(seed);
+  assert.deepEqual(await call(store, 'DELETE', 'alpha', { host: 'stray.example', expect: { host: 'home.example', redirect: true } }),
+    { status: 409, body: { error: 'vanity_state_changed' } });
+  assert.deepEqual(store.ops, []);
+});
+
+test('🔴 DELETE {host}: a Worker that dies at any write leaves no forbidden state, and the same call finishes', async () => {
+  // the card's own host: the usual multi-write removal, killed before every write
+  await crashEveryStep({ alpha: CARD, ...bound('alpha', 'home.example') },
+    (s) => call(s, 'DELETE', 'alpha', { host: 'home.example' }), { alpha: CARD }, 'alpha');
+  // an orphan: ONE write. The starting state already breaks I1 (that stray is the defect being
+  // removed), so the crash loop's invariant check does not apply; what must hold is that a death
+  // changes nothing and the same call then finishes.
+  const live = bound('alpha', 'home.example');
+  const seed = { alpha: CARD, ...live, 'vanity:stray.example': 'alpha' };
+  const dying = kv(seed, { failAt: 1 });
+  await assert.rejects(call(dying, 'DELETE', 'alpha', { host: 'stray.example' }), /injected failure/);
+  assert.deepEqual(Object.fromEntries(dying._m), seed);
+  const healthy = kv(Object.fromEntries(dying._m));
+  assert.equal((await call(healthy, 'DELETE', 'alpha', { host: 'stray.example' })).status, 200);
+  assert.deepEqual(Object.fromEntries(healthy._m), { alpha: CARD, ...live });
+  await assertInvariants(healthy, 'alpha', 'after the orphan is gone');
 });
 
 test('DELETE: a binding whose card is gone can still be removed — cleanup never needs the card', async () => {

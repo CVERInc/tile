@@ -39,8 +39,8 @@
 //
 // Compatibility with bindings written by hand before this API covers the two-key shape only
 // (`vanity:<host>` + `vanityof:<handle>`). A forward-only key (`vanity:<host>` with no reverse key)
-// cannot be found from the handle: GET reports it as unbound, DELETE cannot remove it, and binding
-// that card elsewhere leaves it serving. Those must be cleaned up by hand.
+// cannot be found from the handle: GET reports it as unbound, the plain DELETE cannot remove it, and
+// binding that card elsewhere leaves it serving. `DELETE {host}` removes it BY NAME (handleVanity).
 //
 // …and until this file nothing in the product could WRITE them: binding a domain was a hand-run
 // store write. That made the step CUSTOM-DOMAIN.md marks 🔴 ("adding the host is a step, not an
@@ -126,7 +126,9 @@ function parseExpect(obj) {
  *   PUT     {host, redirect?=true, expect?} → 200 {handle, host, redirect, changed}
  *           400 vanity_host_invalid · 400 vanity_redirect_invalid · 400 vanity_expect_invalid
  *           404 card_not_found · 409 vanity_state_changed · 409 {vanity_taken, held_by} · 503 vanity_unconfirmed
- *   DELETE  {expect?} → 200 {handle, host:null, changed}  400 vanity_expect_invalid · 409 vanity_state_changed
+ *   DELETE  {expect?, host?} → 200 {handle, host:null, changed}
+ *           with `host`: 200 {handle, host: <the card's binding, as GET reports it>|null, changed, orphan_removed}
+ *           400 vanity_expect_invalid · 400 vanity_host_invalid · 409 vanity_state_changed · 409 {vanity_taken, held_by}
  *
  * `expect` is `{host: string|null, redirect: boolean}` — exactly what GET returned. When present and
  * this location's current binding differs, the call writes nothing and answers 409
@@ -247,7 +249,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
     //
     // `held_by` is the raw value of `vanity:<host>` — the key that decides what visitors get — even
     // when the holder's own GET does not report this host (a forward key with no record behind it).
-    // DELETE on the holder cannot remove such a key; see the forward-only note in the file header.
+    // The plain DELETE on the holder cannot reach such a key; `DELETE {host}` on the holder can.
     if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
 
     let record = await store.get(vanityHostKey(handle));
@@ -292,15 +294,39 @@ export async function handleVanity({ method, handle, store, readJson }) {
     const body = await readJson();
     const expect = parseExpect(body && typeof body === 'object' ? body : {});
     if (expect === INVALID) return out(400, { error: 'vanity_expect_invalid' });
+    // `host` (optional): a forward key to remove by NAME. Validated like a PUT's host.
+    const named = body && typeof body === 'object' && 'host' in body ? vanityHost(body.host) : undefined;
+    if (named === null) return out(400, { error: 'vanity_host_invalid' });
     if (await stale(expect)) return out(409, { error: 'vanity_state_changed' });
     let record = await store.get(vanityHostKey(handle));
     const own = await store.get(vanityOfKey(handle));
-    if (!record && !own) return out(200, { handle, host: null, changed: false });
+
+    // ── DELETE {host} where host is NOT this card's own binding: the orphan forward key ──────────
+    //
+    // `vanity:<host>` saying this handle with nothing of this card's pointing back at it: a key
+    // written by hand, or an API write that landed late after the card had been rebound elsewhere.
+    // The plain DELETE cannot find it (it reaches a host through the card's own record), and a 409
+    // vanity_taken names this card as its holder (`held_by`), so this is how the caller converges.
+    // Exactly one write, and only while the key still names THIS card; the card's real binding,
+    // record and redirect are not touched — they belong to another host.
+    if (named && (record || own) !== named) {
+      const holder = await store.get(vanityKey(named));
+      if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
+      if (holder === handle) await store.delete(vanityKey(named));
+      return out(200, { handle, host: (await current()).host, changed: holder === handle, orphan_removed: holder === handle });
+    }
+    if (named) {
+      // the card's own host, named: the ordinary removal below, unless another card holds the key
+      const holder = await store.get(vanityKey(named));
+      if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
+    }
+    const done = (changed) => out(200, { handle, host: null, changed, ...(named ? { orphan_removed: false } : {}) });
+    if (!record && !own) return done(false);
     if (!record) { await store.put(vanityHostKey(handle), own); record = own; }
     if (own != null) await store.delete(vanityOfKey(handle));
     if ((await store.get(vanityKey(record))) === handle) await store.delete(vanityKey(record));
     await store.delete(vanityHostKey(handle));
-    return out(200, { handle, host: null, changed: true });
+    return done(true);
   }
 
   return out(405, { error: 'method_not_allowed' });
