@@ -425,7 +425,18 @@ export default {
     // it after resolveHandle would mean `<a-creator's-domain>/_api/card/<someone-else>` resolved the
     // vanity to the FIRST creator and then ignored it, which is not wrong so much as it is a second idea of what a
     // hostname means. One door, one host-independent path.
-    const api = await handleApi(request, env, url);
+    //
+    // 🔴 And nothing thrown inside it leaves the Worker as an exception or as its own message: an
+    // API caller gets a plain 500 with a code. The message could carry store or configuration detail,
+    // and an uncaught exception is the platform's error page instead of an answer.
+    let api;
+    try {
+      api = await handleApi(request, env, url);
+    } catch {
+      return new Response(JSON.stringify({ error: 'internal_error' }), {
+        status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
     if (api) return api;
 
     // The sandbox editor's own vendored Sortable.min.js — see canvasHtml()'s SORTABLE_SRC override

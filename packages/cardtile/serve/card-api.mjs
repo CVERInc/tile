@@ -193,7 +193,11 @@ export async function handleApi(request, env, url) {
     const handles = Array.isArray(body.handles) ? body.handles.slice(0, 200) : [];
     const out = [];
     for (const h of handles) {
-      const handle = String(h || '').trim().toLowerCase();
+      // 🔴 typeof first: String(x) calls x.toString, and JSON can deliver `{"toString":null}`, which
+      // makes String() throw. A non-string entry is skipped, like any other entry that is not a
+      // handle — this endpoint has always answered for the valid part of a list rather than failing it.
+      if (typeof h !== 'string') continue;
+      const handle = h.trim().toLowerCase();
       if (!VALID_HANDLE.test(handle)) continue;
       const row = await readCard(store, handle);
       if (!row) continue;
@@ -215,7 +219,7 @@ export async function handleApi(request, env, url) {
   // its pictures would be answering a different question than the one the agent asked.
   if (rest === 'preview' && method === 'POST') {
     const body = (await readJson(request)) || {};
-    const handle = String(body.handle || '').trim().toLowerCase();
+    const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(body.handle)}.` }, 400);
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
     const current = await readCard(store, handle);
@@ -280,10 +284,13 @@ export async function handleApi(request, env, url) {
 
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
-      const b64 = String(body.base64 || '').replace(/\s+/g, '');
+      // typeof, never String(): see list_cards. A present but non-string value is refused, not coerced.
+      if (body.base64 != null && typeof body.base64 !== 'string') return json({ error: '`base64` is not base64.' }, 400);
+      if (body.mime != null && typeof body.mime !== 'string') return json({ error: '`mime` must be a string.' }, 400);
+      const b64 = (body.base64 || '').replace(/\s+/g, '');
       if (!b64) return json({ error: 'put_asset needs `base64`.' }, 400);
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return json({ error: '`base64` is not base64.' }, 400);
-      model.assets = { ...model.assets, [id]: { mime: String(body.mime || 'image/webp'), b64 } };
+      model.assets = { ...model.assets, [id]: { mime: body.mime || 'image/webp', b64 } };
       const md = serializeCard(model);
       if (md.length > KV_MAX_BYTES) {
         return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
@@ -342,6 +349,10 @@ export async function handleApi(request, env, url) {
       const body = (await readJson(request)) || {};
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
         return json({ error: 'save_card needs `markdown` — refusing to write an empty card.' }, 400);
+      }
+      // typeof, never String(): see list_cards. checkBaseVersion stringifies what it is given.
+      if (body.base_version != null && body.base_version !== '' && typeof body.base_version !== 'string') {
+        return json({ error: '`base_version` must be a string — the version you read.' }, 400);
       }
       const current = await readCard(store, handle);
 

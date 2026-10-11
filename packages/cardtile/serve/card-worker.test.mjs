@@ -1153,3 +1153,18 @@ test('🔴 /_icon/ with broken percent-encoding is a 400, never an exception', a
     assert.equal(res.status, 400, bad);
   }
 });
+
+test('🔴 an exception inside the API becomes a plain 500 — and its message never reaches the caller', async () => {
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('s3cret')))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  const store = { get: async () => { throw new Error('internal detail: namespace 1234'); } };
+  let res;
+  await assert.doesNotReject(async () => {
+    res = await worker.fetch(new Request('https://card.feelreef.com/_api/card/t', { headers: { authorization: 'Bearer s3cret' } }),
+      { CARDS: store, MCP_TOKEN_HASH: hash });
+  });
+  assert.equal(res.status, 500);
+  const body = await res.text();
+  assert.doesNotMatch(body, /internal detail|1234/);
+  assert.deepEqual(JSON.parse(body), { error: 'internal_error' });
+});
