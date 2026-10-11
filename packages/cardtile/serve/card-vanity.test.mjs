@@ -674,6 +674,41 @@ test('🔴 X-Card-Handle on the markdown exits: /index.md, /<handle>.md and Acce
   assert.equal(foreign.headers.get('x-card-handle'), null);
 });
 
+// ── a stored host the validator would refuse ──
+
+test('🔴 GET does not report a stored host the API would refuse — it says host:null and invalid_host:true', async () => {
+  for (const bad of ['xn--a.example', '127.0x1']) {
+    for (const seed of [
+      { 'vanityhost:maple': bad, 'vanityof:maple': bad, [`vanity:${bad}`]: 'maple' },   // API shape
+      { 'vanityof:maple': bad, [`vanity:${bad}`]: 'maple' },                              // two-key legacy shape
+    ]) {
+      const store = kv({ maple: CARD, ...seed });
+      assert.deepEqual(await call(store, 'GET', 'maple'),
+        { status: 200, body: { handle: 'maple', host: null, redirect: false, invalid_host: true } }, `${bad} ${Object.keys(seed)}`);
+      assert.deepEqual(store.ops, []);
+    }
+  }
+  // CONTROL: a valid stored host is reported, and carries no invalid_host field at all
+  const ok = kv({ maple: CARD, ...bound('maple', 'creator.example') });
+  assert.deepEqual((await call(ok, 'GET', 'maple')).body, { handle: 'maple', host: 'creator.example', redirect: true });
+});
+
+test('🔴 an invalid stored host is cleaned by DELETE and by a PUT elsewhere, with expect taken from GET', async () => {
+  for (const bad of ['xn--a.example', '127.0x1']) {
+    const seed = { maple: CARD, 'vanityof:maple': bad, [`vanity:${bad}`]: 'maple' };
+    const expect = { host: null, redirect: false };   // what GET said
+    const del = kv(seed);
+    assert.deepEqual(await call(del, 'DELETE', 'maple', { expect }), { status: 200, body: { handle: 'maple', host: null, changed: true } }, bad);
+    assert.deepEqual(Object.fromEntries(del._m), { maple: CARD }, bad);
+    const put = kv(seed);
+    assert.equal((await call(put, 'PUT', 'maple', { host: 'creator.example', expect })).status, 200, bad);
+    assert.deepEqual(Object.fromEntries(put._m), { maple: CARD, ...bound('maple', 'creator.example') }, bad);
+    // and expect that names the bad host as if it were bound is stale: GET never said that
+    assert.deepEqual(await call(kv(seed), 'PUT', 'maple', { host: 'creator.example', expect: { host: bad, redirect: true } }),
+      { status: 409, body: { error: 'vanity_state_changed' } }, bad);
+  }
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.

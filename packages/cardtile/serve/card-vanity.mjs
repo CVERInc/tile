@@ -121,7 +121,7 @@ function parseExpect(obj) {
  * handleVanity: one `/_api/vanity/<handle>` call → { status, body }. card-api.mjs owns the door (the
  * bearer, the handle grammar, the JSON response); this owns the keys.
  *
- *   GET     → 200 {handle, host|null, redirect}          404 card_not_found
+ *   GET     → 200 {handle, host|null, redirect, invalid_host?: true}   404 card_not_found
  *   PUT     {host, redirect?=true, expect?} → 200 {handle, host, redirect, changed}
  *           400 vanity_host_invalid · 400 vanity_redirect_invalid · 400 vanity_expect_invalid
  *           404 card_not_found · 409 vanity_state_changed · 409 vanity_taken · 503 vanity_unconfirmed
@@ -189,9 +189,16 @@ export async function handleVanity({ method, handle, store, readJson }) {
 
   // the binding as GET reports it. 🔴 A host is reported only if THIS location's store says it serves
   // this card — a record left by a lost race or a dead Worker is not a binding.
+  //
+  // 🔴 …and only if the host is one the API would accept. A key written before the validator existed
+  // (`xn--a.example` is not a URL; `127.0x1` IS one, but its hostname is 127.0.0.1, under which no key
+  // exists) can agree with itself in the store and still never be served to anyone. Such a binding is
+  // reported as unbound, with `invalid_host: true` so the caller knows there is something to clean —
+  // a DELETE, or a PUT to a valid host, removes it. `expect` compares against this same view.
   const current = async () => {
     const host = await recorded();
     if (!host || (await store.get(vanityKey(host))) !== handle) return { host: null, redirect: false };
+    if (!vanityHost(host)) return { host: null, redirect: false, invalid_host: true };
     return { host, redirect: (await store.get(vanityOfKey(handle))) === host };
   };
   // `expect` given and no longer true ⇒ the caller decided on a state that has since changed.

@@ -68,7 +68,9 @@ The API, for reference:
   - `404 {"error": "card_not_found"}`: bind after the card exists.
   - `409 {"error": "vanity_state_changed"}`: see `expect`; nothing was written.
 - `GET` → `{handle, host, redirect}`. `host` is `null` unless a visitor *at the location that
-  answered* would get this card.
+  answered* would get this card. A stored host the API would refuse today (one written by hand
+  before the validator, such as an invalid punycode name or a hex-spelled IPv4) is reported as
+  `host: null` with `invalid_host: true`; `DELETE`, or a `PUT` to a valid host, cleans it up.
 - `DELETE {expect?}` → removes the binding in either mode.
 - `expect: {host: string|null, redirect: boolean}` (optional, on PUT and DELETE) is the state the
   caller last read from GET. If the binding no longer looks like that, the call writes nothing and
