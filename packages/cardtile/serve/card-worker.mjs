@@ -640,7 +640,15 @@ export default {
     // 🔴 The two markdown exits are NOT one call with a default. A backup taken over the thin exit
     // is 99.7% missing on a real card, and what is missing is the pictures — the part nobody can
     // retype. A parameter with a default is a thing somebody forgets; two paths are not.
-    const host = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    //
+    // 🔴 The domain asked for is the request URL's, never a `Host` header that disagrees with it. On
+    // Cloudflare the two are the same, so production is unchanged; but this line used to prefer the
+    // header, and since X-Card-Handle is a promise about WHICH domain is serving which card (reef's
+    // connection probe reads it), the identity of the domain must come from the one authority, not
+    // from a header a test harness or a proxy can set independently of the URL. Ignored rather than
+    // refused: a mismatch has no legitimate meaning here, and local tools that rewrite one side must
+    // not turn every request into an error. (`hostname` is already lowercase and port-free.)
+    const host = url.hostname;
     const md = /^(.*)\.md$/.exec(url.pathname);
 
     // CARDS store: handle → card.md, plus the vanity bindings. Missing binding (local/misconfig) is

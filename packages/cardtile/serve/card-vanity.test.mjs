@@ -627,6 +627,53 @@ test('🔴 X-Card-Handle is absent wherever the domain is NOT serving a card thr
   assert.equal((await visit(store, 'https://creator.example/', asBrowser)).headers.get('x-card-handle'), 'maple');
 });
 
+test('🔴 the URL decides which domain was asked for — a disagreeing Host header is ignored', async () => {
+  const store = kv({ alpha: CARD, beta: OTHER, ...bound('alpha', 'a.example'), ...bound('beta', 'b.example') });
+  // canonical URL, a vanity Host header: still the canonical directory, and no card claims it
+  const canon = await visit(store, 'https://card.feelreef.com/', { headers: { host: 'a.example', accept: 'text/html' } });
+  assert.equal(canon.status, 404);
+  assert.equal(canon.headers.get('x-card-handle'), null);
+  // one vanity URL, another vanity Host header: the URL's card, and the URL's card's name
+  const a = await visit(store, 'https://a.example/', { headers: { host: 'b.example', accept: 'text/html' } });
+  assert.equal(a.status, 200);
+  assert.equal(a.headers.get('x-card-handle'), 'alpha');
+  assert.match(await a.text(), /Maple Bindery/);
+  // CONTROL: without the stray header, the same two requests answer the same way
+  assert.equal((await visit(store, 'https://card.feelreef.com/', asBrowser)).status, 404);
+  assert.equal((await visit(store, 'https://a.example/', asBrowser)).headers.get('x-card-handle'), 'alpha');
+});
+
+test('🔴 X-Card-Handle on the markdown exits: /index.md, /<handle>.md and Accept: text/markdown name the card they carry', async () => {
+  const store = kv({ maple: CARD, other: OTHER, ...bound('maple', 'creator.example', { redirect: false }), ...bound('other', 'other.example', { redirect: false }) });
+  const exits = [
+    ['/index.md', {}],
+    ['/maple.md', {}],
+    ['/', { headers: { accept: 'text/markdown' } }],
+  ];
+  for (const [path, init] of exits) {
+    const res = await visit(store, `https://creator.example${path}`, init);
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get('content-type'), /text\/markdown/, path);
+    assert.equal(res.headers.get('x-card-handle'), 'maple', path);
+    assert.match(await res.text(), /Maple Bindery/, path);
+  }
+  // another card's own domain names THAT card on the same exits
+  for (const [path, init] of [['/index.md', {}], ['/', { headers: { accept: 'text/markdown' } }]]) {
+    const res = await visit(store, `https://other.example${path}`, init);
+    assert.equal(res.headers.get('x-card-handle'), 'other', path);
+    assert.match(await res.text(), /Somebody Else/, path);
+  }
+  // canonical markdown exits carry no header — the card was not reached through a domain
+  for (const [path, init] of [['/maple.md', {}], ['/maple', { headers: { accept: 'text/markdown' } }]]) {
+    const res = await visit(store, `https://card.feelreef.com${path}`, init);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('x-card-handle'), null, path);
+  }
+  // and asking maple's domain for another handle's file is not that card
+  const foreign = await visit(store, 'https://creator.example/other.md');
+  assert.equal(foreign.headers.get('x-card-handle'), null);
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
