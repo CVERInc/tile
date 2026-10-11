@@ -65,8 +65,11 @@ The API, for reference:
   serialising caller's. Binding a card to a new host releases its old one (one card, one domain), and
   its old redirect too.
   - `200 {handle, host, redirect, changed}`
-  - `409 {"error": "vanity_taken", "held_by": "<handle>"}`: that host already serves another card,
-    named in `held_by` (the raw holder of `vanity:<host>`). Nothing was written **if the host was
+  - `409 {"error": "vanity_taken", "held_by": "<value>"}`: that host is held by another value of
+    `vanity:<host>`, given raw in `held_by`. 🔴 Raw means it may not be a card at all: a hand-written
+    key can hold an empty string or a value outside the handle grammar. The worker treats such a
+    value as no binding (the domain shows the directory), but the API still counts the host as
+    taken. Such a `held_by` is not a handle you can call; the key needs a person to remove it in KV. Nothing was written **if the host was
     already taken when the call began**. If instead it was lost *during* the call (the read-back after
     writing `vanity:<host>` found another card), some changes may already have happened: an old
     binding released, the redirect withdrawn, the record dropped. Re-read `GET` and reconcile. Only bearer holders

@@ -997,6 +997,16 @@ test('🔴 record and reverse key disagree ⇒ PUT and DELETE (plain or {host}) 
   }
 });
 
+test('🔴 held_by is RAW: a forward value that is no handle is still returned as-is, and still blocks the host', async () => {
+  // documented: such a holder is not callable and needs a person — the API does not overwrite it.
+  for (const raw of ['', 'bad\nhandle', '楓葉']) {
+    const store = kv({ maple: CARD, 'vanity:creator.example': raw });
+    assert.deepEqual(await call(store, 'PUT', 'maple', { host: 'creator.example' }),
+      { status: 409, body: { error: 'vanity_taken', held_by: raw } }, JSON.stringify(raw));
+    assert.deepEqual(store.ops, []);
+  }
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
