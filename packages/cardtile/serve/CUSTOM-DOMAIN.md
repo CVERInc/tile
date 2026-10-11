@@ -37,7 +37,22 @@ which is how the whole path was proven before anyone's DNS moved.
    moves, so the switch has no TLS gap.
    🔴 `status` stays `pending` with *"custom hostname does not CNAME to this zone"* the whole time.
    That is not a failure — the hostname only goes `active` once DNS actually points here.
-3. 🔴 **Add the host to `VANITY` in card-worker.mjs, and deploy.** See below.
+3. 🔴 **Bind the host to the card: `PUT /_api/vanity/<handle>` with `{"host": "<their-domain>"}`**
+   (or the reef tool that calls it). Same bearer as the rest of `/_api/`; no deploy. See below.
+   - `200 {handle, host, changed}` — bound; sending the same call again is `changed: false`.
+   - `409 {"error": "vanity_taken"}` — that host already belongs to another card; nothing was written.
+   - `400 {"error": "vanity_host_invalid"}` — lowercase hostname only: no port, path or scheme,
+     punycode for non-ASCII names, nothing under `feelreef.com`.
+   - `404 {"error": "card_not_found"}` — bind after the card exists.
+   - `GET` the same path reads the binding back; `DELETE` removes it. Binding a card to a new host
+     releases its old one — one card, one domain. The write order is in `card-vanity.mjs`.
+
+   Do it right before step 4. From this call on, `card.feelreef.com/<handle>` 301s to their domain,
+   so bound-but-not-pointed sends that URL to whatever their domain served before.
+
+   ⚠️ **Superseded:** this step used to be "add the host to `VANITY` in card-worker.mjs and deploy".
+   That map left the code on 2026-08-12 for two store keys (`vanity:<host>`, `vanityof:<handle>`),
+   which were then written by hand to the store until this API existed. Neither is needed now.
 4. The creator points their apex at `saas.feelreef.com`, **proxied** — the same shape as whatever
    CNAME they had before.
 
@@ -46,7 +61,8 @@ which is how the whole path was proven before anyone's DNS moved.
 **The apex 404'd on a working path.** Everything above was correct and `<their-domain>/<handle>`
 returned 200 — but `<their-domain>/` returned the *directory* page, because `resolveHandle` found no
 entry and no path segment. The plumbing was perfect and nothing pointed her home page at her card.
-**Adding the host to `VANITY` is a step, not an afterthought.**
+**Binding the host (step 3) is a step, not an afterthought** — at the time it was a code change, now
+it is one API call, and skipping it still produces exactly this.
 
 **`www` proxied to `pages.dev` is banned.** A creator's `www` pointing at one of our Pages projects
 must be **DNS only**. Orange-cloud CNAME across accounts returns **error 1014, CNAME Cross-User
