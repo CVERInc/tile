@@ -74,9 +74,12 @@ test('vanityHost: anything that is not a string is refused', () => {
   for (const h of [undefined, null, 42, {}, ['creator.example']]) assert.equal(vanity.vanityHost(h), null);
 });
 
-test('the two store keys are the ones the worker reads', () => {
+test('the two store keys are the ones the worker reads, and the record key is not one of them', () => {
   assert.equal(vanity.vanityKey('creator.example'), 'vanity:creator.example');
   assert.equal(vanity.vanityOfKey('maple'), 'vanityof:maple');
+  assert.equal(vanity.vanityHostKey('maple'), 'vanityhost:maple');
+  // `:` is outside the handle grammar, so none of the three can ever shadow a card's own key
+  assert.ok(!vanity.vanityHostKey('maple').startsWith('vanity:'), 'the record would be read as a host binding');
 });
 
 // ── the API: /_api/vanity/<handle> ───────────────────────────────────────────────────────────────
@@ -142,15 +145,18 @@ const hostsOf = (store, handle) => [...store._m].filter(([k, v]) => k.startsWith
 /**
  * The two states a half-finished write must never leave, checked on whatever the store holds now:
  *
- *   I1  at most ONE host serves a card — read off the store: two `vanity:*` keys naming it.
- *   I2  card.feelreef.com/<h> never sends anyone to a host that does not serve <h> — read off the
- *       WORKER, because that is where it is enforced. 🔴 Not off the store: card-vanity.mjs shows no
- *       single-key write order can keep `vanityof:` and `vanity:` in step AND stay retryable, so a
- *       dangling `vanityof:` exists for one store call during a rebind. What must hold is that no
- *       visitor is ever redirected by it — the worker checks both halves before it 301s.
+ *   I1  at most ONE host serves a card — two `vanity:*` keys naming it.
+ *   I2  card.feelreef.com/<h> never sends anyone to a host that does not serve <h>.
+ *
+ * I2 is checked TWICE, on purpose: in the store (`vanityof:h = X` ⇒ `vanity:X = h`, which the write
+ * order now guarantees on its own) and through the worker (which refuses the 301 unless both halves
+ * agree — the guard for hand-written and pre-API bindings and for KV's cross-location lag). Either
+ * check alone would let the other mechanism rot unnoticed.
  */
 const assertInvariants = async (store, handle, label) => {
   assert.ok(hostsOf(store, handle).length <= 1, `${label}: two hosts serve "${handle}": ${hostsOf(store, handle)}`);
+  const own = store._m.get(`vanityof:${handle}`);
+  if (own) assert.equal(store._m.get(`vanity:${own}`), handle, `${label}: the store says "${handle}" redirects to ${own}, which does not serve it`);
   const canon = await worker.fetch(new Request(`https://card.feelreef.com/${handle}`, { redirect: 'manual' }), env(store));
   if (canon.status === 301) {
     const to = new URL(canon.headers.get('location'));
@@ -161,6 +167,39 @@ const assertInvariants = async (store, handle, label) => {
     assert.equal(canon.status, 200, `${label}: the canonical URL answers ${canon.status}`);
   }
 };
+
+/**
+ * Kill the Worker before each write of `send` in turn, check both invariants on what was left, then
+ * send the same call again on a healthy store and compare with `final`. Runs until a pass where the
+ * injected failure is never reached — so the loop covers every step whatever the step count is, and
+ * a change that adds a step is covered without anyone updating a number.
+ */
+const crashEveryStep = async (seed, send, final, handle = 'maple') => {
+  let k = 1;
+  for (;; k++) {
+    const store = kv(seed, { failAt: k });
+    let died = false;
+    try { await send(store); } catch (e) { if (!/injected failure/.test(e.message)) throw e; died = true; }
+    if (!died) break;
+    await assertInvariants(store, handle, `died at write ${k}`);
+    const healthy = kv(Object.fromEntries(store._m));
+    const r = await send(healthy);
+    assert.equal(r.status, 200, `retry after write ${k}: ${JSON.stringify(r.body)}`);
+    assert.deepEqual(Object.fromEntries(healthy._m), final, `retry after write ${k}`);
+    await assertInvariants(healthy, handle, `retry after write ${k}`);
+  }
+  assert.ok(k > 1, 'the call made no writes at all — the crash loop tested nothing');
+  return k - 1;
+};
+
+/** the three keys of one binding, as the API writes them. */
+const bound = (handle, host, { redirect = true } = {}) => ({
+  [`vanity:${host}`]: handle,
+  [`vanityhost:${handle}`]: host,
+  ...(redirect ? { [`vanityof:${handle}`]: host } : {}),
+});
+
+const visit = (store, href, init) => worker.fetch(new Request(href, init), env(store));
 
 // ── the door ──
 
@@ -192,54 +231,113 @@ test('vanity API: other methods → 405', async () => {
 
 // ── GET ──
 
-test('GET /_api/vanity/<h>: bound → its host; unbound → null; no card → 404 card_not_found', async () => {
-  const store = kv({ maple: CARD, other: OTHER, 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' });
-  assert.deepEqual(await call(store, 'GET', 'maple'), { status: 200, body: { handle: 'maple', host: 'creator.example' } });
-  assert.deepEqual(await call(store, 'GET', 'other'), { status: 200, body: { handle: 'other', host: null } });
+test('GET /_api/vanity/<h>: bound → host + redirect; unbound → null; no card → 404 card_not_found', async () => {
+  const store = kv({ maple: CARD, other: OTHER, third: OTHER, ...bound('maple', 'creator.example'),
+    ...bound('other', 'quiet.example', { redirect: false }) });
+  assert.deepEqual(await call(store, 'GET', 'maple'), { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: true } });
+  assert.deepEqual(await call(store, 'GET', 'other'), { status: 200, body: { handle: 'other', host: 'quiet.example', redirect: false } });
+  assert.deepEqual(await call(store, 'GET', 'third'), { status: 200, body: { handle: 'third', host: null, redirect: false } });
   assert.deepEqual(await call(store, 'GET', 'nobody'), { status: 404, body: { error: 'card_not_found' } });
   assert.deepEqual(store.ops, []);
 });
 
-// ── PUT ──
-
-test('PUT: a fresh binding writes both keys and says changed', async () => {
-  const store = kv({ maple: CARD });
-  const r = await call(store, 'PUT', 'maple', { host: 'creator.example' });
-  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'creator.example', changed: true } });
-  assert.equal(store._m.get('vanity:creator.example'), 'maple');
-  assert.equal(store._m.get('vanityof:maple'), 'creator.example');
+test('🔴 GET: a binding made before this API (vanity: + vanityof:, no vanityhost:) reads as bound and redirecting', async () => {
+  const store = kv({ maple: CARD, 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' });
+  assert.deepEqual(await call(store, 'GET', 'maple'), { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: true } });
+  assert.deepEqual(store.ops, [], 'a GET wrote');
 });
 
-test('🔴 PUT: the same binding sent twice is a no-op the second time — changed:false, zero writes', async () => {
+test('🔴 GET: a record whose host does not serve the card is NOT reported as bound', async () => {
+  // what a 409 lost race or a Worker that died mid-rebind can leave: `vanityhost:` names a host whose
+  // `vanity:` key is gone or belongs to someone else. GET answers what a visitor would get.
+  for (const forward of [undefined, 'other']) {
+    const seed = { maple: CARD, other: OTHER, 'vanityhost:maple': 'creator.example' };
+    if (forward) seed['vanity:creator.example'] = forward;
+    assert.deepEqual(await call(kv(seed), 'GET', 'maple'), { status: 200, body: { handle: 'maple', host: null, redirect: false } }, `forward ${forward}`);
+  }
+});
+
+// ── PUT ──
+
+test('PUT: a fresh binding writes all three keys, redirects by default, and says changed', async () => {
   const store = kv({ maple: CARD });
-  await call(store, 'PUT', 'maple', { host: 'creator.example' });
-  const before = store.ops.length;
   const r = await call(store, 'PUT', 'maple', { host: 'creator.example' });
-  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'creator.example', changed: false } });
-  assert.equal(store.ops.length, before, `a repeat wrote: ${store.ops.slice(before)}`);
+  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: true, changed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, ...bound('maple', 'creator.example') });
+});
+
+test('🔴 PUT redirect:false: the domain serves the card, and the canonical URL does NOT 301 to it', async () => {
+  const store = kv({ maple: CARD });
+  const r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect: false });
+  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: false, changed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, ...bound('maple', 'creator.example', { redirect: false }) });
+  assert.equal((await visit(store, 'https://creator.example/')).status, 200);
+  assert.equal((await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' })).status, 200);
+});
+
+test('🔴 PUT: false → true on the same host writes ONLY vanityof: (changed); true → false removes only it', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'creator.example', { redirect: false }) });
+  const up = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect: true });
+  assert.deepEqual(up, { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: true, changed: true } });
+  assert.deepEqual(store.ops, ['put vanityof:maple=creator.example']);
+  const canon = await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' });
+  assert.equal(canon.status, 301);
+  assert.equal(canon.headers.get('location'), 'https://creator.example/');
+
+  // and back: the request says what the binding should BE, so redirect:false turns the 301 off
+  store.ops.length = 0;
+  const down = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect: false });
+  assert.deepEqual(down, { status: 200, body: { handle: 'maple', host: 'creator.example', redirect: false, changed: true } });
+  assert.deepEqual(store.ops, ['delete vanityof:maple']);
+  assert.equal((await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' })).status, 200);
+  assert.equal((await visit(store, 'https://creator.example/')).status, 200);
+});
+
+test('🔴 PUT: the same binding sent twice is a no-op the second time — changed:false, zero writes, both modes', async () => {
+  for (const redirect of [true, false]) {
+    const store = kv({ maple: CARD });
+    await call(store, 'PUT', 'maple', { host: 'creator.example', redirect });
+    const before = store.ops.length;
+    const r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect });
+    assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'creator.example', redirect, changed: false } });
+    assert.equal(store.ops.length, before, `a repeat wrote: ${store.ops.slice(before)}`);
+  }
+});
+
+test('🔴 PUT: `redirect` that is not a boolean → 400 vanity_redirect_invalid, nothing written', async () => {
+  const store = kv({ maple: CARD });
+  for (const redirect of ['false', 0, 1, null, 'yes']) {
+    const r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect });
+    assert.deepEqual(r, { status: 400, body: { error: 'vanity_redirect_invalid' } }, JSON.stringify(redirect));
+  }
+  assert.deepEqual(store.ops, []);
 });
 
 test('🔴 PUT: a host bound to ANOTHER card → 409 vanity_taken, nothing written, and the owner is not named', async () => {
-  const seed = { maple: CARD, other: OTHER, 'vanity:creator.example': 'other', 'vanityof:other': 'creator.example' };
-  const store = kv(seed);
-  const r = await call(store, 'PUT', 'maple', { host: 'creator.example' });
-  assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken' } });
-  assert.deepEqual(store.ops, []);
-  assert.deepEqual(Object.fromEntries(store._m), seed);
-  // CONTROL: a different host for the same card is fine — the 409 was about the host, not the card.
-  assert.equal((await call(store, 'PUT', 'maple', { host: 'creator2.example' })).status, 200);
+  for (const redirect of [true, false]) {
+    const seed = { maple: CARD, other: OTHER, ...bound('other', 'creator.example', { redirect }) };
+    const store = kv(seed);
+    const r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect });
+    assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken' } });
+    assert.deepEqual(store.ops, []);
+    assert.deepEqual(Object.fromEntries(store._m), seed);
+    // CONTROL: a different host for the same card is fine — the 409 was about the host, not the card.
+    assert.equal((await call(store, 'PUT', 'maple', { host: 'creator2.example', redirect })).status, 200);
+  }
 });
 
 test('🔴 PUT: no such card → 404 card_not_found, nothing written', async () => {
   const store = kv({ maple: CARD });
   assert.deepEqual(await call(store, 'PUT', 'nobody', { host: 'creator.example' }), { status: 404, body: { error: 'card_not_found' } });
+  assert.deepEqual(await call(store, 'PUT', 'nobody', { host: 'creator.example', redirect: false }), { status: 404, body: { error: 'card_not_found' } });
   assert.deepEqual(store.ops, []);
 });
 
 test('🔴 PUT: a bad host → 400 vanity_host_invalid, nothing written — including no body at all', async () => {
   const store = kv({ maple: CARD });
   for (const body of [{ host: 'Creator.example' }, { host: 'creator.example:443' }, { host: 'https://creator.example/' },
-    { host: 'card.feelreef.com' }, { host: 'saas.feelreef.com' }, { host: '名片.example' }, {}, { host: 7 }, null]) {
+    { host: 'card.feelreef.com' }, { host: 'saas.feelreef.com' }, { host: '名片.example' }, {}, { host: 7 }, null,
+    { host: 'Creator.example', redirect: false }]) {
     const r = await call(store, 'PUT', 'maple', body);
     assert.deepEqual(r, { status: 400, body: { error: 'vanity_host_invalid' } }, JSON.stringify(body));
   }
@@ -248,46 +346,62 @@ test('🔴 PUT: a bad host → 400 vanity_host_invalid, nothing written — incl
   assert.deepEqual(store.ops, []);
 });
 
-test('🔴 PUT: rebinding moves the card — the old host stops serving it, and the order is the documented one', async () => {
-  const store = kv({ maple: CARD, 'vanity:old.example': 'maple', 'vanityof:maple': 'old.example' });
+test('🔴 PUT: rebinding moves the card — the old host lets go first, the redirect is withdrawn first and pointed last', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'old.example') });
   const r = await call(store, 'PUT', 'maple', { host: 'new.example' });
-  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'new.example', changed: true } });
-  assert.equal(store._m.has('vanity:old.example'), false, 'the old host still serves the card');
-  assert.equal(store._m.get('vanity:new.example'), 'maple');
-  assert.equal(store._m.get('vanityof:maple'), 'new.example');
+  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'new.example', redirect: true, changed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, ...bound('maple', 'new.example') });
   assert.deepEqual(store.ops, [
-    'delete vanity:old.example',
     'delete vanityof:maple',
+    'delete vanity:old.example',
+    'put vanityhost:maple=new.example',
     'put vanity:new.example=maple',
     'put vanityof:maple=new.example',
   ]);
 });
 
+test('🔴 PUT redirect:false onto a NEW host also clears the old redirect — no 301 to the domain it just left', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'old.example') });
+  const r = await call(store, 'PUT', 'maple', { host: 'new.example', redirect: false });
+  assert.deepEqual(r, { status: 200, body: { handle: 'maple', host: 'new.example', redirect: false, changed: true } });
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, ...bound('maple', 'new.example', { redirect: false }) });
+  assert.equal((await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' })).status, 200);
+  assert.equal((await visit(store, 'https://old.example/')).status, 404);
+});
+
+test('🔴 PUT: a binding made before this API (no vanityhost:) is rebound cleanly — its record is written first', async () => {
+  const store = kv({ maple: CARD, 'vanity:old.example': 'maple', 'vanityof:maple': 'old.example' });
+  assert.equal((await call(store, 'PUT', 'maple', { host: 'new.example' })).status, 200);
+  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD, ...bound('maple', 'new.example') });
+  assert.equal(store.ops[0], 'put vanityhost:maple=old.example', 'the old host must be recorded before vanityof: is withdrawn');
+});
+
 test('🔴 PUT: rebinding never deletes a forward key that points at somebody else', async () => {
   // A store a hand-run write left inconsistent: maple thinks it lives on old.example, but old.example
   // now belongs to `other`. Moving maple must not take other's domain down with it.
-  const store = kv({ maple: CARD, other: OTHER, 'vanity:old.example': 'other', 'vanityof:other': 'old.example', 'vanityof:maple': 'old.example' });
+  const store = kv({ maple: CARD, other: OTHER, ...bound('other', 'old.example'), 'vanityof:maple': 'old.example', 'vanityhost:maple': 'old.example' });
   assert.equal((await call(store, 'PUT', 'maple', { host: 'new.example' })).status, 200);
   assert.equal(store._m.get('vanity:old.example'), 'other');
   assert.equal(store._m.get('vanityof:other'), 'old.example');
 });
 
-test('🔴 PUT: a Worker that dies at ANY step of a rebind leaves no forbidden state — and a retry finishes the job', async () => {
-  const seed = { maple: CARD, 'vanity:old.example': 'maple', 'vanityof:maple': 'old.example' };
-  for (let k = 1; k <= 4; k++) {
-    const store = kv(seed, { failAt: k });
-    await assert.rejects(call(store, 'PUT', 'maple', { host: 'new.example' }), /injected failure/, `step ${k}`);
-    await assertInvariants(store, 'maple', `died at step ${k}`);
-    // the retry, on the same store, now healthy
-    const healthy = kv(Object.fromEntries(store._m));
-    const r = await call(healthy, 'PUT', 'maple', { host: 'new.example' });
-    assert.equal(r.status, 200, `retry after step ${k}`);
-    assert.deepEqual(Object.fromEntries(healthy._m),
-      { maple: CARD, 'vanity:new.example': 'maple', 'vanityof:maple': 'new.example' }, `retry after step ${k}`);
+test('🔴 PUT: a Worker that dies at ANY write leaves no forbidden state, and the same PUT again finishes — every mode and starting point', async () => {
+  const cases = [
+    ['rebind, redirect on', bound('maple', 'old.example'), { host: 'new.example' }, bound('maple', 'new.example')],
+    ['rebind, redirect off', bound('maple', 'old.example'), { host: 'new.example', redirect: false }, bound('maple', 'new.example', { redirect: false })],
+    ['rebind from an unredirected binding', bound('maple', 'old.example', { redirect: false }), { host: 'new.example' }, bound('maple', 'new.example')],
+    ['rebind a pre-API binding', { 'vanity:old.example': 'maple', 'vanityof:maple': 'old.example' }, { host: 'new.example' }, bound('maple', 'new.example')],
+    ['fresh, redirect off', {}, { host: 'new.example', redirect: false }, bound('maple', 'new.example', { redirect: false })],
+    ['turn the redirect on', bound('maple', 'new.example', { redirect: false }), { host: 'new.example', redirect: true }, bound('maple', 'new.example')],
+    ['turn the redirect off', bound('maple', 'new.example'), { host: 'new.example', redirect: false }, bound('maple', 'new.example', { redirect: false })],
+  ];
+  for (const [label, seed, body, final] of cases) {
+    const writes = await crashEveryStep({ maple: CARD, ...seed }, (s) => call(s, 'PUT', 'maple', body), { maple: CARD, ...final });
+    assert.ok(writes >= 1, label);
   }
 });
 
-test('🔴 PUT: losing a race for the host is a 409, and the loser never points its redirect at the winner', async () => {
+test('🔴 PUT: losing a race for the host is a 409, the loser never points its redirect at the winner, and drops its record', async () => {
   // Two binds for one host, interleaved: ours writes `vanity:<host>`, the other lands right after it.
   // The read-back sees the other handle, so we stop before `vanityof:` — otherwise maple's canonical
   // URL would 301 to a domain that serves somebody else's card.
@@ -297,63 +411,69 @@ test('🔴 PUT: losing a race for the host is a 409, and the loser never points 
   const r = await call(store, 'PUT', 'maple', { host: 'contested.example' });
   assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken' } });
   assert.equal(store._m.has('vanityof:maple'), false);
+  assert.equal(store._m.has('vanityhost:maple'), false);
   await assertInvariants(store, 'maple', 'race');
+  assert.deepEqual((await call(store, 'GET', 'maple')).body, { handle: 'maple', host: null, redirect: false });
 });
 
 // ── DELETE ──
 
-test('DELETE: removes both keys and says changed; unbound → changed:false with zero writes', async () => {
-  const store = kv({ maple: CARD, 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' });
-  assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: true } });
-  assert.deepEqual(Object.fromEntries(store._m), { maple: CARD });
-  const n = store.ops.length;
-  assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: false } });
-  assert.equal(store.ops.length, n);
+test('DELETE: removes every key of the binding, either mode, and says changed; unbound → changed:false, zero writes', async () => {
+  for (const seed of [bound('maple', 'creator.example'), bound('maple', 'creator.example', { redirect: false }),
+    { 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' }]) {
+    const store = kv({ maple: CARD, ...seed });
+    assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: true } });
+    assert.deepEqual(Object.fromEntries(store._m), { maple: CARD }, JSON.stringify(seed));
+    const n = store.ops.length;
+    assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: false } });
+    assert.equal(store.ops.length, n);
+  }
 });
 
 test('🔴 DELETE: `vanity:<host>` is removed only while it still points at this card', async () => {
-  const store = kv({ maple: CARD, other: OTHER, 'vanity:old.example': 'other', 'vanityof:other': 'old.example', 'vanityof:maple': 'old.example' });
+  const store = kv({ maple: CARD, other: OTHER, ...bound('other', 'old.example'), 'vanityof:maple': 'old.example', 'vanityhost:maple': 'old.example' });
   assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: true } });
   assert.equal(store._m.get('vanity:old.example'), 'other');
   assert.equal(store._m.has('vanityof:maple'), false);
+  assert.equal(store._m.has('vanityhost:maple'), false);
 });
 
 test('DELETE: a binding whose card is gone can still be removed — cleanup never needs the card', async () => {
-  const store = kv({ 'vanity:creator.example': 'gone', 'vanityof:gone': 'creator.example' });
+  const store = kv({ ...bound('gone', 'creator.example') });
   assert.deepEqual(await call(store, 'DELETE', 'gone'), { status: 200, body: { handle: 'gone', host: null, changed: true } });
   assert.deepEqual(Object.fromEntries(store._m), {});
 });
 
-test('🔴 DELETE: a Worker that dies between the two deletes leaves no forbidden state, and a retry finishes', async () => {
-  const seed = { maple: CARD, 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' };
-  for (let k = 1; k <= 2; k++) {
-    const store = kv(seed, { failAt: k });
-    await assert.rejects(call(store, 'DELETE', 'maple'), /injected failure/);
-    await assertInvariants(store, 'maple', `died at step ${k}`);
-    const healthy = kv(Object.fromEntries(store._m));
-    assert.equal((await call(healthy, 'DELETE', 'maple')).status, 200);
-    assert.deepEqual(Object.fromEntries(healthy._m), { maple: CARD }, `retry after step ${k}`);
+test('🔴 DELETE: a Worker that dies at any write leaves no forbidden state, and a retry finishes — every starting point', async () => {
+  for (const seed of [bound('maple', 'creator.example'), bound('maple', 'creator.example', { redirect: false }),
+    { 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' }]) {
+    await crashEveryStep({ maple: CARD, ...seed }, (s) => call(s, 'DELETE', 'maple'), { maple: CARD });
   }
 });
 
 // ── through the worker: what a visitor sees after each call ──
 
-const visit = (store, href, init) => worker.fetch(new Request(href, init), env(store));
 const viaWorker = (store, method, handle, body, host = 'card.feelreef.com') => visit(store, `https://${host}/_api/vanity/${handle}`, {
   method,
   headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
   ...(body ? { body: JSON.stringify(body) } : {}),
 });
 
-test('🔴 end to end: bind → the apex is the card and the canonical URL 301s there; rebind → the old apex lets go', async () => {
+test('🔴 end to end, in the runbook\'s order: bind without redirect → DNS → redirect on → rebind → unbind', async () => {
   const store = kv({ maple: CARD });
   // before: the creator's apex is the directory — the scar CUSTOM-DOMAIN.md is about
   assert.equal((await visit(store, 'https://creator.example/')).status, 404);
 
-  assert.equal((await viaWorker(store, 'PUT', 'maple', { host: 'creator.example' })).status, 200);
+  // certificate active, DNS not moved yet: bind WITHOUT the redirect. The canonical URL must keep
+  // answering — a 301 now would send it to a domain that does not reach us yet.
+  assert.equal((await viaWorker(store, 'PUT', 'maple', { host: 'creator.example', redirect: false })).status, 200);
+  assert.equal((await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' })).status, 200);
   const apex = await visit(store, 'https://creator.example/');
-  assert.equal(apex.status, 200);
+  assert.equal(apex.status, 200, 'the moment DNS points here, the apex must already be the card');
   assert.match(await apex.text(), /<title>Maple Bindery<\/title>/);
+
+  // hostname active: turn the redirect on
+  assert.equal((await viaWorker(store, 'PUT', 'maple', { host: 'creator.example', redirect: true })).status, 200);
   const canon = await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' });
   assert.equal(canon.status, 301);
   assert.equal(canon.headers.get('location'), 'https://creator.example/');
@@ -370,10 +490,10 @@ test('🔴 end to end: bind → the apex is the card and the canonical URL 301s 
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
-  const store = kv({ maple: CARD, other: OTHER, 'vanity:creator.example': 'maple', 'vanityof:maple': 'creator.example' });
+  const store = kv({ maple: CARD, other: OTHER, ...bound('maple', 'creator.example') });
   const r = await viaWorker(store, 'PUT', 'other', { host: 'other.example' }, 'creator.example');
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { handle: 'other', host: 'other.example', changed: true });
+  assert.deepEqual(await r.json(), { handle: 'other', host: 'other.example', redirect: true, changed: true });
   assert.equal(store._m.get('vanityof:maple'), 'creator.example');
   // and it is just as gated there
   const naked = await visit(store, 'https://creator.example/_api/vanity/other');

@@ -157,8 +157,8 @@ async function writeCard(store, handle, md) {
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
- *   GET    /_api/vanity/<handle>             —             the card's own domain, or null
- *   PUT    /_api/vanity/<handle>             —             { host } → bind it (card-vanity.mjs)
+ *   GET    /_api/vanity/<handle>             —             { host|null, redirect } — the card's own domain
+ *   PUT    /_api/vanity/<handle>             —             { host, redirect? } → bind it (card-vanity.mjs)
  *   DELETE /_api/vanity/<handle>             —             unbind it
  */
 export async function handleApi(request, env, url) {

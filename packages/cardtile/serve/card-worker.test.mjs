@@ -1132,8 +1132,8 @@ test('canonical → own domain: a card bound both ways 301s to its domain', asyn
 });
 
 test('🔴 canonical → own domain: NO 301 to a domain that does not serve this card', async () => {
-  // `vanityof:` says creator.example, but `vanity:creator.example` is gone (a rebind that died after
-  // its first store call — KV has no transactions, see card-vanity.mjs) or says somebody else. A 301
+  // `vanityof:` says creator.example, but `vanity:creator.example` is gone (a hand-written binding, or
+  // a location KV has not caught up at — see card-vanity.mjs) or says somebody else. A 301
   // there would send every visitor and every printed QR to the directory page or to another
   // creator's card. The card answers on its canonical URL until both halves agree.
   for (const forward of [undefined, 'someone-else']) {

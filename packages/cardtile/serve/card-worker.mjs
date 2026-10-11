@@ -678,12 +678,13 @@ export default {
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     //
-    // 🔴 …and only to a domain that SERVES this card. `vanityof:` alone is not enough: KV has no
-    // transactions, so a rebind that dies after letting go of the old domain leaves `vanityof:`
-    // naming a host whose `vanity:` key is gone (card-vanity.mjs proves no write order avoids that
-    // AND stays retryable). Following it would 301 every visitor — and every printed QR — to the
-    // directory page or to another creator's card. So the reader checks both halves; the extra read
-    // happens only on the path that was about to redirect.
+    // 🔴 …and only to a domain that SERVES this card. `vanityof:` alone is not enough. The API's write
+    // order keeps the two halves in step (card-vanity.mjs), but this reader also serves bindings
+    // written by hand before the API existed, and KV propagates each key to each location on its
+    // own clock — so somewhere, for a while, `vanityof:` can name a host whose `vanity:` key is gone.
+    // Following it would 301 every visitor — and every printed QR — to the directory page or to
+    // another creator's card. So the reader checks both halves; the extra read happens only on the
+    // path that was about to redirect.
     const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
     if (ownHost && host !== ownHost && (await store.get(VANITY_KEY(ownHost))) === resolved.handle) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
