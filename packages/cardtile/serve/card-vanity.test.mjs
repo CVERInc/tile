@@ -535,6 +535,20 @@ test('🔴 DELETE {host}: a host held by ANOTHER card → 409 vanity_taken + hel
   assert.deepEqual(Object.fromEntries(store._m), seed);
 });
 
+test('🔴 DELETE {host}: the card\'s own RECORDED host, now held by another card → 409 held_by, nothing deleted', async () => {
+  // a lost race's leftover: alpha's record still names lost.example, but beta holds the key. Naming
+  // the host asks to remove THAT key, which is beta's — refused, and alpha's record is left for the
+  // plain DELETE (which removes it without touching beta's key).
+  const seed = { alpha: CARD, beta: OTHER, 'vanityhost:alpha': 'lost.example', ...bound('beta', 'lost.example') };
+  const store = kv(seed);
+  assert.deepEqual(await call(store, 'DELETE', 'alpha', { host: 'lost.example' }),
+    { status: 409, body: { error: 'vanity_taken', held_by: 'beta' } });
+  assert.deepEqual(store.ops, []);
+  // CONTROL: the plain DELETE clears alpha's record and leaves beta's binding whole
+  assert.equal((await call(store, 'DELETE', 'alpha')).status, 200);
+  assert.deepEqual(Object.fromEntries(store._m), { alpha: CARD, beta: OTHER, ...bound('beta', 'lost.example') });
+});
+
 test('DELETE {host}: nothing at that host → changed:false, orphan_removed:false, zero writes', async () => {
   const store = kv({ alpha: CARD, ...bound('alpha', 'home.example') });
   assert.deepEqual(await call(store, 'DELETE', 'alpha', { host: 'empty.example' }),
