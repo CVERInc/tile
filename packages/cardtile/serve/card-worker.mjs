@@ -247,11 +247,22 @@ const CARD_HEADERS = (env, handle) => ({
   ...(isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
 });
 
-const html = (body, status = 200, env = null, handle = '') =>
+const html = (body, status = 200, env = null, handle = '', extra = {}) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle), ...extra },
   });
+
+// 🔴 `X-Card-Handle: <handle>` — on a creator's OWN domain, on the card it serves, and nowhere else.
+//
+// It is how reef's domain tool proves "this domain now answers with THIS card" (reef#1978). Public DNS
+// cannot show that: a creator's apex is a PROXIED CNAME, so a resolver sees Cloudflare addresses
+// whether or not the record points at us. An HTTP request to the domain can — if the answer says which
+// card it is. So the header carries exactly the handle the store's `vanity:<host>` resolved to, in the
+// same spelling `/_api/vanity/<handle>` uses, and it is set only on the card response itself: never on
+// the directory, a 404, the canonical host, or a card reached any other way. A probe that sees it has
+// seen the binding work end to end, including the `redirect: false` state the probe runs in.
+const vanityHeaders = (vanityHandle, handle) => (vanityHandle ? { 'X-Card-Handle': handle } : {});
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
 //
@@ -265,7 +276,7 @@ const html = (body, status = 200, env = null, handle = '') =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle }) =>
+const markdown = (body, { env, originalLength, alternate, handle, extra = {} }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -274,6 +285,7 @@ const markdown = (body, { env, originalLength, alternate, handle }) =>
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
       ...CARD_HEADERS(env, handle),
+      ...extra,
     },
   });
 
@@ -698,7 +710,7 @@ export default {
     // the download link, in the form this host actually uses
     const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, extra: vanityHeaders(vanityHandle, resolved.handle) });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -706,7 +718,7 @@ export default {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, extra: vanityHeaders(vanityHandle, resolved.handle) });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -720,6 +732,6 @@ export default {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, vanityHeaders(vanityHandle, resolved.handle));
   },
 };

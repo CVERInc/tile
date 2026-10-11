@@ -47,6 +47,10 @@ which is how the whole path was proven before anyone's DNS moved.
 4. The creator points their apex at `saas.feelreef.com`, **proxied**: the same shape as whatever
    CNAME they had before.
 5. **Wait for the hostname's `status: active`.** That is Cloudflare saying their DNS now reaches us.
+   **`X-Card-Handle: <handle>` on `GET /` of their domain is what reef's tool takes as "connected".**
+   The worker sends it only on a card served through that domain's binding, with or without the
+   redirect, and never on the canonical host, the directory or a 404. Public DNS can't show it: their
+   apex is a proxied CNAME, so resolvers see Cloudflare addresses either way.
 6. **Turn the redirect on:** the same call with `"redirect": true`. It writes only the redirect, and
    from now on `card.feelreef.com/<handle>` 301s to their domain, which gives the card one address.
 

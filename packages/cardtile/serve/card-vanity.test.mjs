@@ -583,6 +583,50 @@ test('🔴 a DELETE with no body, or a body without `expect`, still works', asyn
   assert.deepEqual(Object.fromEntries(store._m), { maple: CARD });
 });
 
+// ── X-Card-Handle: how reef's probe tells "this domain answers with THIS card" ──
+
+const asBrowser = { headers: { accept: 'text/html' } };
+
+test('🔴 X-Card-Handle: a card served on its own domain names itself — before and after the redirect is on', async () => {
+  for (const redirect of [false, true]) {
+    const store = kv({ maple: CARD, other: OTHER });
+    assert.equal((await call(store, 'PUT', 'maple', { host: 'creator.example', redirect })).status, 200);
+    const res = await visit(store, 'https://creator.example/', asBrowser);
+    assert.equal(res.status, 200, `redirect ${redirect}`);
+    assert.match(res.headers.get('content-type'), /text\/html/);
+    assert.equal(res.headers.get('x-card-handle'), 'maple', `redirect ${redirect}`);
+  }
+});
+
+test('🔴 X-Card-Handle names the card ACTUALLY served — a domain bound to another card says that card', async () => {
+  const store = kv({ maple: CARD, other: OTHER, ...bound('other', 'creator.example', { redirect: false }) });
+  const res = await visit(store, 'https://creator.example/', asBrowser);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-card-handle'), 'other');
+  assert.match(await res.text(), /Somebody Else/);
+});
+
+test('🔴 X-Card-Handle is absent wherever the domain is NOT serving a card through its binding', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'creator.example', { redirect: false }), 'vanity:dangling.example': 'nobody' });
+  const cases = [
+    ['canonical, bound card without redirect', 'https://card.feelreef.com/maple', 200],
+    ['canonical, unbound card', 'https://card.feelreef.com/maple', 200],
+    ['an unbound host: the directory', 'https://unbound.example/', 404],
+    ['a bound host, a path that is not the card', 'https://creator.example/nothing-here', 404],
+    ['a host bound to a card that does not exist', 'https://dangling.example/', 404],
+    ['the canonical directory', 'https://card.feelreef.com/', 404],
+  ];
+  for (const [label, href, status] of cases) {
+    const target = label === 'canonical, unbound card' ? kv({ maple: CARD }) : store;
+    const res = await visit(target, href, { ...asBrowser, redirect: 'manual' });
+    assert.equal(res.status, status, label);
+    assert.equal(res.headers.get('x-card-handle'), null, label);
+  }
+  // CONTROL: the same store, the card's own domain — the header is there, so its absence above is
+  // the rule and not a header that never exists.
+  assert.equal((await visit(store, 'https://creator.example/', asBrowser)).headers.get('x-card-handle'), 'maple');
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
