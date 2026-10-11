@@ -18,6 +18,7 @@ import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
+import { tagLocalesSource, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
 
 
@@ -78,6 +79,11 @@ export function getStaticPaths() {
     // blog-search etc. consistent across ALL pages instead of each page duplicating the chrome.
     const site = parseSite(raw);
     const siteConfig = loadSite(files, rel);
+    // A page may carry its own `locales:`. Under a site-config layer that is a PAGE's line: a bad
+    // one is warned about against this file and dropped (lingo/locale.mjs → pageLocalesOrWarn).
+    // With no `_site.md` the root home IS the site's declaration, and a bad one there still fails.
+    if (siteConfig || rel !== 'home') pageLocalesOrWarn(site.meta, `content/${rel}.md`, siteConfig);
+    else tagLocalesSource(site.meta, `content/${rel}.md`);
     // Reserved resolution marker: after Site ⊕ page both values look identical, but the layout
     // must know that an explicit page `on` wins over the site's exclusion patterns.
     if (Object.prototype.hasOwnProperty.call(site.meta, 'inbox-bubble')) site.meta['inbox-bubble-page-override'] = true;

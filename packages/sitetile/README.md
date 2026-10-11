@@ -23,6 +23,8 @@ sitetile-page: home            ← claim flag (frontmatter; routes the file). ti
 title: 山田珈琲
 lang: zh-Hant
 locales: zh-TW, ja-JP, en-US   ← Lingo mount points → <html lang> + hreflang
+                               ← the FIRST locale is the site default and lives at `/`; each other
+                                 one at `/<lowercased>/`. Two or more turn Lingo on; one changes nothing.
 ---
 
 ## 每一杯，都從產地說起        ← `## ` = ONE section; heading text = the section title

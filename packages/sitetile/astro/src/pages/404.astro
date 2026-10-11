@@ -26,8 +26,12 @@ const meta = siteMeta(files);
 // (`/language`) through the same code every other page uses.
 const lang = siteDefaultLang(meta, files) || DEFAULT_LANG;
 const copy = uiCopy(lang);
+// `languageReturn="/"`: this file is built at /404/ but SERVED at whatever address was missing, so
+// "come back to this page in the language I pick" has no page to come back to. 🩸 CVERInc/reef#1910:
+// the footer link carried `?return=%2F404%2F` and the chooser sent the visitor on to
+// /<locale>/404/, which no build writes. From here the way back is that language's home.
 ---
-<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex">
+<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex" languageReturn="/">
   <section class="st-section st-notfound">
     <h1>{copy.notFoundTitle}</h1>
     <p>{copy.notFoundBody}</p>

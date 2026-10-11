@@ -49,11 +49,14 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // It may also be a FUNCTION of the site's theme CSS — the chooser decides which layer the box of its
 // heading block and of its list goes in by whether the theme names them (lingo/language-page-css.mjs). The layout is the
 // one place that has the theme's text, so it is the one that calls it.
-const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '', routeCss = '' } = Astro.props;
+// `languageReturn: '<path>'` — where the language chooser sends a visitor back to, for a page whose
+// own address is not a place to return to (the 404: built at /404/, served everywhere). Default:
+// this page.
+const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '', routeCss = '', languageReturn = '' } = Astro.props;
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
 // the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
 const renderedPageBody = await Astro.slots.render('default');
-const locales = String(meta.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+const locales = lingo.parseLocales(meta.locales, lingo.localesSourceOf(meta));
 const themeName = meta.theme ? String(meta.theme).trim() : '';
 // The `?raw` + `set:html` inline path bypasses Vite's CSS minifier, so without this every theme's
 // verbose authoring commentary would ship verbatim in the page's <style> source. Strip the CSS
@@ -310,7 +313,11 @@ const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-h
 // round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
 // verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
 // every other emitter uses, falling back to the safe default rather than going live unfiltered.
-const languageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '/language') : '/language';
+// 🩸 CVERInc/reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
+// key having a value: a refused value fell back to `/language`, and on a one-locale site (which
+// builds no chooser) that put a dead link on every page while reading as the owner's own.
+const ownLanguageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '') : '';
+const languageHref = ownLanguageHref || '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
 // round 4 (R3-P3-1): `fonts:` is a raw frontmatter destination reaching a live
@@ -362,6 +369,12 @@ const PKG_REGISTRY = {
 // ON when the owner declares a second language (`locales` ≥ 2) or carries `packages: lingo` —
 // one definition, lingo/locale.mjs → lingoEnabled(); never re-derive it inline here.
 const hasLingo = lingo.lingoEnabled({ packages, locales });
+// Lingo with something to switch BETWEEN. hasLingo alone still decides the attribute form of the
+// document's `lang`; everything that links one edition to another reads this.
+// 🩸 CVERInc/reef#1910. One declared locale is not an install: `locales: zh-TW` put
+// `hreflang → /zh-TW/` and a footer link to `/language` on every page, and neither was ever built
+// (10 dead links on a 6-page site). With `packages: lingo` it built a chooser with one row on it.
+const multilingual = hasLingo && locales.length > 1;
 // REEF with PWA — `packages: pwa` makes the site installable: <link> a manifest + serve the
 // opaque icon set (gen-icons.sh output, which lands in public/ and therefore wins the icon paths
 // over the generated badge). Off → the ordinary icon set below, which every site now gets.
@@ -372,7 +385,8 @@ const hasPwa = packages.includes('pwa');
 // "main language at root": the SITE default (first locale, e.g. en-US) lives at `/`,
 // every OTHER locale at `/<lower-full-code>/`. Root is the site default — NOT the
 // current page's lang — so a /zh-tw/ page still emits en→/ and zh-Hant→/zh-tw/.
-const defaultLocale = (locales[0] || lang || '').trim();
+// One definition, lingo/locale.mjs → defaultLocaleOf(); this page's own `lang` is the fallback.
+const defaultLocale = lingo.defaultLocaleOf(locales, lang);
 // PAGE-AWARE locale path: each locale link/hreflang points at the SAME page in that
 // locale (not the locale home). Strip a leading locale prefix off the current URL to
 // get the logical sub-path, then re-prefix per target locale. (default → root, others
@@ -389,7 +403,6 @@ const subPath = (firstIsLocale ? pathSegs.slice(1) : pathSegs).join('/');
 // whole cluster is unreliable. The build emits directory-style URLs, so the trailing slash is the
 // real shape and this is the copy that was wrong.
 const localePath = (l) => {
-  if (!hasLingo) return `/${l}/`;
   const prefix = l === defaultLocale ? '' : `/${lingo.toUrlLocale(l)}`;
   return subPath ? `${prefix}/${subPath}/` : (prefix ? `${prefix}/` : '/');
 };
@@ -408,7 +421,8 @@ const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', i
 // way (blog.mjs's alternateArchiveLocales, for a category/tag archive) and is handing the answer
 // straight through; content-file detection would only find nothing (an archive has no content file
 // in any locale) and wrongly empty out a real answer.
-const altLocales = Array.isArray(alternates) ? alternates.filter(Boolean) : lingo.alternateLocales({
+// A site with one language has no alternates at all, whatever a route hands in.
+const altLocales = !multilingual ? [] : Array.isArray(alternates) ? alternates.filter(Boolean) : lingo.alternateLocales({
   locales, defaultLocale, subPath, all: String(alternates) === 'all',
   contentRels: lingo.contentRelsOf(contentGlob),
 });
@@ -423,18 +437,22 @@ const htmlLang = hasLingo && lang ? lingo.toBcp47(lang) : lang;
 // raw `lang:` against the default's URL form put `/en/language` (404) on every root page of a site
 // that wrote `locales: en-US` + `lang: en` — two correct spellings of one locale.
 const pageLocale = lingo.localeOf(locales, lang);
-const langUrlPrefix = hasLingo && !lingo.sameLocale(pageLocale, defaultLocale) ? `/${lingo.toUrlLocale(pageLocale)}` : '';
-const currentPath = String(Astro.url?.pathname || '/');
+const langUrlPrefix = multilingual && !lingo.sameLocale(pageLocale, defaultLocale) ? `/${lingo.toUrlLocale(pageLocale)}` : '';
+const currentPath = String(languageReturn || Astro.url?.pathname || '/');
 // 🩸 2026-08-06: `?has=` was never populated by anybody. The chooser's inline script has always
 // supported it — a row whose locale is NOT listed falls back to that locale's home instead of the
 // return path — and with nothing to read it took the other branch every time. So from /devlog the
 // chooser offered /ja-jp/devlog, /ko-kr/devlog and /zh-tw/devlog, all 404: a switcher that walks a
 // visitor off the site. Same root cause as the hreflang above (asserting a page exists in a locale
 // without checking), which is why both now read the same measured set.
-const hasParam = hasLingo && altLocales.length ? `&has=${altLocales.map((l) => lingo.toUrlLocale(l)).join(',')}` : '';
-const computedLanguageHref = hasLingo
+const hasParam = multilingual && altLocales.length ? `&has=${altLocales.map((l) => lingo.toUrlLocale(l)).join(',')}` : '';
+const computedLanguageHref = multilingual
   ? `${langUrlPrefix}/language?return=${encodeURIComponent(currentPath)}${hasParam}`
   : languageHref;
+// The plain footer's Language link: the chooser on a multilingual site; on a one-locale site only
+// a `language-href:` the owner wrote themselves and safeHref accepted — the engine's own default
+// there is a page it never builds.
+const showLanguageLink = multilingual || (locales.length > 0 && !!ownLanguageHref);
 // 🩸 corrected: verified against three live locale paths (/ja-jp, /ko-kr, /zh-tw) — the footer
 // "Language" link label stays in English on EVERY locale (a deliberate, consistent choice,
 // not a translation gap), unlike the /language chooser PAGE's own title which IS localized.
@@ -458,7 +476,7 @@ const languageLabel = 'Language';
 // bleedblend IS loaded (same declarations). Opaque bar: the header is cleanly cut at the bar's
 // bottom edge; a translucent/blur bar would still show it through and needs a clip, not a cover.
 const LINGO_BAR_POSITION = '\n.locale-banner.bleedblend-top{position:sticky!important;top:0!important;z-index:50!important}\n';
-const localeBannerCss = hasLingo ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
+const localeBannerCss = multilingual ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
 // Options come from altLocales — the measured set hreflang and `?has=` read above — never from
 // `locales`: a declared language this page has no version in is a 404, not a suggestion. null
 // (no markup, no script) when the page exists in this language only. See suggestionBanner().
@@ -913,7 +931,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         article with an author and a date. Emitted only when there is something true to say. */}
     {jsonLd && <script type="application/ld+json" set:html={jsonLd} />}
     {altLocales.map((l) => <link rel="alternate" hreflang={localeTag(l)} href={Astro.site ? new URL(localePath(l), Astro.site).href : localePath(l)} />)}
-    {hasLingo && defaultLocale && altLocales.includes(defaultLocale) && <link rel="alternate" hreflang="x-default" href={Astro.site ? new URL(localePath(defaultLocale), Astro.site).href : localePath(defaultLocale)} />}
+    {multilingual && defaultLocale && altLocales.includes(defaultLocale) && <link rel="alternate" hreflang="x-default" href={Astro.site ? new URL(localePath(defaultLocale), Astro.site).href : localePath(defaultLocale)} />}
     {/* canonical — this page's own absolute self URL (canonicalHref). Lingo sites: each locale page
         is its own canonical. Non-Lingo sites still need ONE canonical (live WP emits
         one); previously gated on hasLingo so they emitted none — a real recast regression. 2026-07-13. */}
@@ -1287,10 +1305,10 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
           <div class="rf-foot">
             <div class="rf-foot-brand">
               {footerBrand && <a class="rf-foot-wordmark" href="/">{footerBrand}</a>}
-              {(copyright || (hasLingo && locales.length > 1)) && (
+              {(copyright || multilingual) && (
                 <p class="rf-foot-copy">
                   {copyright && <span>{copyright}</span>}
-                  {hasLingo && locales.length > 1 && (
+                  {multilingual && (
                     <a class="rf-foot-lang rf-lang" href={computedLanguageHref}>{languageLabel}</a>
                   )}
                 </p>
@@ -1343,7 +1361,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
             switching itself lives elsewhere (the bleedblend top band, or the
             /language page). `copyright-href`/`language-href` are optional.
             Suppressed when a columned footer carries the copyright in its brand block. */}
-        {footerCols.length === 0 && (copyright || locales.length > 0) && (
+        {footerCols.length === 0 && (copyright || showLanguageLink) && (
           <div class="rf-footer-meta">
             {copyright && (() => {
               const parts = copyright.split(/　　|　|  /);
@@ -1352,7 +1370,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
                 : <span class="rf-copy">{p}</span>
               );
             })()}
-            {locales.length > 0 && <a class="rf-lang" href={computedLanguageHref}>{languageLabel}</a>}
+            {showLanguageLink && <a class="rf-lang" href={computedLanguageHref}>{languageLabel}</a>}
           </div>
         )}
         {footerLinks.length === 0 && !copyright && <p>{title}</p>}
