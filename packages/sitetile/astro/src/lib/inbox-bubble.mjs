@@ -1,3 +1,5 @@
+import { parseLocales } from '../packages/lingo/locale.mjs';
+
 const OFF = /^(off|false|no|0)$/i;
 const ON = /^(on|true|yes|1)$/i;
 
@@ -19,7 +21,7 @@ export function inboxBubbleOn(meta = {}, pathname = '/', renderedBody = '') {
   const raw = String(meta['inbox-bubble'] ?? 'on').trim();
   if (OFF.test(raw)) return false;
   if (ON.test(raw) && Object.prototype.hasOwnProperty.call(meta, 'inbox-bubble-page-override')) return true;
-  const locales = String(meta.locales || '').split(',').map((v) => v.trim()).filter(Boolean);
+  const locales = parseLocales(meta.locales);
   const path = localeAgnosticPath(pathname, locales);
   const excluded = String(meta['inbox-bubble-except'] || '').split(',').some((p) => pathMatches(p, path));
   return !excluded;

@@ -17,16 +17,23 @@
 // page uses). It tests the answer: real IR in, real HTML out, and the href resolved against the
 // files the build actually wrote.
 //
+// 🩸 CVERInc/reef#1910 is held here too, because its edges are read off the same kind of build: one
+// declared locale, a root page that disagrees with `locales`, list spellings the frontmatter reader
+// hands over verbatim, the way back from the 404's chooser, and the one definition of "the site's
+// default language". Each has a fixture below and is asserted on what the build WROTE.
+//
 // It needs the renderer's dependencies and SAYS SO when they are absent — same shape as
 // packages/build/build-site.test.mjs. The pure half below runs regardless.
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import vm from 'node:vm';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
+import { RENDERER_SUBPATH } from '../build/index.mjs';
 import { DEFAULT_LANG } from './astro/src/packages/lingo/locale.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -58,8 +65,20 @@ const sdl = (meta, files = {}) => {
   return blog.siteDefaultLang(meta, glob(files));
 };
 
-await test('the site config\'s own `lang` wins over everything else', () => {
-  assert.equal(sdl({ lang: 'ko-KR', locales: 'zh-TW, en' }, { 'home.md': 'sitetile-page: home\nlang: ja' }), 'ko-KR');
+await test('🔴 the first declared locale outranks the site config\'s own `lang`', () => {
+  // 🩸 CVERInc/reef#1910. This said the opposite — "the site config's own `lang` wins over
+  // everything else" — and was the one reader of the site's default that did not put `locales`
+  // first. Every URL on the site already obeyed `locales`; only the 404's language did not.
+  assert.equal(sdl({ lang: 'ko-KR', locales: 'zh-TW, en' }, { 'home.md': 'sitetile-page: home\nlang: ja' }), 'zh-TW');
+  // With no `locales` the config's `lang` is still the answer, ahead of the home page's.
+  assert.equal(sdl({ lang: 'ko-KR' }, { 'home.md': 'sitetile-page: home\nlang: ja' }), 'ko-KR');
+});
+
+await test('the config\'s `lang` is returned AS WRITTEN when it names the first locale', () => {
+  // `zh-Hant` over `locales: zh-TW` is one locale spelled two correct ways, and a one-language
+  // site puts this value in <html lang> verbatim — so the spelling the site chose is kept.
+  assert.equal(sdl({ lang: 'zh-Hant', locales: 'zh-TW' }), 'zh-Hant');
+  assert.equal(sdl({ lang: 'en', locales: 'en-US, ja-JP' }), 'en');
 });
 
 await test('🔴 a multi-locale site: the FIRST declared locale, not the alphabetically first', () => {
@@ -113,6 +132,50 @@ const SITES = {
     'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
     'home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja', '折り鶴'),
   },
+  // ── CVERInc/reef#1910 ──
+  // ONE declared locale and nothing else. `legal/terms` is nested on purpose: the dead hreflang was
+  // built from the page's own path.
+  oneLocale: {
+    '_site.md': '---\nbrand: 紙鶴工坊\nlocales: zh-TW\ncopyright: © 紙鶴工坊\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+    'legal/terms.md': page('sitetile-page: terms\ntitle: 條款\nlang: zh-TW', '條款'),
+  },
+  // One locale WITH `packages: lingo` — the switch is on and there is still nothing to switch to.
+  oneLocaleLingo: {
+    '_site.md': '---\nbrand: 종이학\nlocales: ko-KR\npackages: lingo\ncopyright: © 종이학\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 종이학\nlang: ko-KR', '종이학'),
+    'about.md': page('sitetile-page: about\ntitle: 소개\nlang: ko-KR', '소개'),
+  },
+  // The root home is Chinese; `locales` puts English first. No /zh-tw/ home was written.
+  rootDisagrees: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, zh-TW\ncopyright: © Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+  },
+  // The two list spellings the frontmatter reader hands over verbatim. Different locales in each,
+  // so one cannot pass on the other's directories.
+  bracketed: {
+    '_site.md': '---\nbrand: 折り鶴\nlocales: [ja-JP, en-US]\ncopyright: © 折り鶴\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+    'en-us/home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+  },
+  quoted: {
+    '_site.md': '---\nbrand: 紙鶴工坊\nlocales: "zh-TW, ko-KR"\ncopyright: © 紙鶴工坊\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'ko-kr/home.md': page('sitetile-page: home\ntitle: 종이학\nlang: ko-KR', '종이학'),
+  },
+  // Not a locale code at all. The build must refuse it by name.
+  unsafe: {
+    '_site.md': '---\nbrand: 紙鶴工坊\nlocales: zh-TW, ../kiln\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+  },
+  // The site config's own `lang` is NOT the first locale. Its 404 used to follow `lang`.
+  configDisagrees: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlang: ja-JP\nlocales: en-US, ja-JP\ncopyright: © Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'ja-jp/home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+  },
   // Says nothing at all. Must keep getting exactly what it got before.
   undeclared: {
     '_site.md': '---\nbrand: Nobody\n---\n',
@@ -131,6 +194,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
 } else {
   const work = mkdtempSync(join(tmpdir(), 'tile-404-locale-'));
   const built = {};
+  const walk = (d) => (existsSync(d) ? readdirSync(d) : []).flatMap((n) => {
+    const p = join(d, n);
+    return statSync(p).isDirectory() ? walk(p) : [p];
+  });
   try {
     for (const [name, files] of Object.entries(SITES)) {
       const irDir = join(work, name, 'ir');
@@ -139,19 +206,51 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         writeFileSync(join(irDir, rel), body);
       }
       const outDir = join(work, name, 'out');
-      const r = await buildSite({ irDir, engineDir: ENGINE, outDir, siteUrl: 'https://example.com' });
-      assert.equal(r.code, 0, `astro build failed for the ${name} fixture`);
-      built[name] = { outDir, notFound: readFileSync(join(outDir, '404.html'), 'utf8') };
+      // Through the CLI (which is buildSite and nothing else) so the build's own log can be READ:
+      // a warning is part of what a build produces, and buildSite hands its child our stdio.
+      const r = spawnSync(process.execPath, [join(ENGINE, 'packages/build/cli.mjs'), irDir, outDir, '--site-url', 'https://example.com'], { encoding: 'utf8' });
+      const log = `${r.stdout || ''}\n${r.stderr || ''}`;
+      const pages = Object.fromEntries(walk(outDir).filter((p) => p.endsWith('.html')).map((p) => [relative(outDir, p), readFileSync(p, 'utf8')]));
+      built[name] = { outDir, code: r.status, log, pages, notFound: pages['404.html'] };
     }
+
+    // A fixture's build, which must have SUCCEEDED — asserted where it is used, so a build that
+    // fails turns the tests that read it red, by name, and leaves the others to run.
+    const site = (name) => {
+      const b = built[name];
+      assert.equal(b.code, 0, `astro build failed for the ${name} fixture:\n${b.log.slice(-1200)}`);
+      return b;
+    };
 
     // A chooser href must name a file this build wrote. That is the whole defect, stated as a check.
     const resolves = (outDir, href) => {
       const p = href.split('?')[0].replace(/^\/+|\/+$/g, '');
       return existsSync(join(outDir, p, 'index.html')) || existsSync(join(outDir, `${p}.html`));
     };
+    const alternates = (html) => [...html.matchAll(/<link rel="alternate" hreflang="([^"]*)" href="([^"]*)"/g)].map((m) => ({ tag: m[1], href: m[2] }));
+    const topDirs = (outDir) => readdirSync(outDir).filter((n) => statSync(join(outDir, n)).isDirectory()).sort();
+    const allOf = (name, fn) => Object.entries(site(name).pages).flatMap(([rel, html]) => fn(html).map((v) => [rel, v]));
+    // The chooser's own `?return=` script, run against the rows the build wrote: what each row's
+    // href IS after a visitor arrives with that query string. Resolved the way a browser resolves
+    // it (WHATWG URL), because the question is where a click goes, not what the string looks like.
+    const ORIGIN = 'https://example.com';
+    const chooserRows = (chooserHtml, search) => {
+      const rows = [...chooserHtml.matchAll(/<a href="([^"]*)" hreflang="[^"]*" data-language-link data-locale="([^"]*)"/g)]
+        .map((m) => ({ built: m[1], href: m[1], locale: m[2] }));
+      assert.ok(rows.length >= 2, 'no chooser rows found — the fixture stopped exercising the chooser');
+      const script = [...chooserHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((t) => t.includes('data-language-link'));
+      assert.equal(script.length, 1, 'expected exactly one ?return= script on the chooser');
+      const els = rows.map((row) => ({ getAttribute: (k) => (k === 'data-locale' ? row.locale : null), setAttribute: (k, v) => { if (k === 'href') row.href = v; } }));
+      vm.runInNewContext(script[0], {
+        URL, URLSearchParams,
+        window: { location: { search, href: `${ORIGIN}/language${search}`, origin: ORIGIN } },
+        document: { querySelectorAll: () => els, addEventListener: () => {} },
+      });
+      return rows.map((row) => ({ ...row, url: new URL(row.href, `${ORIGIN}/language`) }));
+    };
 
     await test('🔴 two locales, English default → the 404 is English', () => {
-      const { notFound } = built.multiEn;
+      const { notFound } = site('multiEn');
       assert.equal(htmlLang(notFound), 'en');
       assert.match(notFound, /Page not found/);
       assert.doesNotMatch(notFound, /找不到頁面/);
@@ -159,7 +258,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     await test('🔴 two locales, English default → the Language link is /language, and it exists', () => {
-      const { notFound, outDir } = built.multiEn;
+      const { notFound, outDir } = site('multiEn');
       const links = langLinks(notFound);
       assert.ok(links.length >= 1, 'no Language link on the 404 at all — the fixture stopped exercising it');
       for (const href of links) {
@@ -173,13 +272,13 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       // Without this the `resolves` check above could be passing because it resolves everything.
       // `/zh-hant/language` is an attribute tag where a URL locale goes — no build emits it — and
       // `/zh-tw/language` is the real non-default chooser on this site.
-      const { outDir } = built.multiEn;
+      const { outDir } = site('multiEn');
       assert.equal(resolves(outDir, '/zh-hant/language?return=%2F404%2F'), false);
       assert.equal(resolves(outDir, '/zh-tw/language?return=%2F404%2F'), true, 'the non-default chooser should exist');
     });
 
     await test('two locales, zh-TW default → still zh-Hant, and its link resolves too', () => {
-      const { notFound, outDir } = built.multiZh;
+      const { notFound, outDir } = site('multiZh');
       assert.equal(htmlLang(notFound), 'zh-Hant', 'the attribute form of zh-TW, as before');
       assert.match(notFound, /找不到頁面/);
       const links = langLinks(notFound);
@@ -191,17 +290,144 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     await test('🔴 one language (ja), no locales → the 404 is Japanese, not the page that sorts first', () => {
-      const { notFound } = built.monoJa;
+      const { notFound } = site('monoJa');
       assert.equal(htmlLang(notFound), 'ja');
       assert.match(notFound, /ページが見つかりません/);
       assert.deepEqual([...new Set(inLanguage(notFound))], ['ja']);
     });
 
     await test('nothing declared → exactly the shared default, as before', () => {
-      const { notFound } = built.undeclared;
+      const { notFound } = site('undeclared');
       assert.equal(htmlLang(notFound), DEFAULT_LANG);
       assert.match(notFound, /找不到頁面/);
       assert.deepEqual(langLinks(notFound), [], 'a site with no locales grew a Language link');
+    });
+
+    // ── CVERInc/reef#1910 · 1: one declared locale is not an install ──────────────────────────
+    for (const [name, lang] of [['oneLocale', 'zh-TW'], ['oneLocaleLingo', 'ko']]) {
+      await test(`🔴 ${name}: no alternates, no x-default, no Language link, no chooser, no banner`, () => {
+        const { outDir, pages } = site(name);
+        assert.ok(Object.keys(pages).length >= 4, `only ${Object.keys(pages).length} pages built — the fixture shrank`);
+        assert.deepEqual(allOf(name, alternates), [], 'a one-language site advertised an alternate');
+        assert.deepEqual(allOf(name, langLinks), [], 'a one-language site links to a language chooser');
+        assert.equal(existsSync(join(outDir, 'language')), false, 'a chooser was built for one language');
+        assert.deepEqual(Object.keys(pages).filter((rel) => /locale-banner/.test(pages[rel])), [], 'banner markup or CSS shipped');
+        assert.deepEqual(topDirs(outDir).filter((d) => /^[a-z]{2}-[a-z]{2}$/.test(d)), [], 'a locale directory was written');
+      });
+      await test(`${name}: <html lang> still says the one language`, () => {
+        const { pages } = site(name);
+        for (const rel of ['index.html', 'about/index.html', '404.html']) assert.equal(htmlLang(pages[rel]), lang, rel);
+      });
+    }
+
+    await test('🔴 CONTROL: the same counters DO see a two-locale site\'s alternates, links and chooser', () => {
+      // Otherwise every "deepEqual(..., [])" above could be a regex that matches nothing.
+      const { outDir } = site('multiEn');
+      assert.ok(allOf('multiEn', alternates).length >= 4);
+      assert.ok(allOf('multiEn', langLinks).length >= 2);
+      assert.equal(existsSync(join(outDir, 'language', 'index.html')), true);
+      assert.deepEqual(topDirs(outDir).filter((d) => /^[a-z]{2}-[a-z]{2}$/.test(d)), ['zh-tw']);
+    });
+
+    // ── 2: the root page's `lang` disagrees with locales[0] ──────────────────────────────────
+    await test('🔴 rootDisagrees: the build SAYS the home page and `locales` disagree, and which wins', () => {
+      const lines = site('rootDisagrees').log.split('\n').filter((l) => l.includes('sitetile: the home page says'));
+      assert.equal(lines.length, 1, `expected the warning exactly once, got ${lines.length}`);
+      assert.ok(lines[0].includes('lang: zh-TW') && lines[0].includes('en-US first'), lines[0]);
+      assert.match(lines[0], /en-US wins/);
+    });
+
+    await test('rootDisagrees: nothing else changed — locales[0] still owns `/`', () => {
+      const home = site('rootDisagrees').pages['index.html'];
+      assert.equal(htmlLang(home), 'zh-Hant', 'the page still says its own language');
+      assert.deepEqual(alternates(home), [
+        { tag: 'en', href: 'https://example.com/' }, { tag: 'x-default', href: 'https://example.com/' }]);
+    });
+
+    await test('🔴 CONTROL: sites whose home page agrees with `locales` are not warned', () => {
+      for (const name of ['multiEn', 'multiZh', 'bracketed', 'oneLocale', 'monoJa', 'undeclared']) {
+        assert.equal(site(name).log.includes('the home page says'), false, `${name} was warned`);
+      }
+    });
+
+    // ── 3: list spellings never become a path ────────────────────────────────────────────────
+    for (const [name, other, rootLang] of [['bracketed', 'en-us', 'ja'], ['quoted', 'ko-kr', 'zh-Hant']]) {
+      await test(`🔴 ${name}: the locale directory is ${other}/ — no bracket or quote in any path`, () => {
+        const { outDir, pages } = site(name);
+        assert.deepEqual(topDirs(outDir).filter((d) => !['_astro', 'preview', 'language'].includes(d)), [other]);
+        assert.equal(existsSync(join(outDir, other, 'language', 'index.html')), true, 'its chooser was not built');
+        const bad = Object.keys(pages).filter((rel) => /[\[\]"']|%5B|%5D|%22/i.test(rel));
+        assert.deepEqual(bad, []);
+        const hrefs = [...allOf(name, alternates).map(([, a]) => a.href), ...allOf(name, langLinks).map(([, h]) => h)];
+        assert.ok(hrefs.length >= 6, 'too few links to mean anything');
+        assert.deepEqual(hrefs.filter((h) => /[\[\]"']|%5B|%5D|%22|&quot;/i.test(h)), [], 'list punctuation reached a URL');
+        assert.equal(htmlLang(pages['index.html']), rootLang);
+        assert.equal(htmlLang(pages['404.html']), rootLang, 'the 404 read the first locale with its bracket still on');
+      });
+    }
+
+    await test('🔴 unsafe: `../kiln` is refused BY NAME and nothing is built from it', () => {
+      const { code, log, outDir } = built.unsafe;
+      assert.notEqual(code, 0, 'the build accepted a path as a locale');
+      assert.match(log, /sitetile: locales entry "\.\.\/kiln" is not a locale code/);
+      assert.equal(existsSync(join(outDir, 'index.html')), false, 'pages were written anyway');
+      assert.deepEqual(readdirSync(join(work, 'unsafe')).sort().filter((n) => n !== 'out'), ['ir'], 'something was written beside the output directory');
+    });
+
+    // ── 4: the way back from the 404's chooser ───────────────────────────────────────────────
+    await test('🔴 the 404\'s Language link returns to the chosen language\'s HOME, not to /404/', () => {
+      for (const name of ['multiEn', 'multiZh']) {
+        const { outDir, pages, notFound } = site(name);
+        const links = langLinks(notFound);
+        assert.ok(links.length >= 1);
+        for (const href of links) {
+          assert.equal(new URL(href, ORIGIN).searchParams.get('return'), '/', `${name}: ${href}`);
+          const rows = chooserRows(pages['language/index.html'], href.slice(href.indexOf('?')));
+          for (const row of rows) {
+            assert.ok(resolves(outDir, row.url.pathname), `${name}: choosing ${row.locale} lands on ${row.url.pathname}, which was never built`);
+            assert.equal(row.href, row.built, 'home is where the row already pointed');
+          }
+        }
+      }
+    });
+
+    await test('CONTROL: from an ordinary page the chooser still returns to THAT page', () => {
+      // …so "return=/" above is the 404's own answer, not the return feature being switched off.
+      const { pages } = site('multiEn');
+      const rows = chooserRows(pages['language/index.html'], '?return=%2Fabout%2F&has=en,zh-tw');
+      assert.deepEqual(rows.map((r) => r.href), ['/about/', '/zh-tw/about/']);
+      // …and through a non-default page's own prefix, which bare() takes off first.
+      assert.deepEqual(chooserRows(pages['zh-tw/language/index.html'], '?return=%2Fzh-tw%2Fabout%2F').map((r) => r.href), ['/about/', '/zh-tw/about/']);
+    });
+
+    await test('🔴 `return=` never takes a chooser row off this site', () => {
+      // 🩸 CVERInc/reef#1910. The script checked "starts with one slash". A browser reads `/\` as
+      // `//`, deletes a tab or newline between two slashes, and bare() itself removed a locale
+      // prefix standing in front of two — each put another origin on the default locale's row.
+      const hostile = ['/\\evil.example', '/\\/evil.example', '/\t/evil.example', '/\n/evil.example', '/zh-tw//evil.example',
+        '/zh-tw/\\evil.example', '//evil.example', '///evil.example', 'https://evil.example/', 'javascript:alert(1)',
+        '/..//evil.example', '/../../evil.example', '\\\\evil.example', ' //evil.example', '/%5Cevil.example', '/@evil.example'];
+      const { pages } = site('multiEn');
+      for (const chooser of ['language/index.html', 'zh-tw/language/index.html']) {
+        for (const value of hostile) {
+          for (const row of chooserRows(pages[chooser], `?return=${encodeURIComponent(value)}`)) {
+            assert.equal(row.url.origin, ORIGIN, `${chooser} ?return=${JSON.stringify(value)}: the ${row.locale} row goes to ${row.url.href}`);
+          }
+        }
+      }
+    });
+
+    // ── 5: one definition of the site's default language ─────────────────────────────────────
+    await test('🔴 configDisagrees: the 404 follows `locales`, like every other route — not the config\'s `lang`', () => {
+      const { notFound, outDir } = site('configDisagrees');
+      assert.equal(htmlLang(notFound), 'en', 'the 404 is in the language that lives at /');
+      assert.match(notFound, /Page not found/);
+      for (const href of langLinks(notFound)) {
+        assert.match(href, /^\/language\?return=%2F$/, `not the default-locale chooser: ${href}`);
+        assert.ok(resolves(outDir, href));
+      }
+      // …which is what the home page at `/` said all along.
+      assert.equal(htmlLang(site('configDisagrees').pages['index.html']), 'en');
     });
   } finally {
     if (process.env.KEEP_404_LOCALE_OUT) console.log(`  · kept: ${work}`);

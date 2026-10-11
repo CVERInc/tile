@@ -11,7 +11,7 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
-import { toUrlLocale, toBcp47 } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
 
@@ -340,8 +340,7 @@ function categoryHrefSlug(href, meta) {
 // localeUrlPrefix: '/<url-locale>' when `meta` is a NON-DEFAULT locale's own meta; '' for the
 // default/base locale or a non-Lingo site (both must stay byte-identical to before this feature).
 export function localeUrlPrefix(meta) {
-  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const defaultLocale = locales[0] || '';
+  const defaultLocale = defaultLocaleOf(meta && meta.locales);
   const lang = String((meta && meta.lang) || '').trim();
   if (!lang || !defaultLocale || lang === defaultLocale) return '';
   return `/${toUrlLocale(lang)}`;
@@ -467,24 +466,31 @@ export function siteMeta(contentGlob) {
 // locale by the layout's own comparison and its chooser link is the unprefixed `/language`.
 //
 // No new key. Three sources, all already written by every site that has an answer:
-//   1. the site config's own `lang`, when it says one;
-//   2. `locales[0]` — SiteLayout's own "main language at root" rule, so a route rendered with this
-//      value is ON the default locale by the layout's own comparison and gets unprefixed links;
+//   1. `locales[0]` — the site's default locale, by the one definition every route shares
+//      (lingo/locale.mjs → defaultLocaleOf), so a route rendered with this value is ON the default
+//      locale by the layout's own comparison and gets unprefixed links;
+//   2. the site config's own `lang`, when it says one;
 //   3. the root home page's `lang` — a single-language site declares no `locales`, and its home is
 //      what siteMeta() read before `_site.md` existed. The ROOT home only (content/home.md): a
 //      locale home, or whichever page sorts first, is some other page's language.
 // Returns '' when none of them says anything, so the caller still takes the one shared
 // DEFAULT_LANG rather than this function becoming a tenth place a default lives.
+//
+// 🩸 CVERInc/reef#1910. 1 and 2 were the other way round — the only reader of "the site's default"
+// that did not put `locales[0]` first. A config with `lang: ja-JP` over `locales: en-US, ja-JP`
+// got a Japanese 404 whose Language link was the /ja-jp/ chooser, on a site whose `/` is English.
+// When the config's `lang` names the SAME locale as `locales[0]` (`zh-Hant` over `zh-TW`) it is
+// still returned as written: that spelling is what a one-language site puts in <html lang>.
 export function siteDefaultLang(meta, contentGlob) {
   const own = String((meta && meta.lang) || '').trim();
-  if (own) return own;
-  const first = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean)[0];
-  if (first) return first;
+  let rootHome = '';
   for (const [path, raw] of Object.entries(contentGlob || {})) {
     if ((path.split('/content/')[1] || '') !== 'home.md') continue;
-    return String(splitFrontmatter(String(raw || '')).meta?.lang || '').trim();
+    rootHome = String(splitFrontmatter(String(raw || '')).meta?.lang || '').trim();
+    break;
   }
-  return '';
+  const site = defaultLocaleOf(meta && meta.locales, own || rootHome);
+  return own && sameLocale(own, site) ? own : site;
 }
 
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
@@ -1225,8 +1231,8 @@ export function indexUrl(meta, n = 1) {
 // A locale with zero translated posts contributes nothing — no empty locale index, no dangling
 // hreflang, no locale category/tag archive with nothing in it.
 export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts) {
-  const blogLocales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const defaultBlogLocale = blogLocales[0] || '';
+  const blogLocales = parseLocales(meta && meta.locales);
+  const defaultBlogLocale = defaultLocaleOf(blogLocales);
   const baseBySlug = new Map((basePosts || []).map((p) => [p.slug, p]));
   const out = [];
   for (const L of blogLocales) {
@@ -1284,7 +1290,7 @@ export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts
 //   corpora   — localeBlogCorpora()'s result
 // Returns at(url, urlLocale = '') — `urlLocale` is the prefix the asking page lives under.
 export function blogSwitchLocales(meta, basePosts, corpora) {
-  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const locales = parseLocales(meta && meta.locales);
   const bare = (u) => String(u == null ? '' : u).replace(/^\/+|\/+$/g, '');
   // a url → its path with the locale prefix removed; null when it is not under that prefix at all.
   const keyOf = (u, urlLocale) => {
@@ -1307,7 +1313,8 @@ export function blogSwitchLocales(meta, basePosts, corpora) {
     for (let n = 2; n <= pages; n++) add(indexUrl(m, n));
     for (const p of posts || []) if (postHasPage(p, m)) add(postUrl(p, m));
   };
-  if (locales[0]) walk(locales[0], meta, basePosts, listedPosts(basePosts || [], meta), '');
+  const defaultLocale = defaultLocaleOf(locales);
+  if (defaultLocale) walk(defaultLocale, meta, basePosts, listedPosts(basePosts || [], meta), '');
   for (const c of corpora || []) walk(c.locale, c.meta, c.posts, c.listed, c.url);
   return (url, urlLocale = '') => {
     const k = keyOf(url, urlLocale);
@@ -1325,8 +1332,7 @@ export function blogSwitchLocales(meta, basePosts, corpora) {
 // must be built per-kind (a category archive's hreflang must never consult the tag-routed set).
 export function termLocaleMap(kind, contentFiles, blogLocaleFiles, meta, basePosts, baseListed) {
   const routed = kind === 'tag' ? routedTags : routedCategories;
-  const locales = String((meta && meta.locales) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const defaultLocale = locales[0] || '';
+  const defaultLocale = defaultLocaleOf(meta && meta.locales);
   const corpora = localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts);
   const mapByUrl = { '': routed(baseListed, meta) };
   const urlToData = { '': defaultLocale };

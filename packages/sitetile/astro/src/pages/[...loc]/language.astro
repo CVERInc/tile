@@ -13,7 +13,7 @@
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from '../../lib/blog.mjs';
-import { toUrlLocale, label, languageCopy, lingoEnabled } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, label, languageCopy, lingoEnabled, parseLocales, defaultLocaleOf, rootLangMismatch } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -47,13 +47,21 @@ export function getStaticPaths() {
   // `packages: lingo`. One-language sites get no chooser.
   if (!rootHome || !lingoEnabled(rootHome)) return [];
 
-  const locales = String(rootHome.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const locales = parseLocales(rootHome.locales);
+  // A chooser is a choice between editions. `packages: lingo` over ONE declared locale used to
+  // build a page with a single row on it, and a footer link on every page leading there.
+  if (locales.length < 2) return [];
   // 🩸 2026-10-11: this was the root home's raw `lang:`, compared with `L === defaultLocale` — an
   // unwritten rule that `lang:` be spelled exactly like `locales[0]`. `locales: en-US` + `lang: en`
   // (both correct) matched nothing: the DEFAULT locale's chooser went to /en-us/language and
-  // /language 404'd. The default is now SiteLayout's own rule, `locales[0] || lang`, so the chooser
-  // and the layout's hreflang / footer link can never disagree about which locale lives at `/`.
-  const defaultLocale = locales[0] || String(rootHome.lang || '').trim();
+  // /language 404'd. The default is the site's one definition (lingo/locale.mjs → defaultLocaleOf),
+  // so the chooser and the layout's hreflang / footer link can never disagree about which locale
+  // lives at `/`.
+  const defaultLocale = defaultLocaleOf(locales, rootHome.lang);
+  // …and when the root home page itself disagrees with that, say so. Here because this runs once
+  // per build and already holds the root home; the warning is the build log's, like loadSite's.
+  const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang });
+  if (mismatch) console.warn(mismatch);
 
   return locales.map((L) => {
     const meta = (L === defaultLocale ? rootHome : homesByRel[toUrlLocale(L)]) || rootHome;
@@ -111,6 +119,14 @@ const rows = locales.map((L) => {
     </ul>
   </section>
   {/* ?return=<path> (+ optional ?has=<locales with that path>) → rewrite each row to that page,
-      per-locale-prefixed. Same contract as a live /language page. is:inline so it ships verbatim. */}
-  <script is:inline set:html={`(function(){var LOCS=${urlLocalesJson},DEF="${defaultUrlLocale}";function bare(p){for(var i=0;i<LOCS.length;i++){var loc=LOCS[i];if(loc===DEF)continue;if(p==="/"+loc||p==="/"+loc+"/")return"/";if(p.indexOf("/"+loc+"/")===0)return p.slice(("/"+loc).length)}return p}function l(){var n=new URLSearchParams(window.location.search),e=n.get("return");if(!e||e.charAt(0)!=="/"||e.indexOf("//")===0)return;var b=bare(e),r=(n.get("has")||"").split(",").filter(Boolean);document.querySelectorAll("[data-language-link]").forEach(function(s){var t=s.getAttribute("data-locale");if(!t)return;var a=r.length&&r.indexOf(t)<0?"/":b,o=a;t!==DEF&&(o=a==="/"?"/"+t+"/":"/"+t+a),s.setAttribute("href",o)})}l();document.addEventListener("astro:page-load",l)})();`}></script>
+      per-locale-prefixed. Same contract as a live /language page. is:inline so it ships verbatim.
+      🩸 CVERInc/reef#1910. `return` is a value anyone can put in a link, and the only check was
+      "starts with one slash, not two". Three ways through that to another origin, each on the
+      DEFAULT locale's row (the one row that gets no locale prefix): a backslash after the slash,
+      which a browser reads as a second slash; a tab or newline between two slashes, which a browser
+      deletes; and a locale prefix in front of two slashes, which bare() itself strips. Listing
+      spellings is how the first check came to miss three, so same() asks the browser instead: the
+      href is resolved and compared with this page's origin before it is written. A refused value
+      leaves the row as built — that locale's home. */}
+  <script is:inline set:html={`(function(){var LOCS=${urlLocalesJson},DEF="${defaultUrlLocale}";function bare(p){for(var i=0;i<LOCS.length;i++){var loc=LOCS[i];if(loc===DEF)continue;if(p==="/"+loc||p==="/"+loc+"/")return"/";if(p.indexOf("/"+loc+"/")===0)return p.slice(("/"+loc).length)}return p}function same(h){try{return new URL(h,window.location.href).origin===window.location.origin}catch(x){return false}}function l(){var n=new URLSearchParams(window.location.search),e=n.get("return");if(!e||e.charAt(0)!=="/"||e.indexOf("//")===0)return;var b=bare(e),r=(n.get("has")||"").split(",").filter(Boolean);document.querySelectorAll("[data-language-link]").forEach(function(s){var t=s.getAttribute("data-locale");if(!t)return;var a=r.length&&r.indexOf(t)<0?"/":b,o=a;t!==DEF&&(o=a==="/"?"/"+t+"/":"/"+t+a);same(o)&&s.setAttribute("href",o)})}l();document.addEventListener("astro:page-load",l)})();`}></script>
 </SiteLayout>

@@ -56,6 +56,74 @@ export function label(locale) { const f = _canon(locale); return f ? LINGO_LABEL
 const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
   .map((s) => String(s).trim()).filter(Boolean);
 
+/** `locales:` as a site writes it → the site's locale list. THE one parser: every reader of
+ *  `locales` (layout, chooser route, blog, sitemap, verdict, inbox bubble) calls this, because each
+ *  entry becomes a URL path segment (`/<lowercased>/`) and a directory in the build.
+ *
+ *  🩸 CVERInc/reef#1910. There were eleven copies of `split(',').map(trim).filter(Boolean)`, and the
+ *  frontmatter reader is deliberately not YAML — it hands the value over verbatim. So
+ *  `locales: [zh-TW, en-US]` built a directory named `en-us]`, `"zh-TW, en-US"` one named `en-us"`,
+ *  and `ko/kr` a nested `ko/kr/language/`; `../kiln` failed the build on a routing error that never
+ *  mentioned the line that caused it.
+ *
+ *  Three rules, in this order:
+ *    1. list punctuation around an entry (`[ ] " '`) is dropped — the three spellings above are
+ *       unambiguous, and an empty entry (a trailing comma) is skipped as it always was;
+ *    2. what is left must be letters, digits and single hyphens — anything else THROWS a
+ *       LocaleListError naming the entry, rather than becoming a path;
+ *    3. an entry whose URL form is already listed (`zh-TW, zh-tw`, or the same code twice) is one
+ *       directory written twice — the first spelling is kept. */
+const _LOCALE_CODE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+export class LocaleListError extends Error {
+  constructor(entry) {
+    super(`sitetile: locales entry ${JSON.stringify(entry)} is not a locale code — a code is letters, `
+      + 'digits and hyphens only (en-US, zh-TW), because each one becomes a URL path segment. '
+      + 'Fix the `locales:` line in the site config.');
+    this.name = 'LocaleListError';
+    this.entry = entry;
+  }
+}
+export function parseLocales(v) {
+  const out = [];
+  for (const item of (Array.isArray(v) ? v : String(v ?? '').split(','))) {
+    const s = String(item ?? '').replace(/^[\s\["']+|[\s\]"']+$/g, '');
+    if (!s) continue;
+    if (!_LOCALE_CODE.test(s)) throw new LocaleListError(s);
+    if (!out.some((seen) => seen.toLowerCase() === s.toLowerCase())) out.push(s);
+  }
+  return out;
+}
+
+/** The site's DEFAULT locale — the one that lives at `/`. THE one definition:
+ *  the first entry of `locales`, else `fallback` (the language of a site that declares none).
+ *
+ *  🩸 CVERInc/reef#1910. Nine places derived this inline and they did not all agree on the first
+ *  preference: the layout, the chooser, the blog link helpers and the verdict took `locales[0]`;
+ *  the 404's language took the site config's own `lang:` first. On a site where the two differ the
+ *  404 was rendered as a non-default-locale page of a site whose every other route said otherwise.
+ *  `locales[0]` is the rule the URLs already obey (it is what decides which locale is unprefixed),
+ *  so it is the first preference everywhere; `fallback` is each caller's own second answer. */
+export function defaultLocaleOf(locales, fallback = '') {
+  return parseLocales(locales)[0] || String(fallback || '').trim();
+}
+
+/** The sentence for a site whose ROOT home page says one language while `locales` puts another
+ *  first — or null when they agree (or either is silent). `locales[0]` wins; this only says so.
+ *
+ *  🩸 CVERInc/reef#1910. "The first locale lives at `/`" was a rule nothing stated and nothing
+ *  checked: `locales: en-US, zh-TW` over a Chinese home page built `<html lang="zh-Hant">` at `/`
+ *  with `hreflang="en" href="/"` beside it, and a chooser whose Chinese row went to a `/zh-tw/`
+ *  nobody had written. The build was green and silent. */
+export function rootLangMismatch({ locales = [], rootLang = '' } = {}) {
+  const first = parseLocales(locales)[0];
+  const lang = String(rootLang || '').trim();
+  if (!first || !lang || sameLocale(first, lang)) return null;
+  return `sitetile: the home page says lang: ${lang}, but locales lists ${first} first — and the `
+    + `first locale is the one served at "/". ${first} wins: hreflang, x-default and the language `
+    + `chooser all treat "/" as ${first}, and ${lang} is expected under /${toUrlLocale(localeOf(locales, lang))}/. `
+    + `Put the home page's language first in locales, or move that page under its own locale.`;
+}
+
 /** Is the Lingo install on for this site? — the ONE definition; every gate calls this.
  *
  *  🩸 2026-10-11. This was `packages.includes('lingo')`, copied into SiteLayout and the /language
@@ -68,7 +136,7 @@ const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
  *  two or more entries. Free, but never forced on a one-language site. `packages: lingo` is still
  *  honoured (sites that already carry it keep working) but is no longer required. */
 export function lingoEnabled({ packages = [], locales = [] } = {}) {
-  return _list(packages).includes('lingo') || _distinct(_list(locales)).length > 1;
+  return _list(packages).includes('lingo') || _distinct(parseLocales(locales)).length > 1;
 }
 
 /** Do two locale spellings name the same locale? `en` / `en-US` / `en-us` all do; so do `zh-Hant`
@@ -98,7 +166,7 @@ function _distinct(list) {
 /** The entry of `locales` that a page's `lang:` means (so `lang: zh-Hant` → `zh-TW`), or `lang`
  *  itself when none does. URL prefixes must be derived from THIS, never from the raw `lang:`. */
 export function localeOf(locales, lang) {
-  return _list(locales).find((l) => sameLocale(l, lang)) || lang;
+  return parseLocales(locales).find((l) => sameLocale(l, lang)) || lang;
 }
 
 /** navigator.language prefixes that map to each locale (for the suggestion banner). */
@@ -138,7 +206,7 @@ export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_
  *
  *  No options → null, so the page ships neither the banner markup nor its script. */
 export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null } = {}) {
-  const declared = _list(locales);
+  const declared = parseLocales(locales);
   if (declared.length < 2) return null;
   const pageLocale = localeOf(locales, lang);
   const fromContent = _list(altLocales);
@@ -225,8 +293,8 @@ export function alternateLocales({ locales = [], defaultLocale = '', subPath = '
  *  was sent to the other one's home. The logo already had the right answer, inline in the layout
  *  where the card could not reach it — the fix is that there is one of it now, not a second. */
 export function localeHomePath({ locales = [], pathname = '/', contentRels = null } = {}) {
-  const list = _list(locales);
-  const defaultLocale = list[0] || '';
+  const list = parseLocales(locales);
+  const defaultLocale = defaultLocaleOf(list);
   const first = String(pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0];
   if (!first || first === toUrlLocale(defaultLocale)) return '/';
   if (!list.some((l) => toUrlLocale(l) === first)) return '/';

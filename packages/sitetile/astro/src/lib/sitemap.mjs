@@ -4,7 +4,7 @@
 // hreflang defect this sitemap sits next to. `isPage` and `slugMap` are injected for the same
 // reason — importing them would drag `@sitetile` back in transitively through blog.mjs, which is
 // how the alias got in here the first time.
-import { toUrlLocale } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, parseLocales } from '../packages/lingo/locale.mjs';
 
 /** Canonical form of a site path: directory-style, with the trailing slash.
  *
@@ -27,7 +27,7 @@ export function canonicalPath(p) {
  *  locale's own home collapses to `/<loc>/`. Anything this gets wrong shows up as a 404 in the
  *  sitemap, which is why it copies the router rather than inventing a second convention. */
 export function contentUrls(glob, siteMetaObj = {}, isPage = () => true) {
-  const locales = String(siteMetaObj.locales || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const locales = parseLocales(siteMetaObj.locales);
   const urlLocales = new Set(locales.map((l) => toUrlLocale(l)));
   const out = [];
   for (const [path, raw] of Object.entries(glob || {})) {

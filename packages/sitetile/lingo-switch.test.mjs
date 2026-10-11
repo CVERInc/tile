@@ -21,7 +21,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lingoMod from './astro/src/packages/lingo/locale.mjs';
-import { lingoEnabled, sameLocale, localeOf, toUrlLocale } from './astro/src/packages/lingo/locale.mjs';
+import { lingoEnabled, sameLocale, localeOf, toUrlLocale, parseLocales, defaultLocaleOf, rootLangMismatch, LocaleListError } from './astro/src/packages/lingo/locale.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, 'astro/src');
@@ -211,16 +211,98 @@ test('🔴 nobody re-derives the switch inline — one definition, in locale.mjs
   assert.deepEqual(hits, ['packages/lingo/locale.mjs'], `inline Lingo gates found:\n${hits.join('\n')}`);
 });
 
-test('🔴 the /language default is SiteLayout\'s rule (locales[0]), not the root home\'s raw lang:', () => {
-  assert.match(language, /const defaultLocale = locales\[0\] \|\| String\(rootHome\.lang/);
-  assert.match(layout, /const defaultLocale = \(locales\[0\] \|\| lang \|\| ''\)\.trim\(\);/,
-    'and SiteLayout still says the same thing — if this moves, move the route with it');
+test('🔴 the /language default and SiteLayout\'s are the ONE definition, not two spellings of it', () => {
+  assert.match(language, /const defaultLocale = defaultLocaleOf\(locales, rootHome\.lang\);/);
+  assert.match(layout, /const defaultLocale = lingo\.defaultLocaleOf\(locales, lang\);/,
+    'and SiteLayout says the same thing — if this moves, move the route with it');
 });
 
 test('🔴 SiteLayout derives the page\'s URL prefix from localeOf, not the raw lang:', () => {
   assert.match(layout, /const pageLocale = lingo\.localeOf\(locales, lang\);/);
-  assert.match(layout, /const langUrlPrefix = hasLingo && !lingo\.sameLocale\(pageLocale, defaultLocale\)/);
+  assert.match(layout, /const langUrlPrefix = multilingual && !lingo\.sameLocale\(pageLocale, defaultLocale\)/);
   assert.doesNotMatch(layout, /lingo\.toUrlLocale\(lang\) !== defaultUrlLocale/, 'the old raw comparison is gone');
+});
+
+// ── CVERInc/reef#1910: one parser for `locales`, one definition of the default ──────────────
+// 🩸 Eleven places split `locales` on commas themselves and nine took the first entry (or, in one
+// of them, the site config's `lang:` BEFORE it). The frontmatter reader is not YAML and hands the
+// value over verbatim, so each copy turned `[zh-TW, en-US]` into a directory called `en-us]`.
+
+test('🔴 parseLocales: the three list spellings a site writes are the same list', () => {
+  const want = ['zh-TW', 'en-US'];
+  assert.deepEqual(parseLocales('zh-TW, en-US'), want);
+  assert.deepEqual(parseLocales('[zh-TW, en-US]'), want, 'inline array');
+  assert.deepEqual(parseLocales('"zh-TW, en-US"'), want, 'one quoted string');
+  assert.deepEqual(parseLocales('["zh-TW", \'en-US\']'), want, 'quoted entries in an array');
+  assert.deepEqual(parseLocales(['zh-TW', 'en-US']), want, 'an array, as SiteLayout passes it on');
+  // The control for the case above: uneven on purpose, so a parser that kept only the first or only
+  // the last entry, or lower-cased them, would be caught.
+  assert.deepEqual(parseLocales(' ko-KR ,ja-JP,en '), ['ko-KR', 'ja-JP', 'en']);
+});
+
+test('🔴 parseLocales: an empty entry is skipped and a repeated one is kept once, first spelling', () => {
+  assert.deepEqual(parseLocales('zh-TW, en-US,'), ['zh-TW', 'en-US'], 'trailing comma');
+  assert.deepEqual(parseLocales('zh-TW,, en-US'), ['zh-TW', 'en-US']);
+  assert.deepEqual(parseLocales('zh-TW, en-US, zh-TW'), ['zh-TW', 'en-US'], 'the same code twice');
+  // Different case is the same URL segment (/zh-tw/) — one directory, written twice.
+  assert.deepEqual(parseLocales('zh-TW, zh-tw, ja-JP'), ['zh-TW', 'ja-JP']);
+  assert.deepEqual(parseLocales('zh-tw, zh-TW'), ['zh-tw'], 'first spelling wins, whichever it is');
+  for (const empty of ['', '  ', ',', '[]', '""', undefined, null]) assert.deepEqual(parseLocales(empty), [], JSON.stringify(empty));
+});
+
+test('🔴 parseLocales: anything that is not a locale code is refused BY NAME, never made a path', () => {
+  const refused = ['../kiln', 'ko/kr', '..', 'en-US/', '/ja-JP', 'zh_TW', 'en US', 'zh"TW', 'en-', '-en', 'en--US',
+    'zh-TW;ja-JP', 'en.US', 'ja\\JP', '%2e%2e', 'en-US?x', 'zh-TW#', '日本語'];
+  for (const bad of refused) {
+    assert.throws(() => parseLocales(`zh-TW, ${bad}`), (e) => {
+      assert.ok(e instanceof LocaleListError, `${bad}: not a LocaleListError`);
+      assert.equal(e.name, 'LocaleListError');
+      assert.ok(e.message.includes(JSON.stringify(bad)), `${bad}: the message does not name the entry — ${e.message}`);
+      return true;
+    }, bad);
+  }
+  // The control: the same call with a real code in that position does not throw.
+  assert.deepEqual(parseLocales('zh-TW, ko-KR'), ['zh-TW', 'ko-KR']);
+  assert.deepEqual(parseLocales('zh-Hant-TW, es-419, en'), ['zh-Hant-TW', 'es-419', 'en']);
+});
+
+test('🔴 defaultLocaleOf: the first declared locale, else the caller\'s own fallback', () => {
+  assert.equal(defaultLocaleOf('ja-JP, en-US, zh-TW'), 'ja-JP');
+  assert.equal(defaultLocaleOf('[ko-KR, en]', 'zh-Hant'), 'ko-KR', 'a declared locale outranks the fallback');
+  assert.equal(defaultLocaleOf('', ' zh-Hant '), 'zh-Hant');
+  assert.equal(defaultLocaleOf(undefined), '');
+});
+
+test('🔴 nobody splits `locales` or takes its first entry inline — one parser, one default', () => {
+  const SPLIT = /locales\b[^\n;]*\.split\(\s*['"],['"]\s*\)/;
+  const FIRST = /[lL]ocales\[0\]/;
+  const code = (p) => readFileSync(p, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const hits = walk(SRC).filter((p) => { const c = code(p); return SPLIT.test(c) || FIRST.test(c); }).map((p) => relative(SRC, p));
+  assert.deepEqual(hits, [], `inline locale-list handling found:\n${hits.join('\n')}`);
+  // The control: the same two patterns DO see the spellings that were removed.
+  assert.ok(SPLIT.test("const locales = String(meta.locales || '').split(',').map((s) => s.trim());"));
+  assert.ok(FIRST.test("const defaultLocale = locales[0] || '';") && FIRST.test('const d = blogLocales[0];'));
+});
+
+test('🔴 rootLangMismatch: names both values and says which one wins; silent when they agree', () => {
+  const msg = rootLangMismatch({ locales: 'en-US, zh-TW', rootLang: 'zh-Hant' });
+  assert.match(msg, /^sitetile: /, 'the build log\'s own prefix');
+  assert.ok(msg.includes('lang: zh-Hant') && msg.includes('en-US first'), msg);
+  assert.match(msg, /en-US wins/);
+  assert.ok(msg.includes('/zh-tw/'), 'and where the home page\'s language is expected instead');
+  // Two correct spellings of one locale are not a disagreement.
+  assert.equal(rootLangMismatch({ locales: 'en-US, zh-TW', rootLang: 'en' }), null);
+  assert.equal(rootLangMismatch({ locales: 'zh-TW, ja-JP', rootLang: 'zh-Hant' }), null);
+  assert.equal(rootLangMismatch({ locales: 'ja-JP, ko-KR', rootLang: '' }), null, 'a home page that says nothing');
+  assert.equal(rootLangMismatch({ locales: '', rootLang: 'ko' }), null, 'a site that declares nothing');
+});
+
+test('🔴 SiteLayout: alternates, the chooser link and its prefix all wait for a SECOND locale', () => {
+  assert.match(layout, /const multilingual = hasLingo && locales\.length > 1;/);
+  assert.match(layout, /const altLocales = !multilingual \? \[\] :/);
+  assert.match(layout, /const computedLanguageHref = multilingual\s*\?/);
+  assert.match(layout, /\{multilingual && defaultLocale && altLocales\.includes\(defaultLocale\) && <link rel="alternate" hreflang="x-default"/);
+  assert.doesNotMatch(layout, /locales\.length > 0 && <a class="rf-lang"/, 'the plain footer no longer links on one locale');
 });
 
 console.log(`\n${passed} passed`);
