@@ -1,6 +1,7 @@
 // The language chooser survives a site's own site-wide CSS, and a site can still restyle it.
 //   run: node packages/sitetile/lang-page-isolation.test.mjs   (globbed into scripts/test.sh)
-//        PLAYWRIGHT=/path/to/node_modules/playwright/index.js node …   (adds the measured half)
+//        PLAYWRIGHT=/path/to/node_modules/playwright/index.js node …   (adds the measured half;
+//        index.mjs works too)
 //
 // 🩸 CVERInc/reef#1887. A two-language site wrote a site-wide side gutter in its theme. It was a
 // sound rule for that site's full-width sections. The chooser at /language is a page the platform
@@ -104,10 +105,13 @@ await test('the parser reads the file: two layers, several rules in each', () =>
 await test('🔴 every part\'s box is declared in the layer AFTER the theme', () => {
   const order = /@layer ([^;]+);/.exec(layout)[1].split(',').map((s) => s.trim());
   assert.ok(order.indexOf('reef.responsive') > order.indexOf('reef.theme'), 'reef.responsive must follow reef.theme');
+  // Exact, per selector: an allowed property on the wrong part (`padding-inline` on the band, a
+  // margin on a row link) is as much a change to the lifted layer as a new selector is.
+  assert.deepEqual([...box.keys()].sort(), Object.keys(BOX).sort(), 'the set of selectors lifted above the theme changed');
   for (const [sel, props] of Object.entries(BOX)) {
     const decls = box.get(sel);
     assert.ok(decls, `no rule for \`${sel}\` in reef.responsive — its box is back in the theme's reach`);
-    for (const p of props) assert.ok(decls.has(p), `\`${sel}\` does not hold \`${p}\` above the theme`);
+    assert.deepEqual([...decls.keys()].sort(), props.slice().sort(), `\`${sel}\` above the theme holds other than its pinned box`);
   }
 });
 
@@ -224,16 +228,38 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.ok(at < theme, `the chooser's sheet (${at}) comes after the theme (${theme}): the theme loses every tie`);
     });
 
+    await test('🔴 the chooser\'s sheet is the file as written: two layer blocks, in order, nothing around them', () => {
+      // The checks above and the pure half stay green if the layout wraps the WHOLE sheet in one
+      // layer (everything above the theme: the owner can no longer restyle it); only a browser sees
+      // that. So the emitted text itself is read: top level is `reef.theme` then `reef.responsive`.
+      for (const name of ['plain', 'themed']) {
+        const text = chooserStyles(built[name].chooser)[0][1];
+        const top = []; let depth = 0; let head = ''; let stray = '';
+        for (const ch of text) {
+          if (ch === '{') { if (depth === 0) { top.push(head.trim().replace(/\s+/g, ' ')); head = ''; } depth++; }
+          else if (ch === '}') { depth--; if (depth === 0) continue; }
+          else if (depth === 0) head += ch;
+        }
+        stray = head.trim();
+        assert.equal(depth, 0, `${name}: unbalanced braces in the chooser's sheet`);
+        assert.deepEqual(top, ['@layer reef.theme', '@layer reef.responsive'], `${name}: top level of the chooser's sheet`);
+        assert.equal(stray, '', `${name}: text outside every layer block`);
+        assert.equal(text.replace(/\s+/g, ' ').trim(), css.replace(/\s+/g, ' ').trim(), `${name}: the emitted sheet differs from the source file`);
+      }
+    });
+
     await test('no other page carries it', () => {
       for (const name of ['plain', 'themed']) assert.equal(chooserStyles(built[name].home).length, 0, `${name}: the home page carries the chooser's sheet`);
     });
 
     // ── measured ─────────────────────────────────────────────────────────────────────────────
     if (!process.env.PLAYWRIGHT) {
-      console.log('  · lang-page-isolation MEASURED SKIPPED — set PLAYWRIGHT to a playwright index.js');
+      console.log('  · lang-page-isolation MEASURED SKIPPED — set PLAYWRIGHT to a playwright index.js or index.mjs');
       console.log('    (the checks above read structure; only this half sees a heading wrap or a colour resolve)');
     } else {
-      const { chromium } = await import(process.env.PLAYWRIGHT);
+      // `index.js` is CommonJS, so `chromium` sits on `default`; `index.mjs` exports it by name.
+      const pw = await import(process.env.PLAYWRIGHT);
+      const chromium = pw.chromium || pw.default?.chromium;
       if (!chromium) throw new Error(`no chromium export from ${process.env.PLAYWRIGHT}`);
       const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.json': 'application/json' };
       const browser = await chromium.launch();
