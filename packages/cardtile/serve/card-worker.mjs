@@ -25,7 +25,7 @@ const ytFetch = (u) => fetch(u, {
 });
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
-import { vanityKey as VANITY_KEY, vanityOfKey as VANITY_OF_KEY } from './card-vanity.mjs';
+import { vanityKey as VANITY_KEY, vanityOfKey as VANITY_OF_KEY, vanityHost } from './card-vanity.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -686,7 +686,9 @@ export default {
     // another creator's card. So the reader checks both halves; the extra read happens only on the
     // path that was about to redirect.
     const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
-    if (ownHost && host !== ownHost && (await store.get(VANITY_KEY(ownHost))) === resolved.handle) {
+    // The name itself is checked too: a hand-written key never went through the API's validator, and
+    // an invalid A-label throws inside Response.redirect while a hex-spelled IPv4 redirects to loopback.
+    if (ownHost && host !== ownHost && vanityHost(ownHost) && (await store.get(VANITY_KEY(ownHost))) === resolved.handle) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 

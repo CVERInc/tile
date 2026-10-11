@@ -52,7 +52,8 @@ const OWN_ZONE = 'feelreef.com';
  *   - no port, path, scheme, query, userinfo, whitespace or trailing dot.
  *   - at least two labels; each label 1–63 chars; the whole name ≤ 253.
  *   - not an IP address (the last label must not be all digits; brackets are not in the grammar).
- *   - Unicode names arrive as punycode (`xn--…`), which is what the Host header carries.
+ *   - Unicode names arrive as punycode (`xn--…`), which is what the Host header carries — and it must
+ *     be VALID punycode: the WHATWG URL parser must accept it and read back the identical name.
  *   - 🔴 nothing at or under feelreef.com: the canonical host and the SaaS fallback origin live there.
  */
 export function vanityHost(input) {
@@ -64,6 +65,14 @@ export function vanityHost(input) {
   if (!labels.every((l) => LABEL.test(l))) return null;
   if (/^[0-9]+$/.test(labels[labels.length - 1])) return null;
   if (h === OWN_ZONE || h.endsWith('.' + OWN_ZONE)) return null;
+  // 🔴 …and the URL parser must read it back as the SAME name. Every consumer of this host is a URL
+  // (the worker's own Response.redirect, a browser): `127.0x1` passes every rule above and is
+  // `127.0.0.1` to all of them, and `xn--a.example` passes them and is not a URL at all. So the
+  // parser that will consume the name is the one that judges it — and a dotted quad, however it was
+  // spelled, is still an address.
+  let parsed;
+  try { parsed = new URL(`https://${h}/`).hostname; } catch { return null; }
+  if (parsed !== h || /^\d+\.\d+\.\d+\.\d+$/.test(parsed)) return null;
   return h;
 }
 

@@ -12,6 +12,11 @@ import * as vanity from './card-vanity.mjs';
 
 // ── the host grammar ─────────────────────────────────────────────────────────────────────────────
 
+/** every host this file expects to be accepted — the property tests run over all of them. */
+const ACCEPTED = ['creator.example', 'card.creator.example', 'a-b.example.co.uk', 'xn--fiqs8s.example',
+  'xn--2qq421a.example', 'xn--bcher-kva.example', 'x1.example', 'notfeelreef.com', 'feelreef.com.example',
+  '0x.example', `${'a'.repeat(63)}.example`];
+
 test('vanityHost: an ordinary lowercase hostname is accepted as itself', () => {
   for (const h of ['creator.example', 'card.creator.example', 'a-b.example.co.uk', 'xn--fiqs8s.example', 'x1.example']) {
     assert.equal(vanity.vanityHost(h), h, h);
@@ -68,6 +73,28 @@ test('🔴 vanityHost: nothing under feelreef.com — those hosts are ours, and 
   // CONTROL: a name that merely ENDS in the same letters is somebody else's domain.
   assert.equal(vanity.vanityHost('notfeelreef.com'), 'notfeelreef.com');
   assert.equal(vanity.vanityHost('feelreef.com.example'), 'feelreef.com.example');
+});
+
+test('🔴 vanityHost: every OTHER spelling of an IPv4 address is refused — the URL parser turns them into one', () => {
+  // A label grammar alone accepts these: no label is all digits. But every URL consumer (the worker's
+  // own Response.redirect included) normalises them to a dotted quad, so a "host" like this would be
+  // stored under one name and redirected to another — loopback, here.
+  for (const h of ['127.0x1', '0x7f.0x0.0x0.0x1', '0x7f.0x1', '1.2.3.0x4', '0x7f000001.example.0x1']) {
+    assert.equal(vanity.vanityHost(h), null, h);
+  }
+});
+
+test('🔴 vanityHost: an A-label that is not valid punycode is refused; valid ones still pass', () => {
+  for (const h of ['xn--a.example', 'xn--abc.example']) assert.equal(vanity.vanityHost(h), null, h);
+  for (const h of ['xn--fiqs8s.example', 'xn--bcher-kva.example']) assert.equal(vanity.vanityHost(h), h, h); // CONTROL
+});
+
+test('🔴 vanityHost: whatever it accepts, the URL parser reads back as exactly the same name', () => {
+  // The property the two tests above are instances of, run over every host this file accepts.
+  for (const h of ACCEPTED) {
+    assert.equal(vanity.vanityHost(h), h, h);
+    assert.equal(new URL(`https://${h}/`).hostname, h, h);
+  }
 });
 
 test('vanityHost: anything that is not a string is refused', () => {
@@ -485,6 +512,26 @@ test('🔴 end to end, in the runbook\'s order: bind without redirect → DNS �
   assert.equal((await viaWorker(store, 'DELETE', 'maple')).status, 200);
   assert.equal((await visit(store, 'https://creator2.example/')).status, 404);
   assert.equal((await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' })).status, 200);
+});
+
+test('🔴 every host the API accepts is redirected to under exactly that name, and never throws', async () => {
+  for (const h of ACCEPTED) {
+    const store = kv({ maple: CARD });
+    assert.equal((await call(store, 'PUT', 'maple', { host: h })).status, 200, h);
+    const canon = await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' });
+    assert.equal(canon.status, 301, h);
+    assert.equal(new URL(canon.headers.get('location')).hostname, h, h);
+  }
+});
+
+test('🔴 a hand-written vanityof: the API would refuse is never followed — no throw, no 301 elsewhere', async () => {
+  // Keys written before this API, by hand, never went through vanityHost. The worker must not turn
+  // one into an exception (an invalid A-label throws inside Response.redirect) or a 301 to loopback.
+  for (const h of ['xn--a.example', '127.0x1', '0x7f.0x0.0x0.0x1', 'Creator.example', 'creator.example/x']) {
+    const store = kv({ maple: CARD, [`vanity:${h}`]: 'maple', [`vanityof:maple`]: h });
+    const res = await visit(store, 'https://card.feelreef.com/maple', { redirect: 'manual' });
+    assert.equal(res.status, 200, h);
+  }
 });
 
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
