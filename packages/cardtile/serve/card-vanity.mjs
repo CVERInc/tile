@@ -125,7 +125,7 @@ function parseExpect(obj) {
  *   GET     → 200 {handle, host|null, redirect, invalid_host?: true}   404 card_not_found
  *   PUT     {host, redirect?=true, expect?} → 200 {handle, host, redirect, changed}
  *           400 vanity_host_invalid · 400 vanity_redirect_invalid · 400 vanity_expect_invalid
- *           404 card_not_found · 409 vanity_state_changed · 409 vanity_taken · 503 vanity_unconfirmed
+ *           404 card_not_found · 409 vanity_state_changed · 409 {vanity_taken, held_by} · 503 vanity_unconfirmed
  *   DELETE  {expect?} → 200 {handle, host:null, changed}  400 vanity_expect_invalid · 409 vanity_state_changed
  *
  * `expect` is `{host: string|null, redirect: boolean}` — exactly what GET returned. When present and
@@ -236,9 +236,19 @@ export async function handleVanity({ method, handle, store, readJson }) {
     if (await stale(expect)) return out(409, { error: 'vanity_state_changed' });
 
     const holder = await store.get(vanityKey(host));
-    // 🔴 The other card is not named: whose domain this is belongs to that card's owner, and the
-    // caller is acting for somebody else.
-    if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken' });
+    // 🔴 `held_by` NAMES the card holding the host — a deliberate reversal of this API's first
+    // version, which kept it secret. Who may see it: only a caller holding the infrastructure bearer,
+    // and that bearer can already GET every card's binding, so naming the holder here discloses
+    // nothing it could not read anyway; it is not a tenant-facing answer, and the caller must not pass
+    // it on to the tenant who asked. Why: ownership is decided by the caller's authoritative record
+    // (file header). When that record says this host belongs to THIS card but another card's late
+    // write still holds `vanity:<host>`, the caller has to know which card to DELETE to converge.
+    // The body carries the code and the holder's handle, nothing more.
+    //
+    // `held_by` is the raw value of `vanity:<host>` — the key that decides what visitors get — even
+    // when the holder's own GET does not report this host (a forward key with no record behind it).
+    // DELETE on the holder cannot remove such a key; see the forward-only note in the file header.
+    if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
 
     let record = await store.get(vanityHostKey(handle));
     const own = await store.get(vanityOfKey(handle));
@@ -264,7 +274,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
       const landed = await store.get(vanityKey(host));
       if (landed != null && landed !== handle) {
         await store.delete(vanityHostKey(handle));
-        return out(409, { error: 'vanity_taken' });
+        return out(409, { error: 'vanity_taken', held_by: landed });
       }
       if (landed !== handle) return out(503, { error: 'vanity_unconfirmed' });
     }

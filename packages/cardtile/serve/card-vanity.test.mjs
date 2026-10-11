@@ -342,17 +342,45 @@ test('🔴 PUT: `redirect` that is not a boolean → 400 vanity_redirect_invalid
   assert.deepEqual(store.ops, []);
 });
 
-test('🔴 PUT: a host bound to ANOTHER card → 409 vanity_taken, nothing written, and the owner is not named', async () => {
+test('🔴 PUT: a host bound to ANOTHER card → 409 vanity_taken naming the holder (held_by), nothing written', async () => {
   for (const redirect of [true, false]) {
     const seed = { maple: CARD, other: OTHER, ...bound('other', 'creator.example', { redirect }) };
     const store = kv(seed);
     const r = await call(store, 'PUT', 'maple', { host: 'creator.example', redirect });
-    assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken' } });
+    assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken', held_by: 'other' } });
     assert.deepEqual(store.ops, []);
     assert.deepEqual(Object.fromEntries(store._m), seed);
     // CONTROL: a different host for the same card is fine — the 409 was about the host, not the card.
     assert.equal((await call(store, 'PUT', 'maple', { host: 'creator2.example', redirect })).status, 200);
   }
+});
+
+test('🔴 held_by is the raw holder of vanity:<host> — even when that card\'s own GET does not report the host', async () => {
+  // A stray forward key: `vanity:stray.example` says alpha, but alpha's own record names nothing (a
+  // late-landing write, or a hand-written forward-only key). GET alpha reports it unbound; the host is
+  // still taken, and held_by still says by whom — it reads the one key that decides who is served.
+  const store = kv({ alpha: CARD, beta: OTHER, 'vanity:stray.example': 'alpha' });
+  assert.deepEqual((await call(store, 'GET', 'alpha')).body, { handle: 'alpha', host: null, redirect: false });
+  assert.deepEqual(await call(store, 'PUT', 'beta', { host: 'stray.example' }), { status: 409, body: { error: 'vanity_taken', held_by: 'alpha' } });
+  // 🔴 …and DELETE alpha cannot remove it: DELETE finds a card's host through the card's own record,
+  // and there is none. That is the documented forward-only limit, asserted so it cannot change quietly.
+  assert.deepEqual(await call(store, 'DELETE', 'alpha', { expect: { host: null, redirect: false } }),
+    { status: 200, body: { handle: 'alpha', host: null, changed: false } });
+  assert.equal(store._m.get('vanity:stray.example'), 'alpha');
+  assert.equal((await call(store, 'PUT', 'beta', { host: 'stray.example' })).status, 409);
+});
+
+test('🔴 held_by → GET the holder → DELETE it with that expect → the host is free: the convergence path', async () => {
+  // The case the field exists for: the holder's own record still names the host (the API writes the
+  // record before the forward key), so the holder's GET reports it and its DELETE removes it.
+  const store = kv({ alpha: CARD, beta: OTHER, ...bound('alpha', 'contested.example', { redirect: false }) });
+  const taken = await call(store, 'PUT', 'beta', { host: 'contested.example', expect: { host: null, redirect: false } });
+  assert.deepEqual(taken, { status: 409, body: { error: 'vanity_taken', held_by: 'alpha' } });
+  const held = (await call(store, 'GET', taken.body.held_by)).body;
+  assert.deepEqual(held, { handle: 'alpha', host: 'contested.example', redirect: false });
+  assert.equal((await call(store, 'DELETE', 'alpha', { expect: { host: held.host, redirect: held.redirect } })).status, 200);
+  const won = await call(store, 'PUT', 'beta', { host: 'contested.example', expect: { host: null, redirect: false } });
+  assert.deepEqual(won, { status: 200, body: { handle: 'beta', host: 'contested.example', redirect: true, changed: true } });
 });
 
 test('🔴 PUT: no such card → 404 card_not_found, nothing written', async () => {
@@ -438,7 +466,8 @@ test('🔴 PUT: losing a race for the host is a 409, the loser never points its 
     afterPut: (k, m) => { if (k === 'vanity:contested.example') m.set(k, 'other'); },
   });
   const r = await call(store, 'PUT', 'maple', { host: 'contested.example' });
-  assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken' } });
+  // the winner of the race is named exactly as the up-front check would have named it
+  assert.deepEqual(r, { status: 409, body: { error: 'vanity_taken', held_by: 'other' } });
   assert.equal(store._m.has('vanityof:maple'), false);
   assert.equal(store._m.has('vanityhost:maple'), false);
   await assertInvariants(store, 'maple', 'race');
