@@ -918,6 +918,25 @@ test('🔴 a forward key for a host the API would refuse is never read — saas.
   assert.equal((await visit(ok, 'https://creator.example/index.md')).headers.get('x-card-handle'), 'maple');
 });
 
+test('🔴 an EMPTY stored record is an invalid host, not a missing one — GET flags it, a plain DELETE clears it', async () => {
+  for (const seed of [{ 'vanityhost:maple': '' }, { 'vanityof:maple': '' }, { 'vanityhost:maple': '', 'vanityof:maple': '' }]) {
+    const label = JSON.stringify(seed);
+    const store = kv({ maple: CARD, ...seed });
+    assert.deepEqual(await call(store, 'GET', 'maple'),
+      { status: 200, body: { handle: 'maple', host: null, redirect: false, invalid_host: true } }, label);
+    assert.deepEqual(await call(store, 'DELETE', 'maple'), { status: 200, body: { handle: 'maple', host: null, changed: true } }, label);
+    assert.deepEqual(Object.fromEntries(store._m), { maple: CARD }, label);
+    // and a PUT over it lands a clean binding
+    const put = kv({ maple: CARD, ...seed });
+    assert.equal((await call(put, 'PUT', 'maple', { host: 'creator.example' })).status, 200, label);
+    assert.deepEqual(Object.fromEntries(put._m), { maple: CARD, ...bound('maple', 'creator.example') }, label);
+  }
+  // CONTROL: no key at all is NOT invalid — it is simply unbound, and DELETE has nothing to do
+  const none = kv({ maple: CARD });
+  assert.deepEqual((await call(none, 'GET', 'maple')).body, { handle: 'maple', host: null, redirect: false });
+  assert.deepEqual((await call(none, 'DELETE', 'maple')).body, { handle: 'maple', host: null, changed: false });
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.

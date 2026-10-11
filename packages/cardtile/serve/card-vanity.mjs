@@ -198,7 +198,17 @@ export async function handleVanity({ method, handle, store, readJson }) {
 
   // which host this card is bound to, if any, and whether that host actually serves it.
   // The record first; a binding made before the record existed has only vanityof:.
-  const recorded = async () => (await store.get(vanityHostKey(handle))) || (await store.get(vanityOfKey(handle))) || null;
+  //
+  // 🔴 "No key" is `null` (what KV returns for a missing key) and nothing else. A stored EMPTY string is
+  // a key holding an invalid host: it is reported (invalid_host) and cleaned (DELETE), never mistaken
+  // for absence — which is why nothing in this function tests a stored value for truthiness.
+  const present = (v) => v !== null && v !== undefined;
+  const recorded = async () => {
+    const r = await store.get(vanityHostKey(handle));
+    if (present(r)) return r;
+    const o = await store.get(vanityOfKey(handle));
+    return present(o) ? o : null;
+  };
 
   // the binding as GET reports it. 🔴 A host is reported only if THIS location's store says it serves
   // this card — a record left by a lost race or a dead Worker is not a binding.
@@ -210,7 +220,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
   // a DELETE, or a PUT to a valid host, removes it. `expect` compares against this same view.
   const current = async () => {
     const host = await recorded();
-    if (!host) return { host: null, redirect: false };
+    if (host === null) return { host: null, redirect: false };
     // the record is judged FIRST, whatever its forward key says: an invalid stored host is something
     // to clean whether its key is ours, gone, or another card's (cleaning never touches another
     // card's key — DELETE removes `vanity:<host>` only while it names this card).
@@ -260,19 +270,19 @@ export async function handleVanity({ method, handle, store, readJson }) {
     let record = await store.get(vanityHostKey(handle));
     const own = await store.get(vanityOfKey(handle));
     const want = redirect ? host : null;
-    if (holder === handle && (record || own) === host && (own || null) === want) {
+    if (holder === handle && (present(record) ? record : own) === host && (present(own) ? own : null) === want) {
       // Already exactly this. A pre-record binding gets its record now so its next change is
       // ordered like every other; that is bookkeeping, not a change to what anyone sees.
-      if (!record) await store.put(vanityHostKey(handle), host);
+      if (!present(record)) await store.put(vanityHostKey(handle), host);
       return out(200, { handle, host, redirect, changed: false });
     }
 
     // 0 — a binding from before the record: write the record before vanityof: (its only trace) goes.
-    if (!record && own) { await store.put(vanityHostKey(handle), own); record = own; }
+    if (!present(record) && present(own)) { await store.put(vanityHostKey(handle), own); record = own; }
     // 1 — withdraw the redirect unless it already points exactly where it should stay.
     if (own != null && own !== want) await store.delete(vanityOfKey(handle));
     // 2 — let go of the old host, only if it is still ours.
-    if (record && record !== host && (await store.get(vanityKey(record))) === handle) await store.delete(vanityKey(record));
+    if (present(record) && record !== host && (await store.get(vanityKey(record))) === handle) await store.delete(vanityKey(record));
     // 3 — the record moves before the key it describes exists.
     if (record !== host) await store.put(vanityHostKey(handle), host);
     // 4 — take the new host, and confirm we have it before anything points at it.
@@ -314,7 +324,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
     // vanity_taken names this card as its holder (`held_by`), so this is how the caller converges.
     // Exactly one write, and only while the key still names THIS card; the card's real binding,
     // record and redirect are not touched — they belong to another host.
-    if (named && (record || own) !== named) {
+    if (named && (present(record) ? record : own) !== named) {
       const holder = await store.get(vanityKey(named));
       if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
       if (holder === handle) await store.delete(vanityKey(named));
@@ -326,8 +336,8 @@ export async function handleVanity({ method, handle, store, readJson }) {
       if (holder != null && holder !== handle) return out(409, { error: 'vanity_taken', held_by: holder });
     }
     const done = (changed) => out(200, { handle, host: null, changed, ...(named ? { orphan_removed: false } : {}) });
-    if (!record && !own) return done(false);
-    if (!record) { await store.put(vanityHostKey(handle), own); record = own; }
+    if (!present(record) && !present(own)) return done(false);
+    if (!present(record)) { await store.put(vanityHostKey(handle), own); record = own; }
     if (own != null) await store.delete(vanityOfKey(handle));
     if ((await store.get(vanityKey(record))) === handle) await store.delete(vanityKey(record));
     await store.delete(vanityHostKey(handle));
