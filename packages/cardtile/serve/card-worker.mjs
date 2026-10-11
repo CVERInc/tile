@@ -598,7 +598,10 @@ export default {
     // brand, so it still cannot go stale: that is the property a bundled icon set would have cost us.
     const icm = /^\/_icon\/([^/]+)\.ico$/.exec(url.pathname);
     if (icm) {
-      const domain = decodeURIComponent(icm[1]).toLowerCase();
+      // 🔴 a malformed escape (`%`, `%zz`, a cut UTF-8 sequence) makes decodeURIComponent throw — a
+      // request path must never take the Worker down, so it is the same 400 as a bad domain.
+      let domain;
+      try { domain = decodeURIComponent(icm[1]).toLowerCase(); } catch { return new Response('bad domain', { status: 400 }); }
       // 🔴 The card's markdown is creator-authored and this concatenates into a URL. Without the
       // guard, `/_icon/<anything>.ico` is an open proxy — same discipline as VIDEO_RE on /_yt/.
       if (!ICON_DOMAIN_RE.test(domain)) return new Response('bad domain', { status: 400 });

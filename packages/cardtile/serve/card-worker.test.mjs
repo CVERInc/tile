@@ -1144,3 +1144,12 @@ test('🔴 canonical → own domain: NO 301 to a domain that does not serve this
     assert.match(await res.text(), /<title>INKB<\/title>/);
   }
 });
+
+test('🔴 /_icon/ with broken percent-encoding is a 400, never an exception', async () => {
+  // decodeURIComponent throws URIError on `%`, `%E0%A4`, `%zz`; that used to escape the Worker.
+  for (const bad of ['%', '%E0%A4', '%zz']) {
+    let res;
+    await assert.doesNotReject(async () => { res = await worker.fetch(new Request(`https://creator.example/_icon/${bad}.ico`), { CARDS: storeOf({}) }); }, bad);
+    assert.equal(res.status, 400, bad);
+  }
+});
