@@ -49,7 +49,9 @@
  *                   `.rf-lang-list`, or `.rf-lang-page` for both) anywhere in the theme and its box
  *                   is yours, by ordinary rules. The cost: it is then also within reach of the
  *                   same theme's site-wide rules. For the page itself, or without naming:
- *                   `!important`.
+ *                   `!important`. The column is the page's side padding, so a page narrowed with
+ *                   `max-width` alone starves the heading: change `padding-inline` with it, or
+ *                   set `--rf-lang-width` instead.
  *
  * Measurements kept from the page this was matched to: the column is 32rem, and a row is 62px —
  * the 20px name on a 1.4 line (28px), 1rem of padding above and below, and the 1px border. Do not
