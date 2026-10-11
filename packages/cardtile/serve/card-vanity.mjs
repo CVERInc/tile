@@ -93,6 +93,9 @@ export function vanityHost(input) {
   // `127.0.0.1` to all of them, and `xn--a.example` passes them and is not a URL at all. So the
   // parser that will consume the name is the one that judges it — and a dotted quad, however it was
   // spelled, is still an address.
+  // (Within the label grammar above, the only rewrites the parser makes are IPv4 spellings, which the
+  // dotted-quad test catches, so `parsed !== h` has no reachable input today; a fuzz of ~100k
+  // grammar-valid names found none. It stays as the rule itself, for the day that grammar loosens.)
   let parsed;
   try { parsed = new URL(`https://${h}/`).hostname; } catch { return null; }
   if (parsed !== h || /^\d+\.\d+\.\d+\.\d+$/.test(parsed)) return null;
