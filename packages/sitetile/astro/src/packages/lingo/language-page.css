@@ -20,14 +20,22 @@
  *    `main div { padding-inline }`, `section { display: flex }`, `h1 { max-width: 12ch }`) breaks
  *    without meaning to.
  *
- *    🔴 NAME IT AND YOU OWN IT, per part. A layer cannot tell a blanket rule from an owner who laid
- *    this page out on purpose (a theme's three-column `.rf-lang-list { display: grid }` came out as
- *    one stacked column). The deliberate rule is the one that NAMES the part, so at build time
- *    language-page-css.mjs reads the site's theme: for each of `.rf-lang-page`, `.rf-lang-head`
- *    and `.rf-lang-list` the theme mentions, that part's rules below (its descendants' too) are
- *    emitted in `reef.theme` instead, ahead of the theme, as plain defaults. Parts it does not
- *    mention stay here. That file relies on this block's shape: the last block in the file, flat
- *    rules only, every selector starting with one of the three classes.
+ *    🔴 NAME IT AND YOU OWN IT, for the heading block and the list. A layer cannot tell a blanket
+ *    rule from an owner who laid this page out on purpose (a theme's three-column `.rf-lang-list
+ *    { display: grid }` came out as one stacked column). The deliberate rule is the one that NAMES
+ *    the part, so at build time language-page-css.mjs reads the site's theme: if it mentions
+ *    `.rf-lang-head`, the heading block's rules below (its descendants' too) are emitted in
+ *    `reef.theme` instead, ahead of the theme, as plain defaults; the same for `.rf-lang-list`; and
+ *    mentioning `.rf-lang-page` counts as mentioning both, since a rule that starts from the page
+ *    (`.rf-lang-page ul { … }`) is reaching inside it. Parts it does not mention stay here.
+ *
+ *    🔴 THE PAGE'S OWN BOX STAYS HERE, ALWAYS. Decision 1 only holds while the page is as wide as
+ *    its container: with its `max-width: none; width: auto` below the theme, a theme that named the
+ *    page and also capped its sections (`.rf-main > section { max-width: 60rem }`) left the heading
+ *    192px at a 1280px viewport and nothing at 1920.
+ *
+ *    That file relies on this block's shape: the last block in the file, flat rules only, every
+ *    selector starting with one of the three classes.
  *
  * HOW A SITE RESTYLES IT
  *    look           ordinary rules on `.rf-lang-page`, `.rf-lang-head`, `.rf-lang-list`,
@@ -37,8 +45,11 @@
  *                     --rf-lang-gutter     kept clear at each viewport edge 1.5rem
  *                     --rf-lang-band       the band behind the rows         the theme's surface
  *                     --rf-lang-band-ink   text on the band                 the theme's text
- *    anything in 3  name the part (`.rf-lang-page` / `.rf-lang-head` / `.rf-lang-list`) anywhere in
- *                   the theme and its box is yours, by ordinary rules. `!important` also works.
+ *    anything in 3  for the heading block and the list: name the part (`.rf-lang-head` /
+ *                   `.rf-lang-list`, or `.rf-lang-page` for both) anywhere in the theme and its box
+ *                   is yours, by ordinary rules. The cost: it is then also within reach of the
+ *                   same theme's site-wide rules. For the page itself, or without naming:
+ *                   `!important`.
  *
  * Measurements kept from the page this was matched to: the column is 32rem, and a row is 62px —
  * the 20px name on a 1.4 line (28px), 1rem of padding above and below, and the 1px border. Do not

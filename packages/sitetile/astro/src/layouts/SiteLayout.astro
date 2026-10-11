@@ -46,8 +46,8 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // handed over as text so the layout can place it BEFORE the site's theme. Imported the ordinary way
 // it arrives through Astro's own <style>, which lands after the theme: same layer, later in the
 // document, so the platform won every equal-specificity tie against the site it was dressing.
-// It may also be a FUNCTION of the site's theme CSS — the chooser decides, per part, which layer its
-// box goes in by whether the theme names that part (lingo/language-page-css.mjs). The layout is the
+// It may also be a FUNCTION of the site's theme CSS — the chooser decides which layer the box of its
+// heading block and of its list goes in by whether the theme names them (lingo/language-page-css.mjs). The layout is the
 // one place that has the theme's text, so it is the one that calls it.
 const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '', routeCss = '' } = Astro.props;
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
@@ -935,9 +935,10 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
-        every package above — and the box in `reef.responsive`, except for a part this site's theme
-        names (`themeCss` is all the CSS a site's author supplies: the one theme file, compiled
-        tokens and hand-written rules together). See lingo/language-page.css. */}
+        every package above — and the box in `reef.responsive`, except for the heading block or
+        the list when this site's theme names it; the page's own box never moves (`themeCss` is all
+        the CSS a site's author supplies: the one theme file, compiled tokens and hand-written rules
+        together). See lingo/language-page.css. */}
     {routeCss && <style is:inline set:html={typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
         not because of where this tag sits. The previous comment here claimed it won by being last

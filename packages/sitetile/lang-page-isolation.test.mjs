@@ -16,6 +16,13 @@
 // names the part, so each part the theme names gets its box as a default below the theme instead
 // (astro/src/packages/lingo/language-page-css.mjs).
 //
+// 🩸 The second cut handed over the PAGE's box as well when a theme named the page, and the column
+// is the page's own padding: a theme that named the page for its colour and capped its sections
+// (`.rf-main > section { max-width: 60rem; margin-inline: auto }`) left the heading 192px at a
+// 1280px viewport and 0px at 1920. It also read `.rf-lang-page ul { display: grid }` as naming the
+// page only, so that owner's grid stayed stacked. Now the page's box never moves, and naming the
+// page names the heading block and the list.
+//
 // Three halves, and they do not prove the same thing:
 //
 //   pure      reads the stylesheet's STRUCTURE — which declarations sit in which layer. Runs in a
@@ -194,6 +201,10 @@ const topLevel = (text) => {
   }
   return { top, stray: head.trim(), depth };
 };
+// The rule, stated here independently of the function under test: the heading block and the list
+// are each owned when the theme names them or names the page above them; the page never is.
+const PAGE = '.rf-lang-page';
+const ownedBy = (named) => ['.rf-lang-head', '.rf-lang-list'].filter((p) => named.includes(p) || named.includes(PAGE));
 // Where each pinned box declaration of `out` ended up: every one of the 41 must be in exactly one
 // of the two layers, with the value the file gives it. `owned` is the parts expected below the theme.
 const assertSplit = (out, owned, why) => {
@@ -215,6 +226,13 @@ const assertSplit = (out, owned, why) => {
     if (owned.includes(part)) for (const sel of sels) assert.equal(lifted.has(sel), false, `${why}: \`${sel}\` still has a rule above the theme`);
   }
   assert.equal(seen, 41, 'the pinned box is 41 declarations');
+  // 🔴 The page's own box is above the theme in every output, whatever was named. (Stated on its
+  // own: a caller that wrongly passed the page as owned would otherwise be agreed with above.)
+  assert.equal(owned.includes(PAGE), false, `${why}: the page is never an owned part`);
+  for (const [prop, value] of box.get(PAGE)) {
+    assert.equal(lifted.get(PAGE)?.get(prop), value, `${why}: \`${PAGE} { ${prop} }\` left the layer above the theme`);
+    assert.equal(defaults.get(PAGE)?.has(prop) || false, false, `${why}: \`${PAGE} { ${prop} }\` is below the theme`);
+  }
   // The look is never touched by any of this.
   for (const sel of LOOK) for (const [prop, value] of look.get(sel)) assert.equal(defaults.get(sel)?.get(prop), value, `${why}: the look lost \`${sel} { ${prop} }\``);
   return { lifted, defaults };
@@ -242,15 +260,43 @@ await test('🔴 a theme that names the list owns the list\'s box; the page and 
   assert.deepEqual(topLevel(out), { top: ['@layer reef.theme', '@layer reef.theme', '@layer reef.responsive'], stray: '', depth: 0 });
 });
 
-await test('🔴 each part alone, every pair, and all three: only the named parts move', () => {
+await test('🔴 each part alone, every pair, and all three: the page never moves, and naming it names the other two', () => {
   const rules = { '.rf-lang-page': 'html .rf-lang-page { max-width: 44rem; }', '.rf-lang-head': '.rf-lang-head::before { content: "•"; }', '.rf-lang-list': '.rf-lang-list > li { flex: 1; }' };
-  for (let mask = 1; mask < 8; mask++) {
-    const owned = CHOOSER_PARTS.filter((_, i) => mask & (1 << i));
-    const out = chooserCss(cssRaw, BLANKET + '\n' + owned.map((p) => rules[p]).join('\n'));
-    assertSplit(out, owned, `named ${owned.join(' + ')}`);
-    // With all three named nothing is left above the theme, and no empty block is emitted for it.
-    const expected = owned.length === 3 ? ['@layer reef.theme', '@layer reef.theme'] : ['@layer reef.theme', '@layer reef.theme', '@layer reef.responsive'];
-    assert.deepEqual(topLevel(out), { top: expected, stray: '', depth: 0 }, `named ${owned.join(' + ')}`);
+  // Written out, not computed: seven themes, and for each the parts whose box is the owner's.
+  const HEAD_LIST = ['.rf-lang-head', '.rf-lang-list'];
+  const EXPECT = [
+    [['.rf-lang-page'], HEAD_LIST],
+    [['.rf-lang-head'], ['.rf-lang-head']],
+    [['.rf-lang-list'], ['.rf-lang-list']],
+    [['.rf-lang-page', '.rf-lang-head'], HEAD_LIST],
+    [['.rf-lang-page', '.rf-lang-list'], HEAD_LIST],
+    [['.rf-lang-head', '.rf-lang-list'], HEAD_LIST],
+    [['.rf-lang-page', '.rf-lang-head', '.rf-lang-list'], HEAD_LIST],
+  ];
+  for (const [named, owned] of EXPECT) {
+    const theme = BLANKET + '\n' + named.map((p) => rules[p]).join('\n');
+    const why = `named ${named.join(' + ')}`;
+    assert.deepEqual(namedChooserParts(theme), named, why);
+    assert.deepEqual(ownedBy(named), owned, why);
+    const out = chooserCss(cssRaw, theme);
+    const { lifted } = assertSplit(out, owned, why);
+    // What is left above the theme: always the page, plus whichever of the two was not handed over.
+    const stay = [PAGE, ...HEAD_LIST.filter((p) => !owned.includes(p)).flatMap((p) => PART_SELECTORS[p])];
+    assert.deepEqual([...lifted.keys()].sort(), stay.sort(), why);
+    // So the lifted block is never empty and is always emitted, last.
+    assert.deepEqual(topLevel(out), { top: ['@layer reef.theme', '@layer reef.theme', '@layer reef.responsive'], stray: '', depth: 0 }, why);
+  }
+});
+
+await test('🔴 a rule that starts from the page and reaches inside names the list and the heading block', () => {
+  // The descendants are reached by element name; neither `.rf-lang-list` nor `.rf-lang-head` is
+  // written anywhere. Flat and nested spellings are the same rule.
+  const flat = '.rf-lang-page ul { display: grid; grid-template-columns: 1fr 1fr; } .rf-lang-page li { max-width: none; } .rf-lang-page h1 { max-width: 10ch; }';
+  const nested = '.rf-lang-page { ul { display: grid; grid-template-columns: 1fr 1fr; } li { max-width: none; } h1 { max-width: 10ch; } }';
+  for (const theme of [flat, nested, '.rf-lang-page { color: inherit; }']) {
+    assert.deepEqual(namedChooserParts(theme), [PAGE], theme);
+    const { lifted } = assertSplit(chooserCss(cssRaw, BLANKET + '\n' + theme), ['.rf-lang-head', '.rf-lang-list'], theme);
+    assert.deepEqual([...lifted.keys()], [PAGE], theme);
   }
 });
 
@@ -280,6 +326,16 @@ await test('🔴 what counts as naming a part: the class as a whole token, in a 
   // matching the bare substring instead would also match `rf-lang-list` in a url or a string.
   assert.deepEqual(names('[class~="rf-lang-list"] { display: grid; } [class*="rf-lang-head"] { margin: 0; }'), []);
   assert.equal(chooserCss(cssRaw, '[class~="rf-lang-list"] { display: grid; }'), css);
+  // KNOWN LIMITS, pinned so that changing one is a decision. Not seen (the part stays protected):
+  // an escaped spelling of the class, and a rule that reaches a part through a class INSIDE it.
+  for (const unseen of ['.rf-lang-\\6c ist { display: grid; }', '.rf\\-lang-list { display: grid; }', 'li:has(.rf-lang-name) { max-width: none; }', '.rf-lang-action { display: none; }']) {
+    assert.deepEqual(names(unseen), [], unseen);
+    assert.equal(chooserCss(cssRaw, unseen), css, unseen);
+  }
+  // Seen although it is not a selector (the part loses its protection): the dot form inside a
+  // string or a url(). There is no parser here to know the difference.
+  assert.deepEqual(names('.note::after { content: "see .rf-lang-list"; }'), ['.rf-lang-list']);
+  assert.deepEqual(names('.hero { background: url(/img/banner.rf-lang-head.png); }'), ['.rf-lang-head']);
 });
 
 await test('the function refuses a lifted block it cannot attribute to a part', () => {
@@ -330,13 +386,40 @@ const THEME_GRID = [
   '.rf-lang-list > li { max-width: none; }',
   '.rf-lang-list a { justify-content: center; }',
 ].join('\n');
+// A theme that names all three parts for their APPEARANCE only — no box property anywhere — and
+// keeps the slot, so the site-wide rules of the measured half land in a theme the build saw naming.
+const THEME_NAMED = [
+  '/* Compiled from ir/_theme.md — do not hand-edit. Theme: fxnamed. */',
+  'html:root { --gd-bg: #fbf7f0; --gd-surface: #f1e9da; --gd-text: #2a2118; --gd-accent: #b4532a; }',
+  '/* reef:has-custom-css */',
+  '.rf-lang-page { color: inherit; }',
+  '.rf-lang-head { letter-spacing: 0; }',
+  '.rf-lang-list { border-radius: 0; }',
+  SLOT,
+].join('\n');
+// A theme that lays the chooser out from the page inwards and never writes the inner classes: two
+// columns, rows as wide as their track, a narrow heading. Flat, and the same rules nested.
+const REACH = ['ul { display: grid; grid-template-columns: 1fr 1fr; }', 'li { max-width: none; }', 'h1 { max-width: 10ch; }'];
+const reachTheme = (name, rules) => [
+  `/* Compiled from ir/_theme.md — do not hand-edit. Theme: ${name}. */`,
+  'html:root { --gd-bg: #f4f8f3; --gd-surface: #dfeadb; --gd-text: #1d2a22; --gd-accent: #2f7d5b; }',
+  '/* reef:has-custom-css */',
+  rules,
+].join('\n');
+const THEME_REACH = reachTheme('fxreach', REACH.map((r) => '.rf-lang-page ' + r).join('\n'));
+const THEME_NESTED = reachTheme('fxnested', `.rf-lang-page { ${REACH.join(' ')} }`);
 const SITES = {
   plain: { files: ir('') },
   themed: { files: ir('theme: fx\n'), theme: THEME },
   grid: { files: ir('theme: fxgrid\n', true), theme: THEME_GRID },
+  named: { files: ir('theme: fxnamed\n'), theme: THEME_NAMED },
+  reach: { files: ir('theme: fxreach\n'), theme: THEME_REACH },
+  nested: { files: ir('theme: fxnested\n'), theme: THEME_NESTED },
 };
 
-const chooserStyles = (html) => [...html.matchAll(/<style>([^<]*\.rf-lang-page[^<]*)<\/style>/g)];
+// The <style> blocks carrying the platform's chooser rules. Told by `--rf-lang-gutter`, which only
+// the platform's sheet reads: a fixture theme that names `.rf-lang-page` carries the class too.
+const chooserStyles = (html) => [...html.matchAll(/<style>([^<]*--rf-lang-gutter[^<]*)<\/style>/g)];
 
 if (!existsSync(join(ASTRO, 'node_modules'))) {
   console.log(`  · lang-page-isolation BUILT + MEASURED SKIPPED — no ${RENDERER_SUBPATH}/node_modules (run npm install there)`);
@@ -407,8 +490,21 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       for (const name of ['plain', 'themed']) assert.equal(chooserStyles(built[name].chooser)[0][1], css, name);
     });
 
+    await test('🔴 built with a theme that names the page: the page\'s box is still above the theme, the heading\'s and the list\'s below', () => {
+      for (const [name, theme] of [['named', THEME_NAMED], ['reach', THEME_REACH], ['nested', THEME_NESTED]]) {
+        const sheets = chooserStyles(built[name].chooser);
+        assert.equal(sheets.length, 1, `${name}: ${sheets.length} <style> blocks carry the chooser's rules`);
+        assert.equal(sheets[0][1], chooserCss(cssRaw, theme), `${name}: the emitted sheet is not the function's output for this theme`);
+        const { lifted } = assertSplit(sheets[0][1], ['.rf-lang-head', '.rf-lang-list'], `built ${name} site`);
+        assert.deepEqual([...lifted.keys()], [PAGE], `${name}: what is left above the theme`);
+      }
+      // Neither reaching theme writes an inner class: the page is all they name.
+      assert.deepEqual(namedChooserParts(THEME_REACH), [PAGE]);
+      assert.deepEqual(namedChooserParts(THEME_NESTED), [PAGE]);
+    });
+
     await test('no other page carries it', () => {
-      for (const name of ['plain', 'themed', 'grid']) assert.equal(chooserStyles(built[name].home).length, 0, `${name}: the home page carries the chooser's sheet`);
+      for (const name of Object.keys(SITES)) assert.equal(chooserStyles(built[name].home).length, 0, `${name}: the home page carries the chooser's sheet`);
     });
 
     // ── measured ─────────────────────────────────────────────────────────────────────────────
@@ -462,6 +558,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
               probe.style.cssText = 'background:var(--gd-surface);color:var(--gd-text)'; document.body.append(probe);
               const out = {
                 h1: { lines, w: w(h1), text: h1.textContent.trim(), fits: h1.scrollWidth <= h1.clientWidth, color: cs(h1).color },
+                page: { x: Math.round(q('.rf-lang-page').getBoundingClientRect().left), w: w(q('.rf-lang-page')) },
                 rows, bandLeft: Math.round(list.getBoundingClientRect().left), bandW: w(list),
                 band: cs(list).backgroundColor, ink: cs(q('.rf-lang-list a')).color,
                 padTop: cs(q('.rf-lang-page')).paddingTop, nameSize: cs(q('.rf-lang-name')).fontSize, radius: cs(q('.rf-lang-list a')).borderTopLeftRadius,
@@ -573,6 +670,66 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
           assert.equal(g.headMax, 'none', 'the blanket max-width reached the heading block');
           assert.deepEqual([m.h1.lines, m.h1.w, m.h1.fits], [1, 512, true]);
         });
+
+        // 🩸 The page's box used to go below the theme with the other parts when a theme named it.
+        // The column is the page's own padding, so a width cap on the page turns that padding
+        // inward: under the first rule the heading measured 448 / 192 / 32 / 0px at these four
+        // viewports. `expect` is the heading's width; the page itself must span the viewport in
+        // every row, which is the cause rather than the symptom.
+        const CAPS = [
+          ['.rf-main > section { max-width: 60rem; margin-inline: auto; }', 512],
+          ['.rf-main > * { max-width: 72rem; margin-inline: auto; }', 512],
+          ['.rf-main > section { width: min(60rem, 100% - 3rem); margin-inline: auto; }', 512],
+          // This one reaches INSIDE the page. The theme named the heading block, so its box is the
+          // owner's and a rule that out-scores the default applies to it: 18rem, as on a page with
+          // no protection at all. That is the stated cost of naming a part. What must not happen is
+          // the same rule squeezing the page (it measured 0px at 1440 when it could).
+          ['html .rf-main * { max-width: 18rem; }', 288],
+        ];
+        const CAP_WIDTHS = [1024, 1280, 1440, 1920];
+        await test('🔴 a theme that names every part for its look: a site-wide width cap does not reach the page\'s own box', async () => {
+          for (const W of CAP_WIDTHS) {
+            const pg = await open('named', W);
+            const m0 = await pg.read();
+            assert.deepEqual([m0.page.x, m0.page.w, m0.h1.lines, m0.h1.w], [0, m0.vw, 1, 512], `untouched at ${W}px`);
+            for (const [rule, expect] of CAPS) {
+              const m = await pg.read(rule);
+              const at = `at ${W}px under \`${rule}\``;
+              assert.deepEqual([m.page.x, m.page.w], [0, m.vw], `the page is no longer the full-width block its padding needs ${at}`);
+              assert.equal(m.h1.w, expect, `the heading is ${m.h1.w}px wide ${at}`);
+              assert.deepEqual([m.h1.lines, m.h1.fits], [1, true], `the heading wraps or overflows ${at}`);
+              if (expect === 512) assert.deepEqual(m.rows, m0.rows, `the rows changed ${at}`);
+            }
+            await pg.close();
+          }
+        });
+
+        for (const site of ['reach', 'nested']) {
+          await test(`🔴 a theme that lays the chooser out from \`.rf-lang-page\` inwards (${site === 'reach' ? 'flat rules' : 'nested rules'}) gets its grid and its heading`, async () => {
+            const pg = await open(site, 1280);
+            const m = await pg.read();
+            const g = await pg.evaluate(() => {
+              const list = document.querySelector('.rf-lang-list');
+              const box = (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width) }; };
+              const h1 = document.querySelector('.rf-lang-head h1');
+              return { display: getComputedStyle(list).display, list: box(list), items: [...list.children].map(box), h1Max: parseFloat(getComputedStyle(h1).maxWidth), liMax: getComputedStyle(list.children[0]).maxWidth };
+            });
+            await pg.close();
+            // The list: the owner's two-column grid across the band (1280 less 24px each side and
+            // one 12px gap), not the platform's stacked flex column.
+            assert.equal(g.display, 'grid', 'the theme\'s `display: grid` lost to the platform\'s box');
+            assert.equal(g.items.length, 2);
+            assert.equal(new Set(g.items.map((i) => i.y)).size, 1, `the two rows are stacked: ${JSON.stringify(g.items)}`);
+            assert.deepEqual(g.items.map((i) => [i.x, i.w]), [[24, 610], [646, 610]], `tiles: ${JSON.stringify(g.items)}`);
+            assert.equal(g.liMax, 'none', 'the theme\'s `li { max-width: none }` lost to the platform\'s row width');
+            assert.ok(m.rows.every((r) => r.hit), 'a tile is not clickable at its centre');
+            // The heading: capped at the theme's 10ch (font-dependent, so read back, not repeated).
+            assert.ok(g.h1Max > 100 && g.h1Max < 400, `the theme's \`h1 { max-width: 10ch }\` did not apply: max-width ${g.h1Max}`);
+            assert.equal(m.h1.w, Math.round(g.h1Max), 'the heading is not as wide as the theme made it');
+            // …and the page around them is still the platform's full-width block.
+            assert.deepEqual([m.page.x, m.page.w], [0, m.vw]);
+          });
+        }
 
         await test('🔴 with no theme at all the band is the renderer\'s neutral surface, not a brand colour', async () => {
           const pg = await open('plain', 1280);
