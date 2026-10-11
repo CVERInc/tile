@@ -57,8 +57,11 @@ which is how the whole path was proven before anyone's DNS moved.
 The API, for reference:
 
 - `PUT {host, redirect?, expect?}`: `redirect` defaults to `true`. The body says what the binding should be,
-  so `false` on a redirecting binding turns the redirect off again. Sending the same body twice is
-  `changed: false`. Binding a card to a new host releases its old one (one card, one domain), and
+  so `false` on a redirecting binding turns the redirect off again. Without `expect`, sending the same
+  body twice is `changed: false`, and resending a call that failed midway finishes it. *With* `expect`,
+  the identical call is refused once the state it expected has changed (`409 vanity_state_changed`),
+  including after it succeeded or died halfway. Re-read `GET` and decide again; that reconciliation is the
+  serialising caller's. Binding a card to a new host releases its old one (one card, one domain), and
   its old redirect too.
   - `200 {handle, host, redirect, changed}`
   - `409 {"error": "vanity_taken"}`: that host already belongs to another card; nothing was written.

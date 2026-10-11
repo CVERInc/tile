@@ -31,7 +31,8 @@
 // `connect_card_domain`, holding the infrastructure bearer) does that against its own authoritative
 // record of who owns which domain; this API is the KV projection of that decision, not the decision.
 // What this API adds on top is a cheap optimistic check — `expect`, below — and an order that a
-// SINGLE serialised caller can always finish by retrying.
+// SINGLE serialised caller can always finish: by sending the same call again if it carried no
+// `expect`, or by re-reading GET and deciding again if it did (see `expect`, below).
 //
 // GET answers from THIS location's reads only. It says what a visitor here would get right now, not
 // what every location sees, and not whether the domain's DNS reaches us.
@@ -132,11 +133,19 @@ function parseExpect(obj) {
  * vanity_state_changed. It narrows the window for a lost update; it does not close it (KV cannot),
  * which is why the caller serialises — see the file header.
  *
+ * 🔴 `expect` and retries. The guarantees below that "the same call again finishes the job" and
+ * "the same body twice is changed:false" hold for calls WITHOUT `expect`. A call WITH `expect` is a
+ * decision made against one state; if it died half-done, or even if it succeeded, that state is no
+ * longer current, so the identical call is refused (409 vanity_state_changed, no writes). The
+ * serialised caller re-reads GET and sends its decision again with the new state as `expect` — the
+ * reconciliation is the caller's, because only the caller knows whether the decision still stands.
+ *
  * `handle` arrives already decoded, lowercased and inside the card grammar.
  *
  * PUT is DECLARATIVE: the body says what the binding should be, and the call makes it so. Sending
  * `redirect: true` to a binding made with `false` writes only `vanityof:`; sending `false` to one
- * made with `true` removes only `vanityof:`. The same body twice is `changed: false` with no writes.
+ * made with `true` removes only `vanityof:`. The same body twice is `changed: false` with no writes
+ * (without `expect` — see below).
  *
  * ── 🔴 THE WRITE ORDER (KV has no transactions) ─────────────────────────────────────────────────
  *
@@ -150,7 +159,8 @@ function parseExpect(obj) {
  *                                      — card.feelreef.com/<h> 301s to a host that does not serve
  *                                        that card (the directory page, or someone else's card)
  *
- * …and a third property: the SAME call sent again finishes whatever a dead Worker left half-done.
+ * …and a third property: the SAME call sent again (without `expect`) finishes whatever a dead Worker
+ * left half-done; with `expect`, re-read GET and send it again with the new state.
  * That needs the old host to be findable until its `vanity:` key is gone, and `vanityhost:` is that
  * record — written BEFORE the key it describes, deleted AFTER it. A PUT of h to NEW (redirect on):
  *

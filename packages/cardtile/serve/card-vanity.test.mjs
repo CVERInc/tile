@@ -709,6 +709,40 @@ test('🔴 an invalid stored host is cleaned by DELETE and by a PUT elsewhere, w
   }
 });
 
+// ── expect and retries ──
+
+test('🔴 with `expect`, the identical call is NOT a retry — it is refused, and a re-read GET finishes the job', async () => {
+  // The documented contract: "send the same call again" finishes a dead Worker's work only WITHOUT
+  // `expect`. With it, the state the caller expected has (partly) changed under the dead call, so the
+  // same call is a stale decision and is refused. The serialised caller re-reads and decides again.
+  const cases = [
+    ['PUT', { host: 'new.example', expect: { host: 'a.example', redirect: true } }, bound('maple', 'new.example')],
+    ['DELETE', { expect: { host: 'a.example', redirect: true } }, {}],
+  ];
+  for (const [method, body, final] of cases) {
+    const store = kv({ maple: CARD, ...bound('maple', 'a.example') }, { failAt: 1 + 1 });  // dies at the 2nd write
+    await assert.rejects(call(store, method, 'maple', body), /injected failure/, method);
+    await assertInvariants(store, 'maple', `${method} died`);
+    const healthy = kv(Object.fromEntries(store._m));
+    assert.deepEqual(await call(healthy, method, 'maple', body), { status: 409, body: { error: 'vanity_state_changed' } }, `${method} identical retry`);
+    assert.deepEqual(healthy.ops, [], `${method}: the refused retry wrote`);
+    const now = (await call(healthy, 'GET', 'maple')).body;
+    const again = await call(healthy, method, 'maple', { ...body, expect: { host: now.host, redirect: now.redirect } });
+    assert.equal(again.status, 200, `${method} after re-read`);
+    assert.deepEqual(Object.fromEntries(healthy._m), { maple: CARD, ...final }, `${method} after re-read`);
+  }
+});
+
+test('🔴 with `expect`, repeating a call that SUCCEEDED is also refused — idempotence is for calls without it', async () => {
+  const store = kv({ maple: CARD, ...bound('maple', 'a.example') });
+  const body = { host: 'new.example', expect: { host: 'a.example', redirect: true } };
+  assert.equal((await call(store, 'PUT', 'maple', body)).status, 200);
+  assert.deepEqual(await call(store, 'PUT', 'maple', body), { status: 409, body: { error: 'vanity_state_changed' } });
+  // CONTROL: the same body without expect is the documented no-op
+  const { expect, ...plain } = body;
+  assert.deepEqual(await call(store, 'PUT', 'maple', plain), { status: 200, body: { handle: 'maple', host: 'new.example', redirect: true, changed: false } });
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.
