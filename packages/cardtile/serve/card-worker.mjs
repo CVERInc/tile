@@ -25,6 +25,7 @@ const ytFetch = (u) => fetch(u, {
 });
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { vanityKey as VANITY_KEY, vanityOfKey as VANITY_OF_KEY } from './card-vanity.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -53,9 +54,9 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // segment, returns null, and the visitor gets the DIRECTORY page on the creator's own domain. That
 // was live for several minutes once — the plumbing was right and nothing pointed the apex at the
 // card. A missing key is now the same failure, so seeding is part of binding a domain, not an
-// afterthought: see lab/vanity-bindings.mjs.
-const VANITY_KEY = (host) => `vanity:${host}`;
-const VANITY_OF_KEY = (handle) => `vanityof:${handle}`;
+// afterthought. The keys are WRITTEN by `/_api/vanity/<handle>` (card-vanity.mjs, which also defines
+// them — the import above — so reader and writer spell them once); before that API existed they were
+// hand-written to the store by a script in the private workspace.
 
 // canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
 const CANON_HOST = 'card.feelreef.com';
@@ -676,8 +677,15 @@ export default {
     // working on both hosts because a download link somebody already has must not break.
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
+    //
+    // 🔴 …and only to a domain that SERVES this card. `vanityof:` alone is not enough: KV has no
+    // transactions, so a rebind that dies after letting go of the old domain leaves `vanityof:`
+    // naming a host whose `vanity:` key is gone (card-vanity.mjs proves no write order avoids that
+    // AND stays retryable). Following it would 301 every visitor — and every printed QR — to the
+    // directory page or to another creator's card. So the reader checks both halves; the extra read
+    // happens only on the path that was about to redirect.
     const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
-    if (ownHost && host !== ownHost) {
+    if (ownHost && host !== ownHost && (await store.get(VANITY_KEY(ownHost))) === resolved.handle) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 

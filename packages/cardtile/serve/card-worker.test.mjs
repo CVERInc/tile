@@ -1116,3 +1116,31 @@ test('CONTROL: the untouchable store really does throw when the Worker reads a c
   await worker.fetch(new Request('https://card.feelreef.com/somebody'), env).catch(() => {});
   assert.ok(touched.length > 0, 'the store double is not bound where the Worker reads cards');
 });
+
+// ── the canonical → own-domain 301 (reef#1971) ──────────────────────────────────────────────────
+
+const storeOf = (seed) => {
+  const m = new Map(Object.entries(seed));
+  return { get: async (k) => (m.has(k) ? m.get(k) : null) };
+};
+
+test('canonical → own domain: a card bound both ways 301s to its domain', async () => {
+  const store = storeOf({ inkbrush: CARD, 'vanity:creator.example': 'inkbrush', 'vanityof:inkbrush': 'creator.example' });
+  const res = await worker.fetch(new Request('https://card.feelreef.com/inkbrush', { redirect: 'manual' }), { CARDS: store });
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get('location'), 'https://creator.example/');
+});
+
+test('🔴 canonical → own domain: NO 301 to a domain that does not serve this card', async () => {
+  // `vanityof:` says creator.example, but `vanity:creator.example` is gone (a rebind that died after
+  // its first store call — KV has no transactions, see card-vanity.mjs) or says somebody else. A 301
+  // there would send every visitor and every printed QR to the directory page or to another
+  // creator's card. The card answers on its canonical URL until both halves agree.
+  for (const forward of [undefined, 'someone-else']) {
+    const seed = { inkbrush: CARD, 'vanityof:inkbrush': 'creator.example' };
+    if (forward) seed['vanity:creator.example'] = forward;
+    const res = await worker.fetch(new Request('https://card.feelreef.com/inkbrush', { redirect: 'manual' }), { CARDS: storeOf(seed) });
+    assert.equal(res.status, 200, `forward key ${forward}`);
+    assert.match(await res.text(), /<title>INKB<\/title>/);
+  }
+});
