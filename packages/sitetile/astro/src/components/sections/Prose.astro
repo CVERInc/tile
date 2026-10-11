@@ -1,5 +1,5 @@
 ---
-import { parseParams, inlineHtml, bodyHtml, orderedProseHtml, heroParts, linkButtonsHtml, imgTag } from '@sitetile';
+import { parseParams, inlineHtml, proseBodyHtml } from '@sitetile';
 const { section, hero } = Astro.props;
 // first section on the page → its title is the page's primary heading → <h1> (one per page)
 const Title = hero && section.title ? 'h1' : 'h2';
@@ -15,7 +15,9 @@ const ordered = pm.ordered != null;
 // renders as real CTA buttons, mirroring Hero's identical `heroParts`/`linkButtonsHtml` seam —
 // found on a real /about page, where the closing links are bordered pill buttons, not inline
 // text joined by "·". Reuses the exact same parser so both seams stay in lockstep.
-const hp = heroParts(section.body);
+// Standalone images join one trailing `.st-prose-imgs` group the same way. The split and its
+// markup live in `proseBodyHtml`, which the string renderer's prose branch calls too — written
+// out here instead, the two renderers gave one body two different structures.
 // `surface=<token>` — OPT-IN per-section background belt (cream/teal). Absent → the prose
 // section stays transparent (theme default). Styled by the THEME (`[data-surface]`).
 const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
@@ -28,15 +30,5 @@ const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label 
 <section class="st-prose" id={section.id} data-align={align} data-ordered={ordered ? '' : undefined} data-surface={surface}>
   {eyebrow && <p class="st-prose-eyebrow" set:html={inlineHtml(eyebrow)} />}
   {section.title && <Title set:html={inlineHtml(section.title)} />}
-  {ordered ? (
-    <Fragment set:html={orderedProseHtml(section.body)} />
-  ) : hp.buttons.length || hp.images.length ? (
-    <Fragment set:html={
-      bodyHtml(hp.text)
-      + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-prose') : '')
-      + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '')
-    } />
-  ) : (
-    <Fragment set:html={bodyHtml(section.body)} />
-  )}
+  <Fragment set:html={proseBodyHtml(section.body, ordered)} />
 </section>
