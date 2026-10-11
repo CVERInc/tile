@@ -961,6 +961,42 @@ test('🔴 DELETE {host} for a card that is gone: a stray still goes, and the an
     { status: 200, body: { handle: 'sample', host: null, changed: false, orphan_removed: false } });
 });
 
+test('🔴 record and reverse key disagree ⇒ PUT and DELETE (plain or {host}) refuse with zero writes; GET says inconsistent', async () => {
+  // These states are never produced by the API (it keeps vanityof: absent or equal to the record);
+  // they come from hand edits. The API refuses to guess which trace is true — that needs a person.
+  const seeds = [
+    { 'vanityhost:sample': '', 'vanityof:sample': 'real.example', 'vanity:real.example': 'sample' },
+    { 'vanityhost:sample': 'stale.example', 'vanityof:sample': 'real.example', 'vanity:real.example': 'sample' },
+    { 'vanityhost:sample': 'real.example', 'vanityof:sample': '', 'vanity:real.example': 'sample' },
+  ];
+  const calls = [
+    ['PUT', { host: 'new.example', redirect: false }],
+    ['PUT', { host: 'real.example' }],
+    ['DELETE', undefined],
+    ['DELETE', { host: 'stale.example' }],
+    ['DELETE', { host: 'real.example' }],
+    ['DELETE', { host: 'stray.example', expect: { host: null, redirect: false } }],
+  ];
+  for (const seed of seeds) {
+    for (const [method, body] of calls) {
+      const store = kv({ sample: CARD, ...seed });
+      const label = `${method} ${JSON.stringify(body)} on ${JSON.stringify(seed)}`;
+      assert.deepEqual(await call(store, method, 'sample', body), { status: 409, body: { error: 'vanity_state_inconsistent' } }, label);
+      assert.deepEqual(store.ops, [], label);
+    }
+    assert.deepEqual(await call(kv({ sample: CARD, ...seed }), 'GET', 'sample'),
+      { status: 200, body: { handle: 'sample', host: null, redirect: false, inconsistent: true } }, JSON.stringify(seed));
+  }
+  // and the visitor-facing state is exactly what it was: nothing duplicated, nothing withdrawn
+  const store = kv({ sample: CARD, ...seeds[1] });
+  await call(store, 'DELETE', 'sample', { host: 'stale.example' });
+  assert.equal((await visit(store, 'https://card.feelreef.com/sample', { redirect: 'manual' })).status, 301);
+  // CONTROL: agreeing traces (both the same host) and the legacy two-key shape are not inconsistent
+  for (const ok of [bound('sample', 'real.example'), { 'vanityof:sample': 'real.example', 'vanity:real.example': 'sample' }]) {
+    assert.equal((await call(kv({ sample: CARD, ...ok }), 'DELETE', 'sample')).status, 200, JSON.stringify(ok));
+  }
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.

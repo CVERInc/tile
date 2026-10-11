@@ -79,6 +79,12 @@ The API, for reference:
   - `400 {"error": "vanity_redirect_invalid"}`: `redirect` must be `true` or `false`.
   - `404 {"error": "card_not_found"}`: bind after the card exists.
   - `409 {"error": "vanity_state_changed"}`: see `expect`; nothing was written.
+  - `409 {"error": "vanity_state_inconsistent"}`: the card's two reverse traces disagree:
+    `vanityhost:<handle>` and `vanityof:<handle>` are both present but name different hosts (an
+    empty one included). The API never writes that state; it comes from a hand edit, so the API
+    won't guess which trace is true. Every PUT and DELETE (with or without `host`) is refused with no
+    writes, and GET answers `host: null` with `inconsistent: true`. **This needs a person to fix the
+    keys in KV**: make the two agree, or remove the wrong one.
 - `GET` → `{handle, host, redirect}`. `host` is `null` unless a visitor *at the location that
   answered* would get this card. A stored host the API would refuse today (one written by hand
   before the validator, such as an invalid punycode name, a hex-spelled IPv4, or an empty value) is reported as

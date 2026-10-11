@@ -122,13 +122,15 @@ function parseExpect(obj) {
  * handleVanity: one `/_api/vanity/<handle>` call → { status, body }. card-api.mjs owns the door (the
  * bearer, the handle grammar, the JSON response); this owns the keys.
  *
- *   GET     → 200 {handle, host|null, redirect, invalid_host?: true}   404 card_not_found
+ *   GET     → 200 {handle, host|null, redirect, invalid_host?: true, inconsistent?: true}   404 card_not_found
  *   PUT     {host, redirect?=true, expect?} → 200 {handle, host, redirect, changed}
  *           400 vanity_host_invalid · 400 vanity_redirect_invalid · 400 vanity_expect_invalid
- *           404 card_not_found · 409 vanity_state_changed · 409 {vanity_taken, held_by} · 503 vanity_unconfirmed
+ *           404 card_not_found · 409 vanity_state_inconsistent · 409 vanity_state_changed
+ *           409 {vanity_taken, held_by} · 503 vanity_unconfirmed
  *   DELETE  {expect?, host?} → 200 {handle, host:null, changed}
  *           with `host`: 200 {handle, host: <the card's binding, as GET reports it>|null, changed, orphan_removed}
- *           400 vanity_expect_invalid · 400 vanity_host_invalid · 409 vanity_state_changed · 409 {vanity_taken, held_by}
+ *           400 vanity_expect_invalid · 400 vanity_host_invalid · 409 vanity_state_inconsistent
+ *           409 vanity_state_changed · 409 {vanity_taken, held_by}
  *
  * `expect` is `{host: string|null, redirect: boolean}` — exactly what GET returned. When present and
  * this location's current binding differs, the call writes nothing and answers 409
@@ -222,8 +224,20 @@ export async function handleVanity({ method, handle, store, readJson }) {
   // exists) can agree with itself in the store and still never be served to anyone. Such a binding is
   // reported as unbound, with `invalid_host: true` so the caller knows there is something to clean —
   // a DELETE, or a PUT to a valid host, removes it. `expect` compares against this same view.
+  // 🔴 The record and the reverse key DISAGREE: both present, naming different hosts (an empty or
+  // invalid one included). The API never writes that — it keeps `vanityof:` absent or equal to the
+  // record — so it comes from a hand edit, and either trace may be the true one. Guessing is how a
+  // cleanup takes down a working domain or leaves a card on two; so the API refuses every change
+  // (409 vanity_state_inconsistent, zero writes) and GET says so. A person fixes the keys.
+  const inconsistent = async () => {
+    const r = await store.get(vanityHostKey(handle));
+    const o = await store.get(vanityOfKey(handle));
+    return present(r) && present(o) && r !== o;
+  };
+
   const current = async () => {
     if (!cardExists) return { host: null, redirect: false };   // nothing is served for a card that is not there
+    if (await inconsistent()) return { host: null, redirect: false, inconsistent: true };
     const host = await recorded();
     if (host === null) return { host: null, redirect: false };
     // the record is judged FIRST, whatever its forward key says: an invalid stored host is something
@@ -255,6 +269,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
     const expect = parseExpect(obj);
     if (expect === INVALID) return out(400, { error: 'vanity_expect_invalid' });
     if (!cardExists) return out(404, { error: 'card_not_found' });
+    if (await inconsistent()) return out(409, { error: 'vanity_state_inconsistent' });
     if (await stale(expect)) return out(409, { error: 'vanity_state_changed' });
 
     const holder = await store.get(vanityKey(host));
@@ -317,6 +332,7 @@ export async function handleVanity({ method, handle, store, readJson }) {
     // `host` (optional): a forward key to remove by NAME. Validated like a PUT's host.
     const named = body && typeof body === 'object' && 'host' in body ? vanityHost(body.host) : undefined;
     if (named === null) return out(400, { error: 'vanity_host_invalid' });
+    if (await inconsistent()) return out(409, { error: 'vanity_state_inconsistent' });
     if (await stale(expect)) return out(409, { error: 'vanity_state_changed' });
     let record = await store.get(vanityHostKey(handle));
     const own = await store.get(vanityOfKey(handle));
