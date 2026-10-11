@@ -24,7 +24,7 @@ const ytFetch = (u) => fetch(u, {
   cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
 });
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
-import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
 import { vanityKey as VANITY_KEY, vanityOfKey as VANITY_OF_KEY, vanityHost } from './card-vanity.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
@@ -658,7 +658,13 @@ export default {
 
     // AT MOST ONE extra read per request, and the two branches are mutually exclusive:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
-    const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    //
+    // 🔴 The value read is checked against the handle grammar before it means anything. A key written
+    // by hand never went through the API: `bad\nhandle` or a 楓葉 handle is not a header value, and
+    // putting it in X-Card-Handle made `new Response` throw on the creator's own domain. A value
+    // outside the grammar is no binding — the host answers as an unbound host does.
+    const storedVanity = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    const vanityHandle = storedVanity && VALID_HANDLE.test(storedVanity) ? storedVanity : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);

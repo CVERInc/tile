@@ -863,6 +863,25 @@ test('🔴 with `expect`, repeating a call that SUCCEEDED is also refused — id
   assert.deepEqual(await call(store, 'PUT', 'maple', plain), { status: 200, body: { handle: 'maple', host: 'new.example', redirect: true, changed: false } });
 });
 
+test('🔴 a stored forward value outside the handle grammar is no binding — never an exception, never a header', async () => {
+  // Keys written by hand never went through the API's handle check. `bad\nhandle` cannot be a header
+  // value at all, and 楓葉 is not a ByteString: either one reaching X-Card-Handle made `new Response`
+  // throw. Read as "no binding": the domain gets what an unbound host gets.
+  for (const bad of ['bad\nhandle', '楓葉']) {
+    const store = kv({ [bad]: CARD, 'vanity:creator.example': bad });
+    for (const [path, accept] of [['/', 'text/html'], ['/index.md', 'text/plain'], ['/', 'text/markdown']]) {
+      const label = `${JSON.stringify(bad)} ${path} ${accept}`;
+      let res;
+      await assert.doesNotReject(async () => { res = await visit(store, `https://creator.example${path}`, { headers: { accept } }); }, label);
+      assert.equal(res.status, 404, label);
+      assert.equal(res.headers.get('x-card-handle'), null, label);
+    }
+  }
+  // CONTROL: the same store shape with a valid handle is a bound domain that names its card
+  const ok = kv({ maple: CARD, 'vanity:creator.example': 'maple' });
+  assert.equal((await visit(ok, 'https://creator.example/', asBrowser)).headers.get('x-card-handle'), 'maple');
+});
+
 test('🔴 the vanity API is host-agnostic: on a creator\'s domain it still acts on the handle in the PATH', async () => {
   // card-worker.mjs routes /_api/ before any host resolution. A creator domain bound to maple must not
   // turn `/_api/vanity/other` into an operation on maple.

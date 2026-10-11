@@ -28,7 +28,7 @@ import { handleVanity } from './card-vanity.mjs';
 const API_PREFIX = '/_api/';
 
 /** the same grammar the store keys on: a handle IS the KV key and the URL path segment. */
-const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** asset ids are content-addressed (`sha256-…`) but authors may name their own; keep it URL-safe. */
 const VALID_ASSET_ID = /^[A-Za-z0-9_.\-]{1,128}$/;
 
