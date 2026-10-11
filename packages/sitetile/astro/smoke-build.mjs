@@ -1164,7 +1164,18 @@ const checks = [
     /<a class="st-cell st-cell-link group" href="https:\/\/example\.com\/patreon" target="_blank" rel="noopener"/.test(markers)],
   ['markers: both cells carry the chevron', () => (markers.match(/<span class="st-cell-cta/g) || []).length === 2],
   ['markers: grouped collection renders through the shared cell system', () =>
-    /<section class="st-collection"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(markers)],
+    /<section class="st-collection st-full-bleed"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(markers)],
+  // CVERInc/reef#1869: the belt is a band. The section opts out of the generic floor (once per
+  // collection — markers.md has one), and the built stylesheet carries the un-gated inner floor that
+  // keeps the head/belt content inset in its place.
+  ['markers: collection section opts out of the section floor, exactly once', () =>
+    (markers.match(/<section class="st-collection st-full-bleed"/g) || []).length === 1
+    && (markers.match(/<section class="st-collection[ "]/g) || []).length === 1],
+  ['built css: collection inner boxes carry the floor (un-gated, content-box width)', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes(':where(.st-collection-head,.st-collection-belt){padding-inline:clamp(1rem,4vw,3rem)}')
+      && /:where\(\.st-collection-head-inner,\.st-collection-belt-inner\)\{max-width:calc\(var\(--gd-maxw\)-2\*clamp\(1rem,4vw,3rem\)\);?margin-inline:auto;?\}/.test(css);
+  }],
   ['markers: collection cover targets the learn page across the full card', () =>
     /<a class="st-item-cover" href="\/tools\/compose" aria-label="Compose"><\/a>/.test(markers)],
   ['markers: collection secondary GitHub link remains an independent anchor', () =>
@@ -1175,7 +1186,7 @@ const checks = [
   ['custom theme: built body carries the custom-theme marker', () =>
     /<body\b[^>]*\bdata-theme-custom(?:=""|(?=[\s>]))/.test(customTheme)],
   ['custom theme: collection renders through production markup', () =>
-    /<section class="st-collection"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(customTheme)
+    /<section class="st-collection st-full-bleed"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(customTheme)
     && /<a class="st-item-cover" href="\/tools\/compose" aria-label="Compose"><\/a>/.test(customTheme)
     && /<a class="st-item-gh" href="https:\/\/github\.com\/example\/compose" target="_blank" rel="noopener">/.test(customTheme)],
   ['custom theme: collection born paint remains excluded by the built compatibility gate', () =>

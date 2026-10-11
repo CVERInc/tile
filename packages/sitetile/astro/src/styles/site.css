@@ -329,9 +329,37 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
   margin-inline: auto;
   padding: 2.5rem clamp(1rem, 4vw, 3rem);
 }
-/* Opt-out for a section that is deliberately edge-to-edge — the hero's own background (below) is
-   the only current user. The exemption is for the OUTER box only: a full-bleed section still
-   insets its own inner content itself (.st-hero-overlay / .st-hero h1,p already do that). */
+/* Opt-out for a section that is deliberately edge-to-edge — the hero's own background (below) and
+   the collection's belt (next rule). The exemption is for the OUTER box only: a full-bleed section
+   still insets its own inner content itself (.st-hero-overlay / .st-hero h1,p already do that). */
+
+/* collection — a HEAD on the page field, then a BELT that is a band: its background runs edge to
+   edge while its cards stay inside an inner box (Collection.astro has carried that outer/inner
+   split — `-head`/`-head-inner`, `-belt`/`-belt-inner` — since it was written). The floor above
+   caged the whole section at --gd-maxw, so a theme that painted `.st-collection-belt` got a box
+   in the middle of the page instead of a band, and the born belt's own inner width could never be
+   reached (CVERInc/reef#1869).
+
+   The section now opts out, and the floor moves one level IN, onto the boxes that were built to
+   carry it. Same numbers, so a theme that says nothing about a collection keeps the geometry it
+   had: the inner boxes are `--gd-maxw` minus the two side paddings (what the caged section's
+   content box was), the head keeps the top padding and the belt the bottom one. Zero specificity
+   and NOT theme-gated, for the floor's own reason — the sites whose headings sat at x=0 were the
+   custom-theme ones. A theme's `.st-collection-belt { background; padding }` and
+   `.st-collection-belt-inner { max-width }` win without a fight and now mean what they say. */
+/* `overflow-x: clip` is for the owner who already worked around the cage from the inside — a belt
+   pulled out with negative side margins, sized against a section that used to have padding. With
+   the padding gone that belt is wider than the viewport; clipped, it is simply the band they were
+   after, and the page does not start scrolling sideways on a phone. `clip`, not `hidden`: no
+   scroll container, so nothing sticky or anchored inside changes behaviour. */
+:where(.st-collection) { overflow-x: clip; }
+:where(.st-collection-head, .st-collection-belt) { padding-inline: clamp(1rem, 4vw, 3rem); }
+:where(.st-collection-head) { padding-block-start: 2.5rem; }
+:where(.st-collection-belt) { padding-block-end: 2.5rem; }
+:where(.st-collection-head-inner, .st-collection-belt-inner) {
+  max-width: calc(var(--gd-maxw) - 2 * clamp(1rem, 4vw, 3rem));
+  margin-inline: auto;
+}
 
 /* hero — full-bleed, optional background image */
 .st-hero {
@@ -1759,8 +1787,12 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
    these rules only arrange the collection-specific head, groups, labels and meta content. */
 :where(body:not([data-theme-custom])) .st-collection-head,
 :where(body:not([data-theme-custom])) .st-collection-belt { padding: 2.5rem clamp(1rem, 4vw, 3rem); }
-:where(body:not([data-theme-custom])) .st-collection-head-inner { max-width: var(--gd-maxw); margin-inline: auto; }
-:where(body:not([data-theme-custom])) .st-collection-belt-inner { max-width: 80rem; margin-inline: auto; }
+/* head text lines up with every other section's text: their content box is --gd-maxw minus the two
+   side paddings (border-box), so the head's inner box is the same expression, not a bare --gd-maxw. */
+:where(body:not([data-theme-custom])) .st-collection-head-inner { max-width: calc(var(--gd-maxw) - 2 * clamp(1rem, 4vw, 3rem)); margin-inline: auto; }
+/* …and the belt's cards line up with a grid's: `.st-grid` is 80rem border-box with the same side
+   padding, and both lay their cards out through `.st-cells`. */
+:where(body:not([data-theme-custom])) .st-collection-belt-inner { max-width: calc(80rem - 2 * clamp(1rem, 4vw, 3rem)); margin-inline: auto; }
 :where(body:not([data-theme-custom])) .st-collection-head :where(h1, h2) {
   margin: 0 0 0.75rem; font-size: var(--gd-h2, clamp(1.5rem, 1.2rem + 1.2vw, 2rem)); line-height: 1.25;
 }

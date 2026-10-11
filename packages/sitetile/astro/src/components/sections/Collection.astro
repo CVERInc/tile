@@ -6,6 +6,8 @@ import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // then `### Category` groups each holding `#### name →href "badge"` item cards.
 // Layout: a HEAD (title + intro + link) on the page field, then a full-bleed BELT
 // (eyebrow + jump-pills + grouped cards) — mirrors a dark projects belt.
+// The <section> is `st-full-bleed` (opts out of site.css's generic section floor) so the belt's
+// background can be a band; the head and the belt each inset their own inner box instead.
 import { parseParams, inlineHtml, bodyHtml, slugify, safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';   // tail-retract hover morph — every live
 // /oss "View on GitHub"/"Learn more" link + the head's link=/GitHub button carries this; a bare "→"
@@ -41,7 +43,7 @@ const badges = (b) => String(b || '').split('·').map((s) => s.trim()).filter(Bo
 // on `it.learn`). `safeHref` shares that ONE policy here.
 const linkHrefOk = link ? safeHref(link.href) : null;
 ---
-<section class="st-collection" id={section.id}>
+<section class="st-collection st-full-bleed" id={section.id}>
   <div class="st-collection-head">
     {/* 🩸 2026-07-06 (v2 gate /oss incident): inner wrapper mirrors the belt's own
         outer-padding/inner-max-width split (`.st-collection-belt`/`-belt-inner`), matching
