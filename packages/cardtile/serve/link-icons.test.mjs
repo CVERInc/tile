@@ -28,3 +28,16 @@ test('a two-level public suffix is not a site: books.com.tw never falls back to 
   const sub = chainOf(linkMark(markup(card('- [ ] %% card: link %% [S](https://shop.example.co.uk/x)'))));
   assert.ok(sub.includes('/_icon/example.co.uk.ico') && !sub.includes('/_icon/co.uk.ico'), `${sub}`);
 });
+
+test('🔴 the host as written is asked first, and its www. twin is always in the chain', () => {
+  // books.com.tw is not a brand we draw, so it is the one that shows the chain itself.
+  const written = linkMark(markup(card('- [ ] %% card: link %% [博客來](https://www.books.com.tw/products/1)')));
+  assert.deepEqual(chainOf(written).slice(0, 2), ['/_icon/www.books.com.tw.ico', '/_icon/books.com.tw.ico'],
+    'www. was stripped before asking — the name with the picture is never asked for');
+  const bare = linkMark(markup(card('- [ ] %% card: link %% [博客來](https://books.com.tw/products/1)')));
+  assert.deepEqual(chainOf(bare).slice(0, 2), ['/_icon/books.com.tw.ico', '/_icon/www.books.com.tw.ico'],
+    'a bare host gets no www. twin to fall back to');
+  // the social row walks the same chain — it is the same helper, and must stay so
+  const [soc] = socialMarks(markup(card('- [ ] %% card: social w=6 %% [博客來](https://www.books.com.tw/)')));
+  assert.deepEqual(chainOf(soc).slice(0, 2), ['/_icon/www.books.com.tw.ico', '/_icon/books.com.tw.ico']);
+});

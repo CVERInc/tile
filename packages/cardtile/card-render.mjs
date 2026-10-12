@@ -186,7 +186,10 @@ const IMG_ICON = (src, fallbacks = [], extraClass = '') => {
     + 'else{this.onerror=null;this.style.display="none"}';
   return `<img class="st-cell-icon-img${extraClass ? ' ' + extraClass : ''}" src="${esc(src)}" alt="" width="22" height="22" loading="lazy" referrerpolicy="no-referrer"${attr} onerror='${esc(onerr)}'>`;
 };
-const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+// 🔴 The host AS WRITTEN, `www.` included (reef#2011). This used to strip it, and DuckDuckGo has a
+// mark for `www.instagram.com` and none for `instagram.com` — so the one name with a picture was the
+// one name the card could never ask for. Anything that wants the bare name strips it itself.
+const hostOf = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
 
 // Which domain owns the mark a favicon service will have. Two rules, both fixing a whole CLASS of
 // missing icon rather than one card's link — `iconhost=` stays for an author pointing DELIBERATELY
@@ -207,11 +210,13 @@ function siteOf(host) {
 /** host → the domains worth trying, best first. */
 function iconDomains(host) {
   if (!host) return [];
-  const out = [ICON_ALIAS[host] || host];
-  // sub.example.com → example.com: a subdomain rarely has its own favicon; the site's does.
-  const site = siteOf(host);
-  if (site !== host) out.push(site);
-  return [...new Set(out)];
+  const bare = host.replace(/^www\./, '');
+  const base = ICON_ALIAS[bare] || bare;
+  // As written first — unless the mark moved with the name (twitter.com → x.com) — then the site
+  // (a subdomain rarely has its own favicon; the site's does), then the site's www. twin: a service
+  // can hold a mark for one spelling and not the other, and which one is not ours to predict.
+  const site = siteOf(base);
+  return [...new Set([ICON_ALIAS[bare] ? base : host, site, `www.${site}`])];
 }
 
 // link icon priority: explicit image (iconimg=) → named SVG (icon=) → a favicon AUTO-DERIVED from the
