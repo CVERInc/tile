@@ -196,3 +196,15 @@ test('🔴 a literal space in a URL query is the URL, not an override (review v2
   // an illegal host is not a token either
   assert.equal(linkOf('https://example.org/x iconhost=not_a_host').url, 'https://example.org/x iconhost=not_a_host');
 });
+
+test('🔴 a social line is ONE link, and the hint says what happens to a second (reef#2015)', async () => {
+  // The grammar is one `[name](url)` per line (ai-ops.mjs's BLANKS note, and the hint's first words);
+  // a second link on the same line is not read. That is the rule, not an accident — so the hint has
+  // to say it, or the author of `[A](…) [B](…)` (specimen-rich does it) never learns why B is gone.
+  const html = markup(card('- [ ] %% card: social w=6 %% [Instagram](https://instagram.com/x) [YouTube](https://www.youtube.com/@x)'));
+  assert.equal(socialMarks(html).length, 1, 'the second link on a line was drawn — the hint below would be wrong');
+  const { CELL_STRINGS_BY_KEY } = await import('../w/cell-i18n.mjs');
+  const row = CELL_STRINGS_BY_KEY['type.social.body.hint'];
+  const said = { zh: '第一個', ja: '最初', en: 'first', ko: '첫 번째', 'zh-Hans': '第一个', de: 'erste', fr: 'premier', es: 'primer', pt: 'primeiro' };
+  for (const [loc, word] of Object.entries(said)) assert.ok(row[loc] && row[loc].includes(word), `${loc}: ${row[loc]}`);
+});
