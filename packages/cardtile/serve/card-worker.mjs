@@ -589,8 +589,13 @@ export default {
       // 🔴 The card's markdown is creator-authored and this concatenates into a URL. Without the
       // guard, `/_icon/<anything>.ico` is an open proxy — same discipline as VIDEO_RE on /_yt/.
       if (!ICON_DOMAIN_RE.test(domain)) return new Response('bad domain', { status: 400 });
-      const up = await fetch(iconUpstream(domain), { cf: { cacheTtl: 604800, cacheEverything: true } })
-        .catch(() => null);
+      // 🔴 Per STATUS, not one TTL (reef#2011). `cacheTtl` overrides the TTL for whatever comes back,
+      // 404 included, so one bad answer from the service kept a domain's mark out for a WEEK after
+      // the service had it again (books.com.tw, 2026-10-12). A mark keeps a week; a miss is asked
+      // again within the hour; a 5xx is not kept at all.
+      const up = await fetch(iconUpstream(domain), {
+        cf: { cacheTtlByStatus: { '200-299': 604800, 404: 3600, '500-599': 0 }, cacheEverything: true },
+      }).catch(() => null);
       // A missing mark is not an error — the card's own fallback chain takes over, and after that it
       // hides the slot. A broken image on someone's card is worse than no icon.
       if (!up || !up.ok) return new Response('', { status: 404 });

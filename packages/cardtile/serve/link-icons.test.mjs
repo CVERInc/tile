@@ -9,7 +9,7 @@
 // upstream below are made up; the three sample domains are the real ones the ticket measured.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderCardHTML } from './card-worker.mjs';
+import worker, { renderCardHTML } from './card-worker.mjs';
 import { ICONS } from './card-assets.mjs';
 
 const card = (...cells) => ['---', 'card-page: x', 'title: X', '---', '', '## grid', '', ...cells].join('\n') + '\n';
@@ -87,4 +87,32 @@ test('🔴 each mark in a social row can be told its icon: icon= and iconhost= a
   // an icon= that names nothing we have falls through to the favicon, never to an empty circle
   const [unknown] = socialMarks(markup(card('- [ ] %% card: social w=6 %% [S](https://example.org/) icon=nope')));
   assert.equal(chainOf(unknown)[0], '/_icon/example.org.ico');
+});
+
+test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week', async () => {
+  // `cf.cacheTtl` is "cache this for N seconds regardless of what the response says" — it is the Edge
+  // Cache TTL override, and Cloudflare's edge caches a 404 like any other cacheable status. So one
+  // bad answer from the favicon service locked a domain's mark out for seven days (books.com.tw:
+  // the service answered 200, our route kept answering 404). `cacheTtlByStatus` gives each class
+  // its own TTL. The upstream here is a fake; what is under test is what we ASK the edge to keep.
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), cf: init && init.cf });
+    return /books/.test(String(url)) ? new Response('', { status: 404 })
+      : new Response(new Uint8Array([0, 0, 1, 0]), { status: 200, headers: { 'content-type': 'image/x-icon' } });
+  };
+  try {
+    const env = { PREVIEW: 'false', CARDS: { get: async () => null } };
+    const miss = await worker.fetch(new Request('https://card.feelreef.com/_icon/books.com.tw.ico'), env);
+    const hit = await worker.fetch(new Request('https://card.feelreef.com/_icon/www.instagram.com.ico'), env);
+    assert.equal(miss.status, 404);
+    assert.equal(hit.status, 200);
+    assert.equal(seen.length, 2, 'setup: the route did not reach the upstream');
+    for (const { url, cf } of seen) {
+      assert.ok(cf, `${url}: no cf options at all`);
+      assert.equal(cf.cacheTtl, undefined, `${url}: cacheTtl applies to EVERY status, 404 included`);
+      assert.deepEqual(cf.cacheTtlByStatus, { '200-299': 604800, 404: 3600, '500-599': 0 });
+    }
+  } finally { globalThis.fetch = real; }
 });
