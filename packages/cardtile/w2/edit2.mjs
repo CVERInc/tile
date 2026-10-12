@@ -54,6 +54,9 @@ import {
 // the icon ROUTE, and the guard on what may reach it — the same pair the renderer uses, so a mark
 // on the table and the same mark on the card are one request to one path.
 import { iconPath, ICON_DOMAIN_RE } from '../marks.mjs';
+// the card's own drawn marks (Instagram, Threads, the `icon=` names) — the tile draws what the card
+// draws (reef#2015); esbuild keeps only this export of the generated module, not its stylesheet
+import { ICONS } from '../serve/card-assets.mjs';
 
 const el = (id) => document.getElementById(id);
 
@@ -548,6 +551,15 @@ function markImg(domain) {
     + ` referrerpolicy="no-referrer" onerror="this.remove()">`;
 }
 
+/**
+ * one of `tileFace`'s marks → the tile's markup. `{ icon }` is the card's own svg, drawn — it cannot
+ * fail, so it needs no type icon behind it; `{ host }` is the favicon <img> (reef#2015).
+ */
+export function faceMarkHtml(m) {
+  if (m && m.icon && Object.hasOwn(ICONS, m.icon)) return `<span class="ct2-face-mark ct2-face-mark--drawn" aria-hidden="true">${ICONS[m.icon]}</span>`;
+  return markImg(m && m.host);
+}
+
 function faceHtml(cell) {
   const f = tileFace(cell, bridgeCtx());
   const kindName = TYPES[f.kind] ? say(TYPES[f.kind].title) : f.kind;
@@ -555,8 +567,8 @@ function faceHtml(cell) {
   const src = f.img ? previewSrc(f.img) : '';
   let art = '';
   if (src) art = `<span class="ct2-face-art">${icon}<img src="${esc(src)}" alt="" loading="lazy" onerror="this.remove()"></span>`;
-  else if (f.icons.length === 1) art = `<span class="ct2-face-art ct2-face-art--mark">${icon}${markImg(f.icons[0])}</span>`;
-  else if (f.icons.length > 1) art = `<span class="ct2-face-marks">${f.icons.map(markImg).join('')}</span>`;
+  else if (f.icons.length === 1) art = `<span class="ct2-face-art ct2-face-art--mark">${f.icons[0].icon ? '' : icon}${faceMarkHtml(f.icons[0])}</span>`;
+  else if (f.icons.length > 1) art = `<span class="ct2-face-marks">${f.icons.map(faceMarkHtml).join('')}</span>`;
   return `<div class="ct2-face ct2-face--${esc(f.kind)}">${art}`
     + `<span class="ct2-face-main"><span class="ct2-face-title">${esc(f.title)}</span>`
     + (f.sub ? `<span class="ct2-face-sub">${esc(f.sub)}</span>` : '')
@@ -665,7 +677,11 @@ const BOARD_CSS = `
   .ct2-face-art--mark > img { inset: 10px; width: 24px; height: 24px; object-fit: contain; }
   .ct2-face--profile .ct2-face-art { border-radius: 50%; }
   .ct2-face-marks { display: flex; flex: 0 0 auto; gap: 4px; }
-  .ct2-face-marks img { width: 20px; height: 20px; object-fit: contain; }
+  .ct2-face-marks img, .ct2-face-marks .ct2-face-mark--drawn { width: 20px; height: 20px; object-fit: contain; }
+  /* a drawn mark (the card's own svg) takes the same slot a favicon would */
+  .ct2-face-art--mark > .ct2-face-mark--drawn { width: 24px; height: 24px; color: var(--text-normal); }
+  .ct2-face-mark--drawn { display: block; flex: 0 0 auto; }
+  .ct2-face-mark--drawn svg { width: 100%; height: 100%; display: block; }
   .ct2-face-ico svg, .ct2-face-kind svg { width: 100%; height: 100%; display: block; }
   .ct2-face-kind { box-sizing: border-box; flex: 0 0 auto; width: 28px; height: 28px; padding: 6px;
     border-radius: 8px; background: var(--background-modifier-hover); color: var(--text-muted); }

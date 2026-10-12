@@ -21,7 +21,10 @@
 // and every tile edit would have gone back through tugtile's own text editor — which knows nothing
 // about `%% card:` markers, cannot compose a link, and would have handed a creator's file to a
 // markdown textarea. The board shows a SUMMARY; the seven typed sheets do the editing.
-import { linkOf, hostLabel, hostOf, iconDomains } from '../card-render.mjs';
+// the SAME parse, brand table and override rule the renderer decides a card's marks by (reef#2015)
+import { linkOf, hostLabel, hostOf, socialLineOf, overrideMark, defaultMark } from '../link-marks.mjs';
+// …and the marks the card can DRAW: a name the card cannot draw is not one a tile claims to
+import { ICONS } from '../serve/card-assets.mjs';
 import { posterPath } from '../yt.mjs';
 
 /** the frontmatter `title:` — the name a profile tile shows. Same one-line read as w/editor.mjs. */
@@ -235,7 +238,10 @@ export function tileText(cell, ctx = {}) {
  *   title   the words on the finished element
  *   sub     the grey line under them: a domain, the drawer it opens, a caption, a count
  *   img     a picture to resolve (`asset:<id>` or a url), or ''
- *   icons   favicon DOMAINS, best first — one for a link, one per mark for a social row
+ *   icons   MARKS — one for a link, one per line of a social row: `{ icon }` a mark the card draws
+ *           (its own svg — Instagram, Threads, an `icon=` name), `{ host }` a favicon domain. Decided
+ *           by link-marks.mjs, the renderer's own rule, so `icon=` / `iconhost=` and the brand table
+ *           mean on the table what they mean on the card (reef#2015).
  *
  * `ctx` adds to bridgeCtx: `unsetLink` / `unsetImg`, the two words the RENDERER already puts on a
  * tile whose address or picture is not filled in yet. The table says the same thing the card does.
@@ -246,7 +252,16 @@ export function tileFace(cell, ctx = {}) {
   const target = drawerTargetOf(cell);
   const opens = opensText(target, ctx);
   const face = { kind: (cell && cell.type) || 'text', title: '', sub: '', img: '', icons: [] };
-  const marks = (url) => (url && !url.startsWith('#') && !url.startsWith('mailto:') ? iconDomains(hostOf(url)).slice(0, 1) : []);
+  const has = (n) => Object.hasOwn(ICONS, n);
+  const face1 = (m) => (m.icon ? [{ icon: m.icon }] : m.hosts.length ? [{ host: m.hosts[0] }] : []);
+  // the author's `icon=` / `iconhost=` first — on the card it wins over every default, the mail
+  // envelope included — then the brand / favicon default, which a drawer link and a mail link lack
+  const marks = (url, over) => {
+    if (!url) return [];
+    const o = overrideMark(over, has);
+    if (o) return face1(o);
+    return url.startsWith('#') || url.startsWith('mailto:') ? [] : face1(defaultMark(hostOf(url), has));
+  };
 
   switch (face.kind) {
     case 'profile':
@@ -258,7 +273,7 @@ export function tileFace(cell, ctx = {}) {
       const { label, url } = linkOf(cell.body);
       face.title = flat(label) || flat(cell.body) || name('link');
       face.sub = opens || (url ? hostLabel(url) : ctx.unsetLink || '');
-      face.icons = marks(url);
+      face.icons = marks(url, { icon: p.icon, iconhost: p.iconhost });
       return face;
     }
     case 'feature':
@@ -281,10 +296,10 @@ export function tileFace(cell, ctx = {}) {
       return face;
     }
     case 'social': {
-      const items = lines(cell.body).map((l) => linkOf(l)).filter((x) => x.url && x.url !== '#');
+      const items = lines(cell.body).map(socialLineOf).filter((x) => x.url && x.url !== '#');
       face.title = name('social');
       face.sub = items.map((x) => x.label || hostLabel(x.url)).join(' · ');
-      face.icons = items.flatMap((x) => marks(x.url)).slice(0, 6);
+      face.icons = items.flatMap((x) => marks(x.url, x)).slice(0, 6);
       return face;
     }
     case 'embed': {
