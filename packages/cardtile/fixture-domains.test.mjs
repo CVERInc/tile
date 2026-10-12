@@ -43,6 +43,9 @@ const ALLOW = new Set([
   'bit.ly',          // a shortener, tested as the real-world shape it is; nobody's card
   'www.w3.org',      // the SVG namespace URI. Never fetched — it is an identifier, not an address
   'cdn',             // a bare single-label host in synthetic markdown, not a real name
+  // look-alikes the drawn-brand table must NOT match (reef#2011): they have to be near-Instagram /
+  // near-Threads names, or the negative test proves nothing
+  'foo.instagram.com', 'notinstagram.com', 'instagram.com.evil.tld', 'foo.threads.net',
 ]);
 
 /** …and whole families that can never belong to anyone: RFC 2606 / 6761. */
