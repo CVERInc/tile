@@ -600,14 +600,16 @@ function renderCell(cell, place, ctx) {
       const isSelf = (u) => selfHost && !u.startsWith('mailto:') && bare(hostOf(u)) === selfHost;
       const marks = items.map(({ label, url, icon: named, iconhost }) => {
         const host = url.startsWith('mailto:') ? 'mail' : hostOf(url);
-        const icon = url.startsWith('mailto:')
+        // 🔴 the author's explicit override wins over EVERY default, the envelope and the house
+        // included (reef#2011): a mark the author named is the mark they asked for.
+        const icon = (named && ctx.icons && ctx.icons[named])
+          || (iconhost ? IMG_ICON(iconPath(iconhost)) : '')
+          || (url.startsWith('mailto:')
           ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>'
           : isSelf(url)
             ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V19a1.6 1.6 0 0 0 1.6 1.6h9.6a1.6 1.6 0 0 0 1.6-1.6V9.6"/></svg>'
-            : (named && ctx.icons && ctx.icons[named])
-              || (iconhost ? IMG_ICON(iconPath(iconhost)) : '')
-              || brandIcon(host, ctx)
-              || (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })();
+            : brandIcon(host, ctx)
+              || (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })());
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';

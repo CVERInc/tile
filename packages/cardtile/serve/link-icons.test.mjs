@@ -110,6 +110,19 @@ test('🔴 a bare address keeps its mark when an override follows it', () => {
   assert.match(html, /href="https:\/\/example\.org\/x"/, 'the override leaked into the address');
 });
 
+test('🔴 an explicit override beats the default envelope and house marks', () => {
+  const md = card('- [ ] %% card: social w=6 %% [Home](https://www.example.org/x) icon=shop\n\t[Mail](mailto:x@example.org) icon=shop\n'
+    + '\t[Home2](https://example.org/y) iconhost=webtoons.com\n\t[Home3](https://example.org/z)\n\t[Mail2](mailto:y@example.org)');
+  const html = renderCardHTML(md, { handle: 'x', cardUrl: 'https://example.org/x' }).replace(/<style>[\s\S]*?<\/style>/g, '');
+  const [home, mail, home2, home3, mail2] = socialMarks(html);
+  assert.equal(home, ICONS.shop, 'icon= on an own-site mark lost to the house');
+  assert.equal(mail, ICONS.shop, 'icon= on a mail mark lost to the envelope');
+  assert.deepEqual(chainOf(home2), ['/_icon/webtoons.com.ico'], 'iconhost= on an own-site mark lost to the house');
+  // with no override, the defaults are unchanged
+  assert.match(home3, /M3 10\.6 12 3\.4l9 7\.2/, 'own-site default is no longer the house');
+  assert.match(mail2, /m2 7 10 6 10-6/, 'mail default is no longer the envelope');
+});
+
 test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week', async () => {
   // `cf.cacheTtl` is "cache this for N seconds regardless of what the response says" — it is the Edge
   // Cache TTL override, and Cloudflare's edge caches a 404 like any other cacheable status. So one
