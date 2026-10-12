@@ -107,7 +107,7 @@ export const CELL_TYPES = {
       sub: { disposition: DISPOSITION.FORM, label: 'type.link.sub.label', control: CONTROL.TEXT, hint: '' },
       icon: { disposition: DISPOSITION.FORM, label: 'type.link.icon.label', control: CONTROL.TEXT, hint: 'type.link.icon.hint' },
       iconhost: { disposition: DISPOSITION.FORM, label: 'type.link.iconhost.label', control: CONTROL.URL, hint: '' },
-      iconimg: { disposition: DISPOSITION.FORM, label: 'type.link.iconimg.label', control: CONTROL.ASSET, hint: '' },
+      iconimg: { disposition: DISPOSITION.FORM, label: 'type.link.iconimg.label', control: CONTROL.ASSET, hint: 'type.link.iconimg.hint' },
       w: WIDTH,
     },
     // text + address are TWO fields and ONE body (`[text](url)`). The editor composes them; nobody

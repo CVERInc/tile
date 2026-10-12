@@ -116,3 +116,19 @@ test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week'
     }
   } finally { globalThis.fetch = real; }
 });
+
+test('🔴 the grammar says what iconimg IS: an artwork thumbnail, not a brand mark', async () => {
+  // describe_card_grammar reads every param's label and hint through cell-i18n. iconimg's hint was
+  // empty and its label said "Your own icon image" — so an agent with a broken Instagram mark put
+  // the brand logo there, and got a 64×64 square three times the size of the 22px marks beside it.
+  const { CELL_TYPES } = await import('../ai-ops.mjs');
+  const { CELL_STRINGS_BY_KEY } = await import('../w/cell-i18n.mjs');
+  const key = CELL_TYPES.link.params.iconimg.hint;
+  assert.ok(key, 'iconimg has no hint at all');
+  const row = CELL_STRINGS_BY_KEY[key];
+  assert.ok(row, `${key} is not in the string table`);
+  for (const loc of ['zh', 'ja', 'en', 'ko', 'zh-Hans', 'de', 'fr', 'es', 'pt']) {
+    assert.ok(row[loc] && row[loc].includes('64×64') && row[loc].includes('icon='), `${loc}: ${row[loc]}`);
+  }
+  assert.match(row.en, /thumbnail/i);
+});

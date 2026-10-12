@@ -156,6 +156,20 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Tu propia imagen de icono', pt: 'Sua própria imagem de ícone',
   },
 
+  // 🩸 reef#2011: the label alone read as "a brand icon", and an agent put the Instagram logo here —
+  // a 64×64 artwork square beside 22px marks. The hint says what it is and where a brand mark goes.
+  'type.link.iconimg.hint': {
+    zh: '作品縮圖，64×64；品牌圖示請用 icon= 或留空。',
+    ja: '作品のサムネイル（64×64）。ブランドのアイコンは icon= を使うか、空欄のままに。',
+    en: 'An artwork thumbnail, 64×64. For a brand mark, use icon= or leave this empty.',
+    ko: '작품 썸네일, 64×64. 브랜드 아이콘은 icon=을 쓰거나 비워 두세요.',
+    'zh-Hans': '作品缩略图，64×64；品牌图标请用 icon= 或留空。',
+    de: 'Ein kleines Bild Ihres Werks, 64×64. Für ein Markensymbol icon= verwenden oder leer lassen.',
+    fr: 'Une vignette de votre œuvre, 64×64. Pour une icône de marque, utilisez icon= ou laissez vide.',
+    es: 'Una miniatura de tu obra, 64×64. Para el icono de una marca, usa icon= o déjalo vacío.',
+    pt: 'Uma miniatura da sua obra, 64×64. Para o ícone de uma marca, use icon= ou deixe vazio.',
+  },
+
   // ── the picture tile ───────────────────────────────────────────────────────────────────────────
   'type.feature.title': {
     zh: '圖片', ja: '画像', en: 'Picture', ko: '사진', 'zh-Hans': '图片',
