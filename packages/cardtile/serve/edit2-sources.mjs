@@ -61,6 +61,8 @@ export const EDIT2_SOURCES = [
   // the brand table and the override rule the tile's mark is decided by — the SAME one the card's is
   // (reef#2015)
   '../link-marks.mjs',
+  // …and the card's drawn marks (ICONS), which a tile now draws too — esbuild keeps that one export
+  'card-assets.mjs',
   '../yt.mjs',
   '../../../hosts/web/tugtile/index.html',
   '../../../hosts/web/tugtile/tugtile.css',

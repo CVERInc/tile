@@ -265,7 +265,7 @@ test('🔴 every tile kind renders as the ELEMENT: a picture, the words, the gre
   // a link carries the mark its button will carry, derived the renderer's way — the host AS WRITTEN,
   // www. kept (reef#2011: www.instagram.com has a mark where instagram.com has none). The grey line
   // is a label, and still drops it.
-  assert.deepEqual(by('link')[0], { kind: 'link', title: '預約', sub: 'example.com', img: '', icons: ['www.example.com'] });
+  assert.deepEqual(by('link')[0], { kind: 'link', title: '預約', sub: 'example.com', img: '', icons: [{ host: 'www.example.com' }] });
   // …and a link with no address says what the CARD says about it, rather than looking finished
   assert.equal(by('link')[1].sub, '還沒填網址');
   assert.deepEqual(by('link')[1].icons, [], 'an empty address produced a favicon domain');
@@ -274,8 +274,9 @@ test('🔴 every tile kind renders as the ELEMENT: a picture, the words, the gre
   assert.deepEqual([by('text')[0].title, by('text')[0].sub], ['第一行', '第二行']);
   // a video is its poster, at the SAME path the renderer emits (never i.ytimg.com)
   assert.equal(by('video')[0].img, '/_yt/abcdefghijk.jpg');
-  // a social row is a row of marks, and twitter.com's mark lives at x.com (the renderer's alias)
-  assert.deepEqual(by('social')[0].icons, ['instagram.com', 'x.com']);
+  // a social row is a row of marks, and twitter.com's mark lives at x.com (the renderer's alias).
+  // Instagram is DRAWN, as on the card (reef#2015).
+  assert.deepEqual(by('social')[0].icons, [{ icon: 'instagram' }, { host: 'x.com' }]);
   assert.equal(by('embed')[0].sub, '2', 'a slideshow does not say how many pictures it holds');
   // a 牽線 says where it goes instead of a url
   assert.equal(by('link')[2].sub, '→ 開啟：更多');

@@ -1120,10 +1120,8 @@ export { mdInline as __mdInline, esc as __esc };
 // 🔴 cardtile-w's link form READS a body with these and WRITES it back — so it must be the same
 // parse, not a second one that agrees today. A form that read `[a](b)` slightly differently from the
 // renderer would show one thing and publish another, on somebody's only copy.
-// 🔴 …and the editing table shows the SAME favicon the card will. `/try/edit2`'s tiles are a
-// mini-render of the finished element, so the domain a tile's mark is derived from has to be
-// derived the one way — a second `hostOf` would put a different icon on the table than on the card
-// for exactly the links these two rules exist for (twitter.com → x.com, sub.example.com).
+// 🔴 …and the editing table shows the SAME mark the card will — it imports link-marks.mjs directly
+// (reef#2015); these stay exported for the form, which has always read them from here.
 export { linkOf, hostLabel, hostOf, iconDomains };
 
 export function renderGrid(model, ctx = {}) {
