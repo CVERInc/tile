@@ -194,14 +194,23 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); 
 //   1. renamed sites keep their old domain in a creator's links long after the mark moved
 //   2. a subdomain rarely has its own favicon; the site's does
 const ICON_ALIAS = { 'twitter.com': 'x.com', 'fb.com': 'facebook.com', 'goo.gl': 'google.com', 'youtu.be': 'youtube.com' };
+// The second-level labels a country code sells names UNDER: books.com.tw's site is books.com.tw,
+// not com.tw. Not the public-suffix list — just enough that the common ones (.com.tw .co.uk .co.jp
+// .com.au) stop costing every visitor a request for a suffix that has no mark (reef#2011).
+const CC_SECOND_LEVEL = new Set(['com', 'net', 'org', 'edu', 'gov', 'co', 'ac', 'or', 'ne', 'go', 'idv']);
+/** sub.example.com → example.com; shop.example.co.uk → example.co.uk */
+function siteOf(host) {
+  const parts = host.split('.');
+  const n = parts.length > 2 && parts[parts.length - 1].length === 2 && CC_SECOND_LEVEL.has(parts[parts.length - 2]) ? 3 : 2;
+  return parts.slice(-n).join('.');
+}
 /** host → the domains worth trying, best first. */
 function iconDomains(host) {
   if (!host) return [];
   const out = [ICON_ALIAS[host] || host];
-  const parts = host.split('.');
-  // sub.example.com → example.com. Two labels is already the registrable name for the common
-  // cases here; a longer public suffix (co.uk) would just mean one wasted fallback, never a wrong icon.
-  if (parts.length > 2) out.push(parts.slice(-2).join('.'));
+  // sub.example.com → example.com: a subdomain rarely has its own favicon; the site's does.
+  const site = siteOf(host);
+  if (site !== host) out.push(site);
   return [...new Set(out)];
 }
 
