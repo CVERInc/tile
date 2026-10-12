@@ -79,6 +79,10 @@ test('the author still outranks the table: icon= and iconhost= on a link are obe
     '- [ ] %% card: link icon=shop %% [IG](https://instagram.com/x)'));
   assert.match(html, /_icon\/webtoons\.com\.ico/, 'an explicit iconhost lost to the brand table');
   assert.ok(html.includes(ICONS.shop), 'an explicit icon= lost to the brand table');
+  // 🔴 control: the SAME link with no override is the drawn brand — without this, the two lines above
+  // pass on a renderer with no brand table at all, and prove nothing about the ordering.
+  assert.equal(linkMark(markup(card('- [ ] %% card: link %% [IG](https://instagram.com/x)'))), ICONS.instagram,
+    'no override, yet the brand table was not consulted');
 });
 
 test('🔴 each mark in a social row can be told its icon: icon= and iconhost= after the address', () => {
