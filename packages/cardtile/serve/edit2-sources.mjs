@@ -58,6 +58,9 @@ export const EDIT2_SOURCES = [
   // (marks) and the poster path a video tile shows (yt). Both were already in the bundle through
   // card-render — being in it by accident is not the same as being watched for drift.
   '../marks.mjs',
+  // the brand table and the override rule the tile's mark is decided by — the SAME one the card's is
+  // (reef#2015)
+  '../link-marks.mjs',
   '../yt.mjs',
   '../../../hosts/web/tugtile/index.html',
   '../../../hosts/web/tugtile/tugtile.css',
