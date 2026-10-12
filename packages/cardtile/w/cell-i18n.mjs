@@ -159,15 +159,15 @@ export const CELL_STRINGS_BY_KEY = {
   // 🩸 reef#2011: the label alone read as "a brand icon", and an agent put the Instagram logo here —
   // a 64×64 artwork square beside 22px marks. The hint says what it is and where a brand mark goes.
   'type.link.iconimg.hint': {
-    zh: '作品縮圖，64×64；品牌圖示請用 icon= 或留空。',
-    ja: '作品のサムネイル（64×64）。ブランドのアイコンは icon= を使うか、空欄のままに。',
-    en: 'An artwork thumbnail, 64×64. For a brand mark, use icon= or leave this empty.',
-    ko: '작품 썸네일, 64×64. 브랜드 아이콘은 icon=을 쓰거나 비워 두세요.',
-    'zh-Hans': '作品缩略图，64×64；品牌图标请用 icon= 或留空。',
-    de: 'Ein kleines Bild Ihres Werks, 64×64. Für ein Markensymbol icon= verwenden oder leer lassen.',
-    fr: 'Une vignette de votre œuvre, 64×64. Pour une icône de marque, utilisez icon= ou laissez vide.',
-    es: 'Una miniatura de tu obra, 64×64. Para el icono de una marca, usa icon= o déjalo vacío.',
-    pt: 'Uma miniatura da sua obra, 64×64. Para o ícone de uma marca, use icon= ou deixe vazio.',
+    zh: '作品縮圖，64×64；品牌圖示請用 icon= 或留空。網址裡的空白請寫 %20。',
+    ja: '作品のサムネイル（64×64）。ブランドのアイコンは icon= を使うか、空欄のままに。URL 内の空白は %20 と書いてください。',
+    en: 'An artwork thumbnail, 64×64. For a brand mark, use icon= or leave this empty. Write a space inside an address as %20.',
+    ko: '작품 썸네일, 64×64. 브랜드 아이콘은 icon=을 쓰거나 비워 두세요. 주소 안의 공백은 %20으로 쓰세요.',
+    'zh-Hans': '作品缩略图，64×64；品牌图标请用 icon= 或留空。网址里的空白请写 %20。',
+    de: 'Ein kleines Bild Ihres Werks, 64×64. Für ein Markensymbol icon= verwenden oder leer lassen. Ein Leerzeichen in der Adresse als %20 schreiben.',
+    fr: 'Une vignette de votre œuvre, 64×64. Pour une icône de marque, utilisez icon= ou laissez vide. Écrivez un espace dans l’adresse sous la forme %20.',
+    es: 'Una miniatura de tu obra, 64×64. Para el icono de una marca, usa icon= o déjalo vacío. Escribe un espacio dentro de la dirección como %20.',
+    pt: 'Uma miniatura da sua obra, 64×64. Para o ícone de uma marca, use icon= ou deixe vazio. Escreva um espaço dentro do endereço como %20.',
   },
 
   // ── the picture tile ───────────────────────────────────────────────────────────────────────────
@@ -391,15 +391,15 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Tus cuentas', pt: 'Suas contas',
   },
   'type.social.body.hint': {
-    zh: '一行一個：名稱，然後網址。圖示不對時，網址後面可加 icon=圖示名 或 iconhost=網域。',
-    ja: '1 行に 1 つ：名前のあとに URL。アイコンが違うときは、URL のあとに icon=アイコン名 か iconhost=ドメイン を書けます。',
-    en: 'One per line: the name, then the address. If a mark comes out wrong, add icon=<name> or iconhost=<domain> after the address.',
-    ko: '한 줄에 하나：이름 다음에 주소. 아이콘이 틀리면 주소 뒤에 icon=아이콘이름 또는 iconhost=도메인을 붙여요.',
-    'zh-Hans': '一行一个：名称，然后网址。图标不对时，网址后面可加 icon=图标名 或 iconhost=域名。',
-    de: 'Eines pro Zeile: der Name, dann die Adresse. Stimmt ein Symbol nicht, hinter der Adresse icon=<Name> oder iconhost=<Domain> ergänzen.',
-    fr: 'Un par ligne : le nom, puis l’adresse. Si une icône est fausse, ajoutez icon=<nom> ou iconhost=<domaine> après l’adresse.',
-    es: 'Uno por línea: el nombre y luego la dirección. Si un icono sale mal, añade icon=<nombre> o iconhost=<dominio> tras la dirección.',
-    pt: 'Um por linha: o nome e depois o endereço. Se um ícone sair errado, acrescente icon=<nome> ou iconhost=<domínio> depois do endereço.',
+    zh: '一行一個：名稱，然後網址。圖示不對時，網址後面可加 icon=圖示名 或 iconhost=網域。網址裡的空白請寫 %20。',
+    ja: '1 行に 1 つ：名前のあとに URL。アイコンが違うときは、URL のあとに icon=アイコン名 か iconhost=ドメイン を書けます。URL 内の空白は %20 と書いてください。',
+    en: 'One per line: the name, then the address. If a mark comes out wrong, add icon=<name> or iconhost=<domain> after the address. Write a space inside an address as %20.',
+    ko: '한 줄에 하나：이름 다음에 주소. 아이콘이 틀리면 주소 뒤에 icon=아이콘이름 또는 iconhost=도메인을 붙여요. 주소 안의 공백은 %20으로 쓰세요.',
+    'zh-Hans': '一行一个：名称，然后网址。图标不对时，网址后面可加 icon=图标名 或 iconhost=域名。网址里的空白请写 %20。',
+    de: 'Eines pro Zeile: der Name, dann die Adresse. Stimmt ein Symbol nicht, hinter der Adresse icon=<Name> oder iconhost=<Domain> ergänzen. Ein Leerzeichen in der Adresse als %20 schreiben.',
+    fr: 'Un par ligne : le nom, puis l’adresse. Si une icône est fausse, ajoutez icon=<nom> ou iconhost=<domaine> après l’adresse. Écrivez un espace dans l’adresse sous la forme %20.',
+    es: 'Uno por línea: el nombre y luego la dirección. Si un icono sale mal, añade icon=<nombre> o iconhost=<dominio> tras la dirección. Escribe un espacio dentro de la dirección como %20.',
+    pt: 'Um por linha: o nome e depois o endereço. Se um ícone sair errado, acrescente icon=<nome> ou iconhost=<domínio> depois do endereço. Escreva um espaço dentro do endereço como %20.',
   },
 
   // ── the slideshow tile ─────────────────────────────────────────────────────────────────────────

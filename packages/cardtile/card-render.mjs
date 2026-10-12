@@ -16,7 +16,7 @@ import { resolveBackdropDim, themeCss } from './colour.mjs';
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
 // brand marks come from OUR origin now — see marks.mjs for why, and for the open-proxy guard
-import { iconPath } from './marks.mjs';
+import { iconPath, ICON_DOMAIN_RE } from './marks.mjs';
 // The drawer coral's own stylesheet. It arrives with the DOCUMENT, not from the coral's script,
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
 import { DRAWER_CSS } from '../dynamic-corals/drawer/drawer-style.mjs';
@@ -133,10 +133,25 @@ const linkOf = (body) => {
   if (m) return { label: m[1], url: m[2] };
   const bare = (body || '').trim();
   if (BARE_URL_RE.test(bare)) return { label: hostLabel(bare), url: bare };
-  // a bare address followed only by override tokens (`icon=` / `iconhost=`, reef#2011) is still an
-  // address: the tokens are read by the caller, never part of the url.
-  const t = /^((?:https?:\/\/|mailto:|tel:)\S+)(?:\s+(?:icon|iconhost)=[^\s"'<>]+)+$/i.exec(bare);
-  if (t) return { label: hostLabel(t[1]), url: t[1] };
+  // a bare address followed ONLY by override tokens (`icon=` / `iconhost=`, reef#2011) is still an
+  // address: the tokens are read by the caller, never part of the url. 🔴 The WHOLE tail must be
+  // legal tokens (icon=[a-z0-9-]+, iconhost=<ICON_DOMAIN_RE host>, space-separated, nothing else);
+  // `?q=one icon=shop&x=2` has a tail with `&x=2` in it, so it is not an override and the whole line
+  // stays the URL. A space inside a URL is written %20.
+  const t = /^((?:https?:\/\/|mailto:|tel:)\S+)((?:\s+\S+)+)$/i.exec(bare);
+  if (t) {
+    const over = {};
+    const ok = t[2].trim().split(/\s+/).every((tok) => {
+      const m = /^(icon|iconhost)=(.+)$/i.exec(tok);
+      if (!m) return false;
+      const k = m[1].toLowerCase();
+      if (k === 'icon' ? !/^[a-z0-9-]+$/.test(m[2]) : !ICON_DOMAIN_RE.test(m[2])) return false;
+      over[k] = m[2];
+      return true;
+    });
+    if (ok) return { label: hostLabel(t[1]), url: t[1], over };
+  }
+  if (/^(?:https?:\/\/|mailto:|tel:)\S/i.test(bare)) return { label: hostLabel(bare), url: bare };
   return { label: bare, url: '' };
 };
 
@@ -580,7 +595,8 @@ function renderCell(cell, place, ctx) {
       const items = (b || '').split('\n').map((l) => {
         const line = l.trim();
         const x = linkOf(line);
-        for (const [, k, v] of line.replace(/^\[[^\]]*\]\([^)\s]+\)/, '').matchAll(/(?:^|\s)(icon|iconhost)=([^\s"'<>]+)/g)) x[k] = v;
+        if (x.over) { Object.assign(x, x.over); return x; }
+        if (/^\[/.test(line)) for (const [, k, v] of line.replace(/^\[[^\]]*\]\([^)\s]+\)/, '').matchAll(/(?:^|\s)(icon|iconhost)=([^\s"'<>]+)/g)) x[k] = v;
         return x;
       }).filter((x) => x.url && x.url !== '#');
       if (!items.length) return '';

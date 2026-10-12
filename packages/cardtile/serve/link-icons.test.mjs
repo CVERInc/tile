@@ -170,3 +170,29 @@ test('🔴 the grammar says what iconimg IS: an artwork thumbnail, not a brand m
   }
   assert.match(row.en, /thumbnail/i);
 });
+
+test('🔴 a literal space in a URL query is the URL, not an override (review v2 P2)', async () => {
+  const { linkOf } = await import('../card-render.mjs');
+  const hrefs = (html) => [...html.matchAll(/<a class="st-social-btn"[^>]*href="([^"]*)"/g)].map((m) => m[1]);
+  // codex input 1: tail `icon=shop` is itself a legal token → override, url cut before it
+  const a = 'https://example.org/?q=one icon=shop';
+  assert.deepEqual(linkOf(a).over, { icon: 'shop' });
+  assert.equal(linkOf(a).url, 'https://example.org/?q=one');
+  // codex input 2: tail carries `&x=2`, not a token → the whole line is the URL, nothing dropped
+  const b = 'https://example.org/?q=one icon=shop&x=2';
+  assert.equal(linkOf(b).url, b);
+  assert.equal(linkOf(b).over, undefined);
+  const html = markup(card(`- [ ] %% card: social w=6 %% ${b}`));
+  assert.ok(hrefs(html).every((h) => h.includes('x=2')), `${hrefs(html)}`);
+  assert.ok(!html.includes(ICONS.shop), 'drew the shop mark for a URL that never asked');
+  // %20 control: the space is escaped, so the override is real and the URL keeps its query
+  const c = 'https://example.org/?q=one%20icon=shop';
+  assert.equal(linkOf(c).url, c);
+  assert.equal(linkOf(c).over, undefined);
+  // several legal tokens
+  const d = linkOf('https://example.org/x icon=shop iconhost=x.com');
+  assert.equal(d.url, 'https://example.org/x');
+  assert.deepEqual(d.over, { icon: 'shop', iconhost: 'x.com' });
+  // an illegal host is not a token either
+  assert.equal(linkOf('https://example.org/x iconhost=not_a_host').url, 'https://example.org/x iconhost=not_a_host');
+});
