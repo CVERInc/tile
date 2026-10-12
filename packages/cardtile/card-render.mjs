@@ -133,6 +133,10 @@ const linkOf = (body) => {
   if (m) return { label: m[1], url: m[2] };
   const bare = (body || '').trim();
   if (BARE_URL_RE.test(bare)) return { label: hostLabel(bare), url: bare };
+  // a bare address followed only by override tokens (`icon=` / `iconhost=`, reef#2011) is still an
+  // address: the tokens are read by the caller, never part of the url.
+  const t = /^((?:https?:\/\/|mailto:|tel:)\S+)(?:\s+(?:icon|iconhost)=[^\s"'<>]+)+$/i.exec(bare);
+  if (t) return { label: hostLabel(t[1]), url: t[1] };
   return { label: bare, url: '' };
 };
 

@@ -100,6 +100,16 @@ test('🔴 each mark in a social row can be told its icon: icon= and iconhost= a
   assert.equal(chainOf(unknown)[0], '/_icon/example.org.ico');
 });
 
+test('🔴 a bare address keeps its mark when an override follows it', () => {
+  // The hint says "add icon= after the address"; a bare-URL line used to stop being a URL the moment
+  // anything followed it, and the whole mark vanished.
+  const html = markup(card('- [ ] %% card: social w=6 %% https://example.org/x icon=shop\n\thttps://bit.ly/y iconhost=webtoons.com'));
+  const [shop, comic] = socialMarks(html);
+  assert.equal(shop, ICONS.shop, 'bare URL + icon= drew nothing, or ignored the override');
+  assert.deepEqual(chainOf(comic), ['/_icon/webtoons.com.ico'], 'bare URL + iconhost= drew nothing, or ignored it');
+  assert.match(html, /href="https:\/\/example\.org\/x"/, 'the override leaked into the address');
+});
+
 test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week', async () => {
   // `cf.cacheTtl` is "cache this for N seconds regardless of what the response says" — it is the Edge
   // Cache TTL override, and Cloudflare's edge caches a 404 like any other cacheable status. So one
