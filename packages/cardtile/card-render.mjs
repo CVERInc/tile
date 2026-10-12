@@ -224,10 +224,16 @@ function iconDomains(host) {
 // that is not there; one we ship cannot 404. Deliberately short: everything not in it keeps the
 // brand's CURRENT favicon, which is the whole reason marks are fetched (see marks.mjs). A brand goes
 // in here when the service has nothing for it, not because we would like to draw it.
-const BRAND_ICON = { 'instagram.com': 'instagram', 'threads.net': 'threads', 'threads.com': 'threads' };
+// 🔴 EXACT hosts, not sites: `siteOf()` would hand foo.instagram.com the Instagram mark, and a host
+// we did not list is a host we did not measure — it keeps its own favicon chain.
+const BRAND_ICON = {
+  'instagram.com': 'instagram', 'www.instagram.com': 'instagram',
+  'threads.net': 'threads', 'www.threads.net': 'threads', 'threads.com': 'threads', 'www.threads.com': 'threads',
+};
 /** the drawn mark for `host`'s brand, or '' — the link row and the social row both ask this */
 function brandIcon(host, ctx) {
-  const name = host ? BRAND_ICON[siteOf(host.replace(/^www\./, ''))] : '';
+  const h = String(host || '').toLowerCase();
+  const name = Object.hasOwn(BRAND_ICON, h) ? BRAND_ICON[h] : '';
   return (name && ctx.icons && ctx.icons[name]) || '';
 }
 

@@ -63,6 +63,17 @@ test('🔴 a brand we draw is drawn — Instagram and Threads never reach the fa
   assert.match(css, /\.st-social-btn \.st-cell-icon\{width:20px;height:20px/);
 });
 
+test('🔴 the drawn mark is for the LISTED hosts only: an unlisted subdomain or a look-alike is fetched', () => {
+  // The table names exact hosts. `siteOf()` once reduced foo.instagram.com to instagram.com, so any
+  // subdomain borrowed the brand's drawn mark — which is a claim about a host we never measured.
+  for (const url of ['https://foo.instagram.com/x', 'https://notinstagram.com/x', 'https://instagram.com.evil.tld/x',
+    'https://foo.threads.net/x']) {
+    const html = markup(card(`- [ ] %% card: link %% [L](${url})`, `- [ ] %% card: social w=6 %% [S](${url})`));
+    assert.match(linkMark(html), /^<img/, `link to ${url} drew a built-in mark`);
+    assert.ok(socialMarks(html).every((m) => /^<img/.test(m)), `social mark for ${url} drew a built-in mark`);
+  }
+});
+
 test('the author still outranks the table: icon= and iconhost= on a link are obeyed', () => {
   const html = markup(card('- [ ] %% card: link iconhost=webtoons.com %% [IG](https://instagram.com/x)',
     '- [ ] %% card: link icon=shop %% [IG](https://instagram.com/x)'));
