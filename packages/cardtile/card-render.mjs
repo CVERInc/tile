@@ -219,6 +219,18 @@ function iconDomains(host) {
   return [...new Set([ICON_ALIAS[bare] ? base : host, site, `www.${site}`])];
 }
 
+// 🔴 Brands whose mark we DRAW, by site → the `ICONS` name (reef#2011). The favicon service answers
+// 404 for instagram.com and threads.* — measured 2026-10-12 — so for these a fetched mark is a mark
+// that is not there; one we ship cannot 404. Deliberately short: everything not in it keeps the
+// brand's CURRENT favicon, which is the whole reason marks are fetched (see marks.mjs). A brand goes
+// in here when the service has nothing for it, not because we would like to draw it.
+const BRAND_ICON = { 'instagram.com': 'instagram', 'threads.net': 'threads', 'threads.com': 'threads' };
+/** the drawn mark for `host`'s brand, or '' — the link row and the social row both ask this */
+function brandIcon(host, ctx) {
+  const name = host ? BRAND_ICON[siteOf(host.replace(/^www\./, ''))] : '';
+  return (name && ctx.icons && ctx.icons[name]) || '';
+}
+
 // link icon priority: explicit image (iconimg=) → named SVG (icon=) → a favicon AUTO-DERIVED from the
 // link's domain (or iconhost=). The derive is the fix for a ported link-in-bio: never carry a stale
 // hand-saved favicon URL again — DuckDuckGo resolves the site's CURRENT mark (privacy-respecting, no
@@ -241,6 +253,7 @@ function linkIcon(p, url, ctx) {
   // and the gap became visible the same hour.
   if (p.iconimg) return IMG_ICON(resolveAsset(p.iconimg, ctx), [], 'st-cell-icon-art');
   if (p.icon && ctx.icons && ctx.icons[p.icon]) return ctx.icons[p.icon];
+  if (!p.iconhost) { const drawn = brandIcon(hostOf(url), ctx); if (drawn) return drawn; }
   const chain = p.iconhost ? [p.iconhost] : iconDomains(hostOf(url));
   if (chain.length) return IMG_ICON(iconPath(chain[0]), chain.slice(1));
   return (ctx.icons && ctx.icons._default) || '';
@@ -573,9 +586,10 @@ function renderCell(cell, place, ctx) {
           ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>'
           : isSelf(url)
             ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V19a1.6 1.6 0 0 0 1.6 1.6h9.6a1.6 1.6 0 0 0 1.6-1.6V9.6"/></svg>'
-            : (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })();
+            : brandIcon(host, ctx)
+              || (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })();
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
-        // the self-site house) cannot fail, so giving them a fallback would be dead markup.
+        // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
         return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ' target="_blank" rel="noopener noreferrer"'} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
       }).join('');
@@ -1017,6 +1031,9 @@ const NATIVE_CSS = [
   `.st-social-btn{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--cp-accent-border,rgba(10,140,142,.28));background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 8%,transparent);color:var(--cp-accent,#0a8c8e);transition:background .2s,transform .2s}`,
   `.st-social-btn:hover{background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 20%,transparent);transform:translateY(-2px)}`,
   `.st-social-btn .st-cell-icon-img{width:20px;height:20px;background:none}`,
+  // a DRAWN brand mark (ICONS) carries no width/height of its own — unsized, an inline svg lays out
+  // at 300×150 and the circle becomes a pill
+  `.st-social-btn .st-cell-icon{width:20px;height:20px;flex:0 0 auto}`,
   // the drawn last resort — revealed by the sibling combinator the instant onerror hides the img,
   // so it needs no class toggle and works with JS already done running.
   `.st-social-bare{display:none}`,

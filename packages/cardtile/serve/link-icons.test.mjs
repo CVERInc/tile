@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderCardHTML } from './card-worker.mjs';
+import { ICONS } from './card-assets.mjs';
 
 const card = (...cells) => ['---', 'card-page: x', 'title: X', '---', '', '## grid', '', ...cells].join('\n') + '\n';
 const markup = (md) => renderCardHTML(md, { handle: 'x' }).replace(/<style>[\s\S]*?<\/style>/g, '');
@@ -40,4 +41,31 @@ test('🔴 the host as written is asked first, and its www. twin is always in th
   // the social row walks the same chain — it is the same helper, and must stay so
   const [soc] = socialMarks(markup(card('- [ ] %% card: social w=6 %% [博客來](https://www.books.com.tw/)')));
   assert.deepEqual(chainOf(soc).slice(0, 2), ['/_icon/www.books.com.tw.ico', '/_icon/books.com.tw.ico']);
+});
+
+test('🔴 a brand we draw is drawn — Instagram and Threads never reach the favicon service', () => {
+  // DuckDuckGo answers 404 for instagram.com, threads.net and threads.com. A mark we ship cannot 404,
+  // and the link row and the social row take it from the SAME table, so they cannot disagree.
+  assert.ok(ICONS.threads && /^<svg/.test(ICONS.threads), 'there is no drawn Threads mark to use');
+  for (const [url, name] of [['https://instagram.com/someone', 'instagram'], ['https://www.instagram.com/someone', 'instagram'],
+    ['https://www.threads.net/@someone', 'threads'], ['https://www.threads.com/@someone', 'threads']]) {
+    const html = markup(card(`- [ ] %% card: link %% [L](${url})`, `- [ ] %% card: social w=6 %% [S](${url})`));
+    assert.equal(linkMark(html), ICONS[name], `link to ${url} is not the drawn ${name}`);
+    assert.deepEqual(socialMarks(html), [ICONS[name]], `social mark for ${url} is not the drawn ${name}`);
+    assert.ok(!/_icon\/[^"]*(instagram|threads)/.test(html), `${url} still asks the favicon service`);
+  }
+  // a drawn mark cannot fail, so it carries no broken-image fallback glyph either
+  const soc = markup(card('- [ ] %% card: social w=6 %% [IG](https://instagram.com/x)'));
+  assert.ok(!/st-social-bare/.test(soc), 'a drawn mark got the dead fallback glyph');
+  // 🔴 and it is SIZED in a 40px circle: the drawn marks carry no width/height of their own, and an
+  // unsized inline <svg> lays out at 300×150.
+  const css = renderCardHTML(card('- [ ] %% card: social w=6 %% [IG](https://instagram.com/x)'), { handle: 'x' });
+  assert.match(css, /\.st-social-btn \.st-cell-icon\{width:20px;height:20px/);
+});
+
+test('the author still outranks the table: icon= and iconhost= on a link are obeyed', () => {
+  const html = markup(card('- [ ] %% card: link iconhost=webtoons.com %% [IG](https://instagram.com/x)',
+    '- [ ] %% card: link icon=shop %% [IG](https://instagram.com/x)'));
+  assert.match(html, /_icon\/webtoons\.com\.ico/, 'an explicit iconhost lost to the brand table');
+  assert.ok(html.includes(ICONS.shop), 'an explicit icon= lost to the brand table');
 });
