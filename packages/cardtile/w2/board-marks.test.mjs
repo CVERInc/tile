@@ -73,3 +73,24 @@ test('🔴 board and card agree, case by case (the shared table, not two copies 
     else assert.equal(/src="([^"]+)"/.exec(drawn)[1], `/_icon/${m.host}.ico`, c);
   }
 });
+
+// 🩸 review P2 (tile#124): the behavioural tests above stay green if the editor swaps the shared
+// import for a local copy that returns the same values today. Structure guard: the board must
+// IMPORT these four from link-marks.mjs and must not define any of them itself.
+test('🔴 the board imports the shared mark rules and defines no local copy', async () => {
+  const { readFileSync } = await import('node:fs');
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  const names = ['linkOf', 'socialLineOf', 'overrideMark', 'defaultMark'];
+  const bridge = strip(readFileSync(new URL('./board-bridge.mjs', import.meta.url), 'utf8'));
+  const imp = bridge.match(/import\s*\{([^}]*)\}\s*from\s*['"]\.\.\/link-marks\.mjs['"]/);
+  assert.ok(imp, 'board-bridge.mjs must import from ../link-marks.mjs');
+  const got = imp[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop());
+  for (const n of names) assert.ok(got.includes(n), `board-bridge.mjs must import ${n} from link-marks.mjs`);
+  for (const f of ['./board-bridge.mjs', './edit2.mjs']) {
+    const src = strip(readFileSync(new URL(f, import.meta.url), 'utf8'));
+    for (const n of names) {
+      const def = new RegExp(`(function\\s*\\*?\\s*${n}\\b|\\b(?:const|let|var)\\s+${n}\\b|\\b${n}\\s*[:=]\\s*(?:async\\s*)?(?:function|\\())`);
+      assert.ok(!def.test(src), `${f} must not define its own ${n}`);
+    }
+  }
+});
