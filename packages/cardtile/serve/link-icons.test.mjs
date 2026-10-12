@@ -69,3 +69,22 @@ test('the author still outranks the table: icon= and iconhost= on a link are obe
   assert.match(html, /_icon\/webtoons\.com\.ico/, 'an explicit iconhost lost to the brand table');
   assert.ok(html.includes(ICONS.shop), 'an explicit icon= lost to the brand table');
 });
+
+test('🔴 each mark in a social row can be told its icon: icon= and iconhost= after the address', () => {
+  // The row had NO override at all, so one broken mark meant giving up the whole row for big link
+  // buttons — and the escape route led authors to iconimg=, which draws a 64×64 artwork thumbnail.
+  const html = markup(card('- [ ] %% card: social w=6 %% [Shop](https://shop.example.com/a) icon=shop\n'
+    + '\t[Comic](https://bit.ly/xyz) iconhost=webtoons.com\n\t[Plain](https://example.org/)'));
+  const [shop, comic, plain] = socialMarks(html);
+  assert.equal(shop, ICONS.shop, 'icon= on a social line was ignored');
+  assert.deepEqual(chainOf(comic), ['/_icon/webtoons.com.ico'], 'iconhost= on a social line was ignored, or second-guessed');
+  assert.equal(chainOf(plain)[0], '/_icon/example.org.ico', 'a line with no override changed');
+  // the override is not part of the address, and not part of what the visitor is told
+  assert.match(html, /href="https:\/\/bit\.ly\/xyz"/);
+  assert.ok(!/iconhost|icon=shop/.test(html.replace(/<a class="st-social-btn"[^>]*>/g, (a) => a.replace(/href="[^"]*"/, ''))
+    .match(/<div class="st-cell st-social"[\s\S]*?<\/div>/)[0].replace(/<svg[\s\S]*?<\/svg>|<img[^>]*>/g, '')),
+  'the override leaked into the row');
+  // an icon= that names nothing we have falls through to the favicon, never to an empty circle
+  const [unknown] = socialMarks(markup(card('- [ ] %% card: social w=6 %% [S](https://example.org/) icon=nope')));
+  assert.equal(chainOf(unknown)[0], '/_icon/example.org.ico');
+});

@@ -564,7 +564,15 @@ function renderCell(cell, place, ctx) {
     case 'social': {
       // The compact icon row every link-in-bio has: 40px marks, no labels, sitting with the profile
       // rather than competing with the creator's own tiles for space.
-      const items = (b || '').split('\n').map((l) => linkOf(l.trim())).filter((x) => x.url && x.url !== '#');
+      // A line may carry `icon=<name>` or `iconhost=<domain>` after its address — the same two words a
+      // link cell takes, for a mark the table below gets wrong (reef#2011). Before this the row had no
+      // override at all, and one bad mark meant giving up the whole row.
+      const items = (b || '').split('\n').map((l) => {
+        const line = l.trim();
+        const x = linkOf(line);
+        for (const [, k, v] of line.replace(/^\[[^\]]*\]\([^)\s]+\)/, '').matchAll(/(?:^|\s)(icon|iconhost)=([^\s"'<>]+)/g)) x[k] = v;
+        return x;
+      }).filter((x) => x.url && x.url !== '#');
       if (!items.length) return '';
       // 🔴 A link to the creator's OWN site gets a drawn mark, not a favicon.
       //
@@ -580,13 +588,15 @@ function renderCell(cell, place, ctx) {
       const bare = (h) => String(h || '').replace(/^www\./, '');
       const selfHost = bare(hostOf(ctx.cardUrl || ''));
       const isSelf = (u) => selfHost && !u.startsWith('mailto:') && bare(hostOf(u)) === selfHost;
-      const marks = items.map(({ label, url }) => {
+      const marks = items.map(({ label, url, icon: named, iconhost }) => {
         const host = url.startsWith('mailto:') ? 'mail' : hostOf(url);
         const icon = url.startsWith('mailto:')
           ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>'
           : isSelf(url)
             ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V19a1.6 1.6 0 0 0 1.6 1.6h9.6a1.6 1.6 0 0 0 1.6-1.6V9.6"/></svg>'
-            : brandIcon(host, ctx)
+            : (named && ctx.icons && ctx.icons[named])
+              || (iconhost ? IMG_ICON(iconPath(iconhost)) : '')
+              || brandIcon(host, ctx)
               || (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })();
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.

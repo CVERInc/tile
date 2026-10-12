@@ -31,6 +31,9 @@ const ALLOW = new Set([
   'x.com', 'twitter.com', 'www.facebook.com', 'facebook.com', 'patreon.com', 'www.patreon.com',
   'store.line.me', 'line.me', 'icons.duckduckgo.com', 'goo.gl', 'plausible.io',
   'm.youtube.com',   // the phone share-link shape the Video sheet accepts (youtubeRef)
+  'threads.net', 'www.threads.net', 'threads.com', 'www.threads.com',   // BRAND_ICON draws them (reef#2011)
+  // reef#2011's measured sample of a `.com.tw` site — a public retailer, not anybody's card
+  'books.com.tw', 'www.books.com.tw',
   // stand-ins we minted, kept because a card needs to look like a card
   'card.inkbrush.com', 'vip.paperloom.com', 'shop.example.co.uk', 'placehold.co',
   // 🔴 Each of these was surfaced by this gate on its first run, and each is here for a reason that
