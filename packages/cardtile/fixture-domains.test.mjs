@@ -29,9 +29,9 @@ const ALLOW = new Set([
   // platforms the renderer knows by name — their marks, their embeds, their oEmbed
   'www.youtube.com', 'youtube.com', 'youtu.be', 'instagram.com', 'www.instagram.com',
   'x.com', 'twitter.com', 'www.facebook.com', 'facebook.com', 'patreon.com', 'www.patreon.com',
-  'store.line.me', 'line.me', 'icons.duckduckgo.com', 'goo.gl', 'plausible.io',
+  'store.line.me', 'line.me', 'icons.duckduckgo.com', 't1.gstatic.com', 'goo.gl', 'plausible.io',
   'm.youtube.com',   // the phone share-link shape the Video sheet accepts (youtubeRef)
-  'threads.net', 'www.threads.net', 'threads.com', 'www.threads.com',   // BRAND_ICON draws them (reef#2011)
+  'threads.net', 'www.threads.net', 'threads.com', 'www.threads.com',   // named hosts in the live-icons / link tests (reef#2011, reef#2026)
   // reef#2011's measured sample of a `.com.tw` site — a public retailer, not anybody's card
   'books.com.tw', 'www.books.com.tw',
   // stand-ins we minted, kept because a card needs to look like a card
@@ -43,8 +43,7 @@ const ALLOW = new Set([
   'bit.ly',          // a shortener, tested as the real-world shape it is; nobody's card
   'www.w3.org',      // the SVG namespace URI. Never fetched — it is an identifier, not an address
   'cdn',             // a bare single-label host in synthetic markdown, not a real name
-  // look-alikes the drawn-brand table must NOT match (reef#2011): they have to be near-Instagram /
-  // near-Threads names, or the negative test proves nothing
+  // near-Instagram / near-Threads names (reef#2011), kept for the board's host-chain tests
   'foo.instagram.com', 'notinstagram.com', 'instagram.com.evil.tld', 'foo.threads.net',
 ]);
 

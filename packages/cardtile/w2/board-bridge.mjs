@@ -260,7 +260,7 @@ export function tileFace(cell, ctx = {}) {
     if (!url) return [];
     const o = overrideMark(over, has);
     if (o) return face1(o);
-    return url.startsWith('#') || url.startsWith('mailto:') ? [] : face1(defaultMark(hostOf(url), has));
+    return url.startsWith('#') || url.startsWith('mailto:') ? [] : face1(defaultMark(hostOf(url)));
   };
 
   switch (face.kind) {

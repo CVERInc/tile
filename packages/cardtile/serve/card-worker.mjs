@@ -23,7 +23,7 @@ import { shareTags } from '../card-share.mjs';
 const ytFetch = (u) => fetch(u, {
   cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
 });
-import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
+import { ICON_DOMAIN_RE, iconUpstreams } from '../marks.mjs';
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
@@ -583,6 +583,7 @@ export default {
     // The cache key is the DOMAIN, so every card pointing at instagram.com shares one upstream
     // fetch — cost scales with distinct brands, not with cards. And the mark still comes from the
     // brand, so it still cannot go stale: that is the property a bundled icon set would have cost us.
+    // (reef#2026: external marks are never stored on our side, and never swapped for a built-in one.)
     const icm = /^\/_icon\/([^/]+)\.ico$/.exec(url.pathname);
     if (icm) {
       const domain = decodeURIComponent(icm[1]).toLowerCase();
@@ -593,9 +594,15 @@ export default {
       // 404 included, so one bad answer from the service kept a domain's mark out for a WEEK after
       // the service had it again (books.com.tw, 2026-10-12). A mark keeps a week; a miss is asked
       // again within the hour; a 5xx is not kept at all.
-      const up = await fetch(iconUpstream(domain), {
-        cf: { cacheTtlByStatus: { '200-299': 604800, 404: 3600, '500-599': 0 }, cacheEverything: true },
-      }).catch(() => null);
+      // Two stages, in order, both fixed addresses (reef#2026): DuckDuckGo, then Google. A miss or a
+      // network error on one is the same as a 404 — ask the next; only when both miss is it a 404.
+      let up = null;
+      for (const upstream of iconUpstreams(domain)) {
+        const r = await fetch(upstream, {
+          cf: { cacheTtlByStatus: { '200-299': 604800, 404: 3600, '500-599': 0 }, cacheEverything: true },
+        }).catch(() => null);
+        if (r && r.ok) { up = r; break; }
+      }
       // A missing mark is not an error — the card's own fallback chain takes over, and after that it
       // hides the slot. A broken image on someone's card is worse than no icon.
       if (!up || !up.ok) return new Response('', { status: 404 });

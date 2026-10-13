@@ -88,23 +88,11 @@ function iconDomains(host) {
   return [...new Set([ICON_ALIAS[bare] ? base : host, site, `www.${site}`])];
 }
 
-// 🔴 Brands whose mark we DRAW, by site → the `ICONS` name (reef#2011). The favicon service answers
-// 404 for instagram.com and threads.* — measured 2026-10-12 — so for these a fetched mark is a mark
-// that is not there; one we ship cannot 404. Deliberately short: everything not in it keeps the
-// brand's CURRENT favicon, which is the whole reason marks are fetched (see marks.mjs). A brand goes
-// in here when the service has nothing for it, not because we would like to draw it.
-// 🔴 EXACT hosts, not sites: `siteOf()` would hand foo.instagram.com the Instagram mark, and a host
-// we did not list is a host we did not measure — it keeps its own favicon chain.
-const BRAND_ICON = {
-  'instagram.com': 'instagram', 'www.instagram.com': 'instagram',
-  'threads.net': 'threads', 'www.threads.net': 'threads', 'threads.com': 'threads', 'www.threads.com': 'threads',
-};
-
-/** `host`'s drawn brand → its `ICONS` name, or '' — exact hosts only (see above) */
-function brandOf(host) {
-  const h = String(host || '').toLowerCase();
-  return Object.hasOwn(BRAND_ICON, h) ? BRAND_ICON[h] : '';
-}
+// 🔴 NO automatic built-in brand mark (CVERInc/reef#2026, chodaict's ruling). tile#123 drew Instagram
+// and Threads by host because the favicon service had nothing for them; that is gone. Design
+// principle: an external site's mark is NOT stored on our side, it is fetched LIVE every time (via
+// /_icon, which asks DuckDuckGo, then Google — see marks.mjs), so a rebrand follows by itself. Marks
+// default to the brand's own colour. A drawn mark appears only when the AUTHOR names it: `icon=instagram`.
 
 /**
  * One line of a social row → `{ label, url, icon?, iconhost? }`. A line may carry `icon=<name>` or
@@ -129,11 +117,9 @@ function overrideMark({ icon, iconhost } = {}, has = () => false) {
   if (iconhost) return { hosts: [iconhost] };
   return null;
 }
-/** the mark a host gets when the author named none: the drawn brand (if it ships) → its favicon chain */
-function defaultMark(host, has = () => false) {
-  const brand = brandOf(host);
-  if (brand && has(brand)) return { icon: brand };
+/** the mark a host gets when the author named none: always its LIVE favicon chain, never a built-in brand SVG */
+function defaultMark(host) {
   return { hosts: iconDomains(host) };
 }
 
-export { linkOf, hostLabel, hostOf, siteOf, iconDomains, brandOf, socialLineOf, overrideMark, defaultMark };
+export { linkOf, hostLabel, hostOf, siteOf, iconDomains, socialLineOf, overrideMark, defaultMark };

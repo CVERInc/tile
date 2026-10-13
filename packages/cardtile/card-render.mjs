@@ -193,7 +193,7 @@ function linkIcon(p, url, ctx) {
   // external URL, which happens to work. The importer started emitting `asset:` refs this afternoon
   // and the gap became visible the same hour.
   if (p.iconimg) return IMG_ICON(resolveAsset(p.iconimg, ctx), [], 'st-cell-icon-art');
-  return markHtml(overrideMark({ icon: p.icon, iconhost: p.iconhost }, hasIcon(ctx)) || defaultMark(hostOf(url), hasIcon(ctx)), ctx)
+  return markHtml(overrideMark({ icon: p.icon, iconhost: p.iconhost }, hasIcon(ctx)) || defaultMark(hostOf(url)), ctx)
     || (ctx.icons && ctx.icons._default) || '';
 }
 
@@ -532,7 +532,7 @@ function renderCell(cell, place, ctx) {
           ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>'
           : isSelf(url)
             ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V19a1.6 1.6 0 0 0 1.6 1.6h9.6a1.6 1.6 0 0 0 1.6-1.6V9.6"/></svg>'
-            : (() => { const m = defaultMark(hostOf(url), hasIcon(ctx)); return m.icon ? markHtml(m, ctx) : IMG_ICON(iconPath(m.hosts[0]), m.hosts.slice(1)); })());
+            : (() => { const m = defaultMark(hostOf(url)); return m.icon ? markHtml(m, ctx) : IMG_ICON(iconPath(m.hosts[0]), m.hosts.slice(1)); })());
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
@@ -932,13 +932,17 @@ const NATIVE_CSS = [
   `.st-card.st-card-head-left .st-hero-tagline{margin-left:0;margin-right:0}`,
   // ── `icons: mono` — the fetched brand marks go grey ────────────────────────────────────────────
   // 🔴 Scoped to IMG marks only. Our own drawn glyphs (the envelope, the house) are already themed;
-  // greying them would desaturate a colour we chose. This is why the row reads as mixed today — not
+  // greying them would desaturate a colour we chose.
+  // 🔴 reef#2026: …and NOT the author's artwork thumbnail (`.st-cell-icon-art`, from iconimg=) — a LINE
+  // sticker or a wallpaper is a picture, not a brand mark, and greying it was a bug. An `icon=` the
+  // author named is a drawn <svg> (not an <img>), so it keeps its colour here too. Colour is the
+  // default; mono is the author's opt-in (7/30 1346f56). This is why the row reads as mixed today — not
   // because the brands have colour, but because ours are accent-blue while theirs are their own. In
   // mono both halves finally answer to the same rule.
-  `.st-card.st-card-marks-mono .st-cell-icon-img,.st-card.st-card-marks-mono .st-social img{filter:grayscale(1)}`,
+  `.st-card.st-card-marks-mono .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social img{filter:grayscale(1)}`,
   // hover restores the brand, so the colour is one gesture away rather than gone
-  `.st-card.st-card-marks-mono .st-cell-link:hover .st-cell-icon-img,.st-card.st-card-marks-mono .st-social-btn:hover img{filter:none}`,
-  `@media(prefers-reduced-motion:no-preference){.st-card.st-card-marks-mono .st-cell-icon-img,.st-card.st-card-marks-mono .st-social img{transition:filter .25s}}`,
+  `.st-card.st-card-marks-mono .st-cell-link:hover .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social-btn:hover img{filter:none}`,
+  `@media(prefers-reduced-motion:no-preference){.st-card.st-card-marks-mono .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social img{transition:filter .25s}}`,
   // The tagline is the one run that must not stretch to the card's full width when centred: a
   // centred paragraph running the whole 646px of a desktop card reads as a banner, not a bio.
   // 🔴 `word-break:keep-all` is the whole fix, and it is about CJK rather than about any one card. A

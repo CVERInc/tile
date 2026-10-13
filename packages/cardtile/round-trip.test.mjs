@@ -275,8 +275,8 @@ test('🔴 every tile kind renders as the ELEMENT: a picture, the words, the gre
   // a video is its poster, at the SAME path the renderer emits (never i.ytimg.com)
   assert.equal(by('video')[0].img, '/_yt/abcdefghijk.jpg');
   // a social row is a row of marks, and twitter.com's mark lives at x.com (the renderer's alias).
-  // Instagram is DRAWN, as on the card (reef#2015).
-  assert.deepEqual(by('social')[0].icons, [{ icon: 'instagram' }, { host: 'x.com' }]);
+  // Instagram is a LIVE favicon like any other, as on the card (reef#2015, reef#2026).
+  assert.deepEqual(by('social')[0].icons, [{ host: 'instagram.com' }, { host: 'x.com' }]);
   assert.equal(by('embed')[0].sub, '2', 'a slideshow does not say how many pictures it holds');
   // a 牽線 says where it goes instead of a url
   assert.equal(by('link')[2].sub, '→ 開啟：更多');
