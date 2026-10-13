@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import worker, { renderCardHTML } from './card-worker.mjs';
+import { QR_VERSION, DRAWER_VERSION } from './card-assets.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RICH = readFileSync(join(here, '..', 'cards', 'specimens', 'specimen-rich.card.md'), 'utf8');
@@ -82,4 +83,95 @@ test('CARD_NOINDEX_ALL off / unset / "0" / "false": production cards carry no X-
 
 test('the switch does not weaken an existing stricter rule (preview stays "noindex, nofollow")', async () => {
   assert.equal(await robots('https://card.feelreef.com/maple', { PREVIEW: 'true', CARD_NOINDEX_ALL: '1' }), 'noindex, nofollow');
+});
+
+// ── round 2 (tile#126 review) ───────────────────────────────────────────────────────────────────
+// ① inline Markdown links go through the SAME relFor decision as every other authored anchor.
+const BIO = (host) => [
+  '---', 'card-page: maple', 'title: Maple', '---', '', '## grid', '',
+  `- [ ] %% card: profile w=6 %% hello [home](https://${host}/about) and [away](https://example.com/x)`,
+  `- [ ] %% card: text w=6 %% prose [home](https://${host}/p) - and a list:\n\n  - [li](https://${host}/l)`,
+].join('\n') + '\n';
+const relOf = (html, href) => attr(anchors(html).find((a) => attr(a, 'href') === href), 'rel');
+
+test('inline markdown link to the vanity host is own on the vanity cardUrl, ugc on the canonical one (bio, prose, list)', () => {
+  const v = renderCardHTML(BIO(OWN), { handle: 'maple', cardUrl: `https://${OWN}` });
+  for (const p of ['about', 'p', 'l']) assert.equal(relOf(v, `https://${OWN}/${p}`), 'noopener noreferrer', p);
+  assert.match(relOf(v, 'https://example.com/x'), /\bugc\b/, 'other hosts stay ugc on the vanity card');
+  const c = renderCardHTML(BIO(OWN), { handle: 'maple', cardUrl: 'https://card.feelreef.com/maple' });
+  for (const p of ['about', 'p', 'l']) assert.match(relOf(c, `https://${OWN}/${p}`), /\bugc nofollow\b/, p);
+});
+
+test('inline markdown in a lane label (st-grid-label) uses the same host decision', () => {
+  const md = ['---', 'card-page: maple', 'title: Maple', '---', '', '## grid', '',
+    '- [ ] %% card: link w=2 %% [Shop](https://example.com/shop)', '', `## Second [lane](https://${OWN}/lane)`, '',
+    '- [ ] %% card: link w=2 %% [Other](https://example.com/o)'].join('\n') + '\n';
+  const v = renderCardHTML(md, { handle: 'maple', cardUrl: `https://${OWN}` });
+  const c = renderCardHTML(md, { handle: 'maple', cardUrl: 'https://card.feelreef.com/maple' });
+  assert.match(v, /class="st-grid-label">[^<]*<a /, 'fixture: the second lane must render a label with the link');
+  assert.equal(relOf(v, `https://${OWN}/lane`), 'noopener noreferrer');
+  assert.match(relOf(c, `https://${OWN}/lane`), /\bugc\b/);
+});
+
+// ② every exit of the worker carries the header when the switch is on.
+const ALT = { PREVIEW: 'false', CARD_NOINDEX_ALL: '1' };
+const kvWith = (extra = {}) => {
+  const kv = new Map([
+    ['maple', CARD], [`vanity:${OWN}`, 'maple'],
+    ['bound', CARD], ['vanityof:bound', OWN],
+    ...Object.entries(extra),
+  ]);
+  return { ...ALT, CARDS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => { kv.set(k, v); } } };
+};
+const hit = async (url, { headers = {}, method = 'GET', body, env = kvWith(), upstream = 'miss' } = {}) => {
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => (upstream === 'miss' ? new Response('', { status: 404 }) : new Response('x', { status: 200, headers: { 'content-type': 'image/x-icon' } }));
+  try { return await worker.fetch(new Request(url, { redirect: 'manual', method, headers, body }), env); }
+  finally { globalThis.fetch = real; }
+};
+const C = 'https://card.feelreef.com';
+const EXITS = [
+  ['canonical html', `${C}/maple`],
+  ['canonical .md (fat)', `${C}/maple.md`],
+  ['markdown accept (thin)', `${C}/maple`, { headers: { accept: 'text/markdown' } }],
+  ['vanity html', `https://${OWN}/`],
+  ['vanity /index.md', `https://${OWN}/index.md`],
+  ['301 canonical -> vanity', `${C}/bound`, { expect: 301 }],
+  ['301 vanity alias /maple -> /', `https://${OWN}/maple`, { expect: 301 }],
+  ['icon 200', `${C}/maple/favicon.ico`],
+  ['icon 404 (no such card)', `${C}/absent/favicon.ico`, { expect: 404 }],
+  ['root pick-a-card 404', `${C}/`, { expect: 404 }],
+  ['nothing-here 404', `${C}/maple/nope/deeper`, { expect: 404 }],
+  ['no such card 404', `${C}/absent`, { expect: 404 }],
+  ['/_icon 400 bad domain', `${C}/_icon/..%2f.ico`, { expect: 400 }],
+  ['/_icon 404 upstream miss', `${C}/_icon/example.com.ico`, { expect: 404 }],
+  ['/_icon 200', `${C}/_icon/example.com.ico`, { upstream: 'hit' }],
+  ['/_yt 400 bad id', `${C}/_yt/short.jpg`, { expect: 400 }],
+  ['/_yt 404 upstream miss', `${C}/_yt/abcdefghijk.jpg`, { expect: 404 }],
+  ['/_coral/qr', `${C}/_coral/qr-__QR__.js`],
+  ['/_coral/drawer', `${C}/_coral/drawer-__DRAWER__.js`],
+  ['/try/edit', `${C}/try/edit`],
+  ['/try/edit/t asset 404', `${C}/try/edit/t/en/nope.nope`, { expect: 404 }],
+  ['301 /try/edit2 -> /try/edit', `${C}/try/edit2`, { expect: 301 }],
+  ['/edit without host 400', `${C}/edit`, { expect: 400 }],
+  ['/_preview expired', `${C}/_preview/${'0'.repeat(32)}`],
+  ['/_api unauthenticated', `${C}/_api/card/maple`, { method: 'POST', body: '{}' }],
+];
+test('CARD_NOINDEX_ALL on: EVERY exit of the worker carries X-Robots-Tag (enumerated, incl. 301s and icon/asset 404s)', async () => {
+  const missing = [];
+  for (const [name, rawUrl, o = {}] of EXITS) {
+    const url = rawUrl.replace('__QR__', QR_VERSION).replace('__DRAWER__', DRAWER_VERSION);
+    const res = await hit(url, o);
+    if (o.expect) assert.equal(res.status, o.expect, `${name}: expected ${o.expect}, got ${res.status} (fixture drifted)`);
+    if (!/^noindex/.test(res.headers.get('x-robots-tag') || '')) missing.push(`${name} [${res.status}]`);
+  }
+  assert.deepEqual(missing, [], 'exits without X-Robots-Tag: ' + missing.join('; '));
+});
+
+test('CARD_NOINDEX_ALL off: the wrapper adds nothing to any exit', async () => {
+  const env = { ...kvWith(), CARD_NOINDEX_ALL: '0' };
+  for (const [name, url, o = {}] of EXITS.filter((e) => /301|icon 404|root/.test(e[0]))) {
+    const res = await hit(url, { ...o, env });
+    assert.equal(res.headers.get('x-robots-tag'), null, name);
+  }
 });
