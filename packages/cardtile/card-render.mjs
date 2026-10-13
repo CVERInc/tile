@@ -54,13 +54,15 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 //
 // `ctx.onDestination(url)` is optional — absent, every call below is a no-op that returns its input.
 // Only values that RESOLVE (against the card's address) to http(s) count, except the card itself and this Worker's
-// local resource routes (LOCAL_RESOURCE_PREFIXES); `data:`, in-page `#x` are not destinations — a same-host `/other-card` is. Every output point goes through
+// inert asset routes (LOCAL_RESOURCE_PREFIXES); `data:`, in-page `#x` are not destinations — a same-host `/other-card` is. Every output point goes through
 // `attrUrl` / `cssAttrUrl`; serve/card-webrisk.test.mjs scans a card that uses every feature and
 // fails if a URL appears in the output that the registry did not hear about.
-// 🔴 tile#127 round 6: fixed paths this Worker itself serves (card-worker.mjs / card-api.mjs route table). A same-origin URL under
-// one of these is a local resource, not another page. Everything else on the card's own origin — another handle's
-// `/attacker` included — is a destination. serve/card-webrisk.test.mjs asserts this list matches the route table.
-export const LOCAL_RESOURCE_PREFIXES = ['/_coral/', '/_icon/', '/_yt/', '/_api/', '/_preview/', '/try/', '/edit/'];
+// 🔴 tile#127 round 7: ONLY inert asset routes are exempt (image proxies, script assets). The criterion: a route that a
+// browser navigating to it would show as HTML is NOT exempt — a page is a destination, and Web Risk judges the full URL.
+// So `/_preview/<id>` (author-supplied markdown rendered as a public page), `/try/`, `/edit/`, `/_api/` are all registered.
+// Everything else on the card's own origin — another handle's `/attacker` included — is a destination too.
+// serve/card-webrisk.test.mjs (r7#3) drives the real Worker: every prefix here must answer non-HTML.
+export const LOCAL_RESOURCE_PREFIXES = ['/_icon/', '/_yt/', '/_coral/'];
 const isLocalResource = (pathname) => LOCAL_RESOURCE_PREFIXES.some((p) => pathname.startsWith(p) || pathname + '/' === p);
 const stripSlash = (s) => s.replace(/\/+$/, '');
 const registerDestination = (ctx, raw) => {

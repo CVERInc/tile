@@ -405,7 +405,7 @@ test('r6#1b self URL (any spelling) and #fragment are not destinations', () => {
 });
 
 test('r6#1c local resource routes on the same origin are not destinations', () => {
-  for (const p of ['/_icon/x.ico', '/_yt/abcdefghijk.jpg', '/_api/card/x', '/_coral/qr-1.js']) {
+  for (const p of ['/_icon/x.ico', '/_yt/abcdefghijk.jpg', '/_coral/qr-1.js']) {
     assert.deepEqual(cardDestinations(feat(`img="${p}"`), { base: BASE6 }), [], p);
   }
   // …but a lookalike that is not a route prefix is another page
@@ -451,14 +451,76 @@ test('r6#1h renderCardHTML forwards destinationBase to the renderer', () => {
   assert.deepEqual(seen, ['https://card.example/attacker']);
 });
 
-test('r6#1i LOCAL_RESOURCE_PREFIXES is the worker\'s route table: every fixed path the Worker serves is covered, every prefix is really in the Worker', () => {
-  const worker = readFileSync(new URL('./card-worker.mjs', import.meta.url), 'utf8') + readFileSync(new URL('./card-api.mjs', import.meta.url), 'utf8');
-  const covered = (p) => LOCAL_RESOURCE_PREFIXES.some((x) => (p + '/').startsWith(x) || p.startsWith(x));
-  // fixed route literals: '/_name/…' prefixes, and the path constants
-  const routes = new Set([...worker.matchAll(/['"`]\/(_[a-z]+)\//g)].map((m) => '/' + m[1] + '/'));
-  for (const c of ['SANDBOX_PATH', 'HOST_EDIT_PATH', 'LEGACY_EDIT2_PATH']) routes.add(new RegExp(`const ${c} = '([^']+)'`).exec(worker)[1]);
-  for (const m of worker.matchAll(/pathname === '(\/[^']+)'/g)) routes.add(m[1]);
-  assert.ok(routes.size >= 7, [...routes].join(' '));
-  for (const r of routes) assert.ok(covered(r), `route not in LOCAL_RESOURCE_PREFIXES: ${r}`);
-  for (const p of LOCAL_RESOURCE_PREFIXES) assert.ok(worker.includes(p.replace(/\/$/, '')), `prefix not in the Worker: ${p}`);
+// ── round 7 (review v6 #1/#3): only inert ASSET routes are exempt; a page a browser can navigate to is a destination ──
+import worker from './card-worker.mjs';
+import { QR_VERSION } from './card-assets.mjs';
+const PREVIEW_ID = '0123456789abcdef0123456789abcdef';
+const YT_ID = 'dQw4w9WgXcQ';
+
+test('r7#1 LOCAL_RESOURCE_PREFIXES is exactly the three inert asset routes', () => {
+  assert.deepEqual([...LOCAL_RESOURCE_PREFIXES].sort(), ['/_coral/', '/_icon/', '/_yt/']);
+});
+
+test('r7#1b navigable routes are destinations, registered as the FULL url', () => {
+  const b = { base: BASE6 };
+  assert.deepEqual(cardDestinations(feat(`href="/_preview/${PREVIEW_ID}"`), b), [`https://card.example/_preview/${PREVIEW_ID}`]);
+  assert.deepEqual(cardDestinations(feat('href="/try/"'), b), ['https://card.example/try/']);
+  assert.deepEqual(cardDestinations(feat('href="/edit"'), b), ['https://card.example/edit']);
+  assert.deepEqual(cardDestinations(feat('href="/_api/card/x"'), b), ['https://card.example/_api/card/x']);
+});
+
+test('r7#1c asset routes are still not destinations', () => {
+  const b = { base: BASE6 };
+  assert.deepEqual(cardDestinations(feat('src="/_icon/x.ico"'), b), []);
+  assert.deepEqual(cardDestinations(feat(`src="/_yt/${YT_ID}.jpg"`), b), []);
+});
+
+test('r7#1d PUT refuses a listed preview URL (422, queried as the full url)', async () => {
+  const u = `https://card.example/_preview/${PREVIEW_ID}`;
+  const s = stubFetch({ listed: { [u]: 'SOCIAL_ENGINEERING' } });
+  const r = await save(feat(`href="/_preview/${PREVIEW_ID}"`), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, [u]);
+  assert.equal(r.res.status, 422);
+  assert.equal(r.store.puts, 0);
+});
+
+// Semantic route policy: drive the real Worker. Every exempt prefix must answer with something that is NOT html;
+// the navigable routes must answer html AND stay out of the exemption list. A new HTML-serving prefix added to the
+// exemption list turns the first loop red; a new exemption for an existing HTML route turns the second red.
+test('r7#3 exempt prefixes serve non-HTML; navigable routes serve HTML and are not exempt', async () => {
+  const kv = fakeKv();
+  const env = { CARDS: kv, MCP_TOKEN_HASH: TOKEN_HASH };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('x', { status: 200, headers: { 'content-type': 'image/png' } });
+  const ct = async (req) => (await worker.fetch(req, env)).headers.get('content-type') || '';
+  try {
+    const rep = {
+      '/_icon/': 'https://card.example/_icon/example.com.ico',
+      '/_yt/': `https://card.example/_yt/${YT_ID}.jpg`,
+      '/_coral/': `https://card.example/_coral/qr-${QR_VERSION}.js`,
+    };
+    for (const p of LOCAL_RESOURCE_PREFIXES) {
+      assert.ok(rep[p], `exempt prefix with no representative URL (add one, and prove it is not HTML): ${p}`);
+      const c = await ct(new Request(rep[p]));
+      assert.ok(c && !/text\/html/i.test(c), `${p} → content-type ${JSON.stringify(c)}`);
+      console.log(`# r7#3 content-type ${new URL(rep[p]).pathname} -> ${c}`);
+    }
+    // a preview parked through the API, then fetched
+    const pr = await worker.fetch(new Request('https://card.example/_api/preview', { method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ handle: 'alice', markdown: mk('- [ ] %% card: feature w=3 %% hi') }) }), env);
+    const pid = new URL((await pr.json()).url).pathname.split('/').pop();
+    const nav = {
+      '/_preview/': `https://card.example/_preview/${pid}`,
+      '/try/': 'https://card.example/try/edit',
+      '/edit': 'https://card.example/edit?host=https%3A%2F%2Ffeelreef.com',
+    };
+    for (const [prefix, u] of Object.entries(nav)) {
+      const c = await ct(new Request(u));
+      assert.match(c, /text\/html/i, `${u} → ${c}`);
+      console.log(`# r7#3 content-type ${new URL(u).pathname} -> ${c}`);
+      const path = new URL(u).pathname;
+      assert.ok(!LOCAL_RESOURCE_PREFIXES.some((x) => path.startsWith(x) || path + '/' === x), `HTML route is exempt: ${path}`);
+    }
+  } finally { globalThis.fetch = realFetch; }
 });
