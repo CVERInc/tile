@@ -253,7 +253,7 @@ export function tileFace(cell, ctx = {}) {
   const opens = opensText(target, ctx);
   const face = { kind: (cell && cell.type) || 'text', title: '', sub: '', img: '', icons: [] };
   const has = (n) => Object.hasOwn(ICONS, n);
-  const face1 = (m) => (m.icon ? [{ icon: m.icon }] : m.hosts.length ? [{ host: m.hosts[0] }] : []);
+  const face1 = (m) => (m.icon ? [{ icon: m.icon }] : m.hosts.length ? [m.hosts.length > 1 ? { host: m.hosts[0], fallback: m.hosts.slice(1) } : { host: m.hosts[0] }] : []);
   // the author's `icon=` / `iconhost=` first — on the card it wins over every default, the mail
   // envelope included — then the brand / favicon default, which a drawer link and a mail link lack
   const marks = (url, over) => {

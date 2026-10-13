@@ -53,7 +53,7 @@ import {
 } from './board-bridge.mjs';
 // the icon ROUTE, and the guard on what may reach it — the same pair the renderer uses, so a mark
 // on the table and the same mark on the card are one request to one path.
-import { iconPath, ICON_DOMAIN_RE } from '../marks.mjs';
+import { iconPath, ICON_DOMAIN_RE, iconFallbackAttr, iconOnerror } from '../marks.mjs';
 // the card's own drawn marks (Instagram, Threads, the `icon=` names) — the tile draws what the card
 // draws (reef#2015); esbuild keeps only this export of the generated module, not its stylesheet
 import { ICONS } from '../serve/card-assets.mjs';
@@ -542,13 +542,15 @@ const tableDoc = () => { const f = el('table'); return f && f.contentDocument; }
 let facesFor = null;
 
 /** a favicon <img> for a domain, behind which the type icon is already drawn if it never loads */
-function markImg(domain) {
+function markImg(domain, fallback) {
   const d = String(domain || '').toLowerCase();
   if (!ICON_DOMAIN_RE.test(d)) return '';
+  // the same candidate walk the card has (marks.mjs), removed only when every candidate has failed
+  const rest = (fallback || []).map((x) => String(x).toLowerCase()).filter((x) => ICON_DOMAIN_RE.test(x));
   // inline `onerror` rather than wiring after the fact: the image can fail before any listener this
   // file adds is attached, and a tile with a broken image slot is the thing being fixed.
   return `<img class="ct2-face-mark" src="${esc(iconPath(d))}" alt="" loading="lazy"`
-    + ` referrerpolicy="no-referrer" onerror="this.remove()">`;
+    + ` referrerpolicy="no-referrer"${iconFallbackAttr(rest)} onerror='${esc(iconOnerror('remove'))}'>`;
 }
 
 /**
@@ -557,7 +559,7 @@ function markImg(domain) {
  */
 export function faceMarkHtml(m) {
   if (m && m.icon && Object.hasOwn(ICONS, m.icon)) return `<span class="ct2-face-mark ct2-face-mark--drawn" aria-hidden="true">${ICONS[m.icon]}</span>`;
-  return markImg(m && m.host);
+  return markImg(m && m.host, m && m.fallback);
 }
 
 function faceHtml(cell) {

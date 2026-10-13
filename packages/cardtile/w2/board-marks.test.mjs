@@ -42,8 +42,8 @@ test('🔴 the board walks the SAME live-fetch chain as the card: no automatic b
 test('🔴 a look-alike host keeps its own favicon on the board too', () => {
   for (const u of ['https://foo.instagram.com/x', 'https://notinstagram.com/x', 'https://instagram.com.evil.tld/x']) {
     const host = new URL(u).hostname;
-    assert.deepEqual(face(`- [ ] %% card: link %% [A](${u})`).icons, [{ host }], u);
-    assert.deepEqual(face(`- [ ] %% card: social w=6 %% [A](${u})`).icons, [{ host }], u);
+    assert.deepEqual(face(`- [ ] %% card: link %% [A](${u})`).icons.map((m) => m.host), [host], u);
+    assert.deepEqual(face(`- [ ] %% card: social w=6 %% [A](${u})`).icons.map((m) => m.host), [host], u);
   }
   assert.match(faceMarkHtml({ host: 'foo.instagram.com' }), /<img[^>]*src="\/_icon\/foo\.instagram\.com\.ico"/);
 });
@@ -53,11 +53,11 @@ test('🔴 icon= and iconhost= win on the board exactly as they win on the card'
   assert.deepEqual(face('- [ ] %% card: link icon=shop %% [IG](https://www.instagram.com/x)').icons, [{ icon: 'shop' }]);
   assert.deepEqual(face('- [ ] %% card: link iconhost=x.com %% [IG](https://www.instagram.com/x)').icons, [{ host: 'x.com' }]);
   // an icon= the card does not ship falls through to the default, on both
-  assert.deepEqual(face('- [ ] %% card: link icon=nope %% [IG](https://www.instagram.com/x)').icons, [{ host: 'www.instagram.com' }]);
+  assert.deepEqual(face('- [ ] %% card: link icon=nope %% [IG](https://www.instagram.com/x)').icons.map((m) => m.host), ['www.instagram.com']);
   // social row: tokens after a [name](url) line, and after a bare address
   const row = face('- [ ] %% card: social w=6 %% [A](https://www.instagram.com/a) icon=shop\n\t'
     + 'https://example.org/b iconhost=x.com\n\t[C](https://www.threads.net/@c)');
-  assert.deepEqual(row.icons, [{ icon: 'shop' }, { host: 'x.com' }, { host: 'www.threads.net' }]);
+  assert.deepEqual(row.icons.map((m) => m.icon || m.host), ['shop', 'x.com', 'www.threads.net']);
   // the bare address's tokens never leak into the label the tile shows
   assert.equal(row.sub, 'A · example.org · C');
   // mail: no mark by default, but the author's named one is honoured, as the card honours it
@@ -101,4 +101,39 @@ test('🔴 the board imports the shared mark rules and defines no local copy', a
       assert.ok(!def.test(src), `${f} must not define its own ${n}`);
     }
   }
+});
+
+// 🩸 tile#125 review P2: the table kept only hosts[0] and removed the image on its first error, so a
+// bare host that misses while its www twin has a mark showed on the card and not on the table.
+const cardImg = (c) => {
+  const html = renderCardHTML(card(c), { handle: 'x' }).replace(/<style>[\s\S]*?<\/style>/g, '');
+  return /<div class="st-cell-head">(<img[^>]*>)/.exec(html)[1];
+};
+const attr = (img, n) => (new RegExp(`${n}="([^"]*)"`).exec(img) || [])[1];
+
+test('🔴 the table walks the SAME host candidates as the card (first URL + data-iconfallback, verbatim)', () => {
+  for (const c of ['- [ ] %% card: link %% [IG](https://instagram.com/x)', '- [ ] %% card: link %% [IG](https://foo.instagram.com/x)']) {
+    const cardTag = cardImg(c);
+    const [m] = face(c).icons;
+    const tag = faceMarkHtml(m);
+    assert.equal(attr(tag, 'src'), attr(cardTag, 'src'), c);
+    assert.ok(attr(cardTag, 'data-iconfallback'), `control: the card has a chain for ${c}`);
+    assert.equal(attr(tag, 'data-iconfallback'), attr(cardTag, 'data-iconfallback'), c);
+    assert.match(tag, /\/_icon\/www\.instagram\.com\.ico/, c.includes('foo') ? 'site www twin' : 'www twin');
+    // it removes itself only after the chain runs out
+    assert.match(tag, /else\{this\.remove\(\)\}/);
+  }
+});
+
+test('🔴 iconhost= is a single candidate on the table, as on the card', () => {
+  const c = '- [ ] %% card: link iconhost=x.com %% [IG](https://instagram.com/x)';
+  const tag = faceMarkHtml(face(c).icons[0]);
+  assert.equal(attr(tag, 'src'), '/_icon/x.com.ico');
+  assert.equal(attr(tag, 'data-iconfallback'), undefined);
+  assert.equal(attr(cardImg(c), 'data-iconfallback'), undefined);
+});
+
+test('🔴 control: icon=instagram is still the drawn svg, no img, no chain', () => {
+  const tag = faceMarkHtml(face('- [ ] %% card: link icon=instagram %% [IG](https://instagram.com/x)').icons[0]);
+  assert.ok(tag.includes(ICONS.instagram) && !/<img|iconfallback/.test(tag), tag);
 });

@@ -16,7 +16,7 @@ import { resolveBackdropDim, themeCss } from './colour.mjs';
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
 // brand marks come from OUR origin now — see marks.mjs for why, and for the open-proxy guard
-import { iconPath } from './marks.mjs';
+import { iconPath, iconFallbackAttr, iconOnerror } from './marks.mjs';
 import { linkOf, hostLabel, hostOf, iconDomains, socialLineOf, overrideMark, defaultMark } from './link-marks.mjs';
 // The drawer coral's own stylesheet. It arrives with the DOCUMENT, not from the coral's script,
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
@@ -159,11 +159,8 @@ const IMG_ICON = (src, fallbacks = [], extraClass = '') => {
   // once — a two-step chain that silently stops after one step is the same shape of "gate you never
   // saw fail" as everything else here. When they run out, the icon hides: a broken image slot on a
   // creator's card is worse than no icon.
-  const rest = fallbacks.map((d) => iconPath(d));
-  const attr = rest.length ? ` data-iconfallback="${esc(rest.join(' '))}"` : '';
-  const onerr = 'var f=(this.dataset.iconfallback||"").split(" ").filter(Boolean);'
-    + 'if(f.length){this.dataset.iconfallback=f.slice(1).join(" ");this.src=f[0]}'
-    + 'else{this.onerror=null;this.style.display="none"}';
+  const attr = iconFallbackAttr(fallbacks);
+  const onerr = iconOnerror('hide');
   return `<img class="st-cell-icon-img${extraClass ? ' ' + extraClass : ''}" src="${esc(src)}" alt="" width="22" height="22" loading="lazy" referrerpolicy="no-referrer"${attr} onerror='${esc(onerr)}'>`;
 };
 // The host, the favicon chain and the brand table live in link-marks.mjs (reef#2015): the editing

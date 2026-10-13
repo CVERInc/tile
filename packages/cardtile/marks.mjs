@@ -32,6 +32,16 @@ export const ICON_DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?
 export const iconPath = (domain) => `/_icon/${domain}.ico`;
 
 /**
+ * The host-candidate walk, ONE copy for the card and the editing table (tile#125 review P2). `rest` are
+ * the candidates after the first; they ride on the element as `data-iconfallback`, and each onerror
+ * takes the next one. `last` is what happens when they run out ('hide' on the card, 'remove' on the table).
+ */
+export const iconFallbackAttr = (rest) => (rest.length ? ` data-iconfallback="${rest.map((d) => iconPath(d)).join(' ')}"` : '');
+export const iconOnerror = (last) => 'var f=(this.dataset.iconfallback||"").split(" ").filter(Boolean);'
+  + 'if(f.length){this.dataset.iconfallback=f.slice(1).join(" ");this.src=f[0]}'
+  + (last === 'remove' ? 'else{this.remove()}' : 'else{this.onerror=null;this.style.display="none"}');
+
+/**
  * Upstream, two stages (CVERInc/reef#2026): DuckDuckGo first, Google when DuckDuckGo has nothing,
  * then the card's own fallback. 🔴 Both are FIXED addresses with a validated domain (ICON_DOMAIN_RE)
  * in the path/query — the server never connects to an address a creator wrote. Neither endpoint is
