@@ -205,6 +205,43 @@ test('r2#6 no key with 201 destinations → still saved unchecked (fail-open unc
   assert.equal(r.res.status, 200);
 });
 
+// ── tile#127 round 3: the RENDERER registers destinations (no second parser) ────────────────────
+
+test('r3#1 bubbles `bg=https://b\\000061d.example/x.png` — queries the author string AND what CSS decodes it to', async () => {
+  // In a CSS quoted url() `\000061` is the letter `a`: the browser requests https://bad.example/x.png.
+  const s = stubFetch({ listed: { 'https://bad.example/x.png': 'MALWARE' } });
+  const r = await save(mk('- [ ] %% card: embed bleed kind=bubbles images="https://i.example/1.png,https://i.example/2.png" bg=https://b\\000061d.example/x.png %%'), { env: withKey, fetch: s.fn });
+  assert.ok(s.queried.includes('https://b\\000061d.example/x.png'), 'the author-written string is queried');
+  assert.ok(s.queried.includes('https://bad.example/x.png'), 'the CSS-decoded host the browser fetches is queried');
+  assert.equal(r.res.status, 422);
+  assert.equal(r.body.url, 'https://bad.example/x.png');
+  assert.equal(r.store.puts, 0);
+});
+
+test('r3#2 `backdrop: …/a&#x2F;b.png` — <style> is raw text, so the author string is queried, not `a/b.png`', async () => {
+  const s = stubFetch();
+  const md = ['---', 'card-page: t', 'title: T', 'backdrop: https://bad.example/a&#x2F;b.png', '---', '', '## grid', '', '- [ ] hello', ''].join('\n');
+  await save(md, { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, ['https://bad.example/a&#x2F;b.png']);
+});
+
+test('r3#3 plain text `Please type url(https://bad.example/x)` — no destination, saved untouched', async () => {
+  const s = stubFetch({ listed: { 'https://bad.example/x': 'MALWARE' } });
+  const r = await save(mk('- [ ] Please type url(https://bad.example/x) in the browser'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, []);
+  assert.equal(r.res.status, 200);
+  assert.equal(r.store.puts, 1);
+});
+
+test('r3#4 `backdrop: …/a&#x110000;` — no exception, the save takes the normal path', async () => {
+  const s = stubFetch();
+  const md = ['---', 'card-page: t', 'title: T', 'backdrop: https://e.example/a&#x110000;', '---', '', '## grid', '', '- [ ] hello', ''].join('\n');
+  const r = await save(md, { env: withKey, fetch: s.fn });
+  assert.equal(r.res.status, 200);
+  assert.equal(r.store.puts, 1);
+  assert.deepEqual(s.queried, ['https://e.example/a&#x110000;']);
+});
+
 // ── structure: destinations come only from render output ─────────────────────────────────────────
 
 test('url-risk.mjs / card-api.mjs / card-destinations.mjs hold no markdown-link regex', () => {
