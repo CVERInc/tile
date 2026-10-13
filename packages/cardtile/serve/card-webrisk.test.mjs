@@ -275,7 +275,8 @@ test('every external URL in a feature-complete card\'s render was registered by 
   const registered = new Set(cardDestinations(md));
   const NOT_FETCHED = new Set(['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink']);   // XML namespaces
   // Inline <script> text is renderer code (the click-to-load player's constants), never author input.
-  const seen = new Set((html.replace(/<script[\s\S]*?<\/script>/g, '').match(/https?:\/\/[^"' )]+/g) || []).map((u) => u.replace(/&amp;/g, '&').replace(/&quot;.*$/, '')).filter((u) => !NOT_FETCHED.has(u)));
+  // case-insensitive, and a protocol-relative `//host` counts too (registered as https)
+  const seen = new Set((html.replace(/<script[\s\S]*?<\/script>/gi, '').match(/(?:https?:)?\/\/[a-z0-9][^"' )]*/gi) || []).map((u) => (u.startsWith('//') ? 'https:' + u : u)).map((u) => u.replace(/&amp;/g, '&').replace(/&quot;.*$/, '')).filter((u) => !NOT_FETCHED.has(u)));
   assert.ok(seen.size >= 15, `the scan must have something to scan (saw ${seen.size})`);
   const missing = [...seen].filter((u) => !registered.has(u));
   assert.deepEqual(missing, [], 'rendered but never registered by the renderer');
@@ -315,4 +316,53 @@ test('url-risk.mjs / card-api.mjs / card-destinations.mjs hold no markdown-link,
   }
   assert.match(readFileSync(new URL('card-destinations.mjs', import.meta.url), 'utf8'), /renderCardHTML\(/);
   assert.match(readFileSync(new URL('card-destinations.mjs', import.meta.url), 'utf8'), /onDestination/);
+});
+
+// ── tile#127 round 4 (補件4) ─────────────────────────────────────────────────────────────────────
+const withFm = (extra, ...cells) => ['---', 'card-page: t', 'title: T', ...extra, '---', '', '## grid', '', ...cells, ''].join('\n');
+
+test('r4#1 `accent:` is a colour or nothing — `red;background-image:url(https://evil.example/a)` adds no declaration, no destination', () => {
+  const md = withFm(['accent: red;background-image:url(https://evil.example/a)'], '- [ ] hello');
+  const html = renderCardHTML(md, {});
+  assert.ok(!html.includes('evil.example'), 'the evil host is not in the page at all');
+  assert.match(html, /--cp-accent:#0a8c8e[;}]/, 'falls back to the default accent');
+  assert.deepEqual(cardDestinations(md), []);
+});
+
+test('r4#1b `accent:` keeps every legal colour spelling', () => {
+  for (const c of ['#abc', '#abcd', '#aabbcc', '#aabbccdd', 'rgb(1, 2, 3)', 'rgba(1 2 3 / 50%)', 'hsl(120, 50%, 50%)', 'hsla(120,50%,50%,.5)', 'rebeccapurple', 'Red']) {
+    const html = renderCardHTML(withFm([`accent: ${c}`], '- [ ] hello'), {});
+    assert.ok(html.includes(`--cp-accent:${c};`), `${c} survives`);
+  }
+});
+
+test('r4#1c other author CSS fields: bubbles `origin=` / `origin-narrow=` cannot add declarations either', () => {
+  const md = withFm([], '- [ ] %% card: embed kind=bubbles images=https://i.example/1.png origin="1% 1%;background-image:url(https://evil.example/o)" origin-narrow="0 0}body{background:url(https://evil.example/n)" %%');
+  const html = renderCardHTML(md, {});
+  assert.ok(!html.includes('evil.example'), 'origin fields are positions or nothing');
+  assert.match(html, /transform-origin:53% 76%/);
+});
+
+test('r4#2a `img="https://e.example/a b"` — Web Risk is asked about …/a%20b, what the browser requests', async () => {
+  const s = stubFetch();
+  await save(mk('- [ ] %% card: feature w=3 img="https://e.example/a b" %%'), { env: withKey, fetch: s.fn });
+  assert.ok(s.queried.includes('https://e.example/a%20b'), JSON.stringify(s.queried));
+  assert.ok(!s.queried.includes('https://e.example/a b'));
+});
+
+test('r4#2b `https://e.example/a\\b` — a backslash is a slash to an http URL parser', () => {
+  const d = cardDestinations(mk('- [ ] %% card: feature w=3 img="https://e.example/a\\b" %%'));
+  assert.ok(d.includes('https://e.example/a/b'), JSON.stringify(d));
+  assert.ok(!d.some((u) => u.includes('\\')));
+});
+
+test('r4#2c U+0000 in `bg=` — the queried value carries U+FFFD (what CSS parses), never NUL', () => {
+  const d = cardDestinations(mk('- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg="https://e.example/a\u0000b" %%'));
+  assert.ok(d.some((u) => u.includes('%EF%BF%BD')), JSON.stringify(d));
+  assert.ok(!d.some((u) => u.includes('\u0000') || u.includes('%00')));
+});
+
+test('r4#2d normalised duplicates collapse to one query', () => {
+  const d = cardDestinations(mk('- [ ] %% card: feature w=3 img=https://e.example/x href=https://e.example/x %%'));
+  assert.equal(d.filter((u) => u === 'https://e.example/x').length, 1);
 });
