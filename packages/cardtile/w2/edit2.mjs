@@ -545,12 +545,12 @@ let facesFor = null;
 function markImg(domain, fallback) {
   const d = String(domain || '').toLowerCase();
   if (!ICON_DOMAIN_RE.test(d)) return '';
-  // the same candidate walk the card has (marks.mjs), removed only when every candidate has failed
+  // the same candidate walk the card has (marks.mjs), container hidden only when every candidate has failed
   const rest = (fallback || []).map((x) => String(x).toLowerCase()).filter((x) => ICON_DOMAIN_RE.test(x));
   // inline `onerror` rather than wiring after the fact: the image can fail before any listener this
   // file adds is attached, and a tile with a broken image slot is the thing being fixed.
   return `<img class="ct2-face-mark" src="${esc(iconPath(d))}" alt="" loading="lazy"`
-    + ` referrerpolicy="no-referrer"${iconFallbackAttr(rest)} onerror='${esc(iconOnerror('remove'))}'>`;
+    + ` referrerpolicy="no-referrer"${iconFallbackAttr(rest)} onerror='${esc(iconOnerror('hide-wrapper'))}'>`;
 }
 
 /**
@@ -562,7 +562,7 @@ export function faceMarkHtml(m) {
   return markImg(m && m.host, m && m.fallback);
 }
 
-function faceHtml(cell) {
+export function faceHtml(cell) {
   const f = tileFace(cell, bridgeCtx());
   const kindName = TYPES[f.kind] ? say(TYPES[f.kind].title) : f.kind;
   const icon = `<span class="ct2-face-ico" aria-hidden="true">${typeIconSvg(f.kind)}</span>`;

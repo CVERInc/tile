@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseCard } from '../card-core.js';
 import { boardSlots, tileFace } from './board-bridge.mjs';
-import { faceMarkHtml } from './edit2.mjs';
+import { faceMarkHtml, faceHtml } from './edit2.mjs';
 import { ICONS } from '../serve/card-assets.mjs';
 import { renderCardHTML } from '../serve/card-worker.mjs';
 
@@ -120,8 +120,8 @@ test('🔴 the table walks the SAME host candidates as the card (first URL + dat
     assert.ok(attr(cardTag, 'data-iconfallback'), `control: the card has a chain for ${c}`);
     assert.equal(attr(tag, 'data-iconfallback'), attr(cardTag, 'data-iconfallback'), c);
     assert.match(tag, /\/_icon\/www\.instagram\.com\.ico/, c.includes('foo') ? 'site www twin' : 'www twin');
-    // it removes itself only after the chain runs out
-    assert.match(tag, /else\{this\.remove\(\)\}/);
+    // when the chain runs out it hides the whole mark container, not just the img (see the test below)
+    assert.match(tag, /else\{this\.onerror=null;\(this\.closest\("\.ct2-face-art--mark"\)\|\|this\)\.style\.display="none"\}/);
   }
 });
 
@@ -136,4 +136,23 @@ test('🔴 iconhost= is a single candidate on the table, as on the card', () => 
 test('🔴 control: icon=instagram is still the drawn svg, no img, no chain', () => {
   const tag = faceMarkHtml(face('- [ ] %% card: link icon=instagram %% [IG](https://instagram.com/x)').icons[0]);
   assert.ok(tag.includes(ICONS.instagram) && !/<img|iconfallback/.test(tag), tag);
+});
+
+// 🩸 tile#125 review round 2 P2: the exhausted chain removed only the <img>, leaving the 44px tile with its
+// background and type icon, while the card hides the mark and the title takes the freed space.
+test('🔴 an exhausted chain hides the mark CONTAINER on the table (the card shows no mark, so neither does it)', () => {
+  const c = '- [ ] %% card: link %% [IG](https://instagram.com/x)';
+  const html = faceHtml(boardSlots(parseCard(card(c)), ctx)[0].cell);
+  assert.match(html, /<span class="ct2-face-art ct2-face-art--mark">/);
+  const onerr = /onerror='([^']*)'/.exec(html)[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  const wrapper = { style: {} };
+  const img = { dataset: { iconfallback: '' }, style: {}, closest: (sel) => (sel === '.ct2-face-art--mark' ? wrapper : null) };
+  new Function(onerr).call(img);
+  assert.equal(wrapper.style.display, 'none', 'the container is hidden');
+  // a mark with no container (the multi-mark strip) still just hides itself
+  const bare = { dataset: {}, style: {}, closest: () => null };
+  new Function(onerr).call(bare);
+  assert.equal(bare.style.display, 'none');
+  // the card's end state is unchanged
+  assert.match(cardImg(c), /this\.style\.display=&quot;none&quot;|this\.style\.display="none"/);
 });

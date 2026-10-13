@@ -34,12 +34,15 @@ export const iconPath = (domain) => `/_icon/${domain}.ico`;
 /**
  * The host-candidate walk, ONE copy for the card and the editing table (tile#125 review P2). `rest` are
  * the candidates after the first; they ride on the element as `data-iconfallback`, and each onerror
- * takes the next one. `last` is what happens when they run out ('hide' on the card, 'remove' on the table).
+ * takes the next one. `last` is what happens when they run out: 'hide' on the card (the img), 'hide-wrapper' on the table
+ * (the whole `.ct2-face-art--mark` container, so the title takes the freed space as it does on the card).
  */
 export const iconFallbackAttr = (rest) => (rest.length ? ` data-iconfallback="${rest.map((d) => iconPath(d)).join(' ')}"` : '');
 export const iconOnerror = (last) => 'var f=(this.dataset.iconfallback||"").split(" ").filter(Boolean);'
   + 'if(f.length){this.dataset.iconfallback=f.slice(1).join(" ");this.src=f[0]}'
-  + (last === 'remove' ? 'else{this.remove()}' : 'else{this.onerror=null;this.style.display="none"}');
+  + (last === 'hide-wrapper'
+    ? 'else{this.onerror=null;(this.closest(".ct2-face-art--mark")||this).style.display="none"}'
+    : 'else{this.onerror=null;this.style.display="none"}');
 
 /**
  * Upstream, two stages (CVERInc/reef#2026): DuckDuckGo first, Google when DuckDuckGo has nothing,
