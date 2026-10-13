@@ -332,7 +332,7 @@ export async function handleApi(request, env, url) {
       // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
       // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
       // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
-      const dests = cardDestinations(md);
+      const dests = cardDestinations(md, { base: `${url.origin}/${handle}/` });
       const many = tooManyLinks(dests, env);
       if (many) return json(many, 422);
       const unsafe = await checkUrls(dests, env);

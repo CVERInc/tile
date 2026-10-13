@@ -18,9 +18,11 @@ const effective = (raw) => {
   try { return String(new URL(s)); } catch { return s; }
 };
 
-/** card markdown → the unique outbound http(s) destinations the served page contains, in render order. */
-export function cardDestinations(cardMd) {
+const PLACEHOLDER_BASE = 'https://card.invalid/card/';
+
+/** card markdown (+ the card's real address as `base`, `<origin>/<handle>/`) → the unique outbound http(s) destinations the served page contains, in render order. */
+export function cardDestinations(cardMd, { base = PLACEHOLDER_BASE } = {}) {
   const out = new Set();
-  renderCardHTML(cardMd, { destinationBase: 'https://card.invalid/card/', onDestination: (u) => out.add(effective(u)) });
+  renderCardHTML(cardMd, { destinationBase: base, onDestination: (u) => out.add(effective(u)) });
   return [...out];
 }

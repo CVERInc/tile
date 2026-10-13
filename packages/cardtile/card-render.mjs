@@ -53,24 +53,36 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // browser ends up with (an attribute is entity-decoded back to it; <style> text is raw).
 //
 // `ctx.onDestination(url)` is optional — absent, every call below is a no-op that returns its input.
-// Only values that RESOLVE (against the card's address) to an http(s) host other than the card's count; `data:`,
-// in-page `#x` and same-origin paths are not destinations. Every output point goes through
+// Only values that RESOLVE (against the card's address) to http(s) count, except the card itself and this Worker's
+// local resource routes (LOCAL_RESOURCE_PREFIXES); `data:`, in-page `#x` are not destinations — a same-host `/other-card` is. Every output point goes through
 // `attrUrl` / `cssAttrUrl`; serve/card-webrisk.test.mjs scans a card that uses every feature and
 // fails if a URL appears in the output that the registry did not hear about.
+// 🔴 tile#127 round 6: fixed paths this Worker itself serves (card-worker.mjs / card-api.mjs route table). A same-origin URL under
+// one of these is a local resource, not another page. Everything else on the card's own origin — another handle's
+// `/attacker` included — is a destination. serve/card-webrisk.test.mjs asserts this list matches the route table.
+export const LOCAL_RESOURCE_PREFIXES = ['/_coral/', '/_icon/', '/_yt/', '/_api/', '/_preview/', '/try/', '/edit/'];
+const isLocalResource = (pathname) => LOCAL_RESOURCE_PREFIXES.some((p) => pathname.startsWith(p) || pathname + '/' === p);
+const stripSlash = (s) => s.replace(/\/+$/, '');
 const registerDestination = (ctx, raw) => {
   if (!ctx || typeof ctx.onDestination !== 'function') return;
   // 🔴 tile#127 round 5: resolve FIRST, judge after. A literal `http(s)://` filter misses every spelling the
   // browser still resolves to an external https host (`https:/\\evil.example`, `HTTPS:/\\…`, `//host`).
   // So every value is run through the WHATWG parser against the card's own address (ctx.destinationBase, else
-  // a fixed placeholder — only there so relative and odd spellings resolve); http(s) with a host other than
-  // the card's is a destination, and what is registered is the RESOLVED href. A parse failure registers
+  // a fixed placeholder — only there so relative and odd spellings resolve); http(s) with a URL that is not the
+  // card itself or a local route is a destination, and what is registered is the RESOLVED href. A parse failure registers
   // nothing (the browser would not fetch it either); data: / blob: / javascript: / mailto: are not http(s).
   const base = ctx.destinationBase || `https://card.invalid/${encodeURIComponent(ctx.handle || 'card')}/`;
   let u;
   try {
     const baseUrl = new URL(base);
     u = new URL(String(raw == null ? '' : raw).replace(/\u0000/g, '\ufffd'), baseUrl);
-    if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.host === baseUrl.host) return;
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+    // 🔴 round 6 (review v5 #1): NOT "same host ⇒ skip" — `/attacker` on a shared host is another person's card. Exempt only
+    // (a) the card's own address (fragment and trailing slash ignored) and (b) this Worker's own resource routes.
+    if (u.origin === baseUrl.origin) {
+      const self = (x) => `${x.origin}${stripSlash(x.pathname)}${x.search}`;
+      if (self(u) === self(baseUrl) || isLocalResource(u.pathname)) return;
+    }
   } catch { return; }
   ctx.onDestination(u.href);
 };

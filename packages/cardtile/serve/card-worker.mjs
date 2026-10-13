@@ -210,6 +210,7 @@ export function renderCardHTML(cardMd, ctx = {}) {
     editIndex: !!ctx.editIndex,
     // 🔴 CALLER-supplied: the destination registry (see card-render.mjs `attrUrl`). Absent in serving.
     onDestination: typeof ctx.onDestination === 'function' ? ctx.onDestination : undefined,
+    destinationBase: ctx.destinationBase || undefined,   // round 6: the real card address the registry resolves against
     // …and its companion: the words on the two EDIT-ONLY placeholders (a link with no address, a
     // picture cell with no picture). Only meaningful with editIndex; the Worker never sets either.
     editStrings: ctx.editStrings || null,

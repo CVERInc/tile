@@ -377,8 +377,7 @@ test('r5#1b `HTTPS:/\\evil.example/x` — same', async () => {
   assert.equal(r.res.status, 422);
 });
 
-test('r5#1c `href="/local/page"` and `href="javascript:alert(1)"` are not destinations', () => {
-  assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 href="/local/page" %%')), []);
+test('r5#1c `href="javascript:alert(1)"` and `data:` are not destinations (round 6: a same-host `/local/page` IS one — see r6#1)', () => {
   assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 href="javascript:alert(1)" %%')), []);
   assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 img="data:image/png;base64,AAAA" %%')), []);
 });
@@ -387,4 +386,79 @@ test('r5#2d two spellings of one URL collapse to one query', async () => {
   const s = stubFetch();
   await save(mk('- [ ] %% card: feature w=3 img="https://e.example/a b" href="https://e.example/a%20b" %%'), { env: withKey, fetch: s.fn });
   assert.deepEqual(s.queried, ['https://e.example/a%20b']);
+});
+
+// ── round 6 (review v5 #1): resolve against the REAL card URL; exempt only the card itself and local resource routes ──
+import { LOCAL_RESOURCE_PREFIXES } from '../card-render.mjs';
+const BASE6 = 'https://card.example/alice/';
+const feat = (attrs) => mk(`- [ ] %% card: feature w=3 ${attrs} %%`);
+
+test('r6#1 `href="/attacker"` on a shared host is another card — registered as the FULL url', () => {
+  assert.deepEqual(cardDestinations(feat('href="/attacker"'), { base: BASE6 }), ['https://card.example/attacker']);
+  assert.deepEqual(cardDestinations(feat('img="/attacker"'), { base: BASE6 }), ['https://card.example/attacker']);
+});
+
+test('r6#1b self URL (any spelling) and #fragment are not destinations', () => {
+  for (const h of ['/alice', '/alice/', '/alice#x', '/alice/#x', 'https://card.example/alice', '#drawer']) {
+    assert.deepEqual(cardDestinations(feat(`href="${h}"`), { base: BASE6 }), [], h);
+  }
+});
+
+test('r6#1c local resource routes on the same origin are not destinations', () => {
+  for (const p of ['/_icon/x.ico', '/_yt/abcdefghijk.jpg', '/_api/card/x', '/_coral/qr-1.js']) {
+    assert.deepEqual(cardDestinations(feat(`img="${p}"`), { base: BASE6 }), [], p);
+  }
+  // …but a lookalike that is not a route prefix is another page
+  assert.deepEqual(cardDestinations(feat('href="/_iconx/a"'), { base: BASE6 }), ['https://card.example/_iconx/a']);
+});
+
+test('r6#1d no request (no base) → placeholder base, same rules', () => {
+  assert.deepEqual(cardDestinations(feat('href="/attacker"')), ['https://card.invalid/attacker']);
+  assert.deepEqual(cardDestinations(feat('href="/card"')), []);
+  assert.deepEqual(cardDestinations(feat('img="/_icon/x.ico"')), []);
+});
+
+test('r6#1e PUT uses the request origin as base — `/attacker` is queried and refused (422)', async () => {
+  const s = stubFetch({ listed: { 'https://card.example/attacker': 'SOCIAL_ENGINEERING' } });
+  const r = await save(feat('href="/attacker"'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, ['https://card.example/attacker']);
+  assert.equal(r.res.status, 422);
+  assert.equal(r.store.puts, 0);
+});
+
+test('r6#1f PUT with dry_run takes the same path', async () => {
+  const s = stubFetch({ listed: { 'https://card.example/attacker': 'SOCIAL_ENGINEERING' } });
+  const store = fakeKv();
+  const url = new URL('https://card.example/_api/card/t');
+  const realFetch = globalThis.fetch; globalThis.fetch = s.fn;
+  try {
+    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true }) });
+    const res = await handleApi(req, { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey }, url);
+    assert.equal(res.status, 422);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('r6#1g PUT: the card\'s own URL and a local route are not queried', async () => {
+  const s = stubFetch();
+  const r = await save(mk('- [ ] %% card: feature w=3 href="/t" img="/_icon/x.ico" %%'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, []);
+  assert.equal(r.res.status, 200);
+});
+
+test('r6#1h renderCardHTML forwards destinationBase to the renderer', () => {
+  const seen = [];
+  renderCardHTML(feat('href="/attacker"'), { destinationBase: BASE6, onDestination: (u) => seen.push(u) });
+  assert.deepEqual(seen, ['https://card.example/attacker']);
+});
+
+test('r6#1i LOCAL_RESOURCE_PREFIXES is the worker\'s route table: every fixed path the Worker serves is covered, every prefix is really in the Worker', () => {
+  const worker = readFileSync(new URL('./card-worker.mjs', import.meta.url), 'utf8') + readFileSync(new URL('./card-api.mjs', import.meta.url), 'utf8');
+  const covered = (p) => LOCAL_RESOURCE_PREFIXES.some((x) => (p + '/').startsWith(x) || p.startsWith(x));
+  // fixed route literals: '/_name/…' prefixes, and the path constants
+  const routes = new Set([...worker.matchAll(/['"`]\/(_[a-z]+)\//g)].map((m) => '/' + m[1] + '/'));
+  for (const c of ['SANDBOX_PATH', 'HOST_EDIT_PATH', 'LEGACY_EDIT2_PATH']) routes.add(new RegExp(`const ${c} = '([^']+)'`).exec(worker)[1]);
+  for (const m of worker.matchAll(/pathname === '(\/[^']+)'/g)) routes.add(m[1]);
+  assert.ok(routes.size >= 7, [...routes].join(' '));
+  for (const r of routes) assert.ok(covered(r), `route not in LOCAL_RESOURCE_PREFIXES: ${r}`);
+  for (const p of LOCAL_RESOURCE_PREFIXES) assert.ok(worker.includes(p.replace(/\/$/, '')), `prefix not in the Worker: ${p}`);
 });
