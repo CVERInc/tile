@@ -7,9 +7,14 @@
 // 🔴 The key never appears in a log line or a response: it travels only in the request URL to
 // Google, and every log below names the condition, not the request.
 //
+// 🔴 THE LIMIT IS ENFORCED, NOT WAIVED. Every destination is checked (in batches of BATCH). More than
+// MAX_URLS distinct destinations is refused by the caller (`tooManyLinks`) — "over the limit, check
+// nothing" would hand a card author a deterministic bypass. An outage still fails open.
+//
 // URLs come from card-destinations.mjs (the renderer's output). Nothing here reads markdown.
 export const THREAT_TYPES = ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE'];
-export const MAX_URLS = 50;
+export const MAX_URLS = 200;
+export const BATCH = 10;
 export const TIMEOUT_MS = 3000;
 export const ENDPOINT = 'https://webrisk.googleapis.com/v1/uris:search';
 
@@ -25,7 +30,6 @@ export async function checkUrls(urls, env, deps = {}) {
   const unique = [...new Set(urls)];
   if (!unique.length) return null;
   if (!key) { log('url-risk: WEB_RISK_API_KEY not set; save allowed unchecked'); return null; }
-  if (unique.length > MAX_URLS) { log(`url-risk: ${unique.length} URLs exceeds ${MAX_URLS}; save allowed unchecked`); return null; }
 
   const one = async (uri) => {
     const q = new URLSearchParams();
@@ -46,10 +50,23 @@ export async function checkUrls(urls, env, deps = {}) {
     } finally { clearTimeout(timer); }
   };
 
-  const results = await Promise.all(unique.map(one));
+  const results = [];
+  for (let i = 0; i < unique.length; i += BATCH) {
+    results.push(...await Promise.all(unique.slice(i, i + BATCH).map(one)));
+    if (results.some((r) => r && r.url)) break;      // a listed URL decides; no need to query the rest
+  }
   const hit = results.find((r) => r && r.url);
   if (hit) return hit;
   const failed = results.filter((r) => r && r.failed);
-  if (failed.length) log(`url-risk: ${failed.length}/${unique.length} lookups failed (${failed[0].failed}); save allowed for those`);
+  if (failed.length) log(`url-risk: ${failed.length}/${results.length} lookups failed (${failed[0].failed}); save allowed for those`);
   return null;
+}
+
+/** → null, or the 422 body when a card has more distinct destinations than can be checked. Only applies when checking is on. */
+export function tooManyLinks(urls, env) {
+  if (!(env && env.WEB_RISK_API_KEY)) return null;
+  const n = new Set(urls).size;
+  if (n <= MAX_URLS) return null;
+  return { error: 'card_too_many_links', limit: MAX_URLS, count: n,
+    message: `A card can have at most ${MAX_URLS} outbound links and images; this one has ${n}. Remove some and save again.` };
 }

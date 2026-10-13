@@ -9,6 +9,9 @@
 import { renderCardHTML } from './card-worker.mjs';
 
 const ATTR_RE = /\s(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+// CSS `url(…)` anywhere in the render — `style="…"` attributes and `<style>` blocks. The quote around
+// the target may be a raw ' or ", an HTML-escaped one inside an attribute (&#39; / &quot;), or absent.
+const CSS_URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|&quot;(.*?)&quot;|&#39;(.*?)&#39;|([^)\s'"]*))\s*\)/gi;
 
 /** one pass of HTML entity unescaping — the renderer escapes attribute values exactly once. */
 function unescapeOnce(s) {
@@ -24,12 +27,14 @@ function unescapeOnce(s) {
 /** HTML string → unique outbound http(s) URLs, in document order. data:, relative and in-page are skipped. */
 export function outboundFromHtml(html) {
   const out = new Set();
-  for (const m of html.matchAll(ATTR_RE)) {
-    let u = unescapeOnce(m[1] ?? m[2] ?? '').trim();
+  const add = (raw) => {
+    let u = unescapeOnce(raw ?? '').trim();
     if (u.startsWith('//')) u = 'https:' + u;          // what a browser on the https card resolves
-    if (!/^https?:\/\//i.test(u)) continue;
+    if (!/^https?:\/\//i.test(u)) return;
     out.add(u);
-  }
+  };
+  for (const m of html.matchAll(ATTR_RE)) add(m[1] ?? m[2]);
+  for (const m of html.matchAll(CSS_URL_RE)) add(m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]);
   return [...out];
 }
 

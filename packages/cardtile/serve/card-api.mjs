@@ -23,7 +23,7 @@
 // held only by the hosted Worker.
 import { parseCard, serializeCard } from '../card-core.js';
 import { cardDestinations } from './card-destinations.mjs';
-import { checkUrls } from './url-risk.mjs';
+import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 
 const API_PREFIX = '/_api/';
@@ -332,7 +332,10 @@ export async function handleApi(request, env, url) {
       // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
       // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
       // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
-      const unsafe = await checkUrls(cardDestinations(md), env);
+      const dests = cardDestinations(md);
+      const many = tooManyLinks(dests, env);
+      if (many) return json(many, 422);
+      const unsafe = await checkUrls(dests, env);
       if (unsafe) return json({ error: 'card_url_unsafe', url: unsafe.url, threat: unsafe.threat }, 422);
 
       if (body.dry_run) {
