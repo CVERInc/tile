@@ -10,6 +10,7 @@ import worker, { renderCardHTML } from './card-worker.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const RICH = readFileSync(join(here, '..', 'cards', 'specimens', 'specimen-rich.card.md'), 'utf8');
 const OWN = 'links.creator-example.test';       // made-up vanity host
+const WWW = 'https://' + ['www', OWN].join('.') + '/';   // the www form of the same host
 
 const anchors = (html) => [...html.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]);
 const attr = (tag, n) => (new RegExp(`\\b${n}="([^"]*)"`).exec(tag) || [])[1];
@@ -23,7 +24,7 @@ const CARD = [
   '- [ ] %% card: profile w=6 %% a bookbinder, see [notes](https://example.com/notes)',
   '- [ ] %% card: link w=2 %% [Shop](https://example.com/shop)',
   `- [ ] %% card: link w=2 %% [My site](https://${OWN}/about)`,
-  `- [ ] %% card: social w=6 %% [Home](https://www.${OWN}/) [Instagram](https://instagram.com/maple)`,
+  `- [ ] %% card: social w=6 %% [Home](${WWW}) [Instagram](https://instagram.com/maple)`,
 ].join('\n') + '\n';
 
 test('every external <a> on a rendered card says ugc nofollow (canonical host: no exception)', () => {
