@@ -362,7 +362,29 @@ test('r4#2c U+0000 in `bg=` — the queried value carries U+FFFD (what CSS parse
   assert.ok(!d.some((u) => u.includes('\u0000') || u.includes('%00')));
 });
 
-test('r4#2d normalised duplicates collapse to one query', () => {
-  const d = cardDestinations(mk('- [ ] %% card: feature w=3 img=https://e.example/x href=https://e.example/x %%'));
-  assert.equal(d.filter((u) => u === 'https://e.example/x').length, 1);
+test('r5#1 `img=` / `href=` written `https:/\\evil.example/x` — resolved like the browser, queried and refused (422)', async () => {
+  const s = stubFetch({ listed: { 'https://evil.example/x': 'MALWARE' } });
+  const r = await save(mk('- [ ] %% card: feature w=3 img="https:/\\evil.example/x" href="https:/\\evil.example/x" %%'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, ['https://evil.example/x']);
+  assert.equal(r.res.status, 422);
+  assert.equal(r.store.puts, 0);
+});
+
+test('r5#1b `HTTPS:/\\evil.example/x` — same', async () => {
+  const s = stubFetch({ listed: { 'https://evil.example/x': 'MALWARE' } });
+  const r = await save(mk('- [ ] %% card: feature w=3 img="HTTPS:/\\evil.example/x" href="HTTPS:/\\evil.example/x" %%'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, ['https://evil.example/x']);
+  assert.equal(r.res.status, 422);
+});
+
+test('r5#1c `href="/local/page"` and `href="javascript:alert(1)"` are not destinations', () => {
+  assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 href="/local/page" %%')), []);
+  assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 href="javascript:alert(1)" %%')), []);
+  assert.deepEqual(cardDestinations(mk('- [ ] %% card: feature w=3 img="data:image/png;base64,AAAA" %%')), []);
+});
+
+test('r5#2d two spellings of one URL collapse to one query', async () => {
+  const s = stubFetch();
+  await save(mk('- [ ] %% card: feature w=3 img="https://e.example/a b" href="https://e.example/a%20b" %%'), { env: withKey, fetch: s.fn });
+  assert.deepEqual(s.queried, ['https://e.example/a%20b']);
 });
