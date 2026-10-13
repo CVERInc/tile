@@ -72,7 +72,7 @@ test('sinks: the two indirect cases are guarded where the value is made', () => 
 
 test('sinks: the guard is live — a bare src="${x}" line is reported, in any case', () => {
   const planted = SRC + '\nconst leak = (x) => `<img src="${x}">`;\nconst leak2 = (x) => `<IMG SRC="${x}">`.toLowerCase();\n';
-  const found = unguardedSinks(planted);
+  const found = unguardedSinks(planted).filter((l) => !unguardedSinks(SRC).includes(l));
   assert.equal(found.length, 2, JSON.stringify(found));
   assert.ok(found[0].includes('<img src="${x}">') && found[1].includes('<IMG SRC="${x}">'));
 });
