@@ -11,7 +11,7 @@
 // A block heading is a LANE (`## English`), not a cell — see card-core's parseCard.
 // packGrid gives each cell its w×h → data-span="{w}x{h}". 防醜 (no overlap) is card-core's.
 import { packGrid } from './card-core.js';
-import { resolveBackdropDim, themeCss } from './colour.mjs';
+import { resolveBackdropDim, themeCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
@@ -85,6 +85,27 @@ const cssAttrUrl = (ctx, raw) => {
   const written = cssUrl(raw);
   if (written !== String(raw)) registerDestination(ctx, written);
   return written;
+};
+// 🔴 tile#127 round 4: an author field that lands inside a <style> block is a CSS-injection surface
+// (`accent: red;background-image:url(https://evil.example/a)` added a declaration, and a fetch Web
+// Risk never heard of). The rule is not "escape better" but "accept a SHAPE": a colour field takes a
+// colour and nothing else; anything else yields the default, never an error (the owner sees the
+// default colour). Every author field written into CSS goes through cssColor / cssPos / cssAttrUrl.
+const NAMED_COLOURS = ('transparent aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' ');
+const CSS_NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:%|deg|turn|rad|grad)?';
+const COLOUR_FN_RE = new RegExp(`^(?:rgb|rgba|hsl|hsla)\\(\\s*${CSS_NUM}(?:\\s*[,/]\\s*${CSS_NUM}|\\s+${CSS_NUM})*\\s*\\)$`, 'i');
+const HEX_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+/** an author-written colour, or the default accent when it is anything else */
+const cssColor = (raw) => {
+  const v = String(raw == null ? '' : raw).trim();
+  if (HEX_RE.test(v) || COLOUR_FN_RE.test(v) || NAMED_COLOURS.includes(v.toLowerCase())) return v;
+  return DEFAULT_ACCENT;
+};
+const POS_TOKEN_RE = /^(?:[+-]?(?:\d+\.?\d*|\.\d+)(?:%|px)?|left|right|top|bottom|center)$/i;
+/** an author-written `transform-origin` (one or two position tokens), or `fallback` */
+const cssPos = (raw, fallback) => {
+  const t = String(raw == null ? '' : raw).trim().split(/\s+/);
+  return t.length >= 1 && t.length <= 2 && t.every((x) => POS_TOKEN_RE.test(x)) ? t.join(' ') : fallback;
 };
 // the exact inverse of `esc` (one pass), for a value that had to be escaped before it was matched
 const unesc = (s) => String(s).replace(/&(amp|lt|gt|quot);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"' })[e]);
@@ -425,8 +446,8 @@ function renderEmbed(p, body, size, ctx = {}) {
     const n = imgs.length;
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
     const cycle = n * hold;
-    const origin = p.origin || '53% 76%';
-    const originNarrow = p.narrow || p['origin-narrow'] || '53% 33%';
+    const origin = cssPos(p.origin, '53% 76%');
+    const originNarrow = cssPos(p.narrow || p['origin-narrow'], '53% 33%');
     // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
     // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
     const slot = 100 / n;
@@ -1401,9 +1422,11 @@ export function renderPage(model, ctx = {}) {
   // and looked transparent, and I twice talked myself out of it ("the screenshot caught the
   // fade-in") before sampling the pixels: painting the panel red changed nothing, and the paint
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
+  // the one place the author's `accent:` is read: a colour, or the default (see cssColor)
+  const accentC = ctx.accent ? cssColor(ctx.accent) : '';
   const backdropUrl = resolveAsset(ctx.backdrop, ctx);
   const backdrop = backdropUrl
-    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
+    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
     : '';
   const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, ctx);
   const css = ctx.css || '';
@@ -1449,7 +1472,7 @@ export function renderPage(model, ctx = {}) {
   const footer = `<footer class="st-footer"><div>${owner}${powered}</div></footer>`;
   // accent: ONE author-set hex derives the whole --cp-accent-* family (the same 12/25/35/72% ramp
   // the Python renderer derives per guild), so a card is themed by a single frontmatter field.
-  const accent = ctx.accent ? `<style id="cp-accent">:root{--cp-accent:${esc(ctx.accent)};--cp-accent-bg:color-mix(in srgb,${esc(ctx.accent)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(ctx.accent)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(ctx.accent)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(ctx.accent)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
+  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
   // 🔴 The theme block comes LAST in the head, and that placement is the whole mechanism: card.css
   // declares the --cp-* ramp in :root, so an override at equal specificity has to arrive later to
   // win. It also has to sit after the accent block, which still carries --cp-accent itself.
@@ -1485,7 +1508,7 @@ export function renderPage(model, ctx = {}) {
   const langRaw = String(ctx.lang || '').trim();
   const lang = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(langRaw) ? langRaw : 'en';
   const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
-  const theme = `<style id="cp-theme">${themeCss(mode, ctx.accent)}</style>`;
+  const theme = `<style id="cp-theme">${themeCss(mode, accentC)}</style>`;
   // The icon links (card-icon.mjs decides them — avatar or badge, and where the files live). Built
   // by the caller because only the caller knows the card's address; absent → no links, never a
   // link to a file nobody serves.
