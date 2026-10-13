@@ -265,7 +265,7 @@ test('🔴 every tile kind renders as the ELEMENT: a picture, the words, the gre
   // a link carries the mark its button will carry, derived the renderer's way — the host AS WRITTEN,
   // www. kept (reef#2011: www.instagram.com has a mark where instagram.com has none). The grey line
   // is a label, and still drops it.
-  assert.deepEqual(by('link')[0], { kind: 'link', title: '預約', sub: 'example.com', img: '', icons: [{ host: 'www.example.com' }] });
+  assert.deepEqual(by('link')[0], { kind: 'link', title: '預約', sub: 'example.com', img: '', icons: [{ host: 'www.example.com', fallback: ['example.com'] }] });
   // …and a link with no address says what the CARD says about it, rather than looking finished
   assert.equal(by('link')[1].sub, '還沒填網址');
   assert.deepEqual(by('link')[1].icons, [], 'an empty address produced a favicon domain');
