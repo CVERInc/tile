@@ -558,3 +558,29 @@ for (const [name, path] of Object.entries(PROXY_PATHS)) {
     assert.equal(body, 'x');
   });
 }
+
+// r9: only a response that passed the MIME check is cached; a rejected one is not (and is no-store + nosniff)
+for (const [name, path] of [['icon', '/_icon/x.example.ico'], ['yt', `/_yt/${YT_ID}.jpg`]]) {
+  test(`r9 ${name}: rejection is not cached; a validated image is`, async () => {
+    const stored = new Map();
+    const realFetch = globalThis.fetch, realCaches = globalThis.caches;
+    globalThis.caches = { default: { match: async (r) => stored.get(r.url)?.clone(), put: async (r, v) => { stored.set(r.url, v); } } };
+    const answers = [['text/html', '<script>'], ['image/png', 'x'], ['text/html', '<script>']];
+    let n = 0;
+    globalThis.fetch = async () => { const [t, b] = answers[n++]; return new Response(b, { status: 200, headers: { 'content-type': t } }); };
+    const get = () => worker.fetch(new Request(`https://card.example${path}`), { CARDS: fakeKv(), MCP_TOKEN_HASH: TOKEN_HASH });
+    try {
+      const r1 = await get();
+      assert.equal(r1.status, 404);
+      assert.equal(r1.headers.get('cache-control'), 'no-store');
+      assert.equal(r1.headers.get('x-content-type-options'), 'nosniff');
+      const r2 = await get();
+      assert.equal(r2.status, 200);
+      assert.equal(r2.headers.get('content-type'), 'image/png');
+      const r3 = await get(); // upstream would now say text/html — the cached image must answer
+      assert.equal(r3.status, 200);
+      assert.equal(r3.headers.get('content-type'), 'image/png');
+      assert.equal(n, 2, 'the third request must not reach the upstream');
+    } finally { globalThis.fetch = realFetch; globalThis.caches = realCaches; }
+  });
+}

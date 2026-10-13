@@ -31,6 +31,26 @@ function allowedImageType(header) {
   const t = String(header || '').split(';')[0].trim().toLowerCase();
   return PROXY_IMAGE_TYPES.has(t) ? t : null;
 }
+const NOT_RELAYED = () => new Response('', { status: 404, headers: { 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' } });
+/** /_icon/ and /_yt/: cache-first, upstream only on a miss, store only what passed allowedImageType */
+async function relayImage(request, ctx, upstreamUrl, maxAge) {
+  const cache = globalThis.caches && globalThis.caches.default;
+  const key = new Request(request.url, { method: 'GET' });
+  if (cache) { const hit = await cache.match(key).catch(() => null); if (hit) return hit; }
+  const up = await fetch(upstreamUrl).catch(() => null);
+  // A missing mark/poster is not an error — the card's own fallback chain takes over.
+  if (!up || !up.ok) return NOT_RELAYED();
+  const type = allowedImageType(up.headers.get('content-type'));
+  if (!type) return NOT_RELAYED();
+  const resp = new Response(up.body, {
+    headers: { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': `public, max-age=${maxAge}` },
+  });
+  if (cache) {
+    const put = cache.put(key, resp.clone()).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+  }
+  return resp;
+}
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
@@ -414,7 +434,7 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // 🔴 FIRST, and before any host resolution. The write API is host-agnostic — reef-MCP calls the
@@ -599,37 +619,16 @@ export default {
       // 🔴 The card's markdown is creator-authored and this concatenates into a URL. Without the
       // guard, `/_icon/<anything>.ico` is an open proxy — same discipline as VIDEO_RE on /_yt/.
       if (!ICON_DOMAIN_RE.test(domain)) return new Response('bad domain', { status: 400 });
-      // 🔴 Per STATUS, not one TTL (reef#2011). `cacheTtl` overrides the TTL for whatever comes back,
-      // 404 included, so one bad answer from the service kept a domain's mark out for a WEEK after
-      // the service had it again (books.com.tw, 2026-10-12). A mark keeps a week; a miss is asked
-      // again within the hour; a 5xx is not kept at all.
-      const up = await fetch(iconUpstream(domain), {
-        cf: { cacheTtlByStatus: { '200-299': 604800, 404: 3600, '500-599': 0 }, cacheEverything: true },
-      }).catch(() => null);
-      // A missing mark is not an error — the card's own fallback chain takes over, and after that it
-      // hides the slot. A broken image on someone's card is worse than no icon.
-      if (!up || !up.ok) return new Response('', { status: 404 });
-      // 🔴 r8: only an allowed raster type is relayed; its body is never forwarded otherwise.
-      const iconType = allowedImageType(up.headers.get('content-type'));
-      if (!iconType) return new Response('', { status: 404 });
-      return new Response(up.body, {
-        headers: { 'Content-Type': iconType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=604800' },
-      });
+      // 🔴 r9: we do NOT ask the edge to cache the upstream answer (cf.cacheTtl* would keep an
+      // UNVALIDATED 200 — a transient text/html — for a week). Only a response that passed the MIME check
+      // is stored, in caches.default, under this request's URL. A miss/5xx/rejected answer is never kept.
+      return relayImage(request, ctx, iconUpstream(domain), 604800);
     }
 
     const ytm = /^\/_yt\/([A-Za-z0-9_-]+)\.jpg$/.exec(url.pathname);
     if (ytm) {
       if (!VIDEO_RE.test(ytm[1])) return new Response('bad id', { status: 400 });
-      const upstream = await fetch(`https://i.ytimg.com/vi/${ytm[1]}/hqdefault.jpg`, {
-        cf: { cacheTtl: 86400, cacheEverything: true },
-      }).catch(() => null);
-      // No poster is not an error — the card falls back to the designed degraded state.
-      if (!upstream || !upstream.ok) return new Response('', { status: 404 });
-      const posterType = allowedImageType(upstream.headers.get('content-type'));
-      if (!posterType) return new Response('', { status: 404 });
-      return new Response(upstream.body, {
-        headers: { 'Content-Type': posterType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=86400' },
-      });
+      return relayImage(request, ctx, `https://i.ytimg.com/vi/${ytm[1]}/hqdefault.jpg`, 86400);
     }
 
     // ── which of the three exits? ────────────────────────────────────────────────────────────────
