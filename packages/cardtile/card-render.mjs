@@ -44,8 +44,21 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // ⬆ UPSTREAM ASK (not a private extension): links belong in cssmd, so every host renders
 // `[label](url)` the same way. Until that lands in CVERInc/tile, the Card's superset is documented
 // and tested rather than silent.
+// reef#2044 ①: every outbound link on a card is user-generated content — it must not pass ranking
+// weight. The ONE exception (relFor below) is a link to the card author's own vanity host.
+export const REL_UGC = 'ugc nofollow noopener noreferrer';
+export const REL_OWN = 'noopener noreferrer';
+// A vanity card's cardUrl is the bare host root; the canonical form carries a /<handle> path, and
+// there a same-host link is another creator's card, i.e. still ugc.
+export function relFor(url, ctx) {
+  const cu = String((ctx && ctx.cardUrl) || '');
+  let own = '';
+  try { const u = new URL(cu); if (u.pathname === '/' || u.pathname === '') own = u.hostname; } catch {}
+  const strip = (h) => String(h || '').replace(/^www\./, '');
+  return own && strip(hostOf(url)) === strip(own) ? REL_OWN : REL_UGC;
+}
 const mdInline = (s) => esc(s)
-  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, `<a href="$2" target="_blank" rel="${REL_UGC}">$1</a>`)
   .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   .replace(/\*(.+?)\*/g, '<em>$1</em>')
   // 🔴 A newline in an INLINE context is a line break the author typed on purpose — HTML collapses
@@ -326,7 +339,7 @@ function anchorFor(url, ctx) {
     const id = esc(d[1]);
     return `href="#${id}" data-drawer="${id}" aria-haspopup="dialog"`;
   }
-  return `href="${esc(url)}" target="_blank" rel="noopener noreferrer"`;
+  return `href="${esc(url)}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
 
 function renderCell(cell, place, ctx) {
@@ -533,7 +546,7 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ' target="_blank" rel="noopener noreferrer"'} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
+        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
       }).join('');
       return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
     }

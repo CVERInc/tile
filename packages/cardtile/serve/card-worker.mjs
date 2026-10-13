@@ -220,6 +220,11 @@ export function renderCardHTML(cardMd, ctx = {}) {
 // card it previews, so letting search engines index both splits the ranking between them — and for
 // an ingest DEMO (a creator's page rebuilt to show them what it'd look like here) an indexed copy
 // would compete with that creator's own live page. Production sets PREVIEW=false in its vars.
+// reef#2044 ⑤ — site-wide kill switch. CARD_NOINDEX_ALL=1 (or "true") puts `X-Robots-Tag: noindex` on
+// EVERY card response of the deployment, vanity hosts included; unset/anything else = off. It is a
+// deployment-wide valve (Search Console warns → flip it the same day); it is NOT a per-card state.
+export const noindexAll = (env) => !!env && /^(1|true)$/i.test(String(env.CARD_NOINDEX_ALL ?? '').trim());
+
 const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 
 // 🔴 A DEMO of somebody else's page is never indexed, on ANY deployment.
@@ -234,7 +239,8 @@ const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 
 const ROBOTS_HEADERS = (env, handle, isVanity) =>
-  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {};
+  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' }
+    : noindexAll(env) ? { 'X-Robots-Tag': 'noindex' } : {};
 
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
