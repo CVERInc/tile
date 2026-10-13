@@ -150,7 +150,7 @@ test('the same destination twice is queried once', async () => {
 
 // ── reef#2044 round 2: CSS url() destinations and an enforceable limit ───────────────────────────
 
-const links = (n, extra = []) => [...Array.from({ length: n }, (_, i) => `- [ ] %% card: link w=3 %% [s${i}](https://ok${i}.example/)`), ...extra];
+const links = (n, extra = []) => [...Array.from({ length: n }, (_, i) => `- [ ] %% card: link w=3 %% [s${i}](https://u${i}.example/)`), ...extra];
 
 test('r2#1 frontmatter `backdrop:` (plain text cell) — the CSS url() the renderer emits is queried', async () => {
   const s = stubFetch({ listed: { 'https://bad.example/bg.png': 'MALWARE' } });
