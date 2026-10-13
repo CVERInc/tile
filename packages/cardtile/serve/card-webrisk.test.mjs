@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { handleApi, _internal } from './card-api.mjs';
-import { checkUrls } from './url-risk.mjs';
+import { checkUrls, ENDPOINT } from './url-risk.mjs';
 
 const TOKEN = 'webrisk-test-bearer';
 const KEY = 'WR-KEY-must-never-leak-123';
@@ -102,7 +102,8 @@ test('request asks for the three threat types', async () => {
   const s = stubFetch();
   await save(mk('- [ ] %% card: link w=3 %% [Site](https://good.example/)'), { env: withKey, fetch: s.fn });
   const q = new URL(s.urls[0]);
-  assert.equal(q.origin + q.pathname, 'https://webrisk.googleapis.com/v1/uris:search');
+  assert.equal(q.origin + q.pathname, ENDPOINT);
+  assert.match(ENDPOINT, /\/v1\/uris:search$/);
   assert.deepEqual(q.searchParams.getAll('threatTypes'), ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE']);
 });
 

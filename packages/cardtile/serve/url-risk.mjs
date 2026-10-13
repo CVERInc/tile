@@ -11,7 +11,7 @@
 export const THREAT_TYPES = ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE'];
 export const MAX_URLS = 50;
 export const TIMEOUT_MS = 3000;
-const ENDPOINT = 'https://webrisk.googleapis.com/v1/uris:search';
+export const ENDPOINT = 'https://webrisk.googleapis.com/v1/uris:search';
 
 /**
  * → { url, threat } for the first listed URL, or null (clean, skipped, or failed open).
