@@ -283,6 +283,25 @@ test('every external URL in a feature-complete card\'s render was registered by 
   assert.ok(![...registered].some((u) => u.startsWith('data:') || u.startsWith('/') || u.startsWith('#')));
 });
 
+test('r3b#1 `bg=` cannot break out of url() — exactly one url(), the evil host is never its own url()', () => {
+  const md = ['---', 'card-page: t', 'title: T', '---', '', '## grid', '',
+    "- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg=https://a.example/x'),url('https://evil.example/y %%", ''].join('\n');
+  const html = renderCardHTML(md, {});
+  const style = html.match(/style="background-image[^"]*"/g) || [];
+  assert.equal(style.length, 1);
+  assert.equal((style[0].match(/url\(/g) || []).length, 1, style[0]);
+  assert.ok(!/url\(\s*['"&#;a-z0-9]*https:\/\/evil\.example/i.test(style[0]), 'evil.example is not a url() of its own');
+  // every registered URL is what a browser fetches: the registry holds the author string and the
+  // string actually written into url() — and the loose scan finds nothing outside the registry
+  const reg = new Set(cardDestinations(md));
+  const written = style[0].match(/url\('([^']*)'\)/)[1].replace(/&amp;/g, '&');
+  assert.ok(reg.has(written), `the url() value ${written} is registered`);
+  for (const u of (html.replace(/<script[\s\S]*?<\/script>/g, '').match(/https?:\/\/[^"' )]+/g) || [])) {
+    if (u === 'http://www.w3.org/2000/svg' || u === 'http://www.w3.org/1999/xlink') continue;
+    assert.ok([...reg].some((r) => r.startsWith(u) || u.startsWith(r)), `${u} unregistered`);
+  }
+});
+
 // ── structure: destinations come only from render output ─────────────────────────────────────────
 
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
