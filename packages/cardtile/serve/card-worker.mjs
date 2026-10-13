@@ -24,6 +24,13 @@ const ytFetch = (u) => fetch(u, {
   cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
 });
 import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
+// Image types the /_icon/ and /_yt/ proxies will relay. SVG is deliberately absent (it can carry script).
+const PROXY_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon']);
+/** the normalised allowed type of an upstream content-type header, or null */
+function allowedImageType(header) {
+  const t = String(header || '').split(';')[0].trim().toLowerCase();
+  return PROXY_IMAGE_TYPES.has(t) ? t : null;
+}
 import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
@@ -602,11 +609,11 @@ export default {
       // A missing mark is not an error — the card's own fallback chain takes over, and after that it
       // hides the slot. A broken image on someone's card is worse than no icon.
       if (!up || !up.ok) return new Response('', { status: 404 });
+      // 🔴 r8: only an allowed raster type is relayed; its body is never forwarded otherwise.
+      const iconType = allowedImageType(up.headers.get('content-type'));
+      if (!iconType) return new Response('', { status: 404 });
       return new Response(up.body, {
-        headers: {
-          'Content-Type': up.headers.get('content-type') || 'image/x-icon',
-          'Cache-Control': 'public, max-age=604800',
-        },
+        headers: { 'Content-Type': iconType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=604800' },
       });
     }
 
@@ -618,8 +625,10 @@ export default {
       }).catch(() => null);
       // No poster is not an error — the card falls back to the designed degraded state.
       if (!upstream || !upstream.ok) return new Response('', { status: 404 });
+      const posterType = allowedImageType(upstream.headers.get('content-type'));
+      if (!posterType) return new Response('', { status: 404 });
       return new Response(upstream.body, {
-        headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' },
+        headers: { 'Content-Type': posterType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=86400' },
       });
     }
 

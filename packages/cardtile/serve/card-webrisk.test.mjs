@@ -524,3 +524,37 @@ test('r7#3 exempt prefixes serve non-HTML; navigable routes serve HTML and are n
     }
   } finally { globalThis.fetch = realFetch; }
 });
+
+// r8: a successful upstream answer is only forwarded when its content-type is an allowed raster image. The
+// body of anything else (html, svg — which can carry script) is never relayed; the response is pinned with nosniff
+// and carries the NORMALISED allowed type, not the upstream string.
+const proxied = async (path, upstream) => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(upstream.body, { status: 200, headers: { 'content-type': upstream.type } });
+  try {
+    const res = await worker.fetch(new Request(`https://card.example${path}`), { CARDS: fakeKv(), MCP_TOKEN_HASH: TOKEN_HASH });
+    return { res, body: await res.text() };
+  } finally { globalThis.fetch = realFetch; }
+};
+const PROXY_PATHS = { icon: '/_icon/example.com.ico', yt: `/_yt/${YT_ID}.jpg` };
+for (const [name, path] of Object.entries(PROXY_PATHS)) {
+  test(`r8 ${name}: upstream text/html is not relayed`, async () => {
+    const { res, body } = await proxied(path, { type: 'text/html; charset=utf-8', body: '<script>alert(1)</script>' });
+    assert.equal(res.status, 404);
+    assert.ok(!/text\/html/i.test(res.headers.get('content-type') || ''));
+    assert.ok(!body.includes('<script>'));
+  });
+  test(`r8 ${name}: upstream image/svg+xml is not relayed`, async () => {
+    const { res, body } = await proxied(path, { type: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' });
+    assert.equal(res.status, 404);
+    assert.ok(!/svg|html/i.test(res.headers.get('content-type') || ''));
+    assert.ok(!body.includes('<script>'));
+  });
+  test(`r8 ${name}: upstream image/png is served with nosniff and the normalised type`, async () => {
+    const { res, body } = await proxied(path, { type: 'IMAGE/PNG; charset=evil', body: 'x' });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'image/png');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(body, 'x');
+  });
+}
