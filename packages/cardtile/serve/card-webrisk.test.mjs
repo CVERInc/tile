@@ -211,7 +211,7 @@ test('r3#1 bubbles `bg=https://b\\000061d.example/x.png` — queries the author 
   // In a CSS quoted url() `\000061` is the letter `a`: the browser requests https://bad.example/x.png.
   const s = stubFetch({ listed: { 'https://bad.example/x.png': 'MALWARE' } });
   const r = await save(mk('- [ ] %% card: embed bleed kind=bubbles images="https://i.example/1.png,https://i.example/2.png" bg=https://b\\000061d.example/x.png %%'), { env: withKey, fetch: s.fn });
-  assert.ok(s.queried.includes('https://b\\000061d.example/x.png'), 'the author-written string is queried');
+  assert.ok(s.queried.includes('https://b/000061d.example/x.png'), 'the author-written string is queried, as a URL parser reads it (r4: a backslash is a slash)');
   assert.ok(s.queried.includes('https://bad.example/x.png'), 'the CSS-decoded host the browser fetches is queried');
   assert.equal(r.res.status, 422);
   assert.equal(r.body.url, 'https://bad.example/x.png');
