@@ -1,5 +1,6 @@
 // Every place card-render.mjs writes a URL-bearing attribute / url() must go through the registry.
 // run: node --test card-render-sinks.test.mjs
+// 🔴 round 5: this file now scans CONSTRUCTS (see CONSTRUCT below), not lines — the paragraph below is the round-4 design it replaces.
 //
 // 🔴 tile#127 round 4 (review v3 #3): the old completeness test scanned ONE rendered fixture, so a
 // new output point the fixture did not use was invisible. This reads the renderer's SOURCE: every
@@ -11,53 +12,87 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-// `url(` not preceded by a letter/dot (so `cssUrl(` and `new URL(` are not sinks); `x.src=` in the
-// inline click-to-load / onerror scripts is JS assignment on fixed hosts or local paths, not markup.
-const SINK = /(?<![\w.])(?:href|src|poster|data-url)=|(?<![\w.]|new )url\(/i;
-const GUARDED = /\battrUrl\(|\bcssAttrUrl\(|\besc\(cssColor\(/;
 
-// Output points that are NOT author-selected fetches. [snippet of the line, why]
+// 🔴 tile#127 round 5 (review v4 P2): the guard scans CONSTRUCTS, not lines. A whole-line match let a second
+// author-controlled sink ride on a line that already held a guarded one (a bare `src="${x}"` appended to the
+// slider navigation line passed because `href="${prev}"` was listed). So one regex finds each URL-bearing
+// construct on its own, the `${…}` it opens is read to its closing brace, and THAT content is what is judged.
+//   attribute  : (src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url) = ["']? <literal prefix> ${
+//   css        : url( ["']? ${        @import ["']? ${        background[-image]: … ${
+//   never allowed to appear at all : image-set(
+const CONSTRUCT = new RegExp([
+  String.raw`(?<![\w.-])(?:src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url)\s*=\s*["']?[^"'\s>` + '`' + String.raw`]*?\$\{`,
+  String.raw`(?<![\w.]|new )url\(\s*["']?\$\{`,
+  String.raw`@import\s+["']?\$\{`,
+  String.raw`background(?:-image)?\s*:[^;` + '`' + String.raw`]*?\$\{`,
+].join('|'), 'gi');
+const IMAGE_SET = /image-set\(/i;
+// what the `${…}` content must start with: the registry (optionally HTML-escaped on the way out) or a validated CSS value
+const GUARDED = /^(?:esc\(\s*)?(?:attrUrl|cssAttrUrl)\(|^esc\(\s*(?:cssColor|cssPos)\(/;
+
+// Output constructs that are NOT author-selected fetches: [construct text up to its closing `}`, how many times, why].
+// "Construct + value", never a whole line; the COUNT makes a second identical construct a new, unlisted sink.
 export const FIXED = [
-  ['href="${prev}"', 'in-page #anchor of the slider'],
-  ['href="${next}"', 'in-page #anchor of the slider'],
-  ['href="#${uid}-${i}"', 'in-page #anchor of a slider dot'],
-  ['href="#" class="dc-drawer-scrim"', 'in-page anchor, fixed'],
-  ['href="#" class="dc-drawer-close"', 'in-page anchor, fixed'],
-  ['href="https://feelreef.com/signup${ref}"', 'fixed host, handle-derived query only'],
-  ['<script src="${esc(ctx.qrScriptSrc)}"', 'caller-supplied script path, fixed by card-worker to a local path'],
-  ['<script src="${esc(ctx.drawerScriptSrc)}"', 'caller-supplied script path, fixed by card-worker to a local path'],
-  ['src="${esc(src)}" alt="" width="22" height="22"', 'IMG_ICON: author image registered at its call site (attrUrl) or a local iconPath'],
-  ['href="#${id}" data-drawer', 'in-page drawer anchor'],
-  ['<img src="${esc(src)}" alt="" loading="lazy"', 'slider / bubbles frames: `imgs` came through attrUrl at its definition (asserted below)'],
-  ['url("${img}")', 'BACKDROP_CSS: its argument comes through cssAttrUrl at the call site (asserted below)'],
-  ['<link rel="${esc(l.rel)}"', 'icon <link>s: local icon routes, or the avatar already registered as the profile image'],
-  ['<link rel="canonical" href="${esc(share.canonical)}"', "the card's own address"],
-  ['PICTURE_GLYPH = "url(', 'fixed data: URI'],
+  ['href="${prev}', 1, 'in-page #anchor of the slider'],
+  ['href="${next}', 1, 'in-page #anchor of the slider'],
+  ['href="#${uid}', 1, 'in-page #anchor of a slider dot'],
+  ['href="https://feelreef.com/signup${ref}', 1, 'fixed host, handle-derived query only'],
+  ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
+  ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
+  ['src="${esc(src)}', 3, 'IMG_ICON (author image registered at its call site) and the slider / bubbles frames (`imgs` came through attrUrl at its definition, asserted below)'],
+  ['data-url="${esc(qrUrl)}', 1, "the QR code encodes the card's own address"],
+  ['href="#${id}', 1, 'in-page drawer anchor'],
+  ['background-image:url("${img}', 1, 'the same BACKDROP_CSS url(), seen once more as a background declaration'],
+  ['background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}', 1, 'BACKDROP_CSS: `dim` is a clamped number (colour.mjs), no URL in this declaration'],
+  ['href="${esc(l.href)}', 1, 'icon <link>s: local icon routes, or the avatar already registered as the profile image'],
+  ['href="${esc(share.canonical)}', 1, "the card's own address"],
 ];
-const isFixed = (line) => FIXED.some(([snip]) => line.includes(snip));
+const norm = (t) => t.replace(/\s+/g, ' ');
+
+// the `${…}` that opens at `open` (index of `$`): its content, and the index just past its closing brace
+function readInterpolation(src, open) {
+  let depth = 0;
+  for (let i = open + 1; i < src.length; i += 1) {
+    if (src[i] === '{') depth += 1;
+    else if (src[i] === '}') { depth -= 1; if (depth === 0) return { content: src.slice(open + 2, i).trim(), end: i + 1 }; }
+  }
+  return { content: src.slice(open + 2).trim(), end: src.length };
+}
+
+/** every URL-bearing construct in `src`: { text, content, guarded } */
+export function constructs(src) {
+  const body = stripComments(src);
+  const out = [];
+  for (const m of body.matchAll(CONSTRUCT)) {
+    const { content, end } = readInterpolation(body, m.index + m[0].length - 2);
+    out.push({ text: norm(body.slice(m.index, end)), content, guarded: GUARDED.test(content) });
+  }
+  if (IMAGE_SET.test(body)) out.push({ text: 'image-set(', content: '', guarded: false });
+  return out;
+}
 
 export function unguardedSinks(src) {
+  const left = new Map(FIXED.map(([t, n]) => [t, n]));
   const out = [];
-  for (const line of stripComments(src).split('\n')) {
-    if (!SINK.test(line)) continue;
-    if (GUARDED.test(line) || isFixed(line)) continue;
-    out.push(line.trim().slice(0, 160));
+  for (const c of constructs(src)) {
+    if (c.guarded) continue;
+    if (left.get(c.text) > 0) { left.set(c.text, left.get(c.text) - 1); continue; }
+    out.push(c.text.slice(0, 160));
   }
   return out;
 }
 
 const SRC = readFileSync(new URL('../card-render.mjs', import.meta.url), 'utf8');
 
-test('sinks: every href= / src= / url( / poster= / data-url= in card-render.mjs is guarded or listed as fixed', () => {
+test('sinks: every URL-bearing construct in card-render.mjs is guarded or listed as fixed', () => {
   assert.deepEqual(unguardedSinks(SRC), []);
 });
 
-test('sinks: the scan has something to scan, and every FIXED entry still exists (a stale entry is a hole)', () => {
-  const body = stripComments(SRC);
-  const hits = body.split('\n').filter((l) => SINK.test(l));
-  assert.ok(hits.length >= 15, `saw ${hits.length} sink lines`);
-  assert.ok(hits.filter((l) => GUARDED.test(l)).length >= 8);
-  for (const [snip] of FIXED) assert.ok(body.includes(snip), `FIXED entry no longer in the renderer: ${snip}`);
+test('sinks: the scan has something to scan, and every FIXED entry still exists exactly as often as listed (a stale entry is a hole)', () => {
+  const all = constructs(SRC);
+  assert.ok(all.length >= 20, `saw ${all.length} constructs`);
+  assert.ok(all.filter((c) => c.guarded).length >= 8);
+  for (const [text, n] of FIXED) assert.equal(all.filter((c) => !c.guarded && c.text === text).length, n, `FIXED entry out of step with the renderer: ${text}`);
 });
 
 test('sinks: the two indirect cases are guarded where the value is made', () => {
@@ -70,9 +105,33 @@ test('sinks: the two indirect cases are guarded where the value is made', () => 
   assert.match(calls[0], /BACKDROP_CSS\(cssAttrUrl\(ctx,/);
 });
 
-test('sinks: the guard is live — a bare src="${x}" line is reported, in any case', () => {
-  const planted = SRC + '\nconst leak = (x) => `<img src="${x}">`;\nconst leak2 = (x) => `<IMG SRC="${x}">`.toLowerCase();\n';
-  const found = unguardedSinks(planted).filter((l) => !unguardedSinks(SRC).includes(l));
-  assert.equal(found.length, 2, JSON.stringify(found));
-  assert.ok(found[0].includes('<img src="${x}">') && found[1].includes('<IMG SRC="${x}">'));
+test('sinks: the guard is live — a bare src="${x}" on a NEW line is reported, in any case and with spaces around `=`', () => {
+  const planted = SRC + '\nconst leak = (x) => `<img src="${x}">`;\nconst leak2 = (x) => `<IMG SRC = "${x}">`;\n';
+  const found = unguardedSinks(planted).length - unguardedSinks(SRC).length;
+  assert.equal(found, 2, JSON.stringify(unguardedSinks(planted)));
+});
+
+test('sinks: the guard is live — a second sink APPENDED to an existing fixed line is reported (the old whole-line match excused it)', () => {
+  const marker = 'href="${next}"';
+  const at = SRC.indexOf(marker);
+  assert.ok(at > 0, 'the slider navigation line is still there');
+  const lineEnd = SRC.indexOf('\n', at);
+  const planted = SRC.slice(0, lineEnd) + '<img src="${x}">' + SRC.slice(lineEnd);
+  assert.deepEqual(unguardedSinks(planted), ['src="${x}'], 'exactly the appended construct');
+  assert.deepEqual(unguardedSinks(SRC), []);
+});
+
+test('sinks: the guard sees the other URL-bearing spellings — srcset, action, formaction, data-src, xlink:href, @import, image-set(, background shorthand', () => {
+  for (const frag of ['<img srcset="${x} 2x">', '<form action="${x}">', '<button formaction="${x}">', '<i data-src="${x}">', '<use xlink:href="${x}">', '@import "${x}";', 'background:#fff url(\'${x}\')', 'background-image:${x}', 'image-set(a 1x)']) {
+    const planted = SRC + '\nconst leak = `' + frag + '`;\n';
+    assert.ok(unguardedSinks(planted).length > unguardedSinks(SRC).length, `not reported: ${frag}`);
+  }
+  // and a guarded one in the same spellings is accepted
+  const ok = SRC + '\nconst fine = (ctx, x) => `<img srcset="${esc(attrUrl(ctx, x))}"><i style="background:url(\'${esc(cssAttrUrl(ctx, x))}\')">`;\n';
+  assert.equal(unguardedSinks(ok).length, unguardedSinks(SRC).length);
+});
+
+test('sinks: two constructs on one line are judged one by one', () => {
+  const planted = SRC + '\nconst two = (ctx, x) => `<a href="${esc(attrUrl(ctx, x))}"><img src="${x}">`;\n';
+  assert.deepEqual(unguardedSinks(planted), ['src="${x}']);
 });
