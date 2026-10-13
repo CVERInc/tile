@@ -43,8 +43,47 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // ⬆ UPSTREAM ASK (not a private extension): links belong in cssmd, so every host renders
 // `[label](url)` the same way. Until that lands in CVERInc/tile, the Card's superset is documented
 // and tested rather than silent.
-const mdInline = (s) => esc(s)
-  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+// ── destinations: the renderer says where it sends the reader ───────────────────────────────────
+//
+// 🔴 reef#2054 / tile#127. The save-side Web Risk guard needs "every URL this card makes a browser
+// fetch or follow". Reading that back out of the finished HTML is a SECOND PARSER (HTML entities,
+// CSS escapes, <style> raw text, plain text that merely looks like `url(…)`) and it drifted from the
+// browser three review rounds running. So the renderer REGISTERS each author-given URL at the one
+// place it writes it into href / src / url(), BEFORE any escaping: what the author wrote is what the
+// browser ends up with (an attribute is entity-decoded back to it; <style> text is raw).
+//
+// `ctx.onDestination(url)` is optional — absent, every call below is a no-op that returns its input.
+// Only absolute http(s) and protocol-relative `//host` (registered as https) count; `data:`,
+// in-page `#x` and same-origin paths are not destinations. Every output point goes through
+// `attrUrl` / `cssAttrUrl`; serve/card-webrisk.test.mjs scans a card that uses every feature and
+// fails if a URL appears in the output that the registry did not hear about.
+const registerDestination = (ctx, raw) => {
+  if (!ctx || typeof ctx.onDestination !== 'function') return;
+  let u = String(raw == null ? '' : raw).trim();
+  if (u.startsWith('//')) u = 'https:' + u;            // what a browser on the https card resolves
+  if (/^https?:\/\//i.test(u)) ctx.onDestination(u);
+};
+/** register `raw` and hand it back unchanged (the caller escapes it for its own context). */
+const attrUrl = (ctx, raw) => { registerDestination(ctx, raw); return raw; };
+// CSS reads `\<1-6 hex>[ws]` as that code point and `\<char>` as the char itself. A url('…') that
+// lives in a style="" ATTRIBUTE has only been HTML-escaped, so the browser fetches the DECODED
+// string — register both spellings. (cssUrl()'d values have no backslashes left: nothing to decode.)
+const cssUnescape = (s) => String(s).replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\r\n\f])?|([^\r\n\f]))/g, (m, hex, ch) => {
+  if (ch !== undefined) return ch;
+  const n = parseInt(hex, 16);
+  return n === 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff) ? '�' : String.fromCodePoint(n);
+});
+const cssAttrUrl = (ctx, raw) => {
+  registerDestination(ctx, raw);
+  const decoded = cssUnescape(raw);
+  if (decoded !== String(raw)) registerDestination(ctx, decoded);
+  return raw;
+};
+// the exact inverse of `esc` (one pass), for a value that had to be escaped before it was matched
+const unesc = (s) => String(s).replace(/&(amp|lt|gt|quot);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"' })[e]);
+
+const mdInline = (s, ctx) => esc(s)
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) => `<a href="${esc(attrUrl(ctx, unesc(url)))}" target="_blank" rel="noopener noreferrer">${label}</a>`)
   .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   .replace(/\*(.+?)\*/g, '<em>$1</em>')
   // 🔴 A newline in an INLINE context is a line break the author typed on purpose — HTML collapses
@@ -99,18 +138,18 @@ function label(ctx, key, ...args) {
   return typeof v === 'function' ? v(...args) : v;
 }
 
-const mdBlock = (s) => String(s || '').split(/\n{2,}/).map((para) => {
+const mdBlock = (s, ctx) => String(s || '').split(/\n{2,}/).map((para) => {
   const lines = para.split('\n').filter((l) => l.trim());
   if (!lines.length) return '';
   if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-    return '<ul>' + lines.map((l) => `<li>${mdInline(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('') + '</ul>';
+    return '<ul>' + lines.map((l) => `<li>${mdInline(l.replace(/^\s*[-*]\s+/, ''), ctx)}</li>`).join('') + '</ul>';
   }
   // a rule: `---`/`***`/`___` on its own line. Without this the ingest carried a creator's section
   // break across as four literal hyphens sitting in the middle of their About text.
   if (lines.length === 1 && /^\s*([-*_])\1{2,}\s*$/.test(lines[0])) return '<hr>';
   const h = /^(#{1,3})\s+(.*)$/.exec(lines[0]);
-  if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2])}</h${h[1].length + 2}>`;
-  return `<p>${lines.map(mdInline).join('<br>')}</p>`;
+  if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2], ctx)}</h${h[1].length + 2}>`;
+  return `<p>${lines.map((l) => mdInline(l, ctx)).join('<br>')}</p>`;
 }).join('');
 // A cell body → the label and the address of one link.
 //
@@ -276,7 +315,7 @@ function linkIcon(p, url, ctx) {
   // It survived because until today NO card pointed `iconimg` at its own assets — every one was an
   // external URL, which happens to work. The importer started emitting `asset:` refs this afternoon
   // and the gap became visible the same hour.
-  if (p.iconimg) return IMG_ICON(resolveAsset(p.iconimg, ctx), [], 'st-cell-icon-art');
+  if (p.iconimg) return IMG_ICON(attrUrl(ctx, resolveAsset(p.iconimg, ctx)), [], 'st-cell-icon-art');
   if (p.icon && ctx.icons && ctx.icons[p.icon]) return ctx.icons[p.icon];
   if (!p.iconhost) { const drawn = brandIcon(hostOf(url), ctx); if (drawn) return drawn; }
   const chain = p.iconhost ? [p.iconhost] : iconDomains(hostOf(url));
@@ -332,7 +371,7 @@ function renderEmbed(p, body, size, ctx = {}) {
   // The pop animation below is preserved verbatim under its own name; that one stored card is
   // migrated to `kind=bubbles` so nothing about it changes.
   if (p.kind === 'slider') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
     if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
     // 🔴 CSS scroll-snap + anchor links. No JS: the prev/next are <a href="#…"> into the track, so
     // they work on the first paint, survive a dead script, and the browser's own swipe/keyboard/
@@ -372,7 +411,7 @@ function renderEmbed(p, body, size, ctx = {}) {
       + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div></div>';
   }
   if (p.kind === 'bubbles') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
     if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
     const n = imgs.length;
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
@@ -385,7 +424,7 @@ function renderEmbed(p, body, size, ctx = {}) {
     const inAt = 3;
     const outAt = (slot - 3).toFixed(1);
     const figures = imgs.map((src) => `<figure><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>`).join('');
-    const bgStyle = p.bg ? ` style="background-image:url('${esc(resolveAsset(p.bg, ctx))}')"` : '';
+    const bgStyle = p.bg ? ` style="background-image:url('${esc(cssAttrUrl(ctx, resolveAsset(p.bg, ctx)))}')"` : '';
     const css = [
       `.st-carousel{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background-size:contain;background-position:center;background-repeat:no-repeat}`,
       `.st-carousel figure{position:absolute;inset:0;margin:0;padding:0;display:flex;align-items:center;justify-content:center;opacity:0;transform-origin:${origin};animation:st-carousel-slide ${cycle}s infinite;animation-fill-mode:both}`,
@@ -416,7 +455,7 @@ function anchorFor(url, ctx) {
     const id = esc(d[1]);
     return `href="#${id}" data-drawer="${id}" aria-haspopup="dialog"`;
   }
-  return `href="${esc(url)}" target="_blank" rel="noopener noreferrer"`;
+  return `href="${esc(attrUrl(ctx, url))}" target="_blank" rel="noopener noreferrer"`;
 }
 
 function renderCell(cell, place, ctx) {
@@ -453,7 +492,7 @@ function renderCell(cell, place, ctx) {
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
       const qrUrl = ctx.cardUrl || '';
-      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(avatar)}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
+      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(attrUrl(ctx, avatar))}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
     }
     case 'feature': {
       // 🩸 A PICTURE DOES NOT HAVE TO GO ANYWHERE. `anchorFor(p.href)` was called unconditionally,
@@ -503,7 +542,7 @@ function renderCell(cell, place, ctx) {
         const labelled = !!p.alt && on !== '' && on !== 'off' && on !== 'false' && on !== 'no';
         const cls = 'st-cell st-gal-cell st-gal-cell-bare' + (labelled ? ' st-gal-labelled' : '');
         const capt = labelled ? `<span class="st-gal-label">${esc(p.alt)}</span>` : '';
-        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(featureImg)}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
+        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
       }
       // 🩸 A FEATURE WITH COPY BUT NO PICTURE. Everything below — the scrim, the near-white eyebrow,
       // the white title, their shadows — is chrome designed to sit ON artwork. With no `img=`, the
@@ -515,7 +554,7 @@ function renderCell(cell, place, ctx) {
       // and `st-gal-cell-flat`, which the stylesheet themes against the ground like any other text.
       // (Not `st-gal-cell-bare` — that one already means "picture only, no copy", the opposite case.)
       const hasImg = !!featureImg;
-      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(featureImg)}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
+      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
         // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
         // every feature title — the arrow had been the span's only content, and the container
         // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
@@ -549,7 +588,7 @@ function renderCell(cell, place, ctx) {
     case 'embed':
       return renderEmbed(p, b, size, ctx);
     case 'text':
-      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b)}</div>`;
+      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b, ctx)}</div>`;
     case 'video': {
       // Click-to-load YouTube. The platforms we take refugees from drop a live iframe on page load,
       // which means YouTube is watching every visitor before anyone presses play, and the player's
@@ -584,7 +623,7 @@ function renderCell(cell, place, ctx) {
       const attrs = vid ? `data-yt="${esc(vid)}"`
         : chanIsId ? `data-yt-channel="${esc(chanId)}"`
         : `data-yt-handle="${esc(chan)}"`;
-      return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
+      return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(attrUrl(ctx, poster))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
     }
     case 'social': {
       // The compact icon row every link-in-bio has: 40px marks, no labels, sitting with the profile
@@ -629,12 +668,12 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ' target="_blank" rel="noopener noreferrer"'} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
+        return `<a class="st-social-btn" href="${esc(attrUrl(ctx, url))}"${url.startsWith('mailto:') ? '' : ' target="_blank" rel="noopener noreferrer"'} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
       }).join('');
       return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
     }
     default:
-      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b)}</div>`;
+      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b, ctx)}</div>`;
   }
 }
 
@@ -1260,7 +1299,7 @@ export function renderGrid(model, ctx = {}) {
       const html = grp.items.map((pl) => renderCell(pl.cell, { ...pl, abs: run[pl.index].abs }, ctx)).join('');
       return grp.run ? `<div class="st-run">${html}</div>` : html;
     }).join('');
-    const head = label ? `<div class="st-grid-label">${mdInline(label)}</div>` : '';
+    const head = label ? `<div class="st-grid-label">${mdInline(label, ctx)}</div>` : '';
     // .st-cells-wrap establishes the container-query context (container-type:inline-size) that
     // grid-auto-rows:calc((100cqw − gaps)/6) needs, so the base unit = one column width = a SQUARE.
     parts.push(`<section class="st-grid">${head}<div class="st-cells-wrap"><div class="st-cells">${inner}</div></div></section>`);
@@ -1355,7 +1394,7 @@ export function renderPage(model, ctx = {}) {
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
   const backdropUrl = resolveAsset(ctx.backdrop, ctx);
   const backdrop = backdropUrl
-    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(backdropUrl, resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
+    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(attrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
     : '';
   const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, ctx);
   const css = ctx.css || '';

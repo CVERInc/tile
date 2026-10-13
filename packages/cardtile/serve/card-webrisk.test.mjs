@@ -242,13 +242,60 @@ test('r3#4 `backdrop: …/a&#x110000;` — no exception, the save takes the norm
   assert.deepEqual(s.queried, ['https://e.example/a&#x110000;']);
 });
 
+// ── the ruler that lives only in tests: whatever URL the renderer prints, the registry heard ─────
+//
+// A DELIBERATELY LOOSE scan — every `https?://…` in the output, whatever the context. It is not a
+// parser and must never reach execution code: its only job is to fail when someone adds an output
+// point that does not go through the renderer's registry (`attrUrl` / `cssAttrUrl`).
+import { renderCardHTML } from './card-worker.mjs';
+import { cardDestinations } from './card-destinations.mjs';
+
+test('every external URL in a feature-complete card\'s render was registered by the renderer', () => {
+  const md = [
+    '---', 'card-page: t', 'title: T', 'backdrop: https://cdn.example/backdrop.png', '---', '',
+    '## grid', '',
+    '- [ ] %% card: profile w=6 avatar=https://cdn.example/avatar.png %% hello [tagline](https://t.example/tag)',
+    '- [ ] %% card: feature w=3 img=https://cdn.example/feat.png href=https://f.example/go title=Go %% eyebrow',
+    '- [ ] %% card: feature w=3 img=https://cdn.example/bare.png href=//proto.example/p %%',
+    '- [ ] %% card: embed kind=slider images="https://cdn.example/s1.png,https://cdn.example/s2.png" %%',
+    '- [ ] %% card: embed kind=bubbles images="https://cdn.example/b1.png,https://cdn.example/b2.png" bg=https://cdn.example/bg.png %%',
+    '- [ ] %% card: link w=3 iconimg=https://cdn.example/icon.png %% [Row](https://l.example/row)',
+    '- [ ] %% card: link w=3 %% [Plain](https://p.example/plain)',
+    '- [ ] %% card: social w=6 %% [IG](https://instagram.com/x)\n\t[X](https://twitter.com/x)',
+    '- [ ] %% card: video w=6 yt=abcdefghijk poster=https://cdn.example/poster.jpg %% clip',
+    '- [ ] %% card: text w=6 %% see [docs](https://d.example/docs?a=1&b=2) and [more](https://d.example/m)',
+    '- [ ] %% card: feature w=3 href=#about title=More %% drawer',
+    '',
+    '## drawer: about | About', '',
+    '- [ ] %% card: link w=3 %% [Inner](https://inner.example/in)',
+    '- [ ] %% card: feature w=3 img=https://cdn.example/drawer.png %%',
+    '',
+  ].join('\n');
+  const html = renderCardHTML(md, {});
+  const registered = new Set(cardDestinations(md));
+  const NOT_FETCHED = new Set(['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink']);   // XML namespaces
+  // The click-to-load player script's own constants (renderer text, not author input; the video id is
+  // constrained to [\w-]). They are not author-supplied destinations, so the registry rightly omits them.
+  const RENDERER_CONSTANT = { test: (u) => ['https://www.youtube.com/', 'https://www.youtube-nocookie.com/embed/', 'https://www.youtube-nocookie.com/embed/videoseries?list=UU'].includes(u) };
+  const seen = new Set((html.match(/https?:\/\/[^"' )]+/g) || []).map((u) => u.replace(/&amp;/g, '&').replace(/&quot;.*$/, '')).filter((u) => !NOT_FETCHED.has(u) && !RENDERER_CONSTANT.test(u)));
+  assert.ok(seen.size >= 15, `the scan must have something to scan (saw ${seen.size})`);
+  const missing = [...seen].filter((u) => !registered.has(u));
+  assert.deepEqual(missing, [], 'rendered but never registered by the renderer');
+  assert.ok(registered.has('https://proto.example/p'), '//host is registered as https');
+  assert.ok(![...registered].some((u) => u.startsWith('data:') || u.startsWith('/') || u.startsWith('#')));
+});
+
 // ── structure: destinations come only from render output ─────────────────────────────────────────
 
-test('url-risk.mjs / card-api.mjs / card-destinations.mjs hold no markdown-link regex', () => {
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+test('url-risk.mjs / card-api.mjs / card-destinations.mjs hold no markdown-link, href=, src= or url() extractor', () => {
   for (const f of ['url-risk.mjs', 'card-api.mjs', 'card-destinations.mjs']) {
-    const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+    const src = stripComments(readFileSync(new URL(f, import.meta.url), 'utf8'));
     // a markdown link pattern needs `\]\(` (or `]\(`) inside a regex literal or RegExp string
     assert.ok(!/\\\]\s*\\\(/.test(src) && !/\]\\\(/.test(src), `${f} parses markdown links`);
+    assert.ok(!/\bhref\b/i.test(src) && !/\bsrc\b/i.test(src), `${f} reads href/src out of markup`);
+    assert.ok(!/url\\\(/i.test(src), `${f} extracts CSS url()`);
   }
   assert.match(readFileSync(new URL('card-destinations.mjs', import.meta.url), 'utf8'), /renderCardHTML\(/);
+  assert.match(readFileSync(new URL('card-destinations.mjs', import.meta.url), 'utf8'), /onDestination/);
 });

@@ -208,6 +208,8 @@ export function renderCardHTML(cardMd, ctx = {}) {
     // cardtile-w asks for `data-cell` indices so it can map a box on screen back to a cell in the
     // file; the Worker never sets it, so a served card is byte-identical with the flag absent.
     editIndex: !!ctx.editIndex,
+    // 🔴 CALLER-supplied: the destination registry (see card-render.mjs `attrUrl`). Absent in serving.
+    onDestination: typeof ctx.onDestination === 'function' ? ctx.onDestination : undefined,
     // …and its companion: the words on the two EDIT-ONLY placeholders (a link with no address, a
     // picture cell with no picture). Only meaningful with editIndex; the Worker never sets either.
     editStrings: ctx.editStrings || null,
