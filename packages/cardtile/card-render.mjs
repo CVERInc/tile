@@ -73,11 +73,18 @@ const cssUnescape = (s) => String(s).replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \
   const n = parseInt(hex, 16);
   return n === 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff) ? '�' : String.fromCodePoint(n);
 });
+// 🔴 A value that goes inside url('…') is a CSS-injection surface: esc() is HTML escaping only, so a
+// `'` or `)` in `bg=` closed the url() and let the author open a second one (tile#127 3b). Every
+// url() output point therefore writes `esc(cssAttrUrl(ctx, raw))`, which neutralises quotes, parens,
+// backslashes and whitespace (cssUrl) — exactly ONE url() per value — and registers every spelling
+// that could be fetched: the author's string, its CSS-decoded form, and the string actually written.
 const cssAttrUrl = (ctx, raw) => {
   registerDestination(ctx, raw);
   const decoded = cssUnescape(raw);
   if (decoded !== String(raw)) registerDestination(ctx, decoded);
-  return raw;
+  const written = cssUrl(raw);
+  if (written !== String(raw)) registerDestination(ctx, written);
+  return written;
 };
 // the exact inverse of `esc` (one pass), for a value that had to be escaped before it was matched
 const unesc = (s) => String(s).replace(/&(amp|lt|gt|quot);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"' })[e]);
@@ -1231,7 +1238,7 @@ const FLOATING_INK = [
 // darker than a mid-lightness colour, so NO scrim opacity below 100 makes them safe. Giving them a
 // local shadow is what iOS does for home-screen labels under an arbitrary wallpaper, and it leaves
 // the global scrim answering only for body ink.
-const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${cssUrl(img)}");background-size:cover;background-position:center;background-attachment:fixed}
+const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
 html{scrollbar-gutter:auto}
 .st-wrap,.st-footer{position:relative;z-index:1}
 .st-backdrop::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}%,transparent),color-mix(in srgb,var(--cp-ground,#0a1628) ${Math.min(96, dim + 18)}%,transparent))}
@@ -1394,7 +1401,7 @@ export function renderPage(model, ctx = {}) {
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
   const backdropUrl = resolveAsset(ctx.backdrop, ctx);
   const backdrop = backdropUrl
-    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(attrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
+    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
     : '';
   const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, ctx);
   const css = ctx.css || '';
