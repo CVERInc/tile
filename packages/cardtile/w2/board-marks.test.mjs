@@ -121,7 +121,7 @@ test('🔴 the table walks the SAME host candidates as the card (first URL + dat
     assert.equal(attr(tag, 'data-iconfallback'), attr(cardTag, 'data-iconfallback'), c);
     assert.match(tag, /\/_icon\/www\.instagram\.com\.ico/, c.includes('foo') ? 'site www twin' : 'www twin');
     // when the chain runs out it hides the whole mark container, not just the img (see the test below)
-    assert.match(tag, /else\{this\.onerror=null;\(this\.closest\("\.ct2-face-art--mark"\)\|\|this\)\.style\.display="none"\}/);
+    assert.match(tag.replace(/&quot;/g, '"'), /else\{this\.onerror=null;\(this\.closest\("\.ct2-face-art--mark"\)\|\|this\)\.style\.display="none"\}/);
   }
 });
 
