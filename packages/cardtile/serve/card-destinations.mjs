@@ -21,6 +21,6 @@ const effective = (raw) => {
 /** card markdown → the unique outbound http(s) destinations the served page contains, in render order. */
 export function cardDestinations(cardMd) {
   const out = new Set();
-  renderCardHTML(cardMd, { onDestination: (u) => out.add(effective(u)) });
+  renderCardHTML(cardMd, { destinationBase: 'https://card.invalid/card/', onDestination: (u) => out.add(effective(u)) });
   return [...out];
 }

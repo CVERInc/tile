@@ -53,15 +53,26 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // browser ends up with (an attribute is entity-decoded back to it; <style> text is raw).
 //
 // `ctx.onDestination(url)` is optional — absent, every call below is a no-op that returns its input.
-// Only absolute http(s) and protocol-relative `//host` (registered as https) count; `data:`,
+// Only values that RESOLVE (against the card's address) to an http(s) host other than the card's count; `data:`,
 // in-page `#x` and same-origin paths are not destinations. Every output point goes through
 // `attrUrl` / `cssAttrUrl`; serve/card-webrisk.test.mjs scans a card that uses every feature and
 // fails if a URL appears in the output that the registry did not hear about.
 const registerDestination = (ctx, raw) => {
   if (!ctx || typeof ctx.onDestination !== 'function') return;
-  let u = String(raw == null ? '' : raw).trim();
-  if (u.startsWith('//')) u = 'https:' + u;            // what a browser on the https card resolves
-  if (/^https?:\/\//i.test(u)) ctx.onDestination(u);
+  // 🔴 tile#127 round 5: resolve FIRST, judge after. A literal `http(s)://` filter misses every spelling the
+  // browser still resolves to an external https host (`https:/\\evil.example`, `HTTPS:/\\…`, `//host`).
+  // So every value is run through the WHATWG parser against the card's own address (ctx.destinationBase, else
+  // a fixed placeholder — only there so relative and odd spellings resolve); http(s) with a host other than
+  // the card's is a destination, and what is registered is the RESOLVED href. A parse failure registers
+  // nothing (the browser would not fetch it either); data: / blob: / javascript: / mailto: are not http(s).
+  const base = ctx.destinationBase || `https://card.invalid/${encodeURIComponent(ctx.handle || 'card')}/`;
+  let u;
+  try {
+    const baseUrl = new URL(base);
+    u = new URL(String(raw == null ? '' : raw).replace(/\u0000/g, '\ufffd'), baseUrl);
+    if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.host === baseUrl.host) return;
+  } catch { return; }
+  ctx.onDestination(u.href);
 };
 /** register `raw` and hand it back unchanged (the caller escapes it for its own context). */
 const attrUrl = (ctx, raw) => { registerDestination(ctx, raw); return raw; };
