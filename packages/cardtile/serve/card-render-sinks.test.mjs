@@ -20,8 +20,14 @@ const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s
 //   attribute  : (src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url) = ["']? <literal prefix> ${
 //   css        : url( ["']? ${        @import ["']? ${        background[-image]: … ${
 //   never allowed to appear at all : image-set(
+// 🔴 round 6 (review v5 #2): the attribute branch no longer stops at the first whitespace. ATTR_START finds
+// `src=` / `href=` / …; constructs() then reads the WHOLE value (quoted: to the closing quote, interpolations skipped over
+// as units; bare: to whitespace or `>`), and every `${` inside it is judged — a leading space or newline after the
+// quote (`src=" ${x}"`, which the browser trims and fetches) no longer hides it.
+// NOT SCANNED, on purpose: the inline client script (VIDEO_JS — the click-to-load YouTube iframe). It builds a fixed
+// youtube URL from an encoded id/channel/handle after the visitor clicks; it is renderer code, not an author-chosen destination.
+const ATTR_START = /(?<![\w.-])(?:src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url)\s*=\s*/gi;
 const CONSTRUCT = new RegExp([
-  String.raw`(?<![\w.-])(?:src|href|srcset|data-src|xlink:href|action|formaction|poster|data-url)\s*=\s*["']?[^"'\s>` + '`' + String.raw`]*?\$\{`,
   String.raw`(?<![\w.]|new )url\(\s*["']?\$\{`,
   String.raw`@import\s+["']?\$\{`,
   String.raw`background(?:-image)?\s*:[^;` + '`' + String.raw`]*?\$\{`,
@@ -36,6 +42,7 @@ export const FIXED = [
   ['href="${prev}', 1, 'in-page #anchor of the slider'],
   ['href="${next}', 1, 'in-page #anchor of the slider'],
   ['href="#${uid}', 1, 'in-page #anchor of a slider dot'],
+  ['href="#${uid}-${i}', 1, 'same slider dot: the second interpolation of one in-page #fragment value (round 6 judges every ${} in a value)'],
   ['href="https://feelreef.com/signup${ref}', 1, 'fixed host, handle-derived query only'],
   ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
@@ -66,6 +73,20 @@ export function constructs(src) {
   for (const m of body.matchAll(CONSTRUCT)) {
     const { content, end } = readInterpolation(body, m.index + m[0].length - 2);
     out.push({ text: norm(body.slice(m.index, end)), content, guarded: GUARDED.test(content) });
+  }
+  for (const m of body.matchAll(ATTR_START)) {
+    let i = m.index + m[0].length;
+    const q = body[i] === '"' || body[i] === "'" ? body[i] : '';
+    if (q) i += 1;
+    // walk the value: interpolations are skipped as units (their content may hold quotes), the value ends at its quote
+    for (; i < body.length; i += 1) {
+      const ch = body[i];
+      if (ch === '$' && body[i + 1] === '{') {
+        const { content, end } = readInterpolation(body, i);
+        out.push({ text: norm(body.slice(m.index, end)), content, guarded: GUARDED.test(content) });
+        i = end - 1;
+      } else if (ch === '`' || (q ? ch === q : /[\s>]/.test(ch))) break;
+    }
   }
   if (IMAGE_SET.test(body)) out.push({ text: 'image-set(', content: '', guarded: false });
   return out;
@@ -129,6 +150,19 @@ test('sinks: the guard sees the other URL-bearing spellings — srcset, action, 
   // and a guarded one in the same spellings is accepted
   const ok = SRC + '\nconst fine = (ctx, x) => `<img srcset="${esc(attrUrl(ctx, x))}"><i style="background:url(\'${esc(cssAttrUrl(ctx, x))}\')">`;\n';
   assert.equal(unguardedSinks(ok).length, unguardedSinks(SRC).length);
+});
+
+test('sinks: r6#2 whitespace or a newline between the quote and `${` does not hide a sink (the browser trims it and fetches)', () => {
+  for (const frag of ['<img src=" ${x}">', '<img src="\n${x}">', '<img src=\'\t ${x}\'>', '<a href=" https://a.example/${x}">']) {
+    const planted = SRC + '\nconst leak = (x) => `' + frag + '`;\n';
+    assert.deepEqual(unguardedSinks(planted).slice(unguardedSinks(SRC).length).length, 1, `not reported exactly once: ${frag}`);
+  }
+  // several interpolations in one value are each judged
+  const two = SRC + '\nconst two = (ctx, x, y) => `<a href="${esc(attrUrl(ctx, x))}${y}">`;\n';
+  assert.equal(unguardedSinks(two).length, 1);
+  // and a guarded value behind leading whitespace is accepted
+  const ok = SRC + '\nconst ok = (ctx, x) => `<img src=" ${esc(attrUrl(ctx, x))}">`;\n';
+  assert.deepEqual(unguardedSinks(ok), []);
 });
 
 test('sinks: two constructs on one line are judged one by one', () => {
