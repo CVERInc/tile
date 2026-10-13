@@ -206,7 +206,9 @@ const linkOf = (body) => {
 // That silently broke every backdrop whose url carried a query string (`?alt=media&token=…`), which
 // is every Firebase-hosted image. Also refuses quotes/parens/backslashes and anything that could
 // close the style element early, so a url can never break out into markup.
-const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, encodeURIComponent).replace(/<\/?/g, '');
+// 🔴 NOT `encodeURIComponent` as the replacer: it leaves `' ( ) !` untouched, so `'` and `)` passed
+// straight through and closed a single-quoted url('…') (tile#127 3b). Percent-encode explicitly.
+const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, (c) => ("'()".includes(c) ? '%' + c.charCodeAt(0).toString(16).toUpperCase() : encodeURIComponent(c))).replace(/<\/?/g, '');
 
 // `fallbacks` are tried in order if the first icon fails to load — a 404 otherwise leaves a broken
 // image slot on a creator's card, which is worse than no icon at all. Inline onerror rather than a
