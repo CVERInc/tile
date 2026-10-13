@@ -148,13 +148,61 @@ test('the same destination twice is queried once', async () => {
   assert.deepEqual(s.queried, ['https://dup.example/x']);
 });
 
-test('more than 50 URLs → not checked, allowed, logged', async () => {
+// ── reef#2044 round 2: CSS url() destinations and an enforceable limit ───────────────────────────
+
+const links = (n, extra = []) => [...Array.from({ length: n }, (_, i) => `- [ ] %% card: link w=3 %% [s${i}](https://ok${i}.example/)`), ...extra];
+
+test('r2#1 frontmatter `backdrop:` (plain text cell) — the CSS url() the renderer emits is queried', async () => {
+  const s = stubFetch({ listed: { 'https://bad.example/bg.png': 'MALWARE' } });
+  const md = ['---', 'card-page: t', 'title: T', 'backdrop: https://bad.example/bg.png', '---', '', '## grid', '', '- [ ] hello', ''].join('\n');
+  const r = await save(md, { env: withKey, fetch: s.fn });
+  assert.ok(s.queried.includes('https://bad.example/bg.png'));
+  assert.equal(r.res.status, 422);
+  assert.equal(r.body.url, 'https://bad.example/bg.png');
+  assert.equal(r.store.puts, 0);
+});
+
+test('r2#2 embed bubbles `bg=` — the inline style url() is queried', async () => {
+  const s = stubFetch({ listed: { 'https://bad.example/bubble.jpg': 'SOCIAL_ENGINEERING' } });
+  const r = await save(mk('- [ ] %% card: embed bleed kind=bubbles images="https://i.example/1.png,https://i.example/2.png" bg=https://bad.example/bubble.jpg %%'), { env: withKey, fetch: s.fn });
+  assert.ok(s.queried.includes('https://bad.example/bubble.jpg'));
+  assert.equal(r.res.status, 422);
+  assert.equal(r.store.puts, 0);
+});
+
+test('r2#3 50 benign + a 51st malicious — the 51st is queried and refused', async () => {
+  const s = stubFetch({ listed: { 'https://bad.example/final': 'MALWARE' } });
+  const r = await save(mk(...links(50, ['- [ ] %% card: link w=3 %% [last](https://bad.example/final)'])), { env: withKey, fetch: s.fn });
+  assert.ok(s.queried.includes('https://bad.example/final'));
+  assert.equal(r.res.status, 422);
+  assert.equal(r.store.puts, 0);
+});
+
+test('r2#4 201 destinations → 422 card_too_many_links, zero queries, zero writes', async () => {
   const s = stubFetch();
-  const logs = [];
-  const urls = Array.from({ length: 51 }, (_, i) => `https://u${i}.example/`);
-  assert.equal(await checkUrls(urls, withKey, { fetch: s.fn, log: (l) => logs.push(l) }), null);
-  assert.equal(s.urls.length, 0);
-  assert.equal(logs.length, 1);
+  const r = await save(mk(...links(201)), { env: withKey, fetch: s.fn });
+  assert.equal(r.res.status, 422);
+  assert.equal(r.body.error, 'card_too_many_links');
+  assert.match(r.body.message, /200/);
+  assert.match(r.body.message, /201/);
+  assert.equal(s.queried.length, 0);
+  assert.equal(r.store.puts, 0);
+});
+
+test('r2#5 exactly 200 benign → saved, all 200 queried, at most 10 in flight', async () => {
+  let inflight = 0, peak = 0;
+  const s = stubFetch();
+  const fn = async (...a) => { inflight++; peak = Math.max(peak, inflight); try { await new Promise((r) => setTimeout(r, 2)); return await s.fn(...a); } finally { inflight--; } };
+  const r = await save(mk(...links(200)), { env: withKey, fetch: fn });
+  assert.equal(r.res.status, 200);
+  assert.equal(r.store.puts, 1);
+  assert.equal(s.queried.length, 200);
+  assert.ok(peak <= 10, `peak in flight ${peak}`);
+});
+
+test('r2#6 no key with 201 destinations → still saved unchecked (fail-open unchanged)', async () => {
+  const r = await save(mk(...links(201)), { fetch: stubFetch().fn });
+  assert.equal(r.res.status, 200);
 });
 
 // ── structure: destinations come only from render output ─────────────────────────────────────────
