@@ -274,10 +274,8 @@ test('every external URL in a feature-complete card\'s render was registered by 
   const html = renderCardHTML(md, {});
   const registered = new Set(cardDestinations(md));
   const NOT_FETCHED = new Set(['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink']);   // XML namespaces
-  // The click-to-load player script's own constants (renderer text, not author input; the video id is
-  // constrained to [\w-]). They are not author-supplied destinations, so the registry rightly omits them.
-  const RENDERER_CONSTANT = { test: (u) => ['https://www.youtube.com/', 'https://www.youtube-nocookie.com/embed/', 'https://www.youtube-nocookie.com/embed/videoseries?list=UU'].includes(u) };
-  const seen = new Set((html.match(/https?:\/\/[^"' )]+/g) || []).map((u) => u.replace(/&amp;/g, '&').replace(/&quot;.*$/, '')).filter((u) => !NOT_FETCHED.has(u) && !RENDERER_CONSTANT.test(u)));
+  // Inline <script> text is renderer code (the click-to-load player's constants), never author input.
+  const seen = new Set((html.replace(/<script[\s\S]*?<\/script>/g, '').match(/https?:\/\/[^"' )]+/g) || []).map((u) => u.replace(/&amp;/g, '&').replace(/&quot;.*$/, '')).filter((u) => !NOT_FETCHED.has(u)));
   assert.ok(seen.size >= 15, `the scan must have something to scan (saw ${seen.size})`);
   const missing = [...seen].filter((u) => !registered.has(u));
   assert.deepEqual(missing, [], 'rendered but never registered by the renderer');
