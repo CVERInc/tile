@@ -84,7 +84,10 @@ test('🔴 the shared default is actually USED, in every view that can need one'
   // So the precise rule is the first test (no literal fallbacks anywhere). This one guards the
   // other direction: the constant must still be reaching real views, or a future refactor could
   // delete every use and leave test one passing over a codebase that sets no lang at all.
-  const users = sources.filter((p) => /DEFAULT_LANG/.test(readFileSync(p, 'utf8')))
+  // 🩸 CVERInc/reef#1868: the system pages (preview, search, tag routes) take it through
+  // `systemPageLang()` in lib/blog.mjs — which itself names DEFAULT_LANG — instead of each carrying
+  // `meta.lang || DEFAULT_LANG`. Using the helper IS using the shared default, so both count.
+  const users = sources.filter((p) => /DEFAULT_LANG|systemPageLang\(/.test(readFileSync(p, 'utf8')))
     .map((p) => relative(SRC, p))
     .filter((p) => !p.endsWith('locale.mjs'));
   assert.ok(users.length >= 10, `DEFAULT_LANG should reach the whole view family, found ${users.length}: ${users.join(', ')}`);
