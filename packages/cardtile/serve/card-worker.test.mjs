@@ -194,6 +194,13 @@ test('bubbles: the narrow-screen anchor is read from `narrow=`, and from the `or
   assert.equal(narrowOf('narrow="40% 20%"'), '40% 20%');
   assert.equal(narrowOf('origin-narrow="40% 20%"'), '40% 20%');
   assert.equal(narrowOf('origin-narrow="40% 20%" narrow="10% 10%"'), '10% 10%', '`narrow=` is the name; it wins when both are written');
+  // 🔴 #1929: the OTHER written order. The precedence is by NAME, never by position on the line —
+  // `narrow=` wins whichever side of `origin-narrow=` it is written, and that is DELIBERATE:
+  // `origin-narrow=` is the legacy spelling (read only so old cards keep their anchor), so a card
+  // that carries both has been edited since, and the edit is the named one. A reader who sees the
+  // anchor go from 40% 20% to 10% 10% is seeing the rule, not a bug. The test above wrote only one order.
+  assert.equal(narrowOf('narrow="10% 10%" origin-narrow="40% 20%"'), '10% 10%', 'narrow= wins when it is written FIRST too (by name, not by position)');
+  assert.equal(narrowOf('narrow="" origin-narrow="40% 20%"'), '40% 20%', 'an empty narrow= is not a value: the legacy spelling still answers');
   // …and `origin-narrow=` is not `origin=`: the wide-screen anchor stays the default.
   assert.match(renderCardHTML(card('origin-narrow="40% 20%"'), { handle: 'x' }), /opacity:0;transform-origin:53% 76%/);
 });
