@@ -33,6 +33,9 @@ workers_dev = true
 
 [vars]
 PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outrank the real card)
+# CARD_NOINDEX_ALL = "1"  # kill switch (reef#2044): uncomment/set to put `X-Robots-Tag: noindex` on EVERY
+#                         # card response, vanity hosts included. Default off. Per-environment: set it under
+#                         # [env.production.vars] too. Remove it (or "0") to resume indexing.
 
 # handle → card.md store. Create it once (see the header) and paste its id here.
 [[kv_namespaces]]

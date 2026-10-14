@@ -23,7 +23,7 @@ import { shareTags } from '../card-share.mjs';
 const ytFetch = (u) => fetch(u, {
   cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
 });
-import { ICON_DOMAIN_RE, iconUpstream } from '../marks.mjs';
+import { ICON_DOMAIN_RE, iconUpstreams } from '../marks.mjs';
 // Image types the /_icon/ and /_yt/ proxies will relay. SVG is deliberately absent (it can carry script).
 const PROXY_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon']);
 /** the normalised allowed type of an upstream content-type header, or null */
@@ -32,14 +32,21 @@ function allowedImageType(header) {
   return PROXY_IMAGE_TYPES.has(t) ? t : null;
 }
 const NOT_RELAYED = () => new Response('', { status: 404, headers: { 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' } });
-/** /_icon/ and /_yt/: cache-first, upstream only on a miss, store only what passed allowedImageType */
-async function relayImage(request, ctx, upstreamUrl, maxAge) {
+/** /_icon/ and /_yt/: cache-first, upstream only on a miss, store only what passed allowedImageType.
+ *  `upstreams` is one fixed address or an ordered list (reef#2026: DuckDuckGo, then Google) — a miss or a
+ *  network error on one is the same as a 404: ask the next. An ANSWER whose type we do not relay ends it
+ *  (r9: one upstream call per rejected request — the rejection is a 404, never a second fetch). */
+async function relayImage(request, ctx, upstreams, maxAge) {
   const cache = globalThis.caches && globalThis.caches.default;
   const key = new Request(request.url, { method: 'GET' });
   if (cache) { const hit = await cache.match(key).catch(() => null); if (hit) return hit; }
-  const up = await fetch(upstreamUrl).catch(() => null);
+  let up = null;
+  for (const upstreamUrl of [].concat(upstreams)) {
+    const r = await fetch(upstreamUrl).catch(() => null);
+    if (r && r.ok) { up = r; break; }
+  }
   // A missing mark/poster is not an error — the card's own fallback chain takes over.
-  if (!up || !up.ok) return NOT_RELAYED();
+  if (!up) return NOT_RELAYED();
   const type = allowedImageType(up.headers.get('content-type'));
   if (!type) return NOT_RELAYED();
   const resp = new Response(up.body, {
@@ -250,6 +257,11 @@ export function renderCardHTML(cardMd, ctx = {}) {
 // card it previews, so letting search engines index both splits the ranking between them — and for
 // an ingest DEMO (a creator's page rebuilt to show them what it'd look like here) an indexed copy
 // would compete with that creator's own live page. Production sets PREVIEW=false in its vars.
+// reef#2044 ⑤ — site-wide kill switch. CARD_NOINDEX_ALL=1 (or "true") puts `X-Robots-Tag: noindex` on
+// EVERY card response of the deployment, vanity hosts included; unset/anything else = off. It is a
+// deployment-wide valve (Search Console warns → flip it the same day); it is NOT a per-card state.
+export const noindexAll = (env) => !!env && /^(1|true)$/i.test(String(env.CARD_NOINDEX_ALL ?? '').trim());
+
 const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 
 // 🔴 A DEMO of somebody else's page is never indexed, on ANY deployment.
@@ -263,6 +275,9 @@ const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 // So the noindex follows the HANDLE, not the deployment. `demo-` is a reserved prefix.
 const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 
+const ROBOTS_HEADERS = (env, handle, isVanity) =>
+  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {};
+
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
 // One URL now answers with two different bodies depending on Accept, and the edge caches for 60s.
@@ -270,16 +285,17 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // for up to a minute, at random. Putting it only on the markdown response is the version that looks
 // right and still breaks — the HTML response is the one that gets cached first, because that is what
 // people request.
-const CARD_HEADERS = (env, handle) => ({
+const CARD_HEADERS = (env, handle, isVanity) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
-  ...(isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
+  // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
+  ...ROBOTS_HEADERS(env, handle, isVanity),
 });
 
-const html = (body, status = 200, env = null, handle = '') =>
+const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity) },
   });
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
@@ -294,7 +310,7 @@ const html = (body, status = 200, env = null, handle = '') =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle }) =>
+const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -302,7 +318,7 @@ const markdown = (body, { env, originalLength, alternate, handle }) =>
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
-      ...CARD_HEADERS(env, handle),
+      ...CARD_HEADERS(env, handle, isVanity),
     },
   });
 
@@ -433,7 +449,7 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 </body></html>`;
 }
 
-export default {
+const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
@@ -613,6 +629,7 @@ export default {
     // The cache key is the DOMAIN, so every card pointing at instagram.com shares one upstream
     // fetch — cost scales with distinct brands, not with cards. And the mark still comes from the
     // brand, so it still cannot go stale: that is the property a bundled icon set would have cost us.
+    // (reef#2026: external marks are never stored on our side, and never swapped for a built-in one.)
     const icm = /^\/_icon\/([^/]+)\.ico$/.exec(url.pathname);
     if (icm) {
       const domain = decodeURIComponent(icm[1]).toLowerCase();
@@ -622,7 +639,8 @@ export default {
       // 🔴 r9: we do NOT ask the edge to cache the upstream answer (cf.cacheTtl* would keep an
       // UNVALIDATED 200 — a transient text/html — for a week). Only a response that passed the MIME check
       // is stored, in caches.default, under this request's URL. A miss/5xx/rejected answer is never kept.
-      return relayImage(request, ctx, iconUpstream(domain), 604800);
+      // Two stages, in order, both fixed addresses (reef#2026): DuckDuckGo, then Google; only when both miss is it a 404.
+      return relayImage(request, ctx, iconUpstreams(domain), 604800);
     }
 
     const ytm = /^\/_yt\/([A-Za-z0-9_-]+)\.jpg$/.exec(url.pathname);
@@ -651,26 +669,41 @@ export default {
     const store = env && env.CARDS;
     if (!store) return html('<!doctype html><meta charset=utf-8><p>card store not bound</p>', 500, env);
 
-    // AT MOST ONE extra read per request, and the two branches are mutually exclusive:
+    // Vanity routing uses the forward binding here or the inverse below:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);
 
-    // Is this path the card at all? Decided BEFORE the card is read — a path that is nothing costs
-    // no store read and no render. See cardPath.
+    // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
+    // Card exits read the body and stop marker in parallel before any exit or redirect.
     const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
-    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle);
+    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
+    const [cardMd, stopped] = await Promise.all([
+      store.get(resolved.handle),
+      store.get(`stop:${resolved.handle}`),
+    ]);
+    if (stopped != null) {
+      return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
+        status: 404,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow',
+          Vary: 'Accept',
+        },
+      });
+    }
+
     if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
     // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
     if (want === 'ico' || want === 'svg' || want === 'apple') {
-      const iconMd = await store.get(resolved.handle);
-      if (!iconMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60' } });
-      const file = await iconFile(want, parseCard(iconMd),
-        { name: cardName(iconMd, resolved.handle), accent: frontmatter(iconMd, 'accent') });
+      if (!cardMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle) } });
+      const file = await iconFile(want, parseCard(cardMd),
+        { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
       return new Response(file.body, {
         headers: {
           'Content-Type': file.type,
@@ -679,6 +712,7 @@ export default {
           'Cache-Control': 'public, max-age=3600',
           // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
           'X-Content-Type-Options': 'nosniff',
+          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle),
         },
       });
     }
@@ -697,13 +731,12 @@ export default {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
-    const cardMd = await store.get(resolved.handle);
-    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env);
+    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env, resolved.handle, !!vanityHandle);
 
     // the download link, in the form this host actually uses
     const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -711,7 +744,7 @@ export default {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -725,6 +758,25 @@ export default {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle);
+  },
+};
+
+// reef#2044 ⑤ — ONE wrapper around EVERY exit. The kill switch used to be threaded into individual
+// response builders, which is how the 301s (canonical↔vanity, /try/edit2) and the icon/asset 404s
+// were missed. Whatever `router` returns — new Response, Response.redirect, a future exit nobody has
+// written yet — gets the header here when the switch is on. A stricter header already set by the
+// route (`noindex, nofollow`) is never weakened. Response.redirect() headers are immutable, so the
+// response is rebuilt rather than mutated.
+export const withNoindexAll = (res, env) => {
+  if (!noindexAll(env) || res.headers.has('X-Robots-Tag')) return res;
+  const headers = new Headers(res.headers);
+  headers.set('X-Robots-Tag', 'noindex');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+};
+
+export default {
+  async fetch(request, env, ctx) {
+    return withNoindexAll(await router.fetch(request, env, ctx), env);
   },
 };

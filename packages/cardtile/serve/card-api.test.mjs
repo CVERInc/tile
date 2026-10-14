@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleApi, previewKey, PREVIEW_TTL, _internal } from './card-api.mjs';
+import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
 
@@ -52,6 +53,7 @@ const fakeKv = (seed = {}) => {
     _ttl: new Map(),
     async get(k) { return m.has(k) ? m.get(k) : null; },
     async put(k, v, opts) { m.set(k, v); if (opts?.expirationTtl) this._ttl.set(k, opts.expirationTtl); },
+    async delete(k) { m.delete(k); },
   };
 };
 
@@ -132,6 +134,168 @@ test('get_card on a handle with no card → 404, and a bad handle → 400', asyn
   const env = envWith({ t: CARD });
   assert.equal((await call(env, 'GET', '/_api/card/nobody')).status, 404);
   assert.equal((await call(env, 'GET', '/_api/card/' + encodeURIComponent('bad handle!'))).status, 400);
+});
+
+// ── full owner read ───────────────────────────────────────────────────────────────────────────────
+
+test('full owner read returns the stored bytes, identical to the public fat markdown', async () => {
+  for (const md of [CARD, HAND_TYPED.replace('hello', 'hello 🐚').replace(/\n/g, '\r\n')]) {
+    const env = envWith({ t: md });
+    const publicRes = await worker.fetch(new Request('https://card.example/t.md'), env);
+    assert.equal(publicRes.status, 200);
+    const publicBytes = Buffer.from(await publicRes.arrayBuffer());
+    assert.deepEqual(publicBytes, Buffer.from(md));
+    const res = await call(env, 'GET', '/_api/card/t/full');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), publicBytes);
+  }
+});
+
+test('a serving stop leaves the full owner read available with the same bytes', async () => {
+  const env = envWith({ t: CARD });
+  const publicRes = await worker.fetch(new Request('https://card.example/t.md'), env);
+  assert.equal(publicRes.status, 200);
+  const publicBytes = Buffer.from(await publicRes.arrayBuffer());
+  for (const marker of ['', JSON.stringify({ reason: 'Review requested' })]) {
+    env.CARDS._m.set('stop:t', marker);
+    assert.equal((await worker.fetch(new Request('https://card.example/t.md'), env)).status, 404);
+    const res = await call(env, 'GET', '/_api/card/t/full');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), publicBytes);
+    assert.deepEqual([...env.CARDS._m], [['t', CARD], ['stop:t', marker]]);
+  }
+});
+
+test('full owner read uses the existing bearer guard, including an authorized control', async () => {
+  const env = envWith({ t: CARD, 'stop:t': '' });
+  const missing = await call(env, 'GET', '/_api/card/t/full', null, null);
+  const wrong = await call(env, 'GET', '/_api/card/t/full', null, 'wrong');
+  assert.equal(missing.status, 401);
+  assert.equal(wrong.status, 401);
+  assert.deepEqual(await missing.json(), await wrong.json());
+  assert.equal((await call({ ...env, MCP_TOKEN_HASH: null }, 'GET', '/_api/card/t/full')).status, 503);
+  const res = await call(env, 'GET', '/_api/card/t/full');
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), CARD);
+});
+
+test('full owner read with no card returns the neighbouring routes\' JSON error', async () => {
+  const env = envWith({ 'stop:t': '' });
+  const res = await call(env, 'GET', '/_api/card/t/full');
+  assert.equal(res.status, 404);
+  assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await res.json(), { error: 'No card at "t".' });
+  env.CARDS._m.set('t', CARD);
+  assert.equal((await call(env, 'GET', '/_api/card/t/full')).status, 200);
+});
+
+test('full owner read refuses other methods without changing the stored card or stop', async () => {
+  const env = envWith({ t: CARD, 'stop:t': '' });
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']) {
+    const res = await call(env, method, '/_api/card/t/full');
+    assert.equal(res.status, 405, method);
+    assert.deepEqual(await res.json(), { error: `${method} not allowed here.` });
+  }
+  assert.deepEqual([...env.CARDS._m], [['t', CARD], ['stop:t', '']]);
+  assert.equal((await call(env, 'GET', '/_api/card/t/full')).status, 200);
+});
+
+test('full owner read refuses bad handles before touching the store', async () => {
+  const env = envWith({ t: CARD }), reads = [];
+  const get = env.CARDS.get.bind(env.CARDS);
+  env.CARDS.get = async (k) => { reads.push(k); return get(k); };
+  for (const handle of ['', '-t', 'bad%20handle', 'bad%2Fhandle', '%ZZ', 't'.repeat(64)]) {
+    const res = await call(env, 'GET', `/_api/card/${handle}/full`);
+    assert.equal(res.status, 400, handle);
+    assert.deepEqual(await res.json(), { error: `Bad handle ${JSON.stringify(handle)}.` });
+  }
+  assert.deepEqual(reads, []);
+  const res = await call(env, 'GET', '/_api/card/%54/full');
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), CARD);
+  assert.deepEqual(reads, ['t']);
+});
+
+// ── serving stop ─────────────────────────────────────────────────────────────────────────────────
+
+test('stop and resume only set and clear the marker, with or without a card body', async () => {
+  for (const hasCard of [true, false]) {
+    const seed = {
+      ...(hasCard ? { t: CARD } : {}),
+      'vanity:card.example': 't', 'vanityof:t': 'card.example',
+    };
+    const env = envWith(seed);
+    const writes = [], deletes = [];
+    const put = env.CARDS.put.bind(env.CARDS);
+    env.CARDS.get = async () => { throw new Error('stop must never read the card body'); };
+    env.CARDS.put = async (k, v, opts) => { writes.push(k); await put(k, v, opts); };
+    env.CARDS.delete = async (k) => { deletes.push(k); env.CARDS._m.delete(k); };
+    const reason = hasCard ? 'Review requested' : '';
+    const stopped = await call(env, 'PUT', '/_api/card/T/stop', hasCard ? { reason } : undefined);
+    assert.equal(stopped.status, 200);
+    assert.deepEqual(await stopped.json(), { handle: 't', stopped: true });
+    const marker = JSON.parse(env.CARDS._m.get('stop:t'));
+    assert.deepEqual(Object.keys(marker).sort(), ['reason', 'stopped_at']);
+    assert.equal(marker.reason, reason);
+    assert.equal(new Date(marker.stopped_at).toISOString(), marker.stopped_at);
+    assert.deepEqual(writes, ['stop:t']);
+    assert.deepEqual([...env.CARDS._m].filter(([k]) => k !== 'stop:t'), Object.entries(seed));
+    for (let i = 0; i < 2; i++) {
+      const resumed = await call(env, 'DELETE', '/_api/card/t/stop');
+      assert.equal(resumed.status, 200);
+      assert.deepEqual(await resumed.json(), { handle: 't', stopped: false });
+      assert.equal(env.CARDS._m.has('stop:t'), false);
+    }
+    assert.deepEqual(deletes, ['stop:t', 'stop:t']);
+    assert.deepEqual([...env.CARDS._m], Object.entries(seed));
+  }
+});
+
+test('stop and resume use the existing bearer guard, including an authorized control', async () => {
+  for (const method of ['PUT', 'DELETE']) {
+    const env = envWith({ t: CARD, 'stop:t': '{"reason":"Review requested"}' });
+    const before = [...env.CARDS._m];
+    const missing = await call(env, method, '/_api/card/t/stop', null, null);
+    const wrong = await call(env, method, '/_api/card/t/stop', null, 'wrong');
+    assert.equal(missing.status, 401);
+    assert.equal(wrong.status, 401);
+    assert.deepEqual(await missing.json(), await wrong.json());
+    assert.equal((await call({ ...env, MCP_TOKEN_HASH: null }, method, '/_api/card/t/stop')).status, 503);
+    assert.deepEqual([...env.CARDS._m], before, 'a refused serving action changed the store');
+    assert.equal((await call(env, method, '/_api/card/t/stop')).status, 200);
+    assert.equal(env.CARDS._m.has('stop:t'), method === 'PUT');
+    assert.equal(env.CARDS._m.get('t'), CARD);
+  }
+});
+
+test('the stop path refuses other methods and leaves unrelated endpoints unknown', async () => {
+  const env = envWith({ t: CARD });
+  for (const method of ['GET', 'POST', 'PATCH', 'HEAD', 'OPTIONS']) {
+    assert.equal((await call(env, method, '/_api/card/t/stop')).status, 405, method);
+  }
+  for (const path of ['/_api/card/t/stopped', '/_api/card/t/stop/extra', '/_api/whatever']) {
+    const res = await call(env, 'PUT', path);
+    assert.equal(res.status, 404, path);
+    assert.deepEqual(await res.json(), { error: `No such endpoint: ${path}` });
+  }
+  assert.deepEqual([...env.CARDS._m], [['t', CARD]]);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/stop')).status, 200);
+});
+
+test('stop and resume refuse bad handles before touching the store', async () => {
+  const env = envWith({ t: CARD });
+  for (const handle of ['', '-t', 'bad%20handle', 'bad%2Fhandle', '%ZZ', 't'.repeat(64)]) {
+    for (const method of ['PUT', 'DELETE']) {
+      assert.equal((await call(env, method, `/_api/card/${handle}/stop`)).status, 400, `${method} ${handle}`);
+    }
+  }
+  assert.deepEqual([...env.CARDS._m], [['t', CARD]]);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/stop')).status, 200);
 });
 
 // ── save_card ────────────────────────────────────────────────────────────────────────────────────

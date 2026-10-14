@@ -1116,3 +1116,185 @@ test('CONTROL: the untouchable store really does throw when the Worker reads a c
   await worker.fetch(new Request('https://card.feelreef.com/somebody'), env).catch(() => {});
   assert.ok(touched.length > 0, 'the store double is not bound where the Worker reads cards');
 });
+
+// ── indexing and serving stop ─────────────────────────────────────────────────────────────────────
+
+const SERVING_CARD = [
+  '---', 'card-page: t', 'title: Test Card', '---', '', '## grid', '',
+  '- [ ] %% card: profile w=6 avatar="asset:pic" %% A public bio',
+  '', '## assets', '',
+  '- [ ] %% card: asset id=pic mime=image/gif %% R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+  '',
+].join('\n');
+
+function servingRequests(host, handle = 't', vanity = false) {
+  const origin = `https://${host}`, base = vanity ? '' : `/${handle}`;
+  const page = origin + (base || '/');
+  return [
+    [page, {}],
+    [page, { headers: { accept: 'text/markdown' } }],
+    [origin + (vanity ? '/index.md' : `/${handle}.md`), {}],
+    ...['favicon.ico', 'favicon.svg', 'apple-touch-icon.png'].map((file) => [`${origin}${base}/${file}`, {}]),
+    ...(vanity ? [[`${origin}/${handle}.md`, {}]] : []),
+  ];
+}
+
+const responseBytes = async (res) => ({
+  status: res.status, headers: [...res.headers], body: Buffer.from(await res.arrayBuffer()),
+});
+
+test('production Cards on canonical, fallback and unbound hosts carry noindex on every representation', async () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'unbound.example']) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }) };
+    for (const [url, init] of servingRequests(host)) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 200, url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+      const icon = /\.(ico|svg|png)$/.test(url);
+      assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
+      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+    }
+  }
+});
+
+test('a bound vanity Card stays indexable, while preview and demo Cards include noindex on icons too', async () => {
+  for (const [handle, preview, robots] of [
+    ['t', 'false', null], ['demo-t', 'false', 'noindex, nofollow'],
+    ['t', 'true', 'noindex, nofollow'], ['t', undefined, 'noindex, nofollow'],
+  ]) {
+    const env = { PREVIEW: preview, CARDS: recordingStore({ [handle]: SERVING_CARD, 'vanity:card.example': handle }) };
+    for (const [url, init] of servingRequests('card.example', handle, true)) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 200, url);
+      assert.equal(res.headers.get('x-robots-tag'), robots, `${handle} ${preview} ${url}`);
+      const icon = /\.(ico|svg|png)$/.test(url);
+      assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
+      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+    }
+  }
+});
+
+test('Card not-found pages and missing icons carry the same host-aware noindex rule', async () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'unbound.example']) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore() };
+    for (const [url, init] of [...servingRequests(host, 'missing'), [`https://${host}/t/nothing`, {}], [`https://${host}/`, {}]]) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 404, url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+      assert.equal(res.headers.get('cache-control'), 'public, max-age=60', url);
+    }
+  }
+  for (const handle of ['missing', 'demo-missing']) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ 'vanity:card.example': handle }) };
+    for (const [url, init] of [...servingRequests('card.example', handle, true), ['https://card.example/nothing', {}]]) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 404, url);
+      assert.equal(res.headers.get('x-robots-tag'), handle === 'missing' ? null : 'noindex, nofollow', url);
+    }
+  }
+});
+
+test('stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes', async () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'unbound.example', 'card.example']) {
+    const vanity = host === 'card.example';
+    const seed = { t: SERVING_CARD, ...(vanity ? { 'vanity:card.example': 't' } : {}) };
+    const store = recordingStore(seed), deletes = [];
+    store.delete = async (k) => { deletes.push(k); store.kv.delete(k); };
+    const env = { PREVIEW: 'false', CARDS: store };
+    const requests = servingRequests(host, 't', vanity), before = [];
+    for (const [url, init] of requests) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 200, url);
+      before.push(await responseBytes(res));
+    }
+    assert.notDeepEqual(before[1].body, before[2].body, 'thin and fat fixtures must differ');
+    const marker = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
+    store.kv.set('stop:t', marker);
+    for (const [url, init] of requests) {
+      const res = await worker.fetch(new Request(url, init), env);
+      assert.equal(res.status, 404, url);
+      assert.equal(res.headers.get('cache-control'), 'no-store', url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+      const body = await res.text();
+      assert.match(body, /<p>This Card is unavailable\.<\/p>/, url);
+      assert.doesNotMatch(body, /Test Card|A public bio|Review requested|R0lGODlh/, url);
+    }
+    assert.equal(store.kv.get('stop:t'), marker, 'the Worker changed the serving marker');
+    store.kv.delete('stop:t');
+    for (let i = 0; i < requests.length; i++) {
+      const [url, init] = requests[i];
+      assert.deepEqual(await responseBytes(await worker.fetch(new Request(url, init), env)), before[i], url);
+    }
+    assert.deepEqual(store.puts, [], 'the Worker wrote to the store');
+    assert.deepEqual(deletes, [], 'the Worker deleted from the store');
+    assert.deepEqual([...store.kv], Object.entries(seed));
+  }
+});
+
+test('the card body and stop marker reads start in parallel for pages, markdown and icons', async () => {
+  for (const host of ['card.feelreef.com', 'card.example']) {
+    for (const [url, init] of servingRequests(host, 't', host === 'card.example')) {
+      const reads = [];
+      let releaseCard, releaseStop;
+      const cardRead = new Promise((resolve) => { releaseCard = resolve; });
+      const stopRead = new Promise((resolve) => { releaseStop = resolve; });
+      const store = { get: async (k) => {
+        reads.push(k);
+        if (k === 't') return cardRead;
+        if (k === 'stop:t') return stopRead;
+        return k === 'vanity:card.example' ? 't' : null;
+      } };
+      const pending = worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: store });
+      await new Promise((resolve) => setImmediate(resolve));
+      const started = [...reads];
+      releaseCard(SERVING_CARD);
+      releaseStop(null);
+      assert.equal((await pending).status, 200, url);
+      assert.ok(started.includes('t'), `${url}: the body read waited for the marker`);
+      assert.ok(started.includes('stop:t'), `${url}: the marker read waited for the body`);
+      assert.equal(reads.filter((k) => k === 't').length, 1, url);
+      assert.equal(reads.filter((k) => k === 'stop:t').length, 1, url);
+    }
+  }
+});
+
+test('an unknown path under a stopped handle returns Nothing here without any store read', async () => {
+  const store = recordingStore({ t: SERVING_CARD, 'stop:t': '' }), reads = [];
+  const get = store.get;
+  store.get = async (k) => { reads.push(k); return get(k); };
+  const res = await worker.fetch(new Request('https://card.feelreef.com/t/nothing'), { PREVIEW: 'false', CARDS: store });
+  assert.deepEqual(reads, []);
+  assert.equal(res.status, 404);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=60');
+  assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.equal(res.headers.get('vary'), 'Accept');
+  assert.match(await res.text(), /<p>Nothing here\.<\/p>/);
+});
+
+test('stop takes precedence over redirects and missing cards, and resume preserves their responses', async () => {
+  const store = recordingStore({
+    t: SERVING_CARD, 'vanity:card.example': 't', 'vanityof:t': 'card.example',
+    'vanity:missing.example': 'missing',
+  });
+  const env = { PREVIEW: 'false', CARDS: store };
+  for (const [url, handle, status] of [
+    ['https://card.feelreef.com/t?lang=en', 't', 301],
+    ['https://card.example/t?lang=en', 't', 301],
+    ['https://missing.example/', 'missing', 404],
+    ['https://card.feelreef.com/missing', 'missing', 404],
+    ['https://card.feelreef.com/missing/favicon.ico', 'missing', 404],
+  ]) {
+    const before = await responseBytes(await worker.fetch(new Request(url), env));
+    assert.equal(before.status, status, url);
+    if (status === 301) assert.equal(new Map(before.headers).get('location'), 'https://card.example/?lang=en');
+    store.kv.set(`stop:${handle}`, '');
+    const res = await worker.fetch(new Request(url), env);
+    assert.equal(res.status, 404, url);
+    assert.equal(res.headers.get('cache-control'), 'no-store', url);
+    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+    assert.match(await res.text(), /<p>This Card is unavailable\.<\/p>/, url);
+    store.kv.delete(`stop:${handle}`);
+    assert.deepEqual(await responseBytes(await worker.fetch(new Request(url), env)), before, url);
+  }
+  assert.deepEqual(store.puts, []);
+});
