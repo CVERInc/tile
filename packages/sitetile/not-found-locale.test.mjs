@@ -486,6 +486,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
         assert.equal(htmlLang(pages[rel]), 'en', rel);
         assert.deepEqual([...new Set(inLanguage(pages[rel]))].filter((l) => l !== 'en'), [], rel);
+        assert.ok(langLinks(pages[rel]).length >= 1, `${rel}: no Language link — the fixture stopped exercising it`);
         for (const href of langLinks(pages[rel])) assert.match(href, /^\/language\?return=/, `${rel}: ${href}`);
       }
     });
@@ -495,6 +496,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       for (const rel of ['ja-jp/devlog/index.html', 'ja-jp/devlog/p1/index.html', 'ja-jp/tag/crane/index.html']) {
         assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
         assert.equal(htmlLang(pages[rel]), 'ja', rel);   // the attribute form of ja-JP
+        assert.ok(langLinks(pages[rel]).length >= 1, `${rel}: no Language link — the fixture stopped exercising it`);
         for (const href of langLinks(pages[rel])) assert.match(href, /^\/ja-jp\/language\?return=/, `${rel}: ${href}`);
       }
     });
