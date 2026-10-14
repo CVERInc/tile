@@ -52,7 +52,11 @@ export const posterPath = (videoId) => `/_yt/${videoId}.jpg`;
  */
 export function channelsIn(cardMd) {
   const out = new Set();
-  for (const m of String(cardMd || '').matchAll(/\bchannel\s*=\s*"?(@?[A-Za-z0-9_.-]+)"?/g)) {
+  // 🔴 #1929: `channel` must be a param NAME read whole, as parseParams reads it (`\w[\w-]*`; a hyphen
+  // run BEFORE the first word character is not part of the name, so `--channel=` is `channel`). The
+  // lookbehind refuses a word character, with or without hyphens after it, directly before `channel`:
+  // `yt-channel=`, `a--channel=`, `x_channel=` are other names, and a plain \b would have read them.
+  for (const m of String(cardMd || '').matchAll(/(?<!\w-*)channel\s*=\s*"?(@?[A-Za-z0-9_.-]+)"?/g)) {
     if (isChannelRef(m[1])) out.add(m[1]);
   }
   return [...out];
