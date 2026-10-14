@@ -208,3 +208,19 @@ test('render: a handle card plays the resolved uploads playlist; unresolved, its
   assert.doesNotMatch(degraded, /data-yt-channel="/, 'a handle must never be turned into list=UU…');
   assert.doesNotMatch(degraded, /i\.ytimg\.com/);
 });
+
+test('🔴 #1929: channelsIn reads a NAME whole — `yt-channel=` is not `channel=` (the renderer already says so)', () => {
+  // The renderer reads `yt-channel=` as the key `yt-channel` (parseParams takes a name whole), so
+  // `p.channel` is unset and the card draws no channel video. channelsIn used to run \bchannel=
+  // over the raw text, where `-` is a word boundary: the Worker made an upstream request for a
+  // reference the card never uses.
+  assert.deepEqual(channelsIn(`- [ ] %% card: video yt-channel="${CH}" %% x`), [], 'hyphenated prefix');
+  assert.deepEqual(channelsIn(`- [ ] %% card: video my-yt-channel=${HANDLE} %% x`), [], 'two hyphens deep');
+  assert.deepEqual(channelsIn(`- [ ] %% card: video x_channel=${CH} %% x`), [], 'underscore prefix');
+  assert.deepEqual(channelsIn(`- [ ] %% card: video a--channel=${CH} %% x`), [], 'word, then a run of hyphens');
+  // CONTROLS: the plain spellings still resolve, and so does a leading `--` (parseParams drops a
+  // hyphen run BEFORE the first word character: `--wide=1` is `wide`).
+  assert.deepEqual(channelsIn(`- [ ] %% card: video channel="${CH}" %% x`), [CH]);
+  assert.deepEqual(channelsIn(`%% card: video --channel=${HANDLE} %%`), [HANDLE]);
+  assert.deepEqual(channelsIn(`%% card: video yt-channel="${CH}" channel=${HANDLE} %%`), [HANDLE], 'the real one beside the decoy');
+});

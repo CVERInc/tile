@@ -397,6 +397,7 @@ function renderEmbed(p, body, size, ctx = {}) {
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
     const cycle = n * hold;
     const origin = cssPos(p.origin, '53% 76%');
+    // #1929: `narrow=` (the name) beats the legacy `origin-narrow=` by NAME, not by order on the line — deliberate.
     const originNarrow = cssPos(p.narrow || p['origin-narrow'], '53% 33%');
     // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
     // this figure's slot, popped in 3% after the slot opens until 3% before it closes.

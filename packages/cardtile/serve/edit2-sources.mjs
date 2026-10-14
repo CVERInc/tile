@@ -14,60 +14,22 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
-/** every file whose bytes end up inside edit2-assets.mjs, relative to serve/ */
-export const EDIT2_SOURCES = [
-  '../w2/index.html',
-  '../w2/edit2.css',
-  '../w2/porch-tokens.css',
-  '../w2/porch-fonts.css',
-  '../w2/fonts/NunitoVariable-latin.woff2',
-  '../w2/fonts/NunitoVariable-latin-ext.woff2',
-  '../w2/fonts/YoungSerif-latin.woff2',
-  '../w2/fonts/YoungSerif-latin-ext.woff2',
-  '../w2/edit2.mjs',
-  '../w2/board-bridge.mjs',
-  '../w2/board-i18n.mjs',
-  '../w2/type-icons.mjs',
-  '../w2/host-bridge.mjs',
-  // host-bridge splits the assets lane with the SAME scan save_card uses
-  '../card-save.mjs',
-  '../w/editor.css',
-  '../w/cell-form-core.mjs',
-  '../w/cell-i18n.mjs',
-  '../w/md-guard.mjs',
-  '../w/sandbox-i18n.mjs',
-  '../w/sandbox-door.mjs',
-  '../ai-ops.mjs',
-  '../card-core.js',
-  // card-core's param parser (parseParams) lives here, and the bundle carries a COPY of it. It was
-  // not on this list, so the committed bundle went on reading `a-b=x` the old way after the source
-  // stopped: the stamp below had nothing to say about a file it never opened.
-  '../../sitetile/site-core.js',
-  '../card-render.mjs',
-  // renderCardHTML's <head> icon links (reef#1090): card-icon.mjs, and the two names it takes from
-  // icon-core (ICON_PATHS, markType) — esbuild keeps only those, but they are bytes in the bundle.
-  '../card-icon.mjs',
-  // …and its og:*/twitter:*/description tags (reef#1092), which read card-icon's cardRaster
-  '../card-share.mjs',
-  '../../sitetile/icon-core.mjs',
-  // the two the w2 modules import DIRECTLY as of the P1 fixes: the icon route a tile's favicon uses
-  // (marks) and the poster path a video tile shows (yt). Both were already in the bundle through
-  // card-render — being in it by accident is not the same as being watched for drift.
-  '../marks.mjs',
-  // the brand table and the override rule the tile's mark is decided by — the SAME one the card's is
-  // (reef#2015)
-  '../link-marks.mjs',
-  // …and the card's drawn marks (ICONS), which a tile now draws too — esbuild keeps that one export
-  'card-assets.mjs',
-  '../yt.mjs',
-  '../../../hosts/web/tugtile/index.html',
-  '../../../hosts/web/tugtile/tugtile.css',
-  '../../../packages/tugtile/board-core.js',
-];
+// 🔴 #1929: there is NO hand-kept list here any more. It used to be one, and it was exactly as
+// complete as the last person's memory: vendor/editor-core.js, icons.js, obsidian-shim.js, host.js,
+// Sortable.min.js, i18n/*.json (all copied verbatim into the bundle) were never on it, so editing
+// them left a stale artifact and a green gate. gen-edit2-assets.mjs now RECORDS every file it opens
+// (its own reads, plus the inputs esbuild reports for the JS it bundles) and writes that list into
+// edit2-assets.mjs as SOURCE_FILES; the stamp is over that list. A file the generator reads is, by
+// construction, a file the stamp watches. (card-worker.test.mjs walks the import graph on its own,
+// without esbuild, to check the recorded list against a second opinion.)
+//
+// The one input outside the repo is @cvernet/signet's corners.css, which is resolved from
+// node_modules (and `latest`). Its path differs by checkout, so it is NOT in the path-hashed list: it
+// gets its own stamp (signetCornersStamp), which the test compares only where signet is installed.
 
 /**
  * A stamp over those files' bytes. NOT a hash of the generated bundle — that would only ever say
@@ -77,13 +39,65 @@ export const EDIT2_SOURCES = [
  * 🔴 The path is part of the hash. A file that moves is a file the generator would stop reading, and
  * hashing only contents would go on being green while a whole module quietly left the bundle.
  */
-export function sourceStamp(dir = DIR) {
+export function sourceStamp(files, dir = DIR, readFile = fs.readFileSync) {
+  if (!Array.isArray(files) || !files.length) throw new Error('edit2 sources: no file list — the stamp would hash an empty set');
   const h = createHash('sha256');
-  for (const rel of EDIT2_SOURCES) {
+  for (const rel of files) {
     const p = join(dir, rel);
     if (!fs.existsSync(p)) throw new Error(`edit2 sources: ${rel} is missing — the bundle would be built without it`);
     h.update(rel, 'utf8');
-    h.update(fs.readFileSync(p));
+    h.update(readFile(p));
   }
   return h.digest('hex').slice(0, 16);
+}
+
+/** signet's corners.css, found the way Node would (node_modules walked up from packages/cardtile), or null */
+export function signetCornersPath(dir = DIR) {
+  for (let d = join(dir, '..'); ; d = dirname(d)) {
+    const p = join(d, 'node_modules/@cvernet/signet/src/corners.css');
+    if (fs.existsSync(p)) return p;
+    if (dirname(d) === d) return null;
+  }
+}
+export const signetCornersStamp = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16);
+
+/**
+ * Is `absPath` THIS generator's own output (edit2-assets.mjs next to it)? An exact resolved-path
+ * comparison — 🔴 not a basename suffix: `endsWith('edit2-assets.mjs')` would also exempt `other-
+ * edit2-assets.mjs` and any future module that happens to share the tail (tile#133 review).
+ */
+export const isOwnOutput = (absPath, dir = DIR) => resolve(absPath) === resolve(dir, 'edit2-assets.mjs');
+
+// ── signet: bound to the LOCKFILE, not to whatever is installed ───────────────────────────────────
+/** the version packages/cardtile/package-lock.json resolves @cvernet/signet to */
+export function signetLockVersion(dir = DIR) {
+  const lock = JSON.parse(fs.readFileSync(join(dir, '../package-lock.json'), 'utf8'));
+  const v = lock.packages?.['node_modules/@cvernet/signet']?.version;
+  if (!v) throw new Error('edit2 sources: package-lock.json names no @cvernet/signet version');
+  return v;
+}
+/** { version, stamp } of the installed corners.css, or null when signet is not installed */
+export function signetInstalled(dir = DIR) {
+  const p = signetCornersPath(dir);
+  if (!p) return null;
+  const version = JSON.parse(fs.readFileSync(join(dirname(p), '../package.json'), 'utf8')).version;
+  return { version, stamp: signetCornersStamp(p) };
+}
+/**
+ * What to say about signet's corners.css. Bytes are compared ONLY when the installed version is the
+ * one the lockfile pins and the bundle was generated against; a different installed version is an
+ * environment difference, reported as such — never as "the bundle is stale".
+ */
+export function signetVerdict({ recordedVersion, lockVersion, recordedStamp, installed }) {
+  if (recordedVersion !== lockVersion) {
+    return { status: 'lock-moved', message: `package-lock.json now pins signet ${lockVersion}, the bundle was generated against ${recordedVersion} — regenerate: node packages/cardtile/serve/gen-edit2-assets.mjs` };
+  }
+  if (!installed) return { status: 'skipped', message: 'signet is not installed' };
+  if (installed.version !== lockVersion) {
+    return { status: 'version-differs', message: `signet 版本不同（${installed.version} vs ${lockVersion}）：安裝的版本不是 lockfile 鎖的那個` };
+  }
+  if (installed.stamp !== recordedStamp) {
+    return { status: 'bytes-differ', message: `signet ${lockVersion} corners.css differs from the bytes the bundle was built from — regenerate: node packages/cardtile/serve/gen-edit2-assets.mjs` };
+  }
+  return { status: 'ok', message: '' };
 }

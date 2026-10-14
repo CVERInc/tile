@@ -194,6 +194,13 @@ test('bubbles: the narrow-screen anchor is read from `narrow=`, and from the `or
   assert.equal(narrowOf('narrow="40% 20%"'), '40% 20%');
   assert.equal(narrowOf('origin-narrow="40% 20%"'), '40% 20%');
   assert.equal(narrowOf('origin-narrow="40% 20%" narrow="10% 10%"'), '10% 10%', '`narrow=` is the name; it wins when both are written');
+  // 🔴 #1929: the OTHER written order. The precedence is by NAME, never by position on the line —
+  // `narrow=` wins whichever side of `origin-narrow=` it is written, and that is DELIBERATE:
+  // `origin-narrow=` is the legacy spelling (read only so old cards keep their anchor), so a card
+  // that carries both has been edited since, and the edit is the named one. A reader who sees the
+  // anchor go from 40% 20% to 10% 10% is seeing the rule, not a bug. The test above wrote only one order.
+  assert.equal(narrowOf('narrow="10% 10%" origin-narrow="40% 20%"'), '10% 10%', 'narrow= wins when it is written FIRST too (by name, not by position)');
+  assert.equal(narrowOf('narrow="" origin-narrow="40% 20%"'), '40% 20%', 'an empty narrow= is not a value: the legacy spelling still answers');
   // …and `origin-narrow=` is not `origin=`: the wide-screen anchor stays the default.
   assert.match(renderCardHTML(card('origin-narrow="40% 20%"'), { handle: 'x' }), /opacity:0;transform-origin:53% 76%/);
 });
@@ -1032,18 +1039,115 @@ test('🔴 the committed /try/edit bundle is the one its sources produce', async
   // 🔴 It hashes the INPUTS, not the output. A hash of the artifact only ever says "the file I
   // wrote is the file I wrote"; this asks the question a drift gate has — is the committed bundle
   // still what these sources make?
-  const { SOURCE_STAMP } = await import('./edit2-assets.mjs');
-  const { sourceStamp, EDIT2_SOURCES } = await import('./edit2-sources.mjs');
+  const { SOURCE_STAMP, SOURCE_FILES } = await import('./edit2-assets.mjs');
+  const { sourceStamp } = await import('./edit2-sources.mjs');
   assert.ok(SOURCE_STAMP, 'the generated bundle carries no source stamp — regenerate it');
-  assert.equal(SOURCE_STAMP, sourceStamp(),
+  assert.equal(SOURCE_STAMP, sourceStamp(SOURCE_FILES),
     'serve/edit2-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit2-assets.mjs');
   assert.match(SOURCE_STAMP, /^[0-9a-f]{16}$/);
   // CONTROL: a stamp that reads nothing would agree with itself forever. This one has to actually
   // open every file on the list — point it somewhere the files are not, and it must refuse rather
   // than hand back a hash of an empty set.
-  assert.ok(EDIT2_SOURCES.length >= 10, 'the source list is suspiciously short');
-  assert.throws(() => sourceStamp('/tmp/there-is-no-cardtile-here'),
+  assert.ok(SOURCE_FILES.length >= 10, 'the source list is suspiciously short');
+  assert.throws(() => sourceStamp(SOURCE_FILES, '/tmp/there-is-no-cardtile-here'),
     /is missing/, 'the stamp does not actually read the sources it claims to hash');
+});
+
+test('🔴 #1929: the stale-bundle stamp covers every file the generator READ, not a hand-kept list', async () => {
+  // 🩸 The list was written by hand, so it was exactly as complete as the last person's memory:
+  // editing hosts/web/tugtile/vendor/editor-core.js (and icons.js, obsidian-shim.js, host.js,
+  // Sortable.min.js, i18n/*.json) left the bundle STALE and this gate green. The generator now records
+  // every file it opens (its own reads, plus esbuild's metafile for the JS it bundles) and ships that
+  // list inside the artifact; the stamp is over THAT list.
+  const assets = await import('./edit2-assets.mjs');
+  const { sourceStamp, isOwnOutput } = await import('./edit2-sources.mjs');
+  const files = assets.SOURCE_FILES;
+  assert.ok(Array.isArray(files) && files.length > 20, 'the bundle carries no list of the files it was built from — regenerate it');
+  const has = (suffix) => files.some((f) => f.endsWith(suffix.replace(/^packages\//, '')));
+  // the engine's table, file by file — every one the ticket found un-hashed
+  for (const f of ['hosts/web/tugtile/vendor/editor-core.js', 'hosts/web/tugtile/icons.js', 'hosts/web/tugtile/obsidian-shim.js',
+    'hosts/web/tugtile/host.js', 'hosts/web/tugtile/Sortable.min.js', 'hosts/web/tugtile/index.html', 'packages/tugtile/board-core.js',
+  ]) assert.ok(has(f), `${f} is read into the bundle but is not on the stamped list`);
+  assert.ok(files.filter((f) => /hosts\/web\/tugtile\/i18n\/[\w-]+\.json$/.test(f)).length >= 4, 'the engine\'s i18n/*.json are not all on the stamped list');
+  // CONTROL: the stamp over the list is the committed one, and flipping ONE byte of ONE file the
+  // old list never named moves it (a stamp that cannot see editor-core.js is the bug itself).
+  assert.equal(sourceStamp(files), assets.SOURCE_STAMP, 'serve/edit2-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit2-assets.mjs');
+  const flipped = sourceStamp(files, undefined, (p) => {
+    const b = Buffer.from(readFileSync(p));
+    if (p.endsWith('hosts/web/tugtile/vendor/editor-core.js')) b[0] ^= 1;
+    return b;
+  });
+  assert.notEqual(flipped, assets.SOURCE_STAMP, 'editing vendor/editor-core.js does not move the stamp');
+  // INDEPENDENT of the generator and of esbuild (CI has neither): walk the relative-import graph from
+  // the bundle's entry with a plain regex. Every local module it reaches must be on the list.
+  const root = new URL('../w2/edit2.mjs', import.meta.url);
+  const seen = new Set(); const todo = [fileURLToPath(root)];
+  while (todo.length) {
+    const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
+    if (isOwnOutput(f, dirname(fileURLToPath(import.meta.url)))) continue;   // the generator's own output (esbuild keeps none of it; the generator asserts that)
+    for (const m of readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g)) todo.push(join(dirname(f), m[1]));
+  }
+  assert.ok(seen.size > 10, 'the import walk found suspiciously few modules');
+  const listed = new Set(files.map((f) => join(dirname(fileURLToPath(import.meta.url)), f)));
+  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, dirname(fileURLToPath(import.meta.url))));
+  assert.deepEqual(missing, [], 'modules reachable by import from w2/edit2.mjs but not on the stamped list');
+});
+
+test('🔴 #1929 r1: the generator itself is stamped — changing how the bundle is ASSEMBLED makes it stale', async () => {
+  // codex review of tile#133, P1. SOURCE_FILES held what the generator READ, not the generator: change
+  // FONT_BASE, the HTML slicing or the CSS order in gen-edit2-assets.mjs and the committed artifact is
+  // no longer what it would emit, while every byte it reads is unchanged — stamp green, bundle stale.
+  const assets = await import('./edit2-assets.mjs');
+  const { sourceStamp } = await import('./edit2-sources.mjs');
+  for (const f of ['gen-edit2-assets.mjs', 'edit2-sources.mjs']) {
+    assert.ok(assets.SOURCE_FILES?.includes(f), `${f} decides what the bundle contains but is not on the stamped list`);
+  }
+  // the knife the reviewer asked for, by injection: flip one byte of the generator ⇒ the stamp moves
+  const flipped = sourceStamp(assets.SOURCE_FILES, undefined, (p) => {
+    const b = Buffer.from(readFileSync(p));
+    if (p.endsWith('/gen-edit2-assets.mjs')) b[0] ^= 1;
+    return b;
+  });
+  assert.notEqual(flipped, assets.SOURCE_STAMP, 'editing the generator does not move the stamp');
+});
+
+test('🔴 #1929 r1: the previous-output exclusion is an EXACT path, not a basename suffix', async () => {
+  // codex review P2. `endsWith('edit2-assets.mjs')` exempted any module with that tail from the
+  // stamped list and from the import walk. Only this generator's own output is circular.
+  const { isOwnOutput } = await import('./edit2-sources.mjs');
+  const here = dirname(fileURLToPath(import.meta.url));
+  assert.equal(typeof isOwnOutput, 'function', 'isOwnOutput is missing');
+  assert.equal(isOwnOutput(join(here, 'edit2-assets.mjs'), here), true, 'CONTROL: the real output is excluded');
+  assert.equal(isOwnOutput(join(here, '../serve/./edit2-assets.mjs'), here), true, 'same file spelled differently is still the same file');
+  assert.equal(isOwnOutput(join(here, '../w2/edit2-assets.mjs'), here), false, 'same name, other directory');
+  assert.equal(isOwnOutput(join(here, 'other-edit2-assets.mjs'), here), false, 'same tail, other name');
+});
+
+test('🔴 #1929 r1: signet is bound to the LOCKFILE version; a different installed version is a version message, not "bundle stale"', async () => {
+  // codex review P2. package.json says `latest`, the lockfile resolves one version, and corners.css is
+  // read from whatever is installed. The bytes may only be compared when the installed version is the
+  // one the bundle was generated against; otherwise the honest report is "different signet".
+  const { signetVerdict, signetLockVersion } = await import('./edit2-sources.mjs');
+  const assets = await import('./edit2-assets.mjs');
+  assert.equal(typeof signetVerdict, 'function', 'signetVerdict is missing');
+  const lock = signetLockVersion();
+  assert.match(lock, /^\d+\.\d+\.\d+/, 'the lockfile names no signet version');
+  assert.equal(assets.SIGNET_LOCK_VERSION, lock, `the bundle was generated against signet ${assets.SIGNET_LOCK_VERSION}, the lockfile now says ${lock} — regenerate`);
+  const base = { recordedVersion: '0.6.0', lockVersion: '0.6.0', recordedStamp: 'aaaa', installed: { version: '0.6.0', stamp: 'aaaa' } };
+  assert.equal(signetVerdict(base).status, 'ok');
+  assert.equal(signetVerdict({ ...base, installed: null }).status, 'skipped');
+  assert.equal(signetVerdict({ ...base, installed: { version: '0.6.0', stamp: 'bbbb' } }).status, 'bytes-differ', 'same version, other bytes: the one case that is the bundle\'s fault');
+  const other = signetVerdict({ ...base, installed: { version: '0.7.1', stamp: 'bbbb' } });
+  assert.equal(other.status, 'version-differs', 'a different installed version never reaches the bytes comparison');
+  assert.match(other.message, /signet 版本不同（0\.7\.1 vs 0\.6\.0）/);
+  assert.doesNotMatch(other.message, /stale|過期/);
+  assert.equal(signetVerdict({ ...base, lockVersion: '0.7.0' }).status, 'lock-moved', 'lockfile moved since generation');
+  // and the live check: where signet is installed at the lockfile's version, its bytes are the recorded ones
+  const { signetInstalled } = await import('./edit2-sources.mjs');
+  const v = signetVerdict({ recordedVersion: assets.SIGNET_LOCK_VERSION, lockVersion: lock, recordedStamp: assets.SIGNET_CORNERS_STAMP, installed: signetInstalled() });
+  if (v.status === 'skipped') console.log('    (partial: @cvernet/signet not installed — corners.css stamp check skipped)');
+  else if (v.status === 'version-differs') console.log('    (partial: ' + v.message + ' — corners.css bytes not compared)');
+  else assert.equal(v.status, 'ok', v.message);
 });
 
 // ── HOST MODE: /edit?host=<parent origin> ───────────────────────────────────────────────────────
