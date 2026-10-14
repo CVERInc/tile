@@ -130,15 +130,16 @@ function open(text) {
     // A URL goes to the system browser through AppKit, not `window.open` — inside a WKWebView that
     // would try to navigate the app's own view, and this app has exactly one document in it.
     //
-    // `[[wikilink]]` deliberately does NOT open yet. Resolving one means asking which file on this
-    // machine is called that, which is the retrieval side's job and its own piece of work; a link
-    // that silently does nothing is better than one that guesses at a file and opens the wrong note.
+    // `[[wikilink]]` goes to AppKit by NAME. Which file that name means is a question about the disk,
+    // so Swift answers it (WikilinkResolver): the one file it can be sure of, or — when it can't —
+    // this page's own search panel with the name already typed. It never guesses.
     (() => {
       const host = makeWebHost({
         openLink: (link) => {
           if (link.kind === 'url' || link.kind === 'image') send('openurl', { url: link.target });
           // A result from the search panel is a file on this machine — AppKit opens it as a document.
           else if (link.kind === 'file') send('openfile', { path: link.target, line: link.line || 0 });
+          else if (link.kind === 'wiki') send('openwiki', { target: link.target });
         },
       });
       if (caps.searchAll) host.searchAll = searchAll;   // absent ⇒ the engine grows no scope control
@@ -211,6 +212,9 @@ window.__mt = {
     ctrl.toggleFind(true);
   },
   toggleSearchAll: (show) => { if (ctrl) ctrl.toggleSearchAll(show); },
+  // A `[[wikilink]]` AppKit could not settle to one file: the panel opens already searching for the
+  // name, so "which of these did you mean" is one arrow key away rather than a retyped query.
+  searchFor: (query) => { if (ctrl && caps.searchAll) ctrl.toggleSearchAll(true, query); },
   canSearchAll: () => !!(ctrl && ctrl.canSearchAll()),
   // ⌘+ / ⌘- / ⌘0. One custom property on the root, read by the one rule in index.html that sizes the
   // editable surface — so the TEXT scales and the toolbar, the find bar and the window chrome do not.
