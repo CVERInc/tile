@@ -572,4 +572,32 @@ test('🔴 r2-2 a sentence longer than 120 graphemes is cut to 120 without split
   assert.equal(f.dropped, '多出來的字');
   assert.match(warnings.join('\n'), /多出來的字/);
 });
+
+// tile#128 r3-1: with no _site.md, siteMeta() falls back to home.md's frontmatter as the site layer
+// for GENERATED routes (blog index, posts, archives, preview, 404). home.md is a page: its banner
+// keys are ignored there too, with the same page-level finding the content route gives.
+const { siteMeta } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const NO_SITE = { '/x/content/home.md': fm({ 'sitetile-page': 'home', locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '首頁寫的' }) };
+const homeOwn = () => ({ 'sitetile-page': 'home', locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '首頁寫的' });
+
+test('🔴 r3-1 no _site.md: a generated route ignores home.md\'s banner keys, page-level', () => {
+  const { copy, findings } = bannerOverrides(siteMeta(NO_SITE), TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, DEFAULT_ZH.prompt);
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`), ['locales-banner-zh-tw-prompt:page-level']);
+});
+
+test('🔴 r3-1 no _site.md: the content route gives the same answer', () => {
+  const { copy, findings } = bannerOverrides(pageMeta(NO_SITE, 'home', homeOwn()), TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, DEFAULT_ZH.prompt);
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`), ['locales-banner-zh-tw-prompt:page-level']);
+});
+
+test('r3-1 a site WITH _site.md is untouched by the fallback rule', () => {
+  const { copy, findings } = bannerOverrides(siteMeta(FILES), TWO);
+  assert.deepEqual(findings, []);
+  assert.equal(copy['zh-TW'].prompt, '站台的句子');
+});
+
 console.log(`\n${passed} passed`);
