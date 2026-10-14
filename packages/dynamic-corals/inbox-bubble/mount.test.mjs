@@ -1461,3 +1461,40 @@ test('#1866 row 2 — what the ask-only bubble is CALLED: the ask box\'s words, 
 		document.documentElement.attrs.lang = lang;
 	}
 });
+
+// reef#1921 — the platform's assistant name is read when the panel OPENS, not when the page loads.
+// A visitor who never opens the bubble (nearly all of them) used to cost one request per page view.
+const assistantReads = (from) =>
+	requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant');
+
+test('1921: mount sends no assistant-name request; opening sends one and applies the name', async () => {
+	const prev = respond;
+	respond = (url) => url.includes('/api/inbox/assistant')
+		? { ok: true, status: 200, json: async () => ({ ok: true, resolved: true, assistantName: 'Mei' }) }
+		: undefined;
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-assistant-name': 'Baked' });
+		await settle();
+		assert.equal(assistantReads(from).length, 0, 'mount still asks for the assistant name');
+		await openBubble(root);
+		await settle();
+		assert.equal(assistantReads(from).length, 1, 'opening the panel did not read the name once');
+		assert.match(root.innerHTML, /Mei/, 'the platform name was not applied');
+		assert.doesNotMatch(root.innerHTML, /Baked/, 'the baked name stayed on screen');
+		// closing and reopening is not a second read
+		dispatch('reef-inbox:open');
+		await settle();
+		assert.equal(assistantReads(from).length, 1, 'a second open asked again');
+	} finally {
+		respond = prev;
+	}
+});
+
+test('1921: reef-inbox:open also reads the name, once', async () => {
+	const { root } = await mountFresh();
+	const from = requests.length;
+	await openBubble(root);
+	await settle();
+	assert.equal(assistantReads(from).length, 1);
+});
