@@ -22,6 +22,8 @@
 // ANY card. It is an infrastructure credential, not a user credential, and it is scoped by being
 // held only by the hosted Worker.
 import { parseCard, serializeCard } from '../card-core.js';
+import { cardDestinations } from './card-destinations.mjs';
+import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 
 const API_PREFIX = '/_api/';
@@ -363,6 +365,15 @@ export async function handleApi(request, env, url) {
         return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
       }
       const wouldChange = !current || md !== current.md;
+
+      // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
+      // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
+      // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
+      const dests = cardDestinations(md, { base: `${url.origin}/${handle}/` });
+      const many = tooManyLinks(dests, env);
+      if (many) return json(many, 422);
+      const unsafe = await checkUrls(dests, env);
+      if (unsafe) return json({ error: 'card_url_unsafe', url: unsafe.url, threat: unsafe.threat }, 422);
 
       if (body.dry_run) {
         return json({

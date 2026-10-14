@@ -108,14 +108,12 @@ test('🔴 an explicit override beats the default envelope and house marks', () 
   assert.match(mail2, /m2 7 10 6 10-6/, 'mail default is no longer the envelope');
 });
 
-test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week', async () => {
-  // `cf.cacheTtl` is "cache this for N seconds regardless of what the response says" — it is the Edge
-  // Cache TTL override, and Cloudflare's edge caches a 404 like any other cacheable status. So one
-  // bad answer from the favicon service locked a domain's mark out for seven days (books.com.tw:
-  // the service answered 200, our route kept answering 404). `cacheTtlByStatus` gives each class
-  // its own TTL. The upstream here is a fake; what is under test is what we ASK the edge to keep.
-  const seen = [];
-  const real = globalThis.fetch;
+test('🔴 only a validated mark is kept (caches.default); no cf cache options on the upstream fetch', async () => {
+  // r9: `cf.cacheTtl*` would keep an UNVALIDATED upstream answer. The route now asks for no edge caching on
+  // the upstream fetch and stores only a response that passed the MIME check. A miss is asked again.
+  const seen = [], stored = new Map();
+  const real = globalThis.fetch, realCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async (r) => stored.get(r.url)?.clone(), put: async (r, v) => { stored.set(r.url, v); } } };
   globalThis.fetch = async (url, init) => {
     seen.push({ url: String(url), cf: init && init.cf });
     return /books/.test(String(url)) ? new Response('', { status: 404 })
@@ -127,13 +125,11 @@ test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week'
     const hit = await worker.fetch(new Request('https://card.feelreef.com/_icon/www.instagram.com.ico'), env);
     assert.equal(miss.status, 404);
     assert.equal(hit.status, 200);
-    assert.ok(seen.length >= 2, 'setup: the route did not reach the upstream');
-    for (const { url, cf } of seen) {
-      assert.ok(cf, `${url}: no cf options at all`);
-      assert.equal(cf.cacheTtl, undefined, `${url}: cacheTtl applies to EVERY status, 404 included`);
-      assert.deepEqual(cf.cacheTtlByStatus, { '200-299': 604800, 404: 3600, '500-599': 0 });
-    }
-  } finally { globalThis.fetch = real; }
+    // reef#2026 (tile#125): the books miss asks DuckDuckGo AND Google before giving up; the hit stops at DuckDuckGo.
+    assert.equal(seen.length, 3, 'setup: the route did not reach the upstream');
+    for (const { url, cf } of seen) assert.equal(cf, undefined, `${url}: upstream fetch must not ask the edge to cache`);
+    assert.deepEqual([...stored.keys()], ['https://card.feelreef.com/_icon/www.instagram.com.ico']);
+  } finally { globalThis.fetch = real; globalThis.caches = realCaches; }
 });
 
 test('🔴 the grammar says what iconimg IS: an artwork thumbnail, not a brand mark', async () => {

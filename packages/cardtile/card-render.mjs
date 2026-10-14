@@ -11,7 +11,7 @@
 // A block heading is a LANE (`## English`), not a cell — see card-core's parseCard.
 // packGrid gives each cell its w×h → data-span="{w}x{h}". 防醜 (no overlap) is card-core's.
 import { packGrid } from './card-core.js';
-import { resolveBackdropDim, themeCss } from './colour.mjs';
+import { resolveBackdropDim, themeCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
@@ -44,6 +44,98 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // ⬆ UPSTREAM ASK (not a private extension): links belong in cssmd, so every host renders
 // `[label](url)` the same way. Until that lands in CVERInc/tile, the Card's superset is documented
 // and tested rather than silent.
+// ── destinations: the renderer says where it sends the reader ───────────────────────────────────
+//
+// 🔴 reef#2054 / tile#127. The save-side Web Risk guard needs "every URL this card makes a browser
+// fetch or follow". Reading that back out of the finished HTML is a SECOND PARSER (HTML entities,
+// CSS escapes, <style> raw text, plain text that merely looks like `url(…)`) and it drifted from the
+// browser three review rounds running. So the renderer REGISTERS each author-given URL at the one
+// place it writes it into href / src / url(), BEFORE any escaping: what the author wrote is what the
+// browser ends up with (an attribute is entity-decoded back to it; <style> text is raw).
+//
+// `ctx.onDestination(url)` is optional — absent, every call below is a no-op that returns its input.
+// Only values that RESOLVE (against the card's address) to http(s) count, except the card itself and this Worker's
+// inert asset routes (LOCAL_RESOURCE_PREFIXES); `data:`, in-page `#x` are not destinations — a same-host `/other-card` is. Every output point goes through
+// `attrUrl` / `cssAttrUrl`; serve/card-webrisk.test.mjs scans a card that uses every feature and
+// fails if a URL appears in the output that the registry did not hear about.
+// 🔴 tile#127 round 7: ONLY inert asset routes are exempt (image proxies, script assets). The criterion: a route that a
+// browser navigating to it would show as HTML is NOT exempt — a page is a destination, and Web Risk judges the full URL.
+// So `/_preview/<id>` (author-supplied markdown rendered as a public page), `/try/`, `/edit/`, `/_api/` are all registered.
+// Everything else on the card's own origin — another handle's `/attacker` included — is a destination too.
+// serve/card-webrisk.test.mjs (r7#3) drives the real Worker: every prefix here must answer non-HTML.
+export const LOCAL_RESOURCE_PREFIXES = ['/_icon/', '/_yt/', '/_coral/'];
+const isLocalResource = (pathname) => LOCAL_RESOURCE_PREFIXES.some((p) => pathname.startsWith(p) || pathname + '/' === p);
+const stripSlash = (s) => s.replace(/\/+$/, '');
+const registerDestination = (ctx, raw) => {
+  if (!ctx || typeof ctx.onDestination !== 'function') return;
+  // 🔴 tile#127 round 5: resolve FIRST, judge after. A literal `http(s)://` filter misses every spelling the
+  // browser still resolves to an external https host (`https:/\\evil.example`, `HTTPS:/\\…`, `//host`).
+  // So every value is run through the WHATWG parser against the card's own address (ctx.destinationBase, else
+  // a fixed placeholder — only there so relative and odd spellings resolve); http(s) with a URL that is not the
+  // card itself or a local route is a destination, and what is registered is the RESOLVED href. A parse failure registers
+  // nothing (the browser would not fetch it either); data: / blob: / javascript: / mailto: are not http(s).
+  const base = ctx.destinationBase || `https://card.invalid/${encodeURIComponent(ctx.handle || 'card')}/`;
+  let u;
+  try {
+    const baseUrl = new URL(base);
+    u = new URL(String(raw == null ? '' : raw).replace(/\u0000/g, '\ufffd'), baseUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+    // 🔴 round 6 (review v5 #1): NOT "same host ⇒ skip" — `/attacker` on a shared host is another person's card. Exempt only
+    // (a) the card's own address (fragment and trailing slash ignored) and (b) this Worker's own resource routes.
+    if (u.origin === baseUrl.origin) {
+      const self = (x) => `${x.origin}${stripSlash(x.pathname)}${x.search}`;
+      if (self(u) === self(baseUrl) || isLocalResource(u.pathname)) return;
+    }
+  } catch { return; }
+  ctx.onDestination(u.href);
+};
+/** register `raw` and hand it back unchanged (the caller escapes it for its own context). */
+const attrUrl = (ctx, raw) => { registerDestination(ctx, raw); return raw; };
+// CSS reads `\<1-6 hex>[ws]` as that code point and `\<char>` as the char itself. A url('…') that
+// lives in a style="" ATTRIBUTE has only been HTML-escaped, so the browser fetches the DECODED
+// string — register both spellings. (cssUrl()'d values have no backslashes left: nothing to decode.)
+const cssUnescape = (s) => String(s).replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\r\n\f])?|([^\r\n\f]))/g, (m, hex, ch) => {
+  if (ch !== undefined) return ch;
+  const n = parseInt(hex, 16);
+  return n === 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff) ? '�' : String.fromCodePoint(n);
+});
+// 🔴 A value that goes inside url('…') is a CSS-injection surface: esc() is HTML escaping only, so a
+// `'` or `)` in `bg=` closed the url() and let the author open a second one (tile#127 3b). Every
+// url() output point therefore writes `esc(cssAttrUrl(ctx, raw))`, which neutralises quotes, parens,
+// backslashes and whitespace (cssUrl) — exactly ONE url() per value — and registers every spelling
+// that could be fetched: the author's string, its CSS-decoded form, and the string actually written.
+const cssAttrUrl = (ctx, raw) => {
+  registerDestination(ctx, raw);
+  const decoded = cssUnescape(raw);
+  if (decoded !== String(raw)) registerDestination(ctx, decoded);
+  const written = cssUrl(raw);
+  if (written !== String(raw)) registerDestination(ctx, written);
+  return written;
+};
+// 🔴 tile#127 round 4: an author field that lands inside a <style> block is a CSS-injection surface
+// (`accent: red;background-image:url(https://evil.example/a)` added a declaration, and a fetch Web
+// Risk never heard of). The rule is not "escape better" but "accept a SHAPE": a colour field takes a
+// colour and nothing else; anything else yields the default, never an error (the owner sees the
+// default colour). Every author field written into CSS goes through cssColor / cssPos / cssAttrUrl.
+const NAMED_COLOURS = ('transparent aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' ');
+const CSS_NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:%|deg|turn|rad|grad)?';
+const COLOUR_FN_RE = new RegExp(`^(?:rgb|rgba|hsl|hsla)\\(\\s*${CSS_NUM}(?:\\s*[,/]\\s*${CSS_NUM}|\\s+${CSS_NUM})*\\s*\\)$`, 'i');
+const HEX_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+/** an author-written colour, or the default accent when it is anything else */
+const cssColor = (raw) => {
+  const v = String(raw == null ? '' : raw).trim();
+  if (HEX_RE.test(v) || COLOUR_FN_RE.test(v) || NAMED_COLOURS.includes(v.toLowerCase())) return v;
+  return DEFAULT_ACCENT;
+};
+const POS_TOKEN_RE = /^(?:[+-]?(?:\d+\.?\d*|\.\d+)(?:%|px)?|left|right|top|bottom|center)$/i;
+/** an author-written `transform-origin` (one or two position tokens), or `fallback` */
+const cssPos = (raw, fallback) => {
+  const t = String(raw == null ? '' : raw).trim().split(/\s+/);
+  return t.length >= 1 && t.length <= 2 && t.every((x) => POS_TOKEN_RE.test(x)) ? t.join(' ') : fallback;
+};
+// the exact inverse of `esc` (one pass), for a value that had to be escaped before it was matched
+const unesc = (s) => String(s).replace(/&(amp|lt|gt|quot);/g, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"' })[e]);
+
 // reef#2044 ①: every outbound link on a card is user-generated content — it must not pass ranking
 // weight. The ONE exception (relFor below) is a link to the card author's own vanity host.
 export const REL_UGC = 'ugc nofollow noopener noreferrer';
@@ -60,7 +152,7 @@ export function relFor(url, ctx) {
 // `ctx` is the render context: an inline link takes the SAME own/ugc decision (relFor) as every other
 // authored anchor, so bio, prose, list items, drawers and lane labels cannot disagree with link cells.
 const mdInline = (s, ctx) => esc(s)
-  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_m, label, url) => `<a href="${url}" target="_blank" rel="${relFor(url, ctx)}">${label}</a>`)
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_m, label, url) => `<a href="${esc(attrUrl(ctx, unesc(url)))}" target="_blank" rel="${relFor(unesc(url), ctx)}">${label}</a>`)
   .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   .replace(/\*(.+?)\*/g, '<em>$1</em>')
   // 🔴 A newline in an INLINE context is a line break the author typed on purpose — HTML collapses
@@ -136,7 +228,9 @@ const mdBlock = (s, ctx) => String(s || '').split(/\n{2,}/).map((para) => {
 // That silently broke every backdrop whose url carried a query string (`?alt=media&token=…`), which
 // is every Firebase-hosted image. Also refuses quotes/parens/backslashes and anything that could
 // close the style element early, so a url can never break out into markup.
-const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, encodeURIComponent).replace(/<\/?/g, '');
+// 🔴 NOT `encodeURIComponent` as the replacer: it leaves `' ( ) !` untouched, so `'` and `)` passed
+// straight through and closed a single-quoted url('…') (tile#127 3b). Percent-encode explicitly.
+const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, (c) => ("'()".includes(c) ? '%' + c.charCodeAt(0).toString(16).toUpperCase() : encodeURIComponent(c))).replace(/<\/?/g, '');
 
 // `fallbacks` are tried in order if the first icon fails to load — a 404 otherwise leaves a broken
 // image slot on a creator's card, which is worse than no icon at all. Inline onerror rather than a
@@ -204,7 +298,7 @@ function linkIcon(p, url, ctx) {
   // It survived because until today NO card pointed `iconimg` at its own assets — every one was an
   // external URL, which happens to work. The importer started emitting `asset:` refs this afternoon
   // and the gap became visible the same hour.
-  if (p.iconimg) return IMG_ICON(resolveAsset(p.iconimg, ctx), [], 'st-cell-icon-art');
+  if (p.iconimg) return IMG_ICON(attrUrl(ctx, resolveAsset(p.iconimg, ctx)), [], 'st-cell-icon-art');
   return markHtml(overrideMark({ icon: p.icon, iconhost: p.iconhost }, hasIcon(ctx)) || defaultMark(hostOf(url)), ctx)
     || (ctx.icons && ctx.icons._default) || '';
 }
@@ -257,7 +351,7 @@ function renderEmbed(p, body, size, ctx = {}) {
   // The pop animation below is preserved verbatim under its own name; that one stored card is
   // migrated to `kind=bubbles` so nothing about it changes.
   if (p.kind === 'slider') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
     if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
     // 🔴 CSS scroll-snap + anchor links. No JS: the prev/next are <a href="#…"> into the track, so
     // they work on the first paint, survive a dead script, and the browser's own swipe/keyboard/
@@ -297,20 +391,20 @@ function renderEmbed(p, body, size, ctx = {}) {
       + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div></div>';
   }
   if (p.kind === 'bubbles') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
     if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
     const n = imgs.length;
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
     const cycle = n * hold;
-    const origin = p.origin || '53% 76%';
-    const originNarrow = p.narrow || p['origin-narrow'] || '53% 33%';
+    const origin = cssPos(p.origin, '53% 76%');
+    const originNarrow = cssPos(p.narrow || p['origin-narrow'], '53% 33%');
     // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
     // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
     const slot = 100 / n;
     const inAt = 3;
     const outAt = (slot - 3).toFixed(1);
     const figures = imgs.map((src) => `<figure><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>`).join('');
-    const bgStyle = p.bg ? ` style="background-image:url('${esc(resolveAsset(p.bg, ctx))}')"` : '';
+    const bgStyle = p.bg ? ` style="background-image:url('${esc(cssAttrUrl(ctx, resolveAsset(p.bg, ctx)))}')"` : '';
     const css = [
       `.st-carousel{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background-size:contain;background-position:center;background-repeat:no-repeat}`,
       `.st-carousel figure{position:absolute;inset:0;margin:0;padding:0;display:flex;align-items:center;justify-content:center;opacity:0;transform-origin:${origin};animation:st-carousel-slide ${cycle}s infinite;animation-fill-mode:both}`,
@@ -341,7 +435,7 @@ function anchorFor(url, ctx) {
     const id = esc(d[1]);
     return `href="#${id}" data-drawer="${id}" aria-haspopup="dialog"`;
   }
-  return `href="${esc(url)}" target="_blank" rel="${relFor(url, ctx)}"`;
+  return `href="${esc(attrUrl(ctx, url))}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
 
 function renderCell(cell, place, ctx) {
@@ -378,7 +472,7 @@ function renderCell(cell, place, ctx) {
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
       const qrUrl = ctx.cardUrl || '';
-      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(avatar)}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
+      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(attrUrl(ctx, avatar))}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
     }
     case 'feature': {
       // 🩸 A PICTURE DOES NOT HAVE TO GO ANYWHERE. `anchorFor(p.href)` was called unconditionally,
@@ -428,7 +522,7 @@ function renderCell(cell, place, ctx) {
         const labelled = !!p.alt && on !== '' && on !== 'off' && on !== 'false' && on !== 'no';
         const cls = 'st-cell st-gal-cell st-gal-cell-bare' + (labelled ? ' st-gal-labelled' : '');
         const capt = labelled ? `<span class="st-gal-label">${esc(p.alt)}</span>` : '';
-        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(featureImg)}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
+        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
       }
       // 🩸 A FEATURE WITH COPY BUT NO PICTURE. Everything below — the scrim, the near-white eyebrow,
       // the white title, their shadows — is chrome designed to sit ON artwork. With no `img=`, the
@@ -440,7 +534,7 @@ function renderCell(cell, place, ctx) {
       // and `st-gal-cell-flat`, which the stylesheet themes against the ground like any other text.
       // (Not `st-gal-cell-bare` — that one already means "picture only, no copy", the opposite case.)
       const hasImg = !!featureImg;
-      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(featureImg)}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
+      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
         // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
         // every feature title — the arrow had been the span's only content, and the container
         // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
@@ -509,7 +603,7 @@ function renderCell(cell, place, ctx) {
       const attrs = vid ? `data-yt="${esc(vid)}"`
         : chanIsId ? `data-yt-channel="${esc(chanId)}"`
         : `data-yt-handle="${esc(chan)}"`;
-      return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
+      return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(attrUrl(ctx, poster))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
     }
     case 'social': {
       // The compact icon row every link-in-bio has: 40px marks, no labels, sitting with the profile
@@ -548,7 +642,7 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
+        return `<a class="st-social-btn" href="${esc(attrUrl(ctx, url))}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
       }).join('');
       return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
     }
@@ -1115,7 +1209,7 @@ const FLOATING_INK = [
 // darker than a mid-lightness colour, so NO scrim opacity below 100 makes them safe. Giving them a
 // local shadow is what iOS does for home-screen labels under an arbitrary wallpaper, and it leaves
 // the global scrim answering only for body ink.
-const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${cssUrl(img)}");background-size:cover;background-position:center;background-attachment:fixed}
+const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
 html{scrollbar-gutter:auto}
 .st-wrap,.st-footer{position:relative;z-index:1}
 .st-backdrop::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}%,transparent),color-mix(in srgb,var(--cp-ground,#0a1628) ${Math.min(96, dim + 18)}%,transparent))}
@@ -1274,9 +1368,11 @@ export function renderPage(model, ctx = {}) {
   // and looked transparent, and I twice talked myself out of it ("the screenshot caught the
   // fade-in") before sampling the pixels: painting the panel red changed nothing, and the paint
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
+  // the one place the author's `accent:` is read: a colour, or the default (see cssColor)
+  const accentC = ctx.accent ? cssColor(ctx.accent) : '';
   const backdropUrl = resolveAsset(ctx.backdrop, ctx);
   const backdrop = backdropUrl
-    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(backdropUrl, resolveBackdropDim(ctx.backdropDim, ctx.accent))}</style>`
+    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
     : '';
   const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, ctx);
   const css = ctx.css || '';
@@ -1322,7 +1418,7 @@ export function renderPage(model, ctx = {}) {
   const footer = `<footer class="st-footer"><div>${owner}${powered}</div></footer>`;
   // accent: ONE author-set hex derives the whole --cp-accent-* family (the same 12/25/35/72% ramp
   // the Python renderer derives per guild), so a card is themed by a single frontmatter field.
-  const accent = ctx.accent ? `<style id="cp-accent">:root{--cp-accent:${esc(ctx.accent)};--cp-accent-bg:color-mix(in srgb,${esc(ctx.accent)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(ctx.accent)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(ctx.accent)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(ctx.accent)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
+  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
   // 🔴 The theme block comes LAST in the head, and that placement is the whole mechanism: card.css
   // declares the --cp-* ramp in :root, so an override at equal specificity has to arrive later to
   // win. It also has to sit after the accent block, which still carries --cp-accent itself.
@@ -1358,7 +1454,7 @@ export function renderPage(model, ctx = {}) {
   const langRaw = String(ctx.lang || '').trim();
   const lang = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(langRaw) ? langRaw : 'en';
   const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
-  const theme = `<style id="cp-theme">${themeCss(mode, ctx.accent)}</style>`;
+  const theme = `<style id="cp-theme">${themeCss(mode, accentC)}</style>`;
   // The icon links (card-icon.mjs decides them — avatar or badge, and where the files live). Built
   // by the caller because only the caller knows the card's address; absent → no links, never a
   // link to a file nobody serves.
