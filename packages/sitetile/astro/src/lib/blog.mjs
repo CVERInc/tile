@@ -534,13 +534,32 @@ function pagesLangMajority(contentGlob) {
 }
 
 // The language of a SYSTEM page's own chrome (/preview, /search, /search/label/…) — routes with no
-// page behind them. 🩸 CVERInc/reef#1868. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
-// per-page key, so an English single-language site's preview said zh-Hant. A site that declares
-// `locales` keeps its old answer exactly (a separate gap, the same on every such site); a site that
-// does not gets siteDefaultLang, then the one shared default.
+// page behind them. 🩸 CVERInc/reef#1868, #2066. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
+// per-page key, so an English single-language site's preview said zh-Hant. siteDefaultLang, then the
+// one shared default. A site that declares `locales` used to be exempt (tile#135 kept its zh-Hant so
+// its artifacts stayed bit-identical) and its 404 disagreed with its /preview and /search; #2066
+// removed the exemption, so every route a site has speaks the same default language.
 export function systemPageLang(meta, contentGlob) {
-  if (parseLocales(meta && meta.locales, localesSourceOf(meta)).length) return String((meta && meta.lang) || '').trim() || DEFAULT_LANG;
   return siteDefaultLang(meta, contentGlob) || DEFAULT_LANG;
+}
+
+// Marks a meta as a NON-DEFAULT locale's own (localeBlogCorpora is the only place that sets it). A
+// symbol key, so it is invisible to Object.keys / frontmatter-style iteration and survives `{...meta}`.
+export const LOCALE_VIEW = Symbol.for('sitetile.localeView');
+
+// The language of a BLOG view's <html lang> (/devlog index, a post, a tag/category/author/date
+// archive). 🩸 CVERInc/reef#2066. These took `meta.lang || DEFAULT_LANG`: on a site that declares
+// `locales` and writes no site-level `lang`, `meta.lang` is empty, so every one of them said zh-Hant
+// while the site's pages said `locales[0]`. The site's own language is siteDefaultLang's question,
+// answered once for the 404, the system pages and these.
+// The exception is a view built from a NON-DEFAULT locale's meta (translated posts, /<loc>/devlog):
+// localeBlogCorpora forces that meta's `lang` to the locale and stamps LOCALE_VIEW on it. The marker
+// is the route context — NOT "meta.lang differs from the default", because a BASE view's meta.lang can
+// come from `_site.md` and disagree with `locales[0]` (tile#136 review: `lang: ja-JP` over
+// `locales: en-US, ja-JP` made the base /devlog Japanese while its 404 was English).
+export function blogViewLang(meta, contentGlob) {
+  if (meta && meta[LOCALE_VIEW]) return String(meta.lang).trim();
+  return systemPageLang(meta, contentGlob);
 }
 
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
@@ -1309,6 +1328,7 @@ export function localeBlogCorpora(contentFiles, blogLocaleFiles, meta, basePosts
       lang: L,                                                    // DATA code → SiteLayout toBcp47 → <html lang>
       'blog-path': `/${url}${base}`,
       'blog-url-pattern': `/${url}${pat}`,
+      [LOCALE_VIEW]: true,                                        // the route context blogViewLang reads (see there)
     };
     const listedL = listedPosts(postsL, metaL);
     out.push({ locale: L, url, meta: metaL, posts: postsL, listed: listedL });

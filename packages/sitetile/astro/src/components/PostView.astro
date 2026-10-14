@@ -1,5 +1,4 @@
 ---
-import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // Blog post view — renders a single post's body (via PostArticle) inside SiteLayout, EITHER bare
 // (single column) OR as the main column of the OPT-IN two-column post-sidebar layout. The wrapper +
 // aside appear ONLY when the site set `blog-post-sidebar: left|right` (→ `sidebar` prop is non-null,
@@ -10,10 +9,11 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // post's rail and its index's rail read as one thing; content is corpus-derived (buildPostSidebar).
 import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from './PostArticle.astro';
-import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy} from '../lib/blog.mjs';
+import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy, blogViewLang } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null, bannerLocales = null } = Astro.props;
+const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
 // Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
 // These strings used to be Chinese literals inline in this file AND in two sibling
 // components, so a non-CJK tenant read 最新文章 and a fix could land in one of three copies.
@@ -66,7 +66,7 @@ const headMeta = {
   'share-title': post.title,
 };
 ---
-<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={meta.lang || DEFAULT_LANG} meta={headMeta} bannerLocales={bannerLocales}>
+<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales}>
   {sidebar ? (
     <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
       <PostArticle post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
