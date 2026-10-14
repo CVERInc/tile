@@ -64,19 +64,21 @@ const envWith = (extra = {}) => {
 const robots = async (url, extra, headers = {}) =>
   (await worker.fetch(new Request(url, { redirect: 'manual', headers }), envWith(extra))).headers.get('x-robots-tag');
 
+// Since tile#125 a card on the canonical host is `noindex, nofollow` on its own (ROBOTS_HEADERS: only a
+// vanity host is indexable) — the switch never weakens that; it is the vanity host the switch reaches.
 test('CARD_NOINDEX_ALL on: every card response (html, markdown, vanity host) is noindex', async () => {
   for (const flag of ['1', 'true']) {
     const e = { CARD_NOINDEX_ALL: flag };
-    assert.equal(await robots('https://card.feelreef.com/maple', e), 'noindex');
+    assert.equal(await robots('https://card.feelreef.com/maple', e), 'noindex, nofollow');
     assert.equal(await robots(`https://${OWN}/`, e), 'noindex');
     assert.equal(await robots(`https://${OWN}/`, e, { accept: 'text/markdown' }), 'noindex');
-    assert.equal(await robots('https://card.feelreef.com/maple.md', e), 'noindex');
+    assert.equal(await robots('https://card.feelreef.com/maple.md', e), 'noindex, nofollow');
   }
 });
 
-test('CARD_NOINDEX_ALL off / unset / "0" / "false": production cards carry no X-Robots-Tag', async () => {
+test('CARD_NOINDEX_ALL off / unset / "0" / "false": a vanity card carries no X-Robots-Tag; the canonical host keeps its own rule', async () => {
   for (const e of [{}, { CARD_NOINDEX_ALL: '0' }, { CARD_NOINDEX_ALL: 'false' }, { CARD_NOINDEX_ALL: '' }]) {
-    assert.equal(await robots('https://card.feelreef.com/maple', e), null);
+    assert.equal(await robots('https://card.feelreef.com/maple', e), 'noindex, nofollow');
     assert.equal(await robots(`https://${OWN}/`, e), null);
   }
 });
@@ -172,6 +174,8 @@ test('CARD_NOINDEX_ALL off: the wrapper adds nothing to any exit', async () => {
   const env = { ...kvWith(), CARD_NOINDEX_ALL: '0' };
   for (const [name, url, o = {}] of EXITS.filter((e) => /301|icon 404|root/.test(e[0]))) {
     const res = await hit(url, { ...o, env });
-    assert.equal(res.headers.get('x-robots-tag'), null, name);
+    // the wrapper's signature is the bare `noindex`; a route's own `noindex, nofollow` (canonical host) is not it
+    assert.notEqual(res.headers.get('x-robots-tag'), 'noindex', name);
+    if (/^https:\/\/card\.feelreef\.com/.test(url) === false) assert.equal(res.headers.get('x-robots-tag'), null, name);
   }
 });
