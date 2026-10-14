@@ -261,6 +261,54 @@ const LINGO_BANNER = {
 };
 export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
 
+/** The banner's three sentences, overridden per locale from the SITE layer (CVERInc/reef#1888).
+ *
+ *  A site wanted a more formal register than the defaults and had no setting for it — the only
+ *  way was per-page JS, which is the kind of patch that breaks on the next release. The override
+ *  opens TEXT only (never style), as flat keys in the `locales` family, because every site-layer
+ *  key is a flat scalar and `locales` itself is one:
+ *    locales-banner-<locale>-prompt | locales-banner-<locale>-continue | locales-banner-<locale>-dismiss
+ *  <locale> is spelled any way `locales` accepts (zh-TW, zh-tw, zh-Hant). The sentence is the one
+ *  shown to a visitor whose browser prefers <locale> — like the defaults, it speaks THAT language.
+ *
+ *  Unset ⇒ the default. Blank ⇒ the default (a blank button is worse than the default one). A key
+ *  that is not one of the three fields, or names a locale the site does not declare, is IGNORED
+ *  and reported in `warnings` — a typo in a banner sentence must never fail a build.
+ *  Returns { copy: { <data-locale>: { prompt?, continue?, dismiss? } }, warnings: string[] }. */
+export const BANNER_OVERRIDE_PREFIX = 'locales-banner-';
+export const BANNER_FIELDS = ['prompt', 'continue', 'dismiss'];
+const _warned = new Set();
+/** One line per distinct warning per build — the layout runs once per page. */
+export function warnOnce(msg) { if (_warned.has(msg)) return; _warned.add(msg); console.warn(msg); }
+export function bannerOverrides(meta, locales) {
+  const copy = {};
+  const warnings = [];
+  if (!meta || typeof meta !== 'object') return { copy, warnings };
+  let declared = [];
+  try { declared = parseLocales(locales); } catch { declared = []; }
+  for (const key of Object.keys(meta)) {
+    if (!key.startsWith(BANNER_OVERRIDE_PREFIX)) continue;
+    const rest = key.slice(BANNER_OVERRIDE_PREFIX.length);
+    const m = rest.match(/^(.+)-([a-z]+)$/i);
+    const field = m ? m[2].toLowerCase() : '';
+    if (!m || !BANNER_FIELDS.includes(field)) {
+      warnings.push(`\`${key}\` is ignored: a banner key ends in one of ${BANNER_FIELDS.join(', ')} (e.g. ${BANNER_OVERRIDE_PREFIX}zh-tw-prompt).`);
+      continue;
+    }
+    const loc = declared.find((l) => sameLocale(l, m[1]));
+    if (!loc) {
+      warnings.push(`\`${key}\` is ignored: "${m[1]}" is not one of this site's locales (${declared.join(', ') || 'none declared'}).`);
+      continue;
+    }
+    const raw = meta[key];
+    const text = (typeof raw === 'string' || typeof raw === 'number') ? String(raw).replace(/\s+/g, ' ').trim() : '';
+    if (!text) continue;
+    const id = _canon(loc) || loc;
+    (copy[id] ||= {})[field] = text;
+  }
+  return { copy, warnings };
+}
+
 /** The suggestion banner's config for ONE page, or null when the page has nothing to suggest.
  *
  *  `altLocales` is the MEASURED set — the locales this page really exists in, the same list its
@@ -284,7 +332,7 @@ export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_
  *  measurement says "this page exists there" and each is true, so the answer is the union.
  *
  *  No options → null, so the page ships neither the banner markup nor its script. */
-export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null } = {}) {
+export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null, copy = null } = {}) {
   const declared = parseLocales(locales);
   if (declared.length < 2) return null;
   const pageLocale = localeOf(locales, lang);
@@ -295,7 +343,7 @@ export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', 
     ? declared.filter((l) => routeLocales.includes(l) || fromContent.includes(l))
     : fromContent;
   const options = exists.filter((l) => !sameLocale(l, pageLocale))
-    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l) }));
+    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l), ...((copy && copy[_canon(l) || l]) || {}) }));
   if (!options.length) return null;
   return {
     current: toUrlLocale(pageLocale),
