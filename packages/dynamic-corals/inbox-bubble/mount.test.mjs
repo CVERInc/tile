@@ -1495,10 +1495,52 @@ test('1921: mount sends no assistant-name request; opening sends one and applies
 	}
 });
 
-test('1921: reef-inbox:open also reads the name, once', async () => {
+test('1921: the icon click reads the name, once', async () => {
 	const { root } = await mountFresh();
 	const from = requests.length;
 	await openBubble(root);
-	await settle();
+	await drain();
 	assert.equal(assistantReads(from).length, 1);
+});
+
+test('1921: a first open by reef-inbox:open event (no icon click) reads the name once', async () => {
+	const from = requests.length;
+	const { root } = await mountFresh();
+	assert.equal(assistantReads(from).length, 0);
+	dispatch('reef-inbox:open');
+	await drain();
+	assert.ok(isOpen(root), 'the event did not open the panel');
+	assert.equal(assistantReads(from).length >= 1, true);
+	// every earlier test's mount is still listening to the broadcast; count only this tenant
+	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+		&& new URL(r.url).searchParams.get('id') === `t${seq}`);
+	assert.equal(mine.length, 1);
+});
+
+test('1921: #inbox auto-open (data-open-on-hash) reads the name once', async () => {
+	location.hash = '#inbox';
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-open-on-hash': '1' });
+		await drain();
+		assert.ok(isOpen(root), 'the hash did not open the panel');
+		const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+			&& new URL(r.url).searchParams.get('id') === `t${seq}`);
+		assert.equal(mine.length, 1, 'the auto-opened panel never read the platform name');
+	} finally {
+		location.hash = '';
+	}
+});
+
+test('1921: a reef-inbox:open held while the claim gate is pending reads the name once when it opens', async () => {
+	const from = requests.length;
+	const el = new El({ 'data-kind': 'site', 'data-id': 'held-1921', 'data-kaito': '1' });
+	const done = mount(el);
+	dispatch('reef-inbox:open');
+	await done;
+	await drain();
+	assert.ok(isOpen(el.children[0]), 'the held open did not open the panel');
+	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+		&& new URL(r.url).searchParams.get('id') === 'held-1921');
+	assert.equal(mine.length, 1, 'the held open skipped the name read');
 });
