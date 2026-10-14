@@ -111,6 +111,39 @@ await test('a site that declares no language anywhere answers nothing', () => {
   assert.equal(sdl(undefined), '');
 });
 
+await test('🔴 #1868 no locales, no config `lang`: the MAJORITY of the root pages\' `lang`, home or not', () => {
+  const pg = (l) => (l ? `sitetile-page: x\nlang: ${l}` : 'sitetile-page: x');
+  // The home says nothing; three pages say English, one says Japanese.
+  assert.equal(sdl({}, { 'home.md': pg(''), 'a.md': pg('en'), 'b.md': pg('en'), 'c.md': pg('ja') }), 'en');
+  // The home disagrees with the majority — the majority is the site's language, not the home's.
+  assert.equal(sdl({}, { 'home.md': pg('ja'), 'a.md': pg('en'), 'b.md': pg('en') }), 'en');
+  // `en` and `en-US` are one vote, and the first spelling seen is kept as written.
+  assert.equal(sdl({}, { 'a.md': pg('en-US'), 'b.md': pg('en'), 'c.md': pg('ja') }), 'en-US');
+});
+
+await test('🔴 #1868 a tie goes to the home page; a tie without it goes to the first path, not object order', () => {
+  const pg = (l) => `sitetile-page: x\nlang: ${l}`;
+  assert.equal(sdl({}, { 'about.md': pg('en'), 'home.md': pg('ja') }), 'ja');
+  assert.equal(sdl({}, { 'b.md': pg('ja'), 'a.md': pg('en') }), 'en');
+  assert.equal(sdl({}, { 'a.md': pg('en'), 'b.md': pg('ja') }), 'en');
+});
+
+await test('#1868 the majority is a fallback: `locales` and the config\'s `lang` both outrank it', () => {
+  const pg = (l) => `sitetile-page: x\nlang: ${l}`;
+  const files = { 'a.md': pg('en'), 'b.md': pg('en'), 'c.md': pg('en') };
+  assert.equal(sdl({ locales: 'ja-JP, en-US' }, files), 'ja-JP');
+  assert.equal(sdl({ lang: 'ko-KR' }, files), 'ko-KR');
+});
+
+await test('🔴 #1868 systemPageLang: config `lang` kept; locales site unchanged; otherwise the site default', () => {
+  assert.equal(typeof blog.systemPageLang, 'function', 'lib/blog.mjs does not export systemPageLang');
+  const files = glob({ 'a.md': 'sitetile-page: a\nlang: en', 'b.md': 'sitetile-page: b\nlang: en' });
+  assert.equal(blog.systemPageLang({ lang: 'ja' }, files), 'ja');
+  assert.equal(blog.systemPageLang({ locales: 'en, zh-TW' }, files), DEFAULT_LANG, 'a locales site must keep its old answer');
+  assert.equal(blog.systemPageLang({}, files), 'en');
+  assert.equal(blog.systemPageLang({}, {}), DEFAULT_LANG);
+});
+
 // ── the real half: IR in, HTML out ───────────────────────────────────────────────────────────
 const page = (fm, heading) => `---\n${fm}\n---\n\n## ${heading}\n%% sitetile: hero %%\n\nA fixture page.\n`;
 const SITES = {
@@ -202,6 +235,27 @@ const SITES = {
     'about.md': page('sitetile-page: about\ntitle: About\nlang: en-US\nlocales: en-US, ko/kr', 'About'),
     'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW\nlocales: zh-TW, ../kiln', '紙鶴'),
     'zh-tw/about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+  },
+  // ── CVERInc/reef#1868: one language, no `locales`, nothing in `_site.md` ──
+  // English throughout.
+  monoEn: {
+    '_site.md': '---\nbrand: Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
+    'contact.md': page('sitetile-page: contact\ntitle: Contact\nlang: en', 'Contact'),
+  },
+  // The home page writes no `lang`; the other pages are English. The home page is not the only voice.
+  monoEnSilentHome: {
+    '_site.md': '---\nbrand: Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper', 'Paper cranes'),
+    'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
+    'contact.md': page('sitetile-page: contact\ntitle: Contact\nlang: en', 'Contact'),
+  },
+  // The same shape in zh-Hant: the old default must come out exactly as before.
+  monoZh: {
+    '_site.md': '---\nbrand: 紙鶴工坊\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-Hant', '紙鶴'),
+    'about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-Hant', '關於'),
   },
   // Says nothing at all. Must keep getting exactly what it got before.
   undeclared: {
@@ -321,6 +375,30 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(htmlLang(notFound), 'ja');
       assert.match(notFound, /ページが見つかりません/);
       assert.deepEqual([...new Set(inLanguage(notFound))], ['ja']);
+    });
+
+    // ── CVERInc/reef#1868: a one-language site that is not zh-Hant ───────────────────────────
+    for (const name of ['monoEn', 'monoEnSilentHome']) {
+      await test(`🔴 #1868 ${name}: the 404 and /preview/ speak English, and the JSON-LD says so`, () => {
+        const { pages } = site(name);
+        for (const rel of ['404.html', 'preview/index.html']) {
+          assert.equal(htmlLang(pages[rel]), 'en', rel);
+          assert.deepEqual([...new Set(inLanguage(pages[rel]))], ['en'], `${rel}: JSON-LD names another language than the document`);
+          assert.doesNotMatch(pages[rel], /找不到頁面/, rel);
+        }
+        assert.match(pages['404.html'], /Page not found/);
+      });
+    }
+
+    await test('#1868 monoZh and undeclared: the system pages are exactly zh-Hant, as before', () => {
+      for (const name of ['monoZh', 'undeclared']) {
+        const { pages } = site(name);
+        for (const rel of ['404.html', 'preview/index.html']) {
+          assert.equal(htmlLang(pages[rel]), 'zh-Hant', `${name} ${rel}`);
+          assert.deepEqual([...new Set(inLanguage(pages[rel]))], ['zh-Hant'], `${name} ${rel}`);
+        }
+        assert.match(pages['404.html'], /找不到頁面/);
+      }
     });
 
     await test('nothing declared → exactly the shared default, as before', () => {
