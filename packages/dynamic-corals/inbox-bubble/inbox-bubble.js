@@ -2633,6 +2633,8 @@ export async function mount(el) {
 	// republish (CANON 第一條). Every reader below already goes through `headHtml()`/`renderClosed()`,
 	// so a re-render after that read is all it takes.
 	let assistantName = resolveAssistantName(el);
+	/** Set at the bottom of `mount`; called by `renderOpen` (reef#1921). */
+	let readName = () => {};
 	// 🔴 ASK-ONLY READS NO HANDLE. A handle is a conversation with a person; adopting one here would
 	// put the human thread, its poller and its compose box back on a tenant we were just told (or
 	// could not confirm) has nobody to read them. It is left in storage untouched — if the next page
@@ -2883,6 +2885,7 @@ export async function mount(el) {
 	 * thread has concluded.
 	 */
 	function renderOpen() {
+	readName();
 		const concluded = handoffConcluded(messages, conversationStatus);
 		const mode = resolveViewMode({ hasHandoffConv: !!handoffConv, storedMode, concluded, kaitoOn });
 		if (mode === 'ask') {
@@ -3279,22 +3282,27 @@ export async function mount(el) {
 	// `renderMessages()`, and a second one would be two requests for one paint.
 	if (conv && !open) await refresh();
 
-	// 🏛 The platform's name, applied AFTER the first paint (CANON 第一條 / ruling #36).
+	// 🏛 The platform's name is read when the panel OPENS, not at mount (reef#1921).
 	//
-	// 🔴 DELIBERATELY NOT AWAITED, and that is a correctness decision rather than a stylistic one.
-	// `mount()` resolving is what the whole rest of the system treats as「the bubble is up」, so
-	// awaiting a network round trip here would put the platform's latency in front of every
-	// visitor's first paint on every page — to fix a LABEL. It also silently lengthened the async
-	// chain enough to break an unrelated send-path test, which is the cheap version of the bug a
-	// real visitor would have hit as a dropped first message on a slow connection.
+	// 🔴 A MOUNT COSTS NO REQUEST FOR A VISITOR WHO NEVER OPENS THE BUBBLE — nearly all of them. The
+	// name is only ever painted inside the panel (`headHtml`), so reading it at page load bought a
+	// round trip per page view for a label nobody looked at. An owner's rename is still effective
+	// without a republish: the next open reads it. Once per mount; a failed read keeps the baked
+	// name and is not retried by every re-render.
 	//
-	// So the bubble draws immediately with the baked value and corrects itself a beat later.
-	// `null` ⇒ nothing to correct, and the name already on screen stands.
-	void fetchAssistantName(apiBase, kind, id).then((platformName) => {
-		if (!platformName || platformName === assistantName) return;
-		assistantName = platformName;
-		applyAssistantName();
-	});
+	// Not awaited: the panel draws at once with the baked value and corrects itself a beat later
+	// (`applyAssistantName` patches the name nodes only, so a draft survives).
+	let nameRead = false;
+	function readPlatformName() {
+		if (nameRead) return;
+		nameRead = true;
+		void fetchAssistantName(apiBase, kind, id).then((platformName) => {
+			if (!platformName || platformName === assistantName) return;
+			assistantName = platformName;
+			applyAssistantName();
+		});
+	}
+	readName = readPlatformName;
 }
 
 /** Each mounted element → the one function that undoes what its `mount()` installed (review B9). */

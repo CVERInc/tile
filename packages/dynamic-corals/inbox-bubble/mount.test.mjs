@@ -795,11 +795,13 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		assert.equal(el.children.length, 1, name);
 		assert.equal(digest(el.children[0].innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
 		assert.equal(listenerCount(), before + 2, `${name}: not the two window listeners a mount had`);
-		// Apart from the probe, the same requests as before: the one assistant-name read.
+		// Apart from the probe, the same requests as before — except the assistant-name read, which
+		// moved from mount to the first open (reef#1921).
 		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname),
-			['/api/inbox/session', '/api/inbox/assistant'], name);
+			['/api/inbox/session'], name);
 		await el.children[0].querySelector('.dc-inbox-open').emit('click');
 		await settle();
+		assert.equal(assistantReads(from).length, 1, `${name}: opening did not read the name once`);
 		assert.equal(digest(el.children[0].innerHTML), BEFORE.open[name], `${name}: open panel changed`);
 	}
 });
@@ -1296,9 +1298,11 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	await mount(el);
 	await drain();
 	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
-	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session', '/api/inbox/assistant']);
+	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 	assert.equal(listenerCount(), before + 2);
 	await openBubble(el.children[0]);
+	await drain();
+	assert.equal(assistantReads(from).length, 1);
 	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_status);
 	assert.match(el.children[0].innerHTML, /name="text"/);
 	assert.equal(el.children[0].innerHTML.includes(ASK_ONLY_LINE), false);
@@ -1478,10 +1482,10 @@ test('1921: mount sends no assistant-name request; opening sends one and applies
 		await settle();
 		assert.equal(assistantReads(from).length, 0, 'mount still asks for the assistant name');
 		await openBubble(root);
-		await settle();
+		await drain();
 		assert.equal(assistantReads(from).length, 1, 'opening the panel did not read the name once');
-		assert.match(root.innerHTML, /Mei/, 'the platform name was not applied');
-		assert.doesNotMatch(root.innerHTML, /Baked/, 'the baked name stayed on screen');
+		// the stand-in hands out the status node the in-place patch writes to
+		assert.match(root.querySelector('.dc-inbox-status').innerHTML, /^Mei/, 'the platform name was not applied');
 		// closing and reopening is not a second read
 		dispatch('reef-inbox:open');
 		await settle();
