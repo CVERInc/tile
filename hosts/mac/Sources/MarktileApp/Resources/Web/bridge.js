@@ -8,8 +8,8 @@
 // picker, because there is no vault — and adds nothing.
 
 import "../Engine/obsidian-shim.js";
-import { mountEditor, equipEditor, buildEditorCtl, t } from "../Engine/tile-core.js";
-import { makeWebHost } from "../Engine/host.js";
+import { mountEditor, equipEditor, buildEditorCtl, t } from "../Engine/editor-core.js";
+import { makeWebHost } from "../Engine/web-host.js";
 
 const send = (kind, payload) => {
   try {

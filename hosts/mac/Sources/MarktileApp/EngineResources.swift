@@ -21,9 +21,9 @@ enum EngineResources {
     static let required = [
         "Web/index.html",
         "Web/bridge.js",
-        "Engine/tile-core.js",
+        "Engine/editor-core.js",
         "Engine/obsidian-shim.js",
-        "Engine/host.js",
+        "Engine/web-host.js",
         "Engine/styles.css",
     ]
 
@@ -46,7 +46,16 @@ enum EngineResources {
 
     /// The directory to serve over `marktile-app://`, or nil when the app is missing its engine.
     static func resourceRoot() -> URL? {
-        candidates.first(where: isComplete)
+        candidates.lazy.map(contents).first(where: isComplete)
+    }
+
+    /// Where a candidate bundle keeps its files. SwiftPM has written this bundle in two shapes: flat
+    /// (Web/ and Engine/ at its top), and — from the toolchain on this machine as of 2026-10-14 — as
+    /// a real bundle with Contents/Resources/. The installed app from 2026-08-10 is the first shape
+    /// and a build today is the second, so a lookup that assumed either one was right for exactly
+    /// one of them. Foundation already knows how to read both; asking it is the whole fix.
+    static func contents(of bundle: URL) -> URL {
+        Bundle(url: bundle)?.resourceURL?.standardizedFileURL ?? bundle
     }
 
     static func isComplete(_ root: URL) -> Bool {
@@ -70,7 +79,7 @@ enum EngineResources {
         FileHandle.standardError.write(Data("✗ marktile cannot find its engine. Tried:\n".utf8))
         for candidate in candidates {
             let why = FileManager.default.fileExists(atPath: candidate.path)
-                ? "missing \(missing(in: candidate).joined(separator: ", "))"
+                ? "missing \(missing(in: contents(of: candidate)).joined(separator: ", "))"
                 : "no such directory"
             FileHandle.standardError.write(Data("    \(candidate.path) — \(why)\n".utf8))
         }
