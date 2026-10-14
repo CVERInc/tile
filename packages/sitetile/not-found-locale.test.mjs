@@ -287,6 +287,18 @@ const SITES = {
     'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
     'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
     'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\ntags: [crane]\nlang: zh-TW\n---\n內文。\n',
+    // No `lang:` of its own: the /zh-tw/ directory is what says which language it is.
+    'posts/zh-tw/p2.md': '---\ntitle: 紙鶴二\ndate: 2026-01-03\ntags: [crane]\n---\n內文。\n',
+  },
+  // ── CVERInc/reef#2066, tile#136 review: the site config's `lang` DISAGREES with locales[0], and a
+  // blog is on. The base views' meta.lang is then ja-JP (from `_site.md`) although the site's default
+  // is en-US; a view must not take that for "this is a translated view".
+  configDisagreesBlog: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlang: ja-JP\nlocales: en-US, ja-JP\npackages: lingo, blog\nblog-label-routes: true\nblog-tag-routes: true\ncopyright: © Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'ja-jp/home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+    'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
+    'posts/ja-jp/p1.md': '---\ntitle: 折り鶴一\ndate: 2026-01-02\ntags: [crane]\n---\n本文。\n',
   },
   // The same shape in zh-Hant: the old default must come out exactly as before.
   monoZh: {
@@ -448,11 +460,42 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
-    await test('🔴 #2066 multiEnBlog: a translated post (`lang: zh-TW`) and its locale blog stay zh-Hant', () => {
+    await test('🔴 #2066 multiEnBlog: base views link the default chooser (/language), as the 404 does', () => {
       const { pages } = site('multiEnBlog');
-      for (const rel of ['zh-tw/devlog/index.html', 'zh-tw/devlog/p1/index.html', 'zh-tw/tag/crane/index.html']) {
+      for (const rel of ['404.html', 'preview/index.html', 'search/index.html', 'tag/crane/index.html', 'devlog/index.html', 'devlog/p1/index.html', '2026/index.html']) {
+        const links = langLinks(pages[rel]);
+        assert.ok(links.length >= 1, `${rel}: no Language link — the fixture stopped exercising it`);
+        for (const href of links) assert.match(href, /^\/language\?return=/, `${rel}: ${href}`);
+      }
+    });
+
+    await test('🔴 #2066 multiEnBlog: translated posts (with AND without `lang:`) and the locale blog stay zh-Hant, chooser /zh-tw/language', () => {
+      const { pages } = site('multiEnBlog');
+      for (const rel of ['zh-tw/devlog/index.html', 'zh-tw/devlog/p1/index.html', 'zh-tw/devlog/p2/index.html', 'zh-tw/tag/crane/index.html']) {
         assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
         assert.equal(htmlLang(pages[rel]), 'zh-Hant', rel);
+        const links = langLinks(pages[rel]);
+        assert.ok(links.length >= 1, `${rel}: no Language link`);
+        for (const href of links) assert.match(href, /^\/zh-tw\/language\?return=/, `${rel}: ${href}`);
+      }
+    });
+
+    await test('🔴 #2066 configDisagreesBlog: base /devlog, post and tag archive follow locales[0] (en), not the config `lang` (ja-JP)', () => {
+      const { pages } = site('configDisagreesBlog');
+      for (const rel of ['404.html', 'preview/index.html', 'devlog/index.html', 'devlog/p1/index.html', 'tag/crane/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
+        assert.equal(htmlLang(pages[rel]), 'en', rel);
+        assert.deepEqual([...new Set(inLanguage(pages[rel]))].filter((l) => l !== 'en'), [], rel);
+        for (const href of langLinks(pages[rel])) assert.match(href, /^\/language\?return=/, `${rel}: ${href}`);
+      }
+    });
+
+    await test('🔴 #2066 configDisagreesBlog: the ja-JP edition (post without `lang:`) stays ja', () => {
+      const { pages } = site('configDisagreesBlog');
+      for (const rel of ['ja-jp/devlog/index.html', 'ja-jp/devlog/p1/index.html', 'ja-jp/tag/crane/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
+        assert.equal(htmlLang(pages[rel]), 'ja-JP', rel);
+        for (const href of langLinks(pages[rel])) assert.match(href, /^\/ja-jp\/language\?return=/, `${rel}: ${href}`);
       }
     });
 
