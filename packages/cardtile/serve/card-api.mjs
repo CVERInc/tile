@@ -22,6 +22,8 @@
 // ANY card. It is an infrastructure credential, not a user credential, and it is scoped by being
 // held only by the hosted Worker.
 import { parseCard, serializeCard } from '../card-core.js';
+import { cardDestinations } from './card-destinations.mjs';
+import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 
 const API_PREFIX = '/_api/';
@@ -148,10 +150,13 @@ async function writeCard(store, handle, md) {
 /**
  * handleApi: the `/_api/*` surface, or null when the request is not ours (the card renderer takes it).
  *
- * Routes — one per OPS entry in ai-ops.mjs, and no more:
+ * Routes:
  *   POST   /_api/cards                       list_cards    { handles: [...] } → summaries
  *   GET    /_api/card/<handle>               get_card      thin markdown + manifest + version
+ *   GET    /_api/card/<handle>/full          —             full markdown for the owner
  *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run }
+ *   PUT    /_api/card/<handle>/stop          —             { reason? } → stop serving
+ *   DELETE /_api/card/<handle>/stop          —             resume serving
  *   PUT    /_api/card/<handle>/asset/<id>    put_asset     { base64, mime }
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
@@ -236,6 +241,40 @@ export async function handleApi(request, env, url) {
 
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
   const card = /^card\/([^/]+)$/.exec(rest);
+  const stop = /^card\/([^/]*)\/stop$/.exec(rest);
+  const full = /^card\/([^/]*)\/full$/.exec(rest);
+
+  if (full) {
+    let handle;
+    try { handle = decodeURIComponent(full[1]).toLowerCase(); } catch { handle = ''; }
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(full[1])}.` }, 400);
+    if (method !== 'GET') return json({ error: `${method} not allowed here.` }, 405);
+    const md = await store.get(handle);
+    if (md == null) return json({ error: `No card at "${handle}".` }, 404);
+    return new Response(md, {
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  if (stop) {
+    let handle;
+    try { handle = decodeURIComponent(stop[1]).toLowerCase(); } catch { handle = ''; }
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(stop[1])}.` }, 400);
+    const key = `stop:${handle}`;
+    if (method === 'PUT') {
+      const body = (await readJson(request)) || {};
+      await store.put(key, JSON.stringify({
+        stopped_at: new Date().toISOString(),
+        reason: typeof body.reason === 'string' ? body.reason : '',
+      }));
+      return json({ handle, stopped: true });
+    }
+    if (method === 'DELETE') {
+      await store.delete(key);
+      return json({ handle, stopped: false });
+    }
+    return json({ error: `${method} not allowed here.` }, 405);
+  }
 
   // ── put_asset / delete_asset ───────────────────────────────────────────────────────────────────
   if (asset) {
@@ -289,9 +328,9 @@ export async function handleApi(request, env, url) {
 
     // ── get_card ─────────────────────────────────────────────────────────────────────────────────
     //
-    // Thin by construction. `assets: "inline"` is NOT a parameter here: the fat bytes already have
-    // their own exit (`/<handle>.md`, unauthenticated, because a card is public), and a backup taken
-    // over a flag somebody forgot to pass is 99.7% missing on the heaviest real card.
+    // Thin by construction. `assets: "inline"` is NOT a parameter here: the fat bytes have explicit
+    // exits (`/<handle>.md` publicly while serving, `/_api/card/<handle>/full` for the owner even while
+    // stopped), and a backup over a forgotten flag is 99.7% missing on the heaviest real card.
     if (method === 'GET') {
       const row = await readCard(store, handle);
       if (!row) return json({ error: `No card at "${handle}".` }, 404);
@@ -326,6 +365,15 @@ export async function handleApi(request, env, url) {
         return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
       }
       const wouldChange = !current || md !== current.md;
+
+      // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
+      // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
+      // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
+      const dests = cardDestinations(md, { base: `${url.origin}/${handle}/` });
+      const many = tooManyLinks(dests, env);
+      if (many) return json(many, 422);
+      const unsafe = await checkUrls(dests, env);
+      if (unsafe) return json({ error: 'card_url_unsafe', url: unsafe.url, threat: unsafe.threat }, 422);
 
       if (body.dry_run) {
         return json({

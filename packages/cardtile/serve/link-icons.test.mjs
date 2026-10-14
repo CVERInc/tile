@@ -43,34 +43,15 @@ test('🔴 the host as written is asked first, and its www. twin is always in th
   assert.deepEqual(chainOf(soc).slice(0, 2), ['/_icon/www.books.com.tw.ico', '/_icon/books.com.tw.ico']);
 });
 
-test('🔴 a brand we draw is drawn — Instagram and Threads never reach the favicon service', () => {
-  // DuckDuckGo answers 404 for instagram.com, threads.net and threads.com. A mark we ship cannot 404,
-  // and the link row and the social row take it from the SAME table, so they cannot disagree.
-  assert.ok(ICONS.threads && /^<svg/.test(ICONS.threads), 'there is no drawn Threads mark to use');
-  for (const [url, name] of [['https://instagram.com/someone', 'instagram'], ['https://www.instagram.com/someone', 'instagram'],
-    ['https://www.threads.net/@someone', 'threads'], ['https://www.threads.com/@someone', 'threads']]) {
+test('🔴 Instagram and Threads are fetched LIVE like every other mark — no automatic built-in SVG (reef#2026)', () => {
+  // tile#123 drew these by host because DuckDuckGo had nothing; reef#2026 reversed it: marks are never
+  // stored on our side, /_icon asks DuckDuckGo then Google. The built-in glyph is for `icon=instagram`.
+  assert.ok(ICONS.threads && /^<svg/.test(ICONS.threads), 'the named icon= must still ship');
+  for (const url of ['https://instagram.com/someone', 'https://www.instagram.com/someone',
+    'https://www.threads.net/@someone', 'https://www.threads.com/@someone']) {
     const html = markup(card(`- [ ] %% card: link %% [L](${url})`, `- [ ] %% card: social w=6 %% [S](${url})`));
-    assert.equal(linkMark(html), ICONS[name], `link to ${url} is not the drawn ${name}`);
-    assert.deepEqual(socialMarks(html), [ICONS[name]], `social mark for ${url} is not the drawn ${name}`);
-    assert.ok(!/_icon\/[^"]*(instagram|threads)/.test(html), `${url} still asks the favicon service`);
-  }
-  // a drawn mark cannot fail, so it carries no broken-image fallback glyph either
-  const soc = markup(card('- [ ] %% card: social w=6 %% [IG](https://instagram.com/x)'));
-  assert.ok(!/st-social-bare/.test(soc), 'a drawn mark got the dead fallback glyph');
-  // 🔴 and it is SIZED in a 40px circle: the drawn marks carry no width/height of their own, and an
-  // unsized inline <svg> lays out at 300×150.
-  const css = renderCardHTML(card('- [ ] %% card: social w=6 %% [IG](https://instagram.com/x)'), { handle: 'x' });
-  assert.match(css, /\.st-social-btn \.st-cell-icon\{width:20px;height:20px/);
-});
-
-test('🔴 the drawn mark is for the LISTED hosts only: an unlisted subdomain or a look-alike is fetched', () => {
-  // The table names exact hosts. `siteOf()` once reduced foo.instagram.com to instagram.com, so any
-  // subdomain borrowed the brand's drawn mark — which is a claim about a host we never measured.
-  for (const url of ['https://foo.instagram.com/x', 'https://notinstagram.com/x', 'https://instagram.com.evil.tld/x',
-    'https://foo.threads.net/x']) {
-    const html = markup(card(`- [ ] %% card: link %% [L](${url})`, `- [ ] %% card: social w=6 %% [S](${url})`));
-    assert.match(linkMark(html), /^<img/, `link to ${url} drew a built-in mark`);
-    assert.ok(socialMarks(html).every((m) => /^<img/.test(m)), `social mark for ${url} drew a built-in mark`);
+    assert.match(linkMark(html), /^<img[^>]*src="\/_icon\//, `link to ${url} is not a live <img>`);
+    assert.ok(socialMarks(html).every((m) => /^<img[^>]*src="\/_icon\//.test(m)), `social mark for ${url} is not a live <img>`);
   }
 });
 
@@ -79,10 +60,10 @@ test('the author still outranks the table: icon= and iconhost= on a link are obe
     '- [ ] %% card: link icon=shop %% [IG](https://instagram.com/x)'));
   assert.match(html, /_icon\/webtoons\.com\.ico/, 'an explicit iconhost lost to the brand table');
   assert.ok(html.includes(ICONS.shop), 'an explicit icon= lost to the brand table');
-  // 🔴 control: the SAME link with no override is the drawn brand — without this, the two lines above
-  // pass on a renderer with no brand table at all, and prove nothing about the ordering.
-  assert.equal(linkMark(markup(card('- [ ] %% card: link %% [IG](https://instagram.com/x)'))), ICONS.instagram,
-    'no override, yet the brand table was not consulted');
+  // 🔴 control: the SAME link with no override is the live favicon, so the two lines above prove the
+  // author's word changed something (reef#2026: there is no automatic brand SVG any more).
+  assert.match(linkMark(markup(card('- [ ] %% card: link %% [IG](https://instagram.com/x)'))), /^<img[^>]*_icon\/instagram\.com\.ico/,
+    'no override, yet the link was not the live favicon');
 });
 
 test('🔴 each mark in a social row can be told its icon: icon= and iconhost= after the address', () => {
@@ -127,14 +108,12 @@ test('🔴 an explicit override beats the default envelope and house marks', () 
   assert.match(mail2, /m2 7 10 6 10-6/, 'mail default is no longer the envelope');
 });
 
-test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week', async () => {
-  // `cf.cacheTtl` is "cache this for N seconds regardless of what the response says" — it is the Edge
-  // Cache TTL override, and Cloudflare's edge caches a 404 like any other cacheable status. So one
-  // bad answer from the favicon service locked a domain's mark out for seven days (books.com.tw:
-  // the service answered 200, our route kept answering 404). `cacheTtlByStatus` gives each class
-  // its own TTL. The upstream here is a fake; what is under test is what we ASK the edge to keep.
-  const seen = [];
-  const real = globalThis.fetch;
+test('🔴 only a validated mark is kept (caches.default); no cf cache options on the upstream fetch', async () => {
+  // r9: `cf.cacheTtl*` would keep an UNVALIDATED upstream answer. The route now asks for no edge caching on
+  // the upstream fetch and stores only a response that passed the MIME check. A miss is asked again.
+  const seen = [], stored = new Map();
+  const real = globalThis.fetch, realCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async (r) => stored.get(r.url)?.clone(), put: async (r, v) => { stored.set(r.url, v); } } };
   globalThis.fetch = async (url, init) => {
     seen.push({ url: String(url), cf: init && init.cf });
     return /books/.test(String(url)) ? new Response('', { status: 404 })
@@ -146,13 +125,11 @@ test('🔴 an upstream 404 is cached for an hour, not a week; a mark for a week'
     const hit = await worker.fetch(new Request('https://card.feelreef.com/_icon/www.instagram.com.ico'), env);
     assert.equal(miss.status, 404);
     assert.equal(hit.status, 200);
-    assert.equal(seen.length, 2, 'setup: the route did not reach the upstream');
-    for (const { url, cf } of seen) {
-      assert.ok(cf, `${url}: no cf options at all`);
-      assert.equal(cf.cacheTtl, undefined, `${url}: cacheTtl applies to EVERY status, 404 included`);
-      assert.deepEqual(cf.cacheTtlByStatus, { '200-299': 604800, 404: 3600, '500-599': 0 });
-    }
-  } finally { globalThis.fetch = real; }
+    // reef#2026 (tile#125): the books miss asks DuckDuckGo AND Google before giving up; the hit stops at DuckDuckGo.
+    assert.equal(seen.length, 3, 'setup: the route did not reach the upstream');
+    for (const { url, cf } of seen) assert.equal(cf, undefined, `${url}: upstream fetch must not ask the edge to cache`);
+    assert.deepEqual([...stored.keys()], ['https://card.feelreef.com/_icon/www.instagram.com.ico']);
+  } finally { globalThis.fetch = real; globalThis.caches = realCaches; }
 });
 
 test('🔴 the grammar says what iconimg IS: an artwork thumbnail, not a brand mark', async () => {
@@ -195,4 +172,16 @@ test('🔴 a literal space in a URL query is the URL, not an override (review v2
   assert.deepEqual(d.over, { icon: 'shop', iconhost: 'x.com' });
   // an illegal host is not a token either
   assert.equal(linkOf('https://example.org/x iconhost=not_a_host').url, 'https://example.org/x iconhost=not_a_host');
+});
+
+test('🔴 a social line is ONE link, and the hint says what happens to a second (reef#2015)', async () => {
+  // The grammar is one `[name](url)` per line (ai-ops.mjs's BLANKS note, and the hint's first words);
+  // a second link on the same line is not read. That is the rule, not an accident — so the hint has
+  // to say it, or the author of `[A](…) [B](…)` (specimen-rich does it) never learns why B is gone.
+  const html = markup(card('- [ ] %% card: social w=6 %% [Instagram](https://instagram.com/x) [YouTube](https://www.youtube.com/@x)'));
+  assert.equal(socialMarks(html).length, 1, 'the second link on a line was drawn — the hint below would be wrong');
+  const { CELL_STRINGS_BY_KEY } = await import('../w/cell-i18n.mjs');
+  const row = CELL_STRINGS_BY_KEY['type.social.body.hint'];
+  const said = { zh: '第一個', ja: '最初', en: 'first', ko: '첫 번째', 'zh-Hans': '第一个', de: 'erste', fr: 'premier', es: 'primer', pt: 'primeiro' };
+  for (const [loc, word] of Object.entries(said)) assert.ok(row[loc] && row[loc].includes(word), `${loc}: ${row[loc]}`);
 });

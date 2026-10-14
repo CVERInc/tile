@@ -1506,6 +1506,23 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
    requests pend): same disabled look, but the cursor says work is in progress, not refusal. */
 .st-runtime :where(.dc-native-buy)[aria-busy="true"] { cursor: progress; }
 
+/* `[data-native-email-field]` is a plain attribute hook, not a class — the native Buy script's
+   `ask()` builds this input with `doc.createElement('input')` and never sets a class on it, so a
+   class selector has nothing to grab; the attribute it DOES set is the only hook available.
+   Scoped under `.st-runtime` for the same reason `.dc-native-buy` above is: this can never reach
+   an unrelated bare `<input>` outside a runtime surface. Declarations reuse `.st-form-input`'s
+   exact token recipe (font/colour/background/border/radius/padding, further up this file) so a
+   guest asked for an email here sees the SAME form control the rest of the site already has,
+   instead of the browser's unstyled default (Arial, black text, grey 2px border, radius 0). */
+.st-runtime :where([data-native-email-field]) {
+  font: inherit; color: var(--gd-text); background: var(--gd-bg);
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
+  padding: .7rem .85rem; box-sizing: border-box;
+}
+.st-runtime :where([data-native-email-field]):focus-visible {
+  outline: 2px solid var(--gd-accent); outline-offset: 2px; border-color: var(--gd-accent);
+}
+
 /* Account's signed-in sections (orders/membership/profile/contact/discord) are only STAMPED by
    this repo (accountPageBody, the empty `[data-ejecta-account-section]` divs); their INSIDES are
    filled by the client-side account island (its renderAccountSection and friends), which builds

@@ -5,7 +5,7 @@ file in Finder and you get the same three-mode editor the Obsidian plugin runs â
 Seasoned, Rendered, Plain â€” in a window, with no vault involved.
 
 It does **not** reimplement the editor. This is an `NSDocument` + `WKWebView` shell
-around `tile-core.js`, so the fourth surface cannot drift from the other three.
+around `editor-core.js`, so the fourth surface cannot drift from the other three.
 `scripts/sync-engine.sh` copies the engine in at build time from this repo's single
 sources; `Sources/MarktileApp/Resources/Engine` is generated, git-ignored, and never
 hand-edited.

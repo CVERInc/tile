@@ -33,6 +33,9 @@ workers_dev = true
 
 [vars]
 PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outrank the real card)
+# CARD_NOINDEX_ALL = "1"  # kill switch (reef#2044): uncomment/set to put `X-Robots-Tag: noindex` on EVERY
+#                         # card response, vanity hosts included. Default off. Per-environment: set it under
+#                         # [env.production.vars] too. Remove it (or "0") to resume indexing.
 
 # handle → card.md store. Create it once (see the header) and paste its id here.
 [[kv_namespaces]]
@@ -80,3 +83,9 @@ PREVIEW = "false"
 [[env.production.kv_namespaces]]
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
+
+# ── Secrets (set with `wrangler secret put`, never in this file) ──────────────────────────────────
+# WEB_RISK_API_KEY — Google Web Risk API key. card save (PUT /_api/card/<handle>) looks up every
+#   outbound href/src the renderer would emit and refuses a listed one with 422 card_url_unsafe.
+#   Unset, a timeout (3 s) or a non-2xx answer lets the save through with one log line — fail-open
+#   on purpose (see serve/url-risk.mjs). The key never appears in logs or responses.

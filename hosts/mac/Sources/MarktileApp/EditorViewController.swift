@@ -8,6 +8,10 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// Fired whenever the editor's text changes. Carries the full document (files are small, and a
     /// full copy keeps the document's mirror trivially correct).
     var onChange: ((String) -> Void)?
+    /// Where the document lives, asked at the moment it matters: a ⌘-click on `[[wikilink]]`
+    /// resolves against the folder the file is in NOW, which Save As may have changed since the
+    /// window opened. Nil for a document that was never saved.
+    var documentURL: (() -> URL?)?
 
     private var webView: WKWebView!
     private var isReady = false
@@ -265,6 +269,62 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         }
     }
 
+    // MARK: - Wikilinks
+
+    /// ⌘-click on `[[name]]`. Resolution reads the disk — a vault can be thousands of files — so it
+    /// runs off the main thread. Three answers, one per thing the person can do next: the file it
+    /// means; a menu of the files it might mean; or the search panel with the name in it. See
+    /// WikilinkResolver for why it stops short of guessing.
+    private func openWikilink(_ target: String) {
+        let document = documentURL?()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let answer = WikilinkResolver.resolve(target: target, from: document)
+            DispatchQueue.main.async {
+                switch answer {
+                case .file(let url):
+                    self.openDocument(url)
+                case .several(let urls, let vault):
+                    self.chooseAmong(urls, vault: vault)
+                case .none where Self.flintfind != nil:
+                    self.webView.evaluateJavaScript("window.__mt.searchFor(\(self.jsString(target)))", completionHandler: nil)
+                case .none:
+                    // No match and no search to hand it to. A beep is the one honest answer left:
+                    // the click was heard, and there is nothing this app can open for it.
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
+    private func openDocument(_ url: URL) {
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+    }
+
+    /// Several notes share the name: a menu where the pointer is, one item per file, titled by its
+    /// path inside the vault — the folder is the only thing that tells two same-named notes apart.
+    /// A native menu rather than a panel in the page: "which of these did you mean" is what a Mac
+    /// asks with a pop-up menu, and Escape or a click elsewhere dismisses it with nothing opened.
+    private func chooseAmong(_ urls: [URL], vault: URL) {
+        let menu = NSMenu()
+        let root = vault.standardizedFileURL.path + "/"
+        for url in urls {
+            let full = url.standardizedFileURL.path
+            let title = full.hasPrefix(root) ? String(full.dropFirst(root.count)) : url.lastPathComponent
+            let item = NSMenuItem(title: title, action: #selector(openChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            menu.addItem(item)
+        }
+        // Where the pointer is now, which is where it was when the person clicked: resolution takes
+        // tens of milliseconds, not long enough for the hand to have moved on.
+        let inWindow = view.window?.mouseLocationOutsideOfEventStream ?? .zero
+        menu.popUp(positioning: nil, at: webView.convert(inWindow, from: nil), in: webView)
+    }
+
+    @objc private func openChosen(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { openDocument(url) }
+    }
+
     private func replySearch(id: Int, json: String) {
         // The payload is JSON built by flintfind, so it goes in as a STRING the page parses — never
         // spliced into the script as source, where a stray backtick would be code.
@@ -376,6 +436,8 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
                 NSDocumentController.shared.openDocument(
                     withContentsOf: URL(fileURLWithPath: path), display: true) { _, _, _ in }
             }
+        case "openwiki":
+            if let target = body["target"] as? String { openWikilink(target) }
         case "change":
             if let text = body["text"] as? String { onChange?(text) }
         default:

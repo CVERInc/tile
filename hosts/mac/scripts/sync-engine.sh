@@ -10,9 +10,15 @@ cd "$(dirname "$0")/.."          # hosts/mac
 ROOT="$(cd ../.. && pwd)"        # repo root
 ENGINE="Sources/MarktileApp/Resources/Engine"
 
-# tile-core.js is itself emitted from packages/core/editor-core.js. Regenerate it rather than
+# dist/editor-core.js is itself emitted from packages/core/editor-core.js. Regenerate it rather than
 # trusting whatever is checked in, so a stale emit can't ship inside the app.
-echo "▸ regenerating tile-core.js from packages/core/editor-core.js"
+#
+# 🩸 Files land here under their SOURCE basename, so whatever imports them (bridge.js) and whatever
+# checks for them (EngineResources.required) must say the same names. On 2026-08-12 the sources were
+# renamed (tile-core.js → editor-core.js, host.js → web-host.js) and only this list followed: the
+# app could not be built from main for two months, and the guard in build-app.sh was the one thing
+# that said so — to nobody, because nobody built it.
+echo "▸ regenerating dist/editor-core.js from packages/core/editor-core.js"
 bash "$ROOT/scripts/build-editor-core.sh"
 
 mkdir -p "$ENGINE"

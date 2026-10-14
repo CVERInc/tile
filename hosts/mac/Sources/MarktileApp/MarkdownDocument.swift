@@ -35,6 +35,7 @@ final class MarkdownDocument: NSDocument {
 
     override func makeWindowControllers() {
         let vc = EditorViewController()
+        vc.documentURL = { [weak self] in self?.fileURL }
         vc.onChange = { [weak self] newText in
             guard let self else { return }
             guard newText != self.text else { return }
