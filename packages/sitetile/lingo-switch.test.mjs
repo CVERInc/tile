@@ -518,23 +518,58 @@ test('🔴 r1-1 a declared locale outside the four: each sentence falls back on 
   for (const f of ['prompt', 'continue', 'dismiss']) assert.ok(none.options[0][f], `no override: ${f} is not empty`);
 });
 
-test('🔴 r1-2 site layer only: a page frontmatter key of the family is ignored and warned page-level', () => {
-  const siteMeta = { 'locales-banner-zh-tw-prompt': '站台的句子' };
-  const pageMeta = { ...siteMeta, 'locales-banner-zh-tw-prompt': '頁面的句子', 'locales-banner-zh-tw-dismiss': '頁面婉拒' };
-  const { copy, warnings } = bannerOverrides(siteMeta, TWO, pageMeta);
+// tile#128 r2-1: the site layer is what loadSite says it is — base _site.md plus the page's own
+// locale _site.md — and `page-level` is decided by WHERE a key was written, not by its value.
+const { registerHooks } = await import('node:module');
+const { pathToFileURL } = await import('node:url');
+registerHooks({ resolve(spec, ctx, next) { return spec === '@sitetile' ? { url: pathToFileURL(join(HERE, 'site-core.js')).href, shortCircuit: true } : next(spec, ctx); } });
+const { loadSite } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const fm = (o) => `---\n${Object.entries(o).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+/** What the page route does: loadSite for this page, merge the page over it, then put the banner
+ *  keys back to the site layer's and remember which ones the page wrote. */
+function pageMeta(files, rel, own) {
+  const siteConfig = loadSite(files, rel);
+  return lingoMod.siteLayerBannerMeta(own, siteConfig, { ...siteConfig, ...own });
+}
+const FILES = {
+  '/x/content/_site.md': fm({ locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '站台的句子', 'locales-banner-en-us-prompt': 'Base English' }),
+  '/x/content/zh-tw/_site.md': fm({ 'locales-banner-en-us-prompt': 'Locale-file English' }),
+};
+
+test('🔴 r2-1 a locale _site.md is site layer: its override applies on that locale\'s pages, no warning', () => {
+  const meta = pageMeta(FILES, 'zh-tw/about', { title: 'A' });
+  const { copy, findings } = bannerOverrides(meta, TWO);
+  assert.deepEqual(findings, []);
+  const b = banner({ locales: TWO, lang: 'zh-TW', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, 'Locale-file English');
+  const base = pageMeta(FILES, 'about', { title: 'A' });
+  assert.equal(bannerOverrides(base, TWO).copy['en-US'].prompt, 'Base English', 'the base pages keep the base value');
+});
+
+test('🔴 r2-1 a page frontmatter key is ignored and warned page-level — even when it equals the site value', () => {
+  const meta = pageMeta(FILES, 'about', { title: 'A', 'locales-banner-zh-tw-prompt': '站台的句子', 'locales-banner-zh-tw-dismiss': '頁面婉拒' });
+  const { copy, findings } = bannerOverrides(meta, TWO);
   const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
   assert.equal(b.options[0].prompt, '站台的句子');
-  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss);
-  assert.equal(warnings.filter((w) => /\[page-level\]/.test(w)).length, 2, warnings.join(' | '));
-  assert.match(layout, /lingo\.bannerOverrides\(loadSite\(contentGlob\) \|\| \{\}, locales, meta\)/);
+  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss, 'the page value is not used');
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`).sort(), ['locales-banner-zh-tw-dismiss:page-level', 'locales-banner-zh-tw-prompt:page-level']);
 });
 
-test('🔴 r1-3 a sentence longer than 120 code points is cut to 120 and warned too-long', () => {
-  const long = '字'.repeat(119) + '尾🙂多';
-  const { copy, warnings } = bannerOverrides({ 'locales-banner-zh-tw-prompt': long }, TWO);
-  assert.equal([...copy['zh-TW'].prompt].length, 120);
-  assert.ok(copy['zh-TW'].prompt.endsWith('尾'), 'cut on code points, keeps the head');
-  assert.equal(warnings.filter((w) => /\[too-long\]/.test(w)).length, 1, warnings.join(' | '));
+test('🔴 r2-1 the page route stamps the page keys before handing meta to the layout', () => {
+  const route = readFileSync(join(SRC, 'pages/[...path].astro'), 'utf8');
+  assert.match(route, /siteLayerBannerMeta\(/);
 });
 
+// tile#128 r2-2: cut by grapheme, never inside one; say what was dropped.
+test('🔴 r2-2 a sentence longer than 120 graphemes is cut to 120 without splitting one, and the drop is shown', () => {
+  const family = '👨‍👩‍👧‍👦';
+  const long = '字'.repeat(119) + family + '多出來的字';
+  const { copy, warnings, findings } = bannerOverrides({ 'locales-banner-zh-tw-prompt': long }, TWO);
+  const seg = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(copy['zh-TW'].prompt)];
+  assert.equal(seg.length, 120);
+  assert.ok(copy['zh-TW'].prompt.endsWith(family), 'the whole family emoji is kept — no orphan code point');
+  const f = findings.find((x) => x.reason === 'too-long');
+  assert.equal(f.dropped, '多出來的字');
+  assert.match(warnings.join('\n'), /多出來的字/);
+});
 console.log(`\n${passed} passed`);
