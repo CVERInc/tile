@@ -233,6 +233,9 @@ const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 // So the noindex follows the HANDLE, not the deployment. `demo-` is a reserved prefix.
 const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 
+const ROBOTS_HEADERS = (env, handle, isVanity) =>
+  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {};
+
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
 // One URL now answers with two different bodies depending on Accept, and the edge caches for 60s.
@@ -240,16 +243,16 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // for up to a minute, at random. Putting it only on the markdown response is the version that looks
 // right and still breaks — the HTML response is the one that gets cached first, because that is what
 // people request.
-const CARD_HEADERS = (env, handle) => ({
+const CARD_HEADERS = (env, handle, isVanity) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
-  ...(isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
+  ...ROBOTS_HEADERS(env, handle, isVanity),
 });
 
-const html = (body, status = 200, env = null, handle = '') =>
+const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity) },
   });
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
@@ -264,7 +267,7 @@ const html = (body, status = 200, env = null, handle = '') =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle }) =>
+const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -272,7 +275,7 @@ const markdown = (body, { env, originalLength, alternate, handle }) =>
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
-      ...CARD_HEADERS(env, handle),
+      ...CARD_HEADERS(env, handle, isVanity),
     },
   });
 
@@ -640,26 +643,41 @@ export default {
     const store = env && env.CARDS;
     if (!store) return html('<!doctype html><meta charset=utf-8><p>card store not bound</p>', 500, env);
 
-    // AT MOST ONE extra read per request, and the two branches are mutually exclusive:
+    // Vanity routing uses the forward binding here or the inverse below:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);
 
-    // Is this path the card at all? Decided BEFORE the card is read — a path that is nothing costs
-    // no store read and no render. See cardPath.
+    // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
+    // Card exits read the body and stop marker in parallel before any exit or redirect.
     const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
-    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle);
+    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
+    const [cardMd, stopped] = await Promise.all([
+      store.get(resolved.handle),
+      store.get(`stop:${resolved.handle}`),
+    ]);
+    if (stopped != null) {
+      return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
+        status: 404,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow',
+          Vary: 'Accept',
+        },
+      });
+    }
+
     if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
     // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
     if (want === 'ico' || want === 'svg' || want === 'apple') {
-      const iconMd = await store.get(resolved.handle);
-      if (!iconMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60' } });
-      const file = await iconFile(want, parseCard(iconMd),
-        { name: cardName(iconMd, resolved.handle), accent: frontmatter(iconMd, 'accent') });
+      if (!cardMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle) } });
+      const file = await iconFile(want, parseCard(cardMd),
+        { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
       return new Response(file.body, {
         headers: {
           'Content-Type': file.type,
@@ -668,6 +686,7 @@ export default {
           'Cache-Control': 'public, max-age=3600',
           // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
           'X-Content-Type-Options': 'nosniff',
+          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle),
         },
       });
     }
@@ -686,13 +705,12 @@ export default {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
-    const cardMd = await store.get(resolved.handle);
-    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env);
+    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env, resolved.handle, !!vanityHandle);
 
     // the download link, in the form this host actually uses
     const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -700,7 +718,7 @@ export default {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -714,6 +732,6 @@ export default {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle);
   },
 };
