@@ -62,7 +62,8 @@ const glob = (files) => Object.fromEntries(Object.entries(files).map(([rel, fm])
   [`/x/content/${rel}`, `---\n${fm}\n---\n\n## A section\n%% sitetile: prose %%\n\nBody.\n`]));
 const sdl = (meta, files = {}) => {
   assert.equal(typeof blog.siteDefaultLang, 'function', 'lib/blog.mjs does not export siteDefaultLang');
-  return blog.siteDefaultLang(meta, glob(files));
+  // A real site config sits in the glob (siteMeta() only reads `meta.lang` as the site's when it does).
+  return blog.siteDefaultLang(meta, glob({ '_site.md': 'brand: x', ...files }));
 };
 
 await test('🔴 the first declared locale outranks the site config\'s own `lang`', () => {
@@ -135,9 +136,17 @@ await test('#1868 the majority is a fallback: `locales` and the config\'s `lang`
   assert.equal(sdl({ lang: 'ko-KR' }, files), 'ko-KR');
 });
 
+await test('🔴 #1868 no `_site.md`: the home page\'s `lang` that siteMeta() falls back to is not a site-level `lang`', () => {
+  const pg = (l) => `sitetile-page: x\nlang: ${l}`;
+  const files = glob({ 'home.md': pg('ja'), 'a.md': pg('en'), 'b.md': pg('en') });
+  const fellBack = { 'sitetile-page': 'x', lang: 'ja' };   // what siteMeta() hands over with no _site.md
+  assert.equal(blog.siteDefaultLang(fellBack, files), 'en');
+  assert.equal(blog.systemPageLang(fellBack, files), 'en');
+});
+
 await test('🔴 #1868 systemPageLang: config `lang` kept; locales site unchanged; otherwise the site default', () => {
   assert.equal(typeof blog.systemPageLang, 'function', 'lib/blog.mjs does not export systemPageLang');
-  const files = glob({ 'a.md': 'sitetile-page: a\nlang: en', 'b.md': 'sitetile-page: b\nlang: en' });
+  const files = glob({ '_site.md': 'brand: x', 'a.md': 'sitetile-page: a\nlang: en', 'b.md': 'sitetile-page: b\nlang: en' });
   assert.equal(blog.systemPageLang({ lang: 'ja' }, files), 'ja');
   assert.equal(blog.systemPageLang({ locales: 'en, zh-TW' }, files), DEFAULT_LANG, 'a locales site must keep its old answer');
   assert.equal(blog.systemPageLang({}, files), 'en');
@@ -257,6 +266,12 @@ const SITES = {
     'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
     'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
     'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
+  },
+  // No `_site.md` at all: siteMeta() hands the home page's own frontmatter over as the site's.
+  noSiteFile: {
+    'home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja', '折り鶴'),
+    'a.md': page('sitetile-page: a\ntitle: A\nlang: en', 'A'),
+    'b.md': page('sitetile-page: b\ntitle: B\nlang: en', 'B'),
   },
   // The same shape in zh-Hant: the old default must come out exactly as before.
   monoZh: {
@@ -385,7 +400,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     // ── CVERInc/reef#1868: a one-language site that is not zh-Hant ───────────────────────────
-    for (const name of ['monoEn', 'monoEnSilentHome']) {
+    for (const name of ['monoEn', 'monoEnSilentHome', 'noSiteFile']) {
       await test(`🔴 #1868 ${name}: the 404 and /preview/ speak English, and the JSON-LD says so`, () => {
         const { pages } = site(name);
         for (const rel of ['404.html', 'preview/index.html']) {

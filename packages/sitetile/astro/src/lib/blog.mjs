@@ -487,9 +487,18 @@ export function siteMeta(contentGlob) {
 // When the config's `lang` names the SAME locale as `locales[0]` (`zh-Hant` over `zh-TW`) it is
 // still returned as written: that spelling is what a one-language site puts in <html lang>.
 export function siteDefaultLang(meta, contentGlob) {
-  const own = String((meta && meta.lang) || '').trim();
+  const own = siteLayerLang(meta, contentGlob);
   const site = defaultLocaleOf(meta && meta.locales, own || pagesLangMajority(contentGlob));
   return own && sameLocale(own, site) ? own : site;
+}
+
+// The `lang` the SITE CONFIG layer wrote. 🩸 CVERInc/tile#135 review. With no `_site.md`, siteMeta()
+// falls back to the HOME page's frontmatter, so `meta.lang` is then the home page's own language, not
+// a site-level answer — and it would outrank the majority forever. A fallen-back home key is not a
+// site key (same rule as the banner keys, tile#128): no site config layer ⇒ ''.
+function siteLayerLang(meta, contentGlob) {
+  if (!loadSite(contentGlob)) return '';
+  return String((meta && meta.lang) || '').trim();
 }
 
 // The language most of the site's root pages declare — the third answer to "what language is this
@@ -497,7 +506,9 @@ export function siteDefaultLang(meta, contentGlob) {
 // This used to read the root home page ONLY, so a site whose home wrote no `lang` (or wrote a
 // different one from the rest) took the engine default on every route without a page behind it.
 // Counted over `content/*.md` (no sub-directories: a locale directory is another language by
-// construction) minus `_`-files (the site config is read separately). Spellings of one locale
+// construction; the root pages are the site's chrome pages — home, about, contact — which is what the
+// 404 and the other system pages stand beside, whereas posts are content in whatever language their
+// author wrote, and one translated post must not re-language the site's chrome) minus `_`-files (the site config is read separately). Spellings of one locale
 // (`en`, `en-US`) are one vote and the first spelling seen is returned as written. A tie goes to the
 // root home's language when it is among the leaders, else to the first leader in path order, so the
 // answer never depends on object order.
@@ -528,9 +539,7 @@ function pagesLangMajority(contentGlob) {
 // `locales` keeps its old answer exactly (a separate gap, the same on every such site); a site that
 // does not gets siteDefaultLang, then the one shared default.
 export function systemPageLang(meta, contentGlob) {
-  const own = String((meta && meta.lang) || '').trim();
-  if (own) return own;
-  if (parseLocales(meta && meta.locales, localesSourceOf(meta)).length) return DEFAULT_LANG;
+  if (parseLocales(meta && meta.locales, localesSourceOf(meta)).length) return String((meta && meta.lang) || '').trim() || DEFAULT_LANG;
   return siteDefaultLang(meta, contentGlob) || DEFAULT_LANG;
 }
 
