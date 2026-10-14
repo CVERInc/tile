@@ -1,5 +1,4 @@
 ---
-import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // REEF with Pagetile — preview landing: optional content-notice interstitial + chapter picker.
 // Lightweight notice, NOT real age verification (a click-through confirm, matching the family's
 // no-phantom-features rule: we don't pretend to gate what we don't actually verify). Consent is
@@ -10,12 +9,13 @@ import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // none of the copy. A book with no `notice` gets no interstitial — the reader lands straight on the
 // chapters, rather than on a notice we invented for them.
 import SiteLayout from '../../layouts/SiteLayout.astro';
-import { siteMeta } from '../../lib/blog.mjs';
+import { siteMeta, systemPageLang } from '../../lib/blog.mjs';
 import { loadFirstReaderBook } from '../../lib/pagetile.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';
 
 const bookGlob = import.meta.glob('../../../pagetile/*.book.md', { query: '?raw', import: 'default', eager: true });
+const sysFiles = import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true });
 const meta = siteMeta(
   import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })
 );
@@ -24,7 +24,7 @@ const bookKey = (book?.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-'
 const notice = book?.notice || '';
 const blurb = book?.blurb || null;
 ---
-<SiteLayout title={`Preview — ${meta.title || ''}`} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={`Preview — ${meta.title || ''}`} lang={systemPageLang(meta, sysFiles)} meta={meta}>
   {notice && (
     <Fragment>
       <noscript><style>#pv-gate {'{'} display: flex !important; {'}'}</style></noscript>

@@ -11,7 +11,7 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
-import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
+import { DEFAULT_LANG, toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
 
@@ -488,14 +488,50 @@ export function siteMeta(contentGlob) {
 // still returned as written: that spelling is what a one-language site puts in <html lang>.
 export function siteDefaultLang(meta, contentGlob) {
   const own = String((meta && meta.lang) || '').trim();
-  let rootHome = '';
-  for (const [path, raw] of Object.entries(contentGlob || {})) {
-    if ((path.split('/content/')[1] || '') !== 'home.md') continue;
-    rootHome = String(splitFrontmatter(String(raw || '')).meta?.lang || '').trim();
-    break;
-  }
-  const site = defaultLocaleOf(meta && meta.locales, own || rootHome);
+  const site = defaultLocaleOf(meta && meta.locales, own || pagesLangMajority(contentGlob));
   return own && sameLocale(own, site) ? own : site;
+}
+
+// The language most of the site's root pages declare — the third answer to "what language is this
+// site", for a site with no `locales:` and no `lang:` in its site config. 🩸 CVERInc/reef#1868.
+// This used to read the root home page ONLY, so a site whose home wrote no `lang` (or wrote a
+// different one from the rest) took the engine default on every route without a page behind it.
+// Counted over `content/*.md` (no sub-directories: a locale directory is another language by
+// construction) minus `_`-files (the site config is read separately). Spellings of one locale
+// (`en`, `en-US`) are one vote and the first spelling seen is returned as written. A tie goes to the
+// root home's language when it is among the leaders, else to the first leader in path order, so the
+// answer never depends on object order.
+function pagesLangMajority(contentGlob) {
+  const tally = new Map();   // bcp47 key → { n, raw }
+  let homeKey = '';
+  for (const [path, raw] of Object.entries(contentGlob || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const rel = path.split('/content/')[1] || '';
+    if (!rel || rel.includes('/') || rel.startsWith('_')) continue;
+    const lang = String(splitFrontmatter(String(raw || '')).meta?.lang || '').trim();
+    if (!lang) continue;
+    const key = String(toBcp47(lang)).toLowerCase();
+    const row = tally.get(key) || { n: 0, raw: lang };
+    row.n++;
+    tally.set(key, row);
+    if (rel === 'home.md') homeKey = key;
+  }
+  let best = null;
+  for (const [key, row] of tally) {
+    if (!best || row.n > best.row.n || (row.n === best.row.n && key === homeKey)) best = { key, row };
+  }
+  return best ? best.row.raw : '';
+}
+
+// The language of a SYSTEM page's own chrome (/preview, /search, /search/label/…) — routes with no
+// page behind them. 🩸 CVERInc/reef#1868. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
+// per-page key, so an English single-language site's preview said zh-Hant. A site that declares
+// `locales` keeps its old answer exactly (a separate gap, the same on every such site); a site that
+// does not gets siteDefaultLang, then the one shared default.
+export function systemPageLang(meta, contentGlob) {
+  const own = String((meta && meta.lang) || '').trim();
+  if (own) return own;
+  if (parseLocales(meta && meta.locales).length) return DEFAULT_LANG;
+  return siteDefaultLang(meta, contentGlob) || DEFAULT_LANG;
 }
 
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`

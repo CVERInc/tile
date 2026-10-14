@@ -1,5 +1,4 @@
 ---
-import { DEFAULT_LANG } from '../../../../packages/lingo/locale.mjs';
 // REEF with Blog — /search/label/<tag>, PAGE 1 of the Blogger-style "posts with this
 // label" listing (pages 2+ live at /search/label/<tag>/page/<n> in ./page/[n].astro).
 // Blogger-descended sites publish their category pages at
@@ -27,7 +26,7 @@ import { DEFAULT_LANG } from '../../../../packages/lingo/locale.mjs';
 // (`/search/label/活動`) alike; both decode to the same dir, and trailingSlash:'ignore'
 // + build.format:'directory' serve them with or without the trailing slash.
 import SiteLayout from '../../../../layouts/SiteLayout.astro';
-import { allPosts, listedPosts, siteMeta, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, systemPageLang, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
@@ -56,6 +55,7 @@ export function getStaticPaths() {
   return tags.map((tag) => ({ params: { tag }, props: { posts, meta, tag } }));
 }
 
+const sysFiles = import.meta.glob('../../../../../content/*.md', { query: '?raw', import: 'default', eager: true });
 const { posts, meta, tag } = Astro.props;
 // 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
 // one destination, two affordances, and the chip was the one readers actually reach for
@@ -81,7 +81,7 @@ const title = `${tag} — ${meta.title || ''}`;
 // segment matches the UTF-8 dir the build emits (browsers percent-encode on request).
 const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag}/page/${n}`);
 ---
-<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={title} lang={systemPageLang(meta, sysFiles)} meta={meta}>
   <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
     <div class="bl-main">
     <header class="bl-head">

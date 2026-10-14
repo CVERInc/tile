@@ -1,12 +1,11 @@
 ---
-import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // REEF with Pagetile — the reader (`/preview/<chapter-id>`). One route per CHAPTER; every page
 // image of the chapter is in the DOM (lazy-loaded), and reader.js switches paged⇄scroll,
 // drives page-turns, the thumbnail scrubber, resume, and immersive mode entirely client-side —
 // the Kindle-manga model the maintainer studied 2026-07-07. Deep-link a page via `#<page-id>`.
 // Without JS this degrades to a readable vertical stack of all pages.
 import SiteLayout from '../../layouts/SiteLayout.astro';
-import { siteMeta } from '../../lib/blog.mjs';
+import { siteMeta, systemPageLang } from '../../lib/blog.mjs';
 import { loadFirstReaderBook } from '../../lib/pagetile.mjs';
 import { lucideSvg } from '../../lib/lucide.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
@@ -33,12 +32,13 @@ export function getStaticPaths() {
 }
 
 const { chapter, book, prevChapter, nextChapter, nextMeta } = Astro.props;
+const sysFiles = import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true });
 const meta = siteMeta(
   import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })
 );
 const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 ---
-<SiteLayout title={`${chapter.title} — ${book.title}`} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={`${chapter.title} — ${book.title}`} lang={systemPageLang(meta, sysFiles)} meta={meta}>
   <div
     class="ptr"
     data-book={bookKey}

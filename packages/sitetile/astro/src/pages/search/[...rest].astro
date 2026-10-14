@@ -1,5 +1,4 @@
 ---
-import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // REEF with Blog — /search, the shareable full-page search view (the header overlay's
 // Enter target and a bookmarkable `?q=` URL, semantically matching live Blogger's own
 // /search page). Wears the SAME SiteLayout shell + `.bl-*` result markup as /devlog, so
@@ -21,7 +20,7 @@ import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
 // emits exactly /search when it is on. The deeper /search/label/<tag> routes are more specific and
 // keep winning — asserted by the build, not assumed.
 import SiteLayout from '../../layouts/SiteLayout.astro';
-import { siteMeta, blogSearchOn } from '../../lib/blog.mjs';
+import { siteMeta, blogSearchOn, systemPageLang } from '../../lib/blog.mjs';
 
 export function getStaticPaths() {
   const meta = siteMeta(import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true }));
@@ -31,6 +30,7 @@ export function getStaticPaths() {
   return [{ params: { rest: undefined }, props: { meta } }];
 }
 
+const sysFiles = import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true });
 const { meta } = Astro.props;
 const heading = (meta['blog-search-title'] ? String(meta['blog-search-title']).trim() : '') || 'Search';
 const placeholder = (meta['blog-search-placeholder'] ? String(meta['blog-search-placeholder']).trim() : '') || heading;
@@ -38,7 +38,7 @@ const emptyText = (meta['blog-search-empty'] ? String(meta['blog-search-empty'])
 const countLabel = (meta['blog-search-count-label'] ? String(meta['blog-search-count-label']).trim() : '') || 'results';
 const title = heading + ' — ' + (meta.title || '');
 ---
-<SiteLayout title={title} lang={meta.lang || DEFAULT_LANG} meta={meta}>
+<SiteLayout title={title} lang={systemPageLang(meta, sysFiles)} meta={meta}>
   <section class="bl-index bl-search">
     <div class="bl-main">
       <header class="bl-head">

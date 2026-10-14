@@ -251,6 +251,13 @@ const SITES = {
     'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
     'contact.md': page('sitetile-page: contact\ntitle: Contact\nlang: en', 'Contact'),
   },
+  // The same English site with a blog, search and tag routes: the other system pages.
+  monoEnBlog: {
+    '_site.md': '---\nbrand: Tsuru Paper\npackages: blog\nblog-search: true\nblog-label-routes: true\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
+    'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
+  },
   // The same shape in zh-Hant: the old default must come out exactly as before.
   monoZh: {
     '_site.md': '---\nbrand: 紙鶴工坊\n---\n',
@@ -389,6 +396,15 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         assert.match(pages['404.html'], /Page not found/);
       });
     }
+
+    await test('🔴 #1868 monoEnBlog: /search and /search/label/<tag> speak English too', () => {
+      const { pages } = site('monoEnBlog');
+      for (const rel of ['404.html', 'preview/index.html', 'search/index.html', 'search/label/crane/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
+        assert.equal(htmlLang(pages[rel]), 'en', rel);
+        assert.deepEqual([...new Set(inLanguage(pages[rel]))], ['en'], rel);
+      }
+    });
 
     await test('#1868 monoZh and undeclared: the system pages are exactly zh-Hant, as before', () => {
       for (const name of ['monoZh', 'undeclared']) {
