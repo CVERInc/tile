@@ -795,11 +795,13 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		assert.equal(el.children.length, 1, name);
 		assert.equal(digest(el.children[0].innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
 		assert.equal(listenerCount(), before + 2, `${name}: not the two window listeners a mount had`);
-		// Apart from the probe, the same requests as before: the one assistant-name read.
+		// Apart from the probe, the same requests as before — except the assistant-name read, which
+		// moved from mount to the first open (reef#1921).
 		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname),
-			['/api/inbox/session', '/api/inbox/assistant'], name);
+			['/api/inbox/session'], name);
 		await el.children[0].querySelector('.dc-inbox-open').emit('click');
 		await settle();
+		assert.equal(assistantReads(from).length, 1, `${name}: opening did not read the name once`);
 		assert.equal(digest(el.children[0].innerHTML), BEFORE.open[name], `${name}: open panel changed`);
 	}
 });
@@ -1296,9 +1298,11 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	await mount(el);
 	await drain();
 	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
-	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session', '/api/inbox/assistant']);
+	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 	assert.equal(listenerCount(), before + 2);
 	await openBubble(el.children[0]);
+	await drain();
+	assert.equal(assistantReads(from).length, 1);
 	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_status);
 	assert.match(el.children[0].innerHTML, /name="text"/);
 	assert.equal(el.children[0].innerHTML.includes(ASK_ONLY_LINE), false);
@@ -1460,4 +1464,83 @@ test('#1866 row 2 — what the ask-only bubble is CALLED: the ask box\'s words, 
 	} finally {
 		document.documentElement.attrs.lang = lang;
 	}
+});
+
+// reef#1921 — the platform's assistant name is read when the panel OPENS, not when the page loads.
+// A visitor who never opens the bubble (nearly all of them) used to cost one request per page view.
+const assistantReads = (from) =>
+	requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant');
+
+test('1921: mount sends no assistant-name request; opening sends one and applies the name', async () => {
+	const prev = respond;
+	respond = (url) => url.includes('/api/inbox/assistant')
+		? { ok: true, status: 200, json: async () => ({ ok: true, resolved: true, assistantName: 'Mei' }) }
+		: undefined;
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-assistant-name': 'Baked' });
+		await settle();
+		assert.equal(assistantReads(from).length, 0, 'mount still asks for the assistant name');
+		await openBubble(root);
+		await drain();
+		assert.equal(assistantReads(from).length, 1, 'opening the panel did not read the name once');
+		// the stand-in hands out the status node the in-place patch writes to
+		assert.match(root.querySelector('.dc-inbox-status').innerHTML, /^Mei/, 'the platform name was not applied');
+		// closing and reopening is not a second read
+		dispatch('reef-inbox:open');
+		await settle();
+		assert.equal(assistantReads(from).length, 1, 'a second open asked again');
+	} finally {
+		respond = prev;
+	}
+});
+
+test('1921: the icon click reads the name, once', async () => {
+	const { root } = await mountFresh();
+	const from = requests.length;
+	await openBubble(root);
+	await drain();
+	assert.equal(assistantReads(from).length, 1);
+});
+
+test('1921: a first open by reef-inbox:open event (no icon click) reads the name once', async () => {
+	const from = requests.length;
+	const { root } = await mountFresh();
+	assert.equal(assistantReads(from).length, 0);
+	dispatch('reef-inbox:open');
+	await drain();
+	assert.ok(isOpen(root), 'the event did not open the panel');
+	assert.equal(assistantReads(from).length >= 1, true);
+	// every earlier test's mount is still listening to the broadcast; count only this tenant
+	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+		&& new URL(r.url).searchParams.get('id') === `t${seq}`);
+	assert.equal(mine.length, 1);
+});
+
+test('1921: #inbox auto-open (data-open-on-hash) reads the name once', async () => {
+	location.hash = '#inbox';
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-open-on-hash': '1' });
+		await drain();
+		assert.ok(isOpen(root), 'the hash did not open the panel');
+		const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+			&& new URL(r.url).searchParams.get('id') === `t${seq}`);
+		assert.equal(mine.length, 1, 'the auto-opened panel never read the platform name');
+	} finally {
+		location.hash = '';
+	}
+});
+
+test('1921: a reef-inbox:open held while the claim gate is pending reads the name once when it opens', async () => {
+	const from = requests.length;
+	const el = new El({ 'data-kind': 'site', 'data-id': 'held-1921', 'data-kaito': '1' });
+	const done = mount(el);
+	dispatch('reef-inbox:open');
+	await done;
+	await drain();
+	assert.ok(isOpen(el.children[0]), 'the held open did not open the panel');
+	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
+		&& new URL(r.url).searchParams.get('id') === 'held-1921');
+	assert.equal(mine.length, 1, 'the held open skipped the name read');
 });
