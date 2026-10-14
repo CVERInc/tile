@@ -530,7 +530,7 @@ function pagesLangMajority(contentGlob) {
 export function systemPageLang(meta, contentGlob) {
   const own = String((meta && meta.lang) || '').trim();
   if (own) return own;
-  if (parseLocales(meta && meta.locales).length) return DEFAULT_LANG;
+  if (parseLocales(meta && meta.locales, localesSourceOf(meta)).length) return DEFAULT_LANG;
   return siteDefaultLang(meta, contentGlob) || DEFAULT_LANG;
 }
 
