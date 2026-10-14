@@ -856,13 +856,20 @@ function mountEditor(contentEl, opts, host) {
     // "read three of these in turn" work without keeping a panel on screen — the state persists, the
     // pixels do not. The find bar already behaves this way; this follows its sibling rather than
     // inventing a second convention.
-    const toggleSearchAll = (show) => {
+    // `query` (optional) opens the panel already searching for something the host chose — a
+    // `[[wikilink]]` it could not settle to one file is the case. It replaces the remembered query
+    // the same way typing would, so reopening afterwards shows that search, not the one before it.
+    const toggleSearchAll = (show, query) => {
       if (!canSearchAll) return false;
       if (!panel) panel = buildPanel();
       const on = (show === undefined) ? !panel.classList.contains('is-open') : show;
       panel.classList.toggle('is-open', on);
       if (on) {
         const inp = panel.querySelector('.tugtile-sa-i');
+        const asked = typeof query === 'string' && query.trim() ? query : null;
+        // The old answer is cleared first: it belongs to a different question, and leaving it under
+        // the new query until the new answer lands would show the wrong files beside the right name.
+        if (asked) { toggleFind(false); panelState.res = null; panelState.sel = 0; runSearch(asked); }
         inp.value = panelState.q;
         drawResults();
         setTimeout(() => { inp.focus(); inp.select(); }, 0);
@@ -1224,7 +1231,7 @@ function mountEditor(contentEl, opts, host) {
     toggleFind: (show) => toggleFind(show),   // ⌘F — the same bar the magnifier opens
     // ⌘F⌘F from the host's menu. Returns false when the host provides no searchAll, so the caller
     // can decline to offer the menu item rather than shipping one that does nothing.
-    toggleSearchAll: (show) => toggleSearchAll(show),
+    toggleSearchAll: (show, query) => toggleSearchAll(show, query),
     canSearchAll: () => canSearchAll,
     focus: () => ta.focus(),
     destroy: () => { clearTimeout(syncT); if (sepRO) { sepRO.disconnect(); sepRO = null; } if (vv) { vv.removeEventListener('resize', applyVV); vv.removeEventListener('scroll', applyVV); } if (sizer) { sizer.style.height = ''; sizer.style.maxHeight = ''; } document.removeEventListener('selectionchange', updateSelPill); selPill.remove(); },
