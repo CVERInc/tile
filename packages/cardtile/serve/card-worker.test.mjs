@@ -1060,7 +1060,7 @@ test('🔴 #1929: the stale-bundle stamp covers every file the generator READ, n
   // every file it opens (its own reads, plus esbuild's metafile for the JS it bundles) and ships that
   // list inside the artifact; the stamp is over THAT list.
   const assets = await import('./edit2-assets.mjs');
-  const { sourceStamp } = await import('./edit2-sources.mjs');
+  const { sourceStamp, isOwnOutput } = await import('./edit2-sources.mjs');
   const files = assets.SOURCE_FILES;
   assert.ok(Array.isArray(files) && files.length > 20, 'the bundle carries no list of the files it was built from — regenerate it');
   const has = (suffix) => files.some((f) => f.endsWith(suffix.replace(/^packages\//, '')));
@@ -1084,20 +1084,70 @@ test('🔴 #1929: the stale-bundle stamp covers every file the generator READ, n
   const seen = new Set(); const todo = [fileURLToPath(root)];
   while (todo.length) {
     const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
-    if (f.endsWith('/edit2-assets.mjs')) continue;   // the generator's own output (esbuild keeps none of it; the generator asserts that)
+    if (isOwnOutput(f, dirname(fileURLToPath(import.meta.url)))) continue;   // the generator's own output (esbuild keeps none of it; the generator asserts that)
     for (const m of readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g)) todo.push(join(dirname(f), m[1]));
   }
   assert.ok(seen.size > 10, 'the import walk found suspiciously few modules');
   const listed = new Set(files.map((f) => join(dirname(fileURLToPath(import.meta.url)), f)));
-  const missing = [...seen].filter((f) => !listed.has(f) && !f.endsWith('/edit2-assets.mjs'));
+  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, dirname(fileURLToPath(import.meta.url))));
   assert.deepEqual(missing, [], 'modules reachable by import from w2/edit2.mjs but not on the stamped list');
-  // signet's corners.css is the one input outside the repo (resolved from node_modules, at `latest`),
-  // so it has its own stamp, checked where signet is installed — the same "partial" convention as the
-  // arrow.css byte check above, and said out loud when it is skipped.
-  const { signetCornersPath, signetCornersStamp } = await import('./edit2-sources.mjs');
-  const cp = signetCornersPath();
-  if (!cp) console.log('    (partial: @cvernet/signet not installed — corners.css stamp check skipped)');
-  else assert.equal(signetCornersStamp(cp), assets.SIGNET_CORNERS_STAMP, 'signet corners.css changed since the bundle was built — run: node packages/cardtile/serve/gen-edit2-assets.mjs');
+});
+
+test('🔴 #1929 r1: the generator itself is stamped — changing how the bundle is ASSEMBLED makes it stale', async () => {
+  // codex review of tile#133, P1. SOURCE_FILES held what the generator READ, not the generator: change
+  // FONT_BASE, the HTML slicing or the CSS order in gen-edit2-assets.mjs and the committed artifact is
+  // no longer what it would emit, while every byte it reads is unchanged — stamp green, bundle stale.
+  const assets = await import('./edit2-assets.mjs');
+  const { sourceStamp } = await import('./edit2-sources.mjs');
+  for (const f of ['gen-edit2-assets.mjs', 'edit2-sources.mjs']) {
+    assert.ok(assets.SOURCE_FILES?.includes(f), `${f} decides what the bundle contains but is not on the stamped list`);
+  }
+  // the knife the reviewer asked for, by injection: flip one byte of the generator ⇒ the stamp moves
+  const flipped = sourceStamp(assets.SOURCE_FILES, undefined, (p) => {
+    const b = Buffer.from(readFileSync(p));
+    if (p.endsWith('/gen-edit2-assets.mjs')) b[0] ^= 1;
+    return b;
+  });
+  assert.notEqual(flipped, assets.SOURCE_STAMP, 'editing the generator does not move the stamp');
+});
+
+test('🔴 #1929 r1: the previous-output exclusion is an EXACT path, not a basename suffix', async () => {
+  // codex review P2. `endsWith('edit2-assets.mjs')` exempted any module with that tail from the
+  // stamped list and from the import walk. Only this generator's own output is circular.
+  const { isOwnOutput } = await import('./edit2-sources.mjs');
+  const here = dirname(fileURLToPath(import.meta.url));
+  assert.equal(typeof isOwnOutput, 'function', 'isOwnOutput is missing');
+  assert.equal(isOwnOutput(join(here, 'edit2-assets.mjs'), here), true, 'CONTROL: the real output is excluded');
+  assert.equal(isOwnOutput(join(here, '../serve/./edit2-assets.mjs'), here), true, 'same file spelled differently is still the same file');
+  assert.equal(isOwnOutput(join(here, '../w2/edit2-assets.mjs'), here), false, 'same name, other directory');
+  assert.equal(isOwnOutput(join(here, 'other-edit2-assets.mjs'), here), false, 'same tail, other name');
+});
+
+test('🔴 #1929 r1: signet is bound to the LOCKFILE version; a different installed version is a version message, not "bundle stale"', async () => {
+  // codex review P2. package.json says `latest`, the lockfile resolves one version, and corners.css is
+  // read from whatever is installed. The bytes may only be compared when the installed version is the
+  // one the bundle was generated against; otherwise the honest report is "different signet".
+  const { signetVerdict, signetLockVersion } = await import('./edit2-sources.mjs');
+  const assets = await import('./edit2-assets.mjs');
+  assert.equal(typeof signetVerdict, 'function', 'signetVerdict is missing');
+  const lock = signetLockVersion();
+  assert.match(lock, /^\d+\.\d+\.\d+/, 'the lockfile names no signet version');
+  assert.equal(assets.SIGNET_LOCK_VERSION, lock, `the bundle was generated against signet ${assets.SIGNET_LOCK_VERSION}, the lockfile now says ${lock} — regenerate`);
+  const base = { recordedVersion: '0.6.0', lockVersion: '0.6.0', recordedStamp: 'aaaa', installed: { version: '0.6.0', stamp: 'aaaa' } };
+  assert.equal(signetVerdict(base).status, 'ok');
+  assert.equal(signetVerdict({ ...base, installed: null }).status, 'skipped');
+  assert.equal(signetVerdict({ ...base, installed: { version: '0.6.0', stamp: 'bbbb' } }).status, 'bytes-differ', 'same version, other bytes: the one case that is the bundle\'s fault');
+  const other = signetVerdict({ ...base, installed: { version: '0.7.1', stamp: 'bbbb' } });
+  assert.equal(other.status, 'version-differs', 'a different installed version never reaches the bytes comparison');
+  assert.match(other.message, /signet 版本不同（0\.7\.1 vs 0\.6\.0）/);
+  assert.doesNotMatch(other.message, /stale|過期/);
+  assert.equal(signetVerdict({ ...base, lockVersion: '0.7.0' }).status, 'lock-moved', 'lockfile moved since generation');
+  // and the live check: where signet is installed at the lockfile's version, its bytes are the recorded ones
+  const { signetInstalled } = await import('./edit2-sources.mjs');
+  const v = signetVerdict({ recordedVersion: assets.SIGNET_LOCK_VERSION, lockVersion: lock, recordedStamp: assets.SIGNET_CORNERS_STAMP, installed: signetInstalled() });
+  if (v.status === 'skipped') console.log('    (partial: @cvernet/signet not installed — corners.css stamp check skipped)');
+  else if (v.status === 'version-differs') console.log('    (partial: ' + v.message + ' — corners.css bytes not compared)');
+  else assert.equal(v.status, 'ok', v.message);
 });
 
 // ── HOST MODE: /edit?host=<parent origin> ───────────────────────────────────────────────────────

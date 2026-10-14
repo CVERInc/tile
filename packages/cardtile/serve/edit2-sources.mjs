@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -60,3 +60,44 @@ export function signetCornersPath(dir = DIR) {
   }
 }
 export const signetCornersStamp = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16);
+
+/**
+ * Is `absPath` THIS generator's own output (edit2-assets.mjs next to it)? An exact resolved-path
+ * comparison — 🔴 not a basename suffix: `endsWith('edit2-assets.mjs')` would also exempt `other-
+ * edit2-assets.mjs` and any future module that happens to share the tail (tile#133 review).
+ */
+export const isOwnOutput = (absPath, dir = DIR) => resolve(absPath) === resolve(dir, 'edit2-assets.mjs');
+
+// ── signet: bound to the LOCKFILE, not to whatever is installed ───────────────────────────────────
+/** the version packages/cardtile/package-lock.json resolves @cvernet/signet to */
+export function signetLockVersion(dir = DIR) {
+  const lock = JSON.parse(fs.readFileSync(join(dir, '../package-lock.json'), 'utf8'));
+  const v = lock.packages?.['node_modules/@cvernet/signet']?.version;
+  if (!v) throw new Error('edit2 sources: package-lock.json names no @cvernet/signet version');
+  return v;
+}
+/** { version, stamp } of the installed corners.css, or null when signet is not installed */
+export function signetInstalled(dir = DIR) {
+  const p = signetCornersPath(dir);
+  if (!p) return null;
+  const version = JSON.parse(fs.readFileSync(join(dirname(p), '../package.json'), 'utf8')).version;
+  return { version, stamp: signetCornersStamp(p) };
+}
+/**
+ * What to say about signet's corners.css. Bytes are compared ONLY when the installed version is the
+ * one the lockfile pins and the bundle was generated against; a different installed version is an
+ * environment difference, reported as such — never as "the bundle is stale".
+ */
+export function signetVerdict({ recordedVersion, lockVersion, recordedStamp, installed }) {
+  if (recordedVersion !== lockVersion) {
+    return { status: 'lock-moved', message: `package-lock.json now pins signet ${lockVersion}, the bundle was generated against ${recordedVersion} — regenerate: node packages/cardtile/serve/gen-edit2-assets.mjs` };
+  }
+  if (!installed) return { status: 'skipped', message: 'signet is not installed' };
+  if (installed.version !== lockVersion) {
+    return { status: 'version-differs', message: `signet 版本不同（${installed.version} vs ${lockVersion}）：安裝的版本不是 lockfile 鎖的那個` };
+  }
+  if (installed.stamp !== recordedStamp) {
+    return { status: 'bytes-differ', message: `signet ${lockVersion} corners.css differs from the bytes the bundle was built from — regenerate: node packages/cardtile/serve/gen-edit2-assets.mjs` };
+  }
+  return { status: 'ok', message: '' };
+}
