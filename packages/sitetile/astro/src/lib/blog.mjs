@@ -534,13 +534,26 @@ function pagesLangMajority(contentGlob) {
 }
 
 // The language of a SYSTEM page's own chrome (/preview, /search, /search/label/…) — routes with no
-// page behind them. 🩸 CVERInc/reef#1868. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
-// per-page key, so an English single-language site's preview said zh-Hant. A site that declares
-// `locales` keeps its old answer exactly (a separate gap, the same on every such site); a site that
-// does not gets siteDefaultLang, then the one shared default.
+// page behind them. 🩸 CVERInc/reef#1868, #2066. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
+// per-page key, so an English single-language site's preview said zh-Hant. siteDefaultLang, then the
+// one shared default. A site that declares `locales` used to be exempt (tile#135 kept its zh-Hant so
+// its artifacts stayed bit-identical) and its 404 disagreed with its /preview and /search; #2066
+// removed the exemption, so every route a site has speaks the same default language.
 export function systemPageLang(meta, contentGlob) {
-  if (parseLocales(meta && meta.locales, localesSourceOf(meta)).length) return String((meta && meta.lang) || '').trim() || DEFAULT_LANG;
   return siteDefaultLang(meta, contentGlob) || DEFAULT_LANG;
+}
+
+// The language of a BLOG view's <html lang> (/devlog index, a post, a tag/category/author/date
+// archive). 🩸 CVERInc/reef#2066. These took `meta.lang || DEFAULT_LANG`: on a site that declares
+// `locales` and writes no site-level `lang`, `meta.lang` is empty, so every one of them said zh-Hant
+// while the site's pages said `locales[0]`. The site's own language is siteDefaultLang's question,
+// answered once for the 404, the system pages and these.
+// The exception is a view built from a NON-DEFAULT locale's meta (translated posts, /<loc>/devlog):
+// that meta's `lang` IS the locale's own, set by localeBlogCorpora, and it is the page's language,
+// not a site-level guess — it is kept. A default-locale meta never has one (localeUrlPrefix === '').
+export function blogViewLang(meta, contentGlob) {
+  if (localeUrlPrefix(meta)) return String(meta.lang).trim();
+  return systemPageLang(meta, contentGlob);
 }
 
 // `dynamic-coral-css` lives in the site-config layer and nowhere else. A site with no `_site.md`
