@@ -18,7 +18,7 @@ import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, isSiteFile } from '@sitetile';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
-import { tagLocalesSource, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
+import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
 
 
@@ -94,7 +94,11 @@ export function getStaticPaths() {
     // /about/ and /oss/, while / and the posts correctly carried the site's name.
     // A crawler reading two pages of one site saw three different site names.
     // Reserved key, not authorable: a page setting `site-title:` itself is overwritten here.
+    const ownMeta = { ...site.meta };
     if (siteConfig) site.meta = { ...siteConfig, ...site.meta, 'site-title': siteConfig.title || '' };
+    // #1888 — banner sentences are site layer only (base + this page's locale _site.md): the page's
+    // own banner keys are put back and named, so the layout warns `page-level` by source, not value.
+    site.meta = siteLayerBannerMeta(ownMeta, siteConfig, site.meta);
     // Reserved key, not authorable per page — same class as `site-title` above: a page that could
     // override `dynamic-coral-css` would give one site two answers about its own cascade. loadSite
     // already resolved it from the base `_site.md`; the page's own value (if any) is dropped.

@@ -498,7 +498,7 @@ test('🔴 #1888 a locale is matched however the site spells it (zh-TW, zh-tw, z
 });
 
 test('🔴 #1888 SiteLayout feeds the site-layer overrides into the banner', () => {
-  assert.match(layout, /lingo\.bannerOverrides\(loadSite\(contentGlob\) \|\| \{\}, locales, meta\)/);
+  assert.match(layout, /lingo\.bannerOverrides\(meta, locales\)/);
   assert.match(layout, /lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides \}\)/);
 });
 

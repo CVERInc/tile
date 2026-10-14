@@ -280,27 +280,39 @@ export const BANNER_FIELDS = ['prompt', 'continue', 'dismiss'];
 const _warned = new Set();
 /** One line per distinct warning per build — the layout runs once per page. */
 export function warnOnce(msg) { if (_warned.has(msg)) return; _warned.add(msg); console.warn(msg); }
-export const BANNER_MAX_CHARS = 120;
-/** `meta` = the SITE layer (base _site.md, read before any page frontmatter is merged over it).
- *  `pageMeta` (optional) = the page's merged meta: a family key whose value differs from the site
- *  layer came from the page and is ignored, warned `[page-level]` — the banner is site chrome. */
-export function bannerOverrides(meta, locales, pageMeta = null) {
+export const BANNER_MAX_CHARS = 120;   // graphemes
+/** Reserved meta key: the banner keys the PAGE's own frontmatter wrote (set by the page route). */
+export const BANNER_PAGE_KEYS = 'locales-banner-page-keys';
+/** The page route's half (tile#128 r2-1). `own` = the page's frontmatter, `siteConfig` = loadSite()
+ *  for this page (base _site.md + its locale _site.md — the site layer), `merged` = own over it.
+ *  Puts every banner key back to the site layer's value and records which ones the page wrote, so
+ *  `page-level` is decided by where a key came from, never by whether its value differs. */
+export function siteLayerBannerMeta(own, siteConfig, merged) {
+  const out = merged || {};
+  const cfg = siteConfig || {};
+  const keys = Object.keys(own || {}).filter((k) => k.startsWith(BANNER_OVERRIDE_PREFIX) && k !== BANNER_PAGE_KEYS);
+  for (const k of keys) { if (Object.prototype.hasOwnProperty.call(cfg, k)) out[k] = cfg[k]; else delete out[k]; }
+  if (keys.length) out[BANNER_PAGE_KEYS] = keys; else delete out[BANNER_PAGE_KEYS];
+  return out;
+}
+const _graphemes = (t) => (typeof Intl !== 'undefined' && Intl.Segmenter)
+  ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t)].map((x) => x.segment)
+  : [...t];
+/** `meta` = the site layer as the layout sees it (after siteLayerBannerMeta): base + locale
+ *  _site.md values, plus BANNER_PAGE_KEYS naming the keys a page wrote (ignored, `page-level`). */
+export function bannerOverrides(meta, locales) {
   const copy = {};
   const warnings = [];
-  const findings = [];   // { key, reason } — the same verdicts as `warnings`, for a reader (reef verify_site)
-  const note = (reason, key, msg) => { findings.push({ key, reason }); warnings.push(`[${reason}] ${msg}`); };
+  const findings = [];   // { key, reason, dropped? } — the same verdicts as `warnings`, for reef verify_site
+  const note = (reason, key, msg, extra) => { findings.push({ key, reason, ...(extra || {}) }); warnings.push(`[${reason}] ${msg}`); };
   if (!meta || typeof meta !== 'object') return { copy, warnings, findings };
+  for (const key of (Array.isArray(meta[BANNER_PAGE_KEYS]) ? meta[BANNER_PAGE_KEYS] : [])) {
+    note('page-level', key, `\`${key}\` in a page's frontmatter is ignored: the banner sentences are set in _site.md (or a locale's own _site.md).`);
+  }
   let declared = [];
   try { declared = parseLocales(locales); } catch { declared = []; }
-  if (pageMeta && typeof pageMeta === 'object') {
-    for (const key of Object.keys(pageMeta)) {
-      if (key.startsWith(BANNER_OVERRIDE_PREFIX) && pageMeta[key] !== meta[key]) {
-        note('page-level', key, `\`${key}\` in a page's frontmatter is ignored: the banner sentences are set once, in _site.md.`);
-      }
-    }
-  }
   for (const key of Object.keys(meta)) {
-    if (!key.startsWith(BANNER_OVERRIDE_PREFIX)) continue;
+    if (!key.startsWith(BANNER_OVERRIDE_PREFIX) || key === BANNER_PAGE_KEYS) continue;
     const rest = key.slice(BANNER_OVERRIDE_PREFIX.length);
     const m = rest.match(/^(.+)-([a-z]+)$/i);
     const field = m ? m[2].toLowerCase() : '';
@@ -320,9 +332,11 @@ export function bannerOverrides(meta, locales, pageMeta = null) {
     const text = (typeof raw === 'string' || typeof raw === 'number') ? String(raw).replace(/\s+/g, ' ').trim() : '';
     if (!text) continue;
     let cut = text;
-    if ([...text].length > BANNER_MAX_CHARS) {
-      cut = [...text].slice(0, BANNER_MAX_CHARS).join('');
-      note('too-long', key, `\`${key}\` is longer than ${BANNER_MAX_CHARS} characters and was cut to ${BANNER_MAX_CHARS}.`);
+    const g = _graphemes(text);
+    if (g.length > BANNER_MAX_CHARS) {
+      cut = g.slice(0, BANNER_MAX_CHARS).join('');
+      const dropped = g.slice(BANNER_MAX_CHARS).join('');
+      note('too-long', key, `\`${key}\` is longer than ${BANNER_MAX_CHARS} characters and was cut; dropped: "${[..._graphemes(dropped)].slice(0, 20).join('')}${_graphemes(dropped).length > 20 ? '…' : ''}".`, { dropped });
     }
     const id = _canon(loc) || loc;
     (copy[id] ||= {})[field] = cut;

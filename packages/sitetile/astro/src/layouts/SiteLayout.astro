@@ -486,7 +486,7 @@ const localeBannerCss = multilingual ? stripCssComments(signetLocaleBannerCss) +
 // of a root-mounted blog. Every other page passes null and gets altLocales as before.
 // CVERInc/reef#1888: the three sentences can be overridden per locale in _site.md
 // (`locales-banner-<locale>-prompt|continue|dismiss`) — text only; a bad key is warned, never fatal.
-const { copy: bannerCopyOverrides, warnings: bannerCopyWarnings } = hasLingo ? lingo.bannerOverrides(loadSite(contentGlob) || {}, locales, meta) : { copy: null, warnings: [] };
+const { copy: bannerCopyOverrides, warnings: bannerCopyWarnings } = hasLingo ? lingo.bannerOverrides(meta, locales) : { copy: null, warnings: [] };
 for (const w of bannerCopyWarnings) lingo.warnOnce(`sitetile: ${w}`);
 const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides }) : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
