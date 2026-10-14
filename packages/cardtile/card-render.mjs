@@ -16,7 +16,8 @@ import { resolveBackdropDim, themeCss } from './colour.mjs';
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
 // brand marks come from OUR origin now — see marks.mjs for why, and for the open-proxy guard
-import { iconPath, ICON_DOMAIN_RE } from './marks.mjs';
+import { iconPath, iconFallbackAttr, iconOnerror } from './marks.mjs';
+import { linkOf, hostLabel, hostOf, iconDomains, socialLineOf, overrideMark, defaultMark } from './link-marks.mjs';
 // The drawer coral's own stylesheet. It arrives with the DOCUMENT, not from the coral's script,
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
 import { DRAWER_CSS } from '../dynamic-corals/drawer/drawer-style.mjs';
@@ -112,48 +113,8 @@ const mdBlock = (s) => String(s || '').split(/\n{2,}/).map((para) => {
   if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2])}</h${h[1].length + 2}>`;
   return `<p>${lines.map(mdInline).join('<br>')}</p>`;
 }).join('');
-// A cell body → the label and the address of one link.
-//
-// 🩸 The `else` used to be `{ label: body, url: '#' }`, and that single `'#'` was the most expensive
-// character in the file. The most natural thing a first-time visitor does — paste a bare URL into a
-// field called 「連結」 — produced a full-width button whose text was the raw address and whose
-// href was `#`: it opened a new tab onto the same page. Six locales, six times, every time.
-//
-// Two changes, and neither of them guesses. A body that IS an address is read as one (the label
-// falls back to the host, which is what a person would have typed anyway); a body that is neither a
-// markdown link nor an address yields url `''`, and the caller declines to draw a button rather than
-// drawing a dead one. `'#'` is a MEANINGFUL value elsewhere in this file (a drawer target), which is
-// precisely why it must never also be the value for "there was nothing here".
-const BARE_URL_RE = /^(?:https?:\/\/|mailto:|tel:)\S+$/i;
-const hostLabel = (url) => {
-  try { return new URL(url).hostname.replace(/^www\./, '') || url; } catch { return url; }
-};
-const linkOf = (body) => {
-  const m = /^\[([^\]]*)\]\(([^)\s]+)\)/.exec(body || '');
-  if (m) return { label: m[1], url: m[2] };
-  const bare = (body || '').trim();
-  if (BARE_URL_RE.test(bare)) return { label: hostLabel(bare), url: bare };
-  // a bare address followed ONLY by override tokens (`icon=` / `iconhost=`, reef#2011) is still an
-  // address: the tokens are read by the caller, never part of the url. 🔴 The WHOLE tail must be
-  // legal tokens (icon=[a-z0-9-]+, iconhost=<ICON_DOMAIN_RE host>, space-separated, nothing else);
-  // `?q=one icon=shop&x=2` has a tail with `&x=2` in it, so it is not an override and the whole line
-  // stays the URL. A space inside a URL is written %20.
-  const t = /^((?:https?:\/\/|mailto:|tel:)\S+)((?:\s+\S+)+)$/i.exec(bare);
-  if (t) {
-    const over = {};
-    const ok = t[2].trim().split(/\s+/).every((tok) => {
-      const m = /^(icon|iconhost)=(.+)$/i.exec(tok);
-      if (!m) return false;
-      const k = m[1].toLowerCase();
-      if (k === 'icon' ? !/^[a-z0-9-]+$/.test(m[2]) : !ICON_DOMAIN_RE.test(m[2])) return false;
-      over[k] = m[2];
-      return true;
-    });
-    if (ok) return { label: hostLabel(t[1]), url: t[1], over };
-  }
-  if (/^(?:https?:\/\/|mailto:|tel:)\S/i.test(bare)) return { label: hostLabel(bare), url: bare };
-  return { label: bare, url: '' };
-};
+// A cell body → the label and the address of one link: `linkOf`, in link-marks.mjs (reef#2015) — the
+// editing table reads a line the same way, so it lives where both can import it.
 
 // 🔴 A url going into a <style> BLOCK needs CSS escaping, not HTML escaping. `esc()` turns `&` into
 // `&amp;`, which an HTML *attribute* decodes back but a <style> element does NOT — it is raw text.
@@ -198,63 +159,15 @@ const IMG_ICON = (src, fallbacks = [], extraClass = '') => {
   // once — a two-step chain that silently stops after one step is the same shape of "gate you never
   // saw fail" as everything else here. When they run out, the icon hides: a broken image slot on a
   // creator's card is worse than no icon.
-  const rest = fallbacks.map((d) => iconPath(d));
-  const attr = rest.length ? ` data-iconfallback="${esc(rest.join(' '))}"` : '';
-  const onerr = 'var f=(this.dataset.iconfallback||"").split(" ").filter(Boolean);'
-    + 'if(f.length){this.dataset.iconfallback=f.slice(1).join(" ");this.src=f[0]}'
-    + 'else{this.onerror=null;this.style.display="none"}';
+  const attr = iconFallbackAttr(fallbacks);
+  const onerr = iconOnerror('hide');
   return `<img class="st-cell-icon-img${extraClass ? ' ' + extraClass : ''}" src="${esc(src)}" alt="" width="22" height="22" loading="lazy" referrerpolicy="no-referrer"${attr} onerror='${esc(onerr)}'>`;
 };
-// 🔴 The host AS WRITTEN, `www.` included (reef#2011). This used to strip it, and DuckDuckGo has a
-// mark for `www.instagram.com` and none for `instagram.com` — so the one name with a picture was the
-// one name the card could never ask for. Anything that wants the bare name strips it itself.
-const hostOf = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
-
-// Which domain owns the mark a favicon service will have. Two rules, both fixing a whole CLASS of
-// missing icon rather than one card's link — `iconhost=` stays for an author pointing DELIBERATELY
-// somewhere else (a bit.ly whose real destination is webtoons.com), not for patching our lookup:
-//   1. renamed sites keep their old domain in a creator's links long after the mark moved
-//   2. a subdomain rarely has its own favicon; the site's does
-const ICON_ALIAS = { 'twitter.com': 'x.com', 'fb.com': 'facebook.com', 'goo.gl': 'google.com', 'youtu.be': 'youtube.com' };
-// The second-level labels a country code sells names UNDER: books.com.tw's site is books.com.tw,
-// not com.tw. Not the public-suffix list — just enough that the common ones (.com.tw .co.uk .co.jp
-// .com.au) stop costing every visitor a request for a suffix that has no mark (reef#2011).
-const CC_SECOND_LEVEL = new Set(['com', 'net', 'org', 'edu', 'gov', 'co', 'ac', 'or', 'ne', 'go', 'idv']);
-/** sub.example.com → example.com; shop.example.co.uk → example.co.uk */
-function siteOf(host) {
-  const parts = host.split('.');
-  const n = parts.length > 2 && parts[parts.length - 1].length === 2 && CC_SECOND_LEVEL.has(parts[parts.length - 2]) ? 3 : 2;
-  return parts.slice(-n).join('.');
-}
-/** host → the domains worth trying, best first. */
-function iconDomains(host) {
-  if (!host) return [];
-  const bare = host.replace(/^www\./, '');
-  const base = ICON_ALIAS[bare] || bare;
-  // As written first — unless the mark moved with the name (twitter.com → x.com) — then the site
-  // (a subdomain rarely has its own favicon; the site's does), then the site's www. twin: a service
-  // can hold a mark for one spelling and not the other, and which one is not ours to predict.
-  const site = siteOf(base);
-  return [...new Set([ICON_ALIAS[bare] ? base : host, site, `www.${site}`])];
-}
-
-// 🔴 Brands whose mark we DRAW, by site → the `ICONS` name (reef#2011). The favicon service answers
-// 404 for instagram.com and threads.* — measured 2026-10-12 — so for these a fetched mark is a mark
-// that is not there; one we ship cannot 404. Deliberately short: everything not in it keeps the
-// brand's CURRENT favicon, which is the whole reason marks are fetched (see marks.mjs). A brand goes
-// in here when the service has nothing for it, not because we would like to draw it.
-// 🔴 EXACT hosts, not sites: `siteOf()` would hand foo.instagram.com the Instagram mark, and a host
-// we did not list is a host we did not measure — it keeps its own favicon chain.
-const BRAND_ICON = {
-  'instagram.com': 'instagram', 'www.instagram.com': 'instagram',
-  'threads.net': 'threads', 'www.threads.net': 'threads', 'threads.com': 'threads', 'www.threads.com': 'threads',
-};
-/** the drawn mark for `host`'s brand, or '' — the link row and the social row both ask this */
-function brandIcon(host, ctx) {
-  const h = String(host || '').toLowerCase();
-  const name = Object.hasOwn(BRAND_ICON, h) ? BRAND_ICON[h] : '';
-  return (name && ctx.icons && ctx.icons[name]) || '';
-}
+// The host, the favicon chain and the brand table live in link-marks.mjs (reef#2015): the editing
+// table draws the same mark, so it has to be decided the one way. This side only DRAWS a mark.
+const hasIcon = (ctx) => (name) => !!(ctx.icons && ctx.icons[name]);
+/** a mark → the card's markup: the drawn svg, or the favicon <img> with its fallback chain ('' if none) */
+const markHtml = (m, ctx) => (m.icon ? ctx.icons[m.icon] : m.hosts.length ? IMG_ICON(iconPath(m.hosts[0]), m.hosts.slice(1)) : '');
 
 // link icon priority: explicit image (iconimg=) → named SVG (icon=) → a favicon AUTO-DERIVED from the
 // link's domain (or iconhost=). The derive is the fix for a ported link-in-bio: never carry a stale
@@ -277,11 +190,8 @@ function linkIcon(p, url, ctx) {
   // external URL, which happens to work. The importer started emitting `asset:` refs this afternoon
   // and the gap became visible the same hour.
   if (p.iconimg) return IMG_ICON(resolveAsset(p.iconimg, ctx), [], 'st-cell-icon-art');
-  if (p.icon && ctx.icons && ctx.icons[p.icon]) return ctx.icons[p.icon];
-  if (!p.iconhost) { const drawn = brandIcon(hostOf(url), ctx); if (drawn) return drawn; }
-  const chain = p.iconhost ? [p.iconhost] : iconDomains(hostOf(url));
-  if (chain.length) return IMG_ICON(iconPath(chain[0]), chain.slice(1));
-  return (ctx.icons && ctx.icons._default) || '';
+  return markHtml(overrideMark({ icon: p.icon, iconhost: p.iconhost }, hasIcon(ctx)) || defaultMark(hostOf(url)), ctx)
+    || (ctx.icons && ctx.icons._default) || '';
 }
 
 // The signet arrow comes from @cvernet/signet via ctx.arrow — a template lifted from the package's
@@ -592,13 +502,8 @@ function renderCell(cell, place, ctx) {
       // A line may carry `icon=<name>` or `iconhost=<domain>` after its address — the same two words a
       // link cell takes, for a mark the table below gets wrong (reef#2011). Before this the row had no
       // override at all, and one bad mark meant giving up the whole row.
-      const items = (b || '').split('\n').map((l) => {
-        const line = l.trim();
-        const x = linkOf(line);
-        if (x.over) { Object.assign(x, x.over); return x; }
-        if (/^\[/.test(line)) for (const [, k, v] of line.replace(/^\[[^\]]*\]\([^)\s]+\)/, '').matchAll(/(?:^|\s)(icon|iconhost)=([^\s"'<>]+)/g)) x[k] = v;
-        return x;
-      }).filter((x) => x.url && x.url !== '#');
+      // (`socialLineOf`, shared with the editing table — reef#2015)
+      const items = (b || '').split('\n').map(socialLineOf).filter((x) => x.url && x.url !== '#');
       if (!items.length) return '';
       // 🔴 A link to the creator's OWN site gets a drawn mark, not a favicon.
       //
@@ -614,18 +519,17 @@ function renderCell(cell, place, ctx) {
       const bare = (h) => String(h || '').replace(/^www\./, '');
       const selfHost = bare(hostOf(ctx.cardUrl || ''));
       const isSelf = (u) => selfHost && !u.startsWith('mailto:') && bare(hostOf(u)) === selfHost;
-      const marks = items.map(({ label, url, icon: named, iconhost }) => {
-        const host = url.startsWith('mailto:') ? 'mail' : hostOf(url);
+      const marks = items.map((x) => {
+        const { label, url } = x;
+        const over = overrideMark(x, hasIcon(ctx));
         // 🔴 the author's explicit override wins over EVERY default, the envelope and the house
         // included (reef#2011): a mark the author named is the mark they asked for.
-        const icon = (named && ctx.icons && ctx.icons[named])
-          || (iconhost ? IMG_ICON(iconPath(iconhost)) : '')
+        const icon = (over && markHtml(over, ctx))
           || (url.startsWith('mailto:')
           ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>'
           : isSelf(url)
             ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V19a1.6 1.6 0 0 0 1.6 1.6h9.6a1.6 1.6 0 0 0 1.6-1.6V9.6"/></svg>'
-            : brandIcon(host, ctx)
-              || (() => { const c = iconDomains(host); return IMG_ICON(iconPath(c[0]), c.slice(1)); })());
+            : (() => { const m = defaultMark(hostOf(url)); return m.icon ? markHtml(m, ctx) : IMG_ICON(iconPath(m.hosts[0]), m.hosts.slice(1)); })());
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
@@ -1025,13 +929,17 @@ const NATIVE_CSS = [
   `.st-card.st-card-head-left .st-hero-tagline{margin-left:0;margin-right:0}`,
   // ── `icons: mono` — the fetched brand marks go grey ────────────────────────────────────────────
   // 🔴 Scoped to IMG marks only. Our own drawn glyphs (the envelope, the house) are already themed;
-  // greying them would desaturate a colour we chose. This is why the row reads as mixed today — not
+  // greying them would desaturate a colour we chose.
+  // 🔴 reef#2026: …and NOT the author's artwork thumbnail (`.st-cell-icon-art`, from iconimg=) — a LINE
+  // sticker or a wallpaper is a picture, not a brand mark, and greying it was a bug. An `icon=` the
+  // author named is a drawn <svg> (not an <img>), so it keeps its colour here too. Colour is the
+  // default; mono is the author's opt-in (7/30 1346f56). This is why the row reads as mixed today — not
   // because the brands have colour, but because ours are accent-blue while theirs are their own. In
   // mono both halves finally answer to the same rule.
-  `.st-card.st-card-marks-mono .st-cell-icon-img,.st-card.st-card-marks-mono .st-social img{filter:grayscale(1)}`,
+  `.st-card.st-card-marks-mono .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social img{filter:grayscale(1)}`,
   // hover restores the brand, so the colour is one gesture away rather than gone
-  `.st-card.st-card-marks-mono .st-cell-link:hover .st-cell-icon-img,.st-card.st-card-marks-mono .st-social-btn:hover img{filter:none}`,
-  `@media(prefers-reduced-motion:no-preference){.st-card.st-card-marks-mono .st-cell-icon-img,.st-card.st-card-marks-mono .st-social img{transition:filter .25s}}`,
+  `.st-card.st-card-marks-mono .st-cell-link:hover .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social-btn:hover img{filter:none}`,
+  `@media(prefers-reduced-motion:no-preference){.st-card.st-card-marks-mono .st-cell-icon-img:not(.st-cell-icon-art),.st-card.st-card-marks-mono .st-social img{transition:filter .25s}}`,
   // The tagline is the one run that must not stretch to the card's full width when centred: a
   // centred paragraph running the whole 646px of a desktop card reads as a banner, not a bio.
   // 🔴 `word-break:keep-all` is the whole fix, and it is about CJK rather than about any one card. A
@@ -1213,10 +1121,8 @@ export { mdInline as __mdInline, esc as __esc };
 // 🔴 cardtile-w's link form READS a body with these and WRITES it back — so it must be the same
 // parse, not a second one that agrees today. A form that read `[a](b)` slightly differently from the
 // renderer would show one thing and publish another, on somebody's only copy.
-// 🔴 …and the editing table shows the SAME favicon the card will. `/try/edit2`'s tiles are a
-// mini-render of the finished element, so the domain a tile's mark is derived from has to be
-// derived the one way — a second `hostOf` would put a different icon on the table than on the card
-// for exactly the links these two rules exist for (twitter.com → x.com, sub.example.com).
+// 🔴 …and the editing table shows the SAME mark the card will — it imports link-marks.mjs directly
+// (reef#2015); these stay exported for the form, which has always read them from here.
 export { linkOf, hostLabel, hostOf, iconDomains };
 
 export function renderGrid(model, ctx = {}) {
