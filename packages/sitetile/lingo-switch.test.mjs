@@ -182,7 +182,7 @@ test('no route measurement (every non-blog page) → the content set, untouched,
 });
 
 test('🔴 SiteLayout hands the banner BOTH measurements — content (altLocales) and the route\'s own', () => {
-  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales \}\)\s*:\s*null;/);
+  assert.match(layout, /const localeBanner = hasLingo\s*\?\s*lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides \}\)\s*:\s*null;/);
   // …and does not pick between them itself: the choice that lost a banner was made right here.
   assert.doesNotMatch(layout, /Array\.isArray\(bannerLocales\)/);
 });
@@ -425,6 +425,179 @@ test('🔴 SiteLayout: alternates, the chooser link and its prefix all wait for 
   assert.match(layout, /const computedLanguageHref = multilingual\s*\?/);
   assert.match(layout, /\{multilingual && defaultLocale && altLocales\.includes\(defaultLocale\) && <link rel="alternate" hreflang="x-default"/);
   assert.doesNotMatch(layout, /locales\.length > 0 && <a class="rf-lang"/, 'the plain footer no longer links on one locale');
+});
+
+
+// ── CVERInc/reef#1888: the banner's three sentences can be overridden per locale ──────────────
+// A site wanted a formal register and had no setting for it. The override opens TEXT ONLY, in the
+// site layer, as flat keys in the `locales` family (the site layer has no nested blocks):
+//   locales-banner-<url-locale>-prompt | -continue | -dismiss
+// Unset ⇒ the default. One sentence missing ⇒ that one sentence is the default. A key that is not
+// one of those three, or names a locale the site does not declare, is ignored with a warning —
+// never a failed build.
+const bannerOverrides = (meta, locales, pageMeta) => {
+  assert.equal(typeof lingoMod.bannerOverrides, 'function', 'locale.mjs exports bannerOverrides()');
+  return lingoMod.bannerOverrides(meta, locales, pageMeta);
+};
+const TWO = ['en-US', 'zh-TW'];
+const DEFAULT_ZH = lingoMod.bannerCopy('zh-TW');
+
+test('🔴 #1888 an override replaces the sentence it names, in the option for that locale', () => {
+  const { copy, warnings } = bannerOverrides({
+    'locales-banner-zh-tw-prompt': '本網站提供中文版',
+    'locales-banner-zh-tw-continue': '切換至中文',
+    'locales-banner-zh-tw-dismiss': '繼續瀏覽英文版',
+  }, TWO);
+  assert.deepEqual(warnings, []);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, '本網站提供中文版');
+  assert.equal(b.options[0].continue, '切換至中文');
+  assert.equal(b.options[0].dismiss, '繼續瀏覽英文版');
+});
+
+test('🔴 #1888 no override ⇒ the default copy, byte for byte', () => {
+  const { copy } = bannerOverrides({ title: 'x' }, TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, DEFAULT_ZH.prompt);
+  assert.equal(b.options[0].continue, DEFAULT_ZH.continue);
+  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss);
+  const without = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO });
+  assert.deepEqual(b, without, 'passing an empty override changes nothing');
+});
+
+test('🔴 #1888 a missing sentence falls back to that one default, never to empty', () => {
+  const { copy } = bannerOverrides({ 'locales-banner-zh-tw-prompt': '本網站提供中文版', 'locales-banner-zh-tw-dismiss': '   ' }, TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, '本網站提供中文版');
+  assert.equal(b.options[0].continue, DEFAULT_ZH.continue, 'unset ⇒ default');
+  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss, 'blank ⇒ default, not a blank button');
+});
+
+test('🔴 #1888 an unknown field or an undeclared locale is ignored with a readable warning, never a throw', () => {
+  const { copy, warnings } = bannerOverrides({
+    'locales-banner-zh-tw-title': 'x',
+    'locales-banner-fr-fr-prompt': 'Bonjour',
+    'locales-banner-zh-tw-prompt': '本網站提供中文版',
+  }, TWO);
+  assert.equal(warnings.length, 2, warnings.join(' | '));
+  assert.match(warnings.join('\n'), /locales-banner-zh-tw-title/);
+  assert.match(warnings.join('\n'), /prompt, continue, dismiss/);
+  assert.match(warnings.join('\n'), /locales-banner-fr-fr-prompt/);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, '本網站提供中文版', 'the good key still applies');
+  assert.equal(b.options[0].continue, DEFAULT_ZH.continue);
+});
+
+test('🔴 #1888 a locale is matched however the site spells it (zh-TW, zh-tw, zh-Hant)', () => {
+  for (const spell of ['zh-TW', 'zh-tw', 'zh-hant']) {
+    const { copy, warnings } = bannerOverrides({ [`locales-banner-${spell}-continue`]: '切換至中文' }, TWO);
+    assert.deepEqual(warnings, [], spell);
+    const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+    assert.equal(b.options[0].continue, '切換至中文', spell);
+  }
+});
+
+test('🔴 #1888 SiteLayout feeds the site-layer overrides into the banner', () => {
+  assert.match(layout, /lingo\.bannerOverrides\(meta, locales\)/);
+  assert.match(layout, /lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides \}\)/);
+});
+
+
+// ── tile#128 review round 1 ──────────────────────────────────────────────────────────────────
+test('🔴 r1-1 a declared locale outside the four: each sentence falls back on its own, ending at en — never empty', () => {
+  const loc = ['en-US', 'fr-FR'];
+  const { copy, warnings, findings } = bannerOverrides({ 'locales-banner-fr-fr-prompt': 'Bonjour' }, loc);
+  // reef#2061 r1-5: declared but outside the four the banner is offered in ⇒ said, not silent.
+  assert.deepEqual(findings, [{ key: 'locales-banner-fr-fr-prompt', reason: 'banner-unsupported-locale' }], warnings.join(' | '));
+  const b = banner({ locales: loc, lang: 'en-US', defaultLocale: 'en-US', altLocales: loc, copy });
+  const en = lingoMod.bannerCopy('en-US');
+  assert.equal(b.options[0].prompt, 'Bonjour');
+  assert.equal(b.options[0].continue, en.continue);
+  assert.equal(b.options[0].dismiss, en.dismiss);
+  const none = banner({ locales: loc, lang: 'en-US', defaultLocale: 'en-US', altLocales: loc });
+  for (const f of ['prompt', 'continue', 'dismiss']) assert.ok(none.options[0][f], `no override: ${f} is not empty`);
+});
+
+// tile#128 r2-1: the site layer is what loadSite says it is — base _site.md plus the page's own
+// locale _site.md — and `page-level` is decided by WHERE a key was written, not by its value.
+const { registerHooks } = await import('node:module');
+const { pathToFileURL } = await import('node:url');
+registerHooks({ resolve(spec, ctx, next) { return spec === '@sitetile' ? { url: pathToFileURL(join(HERE, 'site-core.js')).href, shortCircuit: true } : next(spec, ctx); } });
+const { loadSite } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const fm = (o) => `---\n${Object.entries(o).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+/** What the page route does: loadSite for this page, merge the page over it, then put the banner
+ *  keys back to the site layer's and remember which ones the page wrote. */
+function pageMeta(files, rel, own) {
+  const siteConfig = loadSite(files, rel);
+  return lingoMod.siteLayerBannerMeta(own, siteConfig, { ...siteConfig, ...own });
+}
+const FILES = {
+  '/x/content/_site.md': fm({ locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '站台的句子', 'locales-banner-en-us-prompt': 'Base English' }),
+  '/x/content/zh-tw/_site.md': fm({ 'locales-banner-en-us-prompt': 'Locale-file English' }),
+};
+
+test('🔴 r2-1 a locale _site.md is site layer: its override applies on that locale\'s pages, no warning', () => {
+  const meta = pageMeta(FILES, 'zh-tw/about', { title: 'A' });
+  const { copy, findings } = bannerOverrides(meta, TWO);
+  assert.deepEqual(findings, []);
+  const b = banner({ locales: TWO, lang: 'zh-TW', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, 'Locale-file English');
+  const base = pageMeta(FILES, 'about', { title: 'A' });
+  assert.equal(bannerOverrides(base, TWO).copy['en-US'].prompt, 'Base English', 'the base pages keep the base value');
+});
+
+test('🔴 r2-1 a page frontmatter key is ignored and warned page-level — even when it equals the site value', () => {
+  const meta = pageMeta(FILES, 'about', { title: 'A', 'locales-banner-zh-tw-prompt': '站台的句子', 'locales-banner-zh-tw-dismiss': '頁面婉拒' });
+  const { copy, findings } = bannerOverrides(meta, TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, '站台的句子');
+  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss, 'the page value is not used');
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`).sort(), ['locales-banner-zh-tw-dismiss:page-level', 'locales-banner-zh-tw-prompt:page-level']);
+});
+
+test('🔴 r2-1 the page route stamps the page keys before handing meta to the layout', () => {
+  const route = readFileSync(join(SRC, 'pages/[...path].astro'), 'utf8');
+  assert.match(route, /siteLayerBannerMeta\(/);
+});
+
+// tile#128 r2-2: cut by grapheme, never inside one; say what was dropped.
+test('🔴 r2-2 a sentence longer than 120 graphemes is cut to 120 without splitting one, and the drop is shown', () => {
+  const family = '👨‍👩‍👧‍👦';
+  const long = '字'.repeat(119) + family + '多出來的字';
+  const { copy, warnings, findings } = bannerOverrides({ 'locales-banner-zh-tw-prompt': long }, TWO);
+  const seg = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(copy['zh-TW'].prompt)];
+  assert.equal(seg.length, 120);
+  assert.ok(copy['zh-TW'].prompt.endsWith(family), 'the whole family emoji is kept — no orphan code point');
+  const f = findings.find((x) => x.reason === 'too-long');
+  assert.equal(f.dropped, '多出來的字');
+  assert.match(warnings.join('\n'), /多出來的字/);
+});
+
+// tile#128 r3-1: with no _site.md, siteMeta() falls back to home.md's frontmatter as the site layer
+// for GENERATED routes (blog index, posts, archives, preview, 404). home.md is a page: its banner
+// keys are ignored there too, with the same page-level finding the content route gives.
+const { siteMeta } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const NO_SITE = { '/x/content/home.md': fm({ 'sitetile-page': 'home', locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '首頁寫的' }) };
+const homeOwn = () => ({ 'sitetile-page': 'home', locales: 'en-US, zh-TW', 'locales-banner-zh-tw-prompt': '首頁寫的' });
+
+test('🔴 r3-1 no _site.md: a generated route ignores home.md\'s banner keys, page-level', () => {
+  const { copy, findings } = bannerOverrides(siteMeta(NO_SITE), TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, DEFAULT_ZH.prompt);
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`), ['locales-banner-zh-tw-prompt:page-level']);
+});
+
+test('🔴 r3-1 no _site.md: the content route gives the same answer', () => {
+  const { copy, findings } = bannerOverrides(pageMeta(NO_SITE, 'home', homeOwn()), TWO);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, DEFAULT_ZH.prompt);
+  assert.deepEqual(findings.map((f) => `${f.key}:${f.reason}`), ['locales-banner-zh-tw-prompt:page-level']);
+});
+
+test('r3-1 a site WITH _site.md is untouched by the fallback rule', () => {
+  const { copy, findings } = bannerOverrides(siteMeta(FILES), TWO);
+  assert.deepEqual(findings, []);
+  assert.equal(copy['zh-TW'].prompt, '站台的句子');
 });
 
 console.log(`\n${passed} passed`);

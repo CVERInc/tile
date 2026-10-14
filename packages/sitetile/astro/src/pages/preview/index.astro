@@ -85,7 +85,7 @@ const blurb = book?.blurb || null;
   .pv-gate-card h1 { margin: 0 0 12px; font-size: clamp(22px, 4vw, 28px); text-wrap: balance; }
   .pv-gate-copy { color: var(--gd-muted, #8b8598); line-height: 1.6; margin-bottom: 24px; }
   .pv-gate-btn {
-    font: inherit; font-weight: 600; font-size: 14.5px; padding: 12px 26px; border-radius: 999px; border: none; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 14.5px; padding: 12px 26px; border-radius: var(--gd-pill, var(--gd-btn-radius, 999px)); border: none; cursor: pointer;
     background: var(--gd-accent-deep, #875fb6); color: #fff;
   }
   .pv-gate-btn:hover { opacity: .9; }
@@ -116,7 +116,7 @@ const blurb = book?.blurb || null;
      accent-deep link colour and vanishes into its own accent-deep background (purple on purple) */
   .pv-toc-head a.pv-resume {
     display: inline-block; margin-top: 14px; font-weight: 600; font-size: 14px;
-    padding: 9px 20px; border-radius: 999px; background: var(--gd-accent-deep, #875fb6);
+    padding: 9px 20px; border-radius: var(--gd-pill, var(--gd-btn-radius, 999px)); background: var(--gd-accent-deep, #875fb6);
     color: #fff; text-decoration: none;
   }
   .pv-toc-head a.pv-resume:hover { opacity: .9; }

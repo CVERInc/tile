@@ -11,7 +11,7 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
-import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
 
@@ -436,6 +436,10 @@ function warnLocaleCoralCss(locale, baseMode) {
 // The site-level frontmatter (theme/packages/locales/footer/…) the blog pages must
 // pass to SiteLayout so they share the site's skin + capabilities. Prefers `_site` (the
 // site-config layer); else the sitetile home page in content/ (legacy single-source).
+// #1888 (tile#128 r3) — this fallback is a PAGE standing in for the site layer, and banner copy is
+// site layer only: its banner keys are dropped and named, so a generated route warns `page-level`
+// exactly as the content route for the same home.md does.
+function withoutPageBannerCopy(meta) { return siteLayerBannerMeta(meta, null, meta); }
 export function siteMeta(contentGlob) {
   // Prefer the first-class `_site` config layer when present (SPEC-site-data-model).
   const site = loadSite(contentGlob);
@@ -447,10 +451,10 @@ export function siteMeta(contentGlob) {
     const { meta } = splitFrontmatter(String(raw || ''));
     if (!meta || !(meta['sitetile-page'] || meta.theme)) continue;
     tagLocalesSource(meta, `content/${path.split('/content/')[1] || path}`);
-    if (/(^|\/)home\.md$/.test(path)) return withoutPageCoralCss(meta);
+    if (/(^|\/)home\.md$/.test(path)) return withoutPageBannerCopy(withoutPageCoralCss(meta));
     if (!Object.keys(fallback).length) fallback = meta;
   }
-  return withoutPageCoralCss(fallback);
+  return withoutPageBannerCopy(withoutPageCoralCss(fallback));
 }
 
 // The language of the SITE — for a route with no page behind it (the 404), which therefore has no

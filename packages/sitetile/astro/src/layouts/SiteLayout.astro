@@ -5,6 +5,7 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // (ejecta) path keeps fidelity and treats VT as opt-in; the NATIVE path bakes it in here.
 import '../styles/site.css';
 import * as lingo from '../packages/lingo/locale.mjs';
+import { LOCALE_BANNER_RADIUS_CSS } from '../packages/lingo/banner-radius-css.mjs';
 // Brand/social marks — Simple Icons (CC0), NOT hand-drawn inline SVGs. Lucide dropped brand icons
 // in 2023, so social logos come from lib/brands.mjs (official filled marks) while UI/decorative
 // glyphs stay Lucide line-style. See lib/brands.mjs.
@@ -476,14 +477,18 @@ const languageLabel = 'Language';
 // bleedblend IS loaded (same declarations). Opaque bar: the header is cleanly cut at the bar's
 // bottom edge; a translucent/blur bar would still show it through and needs a clip, not a cover.
 const LINGO_BAR_POSITION = '\n.locale-banner.bleedblend-top{position:sticky!important;top:0!important;z-index:50!important}\n';
-const localeBannerCss = multilingual ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION : '';
+const localeBannerCss = multilingual ? stripCssComments(signetLocaleBannerCss) + LINGO_BAR_POSITION + LOCALE_BANNER_RADIUS_CSS : '';
 // Options come from altLocales — the measured set hreflang and `?has=` read above — never from
 // `locales`: a declared language this page has no version in is a 404, not a suggestion. null
 // (no markup, no script) when the page exists in this language only. See suggestionBanner().
 // A blog route brings a second measurement (`bannerLocales`). Both go in and suggestionBanner()
 // takes their union — choosing between them HERE is what once took the banner off the home page
 // of a root-mounted blog. Every other page passes null and gets altLocales as before.
-const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales }) : null;
+// CVERInc/reef#1888: the three sentences can be overridden per locale in _site.md
+// (`locales-banner-<locale>-prompt|continue|dismiss`) — text only; a bad key is warned, never fatal.
+const { copy: bannerCopyOverrides, warnings: bannerCopyWarnings } = hasLingo ? lingo.bannerOverrides(meta, locales) : { copy: null, warnings: [] };
+for (const w of bannerCopyWarnings) lingo.warnOnce(`sitetile: ${w}`);
+const localeBanner = hasLingo ? lingo.suggestionBanner({ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides }) : null;
 const active = packages.map((p) => PKG_REGISTRY[p]).filter(Boolean);
 const pkgCss = active.map((p) => p.css).filter(Boolean).join('\n');
 const viewportFit = active.some((p) => p.viewportFit);

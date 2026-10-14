@@ -261,6 +261,89 @@ const LINGO_BANNER = {
 };
 export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
 
+/** The banner's three sentences, overridden per locale from the SITE layer (CVERInc/reef#1888).
+ *
+ *  A site wanted a more formal register than the defaults and had no setting for it — the only
+ *  way was per-page JS, which is the kind of patch that breaks on the next release. The override
+ *  opens TEXT only (never style), as flat keys in the `locales` family, because every site-layer
+ *  key is a flat scalar and `locales` itself is one:
+ *    locales-banner-<locale>-prompt | locales-banner-<locale>-continue | locales-banner-<locale>-dismiss
+ *  <locale> is spelled any way `locales` accepts (zh-TW, zh-tw, zh-Hant). The sentence is the one
+ *  shown to a visitor whose browser prefers <locale> — like the defaults, it speaks THAT language.
+ *
+ *  Unset ⇒ the default. Blank ⇒ the default (a blank button is worse than the default one). A key
+ *  that is not one of the three fields, or names a locale the site does not declare, is IGNORED
+ *  and reported in `warnings` — a typo in a banner sentence must never fail a build.
+ *  Returns { copy: { <data-locale>: { prompt?, continue?, dismiss? } }, warnings: string[] }. */
+export const BANNER_OVERRIDE_PREFIX = 'locales-banner-';
+export const BANNER_FIELDS = ['prompt', 'continue', 'dismiss'];
+const _warned = new Set();
+/** One line per distinct warning per build — the layout runs once per page. */
+export function warnOnce(msg) { if (_warned.has(msg)) return; _warned.add(msg); console.warn(msg); }
+export const BANNER_MAX_CHARS = 120;   // graphemes
+/** Reserved meta key: the banner keys the PAGE's own frontmatter wrote (set by the page route). */
+export const BANNER_PAGE_KEYS = 'locales-banner-page-keys';
+/** The page route's half (tile#128 r2-1). `own` = the page's frontmatter, `siteConfig` = loadSite()
+ *  for this page (base _site.md + its locale _site.md — the site layer), `merged` = own over it.
+ *  Puts every banner key back to the site layer's value and records which ones the page wrote, so
+ *  `page-level` is decided by where a key came from, never by whether its value differs. */
+export function siteLayerBannerMeta(own, siteConfig, merged) {
+  const out = merged || {};
+  const cfg = siteConfig || {};
+  const keys = Object.keys(own || {}).filter((k) => k.startsWith(BANNER_OVERRIDE_PREFIX) && k !== BANNER_PAGE_KEYS);
+  for (const k of keys) { if (Object.prototype.hasOwnProperty.call(cfg, k)) out[k] = cfg[k]; else delete out[k]; }
+  if (keys.length) out[BANNER_PAGE_KEYS] = keys; else delete out[BANNER_PAGE_KEYS];
+  return out;
+}
+const _graphemes = (t) => (typeof Intl !== 'undefined' && Intl.Segmenter)
+  ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t)].map((x) => x.segment)
+  : [...t];
+/** `meta` = the site layer as the layout sees it (after siteLayerBannerMeta): base + locale
+ *  _site.md values, plus BANNER_PAGE_KEYS naming the keys a page wrote (ignored, `page-level`). */
+export function bannerOverrides(meta, locales) {
+  const copy = {};
+  const warnings = [];
+  const findings = [];   // { key, reason, dropped? } — the same verdicts as `warnings`, for reef verify_site
+  const note = (reason, key, msg, extra) => { findings.push({ key, reason, ...(extra || {}) }); warnings.push(`[${reason}] ${msg}`); };
+  if (!meta || typeof meta !== 'object') return { copy, warnings, findings };
+  for (const key of (Array.isArray(meta[BANNER_PAGE_KEYS]) ? meta[BANNER_PAGE_KEYS] : [])) {
+    note('page-level', key, `\`${key}\` in a page's frontmatter is ignored: the banner sentences are set in _site.md (or a locale's own _site.md).`);
+  }
+  let declared = [];
+  try { declared = parseLocales(locales); } catch { declared = []; }
+  for (const key of Object.keys(meta)) {
+    if (!key.startsWith(BANNER_OVERRIDE_PREFIX) || key === BANNER_PAGE_KEYS) continue;
+    const rest = key.slice(BANNER_OVERRIDE_PREFIX.length);
+    const m = rest.match(/^(.+)-([a-z]+)$/i);
+    const field = m ? m[2].toLowerCase() : '';
+    if (!m || !BANNER_FIELDS.includes(field)) {
+      note('unknown-field', key, `\`${key}\` is ignored: a banner key ends in one of ${BANNER_FIELDS.join(', ')} (e.g. ${BANNER_OVERRIDE_PREFIX}zh-tw-prompt).`);
+      continue;
+    }
+    const loc = declared.find((l) => sameLocale(l, m[1]));
+    if (!loc) {
+      note('undeclared-locale', key, `\`${key}\` is ignored: "${m[1]}" is not one of this site's locales (${declared.join(', ') || 'none declared'}).`);
+      continue;
+    }
+    if (!_canon(loc)) {
+      note('banner-unsupported-locale', key, `\`${key}\` sets copy for "${loc}", but the banner is only offered to browsers preferring en, ja, zh-TW or ko — visitors preferring ${loc} are never shown it.`);
+    }
+    const raw = meta[key];
+    const text = (typeof raw === 'string' || typeof raw === 'number') ? String(raw).replace(/\s+/g, ' ').trim() : '';
+    if (!text) continue;
+    let cut = text;
+    const g = _graphemes(text);
+    if (g.length > BANNER_MAX_CHARS) {
+      cut = g.slice(0, BANNER_MAX_CHARS).join('');
+      const dropped = g.slice(BANNER_MAX_CHARS).join('');
+      note('too-long', key, `\`${key}\` is longer than ${BANNER_MAX_CHARS} characters and was cut; dropped: "${[..._graphemes(dropped)].slice(0, 20).join('')}${_graphemes(dropped).length > 20 ? '…' : ''}".`, { dropped });
+    }
+    const id = _canon(loc) || loc;
+    (copy[id] ||= {})[field] = cut;
+  }
+  return { copy, warnings, findings };
+}
+
 /** The suggestion banner's config for ONE page, or null when the page has nothing to suggest.
  *
  *  `altLocales` is the MEASURED set — the locales this page really exists in, the same list its
@@ -284,7 +367,7 @@ export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_
  *  measurement says "this page exists there" and each is true, so the answer is the union.
  *
  *  No options → null, so the page ships neither the banner markup nor its script. */
-export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null } = {}) {
+export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', altLocales = [], routeLocales = null, copy = null } = {}) {
   const declared = parseLocales(locales);
   if (declared.length < 2) return null;
   const pageLocale = localeOf(locales, lang);
@@ -295,7 +378,13 @@ export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', 
     ? declared.filter((l) => routeLocales.includes(l) || fromContent.includes(l))
     : fromContent;
   const options = exists.filter((l) => !sameLocale(l, pageLocale))
-    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l) }));
+    .map((l) => {
+      // tile#128 r1: each sentence falls back on its own — override → that locale's default → en.
+      const own = (copy && copy[_canon(l) || l]) || {};
+      const def = bannerCopy(l); const en = LINGO_BANNER['en-US'];
+      const pick = (f) => own[f] || def[f] || en[f];
+      return { id: toUrlLocale(l), match: prefixes(l), prompt: pick('prompt'), continue: pick('continue'), dismiss: pick('dismiss') };
+    });
   if (!options.length) return null;
   return {
     current: toUrlLocale(pageLocale),
