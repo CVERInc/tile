@@ -220,6 +220,11 @@ export function renderCardHTML(cardMd, ctx = {}) {
 // card it previews, so letting search engines index both splits the ranking between them — and for
 // an ingest DEMO (a creator's page rebuilt to show them what it'd look like here) an indexed copy
 // would compete with that creator's own live page. Production sets PREVIEW=false in its vars.
+// reef#2044 ⑤ — site-wide kill switch. CARD_NOINDEX_ALL=1 (or "true") puts `X-Robots-Tag: noindex` on
+// EVERY card response of the deployment, vanity hosts included; unset/anything else = off. It is a
+// deployment-wide valve (Search Console warns → flip it the same day); it is NOT a per-card state.
+export const noindexAll = (env) => !!env && /^(1|true)$/i.test(String(env.CARD_NOINDEX_ALL ?? '').trim());
+
 const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 
 // 🔴 A DEMO of somebody else's page is never indexed, on ANY deployment.
@@ -246,6 +251,7 @@ const ROBOTS_HEADERS = (env, handle, isVanity) =>
 const CARD_HEADERS = (env, handle, isVanity) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
+  // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
   ...ROBOTS_HEADERS(env, handle, isVanity),
 });
 
@@ -406,7 +412,7 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 </body></html>`;
 }
 
-export default {
+const router = {
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -740,5 +746,24 @@ export default {
     const videos = await resolveChannels(cardMd, ytFetch);
 
     return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle);
+  },
+};
+
+// reef#2044 ⑤ — ONE wrapper around EVERY exit. The kill switch used to be threaded into individual
+// response builders, which is how the 301s (canonical↔vanity, /try/edit2) and the icon/asset 404s
+// were missed. Whatever `router` returns — new Response, Response.redirect, a future exit nobody has
+// written yet — gets the header here when the switch is on. A stricter header already set by the
+// route (`noindex, nofollow`) is never weakened. Response.redirect() headers are immutable, so the
+// response is rebuilt rather than mutated.
+export const withNoindexAll = (res, env) => {
+  if (!noindexAll(env) || res.headers.has('X-Robots-Tag')) return res;
+  const headers = new Headers(res.headers);
+  headers.set('X-Robots-Tag', 'noindex');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+};
+
+export default {
+  async fetch(request, env) {
+    return withNoindexAll(await router.fetch(request, env), env);
   },
 };

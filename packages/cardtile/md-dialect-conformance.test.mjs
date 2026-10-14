@@ -56,7 +56,7 @@ test('the Card publishes semantics, not classes — <strong>/<em>, no marker spa
 
 test('links are the Card\'s documented superset — cssmd has none yet (upstream ask)', () => {
   const src = 'see [my shop](https://example.com/x)';
-  assert.match(mdInline(src), /<a href="https:\/\/example\.com\/x" target="_blank" rel="noopener noreferrer">my shop<\/a>/);
+  assert.match(mdInline(src), /<a href="https:\/\/example\.com\/x" target="_blank" rel="ugc nofollow noopener noreferrer">my shop<\/a>/);
   assert.ok(!renderInlineMd(src, { prefix: 'ct' }).includes('<a '), 'cssmd gained links — adopt it and delete the superset');
 });
 

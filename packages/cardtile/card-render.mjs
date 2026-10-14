@@ -44,8 +44,23 @@ const esc = (s) => escHtml(s == null ? '' : s).replace(/"/g, '&quot;');
 // ⬆ UPSTREAM ASK (not a private extension): links belong in cssmd, so every host renders
 // `[label](url)` the same way. Until that lands in CVERInc/tile, the Card's superset is documented
 // and tested rather than silent.
-const mdInline = (s) => esc(s)
-  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+// reef#2044 ①: every outbound link on a card is user-generated content — it must not pass ranking
+// weight. The ONE exception (relFor below) is a link to the card author's own vanity host.
+export const REL_UGC = 'ugc nofollow noopener noreferrer';
+export const REL_OWN = 'noopener noreferrer';
+// A vanity card's cardUrl is the bare host root; the canonical form carries a /<handle> path, and
+// there a same-host link is another creator's card, i.e. still ugc.
+export function relFor(url, ctx) {
+  const cu = String((ctx && ctx.cardUrl) || '');
+  let own = '';
+  try { const u = new URL(cu); if (u.pathname === '/' || u.pathname === '') own = u.hostname; } catch {}
+  const strip = (h) => String(h || '').replace(/^www\./, '');
+  return own && strip(hostOf(url)) === strip(own) ? REL_OWN : REL_UGC;
+}
+// `ctx` is the render context: an inline link takes the SAME own/ugc decision (relFor) as every other
+// authored anchor, so bio, prose, list items, drawers and lane labels cannot disagree with link cells.
+const mdInline = (s, ctx) => esc(s)
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_m, label, url) => `<a href="${url}" target="_blank" rel="${relFor(url, ctx)}">${label}</a>`)
   .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   .replace(/\*(.+?)\*/g, '<em>$1</em>')
   // 🔴 A newline in an INLINE context is a line break the author typed on purpose — HTML collapses
@@ -100,18 +115,18 @@ function label(ctx, key, ...args) {
   return typeof v === 'function' ? v(...args) : v;
 }
 
-const mdBlock = (s) => String(s || '').split(/\n{2,}/).map((para) => {
+const mdBlock = (s, ctx) => String(s || '').split(/\n{2,}/).map((para) => {
   const lines = para.split('\n').filter((l) => l.trim());
   if (!lines.length) return '';
   if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-    return '<ul>' + lines.map((l) => `<li>${mdInline(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('') + '</ul>';
+    return '<ul>' + lines.map((l) => `<li>${mdInline(l.replace(/^\s*[-*]\s+/, ''), ctx)}</li>`).join('') + '</ul>';
   }
   // a rule: `---`/`***`/`___` on its own line. Without this the ingest carried a creator's section
   // break across as four literal hyphens sitting in the middle of their About text.
   if (lines.length === 1 && /^\s*([-*_])\1{2,}\s*$/.test(lines[0])) return '<hr>';
   const h = /^(#{1,3})\s+(.*)$/.exec(lines[0]);
-  if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2])}</h${h[1].length + 2}>`;
-  return `<p>${lines.map(mdInline).join('<br>')}</p>`;
+  if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2], ctx)}</h${h[1].length + 2}>`;
+  return `<p>${lines.map((l) => mdInline(l, ctx)).join('<br>')}</p>`;
 }).join('');
 // A cell body → the label and the address of one link: `linkOf`, in link-marks.mjs (reef#2015) — the
 // editing table reads a line the same way, so it lives where both can import it.
@@ -326,7 +341,7 @@ function anchorFor(url, ctx) {
     const id = esc(d[1]);
     return `href="#${id}" data-drawer="${id}" aria-haspopup="dialog"`;
   }
-  return `href="${esc(url)}" target="_blank" rel="noopener noreferrer"`;
+  return `href="${esc(url)}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
 
 function renderCell(cell, place, ctx) {
@@ -363,7 +378,7 @@ function renderCell(cell, place, ctx) {
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
       const qrUrl = ctx.cardUrl || '';
-      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(avatar)}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
+      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(avatar)}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
     }
     case 'feature': {
       // 🩸 A PICTURE DOES NOT HAVE TO GO ANYWHERE. `anchorFor(p.href)` was called unconditionally,
@@ -459,7 +474,7 @@ function renderCell(cell, place, ctx) {
     case 'embed':
       return renderEmbed(p, b, size, ctx);
     case 'text':
-      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b)}</div>`;
+      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b, ctx)}</div>`;
     case 'video': {
       // Click-to-load YouTube. The platforms we take refugees from drop a live iframe on page load,
       // which means YouTube is watching every visitor before anyone presses play, and the player's
@@ -533,12 +548,12 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ' target="_blank" rel="noopener noreferrer"'} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
+        return `<a class="st-social-btn" href="${esc(url)}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
       }).join('');
       return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
     }
     default:
-      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b)}</div>`;
+      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b, ctx)}</div>`;
   }
 }
 
@@ -1166,7 +1181,7 @@ export function renderGrid(model, ctx = {}) {
       const html = grp.items.map((pl) => renderCell(pl.cell, { ...pl, abs: run[pl.index].abs }, ctx)).join('');
       return grp.run ? `<div class="st-run">${html}</div>` : html;
     }).join('');
-    const head = label ? `<div class="st-grid-label">${mdInline(label)}</div>` : '';
+    const head = label ? `<div class="st-grid-label">${mdInline(label, ctx)}</div>` : '';
     // .st-cells-wrap establishes the container-query context (container-type:inline-size) that
     // grid-auto-rows:calc((100cqw − gaps)/6) needs, so the base unit = one column width = a SQUARE.
     parts.push(`<section class="st-grid">${head}<div class="st-cells-wrap"><div class="st-cells">${inner}</div></div></section>`);
