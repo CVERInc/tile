@@ -435,9 +435,9 @@ test('🔴 SiteLayout: alternates, the chooser link and its prefix all wait for 
 // Unset ⇒ the default. One sentence missing ⇒ that one sentence is the default. A key that is not
 // one of those three, or names a locale the site does not declare, is ignored with a warning —
 // never a failed build.
-const bannerOverrides = (meta, locales) => {
+const bannerOverrides = (meta, locales, pageMeta) => {
   assert.equal(typeof lingoMod.bannerOverrides, 'function', 'locale.mjs exports bannerOverrides()');
-  return lingoMod.bannerOverrides(meta, locales);
+  return lingoMod.bannerOverrides(meta, locales, pageMeta);
 };
 const TWO = ['en-US', 'zh-TW'];
 const DEFAULT_ZH = lingoMod.bannerCopy('zh-TW');
@@ -506,8 +506,9 @@ test('🔴 #1888 SiteLayout feeds the site-layer overrides into the banner', () 
 // ── tile#128 review round 1 ──────────────────────────────────────────────────────────────────
 test('🔴 r1-1 a declared locale outside the four: each sentence falls back on its own, ending at en — never empty', () => {
   const loc = ['en-US', 'fr-FR'];
-  const { copy, warnings } = bannerOverrides({ 'locales-banner-fr-fr-prompt': 'Bonjour' }, loc);
-  assert.deepEqual(warnings, []);
+  const { copy, warnings, findings } = bannerOverrides({ 'locales-banner-fr-fr-prompt': 'Bonjour' }, loc);
+  // reef#2061 r1-5: declared but outside the four the banner is offered in ⇒ said, not silent.
+  assert.deepEqual(findings, [{ key: 'locales-banner-fr-fr-prompt', reason: 'banner-unsupported-locale' }], warnings.join(' | '));
   const b = banner({ locales: loc, lang: 'en-US', defaultLocale: 'en-US', altLocales: loc, copy });
   const en = lingoMod.bannerCopy('en-US');
   assert.equal(b.options[0].prompt, 'Bonjour');

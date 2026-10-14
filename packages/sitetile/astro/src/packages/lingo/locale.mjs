@@ -280,33 +280,54 @@ export const BANNER_FIELDS = ['prompt', 'continue', 'dismiss'];
 const _warned = new Set();
 /** One line per distinct warning per build — the layout runs once per page. */
 export function warnOnce(msg) { if (_warned.has(msg)) return; _warned.add(msg); console.warn(msg); }
-export function bannerOverrides(meta, locales) {
+export const BANNER_MAX_CHARS = 120;
+/** `meta` = the SITE layer (base _site.md, read before any page frontmatter is merged over it).
+ *  `pageMeta` (optional) = the page's merged meta: a family key whose value differs from the site
+ *  layer came from the page and is ignored, warned `[page-level]` — the banner is site chrome. */
+export function bannerOverrides(meta, locales, pageMeta = null) {
   const copy = {};
   const warnings = [];
-  if (!meta || typeof meta !== 'object') return { copy, warnings };
+  const findings = [];   // { key, reason } — the same verdicts as `warnings`, for a reader (reef verify_site)
+  const note = (reason, key, msg) => { findings.push({ key, reason }); warnings.push(`[${reason}] ${msg}`); };
+  if (!meta || typeof meta !== 'object') return { copy, warnings, findings };
   let declared = [];
   try { declared = parseLocales(locales); } catch { declared = []; }
+  if (pageMeta && typeof pageMeta === 'object') {
+    for (const key of Object.keys(pageMeta)) {
+      if (key.startsWith(BANNER_OVERRIDE_PREFIX) && pageMeta[key] !== meta[key]) {
+        note('page-level', key, `\`${key}\` in a page's frontmatter is ignored: the banner sentences are set once, in _site.md.`);
+      }
+    }
+  }
   for (const key of Object.keys(meta)) {
     if (!key.startsWith(BANNER_OVERRIDE_PREFIX)) continue;
     const rest = key.slice(BANNER_OVERRIDE_PREFIX.length);
     const m = rest.match(/^(.+)-([a-z]+)$/i);
     const field = m ? m[2].toLowerCase() : '';
     if (!m || !BANNER_FIELDS.includes(field)) {
-      warnings.push(`\`${key}\` is ignored: a banner key ends in one of ${BANNER_FIELDS.join(', ')} (e.g. ${BANNER_OVERRIDE_PREFIX}zh-tw-prompt).`);
+      note('unknown-field', key, `\`${key}\` is ignored: a banner key ends in one of ${BANNER_FIELDS.join(', ')} (e.g. ${BANNER_OVERRIDE_PREFIX}zh-tw-prompt).`);
       continue;
     }
     const loc = declared.find((l) => sameLocale(l, m[1]));
     if (!loc) {
-      warnings.push(`\`${key}\` is ignored: "${m[1]}" is not one of this site's locales (${declared.join(', ') || 'none declared'}).`);
+      note('undeclared-locale', key, `\`${key}\` is ignored: "${m[1]}" is not one of this site's locales (${declared.join(', ') || 'none declared'}).`);
       continue;
+    }
+    if (!_canon(loc)) {
+      note('banner-unsupported-locale', key, `\`${key}\` sets copy for "${loc}", but the banner is only offered to browsers preferring en, ja, zh-TW or ko — visitors preferring ${loc} are never shown it.`);
     }
     const raw = meta[key];
     const text = (typeof raw === 'string' || typeof raw === 'number') ? String(raw).replace(/\s+/g, ' ').trim() : '';
     if (!text) continue;
+    let cut = text;
+    if ([...text].length > BANNER_MAX_CHARS) {
+      cut = [...text].slice(0, BANNER_MAX_CHARS).join('');
+      note('too-long', key, `\`${key}\` is longer than ${BANNER_MAX_CHARS} characters and was cut to ${BANNER_MAX_CHARS}.`);
+    }
     const id = _canon(loc) || loc;
-    (copy[id] ||= {})[field] = text;
+    (copy[id] ||= {})[field] = cut;
   }
-  return { copy, warnings };
+  return { copy, warnings, findings };
 }
 
 /** The suggestion banner's config for ONE page, or null when the page has nothing to suggest.
@@ -343,7 +364,13 @@ export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', 
     ? declared.filter((l) => routeLocales.includes(l) || fromContent.includes(l))
     : fromContent;
   const options = exists.filter((l) => !sameLocale(l, pageLocale))
-    .map((l) => ({ id: toUrlLocale(l), match: prefixes(l), ...bannerCopy(l), ...((copy && copy[_canon(l) || l]) || {}) }));
+    .map((l) => {
+      // tile#128 r1: each sentence falls back on its own — override → that locale's default → en.
+      const own = (copy && copy[_canon(l) || l]) || {};
+      const def = bannerCopy(l); const en = LINGO_BANNER['en-US'];
+      const pick = (f) => own[f] || def[f] || en[f];
+      return { id: toUrlLocale(l), match: prefixes(l), prompt: pick('prompt'), continue: pick('continue'), dismiss: pick('dismiss') };
+    });
   if (!options.length) return null;
   return {
     current: toUrlLocale(pageLocale),
