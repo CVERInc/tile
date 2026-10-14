@@ -35,8 +35,8 @@
 import esbuild from 'esbuild';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { sourceStamp } from './edit2-sources.mjs';
+import { dirname, join, relative } from 'node:path';
+import { sourceStamp, signetCornersPath, signetCornersStamp } from './edit2-sources.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const W2 = join(DIR, '../w2');
@@ -46,12 +46,18 @@ const W2 = join(DIR, '../w2');
 const ENGINE = join(DIR, '../../..');
 const TUG = join(ENGINE, 'hosts/web/tugtile');
 
+// 🔴 #1929: every file this generator opens goes through here (or comes out of esbuild's metafile
+// below) and lands in SOURCE_FILES, which the stale-bundle stamp is computed over. Do not call
+// fs.readFileSync on a bundle input directly.
+const READ = new Set();
+const rd = (p, enc) => { READ.add(relative(DIR, p).split('\\').join('/')); return fs.readFileSync(p, enc); };
+
 const readEngine = (rel, from = TUG) => {
   const p = join(from, rel);
   if (!fs.existsSync(p)) {
     throw new Error(`gen-edit2-assets: the engine submodule is missing ${p.replace(process.env.HOME, '~')} — run: git submodule update --init`);
   }
-  return fs.readFileSync(p, 'utf8');
+  return rd(p, 'utf8');
 };
 
 // edit2.mjs exports `boot`, not a global — bundle to an IIFE that hangs it off `window`, so the
@@ -66,12 +72,26 @@ const bundled = await esbuild.build({
   format: 'iife',
   platform: 'browser',
   write: false,
+  metafile: true,
   logLevel: 'silent',
 });
 if (bundled.errors?.length) {
   throw new Error('gen-edit2-assets: bundle failed:\n' + bundled.errors.map((e) => e.text).join('\n'));
 }
 const EDIT2_JS = bundled.outputFiles[0].text;
+// the JS esbuild actually read (the stdin entry is not a file)
+const OUT_INPUTS = Object.values(bundled.metafile.outputs)[0].inputs;
+for (const k of Object.keys(bundled.metafile.inputs)) {
+  if (k.startsWith('<stdin>')) continue;
+  // 🔴 This file's OWN previous output is in the graph (card-worker.mjs imports edit2-assets.mjs) but
+  // esbuild keeps none of it. Hashing the file we are about to write could never be stable; if it ever
+  // starts contributing bytes, the bundle contains a previous copy of itself and that is a bug.
+  if (k.endsWith('edit2-assets.mjs')) {
+    if (OUT_INPUTS[k] && OUT_INPUTS[k].bytesInOutput > 0) throw new Error('gen-edit2-assets: the bundle carries bytes of edit2-assets.mjs — it would embed its own previous output');
+    continue;
+  }
+  READ.add(relative(DIR, join(process.cwd(), k)).split('\\').join('/'));   // metafile keys are relative to esbuild's cwd
+}
 
 // ── the porch skin's two faces (owner ruling 2026-09-24; w2/fonts/PROVENANCE.md) ─────────────────
 // Served by the Worker from the SAME immutable path as the table files (`/try/edit/t/<loc>/…`) —
@@ -79,8 +99,8 @@ const EDIT2_JS = bundled.outputFiles[0].text;
 // visitor shares one cached copy. Base64 in the module because a Worker has no filesystem.
 const FONT_BASE = '/try/edit/t/en/';
 const FONT_NAMES = ['NunitoVariable-latin.woff2', 'NunitoVariable-latin-ext.woff2', 'YoungSerif-latin.woff2', 'YoungSerif-latin-ext.woff2'];
-const FONTS = Object.fromEntries(FONT_NAMES.map((f) => [`fonts/${f}`, fs.readFileSync(join(W2, 'fonts', f)).toString('base64')]));
-const PORCH_FONTS_CSS = fs.readFileSync(join(W2, 'porch-fonts.css'), 'utf8').replaceAll('url(./fonts/', `url(${FONT_BASE}fonts/`);
+const FONTS = Object.fromEntries(FONT_NAMES.map((f) => [`fonts/${f}`, rd(join(W2, 'fonts', f)).toString('base64')]));
+const PORCH_FONTS_CSS = rd(join(W2, 'porch-fonts.css'), 'utf8').replaceAll('url(./fonts/', `url(${FONT_BASE}fonts/`);
 if (PORCH_FONTS_CSS.includes('url(./')) throw new Error('gen-edit2-assets: porch-fonts.css has a relative url the rewrite missed');
 
 // ── squircle corners: @cvernet/signet's corners.css, READ from the package, never copied ────────
@@ -89,28 +109,25 @@ if (PORCH_FONTS_CSS.includes('url(./')) throw new Error('gen-edit2-assets: porch
 // here upward, so a checkout with node_modules at packages/cardtile/ or at the workspace root works.
 // (signet's `exports` map does not list src/corners.css, so walk node_modules up by hand — the same
 // lookup Node would do.)
-let SIGNET_CORNERS;
-for (let d = join(DIR, '..'); ; d = dirname(d)) {
-  const p = join(d, 'node_modules/@cvernet/signet/src/corners.css');
-  if (fs.existsSync(p)) { SIGNET_CORNERS = fs.readFileSync(p, 'utf8'); break; }
-  if (dirname(d) === d) throw new Error('gen-edit2-assets: @cvernet/signet is not installed — run: npm install --prefix packages/cardtile');
-}
+const CORNERS_PATH = signetCornersPath(DIR);
+if (!CORNERS_PATH) throw new Error('gen-edit2-assets: @cvernet/signet is not installed — run: npm install --prefix packages/cardtile');
+const SIGNET_CORNERS = fs.readFileSync(CORNERS_PATH, 'utf8');   // outside the repo: stamped on its own (SIGNET_CORNERS_STAMP)
 
 // the page's stylesheets, in cascade order: the shared cardtile-w chrome, signet's corners, the
 // porch tokens + faces, then w2's own layer (whose tail is the porch skin)
 const EDIT2_CSS = [
-  fs.readFileSync(join(DIR, '../w/editor.css'), 'utf8'),
+  rd(join(DIR, '../w/editor.css'), 'utf8'),
   SIGNET_CORNERS,
-  fs.readFileSync(join(W2, 'porch-tokens.css'), 'utf8'),
+  rd(join(W2, 'porch-tokens.css'), 'utf8'),
   PORCH_FONTS_CSS,
-  fs.readFileSync(join(W2, 'edit2.css'), 'utf8'),
+  rd(join(W2, 'edit2.css'), 'utf8'),
 ].join('\n');
 
 // The served page's markup, MINUS the two things that only make sense loaded from disk: the two
 // stylesheet <link>s (inlined instead) and the `<script type="module">` tail (replaced with a plain
 // <script>, since EDIT2_JS is already an IIFE). Everything else — every id the JS wires up to — is
 // index.html's own markup, unedited, so the sandbox and a locally-served copy can never drift.
-const RAW_HTML = fs.readFileSync(join(W2, 'index.html'), 'utf8');
+const RAW_HTML = rd(join(W2, 'index.html'), 'utf8');
 const bodyStart = RAW_HTML.indexOf('<body>');
 const scriptStart = RAW_HTML.indexOf('<script type="module">');
 if (bodyStart < 0 || scriptStart < 0) {
@@ -150,6 +167,8 @@ const ENGINE_I18N = Object.fromEntries(
 );
 if (!Object.keys(ENGINE_I18N).length) throw new Error('gen-edit2-assets: the engine ships no i18n JSON');
 
+// i18n: readEngine above records each locale file it parses; the directory listing itself is not a read.
+const SOURCE_FILES = [...READ].sort();
 const out = `// GENERATED by gen-edit2-assets.mjs — do not edit. cardtile-w2 bundled for the edge Worker's
 // public sandbox (card.feelreef.com/try/edit), together with the ENGINE's browser tugtile served
 // verbatim as its editing table. See that file for what is and is not committed here.
@@ -163,7 +182,11 @@ export const TABLE_I18N = ${JSON.stringify(ENGINE_I18N)};
 /** the porch skin's woff2 files, base64, keyed by their path under FONT_BASE */
 export const FONT_FILES = ${JSON.stringify(FONTS)};
 /** a hash of the SOURCES this was built from — see edit2-sources.mjs, and the test that recomputes it */
-export const SOURCE_STAMP = ${JSON.stringify(sourceStamp())};
+export const SOURCE_STAMP = ${JSON.stringify(sourceStamp(SOURCE_FILES))};
+/** every file the generator read (paths relative to serve/) — the stamp above is over exactly these */
+export const SOURCE_FILES = ${JSON.stringify(SOURCE_FILES, null, 0)};
+/** @cvernet/signet's corners.css lives outside the repo, so it is stamped on its own */
+export const SIGNET_CORNERS_STAMP = ${JSON.stringify(signetCornersStamp(CORNERS_PATH))};
 `;
 fs.writeFileSync(join(DIR, 'edit2-assets.mjs'), out);
 console.log('wrote edit2-assets.mjs — body', BODY.length, '| css', EDIT2_CSS.length,
