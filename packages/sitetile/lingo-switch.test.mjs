@@ -498,8 +498,42 @@ test('🔴 #1888 a locale is matched however the site spells it (zh-TW, zh-tw, z
 });
 
 test('🔴 #1888 SiteLayout feeds the site-layer overrides into the banner', () => {
-  assert.match(layout, /lingo\.bannerOverrides\(meta, locales\)/);
+  assert.match(layout, /lingo\.bannerOverrides\(loadSite\(contentGlob\) \|\| \{\}, locales, meta\)/);
   assert.match(layout, /lingo\.suggestionBanner\(\{ locales, lang, defaultLocale, altLocales, routeLocales: bannerLocales, copy: bannerCopyOverrides \}\)/);
+});
+
+
+// ── tile#128 review round 1 ──────────────────────────────────────────────────────────────────
+test('🔴 r1-1 a declared locale outside the four: each sentence falls back on its own, ending at en — never empty', () => {
+  const loc = ['en-US', 'fr-FR'];
+  const { copy, warnings } = bannerOverrides({ 'locales-banner-fr-fr-prompt': 'Bonjour' }, loc);
+  assert.deepEqual(warnings, []);
+  const b = banner({ locales: loc, lang: 'en-US', defaultLocale: 'en-US', altLocales: loc, copy });
+  const en = lingoMod.bannerCopy('en-US');
+  assert.equal(b.options[0].prompt, 'Bonjour');
+  assert.equal(b.options[0].continue, en.continue);
+  assert.equal(b.options[0].dismiss, en.dismiss);
+  const none = banner({ locales: loc, lang: 'en-US', defaultLocale: 'en-US', altLocales: loc });
+  for (const f of ['prompt', 'continue', 'dismiss']) assert.ok(none.options[0][f], `no override: ${f} is not empty`);
+});
+
+test('🔴 r1-2 site layer only: a page frontmatter key of the family is ignored and warned page-level', () => {
+  const siteMeta = { 'locales-banner-zh-tw-prompt': '站台的句子' };
+  const pageMeta = { ...siteMeta, 'locales-banner-zh-tw-prompt': '頁面的句子', 'locales-banner-zh-tw-dismiss': '頁面婉拒' };
+  const { copy, warnings } = bannerOverrides(siteMeta, TWO, pageMeta);
+  const b = banner({ locales: TWO, lang: 'en-US', defaultLocale: 'en-US', altLocales: TWO, copy });
+  assert.equal(b.options[0].prompt, '站台的句子');
+  assert.equal(b.options[0].dismiss, DEFAULT_ZH.dismiss);
+  assert.equal(warnings.filter((w) => /\[page-level\]/.test(w)).length, 2, warnings.join(' | '));
+  assert.match(layout, /lingo\.bannerOverrides\(loadSite\(contentGlob\) \|\| \{\}, locales, meta\)/);
+});
+
+test('🔴 r1-3 a sentence longer than 120 code points is cut to 120 and warned too-long', () => {
+  const long = '字'.repeat(119) + '尾🙂多';
+  const { copy, warnings } = bannerOverrides({ 'locales-banner-zh-tw-prompt': long }, TWO);
+  assert.equal([...copy['zh-TW'].prompt].length, 120);
+  assert.ok(copy['zh-TW'].prompt.endsWith('尾'), 'cut on code points, keeps the head');
+  assert.equal(warnings.filter((w) => /\[too-long\]/.test(w)).length, 1, warnings.join(' | '));
 });
 
 console.log(`\n${passed} passed`);
