@@ -1393,6 +1393,15 @@ export function blogSwitchLocales(meta, basePosts, corpora) {
   };
 }
 
+// blogAlternates: the hreflang set of a blog index / pager / post — the route's own measurement
+// (blogSwitchLocales' answer, handed down as `bannerLocales`), or '' for "advertise nothing" so the
+// layout falls to its content-file measurement, which finds none for a generated route.
+// CVERInc/reef#1910 item 5. A url that exists in ONE language has no alternate to name, so fewer
+// than two is nothing — the same bar the language banner uses to draw at all.
+export function blogAlternates(bannerLocales) {
+  return Array.isArray(bannerLocales) && bannerLocales.length >= 2 ? bannerLocales : '';
+}
+
 // termLocaleMap: everything a category/tag archive route (base OR locale) needs to compute its own
 // hreflang — the per-locale "which slugs does THIS locale route" map (`mapByUrl`, keyed '' for the
 // default locale and '<url-locale>' for each translated one), a `urlToLocale` lookup back to DATA

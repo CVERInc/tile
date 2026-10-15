@@ -10,6 +10,7 @@ import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase, dialogueAuthorRight } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
+import { localeHomePath } from '../packages/lingo/locale.mjs';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
@@ -86,12 +87,14 @@ const commentsLabel = String(meta['blog-comments-label'] || 'Comments').trim();
 // "Home"), middle = the blog's own `blog-title`, leaf = this post's title. Absent → back-link as before.
 const showBreadcrumb = String(meta['blog-breadcrumb'] || '').trim() === 'true';
 const crumbHome = String(meta['breadcrumb-home'] || 'Home').trim();
+// CVERInc/reef#1910: the home of the locale this post's URL sits under (one definition, lingo/locale.mjs).
+const crumbHomeHref = localeHomePath({ locales: meta.locales, pathname: Astro.url?.pathname });
 const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
 ---
 <article class="bl-post">
   {showBreadcrumb ? (
     <nav class="rf-breadcrumb reef-breadcrumb bl-breadcrumb" aria-label="Breadcrumb">
-      <a href="/">{crumbHome}</a>
+      <a href={crumbHomeHref}>{crumbHome}</a>
       <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><a href={blogBase(meta)}>{crumbBlog}</a>
       <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{post.title}</span>
     </nav>

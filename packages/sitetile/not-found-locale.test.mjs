@@ -300,6 +300,28 @@ const SITES = {
     'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
     'posts/ja-jp/p1.md': '---\ntitle: 折り鶴一\ndate: 2026-01-02\ntags: [crane]\n---\n本文。\n',
   },
+  // ── CVERInc/reef#1910 items 5 and 7: the engine's "home" links and the blog's hreflang. English
+  // default, zh-TW second; a post in both languages (p1) and one in English only (p2).
+  homeLinks: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nbreadcrumb-label: Paper\nfooter-brand: Tsuru Paper\nfooter-cols: Shop: Cranes=/cranes\nblog-breadcrumb: true\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'zh-tw/about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
+    'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\n---\nBody text.\n',
+    'posts/p2.md': '---\ntitle: P2\ndate: 2026-01-03\n---\nBody text.\n',
+    'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\nlang: zh-TW\n---\n內文。\n',
+  },
+  // CVERInc/reef#1910 item 5, the pager: page size 1, two English posts (two pages), one translated
+  // (one page). Page 1 exists in both languages; English page 2 exists in one.
+  homeLinksPager: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nblog-page-size: 1\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\n---\nBody text.\n',
+    'posts/p2.md': '---\ntitle: P2\ndate: 2026-01-03\n---\nBody text.\n',
+    'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\nlang: zh-TW\n---\n內文。\n',
+  },
   // The same shape in zh-Hant: the old default must come out exactly as before.
   monoZh: {
     '_site.md': '---\nbrand: 紙鶴工坊\n---\n',
@@ -710,6 +732,63 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
       // …which is what the home page at `/` said all along.
       assert.equal(htmlLang(site('configDisagrees').pages['index.html']), 'en');
+    });
+
+    // ── CVERInc/reef#1910 item 7: the engine's four "home" links follow the page's locale ─────────
+    const homeHrefs = (html) => ({
+      crumb: [...html.matchAll(/<nav class="[^"]*\brf-breadcrumb\b[^"]*"[^>]*>\s*<a href="([^"]*)"/g)].map((m) => m[1]),
+      wordmark: [...html.matchAll(/<a class="rf-foot-wordmark" href="([^"]*)"/g)].map((m) => m[1]),
+    });
+    await test('🔴 #1910 homeLinks: on /zh-tw/ pages the breadcrumb home, the footer wordmark and the post breadcrumb are /zh-tw/', () => {
+      const { pages } = site('homeLinks');
+      for (const rel of ['zh-tw/about/index.html', 'zh-tw/devlog/p1/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built — the fixture stopped exercising it`);
+        const h = homeHrefs(pages[rel]);
+        assert.ok(h.crumb.length >= 1 && h.wordmark.length === 1, `${rel}: the links were not rendered (${JSON.stringify(h)}) — the fixture stopped exercising them`);
+        for (const href of [...h.crumb, ...h.wordmark]) assert.equal(href, '/zh-tw/', rel);
+      }
+    });
+    await test('CONTROL #1910 homeLinks: on default-locale pages the same links are still /', () => {
+      const { pages } = site('homeLinks');
+      for (const rel of ['about/index.html', 'devlog/p1/index.html']) {
+        const h = homeHrefs(pages[rel]);
+        assert.ok(h.crumb.length >= 1 && h.wordmark.length === 1, `${rel}: the links were not rendered`);
+        for (const href of [...h.crumb, ...h.wordmark]) assert.equal(href, '/', rel);
+      }
+    });
+
+    // ── CVERInc/reef#1910 item 5: the blog routes carry hreflang, measured by the route ───────────
+    await test('🔴 #1910 homeLinks: a post that exists in both languages names both, reciprocally, plus x-default', () => {
+      const { pages } = site('homeLinks');
+      const want = [{ tag: 'en', href: 'https://example.com/devlog/p1/' }, { tag: 'zh-Hant', href: 'https://example.com/zh-tw/devlog/p1/' },
+        { tag: 'x-default', href: 'https://example.com/devlog/p1/' }];
+      for (const rel of ['devlog/p1/index.html', 'zh-tw/devlog/p1/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built`);
+        assert.deepEqual(alternates(pages[rel]), want, rel);
+      }
+    });
+    await test('🔴 #1910 homeLinks: the blog index in both languages is reciprocal', () => {
+      const { pages } = site('homeLinks');
+      for (const rel of ['devlog/index.html', 'zh-tw/devlog/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built`);
+        assert.deepEqual(alternates(pages[rel]).map((a) => a.tag), ['en', 'zh-Hant', 'x-default'], rel);
+      }
+    });
+    await test('CONTROL #1910 homeLinks: a post that exists in English only advertises nothing (no dead alternate)', () => {
+      const { pages } = site('homeLinks');
+      assert.ok(pages['devlog/p2/index.html'], 'devlog/p2 was not built');
+      assert.deepEqual(alternates(pages['devlog/p2/index.html']), []);
+    });
+    await test('🔴 #1910 homeLinksPager: page 1 names both languages; English page 2 (no translation) names nothing', () => {
+      const { pages } = site('homeLinksPager');
+      const p2 = Object.keys(pages).filter((r) => /^devlog\/page\/2\/index\.html$/.test(r));
+      assert.equal(p2.length, 1, 'English page 2 was not built — the fixture stopped exercising the pager');
+      assert.deepEqual(alternates(pages[p2[0]]), [], 'a pager page that exists in one language emitted an alternate');
+      assert.ok(!pages['zh-tw/devlog/page/2/index.html'], 'the translated blog grew a page 2 — the fixture stopped being uneven');
+      for (const rel of ['devlog/index.html', 'zh-tw/devlog/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built`);
+        assert.deepEqual(alternates(pages[rel]).map((a) => a.tag), ['en', 'zh-Hant', 'x-default'], rel);
+      }
     });
   } finally {
     if (process.env.KEEP_404_LOCALE_OUT) console.log(`  · kept: ${work}`);
