@@ -2364,7 +2364,13 @@ function proseBodyHtml(body, ordered) {
     + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '');
 }
 
-function renderSection(s) {
+function renderSection(s, hero) {
+  // 🩸 #1933: the page's FIRST section carries its title as <h1> in the built page (Section.astro
+  // `index === 0`); a string render that always wrote <h2> described a page with no h1. Only the
+  // ten types whose Astro component reads `hero` follow (prose, grid, people, collection, faq,
+  // timeline, social, tagcloud, links, and form once it has a branch); gallery, carousel, cta and
+  // embed hard-code <h2> there, so they do here.
+  const H = hero && s.title ? 'h1' : 'h2';
   const pm = parseParams(s.params);
   const type = KNOWN_TYPES.indexOf(s.type) >= 0 ? s.type : 'prose';
   switch (type) {
@@ -2482,7 +2488,7 @@ function renderSection(s) {
       // `surface=<token>` — opt-in per-section background belt (see Grid.astro). Round-trips via
       // the raw params; here it just emits `data-surface` for the theme to paint.
       const surface = pm.surface ? ' data-surface="' + escAttr(typeof pm.surface === 'object' ? pm.surface.label : pm.surface) + '"' : '';
-      return '<section class="st-grid" data-cols="' + escAttr(pm.cols || '') + '"' + (imageCards ? ' data-cards="image"' : '') + surface + '><h2>' + inlineHtml(s.title) + '</h2>' +
+      return '<section class="st-grid" data-cols="' + escAttr(pm.cols || '') + '"' + (imageCards ? ' data-cards="image"' : '') + surface + '>' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         bodyHtml(s.body) + '<div class="st-cells"' + cellsAttr + '>' + cellsHtml + '</div></section>';
     }
     case 'gallery': {
@@ -2593,7 +2599,7 @@ function renderSection(s) {
             '<p class="st-people-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p>' +
             bodyHtml(g.lead) + '<div class="st-people-cells">' + cellsOf(g) + '</div></div>').join('');
       return '<section class="st-people" data-cols="' + escAttr(pm.cols || '') + '" data-shape="' + shape + '">' +
-        (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + inner + '</section>';
+        (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + inner + '</section>';
     }
     case 'collection': {
       // A list of items, optionally grouped (### category / #### item), with category jump-pills.
@@ -2610,7 +2616,7 @@ function renderSection(s) {
         : (pm.link && typeof pm.link === 'object') ? '<span class="st-collection-link"><span>' + escHtml(pm.link.label) + '</span></span>' : '';
       // head carries the same outer/inner split as the belt (and as Collection.astro): the section
       // is `st-full-bleed`, so the INNER box is what keeps the head text at the page's content width.
-      const head = '<div class="st-collection-head"><div class="st-collection-head-inner">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + link + '</div></div>';
+      const head = '<div class="st-collection-head"><div class="st-collection-head-inner">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + link + '</div></div>';
       const eyebrow = pm.eyebrow ? '<p class="st-collection-eyebrow">' + escHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       const pills = multi ? '<nav class="st-collection-pills" aria-label="Categories">' +
         groups.map((g) => '<a class="st-collection-pill" href="#' + gid(g.title) + '">' + inlineHtml(g.title) + '</a>').join('') + '</nav>' : '';
@@ -2635,7 +2641,7 @@ function renderSection(s) {
           const meta = (it.href || it.learn) ? '<div class="st-item-meta">' + (it.updated ? '<span class="st-item-updated">Updated ' + escHtml(it.updated) + '</span>' : '') +
             (it.href ? '<' + ghTag + ' class="st-item-gh"' + ((ghOk && learnOk) ? ' href="' + escHrefAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
             (learnOk ? '<a class="st-item-learn" href="' + escHrefAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
-          return '<div class="st-cell st-item"><div class="st-item-head"><h4>' + inlineHtml(it.title) + '</h4>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
+          return '<div class="st-cell st-item"><div class="st-item-head"><' + (hero ? 'h2' : 'h4') + '>' + inlineHtml(it.title) + '</' + (hero ? 'h2' : 'h4') + '>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
         }).join('');
         return '<div class="st-collection-group"><p class="st-collection-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p><div class="st-cells">' + cards + '</div></div>';
       }).join('');
@@ -2654,7 +2660,7 @@ function renderSection(s) {
         '<summary class="st-faq-q">' + inlineHtml(e.q) + '</summary>' +
         '<div class="st-faq-a">' + bodyHtml(e.body) + '</div></details>').join('');
       return '<section class="st-faq">' +
-        '<div class="st-faq-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) + '</div>' +
+        '<div class="st-faq-head">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' +
         '<div class="st-faq-list">' + items + '</div></section>';
     }
     case 'timeline': {
@@ -2669,7 +2675,7 @@ function renderSection(s) {
         '<p class="st-tl-year">' + inlineHtml(e.year) + '</p>' +
         '<div class="st-tl-body">' + (e.title ? '<h3>' + inlineHtml(e.title) + '</h3>' : '') + bodyHtml(e.body) + '</div></div>').join('');
       const tlSurface = pm.surface ? ' data-surface="' + escAttr(typeof pm.surface === 'object' ? pm.surface.label : pm.surface) + '"' : '';
-      return '<section class="st-timeline"' + (zigzag ? ' data-style="zigzag"' : '') + tlSurface + '>' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+      return '<section class="st-timeline"' + (zigzag ? ' data-style="zigzag"' : '') + tlSurface + '>' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         bodyHtml(s.body) + '<div class="st-tl-rows">' + rows + '</div></section>';
     }
     case 'social': {
@@ -2677,7 +2683,7 @@ function renderSection(s) {
       // (first = primary filled, rest = outline). Buttons render AFTER the caption. General — any
       // creator/landing follow band. Mirrors Social.astro for editor-preview parity.
       const sp = socialParts(s.body);
-      return '<section class="st-social">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+      return '<section class="st-social">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         (sp.caption ? bodyHtml(sp.caption) : '') + linkButtonsHtml(sp.links, 'st-social') + '</section>';
     }
     case 'tagcloud': {
@@ -2690,7 +2696,7 @@ function renderSection(s) {
       const tags = links.map((l) => isSafeHref(l.href)
         ? '<a class="st-tag" href="' + escHrefAttr(l.href) + '">' + inlineHtml(l.label) + '</a>'
         : '<span class="st-tag">' + inlineHtml(l.label) + '</span>').join('');
-      return '<section class="st-tagcloud">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+      return '<section class="st-tagcloud">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         '<div class="st-tag-flow">' + tags + '</div></section>';
     }
     case 'links': {
@@ -2706,7 +2712,7 @@ function renderSection(s) {
           : '<span class="st-link-name">' + inlineHtml(it.label) + '</span>') +
         (it.host ? '<span class="st-link-host">' + escHtml(it.host) + '</span>' : '') +
         (it.note ? '<p class="st-link-note">' + inlineHtml(it.note) + '</p>' : '') + '</li>').join('');
-      return '<section class="st-links">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+      return '<section class="st-links">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         (lp.caption ? bodyHtml(lp.caption) : '') + (cards ? '<ul class="st-links-list">' + cards + '</ul>' : '') + '</section>';
     }
     default: { // prose — omit the heading when headingless; `align=left` opts out of centering.
@@ -2717,7 +2723,7 @@ function renderSection(s) {
       const ordered = pm.ordered != null;
       // `eyebrow="…"` — the small label above the heading, as in the hero branch above.
       const prEyebrow = pm.eyebrow ? '<p class="st-prose-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
-      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + proseBodyHtml(s.body, ordered) + '</section>';
+      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + proseBodyHtml(s.body, ordered) + '</section>';
     }
   }
 }
@@ -2772,7 +2778,7 @@ function _stampDropWarnings(site, before) {
 }
 function renderSiteToHtml(site) {
   const _before = _dropWarnings.length;
-  const sectionsHtml = (site.sections || []).map((s) => withSectionId(renderSection(s), s.id)).join('\n');
+  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
   if (String((site.meta || {}).layout || '').trim() === 'sidebar') {

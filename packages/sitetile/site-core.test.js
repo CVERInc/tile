@@ -2361,4 +2361,37 @@ test('#496 x link-dest: a destination sitting entirely INSIDE an HTML comment is
   assert.equal(block, '<p>before  after</p>');
 });
 
+// #1933 S3: the page's first section's title is the <h1> (as the built page has it); later ones stay <h2>.
+const firstH = (md) => { const h = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n' + md)); return [...h.matchAll(/<(h[1-4])>(?:T\d)<\/\1>/g)].map((m) => m[0]); };
+const FIRST_SECTION_TYPES = {
+  prose: '', grid: '%% sitetile: grid cols=2 %%\n### A\nx', people: '%% sitetile: people %%\n### A\nx',
+  collection: '%% sitetile: collection %%\n### G\n#### I\nx', faq: '%% sitetile: faq %%\n### Q\nA',
+  timeline: '%% sitetile: timeline %%\n### 2020\nx', social: '%% sitetile: social %%\n[a](https://a.example)',
+  tagcloud: '%% sitetile: tagcloud %%\n- a', links: '%% sitetile: links %%\n[a](/a)',
+};
+for (const [type, marker] of Object.entries(FIRST_SECTION_TYPES)) {
+  test('#1933: ' + type + ' as the first section titles with <h1>, as the second with <h2>', () => {
+    const sec = (n) => '## T' + n + '\n' + (marker ? marker + '\n' : '') + (marker ? '' : 'Body.') + '\n';
+    assert.deepEqual(firstH(sec(1) + '\n## T2\nBody.\n'), ['<h1>T1</h1>', '<h2>T2</h2>']);
+    assert.deepEqual(firstH('## T0\nLead.\n\n' + sec(1)), ['<h1>T0</h1>', '<h2>T1</h2>']);
+  });
+}
+test('#1933: gallery / carousel / cta keep <h2> even as the first section (the built page hard-codes it)', () => {
+  assert.deepEqual(firstH('## T1\n%% sitetile: gallery %%\n![a](/a.png)\n'), ['<h2>T1</h2>']);
+  assert.deepEqual(firstH('## T1\n%% sitetile: cta %%\nGo.\n\n[Join](/join)\n'), ['<h2>T1</h2>']);
+  const car = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n## T1\n%% sitetile: carousel %%\n### a\nx\n'));
+  assert.doesNotMatch(car, /<h1>/);
+});
+test('#1933: the first section without a title gets no <h1> (nothing to promote)', () => {
+  const h = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n## \n%% sitetile: grid cols=2 %%\n### A\nx\n'));
+  assert.doesNotMatch(h, /<h1>/);
+});
+test('#1933: an untitled grid renders no heading node at all (not an empty <h2>), first or not', () => {
+  for (const lead of ['', '## T0\nLead.\n\n']) {
+    const h = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n' + lead + '##\n%% sitetile: grid cols=2 %%\n### A\nx\n'));
+    assert.match(h, /class="st-grid"/);
+    assert.doesNotMatch(h.slice(h.indexOf('class="st-grid"')), /<h[1-3]>\s*<\/h[1-3]>|<h1/);
+  }
+});
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
