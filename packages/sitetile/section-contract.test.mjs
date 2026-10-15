@@ -123,13 +123,11 @@ const CASES = [
 const XFAIL = {
   'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
   'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
-  form: 'string render has no form branch; a form falls through to prose',
 };
 // The sections that carry a gap, by title.
 const GAPS = {
   'Hero layered': 'hero-layered',
   'Collection later': 'collection-card-heading',
-  'Form': 'form',
 };
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'

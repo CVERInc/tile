@@ -2648,6 +2648,44 @@ function renderSection(s, hero) {
       return '<section class="st-collection st-full-bleed">' + head +
         '<div class="st-collection-belt"><div class="st-collection-belt-inner">' + eyebrow + pills + groupsHtml + '</div></div></section>';
     }
+    case 'form': {
+      // Native <form>: lead + title in `.st-form-head`, one `.st-form-field` per `### <label>`, a
+      // submit button (DISABLED unless an action is wired). Mirrors Form.astro's static skeleton
+      // and its action/method/name/required attributes. 🔴 NOT mirrored (S4b): the `action=inbox`
+      // extras that need Astro-only runtime data (lingo copy for `lang`, the page URL) — the
+      // success card, `return_to`/`thanks_to` hidden inputs, honeypot, error line, inline script,
+      // `data-inbox-copy`, and `data-required-msg`.
+      const fEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+      const isInbox = pm.action === 'inbox';
+      const fAction = isInbox ? '/__reef/inbox' : (safeHref(pm.action) || undefined);
+      const fMethod = isInbox ? 'post' : String(pm.method || 'post').toLowerCase();
+      const reserved = ['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp', 'visitor_email', 'email_field'];
+      const nameFor = (f) => {
+        if (!isInbox) return f.label;
+        if (f.kind === 'email') return 'visitor_email';
+        return reserved.indexOf(String(f.label).toLowerCase()) >= 0 ? 'field_' + f.label : String(f.label);
+      };
+      const req = (f) => typeof f.required === 'boolean' ? f.required : (isInbox && (f.kind === 'textarea' || f.kind === 'email'));
+      const fieldsHtml = (s.fields || []).map((f, i) => {
+        const id = 'st-form-f' + (i + 1), r = req(f), nm = escAttr(nameFor(f));
+        const ra = r ? ' required aria-required="true"' : '';
+        const label = r
+          ? '<label class="st-form-label" for="' + id + '"><span>' + inlineHtml(f.label) + '</span><span class="st-form-required-mark" aria-hidden="true"> *</span></label>'
+          : '<label class="st-form-label" for="' + id + '">' + inlineHtml(f.label) + '</label>';
+        const control = f.kind === 'textarea'
+          ? '<textarea class="st-form-input st-form-textarea" id="' + id + '" name="' + nm + '" rows="5"' + ra + '></textarea>'
+          : f.kind === 'select'
+            ? '<select class="st-form-input st-form-select" id="' + id + '" name="' + nm + '"' + ra + '><option value="" disabled selected>—</option>' +
+              (f.options || []).map((o) => '<option value="' + escAttr(o) + '">' + escHtml(o) + '</option>').join('') + '</select>'
+            : '<input class="st-form-input" id="' + id + '" name="' + nm + '" type="' + (f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text') + '"' + ra + '>';
+        return '<div class="st-form-field">' + label + control + '</div>';
+      }).join('');
+      return '<section class="st-form-section"><div class="st-form-head">' +
+        (fEyebrow ? '<p class="st-form-eyebrow">' + inlineHtml(fEyebrow) + '</p>' : '') +
+        (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' +
+        '<form class="st-form"' + (fAction ? ' action="' + escAttr(fAction) + '"' : '') + ' method="' + escAttr(fMethod) + '">' + fieldsHtml +
+        '<button class="st-form-submit" type="submit"' + (fAction ? '' : ' disabled') + '>' + escHtml(pm.submit || 'Send') + '</button></form></section>';
+    }
     case 'faq': {
       // Q&A accordion → native <details>/<summary> (zero-JS, a11y, progressive-enhancement —
       // the family posture). `open` (bare flag) expands every item on load (a live all-expanded

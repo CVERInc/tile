@@ -2394,4 +2394,45 @@ test('#1933: an untitled grid renders no heading node at all (not an empty <h2>)
   }
 });
 
+// ── #1933 S4: string render's form branch (skeleton + action/method/name/required) ──
+const formHtml = (type, body, first) => renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n' + (first ? '' : '## Lead\nx\n\n') + '## Contact\n%% sitetile: ' + type + ' %%\n' + body + '\n'));
+test('#1933 form: no action → disabled submit, post form with no action attribute, fields in order', () => {
+  const h = formHtml('form', 'Write to us.\n\n### Name {required}\n### Email {email}\n### Topic\n- A\n- B\n### Message {textarea}');
+  assert.match(h, /<section class="st-form-section"[^>]*><div class="st-form-head"><h2>Contact<\/h2>/);
+  assert.match(h, /<form class="st-form" method="post">/);
+  assert.doesNotMatch(h, /<form[^>]* action=/);
+  assert.match(h, /<button class="st-form-submit" type="submit" disabled>Send<\/button>/);
+  assert.match(h, /<label class="st-form-label" for="st-form-f1"><span>Name<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span><\/label><input class="st-form-input" id="st-form-f1" name="Name" type="text" required aria-required="true">/);
+  assert.match(h, /<input class="st-form-input" id="st-form-f2" name="Email" type="email">/);
+  assert.match(h, /<select class="st-form-input st-form-select" id="st-form-f3" name="Topic"><option value="" disabled selected>—<\/option><option value="A">A<\/option><option value="B">B<\/option><\/select>/);
+  assert.match(h, /<textarea class="st-form-input st-form-textarea" id="st-form-f4" name="Message" rows="5"><\/textarea>/);
+  assert.ok(h.indexOf('st-form-f1') < h.indexOf('st-form-f2') && h.indexOf('st-form-f3') < h.indexOf('st-form-f4'));
+});
+test('#1933 form: first section titles with <h1>; a later one with <h2>', () => {
+  assert.match(formHtml('form', '### Name', true), /<div class="st-form-head"><h1>Contact<\/h1>/);
+  assert.match(formHtml('form', '### Name', false), /<div class="st-form-head"><h2>Contact<\/h2>/);
+});
+test('#1933 form: action=URL → live submit with that action; method lower-cased; submit= text', () => {
+  const h = formHtml('form action=https://example.com/x method=GET submit="Go"', '### Name');
+  assert.match(h, /<form class="st-form" action="https:\/\/example.com\/x" method="get">/);
+  assert.match(h, /<button class="st-form-submit" type="submit">Go<\/button>/);
+});
+test('#1933 form: an unsafe action is dropped (submit stays disabled)', () => {
+  const h = formHtml('form action=javascript:alert(1)', '### Name');
+  assert.doesNotMatch(h, /javascript:/);
+  assert.match(h, /type="submit" disabled>/);
+});
+test('#1933 form: action=inbox → /__reef/inbox, visitor_email name, message/email required by default, reserved names prefixed', () => {
+  const h = formHtml('form action=inbox', '### Your email {email}\n### Message {textarea}\n### Text\n### Notes {required: false}');
+  assert.match(h, /<form class="st-form" action="\/__reef\/inbox" method="post">/);
+  assert.match(h, /id="st-form-f1" name="visitor_email" type="email" required aria-required="true">/);
+  assert.match(h, /id="st-form-f2" name="Message" rows="5" required aria-required="true">/);
+  assert.match(h, /id="st-form-f3" name="field_Text" type="text">/);
+  assert.match(h, /id="st-form-f4" name="Notes" type="text">/);
+  assert.match(h, /type="submit">Send<\/button>/);
+});
+test('#1933 form: no longer falls through to prose', () => {
+  assert.doesNotMatch(formHtml('form', '### Name', true), /class="st-prose"/);
+});
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
