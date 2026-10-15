@@ -2386,5 +2386,12 @@ test('#1933: the first section without a title gets no <h1> (nothing to promote)
   const h = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n## \n%% sitetile: grid cols=2 %%\n### A\nx\n'));
   assert.doesNotMatch(h, /<h1>/);
 });
+test('#1933: an untitled grid renders no heading node at all (not an empty <h2>), first or not', () => {
+  for (const lead of ['', '## T0\nLead.\n\n']) {
+    const h = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n---\n\n' + lead + '##\n%% sitetile: grid cols=2 %%\n### A\nx\n'));
+    assert.match(h, /class="st-grid"/);
+    assert.doesNotMatch(h.slice(h.indexOf('class="st-grid"')), /<h[1-3]>\s*<\/h[1-3]>|<h1/);
+  }
+});
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

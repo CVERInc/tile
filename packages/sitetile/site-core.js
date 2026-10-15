@@ -2488,7 +2488,7 @@ function renderSection(s, hero) {
       // `surface=<token>` — opt-in per-section background belt (see Grid.astro). Round-trips via
       // the raw params; here it just emits `data-surface` for the theme to paint.
       const surface = pm.surface ? ' data-surface="' + escAttr(typeof pm.surface === 'object' ? pm.surface.label : pm.surface) + '"' : '';
-      return '<section class="st-grid" data-cols="' + escAttr(pm.cols || '') + '"' + (imageCards ? ' data-cards="image"' : '') + surface + '><' + H + '>' + inlineHtml(s.title) + '</' + H + '>' +
+      return '<section class="st-grid" data-cols="' + escAttr(pm.cols || '') + '"' + (imageCards ? ' data-cards="image"' : '') + surface + '>' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         bodyHtml(s.body) + '<div class="st-cells"' + cellsAttr + '>' + cellsHtml + '</div></section>';
     }
     case 'gallery': {

@@ -109,6 +109,8 @@ const CASES = [
   { title: 'Hero layered', marker: '%% sitetile: hero layers=/img/back.png|/img/front.png logo=/img/logo.png %%', body: 'Layered hero.' },
   { title: 'Grid cells', marker: '%% sitetile: grid cols=3 %%',
     body: '### Plain\nBody one.\n\n### Linked →/internal\nBody two.\n\n### Labelled →/x "Read"\nBody three.\n\n### 🎉 Emoji\nBody four.\n\n### Badged [New]\nBody five.\n\n### External →https://example.com/e\nBody six.' },
+  { title: '', label: 'Grid untitled', marker: '%% sitetile: grid cols=2 %%', body: '### Only\nBody.' },
+  { title: 'Collection later', marker: '%% sitetile: collection %%', body: '### Group\n#### Item one\nBody one.\n\n#### Item two\nBody two.' },
   { title: 'Form', marker: '%% sitetile: form %%', body: 'Write to us.\n\n### Name {required}\n### Email {email}\n### Topic\n- A\n- B\n### Message {textarea}' },
   { title: 'FAQ', marker: '%% sitetile: faq %%', body: '### Why?\nBecause.\n\n### How?\nLike this.' },
   { title: 'Timeline', marker: '%% sitetile: timeline %%', body: '### 2020\nStart.\n\n### 2021\nGrowth.' },
@@ -120,25 +122,28 @@ const CASES = [
 // Remove the entry when the gap is closed.
 const XFAIL = {
   'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
+  'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
   form: 'string render has no form branch; a form falls through to prose',
 };
 // The sections that carry a gap, by title.
 const GAPS = {
   'Hero layered': 'hero-layered',
+  'Collection later': 'collection-card-heading',
   'Form': 'form',
 };
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
-  + CASES.map((c) => `## ${c.title}\n${c.marker ? c.marker + '\n' : ''}${c.body}\n`).join('\n');
+  + CASES.map((c) => `##${c.title ? ' ' + c.title : ''}\n${c.marker ? c.marker + '\n' : ''}${c.body}\n`).join('\n');
 const site = parseSite(MD);
-const idOf = (title) => site.sections[CASES.findIndex((c) => c.title === title)].id;
+const nameOf = (c) => c.label || c.title;
+const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title)].id;
 
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'form', 'faq', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'faq', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
-  for (const c of CASES) assert.ok(stringById.get(idOf(c.title)), `string render has no section for ${c.title}`);
+  for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });
 
 await test('CONTROL: class tokens are compared as a list — `a.b` and `a b` differ', () => {
@@ -175,28 +180,28 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
 
     await test('the fixture built, and every section is on the page under the id the string render gave it', () => {
       assert.equal(result.code, 0, 'astro build exited non-zero');
-      for (const c of CASES) assert.ok(astroById.get(idOf(c.title)), `no section ${c.title} in the built page`);
+      for (const c of CASES) assert.ok(astroById.get(idOf(nameOf(c))), `no section ${nameOf(c)} in the built page`);
     });
 
     const diffs = new Map();
     const SHOW = process.env.SECTION_CONTRACT_SHOW;
     for (const c of CASES) {
-      const an = astroById.get(idOf(c.title)), sn = stringById.get(idOf(c.title));
+      const an = astroById.get(idOf(nameOf(c))), sn = stringById.get(idOf(nameOf(c)));
       const a = an ? whole(an) : { missing: true }, s = whole(sn);
       let same = true;
       try { assert.deepStrictEqual(a, s); } catch { same = false; }
-      diffs.set(c.title, same ? null : { a: JSON.stringify(a), s: JSON.stringify(s) });
-      if (SHOW && !same) console.log('DIFF', c.title, '\n--- built\n' + JSON.stringify(a) + '\n--- string\n' + JSON.stringify(s));
+      diffs.set(nameOf(c), same ? null : { a: JSON.stringify(a), s: JSON.stringify(s) });
+      if (SHOW && !same) console.log('DIFF', nameOf(c), '\n--- built\n' + JSON.stringify(a) + '\n--- string\n' + JSON.stringify(s));
     }
 
     for (const c of CASES) {
-      await test(`${c.title}: ${GAPS[c.title] ? `known gap "${GAPS[c.title]}" is still real` : 'identical structure'}`, () => {
-        const d = diffs.get(c.title), gap = GAPS[c.title];
+      await test(`${nameOf(c)}: ${GAPS[nameOf(c)] ? `known gap "${GAPS[nameOf(c)]}" is still real` : 'identical structure'}`, () => {
+        const d = diffs.get(nameOf(c)), gap = GAPS[nameOf(c)];
         if (gap) {
           assert.ok(XFAIL[gap], `gap ${gap} is not in XFAIL`);
-          assert.ok(d, `${c.title} is now IDENTICAL in both renderers — remove "${gap}" from the xfail list`);
+          assert.ok(d, `${nameOf(c)} is now IDENTICAL in both renderers — remove "${gap}" from the xfail list`);
         } else {
-          assert.ok(!d, `${c.title} differs between the renderers:\n--- built page\n${d && d.a}--- string render\n${d && d.s}`);
+          assert.ok(!d, `${nameOf(c)} differs between the renderers:\n--- built page\n${d && d.a}--- string render\n${d && d.s}`);
         }
       });
     }
