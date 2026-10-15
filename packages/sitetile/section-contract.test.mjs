@@ -122,7 +122,6 @@ const CASES = [
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
 // Remove the entry when the gap is closed.
 const XFAIL = {
-  'form-inbox': 'action=inbox: Form.astro adds the success card, return_to hidden input, honeypot, error line and script; the string branch has none of them (S4b)',
   'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
   'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
 };
@@ -130,7 +129,6 @@ const XFAIL = {
 const GAPS = {
   'Hero layered': 'hero-layered',
   'Collection later': 'collection-card-heading',
-  'Form inbox': 'form-inbox',
 };
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
