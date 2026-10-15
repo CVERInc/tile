@@ -67,14 +67,34 @@ function parseHtml(html) {
   return root;
 }
 const all = (n, out = []) => { for (const k of n.kids) { out.push(k); all(k, out); } return out; };
-// Tag + class tokens, in document order, down the whole subtree. No text, no ids, no data-*, no
-// whitespace: this is the structure a stylesheet can see.
-const shape = (n, depth = 0) => '  '.repeat(depth) + n.tag + n.cls.map((c) => '.' + c).join('') + '\n' + n.kids.map((k) => shape(k, depth + 1)).join('');
-const sectionsById = (html) => {
-  const out = new Map();
-  for (const n of all(parseHtml(html))) if (n.tag === 'section' && n.attrs.id) out.set(n.attrs.id, n);
-  return out;
+// Structure a stylesheet can see: tag, class tokens (a list, never a joined string — `a.b` and
+// `a b` are different), children in document order. No text, ids, data-* or whitespace.
+const shape = (n) => ({ tag: n.tag, classes: [...n.cls], children: n.kids.map(shape) });
+// A section's wrapper chain: tag + classes of every ancestor between the page's <main> and the
+// section, outermost first. The built page has page chrome (html/body/main) that the string
+// render, a fragment, does not; an extra wrapper BETWEEN main and the section is what counts.
+const chainOf = (n) => {
+  const at = n.chain.map((c) => c.tag).lastIndexOf('main');
+  return n.chain.slice(at + 1);
 };
+// Every <section id>, with its ancestor chain. 🔴 A duplicate id is a failure, not an overwrite:
+// Map.set would keep the last one and the first would never be compared.
+function sectionsById(html, where) {
+  const out = new Map();
+  const walk = (n, chain) => {
+    for (const k of n.kids) {
+      if (k.tag === 'section' && k.attrs.id) {
+        assert.ok(!out.has(k.attrs.id), `${where}: section id ${JSON.stringify(k.attrs.id)} appears more than once`);
+        k.chain = chain.map((c) => ({ tag: c.tag, classes: [...c.cls] }));
+        out.set(k.attrs.id, k);
+      }
+      walk(k, [...chain, k]);
+    }
+  };
+  walk(parseHtml(html), []);
+  return out;
+}
+const whole = (n) => ({ chain: chainOf(n), shape: shape(n) });
 
 // ── the fixture: one page, one section per type under test, none of them uniform ─────────────
 // `key` names the xfail entry the section belongs to (if any).
@@ -115,12 +135,26 @@ const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\
 const site = parseSite(MD);
 const idOf = (title) => site.sections[CASES.findIndex((c) => c.title === title)].id;
 
-const stringById = sectionsById(renderSiteToHtml(site));
+const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
   const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'form', 'faq', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(c.title)), `string render has no section for ${c.title}`);
+});
+
+await test('CONTROL: class tokens are compared as a list — `a.b` and `a b` differ', () => {
+  const one = parseHtml('<section id="x" class="a.b"><p></p></section>').kids[0];
+  const two = parseHtml('<section id="x" class="a b"><p></p></section>').kids[0];
+  assert.notDeepEqual(shape(one), shape(two));
+  assert.deepEqual(shape(two), shape(parseHtml('<section id="x" class="a  b"><p></p></section>').kids[0]));
+});
+
+await test('CONTROL: a duplicate section id fails instead of being overwritten, and a wrapper difference is seen', () => {
+  assert.throws(() => sectionsById('<section id="d"></section><section id="d"></section>', 't'), /more than once/);
+  const bare = sectionsById('<main><section id="w"><p></p></section></main>', 't').get('w');
+  const wrapped = sectionsById('<main><div class="wrap"><section id="w"><p></p></section></div></main>', 't').get('w');
+  assert.notDeepEqual(whole(bare), whole(wrapped));
 });
 
 const ASTRO = join(ENGINE, RENDERER_SUBPATH);
@@ -139,7 +173,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     writeFileSync(join(ir, 'home.md'), MD);
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const astroHtml = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
-    const astroById = sectionsById(astroHtml);
+    const astroById = sectionsById(astroHtml, 'built page');
 
     await test('the fixture built, and every section is on the page under the id the string render gave it', () => {
       assert.equal(result.code, 0, 'astro build exited non-zero');
@@ -149,10 +183,12 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     const diffs = new Map();
     const SHOW = process.env.SECTION_CONTRACT_SHOW;
     for (const c of CASES) {
-      const a = shape(astroById.get(idOf(c.title)) || { tag: 'MISSING', cls: [], kids: [] });
-      const s = shape(stringById.get(idOf(c.title)));
-      diffs.set(c.title, a === s ? null : { a, s });
-      if (SHOW && a !== s) console.log('DIFF', c.title, '\n--- built\n' + a + '--- string\n' + s);
+      const an = astroById.get(idOf(c.title)), sn = stringById.get(idOf(c.title));
+      const a = an ? whole(an) : { missing: true }, s = whole(sn);
+      let same = true;
+      try { assert.deepStrictEqual(a, s); } catch { same = false; }
+      diffs.set(c.title, same ? null : { a: JSON.stringify(a), s: JSON.stringify(s) });
+      if (SHOW && !same) console.log('DIFF', c.title, '\n--- built\n' + JSON.stringify(a) + '\n--- string\n' + JSON.stringify(s));
     }
 
     for (const c of CASES) {
@@ -177,8 +213,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     await test('CONTROL: the comparison can tell two different sections apart', () => {
-      assert.notEqual(shape(astroById.get(idOf('FAQ'))), shape(stringById.get(idOf('Timeline'))));
-      assert.notEqual(shape(astroById.get(idOf('Plain prose'))), shape(astroById.get(idOf('Gallery'))));
+      assert.notDeepEqual(whole(astroById.get(idOf('FAQ'))), whole(stringById.get(idOf('Timeline'))));
+      assert.notDeepEqual(whole(astroById.get(idOf('Plain prose'))), whole(astroById.get(idOf('Gallery'))));
     });
   } finally {
     rmSync(ir, { recursive: true, force: true });
