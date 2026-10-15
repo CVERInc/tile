@@ -52,10 +52,19 @@ test('row is a wrapping flex row; primary has a fill', () => {
   assert.equal(decls(`${FLOOR}.st-prose-btn-primary`).out.background, 'var(--gd-btn-fill)');
 });
 
-test('no UNFLOORED .st-prose-btn* rule exists (custom-themed sites stay untouched)', () => {
+test('no UNFLOORED .st-prose-btn* rule exists (base paint only; the squircle corner rule is outside the floor, same as hero)', () => {
   const re = /([^{}]+)\{/g; let m;
   while ((m = re.exec(css))) for (const s of m[1].split(',').map((x) => x.trim())) {
     if (/\.st-prose-(btn|plain)/.test(s) && !s.startsWith(FLOOR) && !/^body\[data-corner=/.test(m[1].trim())) assert.fail(`unfloored: ${s}`);
+  }
+});
+
+test('prose and hero selectors sit in the SAME declaration block (one shared rule, not a copy)', () => {
+  const blocks = []; const re = /([^{}]+)\{([^{}]*)\}/g; let m;
+  while ((m = re.exec(css))) blocks.push(m[1].split(',').map((s) => s.trim()));
+  for (const suffix of ['btn', 'btn-primary', 'btn-secondary', 'btn-primary:hover', 'btn-secondary:hover', 'plain:hover']) {
+    const hero = `${FLOOR}.st-hero-${suffix}`; const prose = `${FLOOR}.st-prose-${suffix}`;
+    assert.ok(blocks.some((b) => b.includes(hero) && b.includes(prose)), `.st-hero-${suffix} and .st-prose-${suffix} are not in one block`);
   }
 });
 
