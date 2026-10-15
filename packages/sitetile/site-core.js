@@ -40,6 +40,11 @@
 
 import { escHtml, markCode, markEmphasis, markEscapes } from '../cssmd/cssmd.js';
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
+// The `action=inbox` form's runtime copy and script: the SAME module and the SAME text Form.astro
+// reads (CVERInc/reef#1933 S4b), never a second copy of the strings.
+import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
+import { localeHomePath } from './locale.mjs';
+import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
@@ -2364,7 +2369,9 @@ function proseBodyHtml(body, ordered) {
     + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '');
 }
 
-function renderSection(s, hero) {
+// `ctx` is the page-level runtime data a section can need that the section itself does not carry —
+// today only the `action=inbox` form reads it: { lang, meta, path } (see renderSiteToHtml).
+function renderSection(s, hero, ctx) {
   // 🩸 #1933: the page's FIRST section carries its title as <h1> in the built page (Section.astro
   // `index === 0`); a string render that always wrote <h2> described a page with no h1. Only the
   // ten types whose Astro component reads `hero` follow (prose, grid, people, collection, faq,
@@ -2650,11 +2657,12 @@ function renderSection(s, hero) {
     }
     case 'form': {
       // Native <form>: lead + title in `.st-form-head`, one `.st-form-field` per `### <label>`, a
-      // submit button (DISABLED unless an action is wired). Mirrors Form.astro's static skeleton
-      // and its action/method/name/required attributes. 🔴 NOT mirrored (S4b): the `action=inbox`
-      // extras that need Astro-only runtime data (lingo copy for `lang`, the page URL) — the
-      // success card, `return_to`/`thanks_to` hidden inputs, honeypot, error line, inline script,
-      // `data-inbox-copy`, and `data-required-msg`.
+      // submit button (DISABLED unless an action is wired). Mirrors Form.astro, including the
+      // `action=inbox` subtree: success card, `return_to`/`thanks_to` hidden inputs, honeypot,
+      // error line, inline script, `data-inbox-copy` and `data-required-msg`. Those need runtime
+      // data the section does not carry — `lang` (lingo copy), the page path (`return_to`, the
+      // home link) and `meta.locales` — which arrive in `ctx` from renderSiteToHtml, with the same
+      // defaults Form.astro has (DEFAULT_LANG; path '/').
       const fEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
       const isInbox = pm.action === 'inbox';
       const fAction = isInbox ? '/__reef/inbox' : (safeHref(pm.action) || undefined);
@@ -2666,9 +2674,15 @@ function renderSection(s, hero) {
         return reserved.indexOf(String(f.label).toLowerCase()) >= 0 ? 'field_' + f.label : String(f.label);
       };
       const req = (f) => typeof f.required === 'boolean' ? f.required : (isInbox && (f.kind === 'textarea' || f.kind === 'email'));
-      const fieldsHtml = (s.fields || []).map((f, i) => {
-        const id = 'st-form-f' + (i + 1), r = req(f), nm = escAttr(nameFor(f));
-        const ra = r ? ' required aria-required="true"' : '';
+      // Runtime data (Form.astro: `lang` prop, `Astro.url.pathname`, `meta`) — see ctx above.
+      const fCtx = ctx || {};
+      const fieldCopy = isInbox ? inboxFormCopy(fCtx.lang || DEFAULT_LANG) : null;
+      const returnTo = fCtx.path || '/';
+      const thanksPath = safeInternalPath(pm.thanks);
+      const fields = (s.fields || []).map((f, i) => ({ f, id: 'st-form-f' + (i + 1), r: req(f), nm: nameFor(f) }));
+      const fieldsHtml = fields.map(({ f, id, r, nm: wire }) => {
+        const nm = escAttr(wire);
+        const ra = r ? ' required aria-required="true"' + (isInbox ? ' data-required-msg="' + escAttr(fieldCopy.fieldRequired) + '"' : '') : '';
         const label = r
           ? '<label class="st-form-label" for="' + id + '"><span>' + inlineHtml(f.label) + '</span><span class="st-form-required-mark" aria-hidden="true"> *</span></label>'
           : '<label class="st-form-label" for="' + id + '">' + inlineHtml(f.label) + '</label>';
@@ -2680,11 +2694,45 @@ function renderSection(s, hero) {
             : '<input class="st-form-input" id="' + id + '" name="' + nm + '" type="' + (f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text') + '"' + ra + '>';
         return '<div class="st-form-field">' + label + control + '</div>';
       }).join('');
-      return '<section class="st-form-section"><div class="st-form-head">' +
+      let inboxAttr = '', successCard = '', hiddenInputs = '', errorLine = '', inboxScript = '';
+      if (isInbox) {
+        // Which success sentence applies is a fact about this form's own configuration: a REQUIRED
+        // email field is filled on every submission the browser lets through.
+        const emailGuaranteed = fields.some(({ f, r }) => f.kind === 'email' && r);
+        const excerpt = fields.find(({ f }) => f.kind === 'textarea');
+        const inboxCopy = {
+          submitting: fieldCopy.submitting,
+          successHeading: fieldCopy.successHeading,
+          errorNetwork: fieldCopy.errorNetwork,
+          errorServer: fieldCopy.errorServer,
+          sentWithEmail: fieldCopy.sentWithEmail,
+          sentNoEmail: fieldCopy.sentNoEmail,
+          emailField: fields.some(({ f }) => f.kind === 'email') ? 'visitor_email' : null,
+          excerptField: excerpt ? excerpt.nm : null,
+          redirectsToThanks: thanksPath ? true : undefined,
+        };
+        inboxAttr = ' data-inbox-copy="' + escAttr(JSON.stringify(inboxCopy)) + '"';
+        const homeHref = localeHomePath({ locales: fCtx.meta && fCtx.meta.locales, pathname: returnTo, contentRels: fCtx.contentRels || null });
+        successCard = '<div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>' +
+          '<svg class="st-form-success-check" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true" focusable="false">' +
+          '<circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"></circle>' +
+          '<path d="M14 25l7 7 14-15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>' +
+          '<p class="st-form-success-heading" role="heading" aria-level="3">' + escHtml(fieldCopy.successHeading) + '</p>' +
+          '<p class="st-form-success-next" data-inbox-next>' + inlineHtml(emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCopy.sentNoEmail) + '</p>' +
+          '<p class="st-form-success-excerpt" data-inbox-excerpt hidden></p>' +
+          '<p class="st-form-success-again"><a href="' + escAttr(returnTo) + '" data-inbox-again>' + escHtml(fieldCopy.sendAnother) + '</a></p>' +
+          '<p class="st-form-success-back"><a href="' + escAttr(homeHref) + '">' + escHtml(fieldCopy.backHome) + '</a></p></div>';
+        hiddenInputs = '<input type="hidden" name="return_to" value="' + escAttr(returnTo) + '">' +
+          (thanksPath ? '<input type="hidden" name="thanks_to" value="' + escAttr(thanksPath) + '">' : '') +
+          '<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">';
+        errorLine = '<p class="st-form-error" data-inbox-error hidden>' + inlineHtml(fieldCopy.errorServer) + '</p>';
+        inboxScript = '<script>' + INBOX_FORM_SCRIPT + '</script>';
+      }
+      return '<section class="st-form-section"' + inboxAttr + '><div class="st-form-head">' +
         (fEyebrow ? '<p class="st-form-eyebrow">' + inlineHtml(fEyebrow) + '</p>' : '') +
-        (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' +
-        '<form class="st-form"' + (fAction ? ' action="' + escAttr(fAction) + '"' : '') + ' method="' + escAttr(fMethod) + '">' + fieldsHtml +
-        '<button class="st-form-submit" type="submit"' + (fAction ? '' : ' disabled') + '>' + escHtml(pm.submit || 'Send') + '</button></form></section>';
+        (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' + successCard +
+        '<form class="st-form"' + (fAction ? ' action="' + escAttr(fAction) + '"' : '') + ' method="' + escAttr(fMethod) + '">' + hiddenInputs + fieldsHtml + errorLine +
+        '<button class="st-form-submit" type="submit"' + (fAction ? '' : ' disabled') + '>' + escHtml(pm.submit || 'Send') + '</button></form>' + inboxScript + '</section>';
     }
     case 'faq': {
       // Q&A accordion → native <details>/<summary> (zero-JS, a11y, progressive-enhancement —
@@ -2814,9 +2862,25 @@ function _stampDropWarnings(site, before) {
   const page = String((site.meta || {})[FRONTMATTER_KEY] || (site.meta || {}).title || '(untitled)');
   for (let i = before; i < _dropWarnings.length; i++) _dropWarnings[i].page = page;
 }
-function renderSiteToHtml(site) {
+/**
+ * Render a parsed site to the reference HTML string.
+ *
+ * @param {object} site  parseSite() output.
+ * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
+ *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
+ *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
+ *   gets `return_to="/"` and a visitor is sent back to the wrong page.
+ *   `contentRels` — contentRelsOf()'s set, which makes the form's "Back to homepage" MEASURED the
+ *   way the built page's is (a locale prefix is used only when that locale's home file exists);
+ *   absent → the locale prefix of `path` alone decides.
+ *   `lang` and `locales` come from the site's own frontmatter, as PageView hands them to Form.astro.
+ */
+function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
-  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0), s.id)).join('\n');
+  const o = opts || {};
+  const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: o.path, contentRels: o.contentRels };
+  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0, ctx), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
   if (String((site.meta || {}).layout || '').trim() === 'sidebar') {
@@ -2930,6 +2994,8 @@ export {
   safeHref, safeSrc,
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
+  // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
+  INBOX_FORM_SCRIPT,
   // the editing door's view of the dialogue convention — see quoteRunReport's own comment.
   quoteRunReport,
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —

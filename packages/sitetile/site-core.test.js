@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
-  safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin } from './site-core.js';
+  safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin, INBOX_FORM_SCRIPT } from './site-core.js';
+import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
+import { contentRelsOf } from './locale.mjs';
 
 let passed = 0;
 function test(name, fn) {
@@ -2425,14 +2427,99 @@ test('#1933 form: an unsafe action is dropped (submit stays disabled)', () => {
 test('#1933 form: action=inbox → /__reef/inbox, visitor_email name, message/email required by default, reserved names prefixed', () => {
   const h = formHtml('form action=inbox', '### Your email {email}\n### Message {textarea}\n### Text\n### Notes {required: false}');
   assert.match(h, /<form class="st-form" action="\/__reef\/inbox" method="post">/);
-  assert.match(h, /id="st-form-f1" name="visitor_email" type="email" required aria-required="true">/);
-  assert.match(h, /id="st-form-f2" name="Message" rows="5" required aria-required="true">/);
+  assert.match(h, /id="st-form-f1" name="visitor_email" type="email" required aria-required="true" data-required-msg="[^"]+">/);
+  assert.match(h, /id="st-form-f2" name="Message" rows="5" required aria-required="true" data-required-msg="[^"]+"><\/textarea>/);
   assert.match(h, /id="st-form-f3" name="field_Text" type="text">/);
   assert.match(h, /id="st-form-f4" name="Notes" type="text">/);
   assert.match(h, /type="submit">Send<\/button>/);
 });
 test('#1933 form: no longer falls through to prose', () => {
   assert.doesNotMatch(formHtml('form', '### Name', true), /class="st-prose"/);
+});
+
+// ── #1933 S4b: the action=inbox subtree (runtime data: lang, page path, meta.locales) ──────────
+const inboxHtml = (lang, body, opts, marker) => renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: T\n' + (lang ? 'lang: ' + lang + '\n' : '') + '---\n\n## Contact\n%% sitetile: ' + (marker || 'form action=inbox') + ' %%\n' + body + '\n'), opts);
+const copyOf = (h) => JSON.parse(h.match(/data-inbox-copy="([^"]*)"/)[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+const INBOX_BODY = '### Email {email}\n### Message {textarea}';
+test('#1933 S4b inbox: success card, hidden return_to, honeypot, error line and script, in Form.astro order', () => {
+  const h = inboxHtml('en-US', INBOX_BODY);
+  const at = (needle) => { const i = h.indexOf(needle); assert.ok(i >= 0, needle + ' missing'); return i; };
+  assert.ok(at('<div class="st-form-head">') < at('<div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>'));
+  assert.ok(at('data-inbox-success') < at('<form class="st-form"'));
+  assert.ok(at('<input type="hidden" name="return_to"') < at('name="_hp"'));
+  assert.ok(at('name="_hp"') < at('<div class="st-form-field">'));
+  assert.ok(at('<p class="st-form-error" data-inbox-error hidden>') < at('<button class="st-form-submit"'));
+  assert.ok(at('</form>') < at('<script>'));
+  assert.ok(h.endsWith('</script></section>'));
+  assert.match(h, /<p class="st-form-success-excerpt" data-inbox-excerpt hidden><\/p>/);
+  assert.match(h, /<a href="\/" data-inbox-again>Send another<\/a>/);
+  assert.match(h, /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/);
+});
+test('#1933 S4b inbox: return_to is the page path passed in (default "/"), thanks_to only for a safe internal path', () => {
+  assert.match(inboxHtml('en', INBOX_BODY), /<input type="hidden" name="return_to" value="\/">/);
+  const h = inboxHtml('en', INBOX_BODY, { path: '/contact/' });
+  assert.match(h, /<input type="hidden" name="return_to" value="\/contact\/">/);
+  assert.match(h, /data-inbox-again>/);
+  assert.match(h, /href="\/contact\/" data-inbox-again/);
+  assert.doesNotMatch(h, /name="thanks_to"/);
+  const t = inboxHtml('en', INBOX_BODY, { path: '/contact/' }, 'form action=inbox thanks=/thanks');
+  assert.match(t, /<input type="hidden" name="return_to" value="\/contact\/"><input type="hidden" name="thanks_to" value="\/thanks">/);
+  assert.equal(copyOf(t).redirectsToThanks, true);
+  assert.doesNotMatch(inboxHtml('en', INBOX_BODY, {}, 'form action=inbox thanks=https://evil.example/x'), /name="thanks_to"/);
+  assert.equal('redirectsToThanks' in copyOf(h), false, 'absent when there is no thanks=, as in Form.astro');
+});
+test('#1933 S4b inbox: honeypot is off-screen text input named _hp, kept out of tab order and not display:none', () => {
+  const h = inboxHtml('en', INBOX_BODY);
+  assert.match(h, /<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">/);
+  assert.doesNotMatch(h.match(/<input type="text" name="_hp"[^>]*>/)[0], /display:\s*none/);
+});
+test('#1933 S4b inbox: data-inbox-copy follows the site lang (one assertion per language)', () => {
+  const ja = copyOf(inboxHtml('ja-JP', INBOX_BODY)), en = copyOf(inboxHtml('en-US', INBOX_BODY));
+  const tw = copyOf(inboxHtml('zh-TW', INBOX_BODY)), cn = copyOf(inboxHtml('zh-Hans', INBOX_BODY));
+  assert.equal(ja.successHeading, '送信しました');
+  assert.equal(en.successHeading, 'Sent');
+  assert.equal(tw.successHeading, '已送出');
+  assert.equal(cn.successHeading, '已发送');
+  assert.equal(en.submitting, 'Sending…');
+  assert.equal(en.emailField, 'visitor_email');
+  assert.equal(en.excerptField, 'Message');
+  assert.equal(en.sentWithEmail, "We've sent a confirmation to {email} — the owner's reply will go to the same address.");
+});
+test('#1933 S4b inbox: the copy IS lingo\'s table, and a site with no lang gets Form.astro\'s DEFAULT_LANG copy', () => {
+  assert.deepEqual(copyOf(inboxHtml('ja', INBOX_BODY)).errorServer, inboxFormCopy('ja').errorServer);
+  assert.equal(copyOf(inboxHtml('', INBOX_BODY)).successHeading, inboxFormCopy(DEFAULT_LANG).successHeading);
+  assert.equal(copyOf(inboxHtml('', INBOX_BODY)).successHeading, '已送出');
+});
+test('#1933 S4b inbox: data-required-msg on each required control, in the site language; none on an optional one', () => {
+  const h = inboxHtml('ja', '### Email {email}\n### Name {required: false}\n### Message {textarea}');
+  assert.equal(h.match(/data-required-msg="この項目は必須です。"/g).length, 2);
+  assert.match(h, /id="st-form-f2" name="Name" type="text"><\/div>/);
+  assert.doesNotMatch(inboxHtml('en', '### Name', {}, 'form'), /data-required-msg|data-inbox/);
+});
+test('#1933 S4b inbox: success sentence is the generic one when an email is guaranteed, else the no-email one; script text is the shared constant', () => {
+  const withEmail = inboxHtml('en', INBOX_BODY);
+  assert.match(withEmail, /data-inbox-next>We've sent a confirmation to your email/);
+  const without = inboxHtml('en', '### Message {textarea}');
+  assert.match(without, /data-inbox-next>The owner will get to this soon/);
+  assert.equal(copyOf(without).emailField, null);
+  assert.ok(withEmail.includes('<script>' + INBOX_FORM_SCRIPT + '</script>'));
+});
+test('#1933 S4b inbox: "Back to homepage" follows the locale prefix of the path, as the built page does', () => {
+  const md = '---\nsitetile-page: home\ntitle: T\nlang: ja\nlocales: en, ja\n---\n\n## C\n%% sitetile: form action=inbox %%\n### Message {textarea}\n';
+  assert.match(renderSiteToHtml(parseSite(md), { path: '/ja/contact/' }), /<p class="st-form-success-back"><a href="\/ja\/">/);
+  assert.match(renderSiteToHtml(parseSite(md), { path: '/contact/' }), /<p class="st-form-success-back"><a href="\/">/);
+});
+
+test('#1933 S4b inbox: locales en-US, zh-TW, path /zh-tw/contact/, no zh-tw home in contentRels → "Back to homepage" is "/" (as the built page)', () => {
+  const md = '---\nsitetile-page: contact\ntitle: T\nlang: zh-TW\nlocales: en-US, zh-TW\n---\n\n## C\n%% sitetile: form action=inbox %%\n### Message {textarea}\n';
+  const noHome = contentRelsOf({ '/c/content/home.md': 1, '/c/content/zh-tw/contact.md': 1 });
+  const withHome = contentRelsOf({ '/c/content/home.md': 1, '/c/content/zh-tw/home.md': 1, '/c/content/zh-tw/contact.md': 1 });
+  const back = (o) => renderSiteToHtml(parseSite(md), o).match(/<p class="st-form-success-back"><a href="([^"]*)">/)[1];
+  assert.equal(back({ path: '/zh-tw/contact/', contentRels: noHome }), '/');
+  assert.equal(back({ path: '/zh-tw/contact/', contentRels: withHome }), '/zh-tw/');
+  assert.equal(back({ path: '/zh-tw/contact/' }), '/zh-tw/', 'no contentRels: the prefix alone decides, as localeHomePath documents');
+  assert.match(renderSiteToHtml(parseSite(md), { path: '/zh-tw/contact/' }), /name="return_to" value="\/zh-tw\/contact\/"/);
+  assert.match(renderSiteToHtml(parseSite(md)), /name="return_to" value="\/"/, 'no path → "/" (callers of a non-root page must pass one)');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
