@@ -68,9 +68,9 @@ test('🔴 CONTROL: the check can see a fallback — it is not passing for free'
 });
 
 test('the default is exported once, and it is a real locale', () => {
-  const loc = readFileSync(join(SRC, 'packages', 'lingo', 'locale.mjs'), 'utf8');
+  const loc = readFileSync(join(SRC, '..', '..', 'inbox-form-copy.js'), 'utf8'); // moved up a level so site-core can import it (#1933 S4b); locale.mjs re-exports it
   const m = /export const DEFAULT_LANG = '([^']+)'/.exec(loc);
-  assert.ok(m, 'DEFAULT_LANG must be exported from locale.mjs');
+  assert.ok(m, 'DEFAULT_LANG must be exported from inbox-form-copy.js');
   assert.match(m[1], /^[a-z]{2}(-[A-Za-z]{2,4})?$/, `not a locale tag: ${m[1]}`);
 });
 

@@ -42,7 +42,8 @@ import { escHtml, markCode, markEmphasis, markEscapes } from '../cssmd/cssmd.js'
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 // The `action=inbox` form's runtime copy and script: the SAME module and the SAME text Form.astro
 // reads (CVERInc/reef#1933 S4b), never a second copy of the strings.
-import { inboxFormCopy, DEFAULT_LANG, localeHomePath } from './astro/src/packages/lingo/locale.mjs';
+import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
+import { localeHomePath } from './locale.mjs';
 import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
@@ -2861,11 +2862,20 @@ function _stampDropWarnings(site, before) {
   const page = String((site.meta || {})[FRONTMATTER_KEY] || (site.meta || {}).title || '(untitled)');
   for (let i = before; i < _dropWarnings.length; i++) _dropWarnings[i].page = page;
 }
-// `opts.path` is the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`):
-// the `action=inbox` form writes it into `return_to`. Optional; absent → '/', the same fallback
-// localeHomePath has. `opts.contentRels` is contentRelsOf()'s set, which makes the form's home link
-// MEASURED the way the built page's is; absent → the locale prefix alone decides. `lang` and
-// `locales` come from the site's own frontmatter, exactly as PageView hands them to Form.astro.
+/**
+ * Render a parsed site to the reference HTML string.
+ *
+ * @param {object} site  parseSite() output.
+ * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
+ *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
+ *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
+ *   gets `return_to="/"` and a visitor is sent back to the wrong page.
+ *   `contentRels` — contentRelsOf()'s set, which makes the form's "Back to homepage" MEASURED the
+ *   way the built page's is (a locale prefix is used only when that locale's home file exists);
+ *   absent → the locale prefix of `path` alone decides.
+ *   `lang` and `locales` come from the site's own frontmatter, as PageView hands them to Form.astro.
+ */
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};

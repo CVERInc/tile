@@ -18,11 +18,12 @@
 // run the string half only, knowingly.
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSite, renderSiteToHtml } from './site-core.js';
+import { contentRelsOf } from './locale.mjs';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -133,6 +134,9 @@ const GAPS = {
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
   + CASES.map((c) => `##${c.title ? ' ' + c.title : ''}\n${c.marker ? c.marker + '\n' : ''}${c.body}\n`).join('\n');
+const ZH_HOME_MD = '---\nsitetile-page: home\ntitle: Home zh\nlang: zh-TW\nlocales: en-US, zh-TW\n---\n\n## Hi\nzh home.\n';
+const ZH_CONTACT_MD = '---\nsitetile-page: contact\ntitle: Contact zh\nlang: zh-TW\nlocales: en-US, zh-TW\n---\n\n## Form zh\n%% sitetile: form action=inbox thanks=/thanks %%\nWrite to us.\n\n### Email {email}\n### Message {textarea}\n';
+const zhSite = parseSite(ZH_CONTACT_MD);
 const site = parseSite(MD);
 const nameOf = (c) => c.label || c.title;
 const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title)].id;
@@ -173,6 +177,12 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
   const out = mkdtempSync(join(tmpdir(), 'tile-section-contract-out-'));
   try {
     writeFileSync(join(ir, 'home.md'), MD);
+    // A non-root locale page with an action=inbox form: its return_to and "Back to homepage" depend
+    // on the page path and on which locale homes exist, which only the CALLER of the string render
+    // knows (opts.path / opts.contentRels). Written as its own pages so the built page has them too.
+    mkdirSync(join(ir, 'zh-tw'), { recursive: true });
+    writeFileSync(join(ir, 'zh-tw', 'home.md'), ZH_HOME_MD);
+    writeFileSync(join(ir, 'zh-tw', 'contact.md'), ZH_CONTACT_MD);
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const astroHtml = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
     const astroById = sectionsById(astroHtml, 'built page');
@@ -204,6 +214,28 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         }
       });
     }
+
+    await test('Form inbox on /zh-tw/contact/: identical structure once the caller supplies path and contentRels', () => {
+      const html = readFileSync(join(out, 'zh-tw', 'contact', 'index.html'), 'utf8');
+      const id = zhSite.sections[0].id;
+      const built = sectionsById(html, 'built page (zh-tw/contact)').get(id);
+      const str = sectionsById(renderSiteToHtml(zhSite, {
+        path: '/zh-tw/contact/',
+        contentRels: contentRelsOf({ '/x/content/home.md': 1, '/x/content/zh-tw/home.md': 1, '/x/content/zh-tw/contact.md': 1 }),
+      }), 'string render (zh-tw/contact)').get(id);
+      assert.ok(built && str, 'the section is missing on one side');
+      assert.deepStrictEqual(whole(str), whole(built));
+      // …and the values the structure comparison cannot see
+      const val = (n, sel) => all(n).find(sel);
+      const hidden = (n, name) => val(n, (k) => k.tag === 'input' && k.attrs.name === name);
+      assert.equal(hidden(built, 'return_to').attrs.value, '/zh-tw/contact/');
+      assert.equal(hidden(str, 'return_to').attrs.value, hidden(built, 'return_to').attrs.value);
+      assert.equal(hidden(str, 'thanks_to').attrs.value, hidden(built, 'thanks_to').attrs.value);
+      const back = (n) => val(n, (k) => k.tag === 'p' && k.cls.includes('st-form-success-back')).kids[0].attrs.href;
+      assert.equal(back(built), '/zh-tw/');
+      assert.equal(back(str), back(built));
+      assert.equal(str.attrs['data-inbox-copy'], built.attrs['data-inbox-copy']);
+    });
 
     await test('every xfail entry is carried by at least one section, and every section gap names an entry', () => {
       const used = new Set(Object.values(GAPS));

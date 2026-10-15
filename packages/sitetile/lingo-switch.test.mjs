@@ -208,7 +208,12 @@ test('🔴 nobody re-derives the switch inline — one definition, in locale.mjs
   const hits = walk(SRC)
     .filter((p) => GATE.test(readFileSync(p, 'utf8')))
     .map((p) => relative(SRC, p));
-  assert.deepEqual(hits, ['packages/lingo/locale.mjs'], `inline Lingo gates found:\n${hits.join('\n')}`);
+  // The definition moved up to packages/sitetile/locale.mjs (site-core.js imports it from its own
+  // directory, #1933 S4b); astro/src/packages/lingo/locale.mjs is a re-export shim. So: no copy
+  // under the Astro tree, and exactly one definition at the top.
+  assert.deepEqual(hits, [], `inline Lingo gates found:\n${hits.join('\n')}`);
+  const top = readFileSync(join(SRC, '..', '..', 'locale.mjs'), 'utf8');
+  assert.ok(GATE.test(top), 'the one definition lives in packages/sitetile/locale.mjs');
 });
 
 test('🔴 the /language default and SiteLayout\'s are the ONE definition, not two spellings of it', () => {

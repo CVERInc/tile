@@ -6,7 +6,8 @@ import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
   safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin, INBOX_FORM_SCRIPT } from './site-core.js';
-import { inboxFormCopy, DEFAULT_LANG } from './astro/src/packages/lingo/locale.mjs';
+import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
+import { contentRelsOf } from './locale.mjs';
 
 let passed = 0;
 function test(name, fn) {
@@ -2507,6 +2508,18 @@ test('#1933 S4b inbox: "Back to homepage" follows the locale prefix of the path,
   const md = '---\nsitetile-page: home\ntitle: T\nlang: ja\nlocales: en, ja\n---\n\n## C\n%% sitetile: form action=inbox %%\n### Message {textarea}\n';
   assert.match(renderSiteToHtml(parseSite(md), { path: '/ja/contact/' }), /<p class="st-form-success-back"><a href="\/ja\/">/);
   assert.match(renderSiteToHtml(parseSite(md), { path: '/contact/' }), /<p class="st-form-success-back"><a href="\/">/);
+});
+
+test('#1933 S4b inbox: locales en-US, zh-TW, path /zh-tw/contact/, no zh-tw home in contentRels → "Back to homepage" is "/" (as the built page)', () => {
+  const md = '---\nsitetile-page: contact\ntitle: T\nlang: zh-TW\nlocales: en-US, zh-TW\n---\n\n## C\n%% sitetile: form action=inbox %%\n### Message {textarea}\n';
+  const noHome = contentRelsOf({ '/c/content/home.md': 1, '/c/content/zh-tw/contact.md': 1 });
+  const withHome = contentRelsOf({ '/c/content/home.md': 1, '/c/content/zh-tw/home.md': 1, '/c/content/zh-tw/contact.md': 1 });
+  const back = (o) => renderSiteToHtml(parseSite(md), o).match(/<p class="st-form-success-back"><a href="([^"]*)">/)[1];
+  assert.equal(back({ path: '/zh-tw/contact/', contentRels: noHome }), '/');
+  assert.equal(back({ path: '/zh-tw/contact/', contentRels: withHome }), '/zh-tw/');
+  assert.equal(back({ path: '/zh-tw/contact/' }), '/zh-tw/', 'no contentRels: the prefix alone decides, as localeHomePath documents');
+  assert.match(renderSiteToHtml(parseSite(md), { path: '/zh-tw/contact/' }), /name="return_to" value="\/zh-tw\/contact\/"/);
+  assert.match(renderSiteToHtml(parseSite(md)), /name="return_to" value="\/"/, 'no path → "/" (callers of a non-root page must pass one)');
 });
 
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
