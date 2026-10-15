@@ -47,7 +47,7 @@ test('links is a known coral and round-trips byte-identical', () => {
 
 test('each list item becomes a static card: name link, host, recommendation; other lines are the caption', () => {
   const html = linksHtml(BASIC);
-  assert.match(html, /<h2>Friends<\/h2>/);
+  assert.match(html, /<h1>Friends<\/h1>/);
   assert.match(html, /<p>Sites I read every week\.<\/p>/);
   assert.equal((html.match(/<li class="st-link">/g) || []).length, 3);
   assert.match(html, /<a class="st-link-name" href="https:\/\/www\.example\.com\/essays"[^>]*>Example Journal<\/a><span class="st-link-host">example\.com<\/span><p class="st-link-note">Long-form essays on slow software\.<\/p>/);
@@ -59,11 +59,11 @@ test('each list item becomes a static card: name link, host, recommendation; oth
 
 test('zero items: heading + caption still render, and there is no empty <ul>', () => {
   const html = linksHtml(page('links', ['Nothing here yet.']));
-  assert.match(html, /<h2>Friends<\/h2><p>Nothing here yet\.<\/p><\/section>$/);
+  assert.match(html, /<h1>Friends<\/h1><p>Nothing here yet\.<\/p><\/section>$/);
   assert.doesNotMatch(html, /st-links-list/);
   // Entirely empty body: a bare heading, still no list.
   const bare = linksHtml(page('links', []));
-  assert.equal(bare.replace(/ id="[^"]*"/, ''), '<section class="st-links"><h2>Friends</h2></section>');
+  assert.equal(bare.replace(/ id="[^"]*"/, ''), '<section class="st-links"><h1>Friends</h1></section>');
   assert.deepEqual(linksParts(''), { caption: '', items: [] });
 });
 

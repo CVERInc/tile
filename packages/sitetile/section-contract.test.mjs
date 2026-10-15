@@ -119,13 +119,11 @@ const CASES = [
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
 // Remove the entry when the gap is closed.
 const XFAIL = {
-  'first-section-heading': 'the first section of a page is an <h1> in the built page and an <h2> in the string render',
   'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
   form: 'string render has no form branch; a form falls through to prose',
 };
 // The sections that carry a gap, by title.
 const GAPS = {
-  'Lead': 'first-section-heading',
   'Hero layered': 'hero-layered',
   'Form': 'form',
 };
