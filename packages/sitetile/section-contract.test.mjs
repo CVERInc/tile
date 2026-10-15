@@ -112,6 +112,7 @@ const CASES = [
   { title: '', label: 'Grid untitled', marker: '%% sitetile: grid cols=2 %%', body: '### Only\nBody.' },
   { title: 'Collection later', marker: '%% sitetile: collection %%', body: '### Group\n#### Item one\nBody one.\n\n#### Item two\nBody two.' },
   { title: 'Form', marker: '%% sitetile: form %%', body: 'Write to us.\n\n### Name {required}\n### Email {email}\n### Topic\n- A\n- B\n### Message {textarea}' },
+  { title: 'Form inbox', marker: '%% sitetile: form action=inbox %%', body: 'Write to us.\n\n### Email {email}\n### Message {textarea}' },
   { title: 'FAQ', marker: '%% sitetile: faq %%', body: '### Why?\nBecause.\n\n### How?\nLike this.' },
   { title: 'Timeline', marker: '%% sitetile: timeline %%', body: '### 2020\nStart.\n\n### 2021\nGrowth.' },
   { title: 'CTA', marker: '%% sitetile: cta %%', body: 'Come along.\n\n[Join](/join)' },
@@ -121,15 +122,15 @@ const CASES = [
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
 // Remove the entry when the gap is closed.
 const XFAIL = {
+  'form-inbox': 'action=inbox: Form.astro adds the success card, return_to hidden input, honeypot, error line and script; the string branch has none of them (S4b)',
   'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
   'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
-  form: 'string render has no form branch; a form falls through to prose',
 };
 // The sections that carry a gap, by title.
 const GAPS = {
   'Hero layered': 'hero-layered',
   'Collection later': 'collection-card-heading',
-  'Form': 'form',
+  'Form inbox': 'form-inbox',
 };
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
@@ -141,7 +142,7 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'faq', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });
