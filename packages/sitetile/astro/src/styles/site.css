@@ -1690,7 +1690,7 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
 
 /* A.2 #4 · Button shape — `pill` (999px) is the only override; `rect` (the default) is the token's own
    --gd-radius, i.e. the absent state, so it needs no rule. Drives every token-routed button
-   (.st-hero-cta/.st-cta-btn/.st-form-submit/.st-hero-btn/.st-social-btn). */
+   (.st-hero-cta/.st-cta-btn/.st-form-submit/.st-hero-btn/.st-social-btn/.st-prose-btn). */
 body[data-button="pill"] { --gd-btn-radius: 999px; }
 
 /* A.2 #7 · Content band — the grid becomes a full-bleed tinted belt with the cards centered inside.
@@ -1717,7 +1717,7 @@ body[data-card="glass"] .st-cell {
 body[data-cell-cta="off"] .st-cell-cta { display: none; }
 
 /* A.2 #11 · Corner geometry (Signet axis) — round (default rounded rects) · squircle. Absent = today. */
-body[data-corner="squircle"] :where(.st-cell, .st-cta, .st-hero-cta, .st-cta-btn, .st-hero-btn, .st-social-btn, .st-faq-item, .st-img) {
+body[data-corner="squircle"] :where(.st-cell, .st-cta, .st-hero-cta, .st-cta-btn, .st-hero-btn, .st-social-btn, .st-prose-btn, .st-faq-item, .st-img) {
   corner-shape: superellipse(4);
 }
 
@@ -1775,22 +1775,23 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
 :where(body:not([data-theme-custom])) .st-social h2 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); line-height: 1.25; margin: 0 0 0.5rem; }
 :where(body:not([data-theme-custom])) .st-social p { color: var(--gd-muted); margin: 0 0 1.25rem; }
 
-/* hero + social button rows (linkButtonsHtml `st-hero`/`st-social`): primary fill + secondary ghost,
+/* hero + social + prose button rows (linkButtonsHtml `st-hero`/`st-social`/`st-prose`): primary fill + secondary ghost,
    sharing the button-shape/fill tokens so #4's pill/rect axis reaches them too. */
 :where(body:not([data-theme-custom])) .st-hero-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
 :where(body:not([data-theme-custom])) .st-social-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
-:where(body:not([data-theme-custom])) .st-hero-btn, :where(body:not([data-theme-custom])) .st-social-btn {
+:where(body:not([data-theme-custom])) .st-prose-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+:where(body:not([data-theme-custom])) .st-hero-btn, :where(body:not([data-theme-custom])) .st-social-btn, :where(body:not([data-theme-custom])) .st-prose-btn {
   display: inline-flex; align-items: center; gap: 0.5rem;
   font-weight: 600; font-size: 0.9rem; padding: 0.6rem 1.2rem;
   border-radius: var(--gd-btn-radius); text-decoration: none;
   transition: transform 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
 }
-:where(body:not([data-theme-custom])) .st-hero-btn-primary, :where(body:not([data-theme-custom])) .st-social-btn-primary { background: var(--gd-btn-fill); color: var(--gd-accent-ink); }
-:where(body:not([data-theme-custom])) .st-hero-btn-primary:hover, :where(body:not([data-theme-custom])) .st-social-btn-primary:hover { transform: translateY(-1px); }
-:where(body:not([data-theme-custom])) .st-hero-btn-secondary, :where(body:not([data-theme-custom])) .st-social-btn-secondary { border: 1.5px solid var(--gd-border); color: var(--gd-text); }
-:where(body:not([data-theme-custom])) .st-hero-btn-secondary:hover, :where(body:not([data-theme-custom])) .st-social-btn-secondary:hover { border-color: var(--gd-accent); color: var(--gd-accent); }
-:where(body:not([data-theme-custom])) .st-hero-plain, :where(body:not([data-theme-custom])) .st-social-plain { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--gd-muted); text-decoration: none; }
-:where(body:not([data-theme-custom])) .st-hero-plain:hover, :where(body:not([data-theme-custom])) .st-social-plain:hover { color: var(--gd-text); }
+:where(body:not([data-theme-custom])) .st-hero-btn-primary, :where(body:not([data-theme-custom])) .st-social-btn-primary, :where(body:not([data-theme-custom])) .st-prose-btn-primary { background: var(--gd-btn-fill); color: var(--gd-accent-ink); }
+:where(body:not([data-theme-custom])) .st-hero-btn-primary:hover, :where(body:not([data-theme-custom])) .st-social-btn-primary:hover, :where(body:not([data-theme-custom])) .st-prose-btn-primary:hover { transform: translateY(-1px); }
+:where(body:not([data-theme-custom])) .st-hero-btn-secondary, :where(body:not([data-theme-custom])) .st-social-btn-secondary, :where(body:not([data-theme-custom])) .st-prose-btn-secondary { border: 1.5px solid var(--gd-border); color: var(--gd-text); }
+:where(body:not([data-theme-custom])) .st-hero-btn-secondary:hover, :where(body:not([data-theme-custom])) .st-social-btn-secondary:hover, :where(body:not([data-theme-custom])) .st-prose-btn-secondary:hover { border-color: var(--gd-accent); color: var(--gd-accent); }
+:where(body:not([data-theme-custom])) .st-hero-plain, :where(body:not([data-theme-custom])) .st-social-plain, :where(body:not([data-theme-custom])) .st-prose-plain { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--gd-muted); text-decoration: none; }
+:where(body:not([data-theme-custom])) .st-hero-plain:hover, :where(body:not([data-theme-custom])) .st-social-plain:hover, :where(body:not([data-theme-custom])) .st-prose-plain:hover { color: var(--gd-text); }
 
 /* A.2 #12 · Columned footer. SiteLayout already renders .rf-foot / .rf-foot-cols STRUCTURALLY when
    the site supplies `footer-cols` (a data choice, not a treatment) — but base.css never painted it,
