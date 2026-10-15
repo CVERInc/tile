@@ -312,6 +312,16 @@ const SITES = {
     'posts/p2.md': '---\ntitle: P2\ndate: 2026-01-03\n---\nBody text.\n',
     'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\nlang: zh-TW\n---\n內文。\n',
   },
+  // CVERInc/reef#1910 item 5, the pager: page size 1, two English posts (two pages), one translated
+  // (one page). Page 1 exists in both languages; English page 2 exists in one.
+  homeLinksPager: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nblog-page-size: 1\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\n---\nBody text.\n',
+    'posts/p2.md': '---\ntitle: P2\ndate: 2026-01-03\n---\nBody text.\n',
+    'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\nlang: zh-TW\n---\n內文。\n',
+  },
   // The same shape in zh-Hant: the old default must come out exactly as before.
   monoZh: {
     '_site.md': '---\nbrand: 紙鶴工坊\n---\n',
@@ -768,6 +778,17 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       const { pages } = site('homeLinks');
       assert.ok(pages['devlog/p2/index.html'], 'devlog/p2 was not built');
       assert.deepEqual(alternates(pages['devlog/p2/index.html']), []);
+    });
+    await test('🔴 #1910 homeLinksPager: page 1 names both languages; English page 2 (no translation) names nothing', () => {
+      const { pages } = site('homeLinksPager');
+      const p2 = Object.keys(pages).filter((r) => /^devlog\/page\/2\/index\.html$/.test(r));
+      assert.equal(p2.length, 1, 'English page 2 was not built — the fixture stopped exercising the pager');
+      assert.deepEqual(alternates(pages[p2[0]]), [], 'a pager page that exists in one language emitted an alternate');
+      assert.ok(!pages['zh-tw/devlog/page/2/index.html'], 'the translated blog grew a page 2 — the fixture stopped being uneven');
+      for (const rel of ['devlog/index.html', 'zh-tw/devlog/index.html']) {
+        assert.ok(pages[rel], `${rel} was not built`);
+        assert.deepEqual(alternates(pages[rel]).map((a) => a.tag), ['en', 'zh-Hant', 'x-default'], rel);
+      }
     });
   } finally {
     if (process.env.KEEP_404_LOCALE_OUT) console.log(`  · kept: ${work}`);
