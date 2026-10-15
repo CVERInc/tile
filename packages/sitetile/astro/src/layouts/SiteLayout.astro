@@ -41,8 +41,7 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // (blog.mjs's alternateArchiveLocales) — computed by the route, since only it knows the slug.
 // `bannerLocales: [...]` — for a generated BLOG route (index, pager, post): the locales whose build
 // emits this same url, measured by the route (lib/blog.mjs → blogSwitchLocales). It feeds the
-// language banner ONLY. It is deliberately not `alternates`: that would also start emitting
-// hreflang and `?has=` on every blog page of every existing site, which is a change of its own.
+// language banner AND, since CVERInc/reef#1910 item 5, the hreflang set (two or more locales only).
 // `routeCss: '<css>'` — the stylesheet of a page the PLATFORM draws (pages/[...loc]/language.astro),
 // handed over as text so the layout can place it BEFORE the site's theme. Imported the ordinary way
 // it arrives through Astro's own <style>, which lands after the theme: same layer, later in the
@@ -423,7 +422,12 @@ const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', i
 // straight through; content-file detection would only find nothing (an archive has no content file
 // in any locale) and wrongly empty out a real answer.
 // A site with one language has no alternates at all, whatever a route hands in.
-const altLocales = !multilingual ? [] : Array.isArray(alternates) ? alternates.filter(Boolean) : lingo.alternateLocales({
+// 🩸 CVERInc/reef#1910 item 5: a blog route (index, pager, post) has no content file, so the glob
+// measurement below found nothing and it advertised nothing. `bannerLocales` IS the route's own
+// measurement of the same fact (blogSwitchLocales: which locales build THIS url), so it is the
+// hreflang set too. Two or more, because a url that exists in one language has no alternate.
+const routeAlternates = Array.isArray(bannerLocales) && bannerLocales.length >= 2 ? bannerLocales : null;
+const altLocales = !multilingual ? [] : Array.isArray(alternates) ? alternates.filter(Boolean) : routeAlternates ? [...routeAlternates] : lingo.alternateLocales({
   locales, defaultLocale, subPath, all: String(alternates) === 'all',
   contentRels: lingo.contentRelsOf(contentGlob),
 });
@@ -1178,7 +1182,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
 
     {breadcrumbLabel && (
       <nav class="rf-breadcrumb reef-breadcrumb" aria-label="Breadcrumb">
-        <a href="/">{breadcrumbHome}</a>
+        <a href={localeHome}>{breadcrumbHome}</a>
         {breadcrumbTrail.map((t) => {
           // round 4 (R3-P3-2): hoisted to a const — was two calls per item.
           const hrefOk = safeHref(t.href);
@@ -1309,7 +1313,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         {footerCols.length > 0 ? (
           <div class="rf-foot">
             <div class="rf-foot-brand">
-              {footerBrand && <a class="rf-foot-wordmark" href="/">{footerBrand}</a>}
+              {footerBrand && <a class="rf-foot-wordmark" href={localeHome}>{footerBrand}</a>}
               {(copyright || multilingual) && (
                 <p class="rf-foot-copy">
                   {copyright && <span>{copyright}</span>}
