@@ -1052,21 +1052,21 @@ const checks = [
       && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
       && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
   }],
-  // 🔴 The banner on a blog route is the ONLY thing `bannerLocales` may touch. Feeding the same
-  // set to hreflang and to the footer link's `?has=` is a change to the <head> of every blog page
-  // on every existing site — worth doing, and its own decision. Until it is made, a translated
-  // post says so in exactly one place. (Wiring bannerLocales into altLocales left every suite and
-  // this smoke green before this check existed.) The banner and the footer link are asserted
-  // PRESENT first, so "no hreflang, no has=" cannot pass on a page that simply has neither.
-  ['🔴 blog route: a translated post carries the banner — and still no hreflang, and no `has=` on the footer link', () => {
+  // 🔴 CVERInc/reef#1910 item 5 made the decision this check used to forbid: a blog route's own
+  // measurement (bannerLocales) is also its hreflang set, and the footer link's `?has=` follows it.
+  // This post exists in both languages, so BOTH editions are named (and x-default), each pointing at
+  // a page this build wrote. The banner and the footer link are asserted PRESENT first, so the
+  // hreflang check cannot pass on a page that simply has neither.
+  ['🔴 blog route: a translated post carries the banner, hreflang to the edition that exists, and `has=` on the footer link', () => {
     const post = readFileSync(join(DIST, 'devlog/a-signed-post/index.html'), 'utf8');
     const foot = (post.match(/<a class="rf-lang" href="([^"]*)"/) || [])[1];
     const c = bannerConfig(post);
+    const alts = [...post.matchAll(/<link rel="alternate" hreflang="([^"]*)" href="([^"]*)"/g)].map((m) => m[1] + ' ' + new URL(m[2]).pathname);
     return !!c && c.options.map((o) => o.id).join() === 'zh-tw'
       && typeof foot === 'string' && foot.startsWith('/language?return=')
-      && !/[?&;]has=/.test(foot)
-      && !/<link\b[^>]*rel="alternate"[^>]*hreflang=/.test(post)
-      && !/<link\b[^>]*hreflang=/.test(post);
+      && /[?&;]has=/.test(foot)
+      && alts.join('|') === 'en /devlog/a-signed-post/|zh-Hant /zh-tw/devlog/a-signed-post/|x-default /devlog/a-signed-post/'
+      && existsSync(join(DIST, 'zh-tw/devlog/a-signed-post/index.html'));
   }],
   // 🔴 The other direction of "every option leads to a page that exists". That check counts
   // options with no page behind them; this one counts pages with no option in front of them — an

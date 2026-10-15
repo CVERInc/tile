@@ -7,7 +7,7 @@
 // old index.astro so output stays byte-for-byte identical.
 import SiteLayout from '../layouts/SiteLayout.astro';
 import Section from './Section.astro';
-import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang } from '../lib/blog.mjs';
+import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
@@ -57,7 +57,7 @@ const title = isHome
   ? (meta.title || meta['blog-title'] || 'Blog')
   : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
 ---
-<SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} bannerLocales={bannerLocales}>
+<SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)}>
   <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
     <div class="bl-main">
     {!isHome && (
