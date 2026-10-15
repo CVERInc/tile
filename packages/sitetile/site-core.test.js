@@ -133,7 +133,7 @@ test('isSiteFile: frontmatter without the claim key → false', () => {
 // ── renderSiteToHtml ──────────────────────────────────────────────────────────────────────────
 test('render: each of the 5 types emits its st- section', () => {
   const html = renderSiteToHtml(parseSite(CANON));
-  assert.ok(html.includes('<section class="st-hero"'), 'hero');
+  assert.ok(html.includes('<section class="st-hero st-full-bleed"'), 'hero');
   assert.ok(html.includes('<section class="st-prose"'), 'prose');
   assert.ok(/<section class="st-grid"[^>]*data-cols="3"/.test(html), 'grid + cols');
   assert.ok(html.includes('<section class="st-cta"'), 'cta');
@@ -303,14 +303,14 @@ test('grid cell href round-trips (`### Title →/href` verbatim; plain unchanged
 test('render: cell with href → <a class="st-cell st-cell-link"> + chevron; plain → <div>', () => {
   const html = renderSiteToHtml(parseSite(GRAD));
   assert.ok(html.includes('<a class="st-cell st-cell-link group" href="/go"><h3>Linked</h3>'), 'link cell anchor');
-  assert.ok(html.includes('<span class="st-cell-cta" aria-hidden="true">›</span></a>'), 'chevron CTA');
+  assert.ok(html.includes('<span class="st-cell-cta" aria-hidden="true"><span class="signet-arrow') && !html.includes('>›<'), 'chevron CTA');
   assert.ok(html.includes('<div class="st-cell"><h3>Plain</h3>'), 'plain cell stays a div');
 });
 
 test('render: hero media=logo → data-media="logo"; default → avatar', () => {
-  assert.ok(/<section class="st-hero"[^>]*data-media="logo"/.test(renderSiteToHtml(parseSite(GRAD))), 'logo variant');
+  assert.ok(/<section class="st-hero st-full-bleed"[^>]*data-media="logo"/.test(renderSiteToHtml(parseSite(GRAD))), 'logo variant');
   const def = renderSiteToHtml(parseSite('---\nsitetile-page: t\n---\n\n## H\n%% sitetile: hero %%\nhi\n'));
-  assert.ok(/<section class="st-hero"[^>]*data-media="avatar"/.test(def), 'default avatar');
+  assert.ok(/<section class="st-hero st-full-bleed"[^>]*data-media="avatar"/.test(def), 'default avatar');
 });
 
 // ── base-content block rendering (2026-06-24): lists / blockquote / fenced code / GFM table ──────

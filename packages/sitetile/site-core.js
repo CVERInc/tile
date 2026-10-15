@@ -2382,7 +2382,7 @@ function renderSection(s) {
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
       // DOM (the logo image stays a `.st-figure` via bodyHtml). New columned hero is OPT-IN via `layout`.
       if (!pm.layout) {
-        return '<section class="st-hero" data-media="' + media + '"' + style + '><h1>' + inlineHtml(s.title) + '</h1>' +
+        return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + style + '><h1>' + inlineHtml(s.title) + '</h1>' +
           bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</section>';
       }
       const layout = ' data-layout="' + escAttr(typeof pm.layout === 'object' ? pm.layout.label : pm.layout) + '"';
@@ -2400,7 +2400,7 @@ function renderSection(s) {
       const marquee = mWords.length ? '<div class="st-hero-marquee" aria-hidden="true">' + mWords.map((w, i) =>
         '<div class="st-hero-marquee-row" data-dir="' + (i % 2 ? 'rev' : 'fwd') + '"><div class="st-hero-marquee-track">' +
         new Array(12).fill('<span>' + escHtml(w) + '</span>').join('') + '</div></div>').join('') + '</div>' : '';
-      return '<section class="st-hero" data-media="' + media + '"' + layout + style + '>' + marquee + txt + art + '</section>';
+      return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + layout + style + '>' + marquee + txt + art + '</section>';
     }
     case 'grid': {
       // `cards=image` — cells become image-first cards (leading image floats to a top figure,
@@ -2455,7 +2455,7 @@ function renderSection(s) {
         // Cells that carry an emoji/badge (status cards) get NO chevron — the badge is the affordance.
         const cta = c.cta
           ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span>' + arrowSvg(/^https?:\/\//.test(c.href) ? 'up-right' : 'right') + '</span>'
-          : (c.badge || c.emoji) ? '' : '<span class="st-cell-cta" aria-hidden="true">›</span>';
+          : (c.badge || c.emoji) ? '' : '<span class="st-cell-cta" aria-hidden="true">' + arrowSvg('right') + '</span>';
         if (hasAction) {
           const action = '<a class="st-cell-action" href="' + escHrefAttr(c.badgeHref) + '"' + (/^https?:\/\//.test(c.badgeHref) ? ' target="_blank" rel="noopener"' : '') + '>'
             + '<span class="st-cta-label">' + inlineHtml(c.badge) + '</span>' + arrowSvg(/^https?:\/\//.test(c.badgeHref) ? 'up-right' : 'right') + '</a>';
