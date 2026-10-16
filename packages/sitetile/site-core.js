@@ -2428,6 +2428,31 @@ function renderSection(s, hero, ctx) {
       const style = bgOk ? ' style="' + escAttr('background-image:url("' + cssUrlString(bgOk) + '")') + '"' : '';
       // media variant for a foreground image: avatar (round, default) vs logo (uncropped, not round).
       const media = pm.media === 'logo' ? 'logo' : 'avatar';
+      // `layers=back|front` (+ `parallax`, `enter`, `logo=`, `logo-pos=`, `eyebrow=`): the multi-layer depth
+      // hero. Mirrors Hero.astro's first branch (it wins over `layout`): an aria-hidden stage of
+      // absolutely-stacked `.st-hero-layer` images (data-depth = index, back to front), then the
+      // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
+      const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
+      const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
+      // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
+      const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+      const logo = logoRaw ? safeSrc(logoRaw) : null;
+      const h1Html = logo
+        ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
+        : '<h1>' + inlineHtml(s.title) + '</h1>';
+      if (layerList.length) {
+        const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+        const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
+        const stage = '<div class="st-hero-stage" aria-hidden="true">' + layerList.map((src, i) => {
+          const srcOk = safeSrc(src);
+          return srcOk ? '<img class="st-hero-layer" src="' + escAttr(srcOk) + '" alt="" data-depth="' + i + '" loading="eager" decoding="async">' : '';
+        }).join('') + '</div>';
+        return '<section class="st-hero st-full-bleed st-hero-layered" data-media="' + media + '"' +
+          (pm.parallax != null ? ' data-parallax=""' : '') + ' data-logo-pos="' + escAttr(logoPos) + '"' +
+          (pm.enter != null ? ' data-enter=""' : '') + '>' + stage +
+          '<div class="st-hero-text st-hero-overlay">' + (lEyebrow ? '<p class="st-hero-eyebrow">' + inlineHtml(lEyebrow) + '</p>' : '') +
+          h1Html + bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</div></section>';
+      }
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
       // DOM (the logo image stays a `.st-figure` via bodyHtml). New columned hero is OPT-IN via `layout`.
       if (!pm.layout) {
@@ -2438,7 +2463,7 @@ function renderSection(s, hero, ctx) {
       const hp = heroParts(s.body);
       const eyebrow = pm.eyebrow ? '<p class="st-hero-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       // text column: eyebrow + h1 + lead prose + button row (or the legacy single `cta=` param).
-      const txt = '<div class="st-hero-text">' + eyebrow + '<h1>' + inlineHtml(s.title) + '</h1>' +
+      const txt = '<div class="st-hero-text">' + eyebrow + h1Html +
         bodyHtml(hp.text) + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-hero') : ctaHtml(pm.cta, 'st-hero-cta')) + '</div>';
       const art = hp.images.length ? '<div class="st-hero-art"' + (hp.images.length > 1 ? ' data-imgs="' + hp.images.length + '"' : '') + '>' +
         hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '';
@@ -2684,7 +2709,7 @@ function renderSection(s, hero, ctx) {
           const meta = (it.href || it.learn) ? '<div class="st-item-meta">' + (it.updated ? '<span class="st-item-updated">Updated ' + escHtml(it.updated) + '</span>' : '') +
             (it.href ? '<' + ghTag + ' class="st-item-gh"' + ((ghOk && learnOk) ? ' href="' + escHrefAttr(it.href) + '" target="_blank" rel="noopener"' : '') + '>View on GitHub ' + arrowSvg('up-right', 12) + '</' + ghTag + '>' : '') +
             (learnOk ? '<a class="st-item-learn" href="' + escHrefAttr(it.learn) + '">Learn more ' + arrowSvg('right', 12) + '</a>' : '') + '</div>' : '';
-          return '<div class="st-cell st-item"><div class="st-item-head"><' + (hero ? 'h2' : 'h4') + '>' + inlineHtml(it.title) + '</' + (hero ? 'h2' : 'h4') + '>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
+          return '<div class="st-cell st-item"><div class="st-item-head"><' + (hero ? 'h2' : 'h3') + '>' + inlineHtml(it.title) + '</' + (hero ? 'h2' : 'h3') + '>' + bdg + '</div>' + bodyHtml(it.body) + tags + meta + '</div>';
         }).join('');
         return '<div class="st-collection-group"><p class="st-collection-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p><div class="st-cells">' + cards + '</div></div>';
       }).join('');

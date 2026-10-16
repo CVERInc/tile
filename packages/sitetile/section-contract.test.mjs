@@ -107,6 +107,7 @@ const CASES = [
   { title: 'Ordered', marker: '%% sitetile: prose ordered %%', body: 'Lead.\n\n### First clause\nBody.' },
   { title: 'Hero legacy', marker: '%% sitetile: hero cta="Go"→/go %%', body: 'A hero.' },
   { title: 'Hero split', marker: '%% sitetile: hero layout=split %%', body: 'Split hero.\n\n[Act](/act)\n\n![Art](/img/art.png)' },
+  { title: 'Hero split logo', marker: '%% sitetile: hero layout=split logo=/img/logo.png %%', body: 'Split logo hero.\n\n[Act](/act)\n\n![Art](/img/art.png)' },
   { title: 'Hero layered', marker: '%% sitetile: hero layers=/img/back.png|/img/front.png logo=/img/logo.png %%', body: 'Layered hero.' },
   { title: 'Grid cells', marker: '%% sitetile: grid cols=3 %%',
     body: '### Plain\nBody one.\n\n### Linked →/internal\nBody two.\n\n### Labelled →/x "Read"\nBody three.\n\n### 🎉 Emoji\nBody four.\n\n### Badged [New]\nBody five.\n\n### External →https://example.com/e\nBody six.' },
@@ -122,15 +123,9 @@ const CASES = [
 
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
 // Remove the entry when the gap is closed.
-const XFAIL = {
-  'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
-  'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
-};
+const XFAIL = {};
 // The sections that carry a gap, by title.
-const GAPS = {
-  'Hero layered': 'hero-layered',
-  'Collection later': 'collection-card-heading',
-};
+const GAPS = {};
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
   + CASES.map((c) => `##${c.title ? ' ' + c.title : ''}\n${c.marker ? c.marker + '\n' : ''}${c.body}\n`).join('\n');
@@ -144,7 +139,7 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });
