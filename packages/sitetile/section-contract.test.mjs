@@ -122,15 +122,9 @@ const CASES = [
 
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
 // Remove the entry when the gap is closed.
-const XFAIL = {
-  'hero-layered': 'string render has no st-hero-layered variant (layers= / logo=)',
-  'collection-card-heading': 'a collection item title is <h4> in the string render and <h3> in the built page (non-first section)',
-};
+const XFAIL = {};
 // The sections that carry a gap, by title.
-const GAPS = {
-  'Hero layered': 'hero-layered',
-  'Collection later': 'collection-card-heading',
-};
+const GAPS = {};
 
 const MD = '---\nsitetile-page: home\ntitle: Section contract\nlang: en-US\n---\n\n'
   + CASES.map((c) => `##${c.title ? ' ' + c.title : ''}\n${c.marker ? c.marker + '\n' : ''}${c.body}\n`).join('\n');
