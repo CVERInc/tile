@@ -6,3 +6,8 @@ pubDate: 2026-08-03
 The other two fixture posts each have a zh-TW edition at the same slug. This one does not, on
 purpose: it is the specimen for "a post that exists in one language offers no switch", which a
 corpus where every post is translated can never fail.
+
+It also carries a YouTube line (tile#148) — a paragraph that is only the address — so the smoke
+builds the click-to-play block and its script through the real post page:
+
+https://www.youtube.com/watch?v=dQw4w9WgXcQ

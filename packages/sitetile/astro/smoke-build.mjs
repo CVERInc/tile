@@ -1111,6 +1111,18 @@ const checks = [
     && !existsSync(new URL('./blog/zh-tw/a-base-only-post.md', import.meta.url))
     && existsSync(join(DIST, 'devlog/a-base-only-post/index.html'))
     && !existsSync(join(DIST, 'zh-tw/devlog/a-base-only-post/index.html'))],
+  // tile#148 — a YouTube line in a real post: the block is built, its script is the accounted one
+  // (`every script accounted` above sees it on this page), the post's archive card takes the proxied
+  // poster, and NO built page names i.ytimg.com — the visitor's browser reaches Google only on press.
+  ['YouTube line: the post page has the click-to-play block, on our /_yt/ poster', () => {
+    const h = readFileSync(join(DIST, 'devlog/a-base-only-post/index.html'), 'utf8');
+    return h.includes('<figure class="st-video st-video-youtube"><a class="st-video-yt" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"')
+      && h.includes('src="/_yt/dQw4w9WgXcQ.jpg"') && h.includes('a.st-video-yt[data-yt]');
+  }],
+  ['YouTube line: the devlog index card for that post uses the same proxied poster', () =>
+    readFileSync(join(DIST, 'devlog/index.html'), 'utf8').includes('src="/_yt/dQw4w9WgXcQ.jpg"')],
+  ['🔴 YouTube line: no built page points at i.ytimg.com', () =>
+    allHtmlPages(DIST).every((f) => !readFileSync(f, 'utf8').includes('i.ytimg.com'))],
   ['🔴 banner on a post: a post that exists in one language offers no switch at all', () =>
     bannerConfig(readFileSync(join(DIST, 'devlog/a-base-only-post/index.html'), 'utf8')) === null],
   ['banner: 404 and /preview/ exist once per site, not once per language — no banner', () =>
