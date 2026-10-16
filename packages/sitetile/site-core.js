@@ -2132,13 +2132,19 @@ function bodyHtml(body, opts) {
     const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
     const t = softJoin(marked, BR, CJK).split(BR + ' ').join(BR).trim();
     const html = inlineHtml(t, indented ? { stripComments: false } : undefined).split(BR).join('<br>');
-    // A paragraph of ONLY images is a figure — hard breaks included (`![a](…)  ` on its own line is
-    // still only images). Its children are the images and nothing else: the line breaks and spaces
-    // between them are source layout, and kept as text nodes / <br> they sat between the images
-    // that `> .st-img ~ .st-img`, `:first-child` and a lightbox's `.st-figure .st-img` count on.
-    // (reef#1933: a real site writes eight images one per line, single newlines, one paragraph.)
-    if (isImageOnly(t.split(BR).join(' '))) {
-      out.push('<figure class="st-figure">' + html.split('<br>').join('').replace(/>\s+</g, '><').trim() + '</figure>');
+    // A paragraph of ONLY images is a figure, and its children are the images and nothing else. The
+    // soft line breaks and spaces between the images are source layout: written into the figure as
+    // whitespace text they sat between the images that `> .st-img ~ .st-img`, `:first-child` and a
+    // lightbox's `.st-figure .st-img` count on (reef#1933: a real site writes eight images one per
+    // line, single newlines, one paragraph). So the figure is rendered from the image tokens alone,
+    // in source order, at the markdown level — before inlineHtml, not by editing its HTML after.
+    // A HARD break (two trailing spaces) is the author asking for a line break: `t` then carries the
+    // break token, isImageOnly says no, and the paragraph stays `<p><img><br><img></p>`.
+    if (isImageOnly(t)) {
+      const toks = [...bracketMatches(t, MD_IMAGE), ...bracketMatches(t, WIKI_IMAGE)].sort((x, y) => x.index - y.index);
+      let end = -1, src = '';
+      for (const m of toks) { if (m.index < end) continue; src += m[0]; end = m.index + m[0].length; }
+      out.push('<figure class="st-figure">' + inlineHtml(src, indented ? { stripComments: false } : undefined) + '</figure>');
       continue;
     }
     out.push('<p>' + html + '</p>');

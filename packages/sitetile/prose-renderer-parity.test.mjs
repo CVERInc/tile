@@ -169,9 +169,11 @@ const SECTIONS = [
   // 🔴 The shape a real site writes (wtg, reef#1933 inventory): eight images, ONE PER LINE, single
   // newlines, one paragraph. One figure whose children are eight ADJACENT images — no <br>, no
   // whitespace text between them — or `> .st-img ~ .st-img`, `:first-child` and a lightbox's
-  // `querySelectorAll('.st-prose .st-figure .st-img')` all see something else. One line ends in
-  // two spaces (a markdown hard break), which must not turn the figure back into a <p>.
-  ['Eight lines', '', 'Shots.\n\n' + [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `![w${n}](/img/w${n}.png)` + (n === 3 ? '  ' : '')).join('\n')],
+  // `querySelectorAll('.st-prose .st-figure .st-img')` all see something else.
+  ['Eight lines', '', 'Shots.\n\n' + [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `![w${n}](/img/w${n}.png)`).join('\n')],
+  // CONTROL: a HARD break (two trailing spaces) is the author asking for a line break, so this is a
+  // paragraph — <p><img><br><img></p> — not a figure (and so never the hero's avatar row).
+  ['Hard break', '', '![h1](/img/h1.png)  \n![h2](/img/h2.png)'],
   // CONTROL: the same images with a blank line between are two paragraphs, so two figures.
   ['Two figures', '', '![x1](/img/x1.png)\n\n![x2](/img/x2.png)'],
 ];
@@ -282,6 +284,12 @@ EXPECTED['Eight lines'] = {
   rows: [], figures: [EIGHT.map(() => IMG)],
   counts: { 'st-prose-imgs': 0, 'st-figure': 1, 'st-img': 8 },
 };
+EXPECTED['Hard break'] = {
+  children: ['h2', 'p'],
+  images: [img('/img/h1.png', 'h1', 'p'), img('/img/h2.png', 'h2', 'p')],
+  rows: [], figures: [],
+  counts: { 'st-figure': 0, 'st-img': 2 },
+};
 EXPECTED['Two figures'] = {
   children: ['h2', FIG, FIG],
   images: [img('/img/x1.png', 'x1', FIG), img('/img/x2.png', 'x2', FIG)],
@@ -297,6 +305,13 @@ function assertBareFigures(where, byId) {
       assert.ok(f.kids.every((k) => k.tag === 'img'), `${where}, section ${JSON.stringify(title)}: a figure holds ${f.kids.map(sig).join(', ')}`);
     }
   }
+}
+// The hard-break paragraph, node for node: img, br, img and no text between them.
+function assertHardBreak(where, byId) {
+  const p = byId.get(idOf('Hard break')).kids.find((n) => n.tag === 'p');
+  assert.ok(p, `${where}: the hard-break paragraph is not a <p> (${byId.get(idOf('Hard break')).kids.map(sig).join(', ')})`);
+  assert.deepEqual(p.kids.map(sig), ['img.st-img', 'br', 'img.st-img'], `${where}: the hard-break paragraph's children`);
+  assert.equal(JSON.stringify(p.text), '""', `${where}: text inside the hard-break paragraph`);
 }
 const FENCE_TEXT = 'code [A](/a) ![x](/x.png) more';
 
@@ -362,6 +377,10 @@ await test('🔴 string renderer: standalone images and link rows stay where the
 
 await test('🔴 string renderer: a figure is images and nothing else — no <br>, no whitespace between them', () => {
   assertBareFigures('string renderer', stringById);
+});
+
+await test('string renderer: two images with a hard break between them are <p><img><br><img></p>', () => {
+  assertHardBreak('string renderer', stringById);
 });
 
 await test('🔴 string renderer: no .st-prose-imgs anywhere on the page', () => {
@@ -444,6 +463,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
 
     await test('🔴 built page: a figure is images and nothing else — no <br>, no whitespace between them', () => {
       assertBareFigures('built page', astroById);
+    });
+
+    await test('built page: two images with a hard break between them are <p><img><br><img></p>', () => {
+      assertHardBreak('built page', astroById);
     });
 
     await test('🔴 built page: no .st-prose-imgs anywhere on the page', () => {
