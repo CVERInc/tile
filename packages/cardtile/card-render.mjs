@@ -216,9 +216,19 @@ const mdBlock = (s, ctx) => String(s || '').split(/\n{2,}/).map((para) => {
   // a rule: `---`/`***`/`___` on its own line. Without this the ingest carried a creator's section
   // break across as four literal hyphens sitting in the middle of their About text.
   if (lines.length === 1 && /^\s*([-*_])\1{2,}\s*$/.test(lines[0])) return '<hr>';
-  const h = /^(#{1,3})\s+(.*)$/.exec(lines[0]);
-  if (h && lines.length === 1) return `<h${h[1].length + 2}>${mdInline(h[2], ctx)}</h${h[1].length + 2}>`;
-  return `<p>${lines.map((l) => mdInline(l, ctx)).join('<br>')}</p>`;
+  // 🔴 An ATX heading is ALWAYS a one-line block (CommonMark), so a heading line inside a paragraph
+  // ends the run before it and starts a new one after it. This used to fire only when the heading was
+  // the paragraph's single line, so `### X` followed directly by a line rendered the literal `### `
+  // inside a <p>. Runs of non-heading lines still join with <br>.
+  const out = [];
+  let run = [];
+  const flush = () => { if (run.length) out.push(`<p>${run.map((l) => mdInline(l, ctx)).join('<br>')}</p>`); run = []; };
+  for (const l of lines) {
+    const h = /^(#{1,3})\s+(.*)$/.exec(l);
+    if (h) { flush(); out.push(`<h${h[1].length + 2}>${mdInline(h[2], ctx)}</h${h[1].length + 2}>`); } else run.push(l);
+  }
+  flush();
+  return out.join('');
 }).join('');
 // A cell body → the label and the address of one link: `linkOf`, in link-marks.mjs (reef#2015) — the
 // editing table reads a line the same way, so it lives where both can import it.
