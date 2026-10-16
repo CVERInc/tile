@@ -729,10 +729,16 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
 .st-hero[data-media="logo"] .st-figure .st-img { width: auto; max-height: 88px; border-radius: 0; box-shadow: none; }
 /* an inline image inside running text stays inline */
 p .st-img { display: inline; vertical-align: middle; }
-/* a figure holding 2+ images (e.g. `![](a.jpg)![](b.jpg)…`) is a photo/avatar cluster row —
-   auto-detected from existing multi-image syntax, no new markdown needed. */
-.st-figure:has(> .st-img ~ .st-img) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-.st-figure:has(> .st-img ~ .st-img) .st-img { width: 3.5rem; height: 3.5rem; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px rgba(255,255,255,.2); }
+/* a HERO figure holding 2+ images (e.g. `![](a.jpg)![](b.jpg)…`) is an avatar cluster row —
+   auto-detected from existing multi-image syntax, no new markdown needed.
+   🩸 CVERInc/reef#1933 S6: this was written for the hero but selected every multi-image figure on
+   the page. While prose gathered its images into `.st-prose-imgs` no prose figure had two images,
+   so nothing showed; once prose images stay in place as `figure.st-figure`, a row of product
+   thumbnails or screenshots in a prose body would have become 3.5rem circles on every site. The
+   intent is the hero's, so the scope is the hero's; a multi-image figure anywhere else is just a
+   figure (prose-multi-image-figure-1933.test.mjs). */
+.st-hero .st-figure:has(> .st-img ~ .st-img) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.st-hero .st-figure:has(> .st-img ~ .st-img) .st-img { width: 3.5rem; height: 3.5rem; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px rgba(255,255,255,.2); }
 
 /* ── base-content blocks: lists / blockquote / code / table (reef-token styled, zero JS) ── */
 .st-list { margin: 0 0 1rem; padding-left: 1.4rem; }
