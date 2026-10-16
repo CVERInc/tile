@@ -52,6 +52,13 @@ await test('a miss fetches i.ytimg.com hqdefault ONCE, relays the image, and cac
   assert.equal(h.fetched.length, 1, 'the second request went upstream again');
 });
 
+await test('🔴 the cache key is origin + path: `?1`, `?2`, … are the same poster — one upstream fetch, one entry (tile#150 L3)', async () => {
+  const h = harness(() => jpeg());
+  for (const q of ['?1', '?2', '', '?x=y']) assert.equal((await relayYoutubePoster(req(posterPath(ID) + q), {}, ID)).status, 200, q);
+  assert.equal(h.fetched.length, 1, 'a query string went upstream again');
+  assert.deepEqual([...h.stored.keys()], ['https://site.example' + posterPath(ID)]);
+});
+
 await test('🔴 an upstream answer that is not an image (or a 404, or a network error) is a 404, no-store, and NOT cached', async () => {
   for (const up of [
     () => new Response('<html>', { headers: { 'content-type': 'text/html' } }),

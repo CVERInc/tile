@@ -119,6 +119,11 @@ const CASES = [
   // links-only test would have made it a button) and a FAQ answer — in both renderers alike.
   { title: 'Prose YouTube', marker: '', body: 'Watch.\n\n[https://www.youtube.com/watch?v=dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)\n\nhttps://youtu.be/K9j8H7g6F5d?t=30\n\n[Watch it there](https://youtu.be/K9j8H7g6F5d)' },
   { title: 'FAQ YouTube', marker: '%% sitetile: faq %%', body: '### Where is the video?\nHere:\n\nhttps://www.youtube.com/shorts/s0rTsVid3oX' },
+  // tile#150 L1: a linked cell is one <a> — its YouTube line stays the paragraph it was, in both
+  // renderers; the unlinked cell beside it gets the player. Grid (plain and cards=image), gallery, carousel.
+  { title: 'Grid YouTube', marker: '%% sitetile: grid cols=2 %%', body: '### Linked →/internal\nhttps://youtu.be/K9j8H7g6F5d\n\n### Plain\nhttps://youtu.be/dQw4w9WgXcQ' },
+  { title: 'Grid image YouTube', marker: '%% sitetile: grid cols=2 cards=image %%', body: '### Linked →/internal\nhttps://youtu.be/K9j8H7g6F5d\n\n### Plain\n[https://youtu.be/dQw4w9WgXcQ](https://youtu.be/dQw4w9WgXcQ)' },
+  { title: 'Gallery YouTube', marker: '%% sitetile: gallery %%', body: '### Linked →/internal\nhttps://youtu.be/K9j8H7g6F5d\n\n### Plain\nhttps://youtu.be/dQw4w9WgXcQ' },
   { title: 'Timeline', marker: '%% sitetile: timeline %%', body: '### 2020\nStart.\n\n### 2021\nGrowth.' },
   { title: 'CTA', marker: '%% sitetile: cta %%', body: 'Come along.\n\n[Join](/join)' },
   { title: 'Gallery', marker: '%% sitetile: gallery %%', body: '![One](/img/1.png)\n\n![Two](/img/2.png)' },
@@ -148,9 +153,25 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
+});
+
+// tile#150 L1, written out and checked against each renderer on its own (structure parity alone
+// would stay green if both put a player inside the cell's link).
+function assertNoPlayerInLinkedCell(where, byId) {
+  for (const title of ['Grid YouTube', 'Grid image YouTube', 'Gallery YouTube']) {
+    const sec = byId.get(idOf(title));
+    assert.ok(sec, `${where}: no section ${title}`);
+    const links = all(sec).filter((n) => n.tag === 'a' && n.cls.includes('st-cell-link'));
+    assert.equal(links.length, 1, `${where}, ${title}: linked cells`);
+    assert.ok(!all(links[0]).some((n) => n.tag === 'a' || n.cls.includes('st-video-youtube')), `${where}, ${title}: a player / an <a> inside the cell's link`);
+    assert.equal(all(sec).filter((n) => n.cls.includes('st-video-youtube')).length, 1, `${where}, ${title}: the unlinked cell's player`);
+  }
+}
+await test('🔴 string render: a linked cell holds no YouTube player (no <a> inside its <a>)', () => {
+  assertNoPlayerInLinkedCell('string render', stringById);
 });
 
 await test('CONTROL: class tokens are compared as a list — `a.b` and `a b` differ', () => {
@@ -194,6 +215,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     await test('the fixture built, and every section is on the page under the id the string render gave it', () => {
       assert.equal(result.code, 0, 'astro build exited non-zero');
       for (const c of CASES) assert.ok(astroById.get(idOf(nameOf(c))), `no section ${nameOf(c)} in the built page`);
+    });
+
+    await test('🔴 built page: a linked cell holds no YouTube player (no <a> inside its <a>)', () => {
+      assertNoPlayerInLinkedCell('built page', astroById);
     });
 
     const diffs = new Map();

@@ -1402,3 +1402,19 @@ test('stop takes precedence over redirects and missing cards, and resume preserv
   }
   assert.deepEqual(store.puts, []);
 });
+
+test('🔴 /_yt/ and /_icon/ cache on origin + path: a query string does not make a second entry or a second upstream fetch (tile#150 L3)', async () => {
+  const seen = [], stored = new Map();
+  const real = globalThis.fetch, realCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async (r) => stored.get(r.url)?.clone(), put: async (r, v) => { stored.set(r.url, v); } } };
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { 'content-type': 'image/jpeg' } }); };
+  try {
+    const env = { PREVIEW: 'false', CARDS: { get: async () => null } };
+    for (const q of ['', '?1', '?2', '?cache=bust']) {
+      const res = await worker.fetch(new Request('https://card.feelreef.com/_yt/dQw4w9WgXcQ.jpg' + q), env);
+      assert.equal(res.status, 200, q);
+    }
+    assert.deepEqual(seen, ['https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'], 'a query string went upstream again');
+    assert.deepEqual([...stored.keys()], ['https://card.feelreef.com/_yt/dQw4w9WgXcQ.jpg']);
+  } finally { globalThis.fetch = real; globalThis.caches = realCaches; }
+});

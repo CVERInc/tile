@@ -31,6 +31,7 @@ const ALLOW = new Set([
   'x.com', 'twitter.com', 'www.facebook.com', 'facebook.com', 'patreon.com', 'www.patreon.com',
   'store.line.me', 'line.me', 'icons.duckduckgo.com', 't1.gstatic.com', 'goo.gl', 'plausible.io',
   'm.youtube.com',   // the phone share-link shape the Video sheet accepts (youtubeRef)
+  'i.ytimg.com',     // the ONE upstream the /_yt/ poster relay fetches; its test asserts that exact address (tile#150 L3)
   'threads.net', 'www.threads.net', 'threads.com', 'www.threads.com',   // named hosts in the live-icons / link tests (reef#2011, reef#2026)
   // reef#2011's measured sample of a `.com.tw` site — a public retailer, not anybody's card
   'books.com.tw', 'www.books.com.tw',

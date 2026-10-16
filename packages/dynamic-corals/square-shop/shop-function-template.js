@@ -1184,8 +1184,10 @@ function inboxRedirectResponse(returnPath, outcome) {
 //   · the id is held to the 11-character video shape (cardtile's VIDEO_RE) BY THE ROUTE PATTERN,
 //     before it is ever part of a URL — without that this is an open proxy;
 //   · only an image type is relayed (never SVG, never a transient text/html);
-//   · only a response that passed that check is cached (caches.default, under this request's
-//     own URL), so a bad upstream moment is never kept;
+//   · only a response that passed that check is cached (caches.default, keyed on this request's
+//     origin + path — NOT its query: the route reads the path only, so `?1`, `?2`, … would each be
+//     a miss, an upstream fetch and a cache entry for one and the same poster — tile#150 L3), so a
+//     bad upstream moment is never kept;
 //   · a miss is a 404 with no-store — the block is designed to look like an unopened video
 //     without its poster, so a missing poster costs a picture and nothing else.
 const YT_POSTER_PATH = /^\/_yt\/([A-Za-z0-9_-]{11})\.jpg$/;
@@ -1196,7 +1198,8 @@ async function relayYoutubePoster(request, ctx, id) {
 		return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8' } });
 	}
 	const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
-	const key = new Request(request.url, { method: 'GET' });
+	const at = new URL(request.url);
+	const key = new Request(at.origin + at.pathname, { method: 'GET' });
 	if (cache) {
 		const hit = await cache.match(key).catch(() => null);
 		if (hit) return hit;

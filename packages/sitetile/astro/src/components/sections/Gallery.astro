@@ -32,18 +32,19 @@ const align = pm.align || undefined;
       const fig = fi.img ? `<figure class="st-gal-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>` : '';
       const badge = c.badge ? <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} /> : null;
       const cta = c.cta ? <span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label" set:html={inlineHtml(c.cta)} /></span> : null;
+      // round 3 (Astro consumers, R2-P3-5): `c.href` is author Markdown, gated by site-core.js's
+      // own `gallery` case via `isSafeHref`; `safeHref` shares that ONE policy here.
+      const hrefOk = c.href ? safeHref(c.href) : null;
       const inner = (
         <Fragment>
           {badge}
           <Fragment set:html={fig} />
           <h3 set:html={inlineHtml(c.title)} />
-          <Fragment set:html={bodyHtml(fi.rest)} />
+          {/* a linked card is one link: no YouTube player inside it (tile#150 L1) */}
+          <Fragment set:html={bodyHtml(fi.rest, hrefOk ? { inLink: true } : undefined)} />
           {cta}
         </Fragment>
       );
-      // round 3 (Astro consumers, R2-P3-5): `c.href` is author Markdown, gated by site-core.js's
-      // own `gallery` case via `isSafeHref`; `safeHref` shares that ONE policy here.
-      const hrefOk = c.href ? safeHref(c.href) : null;
       return hrefOk
         ? <a class="st-gal-cell st-cell-link group" href={hrefOk}>{inner}</a>
         : <div class="st-gal-cell">{inner}</div>;

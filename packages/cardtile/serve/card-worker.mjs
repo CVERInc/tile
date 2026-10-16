@@ -38,7 +38,10 @@ const NOT_RELAYED = () => new Response('', { status: 404, headers: { 'X-Content-
  *  (r9: one upstream call per rejected request — the rejection is a 404, never a second fetch). */
 async function relayImage(request, ctx, upstreams, maxAge) {
   const cache = globalThis.caches && globalThis.caches.default;
-  const key = new Request(request.url, { method: 'GET' });
+  // Keyed on origin + path, never the query: both routes read the path only, so `?1`, `?2`, … were
+  // each a miss, an upstream fetch and a cache entry for one and the same image (tile#150 L3).
+  const at = new URL(request.url);
+  const key = new Request(at.origin + at.pathname, { method: 'GET' });
   if (cache) { const hit = await cache.match(key).catch(() => null); if (hit) return hit; }
   let up = null;
   for (const upstreamUrl of [].concat(upstreams)) {

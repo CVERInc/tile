@@ -107,7 +107,7 @@ test('🔴 NEGATIVE CONTROL: a YouTube link with any other word, or a second lin
 // ── the block, written out by hand and derived from neither renderer ────────────────────────
 const block = (id, href, start = 0) => '<figure class="st-video st-video-youtube"><a class="st-video-yt" href="' + href +
   '" target="_blank" rel="noopener" data-yt="' + id + '"' + (start ? ' data-yt-start="' + start + '"' : '') +
-  ' aria-label="YouTube"><img class="st-video-yt-poster" src="/_yt/' + id + '.jpg" alt="" loading="lazy" decoding="async">';
+  ' aria-label="YouTube ' + id + '"><img class="st-video-yt-poster" src="/_yt/' + id + '.jpg" alt="" loading="lazy" decoding="async">';
 
 test('bodyHtml: the line is figure.st-video-youtube > a(the author\'s link) > our poster — then the script', () => {
   const html = bodyHtml(`Before.\n\n[${W}](${W})\n\nAfter.`);
@@ -151,6 +151,37 @@ test('any section body that goes through bodyHtml gets it — a FAQ answer, thro
   assert.ok(renderSiteToHtml(site).includes(block('dQw4w9WgXcQ', W)));
 });
 
+// ── tile#150 L1: a whole-cell link is one link — no player (an <a>) inside it ────────────────
+const cellPage = (marker, title) => '---\nsitetile-page: home\ntitle: T\n---\n\n## Cells\n' + marker + '\n'
+  + '### ' + title + '\n' + W + '\n\n### Plain\n' + W + '\n';
+test('🔴 a linked grid / gallery / carousel cell keeps its YouTube line as the paragraph it was; an unlinked one gets the player', () => {
+  for (const marker of ['%% sitetile: grid cols=2 %%', '%% sitetile: grid cols=2 cards=image %%', '%% sitetile: gallery %%', '%% sitetile: carousel %%']) {
+    const html = renderSiteToHtml(parseSite(cellPage(marker, 'Linked →/internal')));
+    const linked = html.slice(html.indexOf('href="/internal"'), html.indexOf('<h3>Plain</h3>'));
+    assert.ok(linked.includes('<p>' + W + '</p>') && !linked.includes('st-video-youtube'), marker + ': ' + linked.slice(0, 300));
+    assert.ok(!/<a\b[^>]*>(?:(?!<\/a>)[\s\S])*<a\b/.test(linked), marker + ': an <a> inside the cell\'s <a>');
+    assert.equal((html.match(/st-video-youtube/g) || []).length, 1, marker + ': the unlinked cell lost its player, or the linked one kept it');
+  }
+  // the overlay pattern (`→href` plus a `[Label →href]` action) is a linked cell too
+  const overlay = renderSiteToHtml(parseSite(cellPage('%% sitetile: grid cols=2 %%', 'Both [Open →/open] →/internal')));
+  assert.equal((overlay.match(/st-video-youtube/g) || []).length, 1);
+  assert.ok(bodyHtml(W, { inLink: true }) === '<p>' + W + '</p>');
+  // `[url](url)` in a linked cell renders as it always did — the author's own <a> in a <p>. That one
+  // nests an <a> in the cell's <a>, as every labelled link in a linked cell always has; not new here.
+  assert.equal(bodyHtml(`[${W}](${W})`, { inLink: true }), `<p><a href="${W}" target="_blank" rel="noopener">${W}</a></p>`);
+});
+
+// ── tile#150 L4 / N1 ────────────────────────────────────────────────────────────────────────
+test('a 4-space-indented line keeps CommonMark\'s literal signal: not a player', () => {
+  assert.ok(!bodyHtml('    ' + W).includes('st-video-youtube'));
+});
+test('a start past a year is not a start: 0, never `1e+23` in the markup', () => {
+  assert.equal(youtubeVideoOf(W + '&t=99999999999999999999999').start, 0);
+  assert.equal(youtubeVideoOf(W + '&t=31536001').start, 0);
+  assert.equal(youtubeVideoOf(W + '&t=31536000').start, 31536000);
+  assert.ok(!bodyHtml(W + '&t=99999999999999999999999').includes(' data-yt-start="'));
+});
+
 // ── the body's list of videos (blog featured image) ─────────────────────────────────────────
 test('youtubeLines: the lines bodyHtml turns into players, in order, with their poster path', () => {
   const body = ['Intro.', `[${W}](${W})`, 'Inline https://youtu.be/K9j8H7g6F5d here.', '```', 'https://youtu.be/F3nc3dC0d3x', '```',
@@ -159,6 +190,21 @@ test('youtubeLines: the lines bodyHtml turns into players, in order, with their 
     [['dQw4w9WgXcQ', 0, '/_yt/dQw4w9WgXcQ.jpg'], ['K9j8H7g6F5d', 5, '/_yt/K9j8H7g6F5d.jpg']]);
   // …and they are exactly the ones bodyHtml rendered as blocks
   assert.deepEqual([...bodyHtml(body).matchAll(/data-yt="([^"]+)"/g)].map((m) => m[1]), ['dQw4w9WgXcQ', 'K9j8H7g6F5d']);
+});
+// tile#150 L2: the shapes where a second walk over raw lines disagreed with bodyHtml's paragraphs.
+test('🔴 youtubeLines and the rendered post agree on the shapes a line walk got wrong — heading above, fence above, inside a comment', () => {
+  const ids = (html) => [...html.matchAll(/data-yt="([^"]+)"/g)].map((m) => m[1]);
+  for (const [body, want] of [
+    ['### T\nhttps://youtu.be/K9j8H7g6F5d', ['K9j8H7g6F5d']],
+    ['```\ncode\n```\nhttps://youtu.be/K9j8H7g6F5d', ['K9j8H7g6F5d']],
+    ['<!--\n\nhttps://youtu.be/K9j8H7g6F5d\n\n-->', []],
+    ['Intro.\n\n<!-- https://youtu.be/dQw4w9WgXcQ -->\n\nhttps://youtu.be/K9j8H7g6F5d', ['K9j8H7g6F5d']],
+  ]) {
+    const at = JSON.stringify(body);
+    assert.deepEqual(youtubeLines(body).map((v) => v.id), want, at + ': youtubeLines');
+    assert.deepEqual(ids(bodyHtml(body)), want, at + ': bodyHtml');
+    assert.deepEqual(ids(flowingHtml(body)), want, at + ': the post page (flowingHtml)');
+  }
 });
 
 // ── the script, run against a stand-in DOM ──────────────────────────────────────────────────
@@ -189,7 +235,7 @@ test('the script: a press swaps the link for a youtube-nocookie player, autoplay
   assert.ok(e.prevented, 'the link was followed instead of swapped');
   assert.equal(a.replaced.tag, 'iframe');
   assert.equal(a.replaced.src, 'https://www.youtube-nocookie.com/embed/K9j8H7g6F5d?autoplay=1&start=90');
-  assert.equal(a.replaced.title, 'YouTube');
+  assert.equal(a.replaced.title, 'YouTube K9j8H7g6F5d');
   assert.equal(a.replaced.referrerPolicy, 'strict-origin-when-cross-origin');
   assert.equal(a.replaced.allowFullscreen, true);
   assert.ok(/encrypted-media/.test(a.replaced.allow) && /picture-in-picture/.test(a.replaced.allow));

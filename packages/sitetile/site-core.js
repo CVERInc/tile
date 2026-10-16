@@ -1488,13 +1488,14 @@ function cellHtml(cell) {
 }
 // Grid cells split a single <br> run of Markdown bullets, retaining the block-list class.
 // Other bodies retain block parsing. Code and comments stay opaque to splitting.
-function gridCellBodyHtml(body) {
+// `opts` goes to bodyHtml (a linked cell passes { inLink: true } — see bodyHtml's YouTube line).
+function gridCellBodyHtml(body, opts) {
   const text = String(body == null ? '' : body).trim();
   const parts = text.split(RE_CELL_BR);
   const bullets = parts.every((p) => /^\s*[-*+]\s+/.test(p)
     && !/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(p));
   const list = /[\r\n`]|<!--/.test(text) || !bullets ? null : cellListHtml(parts, 'st-list');
-  return list ?? bodyHtml(body);
+  return list ?? bodyHtml(body, opts);
 }
 // `nextCloser` is optional (commentBlockEnd/nextCommentCloser are defined near bodyHtml; function
 // declarations hoist, so this only matters for callers with no `nextCloser` to hand in, which then
@@ -2105,8 +2106,16 @@ function bodyHtml(body, opts) {
     const paraSrc = para.join('\n').trim();
     // tile#148: a paragraph that is ONLY a YouTube link is a player, in every body (a post, a prose
     // section, a FAQ answer…). Asked before the link-row test, which would otherwise make it a button.
-    const yt = youtubeLine(paraSrc);
-    if (yt) { out.push(youtubeLineHtml(yt)); continue; }
+    // Three bodies keep the paragraph they had: one inside a whole-cell link (`opts.inLink` — a grid,
+    // gallery or carousel cell with an href; the player is an <a> itself, and an <a> inside an <a>
+    // is closed by the HTML parser, taking the cell's link apart), and one whose every line is
+    // 4-space indented (CommonMark's "this is literal" signal, honoured below for comments too).
+    const yt = opts && opts.inLink ? null : youtubeLine(paraSrc);
+    if (yt && !para.every((ln) => leadingIndentCols(ln) >= 4)) {
+      if (opts && opts.youtube) opts.youtube.push(yt);
+      out.push(youtubeLineHtml(yt));
+      continue;
+    }
     const links = opts && opts.linkRows ? linksOnly(paraSrc) : null;
     if (links) {
       const back = isBackLink(paraSrc, links);
@@ -2258,32 +2267,32 @@ function youtubeLine(src) {
   const v = youtubeVideoOf(href);
   return v ? { id: v.id, start: v.start, href } : null;
 }
-// The block. 🔴 Nothing in it reaches Google before the visitor presses play: the poster is OUR path
+// The block. Its accessible name, and the player's title, carry the video id, so three videos on
+// one page do not announce identically (tile#150 N2); "YouTube" + an id needs no translation.
+// 🔴 Nothing in it reaches Google before the visitor presses play: the poster is OUR path
 // (yt.mjs posterPath — the site's Worker relays it, like the Card Worker does), and the player is
 // created by YOUTUBE_LINE_SCRIPT only on that press, on youtube-nocookie. With no script it is the
 // author's own link round a picture — it opens the video on YouTube, which is what the line did before.
 const YT_PLAY_SVG = '<svg viewBox="0 0 68 48" width="68" height="48"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg>';
+// The opts a body inside a whole-cell link is rendered with (bodyHtml: no YouTube player there).
+const IN_LINK = Object.freeze({ inLink: true });
 function youtubeLineHtml(v) {
   return '<figure class="st-video st-video-youtube"><a class="st-video-yt" href="' + escHrefAttr(v.href) +
     '" target="_blank" rel="noopener" data-yt="' + v.id + '"' + (v.start > 0 ? ' data-yt-start="' + v.start + '"' : '') +
-    ' aria-label="YouTube"><img class="st-video-yt-poster" src="' + posterPath(v.id) + '" alt="" loading="lazy" decoding="async">' +
+    ' aria-label="YouTube ' + v.id + '"><img class="st-video-yt-poster" src="' + posterPath(v.id) + '" alt="" loading="lazy" decoding="async">' +
     '<span class="st-video-yt-play" aria-hidden="true">' + YT_PLAY_SVG + '</span></a><script>' + YOUTUBE_LINE_SCRIPT + '</script></figure>';
 }
-// Every video a body shows as a YouTube line, in source order → [{ id, start, href, poster }]. A line counts
-// when it is a paragraph of its own (blank line, or the body's edge, on both sides) outside a code
-// fence — what bodyHtml turns into a player. For the blog layer's featured image (blog.mjs parsePost).
+// Every video a body shows as a YouTube line, in source order → [{ id, start, href, poster }]. Read
+// off bodyHtml ITSELF (each block it emits is collected as it is emitted), not a second walk over the
+// lines: a second walk is a second opinion about where a paragraph ends — a heading or a fence right
+// above, a commented-out line — and the featured image then names a video the post does not show, or
+// misses one it does (tile#150 review L2). Cheap exit first: no `youtu` in the body, no video.
 function youtubeLines(body) {
-  const lines = String(body || '').split('\n');
-  const out = [];
-  let fence = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
-    if (fence || !lines[i].trim()) continue;
-    if ((i > 0 && lines[i - 1].trim()) || (i + 1 < lines.length && lines[i + 1].trim())) continue;
-    const v = youtubeLine(lines[i].trim());
-    if (v) out.push({ ...v, poster: posterPath(v.id) });
-  }
-  return out;
+  const text = String(body || '');
+  if (!/youtu/i.test(text)) return [];
+  const youtube = [];
+  bodyHtml(text, { youtube });
+  return youtube.map((v) => ({ ...v, poster: posterPath(v.id) }));
 }
 
 // A paragraph that is ONLY links (`[A](/a) · [B](/b)`, joined by `·`, `,` or whitespace) → its link
@@ -2540,7 +2549,7 @@ function renderSection(s, hero, ctx) {
           const fi = firstImage(c.body);
           const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
           const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
-          const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(fi.rest);
+          const inner = fig + badge + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(fi.rest, hrefOk ? IN_LINK : undefined);
           return hrefOk
             ? '<a class="st-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + inner + '</a>'
             : '<div class="st-cell st-gal-cell">' + inner + '</div>';
@@ -2557,7 +2566,8 @@ function renderSection(s, hero, ctx) {
         // whole-cell <a>, so such a cell uses the OVERLAY pattern: a relative container, an absolute
         // full-cell overlay <a> (the primary link), and the action + "Learn more" stacked above it.
         const hasAction = hrefOk && badgeHrefOk;
-        const inner = ((footTag || hasAction) ? '' : badge) + emoji + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(c.body);
+        // a linked cell (whole-cell <a>, or the overlay that covers it) is one link: no player inside
+        const inner = ((footTag || hasAction) ? '' : badge) + emoji + '<h3>' + inlineHtml(c.title) + '</h3>' + gridCellBodyHtml(c.body, hrefOk ? IN_LINK : undefined);
         // labeled CTA ("<cta>" on the heading) renders the directional arrow; bare href → a chevron.
         // Cells that carry an emoji/badge (status cards) get NO chevron — the badge is the affordance.
         const cta = c.cta
@@ -2600,7 +2610,7 @@ function renderSection(s, hero, ctx) {
         const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
         const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
-        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
+        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest, c.href && isSafeHref(c.href) ? IN_LINK : undefined) + cta;
         return (c.href && isSafeHref(c.href))
           ? '<a class="st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-gal-cell">' + badge + inner + '</div>';
@@ -2619,7 +2629,7 @@ function renderSection(s, hero, ctx) {
         const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
         const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
-        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest) + cta;
+        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest, c.href && isSafeHref(c.href) ? IN_LINK : undefined) + cta;
         return (c.href && isSafeHref(c.href))
           ? '<a class="st-car-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-car-cell st-gal-cell">' + badge + inner + '</div>';

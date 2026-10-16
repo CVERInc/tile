@@ -76,6 +76,7 @@ function arrowSvg(left = false) {
     <div class="st-car-track" data-start={pm.start || ''}>
       {cells.map((c) => {
         const fi = firstImage(c.body);
+        const hrefOk = c.href ? safeHref(c.href) : null;
         const fig = fi.img ? `<figure class="st-gal-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>` : '';
         const badge = c.badge ? <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} /> : null;
         const cta = c.cta ? <span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label" set:html={inlineHtml(c.cta)} /></span> : null;
@@ -86,12 +87,11 @@ function arrowSvg(left = false) {
             {c.date && <p class="st-car-date">{c.date}</p>}
             <h3 set:html={inlineHtml(c.title)} />
             {isBlogFull && <div class="st-car-byline" aria-hidden="true"></div>}
-            <Fragment set:html={bodyHtml(fi.rest)} />
+            <Fragment set:html={bodyHtml(fi.rest, hrefOk ? { inLink: true } : undefined)} />
             {cta}
           </Fragment>
         );
         const cellClass = 'st-car-cell st-gal-cell' + (isBlogFull ? ' st-car-cell-blogfull' : '');
-        const hrefOk = c.href ? safeHref(c.href) : null;
         return hrefOk
           ? <a class={`${cellClass} st-cell-link group`} href={hrefOk}>{inner}</a>
           : <div class={cellClass}>{inner}</div>;

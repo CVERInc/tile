@@ -75,6 +75,7 @@ export function youtubeUrlRef(u) {
  * (or `start=`, or an old `#t=`) the link carries, in whole seconds — `90`, `90s`, `1m30s`, `1h2m3s`;
  * 0 when absent or unreadable, which is where the video starts anyway.
  */
+const MAX_START = 86400 * 365;
 export function youtubeVideoOf(href) {
   const s = String(href == null ? '' : href).trim();
   if (!/^https?:\/\/[^\s]+$/i.test(s)) return null;
@@ -85,7 +86,9 @@ export function youtubeVideoOf(href) {
   const t = u.searchParams.get('t') ?? u.searchParams.get('start') ?? hash.get('t') ?? '';
   const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/i.exec(t);
   const start = m ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : 0;
-  return { id, start: Number.isFinite(start) ? start : 0 };
+  // Past a year is not a start time anyone wrote on purpose — and an unbounded one printed `1e+23`
+  // into the markup (tile#150 N1). Treated like an unreadable `t=`: the start of the video.
+  return { id, start: Number.isFinite(start) && start <= MAX_START ? start : 0 };
 }
 
 /**
