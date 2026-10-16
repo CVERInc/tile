@@ -2434,23 +2434,24 @@ function renderSection(s, hero, ctx) {
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
       const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
       const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
+      // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
+      const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+      const logo = logoRaw ? safeSrc(logoRaw) : null;
+      const h1Html = logo
+        ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
+        : '<h1>' + inlineHtml(s.title) + '</h1>';
       if (layerList.length) {
-        const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
-        const logo = logoRaw ? safeSrc(logoRaw) : null;
         const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
         const stage = '<div class="st-hero-stage" aria-hidden="true">' + layerList.map((src, i) => {
           const srcOk = safeSrc(src);
           return srcOk ? '<img class="st-hero-layer" src="' + escAttr(srcOk) + '" alt="" data-depth="' + i + '" loading="eager" decoding="async">' : '';
         }).join('') + '</div>';
-        const lTitle = logo
-          ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
-          : '<h1>' + inlineHtml(s.title) + '</h1>';
         return '<section class="st-hero st-full-bleed st-hero-layered" data-media="' + media + '"' +
           (pm.parallax != null ? ' data-parallax=""' : '') + ' data-logo-pos="' + escAttr(logoPos) + '"' +
           (pm.enter != null ? ' data-enter=""' : '') + '>' + stage +
           '<div class="st-hero-text st-hero-overlay">' + (lEyebrow ? '<p class="st-hero-eyebrow">' + inlineHtml(lEyebrow) + '</p>' : '') +
-          lTitle + bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</div></section>';
+          h1Html + bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</div></section>';
       }
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
       // DOM (the logo image stays a `.st-figure` via bodyHtml). New columned hero is OPT-IN via `layout`.
@@ -2462,7 +2463,7 @@ function renderSection(s, hero, ctx) {
       const hp = heroParts(s.body);
       const eyebrow = pm.eyebrow ? '<p class="st-hero-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       // text column: eyebrow + h1 + lead prose + button row (or the legacy single `cta=` param).
-      const txt = '<div class="st-hero-text">' + eyebrow + '<h1>' + inlineHtml(s.title) + '</h1>' +
+      const txt = '<div class="st-hero-text">' + eyebrow + h1Html +
         bodyHtml(hp.text) + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-hero') : ctaHtml(pm.cta, 'st-hero-cta')) + '</div>';
       const art = hp.images.length ? '<div class="st-hero-art"' + (hp.images.length > 1 ? ' data-imgs="' + hp.images.length + '"' : '') + '>' +
         hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '';
