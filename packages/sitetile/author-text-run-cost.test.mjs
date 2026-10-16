@@ -151,8 +151,16 @@ function refFooterWidgets(contentGlob) {
   return (popular || categories) ? { popular, categories } : null;
 }
 
-// parsePost's featured image and excerpt, as they were.
-const refFeatured = (b) => [...b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+// parsePost's featured image and excerpt, as they were — plus the one rule added after this ruler
+// was written (a video-only post takes the poster URL in its alt slot; blog-video-poster-thumb
+// .test.mjs owns that behaviour). The ruler compares answers, so the reference carries the same rule
+// in the same quadratic regex shape; the cost ruler below still reads this reference's growth.
+const refFeatured = (b) => {
+  const all = [...b.matchAll(/!\[([^\]]*)\]\(([^)\s]+)/g)];
+  const isVideo = (s) => /\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s);
+  return all.map((m) => m[2]).find((s) => !isVideo(s))
+    || all.filter((m) => isVideo(m[2])).map((m) => m[1]).find((alt) => /^https?:\/\/|^\//.test(alt || ''));
+};
 const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
   .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
   .join(' ');

@@ -137,7 +137,15 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // posts. They are the same patterns read by site-core's bracketMatches, which reads each run once:
   // MD_IMAGE_SRC is /!\[[^\]]*\]\(([^)\s]+)/g (its match is [whole, alt, src]), DESC_IMAGE is
   // /!\[[^\]]*\]\([^)]*\)/g.
-  const imgM = bracketMatches(b, BRACKET_SHAPES.MD_IMAGE_SRC).map((m) => m[2]).find((s) => !/\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s));
+  const mdImages = bracketMatches(b, BRACKET_SHAPES.MD_IMAGE_SRC);
+  const isVideoSrc = (s) => /\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(s);
+  // A post whose only media is a video still has a face: the poster carried in the alt slot
+  // (`![poster-url](clip.mp4)` — the same slot imgTag reads for `<video poster>`). It is a still
+  // image, so it is exactly what an archive card wants; the video src itself never is. Measured on
+  // a Wix recast (sodaart, 2026-10-16): 116 showcase posts had a video and nothing else, so every
+  // one of them listed as a blank card and the news carousel (image-first) dropped them outright.
+  const imgM = mdImages.map((m) => m[2]).find((s) => !isVideoSrc(s))
+    || mdImages.filter((m) => isVideoSrc(m[2])).map((m) => m[1]).find((alt) => /^https?:\/\/|^\//.test(alt || ''));
   // round 5 (R4-P3-2): `image` is this post's featured-image URL — extracted straight off a
   // markdown regex, with NO gate of its own, and consumed VERBATIM as a live `<img src>` by every
   // card renderer that shows it (blog index, both term archives, "Keep reading"/"Recent posts",
