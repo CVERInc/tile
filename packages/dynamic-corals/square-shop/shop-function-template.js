@@ -1176,6 +1176,45 @@ function inboxRedirectResponse(returnPath, outcome) {
 	return new Response(null, { status: 303, headers: { location: url.pathname + url.search + url.hash } });
 }
 
+// ── /_yt/<id>.jpg — a YouTube line's poster, relayed (tile#148) ─────────────────────────
+// sitetile renders a paragraph that is only a YouTube link as a click-to-play block whose poster is
+// THIS path (cardtile/yt.mjs posterPath), never i.ytimg.com: a Google-hosted poster in the markup
+// would have every visitor's browser report to Google on page load — the exact thing click-to-play
+// exists to prevent. The same relay as the Card Worker's /_yt/ (cardtile/serve/card-worker.mjs):
+//   · the id is held to the 11-character video shape (cardtile's VIDEO_RE) BY THE ROUTE PATTERN,
+//     before it is ever part of a URL — without that this is an open proxy;
+//   · only an image type is relayed (never SVG, never a transient text/html);
+//   · only a response that passed that check is cached (caches.default, under this request's
+//     own URL), so a bad upstream moment is never kept;
+//   · a miss is a 404 with no-store — the block is designed to look like an unopened video
+//     without its poster, so a missing poster costs a picture and nothing else.
+const YT_POSTER_PATH = /^\/_yt\/([A-Za-z0-9_-]{11})\.jpg$/;
+const YT_POSTER_TYPES = ['image/jpeg', 'image/webp', 'image/png'];
+const ytPosterMiss = () => new Response('', { status: 404, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
+async function relayYoutubePoster(request, ctx, id) {
+	if (request.method !== 'GET' && request.method !== 'HEAD') {
+		return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8' } });
+	}
+	const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+	const key = new Request(request.url, { method: 'GET' });
+	if (cache) {
+		const hit = await cache.match(key).catch(() => null);
+		if (hit) return hit;
+	}
+	const up = await fetch('https://i.ytimg.com/vi/' + id + '/hqdefault.jpg').catch(() => null);
+	if (!up || !up.ok) return ytPosterMiss();
+	const type = String(up.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+	if (!YT_POSTER_TYPES.includes(type)) return ytPosterMiss();
+	const resp = new Response(up.body, {
+		headers: { 'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=86400' }
+	});
+	if (cache) {
+		const put = cache.put(key, resp.clone()).catch(() => {});
+		if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+	}
+	return resp;
+}
+
 async function handleInboxForward(request, CFG) {
 	if (request.method !== 'POST') {
 		return new Response('Method Not Allowed', {
@@ -1489,6 +1528,9 @@ export default {
 		// below — it exists on every site regardless of --api-contract, --shop or
 		// --platform-origin, so it never depends on any of them being present.
 		if (pathname === '/__reef/inbox') return handleInboxForward(request, CFG);
+		// Same terms (fixed, site-owned, on every site): a YouTube line's poster (tile#148).
+		const ytPoster = YT_POSTER_PATH.exec(pathname);
+		if (ytPoster) return relayYoutubePoster(request, ctx, ytPoster[1]);
 
 		// Native checkout returns to the contract-declared shared platform path. A
 		// resolved native storefront claims it before the generic forward so the
@@ -1554,5 +1596,6 @@ export {
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
-	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse
+	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
+	YT_POSTER_PATH, relayYoutubePoster
 };

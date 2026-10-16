@@ -188,6 +188,11 @@ const ALLOWED_INLINE = [
   // `carousel` coral at all — round 2 already named it as untested). Self-gates per instance
   // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page.
   ['carousel prev/next + overflow wiring (per-instance self-gating, zero-op with no .st-carousel)', 'carInit'],
+  // YouTube line click-to-play (tile#148, youtube-line-script.js): progressive over a real link —
+  // JS-off, the poster IS `<a href="…youtube…">`, so the video still opens; the script only swaps
+  // that link for a youtube-nocookie iframe on press. Idempotent per page (window.__stYt), and a
+  // no-op with no `a.st-video-yt[data-yt]` on the page.
+  ['YouTube line click-to-play (swap the poster link for a youtube-nocookie player on press)', 'a.st-video-yt[data-yt]'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],

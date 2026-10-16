@@ -115,6 +115,10 @@ const CASES = [
   { title: 'Form', marker: '%% sitetile: form %%', body: 'Write to us.\n\n### Name {required}\n### Email {email}\n### Topic\n- A\n- B\n### Message {textarea}' },
   { title: 'Form inbox', marker: '%% sitetile: form action=inbox %%', body: 'Write to us.\n\n### Email {email}\n### Message {textarea}' },
   { title: 'FAQ', marker: '%% sitetile: faq %%', body: '### Why?\nBecause.\n\n### How?\nLike this.' },
+  // tile#148: a YouTube line is a player wherever bodyHtml renders a body — a prose section (where the
+  // links-only test would have made it a button) and a FAQ answer — in both renderers alike.
+  { title: 'Prose YouTube', marker: '', body: 'Watch.\n\n[https://www.youtube.com/watch?v=dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)\n\nhttps://youtu.be/K9j8H7g6F5d?t=30\n\n[Watch it there](https://youtu.be/K9j8H7g6F5d)' },
+  { title: 'FAQ YouTube', marker: '%% sitetile: faq %%', body: '### Where is the video?\nHere:\n\nhttps://www.youtube.com/shorts/s0rTsVid3oX' },
   { title: 'Timeline', marker: '%% sitetile: timeline %%', body: '### 2020\nStart.\n\n### 2021\nGrowth.' },
   { title: 'CTA', marker: '%% sitetile: cta %%', body: 'Come along.\n\n[Join](/join)' },
   { title: 'Gallery', marker: '%% sitetile: gallery %%', body: '![One](/img/1.png)\n\n![Two](/img/2.png)' },
@@ -144,7 +148,7 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'timeline', 'cta', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });

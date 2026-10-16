@@ -45,6 +45,11 @@ import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { localeHomePath } from './locale.mjs';
 import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
+// tile#148: a YouTube line. The address rules and the poster path are cardtile's (yt.mjs, no imports
+// of its own), so a Card's video cell and a post's YouTube line read a link the same way and point at
+// the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
+import { youtubeVideoOf, posterPath } from '../cardtile/yt.mjs';
+import { YOUTUBE_LINE_SCRIPT } from './youtube-line-script.js';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
@@ -2098,6 +2103,10 @@ function bodyHtml(body, opts) {
     // before inlineHtml runs: that call would render (and, for a disallowed scheme, report) the
     // links a second time.
     const paraSrc = para.join('\n').trim();
+    // tile#148: a paragraph that is ONLY a YouTube link is a player, in every body (a post, a prose
+    // section, a FAQ answer…). Asked before the link-row test, which would otherwise make it a button.
+    const yt = youtubeLine(paraSrc);
+    if (yt) { out.push(youtubeLineHtml(yt)); continue; }
     const links = opts && opts.linkRows ? linksOnly(paraSrc) : null;
     if (links) {
       const back = isBackLink(paraSrc, links);
@@ -2226,6 +2235,55 @@ function ctaButtonsHtml(pmButton, body, pmIcon) {
 function ctaCaptionFirst(caption) {
   const v = caption && typeof caption === 'object' ? caption.label : caption;
   return v === 'before';
+}
+
+// ── the YouTube line (tile#148) ──────────────────────────────────────────────────────────────────
+// A paragraph that is ONLY a YouTube video link — the bare address, or `[address](address)` with the
+// label equal to the destination (what a migration writes when it had a player and no way to say so)
+// — names a video and nothing else, so it renders as one: a click-to-play block. Anything with words
+// in it is a link someone chose to label, and stays a link: `[watch this](https://youtu.be/…)`, a
+// YouTube link inside a sentence, two links in one paragraph, a channel address.
+//   → { id, start, href } | null. `src` is the paragraph's own source, trimmed.
+function youtubeLine(src) {
+  const s = String(src || '');
+  if (!s || /\s/.test(s)) return null;   // one token: no second word, no second line
+  let href = s;
+  if (s[0] === '[') {
+    const m = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(s);
+    // A label is markdown text, so a converter may have backslash-escaped it (`v=a\_b`); compare it
+    // as the reader sees it.
+    if (!m || m[1].replace(/\\([!-\/:-@[-`{-~])/g, '$1') !== m[2]) return null;
+    href = m[2];
+  }
+  const v = youtubeVideoOf(href);
+  return v ? { id: v.id, start: v.start, href } : null;
+}
+// The block. 🔴 Nothing in it reaches Google before the visitor presses play: the poster is OUR path
+// (yt.mjs posterPath — the site's Worker relays it, like the Card Worker does), and the player is
+// created by YOUTUBE_LINE_SCRIPT only on that press, on youtube-nocookie. With no script it is the
+// author's own link round a picture — it opens the video on YouTube, which is what the line did before.
+const YT_PLAY_SVG = '<svg viewBox="0 0 68 48" width="68" height="48"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg>';
+function youtubeLineHtml(v) {
+  return '<figure class="st-video st-video-youtube"><a class="st-video-yt" href="' + escHrefAttr(v.href) +
+    '" target="_blank" rel="noopener" data-yt="' + v.id + '"' + (v.start > 0 ? ' data-yt-start="' + v.start + '"' : '') +
+    ' aria-label="YouTube"><img class="st-video-yt-poster" src="' + posterPath(v.id) + '" alt="" loading="lazy" decoding="async">' +
+    '<span class="st-video-yt-play" aria-hidden="true">' + YT_PLAY_SVG + '</span></a><script>' + YOUTUBE_LINE_SCRIPT + '</script></figure>';
+}
+// Every video a body shows as a YouTube line, in source order → [{ id, start, href, poster }]. A line counts
+// when it is a paragraph of its own (blank line, or the body's edge, on both sides) outside a code
+// fence — what bodyHtml turns into a player. For the blog layer's featured image (blog.mjs parsePost).
+function youtubeLines(body) {
+  const lines = String(body || '').split('\n');
+  const out = [];
+  let fence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
+    if (fence || !lines[i].trim()) continue;
+    if ((i > 0 && lines[i - 1].trim()) || (i + 1 < lines.length && lines[i + 1].trim())) continue;
+    const v = youtubeLine(lines[i].trim());
+    if (v) out.push({ ...v, poster: posterPath(v.id) });
+  }
+  return out;
 }
 
 // A paragraph that is ONLY links (`[A](/a) · [B](/b)`, joined by `·`, `,` or whitespace) → its link
@@ -3032,6 +3090,8 @@ export {
   safeInternalPath,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
   INBOX_FORM_SCRIPT,
+  // tile#148: the YouTube line — the paragraph test and the list of a body's videos (blog featured image).
+  youtubeLine, youtubeLines,
   // the editing door's view of the dialogue convention — see quoteRunReport's own comment.
   quoteRunReport,
   // round 5: the CSS-string escape a gated destination needs before an unquoted url() token —

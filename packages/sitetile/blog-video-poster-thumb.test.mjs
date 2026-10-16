@@ -61,4 +61,33 @@ test('the poster is still gated by safeSrc (a data: svg poster is refused)', () 
   assert.equal(p.image, '');
 });
 
+// tile#148 — a post whose only media is a YouTube line (sodaart's 阿蕥生活日記: 54 lines, 19 posts)
+// takes that video's poster: the SAME proxied path its player shows, never i.ytimg.com (an archive
+// card is a page load too).
+const YT = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+
+test('a YouTube-line-only post: the proxied poster of its first video is the featured image', () => {
+  const p = post('Today.\n\n[' + YT + '](' + YT + ')\n\nhttps://youtu.be/K9j8H7g6F5d\n');
+  assert.equal(p.image, '/_yt/dQw4w9WgXcQ.jpg');
+});
+
+test('🔴 the YouTube fallback never names Google — no i.ytimg.com in the featured image', () => {
+  assert.ok(!/ytimg|youtube/.test(post('https://youtu.be/K9j8H7g6F5d\n').image));
+});
+
+test('a still image anywhere still wins over a YouTube poster; so does a video poster', () => {
+  assert.equal(post('https://youtu.be/K9j8H7g6F5d\n\n![](/still.webp)\n').image, '/still.webp');
+  assert.equal(post('https://youtu.be/K9j8H7g6F5d\n\n![/p.jpg](/clip.mp4)\n').image, '/p.jpg');
+});
+
+test('NEGATIVE CONTROL: a YouTube link that is not a line (labelled, or in a sentence) gives no featured image', () => {
+  assert.equal(post('[Watch](' + YT + ')\n').image, '');
+  assert.equal(post('See ' + YT + ' now.\n').image, '');
+});
+
+test('the excerpt does not read a bare YouTube line as words', () => {
+  const p = post('Opening words.\n\nhttps://youtu.be/K9j8H7g6F5d\n\nClosing words.\n');
+  assert.equal(p.excerpt, 'Opening words. Closing words.');
+});
+
 console.log(`blog-video-poster-thumb: ${passed} passed`);
