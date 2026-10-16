@@ -23,6 +23,7 @@
 import { CONTROL, SOURCE } from '../ai-ops.mjs';
 import { setToken, removeToken, quoteParam } from '../card-core.js';
 import { linkOf, hostLabel } from '../card-render.mjs';
+import { youtubeUrlRef } from '../yt.mjs';
 
 export const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -160,16 +161,8 @@ export function youtubeRef(input) {
   if (!s || YT_ID.test(s) || YT_CH.test(s) || YT_HANDLE.test(s)) return s;
   let u;
   try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`); } catch { return s; }
-  const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
-  const seg = u.pathname.split('/').filter(Boolean);
-  let got = '';
-  if (host === 'youtu.be') got = seg[0] || '';
-  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
-    if (seg[0] === 'watch') got = u.searchParams.get('v') || '';
-    else if (['shorts', 'embed', 'live', 'v'].includes(seg[0])) got = seg[1] || '';
-    else if (seg[0] === 'channel') got = seg[1] || '';
-    else if (seg[0] && seg[0].startsWith('@')) got = decodeURIComponent(seg[0]);   // youtube.com/@name(/videos)
-  }
+  // the host/path rules live in yt.mjs, shared with sitetile's YouTube line (tile#148)
+  const got = youtubeUrlRef(u);
   return YT_ID.test(got) || YT_CH.test(got) || YT_HANDLE.test(got) ? got : s;
 }
 

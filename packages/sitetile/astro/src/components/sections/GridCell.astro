@@ -22,6 +22,9 @@ const footTag = c.badge && c.cta;
 // below reads the `*Ok` value, never `c.href`/`c.badgeHref` directly, so a `javascript:`/`data:`
 // cell link degrades to the existing plain (non-`<a>`) shape instead of going live.
 const hrefOk = c.href ? safeHref(c.href) : null;
+// A linked cell (whole-cell <a>, or the overlay covering it) is one link: its body gets no YouTube
+// player, which is an <a> itself (tile#150 L1 — same rule as site-core's grid case).
+const cellOpts = hrefOk ? { inLink: true } : undefined;
 const badgeHrefOk = c.badgeHref ? safeHref(c.badgeHref) : null;
 // `[Label →href]` badge = a SECONDARY card link (e.g. an "Open in …" action). It can't
 // nest inside the whole-cell <a>, so such a cell uses the OVERLAY pattern: a relative container, an
@@ -34,14 +37,14 @@ const hasAction = !!(hrefOk && badgeHrefOk);
       {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
       {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={gridCellBodyHtml(fi.rest)} />
+      <Fragment set:html={gridCellBodyHtml(fi.rest, cellOpts)} />
     </a>
   ) : (
     <div class="st-cell st-gal-cell" data-cat={c.badge || undefined}>
       {fi.img && <figure class="st-gal-fig" set:html={imgTag(fi.img.alt, fi.img.src)} />}
       {badge && <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={gridCellBodyHtml(fi.rest)} />
+      <Fragment set:html={gridCellBodyHtml(fi.rest, cellOpts)} />
     </div>
   )
 ) : hasAction ? (
@@ -51,7 +54,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
       ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
       : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
     {c.title && <h3 set:html={inlineHtml(c.title)} />}
-    <Fragment set:html={gridCellBodyHtml(c.body)} />
+    <Fragment set:html={gridCellBodyHtml(c.body, cellOpts)} />
     <div class="st-cell-foot">
       <a class="st-cell-action" href={badgeHrefOk} {...tgt(badgeHrefOk)}>
         <span class="st-cta-label" set:html={inlineHtml(c.badge)} />
@@ -73,7 +76,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
         ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
         : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={gridCellBodyHtml(c.body)} />
+      <Fragment set:html={gridCellBodyHtml(c.body, cellOpts)} />
       {footTag ? (
         <div class="st-cell-foot">
           <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />
@@ -95,7 +98,7 @@ const hasAction = !!(hrefOk && badgeHrefOk);
         ? <span class="st-cell-icon" aria-hidden="true" set:html={lucideSvg(c.icon)} />
         : c.emoji && <span class="st-cell-emoji" aria-hidden="true" set:html={inlineHtml(c.emoji)} />}
       {c.title && <h3 set:html={inlineHtml(c.title)} />}
-      <Fragment set:html={gridCellBodyHtml(c.body)} />
+      <Fragment set:html={gridCellBodyHtml(c.body, cellOpts)} />
       {footTag ? (
         <div class="st-cell-foot">
           <span class="st-cell-badge" data-badge={String(c.badge).toLowerCase()} set:html={inlineHtml(c.badge)} />

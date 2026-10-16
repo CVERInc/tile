@@ -78,7 +78,8 @@ test('Astro routes every cell body through the shared grid renderer', () => {
     calls: [...source.matchAll(/<Fragment set:html=\{([^}]+)\} \/>/g)].map((m) => m[1]),
   }, {
     imported: true,
-    calls: ['gridCellBodyHtml(fi.rest)', 'gridCellBodyHtml(fi.rest)',
-      'gridCellBodyHtml(c.body)', 'gridCellBodyHtml(c.body)', 'gridCellBodyHtml(c.body)'],
+    // `cellOpts` = { inLink: true } on a linked cell (tile#150 L1: no YouTube player inside its <a>)
+    calls: ['gridCellBodyHtml(fi.rest, cellOpts)', 'gridCellBodyHtml(fi.rest, cellOpts)',
+      'gridCellBodyHtml(c.body, cellOpts)', 'gridCellBodyHtml(c.body, cellOpts)', 'gridCellBodyHtml(c.body, cellOpts)'],
   });
 });

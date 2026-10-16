@@ -176,6 +176,9 @@ const SECTIONS = [
   ['Hard break', '', '![h1](/img/h1.png)  \n![h2](/img/h2.png)'],
   // CONTROL: the same images with a blank line between are two paragraphs, so two figures.
   ['Two figures', '', '![x1](/img/x1.png)\n\n![x2](/img/x2.png)'],
+  // tile#148: a YouTube line is the click-to-play block in place — not a button row (it IS a
+  // links-only paragraph), and its neighbours keep theirs: a labelled YouTube link is still a row.
+  ['YouTube line', '', 'Watch.\n\n[https://www.youtube.com/watch?v=dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)\n\nhttps://youtu.be/K9j8H7g6F5d?t=30\n\n[Watch it there](https://youtu.be/K9j8H7g6F5d)'],
 ];
 const MD = '---\nsitetile-page: home\ntitle: Prose parity\nlang: en-US\n---\n\n'
   + SECTIONS.map(([title, marker, body]) => `## ${title}\n${marker ? marker + '\n' : ''}${body}\n`).join('\n');
@@ -344,6 +347,20 @@ function assertTags(where, byId) {
   }
 }
 
+// tile#148, written out by hand: p, the two blocks (each figure.st-video-youtube > a.st-video-yt >
+// img.st-video-yt-poster + span, then the script), then the labelled link's row.
+function assertYoutube(where, byId) {
+  const sec = byId.get(idOf('YouTube line'));
+  assert.ok(sec, `${where}: no YouTube line section`);
+  assert.deepEqual(sec.kids.map(sig), ['h2', 'p', 'figure.st-video.st-video-youtube', 'figure.st-video.st-video-youtube', 'div.st-prose-btns'], `${where}: the YouTube section's children`);
+  const figs = sec.kids.filter((n) => n.tag === 'figure');
+  assert.deepEqual(figs.map((f) => f.kids.map(sig)), [['a.st-video-yt', 'script'], ['a.st-video-yt', 'script']], `${where}: what each block holds`);
+  assert.deepEqual(figs.map((f) => [f.kids[0].attrs['data-yt'], f.kids[0].attrs['data-yt-start'] ?? null, f.kids[0].kids[0].attrs.src]),
+    [['dQw4w9WgXcQ', null, '/_yt/dQw4w9WgXcQ.jpg'], ['K9j8H7g6F5d', '30', '/_yt/K9j8H7g6F5d.jpg']], `${where}: each block's video, start and proxied poster`);
+  const rows = facts(sec).buttonRows.map((row) => row.map((b) => [b.label, b.href, b.cls]));
+  assert.deepEqual(rows, [[btn('Watch it there', 'https://youtu.be/K9j8H7g6F5d')]], `${where}: only the labelled link is a row`);
+}
+
 function assertExpected(where, byId) {
   for (const [title, want] of Object.entries(EXPECTED)) {
     const section = byId.get(idOf(title));
@@ -373,6 +390,10 @@ await test('the fixture parsed into the sections it was written as, all of them 
 
 await test('🔴 string renderer: standalone images and link rows stay where they were written', () => {
   assertExpected('string renderer', stringById);
+});
+
+await test('🔴 string renderer: a YouTube line is the click-to-play block in place, not a button row', () => {
+  assertYoutube('string renderer', stringById);
 });
 
 await test('🔴 string renderer: a figure is images and nothing else — no <br>, no whitespace between them', () => {
@@ -459,6 +480,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
 
     await test('🔴 built page: standalone images and link rows stay where they were written', () => {
       assertExpected('built page', astroById);
+    });
+
+    await test('🔴 built page: a YouTube line is the click-to-play block in place, not a button row', () => {
+      assertYoutube('built page', astroById);
     });
 
     await test('🔴 built page: a figure is images and nothing else — no <br>, no whitespace between them', () => {

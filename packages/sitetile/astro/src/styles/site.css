@@ -720,6 +720,20 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
 .st-video { max-width: 100%; height: auto; display: block; }
 .st-figure { margin: 1.5rem 0; }
 .st-figure .st-img, .st-figure .st-video { border-radius: var(--gd-radius); }
+/* tile#148 — a YouTube line: a paragraph that is only a YouTube link becomes
+   figure.st-video-youtube > a.st-video-yt (our proxied poster + play mark) until the visitor presses
+   it, then figure > iframe (youtube-nocookie). The box is the video's: 16:9, full width, the poster
+   cropped to it (hqdefault is 4:3 with the bars baked in) and the player filling it.
+   🔴 NOT gated on `body:not([data-theme-custom])` like the born-paint rules. That gate keeps base off
+   DOM a hand-rolled theme already styles its own way; no theme has ever seen this DOM (it is new), and
+   without these rules a custom-themed site would get a 300×150 iframe — `.st-embed iframe` above is
+   ungated for the same reason. Single-class selectors, so a theme overrides by naming the class. */
+.st-video-youtube { position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 1.5rem 0; border-radius: var(--gd-radius); overflow: hidden; background: #000; }
+.st-video-youtube > .st-video-yt, .st-video-youtube > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.st-video-yt-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
+.st-video-yt-play { position: absolute; inset: 0; display: grid; place-items: center; }
+.st-video-yt-play svg { opacity: .9; transition: opacity .15s; }
+.st-video-yt:hover .st-video-yt-play svg, .st-video-yt:focus-visible .st-video-yt-play svg { opacity: 1; }
 .st-prose .st-figure, .st-cta .st-figure { margin-inline: auto; }
 .st-cell .st-figure { margin: 0 0 0.75rem; }
 /* hero foreground media variants (data-media): avatar (round portrait, default)

@@ -47,6 +47,51 @@ export const TIMEOUT_MS = 1500;
 export const posterPath = (videoId) => `/_yt/${videoId}.jpg`;
 
 /**
+ * What a YouTube address names — a video id, a channel code or an @handle — read off its host and
+ * path. ONE copy of these rules: the Card editor's paste box (w/cell-form-core.mjs `youtubeRef`) and
+ * sitetile's YouTube line (site-core.js, tile#148) both read it, so "is this a YouTube video" cannot
+ * mean two things in one product. `u` is a parsed URL. Returns '' for any other address. NOT
+ * validated: each caller holds the answer against the shapes it accepts (VIDEO_RE, CHANNEL_RE, …).
+ * No imports, on purpose — sitetile's vendored import closure carries this file and nothing else
+ * from cardtile.
+ */
+export function youtubeUrlRef(u) {
+  const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
+  const seg = u.pathname.split('/').filter(Boolean);
+  if (host === 'youtu.be') return seg[0] || '';
+  if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    if (seg[0] === 'watch') return u.searchParams.get('v') || '';
+    if (['shorts', 'embed', 'live', 'v'].includes(seg[0])) return seg[1] || '';
+    if (seg[0] === 'channel') return seg[1] || '';
+    if (seg[0] && seg[0].startsWith('@')) return decodeURIComponent(seg[0]);   // youtube.com/@name(/videos)
+  }
+  return '';
+}
+
+/**
+ * A written-out link → the one video it plays, `{ id, start }`, or null. Strict where the paste box is
+ * forgiving: a scheme is required (http/https — this reads links an author published, not something
+ * being typed) and the answer must be a VIDEO id, never a channel or a handle. `start` is the `t=`
+ * (or `start=`, or an old `#t=`) the link carries, in whole seconds — `90`, `90s`, `1m30s`, `1h2m3s`;
+ * 0 when absent or unreadable, which is where the video starts anyway.
+ */
+const MAX_START = 86400 * 365;
+export function youtubeVideoOf(href) {
+  const s = String(href == null ? '' : href).trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(s)) return null;
+  let u, id;
+  try { u = new URL(s); id = youtubeUrlRef(u); } catch { return null; }
+  if (!VIDEO_RE.test(id)) return null;
+  const hash = new URLSearchParams(u.hash.replace(/^#/, ''));
+  const t = u.searchParams.get('t') ?? u.searchParams.get('start') ?? hash.get('t') ?? '';
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/i.exec(t);
+  const start = m ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : 0;
+  // Past a year is not a start time anyone wrote on purpose — and an unbounded one printed `1e+23`
+  // into the markup (tile#150 N1). Treated like an unreadable `t=`: the start of the video.
+  return { id, start: Number.isFinite(start) && start <= MAX_START ? start : 0 };
+}
+
+/**
  * Every channel id a card asks about. Reads the raw markdown rather than the parsed model so the
  * Worker can resolve BEFORE rendering — renderCardHTML is pure and synchronous, and stays that way.
  */

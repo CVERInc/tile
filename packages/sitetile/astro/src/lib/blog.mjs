@@ -3,7 +3,7 @@
 // + body) living in the build's `blog/` dir (the reef `blog_posts` store shape).
 // The blog pages wear the SAME SiteLayout shell as the rest of the site, so the
 // site's theme + packages (bleedblend band, lingo head) apply to /devlog too.
-import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext, bracketMatches, replaceMatches, BRACKET_SHAPES } from '@sitetile';
+import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, dialogueContext, bracketMatches, replaceMatches, BRACKET_SHAPES, youtubeLine, youtubeLines } from '@sitetile';
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
@@ -118,6 +118,9 @@ function capExcerpt(text, max) {
   return text.length > n ? text.slice(0, n).trim() + ' […]' : text;
 }
 
+// The first YouTube line's poster path, or '' (tile#148 — see parsePost's featured image).
+const youtubePoster = (body) => { const v = youtubeLines(body)[0]; return v ? v.poster : ''; };
+
 // Parse one post's raw markdown → { slug, title, description, date, tags, body, author, excerptText }.
 // excerptMax caps the derived excerpt (default 180 = historic behavior); callers that want a
 // per-site cap pass it, but the effective index cap is normally applied later in buildIndexView.
@@ -144,8 +147,13 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // image, so it is exactly what an archive card wants; the video src itself never is. Measured on
   // a Wix recast (sodaart, 2026-10-16): 116 showcase posts had a video and nothing else, so every
   // one of them listed as a blank card and the news carousel (image-first) dropped them outright.
+  // …and a post whose only media is a YouTube line (tile#148: sodaart's 阿蕥生活日記 posts carry
+  // nothing else) takes that video's poster — the SAME proxied path its player shows (cardtile's
+  // posterPath, `/_yt/<id>.jpg`, relayed by the site's Worker), never i.ytimg.com: an archive card is
+  // a page load too, and the visitor's browser must not reach Google from one any more than from the post.
   const imgM = mdImages.map((m) => m[2]).find((s) => !isVideoSrc(s))
-    || mdImages.filter((m) => isVideoSrc(m[2])).map((m) => m[1]).find((alt) => /^https?:\/\/|^\//.test(alt || ''));
+    || mdImages.filter((m) => isVideoSrc(m[2])).map((m) => m[1]).find((alt) => /^https?:\/\/|^\//.test(alt || ''))
+    || youtubePoster(b);
   // round 5 (R4-P3-2): `image` is this post's featured-image URL — extracted straight off a
   // markdown regex, with NO gate of its own, and consumed VERBATIM as a live `<img src>` by every
   // card renderer that shows it (blog index, both term archives, "Keep reading"/"Recent posts",
@@ -171,7 +179,8 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
   const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
-    .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
+    // (a bare YouTube address on its own line is a player now, not words — tile#148)
+    .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>') && !youtubeLine(s))
     .join(' ');
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
