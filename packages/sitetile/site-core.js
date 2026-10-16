@@ -2093,6 +2093,17 @@ function bodyHtml(body, opts) {
 
     const para = [];                                                          // paragraph / figure
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i, nextCloser)) { para.push(lines[i]); i++; }
+    // `linkRows` (a prose body): a paragraph that is ONLY links is a button row, here, where it was
+    // written — read off the paragraph's source lines, the same test a hero's CTA row uses. Decided
+    // before inlineHtml runs: that call would render (and, for a disallowed scheme, report) the
+    // links a second time.
+    const paraSrc = para.join('\n').trim();
+    const links = opts && opts.linkRows ? linksOnly(paraSrc) : null;
+    if (links) {
+      const back = isBackLink(paraSrc, links);
+      out.push(linkButtonsHtml(links.map((m, k) => ({ label: m[1].trim(), href: m[2].trim(), primary: k === 0 && !back, plain: back })), opts.linkRows));
+      continue;
+    }
     // A paragraph whose EVERY line carries CommonMark's own "this is literal" signal — 4+ leading
     // spaces — keeps comment-stripping OFF (issue #496 P2-04): this renderer does not implement
     // indented code blocks (no `<pre>` here, just the ordinary <p> below), but the signal itself is
@@ -2121,7 +2132,22 @@ function bodyHtml(body, opts) {
     const marked = para.map((ln, idx) => (idx < para.length - 1 && /  $/.test(ln) ? ln.replace(/\s+$/, '') + BR : ln));
     const t = softJoin(marked, BR, CJK).split(BR + ' ').join(BR).trim();
     const html = inlineHtml(t, indented ? { stripComments: false } : undefined).split(BR).join('<br>');
-    out.push(isImageOnly(t) ? '<figure class="st-figure">' + html + '</figure>' : '<p>' + html + '</p>');
+    // A paragraph of ONLY images is a figure, and its children are the images and nothing else. The
+    // soft line breaks and spaces between the images are source layout: written into the figure as
+    // whitespace text they sat between the images that `> .st-img ~ .st-img`, `:first-child` and a
+    // lightbox's `.st-figure .st-img` count on (reef#1933: a real site writes eight images one per
+    // line, single newlines, one paragraph). So the figure is rendered from the image tokens alone,
+    // in source order, at the markdown level — before inlineHtml, not by editing its HTML after.
+    // A HARD break (two trailing spaces) is the author asking for a line break: `t` then carries the
+    // break token, isImageOnly says no, and the paragraph stays `<p><img><br><img></p>`.
+    if (isImageOnly(t)) {
+      const toks = [...bracketMatches(t, MD_IMAGE), ...bracketMatches(t, WIKI_IMAGE)].sort((x, y) => x.index - y.index);
+      let end = -1, src = '';
+      for (const m of toks) { if (m.index < end) continue; src += m[0]; end = m.index + m[0].length; }
+      out.push('<figure class="st-figure">' + inlineHtml(src, indented ? { stripComments: false } : undefined) + '</figure>');
+      continue;
+    }
+    out.push('<p>' + html + '</p>');
   }
   return out.join('\n');
 }
@@ -2150,8 +2176,8 @@ function splitCtaBody(body) {
   const buttons = [], caption = [];
   String(body || '').split(/\n\s*\n/).forEach((para) => {
     const p = para.trim(); if (!p) return;
-    const links = bracketMatches(p, CTA_LINK);
-    const onlyLinks = links.length > 0 && replaceMatches(p, CTA_LINK, () => '').replace(/[·,\s]+/g, '') === '';
+    const links = linksOnly(p);
+    const onlyLinks = !!links;
     if (onlyLinks) { for (const m of links) buttons.push({ label: m[1].trim(), href: m[2].trim() }); }
     else caption.push(p);
   });
@@ -2202,6 +2228,17 @@ function ctaCaptionFirst(caption) {
   return v === 'before';
 }
 
+// A paragraph that is ONLY links (`[A](/a) · [B](/b)`, joined by `·`, `,` or whitespace) → its link
+// matches; anything else → null. The one test both a hero's CTA row and a prose button row use.
+function linksOnly(p) {
+  const links = bracketMatches(p, CTA_LINK);
+  return links.length > 0 && replaceMatches(p, CTA_LINK, () => '').replace(/[·,\s]+/g, '') === '' ? links : null;
+}
+// A lone "Back to X" link is return-to-listing navigation, drawn as a plain link, not a button.
+function isBackLink(p, links) {
+  return links.length === 1 && /^\[Back to /i.test(p);
+}
+
 // heroParts: a hero body → { text, buttons:[{label,href,primary}], image:{alt,src}|null }. Lets a hero
 // carry (in plain Markdown, in any order): lead prose paragraphs, ONE links-only paragraph that becomes
 // the CTA button row (first link = primary/filled, rest = secondary/outline), and ONE standalone image
@@ -2218,8 +2255,8 @@ function heroParts(body) {
       for (const m of bracketMatches(p, WIKI_IMAGE)) images.push({ alt: (m[1] || '').split('/').pop(), src: m[1] });
       return;
     }
-    const links = bracketMatches(p, CTA_LINK);
-    const onlyLinks = links.length > 0 && replaceMatches(p, CTA_LINK, () => '').replace(/[·,\s]+/g, '') === '';
+    const links = linksOnly(p);
+    const onlyLinks = !!links;
     // 🩸 general (2026-07-05, round 2): a lone "Back to X" link is return-to-listing navigation,
     // not a CTA — rendering it as a filled/outlined button adds real height nothing on live has.
     // Originally pulled it into `text` instead of `buttons`, but `text`/`buttons` render as two
@@ -2229,7 +2266,7 @@ function heroParts(body) {
     // /oss/liquidframe|demodeck|motifmint — DOM order was literally swapped). Keep it IN
     // `buttons` (preserves source order) but flag `plain:true` so the renderer draws it as a
     // plain link instead of button chrome.
-    const singleBackLink = onlyLinks && /^\[Back to /i.test(p) && links.length === 1;
+    const singleBackLink = onlyLinks && isBackLink(p, links);
     if (onlyLinks) {
       for (const m of links) buttons.push({ label: m[1].trim(), href: m[2].trim(), primary: buttons.length === 0 && !singleBackLink, plain: singleBackLink });
     } else text.push(p);
@@ -2350,23 +2387,22 @@ function orderedProseHtml(body) {
 // renderSection's prose branch below call this and nothing else, so the two cannot disagree about
 // where an image lands.
 //
-// A paragraph that is ONLY images leaves its place and joins one trailing `.st-prose-imgs` group;
-// a paragraph that is ONLY links becomes the `.st-prose-btns` row before it (the same `heroParts`
-// split a hero uses). What is left renders in source order. A body with neither is plain
-// bodyHtml — and so is an `ordered` one, whose clauses orderedProseHtml numbers.
+// Everything stays where the author wrote it (CVERInc/reef#1933 S6). It is `bodyHtml`, paragraph by
+// paragraph: a paragraph that is ONLY images is bodyHtml's own `figure.st-figure` (several images in
+// one paragraph = one figure holding them all), and a paragraph that is ONLY links is a
+// `.st-prose-btns` row drawn at that position (a lone `[Back to X](…)` is a `.st-prose-plain` link).
+// An `ordered` body takes no rows; orderedProseHtml numbers its clauses.
 //
-// 🩸 The split used to be written out in `Prose.astro` alone, while renderSection kept calling
-// bodyHtml on the whole body: the same Markdown gave a built page `div.st-prose-imgs > img` and
-// gave this file's reader `figure.st-figure > img`, in a different order. Anything derived from
-// the string render — a count of what a CSS selector matches, a description of the grammar —
-// described a page no visitor was served, and no test fed one body to both.
+// 🩸 tile#120 made the two renderers agree by lifting every images-only paragraph into one trailing
+// `.st-prose-imgs` group and every links-only paragraph into one row before it — the `heroParts`
+// split, which cuts the raw body on blank lines. Two things were wrong with that: the author's
+// order was thrown away (chodaict's ruling on #1933: images stay where they are written), and a
+// blank-line split does not know a code fence — a `[A](/a)` line inside a fenced block became a
+// button and an `![x](…)` line inside it left the code for the image group. The paragraphs here are
+// the ones bodyHtml finds after it has taken fences, lists, quotes and tables whole.
 function proseBodyHtml(body, ordered) {
   if (ordered) return orderedProseHtml(body);
-  const hp = heroParts(body);
-  if (!hp.buttons.length && !hp.images.length) return bodyHtml(body);
-  return bodyHtml(hp.text)
-    + (hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-prose') : '')
-    + (hp.images.length ? '<div class="st-prose-imgs">' + hp.images.map((im) => imgTag(im.alt, im.src)).join('') + '</div>' : '');
+  return bodyHtml(body, { linkRows: 'st-prose' });
 }
 
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
