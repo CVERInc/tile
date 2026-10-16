@@ -136,4 +136,15 @@ test('🔴 a locale HOME keeps its alternates through the build\'s filename coll
   );
 });
 
+// 🩸 CVERInc/tile#143. The glob key is `<prefix>/content/<rel>.md` where <prefix> is `/`, `../..` or
+// a repo path — never itself a `content` directory — so the content root is the FIRST `/content/`.
+// Everything after it is the rel, including a directory literally named `content`.
+test('a directory named content below the content root keeps its rel (#143)', () => {
+  const rels = contentRelsOf({
+    '/content/home.md': 1, '/content/x/content/home.md': 1, '/content/content/about.md': 1,
+    '../../content/y/content/home.md': 1,
+  });
+  assert.deepEqual([...rels].sort(), ['content/about', 'home', 'x/content/home', 'y/content/home']);
+});
+
 console.log(`\n${passed} passed`);

@@ -479,7 +479,12 @@ export function contentRelsOf(contentGlob) {
   const out = new Set();
   for (const path of Object.keys(contentGlob || {})) {
     if (/(^|\/)_(site|theme)\.md$/.test(path)) continue;
-    const rel = String(path).split('/content/')[1];
+    // Strip through the FIRST `/content/` only: keys are `<prefix>/content/<rel>.md` (`/content/…`,
+    // `../../content/…`), the prefix is never a content dir, and a `content` directory below the
+    // root is just a directory (#143). split('/content/')[1] cut the rel at the second one.
+    const s = String(path);
+    const at = s.indexOf('/content/');
+    const rel = at < 0 ? '' : s.slice(at + '/content/'.length);
     if (rel) out.add(rel.replace(/\.md$/, ''));
   }
   return out;
