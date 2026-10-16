@@ -50,7 +50,7 @@ locales: zh-TW, ja-JP, en-US   ← Lingo mount points → <html lang> + hreflang
 
 | Type | Params | Renders | Notes |
 |---|---|---|---|
-| **prose** | `align=left` · `ordered` · `surface=<token>` · `eyebrow="Label"` | `<section class="st-prose">` h2 + body, then `.st-prose-btns`, then `.st-prose-imgs` | **Default** (no type line needed). A paragraph that is only links becomes the button row; a paragraph that is only images leaves its place and joins the one trailing image group. |
+| **prose** | `align=left` · `ordered` · `surface=<token>` · `eyebrow="Label"` | `<section class="st-prose">` h2 + body, in source order | **Default** (no type line needed). Everything stays where it is written: a paragraph that is only links is a `.st-prose-btns` button row at that position (a lone `[Back to X](…)` is a plain `.st-prose-plain` link); a paragraph that is only images is a `<figure class="st-figure">` at that position (several images in one paragraph = one figure holding them all). |
 | **hero** | `bg=<url>` · `cta="Label"→/href` · `media=avatar\|logo` | `<section class="st-hero" data-media>` h1 + body + CTA | Full-bleed, optional bg. A foreground image in the body renders per `media`: **avatar** (round portrait, default) or **logo** (uncropped wordmark). |
 | **grid** | `cols=N` · `### ` = each cell · `### Title →/href` = whole-cell link | `<section class="st-grid" data-cols>` + responsive `st-cell` cards | Cells collapse on small screens regardless of `cols`. A cell with a trailing `→/href` becomes `<a class="st-cell st-cell-link">` with a chevron CTA; without, a plain `<div>`. |
 | **cta** | `button="Label"→/href` | `<section class="st-cta">` centered band | |
@@ -60,7 +60,7 @@ Unknown types render as `prose` but round-trip their literal type token.
 
 **Body content** (prose / hero / grid-cell bodies) is rendered by a small block parser — inline marks via cssmd **plus** these blocks:
 
-- **images** — `![alt](src)` / Obsidian `![[wikilink]]` → `<img class="st-img">`; an image-only block is a `<figure class="st-figure">` (hero portraits / in-body figures), an inline image stays in the `<p>`. **Not in a `prose` section**, which gathers its image-only paragraphs into `.st-prose-imgs` instead (see the table above) — a `figure` appears there only where the body is not split: under `ordered`, or for an image line written directly under a `###` heading with no blank line between.
+- **images** — `![alt](src)` / Obsidian `![[wikilink]]` → `<img class="st-img">`; an image-only block is a `<figure class="st-figure">` (hero portraits / in-body figures), an inline image stays in the `<p>`. Several images in one image-only paragraph are one figure holding them all; only inside a **hero** does such a figure become a row of round avatars.
 - **lists** — `-` / `*` / `1.` → `<ul>` / `<ol class="st-list">`.
 - **blockquotes** — `> …` → `<blockquote class="st-quote">`.
 - **fenced code** — ```` ``` ```` → `<pre class="st-code">` **verbatim** (the `#` / `>` / `|` / `-` inside are NOT parsed as blocks).

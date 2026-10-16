@@ -11,6 +11,15 @@
 // links as a paragraph. A count taken from the string render (`.st-figure` → 2) described a page
 // whose visitors were served zero of them. Nothing fed one body to both, so nothing was red.
 //
+// CVERInc/tile#120 made them agree by moving every standalone image to one trailing
+// `.st-prose-imgs` and every links-only paragraph to one row before it — in both renderers.
+// CVERInc/reef#1933 (S6, chodaict's ruling) puts them back where the author wrote them: an
+// images-only paragraph is a `figure.st-figure` in place (several images in one paragraph = one
+// figure holding them all), a links-only paragraph is a `.st-prose-btns` row in place, and there
+// is no `.st-prose-imgs` at all. The paragraphs are the ones `bodyHtml` already finds, so a fenced
+// code block or a list is never cut up by a blank line inside it — the old split ran a blank-line
+// regex over the raw body and lifted a link line out of the middle of a code fence.
+//
 // 🔴 Three kinds of assertion, because each alone has a way of staying green:
 //   · parity (Astro == string) is silent when both are wrong the same way — and they now share
 //     `proseBodyHtml`, so "the same way" is the likeliest way;
@@ -27,7 +36,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseSite, renderSiteToHtml } from './site-core.js';
+import { bodyHtml, parseSite, proseBodyHtml, renderSiteToHtml } from './site-core.js';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -88,6 +97,8 @@ function facts(section) {
     images: nodes.filter((n) => n.tag === 'img').map((n) => ({ src: n.attrs.src, alt: n.attrs.alt, in: sig(n.parent) })),
     buttonRows: nodes.filter((n) => n.cls.includes('st-prose-btns'))
       .map((row) => row.kids.map((b) => ({ tag: b.tag, cls: b.cls.join(' '), href: b.attrs.href ?? null, label: textOf(b) }))),
+    // what each figure holds, element by element — "one figure with two images" vs "two figures"
+    figures: nodes.filter((n) => n.tag === 'figure').map((f) => f.kids.map(sig)),
     counts,
   };
 }
@@ -142,6 +153,27 @@ const SECTIONS = [
   // and full-width punctuation (and the title a `"` too; the eyebrow cannot, its value is quoted).
   [ESC_TITLE, '', 'Body.'],
   ['Eyebrow escaping', `%% sitetile: prose eyebrow="${ESC_EYEBROW}" %%`, 'Body.'],
+  // The #1933 S6 fixture, verbatim from the plan: every kind of standalone paragraph, interleaved.
+  ['In place', '', 'intro\n\n![a](/1.png)\n\nmiddle\n\n[A](/a) · [B](/b)\n\n![b](/2.png)![c](/3.png)\n\nend'],
+  // A row written straight after an image stays after it — and each row is its own row, with its
+  // own first (primary) button, not one merged row.
+  ['Row after image', '', '![Lead image](/img/lead.png)\n\n[Go](/go) · [More](https://example.com/more)\n\nBetween.\n\n[Second row](/second)'],
+  // 🔴 A fence with blank lines, a links-only line and an images-only line inside it is CODE. The
+  // old blank-line split lifted `[A](/a)` into the button row and `![x]` into the image group.
+  ['Fenced', '', 'Intro.\n\n```\ncode\n\n[A](/a)\n\n![x](/x.png)\n\nmore\n```\n\nAfter.'],
+  // A loose list (blank lines between items) with a links-only paragraph inside the run: the row
+  // stays between the items it was written between.
+  ['Loose list', '', '- one\n\n- two\n\n[Mid list](/mid)\n\n- three'],
+  // Three images in one paragraph: ONE figure holding three images.
+  ['Trio', '', 'Team.\n\n![t1](/img/t1.png)![t2](/img/t2.png)![t3](/img/t3.png)'],
+  // 🔴 The shape a real site writes (wtg, reef#1933 inventory): eight images, ONE PER LINE, single
+  // newlines, one paragraph. One figure whose children are eight ADJACENT images — no <br>, no
+  // whitespace text between them — or `> .st-img ~ .st-img`, `:first-child` and a lightbox's
+  // `querySelectorAll('.st-prose .st-figure .st-img')` all see something else. One line ends in
+  // two spaces (a markdown hard break), which must not turn the figure back into a <p>.
+  ['Eight lines', '', 'Shots.\n\n' + [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `![w${n}](/img/w${n}.png)` + (n === 3 ? '  ' : '')).join('\n')],
+  // CONTROL: the same images with a blank line between are two paragraphs, so two figures.
+  ['Two figures', '', '![x1](/img/x1.png)\n\n![x2](/img/x2.png)'],
 ];
 const MD = '---\nsitetile-page: home\ntitle: Prose parity\nlang: en-US\n---\n\n'
   + SECTIONS.map(([title, marker, body]) => `## ${title}\n${marker ? marker + '\n' : ''}${body}\n`).join('\n');
@@ -151,60 +183,122 @@ const idOf = (title) => site.sections[SECTIONS.findIndex(([t]) => t === title)].
 
 // ── what the page must be, written out by hand and derived from neither renderer ────────────
 const img = (src, alt, container) => ({ src, alt, in: container });
+const FIG = 'figure.st-figure';
+const IMG = 'img.st-img';
+const btn = (label, href) => [label, href, 'st-prose-btn st-prose-btn-primary'];
+const btn2 = (label, href) => [label, href, 'st-prose-btn st-prose-btn-secondary'];
+// `rows` = every `.st-prose-btns` row in document order; `figures` = every figure's children.
 const EXPECTED = {
   Mixed: {
-    children: ['h2', 'p', 'p', 'ul.st-list', 'p', 'p', 'div.st-prose-btns', 'div.st-prose-imgs'],
+    children: ['h2', 'p', FIG, 'p', 'div.st-prose-btns', 'ul.st-list', FIG, 'p', FIG, 'p'],
     images: [
       img('/img/dot.png', 'dot', 'p'),
+      img('/img/first.png', 'First alone', FIG),
       img('/img/list.png', 'in a list', 'li'),
-      img('/img/first.png', 'First alone', 'div.st-prose-imgs'),
-      img('/img/second.jpg', 'Second alone', 'div.st-prose-imgs'),
-      img('/img/pair-left.png', 'Pair left', 'div.st-prose-imgs'),
-      img('/img/pair-right.png', 'Pair right', 'div.st-prose-imgs'),
+      img('/img/second.jpg', 'Second alone', FIG),
+      img('/img/pair-left.png', 'Pair left', FIG),
+      img('/img/pair-right.png', 'Pair right', FIG),
     ],
-    buttons: [['Read on', '/more', 'st-prose-btn st-prose-btn-primary'], ['Elsewhere', 'https://example.com/elsewhere', 'st-prose-btn st-prose-btn-secondary']],
-    counts: { 'st-prose-imgs': 1, 'st-prose-btns': 1, 'st-prose-btn': 2, 'st-figure': 0, 'st-img': 6 },
+    rows: [[btn('Read on', '/more'), btn2('Elsewhere', 'https://example.com/elsewhere')]],
+    figures: [[IMG], [IMG], [IMG, IMG]],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 1, 'st-prose-btn': 2, 'st-figure': 3, 'st-img': 6 },
   },
   Plain: {
     children: ['h2', 'p', 'ul.st-list', 'p'],
     images: [img('/img/plain-dot.png', 'dot', 'p')],
-    buttons: null,
+    rows: [], figures: [],
     counts: { 'st-prose-imgs': 0, 'st-prose-btns': 0, 'st-figure': 0, 'st-img': 1 },
   },
   'Images only': {
-    children: ['h2', 'p', 'p', 'div.st-prose-imgs'],
-    images: [img('/img/solo.png', 'Solo', 'div.st-prose-imgs')],
-    buttons: null,
-    counts: { 'st-prose-imgs': 1, 'st-prose-btns': 0, 'st-figure': 0 },
+    children: ['h2', 'p', FIG, 'p'],
+    images: [img('/img/solo.png', 'Solo', FIG)],
+    rows: [], figures: [[IMG]],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 0, 'st-figure': 1 },
   },
   'Links only': {
-    children: ['h2', 'p', 'p', 'div.st-prose-btns'],
+    children: ['h2', 'p', 'div.st-prose-btns', 'p'],
     images: [],
-    buttons: [['Only link', '/only', 'st-prose-btn st-prose-btn-primary']],
+    rows: [[btn('Only link', '/only')]], figures: [],
     counts: { 'st-prose-imgs': 0, 'st-prose-btns': 1, 'st-prose-btn': 1 },
   },
-  // A lone "Back to …" link is navigation: it joins the row, but as a plain link and not a button.
+  // A lone "Back to …" link is navigation: it is a row, but holding a plain link and not a button.
   'Back link': {
     children: ['h2', 'p', 'div.st-prose-btns'],
     images: [],
-    buttons: [['Back to the index', '/index', 'st-prose-plain']],
+    rows: [[['Back to the index', '/index', 'st-prose-plain']]], figures: [],
     counts: { 'st-prose-btns': 1, 'st-prose-plain': 1, 'st-prose-btn': 0 },
   },
   Dressed: {
-    children: ['p.st-prose-eyebrow', 'h2', 'p', 'div.st-prose-imgs'],
-    images: [img('/img/dressed.png', 'Dressed image', 'div.st-prose-imgs')],
-    buttons: null,
-    counts: { 'st-prose-eyebrow': 1, 'st-prose-imgs': 1, 'st-figure': 0 },
+    children: ['p.st-prose-eyebrow', 'h2', 'p', FIG],
+    images: [img('/img/dressed.png', 'Dressed image', FIG)],
+    rows: [], figures: [[IMG]],
+    counts: { 'st-prose-eyebrow': 1, 'st-prose-imgs': 0, 'st-figure': 1 },
   },
   Ordered: {
     children: ['h2', 'p', 'ol.st-ordered'],
-    images: [img('/img/clause.png', 'Clause figure', 'figure.st-figure')],
-    buttons: null,
+    images: [img('/img/clause.png', 'Clause figure', FIG)],
+    rows: [], figures: [[IMG]],
     counts: { 'st-prose-imgs': 0, 'st-figure': 1, 'st-ord-item': 1 },
   },
-  [ESC_TITLE]: { children: ['h2', 'p'], images: [], buttons: null, counts: { 'st-prose-eyebrow': 0 } },
-  'Eyebrow escaping': { children: ['p.st-prose-eyebrow', 'h2', 'p'], images: [], buttons: null, counts: { 'st-prose-eyebrow': 1 } },
+  [ESC_TITLE]: { children: ['h2', 'p'], images: [], rows: [], figures: [], counts: { 'st-prose-eyebrow': 0 } },
+  'Eyebrow escaping': { children: ['p.st-prose-eyebrow', 'h2', 'p'], images: [], rows: [], figures: [], counts: { 'st-prose-eyebrow': 1 } },
+  // p, figure.st-figure>img, p, div.st-prose-btns, figure.st-figure>img+img, p — source order.
+  'In place': {
+    children: ['h2', 'p', FIG, 'p', 'div.st-prose-btns', FIG, 'p'],
+    images: [img('/1.png', 'a', FIG), img('/2.png', 'b', FIG), img('/3.png', 'c', FIG)],
+    rows: [[btn('A', '/a'), btn2('B', '/b')]],
+    figures: [[IMG], [IMG, IMG]],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 1, 'st-prose-btn': 2, 'st-figure': 2, 'st-img': 3 },
+  },
+  'Row after image': {
+    children: ['h2', FIG, 'div.st-prose-btns', 'p', 'div.st-prose-btns'],
+    images: [img('/img/lead.png', 'Lead image', FIG)],
+    rows: [[btn('Go', '/go'), btn2('More', 'https://example.com/more')], [btn('Second row', '/second')]],
+    figures: [[IMG]],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 2, 'st-prose-btn': 3, 'st-prose-btn-primary': 2, 'st-figure': 1 },
+  },
+  Fenced: {
+    children: ['h2', 'p', 'pre.st-code', 'p'],
+    images: [], rows: [], figures: [],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 0, 'st-figure': 0, 'st-img': 0, 'st-code': 1 },
+  },
+  'Loose list': {
+    children: ['h2', 'ul.st-list', 'ul.st-list', 'div.st-prose-btns', 'ul.st-list'],
+    images: [], rows: [[btn('Mid list', '/mid')]], figures: [],
+    counts: { 'st-prose-imgs': 0, 'st-prose-btns': 1 },
+  },
+  Trio: {
+    children: ['h2', 'p', FIG],
+    images: [img('/img/t1.png', 't1', FIG), img('/img/t2.png', 't2', FIG), img('/img/t3.png', 't3', FIG)],
+    rows: [], figures: [[IMG, IMG, IMG]],
+    counts: { 'st-prose-imgs': 0, 'st-figure': 1, 'st-img': 3 },
+  },
 };
+// The fence's text, typed out: every line of it survives, inside the <pre>, in order.
+const EIGHT = [1, 2, 3, 4, 5, 6, 7, 8];
+EXPECTED['Eight lines'] = {
+  children: ['h2', 'p', FIG],
+  images: EIGHT.map((n) => img(`/img/w${n}.png`, `w${n}`, FIG)),
+  rows: [], figures: [EIGHT.map(() => IMG)],
+  counts: { 'st-prose-imgs': 0, 'st-figure': 1, 'st-img': 8 },
+};
+EXPECTED['Two figures'] = {
+  children: ['h2', FIG, FIG],
+  images: [img('/img/x1.png', 'x1', FIG), img('/img/x2.png', 'x2', FIG)],
+  rows: [], figures: [[IMG], [IMG]],
+  counts: { 'st-figure': 2, 'st-img': 2 },
+};
+// Every figure's child NODES: nothing but images. The tree above drops text, so a figure that
+// held `img␠img<br>img` would pass `figures`; this reads the figure's own text, whitespace included.
+function assertBareFigures(where, byId) {
+  for (const title of Object.keys(EXPECTED)) {
+    for (const f of all(byId.get(idOf(title))).filter((n) => n.tag === 'figure')) {
+      assert.equal(JSON.stringify(f.text), '""', `${where}, section ${JSON.stringify(title)}: text between a figure's images`);
+      assert.ok(f.kids.every((k) => k.tag === 'img'), `${where}, section ${JSON.stringify(title)}: a figure holds ${f.kids.map(sig).join(', ')}`);
+    }
+  }
+}
+const FENCE_TEXT = 'code [A](/a) ![x](/x.png) more';
 
 // 🔴 The escaped text, as the markup both renderers must write — typed out here, not read from
 // either of them, so a mistake they share (both writing the raw string) is still red. `"` stays
@@ -244,9 +338,12 @@ function assertExpected(where, byId) {
     assert.deepEqual(got.children, want.children, `${at}: the section's children, in order`);
     assert.deepEqual(got.images, want.images, `${at}: every image, in document order, and the element holding it`);
     const rows = got.buttonRows.map((row) => row.map((b) => [b.label, b.href, b.cls]));
-    assert.deepEqual(rows, want.buttons ? [want.buttons] : [], `${at}: the button row`);
+    assert.deepEqual(rows, want.rows, `${at}: the button rows, in order`);
+    assert.deepEqual(got.figures, want.figures, `${at}: what each figure holds`);
     for (const [cls, n] of Object.entries(want.counts)) assert.equal(got.counts[cls] || 0, n, `${at}: elements carrying .${cls}`);
   }
+  const pre = all(byId.get(idOf('Fenced'))).find((n) => n.tag === 'pre');
+  assert.equal(pre && textOf(pre), FENCE_TEXT, `${where}: the fenced code block's text`);
 }
 
 // ── the string renderer, which needs nothing but this file's imports ────────────────────────
@@ -259,8 +356,26 @@ await test('the fixture parsed into the sections it was written as, all of them 
   assert.equal(stringById.size, SECTIONS.length, 'a section the string renderer wrote has no id to find it by');
 });
 
-await test('🔴 string renderer: standalone images are gathered, standalone links are a button row', () => {
+await test('🔴 string renderer: standalone images and link rows stay where they were written', () => {
   assertExpected('string renderer', stringById);
+});
+
+await test('🔴 string renderer: a figure is images and nothing else — no <br>, no whitespace between them', () => {
+  assertBareFigures('string renderer', stringById);
+});
+
+await test('🔴 string renderer: no .st-prose-imgs anywhere on the page', () => {
+  assert.ok(!/st-prose-imgs/.test(stringHtml), 'the string render still writes a .st-prose-imgs group');
+});
+
+// The figure is bodyHtml's own: a prose body with no links-only paragraph renders byte-for-byte as
+// bodyHtml renders it. Only a links-only paragraph is drawn differently, and only in place.
+await test('a prose body without a links-only paragraph is exactly bodyHtml', () => {
+  const bodies = SECTIONS.map(([, , body]) => body).filter((b) => !/^\[[^\]]+\]\([^)]*\)\s*(?:[·,]\s*\[[^\]]+\]\([^)]*\)\s*)*$/m.test(b));
+  assert.ok(bodies.length >= 6, `only ${bodies.length} bodies to compare`);
+  for (const b of bodies) assert.equal(proseBodyHtml(b), bodyHtml(b), JSON.stringify(b.slice(0, 40)));
+  // CONTROL: a body WITH a links-only paragraph is not bodyHtml — the comparison can see a difference.
+  assert.notEqual(proseBodyHtml('Text.\n\n[A](/a)'), bodyHtml('Text.\n\n[A](/a)'));
 });
 
 await test('string renderer: a titled image is not in the grammar, and is not read as an image', () => {
@@ -323,8 +438,16 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
-    await test('🔴 built page: standalone images are gathered, standalone links are a button row', () => {
+    await test('🔴 built page: standalone images and link rows stay where they were written', () => {
       assertExpected('built page', astroById);
+    });
+
+    await test('🔴 built page: a figure is images and nothing else — no <br>, no whitespace between them', () => {
+      assertBareFigures('built page', astroById);
+    });
+
+    await test('🔴 built page: no .st-prose-imgs anywhere on the page', () => {
+      assert.ok(!/st-prose-imgs/.test(astroHtml), 'the built page still has a .st-prose-imgs group');
     });
 
     await test('🔴 the two renderers agree: children, images and their order, button row, class counts', () => {
@@ -333,7 +456,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         const at = `section ${JSON.stringify(title)}`;
         assert.deepEqual(s.children, a.children, `${at}: children (string renderer vs built page)`);
         assert.deepEqual(s.images, a.images, `${at}: images, in order, and their containers`);
-        assert.deepEqual(s.buttonRows, a.buttonRows, `${at}: the button row`);
+        assert.deepEqual(s.buttonRows, a.buttonRows, `${at}: the button rows`);
+        assert.deepEqual(s.figures, a.figures, `${at}: what each figure holds`);
         assert.deepEqual(s.counts, a.counts, `${at}: how many elements carry each class`);
       }
     });
