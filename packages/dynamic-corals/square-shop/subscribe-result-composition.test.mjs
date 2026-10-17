@@ -89,7 +89,11 @@ const UNKNOWN = { state: 'unknown', plan: null };
 
 const RSP_PAGE = 'RSP-WHOLE-PAGE-LEGACY-LANDING';
 
-function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING } = {}) {
+// `homes` is the site's locale homes beyond the root — `{ '/zh-tw/': <shell> }` —
+// the build-owned fact "this locale has a home" that localeHomePath() reads at
+// build time and this worker can only read by asking ASSETS. A path not in it
+// 404s, exactly as a locale without a home does on the real ASSETS.
+function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {} } = {}) {
 	const seenByRsp = [];
 	const seenByAssets = [];
 	const env = {
@@ -100,6 +104,11 @@ function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING } = {}) {
 				if (url.pathname === '/') {
 					if (shell === null) return new Response('missing', { status: 404 });
 					return new Response(shell, { status: 200, headers: { 'content-type': 'text/html' } });
+				}
+				if (/^\/[a-z]{2}(?:-[a-z]{2})?\/$/.test(url.pathname)) {
+					const home = homes[url.pathname];
+					if (home == null) return new Response('missing', { status: 404 });
+					return new Response(home, { status: 200, headers: { 'content-type': 'text/html' } });
 				}
 				return new Response('STATIC:' + url.pathname, { status: 200 });
 			}
@@ -407,6 +416,110 @@ test('matchSubscribeResult answers null for an absent route and honours the decl
 	assert.equal(claimed.matchSubscribeResult(get(PAGE), null), null);
 	assert.equal(claimed.matchSubscribeResult(get(PAGE, { method: 'POST' }), route), null);
 	assert.equal(claimed.matchSubscribeResult(get(PAGE + '?' + PARAM + '=x'), route), route);
+});
+
+// ── 5b. the locale the buyer came from (CVERInc/reef#1910, last item) ────────
+// The URL that sends a buyer here carries the shop's locale prefix — the caller
+// contract — so /zh-tw/<path> is the zh-tw shop's result page. Its shell is that
+// locale's home, its copy is that locale, and its way back is THAT home, the same
+// answer localeHomePath() gives the 404 page, the breadcrumb and the footer
+// wordmark (tile#137). A locale with no home on this site goes to `/`, as there.
+//
+// The fixture SITE: the default locale is served bare at `/` (en-US), and zh-TW
+// lives at /zh-tw/. The two shells differ in lang AND chrome so the assertions can
+// tell which one was composed into, not just which language the copy came out in.
+const ROOT_EN = SHELL.replace('lang="zh-Hant"', 'lang="en-US"').replace(NAV, 'NAV-ROOT').replace(FOOT, 'FOOT-ROOT');
+const HOME_ZHTW = SHELL.replace(NAV, 'NAV-ZHTW').replace(FOOT, 'FOOT-ZHTW');
+const TWO_LOCALES = { shell: ROOT_EN, homes: { '/zh-tw/': HOME_ZHTW } };
+const backLinkOf = (html) => {
+	const section = html.slice(html.indexOf('data-ejecta-subscribe-result'));
+	return (section.match(/<a class="st-runtime-action" href="([^"]*)"/) || [])[1];
+};
+
+test('two locales: the zh-tw result page composes into /zh-tw/ and sends the buyer back to /zh-tw/', async () => {
+	const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE), env);
+	const html = await res.text();
+	assert.equal(res.status, 404, 'no locator: the same unknown answer as the bare path');
+	assert.deepEqual(seenByRsp, [], 'no locator, nothing asked');
+	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/'], 'the shell is the locale\'s own home, asked for once');
+	assert.equal(html.includes('<html lang="zh-Hant"'), true, 'the zh-tw home declares the language');
+	assert.equal(html.includes('NAV-ZHTW') && html.includes('FOOT-ZHTW'), true, 'the zh-tw chrome, not the root\'s');
+	assert.equal(html.includes('NAV-ROOT'), false);
+	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, 'zh-TW copy');
+	assert.equal(backLinkOf(html), '/zh-tw/', 'the way back is the locale home');
+});
+
+test('two locales: an active zh-tw result still reads the locator and shows the plan, in the zh-tw shell', async () => {
+	const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_real'), env);
+	const html = await res.text();
+	assert.equal(res.status, 200);
+	assert.equal(seenByRsp.length, 1);
+	assert.equal(seenByRsp[0].path, FACTS);
+	assert.equal(seenByRsp[0].search, '?' + PARAM + '=cs_real', 'the locale prefix never reaches the facts read');
+	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/']);
+	assert.equal(html.includes('NAV-ZHTW'), true);
+	assert.equal(html.includes('感謝您的訂閱'), true);
+	assert.equal(html.includes('金級會員'), true);
+	assert.equal(html.includes(formatMoney({ minor: 1200, currency: 'TWD', locale: 'zh-TW' })), true);
+});
+
+test('two locales: the default locale\'s result page is the bare path, composed into `/`, and goes back to `/`', async () => {
+	const { env, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const html = await (await claimed.default.fetch(get(PAGE), env)).text();
+	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/']);
+	assert.equal(html.includes('<html lang="en-US"'), true);
+	assert.equal(html.includes('NAV-ROOT'), true);
+	assert.equal(html.includes("We can't confirm this subscription here"), true, 'en-US copy, from the root shell');
+	assert.equal(backLinkOf(html), '/');
+});
+
+test('single locale: the bare path is unchanged, and a locale prefix this site has no home for falls back to `/`', async () => {
+	// CONTROL — the site every already-emitted worker serves: one home, at `/`.
+	const bare = makeEnv({ rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const bareHtml = await (await claimed.default.fetch(get(PAGE), bare.env)).text();
+	assert.deepEqual(bare.seenByAssets.map((hit) => hit.path), ['/'], 'exactly the one shell read it always made');
+	assert.equal(keepsShell(bareHtml), true);
+	assert.equal(backLinkOf(bareHtml), '/');
+
+	// A prefixed URL on a site with no such home: the same measurement localeHomePath
+	// makes ("does this locale have a home?") says no, so the way back is `/` and the
+	// shell is the root's — the buyer is not sent to a 404.
+	const prefixed = makeEnv({ rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE), prefixed.env);
+	const html = await res.text();
+	assert.equal(res.status, 404, 'still the unknown answer, not a shell failure');
+	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/'],
+		'the locale home is asked for first; only its absence falls back to the root');
+	assert.equal(keepsShell(html), true, 'the root shell owns the page');
+	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, 'the copy follows the shell that was actually served');
+	assert.equal(backLinkOf(html), '/', 'no home for that locale, so the way back is the root');
+	assert.equal((html.match(/href="\/zh-tw\/"/g) || []).length, 0, 'never a link to a home that does not exist');
+});
+
+test('the locale prefix is claimed only in the shape the caller contract emits', async () => {
+	for (const [path, init] of [
+		['/zh-tw' + PAGE, { method: 'POST' }],
+		['/zh-tw' + PAGE + '/', {}],
+		['/zh-tw' + PAGE + 'x', {}],
+		['/zh-twx' + PAGE, {}],
+		['/zh-tw/en' + PAGE, {}],
+		['/zh-tw', {}]
+	]) {
+		const { env, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+		const res = await claimed.default.fetch(get(path + '?' + PARAM + '=cs_real', init), env);
+		const html = await res.text();
+		const label = (init.method || 'GET') + ' ' + path;
+		assert.equal(html.includes('data-ejecta-subscribe-result'), false, label + ' must not be claimed');
+		assert.equal(seenByAssets.some((hit) => hit.path === '/' || hit.path === '/zh-tw/'), false, label + ' must not ask for a shell');
+	}
+	// the matcher names the locale it found, and the bare path is still the route object itself
+	const route = FIXTURE_CONTRACT.subscribeResult;
+	assert.equal(claimed.matchSubscribeResult(get(PAGE), route), route);
+	assert.deepEqual(claimed.matchSubscribeResult(get('/zh-tw' + PAGE), route), { ...route, pathLocale: 'zh-tw' });
+	assert.deepEqual(claimed.matchSubscribeResult(get('/ja' + PAGE), route), { ...route, pathLocale: 'ja' });
+	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '/'), route), null);
 });
 
 test('the claimed landing is dropped from the markdown mapping, and only it', async () => {
