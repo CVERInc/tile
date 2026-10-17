@@ -7,7 +7,7 @@
 //
 // 🔴 IT ASKS THE SAME QUESTION THE CORAL ASKS, AND ONLY WHEN THE CORAL WOULD ASK IT — and imports the
 // coral only when the coral would draw. That is the whole design, and it is why behaviour is
-// unchanged for every site that has a bubble:
+// unchanged for every site that has a bubble — given a coral at or above `CORAL_FLOOR` (below):
 //   • `data-kaito="1"` — the coral always draws (the full bubble or the ask-only one), so it is
 //     imported at once and runs its own gate exactly as before. The loader sends nothing.
 //   • a yes this browser heard within the coral's 30-day fallback window — the coral either trusts
@@ -38,19 +38,31 @@
 //     own evaluation, before that, so an open in between was delivered twice. Once `taken` is set the
 //     loader's listener records nothing and the loader replays nothing.
 //
-// 🔴 AN OLDER CORAL IS NEVER WORSE OFF THAN WITH THE OLD <script src>. The page imports the `v0`
-// channel, which can serve a coral that predates the handoff (the engine shipped first, or the channel
-// was rolled back). Such a coral never sets `taken`, so:
-//   • the claim must still reach it through storage — and the loader only gates when storage can
-//     carry it: one throwaway write and read (`carries`) before the first question. Where it cannot
-//     (no storage, a throwing getter, a refused write or read) the coral is imported at once and asks
-//     its own question, exactly as the <script src> did. Those browsers download the coral as they
-//     always have; nothing else does.
+// 🔴 THIS LOADER NEEDS inbox-bubble ≥ `CORAL_FLOOR` ON THE `v0` CHANNEL. CORAL FIRST IS MANDATORY.
+// The page imports the `v0` channel, and with a coral older than the floor (the engine shipped first,
+// or the channel was rolled back) behaviour is NOT guaranteed to match the old <script src> (codex
+// review of tile#151, round 2). Such a coral never takes the handoff, so the yes can reach it only
+// through storage, and two fallbacks narrow — they do not close — that gap:
+//   • `carries` — one throwaway write and read of a short key before the first question. Where storage
+//     is uniformly broken (no storage, a throwing getter, every write or every read refused) the coral
+//     is imported at once and asks its own one question, as the <script src> did. What it does NOT
+//     prove: that the claim written LATER succeeds. A quota with room for the probe and not for the
+//     claim, a script that clears storage between the write and the coral's read, or storage that
+//     changes while the question is in flight all leave an older coral asking again — and a second
+//     no / throttled / 4xx takes away the bubble the first yes earned. With the floor coral the
+//     handed answer makes the probe redundant; it stays because on healthy storage it costs one
+//     short write (two `storage` events in other same-origin tabs) and it keeps uniformly broken
+//     storage on the eager path.
 //   • the held open is replayed — but only what arrived before the coral evaluated: the registry's
 //     stamp (`window.__coralVersions['inbox-bubble']`, the last statement of every published
 //     artifact) marks the moment the coral's own listeners exist, and the loader stops recording then.
 //     (While the document is still parsing the coral mounts later, on DOMContentLoaded, so until then
 //     the loader keeps recording.) On a no, a held open is dropped — the coral would have dropped it.
+//     An open dispatched synchronously from inside an older coral's own mount precedes the stamp and
+//     is delivered twice.
+// So: the coral reaches the floor before any page carries this loader, and never drops below it while
+// one does — the checked procedure is the coral README's "Publishing". The emitted script names the
+// floor (`/*inbox-bubble>=x.y.z*/`), so built pages can be searched for before a coral rollback.
 //
 // `bubbleLoader` is the shipped code: the layout inlines `bubbleLoader.toString()`, and the tests
 // call the same function with a stand-in window. So it may reference nothing outside its own body —
@@ -67,7 +79,8 @@
 //   • `remembered` / `remember` — the coral's `rememberedClaim` (asked here with the 30-day fallback
 //     window, which also covers the six-hour one) and `rememberClaim`: write a yes, forget on a no,
 //     leave it alone when nobody answered — still written, for the next page and for an older coral.
-//   • `carries` — can storage take a write and give it back on this page? Its own key, removed at once.
+//   • `carries` — can storage take a short write and give it back right now? Its own key, removed at
+//     once. Not a promise about any later write (see above).
 //   • `ask` / `gate` — `askInboxClaim` + `probeOnce` + `awaitInboxClaim` with no fallback.
 //   • `drawsAnyway` — the cases where the coral draws without asking first; missing kind/id counts,
 //     because the coral names that broken install on the page and that is for it to do.
@@ -188,10 +201,18 @@ export function bubbleLoader(src, win, importer) {
 	});
 }
 
+/**
+ * The oldest inbox-bubble the `v0` channel may serve to a page carrying this loader: the first one
+ * that takes `window.__reefInboxLoader` (inbox-bubble.js `LOADER_HANDOFF_SINCE`). The loader test
+ * fails if the two drift apart, or if the coral's own version falls below it.
+ */
+export const CORAL_FLOOR = '0.7.12';
+
 /** The inline module the layout emits in place of `<script type="module" src="<coral>">`. */
 // Leading indentation is dropped (no string literal in the body spans a line, so that is all it
-// touches); the tests run this exact string, not only the function.
+// touches); the tests run this exact string, not only the function. The leading comment names the
+// coral floor on every built page — what to search a site's HTML for before rolling the coral back.
 export function bubbleLoaderScript(src) {
 	const body = bubbleLoader.toString().replace(/\n\t+/g, '\n');
-	return `(${body})(${JSON.stringify(String(src)).replace(/</g, '\\u003c')},window);`;
+	return `/*inbox-bubble>=${CORAL_FLOOR}*/(${body})(${JSON.stringify(String(src)).replace(/</g, '\\u003c')},window);`;
 }

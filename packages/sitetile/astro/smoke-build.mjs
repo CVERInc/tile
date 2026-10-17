@@ -30,7 +30,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
-import { bubbleLoaderScript } from './src/lib/inbox-bubble-loader.mjs';
+import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -138,7 +138,10 @@ const nonProdHome = readFileSync(join(DIST_NONPROD_ORIGIN, 'index.html'), 'utf8'
 
 /** The inline bubble loader on a built page, checked as the browser will get it (reef#1921). */
 function builtLoaderOk(page, src) {
-  const at = page.indexOf('<script type="module">(function bubbleLoader(');
+  // The script opens with the coral floor it needs (reef#1921 round 3) — what a site's HTML is
+  // searched for before the coral is rolled back.
+  const open = `<script type="module">/*inbox-bubble>=${CORAL_FLOOR}*/(function bubbleLoader(`;
+  const at = page.indexOf(open);
   if (at < 0) return false;
   const code = page.slice(at + '<script type="module">'.length, page.indexOf('</script>', at));
   try { new Function(code); } catch { return false; }

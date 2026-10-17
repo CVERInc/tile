@@ -5,7 +5,7 @@ channels**, and which one a site consumes is a one-line per-site policy.
 
 ```
 /corals/<coral>/<x.y.z>/<file>     exact   → cache immutable 1y   (the per-site PIN)
-/corals/<coral>/<channel>/<file>   channel → max-age 300 + X-Coral-Resolved   (the OTA ride)
+/corals/<coral>/<channel>/<file>   channel → max-age 300, stale-while-revalidate 3600 + X-Coral-Resolved   (the OTA ride)
 /corals/manifest.json              the channel table (public index)
 ```
 

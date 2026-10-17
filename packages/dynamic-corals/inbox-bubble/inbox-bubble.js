@@ -2088,15 +2088,23 @@ const gating = new WeakMap();
 // is an open nobody was listening for yet; `mount` honours it exactly like its own held open.
 // `taken` is how the loader learns it must not replay anything: set here, in the same synchronous
 // turn that installs this file's own listeners, so from that moment one listener — ours — hears
-// every open. A loader that finds `taken` unset has an older coral, and falls back on its own.
+// every open. A loader that finds `taken` unset has an older coral; its fallbacks narrow the gap
+// but do not close it (a probe write that succeeds does not make the later claim write succeed),
+// so the loader REQUIRES this contract: `LOADER_HANDOFF_SINCE` is the floor the channel must not
+// drop below while loader pages exist, and sitetile's loader test pins its `CORAL_FLOOR` to it.
+// 🔴 Removing or renaming any of this is a breaking change for every site built with the loader.
 //
 // Taken by `mountAll`, not at the top of the module: behind the loader the document is always
 // parsed by the time this file evaluates, so that IS evaluation — and a page that loads this file
 // with a plain <script src> while still parsing keeps the loader's listener in charge until the
 // mounts that will honour it exist. A shape this file does not know is left alone: a page script
 // can write `window` exactly as it can write the remembered yes in `localStorage`, and earns the
-// same trust — a value of the right type or nothing.
+// same trust — a value of the right type or nothing. A WELL-shaped one is honoured: a page script
+// can draw the bubble without the question being asked, exactly as a forged remembered yes can.
+// That is a UI bypass, not an authority — every send still needs the backend's own yes.
 const LOADER_HANDOFF = '__reefInboxLoader';
+/** The first version that takes the handoff — the floor for a channel behind the loader. */
+export const LOADER_HANDOFF_SINCE = '0.7.12';
 
 function takeLoaderHandoff() {
 	if (typeof window === 'undefined') return null;

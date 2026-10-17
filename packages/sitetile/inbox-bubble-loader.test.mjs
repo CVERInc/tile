@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
 
 // reef#1921 — the site layout's inbox-bubble LOADER (astro/src/lib/inbox-bubble-loader.mjs).
 //
@@ -49,7 +50,8 @@ const storage = new Map();
 /**
  * How this browser's storage misbehaves, per test (codex round 2, P1): `ok`, `getter` (reading
  * `window.localStorage` throws), `read` (`getItem` throws), `write` (`setItem` throws — a full
- * quota, a privacy mode).
+ * quota, a privacy mode), `claim-write` (a quota with room for the loader's short probe and none for
+ * the claim — codex round 2's reproduction of why the probe is not a guarantee).
  */
 let storageFault = 'ok';
 const localStore = {
@@ -59,6 +61,7 @@ const localStore = {
 	},
 	setItem: (k, v) => {
 		if (storageFault === 'write') throw new Error('QuotaExceededError');
+		if (storageFault === 'claim-write' && k.startsWith('reef-inbox:claim:')) throw new Error('QuotaExceededError');
 		storage.set(k, v);
 	},
 	removeItem: (k) => storage.delete(k)
@@ -136,7 +139,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { sendBeacon: () => true
 
 const coral = await import('../dynamic-corals/inbox-bubble/inbox-bubble.js');
 win.document.readyState = 'complete';
-const { bubbleLoader, bubbleLoaderScript } = await import('./astro/src/lib/inbox-bubble-loader.mjs');
+const { bubbleLoader, bubbleLoaderScript, CORAL_FLOOR } = await import('./astro/src/lib/inbox-bubble-loader.mjs');
 
 const SRC = 'https://feelreef.com/corals/inbox-bubble/v0/inbox-bubble.js';
 const HOUR = 60 * 60 * 1000;
@@ -277,9 +280,10 @@ const SCENARIOS = [
 	{ name: 'an open dispatched as the coral evaluates, storage refuses the write', openAtEvaluation: true, storage: 'write', answers: () => [yes()], draws: true }
 ];
 
-// Every row twice: behind the loader with the coral this checkout publishes, and with any older one
-// the `v0` channel may still serve (the engine shipped first, or the channel was rolled back) — the
-// loader must never do worse than the <script src> did with either.
+// Every row twice: behind the loader with the coral this checkout publishes, and with an older one.
+// The older-coral rows show the fallbacks hold on THESE rows — not that an older coral is safe behind
+// the loader in general: it is not (see the floor tests at the end), which is why the coral goes
+// first and the channel never drops below `CORAL_FLOOR` while loader pages exist.
 let n = 0;
 for (const served of Object.keys(CORALS)) {
 	for (const scenario of SCENARIOS) {
@@ -421,4 +425,89 @@ test('the mirrored gate constants still match the coral', () => {
 	assert.ok(s.includes('STALE = 30 * 24 * 60 * 60 * 1000'));
 	assert.equal(coral.claimGateKey('site:x'), 'reef-inbox:claim:site:x');
 	assert.ok(s.includes("'reef-inbox:claim:' + t"));
+});
+
+// ── the floor (codex review of tile#151, round 2) ─────────────────────────────────────────────────
+//
+// 🔴 CORAL FIRST IS MANDATORY. The loader's fallbacks for a coral that predates the handoff narrow the
+// gap; they do not close it. The tests below pin both halves: the coral this checkout publishes takes
+// the handoff and is at or above the floor the loader names, and an older coral is shown failing the
+// cases the probe cannot see — so nobody reads the older-coral parity rows as a licence to ship the
+// engine first or roll the channel back below the floor.
+
+const semver = (v) => v.split('.').map(Number);
+const atLeast = (v, floor) => {
+	const [a, b] = [semver(v), semver(floor)];
+	for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+	return true;
+};
+
+/** Two bubbles for two tenants on one page, behind the loader; returns what each one saw. */
+async function twoTenants(served, answers) {
+	reset();
+	const a = new El({ 'data-kind': 'site', 'data-id': `mix-a-${served}` });
+	const b = new El({ 'data-kind': 'site', 'data-id': `mix-b-${served}` });
+	pageEls = [a, b];
+	script = answers;
+	let imports = 0;
+	const outcome = await bubbleLoader(SRC, win, async () => { imports++; CORALS[served](); });
+	await settle();
+	return { outcome, imports, claimRequests: claimRequests(), drawn: [a.children.length > 0, b.children.length > 0] };
+}
+
+test('the floor: the emitted loader and the coral\'s handoff contract name the same minimum version, and this coral meets it', async () => {
+	assert.match(CORAL_FLOOR, /^\d+\.\d+\.\d+$/);
+	assert.equal(coral.LOADER_HANDOFF_SINCE, CORAL_FLOOR, 'the coral\'s handoff contract and the loader disagree about the floor');
+	const s = bubbleLoaderScript(SRC);
+	assert.ok(s.startsWith(`/*inbox-bubble>=${CORAL_FLOOR}*/(function bubbleLoader(`), 'built pages no longer name the floor they need');
+	const pkg = JSON.parse(readFileSync(new URL('../dynamic-corals/inbox-bubble/package.json', import.meta.url), 'utf8'));
+	assert.ok(atLeast(pkg.version, CORAL_FLOOR), `inbox-bubble ${pkg.version} is below the loader's floor ${CORAL_FLOOR}`);
+	// The publishing checklist verifies the floor by name.
+	const readme = readFileSync(new URL('../dynamic-corals/inbox-bubble/README.md', import.meta.url), 'utf8');
+	assert.ok(readme.includes(`X-Coral-Resolved: ${CORAL_FLOOR}`) && readme.includes(`/*inbox-bubble>=${CORAL_FLOOR}*/`),
+		'the coral README\'s rollout checklist does not name the floor');
+
+	// And the contract itself, end to end: the object THIS loader writes is the one THIS coral takes.
+	// Storage keeps nothing for the claim, so only the handoff can carry the yes.
+	reset();
+	storageFault = 'claim-write';
+	const el = new El({ 'data-kind': 'site', 'data-id': 'floor' });
+	pageEls = [el];
+	script = [yes(), no()];
+	let handed;
+	const outcome = await bubbleLoader(SRC, win, async () => {
+		handed = win.__reefInboxLoader;
+		coral.mountAll();
+	});
+	await settle();
+	assert.equal(outcome, 'loaded');
+	assert.equal(handed?.v, 1);
+	assert.equal(handed.taken, true, 'the coral did not take the loader\'s handoff');
+	assert.equal(claimRequests(), 1, 'the coral asked again');
+	assert.equal(el.children.length > 0, true, 'the bubble the first yes earned was lost');
+});
+
+test('the floor coral takes a handed no and a handed could-not-say: a second tenant on the page is not asked again', async () => {
+	// codex round 2: "treat a handed false as absent" passed every single-element row, because a lone
+	// no never imports the coral. Two tenants, one yes, imports it — and the other is handed its answer.
+	const no2 = await twoTenants('handoff', [yes(), no()]);
+	assert.deepEqual(no2, { outcome: 'loaded', imports: 1, claimRequests: 2, drawn: [true, false] });
+	const unknown = await twoTenants('handoff', [yes(), 500, 500, 500, 500]);
+	assert.deepEqual(unknown, { outcome: 'loaded', imports: 1, claimRequests: 5, drawn: [true, false] });
+});
+
+test('an older coral behind the loader is NOT at parity — why coral first is mandatory', async () => {
+	// 🔴 Not a wish: a record. If one of these ever turns into parity, that is news — re-read the coral
+	// README's floor section before relaxing the rollout order, do not just flip the numbers.
+	const scenario = { storage: 'claim-write', answers: () => [yes(), no()], draws: true };
+	const alone = await coralAlone(scenario, 'quota-older');
+	assert.deepEqual([alone.seen.claimRequests, alone.seen.drawn], [1, true], 'the eager coral itself');
+	// A quota with room for the probe and none for the claim: the probe passes, the claim never lands,
+	// and the older coral asks again — the second answer takes away the bubble.
+	const older = await behindLoader(scenario, 'quota-older', 'older');
+	assert.deepEqual([older.seen.claimRequests, older.seen.drawn], [2, false]);
+	const floor = await behindLoader(scenario, 'quota-floor', 'handoff');
+	assert.deepEqual([floor.seen.claimRequests, floor.seen.drawn], [1, true]);
+	// Two tenants, yes and no: the older coral asks the no tenant a second time.
+	assert.equal((await twoTenants('older', [yes(), no(), no()])).claimRequests, 3);
 });
