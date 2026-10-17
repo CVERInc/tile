@@ -30,6 +30,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
+import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -135,6 +136,20 @@ execFileSync('npx', ['astro', 'build', '--outDir', DIST_NONPROD_ORIGIN], {
 });
 const nonProdHome = readFileSync(join(DIST_NONPROD_ORIGIN, 'index.html'), 'utf8');
 
+/** The inline bubble loader on a built page, checked as the browser will get it (reef#1921). */
+function builtLoaderOk(page, src) {
+  // The script opens with the coral floor it needs (reef#1921 round 3) — what a site's HTML is
+  // searched for before the coral is rolled back.
+  const open = `<script type="module">/*inbox-bubble>=${CORAL_FLOOR}*/(function bubbleLoader(`;
+  const at = page.indexOf(open);
+  if (at < 0) return false;
+  const code = page.slice(at + '<script type="module">'.length, page.indexOf('</script>', at));
+  try { new Function(code); } catch { return false; }
+  return code.endsWith(`)(${JSON.stringify(src)},window);`) && /\bimport\(src\)/.test(code)
+    && !/__vite|__import|require\(/.test(code)
+    && code.length <= bubbleLoaderScript(src).length + 256;
+}
+
 const occIn = (s, str) => (s.match(new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
 const occ = (s) => occIn(html, s);
 
@@ -150,7 +165,8 @@ const occ = (s) => occIn(html, s);
 // pkg-runtimes    SiteLayout body-end conditional imports (bleedblend et al) — Astro emits the
 //                 chunk even when no fixture page opts in; it must stay UNREFERENCED by fixtures.
 const ALLOWED_INLINE = [
-  ['site inbox bubble module', '/corals/inbox-bubble/v0/inbox-bubble.js'],
+  // reef#1921: the inline loader, which names the coral's URL and imports it only where it draws.
+  ['site inbox bubble loader', '/corals/inbox-bubble/v0/inbox-bubble.js'],
   ['header-overlay', 'rf-header--overlay'],
   ['parallax', 'st-hero-layered[data-parallax]'],
   ['pv-gate', 'pv-notice-ok'],
@@ -860,8 +876,20 @@ const checks = [
     && readFileSync(join(CDIST, '_headers'), 'utf8') === collisionHeaders],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module" src="https:\/\/feelreef\.com\/corals\/inbox-bubble\/v0\/inbox-bubble\.js"><\/script>/.test(html)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module">/.test(html)],
+  // reef#1921: the page carries the loader, verbatim, and nothing that fetches the coral eagerly —
+  // no <script src>, no modulepreload. The URL appears once, as the loader's argument.
+  // 🩸 Not byte for byte: Vite re-prints the function the layout serialises (quotes, spacing), so the
+  // shipped text is the BUILD's, not the source's. What must hold is that it is still the loader,
+  // still parses, still imports at run time, and gained no bundler helper it cannot reach inline.
+  ['inbox bubble: the initial HTML carries the inline loader — parses, imports at run time, no bundler helper', () =>
+    builtLoaderOk(html, 'https://feelreef.com/corals/inbox-bubble/v0/inbox-bubble.js')],
+  ['inbox bubble: nothing in the initial HTML loads the coral body eagerly', () =>
+    !/<script\b[^>]*\bsrc="[^"]*\/corals\/inbox-bubble\//.test(html) && !/<link\b[^>]*\/corals\/inbox-bubble\//.test(html)
+    && occIn(html, '/corals/inbox-bubble/v0/inbox-bubble.js') === 1],
   ['inbox bubble: site off suppresses it', () => occIn(siteOff, 'data-dynamic-coral="inbox-bubble"') === 0],
+  ['inbox bubble: site off emits no loader either', () =>
+    occIn(siteOff, '/corals/inbox-bubble/') === 0 && occIn(siteOff, 'reef-inbox:') === 0],
   ['inbox bubble: locale-agnostic except suppresses /zh-tw/blocks via /blocks', () => occIn(localeExcept, 'data-dynamic-coral="inbox-bubble"') === 0],
   ['inbox bubble: explicit page on wins over the site /markers exclusion', () => occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1],
   ['inbox bubble: a hand-mounted embed is not doubled', () => occIn(forms, 'data-dynamic-coral="inbox-bubble"') === 1],
@@ -894,8 +922,8 @@ const checks = [
     nonProdHome.includes('data-dynamic-coral="inbox-bubble"')],
   ['inbox bubble (non-production origin): data-api-base is EXACTLY the supplied non-production origin', () =>
     nonProdHome.includes('data-api-base="https://smoke-nonprod.example"')],
-  ['inbox bubble (non-production origin): the bubble module\'s own <script src> host is the SAME supplied non-production origin', () =>
-    nonProdHome.includes('<script type="module" src="https://smoke-nonprod.example/corals/inbox-bubble/v0/inbox-bubble.js"></script>')],
+  ['inbox bubble (non-production origin): the loader imports the coral from the SAME supplied non-production origin', () =>
+    builtLoaderOk(nonProdHome, 'https://smoke-nonprod.example/corals/inbox-bubble/v0/inbox-bubble.js')],
   // Targeted, not a blanket feelreef.com ban — unrelated legitimate content (a site's own copy, an
   // outbound link) can contain that domain without being a defect. Only the two Inbox transport
   // surfaces this task is about: the bubble module host, and the /__reef/inbox forwarder's relay

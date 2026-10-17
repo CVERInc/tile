@@ -169,6 +169,43 @@ yes, and dropped if it is anything else — so it is not lost to that round trip
 without an Inbox it still opens nothing. `#inbox` is checked once, when the bubble is drawn, so on
 such a page it moves focus one round trip later than the page load.
 
+## Behind the site layout's loader (0.7.12)
+
+sitetile does not put this file in a `<script src>` on every page any more (CVERInc/reef#1921): an
+inline loader asks the mount's Inbox question first and imports this coral only where it will draw.
+What the loader learned before this file was on the page reaches it **in memory**, on
+`window.__reefInboxLoader = { v: 1, claims: { '<kind>:<id>': true | false | null }, open, taken }`,
+and `mountAll()` takes it once, in the same turn that installs the mounts' own listeners:
+
+- **`claims`** — the gate's whole outcome for a tenant the loader asked about on this page load
+  (same 2/8/30 s schedule, `null` is「nobody could say」). The mount takes it instead of asking: no
+  second `GET /api/inbox/session`, and no second answer that could take away a bubble the first yes
+  earned — which is what happened when the yes travelled through `localStorage` alone and the browser
+  refused the write or the read.
+- **`open`** — a `reef-inbox:open` dispatched before this file was listening. The mount honours it
+  exactly like one it held itself. The loader does **not** rebroadcast it: an open that arrives once
+  this file is listening reaches this file's listener alone, once.
+- **`taken`** — set by this file; it is how the loader knows not to replay anything.
+
+A shape this file does not know (another `v`, a claim that is not `true`/`false`/`null`) is ignored and
+the mount asks, as it would with no loader — a page script can write `window` just as it can write the
+remembered yes, and earns the same trust. A well-shaped one is honoured, so a page script can draw the
+bubble without the question being asked — the same UI bypass a forged remembered yes already gives.
+It carries no conversation handle and no token; every send still needs the backend's own yes. A host
+that mounts this file with `<script src>` or calls `mount(el)` itself never sees any of it.
+
+**🔴 0.7.12 is the floor behind the loader — not a nicety.** Up to 0.7.11 nothing takes the handoff,
+so the loader can only pass the yes through `localStorage`. It narrows that gap: a throwaway write and
+read (`carries()`) sends **uniformly** broken storage (none, a throwing getter, every write or every
+read refused) down the old eager path, and only an open that arrived before the coral evaluated is
+replayed. It does **not** guarantee the later claim write: a quota with room for the probe and not for
+the claim, a script that clears storage before the coral reads it, a second bubble for a different
+tenant that answered no, or an open dispatched from inside the coral's own mount all leave an older
+coral worse off than with `<script src>` — the first of those loses a bubble the first yes earned. So
+`v0` must serve ≥ 0.7.12 before any page carries the loader, and must not drop below it while one does
+(see Publishing). `LOADER_HANDOFF_SINCE` in this file and `CORAL_FLOOR` in sitetile's loader are the
+same string, and the loader test fails if they are not.
+
 ## Handing a conversation over from elsewhere: navigate, do not dispatch
 
 <!-- handoff-section:start — compose.test.mjs reads between these two markers; keep them around this section's warnings -->
@@ -301,3 +338,37 @@ Registry pipeline, same as every coral — bump `package.json`, `node
 packages/dynamic-corals/build.mjs inbox-bubble`, repoint `registry/manifest.json`,
 `registry/deploy.sh`. 🔴 Never `cp` a fix somewhere; the URL above is the only copy
 anyone consumes.
+
+### 🔴 Rolling out the loader handoff (0.7.12) — coral first, in this order
+
+The sitetile engine that inlines the loader (CVERInc/tile#151, reef#1921) needs this coral at
+0.7.12 or later on `v0` (see "Behind the site layout's loader"). Each step is a gate for the next:
+
+- [ ] **Publish the immutable version.** `node packages/dynamic-corals/build.mjs inbox-bubble
+      --registry <deployment registry root>` (plus that deployment's `--defaults` file if it uses
+      one) writes `versions/inbox-bubble/0.7.12/{inbox-bubble.js,manifest.json}`.
+- [ ] **Repoint `v0` → `0.7.12`** in the deployment's `manifest.json`.
+- [ ] **Deploy the registry** (`registry/deploy.sh`).
+- [ ] **Make the cached channel serve 0.7.12.** The worker answers channel URLs with `Cache-Control:
+      public, max-age=300, stale-while-revalidate=3600` (`registry/registry-worker.mjs`), so any cache
+      that holds an old response may hand it out for up to **3,900 s** after that response was
+      served. Purge whatever shared cache can be purged — but visitors' browser caches cannot be,
+      so in any case wait the full 3,900 s counted from the moment the deployed registry first served
+      0.7.12 (the last moment an old response could have been handed out), plus deploy propagation.
+      One fresh response proves nothing about anybody else's cache.
+- [ ] **Verify the channel**, from outside, on `/corals/inbox-bubble/v0/inbox-bubble.js`: the header
+      `X-Coral-Resolved: 0.7.12` **and** the body itself contains `__reefInboxLoader` and the
+      version stamp `['inbox-bubble']='0.7.12'`. Both, not one: the header is the table, the body is
+      what browsers run.
+- [ ] **Only then release the engine** carrying the loader, and rebuild sites.
+
+On its own, 0.7.12 changes nothing on pages that still carry `<script src>`: no handoff exists there,
+so `mountAll()` takes nothing and every mount asks as before. That is why this order is safe and the
+reverse is not.
+
+**Rollback rule: never serve a coral below 0.7.12 while loader pages exist.** Built pages carry the
+floor in the loader's first bytes (`/*inbox-bubble>=0.7.12*/`), so a site's HTML can be searched for
+it. To downgrade the coral: first restore the eager engine (`<script src>`) and rebuild every site
+that carries the loader, wait out the longest HTML cache those sites are served with, confirm the
+marker is gone — then repoint `v0`. Rolling the **engine** back needs no coral change: the `<script
+src>` page works with any coral.

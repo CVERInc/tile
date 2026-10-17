@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
+import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
@@ -1384,7 +1385,9 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     {bubbleOn && (
       <>
         <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined}></div>
-        <script type="module" src={`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`}></script>
+        {/* reef#1921: a loader in place of `<script src>` — it fetches the 159 KB coral (same URL,
+            same host) only when the coral would draw something. See ../lib/inbox-bubble-loader.mjs. */}
+        <script is:inline type="module" set:html={bubbleLoaderScript(`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`)}></script>
       </>
     )}
     {/* package runtimes (body-end, module). Astro bundles <script> imports that live

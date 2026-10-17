@@ -2064,6 +2064,69 @@ async function awaitInboxClaim(apiBase, kind, id, cancelled, settleOnUnknown = f
 /** Mounts still waiting on their claim answer → the function that tells them to stop. */
 const gating = new WeakMap();
 
+// ── the site layout's loader hands over what it already learned (0.7.12, CVERInc/reef#1921) ─────
+//
+// sitetile no longer puts this file in a <script src> on every page: an inline loader asks the
+// mount's claim question first and imports this coral only where it will draw. Two things that
+// loader learned before this file existed on the page used to reach it the long way round, and
+// both arrived wrong (codex review of tile#151):
+//
+// 🩸 THE ANSWER WENT THROUGH `localStorage`. The loader wrote the yes it heard, and the mount was
+// meant to find it there. Where storage refuses the write or the read (quota, a privacy mode, a
+// policy, a consent script that clears it on load) the mount found nothing, asked again, and a
+// second answer — a no, a `throttled`, a 4xx — took away a bubble the first yes had earned.
+//
+// 🩸 THE HELD OPEN WAS REBROADCAST. The loader replayed a `reef-inbox:open` once the import had
+// resolved — but this file's listeners exist from its own evaluation, before that, so an open
+// dispatched in between was delivered to both and handled twice (a second focus, a second event
+// for anyone else listening).
+//
+// 🔴 SO THE LOADER LEAVES THEM ON `window.__reefInboxLoader` AND THIS FILE TAKES THEM, ONCE, IN
+// MEMORY: `{ v: 1, claims: { '<kind>:<id>': true | false | null }, open, taken }`. `claims` is the
+// whole gate's outcome for a tenant the loader asked about on THIS page load (the same schedule,
+// the same retries — `null` is「nobody could say」), so `mount` takes it instead of asking. `open`
+// is an open nobody was listening for yet; `mount` honours it exactly like its own held open.
+// `taken` is how the loader learns it must not replay anything: set here, in the same synchronous
+// turn that installs this file's own listeners, so from that moment one listener — ours — hears
+// every open. A loader that finds `taken` unset has an older coral; its fallbacks narrow the gap
+// but do not close it (a probe write that succeeds does not make the later claim write succeed),
+// so the loader REQUIRES this contract: `LOADER_HANDOFF_SINCE` is the floor the channel must not
+// drop below while loader pages exist, and sitetile's loader test pins its `CORAL_FLOOR` to it.
+// 🔴 Removing or renaming any of this is a breaking change for every site built with the loader.
+//
+// Taken by `mountAll`, not at the top of the module: behind the loader the document is always
+// parsed by the time this file evaluates, so that IS evaluation — and a page that loads this file
+// with a plain <script src> while still parsing keeps the loader's listener in charge until the
+// mounts that will honour it exist. A shape this file does not know is left alone: a page script
+// can write `window` exactly as it can write the remembered yes in `localStorage`, and earns the
+// same trust — a value of the right type or nothing. A WELL-shaped one is honoured: a page script
+// can draw the bubble without the question being asked, exactly as a forged remembered yes can.
+// That is a UI bypass, not an authority — every send still needs the backend's own yes.
+const LOADER_HANDOFF = '__reefInboxLoader';
+/** The first version that takes the handoff — the floor for a channel behind the loader. */
+export const LOADER_HANDOFF_SINCE = '0.7.12';
+
+function takeLoaderHandoff() {
+	if (typeof window === 'undefined') return null;
+	const handoff = window[LOADER_HANDOFF];
+	if (!handoff || typeof handoff !== 'object' || handoff.v !== 1 || handoff.taken === true) return null;
+	handoff.taken = true;
+	try {
+		delete window[LOADER_HANDOFF];
+	} catch {
+		window[LOADER_HANDOFF] = undefined;
+	}
+	return handoff;
+}
+
+/** The loader's answer for this tenant: `true`/`false`/`null`, or `undefined` when it did not ask. */
+function handedClaim(handoff, tenant) {
+	const claims = handoff && handoff.claims;
+	if (!claims || typeof claims !== 'object' || !Object.prototype.hasOwnProperty.call(claims, tenant)) return undefined;
+	const claim = claims[tenant];
+	return claim === true || claim === false || claim === null ? claim : undefined;
+}
+
 /**
  * The one-line status under the title — the part of the header that actually
  * changes as the conversation moves, so the title itself (the site's name)
@@ -2564,7 +2627,7 @@ export function refusalNeedsHandoffForm(answer) {
 
 // ── mount ───────────────────────────────────────────────────────────────────
 
-export async function mount(el) {
+export async function mount(el, handoff = null) {
 	const kind = el.getAttribute('data-kind') || '';
 	const id = el.getAttribute('data-id') || '';
 	const kaitoOn = el.getAttribute('data-kaito') === '1';
@@ -2588,14 +2651,27 @@ export async function mount(el) {
 			return null;
 		}
 	})();
-	/** A `reef-inbox:open` that arrived while the gate was still asking — see `heldOpen` below. */
-	let openRequested = false;
+	/**
+	 * A `reef-inbox:open` that arrived while the gate was still asking — see `heldOpen` below — or
+	 * one the site layout's loader held before this file was on the page (see `takeLoaderHandoff`).
+	 */
+	let openRequested = !!(handoff && handoff.open === true);
 	/**
 	 * KAITO on a tenant the gate did not hear a yes for: the ask view and nothing that needs an
 	 * Inbox — see the gate's header. Decided once, here, and never revised by this mount.
 	 */
 	let askOnly = false;
-	if (!rememberedClaim(gateStore, tenant)) {
+	const handed = handedClaim(handoff, tenant);
+	if (handed !== undefined) {
+		// The loader already ran this whole gate on this page load — asking again is the request, and
+		// the second answer, that the handoff exists to remove. It also wrote the yes down (or tried
+		// to), so nothing is written here. Same outcomes as the awaited branch below.
+		const fallback = rememberedClaim(gateStore, tenant, Date.now(), CLAIM_GATE_STALE_MS);
+		if (handed === false || (handed === null && !fallback)) {
+			if (!kaitoOn) return;
+			askOnly = true;
+		}
+	} else if (!rememberedClaim(gateStore, tenant)) {
 		let cancelled = false;
 		// 🩸 AN OPEN ASKED FOR WHILE WE ASK IS HELD, NOT DROPPED. A site's own `DOMContentLoaded`
 		// handler (a footer「report a problem」link, say) may dispatch `reef-inbox:open` a round trip
@@ -3337,10 +3413,13 @@ export function unmount(el) {
 }
 
 export function mountAll() {
+	// Taken before the first mount and in the same turn as every mount's synchronous half, so the
+	// loader's listener goes quiet exactly when ours start — see `takeLoaderHandoff`.
+	const handoff = takeLoaderHandoff();
 	document.querySelectorAll(SELECTOR).forEach((el) => {
 		if (el.getAttribute('data-dynamic-coral-mounted') === '1') return;
 		el.setAttribute('data-dynamic-coral-mounted', '1');
-		mount(el);
+		mount(el, handoff);
 	});
 }
 
