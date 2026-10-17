@@ -452,8 +452,8 @@ test('two locales: the zh-tw result page composes into /zh-tw/ and sends the buy
 	const html = await res.text();
 	assert.equal(res.status, 404, 'RSP does not know this locator: the same unknown answer as the bare path');
 	assert.equal(seenByRsp.length, 1, 'the locator is asked about');
-	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/zh-tw' + PAGE],
-		'the shell is the locale\'s own home, asked for once; the page itself is asked whether the site authored it');
+	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw' + PAGE, '/zh-tw/'],
+		'the page itself is asked whether the site authored it; then the shell is the locale\'s own home, asked for once');
 	assert.equal(html.includes('<html lang="zh-Hant"'), true, 'the zh-tw home declares the language');
 	assert.equal(html.includes('NAV-ZHTW') && html.includes('FOOT-ZHTW'), true, 'the zh-tw chrome, not the root\'s');
 	assert.equal(html.includes('NAV-ROOT'), false);
@@ -501,8 +501,8 @@ test('single locale: the bare path is unchanged, and a locale prefix this site h
 	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_stale'), prefixed.env);
 	const html = await res.text();
 	assert.equal(res.status, 404, 'still the unknown answer, not a shell failure');
-	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/zh-tw' + PAGE, '/'],
-		'the locale home is asked for first (then whether the site authored the page); only the home\'s absence falls back to the root');
+	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw' + PAGE, '/zh-tw/', '/'],
+		'whether the site authored the page is asked first, then the locale home; only the home\'s absence falls back to the root');
 	assert.equal(keepsShell(html), true, 'the root shell owns the page');
 	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, 'the copy follows the shell that was actually served');
 	assert.equal(backLinkOf(html), '/', 'no home for that locale, so the way back is the root');
@@ -787,6 +787,70 @@ test('a stray locator on an authored prefixed page does not shadow it; only a re
 	assert.equal(reservedRes.status, 404);
 	assert.equal((await reservedRes.text()).includes('data-ejecta-subscribe-state="unknown"'), true);
 	assert.deepEqual(reserved.seenByAssets.map((hit) => hit.path), ['/'], 'the bare path makes the one shell read it always made');
+});
+
+// Whose route it is gets decided before the locale home is read at all. The home is
+// only the shell to compose into; if it is read alongside the facts, a home read that
+// REJECTS (ASSETS failing, not a 404) lands in the catch before anyone asked whether
+// the site authored the page — and the worker's 503 shadows a healthy authored page.
+// So: the facts alone decide a confirmed buyer; an unconfirmed locator asks ASSETS for
+// the page; only once the worker owns the path is the home read, and a home that fails
+// THEN is round 2's 503. Request counts per branch (RSP + ASSETS):
+//   confirmed (active/confirming)          facts, home               — 1 + 1
+//   unconfirmed, page authored             facts, page               — 1 + 1 (home never read)
+//   unconfirmed, nothing authored          facts, page, home         — 1 + 2 (+ `/` on a home 404)
+//   bare path                              facts ‖ home              — 1 + 1, unchanged
+test('a failing locale home cannot shadow an authored prefixed page: ownership is decided before the home is read', async () => {
+	const authoredPath = '/zh-tw' + PAGE;
+	const homeRejects = () => { throw new Error('assets down'); };
+	const strayArms = [
+		['unknown', { [FACTS]: UNKNOWN }],
+		['facts 500', { [FACTS]: () => new Response('boom', { status: 500 }) }],
+		['facts rejects', { [FACTS]: () => { throw new Error('seam down'); } }]
+	];
+	for (const [name, facts] of strayArms) {
+		const { env, seenByRsp, seenByAssets } = makeEnv({ shell: ROOT_EN, homes: { '/zh-tw/': homeRejects }, rsp: factsRsp(facts), authored: [authoredPath] });
+		const res = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=reader-token'), env);
+		const body = await res.text();
+		assert.equal(res.status, 200, name + ', home rejects: the authored page answers, not a 503');
+		assert.equal(body, 'STATIC:' + authoredPath, name + ': the site\'s own content, byte for byte');
+		assert.equal(seenByRsp.length, 1, name + ': one facts read');
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), [authoredPath, authoredPath],
+			name + ': the page probe, then the dispatcher\'s own read — the home is never asked for');
+	}
+	// binding missing, home rejects: still nothing confirmed, still the authored page
+	const noBinding = makeEnv({ shell: ROOT_EN, homes: { '/zh-tw/': homeRejects }, authored: [authoredPath] });
+	const noBindingRes = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=reader-token'), noBinding.env);
+	assert.equal(noBindingRes.status, 200);
+	assert.equal(await noBindingRes.text(), 'STATIC:' + authoredPath, 'binding missing, home rejects: the authored page');
+
+	// once the worker owns the path, a home that rejects is round 2's 503 — both ways of owning it
+	for (const [name, facts, reads] of [
+		['active', ACTIVE, ['/zh-tw/']],
+		['unknown, nothing authored', UNKNOWN, [authoredPath, '/zh-tw/']]
+	]) {
+		const { env, seenByRsp, seenByAssets } = makeEnv({ shell: ROOT_EN, homes: { '/zh-tw/': homeRejects }, rsp: factsRsp({ [FACTS]: facts }) });
+		const res = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=cs_real'), env);
+		const body = await res.text();
+		assert.equal(res.status, 503, name + ': owned, and its shell cannot be read');
+		assert.equal(body.includes('<html'), false, name);
+		assert.equal(body.includes('NAV-ROOT'), false, name + ': the root is not served in the locale\'s place');
+		assert.equal(res.headers.get('cache-control'), 'private, no-store', name);
+		assert.equal(seenByRsp.length, 1, name);
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), reads, name + ': reads, in order');
+	}
+
+	// request counts on the healthy branches (the table above)
+	const counted = async (facts, authored, path) => {
+		const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: facts }), authored });
+		await (await claimed.default.fetch(get(path), env)).text();
+		return [seenByRsp.length, seenByAssets.map((hit) => hit.path)];
+	};
+	const q = '?' + PARAM + '=cs_real';
+	assert.deepEqual(await counted(ACTIVE, [], authoredPath + q), [1, ['/zh-tw/']], 'confirmed: facts + home');
+	assert.deepEqual(await counted(CONFIRMING, [authoredPath], authoredPath + q), [1, ['/zh-tw/']], 'confirming over an authored page: facts + home, no probe');
+	assert.deepEqual(await counted(UNKNOWN, [], authoredPath + q), [1, [authoredPath, '/zh-tw/']], 'unconfirmed, nothing authored: facts + page + home');
+	assert.deepEqual(await counted(ACTIVE, [], PAGE + q), [1, ['/']], 'bare: facts + home, as before');
 });
 
 test('the claimed landing is dropped from the markdown mapping, and only it', async () => {

@@ -718,25 +718,37 @@ async function renderSubscribeResult(request, env, cfg, route) {
 	try {
 		const factsUrl = new URL(url.origin + route.factsPath);
 		factsUrl.searchParams.set(route.sessionParam, locator);
-		let [facts, shellRes] = await Promise.all([
-			// No locator means there is nothing to ask about — the answer is already
-			// "we couldn't find this subscription" — so the seam is not called at all.
-			// Only the locator is sent: the plan is RSP's to name, never the query's.
-			locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null,
-			env.ASSETS.fetch(new Request(url.origin + homePath, request))
-		]);
-		// The prefixed path is ours only for a buyer. RSP confirming the locator
-		// (active / confirming) is the buyer; any other answer — unknown, a refusal,
-		// the seam unreachable — confirms nothing, so the site's own page at this
-		// path wins if it has one, and this worker hands the request back (null) to
-		// the dispatcher exactly as if it had never matched. Only where the site has
-		// nothing there (a 404) does the page below answer for the path. One facts
-		// read per prefixed request with a locator; the page itself is asked about
-		// only when the locator was not confirmed.
-		const confirmed = !!(facts && facts.ok && (facts.data.state === 'active' || facts.data.state === 'confirming'));
-		if (pathLocale && !confirmed) {
-			const own = await env.ASSETS.fetch(new Request(url.toString(), request));
-			if (!own || own.status !== 404) return null;
+		// No locator means there is nothing to ask about — the answer is already
+		// "we couldn't find this subscription" — so the seam is not called at all.
+		// Only the locator is sent: the plan is RSP's to name, never the query's.
+		const readFacts = () => locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null;
+		const readHome = () => env.ASSETS.fetch(new Request(url.origin + homePath, request));
+		let facts;
+		let shellRes;
+		if (!pathLocale) {
+			// The bare path is reserved: it is always ours, so the shell is read
+			// alongside the facts, as every already-emitted worker does.
+			[facts, shellRes] = await Promise.all([readFacts(), readHome()]);
+		} else {
+			// The prefixed path is ours only for a buyer, and that is settled BEFORE
+			// the locale home is read: the home is only the shell to compose into, and
+			// a home read that fails must not answer for a path the site authored.
+			// RSP confirming the locator (active / confirming) is the buyer; any other
+			// answer — unknown, a refusal, the seam unreachable — confirms nothing, so
+			// the site's own page at this path wins if it has one, and this worker
+			// hands the request back (null) to the dispatcher exactly as if it had
+			// never matched. Only where the site has nothing there (a 404) does the
+			// page below answer for the path. Once it is ours, a home that cannot be
+			// read is the same 503 as any shell failure. Reads per request:
+			// confirmed — facts, home; unconfirmed and authored — facts, page;
+			// unconfirmed and nothing authored — facts, page, home.
+			facts = await readFacts();
+			const confirmed = !!(facts && facts.ok && (facts.data.state === 'active' || facts.data.state === 'confirming'));
+			if (!confirmed) {
+				const own = await env.ASSETS.fetch(new Request(url.toString(), request));
+				if (!own || own.status !== 404) return null;
+			}
+			shellRes = await readHome();
 		}
 		if (pathLocale && shellRes && shellRes.status === 404) {
 			homePath = '/';
