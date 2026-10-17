@@ -40,10 +40,29 @@ class El {
 		if (!this.nodes.has(selector)) this.nodes.set(selector, new El());
 		return this.nodes.get(selector);
 	}
-	focus() {}
+	focus() { focuses++; }
 }
 
+/** Every `.focus()` the coral made — an open it handled twice focuses twice (codex round 2, P2). */
+let focuses = 0;
 const storage = new Map();
+/**
+ * How this browser's storage misbehaves, per test (codex round 2, P1): `ok`, `getter` (reading
+ * `window.localStorage` throws), `read` (`getItem` throws), `write` (`setItem` throws — a full
+ * quota, a privacy mode).
+ */
+let storageFault = 'ok';
+const localStore = {
+	getItem: (k) => {
+		if (storageFault === 'read') throw new Error('SecurityError');
+		return storage.has(k) ? storage.get(k) : null;
+	},
+	setItem: (k, v) => {
+		if (storageFault === 'write') throw new Error('QuotaExceededError');
+		storage.set(k, v);
+	},
+	removeItem: (k) => storage.delete(k)
+};
 const windowListeners = new Map();
 /** The elements the loader finds on "the page" — set per test. */
 let pageEls = [];
@@ -72,10 +91,9 @@ const fakeFetch = async (url, init = {}) => {
 class FakeCustomEvent { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } }
 
 const win = {
-	localStorage: {
-		getItem: (k) => (storage.has(k) ? storage.get(k) : null),
-		setItem: (k, v) => storage.set(k, v),
-		removeItem: (k) => storage.delete(k)
+	get localStorage() {
+		if (storageFault === 'getter') throw new Error('SecurityError');
+		return localStore;
 	},
 	addEventListener: (type, fn) => {
 		if (!windowListeners.has(type)) windowListeners.set(type, []);
@@ -133,9 +151,13 @@ const openListeners = () => (windowListeners.get('reef-inbox:open') ?? []).lengt
 
 function reset() {
 	storage.clear();
+	storageFault = 'ok';
 	windowListeners.clear();
 	requests.length = 0;
 	delays.length = 0;
+	focuses = 0;
+	delete win.__coralVersions;
+	delete win.__reefInboxLoader;
 }
 
 /** What the visitor and the network saw, after everything settled. */
@@ -146,6 +168,7 @@ function observe(el) {
 		delays: [...delays],
 		drawn: el.children.length > 0,
 		open: el.children.length > 0 && el.children[0].innerHTML.includes('role="dialog"'),
+		focuses,
 		claimKey: stored === undefined ? 'absent' : JSON.parse(stored).claim === true ? 'yes' : stored
 	};
 }
@@ -154,19 +177,42 @@ function observe(el) {
 async function coralAlone(scenario, id) {
 	reset();
 	scenario.before?.(id);
+	storageFault = scenario.storage ?? 'ok';
 	script = scenario.answers();
 	const el = new El({ 'data-kind': 'site', 'data-id': id, ...scenario.attrs });
 	const mounting = coral.mount(el);
-	if (scenario.openEarly) win.dispatchEvent(new FakeCustomEvent('reef-inbox:open'));
+	// Either way the open lands once the coral's listeners exist: while it asks, or (`openAtEvaluation`)
+	// in the turn its module evaluated — for a <script src> coral those are the same moment.
+	if (scenario.openEarly || scenario.openAtEvaluation) win.dispatchEvent(new FakeCustomEvent('reef-inbox:open'));
 	await mounting;
 	await settle();
 	return { seen: observe(el), imports: 'n/a' };
 }
 
+/**
+ * The two corals the `v0` channel can serve behind the loader. `handoff` is this checkout (0.7.12+):
+ * its module evaluation is `mountAll()`, which takes `window.__reefInboxLoader`. `older` is every
+ * published coral before it (≤ 0.7.11): its `mountAll()` mounts each element knowing nothing of the
+ * handoff — `mount(el)` with none is exactly that — and the registry's stamp is the artifact's last
+ * statement (build.mjs `reg`).
+ */
+const CORALS = {
+	handoff: () => coral.mountAll(),
+	older: () => {
+		for (const el of pageEls) {
+			if (el.getAttribute('data-dynamic-coral-mounted') === '1') continue;
+			el.setAttribute('data-dynamic-coral-mounted', '1');
+			void coral.mount(el);
+		}
+		(win.__coralVersions ??= {})['inbox-bubble'] = '0.7.11';
+	}
+};
+
 /** The loader, importing the coral (which mounts the element, as its auto-mount does) on demand. */
-async function behindLoader(scenario, id) {
+async function behindLoader(scenario, id, served = 'handoff') {
 	reset();
 	scenario.before?.(id);
+	storageFault = scenario.storage ?? 'ok';
 	script = scenario.answers();
 	const el = new El({ 'data-kind': 'site', 'data-id': id, ...scenario.attrs });
 	pageEls = [el];
@@ -174,14 +220,16 @@ async function behindLoader(scenario, id) {
 	const loading = bubbleLoader(SRC, win, async (src) => {
 		assert.equal(src, SRC);
 		imports++;
-		// The module's own evaluation: `mountAll()` → `mount(el)`, which installs its listeners
-		// synchronously up to its first await.
-		void coral.mount(el);
+		// The module's own evaluation — every listener it installs exists from here.
+		CORALS[served]();
+		// 🩸 codex round 2, P2: an open dispatched after the coral evaluated and before the import's
+		// continuation runs (another task, a focus handler). The coral hears it; nothing may hear it twice.
+		if (scenario.openAtEvaluation) win.dispatchEvent(new FakeCustomEvent('reef-inbox:open'));
 	});
 	if (scenario.openEarly) win.dispatchEvent(new FakeCustomEvent('reef-inbox:open'));
 	const outcome = await loading;
 	await settle();
-	return { seen: observe(el), imports, outcome };
+	return { seen: observe(el), imports, outcome, handoffLeft: win.__reefInboxLoader };
 }
 
 const SCENARIOS = [
@@ -208,23 +256,47 @@ const SCENARIOS = [
 	{ name: 'KAITO, an Inbox', attrs: { 'data-kaito': '1' }, answers: () => [yes()], draws: true },
 	{ name: 'an open dispatched while asking, an Inbox', openEarly: true, answers: () => [yes()], draws: true },
 	{ name: 'an open dispatched while asking, no Inbox', openEarly: true, answers: () => [no()], draws: false },
-	{ name: 'an open dispatched while asking, KAITO', openEarly: true, attrs: { 'data-kaito': '1' }, answers: () => [no()], draws: true }
+	{ name: 'an open dispatched while asking, KAITO', openEarly: true, attrs: { 'data-kaito': '1' }, answers: () => [no()], draws: true },
+	// 🩸 codex round 2, P1 — storage that cannot carry a yes from the loader to the coral. The second
+	// answer is the one round 1 let decide: the coral asked again and lost the bubble the first yes
+	// earned. A store that cannot carry it means the coral is imported at once and asks its own one
+	// question — the <script src> behaviour, for any coral the channel serves — so a no there still
+	// downloads it (`imports: 1`), as it always did in those browsers.
+	{ name: 'storage refuses the write, then yes (a second answer would say no)', storage: 'write', answers: () => [yes(), no()], draws: true },
+	{ name: 'storage refuses the write, then no', storage: 'write', answers: () => [no(), yes()], draws: false, imports: 1 },
+	{ name: 'storage refuses the write, could not ask, then yes', storage: 'write', answers: () => [503, yes(), no()], draws: true },
+	{ name: 'storage refuses the read, then yes (a second answer would say no)', storage: 'read', answers: () => [yes(), no()], draws: true },
+	{ name: 'storage refuses the read, then no', storage: 'read', answers: () => [no(), yes()], draws: false, imports: 1 },
+	{ name: 'no storage at all (the getter throws), then yes', storage: 'getter', answers: () => [yes(), no()], draws: true },
+	{ name: 'no storage at all (the getter throws), then no', storage: 'getter', answers: () => [no(), yes()], draws: false, imports: 1 },
+	// 🩸 codex round 2, P2 — an open dispatched in the window between the coral's evaluation and the
+	// import's continuation: heard by the coral, and must not be handled a second time.
+	{ name: 'an open dispatched as the coral evaluates, an Inbox', openAtEvaluation: true, answers: () => [yes()], draws: true },
+	{ name: 'an open dispatched as the coral evaluates, KAITO', openAtEvaluation: true, attrs: { 'data-kaito': '1' }, answers: () => [no()], draws: true },
+	{ name: 'an open dispatched as the coral evaluates, remembered yes', openAtEvaluation: true, before: (id) => storage.set(claimKey(id), JSON.stringify({ claim: true, at: Date.now() - HOUR })), answers: () => [], draws: true },
+	{ name: 'an open dispatched as the coral evaluates, storage refuses the write', openAtEvaluation: true, storage: 'write', answers: () => [yes()], draws: true }
 ];
 
+// Every row twice: behind the loader with the coral this checkout publishes, and with any older one
+// the `v0` channel may still serve (the engine shipped first, or the channel was rolled back) — the
+// loader must never do worse than the <script src> did with either.
 let n = 0;
-for (const scenario of SCENARIOS) {
-	test(`parity with the coral alone: ${scenario.name}`, async () => {
-		const id = `p${++n}`;
-		const alone = await coralAlone(scenario, id);
-		const loaded = await behindLoader(scenario, id);
-		assert.equal(alone.seen.drawn, scenario.draws, 'the scenario table is wrong about the coral itself');
-		assert.deepEqual(loaded.seen, alone.seen);
-		// The coral is imported when it draws, and — but for the one row that says so — never on a
-		// page where it draws nothing.
-		const imports = scenario.imports ?? (scenario.draws ? 1 : 0);
-		assert.equal(loaded.imports, imports);
-		assert.equal(loaded.outcome, imports ? 'loaded' : 'skipped');
-	});
+for (const served of Object.keys(CORALS)) {
+	for (const scenario of SCENARIOS) {
+		test(`parity with the coral alone (${served} coral): ${scenario.name}`, async () => {
+			const id = `p${++n}`;
+			const alone = await coralAlone(scenario, id);
+			const loaded = await behindLoader(scenario, id, served);
+			assert.equal(alone.seen.drawn, scenario.draws, 'the scenario table is wrong about the coral itself');
+			assert.deepEqual(loaded.seen, alone.seen);
+			// The coral is imported when it draws, and — but for the rows that say so — never on a
+			// page where it draws nothing.
+			const imports = scenario.imports ?? (scenario.draws ? 1 : 0);
+			assert.equal(loaded.imports, imports);
+			assert.equal(loaded.outcome, imports ? 'loaded' : 'skipped');
+			assert.equal(loaded.handoffLeft, undefined, 'the handoff outlived the page load');
+		});
+	}
 }
 
 test('no Inbox, no KAITO: the coral is never imported and the loader leaves no listener behind', async () => {
@@ -235,7 +307,50 @@ test('no Inbox, no KAITO: the coral is never imported and the loader leaves no l
 	assert.deepEqual(requests.map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 });
 
-test('first intent to draw imports the coral once, and a held open is replayed once', async () => {
+for (const served of Object.keys(CORALS)) {
+	test(`two opens — one before the coral, one as it evaluates — are handled twice, never three times (${served} coral)`, async () => {
+		// Not a parity row: alone, the coral is still asking when both arrive and folds them into one.
+		// Behind the loader the second lands on a panel that is already open, which is a refocus — the
+		// coral's documented answer to an open on an open panel. What must not happen is the first one
+		// reaching the coral a second time.
+		const loaded = await behindLoader({ openEarly: true, openAtEvaluation: true, answers: () => [yes()] }, `twice-${served}`, served);
+		assert.equal(loaded.seen.open, true);
+		assert.equal(loaded.seen.focuses, 2);
+	});
+}
+
+test('the handoff coral takes the loader\'s yes in memory: a consent script that clears storage before it evaluates costs no second question', async () => {
+	reset();
+	const el = new El({ 'data-kind': 'site', 'data-id': 'wiped' });
+	pageEls = [el];
+	script = [yes(), no()];
+	const outcome = await bubbleLoader(SRC, win, async () => {
+		storage.clear();
+		coral.mountAll();
+	});
+	await settle();
+	assert.equal(outcome, 'loaded');
+	assert.equal(claimRequests(), 1, 'the coral asked again');
+	assert.equal(el.children.length > 0, true, 'the bubble the first yes earned was lost');
+	assert.equal(win.__reefInboxLoader, undefined);
+});
+
+test('a handoff of a shape the coral does not know is left alone: it asks, as without one', async () => {
+	reset();
+	const el = new El({ 'data-kind': 'site', 'data-id': 'forged' });
+	pageEls = [el];
+	script = [no()];
+	win.__reefInboxLoader = { v: 1, claims: { 'site:forged': 'yes' }, open: false, taken: false };
+	coral.mountAll();
+	await settle();
+	assert.equal(claimRequests(), 1);
+	assert.equal(el.children.length, 0);
+	win.__reefInboxLoader = { v: 2, claims: { 'site:forged': true } };
+	coral.mountAll();
+	assert.equal(win.__reefInboxLoader?.v, 2, 'a version this coral does not speak was consumed');
+});
+
+test('first intent to draw imports the coral once, and a held open is replayed once to a coral that takes no handoff', async () => {
 	reset();
 	const a = new El({ 'data-kind': 'site', 'data-id': 'twice-a' });
 	const b = new El({ 'data-kind': 'site', 'data-id': 'twice-b' });
@@ -274,7 +389,8 @@ test('the emitted script is the loader only — no coral body, small, same URL, 
 	}
 	assert.equal(s.split(SRC).length - 1, 1, 'the coral URL is not named exactly once');
 	assert.ok(!/<\/?script/i.test(s), 'the inline module can close its own <script>');
-	assert.ok(s.length < 4096, `the loader is ${s.length} bytes`);
+	// 4.5 KB raw since the round-2 handoff (round 1: 4 KB); the wire carries the gzip line below.
+	assert.ok(s.length < 4608, `the loader is ${s.length} bytes`);
 	assert.ok(gzipSync(s).length < 2048, `the loader is ${gzipSync(s).length} bytes gzipped`);
 	assert.ok(!bubbleLoaderScript('x</script><b>').includes('</script>'), 'a src can break out of the inline module');
 });

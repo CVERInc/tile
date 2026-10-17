@@ -169,6 +169,34 @@ yes, and dropped if it is anything else — so it is not lost to that round trip
 without an Inbox it still opens nothing. `#inbox` is checked once, when the bubble is drawn, so on
 such a page it moves focus one round trip later than the page load.
 
+## Behind the site layout's loader (0.7.12)
+
+sitetile does not put this file in a `<script src>` on every page any more (CVERInc/reef#1921): an
+inline loader asks the mount's Inbox question first and imports this coral only where it will draw.
+What the loader learned before this file was on the page reaches it **in memory**, on
+`window.__reefInboxLoader = { v: 1, claims: { '<kind>:<id>': true | false | null }, open, taken }`,
+and `mountAll()` takes it once, in the same turn that installs the mounts' own listeners:
+
+- **`claims`** — the gate's whole outcome for a tenant the loader asked about on this page load
+  (same 2/8/30 s schedule, `null` is「nobody could say」). The mount takes it instead of asking: no
+  second `GET /api/inbox/session`, and no second answer that could take away a bubble the first yes
+  earned — which is what happened when the yes travelled through `localStorage` alone and the browser
+  refused the write or the read.
+- **`open`** — a `reef-inbox:open` dispatched before this file was listening. The mount honours it
+  exactly like one it held itself. The loader does **not** rebroadcast it: an open that arrives once
+  this file is listening reaches this file's listener alone, once.
+- **`taken`** — set by this file; it is how the loader knows not to replay anything.
+
+A shape this file does not know (another `v`, a claim that is not `true`/`false`/`null`) is ignored and
+the mount asks, as it would with no loader — a page script can write `window` just as it can write the
+remembered yes, and earns the same trust. A host that mounts this file with `<script src>` or calls
+`mount(el)` itself never sees any of it.
+
+**Older corals behind the loader.** Up to 0.7.11 nothing takes the handoff. The loader then stays on
+paths that need none: it gates only where `localStorage` can carry the yes (otherwise it imports at once
+and this file asks its own question, as with `<script src>`), and replays only an open that arrived
+before the coral evaluated (the registry stamp `window.__coralVersions['inbox-bubble']` marks that).
+
 ## Handing a conversation over from elsewhere: navigate, do not dispatch
 
 <!-- handoff-section:start — compose.test.mjs reads between these two markers; keep them around this section's warnings -->

@@ -23,12 +23,34 @@
 // 🔴 NOT A NEW BUBBLE. It draws nothing, adds no attribute and no node, and talks to no host the page
 // did not already talk to: the coral's URL is the one the layout used to put in a <script src>.
 //
-// 🔴 A `reef-inbox:open` THAT ARRIVES BEFORE THE CORAL IS LISTENING IS HELD AND REPLAYED. The coral's
-// own rule is that an open dispatched by a site's DOMContentLoaded handler must not be lost; with a
-// <script src> the coral was listening before DOMContentLoaded, behind an import it may not be. So the
-// loader listens from its first line, and once the coral has mounted (its listeners are installed
-// synchronously at module evaluation) dispatches the one open it held. On a no, it is dropped — the
-// coral would have dropped it too.
+// 🔴 WHAT IT LEARNED REACHES THE CORAL IN MEMORY, NOT THROUGH STORAGE OR A REBROADCAST (codex review
+// of tile#151, round 2). Before the import it puts `window.__reefInboxLoader = { v: 1, claims, open,
+// taken }` on the page; the coral (0.7.12+, `takeLoaderHandoff` in inbox-bubble.js — the contract is
+// written there) takes it in the same turn that installs its own listeners:
+//   • `claims['<kind>:<id>']` — the gate's whole outcome for a tenant asked about here, so the coral
+//     does not ask again. 🩸 Round 1 sent the yes through `localStorage` alone: where storage refuses
+//     the write or the read, the coral asked again and a second no / throttled / 4xx took away the
+//     bubble the first yes had earned.
+//   • `open` — a `reef-inbox:open` nobody was listening for yet. The coral's own rule is that an open
+//     dispatched by a site's DOMContentLoaded handler must not be lost, and behind an import the coral
+//     may not be listening yet; so the loader listens from its first line and the coral honours what
+//     it held. 🩸 Round 1 rebroadcast it after the import resolved — but the coral listens from its
+//     own evaluation, before that, so an open in between was delivered twice. Once `taken` is set the
+//     loader's listener records nothing and the loader replays nothing.
+//
+// 🔴 AN OLDER CORAL IS NEVER WORSE OFF THAN WITH THE OLD <script src>. The page imports the `v0`
+// channel, which can serve a coral that predates the handoff (the engine shipped first, or the channel
+// was rolled back). Such a coral never sets `taken`, so:
+//   • the claim must still reach it through storage — and the loader only gates when storage can
+//     carry it: one throwaway write and read (`carries`) before the first question. Where it cannot
+//     (no storage, a throwing getter, a refused write or read) the coral is imported at once and asks
+//     its own question, exactly as the <script src> did. Those browsers download the coral as they
+//     always have; nothing else does.
+//   • the held open is replayed — but only what arrived before the coral evaluated: the registry's
+//     stamp (`window.__coralVersions['inbox-bubble']`, the last statement of every published
+//     artifact) marks the moment the coral's own listeners exist, and the loader stops recording then.
+//     (While the document is still parsing the coral mounts later, on DOMContentLoaded, so until then
+//     the loader keeps recording.) On a no, a held open is dropped — the coral would have dropped it.
 //
 // `bubbleLoader` is the shipped code: the layout inlines `bubbleLoader.toString()`, and the tests
 // call the same function with a stand-in window. So it may reference nothing outside its own body —
@@ -44,12 +66,14 @@
 // Reading guide for the body, whose comments are kept out of it because they would ship:
 //   • `remembered` / `remember` — the coral's `rememberedClaim` (asked here with the 30-day fallback
 //     window, which also covers the six-hour one) and `rememberClaim`: write a yes, forget on a no,
-//     leave it alone when nobody answered. A store that refuses the write costs one more probe.
+//     leave it alone when nobody answered — still written, for the next page and for an older coral.
+//   • `carries` — can storage take a write and give it back on this page? Its own key, removed at once.
 //   • `ask` / `gate` — `askInboxClaim` + `probeOnce` + `awaitInboxClaim` with no fallback.
 //   • `drawsAnyway` — the cases where the coral draws without asking first; missing kind/id counts,
 //     because the coral names that broken install on the page and that is for it to do.
+//   • `release` — the loader's listener and its handoff leave the page (an untaken handoff included).
 //   • `load` — runs at most once per page (one call site). The coral mounts on DOMContentLoaded if it
-//     arrives before it; its listener is registered first, so the replay still lands after the mount.
+//     arrives before it; its listener is registered first, so `settle` still runs after the mount.
 //   • `importer` exists for the tests; the inlined call passes only (src, window).
 /* eslint-disable no-var */
 export function bubbleLoader(src, win, importer) {
@@ -61,9 +85,19 @@ export function bubbleLoader(src, win, importer) {
 	var TIMEOUT = 15000;
 	var store = null;
 	try { store = win.localStorage; } catch (e) { store = null; }
-	var held = false;
-	var hold = function () { held = true; };
+	var handoff = { v: 1, claims: {}, open: false, taken: false };
+	win.__reefInboxLoader = handoff;
+	var hold = function () {
+		var v = win.__coralVersions;
+		if (!handoff.taken && !(doc.readyState !== 'loading' && v && v['inbox-bubble'])) handoff.open = true;
+	};
 	win.addEventListener('reef-inbox:open', hold);
+	function release() {
+		win.removeEventListener('reef-inbox:open', hold);
+		if (win.__reefInboxLoader === handoff) {
+			try { delete win.__reefInboxLoader; } catch (e) { win.__reefInboxLoader = undefined; }
+		}
+	}
 
 	function key(t) { return 'reef-inbox:claim:' + t; }
 	function remembered(t) {
@@ -72,6 +106,15 @@ export function bubbleLoader(src, win, importer) {
 			var raw = JSON.parse(store.getItem(key(t)));
 			var now = Date.now();
 			return !!raw && raw.claim === true && Number.isFinite(raw.at) && raw.at <= now && now - raw.at < STALE;
+		} catch (e) { return false; }
+	}
+	function carries() {
+		if (!store) return false;
+		try {
+			store.setItem('reef-inbox:loader', '1');
+			var back = store.getItem('reef-inbox:loader');
+			store.removeItem('reef-inbox:loader');
+			return back === '1';
 		} catch (e) { return false; }
 	}
 	function remember(t, claimed) {
@@ -121,25 +164,26 @@ export function bubbleLoader(src, win, importer) {
 		var base = (el.getAttribute('data-api-base') || 'https://feelreef.com').replace(/\/$/, '');
 		return gate(base, x.kind, x.id, 0).then(function (answer) {
 			remember(x.t, answer);
+			handoff.claims[x.t] = answer;
 			return answer === true;
 		});
 	}
 	function load() {
 		return Promise.resolve().then(function () { return importer ? importer(src) : import(src); })
 			.then(function () {
-				var replay = function () {
-					win.removeEventListener('reef-inbox:open', hold);
-					if (held) win.dispatchEvent(new win.CustomEvent('reef-inbox:open'));
+				var settle = function () {
+					release();
+					if (!handoff.taken && handoff.open) win.dispatchEvent(new win.CustomEvent('reef-inbox:open'));
 				};
-				if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', replay);
-				else replay();
+				if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', settle);
+				else settle();
 				return 'loaded';
 			});
 	}
-	if (els.some(drawsAnyway)) return load();
+	if (els.some(drawsAnyway) || !carries()) return load();
 	return Promise.all(els.map(claimed)).then(function (answers) {
 		if (answers.indexOf(true) >= 0) return load();
-		win.removeEventListener('reef-inbox:open', hold);
+		release();
 		return 'skipped';
 	});
 }
