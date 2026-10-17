@@ -174,6 +174,23 @@ function shellLang(shell) {
 	return ((shell || '').match(/<html\b[^>]*\blang=["']([^"']+)/i) || [])[1] || '';
 }
 
+// Make the document declare `lang` on its <html> element — replacing the donor's
+// declaration, or adding one when the donor had none. Used only when the copy
+// composed into the shell is known to be in a language the donor did not declare.
+function withShellLang(shell, lang) {
+	const safe = escHtml(lang);
+	return shell.replace(/<html\b[^>]*>/i, function (open) {
+		return /\blang=["'][^"']*["']/i.test(open)
+			? open.replace(/\blang=["'][^"']*["']/i, 'lang="' + safe + '"')
+			: open.replace(/^<html\b/i, '<html lang="' + safe + '"');
+	});
+}
+
+// The path's locale segment as a language tag: `zh-tw` → `zh-TW`, `ja` → `ja`.
+function pathLocaleTag(pathLocale) {
+	return String(pathLocale || '').replace(/-([a-z]{2})$/, function (_m, region) { return '-' + region.toUpperCase(); });
+}
+
 // Resolve a free-form hint (a shop path, a document's lang, or both) against the
 // locale set COMPLETE_COPY carries. Lifted out of completionLocale unchanged so a
 // site-owned buyer page can resolve ITS locale from the site's own shell instead
@@ -699,11 +716,22 @@ async function renderSubscribeResult(request, env, cfg, route) {
 			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
 		}
 		if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
-		const shell = await shellRes.text();
-		// The path locale is a hint ahead of the shell's own declaration only when
-		// its home was the shell actually served; a fallback to the root speaks the
-		// root's language, since that is the page the buyer is now looking at.
-		const locale = localeFromHint((homePath === '/' ? '' : pathLocale + ' ') + shellLang(shell));
+		let shell = await shellRes.text();
+		// Whose language the page is in. When the locale home WAS served, the path
+		// is the authority: the buyer came from /ja-jp/, the copy is Japanese, and
+		// the document must say so — a donor declaring some other lang would put
+		// Japanese copy inside <html lang="en-US">, or Simplified copy under a
+		// /zh-tw/ path because the donor said zh-Hans. A donor that agrees keeps
+		// its own spelling (zh-Hant stays zh-Hant). On a fallback to the root, the
+		// root shell is what the buyer is now looking at, so its declared lang
+		// stands and the copy follows it.
+		let locale;
+		if (homePath === '/') {
+			locale = localeFromHint(shellLang(shell));
+		} else {
+			locale = localeFromHint(pathLocale);
+			if (localeFromHint(shellLang(shell)) !== locale) shell = withShellLang(shell, pathLocaleTag(pathLocale));
+		}
 		const copy = BUYER_PAGE_COPY[locale];
 		const state = facts ? (facts.ok ? facts.data.state : '') : 'unknown';
 		let status;

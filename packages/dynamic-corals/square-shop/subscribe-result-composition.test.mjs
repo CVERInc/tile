@@ -544,6 +544,62 @@ test('locale home: a 404 falls back to `/`; a 5xx or a rejected fetch is a shell
 	assert.equal((bareRes.headers.get('content-type') || '').includes('text/html'), false);
 });
 
+// Whose language is the page in? When the locale home WAS served, the path is the
+// authority: the buyer came from /ja-jp/, the copy is Japanese, and the document
+// says so — a donor shell that declares some other lang does not get to put
+// Japanese copy inside <html lang="en-US">, nor Simplified copy under a /zh-tw/
+// path because the donor said zh-Hans. A donor that agrees keeps its own spelling
+// (zh-Hant stays zh-Hant). When the locale home was NOT there and the page fell
+// back to `/`, the root shell is what the buyer is looking at, so its declared
+// lang stands and the copy follows it.
+test('<html lang> and the copy: the path locale outranks a disagreeing donor when its home was served', async () => {
+	const locatorQuery = '?' + PARAM + '=cs_real';
+	const homeDeclaring = (lang, nav) => (lang === null
+		? SHELL.replace(' lang="zh-Hant"', '')
+		: SHELL.replace('lang="zh-Hant"', 'lang="' + lang + '"')).replace(NAV, nav);
+
+	const cases = [
+		// [path locale, donor lang, expected <html lang>, expected heading, headings that must NOT appear]
+		['ja-jp', 'en-US', 'ja-JP', 'ご登録ありがとうございます', ['Thank you for subscribing']],
+		['zh-tw', 'zh-Hans', 'zh-TW', '感謝您的訂閱', ['感谢您的订阅']],
+		['zh-tw', 'zh-Hant', 'zh-Hant', '感謝您的訂閱', ['感谢您的订阅']],
+		['ja', null, 'ja', 'ご登録ありがとうございます', ['Thank you for subscribing']],
+		['en', 'zh-Hant', 'en', 'Thank you for subscribing', ['感謝您的訂閱']]
+	];
+	for (const [pathLocale, donorLang, expectedLang, heading, absent] of cases) {
+		const label = '/' + pathLocale + '/ declaring ' + JSON.stringify(donorLang);
+		const { env, seenByAssets } = makeEnv({
+			shell: ROOT_EN, rsp: factsRsp({ [FACTS]: ACTIVE }),
+			homes: { ['/' + pathLocale + '/']: homeDeclaring(donorLang, 'NAV-LOCALE') }
+		});
+		const res = await claimed.default.fetch(get('/' + pathLocale + PAGE + locatorQuery), env);
+		const html = await res.text();
+		assert.equal(res.status, 200, label);
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/' + pathLocale + '/'], label + ': the locale home was served');
+		assert.equal(html.includes('NAV-LOCALE'), true, label + ': composed into that home');
+		assert.equal((html.match(/<html\b[^>]*>/i) || [''])[0], '<html lang="' + expectedLang + '">', label + ': the document declares the language of its copy');
+		assert.equal((html.match(/<html\b/gi) || []).length, 1, label + ': one html element');
+		assert.equal(html.includes('<h1>' + heading + '</h1>'), true, label + ': copy in the path\'s locale');
+		for (const gone of absent) assert.equal(html.includes(gone), false, label + ': no ' + gone);
+	}
+
+	// fallback: no /ja-jp/ home, root declares zh-Hant → the root's lang stands and the copy follows it
+	const fallback = makeEnv({ rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const res = await claimed.default.fetch(get('/ja-jp' + PAGE + locatorQuery), fallback.env);
+	const html = await res.text();
+	assert.equal(res.status, 200);
+	assert.deepEqual(fallback.seenByAssets.map((hit) => hit.path), ['/ja-jp/', '/']);
+	assert.equal((html.match(/<html\b[^>]*>/i) || [''])[0], '<html lang="zh-Hant">', 'fallback: the root shell\'s own declaration');
+	assert.equal(html.includes('<h1>感謝您的訂閱</h1>'), true, 'fallback: the copy follows the root shell');
+	assert.equal(html.includes('ご登録ありがとうございます'), false, 'fallback: the path locale does not outrank the shell the buyer is actually looking at');
+
+	// fallback, unknown arm: the way back and the copy agree on the root too
+	const fallbackUnknown = makeEnv({ rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const unknownHtml = await (await claimed.default.fetch(get('/ja-jp' + PAGE + '?' + PARAM + '=cs_stale'), fallbackUnknown.env)).text();
+	assert.equal(unknownHtml.includes('<h1>在這裡無法確認這筆訂閱</h1>'), true);
+	assert.equal(backLinkOf(unknownHtml), '/');
+});
+
 test('the locale prefix is claimed only in the shape the caller contract emits', async () => {
 	for (const [path, init] of [
 		['/zh-tw' + PAGE, { method: 'POST' }],
