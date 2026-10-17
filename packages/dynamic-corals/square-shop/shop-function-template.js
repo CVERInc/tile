@@ -624,14 +624,15 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
 // bare contract path is the default locale, served bare at `/` like every other
 // default-locale page, and is answered as it always was.
 //
-// The prefixed shape is claimed ONLY when the request carries the checkout
-// locator the contract names. The bare path is reserved — the markdown mapping
-// drops it, the contract forwards it — but `/zh-tw/<path>` is not: the site can
-// have AUTHORED a page there, and `/en/…` can be an ordinary content directory
-// that spells like a locale. A buyer coming back from checkout always carries the
-// locator; a visitor reading a page never does, so without one the prefixed URL
-// is left to the site's own content (or its 404) rather than shadowed by this
-// page's "we can't confirm this subscription here".
+// The prefixed shape is only a CANDIDATE here, and only when the request carries
+// the checkout locator the contract names. The bare path is reserved — the
+// markdown mapping drops it, the contract forwards it — but `/zh-tw/<path>` is
+// not: the site can have AUTHORED a page there, and `/en/…` can be an ordinary
+// content directory that spells like a locale. Without a locator the prefixed URL
+// is left to the site's own content (or its 404). With one, the key alone still
+// does not tell a buyer from a reader (`session_id` is an ordinary query name), so
+// renderSubscribeResult makes the claim only once RSP confirms the locator names a
+// real checkout — see there.
 function matchSubscribeResult(request, route) {
 	if (!route || request.method !== route.method) return null;
 	let url;
@@ -711,6 +712,19 @@ async function renderSubscribeResult(request, env, cfg, route) {
 			locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null,
 			env.ASSETS.fetch(new Request(url.origin + homePath, request))
 		]);
+		// The prefixed path is ours only for a buyer. RSP confirming the locator
+		// (active / confirming) is the buyer; any other answer — unknown, a refusal,
+		// the seam unreachable — confirms nothing, so the site's own page at this
+		// path wins if it has one, and this worker hands the request back (null) to
+		// the dispatcher exactly as if it had never matched. Only where the site has
+		// nothing there (a 404) does the page below answer for the path. One facts
+		// read per prefixed request with a locator; the page itself is asked about
+		// only when the locator was not confirmed.
+		const confirmed = !!(facts && facts.ok && (facts.data.state === 'active' || facts.data.state === 'confirming'));
+		if (pathLocale && !confirmed) {
+			const own = await env.ASSETS.fetch(new Request(url.toString(), request));
+			if (!own || own.status !== 404) return null;
+		}
 		if (pathLocale && shellRes && shellRes.status === 404) {
 			homePath = '/';
 			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
@@ -1625,7 +1639,12 @@ export default {
 		// so already-emitted workers keep the whole-page fallback, and a contract
 		// without subscribeResult forwards it exactly as before.
 		const subscribeResult = matchSubscribeResult(request, transport && transport.subscribeResult);
-		if (subscribeResult) return renderSubscribeResult(request, env, CFG, subscribeResult);
+		if (subscribeResult) {
+			// null: a prefixed candidate RSP did not confirm, on a path the site has its
+			// own page for — fall through as if unmatched (see renderSubscribeResult).
+			const rendered = await renderSubscribeResult(request, env, CFG, subscribeResult);
+			if (rendered) return rendered;
+		}
 
 		// The branches are MUTUALLY EXCLUSIVE and the transport is first:
 		// contract hit → the binding, verdict-required hit → ask then serve

@@ -95,7 +95,13 @@ const RSP_PAGE = 'RSP-WHOLE-PAGE-LEGACY-LANDING';
 // 404s, exactly as a locale without a home does on the real ASSETS. A FUNCTION
 // value is ASSETS itself misbehaving for that home: it is called and whatever it
 // returns (or throws) is the answer.
-function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {} } = {}) {
+//
+// `authored` is the site's own pages at the PREFIXED result path (`/zh-tw/join/done`):
+// the prefixed path is not reserved the way the bare one is, so a site can have one.
+// A prefixed result path not listed there 404s, as it does on a site that authored
+// nothing there; every other non-home path answers `STATIC:<path>`.
+const PREFIXED_PAGE = new RegExp('^/[a-z]{2}(?:-[a-z]{2})?' + PAGE.replace(/\//g, '\\/') + '$');
+function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {}, authored = [] } = {}) {
 	const seenByRsp = [];
 	const seenByAssets = [];
 	const env = {
@@ -113,6 +119,7 @@ function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {} 
 					if (typeof home === 'function') return home();
 					return new Response(home, { status: 200, headers: { 'content-type': 'text/html' } });
 				}
+				if (PREFIXED_PAGE.test(url.pathname) && !authored.includes(url.pathname)) return new Response('missing', { status: 404 });
 				return new Response('STATIC:' + url.pathname, { status: 200 });
 			}
 		}
@@ -445,7 +452,8 @@ test('two locales: the zh-tw result page composes into /zh-tw/ and sends the buy
 	const html = await res.text();
 	assert.equal(res.status, 404, 'RSP does not know this locator: the same unknown answer as the bare path');
 	assert.equal(seenByRsp.length, 1, 'the locator is asked about');
-	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/'], 'the shell is the locale\'s own home, asked for once');
+	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/zh-tw' + PAGE],
+		'the shell is the locale\'s own home, asked for once; the page itself is asked whether the site authored it');
 	assert.equal(html.includes('<html lang="zh-Hant"'), true, 'the zh-tw home declares the language');
 	assert.equal(html.includes('NAV-ZHTW') && html.includes('FOOT-ZHTW'), true, 'the zh-tw chrome, not the root\'s');
 	assert.equal(html.includes('NAV-ROOT'), false);
@@ -493,8 +501,8 @@ test('single locale: the bare path is unchanged, and a locale prefix this site h
 	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_stale'), prefixed.env);
 	const html = await res.text();
 	assert.equal(res.status, 404, 'still the unknown answer, not a shell failure');
-	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/'],
-		'the locale home is asked for first; only its absence falls back to the root');
+	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/zh-tw' + PAGE, '/'],
+		'the locale home is asked for first (then whether the site authored the page); only the home\'s absence falls back to the root');
 	assert.equal(keepsShell(html), true, 'the root shell owns the page');
 	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, 'the copy follows the shell that was actually served');
 	assert.equal(backLinkOf(html), '/', 'no home for that locale, so the way back is the root');
@@ -646,7 +654,7 @@ test('a prefixed path without a locator is not claimed, so an authored page ther
 		['/en', ''],
 		['/ja', '']
 	]) {
-		const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+		const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }), authored: [prefix + PAGE] });
 		const res = await claimed.default.fetch(get(prefix + PAGE + query), env);
 		const body = await res.text();
 		const label = prefix + PAGE + query;
@@ -673,6 +681,63 @@ test('a prefixed path without a locator is not claimed, so an authored page ther
 	assert.equal(bareRes.status, 404);
 	assert.equal(bareHtml.includes('data-ejecta-subscribe-state="unknown"'), true, 'the bare path still answers the no-locator case itself');
 	assert.deepEqual(bare.seenByAssets.map((hit) => hit.path), ['/']);
+});
+
+// The locator KEY is an ordinary query name: `?sid=reader-token` on an authored
+// /zh-tw/<path> page is a reader, not a buyer. What tells them apart is whether the
+// locator names a real checkout — the same facts read the page itself makes. RSP
+// confirming it (active / confirming) makes the prefixed URL the result page. Any
+// other answer (unknown, a refusal, the seam unreachable) leaves the path to the
+// site: an authored page there is served as authored; only where the site has
+// nothing does this worker answer "we can't confirm this subscription here".
+test('a stray locator on an authored prefixed page does not shadow it; only a real checkout claims the path', async () => {
+	const authoredPath = '/zh-tw' + PAGE;
+	const strayArms = [
+		['unknown', { [FACTS]: UNKNOWN }],
+		['facts 500', { [FACTS]: () => new Response('boom', { status: 500 }) }],
+		['facts unreadable', { [FACTS]: () => new Response('not json', { status: 200 }) }],
+		['facts rejects', { [FACTS]: () => { throw new Error('seam down'); } }]
+	];
+	for (const [name, facts] of strayArms) {
+		const { env, seenByRsp } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp(facts), authored: [authoredPath] });
+		const res = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=reader-token'), env);
+		const body = await res.text();
+		assert.equal(res.status, 200, name + ': the authored page answers');
+		assert.equal(body, 'STATIC:' + authoredPath, name + ': the site\'s own content, byte for byte');
+		assert.equal(seenByRsp.length, 1, name + ': the locator is looked up once');
+		assert.equal(seenByRsp[0].search, '?' + PARAM + '=reader-token', name);
+	}
+	// binding missing: nobody to ask, so nothing is confirmed — the authored page stands
+	const noBinding = makeEnv({ ...TWO_LOCALES, authored: [authoredPath] });
+	const noBindingRes = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=reader-token'), noBinding.env);
+	assert.equal(await noBindingRes.text(), 'STATIC:' + authoredPath, 'binding missing: the authored page');
+
+	// CONTROL, the same authored site: a locator RSP confirms is the buyer, and composes
+	for (const [state, facts] of [['active', ACTIVE], ['confirming', CONFIRMING]]) {
+		const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: facts }), authored: [authoredPath] });
+		const res = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=cs_real'), env);
+		const html = await res.text();
+		assert.equal(res.status, 200, state);
+		assert.equal(html.includes('data-ejecta-subscribe-state="' + state + '"'), true, state + ': the result page is composed');
+		assert.equal(html.includes('NAV-ZHTW'), true, state);
+		assert.equal(seenByRsp.length, 1, state + ': one facts read');
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/'], state + ': the shell only; the page is not probed');
+	}
+
+	// CONTROL: the same stray locator where the site authored nothing is still this page's unknown answer
+	const bare = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const bareRes = await claimed.default.fetch(get(authoredPath + '?' + PARAM + '=reader-token'), bare.env);
+	const bareHtml = await bareRes.text();
+	assert.equal(bareRes.status, 404);
+	assert.equal(bareHtml.includes('data-ejecta-subscribe-state="unknown"'), true, 'nothing authored: the unknown page');
+	assert.equal(backLinkOf(bareHtml), '/zh-tw/');
+
+	// CONTROL: the bare path is unchanged — a stray locator there is still this page's (it is reserved)
+	const reserved = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const reservedRes = await claimed.default.fetch(get(PAGE + '?' + PARAM + '=reader-token'), reserved.env);
+	assert.equal(reservedRes.status, 404);
+	assert.equal((await reservedRes.text()).includes('data-ejecta-subscribe-state="unknown"'), true);
+	assert.deepEqual(reserved.seenByAssets.map((hit) => hit.path), ['/'], 'the bare path makes the one shell read it always made');
 });
 
 test('the claimed landing is dropped from the markdown mapping, and only it', async () => {
