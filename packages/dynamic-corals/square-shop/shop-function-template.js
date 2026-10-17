@@ -174,6 +174,23 @@ function shellLang(shell) {
 	return ((shell || '').match(/<html\b[^>]*\blang=["']([^"']+)/i) || [])[1] || '';
 }
 
+// Make the document declare `lang` on its <html> element — replacing the donor's
+// declaration, or adding one when the donor had none. Used only when the copy
+// composed into the shell is known to be in a language the donor did not declare.
+function withShellLang(shell, lang) {
+	const safe = escHtml(lang);
+	return shell.replace(/<html\b[^>]*>/i, function (open) {
+		return /\blang=["'][^"']*["']/i.test(open)
+			? open.replace(/\blang=["'][^"']*["']/i, 'lang="' + safe + '"')
+			: open.replace(/^<html\b/i, '<html lang="' + safe + '"');
+	});
+}
+
+// The path's locale segment as a language tag: `zh-tw` → `zh-TW`, `ja` → `ja`.
+function pathLocaleTag(pathLocale) {
+	return String(pathLocale || '').replace(/-([a-z]{2})$/, function (_m, region) { return '-' + region.toUpperCase(); });
+}
+
 // Resolve a free-form hint (a shop path, a document's lang, or both) against the
 // locale set COMPLETE_COPY carries. Lifted out of completionLocale unchanged so a
 // site-owned buyer page can resolve ITS locale from the site's own shell instead
@@ -184,6 +201,19 @@ function localeFromHint(value) {
 	if (/zh(?:-|_)tw|zh-tw|zh(?:-|_)hant/.test(hint)) return 'zh-TW';
 	if (/(?:^|[\s/_-])ja(?:[\s/_-]|$)|ja-jp/.test(hint)) return 'ja-JP';
 	return 'en-US';
+}
+
+// One language tag against the copy table, WITHOUT localeFromHint's English default:
+// the table locale the tag names, or '' when the table has no copy for it (`fr`,
+// `fr-CA`, a bare `zh`, no tag at all). The same script/region sets localeFromHint
+// recognises, so a tag both of them read resolves the same way.
+function copyLocaleOf(tag) {
+	const t = String(tag || '').trim().toLowerCase().replace(/_/g, '-');
+	if (/^zh-(?:hans|cn)(?:-|$)/.test(t)) return 'zh-CN';
+	if (/^zh-(?:hant|tw)(?:-|$)/.test(t)) return 'zh-TW';
+	if (/^ja(?:-|$)/.test(t)) return 'ja-JP';
+	if (/^en(?:-|$)/.test(t)) return 'en-US';
+	return '';
 }
 
 function completionLocale(shop, shell, pathLocale) {
@@ -599,11 +629,32 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
 // usable locator. A missing locator is exactly the case this page answers "we
 // can't confirm this subscription here" for; handing it back to the generic forward
 // would show the legacy whole-page fallback under a path this worker owns.
+//
+// CVERInc/reef#1910: the locale the buyer came from rides on the path. The caller
+// contract is that whatever emits the result URL puts the shop's locale prefix
+// in front of the contract path — /zh-tw/subscribe/success for the zh-tw shop —
+// exactly the shape /zh-tw/shop/complete already has (matchShopComplete). The
+// bare contract path is the default locale, served bare at `/` like every other
+// default-locale page, and is answered as it always was.
+//
+// The prefixed shape is only a CANDIDATE here, and only when the request carries
+// the checkout locator the contract names. The bare path is reserved — the
+// markdown mapping drops it, the contract forwards it — but `/zh-tw/<path>` is
+// not: the site can have AUTHORED a page there, and `/en/…` can be an ordinary
+// content directory that spells like a locale. Without a locator the prefixed URL
+// is left to the site's own content (or its 404). With one, the key alone still
+// does not tell a buyer from a reader (`session_id` is an ordinary query name), so
+// renderSubscribeResult makes the claim only once RSP confirms the locator names a
+// real checkout — see there.
 function matchSubscribeResult(request, route) {
 	if (!route || request.method !== route.method) return null;
-	let pathname;
-	try { pathname = new URL(request.url).pathname; } catch (e) { return null; }
-	return pathname === route.path ? route : null;
+	let url;
+	try { url = new URL(request.url); } catch (e) { return null; }
+	if (url.pathname === route.path) return route;
+	const prefixed = url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/.*)$/);
+	if (!prefixed || prefixed[2] !== route.path) return null;
+	if (!(url.searchParams.get(route.sessionParam) || '').trim()) return null;
+	return { ...route, pathLocale: prefixed[1] };
 }
 
 // `active` and `confirming` are both "the payment happened"; they differ only in
@@ -629,12 +680,14 @@ function subscribeResultBody(state, plan, copy, locale) {
 // success and NOT dressed as a transient failure: RSP's `unknown` covers a
 // missing session, a blank locator and a non-matching one alike, so the page
 // claims neither that the subscription exists nor that it does not. The buyer
-// is told it cannot be confirmed here and given the next steps and the way back.
-function subscribeResultUnknownBody(copy) {
+// is told it cannot be confirmed here and given the next steps and the way back —
+// to the home of the locale this page was composed from (reef#1910), never a
+// fixed `/`, which on a localized shop is the OTHER language's home.
+function subscribeResultUnknownBody(copy, homePath) {
 	return '<section class="st-runtime" data-ejecta-subscribe-result="" data-ejecta-subscribe-state="unknown">\n' +
 		'<h1>' + escHtml(copy.subscribeUnknown) + '</h1>\n' +
 		'<p>' + escHtml(copy.subscribeUnknownBody) + '</p>\n' +
-		'<p><a class="st-runtime-action" href="/">' + escHtml(copy.backHome) + '</a></p>\n</section>';
+		'<p><a class="st-runtime-action" href="' + escHtml(homePath || '/') + '">' + escHtml(copy.backHome) + '</a></p>\n</section>';
 }
 
 // The facts could not be read at all. The heading must not claim a subscription
@@ -650,19 +703,90 @@ async function renderSubscribeResult(request, env, cfg, route) {
 	let url;
 	try { url = new URL(request.url); } catch (e) { return buyerPageErrorResponse(503); }
 	const locator = (url.searchParams.get(route.sessionParam) || '').trim();
+	// The shell is the home of the locale the path carries, and that home is also
+	// the way back. Whether this site HAS a home for that locale is the same
+	// question localeHomePath() asks the content tree at build time; out here the
+	// only one who can answer it is ASSETS, so it is asked, and a locale with no
+	// home falls back to the root — shell, copy and way back together — as the
+	// 404 page and the breadcrumb do, rather than sending the buyer to a 404.
+	// "No home" is ONE answer: a 404. A 5xx or a rejected fetch is ASSETS failing
+	// to serve a home the site may well have, and takes the same unavailable path
+	// the bare route takes when its own shell cannot be read — never the root's
+	// language and the root's way back dressed as the site's decision.
+	const pathLocale = route.pathLocale || '';
+	let homePath = pathLocale ? '/' + pathLocale + '/' : '/';
 	try {
 		const factsUrl = new URL(url.origin + route.factsPath);
 		factsUrl.searchParams.set(route.sessionParam, locator);
-		const [facts, shellRes] = await Promise.all([
-			// No locator means there is nothing to ask about — the answer is already
-			// "we couldn't find this subscription" — so the seam is not called at all.
-			// Only the locator is sent: the plan is RSP's to name, never the query's.
-			locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null,
-			env.ASSETS.fetch(new Request(url.origin + '/', request))
-		]);
+		// No locator means there is nothing to ask about — the answer is already
+		// "we couldn't find this subscription" — so the seam is not called at all.
+		// Only the locator is sent: the plan is RSP's to name, never the query's.
+		const readFacts = () => locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null;
+		const readHome = () => env.ASSETS.fetch(new Request(url.origin + homePath, request));
+		let facts;
+		let shellRes;
+		if (!pathLocale) {
+			// The bare path is reserved: it is always ours, so the shell is read
+			// alongside the facts, as every already-emitted worker does.
+			[facts, shellRes] = await Promise.all([readFacts(), readHome()]);
+		} else {
+			// The prefixed path is ours only for a buyer, and that is settled BEFORE
+			// the locale home is read: the home is only the shell to compose into, and
+			// a home read that fails must not answer for a path the site authored.
+			// RSP confirming the locator (active / confirming) is the buyer; any other
+			// answer — unknown, a refusal, the seam unreachable — confirms nothing, so
+			// the site's own page at this path wins if it has one, and this worker
+			// hands the request back (null) to the dispatcher exactly as if it had
+			// never matched. Only where the site has nothing there (a 404) does the
+			// page below answer for the path. Once it is ours, a home that cannot be
+			// read is the same 503 as any shell failure. Reads per request:
+			// confirmed — facts, home; unconfirmed and authored — facts, page;
+			// unconfirmed and nothing authored — facts, page, home.
+			facts = await readFacts();
+			const confirmed = !!(facts && facts.ok && (facts.data.state === 'active' || facts.data.state === 'confirming'));
+			if (!confirmed) {
+				const own = await env.ASSETS.fetch(new Request(url.toString(), request));
+				if (!own || own.status !== 404) return null;
+			}
+			shellRes = await readHome();
+		}
+		if (pathLocale && shellRes && shellRes.status === 404) {
+			homePath = '/';
+			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
+		}
 		if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
-		const shell = await shellRes.text();
-		const locale = localeFromHint(shellLang(shell));
+		let shell = await shellRes.text();
+		// Whose language the page is in. When the locale home WAS served, the path
+		// is the authority: the buyer came from /ja-jp/, the copy is Japanese, and
+		// the document must say so — a donor declaring some other lang would put
+		// Japanese copy inside <html lang="en-US">, or Simplified copy under a
+		// /zh-tw/ path because the donor said zh-Hans. A donor that agrees keeps
+		// its own spelling (zh-Hant stays zh-Hant). On a fallback to the root, the
+		// root shell is what the buyer is now looking at, so its declared lang
+		// stands and the copy follows it.
+		//
+		// The matcher accepts any `xx` / `xx-yy`; the copy table does not. A path
+		// locale with no copy decides nothing: its served home's own declaration
+		// decides if the table has it (`/jp/` declaring `ja`), and otherwise the page
+		// is the root's — shell, copy and way back — the same answer as a locale with
+		// no home. Whatever shell is left, English copy is never left under a
+		// declaration the table lacks: that shell is re-declared `en`.
+		const pathCopy = copyLocaleOf(pathLocale);
+		if (homePath !== '/' && !pathCopy && !copyLocaleOf(shellLang(shell))) {
+			homePath = '/';
+			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
+			if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
+			shell = await shellRes.text();
+		}
+		let locale;
+		if (homePath === '/' || !pathCopy) {
+			const declared = shellLang(shell);
+			locale = copyLocaleOf(declared) || 'en-US';
+			if (declared && !copyLocaleOf(declared)) shell = withShellLang(shell, 'en');
+		} else {
+			locale = pathCopy;
+			if (copyLocaleOf(shellLang(shell)) !== locale) shell = withShellLang(shell, pathLocaleTag(pathLocale));
+		}
 		const copy = BUYER_PAGE_COPY[locale];
 		const state = facts ? (facts.ok ? facts.data.state : '') : 'unknown';
 		let status;
@@ -675,7 +799,7 @@ async function renderSubscribeResult(request, env, cfg, route) {
 		} else if (state === 'unknown') {
 			// Truthful, and a 404 rather than a 200: nothing was found under this URL.
 			status = 404;
-			bodyHtml = subscribeResultUnknownBody(copy);
+			bodyHtml = subscribeResultUnknownBody(copy, homePath);
 			title = copy.subscribeUnknown;
 		} else {
 			// A 2xx carrying a state this page cannot read is no more usable than a
@@ -1556,7 +1680,12 @@ export default {
 		// so already-emitted workers keep the whole-page fallback, and a contract
 		// without subscribeResult forwards it exactly as before.
 		const subscribeResult = matchSubscribeResult(request, transport && transport.subscribeResult);
-		if (subscribeResult) return renderSubscribeResult(request, env, CFG, subscribeResult);
+		if (subscribeResult) {
+			// null: a prefixed candidate RSP did not confirm, on a path the site has its
+			// own page for — fall through as if unmatched (see renderSubscribeResult).
+			const rendered = await renderSubscribeResult(request, env, CFG, subscribeResult);
+			if (rendered) return rendered;
+		}
 
 		// The branches are MUTUALLY EXCLUSIVE and the transport is first:
 		// contract hit → the binding, verdict-required hit → ask then serve
