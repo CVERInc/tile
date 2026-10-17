@@ -92,7 +92,9 @@ const RSP_PAGE = 'RSP-WHOLE-PAGE-LEGACY-LANDING';
 // `homes` is the site's locale homes beyond the root — `{ '/zh-tw/': <shell> }` —
 // the build-owned fact "this locale has a home" that localeHomePath() reads at
 // build time and this worker can only read by asking ASSETS. A path not in it
-// 404s, exactly as a locale without a home does on the real ASSETS.
+// 404s, exactly as a locale without a home does on the real ASSETS. A FUNCTION
+// value is ASSETS itself misbehaving for that home: it is called and whatever it
+// returns (or throws) is the answer.
 function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {} } = {}) {
 	const seenByRsp = [];
 	const seenByAssets = [];
@@ -108,6 +110,7 @@ function makeEnv({ rsp = null, shell = SHELL, bindingName = BINDING, homes = {} 
 				if (/^\/[a-z]{2}(?:-[a-z]{2})?\/$/.test(url.pathname)) {
 					const home = homes[url.pathname];
 					if (home == null) return new Response('missing', { status: 404 });
+					if (typeof home === 'function') return home();
 					return new Response(home, { status: 200, headers: { 'content-type': 'text/html' } });
 				}
 				return new Response('STATIC:' + url.pathname, { status: 200 });
@@ -496,6 +499,49 @@ test('single locale: the bare path is unchanged, and a locale prefix this site h
 	assert.equal(html.includes('在這裡無法確認這筆訂閱'), true, 'the copy follows the shell that was actually served');
 	assert.equal(backLinkOf(html), '/', 'no home for that locale, so the way back is the root');
 	assert.equal((html.match(/href="\/zh-tw\/"/g) || []).length, 0, 'never a link to a home that does not exist');
+});
+
+// "No home for this locale" is ONE answer ASSETS can give — a 404 — and only that
+// one means the site has no such home. A 5xx or a fetch that rejects is ASSETS
+// failing to serve a home the site may well have; reading it as "no home" would
+// hand the buyer the root's language and the root's way back as if that were the
+// site's decision. Those take the same unavailable path the bare route takes
+// when its own shell cannot be read.
+test('locale home: a 404 falls back to `/`; a 5xx or a rejected fetch is a shell failure, not a missing home', async () => {
+	const locatorQuery = '?' + PARAM + '=cs_real';
+
+	// 404 — the fallback (the control for the two arms below)
+	const absent = makeEnv({ shell: ROOT_EN, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const absentRes = await claimed.default.fetch(get('/zh-tw' + PAGE + locatorQuery), absent.env);
+	const absentHtml = await absentRes.text();
+	assert.equal(absentRes.status, 200, '404: the result page still composes');
+	assert.deepEqual(absent.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/'], '404: the root is asked for after the locale home');
+	assert.equal(absentHtml.includes('NAV-ROOT'), true, '404: the root shell');
+	assert.equal(absentHtml.includes('Thank you for subscribing'), true, '404: the root\'s language');
+
+	const failures = [
+		['500', () => new Response('boom', { status: 500 })],
+		['503', () => new Response('try later', { status: 503 })],
+		['rejects', () => { throw new Error('assets down'); }]
+	];
+	for (const [name, answer] of failures) {
+		const { env, seenByAssets } = makeEnv({ shell: ROOT_EN, rsp: factsRsp({ [FACTS]: ACTIVE }), homes: { '/zh-tw/': answer } });
+		const res = await claimed.default.fetch(get('/zh-tw' + PAGE + locatorQuery), env);
+		const body = await res.text();
+		assert.equal(res.status, 503, name + ': unavailable, the same answer as the bare route\'s shell failure');
+		assert.equal((res.headers.get('content-type') || '').includes('text/html'), false, name + ': no HTML page at all');
+		assert.equal(body.includes('<html'), false, name);
+		assert.equal(body.includes('NAV-ROOT'), false, name + ': the root shell is never served in the locale\'s place');
+		assert.equal(body.includes('Thank you for subscribing'), false, name + ': nothing is confirmed in the wrong language');
+		assert.equal(res.headers.get('cache-control'), 'private, no-store', name);
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/'], name + ': the root is NOT asked for — a failure is not an absence');
+	}
+
+	// CONTROL: the bare route's own shell failing is the same 503 (what "the same path" means)
+	const bareDown = makeEnv({ shell: null, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const bareRes = await claimed.default.fetch(get(PAGE + locatorQuery), bareDown.env);
+	assert.equal(bareRes.status, 503);
+	assert.equal((bareRes.headers.get('content-type') || '').includes('text/html'), false);
 });
 
 test('the locale prefix is claimed only in the shape the caller contract emits', async () => {

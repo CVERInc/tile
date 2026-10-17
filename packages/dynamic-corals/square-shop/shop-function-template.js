@@ -678,6 +678,10 @@ async function renderSubscribeResult(request, env, cfg, route) {
 	// only one who can answer it is ASSETS, so it is asked, and a locale with no
 	// home falls back to the root — shell, copy and way back together — as the
 	// 404 page and the breadcrumb do, rather than sending the buyer to a 404.
+	// "No home" is ONE answer: a 404. A 5xx or a rejected fetch is ASSETS failing
+	// to serve a home the site may well have, and takes the same unavailable path
+	// the bare route takes when its own shell cannot be read — never the root's
+	// language and the root's way back dressed as the site's decision.
 	const pathLocale = route.pathLocale || '';
 	let homePath = pathLocale ? '/' + pathLocale + '/' : '/';
 	try {
@@ -690,7 +694,7 @@ async function renderSubscribeResult(request, env, cfg, route) {
 			locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null,
 			env.ASSETS.fetch(new Request(url.origin + homePath, request))
 		]);
-		if (pathLocale && !(shellRes && shellRes.ok)) {
+		if (pathLocale && shellRes && shellRes.status === 404) {
 			homePath = '/';
 			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
 		}
