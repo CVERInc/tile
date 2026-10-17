@@ -523,6 +523,49 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
+    // ── CVERInc/reef#2066, the last item: "`/zh-tw/search/` renders `<html lang="en">`" ─────────
+    // 🩸 Measured on production (wtg, 2026-10-17): /search/, /zh-tw/search/, /zh-tw/preview/ and two
+    // made-up paths all answered 404 with the SAME bytes (one md5) — the root 404.html, which speaks
+    // the site's default language by the rule at the top of this file. The build writes no
+    // locale-prefixed /search or /preview: the search route emits exactly /search (its own header
+    // says so) and /preview has no locale in it. So there was no "prefixed system page" whose lang
+    // could follow its prefix; the page with the wrong-looking lang was the 404 wearing that URL.
+    // Two things are held here so the next reader does not fix a page that does not exist:
+    //   1. the full set of pages written under a locale prefix, each in THAT locale's language — a
+    //      sweep over what the build WROTE, so a new prefixed route is covered the day it appears;
+    //   2. the two URLs the issue named are not written at all, while their unprefixed twins are
+    //      (the control: the feature is ON, the locale edition is a true absence, not a gate).
+    await test('🔴 #2066 multiEnBlog: EVERY page written under /zh-tw/ is zh-Hant — the sweep, not a hand-kept list', () => {
+      const { pages } = site('multiEnBlog');
+      const prefixed = Object.keys(pages).filter((rel) => rel.startsWith('zh-tw/')).sort();
+      // The sweep has to see the whole family or it proves nothing: the locale home, the chooser,
+      // the blog index, both translated posts (with and without `lang:`) and the tag archive.
+      for (const must of ['zh-tw/index.html', 'zh-tw/language/index.html', 'zh-tw/devlog/index.html', 'zh-tw/devlog/p1/index.html', 'zh-tw/devlog/p2/index.html', 'zh-tw/tag/crane/index.html']) {
+        assert.ok(prefixed.includes(must), `${must} was not built — the fixture stopped exercising it`);
+      }
+      const wrong = prefixed.filter((rel) => htmlLang(pages[rel]) !== 'zh-Hant').map((rel) => `${rel} → ${htmlLang(pages[rel])}`);
+      assert.deepEqual(wrong, [], `pages under /zh-tw/ that do not speak zh-Hant:\n${wrong.join('\n')}`);
+      const unprefixed = Object.keys(pages).filter((rel) => !rel.startsWith('zh-tw/'));
+      const wrongBase = unprefixed.filter((rel) => htmlLang(pages[rel]) !== 'en').map((rel) => `${rel} → ${htmlLang(pages[rel])}`);
+      assert.deepEqual(wrongBase, [], `unprefixed pages that do not speak the site default (en):\n${wrongBase.join('\n')}`);
+    });
+
+    await test('🔴 #2066 multiEnBlog: no /zh-tw/search/ or /zh-tw/preview/ is written; what production served there is the root 404', () => {
+      const { pages, outDir } = site('multiEnBlog');
+      // CONTROL first: the unprefixed twins exist, so an absence below is not "the feature is off".
+      assert.ok(pages['search/index.html'], '/search/ was not built — blog-search is off in the fixture, the control is gone');
+      assert.ok(pages['preview/index.html'], '/preview/ was not built');
+      for (const rel of ['zh-tw/search/index.html', 'zh-tw/preview/index.html', 'zh-tw/404.html', 'zh-tw/404/index.html']) {
+        assert.equal(pages[rel], undefined, `${rel} was written — then its lang is a real question, and this test is out of date`);
+      }
+      assert.equal(existsSync(join(outDir, 'zh-tw', 'search')), false);
+      assert.equal(existsSync(join(outDir, 'zh-tw', 'preview')), false);
+      // The one file a missing /zh-tw/… path is answered with, and the language it speaks: the site's
+      // default, by the rule this whole file holds. A per-locale 404 is a hosting question (one
+      // 404.html per deployment), not a lang question on a route that does not exist.
+      assert.equal(htmlLang(pages['404.html']), 'en');
+    });
+
     await test('#1868 monoZh and undeclared: the system pages are exactly zh-Hant, as before', () => {
       for (const name of ['monoZh', 'undeclared']) {
         const { pages } = site(name);
