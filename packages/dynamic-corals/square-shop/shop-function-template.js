@@ -606,14 +606,24 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
 // exactly the shape /zh-tw/shop/complete already has (matchShopComplete). The
 // bare contract path is the default locale, served bare at `/` like every other
 // default-locale page, and is answered as it always was.
+//
+// The prefixed shape is claimed ONLY when the request carries the checkout
+// locator the contract names. The bare path is reserved — the markdown mapping
+// drops it, the contract forwards it — but `/zh-tw/<path>` is not: the site can
+// have AUTHORED a page there, and `/en/…` can be an ordinary content directory
+// that spells like a locale. A buyer coming back from checkout always carries the
+// locator; a visitor reading a page never does, so without one the prefixed URL
+// is left to the site's own content (or its 404) rather than shadowed by this
+// page's "we can't confirm this subscription here".
 function matchSubscribeResult(request, route) {
 	if (!route || request.method !== route.method) return null;
-	let pathname;
-	try { pathname = new URL(request.url).pathname; } catch (e) { return null; }
-	if (pathname === route.path) return route;
-	const prefixed = pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/.*)$/);
-	if (prefixed && prefixed[2] === route.path) return { ...route, pathLocale: prefixed[1] };
-	return null;
+	let url;
+	try { url = new URL(request.url); } catch (e) { return null; }
+	if (url.pathname === route.path) return route;
+	const prefixed = url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/.*)$/);
+	if (!prefixed || prefixed[2] !== route.path) return null;
+	if (!(url.searchParams.get(route.sessionParam) || '').trim()) return null;
+	return { ...route, pathLocale: prefixed[1] };
 }
 
 // `active` and `confirming` are both "the payment happened"; they differ only in

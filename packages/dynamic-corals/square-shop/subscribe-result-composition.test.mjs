@@ -437,11 +437,11 @@ const backLinkOf = (html) => {
 };
 
 test('two locales: the zh-tw result page composes into /zh-tw/ and sends the buyer back to /zh-tw/', async () => {
-	const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
-	const res = await claimed.default.fetch(get('/zh-tw' + PAGE), env);
+	const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_stale'), env);
 	const html = await res.text();
-	assert.equal(res.status, 404, 'no locator: the same unknown answer as the bare path');
-	assert.deepEqual(seenByRsp, [], 'no locator, nothing asked');
+	assert.equal(res.status, 404, 'RSP does not know this locator: the same unknown answer as the bare path');
+	assert.equal(seenByRsp.length, 1, 'the locator is asked about');
 	assert.deepEqual(seenByAssets.map((hit) => hit.path), ['/zh-tw/'], 'the shell is the locale\'s own home, asked for once');
 	assert.equal(html.includes('<html lang="zh-Hant"'), true, 'the zh-tw home declares the language');
 	assert.equal(html.includes('NAV-ZHTW') && html.includes('FOOT-ZHTW'), true, 'the zh-tw chrome, not the root\'s');
@@ -486,8 +486,8 @@ test('single locale: the bare path is unchanged, and a locale prefix this site h
 	// A prefixed URL on a site with no such home: the same measurement localeHomePath
 	// makes ("does this locale have a home?") says no, so the way back is `/` and the
 	// shell is the root's — the buyer is not sent to a 404.
-	const prefixed = makeEnv({ rsp: factsRsp({ [FACTS]: ACTIVE }) });
-	const res = await claimed.default.fetch(get('/zh-tw' + PAGE), prefixed.env);
+	const prefixed = makeEnv({ rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_stale'), prefixed.env);
 	const html = await res.text();
 	assert.equal(res.status, 404, 'still the unknown answer, not a shell failure');
 	assert.deepEqual(prefixed.seenByAssets.map((hit) => hit.path), ['/zh-tw/', '/'],
@@ -517,9 +517,60 @@ test('the locale prefix is claimed only in the shape the caller contract emits',
 	// the matcher names the locale it found, and the bare path is still the route object itself
 	const route = FIXTURE_CONTRACT.subscribeResult;
 	assert.equal(claimed.matchSubscribeResult(get(PAGE), route), route);
-	assert.deepEqual(claimed.matchSubscribeResult(get('/zh-tw' + PAGE), route), { ...route, pathLocale: 'zh-tw' });
-	assert.deepEqual(claimed.matchSubscribeResult(get('/ja' + PAGE), route), { ...route, pathLocale: 'ja' });
-	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '/'), route), null);
+	assert.equal(claimed.matchSubscribeResult(get(PAGE + '?' + PARAM + '=x'), route), route);
+	assert.deepEqual(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '?' + PARAM + '=x'), route), { ...route, pathLocale: 'zh-tw' });
+	assert.deepEqual(claimed.matchSubscribeResult(get('/ja' + PAGE + '?' + PARAM + '=x'), route), { ...route, pathLocale: 'ja' });
+	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '/?' + PARAM + '=x'), route), null);
+	// the prefixed shape is claimed ONLY with the locator the contract names (below)
+	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE), route), null);
+	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '?other=x'), route), null);
+	assert.equal(claimed.matchSubscribeResult(get('/zh-tw' + PAGE + '?' + PARAM + '=%20'), route), null);
+});
+
+// The prefixed path is not reserved the way the bare one is: the manifest drops
+// only `/join/done`, so `/zh-tw/join/done` can be a page the site AUTHORED (and
+// `/en/…` can be an ordinary content directory that happens to spell like a
+// locale). A result URL always carries the checkout locator, so the locator is
+// what tells "the buyer coming back from checkout" from "a visitor reading a
+// page" — without it the prefixed route is left to the site's own content, or
+// its 404. The bare path keeps claiming with or without a locator, exactly as
+// every already-emitted worker does.
+test('a prefixed path without a locator is not claimed, so an authored page there is not shadowed', async () => {
+	for (const [prefix, query] of [
+		['/zh-tw', ''],
+		['/zh-tw', '?other=cs_real'],
+		['/zh-tw', '?' + PARAM + '='],
+		['/zh-tw', '?' + PARAM + '=%20%20'],
+		['/en', ''],
+		['/ja', '']
+	]) {
+		const { env, seenByRsp, seenByAssets } = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+		const res = await claimed.default.fetch(get(prefix + PAGE + query), env);
+		const body = await res.text();
+		const label = prefix + PAGE + query;
+		assert.equal(res.status, 200, label + ': the authored page answers');
+		assert.equal(body, 'STATIC:' + prefix + PAGE, label + ': the site\'s own content, byte for byte');
+		assert.equal(body.includes('data-ejecta-subscribe-result'), false, label + ': not claimed');
+		assert.deepEqual(seenByRsp, [], label + ': RSP is not asked');
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), [prefix + PAGE], label + ': one read, the page itself, no shell');
+	}
+
+	// CONTROL, same site: with the locator the prefixed URL is the result page
+	const withLocator = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const res = await claimed.default.fetch(get('/zh-tw' + PAGE + '?' + PARAM + '=cs_real'), withLocator.env);
+	const html = await res.text();
+	assert.equal(res.status, 200);
+	assert.equal(html.includes('data-ejecta-subscribe-state="active"'), true, 'with a locator the result page is composed');
+	assert.equal(html.includes('NAV-ZHTW'), true);
+	assert.deepEqual(withLocator.seenByAssets.map((hit) => hit.path), ['/zh-tw/']);
+
+	// CONTROL: the bare path's behaviour is unchanged — claimed without a locator too
+	const bare = makeEnv({ ...TWO_LOCALES, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const bareRes = await claimed.default.fetch(get(PAGE), bare.env);
+	const bareHtml = await bareRes.text();
+	assert.equal(bareRes.status, 404);
+	assert.equal(bareHtml.includes('data-ejecta-subscribe-state="unknown"'), true, 'the bare path still answers the no-locator case itself');
+	assert.deepEqual(bare.seenByAssets.map((hit) => hit.path), ['/']);
 });
 
 test('the claimed landing is dropped from the markdown mapping, and only it', async () => {
