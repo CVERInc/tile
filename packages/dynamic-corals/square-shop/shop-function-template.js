@@ -203,6 +203,19 @@ function localeFromHint(value) {
 	return 'en-US';
 }
 
+// One language tag against the copy table, WITHOUT localeFromHint's English default:
+// the table locale the tag names, or '' when the table has no copy for it (`fr`,
+// `fr-CA`, a bare `zh`, no tag at all). The same script/region sets localeFromHint
+// recognises, so a tag both of them read resolves the same way.
+function copyLocaleOf(tag) {
+	const t = String(tag || '').trim().toLowerCase().replace(/_/g, '-');
+	if (/^zh-(?:hans|cn)(?:-|$)/.test(t)) return 'zh-CN';
+	if (/^zh-(?:hant|tw)(?:-|$)/.test(t)) return 'zh-TW';
+	if (/^ja(?:-|$)/.test(t)) return 'ja-JP';
+	if (/^en(?:-|$)/.test(t)) return 'en-US';
+	return '';
+}
+
 function completionLocale(shop, shell, pathLocale) {
 	if (pathLocale) {
 		if (pathLocale === 'zh-tw' || pathLocale === 'zh-hant') return 'zh-TW';
@@ -739,12 +752,28 @@ async function renderSubscribeResult(request, env, cfg, route) {
 		// its own spelling (zh-Hant stays zh-Hant). On a fallback to the root, the
 		// root shell is what the buyer is now looking at, so its declared lang
 		// stands and the copy follows it.
+		//
+		// The matcher accepts any `xx` / `xx-yy`; the copy table does not. A path
+		// locale with no copy decides nothing: its served home's own declaration
+		// decides if the table has it (`/jp/` declaring `ja`), and otherwise the page
+		// is the root's — shell, copy and way back — the same answer as a locale with
+		// no home. Whatever shell is left, English copy is never left under a
+		// declaration the table lacks: that shell is re-declared `en`.
+		const pathCopy = copyLocaleOf(pathLocale);
+		if (homePath !== '/' && !pathCopy && !copyLocaleOf(shellLang(shell))) {
+			homePath = '/';
+			shellRes = await env.ASSETS.fetch(new Request(url.origin + homePath, request));
+			if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
+			shell = await shellRes.text();
+		}
 		let locale;
-		if (homePath === '/') {
-			locale = localeFromHint(shellLang(shell));
+		if (homePath === '/' || !pathCopy) {
+			const declared = shellLang(shell);
+			locale = copyLocaleOf(declared) || 'en-US';
+			if (declared && !copyLocaleOf(declared)) shell = withShellLang(shell, 'en');
 		} else {
-			locale = localeFromHint(pathLocale);
-			if (localeFromHint(shellLang(shell)) !== locale) shell = withShellLang(shell, pathLocaleTag(pathLocale));
+			locale = pathCopy;
+			if (copyLocaleOf(shellLang(shell)) !== locale) shell = withShellLang(shell, pathLocaleTag(pathLocale));
 		}
 		const copy = BUYER_PAGE_COPY[locale];
 		const state = facts ? (facts.ok ? facts.data.state : '') : 'unknown';

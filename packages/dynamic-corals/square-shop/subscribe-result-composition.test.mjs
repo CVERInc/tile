@@ -608,6 +608,55 @@ test('<html lang> and the copy: the path locale outranks a disagreeing donor whe
 	assert.equal(backLinkOf(unknownHtml), '/');
 });
 
+// The matcher accepts any `xx` / `xx-yy` prefix, but the copy table carries English,
+// Chinese (both scripts) and Japanese only. A path locale with no copy does not get
+// to choose the copy (it would choose English by default) nor the language tag.
+// Its home, if served, may still declare a language the table has (`/jp/` declaring
+// `ja`) — then that is the page's language. Otherwise the page is the root's: the
+// root shell, its lang, its copy, its way back. And whichever shell is composed
+// into, English copy never sits under a non-English <html lang>: a shell declaring a
+// language the table lacks is re-declared `en`, the language of the copy it carries.
+test('a path locale outside the copy table: the document\'s lang always describes the copy emitted', async () => {
+	const locatorQuery = '?' + PARAM + '=cs_real';
+	const declaring = (lang, nav) => SHELL.replace('lang="zh-Hant"', 'lang="' + lang + '"').replace(NAV, nav);
+	const ROOT_FR = declaring('fr', 'NAV-ROOT');
+	const cases = [
+		// [label, path locale, root shell, homes, expected ASSETS reads, chrome, expected <html lang>, heading]
+		['/fr/ declaring fr, root en-US', 'fr', ROOT_EN, { '/fr/': declaring('fr', 'NAV-FR') }, ['/fr/', '/'], 'NAV-ROOT', 'en-US', 'Thank you for subscribing'],
+		['/fr-ca/ declaring fr-CA, root en-US', 'fr-ca', ROOT_EN, { '/fr-ca/': declaring('fr-CA', 'NAV-FR') }, ['/fr-ca/', '/'], 'NAV-ROOT', 'en-US', 'Thank you for subscribing'],
+		['/fr/ declaring fr, root ja-JP', 'fr', declaring('ja-JP', 'NAV-ROOT'), { '/fr/': declaring('fr', 'NAV-FR') }, ['/fr/', '/'], 'NAV-ROOT', 'ja-JP', 'ご登録ありがとうございます'],
+		['/fr/ declaring fr, root fr', 'fr', ROOT_FR, { '/fr/': declaring('fr', 'NAV-FR') }, ['/fr/', '/'], 'NAV-ROOT', 'en', 'Thank you for subscribing'],
+		['/jp/ declaring ja', 'jp', ROOT_EN, { '/jp/': declaring('ja', 'NAV-JP') }, ['/jp/'], 'NAV-JP', 'ja', 'ご登録ありがとうございます'],
+		['/ja-jp/ declaring ja-JP', 'ja-jp', ROOT_EN, { '/ja-jp/': declaring('ja-JP', 'NAV-JP') }, ['/ja-jp/'], 'NAV-JP', 'ja-JP', 'ご登録ありがとうございます'],
+		['/ja-jp/ declaring fr', 'ja-jp', ROOT_EN, { '/ja-jp/': declaring('fr', 'NAV-JP') }, ['/ja-jp/'], 'NAV-JP', 'ja-JP', 'ご登録ありがとうございます'],
+		['/en-gb/ declaring en-GB', 'en-gb', declaring('ja-JP', 'NAV-ROOT'), { '/en-gb/': declaring('en-GB', 'NAV-GB') }, ['/en-gb/'], 'NAV-GB', 'en-GB', 'Thank you for subscribing']
+	];
+	for (const [label, pathLocale, shell, homes, reads, chrome, expectedLang, heading] of cases) {
+		const { env, seenByAssets } = makeEnv({ shell, homes, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+		const res = await claimed.default.fetch(get('/' + pathLocale + PAGE + locatorQuery), env);
+		const html = await res.text();
+		assert.equal(res.status, 200, label);
+		assert.deepEqual(seenByAssets.map((hit) => hit.path), reads, label + ': shells read');
+		assert.equal(html.includes(chrome), true, label + ': composed into ' + chrome);
+		assert.equal((html.match(/<html\b[^>]*>/i) || [''])[0], '<html lang="' + expectedLang + '">', label + ': the document declares the language of its copy');
+		assert.equal(html.includes('<h1>' + heading + '</h1>'), true, label + ': copy');
+	}
+
+	// unknown arm, nothing authored: the way back is the home whose shell was composed into
+	const unknown = makeEnv({ shell: ROOT_EN, homes: { '/fr/': declaring('fr', 'NAV-FR') }, rsp: factsRsp({ [FACTS]: UNKNOWN }) });
+	const unknownHtml = await (await claimed.default.fetch(get('/fr' + PAGE + '?' + PARAM + '=cs_stale'), unknown.env)).text();
+	assert.equal((unknownHtml.match(/<html\b[^>]*>/i) || [''])[0], '<html lang="en-US">');
+	assert.equal(unknownHtml.includes("We can't confirm this subscription here"), true);
+	assert.equal(backLinkOf(unknownHtml), '/', 'never a link to /fr/ beside English copy from the root');
+
+	// the bare path on a root declaring a language the table lacks: English copy, declared `en`
+	const bareFr = makeEnv({ shell: ROOT_FR, rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const bareHtml = await (await claimed.default.fetch(get(PAGE + locatorQuery), bareFr.env)).text();
+	assert.deepEqual(bareFr.seenByAssets.map((hit) => hit.path), ['/']);
+	assert.equal((bareHtml.match(/<html\b[^>]*>/i) || [''])[0], '<html lang="en">', 'bare, root fr: re-declared en');
+	assert.equal(bareHtml.includes('<h1>Thank you for subscribing</h1>'), true);
+});
+
 test('the locale prefix is claimed only in the shape the caller contract emits', async () => {
 	for (const [path, init] of [
 		['/zh-tw' + PAGE, { method: 'POST' }],
