@@ -914,6 +914,7 @@ html[data-search-open] .st-search { display: block; }
   flex: 1 1 auto; min-width: 0; padding: 12px 4px; font: inherit; outline: none;
   border: 0; background: transparent; color: var(--gd-text);
 }
+.st-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; } /* the overlay has its own close button */
 .st-search-close {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 2rem; height: 2rem; padding: 0; line-height: 0; cursor: pointer;
@@ -921,7 +922,7 @@ html[data-search-open] .st-search { display: block; }
 }
 .st-search-close:hover { color: var(--gd-text); }
 .st-search-count, .st-search-empty { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--gd-muted); }
-.st-search-count::before { content: attr(data-count) " " attr(data-label); }
+.st-search-count::before { content: attr(data-count) attr(data-sep) attr(data-label); }
 .st-search-empty::before { content: attr(data-text); }
 .st-search-results { list-style: none; margin: 0.5rem 0 0; padding: 0; overflow-y: auto; }
 .st-search-result { border-top: 1px solid var(--gd-border); }

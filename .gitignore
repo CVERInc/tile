@@ -73,3 +73,5 @@ lab/
 # 🔴 The lesson is not "remember to delete it". It is that an ignore rule is part of the wall, and
 # a file crossing between two repos is only as protected as the WEAKER of their two ignore lists.
 .wrangler/
+# the search-vs-drawer smoke build (throwaway sibling of astro/; see real-render/search-drawer.smoke.mjs)
+packages/sitetile/.smoke-search-drawer/
