@@ -30,14 +30,22 @@ class El {
 		this.value = '';
 		this.style = {};
 		this.html = '';
-		this.parentNode = { insertBefore() {} };
 	}
+
+	/**
+	 * An accessor over a private field, as `parentNode` is in a browser — not an own property — so
+	 * the parent link `appendChild` writes does not make an element circular under `JSON.stringify`
+	 * (B15 below serialises a payload that carries a mounted container).
+	 */
+	#parent = { insertBefore() {} };
+	get parentNode() { return this.#parent; }
+	set parentNode(node) { this.#parent = node; }
 
 	getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
 	setAttribute(name, value) { this.attrs[name] = value; }
 	removeAttribute(name) { delete this.attrs[name]; }
 	addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
-	appendChild(child) { this.children.push(child); return child; }
+	appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
 	/** Browser semantics that matter here: one shadow root per element, a second attach throws. */
 	attachShadow(init) {
 		if (this.shadowRoot) throw new Error('NotSupportedError: shadow root already attached');
@@ -46,7 +54,17 @@ class El {
 		return this.shadowRoot;
 	}
 	insertAdjacentHTML(_where, value) { this.html += value; }
-	remove() {}
+	/**
+	 * Browser semantics: the node leaves its parent's children and nothing else does. A node that
+	 * was never appended (a memoised `querySelector` result) has no children list to leave — no-op.
+	 */
+	remove() {
+		const siblings = this.parentNode?.children;
+		const at = siblings ? siblings.indexOf(this) : -1;
+		if (at < 0) return;
+		siblings.splice(at, 1);
+		this.parentNode = null;
+	}
 
 	set innerHTML(value) {
 		this.html = value;
@@ -240,9 +258,11 @@ const openBubble = (root) => root.querySelector('.dc-inbox-open').emit('click');
 test('reef#2139: the panel and its stylesheet live in an open shadow root on a host of their own', async () => {
 	const headBefore = document.head.children.length;
 	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
+	// The site's own content in the same container — what an unmount must leave exactly where it was.
+	const sitesOwn = el.appendChild(new El());
 	await mount(el);
-	assert.equal(el.children.length, 1, 'mount appended something other than one host');
-	const host = el.children[0];
+	assert.equal(el.children.length, 2, 'mount appended something other than one host');
+	const host = el.children[1];
 	assert.equal(host.className, 'dc-inbox-host');
 	assert.ok(host.shadowRoot, 'the host has no shadow root — the panel is back in the light DOM');
 	assert.equal(host.shadowRoot.mode, 'open');
@@ -251,14 +271,18 @@ test('reef#2139: the panel and its stylesheet live in an open shadow root on a h
 	assert.ok(style, 'the panel stylesheet is not inside the shadow root');
 	assert.match(style.textContent, /:host\{font:inherit\}/, 'the site font no longer reaches the panel');
 	assert.equal(document.head.children.length, headBefore, 'a mount still writes into document.head');
-	assert.ok(isClosedBubble(panelOf(el)), 'the closed bubble is not drawn inside the shadow root');
+	assert.ok(isClosedBubble(panelIn(host)), 'the closed bubble is not drawn inside the shadow root');
 	// An SPA that unmounts and remounts the same container must get a fresh host, not a second
 	// attachShadow on an element that already has one (which throws in a browser).
 	assert.equal(coral.unmount(el), true);
-	el.children.length = 0; // the stand-in's `remove()` is a no-op; a browser's takes the host out
+	// 🔴 Exactly the host goes: removing only the panel leaves the host and its stylesheet behind
+	// (a remount then draws a second bubble beside it), and removing nothing leaves the old widget.
+	assert.deepEqual(el.children, [sitesOwn], 'unmount did not take out exactly the shadow host');
 	await mount(el);
-	assert.equal(el.children.length, 1, 'a remount did not draw');
-	assert.ok(isClosedBubble(panelOf(el)));
+	assert.equal(el.children.length, 2, 'a remount did not draw exactly one host');
+	assert.equal(el.children[0], sitesOwn, 'a remount moved the site\'s own content');
+	assert.notEqual(el.children[1], host, 'a remount reused the old host');
+	assert.ok(isClosedBubble(panelIn(el.children[1])));
 	coral.unmount(el);
 });
 
