@@ -1,0 +1,67 @@
+---
+// The 404 page of each NON-DEFAULT locale, wearing that locale's chrome and speaking its language.
+//
+// 🩸 CVERInc/reef#2112. A site with `locales: en-US, zh-TW` served ONE 404 — the root one, in the
+// site's default language (tile#135's ruling, kept: pages/404.astro is untouched) — so a visitor who
+// mistyped a /zh-tw/… address was told "Page not found" in English on a Chinese edition. Cloudflare
+// Pages serves the NEAREST `404.html` up the directory tree, so `dist/zh-tw/404.html` catches every
+// missing /zh-tw/… path and this route writes it.
+//
+// Astro writes only the ROOT `/404` as a bare `.html` (its STATUS_CODE_PAGES); this route lands at
+// `zh-tw/404/index.html`, which Pages does not read as a 404 page. The rename to `zh-tw/404.html`
+// happens in astro.config.mjs's `astro:build:done` (locale-404.mjs) — IN the renderer, because the
+// production deploy runs a plain `npx astro build` and nothing after it — and only for the locales
+// this route declares (declareLocale404s below).
+//
+// Which locales: exactly the editions the /language chooser offers (lib/locale-editions.mjs) minus the
+// default — a visitor is told "not found" in Japanese iff there is a Japanese edition to go back to.
+// One-language sites, and `packages: lingo` over one locale, build nothing here: their dist is
+// byte-identical to before.
+//
+// The Language link behaves like the root 404's (#114 / CVERInc/reef#1910): `languageReturn` is this
+// locale's home, so the chooser (which the layout prefixes for this locale) offers every row at its
+// own home — the missing address has no page to come back to. `notFoundHome` goes to THIS locale's
+// home, not `/`: a Chinese visitor who came in through /zh-tw/ stays in Chinese.
+//
+// noindex, as the root 404: a 404 that gets indexed is a search result that wastes somebody's click.
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { localeEditions, editionMeta, contentPageRel } from '../../lib/locale-editions.mjs';
+import { toUrlLocale, uiCopy, sameLocale } from '../../packages/lingo/locale.mjs';
+import { declareLocale404s } from '../../../locale-404.mjs';
+
+export function getStaticPaths() {
+  const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  const editions = localeEditions(files);
+  if (!editions) return [];
+  const { locales, defaultLocale } = editions;
+  // 🩸 tile#157 review r3: the owner's own `zh-tw/404.md` is a page the content loop already emits at
+  // /zh-tw/404/. A fallback here collided with it, and the rename then moved whichever won to
+  // zh-tw/404.html. That edition gets no generated fallback and declares nothing — the owner's page
+  // stays at zh-tw/404/index.html, byte for byte; Pages then serves the root 404 for missing /zh-tw/…,
+  // exactly as before reef#2112. Same predicate as the loop (contentPageRel), never a second guess.
+  const authored = new Set(Object.entries(files).map(([path, raw]) => contentPageRel(path, raw)));
+  const paths = locales
+    .filter((L) => !sameLocale(L, defaultLocale))
+    .filter((L) => !authored.has(`${toUrlLocale(L)}/404`))
+    .map((L) => ({
+      params: { loc: toUrlLocale(L) },
+      props: { lang: L, meta: editionMeta(editions, L) },
+    }));
+  // The rename at build:done moves `<loc>/404/index.html` for exactly these — never an owner's own
+  // `<seg>/404/` page (tile#157 review). One list, read off the paths this route returns; a site
+  // with no editions declares nothing, and the hook (cleared at build:start) then moves nothing.
+  declareLocale404s(paths.map((p) => p.params.loc));
+  return paths;
+}
+
+const { lang, meta } = Astro.props;
+const copy = uiCopy(lang);
+const home = `/${toUrlLocale(lang)}/`;
+---
+<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex" languageReturn={home}>
+  <section class="st-section st-notfound">
+    <h1>{copy.notFoundTitle}</h1>
+    <p>{copy.notFoundBody}</p>
+    <p><a href={home}>{copy.notFoundHome}</a></p>
+  </section>
+</SiteLayout>

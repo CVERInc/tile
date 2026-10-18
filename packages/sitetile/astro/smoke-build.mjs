@@ -1156,6 +1156,28 @@ const checks = [
   ['banner: 404 and /preview/ exist once per site, not once per language — no banner', () =>
     bannerConfig(readFileSync(join(DIST, '404.html'), 'utf8')) === null
     && bannerConfig(readFileSync(join(DIST, 'preview/index.html'), 'utf8')) === null],
+  // -- CVERInc/reef#2112: one 404.html per declared NON-default locale, as a FILE at <loc>/404.html
+  // (Cloudflare Pages reads the nearest 404.html up the tree; Astro only writes the ROOT one bare,
+  // so astro.config.mjs's locale404Pages() renames <loc>/404/index.html). The root 404 is tile#135's
+  // and stays the site's default language.
+  ['🔴 #2112 every non-default locale has <loc>/404.html, and no <loc>/404/index.html is left', () =>
+    ['zh-tw', 'ja-jp', 'ko-kr'].every((loc) => existsSync(join(DIST, loc, '404.html')) && !existsSync(join(DIST, loc, '404')))
+    && !existsSync(join(DIST, 'en-us'))],
+  ['🔴 #2112 zh-tw/404.html: lang from the Lingo table (zh-Hant), zh copy, home link to /zh-tw/, noindex', () => {
+    const zh = readFileSync(join(DIST, 'zh-tw/404.html'), 'utf8');
+    return /<html lang="zh-Hant" data-lingo-root>/.test(zh) && zh.includes('<h1>找不到頁面</h1>') && zh.includes('這個網站上沒有這個網址。')
+      && zh.includes('<a href="/zh-tw/">回到首頁</a>') && zh.includes('<meta name="robots" content="noindex">') && !zh.includes('Page not found');
+  }],
+  ['🔴 #2112 ja-jp/404.html and ko-kr/404.html speak their own language', () =>
+    /<html lang="ja" /.test(readFileSync(join(DIST, 'ja-jp/404.html'), 'utf8')) && readFileSync(join(DIST, 'ja-jp/404.html'), 'utf8').includes('ページが見つかりません')
+    && /<html lang="ko" /.test(readFileSync(join(DIST, 'ko-kr/404.html'), 'utf8')) && readFileSync(join(DIST, 'ko-kr/404.html'), 'utf8').includes('페이지를 찾을 수 없습니다')],
+  ['🔴 #2112 the locale 404\'s Language link is that locale\'s chooser returning to its home (like the root one\'s /language?return=%2F)', () =>
+    readFileSync(join(DIST, 'zh-tw/404.html'), 'utf8').includes('<a class="rf-lang" href="/zh-tw/language?return=%2Fzh-tw%2F">')
+    && readFileSync(join(DIST, '404.html'), 'utf8').includes('<a class="rf-lang" href="/language?return=%2F">')
+    && existsSync(join(DIST, 'zh-tw/language/index.html'))],
+  ['🔴 #2112 the root 404 is unchanged: site default language (en), noindex, no banner', () =>
+    /<html lang="en" data-lingo-root>/.test(readFileSync(join(DIST, '404.html'), 'utf8'))
+    && readFileSync(join(DIST, '404.html'), 'utf8').includes('<h1>Page not found</h1>')],
   // -- nav: arbitrary-depth submenus (indented-list syntax → recursive NavNode) --
   ['nav: top-level dropdown group', () => /class="rf-nav-group">\s*<a class="rf-nav-link rf-nav-parent" href="\/products"/.test(html)],
   ['nav: 1st-level submenu link', () => /class="rf-nav-sub">[\s\S]*?class="rf-nav-link rf-nav-sublink" href="\/apps"/.test(html)],

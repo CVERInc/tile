@@ -16,7 +16,8 @@ import PageView from '../components/PageView.astro';
 import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
-import { parseSite, isSiteFile } from '@sitetile';
+import { parseSite } from '@sitetile';
+import { contentPageRel } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
@@ -61,9 +62,10 @@ export function getStaticPaths() {
     // are site DATA, NOT routable pages — else /_theme would render the theme's own frontmatter + its
     // residue CSS as a bogus page. `_site` was skipped from the start; `_theme` joined the ir/ layer
     // later and needs the same exclusion (a regenerated site_pages.json includes it).
-    if (/(^|\/)_(site|theme)\.md$/.test(path)) continue;
-    if (!isSiteFile(raw)) continue;
-    const rel = path.split('/content/')[1].replace(/\.md$/, '');   // e.g. "home" or "ja-jp/about"
+    // One predicate (lib/locale-editions.mjs → contentPageRel), shared with the per-locale 404, which
+    // must not generate a fallback at a <loc>/404 this loop already emits (tile#157 r3).
+    const rel = contentPageRel(path, raw);   // e.g. "home" or "ja-jp/about"
+    if (rel === null) continue;
     const slug = rel === 'home' ? undefined : rel;                 // [...path] accepts "legal/terms"
     // Root-mount collision guard: when the blog owns `/` (rootMount), the home page must NOT also
     // emit `/` as a content page — two paths with `path: undefined` is a duplicate-route BUILD ERROR.
