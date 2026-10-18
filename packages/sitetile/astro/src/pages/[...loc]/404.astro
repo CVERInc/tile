@@ -25,7 +25,7 @@
 //
 // noindex, as the root 404: a 404 that gets indexed is a search result that wastes somebody's click.
 import SiteLayout from '../../layouts/SiteLayout.astro';
-import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
+import { localeEditions, editionMeta, contentPageRel } from '../../lib/locale-editions.mjs';
 import { toUrlLocale, uiCopy, sameLocale } from '../../packages/lingo/locale.mjs';
 import { declareLocale404s } from '../../../locale-404.mjs';
 
@@ -34,8 +34,15 @@ export function getStaticPaths() {
   const editions = localeEditions(files);
   if (!editions) return [];
   const { locales, defaultLocale } = editions;
+  // 🩸 tile#157 review r3: the owner's own `zh-tw/404.md` is a page the content loop already emits at
+  // /zh-tw/404/. A fallback here collided with it, and the rename then moved whichever won to
+  // zh-tw/404.html. That edition gets no generated fallback and declares nothing — the owner's page
+  // stays at zh-tw/404/index.html, byte for byte; Pages then serves the root 404 for missing /zh-tw/…,
+  // exactly as before reef#2112. Same predicate as the loop (contentPageRel), never a second guess.
+  const authored = new Set(Object.entries(files).map(([path, raw]) => contentPageRel(path, raw)));
   const paths = locales
     .filter((L) => !sameLocale(L, defaultLocale))
+    .filter((L) => !authored.has(`${toUrlLocale(L)}/404`))
     .map((L) => ({
       params: { loc: toUrlLocale(L) },
       props: { lang: L, meta: editionMeta(editions, L) },

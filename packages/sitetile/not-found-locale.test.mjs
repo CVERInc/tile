@@ -364,10 +364,20 @@ const SITES = {
     'ja-jp/_site.md': '---\nfooter-brand: 折り鶴工房\nfooter-cols: 店: 鶴=/ja-jp/cranes\n---\n',
     'ja-jp/about.md': page('sitetile-page: about\ntitle: 紹介\nlang: ja-JP', '紹介'),
   },
+  // ── tile#157 review r3: the owner wrote the zh-TW edition's own `zh-tw/404.md`. The content loop
+  // already routes it to /zh-tw/404/; a generated fallback there would collide with it, and the rename
+  // would move the owner's page away. That edition gets no fallback; ja-JP still gets its own.
+  triOwnZh404: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, ja-JP, zh-TW\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'ja-jp/home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'zh-tw/404.md': page('sitetile-page: error-guide\ntitle: 迷路指南\nlang: zh-TW', '迷路了嗎'),
+  },
 };
 // Built a second time by a copy of this engine with the reef#2112 feature taken out (the route and
 // the integration) — the reference for "byte-identical to a build without it".
-const BASELINE = ['monoManual404', 'monoEn', 'multiAbout404'];
+const BASELINE = ['monoManual404', 'monoEn', 'multiAbout404', 'triOwnZh404'];
 
 const htmlLang = (html) => (/<html lang="([^"]*)"/.exec(html) || [])[1];
 // EVERY language-chooser link on the page, not the first: a later one would be the one clicked.
@@ -580,6 +590,27 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.deepEqual(Object.keys(A).filter((rel) => !(rel in B)).sort(), ['zh-tw/404.html'], 'files only the reef#2112 build wrote');
       assert.deepEqual(Object.keys(B).filter((rel) => !(rel in A)).sort(), [], 'files the reef#2112 build lost');
       assert.equal(A['about/404/index.html'].equals(B['about/404/index.html']), true, 'about/404/index.html changed bytes');
+      // r3 (codex r2): the root 404 is the same bytes too — and so is every other file both builds wrote.
+      assert.equal(A['404.html'].equals(B['404.html']), true, 'the root 404.html changed bytes on a two-locale site');
+      assert.deepEqual(Object.keys(B).filter((rel) => !A[rel].equals(B[rel])).sort(), [], 'files whose bytes differ from the build without reef#2112');
+    });
+
+    await test('🔴 #2112 r3 the owner\'s own `zh-tw/404.md` inside a declared edition stays theirs: `zh-tw/404/index.html` byte-identical, no `zh-tw/404.html`; ja-jp still gets its 404', () => {
+      const b = site('triOwnZh404');
+      const ref = baseline.triOwnZh404;
+      assert.equal(ref.code, 0, `the reference build failed:\n${ref.log.slice(-1200)}`);
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'ja-jp/404.html'], 'an edition whose owner wrote <loc>/404 must not get a generated fallback');
+      assert.ok(b.pages['zh-tw/404/index.html'], 'the owner\'s /zh-tw/404/ page lost its directory index');
+      assert.match(b.pages['zh-tw/404/index.html'], /迷路了嗎/, 'the page at /zh-tw/404/ is not the owner\'s');
+      assert.equal(existsSync(join(b.outDir, 'zh-tw/404.html')), false, 'the owner\'s page was turned into a fallback 404 document');
+      const A = distBytes(b.outDir); const B = distBytes(ref.outDir);
+      assert.equal(A['zh-tw/404/index.html'].equals(B['zh-tw/404/index.html']), true, 'zh-tw/404/index.html changed bytes');
+      assert.deepEqual(Object.keys(A).filter((rel) => !(rel in B)).sort(), ['ja-jp/404.html'], 'files only the reef#2112 build wrote');
+      assert.deepEqual(Object.keys(B).filter((rel) => !(rel in A)).sort(), [], 'files the reef#2112 build lost');
+      assert.deepEqual(Object.keys(B).filter((rel) => !A[rel].equals(B[rel])).sort(), [], 'files whose bytes differ from the build without reef#2112');
+      // CONTROL: the other edition's fallback is the real one, in its own language.
+      assert.equal(htmlLang(b.pages['ja-jp/404.html']), 'ja');
+      assert.match(b.pages['ja-jp/404.html'], /<h1>ページが見つかりません<\/h1>/);
     });
 
     await test('🔴 #2112 r2 an edition with no home of its own: its 404 wears its `ja-jp/_site.md` layer, not the root\'s chrome', () => {

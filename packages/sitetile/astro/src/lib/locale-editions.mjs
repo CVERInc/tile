@@ -21,6 +21,18 @@ import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from './blog.mjs';
 import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
 
+/**
+ * The rel ("home", "ja-jp/about", "zh-tw/404") a content file is ROUTED at by [...path].astro's
+ * content loop, or null when that loop skips it (`_site.md` / `_theme.md` are site data, and a file
+ * that is not a sitetile page is not a page). One predicate, so the per-locale 404 can ask "did the
+ * owner write a page at <loc>/404?" exactly the way the loop that would emit it decides.
+ */
+export function contentPageRel(path, raw) {
+  if (/(^|\/)_(site|theme)\.md$/.test(path)) return null;
+  if (!isSiteFile(raw)) return null;
+  return path.split('/content/')[1].replace(/\.md$/, '');
+}
+
 export function localeEditions(files) {
   // A home file's basename is "home" (root: content/home.md; locale: content/<loc>/home.md).
   // The build maps each locale HOME to a single-segment path: the default → content/home.md,
