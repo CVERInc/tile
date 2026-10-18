@@ -33,6 +33,13 @@ class El {
 	removeAttribute(name) { delete this.attrs[name]; }
 	addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
 	appendChild(child) { this.children.push(child); return child; }
+	/** One shadow root per element, as in a browser — the coral draws its panel in one (0.7.13, reef#2139). */
+	attachShadow(init) {
+		if (this.shadowRoot) throw new Error('NotSupportedError: shadow root already attached');
+		this.shadowRoot = new El();
+		this.shadowRoot.mode = init.mode;
+		return this.shadowRoot;
+	}
 	insertAdjacentHTML(_where, value) { this.html += value; }
 	remove() {}
 	set innerHTML(value) { this.html = value; this.nodes.clear(); }
@@ -163,6 +170,9 @@ function reset() {
 	delete win.__reefInboxLoader;
 }
 
+/** The panel a mount drew: since 0.7.13 (reef#2139) inside its host's shadow root, found by class. */
+const panelOf = (el) => el.children[0]?.shadowRoot?.children.find((c) => c.className === 'dc-inbox-root');
+
 /** What the visitor and the network saw, after everything settled. */
 function observe(el) {
 	const stored = storage.get(claimKey(el.getAttribute('data-id')));
@@ -170,7 +180,7 @@ function observe(el) {
 		claimRequests: claimRequests(),
 		delays: [...delays],
 		drawn: el.children.length > 0,
-		open: el.children.length > 0 && el.children[0].innerHTML.includes('role="dialog"'),
+		open: el.children.length > 0 && panelOf(el).innerHTML.includes('role="dialog"'),
 		focuses,
 		claimKey: stored === undefined ? 'absent' : JSON.parse(stored).claim === true ? 'yes' : stored
 	};
@@ -388,7 +398,9 @@ test('the emitted script is the loader only — no coral body, small, same URL, 
 	const s = bubbleLoaderScript(SRC);
 	assert.doesNotThrow(() => new Function(s), 'the inline module does not parse');
 	// The coral's own code, by names only it defines.
-	for (const marker of ['renderClosed', 'injectStyles', 'createAiLog', 'OPEN_ICON', 'dc-inbox']) {
+	// `attachShadow`, not the `injectStyles` this list named until 0.7.13: that function is gone from
+	// the coral, and a marker the coral no longer contains cannot catch its body being inlined.
+	for (const marker of ['renderClosed', 'attachShadow', 'createAiLog', 'OPEN_ICON', 'dc-inbox']) {
 		assert.ok(!s.includes(marker), `the loader carries the coral's ${marker}`);
 	}
 	assert.equal(s.split(SRC).length - 1, 1, 'the coral URL is not named exactly once');

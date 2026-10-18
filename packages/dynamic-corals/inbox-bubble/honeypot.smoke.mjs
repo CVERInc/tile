@@ -70,7 +70,19 @@ async function arm({ label, layered, hostCss }) {
 
 	/** Where a label is, and whether any of it lands inside the viewport a person is looking at. */
 	const measure = (sel) => p.evaluate((sel) => {
-		const el = document.querySelector(sel);
+		// Walks open shadow roots: since 0.7.13 (reef#2139) the panel lives in one, where a bare
+		// `document.querySelector` finds nothing — and "no honeypot rendered" would be the probe's
+		// blindness, not the coral's.
+		const find = (root) => {
+			const hit = root.querySelector(sel);
+			if (hit) return hit;
+			for (const e of root.querySelectorAll('*')) {
+				const inner = e.shadowRoot && find(e.shadowRoot);
+				if (inner) return inner;
+			}
+			return null;
+		};
+		const el = find(document);
 		if (!el) return null;
 		const r = el.getBoundingClientRect();
 		const cs = getComputedStyle(el);
