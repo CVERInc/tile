@@ -128,7 +128,15 @@ test('square-shop: client injectStyles() wraps only when the document root decla
 
 test('inbox-bubble: client injectStyles() wraps only when the document root declares layered', async () => {
   async function capture(layered) {
-    globalThis.document = makeRootDocument(layered, { readyState: 'loading' });
+    // 0.7.13 (reef#2139): the panel's <style> goes into the mount's own shadow root, not
+    // document.head — so every created node can host one, and what lands there is what is read.
+    const shadowChildren = [];
+    const node = () => ({
+      setAttribute() {},
+      appendChild() {},
+      attachShadow: () => ({ appendChild: (n) => shadowChildren.push(n) }),
+    });
+    globalThis.document = makeRootDocument(layered, { readyState: 'loading', createElement: node });
     globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, addEventListener() {}, removeEventListener() {} };
     globalThis.location = { hash: '', hostname: 'example.test', href: 'https://example.test/' };
     // The tenant has an Inbox — mount() draws nothing (and injects no style) until the claim
@@ -149,12 +157,14 @@ test('inbox-bubble: client injectStyles() wraps only when the document root decl
       querySelectorAll: () => [],
       addEventListener() {},
     };
-    // mount() calls injectStyles() right after the claim answer, before anything that
-    // needs a fuller DOM — whatever happens afterward (this `el` is deliberately minimal) surfaces
-    // only as a rejected promise, which the caller below discards.
+    // mount() writes the stylesheet into the host's shadow root when it builds the panel, before
+    // anything that needs a fuller DOM — whatever happens afterward (this `el` is deliberately
+    // minimal) surfaces only as a rejected promise, which the caller below discards.
     await mod.mount(el).catch(() => {});
-    assert.equal(globalThis.document._children.length, 1, 'injectStyles must append exactly one <style>');
-    return globalThis.document._children[0].textContent;
+    assert.equal(globalThis.document._children.length, 0, 'the panel CSS must not go into document.head');
+    const styles = shadowChildren.filter((n) => typeof n.textContent === 'string' && n.textContent.includes('.dc-inbox-'));
+    assert.equal(styles.length, 1, 'the shadow root must receive exactly one panel <style>');
+    return styles[0].textContent;
   }
 
   const legacy = await capture(false);

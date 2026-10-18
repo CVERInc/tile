@@ -332,6 +332,16 @@ Every colour is a `--reef-inbox-*` custom property with a neutral fallback, so a
 site's theme wins without this file knowing anything about it. Dark mode follows
 `prefers-color-scheme`; the entrance animation respects reduced motion.
 
+**Since 0.7.13 the panel lives in a shadow root** (`mode:'open'`, on a `div.dc-inbox-host`
+the coral appends to the container), with its stylesheet inside it — nothing goes into
+`document.head`. A page's selectors, and a browser extension's cosmetic CSS, no longer reach
+the bubble: reef#2139 measured one `button{min-width:88px}` turning it into an 88×56 capsule.
+What crosses the boundary is what inherits, on purpose: the `--reef-inbox-*` custom properties
+and the site's `font`. So the colour knobs above are the whole styling surface — a site rule
+aimed at `.dc-inbox-*` no longer applies. A script that needs a node reaches it deliberately
+through `host.shadowRoot`; `shape.smoke.mjs` measures the shape, the colours and the font in
+chromium.
+
 ## Publishing
 
 Registry pipeline, same as every coral — bump `package.json`, `node

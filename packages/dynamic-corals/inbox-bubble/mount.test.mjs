@@ -38,6 +38,13 @@ class El {
 	removeAttribute(name) { delete this.attrs[name]; }
 	addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
 	appendChild(child) { this.children.push(child); return child; }
+	/** Browser semantics that matter here: one shadow root per element, a second attach throws. */
+	attachShadow(init) {
+		if (this.shadowRoot) throw new Error('NotSupportedError: shadow root already attached');
+		this.shadowRoot = new El();
+		this.shadowRoot.mode = init.mode;
+		return this.shadowRoot;
+	}
 	insertAdjacentHTML(_where, value) { this.html += value; }
 	remove() {}
 
@@ -186,12 +193,20 @@ function listenerCount() {
 	return [...windowListeners.values()].reduce((n, list) => n + list.length, 0);
 }
 
+/**
+ * The panel `root` a mount drew, inside the host it appended to `el` — since 0.7.13 (reef#2139)
+ * that root lives in the host's shadow root, beside the panel's own `<style>`. Found by class, not
+ * by position, so a reordering inside the shadow root is not mistaken for a missing panel.
+ */
+const panelIn = (host) => host.shadowRoot.children.find((c) => c.className === 'dc-inbox-root');
+const panelOf = (el) => panelIn(el.children[0]);
+
 let seq = 0;
 /** A fresh mount, with its own tenant so no two tests share a storage key. */
 async function mountFresh(attrs = {}) {
 	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}`, ...attrs });
 	await mount(el);
-	return { el, root: el.children[0] };
+	return { el, root: panelOf(el) };
 }
 
 /**
@@ -218,6 +233,34 @@ const isClosedBubble = (root) => root.innerHTML.includes('dc-inbox-open');
  * so anything counting what a single mount did (a poller, a request) has to open it like a visitor.
  */
 const openBubble = (root) => root.querySelector('.dc-inbox-open').emit('click');
+
+// reef#2139: the bubble's look was the page's to rewrite because it lived in the light DOM. What a
+// browser does with a shadow root (which selectors reach in, what inherits) is shape.smoke.mjs's
+// to measure; this pins the WIRING the smoke relies on, on every run and without a browser.
+test('reef#2139: the panel and its stylesheet live in an open shadow root on a host of their own', async () => {
+	const headBefore = document.head.children.length;
+	const el = new El({ 'data-kind': 'site', 'data-id': `t${++seq}` });
+	await mount(el);
+	assert.equal(el.children.length, 1, 'mount appended something other than one host');
+	const host = el.children[0];
+	assert.equal(host.className, 'dc-inbox-host');
+	assert.ok(host.shadowRoot, 'the host has no shadow root — the panel is back in the light DOM');
+	assert.equal(host.shadowRoot.mode, 'open');
+	assert.equal(el.shadowRoot, undefined, 'the shadow root went on the container itself');
+	const style = host.shadowRoot.children.find((c) => /\.dc-inbox-root\{/.test(c.textContent ?? ''));
+	assert.ok(style, 'the panel stylesheet is not inside the shadow root');
+	assert.match(style.textContent, /:host\{font:inherit\}/, 'the site font no longer reaches the panel');
+	assert.equal(document.head.children.length, headBefore, 'a mount still writes into document.head');
+	assert.ok(isClosedBubble(panelOf(el)), 'the closed bubble is not drawn inside the shadow root');
+	// An SPA that unmounts and remounts the same container must get a fresh host, not a second
+	// attachShadow on an element that already has one (which throws in a browser).
+	assert.equal(coral.unmount(el), true);
+	el.children.length = 0; // the stand-in's `remove()` is a no-op; a browser's takes the host out
+	await mount(el);
+	assert.equal(el.children.length, 1, 'a remount did not draw');
+	assert.ok(isClosedBubble(panelOf(el)));
+	coral.unmount(el);
+});
 
 test('B11: reef-inbox:open opens a mounted panel and focuses the compose box', async () => {
 	const { root } = await mountFresh();
@@ -308,7 +351,7 @@ test('B11: a mount whose panel is open still answers the event, and the stored h
 	const stored = storage.get(`reef-inbox:site:${el.attrs['data-id']}`);
 
 	dispatch('reef-inbox:open');
-	assert.ok(isOpen(el.children[0]));
+	assert.ok(isOpen(panelOf(el)));
 	assert.equal(storage.get(`reef-inbox:site:${el.attrs['data-id']}`), stored,
 		'opening the panel rewrote the visitor\'s handle');
 });
@@ -374,7 +417,7 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	const key = `reef-inbox:site:${el.attrs['data-id']}`;
 	storage.set(key, JSON.stringify({ conv: 'visitor-own', ts: Date.now(), hasEmail: false, mode: 'human' }));
 	await mount(el);
-	const root = el.children[0];
+	const root = panelOf(el);
 
 	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide'],
 		'a window event type nobody named exists — neither of the two may name a conversation');
@@ -467,7 +510,7 @@ test('B9: mounting and unmounting N times leaves no listener or poller behind', 
 		el.setAttribute('data-dynamic-coral-mounted', '1');
 		await mount(el);
 		assert.ok(count() > before, 'a mount added no window listener — this test is measuring nothing');
-		await openBubble(el.children[el.children.length - 1]);
+		await openBubble(panelIn(el.children[el.children.length - 1]));
 		assert.ok(timers.size > pollersBefore, 'an open panel started no poller — nothing to stop');
 		assert.equal(unmount(el), true, 'unmount did not recognise an element mount() set up');
 		assert.equal(el.getAttribute('data-dynamic-coral-mounted'), null, 'the mounted flag was left set');
@@ -481,9 +524,9 @@ test('B9: mounting and unmounting N times leaves no listener or poller behind', 
 	// The visitor's conversation outlives the panel, as it outlives a navigation.
 	assert.equal(storage.get(key), stored, 'unmount touched the stored handle');
 	// And a dispatch after the last unmount reaches nobody from this element.
-	const rendered = el.children.map((c) => c.innerHTML);
+	const rendered = el.children.map((c) => panelIn(c).innerHTML);
 	dispatch('reef-inbox:open');
-	assert.deepEqual(el.children.map((c) => c.innerHTML), rendered, 'an unmounted panel re-rendered on reef-inbox:open');
+	assert.deepEqual(el.children.map((c) => panelIn(c).innerHTML), rendered, 'an unmounted panel re-rendered on reef-inbox:open');
 });
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -507,8 +550,8 @@ test('B12: a handle past the 30-day TTL is not adopted at mount, and one inside 
 	assert.equal(storage.has(liveKey), true, 'a handle inside the TTL was deleted');
 	assert.deepEqual(transcriptConvs(from), ['inside-the-ttl'],
 		'a handle inside the TTL was not read at mount');
-	await openBubble(live.children[0]);
-	assert.match(live.children[0].innerHTML, /name="text"/,
+	await openBubble(panelOf(live));
+	assert.match(panelOf(live).innerHTML, /name="text"/,
 		'the adopted thread did not open as the human thread');
 	assert.equal(timers.size, armed + 1, 'the adopted thread armed no poller');
 
@@ -523,10 +566,10 @@ test('B12: a handle past the 30-day TTL is not adopted at mount, and one inside 
 	await mount(stale);
 	assert.equal(storage.has(staleKey), false, 'the expired handle was left in storage');
 	assert.deepEqual(transcriptConvs(from), [], 'the expired conversation was fetched anyway');
-	await openBubble(stale.children[0]);
-	assert.match(stale.children[0].innerHTML, /name="q"/,
+	await openBubble(panelOf(stale));
+	assert.match(panelOf(stale).innerHTML, /name="q"/,
 		'the expired handle still opened the human thread');
-	assert.doesNotMatch(stale.children[0].innerHTML, /name="text"/);
+	assert.doesNotMatch(panelOf(stale).innerHTML, /name="text"/);
 	assert.equal(timers.size, armed, 'ask mode armed a poller');
 });
 
@@ -776,7 +819,7 @@ test('gate: two tenants on one page, one with an Inbox and one without — only 
 	const off = new El({ 'data-kind': 'site', 'data-id': 'off-mixed' });
 	await Promise.all([mount(on), mount(off)]);
 	await drain();
-	assert.equal(digest(on.children[0].innerHTML), BEFORE.closed);
+	assert.equal(digest(panelOf(on).innerHTML), BEFORE.closed);
 	assert.ok(nothingRendered(off));
 });
 
@@ -793,16 +836,16 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await mount(el);
 		await settle();
 		assert.equal(el.children.length, 1, name);
-		assert.equal(digest(el.children[0].innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
+		assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
 		assert.equal(listenerCount(), before + 2, `${name}: not the two window listeners a mount had`);
 		// Apart from the probe, the same requests as before — except the assistant-name read, which
 		// moved from mount to the first open (reef#1921).
 		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname),
 			['/api/inbox/session'], name);
-		await el.children[0].querySelector('.dc-inbox-open').emit('click');
+		await panelOf(el).querySelector('.dc-inbox-open').emit('click');
 		await settle();
 		assert.equal(assistantReads(from).length, 1, `${name}: opening did not read the name once`);
-		assert.equal(digest(el.children[0].innerHTML), BEFORE.open[name], `${name}: open panel changed`);
+		assert.equal(digest(panelOf(el).innerHTML), BEFORE.open[name], `${name}: open panel changed`);
 	}
 });
 
@@ -861,7 +904,7 @@ test('gate: cannot ask ⇒ nothing, retried at 2 s, 8 s and 30 s, and drawn when
 	await drain();
 	assert.equal(probes(from).length, 4);
 	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
-	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
+	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
 });
 
 test('gate: never answers ⇒ stops after four requests and draws nothing', async () => {
@@ -935,7 +978,7 @@ test('gate: a reef-inbox:open sent while the probe is still out is held, and ope
 	await done;
 	await drain();
 	assert.equal(el.children.length, 1);
-	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_kaito,
+	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito,
 		'the open asked for before the answer was dropped (panel still closed)');
 	assert.equal(listenerCount(), before + 2, 'the holding listener outlived the answer');
 
@@ -999,7 +1042,7 @@ test('gate: nobody could say, but this browser once heard yes (within 30 days) �
 	await drain();
 	assert.equal(probes(from).length, 1);
 	assert.equal(a.children.length, 1, 'a throttled ask took the bubble off a site that has an Inbox');
-	assert.equal(digest(a.children[0].innerHTML), BEFORE.closed);
+	assert.equal(digest(panelOf(a).innerHTML), BEFORE.closed);
 	assert.equal(storage.get(claimKey('site', 'stale-1')), kept, 'a non-answer re-dated the yes');
 
 	// a timeout (could not ask) + a yes from 29 days ago ⇒ drawn at the first non-answer, no retry wait.
@@ -1102,7 +1145,7 @@ async function visit(attrs, answer = GROUNDED) {
 	try {
 		await mount(el);
 		await drain();
-		const root = el.children[0];
+		const root = panelOf(el);
 		if (!root) return { el, id, drawn: false, wire: wire(from), listeners: listenerCount() - listenersBefore };
 		const closed = root.innerHTML;
 		await openBubble(root);
@@ -1230,8 +1273,8 @@ test('#1866 row 2 — a stored handle is not adopted, an open asked for early is
 	await done;
 	await drain();
 	assert.equal(el.children.length, 1, 'no bubble was drawn');
-	assert.match(el.children[0].innerHTML, /name="q"/, 'the held open did not open the ask view');
-	assert.doesNotMatch(el.children[0].innerHTML, /name="text"|dc-inbox-second/);
+	assert.match(panelOf(el).innerHTML, /name="q"/, 'the held open did not open the ask view');
+	assert.doesNotMatch(panelOf(el).innerHTML, /name="text"|dc-inbox-second/);
 	assert.deepEqual(transcriptConvs(from), [], 'the stored conversation was fetched');
 	assert.equal(timers.size, armed, 'a transcript poller was armed');
 	assert.equal(storage.get(handleKey), handle, 'the stored handle was rewritten');
@@ -1245,17 +1288,17 @@ test('#1866 row 2 — a stored handle is not adopted, an open asked for early is
 	const first = new El({ ...attrs });
 	await mount(first);
 	await drain();
-	await openBubble(first.children[0]);
-	assert.ok(first.children[0].innerHTML.includes(ASK_ONLY_LINE), 'the first page was not ask-only');
+	await openBubble(panelOf(first));
+	assert.ok(panelOf(first).innerHTML.includes(ASK_ONLY_LINE), 'the first page was not ask-only');
 	assert.equal(storage.has(claimKey('site', 'up-1')), false, 'a no was remembered');
 	const f = requests.length;
 	const second = new El({ ...attrs });
 	await mount(second);
 	await drain();
 	assert.equal(probes(f).length, 1, 'the next page did not ask again');
-	assert.equal(digest(second.children[0].innerHTML), BEFORE.closed);
-	await openBubble(second.children[0]);
-	assert.equal(digest(second.children[0].innerHTML), BEFORE.open.site_kaito, 'the next page is not the full bubble');
+	assert.equal(digest(panelOf(second).innerHTML), BEFORE.closed);
+	await openBubble(panelOf(second));
+	assert.equal(digest(panelOf(second).innerHTML), BEFORE.open.site_kaito, 'the next page is not the full bubble');
 });
 
 test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, and nothing leaves even if the site does have an Inbox', async () => {
@@ -1287,8 +1330,8 @@ test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, an
 	const el = new El({ 'data-kind': 'site', 'data-id': 'unk-stale', 'data-kaito': '1', 'data-site-name': 'Example Shop' });
 	await mount(el);
 	await drain();
-	await openBubble(el.children[0]);
-	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_kaito);
+	await openBubble(panelOf(el));
+	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito);
 });
 
 test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async () => {
@@ -1297,15 +1340,15 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	const before = listenerCount();
 	await mount(el);
 	await drain();
-	assert.equal(digest(el.children[0].innerHTML), BEFORE.closed);
+	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
 	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 	assert.equal(listenerCount(), before + 2);
-	await openBubble(el.children[0]);
+	await openBubble(panelOf(el));
 	await drain();
 	assert.equal(assistantReads(from).length, 1);
-	assert.equal(digest(el.children[0].innerHTML), BEFORE.open.site_status);
-	assert.match(el.children[0].innerHTML, /name="text"/);
-	assert.equal(el.children[0].innerHTML.includes(ASK_ONLY_LINE), false);
+	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_status);
+	assert.match(panelOf(el).innerHTML, /name="text"/);
+	assert.equal(panelOf(el).innerHTML.includes(ASK_ONLY_LINE), false);
 });
 
 test('#1866 row 5 — no KAITO, no Inbox: still nothing', async () => {
@@ -1366,7 +1409,7 @@ test('#1866 row 2 — when the engine cannot answer, ask-only still offers no pe
 		try {
 			await mount(el);
 			await drain();
-			const root = el.children[0];
+			const root = panelOf(el);
 			assert.ok(root, `${id}: no bubble was drawn`);
 			await openBubble(root);
 			composeBox(root).value = 'do you ship to Japan?';
@@ -1403,7 +1446,7 @@ test('#1866 row 2 — a late rename from the platform repaints the KAITO-only li
 		try {
 			await mount(el);
 			await drain();
-			const root = el.children[0];
+			const root = panelOf(el);
 			assert.ok(root, `${id}: no bubble was drawn`);
 			await openBubble(root);
 			const before = root.innerHTML;
@@ -1432,7 +1475,7 @@ test('#1866 row 2 — what the ask-only bubble is CALLED: the ask box\'s words, 
 		const el = new El({ 'data-kind': 'site', ...attrs });
 		await mount(el);
 		await drain();
-		const root = el.children[0];
+		const root = panelOf(el);
 		const closed = names(root.innerHTML)[0];
 		await openBubble(root);
 		return { closed, dialog: root.innerHTML.match(/role="dialog" aria-label="([^"]*)"/)[1] };
@@ -1539,7 +1582,7 @@ test('1921: a reef-inbox:open held while the claim gate is pending reads the nam
 	dispatch('reef-inbox:open');
 	await done;
 	await drain();
-	assert.ok(isOpen(el.children[0]), 'the held open did not open the panel');
+	assert.ok(isOpen(panelOf(el)), 'the held open did not open the panel');
 	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
 		&& new URL(r.url).searchParams.get('id') === 'held-1921');
 	assert.equal(mine.length, 1, 'the held open skipped the name read');

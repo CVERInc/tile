@@ -240,8 +240,6 @@ function withDynamicCoralCssLayer(css) {
 	return layered ? `@layer reef.corals {\n${css}\n}` : css;
 }
 
-let stylesInjected = false;
-
 // ── copy ────────────────────────────────────────────────────────────────────
 // Defaults come from the PAGE's declared language (`<html lang>`), which is the
 // site's own statement about who it is for — not from a guess, and not from the
@@ -2336,17 +2334,44 @@ const OPEN_ICON =
 	'<path fill="currentColor" d="M12 3.255c-5.08 0-9.2 3.4-9.2 7.6 0 2.4 1.34 4.54 3.42 5.94-.12 1.06-.6 2.36-1.66 3.42-.22.22-.02.6.28.52 1.9-.3 3.56-1.08 4.76-2.16.76.18 1.56.28 2.4.28 5.08 0 9.2-3.4 9.2-7.6S17.08 3.4 12 3.4z"/>' +
 	'</svg>';
 
-function injectStyles() {
-	if (stylesInjected) return;
-	stylesInjected = true;
+/**
+ * The panel's stylesheet, written into the mount's OWN shadow root (0.7.13, reef#2139).
+ *
+ * 🩸 WHY A SHADOW ROOT. Up to 0.7.12 this `<style>` went into `document.head` and the bubble sat in
+ * the light DOM behind one class (specificity 0,1,0) that set width, height, radius and padding and
+ * nothing else. Every property it left unset was the page's to fill in — and not only the page's:
+ * a browser extension's cosmetic CSS (Dark Reader, Grammarly, translators, ad blockers; common on
+ * Windows Chrome) is page CSS too. Measured for reef#2139: one `button{min-width:88px}` turned the
+ * bubble into an 88×56 capsule, and on a layered host an unlayered `button{border-radius:4px}` beat
+ * every rule here regardless of specificity. A document-level selector cannot match inside a
+ * shadow tree, so the coral's look is now the coral's.
+ *
+ * 🔴 WHAT STILL CROSSES THE BOUNDARY, ON PURPOSE: inherited properties. The two colour knobs a site
+ * theme sets (`--reef-inbox-accent`, `--reef-inbox-on-accent`, and the panel's `-bg`/`-fg`) are
+ * custom properties, which inherit into a shadow tree — so a site's own theme still wins without
+ * this file knowing anything about it. `font` inherits too, and `:host` says so out loud: the panel
+ * speaks in the site's typeface, as it did in the light DOM. shape.smoke.mjs measures all three.
+ *
+ * Still wrapped by `withDynamicCoralCssLayer` on a layered host: inside a shadow tree nothing from
+ * the page competes with the layer, so the wrapper changes no outcome, and keeping it keeps the one
+ * rule dynamic-coral-css-registry.test.mjs holds every coral to.
+ */
+function styleElement() {
 	const style = document.createElement('style');
-	// Scoped to this coral's prefix, and every value is either a plain colour or
-	// a CSS custom property the SITE may already define — so a site's own theme
-	// wins without this file knowing anything about it.
 	const css = `
+:host{font:inherit}
 .${PREFIX}-root{position:fixed;right:1rem;bottom:1rem;z-index:2147483000;font:inherit}
-.${PREFIX}-open{border:0;border-radius:999px;padding:0;cursor:pointer;
-  width:3.5rem;height:3.5rem;display:flex;align-items:center;justify-content:center;
+/* 🔴 EVERY SHAPE PROPERTY IS SET, not only the four that draw it (reef#2139). The shadow root keeps
+   the page's selectors out; the one stylesheet that still reaches this button is the browser's
+   own, and its button defaults are exactly these properties, differently per engine. So the shape
+   does not depend on what any stylesheet but this one leaves unset: min-width (the measured
+   capsule), box-sizing (a content-box reset), aspect-ratio and flex (a flex parent), appearance
+   (a native button look), margin. 50% rather than 999px: on a square box the same circle, and an
+   ellipse rather than a capsule if a size ever does get through. */
+.${PREFIX}-open{box-sizing:border-box;margin:0;border:0;padding:0;
+  width:3.5rem;height:3.5rem;min-width:0;min-height:0;max-width:none;max-height:none;
+  aspect-ratio:1;flex:none;border-radius:50%;-webkit-appearance:none;appearance:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
   box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
 .${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
@@ -2428,7 +2453,7 @@ function injectStyles() {
 `;
 	// Layered only for a site whose document root declares it (absent = legacy, unchanged).
 	style.textContent = withDynamicCoralCssLayer(css);
-	document.head.appendChild(style);
+	return style;
 }
 
 // 🔴 No `copy` parameter any more (0.7.3): `copy.empty` was the only string this function ever
@@ -2701,7 +2726,6 @@ export async function mount(el, handoff = null) {
 		}
 	}
 
-	injectStyles();
 	const copy = copyFor(el);
 	const site = resolveSiteName(el, document);
 	// 🏛 `let`, not `const` — the baked value is only the OPENING answer. The platform read at the
@@ -2925,9 +2949,21 @@ export async function mount(el, handoff = null) {
 	const openLabel = askOnly ? askName : copy.open;
 	const panelLabel = askOnly ? (el.getAttribute('data-title') || askName) : copy.title;
 
+	// 🔴 THE PANEL LIVES IN A SHADOW ROOT ON A HOST OF ITS OWN (0.7.13, reef#2139 — see `styleElement`).
+	// Not on `el` itself: a shadow root cannot be attached twice, so an `unmount(el)` followed by a
+	// remount would throw, and `el`'s own children would vanish behind it. Every query this file
+	// makes for its own nodes already goes through `root` (or a node under it), never `document`, so
+	// they all keep working unchanged inside the shadow tree; `focus()` on a node in an open shadow
+	// root focuses it as before. `mode:'open'` so a host script, a test, or an assistive tool can
+	// still reach in deliberately (`host.shadowRoot`) — isolation is from selectors, not from people.
+	const host = document.createElement('div');
+	host.className = `${PREFIX}-host`;
+	const shadow = host.attachShadow({ mode: 'open' });
+	shadow.appendChild(styleElement());
 	const root = document.createElement('div');
 	root.className = `${PREFIX}-root`;
-	el.appendChild(root);
+	shadow.appendChild(root);
+	el.appendChild(host);
 
 	/** See `pollGeneration` — what makes `stopPolling()` reach the requests already in the air. */
 	const generation = pollGeneration();
@@ -3362,7 +3398,7 @@ export async function mount(el, handoff = null) {
 		window.removeEventListener('reef-inbox:open', openPanel);
 		window.removeEventListener('pagehide', onPagehide);
 		stopPolling();
-		root.remove();
+		host.remove();
 	});
 
 	// One read at mount so a returning visitor sees the reply waiting for them behind the closed
