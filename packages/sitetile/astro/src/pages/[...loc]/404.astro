@@ -10,7 +10,8 @@
 // Astro writes only the ROOT `/404` as a bare `.html` (its STATUS_CODE_PAGES); this route lands at
 // `zh-tw/404/index.html`, which Pages does not read as a 404 page. The rename to `zh-tw/404.html`
 // happens in astro.config.mjs's `astro:build:done` (locale-404.mjs) — IN the renderer, because the
-// production deploy runs a plain `npx astro build` and nothing after it.
+// production deploy runs a plain `npx astro build` and nothing after it — and only for the locales
+// this route declares (declareLocale404s below).
 //
 // Which locales: exactly the editions the /language chooser offers (lib/locale-editions.mjs) minus the
 // default — a visitor is told "not found" in Japanese iff there is a Japanese edition to go back to.
@@ -26,18 +27,24 @@
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
 import { toUrlLocale, uiCopy, sameLocale } from '../../packages/lingo/locale.mjs';
+import { declareLocale404s } from '../../../locale-404.mjs';
 
 export function getStaticPaths() {
   const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   const editions = localeEditions(files);
   if (!editions) return [];
   const { locales, defaultLocale } = editions;
-  return locales
+  const paths = locales
     .filter((L) => !sameLocale(L, defaultLocale))
     .map((L) => ({
       params: { loc: toUrlLocale(L) },
       props: { lang: L, meta: editionMeta(editions, L) },
     }));
+  // The rename at build:done moves `<loc>/404/index.html` for exactly these — never an owner's own
+  // `<seg>/404/` page (tile#157 review). One list, read off the paths this route returns; a site
+  // with no editions declares nothing, and the hook (cleared at build:start) then moves nothing.
+  declareLocale404s(paths.map((p) => p.params.loc));
+  return paths;
 }
 
 const { lang, meta } = Astro.props;
