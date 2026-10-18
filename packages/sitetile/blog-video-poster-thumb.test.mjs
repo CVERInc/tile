@@ -1,7 +1,7 @@
 // A post whose only media is a video must still get an archive-card thumbnail: the poster the
 // author put in the alt slot (`![poster-url](clip.mp4)`, the slot imgTag reads for <video poster>).
 //
-// Measured on a Wix recast (sodaart, 2026-10-16): 116 showcase posts carried a video and nothing
+// Measured on a Wix recast (2026-10-16): 116 showcase posts carried a video and nothing
 // else. `image` came out '' for every one, so the /diary cards were blank and the image-first news
 // carousel (Carousel.astro filters on `p.image`) dropped them altogether — the owner's report was
 // "video posts do not get into the news section, and show no thumbnail".
@@ -61,7 +61,7 @@ test('the poster is still gated by safeSrc (a data: svg poster is refused)', () 
   assert.equal(p.image, '');
 });
 
-// tile#148 — a post whose only media is a YouTube line (sodaart's 阿蕥生活日記: 54 lines, 19 posts)
+// tile#148 — a post whose only media is a YouTube line (one recast's diary series: 54 lines, 19 posts)
 // takes that video's poster: the SAME proxied path its player shows, never i.ytimg.com (an archive
 // card is a page load too).
 const YT = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';

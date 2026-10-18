@@ -1,7 +1,7 @@
 // tile#148 — a paragraph that is ONLY a YouTube link renders as a click-to-play block.
 //   run: node packages/sitetile/youtube-line.test.mjs
 //
-// Measured on sodaart (a Wix recast, 2026-10-16): 54 YouTube embeds across 19 posts, dropped by the
+// Measured on a Wix recast (2026-10-16): 54 YouTube embeds across 19 posts, dropped by the
 // migration and restored as `[https://www.youtube.com/watch?v=ID](https://www.youtube.com/watch?v=ID)`
 // on a line of their own — clickable, not a player. They upgrade with no content change.
 //
