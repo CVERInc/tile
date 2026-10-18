@@ -11,9 +11,8 @@
 //     script rewrites each row's href to the return path, per-locale-prefixed — same script as live.
 //   • the suggestion banner is suppressed here (SiteLayout's localeBanner.excludePath = '/language').
 import SiteLayout from '../../layouts/SiteLayout.astro';
-import { parseSite, isSiteFile } from '@sitetile';
-import { loadSite } from '../../lib/blog.mjs';
-import { toUrlLocale, label, languageCopy, lingoEnabled, parseLocales, defaultLocaleOf, rootLangMismatch, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../../packages/lingo/locale.mjs';
+import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
+import { toUrlLocale, label, languageCopy, rootLangMismatch } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -22,52 +21,19 @@ import { chooserCss } from '../../packages/lingo/language-page-css.mjs';
 
 export function getStaticPaths() {
   // Discover the site's locale set + per-locale chrome from the HOME pages authored in content/.
-  // A home file's basename is "home" (root: content/home.md; locale: content/<loc>/home.md).
+  // The loop itself lives in lib/locale-editions.mjs, shared with the per-locale 404 route
+  // (CVERInc/reef#2112) so the two can never disagree about which editions this site has.
   const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
-  // The build maps each locale HOME to a single-segment path: the default → content/home.md,
-  // every other locale → content/<loc>.md (mkpages' `<loc>/home.md → <loc>` collapse). So a
-  // file is a locale-home iff its rel is "home" (default) or equals a declared locale's url form.
-  // Keyed by the home's REL (home / zh-tw), not by its `lang:` — a locale home that writes
-  // `lang: zh-Hant` lives at content/zh-tw.md and must still be found; matching on the raw `lang:`
-  // silently fell back to the root home's chrome.
-  const homesByRel = {};         // rel ("home" | url-locale) → meta
-  for (const [path, raw] of Object.entries(files)) {
-    if (!isSiteFile(raw)) continue;
-    const rel = path.split('/content/')[1].replace(/\.md$/, '');
-    if (rel.includes('/')) continue;   // only single-segment rels can be a home
-    const site = parseSite(raw);
-    // resolve site-config layer (_site + <locale>/_site) UNDER the home's own frontmatter, so a
-    // slimmed home (chrome moved to _site) still exposes packages/lang/locales here.
-    const cfg = loadSite(files, rel);
-    // Same rule as the page route: a home page's own `locales` is a page's line under a site config.
-    if (cfg || rel !== 'home') pageLocalesOrWarn(site.meta, `content/${rel}.md`, cfg);
-    else tagLocalesSource(site.meta, `content/${rel}.md`);
-    if (cfg) site.meta = { ...cfg, ...site.meta };
-    homesByRel[rel] = site.meta;
-  }
-  const rootHome = homesByRel.home;
-  // Same gate as SiteLayout — lingo/locale.mjs → lingoEnabled(): a second declared locale, or
-  // `packages: lingo`. One-language sites get no chooser.
-  if (!rootHome || !lingoEnabled(rootHome)) return [];
-
-  const locales = parseLocales(rootHome.locales, localesSourceOf(rootHome));
-  // A chooser is a choice between editions. `packages: lingo` over ONE declared locale used to
-  // build a page with a single row on it, and a footer link on every page leading there.
-  if (locales.length < 2) return [];
-  // 🩸 2026-10-11: this was the root home's raw `lang:`, compared with `L === defaultLocale` — an
-  // unwritten rule that `lang:` be spelled exactly like `locales[0]`. `locales: en-US` + `lang: en`
-  // (both correct) matched nothing: the DEFAULT locale's chooser went to /en-us/language and
-  // /language 404'd. The default is the site's one definition (lingo/locale.mjs → defaultLocaleOf),
-  // so the chooser and the layout's hreflang / footer link can never disagree about which locale
-  // lives at `/`.
-  const defaultLocale = defaultLocaleOf(locales, rootHome.lang);
+  const editions = localeEditions(files);
+  if (!editions) return [];
+  const { rootHome, locales, defaultLocale } = editions;
   // …and when the root home page itself disagrees with that, say so. Here because this runs once
   // per build and already holds the root home; the warning is the build log's, like loadSite's.
   const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang });
   if (mismatch) console.warn(mismatch);
 
   return locales.map((L) => {
-    const meta = (L === defaultLocale ? rootHome : homesByRel[toUrlLocale(L)]) || rootHome;
+    const meta = editionMeta(editions, L);
     const url = toUrlLocale(L);
     return {
       params: { loc: L === defaultLocale ? undefined : url },
