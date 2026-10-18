@@ -27,7 +27,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import vm from 'node:vm';
@@ -341,7 +341,33 @@ const SITES = {
     '_site.md': '---\nbrand: Nobody\n---\n',
     'home.md': page('sitetile-page: home\ntitle: Nobody', 'Nothing declared'),
   },
+  // ── CVERInc/reef#2112 r2 (tile#157 review): pages of the owner's own whose URL is `<seg>/404/`.
+  // 🩸 The first rename moved ANY two-segment `…/404/` route, so this one-language site lost the
+  // directory index of a page it wrote. `manual` is not a locale; nothing here declares one.
+  monoManual404: {
+    '_site.md': '---\nbrand: Tsuru Paper\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'manual/404.md': page('sitetile-page: manual-404\ntitle: What a 404 means\nlang: en', 'What a 404 means'),
+  },
+  // The same page on a two-locale site: `about` is not one of the editions, so it stays a page.
+  multiAbout404: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+    'about/404.md': page('sitetile-page: about-404\ntitle: Our 404 story\nlang: en', 'Our 404 story'),
+  },
+  // A declared edition with NO home of its own: ja-jp has a page and a site layer, not a home.md.
+  // Its 404 (and its chooser) wore the root home's chrome — the English footer wordmark.
+  noHomeJa: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, ja-JP\nfooter-brand: Tsuru Paper Works\nfooter-cols: Shop: Cranes=/cranes\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
+    'ja-jp/_site.md': '---\nfooter-brand: 折り鶴工房\nfooter-cols: 店: 鶴=/ja-jp/cranes\n---\n',
+    'ja-jp/about.md': page('sitetile-page: about\ntitle: 紹介\nlang: ja-JP', '紹介'),
+  },
 };
+// Built a second time by a copy of this engine with the reef#2112 feature taken out (the route and
+// the integration) — the reference for "byte-identical to a build without it".
+const BASELINE = ['monoManual404', 'monoEn', 'multiAbout404'];
 
 const htmlLang = (html) => (/<html lang="([^"]*)"/.exec(html) || [])[1];
 // EVERY language-chooser link on the page, not the first: a later one would be the one clicked.
@@ -358,21 +384,51 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     const p = join(d, n);
     return statSync(p).isDirectory() ? walk(p) : [p];
   });
-  try {
-    for (const [name, files] of Object.entries(SITES)) {
-      const irDir = join(work, name, 'ir');
-      for (const [rel, body] of Object.entries(files)) {
-        mkdirSync(dirname(join(irDir, rel)), { recursive: true });
-        writeFileSync(join(irDir, rel), body);
-      }
-      const outDir = join(work, name, 'out');
-      // Through the CLI (which is buildSite and nothing else) so the build's own log can be READ:
-      // a warning is part of what a build produces, and buildSite hands its child our stdio.
-      const r = spawnSync(process.execPath, [join(ENGINE, 'packages/build/cli.mjs'), irDir, outDir, '--site-url', 'https://example.com'], { encoding: 'utf8' });
-      const log = `${r.stdout || ''}\n${r.stderr || ''}`;
-      const pages = Object.fromEntries(walk(outDir).filter((p) => p.endsWith('.html')).map((p) => [relative(outDir, p), readFileSync(p, 'utf8')]));
-      built[name] = { outDir, code: r.status, log, pages, notFound: pages['404.html'] };
+  // The reference engine for BASELINE: this checkout with the reef#2112 route and integration taken
+  // out, everything else the same files (symlinked; the renderer copied, because a build stages
+  // content into it). Each removal throws if it found nothing to remove — a reference that quietly
+  // still has the feature would make "byte-identical" true of anything.
+  const shadowEngine = () => {
+    const root = join(work, '_engine-without-2112');
+    mkdirSync(root, { recursive: true });
+    for (const n of readdirSync(ENGINE)) if (n !== 'packages' && n !== '.git') symlinkSync(join(ENGINE, n), join(root, n));
+    mkdirSync(join(root, 'packages'), { recursive: true });
+    for (const n of readdirSync(join(ENGINE, 'packages'))) if (n !== 'sitetile') symlinkSync(join(ENGINE, 'packages', n), join(root, 'packages', n));
+    const skip = new Set([join(ASTRO, 'node_modules'), join(ASTRO, 'dist'), join(ASTRO, '.astro')]);
+    cpSync(join(ENGINE, 'packages/sitetile'), join(root, 'packages/sitetile'), { recursive: true, filter: (src) => !skip.has(src) });
+    const astro = join(root, RENDERER_SUBPATH);
+    symlinkSync(realpathSync(join(ASTRO, 'node_modules')), join(astro, 'node_modules'));
+    const route = join(astro, 'src/pages/[...loc]/404.astro');
+    if (!existsSync(route)) throw new Error('shadow engine: no [...loc]/404.astro to remove');
+    rmSync(route);
+    const cfgPath = join(astro, 'astro.config.mjs');
+    const cfg = readFileSync(cfgPath, 'utf8');
+    const stripped = cfg.replace(/,\s*locale404Pages\(\)/, '');
+    if (stripped === cfg) throw new Error('shadow engine: locale404Pages() not found in astro.config.mjs');
+    writeFileSync(cfgPath, stripped);
+    return root;
+  };
+  const buildOne = (name, files, engine, tag) => {
+    const irDir = join(work, name, 'ir');
+    if (!existsSync(irDir)) for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(dirname(join(irDir, rel)), { recursive: true });
+      writeFileSync(join(irDir, rel), body);
     }
+    const outDir = join(work, name, tag);
+    // Through the CLI (which is buildSite and nothing else) so the build's own log can be READ:
+    // a warning is part of what a build produces, and buildSite hands its child our stdio.
+    const r = spawnSync(process.execPath, [join(ENGINE, 'packages/build/cli.mjs'), irDir, outDir, '--site-url', 'https://example.com', '--engine', engine], { encoding: 'utf8' });
+    const log = `${r.stdout || ''}\n${r.stderr || ''}`;
+    const pages = Object.fromEntries(walk(outDir).filter((p) => p.endsWith('.html')).map((p) => [relative(outDir, p), readFileSync(p, 'utf8')]));
+    return { outDir, code: r.status, log, pages, notFound: pages['404.html'] };
+  };
+  // EVERY file a build wrote (not only .html), as bytes, relative to its output directory.
+  const distBytes = (outDir) => Object.fromEntries(walk(outDir).map((p) => [relative(outDir, p), readFileSync(p)]));
+  const baseline = {};
+  try {
+    for (const [name, files] of Object.entries(SITES)) built[name] = buildOne(name, files, ENGINE, 'out');
+    const shadow = shadowEngine();
+    for (const name of BASELINE) baseline[name] = buildOne(name, SITES[name], shadow, 'out-without-2112');
 
     // A fixture's build, which must have SUCCEEDED — asserted where it is used, so a build that
     // fails turns the tests that read it red, by name, and leaves the others to run.
@@ -487,6 +543,58 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
         assert.deepEqual(notFoundFiles(b), ['404.html'], name);
         assert.deepEqual(notFoundDirs(b), [], name);
       }
+    });
+
+    // ── tile#157 review r2 ──
+    // Two files a build wrote, compared byte for byte; the message names the first that differs.
+    const sameBytes = (a, b, label) => {
+      const A = distBytes(a.outDir); const B = distBytes(b.outDir);
+      assert.deepEqual(Object.keys(A).sort(), Object.keys(B).sort(), `${label}: the two builds wrote different files`);
+      const differ = Object.keys(A).filter((rel) => !A[rel].equals(B[rel]));
+      assert.deepEqual(differ, [], `${label}: files whose bytes differ from the build without reef#2112`);
+    };
+
+    await test('🔴 #2112 r2 a one-language site\'s own `manual/404.md` keeps its directory index: `manual/404/index.html`, no `manual/404.html`', () => {
+      const b = site('monoManual404');
+      assert.ok(b.pages['manual/404/index.html'], `the owner's /manual/404/ page lost its directory index; 404s written: ${notFoundFiles(b).join(', ')}`);
+      assert.match(b.pages['manual/404/index.html'], /What a 404 means/);
+      assert.equal(existsSync(join(b.outDir, 'manual/404.html')), false, 'an authored page was turned into a fallback 404 document');
+      assert.deepEqual(notFoundFiles(b), ['404.html']);
+    });
+
+    await test('🔴 #2112 r2 one-language sites: the WHOLE dist is byte-identical to a build without reef#2112 (not just the 404 paths)', () => {
+      for (const name of ['monoManual404', 'monoEn']) {
+        const ref = baseline[name];
+        assert.equal(ref.code, 0, `the reference build failed for ${name}:\n${ref.log.slice(-1200)}`);
+        sameBytes(site(name), ref, name);
+      }
+    });
+
+    await test('🔴 #2112 r2 two locales + an authored `about/404.md`: `about/404/index.html` untouched; the only new file is zh-tw/404.html', () => {
+      const b = site('multiAbout404');
+      const ref = baseline.multiAbout404;
+      assert.equal(ref.code, 0, `the reference build failed:\n${ref.log.slice(-1200)}`);
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'zh-tw/404.html'], 'about is not an edition — it must not get an about/404.html');
+      assert.ok(b.pages['about/404/index.html'], 'the owner\'s /about/404/ page lost its directory index');
+      const A = distBytes(b.outDir); const B = distBytes(ref.outDir);
+      assert.deepEqual(Object.keys(A).filter((rel) => !(rel in B)).sort(), ['zh-tw/404.html'], 'files only the reef#2112 build wrote');
+      assert.deepEqual(Object.keys(B).filter((rel) => !(rel in A)).sort(), [], 'files the reef#2112 build lost');
+      assert.equal(A['about/404/index.html'].equals(B['about/404/index.html']), true, 'about/404/index.html changed bytes');
+    });
+
+    await test('🔴 #2112 r2 an edition with no home of its own: its 404 wears its `ja-jp/_site.md` layer, not the root\'s chrome', () => {
+      const b = site('noHomeJa');
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'ja-jp/404.html'], 'the declared ja-JP edition gets its 404 (the chooser offers it a row)');
+      const ja = b.pages['ja-jp/404.html'];
+      assert.equal(htmlLang(ja), 'ja');
+      assert.match(ja, /class="rf-foot-wordmark"[^>]*>折り鶴工房</, 'the ja-jp/_site.md footer wordmark');
+      assert.doesNotMatch(ja, /Tsuru Paper Works/, 'the root layer\'s footer wordmark on the Japanese 404');
+      // CONTROL: the root 404 still wears the root layer — the fixture is not just Japanese everywhere.
+      assert.match(b.notFound, /class="rf-foot-wordmark"[^>]*>Tsuru Paper Works</);
+      // …and the Japanese chooser, which reads the same editionMeta, agrees with the 404.
+      assert.match(b.pages['ja-jp/language/index.html'], /class="rf-foot-wordmark"[^>]*>折り鶴工房</);
+      // CONTROL: an ordinary ja-jp page already wore that layer — the 404 is now consistent with it.
+      assert.match(b.pages['ja-jp/about/index.html'], /class="rf-foot-wordmark"[^>]*>折り鶴工房</);
     });
 
     await test('🔴 two locales, English default → the 404 is English', () => {

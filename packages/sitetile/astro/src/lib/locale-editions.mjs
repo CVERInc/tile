@@ -9,16 +9,17 @@
 //
 // Returns null when the site has no Lingo (one language, or `packages: lingo` over one declared
 // locale) — the chooser builds nothing, and so does the per-locale 404. Otherwise:
-//   { rootHome, locales, defaultLocale, homesByRel }
+//   { rootHome, locales, defaultLocale, homesByRel, layersByRel }
 // where homesByRel maps a home's REL ("home" for the default, the url-locale for the others) to its
-// meta with the site-config layer (_site + <locale>/_site) resolved UNDER it.
+// meta with the site-config layer (_site + <locale>/_site) resolved UNDER it, and layersByRel holds
+// the chrome of a declared edition that has a `content/<loc>/_site.md` but no home (see below).
 //
 // Warnings: pageLocalesOrWarn is once-per-file by its own contract, so two callers log each offending
 // page once. The root-home/locales[0] mismatch sentence is NOT emitted here — the chooser route owns
 // that line of the build log (one caller, one line).
 import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from './blog.mjs';
-import { toUrlLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
 
 export function localeEditions(files) {
   // A home file's basename is "home" (root: content/home.md; locale: content/<loc>/home.md).
@@ -65,12 +66,31 @@ export function localeEditions(files) {
   // so the chooser and the layout's hreflang / footer link can never disagree about which locale
   // lives at `/`.
   const defaultLocale = defaultLocaleOf(locales, rootHome.lang);
-  return { rootHome, locales, defaultLocale, homesByRel };
+
+  // 🩸 tile#157 review: a declared edition WITHOUT a home (content/ja-jp/about.md, no ja-jp/home.md)
+  // is still an edition here — the chooser gives it a row, so it gets a 404 — but it fell straight
+  // back to the root home, and its own content/ja-jp/_site.md never reached its 404 or its chooser:
+  // a Japanese error page in the English footer. Its ordinary pages already wear that layer
+  // ([...path].astro → loadSite(files, rel)); the system pages now do too: the locale's site config
+  // (_site + <loc>/_site, through the same loadSite), over the root home for whatever neither says.
+  // No `<loc>/_site.md` ⇒ nothing locale-specific to load ⇒ the root home exactly as before.
+  const layersByRel = {};
+  for (const L of locales) {
+    const rel = toUrlLocale(L);
+    if (sameLocale(L, defaultLocale) || homesByRel[rel]) continue;
+    if (!Object.keys(files).some((path) => path.split('/content/')[1] === `${rel}/_site.md`)) continue;
+    layersByRel[rel] = { ...rootHome, ...loadSite(files, rel) };
+  }
+  return { rootHome, locales, defaultLocale, homesByRel, layersByRel };
 }
 
-/** The chrome (meta) a locale's system page wears: that locale's home, else the root home. */
+/**
+ * The chrome (meta) a locale's system page wears: that locale's home, else its own site layer over
+ * the root home, else the root home.
+ */
 export function editionMeta(editions, locale) {
-  const { rootHome, defaultLocale, homesByRel } = editions;
+  const { rootHome, defaultLocale, homesByRel, layersByRel = {} } = editions;
   if (locale === defaultLocale) return rootHome;
-  return homesByRel[toUrlLocale(locale)] || rootHome;
+  const rel = toUrlLocale(locale);
+  return homesByRel[rel] || layersByRel[rel] || rootHome;
 }
