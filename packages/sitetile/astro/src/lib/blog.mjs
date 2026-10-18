@@ -145,9 +145,9 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // A post whose only media is a video still has a face: the poster carried in the alt slot
   // (`![poster-url](clip.mp4)` — the same slot imgTag reads for `<video poster>`). It is a still
   // image, so it is exactly what an archive card wants; the video src itself never is. Measured on
-  // a Wix recast (sodaart, 2026-10-16): 116 showcase posts had a video and nothing else, so every
+  // a Wix recast (2026-10-16): 116 showcase posts had a video and nothing else, so every
   // one of them listed as a blank card and the news carousel (image-first) dropped them outright.
-  // …and a post whose only media is a YouTube line (tile#148: sodaart's 阿蕥生活日記 posts carry
+  // …and a post whose only media is a YouTube line (tile#148: one recast's diary posts carry
   // nothing else) takes that video's poster — the SAME proxied path its player shows (cardtile's
   // posterPath, `/_yt/<id>.jpg`, relayed by the site's Worker), never i.ytimg.com: an archive card is
   // a page load too, and the visitor's browser must not reach Google from one any more than from the post.
