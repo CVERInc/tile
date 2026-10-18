@@ -36,6 +36,8 @@ const heading = (meta['blog-search-title'] ? String(meta['blog-search-title']).t
 const placeholder = (meta['blog-search-placeholder'] ? String(meta['blog-search-placeholder']).trim() : '') || heading;
 const emptyText = (meta['blog-search-empty'] ? String(meta['blog-search-empty']).trim() : '') || 'No matching posts';
 const countLabel = (meta['blog-search-count-label'] ? String(meta['blog-search-count-label']).trim() : '') || 'results';
+// CJK/fullwidth label hugs the number ("30件"); Latin gets a space ("30 results").
+const countSep = /^[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/.test(countLabel) ? '' : ' ';
 const title = heading + ' — ' + (meta.title || '');
 ---
 <SiteLayout title={title} lang={systemPageLang(meta, sysFiles)} meta={meta}>
@@ -49,7 +51,7 @@ const title = heading + ' — ' + (meta.title || '');
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="search" class="bl-search-input" data-search-page-input name="q" placeholder={placeholder} aria-label={placeholder} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
           </form>
-          <p class="st-search-count" data-search-page-count data-label={countLabel} hidden></p>
+          <p class="st-search-count" data-search-page-count data-label={countLabel} data-sep={countSep} hidden></p>
           <p class="st-search-empty" data-search-page-empty data-text={emptyText} hidden></p>
           <ul class="bl-list bl-search-results" data-search-page-results></ul>
       </Fragment>

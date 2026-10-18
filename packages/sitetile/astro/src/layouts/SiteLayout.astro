@@ -581,6 +581,9 @@ const searchLabel = (meta['blog-search-label'] ? String(meta['blog-search-label'
 const searchPlaceholder = (meta['blog-search-placeholder'] ? String(meta['blog-search-placeholder']).trim() : '') || searchLabel;
 const searchEmptyText = (meta['blog-search-empty'] ? String(meta['blog-search-empty']).trim() : '') || 'No matching posts';
 const searchCountLabel = (meta['blog-search-count-label'] ? String(meta['blog-search-count-label']).trim() : '') || 'results';
+const searchCloseLabel = (meta['blog-search-close'] ? String(meta['blog-search-close']).trim() : '') || 'Close';
+// "30 results" but "30件": a CJK/fullwidth label hugs the number, a Latin one gets a space.
+const searchCountSep = /^[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/.test(searchCountLabel) ? '' : ' ';
 
 // ── FOOTER WIDGETS (popular posts + category cloud) ──────────────────────────
 // Live WP/Blogger footers (the stock `#top-posts-N` + `#tag_cloud-N` widgets) repeat a
@@ -1075,11 +1078,11 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
           <div class="st-search-bar" role="search">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="search" class="st-search-input" data-search-input placeholder={searchPlaceholder} aria-label={searchPlaceholder} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-            <button type="button" class="st-search-close" data-search-close aria-label="Close">
+            <button type="button" class="st-search-close" data-search-close aria-label={searchCloseLabel}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
-          <p class="st-search-count" data-search-count data-label={searchCountLabel} hidden></p>
+          <p class="st-search-count" data-search-count data-label={searchCountLabel} data-sep={searchCountSep} hidden></p>
           <p class="st-search-empty" data-search-empty data-text={searchEmptyText} hidden></p>
           <ul class="st-search-results" data-search-results></ul>
         </div>

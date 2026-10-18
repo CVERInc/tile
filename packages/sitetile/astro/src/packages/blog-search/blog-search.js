@@ -106,6 +106,10 @@
       overlayUi = bind(overlayInput, results, countEl, emptyEl, { navigate: true });
       const root = document.documentElement;
       const open = () => {
+        // Close the nav-mobile drawer first: its header outranks the overlay in z-index, so a
+        // drawer left open would sit on top of the search it just launched.
+        const drawer = document.getElementById('rf-nav-toggle');
+        if (drawer && drawer.checked) drawer.checked = false;
         root.setAttribute('data-search-open', '');
         ensureIndex();
         requestAnimationFrame(() => overlayInput.focus());
