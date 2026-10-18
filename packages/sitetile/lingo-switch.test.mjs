@@ -27,6 +27,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, 'astro/src');
 const layout = readFileSync(join(SRC, 'layouts/SiteLayout.astro'), 'utf8');
 const language = readFileSync(join(SRC, 'pages/[...loc]/language.astro'), 'utf8');
+// reef#2112: the chooser's edition-discovery loop lives here now, shared with the per-locale 404 route.
+const editions = readFileSync(join(SRC, 'lib/locale-editions.mjs'), 'utf8');
+const notFoundLocale = readFileSync(join(SRC, 'pages/[...loc]/404.astro'), 'utf8');
 
 let passed = 0;
 const test = (name, fn) => {
@@ -198,7 +201,11 @@ test('🔴 SiteLayout\'s hasLingo IS the helper', () => {
 });
 
 test('🔴 the /language route uses the same helper, on the root home\'s meta', () => {
-  assert.match(language, /if \(!rootHome \|\| !lingoEnabled\(rootHome\)\) return \[\];/);
+  // The gate sits in the shared discovery module (reef#2112), and BOTH per-locale system routes
+  // read their editions from it — neither re-derives the switch.
+  assert.match(editions, /if \(!lingoEnabled\(rootHome\)\) return null;/);
+  assert.match(language, /const editions = localeEditions\(files\);\n\s*if \(!editions\) return \[\];/);
+  assert.match(notFoundLocale, /const editions = localeEditions\(files\);\n\s*if \(!editions\) return \[\];/);
 });
 
 test('🔴 nobody re-derives the switch inline — one definition, in locale.mjs', () => {
@@ -217,7 +224,7 @@ test('🔴 nobody re-derives the switch inline — one definition, in locale.mjs
 });
 
 test('🔴 the /language default and SiteLayout\'s are the ONE definition, not two spellings of it', () => {
-  assert.match(language, /const defaultLocale = defaultLocaleOf\(locales, rootHome\.lang\);/);
+  assert.match(editions, /const defaultLocale = defaultLocaleOf\(locales, rootHome\.lang\);/);
   assert.match(layout, /const defaultLocale = lingo\.defaultLocaleOf\(locales, lang\);/,
     'and SiteLayout says the same thing — if this moves, move the route with it');
 });
@@ -381,7 +388,7 @@ test('🔴 every reader of a meta object\'s `locales` hands the parser that obje
   assert.deepEqual(bare, [], 'a parseLocales call that does not pass localesSourceOf(<the same object>)');
   // The files that READ frontmatter are the ones that know the path, so they are the ones that tag.
   const page = readFileSync(join(SRC, 'pages/[...path].astro'), 'utf8');
-  for (const [name, text, cfg] of [['[...path].astro', page, 'siteConfig'], ['language.astro', language, 'cfg']]) {
+  for (const [name, text, cfg] of [['[...path].astro', page, 'siteConfig'], ['lib/locale-editions.mjs', editions, 'cfg']]) {
     assert.ok(text.includes(`if (${cfg} || rel !== 'home') pageLocalesOrWarn(site.meta, \`content/\${rel}.md\`, ${cfg});`), `${name}: a page's own locales is not checked as a page's`);
     assert.ok(text.includes('else tagLocalesSource(site.meta, `content/${rel}.md`);'), `${name}: the legacy root home is not tagged`);
   }
