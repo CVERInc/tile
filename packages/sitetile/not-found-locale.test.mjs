@@ -166,6 +166,14 @@ const SITES = {
     'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
     'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
   },
+  // ── CVERInc/reef#2112: three locales, so the per-locale 404 is checked on a locale that is neither
+  // the default nor the one every other fixture uses. `ja-JP` is declared second, `zh-TW` third.
+  triEnJaZh: {
+    '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, ja-JP, zh-TW\n---\n',
+    'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en-US', 'Paper cranes'),
+    'ja-jp/home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja-JP', '折り鶴'),
+    'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
+  },
   // Same site, default flipped — the default sorts LAST and is not the DEFAULT_LANG literal either.
   multiZh: {
     '_site.md': '---\nbrand: 紙鶴工坊\nlocales: zh-TW, en\npackages: lingo\n---\n',
@@ -401,6 +409,86 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       return rows.map((row) => ({ ...row, url: new URL(row.href, `${ORIGIN}/language`) }));
     };
 
+    // ── CVERInc/reef#2112: one 404.html per declared non-default locale ──
+    // Every `404.html` a build wrote and every `404/` directory it left, relative to the output.
+    const notFoundFiles = (b) => Object.keys(b.pages).filter((rel) => /(^|\/)404\.html$/.test(rel)).sort();
+    const notFoundDirs = (b) => Object.keys(b.pages).filter((rel) => /(^|\/)404\/index\.html$/.test(rel)).sort();
+    const robots = (html) => (/<meta name="robots" content="([^"]*)"/.exec(html) || [])[1];
+
+    await test('🔴 #2112 two locales → `zh-tw/404.html` is a FILE at that path, and no `zh-tw/404/index.html` is left', () => {
+      const b = site('multiEn');
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'zh-tw/404.html']);
+      assert.deepEqual(notFoundDirs(b), [], 'Astro\'s directory-index 404 survived the rename — Pages reads only <loc>/404.html');
+      assert.equal(existsSync(join(b.outDir, 'zh-tw/404')), false, 'an empty zh-tw/404/ directory was left behind');
+    });
+
+    await test('🔴 #2112 the zh-tw 404 speaks Chinese: <html lang> from the Lingo table (zh-Hant, never zh-TW) and the zh uiCopy', () => {
+      const zh = site('multiEn').pages['zh-tw/404.html'];
+      assert.equal(htmlLang(zh), 'zh-Hant');
+      assert.match(zh, /<h1>找不到頁面<\/h1>/);
+      assert.match(zh, /這個網站上沒有這個網址。/);
+      assert.match(zh, /<a href="\/zh-tw\/">回到首頁<\/a>/, 'the "home" link goes to THIS locale\'s home, not /');
+      assert.doesNotMatch(zh, /Page not found/);
+      assert.equal(robots(zh), 'noindex', 'every 404 stays noindex');
+      assert.deepEqual([...new Set(inLanguage(zh))], ['zh-Hant'], 'the JSON-LD names another language than the document');
+    });
+
+    await test('🔴 #2112 the zh-tw 404 wears the zh-tw edition\'s chrome (its home\'s title), not the root\'s', () => {
+      const zh = site('multiEn').pages['zh-tw/404.html'];
+      assert.match(zh, /<title>找不到頁面 — 紙鶴工坊<\/title>/);
+    });
+
+    await test('🔴 #2112 the zh-tw 404\'s Language link behaves like the root one: that locale\'s chooser, returning to its home, and it exists', () => {
+      const { pages, outDir } = site('multiEn');
+      const links = langLinks(pages['zh-tw/404.html']);
+      assert.ok(links.length >= 1, 'no Language link on the zh-tw 404 at all — the fixture stopped exercising it');
+      for (const href of links) {
+        assert.equal(href, '/zh-tw/language?return=%2Fzh-tw%2F', `not the zh-tw chooser returning to the zh-tw home: ${href}`);
+        assert.ok(resolves(outDir, href), `the Language link points at a page the build never wrote: ${href}`);
+      }
+      // …and the chooser, arriving with that return, sends every row to its own home (the missing
+      // address has no page to come back to) — the same place the root 404's `return=/` lands.
+      const rows = chooserRows(pages['zh-tw/language/index.html'], '?return=%2Fzh-tw%2F');
+      assert.deepEqual(rows.map((r) => r.url.pathname), ['/', '/zh-tw/']);
+      assert.deepEqual(chooserRows(pages['language/index.html'], '?return=%2F').map((r) => r.url.pathname), ['/', '/zh-tw/'], 'CONTROL: the root 404\'s own return');
+    });
+
+    await test('🔴 #2112 the root 404 is unchanged: site default language, unprefixed chooser (tile#135)', () => {
+      const { notFound } = site('multiEn');
+      assert.equal(htmlLang(notFound), 'en');
+      assert.match(notFound, /<a href="\/">Go to the homepage<\/a>/);
+      assert.deepEqual(langLinks(notFound), ['/language?return=%2F']);
+      assert.equal(robots(notFound), 'noindex');
+    });
+
+    await test('🔴 #2112 three locales → one 404.html per NON-default locale, each in its own language', () => {
+      const b = site('triEnJaZh');
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'ja-jp/404.html', 'zh-tw/404.html']);
+      assert.deepEqual(notFoundDirs(b), []);
+      assert.equal(htmlLang(b.pages['ja-jp/404.html']), 'ja');
+      assert.match(b.pages['ja-jp/404.html'], /<h1>ページが見つかりません<\/h1>/);
+      assert.match(b.pages['ja-jp/404.html'], /<a href="\/ja-jp\/">ホームへ<\/a>/);
+      assert.deepEqual(langLinks(b.pages['ja-jp/404.html']), ['/ja-jp/language?return=%2Fja-jp%2F']);
+      assert.equal(htmlLang(b.pages['zh-tw/404.html']), 'zh-Hant');
+      assert.equal(htmlLang(b.pages['404.html']), 'en');
+    });
+
+    await test('🔴 #2112 the default flipped (zh-TW first): the ENGLISH edition gets `en/404.html`; no zh-tw/404.html', () => {
+      const b = site('multiZh');
+      assert.deepEqual(notFoundFiles(b), ['404.html', 'en/404.html']);
+      assert.equal(htmlLang(b.pages['en/404.html']), 'en');
+      assert.match(b.pages['en/404.html'], /Page not found/);
+      assert.equal(htmlLang(b.pages['404.html']), 'zh-Hant');
+    });
+
+    await test('🔴 #2112 one-language sites build NO locale 404: the root one only, exactly as before', () => {
+      for (const name of ['monoJa', 'oneLocale', 'oneLocaleLingo', 'monoEn', 'noSiteFile', 'undeclared']) {
+        const b = site(name);
+        assert.deepEqual(notFoundFiles(b), ['404.html'], name);
+        assert.deepEqual(notFoundDirs(b), [], name);
+      }
+    });
+
     await test('🔴 two locales, English default → the 404 is English', () => {
       const { notFound } = site('multiEn');
       assert.equal(htmlLang(notFound), 'en');
@@ -555,15 +643,17 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       // CONTROL first: the unprefixed twins exist, so an absence below is not "the feature is off".
       assert.ok(pages['search/index.html'], '/search/ was not built — blog-search is off in the fixture, the control is gone');
       assert.ok(pages['preview/index.html'], '/preview/ was not built');
-      for (const rel of ['zh-tw/search/index.html', 'zh-tw/preview/index.html', 'zh-tw/404.html', 'zh-tw/404/index.html']) {
+      for (const rel of ['zh-tw/search/index.html', 'zh-tw/preview/index.html', 'zh-tw/404/index.html']) {
         assert.equal(pages[rel], undefined, `${rel} was written — then its lang is a real question, and this test is out of date`);
       }
       assert.equal(existsSync(join(outDir, 'zh-tw', 'search')), false);
       assert.equal(existsSync(join(outDir, 'zh-tw', 'preview')), false);
-      // The one file a missing /zh-tw/… path is answered with, and the language it speaks: the site's
-      // default, by the rule this whole file holds. A per-locale 404 is a hosting question (one
-      // 404.html per deployment), not a lang question on a route that does not exist.
+      // The ROOT 404 speaks the site's default, by the rule this whole file holds. 🩸 CVERInc/reef#2112:
+      // this list used to hold `zh-tw/404.html` too, with "a per-locale 404 is a hosting question" — it
+      // was, and the answer is one 404.html per declared locale, which Pages serves as the nearest one
+      // up the tree. So a missing /zh-tw/… path is now answered by `zh-tw/404.html`, in Chinese.
       assert.equal(htmlLang(pages['404.html']), 'en');
+      assert.equal(htmlLang(pages['zh-tw/404.html']), 'zh-Hant', 'the zh-tw edition\'s own 404 (reef#2112)');
     });
 
     await test('#1868 monoZh and undeclared: the system pages are exactly zh-Hant, as before', () => {
