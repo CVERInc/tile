@@ -49,6 +49,21 @@ export const QUERY_REDIRECTS_MAX_RULES = 500;
 export const QUERY_REDIRECTS_MAX_BYTES = 64 * 1024;
 export const QUERY_REDIRECTS_MAX_CHARS = 1000;
 
+// Request-side bounds — the caps above constrain the BAKED map, these constrain what a request can
+// make the worker do (tile#158 r2: a 4 MB query on a mapped path cost ~755 ms and ~110 MiB before
+// it missed). Both make a request a MISS, never an error.
+//   MAX_PAIRS  500   — canonQuery stops parsing past this many non-empty pairs. A `from` is at most
+//                      MAX_CHARS = 1000 characters and a pair needs a character plus its `&`, so no
+//                      rule can hold more; a request with more cannot equal any key.
+//   SPELLING_FACTOR 4 — lookupQueryRedirect refuses, without parsing, a search longer than
+//                      4 × (the longest key on that path) + 1. A key is already in serialised form
+//                      (non-ASCII is %XX), and the longest spelling of one byte is its own %XX — 3×;
+//                      the 4th covers an NFD spelling of an NFC key. Derived from the map rather than
+//                      a fixed ceiling, so a site whose keys are 20 characters parses at most ~80,
+//                      and no legitimate spelling of any key is ever refused.
+export const QUERY_REDIRECTS_MAX_PAIRS = 500;
+const QUERY_SPELLING_FACTOR = 4;
+
 // Status column: this file compiles 301s and nothing else. A 302 would be a redirect nobody
 // wanted search engines to remember, and the ticket's whole point is the opposite.
 export const QUERY_REDIRECTS_STATUS = '301';
@@ -72,6 +87,7 @@ const BASE = 'http://site.invalid';
 const CONTROL_OR_SPACE = /[\u0000- \u007F-\u009F]|\s/u;
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/u;
 const MALFORMED_ESCAPE = /%(?![0-9A-Fa-f]{2})/;
+const ENCODED_CONTROL = /%(?:[01][0-9A-Fa-f]|7[Ff])/;
 
 function refuse(code, message) {
 	return { ok: false, code: code, message: message };
@@ -147,6 +163,7 @@ export function canonQueryDetail(search) {
 	const pairs = [];
 	for (const piece of text.split('&')) {
 		if (piece === '') continue;
+		if (pairs.length === QUERY_REDIRECTS_MAX_PAIRS) return refuse('too_many_pairs', 'more than ' + QUERY_REDIRECTS_MAX_PAIRS + ' parameters');
 		const eq = piece.indexOf('=');
 		const rawName = eq === -1 ? piece : piece.slice(0, eq);
 		const rawValue = eq === -1 ? '' : piece.slice(eq + 1);
@@ -155,7 +172,13 @@ export function canonQueryDetail(search) {
 		if (name.code === 'bad_encoding' || value.code === 'bad_encoding') return refuse('bad_encoding', 'a % must be followed by two hex digits');
 		if (!name.ok || !value.ok) {
 			// 🔴 Legacy bytes: compared raw, as one atomic pair, so the request `?name=%b7%7b` and
-			// the rule `?name=%B7%7B` are the same key and neither becomes U+FFFD.
+			// the rule `?name=%B7%7B` are the same key and neither becomes U+FFFD. 🩸 The decoder
+			// gave up on the whole pair, so its control check never ran: `%B7%7B%00` compiled
+			// (tile#158 r2). Ask the escapes directly — C0 and DEL only; 0x80–0x9F are Big5 trail
+			// bytes here, not C1 controls.
+			if (ENCODED_CONTROL.test(rawName) || ENCODED_CONTROL.test(rawValue)) {
+				return refuse('control_char', 'control characters are refused in a query (after decoding)');
+			}
 			pairs.push({ name: rawPair(rawName), value: rawPair(rawValue), raw: true });
 			continue;
 		}
@@ -179,8 +202,11 @@ export function canonQuery(search) {
 
 // The site-relative gate a `to` must pass — the same one the platform's redirect readers apply to
 // a path rule's target: starts with `/`, not `//`, no scheme anywhere, no `_redirects` placeholder
-// syntax, no control characters, no backslash. The target is stored VERBATIM after passing it; it
-// is a Location header, not a key, so it is not canonicalised.
+// syntax, no control characters, no backslash. The target is a Location header, not a key, so it is
+// not canonicalised — but it IS made header-safe: 🩸 a raw `/產品` passed every check below and
+// then made `new Response(…, {headers: {location}})` throw a ByteString TypeError on every request
+// that matched it (tile#158 r2). Non-ASCII characters are percent-encoded as UTF-8; everything
+// already ASCII — existing `%XX` escapes, reserved characters — is kept exactly as written.
 export function targetDetail(to) {
 	if (typeof to !== 'string' || to === '') return refuse('to_not_site_relative', 'target is empty');
 	if (!to.startsWith('/') || to.startsWith('//')) return refuse('to_not_site_relative', 'target must be a site-relative path starting with a single /');
@@ -194,7 +220,13 @@ export function targetDetail(to) {
 	const decoded = decodeOnce(to);
 	if (!decoded.ok) return refuse('bad_encoding', 'target: ' + decoded.message);
 	if (CONTROL.test(decoded.value)) return refuse('to_not_site_relative', 'target cannot contain control characters (after decoding)');
-	return { ok: true, value: to };
+	let location;
+	try { location = to.replace(/[^\u0000-\u007F]+/gu, (run) => encodeURIComponent(run)); } catch (e) {
+		return refuse('bad_encoding', 'target has a character with no UTF-8 spelling (a lone surrogate)');
+	}
+	// The gate that matters to the worker, asked directly: what is baked must be a header value.
+	if (!/^[!-~]+$/.test(location)) return refuse('to_not_header_safe', 'target cannot be sent as a Location header');
+	return { ok: true, value: location };
 }
 
 /**
@@ -311,9 +343,24 @@ export function countRules(map) {
 	return n;
 }
 
+// The longest search any spelling of a key on this path can arrive as (see SPELLING_FACTOR),
+// computed once per baked per-path object — the map is constant for the worker's lifetime.
+const searchCaps = new WeakMap();
+function maxSearchLength(perPath) {
+	let cap = searchCaps.get(perPath);
+	if (cap === undefined) {
+		let longest = 0;
+		for (const key of Object.keys(perPath)) if (key.length > longest) longest = key.length;
+		cap = QUERY_SPELLING_FACTOR * longest + 1;
+		searchCaps.set(perPath, cap);
+	}
+	return cap;
+}
+
 /**
  * The worker's lookup. Zero work for a request without a query, one object index for a request
- * whose path is not in the map, and the query canonicalisation only when it is.
+ * whose path is not in the map, a length check against that path's longest key, and the query
+ * canonicalisation only when the search could be a spelling of one.
  * @param {string} pathname  `url.pathname`
  * @param {string} search    `url.search`
  * @param {object} byPath    the compiled map's `byPath`
@@ -323,8 +370,9 @@ export function lookupQueryRedirect(pathname, search, byPath) {
 	if (!byPath || !search || search === '?') return null;
 	const p = canonPath(pathname);
 	if (p === null || !Object.prototype.hasOwnProperty.call(byPath, p)) return null;
+	const perPath = byPath[p];
+	if (search.length > maxSearchLength(perPath)) return null;
 	const q = canonQuery(search);
 	if (q === null || q === '') return null;
-	const perPath = byPath[p];
 	return Object.prototype.hasOwnProperty.call(perPath, q) ? perPath[q] : null;
 }

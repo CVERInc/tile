@@ -520,15 +520,21 @@ const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalR
 // third source (it is an import-free ES module like the other two), the glue below turns its
 // `lookupQueryRedirect` into a Response, and the branch runs FIRST in fetch — after the canonical
 // host hop, so the 301 lands on the canonical host, and before everything else, so the key is
-// read off the ORIGINAL request. Cost on a request with no query, or on a path not in the map: one
-// property read and one object index. GET/HEAD only, like the canonical-host 301. The query is
-// the KEY and is not re-appended to Location — doing so would mint a second URL for the target.
+// read off the ORIGINAL request. Cost on a request with no query: one string scan of request.url,
+// no URL constructed (a serialised URL can only carry `?` as the query delimiter). On a path not in
+// the map: one URL parse and one object index. GET/HEAD only, like the canonical-host 301. The
+// query is the KEY and is not re-appended to Location — doing so would mint a second URL for the
+// target. 🔴 This branch never turns a request into an error: anything that throws while building
+// the 301 (a baked Location no Headers accepts, tile#158 r2) falls through to the static path.
 const queryRedirectHelpers = queryRedirects ? `function matchQueryRedirect(request, byPath) {
 \tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
-\tlet url;
-\ttry { url = new URL(request.url); } catch (e) { return null; }
-\tconst to = lookupQueryRedirect(url.pathname, url.search, byPath);
-\treturn to === null ? null : new Response(null, { status: 301, headers: { location: to } });
+\tconst q = request.url.indexOf('?');
+\tif (q === -1 || q === request.url.length - 1) return null;
+\ttry {
+\t\tconst url = new URL(request.url);
+\t\tconst to = lookupQueryRedirect(url.pathname, url.search, byPath);
+\t\treturn to === null ? null : new Response(null, { status: 301, headers: { location: to } });
+\t} catch (e) { return null; }
 }
 
 ` : '';

@@ -261,3 +261,71 @@ test('a rule on a path this worker answers itself is refused by path: storefront
 		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }]), '--api', 'https://api.example',
 		'--query-redirects', rulesFile('ok.md', '/shopping?x=1 /b 301\n/zapi-docs?x=1 /c 301\n/account/history?x=1 /d 301\n')]);
 });
+
+// ── tile#158 r2 (Codex review), each through the emitted worker ─────────────────────────────────
+
+test('P1 a raw CJK target answers 301 with the percent-encoded Location (it used to throw)', async () => {
+	const w = await emitWorker([...BASE_ARGS, '--query-redirects', rulesFile('cjk.md', '/a?x=1 /產品 301\n')]);
+	const { env, seen } = assetsEnv();
+	const res = await w.mod.default.fetch(new Request('https://site.example/a?x=1'), env);
+	assert.equal(res.status, 301);
+	assert.equal(res.headers.get('location'), '/%E7%94%A2%E5%93%81');
+	assert.deepEqual(seen, []);
+});
+
+test('P1 belt-and-braces: a baked target no Response can carry falls through to ASSETS, never throws', async () => {
+	// Hand-corrupt an emitted worker's baked map back to the raw spelling compile() now refuses to
+	// bake — the shape a stale or hand-edited worker would have.
+	const good = emitFile([...BASE_ARGS, '--query-redirects', rulesFile('cjk2.md', '/a?x=1 /產品 301\n')]);
+	const text = readFileSync(good, 'utf8');
+	assert.ok(text.includes('"/%E7%94%A2%E5%93%81"'), 'the emitted map carries the encoded target');
+	const bad = join(workDir, 'corrupt.mjs');
+	writeFileSync(bad, text.replaceAll('"/%E7%94%A2%E5%93%81"', '"/產品"'));
+	const mod = await import(pathToFileURL(bad).href);
+	const { env, seen } = assetsEnv();
+	const res = await mod.default.fetch(new Request('https://site.example/a?x=1'), env);
+	assert.equal(res.status, 200);
+	assert.deepEqual(seen.map((s) => s.url), ['https://site.example/a?x=1']);
+});
+
+test('P2 a ~1 MB query on a mapped path falls through fast and does not 301', async () => {
+	const { env, seen } = assetsEnv();
+	// The key itself, padded with a megabyte of empty pairs — before the cap this canonicalised
+	// straight back onto the key and answered 301.
+	const padded = 'https://site.example/product.php?cid=12' + '&'.repeat(1 << 20);
+	const r1 = await worker.mod.default.fetch(new Request(padded), env);
+	assert.equal(r1.status, 200);
+	assert.equal(r1.headers.get('location'), null);
+	// A megabyte of real pairs on the home page (the /?p=123 rule's path).
+	const pairs = 'https://site.example/?' + 'a=1&'.repeat(1 << 18);
+	const t0 = performance.now();
+	const r2 = await worker.mod.default.fetch(new Request(pairs), env);
+	const ms = performance.now() - t0;
+	assert.equal(r2.status, 200);
+	assert.equal(seen.length, 2, 'both reached ASSETS');
+	assert.ok(ms < 100, 'a 1 MB query is refused by length, not parsed: took ' + ms.toFixed(1) + ' ms');
+});
+
+test('P2 a control byte inside a Big5 pair is FATAL at emit, by name', () => {
+	for (const [name, rule] of [['nul.md', '/a?name=%B7%7B%00 /b 301\n'], ['lf.md', '/a?name=%B7%7B%0A /b 301\n']]) {
+		const r = emitRefusal([...BASE_ARGS, '--query-redirects', rulesFile(name, rule)]);
+		assert.equal(r.status, 2, name);
+		assert.match(r.stderr, /line 1: control_char: /, name);
+	}
+});
+
+test('P3 a request with no query constructs no URL in the redirect branch', async () => {
+	// Differential: for a query-less request the rules worker constructs exactly as many URLs as
+	// the flagless one — the branch returns before `new URL`.
+	const plain = await emitWorker(BASE_ARGS);
+	const count = async (mod, url) => {
+		const Real = globalThis.URL;
+		let n = 0;
+		globalThis.URL = class extends Real { constructor(...a) { super(...a); n++; } };
+		try { await mod.default.fetch(new Request(url), assetsEnv().env); } finally { globalThis.URL = Real; }
+		return n;
+	};
+	for (const url of ['https://site.example/a', 'https://site.example/product.php', 'https://site.example/product.php?']) {
+		assert.equal(await count(worker.mod, url), await count(plain.mod, url), url);
+	}
+});

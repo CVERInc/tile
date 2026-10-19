@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import {
 	canonPath, canonPathDetail, canonQuery, canonQueryDetail, targetDetail,
 	parseQueryRedirects, compile, countRules, lookupQueryRedirect, QueryRedirectError,
-	QUERY_REDIRECTS_MAX_RULES, QUERY_REDIRECTS_MAX_BYTES, QUERY_REDIRECTS_MAX_CHARS
+	QUERY_REDIRECTS_MAX_RULES, QUERY_REDIRECTS_MAX_BYTES, QUERY_REDIRECTS_MAX_CHARS, QUERY_REDIRECTS_MAX_PAIRS
 } from './query-redirects.mjs';
 
 // ── canonPath ───────────────────────────────────────────────────────────────────────────────────
@@ -341,4 +341,58 @@ test('lookupQueryRedirect: exact multiset hit, in any spelling; everything else 
 	// Prototype names are not keys.
 	assert.equal(lookupQueryRedirect('/constructor', '?x=1', byPath), null);
 	assert.equal(lookupQueryRedirect('/product.php', '?constructor', byPath), null);
+});
+
+// ── tile#158 r2 (Codex review) ──────────────────────────────────────────────────────────────────
+
+test('P1 targetDetail: a raw non-ASCII target is baked as an ASCII, percent-encoded Location', () => {
+	const rows = [
+		['/產品', '/%E7%94%A2%E5%93%81'],
+		['/產品?q=中#段', '/%E7%94%A2%E5%93%81?q=%E4%B8%AD#%E6%AE%B5'],
+		// Already-encoded escapes and reserved characters are left exactly as written.
+		['/%E7%94%A2%E5%93%81', '/%E7%94%A2%E5%93%81'],
+		['/a%2Fb?x=1&y=2;z=3', '/a%2Fb?x=1&y=2;z=3'],
+		['/café%20au', '/caf%C3%A9%20au'],
+	];
+	for (const [input, want] of rows) {
+		const r = targetDetail(input);
+		assert.equal(r.ok, true, input);
+		assert.equal(r.value, want, input);
+		assert.match(r.value, /^[\x21-\x7E]+$/, 'header-safe: ' + input);
+	}
+	// A lone surrogate has no UTF-8 spelling; it is refused by name, not baked.
+	assert.equal(targetDetail('/a\uD800').code, 'bad_encoding');
+	// The compiled map carries the encoded spelling, so the worker never sees a raw CJK Location.
+	assert.deepEqual(compile('/a?x=1 /產品 301\n').byPath, { '/a': { 'x=1': '/%E7%94%A2%E5%93%81' } });
+	// Raw and encoded spellings of one target are the same target (duplicate, not conflict).
+	assert.throws(() => compile('/a?x=1 /產品 301\n/a?x=1 /%E7%94%A2%E5%93%81 301\n'), (e) => e.code === 'duplicate_rule');
+});
+
+test('P2 canonQueryDetail: an encoded control byte is refused even inside a non-UTF-8 (Big5) pair', () => {
+	for (const input of ['?name=%B7%7B%00', '?name=%B7%7B%0A', '?name=%b7%7b%0a', '?name=%B7%7B%7F', '?name=%B7%7B%1f', '?%00%B7%7B=x']) {
+		const r = canonQueryDetail(input);
+		assert.equal(r.ok, false, input);
+		assert.equal(r.code, 'control_char', input);
+	}
+	// Big5 trail bytes in 0x80–0x9F are NOT controls in a raw pair — 林 is still a key.
+	assert.equal(canonQuery('?name=%B7%7B'), 'name=%B7%7B');
+	assert.equal(canonQuery('?name=%A4%80'), 'name=%A4%80');
+	assert.throws(() => compile('/a?name=%B7%7B%00 /b 301\n'), (e) => e.code === 'control_char' && e.line === 1);
+	assert.throws(() => compile('/a?name=%B7%7B%0A /b 301\n'), (e) => e.code === 'control_char' && e.line === 1);
+});
+
+test('P2 canonQueryDetail: parsing stops after the pair cap', () => {
+	const r = canonQueryDetail('?' + Array.from({ length: QUERY_REDIRECTS_MAX_PAIRS + 1 }, (_, i) => 'k' + i + '=1').join('&'));
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'too_many_pairs');
+	assert.equal(canonQueryDetail('?' + Array.from({ length: QUERY_REDIRECTS_MAX_PAIRS }, (_, i) => 'k' + i + '=1').join('&')).ok, true);
+});
+
+test('P2 lookupQueryRedirect: a search longer than any spelling of a key on that path is not parsed', () => {
+	const { byPath } = compile('/product.php?cid=12 /products/widget 301\n');
+	// Every spelling of the key still hits, including the longest: each byte percent-encoded.
+	assert.equal(lookupQueryRedirect('/product.php', '?%63%69%64=%31%32', byPath), '/products/widget');
+	assert.equal(lookupQueryRedirect('/product.php', '?cid=12&', byPath), '/products/widget');
+	// The key padded with a megabyte of empty pairs used to canonicalise back onto the key and 301.
+	assert.equal(lookupQueryRedirect('/product.php', '?cid=12' + '&'.repeat(1 << 20), byPath), null);
 });
