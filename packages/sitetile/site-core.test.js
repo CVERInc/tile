@@ -94,7 +94,7 @@ test('directive control: immediately after heading', () => {
 });
 for (const [name, notes] of [
   ['single comment', '<!-- owner note -->\n'],
-  ['multi-line comment', '<!-- owner note\n  keep this spacing  \n-->\n'],
+  ['multi-line comment', '<!-- owner note\n\n\n  keep this spacing  \n-->\n'],
   ['two comments', '<!-- first -->\n<!-- second -->\n'],
   ['comments and blank lines', '\n  <!-- first -->\n\n<!-- second\nline -->\n\n'],
   ['blank lines', '\n\n'],
