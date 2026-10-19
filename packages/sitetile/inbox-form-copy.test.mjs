@@ -23,7 +23,7 @@ const test = (name, fn) => {
 // below rather than assumed here.
 const KEYS = [
   'fieldRequired', 'sentWithEmail', 'sentWithEmailGeneric', 'sentNoEmail',
-  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'sendAnother',
+  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'errorNotClaimed', 'sendAnother',
 ];
 const LANGS = { ja: 'ja-JP', 'zh-tw': 'zh-TW', 'zh-cn': 'zh-CN', ko: 'ko-KR', en: 'en-US' };
 
@@ -75,6 +75,23 @@ test('errorNetwork and errorServer are two different sentences, in every locale'
     const c = inboxFormCopy(lang);
     assert.notEqual(c.errorNetwork, c.errorServer, `${lang} uses the same text for both — the whole point of the split`);
   }
+});
+
+// reef#2204: a site whose owner never claimed Inbox answers every submit with `not_claimed` —
+// permanently, until the owner presses one button. `errorServer` ("please try again") told the
+// visitor to retry something that cannot work; tniop's agent spent a session hunting the "bug".
+// The sentence for that outcome states the fact and promises nothing, in every locale.
+test('🔴 reef#2204 errorNotClaimed: owner-named sentences verbatim, and never a "try again"', () => {
+  assert.equal(inboxFormCopy('zh-TW').errorNotClaimed, '這個網站目前沒有開放留言。');
+  assert.equal(inboxFormCopy('en-US').errorNotClaimed, "This site isn't taking messages right now.");
+  const retryWords = { ja: /もう一度|再試行/, 'zh-tw': /再試|重試/, 'zh-cn': /再试|重试/, ko: /다시/, en: /try again|retry/i };
+  for (const [key, lang] of Object.entries(LANGS)) {
+    const c = inboxFormCopy(lang);
+    assert.notEqual(c.errorNotClaimed, c.errorServer, `${key} (${lang}) errorNotClaimed is just errorServer again`);
+    assert.notEqual(c.errorNotClaimed, c.errorNetwork, `${key} (${lang}) errorNotClaimed is just errorNetwork again`);
+    assert.doesNotMatch(c.errorNotClaimed, retryWords[key], `${key} (${lang}) errorNotClaimed asks the visitor to retry — the one thing it must not say`);
+  }
+  assert.notEqual(inboxFormCopy('zh-TW').errorNotClaimed, inboxFormCopy('zh-CN').errorNotClaimed, 'zh-TW and zh-CN share the same errorNotClaimed');
 });
 
 // bug #2 (2026-09-04): the success card had no way back to the form — reload, the back button, or

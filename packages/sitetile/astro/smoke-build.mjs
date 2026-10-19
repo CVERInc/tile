@@ -1446,6 +1446,8 @@ const checks = [
       && payload.successHeading === 'Sent'
       && payload.errorNetwork === 'Your connection seems to be having trouble — check it and try again.'
       && payload.errorServer === "Couldn't send that — please try again."
+      // reef#2204: the not-claimed sentence rides the same payload — no "try again" in it.
+      && payload.errorNotClaimed === "This site isn't taking messages right now."
       && payload.sentWithEmail.includes('{email}')
       && payload.sentNoEmail.length > 0
       && payload.emailField === 'visitor_email'
@@ -1557,16 +1559,20 @@ const checks = [
   }],
   ['form-thanks: a successful submit navigates to the forwarder\'s own final URL only once this script has confirmed it for itself (same-origin check ahead of the navigate), instead of showing the in-place card', () => {
     const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s1-thanks-page-configured"')));
+    // tile#159 r2: the destination is `inboxSuccessDest(res, thanks_to)` — `res.url` for a followed
+    // 303, the form's own `thanks_to` for a JSON success — and the same-origin check gates that.
     return /if \(copy && copy\.redirectsToThanks\) \{/.test(s)
-      && /new URL\(res\.url, location\.href\)\.origin === location\.origin/.test(s)
-      && /location\.assign\(res\.url\); return;/.test(s)
+      && /const dest = inboxSuccessDest\(res, String\(fd\.get\('thanks_to'\) \|\| ''\)\);/.test(s)
+      && /new URL\(dest, location\.href\)\.origin === location\.origin/.test(s)
+      && /location\.assign\(dest\); return;/.test(s)
+      && !/location\.assign\(res\.url\)/.test(s)
       && /location\.reload\(\);\s*return;/.test(s)
       && /showSuccess\(fd\);/.test(s);
   }],
   ['form-thanks: the SAME script (no redirectsToThanks branch reachable without it) still runs for the control section — one shared script, not a per-section fork', () => {
     const s = formThanks.slice(formThanks.indexOf('<script>', formThanks.indexOf('id="s2-thanks-page-not-configured-control"')));
     return /if \(copy && copy\.redirectsToThanks\) \{/.test(s)
-      && /new URL\(res\.url, location\.href\)\.origin === location\.origin/.test(s);
+      && /new URL\(dest, location\.href\)\.origin === location\.origin/.test(s);
   }],
   // R1-P3-5 (adversarial review, round 1): `return_to` is locale-aware (`Astro.url.pathname` IS
   // the built path, already carrying the locale segment) — `thanks=` is a literal, author-written

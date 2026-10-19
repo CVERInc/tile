@@ -43,6 +43,12 @@ export const DEFAULT_LANG = 'zh-Hant';
  * forwarder and it said no" (any non-`sent` `?inbox=` outcome) — two different things a visitor
  * can act on differently (check your connection vs. just try again), so two different sentences.
  *
+ * `errorNotClaimed` (reef#2204): the forwarder's `not_claimed` outcome — the OWNER never pressed
+ * "claim Inbox", so every submit to this site fails until they do. Not transient, and nothing the
+ * visitor can fix, so this sentence states the fact and asks for nothing: no "try again" in any
+ * locale (the copy test enforces it). Explanation-class copy, no promise. Measured 2026-10-19 on
+ * tniop.tw: the generic retry sentence sent an agent hunting a platform bug for a whole session.
+ *
  * `sentWithEmail` vs `sentWithEmailGeneric`: build time cannot know what a visitor will TYPE, only
  * whether the `{email}` field is guaranteed filled (`required`) — so the server-rendered fallback
  * (what a no-JS visitor sees after the real POST/303 round trip) uses the generic phrasing. The
@@ -68,6 +74,7 @@ const INBOX_FORM_LOCALE = {
     backHome: 'ホームに戻る',
     errorNetwork: 'ネット接続が不安定なようです。確認してもう一度お試しください。',
     errorServer: '送信できませんでした。もう一度お試しください。',
+    errorNotClaimed: 'このサイトは現在メッセージを受け付けていません。',
     sendAnother: 'もう一度送る',
   },
   'zh-tw': {
@@ -80,6 +87,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '回首頁',
     errorNetwork: '網路連線好像不穩，請檢查後再試一次。',
     errorServer: '暫時無法送出，請再試一次。',
+    errorNotClaimed: '這個網站目前沒有開放留言。',
     sendAnother: '再送一則',
   },
   'zh-cn': {
@@ -92,6 +100,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '返回首页',
     errorNetwork: '网络连接好像不稳定，请检查后再试一次。',
     errorServer: '暂时无法发送，请再试一次。',
+    errorNotClaimed: '这个网站目前没有开放留言。',
     sendAnother: '再发一条',
   },
   ko: {
@@ -104,6 +113,7 @@ const INBOX_FORM_LOCALE = {
     backHome: '홈으로 돌아가기',
     errorNetwork: '네트워크 연결이 불안정한 것 같습니다. 확인 후 다시 시도해 주세요.',
     errorServer: '전송하지 못했습니다. 다시 시도해 주세요.',
+    errorNotClaimed: '이 사이트는 현재 메시지를 받지 않고 있습니다.',
     sendAnother: '다시 보내기',
   },
   en: {
@@ -116,6 +126,7 @@ const INBOX_FORM_LOCALE = {
     backHome: 'Back to homepage',
     errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
     errorServer: "Couldn't send that — please try again.",
+    errorNotClaimed: "This site isn't taking messages right now.",
     sendAnother: 'Send another',
   },
 };
