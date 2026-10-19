@@ -32,8 +32,10 @@ Both are the same shape: **open a file, save it unchanged, get a byte-identical 
 
 1. Text is read back with `ctrl.rawValue()`, never `getValue()` — `getValue()` strips
    trailing whitespace, which is right for a kanban card and wrong for a file.
-2. Line endings survive. A CRLF file is converted to LF on the way in and back on the
-   way out.
+2. Line endings survive, line by line. The editor works in LF; each line goes back out
+   with the ending it came in with, so a file that mixes CRLF and LF keeps both. An edited
+   line keeps the ending of the line it replaced; a new line takes the file's majority
+   (`LineEndings.swift`).
 
 Reading is UTF-8 only, and it says so rather than guessing: silently misidentifying a
 legacy encoding corrupts the file on the next save.
@@ -60,13 +62,9 @@ origin. It is public API and sandbox-safe, so the Mac App Store option stays ope
 ## Tested end to end
 
 `e2e/run.sh` drives the real app with keyboard events and checks the bytes on disk: CRLF and
-LF round trips, the last keystrokes surviving an immediate ⌘S ⌘Q, quitting with unsaved edits,
+LF round trips, a file that mixes the two, the last keystrokes surviving an immediate ⌘S ⌘Q, quitting with unsaved edits,
 a file changed on disk while open, and a non-UTF-8 file. See `e2e/README.md` for where it can
 run (it needs a GUI session and the Accessibility grant).
-
-**Known bug, caught by `mixed_line_endings`:** a file that mixes CRLF and LF comes back with
-every line in CRLF. The document records one line ending for the whole file, chosen by
-`raw.contains("\r\n")`. The test stays red until that is decided and fixed.
 
 ## Not yet verified
 
