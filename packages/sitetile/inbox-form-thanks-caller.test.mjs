@@ -7,7 +7,7 @@
 //
 // The script runs here verbatim (the same string both renderers emit), against a stub DOM that
 // carries exactly what the renderers put in the markup: `data-inbox-copy` on the section and, for
-// a `thanks=` form, the hidden `thanks_to` input inside the form.
+// a `thanks=` form, the hidden `thanks_to` input (seen through the submit-time FormData).
 //   run: node packages/sitetile/inbox-form-thanks-caller.test.mjs
 
 import assert from 'node:assert/strict';
@@ -34,7 +34,6 @@ async function run({ thanksTo = null, response }) {
   const did = { assign: [], reload: 0, fetched: [] };
   const listeners = {};
   const btn = el({ disabled: false });
-  const thanksInput = thanksTo != null ? { name: 'thanks_to', value: thanksTo, getAttribute: (k) => (k === 'value' ? thanksTo : null) } : null;
   const form = el({
     hidden: false,
     reset() {},
@@ -42,7 +41,6 @@ async function run({ thanksTo = null, response }) {
     addEventListener: (type, fn) => { listeners[type] = fn; },
     querySelector: (sel) => {
       if (sel === '.st-form-submit') return btn;
-      if (/thanks_to/.test(sel)) return thanksInput;
       return null;
     },
   });
@@ -63,7 +61,8 @@ async function run({ thanksTo = null, response }) {
   };
   const fetch = (url, init) => { did.fetched.push(url); return Promise.resolve(response); };
   const window = { fetch, history: { state: null, replaceState() {} } };
-  class FormData { constructor() {} get() { return null; } }
+  // A real `new FormData(form)` carries the hidden inputs; for a `thanks=` form that includes `thanks_to`.
+  class FormData { constructor() {} get(k) { return k === 'thanks_to' && thanksTo != null ? thanksTo : null; } }
   // eslint-disable-next-line no-new-func
   new Function('document', 'window', 'location', 'fetch', 'FormData', INBOX_FORM_SCRIPT)(document, window, location, fetch, FormData);
   assert.equal(typeof listeners.submit, 'function', 'the script did not wire a submit handler');

@@ -212,11 +212,12 @@ ${INBOX_OUTCOME_HELPERS_SRC}
                 // 🩸 tile#159 r2: a JSON success never followed a 303, so its \`res.url\` is the
                 // Inbox endpoint — navigating there sent the visitor to the API. inboxSuccessDest
                 // hands back the form's own \`thanks_to\` (the value safeInternalPath let into the
-                // markup) for that shape, and the same same-origin check gates it; a form with no
-                // \`thanks_to\` gets the in-place card.
+                // markup, read from \`fd\` — exactly what was POSTed) for that shape, and the same
+                // same-origin check gates it; a form with no \`thanks_to\` gets the in-place card.
+                // (Read off \`fd\`, not a selector: a selector literal naming the hidden field would
+                // sit in every page's script and read as that field to anything scanning the HTML.)
                 if (copy && copy.redirectsToThanks) {
-                  const thanksInput = form.querySelector('input[name="thanks_to"]');
-                  const dest = inboxSuccessDest(res, thanksInput ? thanksInput.value : '');
+                  const dest = inboxSuccessDest(res, String(fd.get('thanks_to') || ''));
                   if (dest) {
                     let sameOrigin = false;
                     try { sameOrigin = new URL(dest, location.href).origin === location.origin; } catch (e) {}

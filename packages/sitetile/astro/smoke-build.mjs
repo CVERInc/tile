@@ -1562,7 +1562,7 @@ const checks = [
     // tile#159 r2: the destination is `inboxSuccessDest(res, thanks_to)` — `res.url` for a followed
     // 303, the form's own `thanks_to` for a JSON success — and the same-origin check gates that.
     return /if \(copy && copy\.redirectsToThanks\) \{/.test(s)
-      && /const dest = inboxSuccessDest\(res, thanksInput \? thanksInput\.value : ''\);/.test(s)
+      && /const dest = inboxSuccessDest\(res, String\(fd\.get\('thanks_to'\) \|\| ''\)\);/.test(s)
       && /new URL\(dest, location\.href\)\.origin === location\.origin/.test(s)
       && /location\.assign\(dest\); return;/.test(s)
       && !/location\.assign\(res\.url\)/.test(s)
