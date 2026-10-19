@@ -10,6 +10,7 @@
 //     [--api-contract <path to site-api-transport.contract.json>] \
 //     [--gated-manifest <path to renderer-generated private URL manifest>] \
 //     [--markdown-manifest <path to renderer-generated public route→markdown map>] \
+//     [--query-redirects <path to the site's IR _query-redirects.md>] \
 //     [--platform-origin <origin>] \
 //     [--canonical-host <host>] \
 //     [--dynamic-coral-css layered] \
@@ -43,6 +44,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The ONE canonicaliser for query-string 301s (reef#1882). Imported here to compile the site's
+// file, and read as SOURCE below to be concatenated into the worker, so the build that compiles a
+// rule and the worker that matches a request execute the same bytes.
+import { compile as compileQueryRedirects, countRules as countQueryRedirects, canonPath as canonQueryRedirectPath, QueryRedirectError } from '../../sitetile/query-redirects.mjs';
 
 function arg(name, def = '') {
 	const i = process.argv.indexOf('--' + name);
@@ -57,6 +62,7 @@ function die(msg) {
 const here = dirname(fileURLToPath(import.meta.url));
 const core = readFileSync(join(here, 'product-page-core.js'), 'utf8');
 const tmpl = readFileSync(join(here, 'shop-function-template.js'), 'utf8');
+const QUERY_REDIRECTS_MODULE = join(here, '..', '..', 'sitetile', 'query-redirects.mjs');
 
 function readRule(rule, where, wantMethods) {
 	if (!rule || typeof rule !== 'object') die(where + ': entry is not an object');
@@ -169,6 +175,32 @@ function loadMarkdownManifest(path, edgeRendered) {
 			dropped.join(', ') + ' (this worker answers them itself; ASSETS has no twin to negotiate)');
 	}
 	return Object.keys(routes).length > 0 ? { routes } : null;
+}
+
+// The site's query-string 301 table (reef#1882): `_query-redirects.md` from the site's IR, in the
+// three-column `_redirects` grammar with `?k=v` allowed in `from`. Cloudflare never reads that
+// file — `_redirects` cannot match a query string — so it is compiled HERE into a map the worker
+// consults before the static assets.
+//
+// Same posture as --markdown-manifest: absent flag ⇒ absent key ⇒ byte-identical worker; a file
+// with no rules bakes nothing either; malformed or refused ⇒ FATAL, with the refusal's name and
+// line, because a build that silently dropped a rule would ship a site that lost a 301 while
+// staying green. Every refusal lives in packages/sitetile/query-redirects.mjs — this loader only
+// adds what the module cannot know: the paths THIS worker answers itself (storefronts, the
+// contract's buyer pages, the subscribe/checkout results, the forwarded API paths). A rule on one
+// of those would run first and take the page away, so it is refused by path.
+function loadQueryRedirects(path, reserved) {
+	if (!path) return null;
+	let text;
+	try { text = readFileSync(path, 'utf8'); } catch { die('--query-redirects not readable: ' + path); }
+	let map;
+	try {
+		map = compileQueryRedirects(text, reserved);
+	} catch (e) {
+		if (e instanceof QueryRedirectError) die('--query-redirects ' + path + ': ' + e.message);
+		throw e;
+	}
+	return countQueryRedirects(map) > 0 ? map : null;
 }
 
 // Reduce the contract to exactly the fields the worker executes. The prose
@@ -413,6 +445,24 @@ const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
 	]
 });
 
+// The paths this worker answers itself, in the module's canonical spelling, so a query rule cannot
+// sit on a page the worker would never let reach ASSETS anyway. Prefix rules reserve at and under;
+// exact rules reserve one path. A forward rule's value is taken as written (the contract spells
+// prefixes with their trailing `/`, which the module reads as "that directory and below").
+const transportForward = (loaded && loaded.transport.forward) || [];
+const queryRedirects = loadQueryRedirects(arg('query-redirects'), {
+	reservedPrefixes: [
+		...shops.map((shop) => shop.shopPath),
+		...transportForward.filter((rule) => rule.match === 'prefix').map((rule) => rule.value)
+	],
+	reservedPaths: [
+		...((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path),
+		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : []),
+		...((loaded && loaded.transport.checkoutResult) ? [loaded.transport.checkoutResult.path] : []),
+		...transportForward.filter((rule) => rule.match === 'exact').map((rule) => canonQueryRedirectPath(rule.value) || rule.value)
+	]
+});
+
 const config = {
 	guildId,
 	// Omitted entirely when absent, so a guild-only site's baked config is the
@@ -439,7 +489,9 @@ const config = {
 	...(dynamicCoralCss ? { dynamicCoralCss } : {}),
 	// Absent flag ⇒ absent key, so a worker emitted without --markdown-manifest is
 	// the same bytes this emitter produced before the flag existed.
-	...(markdown ? { markdown } : {})
+	...(markdown ? { markdown } : {}),
+	// Absent flag (or a file with no rules) ⇒ absent key ⇒ the same bytes as before the flag existed.
+	...(queryRedirects ? { queryRedirects } : {})
 };
 
 // Keep flagless output byte-for-byte unchanged: both placeholders disappear.
@@ -462,18 +514,43 @@ const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalR
 \t\tif (canonicalResponse) return canonicalResponse;
 ` : '';
 
+// Query-string 301s (reef#1882). Same discipline as the canonical-host pair above: both
+// placeholders disappear when nothing was baked, so a flagless worker is byte-identical to one
+// emitted before this existed. When rules ARE baked, the shared module is concatenated in as a
+// third source (it is an import-free ES module like the other two), the glue below turns its
+// `lookupQueryRedirect` into a Response, and the branch runs FIRST in fetch — after the canonical
+// host hop, so the 301 lands on the canonical host, and before everything else, so the key is
+// read off the ORIGINAL request. Cost on a request with no query, or on a path not in the map: one
+// property read and one object index. GET/HEAD only, like the canonical-host 301. The query is
+// the KEY and is not re-appended to Location — doing so would mint a second URL for the target.
+const queryRedirectHelpers = queryRedirects ? `function matchQueryRedirect(request, byPath) {
+\tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
+\tlet url;
+\ttry { url = new URL(request.url); } catch (e) { return null; }
+\tconst to = lookupQueryRedirect(url.pathname, url.search, byPath);
+\treturn to === null ? null : new Response(null, { status: 301, headers: { location: to } });
+}
+
+` : '';
+const queryRedirectFetch = queryRedirects ? `\t\tconst queryRedirectResponse = matchQueryRedirect(request, CFG.queryRedirects.byPath);
+\t\tif (queryRedirectResponse) return queryRedirectResponse;
+` : '';
+const queryRedirectRuntime = queryRedirects ? readFileSync(QUERY_REDIRECTS_MODULE, 'utf8') + '\n' : '';
+
 // A function replacement, so a `$&` / `$'` / `$$` inside a baked value (a site
 // name, a label, a contract path) is inserted literally instead of being read as
 // a replacement pattern.
 const body = tmpl
 	.replace('/*__CANONICAL_HELPERS__*/', () => canonicalHelpers)
+	.replace('/*__QUERY_REDIRECT_HELPERS__*/', () => queryRedirectHelpers)
 	.replace('/*__CANONICAL_FETCH__*/', () => canonicalFetch)
+	.replace('/*__QUERY_REDIRECT_FETCH__*/', () => queryRedirectFetch)
 	.replaceAll('__SHOP_CONFIG__', () => JSON.stringify(config));
 const provenance =
 	'// GENERATED — do not edit. Source: tile/packages/dynamic-corals/square-shop/{product-page-core,shop-function-template}.js\n' +
 	'// emitter commit: ' + emitterCommit() + '\n' +
 	'// api contract: ' + (loaded ? loaded.path + ' sha256=' + loaded.sha256 : 'none (no --api-contract given; this site forwards nothing to RSP)') + '\n';
-const out = provenance + core + '\n' + body;
+const out = provenance + core + '\n' + queryRedirectRuntime + body;
 
 const outFile = arg('out');
 if (!outFile) {
@@ -485,5 +562,6 @@ if (!outFile) {
 		' (site=' + (siteId || 'none') + ', guild=' + (guildId || 'none') +
 		', shops=' + (shops.map((s) => s.shopPath).join(',') || 'none') +
 		', transport=' + (loaded ? loaded.transport.bindingName + ' ' + loaded.transport.forward.length + ' forward/' + (loaded.transport.verdict || []).length + ' verdict' : 'none') +
-		', markdown=' + (markdown ? Object.keys(markdown.routes).length + ' routes' : 'none') + ')');
+		', markdown=' + (markdown ? Object.keys(markdown.routes).length + ' routes' : 'none') +
+		(queryRedirects ? ', queryRedirects=' + countQueryRedirects(queryRedirects) + ' rules' : '') + ')');
 }

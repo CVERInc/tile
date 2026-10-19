@@ -18,7 +18,7 @@
 //
 // stripDonorHead / injectHead / replaceMain / matchShop are pure and unit-tested.
 
-/*__CANONICAL_HELPERS__*/function stripDonorHead(html) {
+/*__CANONICAL_HELPERS__*//*__QUERY_REDIRECT_HELPERS__*/function stripDonorHead(html) {
 	return html
 		.replace(/<title>[\s\S]*?<\/title>/i, '')
 		.replace(/<meta\s+name=["']description["'][^>]*>/gi, '')
@@ -1646,7 +1646,7 @@ async function negotiateMarkdown(request, env, markdown) {
 export default {
 	async fetch(request, env, ctx) {
 		const CFG = __SHOP_CONFIG__;
-/*__CANONICAL_FETCH__*/		const shopDescriptors = CFG.shops || [];
+/*__CANONICAL_FETCH__*//*__QUERY_REDIRECT_FETCH__*/		const shopDescriptors = CFG.shops || [];
 		const shops = shopDescriptors.slice().sort((a, b) => b.shopPath.length - a.shopPath.length);
 		let pathname = '';
 		try { pathname = new URL(request.url).pathname; } catch (e) { pathname = ''; }
