@@ -1,0 +1,69 @@
+# Card link and social icon syntax
+
+This note covers the icon rules shared by the editing table and published cards.
+The cell and parameter definitions live in [ai-ops.mjs](ai-ops.mjs); editor labels
+and hints live in [w/cell-i18n.mjs](w/cell-i18n.mjs).
+
+## Automatic marks
+
+Leave `icon=`, `iconhost=` and `iconimg=` unset to use the linked site's favicon.
+An Instagram or Threads address does not automatically select a bundled SVG.
+The mark comes from the favicon services, so a brand change does not require a
+new icon bundle. External favicons are fetched rather than saved as Card assets.
+
+The shared resolver tries host candidates, including the site's `www` spelling.
+For each candidate, `/_icon/<host>.ico` asks DuckDuckGo, then Google's faviconV2
+when DuckDuckGo misses or fails. If both miss, the card tries its next candidate;
+when all candidates fail, a link cell hides the mark and a published social button
+shows a generic link symbol. The editing table follows the same candidate chain
+and hides its empty mark slot.
+
+The Worker contacts fixed favicon-service addresses. Its existing response cache
+can reuse a validated image for up to seven days; misses are not cached. “Fetched”
+here distinguishes service-provided favicons from a maintained brand-icon bundle;
+it does not mean an upstream request on every page view.
+
+## Author overrides
+
+A link cell takes its override in the parameter list:
+
+```markdown
+- [ ] %% card: link icon=instagram %% [Instagram](https://instagram.com/example)
+- [ ] %% card: link iconhost=example.com %% [Short link](https://example.org/go)
+```
+
+A supported `icon=<name>` selects that built-in SVG, even when the link points to
+another site. It takes precedence over `iconhost=<domain>`. An unknown icon name
+falls through to `iconhost=`, or to the automatic mark if no host is specified.
+`iconhost=` takes a domain without a scheme or path and uses that one host only.
+
+For a social cell, put the override after the address on each line:
+
+```markdown
+- [ ] %% card: social w=6 %% [Instagram](https://instagram.com/example) icon=instagram
+	[Website](https://example.org/) iconhost=example.com
+```
+
+Write one link per line. If a line contains two links, only the first is shown.
+Both surfaces use [link-marks.mjs](link-marks.mjs) for the override rules.
+
+## Colour and artwork
+
+Fetched brand marks keep their own colours by default. Generic drawn symbols,
+such as a house or envelope, use the theme colour.
+
+Set `icons: mono` in the card's frontmatter to make fetched marks greyscale.
+Hover restores their colour. Explicitly named `icon=` SVGs retain their colours.
+`iconimg=` supplies an artwork thumbnail for a link cell and takes precedence
+over its mark; these thumbnails also retain their colours in mono mode.
+
+## Language note
+
+This repository has no localized Markdown grammar documents. This note is in
+English; the editor's labels and hints use the existing nine-language flow in
+`w/cell-i18n.mjs`. The one-link-per-social-line explanation is already present
+in all nine languages. No editor strings or golden rows change here.
+
+These rules follow [reef#2026](https://github.com/CVERInc/reef/issues/2026) and
+[reef#2015](https://github.com/CVERInc/reef/issues/2015), implemented by
+[tile#125](https://github.com/CVERInc/tile/pull/125).
