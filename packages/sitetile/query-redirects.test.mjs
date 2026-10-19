@@ -409,6 +409,10 @@ test('r3 P2 the request-search ceiling is fixed, and no accepted from can serial
 	// 🔴 The two caps cannot drift apart: a from of MAX_CHARS UTF-16 units, each serialised as the
 	// worst case of 4 UTF-8 bytes × `%XX`, plus the `?`, still fits.
 	assert.ok(ceiling >= 12 * QUERY_REDIRECTS_MAX_CHARS + 1, 'ceiling ' + ceiling + ' < 12 × ' + QUERY_REDIRECTS_MAX_CHARS + ' + 1');
+	// r4: and it is EXACTLY 16 KiB — the relation intended, not merely "big enough". A larger ceiling
+	// would pass the line above while widening what one request can make the worker parse.
+	assert.equal(ceiling, 16 * 1024);
+	assert.equal(QUERY_REDIRECTS_MAX_CHARS, 1000, 'the derivation above is for 1000-unit froms');
 	// The worst real froms at the cap. 12 per unit is a bound, not a specimen: a BMP character is 1
 	// unit → 3 bytes → 9 serialised chars (the true worst), an astral one 2 units → 12 chars (6/unit).
 	for (const ch of ['中', '😀']) {
@@ -431,6 +435,17 @@ test('r3 P2 Codex: KELVIN SIGN and empty-pair sources match their own browser sp
 	// Past the ceiling an equivalent spelling is not parsed — the documented contract.
 	const { byPath } = compile('/old?a /new 301\n');
 	assert.equal(lookupQueryRedirect('/old', '?a' + '&'.repeat(queryRedirects.QUERY_REDIRECTS_MAX_SEARCH), byPath), null);
+});
+
+// r4: the bound, without a clock. An equivalent spelling of the key (`a` padded with empty pairs)
+// hits at exactly 16,384 characters and misses at 16,385 — literal lengths, not the constant, so
+// removing the bound, moving it, or turning `>` into `>=` each turns one of the two lines red.
+test('r4 the request-search bound sits exactly at 16,384 characters (no timing)', () => {
+	const { byPath } = compile('/old?a /new 301\n');
+	const at = '?a' + '&'.repeat(16384 - 2);
+	assert.equal(at.length, 16384);
+	assert.equal(lookupQueryRedirect('/old', at, byPath), '/new', 'at the ceiling: parsed, and a hit');
+	assert.equal(lookupQueryRedirect('/old', at + '&', byPath), null, 'one past the ceiling: not parsed');
 });
 
 test('r3 P2 a search at the ceiling canonicalises in single-digit milliseconds', () => {
@@ -486,4 +501,26 @@ test('r3 P2 compile: reserved paths and prefixes are compared in the canonical s
 	for (const from of ['/商店街?x=1', '/接口文件?x=1', '/會員/x?x=1']) {
 		assert.equal(countRules(compile(from + ' /b 301\n', opts)), 1, from);
 	}
+});
+
+// ── tile#158 r4: claimedBy hands the decision to the worker's own matchers ──────────────────────
+
+test('r4 compile: claimedBy is asked about every request spelling of the key, and its answer names the refusal', () => {
+	const asked = [];
+	// A transport-style prefix with startsWith semantics, as the worker's forward has.
+	const claimedBy = (href) => { asked.push(href); return new URL(href).pathname.startsWith('/api') ? 'a forward' : null; };
+	const r = refused('/apix?x=1 /gone 301\n', { claimedBy });
+	assert.equal(r.code, 'reserved_path');
+	assert.match(r.message, /from: \/apix is answered by the worker itself \(a forward\)/);
+	// An escaped spelling is asked about in its canonical spelling too, so it cannot slip past.
+	assert.equal(refused('/%61pix?x=1 /gone 301\n', { claimedBy }).code, 'reserved_path');
+	// The key with its trailing slash: canonPath folds `/m/` onto `/m`, so the rule fires for both.
+	const exact = (href) => new URL(href).pathname === '/m/' ? 'an exact forward' : null;
+	assert.equal(refused('/m?x=1 /gone 301\n', { claimedBy: exact }).code, 'reserved_path');
+	// The query rides along (a matcher may key on it), and a decoded `?` in the path stays path.
+	asked.length = 0;
+	assert.equal(countRules(compile('/a%3Fb?order=1 /gone 301\n', { claimedBy })), 1);
+	assert.deepEqual(asked, ['https://site.invalid/a%3Fb?order=1', 'https://site.invalid/a%3Fb/?order=1']);
+	// A root claimer owns everything, the home page included.
+	assert.equal(refused('/?p=1 /gone 301\n', { claimedBy: () => 'a root forward' }).code, 'reserved_path');
 });

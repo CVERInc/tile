@@ -48,6 +48,12 @@ import { fileURLToPath } from 'node:url';
 // file, and read as SOURCE below to be concatenated into the worker, so the build that compiles a
 // rule and the worker that matches a request execute the same bytes.
 import { compile as compileQueryRedirects, countRules as countQueryRedirects, QueryRedirectError } from '../../sitetile/query-redirects.mjs';
+// The worker's own route matchers — the same functions the emitted fetch runs — so the build's
+// reserved_path refusal asks them rather than a re-derived list (workerClaims below).
+import {
+	matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchSiteOwnedBuyerPage,
+	matchSubscribeResult, matchForwardRule, matchVerdictRule, YT_POSTER_PATH
+} from './shop-function-template.js';
 
 function arg(name, def = '') {
 	const i = process.argv.indexOf('--' + name);
@@ -186,9 +192,8 @@ function loadMarkdownManifest(path, edgeRendered) {
 // with no rules bakes nothing either; malformed or refused ⇒ FATAL, with the refusal's name and
 // line, because a build that silently dropped a rule would ship a site that lost a 301 while
 // staying green. Every refusal lives in packages/sitetile/query-redirects.mjs — this loader only
-// adds what the module cannot know: the paths THIS worker answers itself (storefronts, the
-// contract's buyer pages, the subscribe/checkout results, the forwarded API paths). A rule on one
-// of those would run first and take the page away, so it is refused by path.
+// adds what the module cannot know: which requests THIS worker answers itself (workerClaims,
+// below). A rule on one of those could never fire, so it is refused by path, early and by name.
 function loadQueryRedirects(path, reserved) {
 	if (!path) return null;
 	let text;
@@ -201,6 +206,34 @@ function loadQueryRedirects(path, reserved) {
 		throw e;
 	}
 	return countQueryRedirects(map) > 0 ? map : null;
+}
+
+// Which worker branch claims this request, or null when it would reach env.ASSETS — asked with the
+// worker's OWN matchers, imported from the template, against the config it bakes. 🩸 tile#158 r3/r4:
+// the reservation used to be lists re-derived here (storefront prefixes, contract values), and each
+// round found a matcher the lists spelled or scoped differently — `/api` forwards `/apix` by
+// startsWith, the completion matcher claims `/fr/shop/complete` with no `/fr/shop` storefront.
+// The order is fetch's own, up to the ASSETS fall-through. Unlike fetch, a match counts even when
+// its handler may still decline (a subscribe-result candidate RSP does not confirm, a completion
+// asked with HEAD): refusing such a rule early is friendlier than shipping one that half-fires.
+function workerClaims(request, cfg) {
+	let pathname;
+	try { pathname = new URL(request.url).pathname; } catch { return null; }
+	const shopDescriptors = cfg.shops || [];
+	const shops = shopDescriptors.slice().sort((a, b) => b.shopPath.length - a.shopPath.length);
+	const transport = cfg.apiTransport;
+	if (pathname === '/__reef/inbox') return 'the inbox';
+	if (YT_POSTER_PATH.test(pathname)) return 'the YouTube poster relay';
+	if (matchNativeCheckoutSuccess(request, shopDescriptors, transport && transport.checkoutResult)) return 'the checkout result';
+	if (matchSiteOwnedBuyerPage(request, transport && transport.siteOwnedBuyerPages)) return 'a site-owned buyer page';
+	if (matchSubscribeResult(request, transport && transport.subscribeResult)) return 'the subscribe result';
+	if (transport && matchForwardRule(transport.forward, pathname, request.method)) return 'a forward to ' + transport.bindingName;
+	if (transport && matchVerdictRule(transport.verdict, pathname)) return 'the verdict gate';
+	if (matchShopComplete(pathname, shops)) return 'checkout completion';
+	let product = null;
+	try { product = matchShop(pathname, shops); } catch { product = null; }
+	if (product || matchShopIndex(pathname, shops)) return 'a storefront';
+	return null;
 }
 
 // Reduce the contract to exactly the fields the worker executes. The prose
@@ -445,25 +478,6 @@ const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
 	]
 });
 
-// The paths this worker answers itself, so a query rule cannot sit on a page the worker would never
-// let reach ASSETS anyway. Prefix rules reserve at and under; exact rules reserve one path. Passed
-// in the spellings this worker matches them in (URL-serialised storefronts, contract values as
-// written, trailing `/` meaning "that directory and below"); the module converts every list to its
-// own canonical spelling before comparing, so `/商店` and `/%E5%95%86%E5%BA%97` are one path.
-const transportForward = (loaded && loaded.transport.forward) || [];
-const queryRedirects = loadQueryRedirects(arg('query-redirects'), {
-	reservedPrefixes: [
-		...shops.map((shop) => shop.shopPath),
-		...transportForward.filter((rule) => rule.match === 'prefix').map((rule) => rule.value)
-	],
-	reservedPaths: [
-		...((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path),
-		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : []),
-		...((loaded && loaded.transport.checkoutResult) ? [loaded.transport.checkoutResult.path] : []),
-		...transportForward.filter((rule) => rule.match === 'exact').map((rule) => rule.value)
-	]
-});
-
 const config = {
 	guildId,
 	// Omitted entirely when absent, so a guild-only site's baked config is the
@@ -490,10 +504,16 @@ const config = {
 	...(dynamicCoralCss ? { dynamicCoralCss } : {}),
 	// Absent flag ⇒ absent key, so a worker emitted without --markdown-manifest is
 	// the same bytes this emitter produced before the flag existed.
-	...(markdown ? { markdown } : {}),
-	// Absent flag (or a file with no rules) ⇒ absent key ⇒ the same bytes as before the flag existed.
-	...(queryRedirects ? { queryRedirects } : {})
+	...(markdown ? { markdown } : {})
 };
+
+// Compiled against the config just assembled, so the refusal asks the worker's matchers about the
+// exact shops and transport it will bake: a `from` the worker would claim for GET or HEAD is
+// `reserved_path`. Appended LAST — absent flag (or a file with no rules) ⇒ absent key ⇒ the same
+// bytes as before the flag existed.
+const claimedBy = (href) => workerClaims(new Request(href), config) || workerClaims(new Request(href, { method: 'HEAD' }), config);
+const queryRedirects = loadQueryRedirects(arg('query-redirects'), { claimedBy });
+if (queryRedirects) config.queryRedirects = queryRedirects;
 
 // Keep flagless output byte-for-byte unchanged: both placeholders disappear.
 // The redirect implementation only enters workers explicitly emitted with the flag.
@@ -519,11 +539,21 @@ const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalR
 // placeholders disappear when nothing was baked, so a flagless worker is byte-identical to one
 // emitted before this existed. When rules ARE baked, the shared module is concatenated in as a
 // third source (it is an import-free ES module like the other two), the glue below turns its
-// `lookupQueryRedirect` into a Response, and the branch runs FIRST in fetch — after the canonical
-// host hop, so the 301 lands on the canonical host, and before everything else, so the key is
-// read off the ORIGINAL request. Cost on a request with no query: one string scan of request.url,
-// no URL constructed (a serialised URL can only carry `?` as the query delimiter). On a path not in
-// the map: one URL parse and one object index. GET/HEAD only, like the canonical-host 301. The
+// `lookupQueryRedirect` into a Response, and the branch runs LAST in fetch: at the one point where
+// the request would otherwise be handed to env.ASSETS (before markdown negotiation, which only
+// re-serves the same static page), after every worker-owned matcher — inbox, YouTube poster,
+// checkout and subscribe results, buyer pages, forwards of every match kind, the verdict gate,
+// storefronts and checkout completion, locale fallback included — has declined. 🔴 That placement
+// IS the guarantee that a rule can never take a page away from the worker (tile#158 r4): two rounds
+// of reservation-list holes showed a list compiled beside the matchers cannot keep up with them.
+// The compile-time `reserved_path` refusal (workerClaims, above) is the early, friendly half and
+// asks those same matchers; this half holds even when it misses. The completion family is skipped
+// for every method, not only the GET it renders, so one path never answers HEAD with a 301 and GET
+// with a page. The canonical-host hop is still first, so the 301 lands on the canonical host, and
+// nothing before this point rewrites `request`, so the key is still read off the ORIGINAL request.
+// Cost on a request with no query: one string scan of request.url, no URL constructed (a
+// serialised URL can only carry `?` as the query delimiter). On a path not in the map: one URL
+// parse and one object index. GET/HEAD only, like the canonical-host 301. The
 // query is the KEY and is not re-appended to Location — doing so would mint a second URL for the
 // target. 🔴 This branch never turns a request into an error: anything that throws while building
 // the 301 (a baked Location no Headers accepts, tile#158 r2) falls through to the static path.
@@ -539,7 +569,7 @@ const queryRedirectHelpers = queryRedirects ? `function matchQueryRedirect(reque
 }
 
 ` : '';
-const queryRedirectFetch = queryRedirects ? `\t\tconst queryRedirectResponse = matchQueryRedirect(request, CFG.queryRedirects.byPath);
+const queryRedirectFetch = queryRedirects ? `\t\tconst queryRedirectResponse = complete ? null : matchQueryRedirect(request, CFG.queryRedirects.byPath);
 \t\tif (queryRedirectResponse) return queryRedirectResponse;
 ` : '';
 const queryRedirectRuntime = queryRedirects ? readFileSync(QUERY_REDIRECTS_MODULE, 'utf8') + '\n' : '';

@@ -1646,7 +1646,7 @@ async function negotiateMarkdown(request, env, markdown) {
 export default {
 	async fetch(request, env, ctx) {
 		const CFG = __SHOP_CONFIG__;
-/*__CANONICAL_FETCH__*//*__QUERY_REDIRECT_FETCH__*/		const shopDescriptors = CFG.shops || [];
+/*__CANONICAL_FETCH__*/		const shopDescriptors = CFG.shops || [];
 		const shops = shopDescriptors.slice().sort((a, b) => b.shopPath.length - a.shopPath.length);
 		let pathname = '';
 		try { pathname = new URL(request.url).pathname; } catch (e) { pathname = ''; }
@@ -1715,7 +1715,7 @@ export default {
 		const idx = matchShopIndex(pathname, shops);
 		if (idx && idx.source === 'native') return renderNativeGridPage(request, env, CFG, idx);
 		if (idx && idx.source === 'provider') return renderGridPage(request, env, ctx, CFG, idx);
-		// Last, and only for a route the build itself mapped: same page, markdown.
+/*__QUERY_REDIRECT_FETCH__*/		// Last, and only for a route the build itself mapped: same page, markdown.
 		const negotiated = await negotiateMarkdown(request, env, CFG.markdown);
 		if (negotiated) return negotiated;
 		return env.ASSETS.fetch(request); // everything else: the static site, untouched

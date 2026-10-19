@@ -293,6 +293,25 @@ function canonReservedPrefix(prefix) {
 	return c === '/' ? c : c + '/';
 }
 
+// The URLs a request for this rule's key arrives as, for asking a caller's `claimedBy`: the `from`
+// as written and the canonical key, each in the serialised spelling `new URL` gives a browser's
+// request, and the key with its trailing `/` (canonPath folds `/a/` onto `/a`, so the rule fires
+// for both). The pathname is SET rather than parsed, so a `?` or `#` decoded into the key is
+// escaped back instead of being read as a delimiter.
+function requestSpellings(rawPath, key, search) {
+	const out = new Set();
+	for (const p of [rawPath, key, key === '/' ? null : key + '/']) {
+		if (p === null) continue;
+		try {
+			const u = new URL('https://site.invalid/');
+			u.pathname = p;
+			u.search = search;
+			out.add(u.href);
+		} catch (e) { /* a spelling no URL holds is not a request anyone sends */ }
+	}
+	return [...out];
+}
+
 function startsWithPrefix(path, prefix) {
 	// `/shop` is reserved as `/shop` and as `/shop/…`; a prefix given with its own trailing `/` is
 	// reserved as that directory and everything under it.
@@ -314,6 +333,12 @@ function startsWithPrefix(path, prefix) {
  *                                            refused as a `from`, at and under them. Any spelling,
  *                                            canonicalised here. Always includes
  *                                            QUERY_REDIRECTS_RESERVED_PREFIXES.
+ * @param {(href: string) => (string|null)} [opts.claimedBy]  asks the WORKER's own matchers whether
+ *                                            it answers a request for `href` itself; a truthy answer
+ *                                            (the route's name) refuses the rule. Called with every
+ *                                            spelling of the rule's key (requestSpellings). The
+ *                                            emitter passes this instead of lists: a list re-derived
+ *                                            beside the matchers drifts from them (tile#158 r4).
  * @throws {QueryRedirectError} with a `code` naming the refusal, and the `line` it is about
  */
 export function compile(text, opts = {}) {
@@ -345,6 +370,12 @@ export function compile(text, opts = {}) {
 		if (!to.ok) throw new QueryRedirectError(to.code, 'to: ' + to.message, where);
 		if (reservedPaths.has(path.value) || reservedPrefixes.some((prefix) => startsWithPrefix(path.value, prefix))) {
 			throw new QueryRedirectError('reserved_path', 'from: ' + path.value + ' is answered by the worker itself; a rule there could never match', where);
+		}
+		if (typeof opts.claimedBy === 'function') {
+			for (const href of requestSpellings(rule.from.slice(0, q), path.value, rule.from.slice(q))) {
+				const owner = opts.claimedBy(href);
+				if (owner) throw new QueryRedirectError('reserved_path', 'from: ' + path.value + ' is answered by the worker itself (' + owner + '); a rule there could never match', where);
+			}
 		}
 		const perPath = byPath[path.value] || (byPath[path.value] = {});
 		if (Object.prototype.hasOwnProperty.call(perPath, query.value)) {

@@ -9,7 +9,8 @@
 // bytes as no file, and the template's two placeholders are the only thing that differs.
 //
 // 🔴 THE ORDER IS THE POINT, as it was for markdown negotiation: the hop must land on the canonical
-// host, and the key must be read off the ORIGINAL request before any other branch touches it.
+// host, and the lookup runs only where the request would otherwise reach ASSETS — after every
+// worker-owned branch has declined (tile#158 r4) — still on the ORIGINAL request.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -62,12 +63,13 @@ const BASE_ARGS = ['--guild', 'site_g1', '--name', 'NORTHWIND'];
 
 // ── byte identity ───────────────────────────────────────────────────────────────────────────────
 
-test('the template carries both placeholders exactly once, adjacent to the canonical-host ones', () => {
+test('the template carries both placeholders exactly once: helpers beside the canonical ones, fetch at the ASSETS fall-through', () => {
 	for (const marker of ['/*__QUERY_REDIRECT_HELPERS__*/', '/*__QUERY_REDIRECT_FETCH__*/']) {
 		assert.equal(templateSource.split(marker).length - 1, 1, marker + ' once');
 	}
 	assert.ok(templateSource.includes('/*__CANONICAL_HELPERS__*//*__QUERY_REDIRECT_HELPERS__*/'));
-	assert.ok(templateSource.includes('/*__CANONICAL_FETCH__*//*__QUERY_REDIRECT_FETCH__*/'));
+	assert.ok(!templateSource.includes('/*__CANONICAL_FETCH__*//*__QUERY_REDIRECT_FETCH__*/'), 'no longer first in fetch');
+	assert.ok(templateSource.includes("renderGridPage(request, env, ctx, CFG, idx);\n/*__QUERY_REDIRECT_FETCH__*/\t\t// Last, and only for a route the build itself mapped"));
 });
 
 test('without --query-redirects the worker carries none of the new bytes', async () => {
@@ -105,7 +107,7 @@ test('with rules, the only differences are the module, the glue and the baked ke
 	const helpersAt = stripped.indexOf('function matchQueryRedirect(request, byPath) {');
 	const helpersEnd = stripped.indexOf('}\n\n', helpersAt) + 3;
 	stripped = stripped.slice(0, helpersAt) + stripped.slice(helpersEnd);
-	stripped = stripped.replace(/\t\tconst queryRedirectResponse = matchQueryRedirect\(request, CFG\.queryRedirects\.byPath\);\n\t\tif \(queryRedirectResponse\) return queryRedirectResponse;\n/, '');
+	stripped = stripped.replace(/\t\tconst queryRedirectResponse = complete \? null : matchQueryRedirect\(request, CFG\.queryRedirects\.byPath\);\n\t\tif \(queryRedirectResponse\) return queryRedirectResponse;\n/, '');
 	// Global: the template bakes `__SHOP_CONFIG__` twice (once in its header comment), so the key
 	// appears twice too.
 	stripped = stripped.replace(/,"queryRedirects":\{"v":1,"byPath":\{.*?\}\}\}\}/g, '}');
@@ -116,14 +118,23 @@ test('with rules, the only differences are the module, the glue and the baked ke
 
 const worker = await emitWorker([...BASE_ARGS, '--query-redirects', FIXTURE_RULES]);
 
-test('the branch sits after the canonical-host hop and before everything else in fetch', () => {
+test('the branch sits after every worker-owned branch and right before the ASSETS fall-through', () => {
 	const src = worker.bytes.toString('utf8');
 	const fetchStart = src.indexOf('async fetch(request, env, ctx)');
-	const cfgAt = src.indexOf('const CFG = ', fetchStart);
-	const queryAt = src.indexOf('matchQueryRedirect(request, CFG.queryRedirects.byPath)', fetchStart);
-	const shopsAt = src.indexOf('const shopDescriptors =', fetchStart);
-	const inboxAt = src.indexOf("pathname === '/__reef/inbox'", fetchStart);
-	assert.ok(fetchStart >= 0 && cfgAt > fetchStart && queryAt > cfgAt && queryAt < shopsAt && shopsAt < inboxAt);
+	const at = (needle) => {
+		const i = src.indexOf(needle, fetchStart);
+		assert.ok(i > fetchStart, needle + ' is in fetch');
+		return i;
+	};
+	const queryAt = at('matchQueryRedirect(request, CFG.queryRedirects.byPath)');
+	assert.equal(src.indexOf('matchQueryRedirect(request, CFG.queryRedirects.byPath)', queryAt + 1), -1, 'called once');
+	for (const owned of ["pathname === '/__reef/inbox'", 'YT_POSTER_PATH.exec(pathname)', 'matchNativeCheckoutSuccess(request',
+		'matchSiteOwnedBuyerPage(request', 'matchSubscribeResult(request', 'matchForwardRule(transport.forward', 'matchVerdictRule(transport.verdict',
+		'matchShopComplete(pathname', 'renderNativeProduct(request', 'renderGridPage(request, env, ctx, CFG, idx)']) {
+		assert.ok(at(owned) < queryAt, owned + ' runs before the lookup');
+	}
+	assert.ok(queryAt < at('negotiateMarkdown(request, env, CFG.markdown)'));
+	assert.ok(queryAt < at('return env.ASSETS.fetch(request); // everything else'));
 });
 
 test('/product.php?cid=12 → 301 /products/widget, with no query re-appended and nothing fetched', async () => {
@@ -392,12 +403,19 @@ test('r3 P2 reserved: a non-ASCII site-owned buyer page (/會員) is refused', (
 	assert.match(r.stderr, /reserved_path: from: \/會員 /);
 });
 
-test('r3 P2 reserved: non-ASCII checkout and subscribe result paths are refused', () => {
-	for (const from of ['/結帳/結果', '/訂閱/結果']) {
-		const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-result.md', from + '?x=1 /b 301\n')]);
-		assert.equal(r.status, 2, from);
-		assert.match(r.stderr, new RegExp('reserved_path: from: ' + from + ' '), from);
-	}
+// r4: reserved exactly when the worker's own matcher claims the request. The subscribe result is
+// claimed on its path alone; the checkout result only as a native storefront's return (with the
+// order locator) — without one, and with no forward for it, the worker hands it to ASSETS, so a
+// rule there is a working rule, not a stolen page.
+test('r3 P2 reserved: non-ASCII checkout and subscribe result paths are refused when the worker claims them', () => {
+	const sub = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-result.md', '/訂閱/結果?x=1 /b 301\n')]);
+	assert.equal(sub.status, 2);
+	assert.match(sub.stderr, /reserved_path: from: \/訂閱\/結果 is answered by the worker itself \(the subscribe result\)/);
+	const native = ['--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }]), '--api', 'https://api.example'];
+	const checkout = emitRefusal([...BASE_ARGS, ...native, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-result2.md', '/結帳/結果?order=1 /b 301\n')]);
+	assert.equal(checkout.status, 2, checkout.stderr);
+	assert.match(checkout.stderr, /reserved_path: from: \/結帳\/結果 is answered by the worker itself \(the checkout result\)/);
+	emitFile([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-result3.md', '/結帳/結果?x=1 /b 301\n')]);
 });
 
 test('r3 P2 reserved: a non-ASCII forwarded prefix (/接口/) is refused at and under it', () => {
@@ -414,4 +432,134 @@ test('r3 P2 reserved: a non-ASCII exact forward (/帳戶/) is refused', () => {
 	const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-exact.md', '/帳戶?x=1 /b 301\n')]);
 	assert.equal(r.status, 2);
 	assert.match(r.stderr, /reserved_path: from: \/帳戶 /);
+});
+
+// ── tile#158 r4 (Codex review r3): a worker-owned route can never be intercepted ────────────────
+// Two rounds of reservation-list holes (spelling in r3, matching semantics here) say the same
+// thing: a list compiled beside the worker cannot keep up with the worker's own matchers. So the
+// lookup now runs only where the request would otherwise reach env.ASSETS — after every matcher has
+// declined — and the compile-time refusal asks those SAME matchers (imported from the template).
+
+const R4_CONTRACT = (forward) => rulesFile('r4-contract-' + (++emitted) + '.json', JSON.stringify({
+	schemaVersion: 2, bindingName: 'SEAMLINK',
+	verdictEndpoint: { version: 2, path: '/seam/site-verdict-v2', param: 'path' },
+	onBindingMissing: { status: 599, cacheControl: 'private, no-store' },
+	forward
+}));
+const R4_API = () => R4_CONTRACT([{ match: 'prefix', value: '/api', methods: ['GET'] }]);
+const R4_ROOT = () => R4_CONTRACT([{ match: 'prefix', value: '/', methods: ['GET', 'HEAD'] }]);
+const R4_SHOP = ['--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }]), '--api', 'https://api.example'];
+
+test('r4 P2 a transport prefix without a trailing slash reserves what startsWith forwards: /apix is refused at emit', () => {
+	for (const from of ['/apix?x=1', '/api?x=1', '/api/thing?x=1', '/%61pix?x=1']) {
+		const r = emitRefusal([...BASE_ARGS, '--api-contract', R4_API(), '--query-redirects', rulesFile('r4-apix.md', from + ' /gone 301\n')]);
+		assert.equal(r.status, 2, from);
+		assert.match(r.stderr, /reserved_path: from: \/api\S* is answered by the worker itself/, from);
+	}
+	// Not under the prefix in the transport's own sense.
+	emitFile([...BASE_ARGS, '--api-contract', R4_API(), '--query-redirects', rulesFile('r4-ap.md', '/ap?x=1 /gone 301\n/xapi?x=1 /gone 301\n')]);
+});
+
+test('r4 P2 a root transport prefix (/) reserves every path', () => {
+	for (const from of ['/anything?x=1', '/?p=1', '/deep/er/path?x=1']) {
+		const r = emitRefusal([...BASE_ARGS, '--api-contract', R4_ROOT(), '--query-redirects', rulesFile('r4-root.md', from + ' /gone 301\n')]);
+		assert.equal(r.status, 2, from);
+		assert.match(r.stderr, /reserved_path: /, from);
+	}
+});
+
+test('r4 P2 the locale checkout-completion family is refused whenever a shop exists, with or without the slash', () => {
+	for (const from of ['/fr/shop/complete?order=123', '/fr/shop/complete/?order=123', '/zh-tw/shop/complete?x=1', '/shop/complete?order=1']) {
+		const r = emitRefusal([...BASE_ARGS, ...R4_SHOP, '--query-redirects', rulesFile('r4-complete.md', from + ' /gone 301\n')]);
+		assert.equal(r.status, 2, from);
+		assert.match(r.stderr, /reserved_path: from: \/[a-z-]*\/?shop\/complete is answered by the worker itself/, from);
+	}
+	// A neighbour the completion matcher does not claim still compiles, and with NO shop the
+	// worker owns no completion page, so the same rule compiles too.
+	emitFile([...BASE_ARGS, ...R4_SHOP, '--query-redirects', rulesFile('r4-completed.md', '/fr/shop/completed?x=1 /gone 301\n')]);
+	emitFile([...BASE_ARGS, '--query-redirects', rulesFile('r4-noshop.md', '/fr/shop/complete?order=123 /gone 301\n')]);
+});
+
+// 🔴 THE CLASS GUARD. Bypass compile() entirely: bake map entries for worker-owned paths straight into
+// an emitted worker (the shape a stale worker, a hand edit, or the NEXT matcher nobody reserved
+// would leave), and prove each request still reaches its own handler. A control entry on an
+// unowned path proves the injected map is live, so a pass cannot come from a dead map.
+async function injectedWorker(args, byPath, edits = []) {
+	const good = emitFile([...args, '--query-redirects', rulesFile('r4-seed-' + (++emitted) + '.md', '/r4seed?x=1 /gone 301\n')]);
+	let text = readFileSync(good, 'utf8');
+	const seed = '"queryRedirects":{"v":1,"byPath":{"/r4seed":{"x=1":"/gone"}}}';
+	assert.ok(text.includes(seed), 'the seed map is baked where expected');
+	text = text.replaceAll(seed, '"queryRedirects":' + JSON.stringify({ v: 1, byPath }));
+	// Further hand edits to the baked config (a contract value compile-time would have refused).
+	for (const [from, to] of edits) {
+		assert.ok(text.includes(from), 'the baked config carries ' + from);
+		text = text.replaceAll(from, to);
+	}
+	const bad = join(workDir, 'r4-injected-' + (++emitted) + '.mjs');
+	writeFileSync(bad, text);
+	return import(pathToFileURL(bad).href);
+}
+function boundEnv() {
+	const a = assetsEnv();
+	const bound = [];
+	a.env.SEAMLINK = { fetch: async (req) => { bound.push({ url: req.url, method: req.method }); return new Response('BOUND', { status: 200 }); } };
+	return { ...a, bound };
+}
+
+test('r4 class: injected entries on worker-owned paths never answer 301 — forward, completion, inbox', async () => {
+	const mod = await injectedWorker([...BASE_ARGS, '--api-contract', R4_API(), ...R4_SHOP], {
+		'/apix': { 'x=1': '/gone' },
+		'/api/thing': { 'x=1': '/gone' },
+		'/fr/shop/complete': { 'order=123': '/gone' },
+		'/__reef/inbox': { 'x=1': '/gone' },
+		'/zz': { 'x=1': '/gone' }
+	});
+	// Control: the injected map is live.
+	{
+		const { env } = boundEnv();
+		const res = await mod.default.fetch(new Request('https://site.example/zz?x=1'), env);
+		assert.equal(res.status, 301, 'control: an unowned injected key still answers 301');
+	}
+	// Codex repro 1: the forward gets /apix?x=1 verbatim.
+	for (const u of ['https://site.example/apix?x=1', 'https://site.example/api/thing?x=1']) {
+		const { env, bound, seen } = boundEnv();
+		const res = await mod.default.fetch(new Request(u), env);
+		assert.equal(res.status, 200, u);
+		assert.equal(res.headers.get('location'), null, u);
+		assert.deepEqual(bound, [{ url: u, method: 'GET' }], u + ' reaches the binding');
+		assert.deepEqual(seen, [], u);
+	}
+	// Codex repro 2: the completion handler renders /fr/shop/complete?order=123 (it asks ASSETS for
+	// the locale shop shell, never for the original URL), with or without the trailing slash.
+	for (const u of ['https://site.example/fr/shop/complete?order=123', 'https://site.example/fr/shop/complete/?order=123']) {
+		const { env, seen } = boundEnv();
+		const res = await mod.default.fetch(new Request(u), env);
+		assert.equal(res.status, 200, u);
+		assert.equal(res.headers.get('location'), null, u);
+		assert.equal(seen[0] && seen[0].url, 'https://site.example/fr/shop/', u + ' is rendered by the completion handler');
+	}
+	// HEAD on the completion family is declined by the handler (GET only) and must not 301 either:
+	// one path answering two ways by method would be worse than either answer.
+	{
+		const { env } = boundEnv();
+		const res = await mod.default.fetch(new Request('https://site.example/fr/shop/complete?order=123', { method: 'HEAD' }), env);
+		assert.notEqual(res.status, 301, 'HEAD on the completion family is not redirected');
+	}
+	{
+		const { env } = boundEnv();
+		const res = await mod.default.fetch(new Request('https://site.example/__reef/inbox?x=1'), env);
+		assert.equal(res.status, 405, 'the inbox route still answers first-hand');
+	}
+});
+
+test('r4 class: an injected entry under a root forward (/) reaches the binding', async () => {
+	// A root forward reserves every path, so even the seed rule is refused at emit: seed under a
+	// placeholder prefix and turn it into `/` in the baked config.
+	const placeholder = R4_CONTRACT([{ match: 'prefix', value: '/r4-placeholder/', methods: ['GET', 'HEAD'] }]);
+	const root = await injectedWorker([...BASE_ARGS, '--api-contract', placeholder], { '/anything': { 'x=1': '/gone' } },
+		[['"value":"/r4-placeholder/"', '"value":"/"']]);
+	const { env, bound } = boundEnv();
+	const res = await root.default.fetch(new Request('https://site.example/anything?x=1'), env);
+	assert.equal(res.status, 200);
+	assert.deepEqual(bound.map((b) => b.url), ['https://site.example/anything?x=1'], 'a root forward owns every path');
 });
