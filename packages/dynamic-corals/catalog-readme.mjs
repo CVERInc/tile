@@ -11,6 +11,8 @@ export function renderMetadata(name, metadata) {
   const rows = metadata.attributes.map(({ name: attribute, type, required, default: fallback, description }) =>
     `| \`${attribute}\` | ${type} | ${required ? 'yes' : 'no'} | ${fallback === null ? '—' : `\`${String(fallback).replaceAll('|', '\\|')}\``} | ${description.replaceAll('|', '\\|')} |`);
   return [START, `## ${name} metadata`, '', metadata.summary, '', `Author: \`${metadata.author}\`.`, '',
+    ...(metadata.host ? [`Host: \`${metadata.host}\`. ${metadata.requirements}`, ''] : []),
+    ...(metadata.anyOf ? ['Requires one of: ' + metadata.anyOf.map(group => group.map(a => '`' + a + '`').join(' + ')).join(' or ') + '.', ''] : []),
     '### Embed', '', '```html', metadata.embed, '```', '', '### Attributes', '',
     '| Attribute | Type | Required | Default | Purpose |', '|---|---|---|---|---|', ...rows,
     '', END].join('\n');

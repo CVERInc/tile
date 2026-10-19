@@ -9,7 +9,10 @@
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Selects this coral."
+      "description": "Selects the events coral.",
+      "values": [
+        "events"
+      ]
     },
     {
       "name": "data-src",
@@ -23,7 +26,7 @@
       "type": "string",
       "required": false,
       "default": "No upcoming events.",
-      "description": "Text shown when the feed has no renderable HTML."
+      "description": "Text shown for an empty feed, fetch failure, or non-ok response."
     },
     {
       "name": "data-in-prefix",

@@ -1,7 +1,7 @@
 {
   "id": "inbox-bubble",
   "author": "official",
-  "summary": "Adds a visitor inbox bubble for a site or other tenant, with an optional site-answer view.",
+  "summary": "Draws a visitor inbox bubble only where the site has an Inbox; with data-kaito=\"1\", falls back to an ask-only site-answer view.",
   "embed": "<div data-dynamic-coral=\"inbox-bubble\" data-kind=\"site\" data-id=\"YOUR_SITE_KEY\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/inbox-bubble/v0/inbox-bubble.js\"></script>",
   "attributes": [
     {
@@ -9,14 +9,23 @@
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Selects this coral."
+      "description": "Selects the inbox-bubble coral.",
+      "values": [
+        "inbox-bubble"
+      ]
     },
     {
       "name": "data-kind",
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Tenant kind: site, card, cardtile, or ext."
+      "description": "Tenant kind: site, card, cardtile, or ext.",
+      "values": [
+        "site",
+        "card",
+        "cardtile",
+        "ext"
+      ]
     },
     {
       "name": "data-id",
@@ -29,8 +38,8 @@
       "name": "data-api-base",
       "type": "url",
       "required": false,
-      "default": null,
-      "description": "Backend origin override for previews."
+      "default": "https://feelreef.com",
+      "description": "Backend origin override."
     },
     {
       "name": "data-kaito",
@@ -72,7 +81,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "Dialog accessible-name override."
+      "description": "Dialog accessible-name override; also the visible panel label in the ask-only view."
     },
     {
       "name": "data-open-label",
@@ -100,7 +109,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "Baked site name when the platform has not resolved one."
+      "description": "Site name: this attribute takes priority, then og:site_name, then hostname."
     }
   ]
 }

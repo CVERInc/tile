@@ -123,23 +123,23 @@ Author: `official`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects this coral. |
-| `data-guild-id` | string | yes | — | Seller receiving the amount. |
-| `data-api-base` | url | yes | — | Backend origin that serves the sponsor route. |
+| `data-dynamic-coral` | enum | yes | — | Selects the sponsor coral. |
+| `data-guild-id` | string | yes | — | Seller the checkout link is created for. |
+| `data-api-base` | url | yes | — | Backend base serving the sponsor route; trimmed with trailing slashes removed, without scheme validation. |
 | `data-currency` | string | yes | — | ISO 4217 currency code. |
 | `data-currency-symbol` | string | no | — | Displayed symbol; defaults to the currency code. |
 | `data-presets` | string | no | — | Comma-separated suggested amounts. |
 | `data-default-amount` | string | no | — | Initial amount when the URL has no amount. |
-| `data-min` | number | no | `1` | Smallest accepted amount in major units. |
-| `data-max` | number | no | `1000000` | Largest accepted amount in major units. |
+| `data-min` | number | no | `1` | Smallest accepted amount in major units. Read as a string and clamped in hundredths. |
+| `data-max` | number | no | `1000000` | Largest accepted amount in major units. Read as a string and clamped in hundredths. |
 | `data-amount-param` | string | no | `amount` | URL query key used to prefill the amount. |
 | `data-title` | string | no | — | Heading override. |
 | `data-note` | string | no | — | Supporting text override. |
-| `data-amount-label` | string | no | — | Amount field label override. |
-| `data-submit-label` | string | no | — | Submit button label override. |
-| `data-invalid-label` | string | no | — | Invalid amount message override. |
-| `data-error-label` | string | no | — | Request error message override. |
-| `data-not-activated-label` | string | no | — | Message for a site without collection activated. |
-| `data-unconnected-label` | string | no | — | Message for a site without a connected payment account. |
+| `data-amount-label` | string | no | `Amount` | Amount field label override. |
+| `data-submit-label` | string | no | `Sponsor` | Submit button label override. |
+| `data-invalid-label` | string | no | `Enter an amount to sponsor.` | Invalid amount message override. |
+| `data-error-label` | string | no | `Could not start that just now — try again.` | Request error message override. |
+| `data-not-activated-label` | string | no | `This site hasn't turned on payments yet.` | Message for a site without collection activated. |
+| `data-unconnected-label` | string | no | `Sponsoring is not set up on this site yet.` | Message for a site without a connected payment account. |
 
 <!-- coral metadata: end -->

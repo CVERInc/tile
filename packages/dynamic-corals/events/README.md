@@ -24,9 +24,9 @@ Author: `official`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects this coral. |
+| `data-dynamic-coral` | enum | yes | — | Selects the events coral. |
 | `data-src` | url | no | `/events.json` | JSON event feed URL. |
-| `data-empty` | string | no | `No upcoming events.` | Text shown when the feed has no renderable HTML. |
+| `data-empty` | string | no | `No upcoming events.` | Text shown for an empty feed, fetch failure, or non-ok response. |
 | `data-in-prefix` | string | no | `in ` | Prefix for upcoming countdowns. |
 | `data-live-label` | string | no | `Now` | Text for an event happening now. |
 | `data-countdown` | enum | no | — | Set to always to show far-off countdowns. |

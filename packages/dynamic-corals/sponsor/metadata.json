@@ -9,21 +9,24 @@
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Selects this coral."
+      "description": "Selects the sponsor coral.",
+      "values": [
+        "sponsor"
+      ]
     },
     {
       "name": "data-guild-id",
       "type": "string",
       "required": true,
       "default": null,
-      "description": "Seller receiving the amount."
+      "description": "Seller the checkout link is created for."
     },
     {
       "name": "data-api-base",
       "type": "url",
       "required": true,
       "default": null,
-      "description": "Backend origin that serves the sponsor route."
+      "description": "Backend base serving the sponsor route; trimmed with trailing slashes removed, without scheme validation."
     },
     {
       "name": "data-currency",
@@ -58,14 +61,14 @@
       "type": "number",
       "required": false,
       "default": 1,
-      "description": "Smallest accepted amount in major units."
+      "description": "Smallest accepted amount in major units. Read as a string and clamped in hundredths."
     },
     {
       "name": "data-max",
       "type": "number",
       "required": false,
       "default": 1000000,
-      "description": "Largest accepted amount in major units."
+      "description": "Largest accepted amount in major units. Read as a string and clamped in hundredths."
     },
     {
       "name": "data-amount-param",
@@ -92,42 +95,42 @@
       "name": "data-amount-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "Amount",
       "description": "Amount field label override."
     },
     {
       "name": "data-submit-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "Sponsor",
       "description": "Submit button label override."
     },
     {
       "name": "data-invalid-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "Enter an amount to sponsor.",
       "description": "Invalid amount message override."
     },
     {
       "name": "data-error-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "Could not start that just now — try again.",
       "description": "Request error message override."
     },
     {
       "name": "data-not-activated-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "This site hasn't turned on payments yet.",
       "description": "Message for a site without collection activated."
     },
     {
       "name": "data-unconnected-label",
       "type": "string",
       "required": false,
-      "default": null,
+      "default": "Sponsoring is not set up on this site yet.",
       "description": "Message for a site without a connected payment account."
     }
   ]

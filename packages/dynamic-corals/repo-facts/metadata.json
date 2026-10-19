@@ -9,28 +9,32 @@
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Selects this coral."
+      "description": "Selects the repo-facts coral.",
+      "values": [
+        "repo-facts"
+      ]
     },
     {
       "name": "data-owner",
       "type": "string",
       "required": true,
       "default": null,
-      "description": "GitHub owner whose repository cards are updated."
+      "description": "GitHub owner whose repository cards are updated; must match ^[\\w.-]{1,100}$.",
+      "pattern": "^[\\w.-]{1,100}$"
     },
     {
       "name": "data-api-base",
       "type": "url",
       "required": true,
       "default": null,
-      "description": "Origin serving the repo-facts worker."
+      "description": "Origin serving the repo-facts worker; must start with https://."
     },
     {
       "name": "data-locale",
       "type": "string",
       "required": false,
       "default": null,
-      "description": "Language override; otherwise uses the page HTML lang."
+      "description": "Language override; otherwise page HTML lang, then en. Output languages are en, zh, ja, ko; unsupported languages use en."
     }
   ]
 }

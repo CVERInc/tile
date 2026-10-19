@@ -13,19 +13,22 @@ Opens an animated QR code for a URL from a Cardtile-rendered icon.
 
 Author: `official`.
 
+Host: `cardtile`. Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Requires a child .cp-icon and Cardtile CSS variables --cp-ground, --cp-accent, --r-lg, --s-4.
+
 ### Embed
 
 ```html
-<div data-dynamic-coral="qr" data-url="https://example.com" data-name="Example"><img class="cp-icon" alt="Example" src="icon.png"></div>
+<div class="st-figure" data-dynamic-coral="qr" data-url="https://example.com" data-name="Example" data-version="4"><img class="cp-icon" src="icon.png" alt="Example" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="QR code"></div>
+<script src="/_coral/qr.js"></script>
 ```
 
 ### Attributes
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects this coral. |
-| `data-url` | url | yes | — | URL encoded in the QR matrix. |
+| `data-dynamic-coral` | enum | yes | — | Selects the qr coral. |
+| `data-url` | url | no | `` | URL encoded in the QR matrix. |
 | `data-name` | string | no | `` | Name shown above the QR code. |
-| `data-version` | number | no | `0` | QR version override; zero lets the encoder choose. |
+| `data-version` | number | no | `0` | QR version override; zero or a pinned version too small for the URL falls back to automatic selection. |
 
 <!-- coral metadata: end -->

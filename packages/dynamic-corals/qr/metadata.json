@@ -2,20 +2,23 @@
   "id": "qr",
   "author": "official",
   "summary": "Opens an animated QR code for a URL from a Cardtile-rendered icon.",
-  "embed": "<div data-dynamic-coral=\"qr\" data-url=\"https://example.com\" data-name=\"Example\"><img class=\"cp-icon\" alt=\"Example\" src=\"icon.png\"></div>",
+  "embed": "<div class=\"st-figure\" data-dynamic-coral=\"qr\" data-url=\"https://example.com\" data-name=\"Example\" data-version=\"4\"><img class=\"cp-icon\" src=\"icon.png\" alt=\"Example\" width=\"80\" height=\"80\" fetchpriority=\"high\" role=\"button\" tabindex=\"0\" aria-label=\"QR code\"></div>\n<script src=\"/_coral/qr.js\"></script>",
   "attributes": [
     {
       "name": "data-dynamic-coral",
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "Selects this coral."
+      "description": "Selects the qr coral.",
+      "values": [
+        "qr"
+      ]
     },
     {
       "name": "data-url",
       "type": "url",
-      "required": true,
-      "default": null,
+      "required": false,
+      "default": "",
       "description": "URL encoded in the QR matrix."
     },
     {
@@ -30,7 +33,9 @@
       "type": "number",
       "required": false,
       "default": 0,
-      "description": "QR version override; zero lets the encoder choose."
+      "description": "QR version override; zero or a pinned version too small for the URL falls back to automatic selection."
     }
-  ]
+  ],
+  "host": "cardtile",
+  "requirements": "Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Requires a child .cp-icon and Cardtile CSS variables --cp-ground, --cp-accent, --r-lg, --s-4."
 }
