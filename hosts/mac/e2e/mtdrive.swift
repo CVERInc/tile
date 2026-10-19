@@ -117,7 +117,12 @@ case "wait-windows":
     exit(waitUntil(seconds(2, 10)) { onScreenWindows().count == n } ? 0 : 1)
 
 case "wait-gone":
-    exit(waitUntil(seconds(1, 10)) { app() == nil } ? 0 : 1)
+    // Ask the kernel, not NSWorkspace. `runningApplications` is refreshed by notifications that
+    // only arrive on a spinning run loop, and this tool never spins one — so after the first read
+    // the list is frozen, and an app that quits a moment later is reported as running forever.
+    // That made a slow-but-normal ⌘Q look like a hang.
+    guard let pid = app()?.processIdentifier else { exit(0) }
+    exit(waitUntil(seconds(1, 10)) { kill(pid, 0) != 0 && errno == ESRCH } ? 0 : 1)
 
 case "key":
     guard args.count >= 2 else { fail("key <combo>") }

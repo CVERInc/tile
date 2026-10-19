@@ -29,9 +29,21 @@ quit_app() {
   "$DRIVE" wait-gone 5 || { [ -n "$(app_pids)" ] && kill -9 $(app_pids) 2>/dev/null; }
 }
 
-# open <file>: launch a fresh app on <file> and wait for its document window.
-open_doc() {
+# launch <file>: start the app on <file>. The previous test's app has left the process table by now
+# (quit_app waits for that), but LaunchServices drops it from its own list a moment later, and an
+# `open` in that gap fails with -600 (procNotFound). Retry briefly instead of sleeping blindly.
+launch() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    open -a "$APP" "$1" 2>/dev/null && return 0
+    sleep 0.5
+  done
   open -a "$APP" "$1"
+}
+
+# open_doc <file>: launch a fresh app on <file> and wait for its document window.
+open_doc() {
+  launch "$1"
   "$DRIVE" wait-windows 1 15 || return 1
   sleep "$SETTLE"
 }
@@ -122,7 +134,7 @@ t_external_change_not_overwritten() {
 # Not UTF-8: refuse to open rather than guess, and leave the file alone.
 t_non_utf8_refused() {
   printf 'caf\351\n' > f.md                   # Latin-1 é
-  open -a "$APP" f.md
+  launch f.md
   sleep 4
   local docs; docs="$(doc_windows)"
   [ "$docs" -eq 0 ] || { echo "    a document window opened ($docs)"; false; }
