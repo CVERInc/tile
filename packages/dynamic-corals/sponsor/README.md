@@ -123,7 +123,7 @@ Author: `official`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the sponsor coral. |
+| `data-dynamic-coral` | enum | yes | — | Selects the sponsor coral. Values: `sponsor`. |
 | `data-guild-id` | string | yes | — | Seller the checkout link is created for. |
 | `data-api-base` | url | yes | — | Backend base serving the sponsor route; trimmed with trailing slashes removed, without scheme validation. |
 | `data-currency` | string | yes | — | ISO 4217 currency code. |

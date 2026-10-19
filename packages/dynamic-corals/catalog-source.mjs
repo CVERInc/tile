@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 
 // Follow only runtime local imports, never tests, generated bundles or sibling tools.
-export function sourceFor(entry, seen = new Set()) {
+export function sourceFor(entry, { within = null, seen = new Set() } = {}) {
+  if (within && !entry.startsWith(resolve(within) + sep)) return '';
   if (seen.has(entry)) return '';
   seen.add(entry);
   const source = readFileSync(entry, 'utf8');
   return source + [...source.matchAll(/\bimport\s[\s\S]*?from\s*['"](\.[^'"]+)['"]/g)]
-    .map(([, path]) => sourceFor(resolve(dirname(entry), path), seen)).join('\n');
+    .map(([, path]) => sourceFor(resolve(dirname(entry), path), { within, seen })).join('\n');
 }
 
 export function attributeReads(source) {
@@ -28,22 +29,35 @@ export function attributeReads(source) {
 
 // These are read from generated content or the document, not embed configuration.
 export const INTERNAL = {
-  'data-dynamic-coral': 'Mount selector shared by every coral.',
-  'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
-  'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
-  'data-cancel': 'Cancel control inside the generated inbox dialog.',
-  'data-loc': 'Location on generated event links.',
-  'data-start': 'Timestamp on generated event entries.',
-  'data-end': 'Timestamp on generated event entries.',
-  'data-amount': 'Amount on generated sponsor preset buttons.',
-  'data-variation-id': 'Variation on server-rendered shop cards.',
-  'data-price': 'Price on server-rendered shop cards.',
-  'data-variant-count': 'Variant count on server-rendered shop cards.',
-  'data-price-min': 'Minimum price on server-rendered shop cards.',
-  'data-price-max': 'Maximum price on server-rendered shop cards.',
-  'data-variants': 'Variants on server-rendered shop cards.',
-  'data-currency': 'Currency on server-rendered shop cards (also a sponsor option).',
-  'data-slug': 'Slug on server-rendered shop cards.',
+  events: {
+    'data-loc': 'Location on generated event links.',
+    'data-start': 'Timestamp on generated event entries.',
+    'data-end': 'Timestamp on generated event entries.',
+  },
+  'square-shop': {
+    'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+    'data-variation-id': 'Variation on server-rendered shop cards.',
+    'data-price': 'Price on server-rendered shop cards.',
+    'data-variant-count': 'Variant count on server-rendered shop cards.',
+    'data-price-min': 'Minimum price on server-rendered shop cards.',
+    'data-price-max': 'Maximum price on server-rendered shop cards.',
+    'data-variants': 'Variants on server-rendered shop cards.',
+    'data-currency': 'Currency on server-rendered shop cards.',
+    'data-slug': 'Slug on server-rendered shop cards.',
+  },
+  'inbox-bubble': {
+    'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+    'data-cancel': 'Cancel control inside the generated inbox dialog.',
+  },
+  qr: {},
+  drawer: {},
+  sponsor: {
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+    'data-amount': 'Amount on generated sponsor preset buttons.',
+  },
+  'repo-facts': {},
 };
 
 // Explicitly account for the names passed through inbox-bubble's computed data-${name} helper.

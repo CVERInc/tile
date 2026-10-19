@@ -57,14 +57,24 @@ test('README drift check rejects changed metadata prose', () => {
 for (const [name, coral] of Object.entries(CORALS)) {
   test(`${name}: metadata matches runtime attribute reads`, () => {
     const metadata = JSON.parse(readFileSync(join(HERE, name, 'metadata.json')));
-    const reads = attributeReads(sourceFor(join(HERE, name, coral.src)));
+    const entry = join(HERE, name, coral.src);
+    const reads = attributeReads(sourceFor(entry));
+    // Imported shared helpers may read document policy, but cannot justify a
+    // public option that this coral's own client/core never reads.
+    const ownReads = attributeReads(sourceFor(entry, { within: join(HERE, name) }));
+    const internal = INTERNAL[name];
+    assert.ok(internal, `${name}: internal attribute census missing`);
+    for (const [attribute, reason] of Object.entries(internal)) {
+      assert.ok(reason.trim(), `${name}: internal attribute needs a reason`);
+      assert.ok(reads.has(attribute), `${name}: stale internal allow-list entry ${attribute}`);
+    }
     for (const [attribute, reason] of Object.entries(DYNAMIC_NAMES[name] || {})) {
       assert.ok(reason.trim(), `${name}: dynamic name needs a reason`);
       assert.ok(reads.has(attribute), `${name}: stale dynamic allow-list entry ${attribute}`);
     }
     const documented = new Set(metadata.attributes.map(a => a.name));
-    for (const attribute of reads) assert.ok(documented.has(attribute) || INTERNAL[attribute], `${name}: source reads undocumented ${attribute}`);
-    for (const attribute of documented) assert.ok(reads.has(attribute) || attribute === 'data-dynamic-coral', `${name}: metadata documents unread ${attribute}`);
+    for (const attribute of reads) assert.ok(documented.has(attribute) || Object.hasOwn(internal, attribute), `${name}: source reads undocumented ${attribute}`);
+    for (const attribute of documented) assert.ok(ownReads.has(attribute) || attribute === 'data-dynamic-coral', `${name}: metadata documents unread ${attribute}`);
   });
 }
 
@@ -128,3 +138,15 @@ test('drawer focus documentation matches the client behaviour', () => {
     assert.equal(focused, insidePanel ? 1 : 0, 'drawer: closing must not focus the close control');
   }
 });
+
+for (const field of ['values', 'pattern']) {
+  test(`README drift check includes ${field} constraints`, () => {
+    const metadata = metadataFor(field === 'values' ? 'square-shop' : 'repo-facts');
+    const current = renderMetadata(metadata.id, metadata);
+    const attribute = metadata.attributes.find(a => field === 'values' ? a.name === 'data-cart' : a.name === 'data-owner');
+    attribute[field] = field === 'values' ? ['changed|value'] : '^changed|pattern$';
+    const changed = expectedReadme(metadata.id, metadata, current);
+    assert.ok(current !== changed, `README: changing ${field} must cause drift`);
+    assert.ok(changed.includes(field === 'values' ? 'Values: `changed\\|value`.' : 'Pattern: `^changed\\|pattern$`.'), `README: ${field} must be rendered with escaped table delimiters`);
+  });
+}

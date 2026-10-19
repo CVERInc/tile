@@ -401,8 +401,8 @@ Author: `official`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the inbox-bubble coral. |
-| `data-kind` | enum | yes | — | Tenant kind: site, card, cardtile, or ext. |
+| `data-dynamic-coral` | enum | yes | — | Selects the inbox-bubble coral. Values: `inbox-bubble`. |
+| `data-kind` | enum | yes | — | Tenant kind: site, card, cardtile, or ext. Values: `site`, `card`, `cardtile`, `ext`. |
 | `data-id` | string | yes | — | Tenant key for the selected kind. |
 | `data-api-base` | url | no | `https://feelreef.com` | Backend origin override. |
 | `data-kaito` | boolean | no | `false` | Set to 1 to enable the site-answer view. |

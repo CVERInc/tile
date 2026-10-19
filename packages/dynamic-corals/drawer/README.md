@@ -29,7 +29,7 @@ Host: `cardtile`. Cardtile-only renderer output, not a standalone copy-paste emb
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the drawer coral. |
+| `data-dynamic-coral` | enum | yes | — | Selects the drawer coral. Values: `drawer`. |
 | `data-drawer-panel` | string | yes | — | Panel identifier; its id must equal this value and the opener URL hash. |
 | `data-drawer` | string | no | — | Opener target panel id; remembers the opener to restore focus. |
 

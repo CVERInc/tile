@@ -26,7 +26,7 @@ Host: `cardtile`. Cardtile-only renderer output, not a standalone copy-paste emb
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the qr coral. |
+| `data-dynamic-coral` | enum | yes | — | Selects the qr coral. Values: `qr`. |
 | `data-url` | url | no | `` | URL encoded in the QR matrix. |
 | `data-name` | string | no | `` | Name shown above the QR code. |
 | `data-version` | number | no | `0` | QR version override; zero or a pinned version too small for the URL falls back to automatic selection. |

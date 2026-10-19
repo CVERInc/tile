@@ -68,12 +68,12 @@ Requires one of: `data-site-id` or `data-guild-id`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the square-shop coral. |
+| `data-dynamic-coral` | enum | yes | — | Selects the square-shop coral. Values: `square-shop`. |
 | `data-site-id` | string | no | — | Site locator; use this or data-guild-id. |
 | `data-guild-id` | string | no | — | Guild locator; takes precedence over data-site-id. |
 | `data-api-base` | url | no | `` | Backend origin; empty means same origin. Deployment builds may stamp a different default. |
 | `data-locale` | string | no | — | Preferred locale for shop copy; falls back to data-shop-locale, page lang, then en-US. |
-| `data-cart` | enum | no | — | Set to 1 for cart mode, or header for cart mode without the sidebar. Other values use instant per-item Buy. |
+| `data-cart` | enum | no | — | Set to 1 for cart mode, or header for cart mode without the sidebar. Other values use instant per-item Buy. Values: `1`, `header`. |
 | `data-collect-shipping` | boolean | no | `false` | Set to 1 to request shipping details in cart mode only. |
 | `data-detail-base` | url | no | — | Base URL for product detail links. |
 | `data-shop-locale` | string | no | — | Fallback locale for shop copy when data-locale is absent; then page lang or en-US. |

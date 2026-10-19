@@ -98,8 +98,8 @@ Author: `official`.
 
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
-| `data-dynamic-coral` | enum | yes | — | Selects the repo-facts coral. |
-| `data-owner` | string | yes | — | GitHub owner whose repository cards are updated; must match ^[\w.-]{1,100}$. |
+| `data-dynamic-coral` | enum | yes | — | Selects the repo-facts coral. Values: `repo-facts`. |
+| `data-owner` | string | yes | — | GitHub owner whose repository cards are updated; must match ^[\w.-]{1,100}$. Pattern: `^[\w.-]{1,100}$`. |
 | `data-api-base` | url | yes | — | Origin serving the repo-facts worker; must start with https://. |
 | `data-locale` | string | no | — | Language override; otherwise page HTML lang, then en. Output languages are en, zh, ja, ko; unsupported languages use en. |
 
