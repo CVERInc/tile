@@ -1,0 +1,160 @@
+/* marktile for macOS — 日本語 */
+
+/* macOS system string, as in Safari, Mail */
+"About %@" = "%@について";
+
+/* macOS system string, as in Safari, Mail */
+"Hide %@" = "%@を非表示";
+
+/* macOS system string, as in Mail, TextEdit */
+"Hide Others" = "ほかを非表示";
+
+/* macOS system string, as in AppKit, Mail */
+"Show All" = "すべてを表示";
+
+/* macOS system string, as in Safari, Mail */
+"Quit %@" = "%@を終了";
+
+/* macOS system string, as in Mail */
+"File" = "ファイル";
+
+/* macOS system string, as in TextEdit */
+"New" = "新規";
+
+/* macOS system string, as in TextEdit */
+"Open…" = "開く…";
+
+/* macOS system string, as in TextEdit */
+"Open Recent" = "最近使った項目を開く";
+
+/* macOS system string, as in Mail */
+"Close" = "閉じる";
+
+/* macOS system string, as in Mail */
+"Save" = "保存";
+
+/* macOS system string, as in Mail, AppKit */
+"Save As…" = "別名で保存…";
+
+/* macOS system string, as in TextEdit */
+"Revert to Saved" = "最後に保存した状態に戻す";
+
+/* macOS system string, as in Mail */
+"Edit" = "編集";
+
+/* macOS system string, as in TextEdit */
+"Undo" = "取り消す";
+
+/* macOS system string, as in TextEdit */
+"Redo" = "やり直す";
+
+/* macOS system string, as in Mail */
+"Cut" = "カット";
+
+/* macOS system string, as in Mail */
+"Copy" = "コピー";
+
+/* macOS system string, as in Mail */
+"Paste" = "ペースト";
+
+/* macOS system string, as in Mail */
+"Paste and Match Style" = "ペーストしてスタイルを合わせる";
+
+/* macOS system string, as in Mail */
+"Select All" = "すべてを選択";
+
+/* macOS system string, as in TextEdit */
+"Find…" = "検索…";
+
+/* macOS system string, as in Mail */
+"Format" = "フォーマット";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 1" = "見出し1";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 2" = "見出し2";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 3" = "見出し3";
+
+/* macOS system string, as in Mail */
+"Bold" = "ボールド";
+
+/* macOS system string, as in Mail */
+"Italic" = "イタリック";
+
+/* macOS system string, as in Notes */
+"Strikethrough" = "取り消し線";
+
+/* macOS system string, as in Notes */
+"Bulleted List" = "箇条書きリスト";
+
+/* macOS system string, as in Notes */
+"Numbered List" = "番号付きリスト";
+
+/* macOS system string, as in Notes */
+"Checklist" = "チェックリスト";
+
+/* macOS system string, as in Notes */
+"Block Quote" = "ブロック引用";
+
+/* macOS system string, as in Notes */
+"Table" = "表";
+
+/* engine wording (i18n/edCode) so the menu and the editor agree */
+"Inline Code" = "インラインコード";
+
+/* engine wording (i18n/edLink) so the menu and the editor agree */
+"Wikilink" = "ウィキリンク";
+
+/* macOS system string, as in Mail */
+"View" = "表示";
+
+/* engine wording (i18n/mtMode*+mtModesPick) so the menu and the editor agree */
+"Next Mode (Seasoned / Rendered / Plain)" = "次の表示モード（アジツケ／レンダー／プレーン）";
+
+/* macOS system string, as in Preview */
+"Table of Contents" = "目次";
+
+/* macOS system string, as in Notes */
+"Hide Toolbar" = "ツールバーを非表示";
+
+/* macOS system string, as in Mail */
+"Show Toolbar" = "ツールバーを表示";
+
+/* macOS system string, as in Dictionary */
+"Bigger Text" = "文字を拡大";
+
+/* macOS system string, as in Dictionary */
+"Smaller Text" = "文字を縮小";
+
+/* macOS system string, as in Notes, Preview */
+"Actual Size" = "実際のサイズ";
+
+/* engine wording (i18n/mtLockToggle) so the menu and the editor agree */
+"Lock Editor (Read-Only)" = "エディタをロック（読み取り専用）";
+
+/* macOS system string, as in Mail */
+"Window" = "ウインドウ";
+
+/* macOS system string, as in Mail */
+"Minimize" = "しまう";
+
+/* macOS system string, as in TextEdit */
+"Zoom" = "拡大/縮小";
+
+/* macOS system string, as in TextEdit */
+"Bring All to Front" = "すべてを手前に移動";
+
+/* marktile's own wording */
+"This file isn’t UTF-8 text." = "このファイルは UTF-8 のテキストではありません。";
+
+/* marktile's own wording */
+"marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it." = "marktile が読み書きできるのは UTF-8 だけです。先にファイルを変換するか、文字コードを変換できるエディタで開いてください。";
+
+/* marktile's own wording */
+"Couldn’t encode this document as UTF-8." = "この書類を UTF-8 でエンコードできませんでした。";
+
+/* marktile's own wording */
+"marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile のエディタエンジンが見つかりません。\n\nこの App は不完全です。再インストールするか、scripts/build-app.sh でビルドし直してください。";

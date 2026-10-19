@@ -1,0 +1,161 @@
+/* marktile for macOS — English (development language). Keys ARE the English text, so a build that
+   somehow lost its .lproj folders still shows readable English instead of identifiers. */
+
+/* macOS system string, as in Safari, Mail */
+"About %@" = "About %@";
+
+/* macOS system string, as in Safari, Mail */
+"Hide %@" = "Hide %@";
+
+/* macOS system string, as in Mail, TextEdit */
+"Hide Others" = "Hide Others";
+
+/* macOS system string, as in AppKit, Mail */
+"Show All" = "Show All";
+
+/* macOS system string, as in Safari, Mail */
+"Quit %@" = "Quit %@";
+
+/* macOS system string, as in Mail */
+"File" = "File";
+
+/* macOS system string, as in TextEdit */
+"New" = "New";
+
+/* macOS system string, as in TextEdit */
+"Open…" = "Open…";
+
+/* macOS system string, as in TextEdit */
+"Open Recent" = "Open Recent";
+
+/* macOS system string, as in Mail */
+"Close" = "Close";
+
+/* macOS system string, as in Mail */
+"Save" = "Save";
+
+/* macOS system string, as in Mail, AppKit */
+"Save As…" = "Save As…";
+
+/* macOS system string, as in TextEdit */
+"Revert to Saved" = "Revert to Saved";
+
+/* macOS system string, as in Mail */
+"Edit" = "Edit";
+
+/* macOS system string, as in TextEdit */
+"Undo" = "Undo";
+
+/* macOS system string, as in TextEdit */
+"Redo" = "Redo";
+
+/* macOS system string, as in Mail */
+"Cut" = "Cut";
+
+/* macOS system string, as in Mail */
+"Copy" = "Copy";
+
+/* macOS system string, as in Mail */
+"Paste" = "Paste";
+
+/* macOS system string, as in Mail */
+"Paste and Match Style" = "Paste and Match Style";
+
+/* macOS system string, as in Mail */
+"Select All" = "Select All";
+
+/* macOS system string, as in TextEdit */
+"Find…" = "Find…";
+
+/* macOS system string, as in Mail */
+"Format" = "Format";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 1" = "Heading 1";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 2" = "Heading 2";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 3" = "Heading 3";
+
+/* macOS system string, as in Mail */
+"Bold" = "Bold";
+
+/* macOS system string, as in Mail */
+"Italic" = "Italic";
+
+/* macOS system string, as in Notes */
+"Strikethrough" = "Strikethrough";
+
+/* macOS system string, as in Notes */
+"Bulleted List" = "Bulleted List";
+
+/* macOS system string, as in Notes */
+"Numbered List" = "Numbered List";
+
+/* macOS system string, as in Notes */
+"Checklist" = "Checklist";
+
+/* macOS system string, as in Notes */
+"Block Quote" = "Block Quote";
+
+/* macOS system string, as in Notes */
+"Table" = "Table";
+
+/* engine wording (i18n/edCode) so the menu and the editor agree */
+"Inline Code" = "Inline Code";
+
+/* engine wording (i18n/edLink) so the menu and the editor agree */
+"Wikilink" = "Wikilink";
+
+/* macOS system string, as in Mail */
+"View" = "View";
+
+/* engine wording (i18n/mtMode*+mtModesPick) so the menu and the editor agree */
+"Next Mode (Seasoned / Rendered / Plain)" = "Next Mode (Seasoned / Rendered / Plain)";
+
+/* macOS system string, as in Preview */
+"Table of Contents" = "Table of Contents";
+
+/* macOS system string, as in Notes */
+"Hide Toolbar" = "Hide Toolbar";
+
+/* macOS system string, as in Mail */
+"Show Toolbar" = "Show Toolbar";
+
+/* macOS system string, as in Dictionary */
+"Bigger Text" = "Bigger Text";
+
+/* macOS system string, as in Dictionary */
+"Smaller Text" = "Smaller Text";
+
+/* macOS system string, as in Notes, Preview */
+"Actual Size" = "Actual Size";
+
+/* engine wording (i18n/mtLockToggle) so the menu and the editor agree */
+"Lock Editor (Read-Only)" = "Lock Editor (Read-Only)";
+
+/* macOS system string, as in Mail */
+"Window" = "Window";
+
+/* macOS system string, as in Mail */
+"Minimize" = "Minimize";
+
+/* macOS system string, as in TextEdit */
+"Zoom" = "Zoom";
+
+/* macOS system string, as in TextEdit */
+"Bring All to Front" = "Bring All to Front";
+
+/* marktile's own wording */
+"This file isn’t UTF-8 text." = "This file isn’t UTF-8 text.";
+
+/* marktile's own wording */
+"marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it." = "marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it.";
+
+/* marktile's own wording */
+"Couldn’t encode this document as UTF-8." = "Couldn’t encode this document as UTF-8.";
+
+/* marktile's own wording */
+"marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh.";

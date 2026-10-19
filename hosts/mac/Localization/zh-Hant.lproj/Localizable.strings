@@ -1,0 +1,160 @@
+/* marktile for macOS — 繁體中文（台灣） */
+
+/* macOS system string, as in Safari, Mail */
+"About %@" = "關於%@";
+
+/* macOS system string, as in Safari, Mail */
+"Hide %@" = "隱藏%@";
+
+/* macOS system string, as in Mail, TextEdit */
+"Hide Others" = "隱藏其他";
+
+/* macOS system string, as in AppKit, Mail */
+"Show All" = "顯示全部";
+
+/* macOS system string, as in Safari, Mail */
+"Quit %@" = "結束%@";
+
+/* macOS system string, as in Mail */
+"File" = "檔案";
+
+/* macOS system string, as in TextEdit */
+"New" = "新增";
+
+/* macOS system string, as in TextEdit */
+"Open…" = "打開⋯";
+
+/* macOS system string, as in TextEdit */
+"Open Recent" = "打開最近使用過的檔案";
+
+/* macOS system string, as in Mail */
+"Close" = "關閉";
+
+/* macOS system string, as in Mail */
+"Save" = "儲存";
+
+/* macOS system string, as in Mail, AppKit */
+"Save As…" = "儲存為⋯";
+
+/* macOS system string, as in TextEdit */
+"Revert to Saved" = "回復成儲存過的版本";
+
+/* macOS system string, as in Mail */
+"Edit" = "編輯";
+
+/* macOS system string, as in TextEdit */
+"Undo" = "還原";
+
+/* macOS system string, as in TextEdit */
+"Redo" = "重做";
+
+/* macOS system string, as in Mail */
+"Cut" = "剪下";
+
+/* macOS system string, as in Mail */
+"Copy" = "拷貝";
+
+/* macOS system string, as in Mail */
+"Paste" = "貼上";
+
+/* macOS system string, as in Mail */
+"Paste and Match Style" = "貼上並符合樣式";
+
+/* macOS system string, as in Mail */
+"Select All" = "全選";
+
+/* macOS system string, as in TextEdit */
+"Find…" = "尋找⋯";
+
+/* macOS system string, as in Mail */
+"Format" = "格式";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 1" = "標題1";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 2" = "標題2";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 3" = "標題3";
+
+/* macOS system string, as in Mail */
+"Bold" = "粗體";
+
+/* macOS system string, as in Mail */
+"Italic" = "斜體";
+
+/* macOS system string, as in Notes */
+"Strikethrough" = "刪除線";
+
+/* macOS system string, as in Notes */
+"Bulleted List" = "項目符號列表";
+
+/* macOS system string, as in Notes */
+"Numbered List" = "編號列表";
+
+/* macOS system string, as in Notes */
+"Checklist" = "檢查表";
+
+/* macOS system string, as in Notes */
+"Block Quote" = "區塊引言";
+
+/* macOS system string, as in Notes */
+"Table" = "表格";
+
+/* engine wording (i18n/edCode) so the menu and the editor agree */
+"Inline Code" = "行內程式碼";
+
+/* engine wording (i18n/edLink) so the menu and the editor agree */
+"Wikilink" = "雙向連結";
+
+/* macOS system string, as in Mail */
+"View" = "顯示方式";
+
+/* engine wording (i18n/mtMode*+mtModesPick) so the menu and the editor agree */
+"Next Mode (Seasoned / Rendered / Plain)" = "下一個檢視模式（調味／渲染／原味）";
+
+/* macOS system string, as in Preview */
+"Table of Contents" = "目錄";
+
+/* macOS system string, as in Notes */
+"Hide Toolbar" = "隱藏工具列";
+
+/* macOS system string, as in Mail */
+"Show Toolbar" = "顯示工具列";
+
+/* macOS system string, as in Dictionary */
+"Bigger Text" = "放大文字";
+
+/* macOS system string, as in Dictionary */
+"Smaller Text" = "縮小文字";
+
+/* macOS system string, as in Notes, Preview */
+"Actual Size" = "實際大小";
+
+/* engine wording (i18n/mtLockToggle) so the menu and the editor agree */
+"Lock Editor (Read-Only)" = "鎖定編輯器（唯讀）";
+
+/* macOS system string, as in Mail */
+"Window" = "視窗";
+
+/* macOS system string, as in Mail */
+"Minimize" = "縮到最小";
+
+/* macOS system string, as in TextEdit */
+"Zoom" = "縮放";
+
+/* macOS system string, as in TextEdit */
+"Bring All to Front" = "將此程式所有視窗移至最前";
+
+/* marktile's own wording */
+"This file isn’t UTF-8 text." = "這個檔案不是 UTF-8 文字。";
+
+/* marktile's own wording */
+"marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it." = "marktile 只能讀寫 UTF-8。請先轉換檔案，或用可以重新編碼的編輯器打開。";
+
+/* marktile's own wording */
+"Couldn’t encode this document as UTF-8." = "無法將這份文件編碼為 UTF-8。";
+
+/* marktile's own wording */
+"marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile 找不到編輯器引擎。\n\n這個 App 不完整。請重新安裝，或用 scripts/build-app.sh 重新建置。";

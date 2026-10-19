@@ -1,0 +1,3 @@
+/* Document kind shown by Finder and the Open panel. Info.plist strings are looked up by their English
+   value: CFBundleTypeName and UTTypeDescription are both "Markdown Document". */
+"Markdown Document" = "Markdown 書類";

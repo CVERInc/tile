@@ -47,6 +47,9 @@ BUILD_NUMBER="${MARKTILE_BUILD_NUMBER:-1}"
 # The engine is never committed under Resources/ — pull it from the repo's single sources first.
 bash scripts/sync-engine.sh
 
+# Every language the engine speaks, with every key English has — before spending a build on it.
+python3 scripts/check-l10n.py
+
 echo "▸ [$CHANNEL] swift build -c $CONFIG --product MarktileApp"
 swift build -c "$CONFIG" --product MarktileApp
 BIN=".build/$CONFIG/MarktileApp"
@@ -65,6 +68,15 @@ done
 # The icon is generated (icon/make-icon.swift) and the result committed, so a build needs no drawing.
 cp icon/AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
 
+# Localizations go in the MAIN bundle: AppKit's own menu items and the system's per-app language list
+# both follow the main bundle's .lproj folders (see Localization.swift). CFBundleLocalizations is
+# derived from the same folders so the two cannot disagree.
+cp -R Localization/*.lproj "$DEST/Contents/Resources/"
+LOCALIZATIONS=""
+for lproj in Localization/*.lproj; do
+  LOCALIZATIONS="$LOCALIZATIONS<string>$(basename "$lproj" .lproj)</string>"
+done
+
 cat > "$DEST/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -75,6 +87,8 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>net.cver.marktile</string>
   <key>CFBundleExecutable</key><string>MarktileApp</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array>${LOCALIZATIONS}</array>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
@@ -118,6 +132,7 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 PLIST
 
 chmod +x "$DEST/Contents/MacOS/MarktileApp"
+python3 scripts/check-l10n.py "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
 # Sign BEFORE the checks below, so they run the binary as it will ship: with the hardened runtime,

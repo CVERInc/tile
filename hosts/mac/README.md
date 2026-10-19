@@ -136,8 +136,6 @@ as the to-do list, not as reassurance.
   second panel until relaunch. Also unchecked: the accent colour following System Settings (it
   arrives as a distributed notification).
 
-Smaller, known: the menus are English-only while the editor speaks four languages.
-
 ## Icon
 
 Lucide's `square-m` — the icon marktile already wears in Obsidian — drawn out of Markdown
@@ -148,6 +146,26 @@ symbols blur into a smudge there. To change it, edit the script and regenerate:
 ```bash
 swift icon/make-icon.swift /tmp/AppIcon.iconset && iconutil -c icns /tmp/AppIcon.iconset -o icon/AppIcon.icns
 ```
+
+## Languages
+
+Menus, dialogs and the document kind speak the engine's languages — English, Japanese, Korean
+and Traditional Chinese — and the editor is told which one the menus resolved to, so the two are
+always in the same language. Standard items read exactly as macOS says them; the editor's own
+concepts (the three modes, wikilink) use the engine's words. Strings live in
+`Localization/<lang>.lproj`, keyed by their English text, and `scripts/check-l10n.py` fails the
+build when a language lacks a key, an `L("…")` has no entry, or a title skips `L()`. A language
+the engine does not have cannot be added here alone.
+
+To see what a language actually says, ask the built app — no window, so it works over ssh:
+
+```bash
+marktile.app/Contents/MacOS/MarktileApp --dump-menu -AppleLanguages '(ja)'
+```
+
+It prints the language the menus resolved to, the locale handed to the editor, and every menu
+item with its shortcut. AppKit's own additions (Services, Enter Full Screen) only exist in a
+running app and are not in that list.
 
 ## Releasing
 

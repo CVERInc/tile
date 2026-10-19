@@ -98,9 +98,9 @@ final class MarkdownDocument: NSDocument {
         // failure. (This is the one place where "open anything" is NOT the goal.)
         guard let raw = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "net.cver.marktile", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "This file isn’t UTF-8 text.",
+                NSLocalizedDescriptionKey: L("This file isn’t UTF-8 text."),
                 NSLocalizedRecoverySuggestionErrorKey:
-                    "marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it.",
+                    L("marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it."),
             ])
         }
         lineEnding = raw.contains("\r\n") ? .crlf : .lf
@@ -114,7 +114,7 @@ final class MarkdownDocument: NSDocument {
         let out = (lineEnding == .crlf) ? text.replacingOccurrences(of: "\n", with: "\r\n") : text
         guard let data = out.data(using: .utf8) else {
             throw NSError(domain: "net.cver.marktile", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Couldn’t encode this document as UTF-8.",
+                NSLocalizedDescriptionKey: L("Couldn’t encode this document as UTF-8."),
             ])
         }
         return data
