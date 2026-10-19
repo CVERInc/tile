@@ -329,3 +329,89 @@ test('P3 a request with no query constructs no URL in the redirect branch', asyn
 		assert.equal(await count(worker.mod, url), await count(plain.mod, url), url);
 	}
 });
+
+// ── tile#158 r3 (Codex review r2): every source the compiler ACCEPTS must match the URL a visitor's
+// browser actually sends for it — each case is Codex's repro, driven through the emitted worker ──
+
+async function sourceAnswers(rule, url) {
+	const w = await emitWorker([...BASE_ARGS, '--query-redirects', rulesFile('r3-' + (++emitted) + '.md', rule)]);
+	const { env } = assetsEnv();
+	return w.mod.default.fetch(new Request(url), env);
+}
+
+test('r3 P2 a KELVIN SIGN source answers 301 in its browser spelling (?q=%E2%84%AA%E2%84%AA, 21 chars for a 4-char key)', async () => {
+	const res = await sourceAnswers('/old?q=KK /new 301\n', 'https://site.example/old?q=KK');
+	assert.equal(res.status, 301);
+	assert.equal(res.headers.get('location'), '/new');
+});
+
+test('r3 P2 a source with empty pairs answers 301 in its exact spelling (/old?a&&&&&&&&)', async () => {
+	const res = await sourceAnswers('/old?a&&&&&&&& /new 301\n', 'https://site.example/old?a&&&&&&&&');
+	assert.equal(res.status, 301);
+	assert.equal(res.headers.get('location'), '/new');
+});
+
+test('r3 P2 raw Unicode inside a non-UTF-8 pair answers 301 (/old?name=中%B7%7B → ?name=%E4%B8%AD%B7%7B)', async () => {
+	const res = await sourceAnswers('/old?name=中%B7%7B /new 301\n', 'https://site.example/old?name=中%B7%7B');
+	assert.equal(res.status, 301);
+	assert.equal(res.headers.get('location'), '/new');
+	// The ASCII characters a special-scheme query serialiser escapes, inside a raw pair: same rule.
+	const quote = await sourceAnswers('/old?name=%B7%7B"\'<> /new 301\n', 'https://site.example/old?name=%B7%7B"\'<>');
+	assert.equal(quote.status, 301);
+});
+
+// One test per reserved list: a non-ASCII worker-owned path is reserved exactly like an ASCII one.
+// Forward values are compared by the worker against `url.pathname` as written, so a contract that
+// forwards a non-ASCII path spells it encoded: /接口/ and /帳戶/.
+const R3_CONTRACT = () => rulesFile('r3-contract.json', JSON.stringify({
+	schemaVersion: 2, bindingName: 'SEAMLINK',
+	verdictEndpoint: { version: 2, path: '/seam/site-verdict-v2', param: 'path' },
+	onBindingMissing: { status: 599, cacheControl: 'private, no-store' },
+	forward: [
+		{ match: 'prefix', value: '/%E6%8E%A5%E5%8F%A3/', methods: ['GET', 'POST'] },
+		{ match: 'exact', value: '/%E5%B8%B3%E6%88%B6/', methods: ['GET'] }
+	],
+	siteOwnedBuyerPages: [{ path: '/會員', method: 'GET', kind: 'membership', factsPath: '/接口/membership' }],
+	checkoutResult: { path: '/結帳/結果', method: 'GET', orderParam: 'order', outcomePath: '/接口/outcome' },
+	subscribeResult: { path: '/訂閱/結果', method: 'GET', sessionParam: 'session', factsPath: '/接口/facts' }
+}));
+
+test('r3 P2 reserved: a non-ASCII storefront (/商店) refuses /商店?x=1 at emit', () => {
+	const shop = ['--storefronts', JSON.stringify([{ path: '/商店', source: 'provider', provider: 'square' }]), '--api', 'https://api.example'];
+	const r = emitRefusal([...BASE_ARGS, ...shop, '--query-redirects', rulesFile('r3-shop.md', '/商店?x=1 /gone 301\n')]);
+	assert.equal(r.status, 2);
+	assert.match(r.stderr, /reserved_path: from: \/商店 is answered by the worker itself/);
+	const under = emitRefusal([...BASE_ARGS, ...shop, '--query-redirects', rulesFile('r3-shop2.md', '/%E5%95%86%E5%BA%97/item?x=1 /gone 301\n')]);
+	assert.equal(under.status, 2);
+	assert.match(under.stderr, /reserved_path: from: \/商店\/item /);
+});
+
+test('r3 P2 reserved: a non-ASCII site-owned buyer page (/會員) is refused', () => {
+	const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-buyer.md', '/會員?x=1 /b 301\n')]);
+	assert.equal(r.status, 2);
+	assert.match(r.stderr, /reserved_path: from: \/會員 /);
+});
+
+test('r3 P2 reserved: non-ASCII checkout and subscribe result paths are refused', () => {
+	for (const from of ['/結帳/結果', '/訂閱/結果']) {
+		const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-result.md', from + '?x=1 /b 301\n')]);
+		assert.equal(r.status, 2, from);
+		assert.match(r.stderr, new RegExp('reserved_path: from: ' + from + ' '), from);
+	}
+});
+
+test('r3 P2 reserved: a non-ASCII forwarded prefix (/接口/) is refused at and under it', () => {
+	for (const [from, shown] of [['/接口?x=1', '/接口'], ['/接口/thing?x=1', '/接口/thing']]) {
+		const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-fwd.md', from + ' /b 301\n')]);
+		assert.equal(r.status, 2, from);
+		assert.match(r.stderr, new RegExp('reserved_path: from: ' + shown + ' '), from);
+	}
+	// A sibling is not under the prefix.
+	emitFile([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-fwd-ok.md', '/接口文件?x=1 /b 301\n')]);
+});
+
+test('r3 P2 reserved: a non-ASCII exact forward (/帳戶/) is refused', () => {
+	const r = emitRefusal([...BASE_ARGS, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r3-exact.md', '/帳戶?x=1 /b 301\n')]);
+	assert.equal(r.status, 2);
+	assert.match(r.stderr, /reserved_path: from: \/帳戶 /);
+});

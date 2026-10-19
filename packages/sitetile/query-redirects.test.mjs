@@ -12,6 +12,7 @@ import {
 	parseQueryRedirects, compile, countRules, lookupQueryRedirect, QueryRedirectError,
 	QUERY_REDIRECTS_MAX_RULES, QUERY_REDIRECTS_MAX_BYTES, QUERY_REDIRECTS_MAX_CHARS, QUERY_REDIRECTS_MAX_PAIRS
 } from './query-redirects.mjs';
+import * as queryRedirects from './query-redirects.mjs';
 
 // ── canonPath ───────────────────────────────────────────────────────────────────────────────────
 
@@ -395,4 +396,94 @@ test('P2 lookupQueryRedirect: a search longer than any spelling of a key on that
 	assert.equal(lookupQueryRedirect('/product.php', '?cid=12&', byPath), '/products/widget');
 	// The key padded with a megabyte of empty pairs used to canonicalise back onto the key and 301.
 	assert.equal(lookupQueryRedirect('/product.php', '?cid=12' + '&'.repeat(1 << 20), byPath), null);
+});
+
+// ── tile#158 r3 (Codex review r2): every source the compiler ACCEPTS matches the URL a browser sends ─
+
+// What a browser puts on the wire for a rule's `from`: the URL parser's own serialisation.
+const wire = (from) => { const u = new URL(from, 'https://site.example'); return { pathname: u.pathname, search: u.search }; };
+
+test('r3 P2 the request-search ceiling is fixed, and no accepted from can serialise past it', () => {
+	const ceiling = queryRedirects.QUERY_REDIRECTS_MAX_SEARCH;
+	assert.equal(typeof ceiling, 'number', 'QUERY_REDIRECTS_MAX_SEARCH is exported');
+	// 🔴 The two caps cannot drift apart: a from of MAX_CHARS UTF-16 units, each serialised as the
+	// worst case of 4 UTF-8 bytes × `%XX`, plus the `?`, still fits.
+	assert.ok(ceiling >= 12 * QUERY_REDIRECTS_MAX_CHARS + 1, 'ceiling ' + ceiling + ' < 12 × ' + QUERY_REDIRECTS_MAX_CHARS + ' + 1');
+	// The worst real froms at the cap. 12 per unit is a bound, not a specimen: a BMP character is 1
+	// unit → 3 bytes → 9 serialised chars (the true worst), an astral one 2 units → 12 chars (6/unit).
+	for (const ch of ['中', '😀']) {
+		const from = '/p?q=' + ch.repeat((QUERY_REDIRECTS_MAX_CHARS - 5) / ch.length | 0);
+		assert.ok(from.length <= QUERY_REDIRECTS_MAX_CHARS);
+		const { byPath } = compile(from + ' /t 301\n');
+		const w = wire(from);
+		assert.ok(w.search.length >= (ch.length === 1 ? 8 : 5) * from.length, 'near-worst specimen: ' + w.search.length);
+		assert.ok(w.search.length <= ceiling);
+		assert.equal(lookupQueryRedirect(w.pathname, w.search, byPath), '/t', ch);
+	}
+});
+
+test('r3 P2 Codex: KELVIN SIGN and empty-pair sources match their own browser spelling', () => {
+	for (const from of ['/old?q=KK', '/old?a&&&&&&&&', '/old?' + '&'.repeat(990) + 'a']) {
+		const { byPath } = compile(from + ' /new 301\n');
+		const w = wire(from);
+		assert.equal(lookupQueryRedirect(w.pathname, w.search, byPath), '/new', from.slice(0, 20));
+	}
+	// Past the ceiling an equivalent spelling is not parsed — the documented contract.
+	const { byPath } = compile('/old?a /new 301\n');
+	assert.equal(lookupQueryRedirect('/old', '?a' + '&'.repeat(queryRedirects.QUERY_REDIRECTS_MAX_SEARCH), byPath), null);
+});
+
+test('r3 P2 a search at the ceiling canonicalises in single-digit milliseconds', () => {
+	const ceiling = queryRedirects.QUERY_REDIRECTS_MAX_SEARCH;
+	const { byPath } = compile('/p?a=1 /t 301\n');
+	// The worst shapes that fit under the ceiling: all empty pieces; the pair cap's worth of
+	// percent-encoded UTF-8 values; the same of Big5 (each pair a thrown decode, then the raw path —
+	// the slowest, ~5 ms median measured); pairs past the cap (refused at pair 501).
+	const per = Math.floor((ceiling - 1) / QUERY_REDIRECTS_MAX_PAIRS) - 1;
+	const encodedValue = '%E4%B8%AD'.repeat(Math.floor((per - 2) / 9));
+	const big5Value = '%B7%7B'.repeat(Math.floor((per - 2) / 6));
+	const shapes = {
+		empty: '?' + '&'.repeat(ceiling - 1),
+		encoded: '?' + Array.from({ length: QUERY_REDIRECTS_MAX_PAIRS }, () => 'a=' + encodedValue).join('&'),
+		big5: '?' + Array.from({ length: QUERY_REDIRECTS_MAX_PAIRS }, () => 'a=' + big5Value).join('&'),
+		pairs: '?' + 'a=1&'.repeat((ceiling - 1) / 4 | 0),
+	};
+	for (const [name, search] of Object.entries(shapes)) {
+		assert.ok(search.length <= ceiling, name + ' fits');
+		let best = Infinity;
+		for (let i = 0; i < 7; i++) {
+			const t0 = performance.now();
+			lookupQueryRedirect('/p', search, byPath);
+			best = Math.min(best, performance.now() - t0);
+		}
+		assert.ok(best < 10, name + ': ' + best.toFixed(2) + ' ms');
+	}
+});
+
+test('r3 P2 raw pairs: literal Unicode is serialised as UTF-8 %XX, legacy escapes kept as written', () => {
+	assert.equal(canonQuery('?name=中%B7%7B'), 'name=%E4%B8%AD%B7%7B');
+	assert.equal(canonQuery('?name=%E4%B8%AD%B7%7B'), 'name=%E4%B8%AD%B7%7B');
+	assert.equal(canonQuery('?中=%B7%7B'), '%E4%B8%AD=%B7%7B');
+	// The ASCII characters a special-scheme query serialiser escapes, and an astral character.
+	assert.equal(canonQuery('?name=%B7%7B"\'<>'), 'name=%B7%7B%22%27%3C%3E');
+	assert.equal(canonQuery('?name=%B7%7B😀'), 'name=%B7%7B%F0%9F%98%80');
+	// The invariant itself, for each: the baked key is what the browser's spelling canonicalises to.
+	for (const from of ['/old?name=中%B7%7B', '/old?中=%B7%7B', '/old?name=%B7%7B"\'<>', '/old?name=%b7%7b😀+x', '/old?name=%B7\uD800']) {
+		const { byPath } = compile(from + ' /new 301\n');
+		const w = wire(from);
+		assert.equal(lookupQueryRedirect(w.pathname, w.search, byPath), '/new', from);
+	}
+});
+
+test('r3 P2 compile: reserved paths and prefixes are compared in the canonical spelling', () => {
+	const opts = {
+		reservedPrefixes: ['/%E5%95%86%E5%BA%97', '/%E6%8E%A5%E5%8F%A3/'],
+		reservedPaths: ['/%E6%9C%83%E5%93%A1', '/%E5%B8%B3%E6%88%B6/']
+	};
+	for (const from of ['/商店?x=1', '/商店/item?x=1', '/%E5%95%86%E5%BA%97?x=1', '/接口?x=1', '/接口/thing?x=1', '/會員?x=1', '/帳戶?x=1']) {
+		assert.equal(refused(from + ' /b 301\n', opts).code, 'reserved_path', from);
+	}
+	for (const from of ['/商店街?x=1', '/接口文件?x=1', '/會員/x?x=1']) {
+		assert.equal(countRules(compile(from + ' /b 301\n', opts)), 1, from);
+	}
 });

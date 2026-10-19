@@ -55,14 +55,23 @@ export const QUERY_REDIRECTS_MAX_CHARS = 1000;
 //   MAX_PAIRS  500   — canonQuery stops parsing past this many non-empty pairs. A `from` is at most
 //                      MAX_CHARS = 1000 characters and a pair needs a character plus its `&`, so no
 //                      rule can hold more; a request with more cannot equal any key.
-//   SPELLING_FACTOR 4 — lookupQueryRedirect refuses, without parsing, a search longer than
-//                      4 × (the longest key on that path) + 1. A key is already in serialised form
-//                      (non-ASCII is %XX), and the longest spelling of one byte is its own %XX — 3×;
-//                      the 4th covers an NFD spelling of an NFC key. Derived from the map rather than
-//                      a fixed ceiling, so a site whose keys are 20 characters parses at most ~80,
-//                      and no legitimate spelling of any key is ever refused.
+//   MAX_SEARCH 16 KiB — lookupQueryRedirect refuses, without parsing, a `url.search` longer than
+//                      this. FIXED, and derived from MAX_CHARS, not from the map: 🩸 r2 derived it
+//                      as 4 × the longest key, and equivalent spellings have no such multiplier —
+//                      empty pieces are unbounded (`?a&&&&&&&&` is 10 chars for the 2-char key
+//                      `a=`) and NFC is not length-preserving (`?q=KK` in KELVIN SIGN is 21 chars
+//                      for `q=KK`) — so accepted sources missed (tile#158 r3). The arithmetic: a
+//                      `from` is ≤ 1000 UTF-16 units; the browser serialises each unit as at most
+//                      12 characters (an astral character is 2 units → 4 UTF-8 bytes → 12; a BMP
+//                      one is 1 unit → ≤ 3 bytes → ≤ 9; ASCII ≤ 3), so the search of EVERY accepted
+//                      source, as a browser sends it, is ≤ 12 × 1000 + `?` = 12,001 ≤ 16,384.
+//                      🔴 The contract: every accepted source matches in its browser spelling; an
+//                      EQUIVALENT spelling longer than the ceiling (the key padded with 16 K of `&`)
+//                      is not parsed and falls through to ASSETS. Measured: a 16 KiB search in the
+//                      worst shapes (all `&`; 500 pairs of %XX UTF-8; pairs past the cap)
+//                      canonicalises in well under 10 ms (query-redirects.test.mjs asserts it).
 export const QUERY_REDIRECTS_MAX_PAIRS = 500;
-const QUERY_SPELLING_FACTOR = 4;
+export const QUERY_REDIRECTS_MAX_SEARCH = 16 * 1024;
 
 // Status column: this file compiles 301s and nothing else. A 302 would be a redirect nobody
 // wanted search engines to remember, and the ticket's whole point is the opposite.
@@ -139,9 +148,26 @@ export function canonPath(path) {
 }
 
 // A pair the decoder could not read as UTF-8, in a form that is still one spelling: `+` is the
-// form-encoding of a space, and hex case is the only other freedom a percent-escape has.
+// form-encoding of a space, and hex case is the only other freedom a percent-escape has. 🩸 A
+// rule's `from` is not yet serialised and a request's `url.search` is: `?name=中%B7%7B` arrives as
+// `?name=%E4%B8%AD%B7%7B`, and comparing them raw baked a key no request could reach (tile#158 r3).
+// So the raw form is the URL serialiser's own output: what it escapes in a special-scheme query —
+// non-ASCII as UTF-8 `%XX` (a lone surrogate as U+FFFD's bytes, as the parser does), and `"` `'`
+// `<` `>` — is escaped, uppercase; existing `%XX` legacy bytes are kept as written. On a request
+// this is a no-op (the serialiser already did it); on a rule it is the serialiser, run early. One
+// `from` can never be raw on one side and decodable on the other: the literal characters
+// contribute whole UTF-8 sequences, so the escaped bytes are valid UTF-8 together exactly when
+// they are valid between the literals — no `mixed_encoding` refusal is needed.
+const UTF8 = new TextEncoder();
+const SERIALISER_ESCAPES = /[^\u0000-\u007F]+|["'<>]/gu;
+function percentEncodeBytes(run) {
+	let out = '';
+	for (const b of UTF8.encode(run)) out += '%' + (b < 16 ? '0' : '') + b.toString(16).toUpperCase();
+	return out;
+}
 function rawPair(text) {
-	return text.replace(/\+/g, '%20').replace(/%[0-9a-fA-F]{2}/g, (m) => m.toUpperCase());
+	return text.replace(SERIALISER_ESCAPES, percentEncodeBytes)
+		.replace(/\+/g, '%20').replace(/%[0-9a-fA-F]{2}/g, (m) => m.toUpperCase());
 }
 
 function serialisePair(name, value) {
@@ -252,6 +278,21 @@ export function parseQueryRedirects(text) {
 	return out;
 }
 
+// A reserved path or prefix in the spelling compile() compares `from` in. 🩸 The emitter's
+// storefront path is URL-serialised (`/%E5%95%86%E5%BA%97`) while canonPath decodes (`/商店`), so a
+// non-ASCII storefront compared unequal and a rule took the page away (tile#158 r3). Every list goes
+// through canonPath here, once, so no caller has to remember to. A prefix keeps its own trailing
+// `/` (that is its meaning, see startsWithPrefix); an entry canonPath refuses is compared as given.
+function canonReserved(path) {
+	const c = typeof path === 'string' ? canonPath(path) : null;
+	return c === null ? path : c;
+}
+function canonReservedPrefix(prefix) {
+	if (typeof prefix !== 'string' || prefix.length < 2 || !prefix.endsWith('/')) return canonReserved(prefix);
+	const c = canonReserved(prefix.slice(0, -1));
+	return c === '/' ? c : c + '/';
+}
+
 function startsWithPrefix(path, prefix) {
 	// `/shop` is reserved as `/shop` and as `/shop/…`; a prefix given with its own trailing `/` is
 	// reserved as that directory and everything under it.
@@ -266,11 +307,13 @@ function startsWithPrefix(path, prefix) {
  *
  * @param {string} text  the contents of `_query-redirects.md`
  * @param {object} [opts]
- * @param {string[]} [opts.reservedPaths]     exact canonical paths the worker answers itself (a
- *                                            site's buyer pages) — refused as a `from`
+ * @param {string[]} [opts.reservedPaths]     exact paths the worker answers itself (a site's buyer
+ *                                            pages) — refused as a `from`. Any spelling (raw or
+ *                                            percent-encoded); canonicalised here before comparing.
  * @param {string[]} [opts.reservedPrefixes]  prefixes the worker answers itself (storefronts) —
- *                                            refused as a `from`, at and under them. Always
- *                                            includes QUERY_REDIRECTS_RESERVED_PREFIXES.
+ *                                            refused as a `from`, at and under them. Any spelling,
+ *                                            canonicalised here. Always includes
+ *                                            QUERY_REDIRECTS_RESERVED_PREFIXES.
  * @throws {QueryRedirectError} with a `code` naming the refusal, and the `line` it is about
  */
 export function compile(text, opts = {}) {
@@ -278,8 +321,8 @@ export function compile(text, opts = {}) {
 	if (rules.length > QUERY_REDIRECTS_MAX_RULES) {
 		throw new QueryRedirectError('too_many_rules', rules.length + ' rules; the cap is ' + QUERY_REDIRECTS_MAX_RULES);
 	}
-	const reservedPaths = new Set(opts.reservedPaths || []);
-	const reservedPrefixes = [...QUERY_REDIRECTS_RESERVED_PREFIXES, ...(opts.reservedPrefixes || [])];
+	const reservedPaths = new Set((opts.reservedPaths || []).map(canonReserved));
+	const reservedPrefixes = [...QUERY_REDIRECTS_RESERVED_PREFIXES, ...(opts.reservedPrefixes || [])].map(canonReservedPrefix);
 	const byPath = {};
 	const keys = [];   // [canonPath, canonQuery, to, line] in file order, for the chain guard
 	for (const rule of rules) {
@@ -343,24 +386,10 @@ export function countRules(map) {
 	return n;
 }
 
-// The longest search any spelling of a key on this path can arrive as (see SPELLING_FACTOR),
-// computed once per baked per-path object — the map is constant for the worker's lifetime.
-const searchCaps = new WeakMap();
-function maxSearchLength(perPath) {
-	let cap = searchCaps.get(perPath);
-	if (cap === undefined) {
-		let longest = 0;
-		for (const key of Object.keys(perPath)) if (key.length > longest) longest = key.length;
-		cap = QUERY_SPELLING_FACTOR * longest + 1;
-		searchCaps.set(perPath, cap);
-	}
-	return cap;
-}
-
 /**
  * The worker's lookup. Zero work for a request without a query, one object index for a request
- * whose path is not in the map, a length check against that path's longest key, and the query
- * canonicalisation only when the search could be a spelling of one.
+ * whose path is not in the map, a length check against MAX_SEARCH, and the query
+ * canonicalisation only when the search is short enough to be the browser spelling of a source.
  * @param {string} pathname  `url.pathname`
  * @param {string} search    `url.search`
  * @param {object} byPath    the compiled map's `byPath`
@@ -371,7 +400,7 @@ export function lookupQueryRedirect(pathname, search, byPath) {
 	const p = canonPath(pathname);
 	if (p === null || !Object.prototype.hasOwnProperty.call(byPath, p)) return null;
 	const perPath = byPath[p];
-	if (search.length > maxSearchLength(perPath)) return null;
+	if (search.length > QUERY_REDIRECTS_MAX_SEARCH) return null;
 	const q = canonQuery(search);
 	if (q === null || q === '') return null;
 	return Object.prototype.hasOwnProperty.call(perPath, q) ? perPath[q] : null;

@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 // The ONE canonicaliser for query-string 301s (reef#1882). Imported here to compile the site's
 // file, and read as SOURCE below to be concatenated into the worker, so the build that compiles a
 // rule and the worker that matches a request execute the same bytes.
-import { compile as compileQueryRedirects, countRules as countQueryRedirects, canonPath as canonQueryRedirectPath, QueryRedirectError } from '../../sitetile/query-redirects.mjs';
+import { compile as compileQueryRedirects, countRules as countQueryRedirects, QueryRedirectError } from '../../sitetile/query-redirects.mjs';
 
 function arg(name, def = '') {
 	const i = process.argv.indexOf('--' + name);
@@ -445,10 +445,11 @@ const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
 	]
 });
 
-// The paths this worker answers itself, in the module's canonical spelling, so a query rule cannot
-// sit on a page the worker would never let reach ASSETS anyway. Prefix rules reserve at and under;
-// exact rules reserve one path. A forward rule's value is taken as written (the contract spells
-// prefixes with their trailing `/`, which the module reads as "that directory and below").
+// The paths this worker answers itself, so a query rule cannot sit on a page the worker would never
+// let reach ASSETS anyway. Prefix rules reserve at and under; exact rules reserve one path. Passed
+// in the spellings this worker matches them in (URL-serialised storefronts, contract values as
+// written, trailing `/` meaning "that directory and below"); the module converts every list to its
+// own canonical spelling before comparing, so `/商店` and `/%E5%95%86%E5%BA%97` are one path.
 const transportForward = (loaded && loaded.transport.forward) || [];
 const queryRedirects = loadQueryRedirects(arg('query-redirects'), {
 	reservedPrefixes: [
@@ -459,7 +460,7 @@ const queryRedirects = loadQueryRedirects(arg('query-redirects'), {
 		...((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path),
 		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : []),
 		...((loaded && loaded.transport.checkoutResult) ? [loaded.transport.checkoutResult.path] : []),
-		...transportForward.filter((rule) => rule.match === 'exact').map((rule) => canonQueryRedirectPath(rule.value) || rule.value)
+		...transportForward.filter((rule) => rule.match === 'exact').map((rule) => rule.value)
 	]
 });
 
