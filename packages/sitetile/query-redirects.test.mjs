@@ -520,7 +520,46 @@ test('r4 compile: claimedBy is asked about every request spelling of the key, an
 	// The query rides along (a matcher may key on it), and a decoded `?` in the path stays path.
 	asked.length = 0;
 	assert.equal(countRules(compile('/a%3Fb?order=1 /gone 301\n', { claimedBy })), 1);
-	assert.deepEqual(asked, ['https://site.invalid/a%3Fb?order=1', 'https://site.invalid/a%3Fb/?order=1']);
+	// r5: and the `/index.html` alias canonPath also folds onto the key.
+	assert.deepEqual(asked, ['https://site.invalid/a%3Fb?order=1', 'https://site.invalid/a%3Fb/?order=1', 'https://site.invalid/a%3Fb/index.html?order=1']);
 	// A root claimer owns everything, the home page included.
 	assert.equal(refused('/?p=1 /gone 301\n', { claimedBy: () => 'a root forward' }).code, 'reserved_path');
+});
+
+// ── tile#158 r5 (Codex review r4): the probe covers every request the key answers ────────────────
+
+// What the worker's checkout-result matcher reads: the FIRST `order` value, and only when nonblank.
+const firstOrder = (href) => { const v = new URL(href).searchParams.get('order'); return v && v.trim() ? 'the checkout result' : null; };
+
+test('r5 P2 a duplicated name is probed with each of its values first', () => {
+	// Codex: as written the first `order` is empty, so the matcher declines — but the key sorts its
+	// pairs, and `?order=123&order=` is the same key, which the matcher claims.
+	const r = refused('/結帳/結果?order=&order=123 /gone 301\n', { claimedBy: firstOrder });
+	assert.equal(r.code, 'reserved_path');
+	assert.match(r.message, /\(the checkout result\)/);
+	assert.equal(refused('/p?order=&x=1&order=5&order= /gone 301\n', { claimedBy: firstOrder }).code, 'reserved_path');
+	// No value the matcher would claim ⇒ the rule is a working rule.
+	assert.equal(countRules(compile('/p?order=&order=%20 /gone 301\n', { claimedBy: firstOrder })), 1);
+});
+
+test('r5 P2 more spellings than the probe cap is refused by name, never accepted unchecked', () => {
+	const many = '/p?' + Array.from({ length: 30 }, (_, i) => 'a=' + i).join('&');
+	assert.equal(refused(many + ' /gone 301\n', { claimedBy: () => null }).code, 'too_ambiguous');
+	// The cap only binds when there is a claimer to ask.
+	assert.equal(countRules(compile(many + ' /gone 301\n')), 1);
+	// A handful of duplicates is well under it.
+	assert.equal(countRules(compile('/p?a=1&a=2&a=3&b=1&b=2 /gone 301\n', { claimedBy: () => null })), 1);
+});
+
+test('r5 P3 every path alias canonPath folds onto the key is probed', () => {
+	// The aliases themselves, as canonPath folds them.
+	for (const alias of ['/old/', '/old/index.html', '/o%6Cd', '/old/./']) assert.equal(canonPath(alias), '/old', alias);
+	assert.equal(canonPath('/index.html'), '/');
+	const exact = (path) => (href) => new URL(href).pathname === path ? 'an exact forward' : null;
+	assert.equal(refused('/old?x=1 /gone 301\n', { claimedBy: exact('/old/index.html') }).code, 'reserved_path');
+	assert.equal(refused('/?p=1 /gone 301\n', { claimedBy: exact('/index.html') }).code, 'reserved_path');
+	// NFC: canonPath folds a decomposed spelling onto the composed key, so it is asked about too.
+	const nfd = new URL('https://x/' + 'é'.normalize('NFD')).pathname;
+	assert.equal(canonPath(nfd), '/é');
+	assert.equal(refused('/é?x=1 /gone 301\n', { claimedBy: exact(nfd) }).code, 'reserved_path');
 });

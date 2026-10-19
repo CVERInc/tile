@@ -563,3 +563,21 @@ test('r4 class: an injected entry under a root forward (/) reaches the binding',
 	assert.equal(res.status, 200);
 	assert.deepEqual(bound.map((b) => b.url), ['https://site.example/anything?x=1'], 'a root forward owns every path');
 });
+
+// ── tile#158 r5 (Codex review r4): the two probe gaps, end to end through the real matchers ──────
+
+test('r5 P2 Codex: /結帳/結果?order=&order=123 is refused with a native shop and a checkout-result contract', () => {
+	const native = ['--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }]), '--api', 'https://api.example'];
+	const r = emitRefusal([...BASE_ARGS, ...native, '--api-contract', R3_CONTRACT(), '--query-redirects', rulesFile('r5-dup.md', '/結帳/結果?order=&order=123 /gone 301\n')]);
+	assert.equal(r.status, 2, r.stderr);
+	assert.match(r.stderr, /reserved_path: from: \/結帳\/結果 is answered by the worker itself \(the checkout result\)/);
+});
+
+test('r5 P3 an exact GET forward for /old/index.html refuses /old?x=1', () => {
+	const contract = R4_CONTRACT([{ match: 'exact', value: '/old/index.html', methods: ['GET'] }]);
+	const r = emitRefusal([...BASE_ARGS, '--api-contract', contract, '--query-redirects', rulesFile('r5-index.md', '/old?x=1 /gone 301\n')]);
+	assert.equal(r.status, 2, r.stderr);
+	assert.match(r.stderr, /reserved_path: from: \/old is answered by the worker itself/);
+	// A neighbour the forward does not cover still compiles.
+	emitFile([...BASE_ARGS, '--api-contract', contract, '--query-redirects', rulesFile('r5-index-ok.md', '/older?x=1 /gone 301\n')]);
+});

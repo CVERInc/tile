@@ -8,6 +8,13 @@
 // into a map baked into the site's `_worker.js`, and the worker answers an exact hit with a 301
 // BEFORE it consults the static assets.
 //
+// 🔴 Who owns a request: the GUARANTEE is the runtime placement — the worker looks the map up only
+// at the ASSETS fall-through, after every route it answers itself has declined, so no rule can take
+// a worker-owned page away (tile#158 r4). compile()'s `reserved_path` is an EARLY REFUSAL on top:
+// it probes the worker's own matchers (`claimedBy`) over the key's request spellings so a rule that
+// could never fire is refused at build time with a name, instead of shipping dead. A gap in the
+// probe costs a dead rule, not a stolen route.
+//
 // 🔴 PURE AND IMPORT-FREE, like site-core.js, and for a harder reason: this file is concatenated
 // INTO the emitted worker (emit-shop-function.mjs), vendored into the platform that writes the IR
 // file, and run by the build that compiles it. Three readers, the same bytes — never a "MUST match"
@@ -72,6 +79,12 @@ export const QUERY_REDIRECTS_MAX_CHARS = 1000;
 //                      canonicalises in well under 10 ms (query-redirects.test.mjs asserts it).
 export const QUERY_REDIRECTS_MAX_PAIRS = 500;
 export const QUERY_REDIRECTS_MAX_SEARCH = 16 * 1024;
+
+// Compile-side bound on the ownership probe (requestSpellings): how many request URLs one rule may
+// ask `claimedBy` about. An ordinary rule is a handful (path aliases × one query); each value of a
+// repeated parameter name adds one ordering per alias. Past the cap the rule is `too_ambiguous`,
+// refused by name — never compiled with only some of its spellings checked.
+export const QUERY_REDIRECTS_MAX_PROBES = 64;
 
 // Status column: this file compiles 301s and nothing else. A 302 would be a redirect nobody
 // wanted search engines to remember, and the ticket's whole point is the opposite.
@@ -293,21 +306,53 @@ function canonReservedPrefix(prefix) {
 	return c === '/' ? c : c + '/';
 }
 
-// The URLs a request for this rule's key arrives as, for asking a caller's `claimedBy`: the `from`
-// as written and the canonical key, each in the serialised spelling `new URL` gives a browser's
-// request, and the key with its trailing `/` (canonPath folds `/a/` onto `/a`, so the rule fires
-// for both). The pathname is SET rather than parsed, so a `?` or `#` decoded into the key is
-// escaped back instead of being read as a delimiter.
-function requestSpellings(rawPath, key, search) {
+// The URLs a request for this rule's key arrives as, for asking a caller's `claimedBy`, each in the
+// serialised spelling `new URL` gives a browser's request. The pathname is SET rather than parsed,
+// so a `?` or `#` decoded into the key is escaped back instead of being read as a delimiter.
+//
+// PATHS — every alias canonPath folds onto the key, one representative each: the `from` as written;
+// the key; its NFD form (canonPath composes); the key with a trailing `/` and with `/index.html`
+// (both stripped; the root's alias is `/index.html`). The other folds need no probe of their own:
+// dot segments and stray characters are resolved by the URL parser before any matcher sees the
+// request, and the one percent-decode has one spelling per escape choice — the raw `from` and the
+// serialised key stand for them.
+//
+// QUERIES — the `from`'s own query, the key's sorted pairs, and 🩸 for every name the key carries
+// more than once, one ordering per distinct value that puts that value FIRST: the lookup is
+// order-insensitive but `URLSearchParams.get` reads the first value, so `?order=&order=123` (a
+// matcher declines: blank) and `?order=123&order=` (it claims) are one key (tile#158 r4 review).
+// Returns null past QUERY_REDIRECTS_MAX_PROBES — compile() refuses that rather than ask a subset.
+function requestSpellings(rawPath, key, search, canonSearch) {
+	const bases = [rawPath, key, key.normalize('NFD')];
+	const paths = [];
+	for (const p of bases) paths.push(p, p === '/' ? null : p + '/', p === '/' ? '/index.html' : p + '/index.html');
+	const pairs = canonSearch.split('&');
+	const queries = [search, '?' + canonSearch];
+	const valuesByName = new Map();
+	for (const pair of pairs) {
+		const name = pair.slice(0, pair.indexOf('='));
+		if (!valuesByName.has(name)) valuesByName.set(name, new Set());
+		valuesByName.get(name).add(pair);
+	}
+	for (const distinct of valuesByName.values()) {
+		if (distinct.size < 2) continue;
+		for (const first of distinct) {
+			const i = pairs.indexOf(first);
+			queries.push('?' + [first, ...pairs.slice(0, i), ...pairs.slice(i + 1)].join('&'));
+		}
+	}
 	const out = new Set();
-	for (const p of [rawPath, key, key === '/' ? null : key + '/']) {
+	for (const p of paths) {
 		if (p === null) continue;
-		try {
-			const u = new URL('https://site.invalid/');
-			u.pathname = p;
-			u.search = search;
-			out.add(u.href);
-		} catch (e) { /* a spelling no URL holds is not a request anyone sends */ }
+		for (const q of queries) {
+			try {
+				const u = new URL('https://site.invalid/');
+				u.pathname = p;
+				u.search = q;
+				out.add(u.href);
+			} catch (e) { /* a spelling no URL holds is not a request anyone sends */ }
+			if (out.size > QUERY_REDIRECTS_MAX_PROBES) return null;
+		}
 	}
 	return [...out];
 }
@@ -336,7 +381,9 @@ function startsWithPrefix(path, prefix) {
  * @param {(href: string) => (string|null)} [opts.claimedBy]  asks the WORKER's own matchers whether
  *                                            it answers a request for `href` itself; a truthy answer
  *                                            (the route's name) refuses the rule. Called with every
- *                                            spelling of the rule's key (requestSpellings). The
+ *                                            request spelling of the rule's key — path aliases ×
+ *                                            pair orderings (requestSpellings); more than
+ *                                            QUERY_REDIRECTS_MAX_PROBES is `too_ambiguous`. The
  *                                            emitter passes this instead of lists: a list re-derived
  *                                            beside the matchers drifts from them (tile#158 r4).
  * @throws {QueryRedirectError} with a `code` naming the refusal, and the `line` it is about
@@ -372,7 +419,11 @@ export function compile(text, opts = {}) {
 			throw new QueryRedirectError('reserved_path', 'from: ' + path.value + ' is answered by the worker itself; a rule there could never match', where);
 		}
 		if (typeof opts.claimedBy === 'function') {
-			for (const href of requestSpellings(rule.from.slice(0, q), path.value, rule.from.slice(q))) {
+			const spellings = requestSpellings(rule.from.slice(0, q), path.value, rule.from.slice(q), query.value);
+			if (spellings === null) {
+				throw new QueryRedirectError('too_ambiguous', 'from: ' + path.value + ' has more than ' + QUERY_REDIRECTS_MAX_PROBES + ' request spellings (repeated parameter names) to check against the worker; split it or drop the repeats', where);
+			}
+			for (const href of spellings) {
 				const owner = opts.claimedBy(href);
 				if (owner) throw new QueryRedirectError('reserved_path', 'from: ' + path.value + ' is answered by the worker itself (' + owner + '); a rule there could never match', where);
 			}
