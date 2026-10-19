@@ -6,6 +6,11 @@ import AppKit
 if CommandLine.arguments.contains("--verify-resources") {
     exit(EngineResources.runVerification())
 }
+// Same shape, second question: is the sandbox in the signature the sandbox in force? Reading the
+// entitlements cannot answer that; only the running process can (see FolderAccess.swift).
+if CommandLine.arguments.contains("--report-sandbox") {
+    exit(FolderAccess.runReport())
+}
 
 // No Xcode, no NIB — the app is assembled in code (see scripts/build-app.sh).
 //
