@@ -128,6 +128,27 @@ test('comment without directive keeps existing prose behavior', () => {
   assert.equal(renderSiteToHtml(site), renderSiteToHtml(parseSite(commentPrefix + 'Plain text.\n')));
 });
 
+for (const [name, body] of [
+  ['same-line comment and directive', '<!-- a --> %% sitetile: grid %%\n- x\n'],
+  ['same-line comment and indented directive', '<!-- a -->   %% sitetile: grid %%\n- x\n'],
+  ['prose after comment', '<!-- note -->\nPlain text.\n' + commentBody],
+  ['unterminated comment', '<!-- note\n' + commentBody],
+  ['directive inside single-line comment', '<!-- %% sitetile: grid %% -->\n- x\n'],
+  ['directive inside multi-line comment', '<!-- note\n%% sitetile: grid %%\n-->\n- x\n'],
+  ['directive inside comment after another comment', '<!-- first -->\n<!--\n%% sitetile: grid %%\n-->\n- x\n'],
+  ['comment closer inside code fence', '<!-- note -->\n```\n-->\n```\n' + commentBody],
+]) {
+  test('directive stays prose: ' + name, () => {
+    const site = parseSite(commentPrefix + body);
+    assert.equal(site.sections[0].type, 'prose', name + ' must stay prose');
+    assert.equal(site.sections[0].hasTypeLine, false);
+    assert.equal(site.sections[0].body, body.trim());
+    const saved = serializeSite(site);
+    assert.ok(saved.includes(body));
+    assert.equal(serializeSite(parseSite(saved)), saved);
+  });
+}
+
 test('grid: ### subheadings become cells with bodies', () => {
   const grid = parseSite(CANON).sections[2];
   assert.equal(grid.cells.length, 3);
