@@ -33,6 +33,14 @@ const INBOX_OUTCOME_HELPERS_SRC = [
   "          if (!/application\\/json/i.test(ct) || typeof res.json !== 'function') return Promise.resolve('');",
   "          return res.json().then((b) => (b && b.ok === true ? 'sent' : String((b && b.reason) || '')), () => '');",
   '        }',
+  // tile#159 r2 — where a `thanks=` form goes on success. A followed 303 already landed on the
+  // forwarder's destination, so `res.url` is it (unchanged). A JSON success did not move: its
+  // `res.url` is the Inbox endpoint, never a page — use the form's own build-validated `thanks_to`.
+  '        function inboxSuccessDest(res, thanksPath) {',
+  '          let followed = false;',
+  "          try { followed = new URL(res.url, location.href).searchParams.has('inbox'); } catch (e) {}",
+  "          return followed ? res.url : (thanksPath || '');",
+  '        }',
 ].join('\n');
 
 /**
@@ -41,7 +49,7 @@ const INBOX_OUTCOME_HELPERS_SRC = [
  */
 export function inboxOutcomeHelpers(location = { href: 'http://localhost/' }) {
   // eslint-disable-next-line no-new-func
-  return new Function('location', INBOX_OUTCOME_HELPERS_SRC + '\nreturn { inboxErrorKey, inboxErrorCopy, inboxOutcomeOf };')(location);
+  return new Function('location', INBOX_OUTCOME_HELPERS_SRC + '\nreturn { inboxErrorKey, inboxErrorCopy, inboxOutcomeOf, inboxSuccessDest };')(location);
 }
 inboxOutcomeHelpers.source = INBOX_OUTCOME_HELPERS_SRC;
 
@@ -201,12 +209,21 @@ ${INBOX_OUTCOME_HELPERS_SRC}
                 // where \`thanks=\` names) — fall back to a full top-level reload of this page.
                 // The no-JS round trip has no script here to run this check; it is covered
                 // instead by the forwarder's own result-side check on the \`Location\` it builds.
+                // 🩸 tile#159 r2: a JSON success never followed a 303, so its \`res.url\` is the
+                // Inbox endpoint — navigating there sent the visitor to the API. inboxSuccessDest
+                // hands back the form's own \`thanks_to\` (the value safeInternalPath let into the
+                // markup) for that shape, and the same same-origin check gates it; a form with no
+                // \`thanks_to\` gets the in-place card.
                 if (copy && copy.redirectsToThanks) {
-                  let sameOrigin = false;
-                  try { sameOrigin = new URL(res.url, location.href).origin === location.origin; } catch (e) {}
-                  if (sameOrigin) { location.assign(res.url); return; }
-                  location.reload();
-                  return;
+                  const thanksInput = form.querySelector('input[name="thanks_to"]');
+                  const dest = inboxSuccessDest(res, thanksInput ? thanksInput.value : '');
+                  if (dest) {
+                    let sameOrigin = false;
+                    try { sameOrigin = new URL(dest, location.href).origin === location.origin; } catch (e) {}
+                    if (sameOrigin) { location.assign(dest); return; }
+                    location.reload();
+                    return;
+                  }
                 }
                 showSuccess(fd);
               } else showError(inboxErrorCopy(copy, outcome));
