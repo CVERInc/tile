@@ -57,24 +57,28 @@ origin. It is public API and sandbox-safe, so the Mac App Store option stays ope
   Markdown editor in a way it would not be elsewhere — the syntax *is* the input
   method, so `**bold**` is reachable whether or not a **B** button is on screen.
 
+## Tested end to end
+
+`e2e/run.sh` drives the real app with keyboard events and checks the bytes on disk: CRLF and
+LF round trips, the last keystrokes surviving an immediate ⌘S ⌘Q, quitting with unsaved edits,
+a file changed on disk while open, and a non-UTF-8 file. See `e2e/README.md` for where it can
+run (it needs a GUI session and the Accessibility grant).
+
+**Known bug, caught by `mixed_line_endings`:** a file that mixes CRLF and LF comes back with
+every line in CRLF. The document records one line ending for the whole file, chosen by
+`raw.contains("\r\n")`. The test stays red until that is decided and fixed.
+
 ## Not yet verified
 
-Everything below was reasoned about or exercised once by hand. None of it is covered by
-a test, and none of it has run outside the machine it was written on. Treat this section
-as the to-do list, not as reassurance.
+Everything below was reasoned about or exercised once by hand. Treat this section as the
+to-do list, not as reassurance.
 
 - **A second machine.** Every run so far has been an unsigned, ad-hoc build on the
-  build machine itself. The resource-bundle guard in `build-app.sh` exists precisely
+  machine that built it. The resource-bundle guard in `build-app.sh` exists precisely
   because that case differs — but the guard has never been watched failing on a clean
   machine, so it is untested, not passed.
-- **A file changed underneath an open document.** `NSDocument` compares modification
-  dates and is expected to warn before overwriting, but that dialog has never been made
-  to appear here. Until it has, "open a file, `git checkout`, press ⌘S" is an unknown,
-  and it is the unknown with the worst consequence.
-- **The Swift half has no tests.** The 20-plus green test files in this repo all cover
-  the engine. UTF-8 refusal, CRLF restoration, and the flush that pulls the last
-  keystrokes out of the web view before a save are exactly where data would be lost,
-  and all three are currently verified by reading the code.
+- **Which dialog appears.** The end-to-end tests can see that a dialog came up and that
+  the file was left alone, not what the dialog says or which button does what.
 - **Real editing hours.** A text editor's defects live in the long tail — undo across a
   mode switch, IME composition at a line boundary, a very large file, a table of
   contents drag abandoned halfway. None of these have been sat with.
