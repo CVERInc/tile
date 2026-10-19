@@ -46,6 +46,12 @@ export function collectPages(irDir, { includePosts = false } = {}) {
         // site_pages.json (it would bloat the JSON with the residue block and, pre-renderer-guard,
         // route as a bogus /_theme page). `_site.md` DOES stay — the renderer reads it as config.
         if (e.name === '_theme.md') continue;
+        // `_query-redirects.md` is the site's query-string 301 table (reef#1882): the three-column
+        // `_redirects` grammar with `?k=v` in `from`, compiled into the site's `_worker.js` by the
+        // emitter (packages/sitetile/query-redirects.mjs). Site DATA, like `_theme.md` — it carries
+        // no sitetile frontmatter, so the renderer would skip it anyway; excluding it here keeps it
+        // out of site_pages.json rather than relying on that second guard.
+        if (e.name === '_query-redirects.md') continue;
         acc.push(path.join(dir, e.name));
       }
     }

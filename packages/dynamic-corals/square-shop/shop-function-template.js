@@ -18,7 +18,7 @@
 //
 // stripDonorHead / injectHead / replaceMain / matchShop are pure and unit-tested.
 
-/*__CANONICAL_HELPERS__*/function stripDonorHead(html) {
+/*__CANONICAL_HELPERS__*//*__QUERY_REDIRECT_HELPERS__*/function stripDonorHead(html) {
 	return html
 		.replace(/<title>[\s\S]*?<\/title>/i, '')
 		.replace(/<meta\s+name=["']description["'][^>]*>/gi, '')
@@ -1715,7 +1715,7 @@ export default {
 		const idx = matchShopIndex(pathname, shops);
 		if (idx && idx.source === 'native') return renderNativeGridPage(request, env, CFG, idx);
 		if (idx && idx.source === 'provider') return renderGridPage(request, env, ctx, CFG, idx);
-		// Last, and only for a route the build itself mapped: same page, markdown.
+/*__QUERY_REDIRECT_FETCH__*/		// Last, and only for a route the build itself mapped: same page, markdown.
 		const negotiated = await negotiateMarkdown(request, env, CFG.markdown);
 		if (negotiated) return negotiated;
 		return env.ASSETS.fetch(request); // everything else: the static site, untouched

@@ -97,6 +97,7 @@ the point: something outside this repo reads it.
 | `zh-tw/home.md` | `zh-tw` | `/zh-tw/` |
 | `posts/*.md` | — | staged into `blog/`, not `content/` |
 | `_theme.md` | — | the theme SOURCE. Not a page, at any depth |
+| `_query-redirects.md` | — | the site's query-string 301 table, compiled into its `_worker.js` by the emitter (`packages/sitetile/query-redirects.mjs`). Not a page |
 | `_site.md` | `_site` | not a route — the renderer reads it as config |
 
 The stylesheet you pass as `--theme` is `theme.css`, and it is **compiled by the platform and
