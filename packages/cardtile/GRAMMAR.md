@@ -6,17 +6,21 @@ and hints live in [w/cell-i18n.mjs](w/cell-i18n.mjs).
 
 ## Automatic marks
 
-Leave `icon=`, `iconhost=` and `iconimg=` unset to use the linked site's favicon.
-An Instagram or Threads address does not automatically select a bundled SVG.
-The mark comes from the favicon services, so a brand change does not require a
-new icon bundle. External favicons are fetched rather than saved as Card assets.
+Leave `icon=`, `iconhost=` and `iconimg=` unset to use automatic marks. A social
+row draws an envelope for `mailto:` and a house for the card's own host (with or
+without `www.`); other HTTP(S) links use the linked site's favicon. An Instagram
+or Threads address does not automatically select a bundled SVG. Favicons come from
+the favicon services, so a brand change does not require a new icon bundle,
+though the validated-image cache can take up to seven days to show the new mark.
+External favicons are fetched rather than saved as Card assets.
 
 The shared resolver tries host candidates, including the site's `www` spelling.
-For each candidate, `/_icon/<host>.ico` asks DuckDuckGo, then Google's faviconV2
-when DuckDuckGo misses or fails. If both miss, the card tries its next candidate;
-when all candidates fail, a link cell hides the mark and a published social button
-shows a generic link symbol. The editing table follows the same candidate chain
-and hides its empty mark slot.
+For each candidate, `/_icon/<host>.ico` asks DuckDuckGo first. A network error or
+non-success response makes it ask Google's faviconV2. A successful DuckDuckGo
+response with an unsupported content type returns 404 without asking Google. On
+404, the card tries its next candidate; when all candidates fail, a link cell
+hides the mark and a published social button shows a generic link symbol. The
+editing table follows the same candidate chain and hides its empty mark slot.
 
 The Worker contacts fixed favicon-service addresses. Its existing response cache
 can reuse a validated image for up to seven days; misses are not cached. “Fetched”
@@ -53,7 +57,8 @@ Fetched brand marks keep their own colours by default. Generic drawn symbols,
 such as a house or envelope, use the theme colour.
 
 Set `icons: mono` in the card's frontmatter to make fetched marks greyscale.
-Hover restores their colour. Explicitly named `icon=` SVGs retain their colours.
+Hover restores their colour. Explicitly named `icon=` SVGs use `currentColor`,
+follow the theme colour, and are left alone by mono mode.
 `iconimg=` supplies an artwork thumbnail for a link cell and takes precedence
 over its mark; these thumbnails also retain their colours in mono mode.
 
