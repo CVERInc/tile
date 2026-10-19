@@ -1,0 +1,295 @@
+{
+  "id": "square-shop",
+  "author": "official",
+  "summary": "Displays a site or guild catalog and lets visitors open checkout for items or a cart.",
+  "embed": "<div data-dynamic-coral=\"square-shop\" data-site-id=\"YOUR_SITE_ID\" data-api-base=\"YOUR_BACKEND_ORIGIN\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/square-shop/v0/square-shop.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-site-id",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Site locator; use this or data-guild-id."
+    },
+    {
+      "name": "data-guild-id",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Guild locator; takes precedence over data-site-id."
+    },
+    {
+      "name": "data-api-base",
+      "type": "url",
+      "required": false,
+      "default": null,
+      "description": "Backend origin; deployment builds may supply a default."
+    },
+    {
+      "name": "data-locale",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Preferred locale for shop copy; falls back to data-shop-locale, page lang, then en-US."
+    },
+    {
+      "name": "data-cart",
+      "type": "enum",
+      "required": false,
+      "default": null,
+      "description": "Set to header to omit the sidebar cart."
+    },
+    {
+      "name": "data-collect-shipping",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Set to 1 to request shipping details at checkout."
+    },
+    {
+      "name": "data-detail-base",
+      "type": "url",
+      "required": false,
+      "default": null,
+      "description": "Base URL for product detail links."
+    },
+    {
+      "name": "data-shop-locale",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Fallback locale for shop copy when data-locale is absent; then page lang or en-US."
+    },
+    {
+      "name": "data-site-name",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Site name shown in shop copy."
+    },
+    {
+      "name": "data-buy-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Buy button override."
+    },
+    {
+      "name": "data-add-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Add-to-cart button override."
+    },
+    {
+      "name": "data-choose-options-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Options prompt override."
+    },
+    {
+      "name": "data-checkout-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout button override."
+    },
+    {
+      "name": "data-subtotal-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Subtotal override."
+    },
+    {
+      "name": "data-cart-heading",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Cart heading override."
+    },
+    {
+      "name": "data-empty-cart-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Empty cart override."
+    },
+    {
+      "name": "data-sold-out-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Sold-out badge override."
+    },
+    {
+      "name": "data-view-cart-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "View cart link override."
+    },
+    {
+      "name": "data-in-cart-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Already-in-cart label override."
+    },
+    {
+      "name": "data-shop-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Shop label override."
+    },
+    {
+      "name": "data-confirm-price-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Price confirmation override."
+    },
+    {
+      "name": "data-remove-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Remove button override."
+    },
+    {
+      "name": "data-quantity-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Quantity override."
+    },
+    {
+      "name": "data-sold-out-message",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Sold-out message override."
+    },
+    {
+      "name": "data-price-changed-message",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Price change message override."
+    },
+    {
+      "name": "data-storage-notice",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Storage notice override."
+    },
+    {
+      "name": "data-unavailable-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Unavailable item label override."
+    },
+    {
+      "name": "data-unavailable-note",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Unavailable item note override."
+    },
+    {
+      "name": "data-cart-unavailable-note",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Cart unavailable note override."
+    },
+    {
+      "name": "data-cart-limit-message",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Cart line limit message override."
+    },
+    {
+      "name": "data-checkout-error-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout error override."
+    },
+    {
+      "name": "data-checkout-busy-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout busy message override."
+    },
+    {
+      "name": "data-checkout-closed-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout closed message override."
+    },
+    {
+      "name": "data-checkout-again-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Try checkout again override."
+    },
+    {
+      "name": "data-checkout-unavailable-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout unavailable message override."
+    },
+    {
+      "name": "data-checkout-pending-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout pending message override."
+    },
+    {
+      "name": "data-checkout-note",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Checkout note; empty string hides it override."
+    },
+    {
+      "name": "data-empty-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Empty catalog message override."
+    },
+    {
+      "name": "data-unconnected-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Unconnected catalog message override."
+    },
+    {
+      "name": "data-error-label",
+      "type": "string",
+      "required": false,
+      "default": "locale dictionary",
+      "description": "Catalog error message override."
+    }
+  ]
+}

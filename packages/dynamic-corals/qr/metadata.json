@@ -1,0 +1,36 @@
+{
+  "id": "qr",
+  "author": "official",
+  "summary": "Opens an animated QR code for a URL from a Cardtile-rendered icon.",
+  "embed": "<div data-dynamic-coral=\"qr\" data-url=\"https://example.com\" data-name=\"Example\"><img class=\"cp-icon\" alt=\"Example\" src=\"icon.png\"></div>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-url",
+      "type": "url",
+      "required": true,
+      "default": null,
+      "description": "URL encoded in the QR matrix."
+    },
+    {
+      "name": "data-name",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "Name shown above the QR code."
+    },
+    {
+      "name": "data-version",
+      "type": "number",
+      "required": false,
+      "default": 0,
+      "description": "QR version override; zero lets the encoder choose."
+    }
+  ]
+}

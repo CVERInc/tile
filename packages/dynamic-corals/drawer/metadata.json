@@ -1,0 +1,22 @@
+{
+  "id": "drawer",
+  "author": "official",
+  "summary": "Adds keyboard and focus handling to a Cardtile-rendered drawer; its panel and CSS come from the renderer.",
+  "embed": "<div data-dynamic-coral=\"drawer\"><section id=\"details\" data-drawer-panel=\"details\">Drawer content</section></div>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-drawer-panel",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "Panel identifier on a child section; matches its URL hash."
+    }
+  ]
+}

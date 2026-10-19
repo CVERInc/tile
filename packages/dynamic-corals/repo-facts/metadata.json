@@ -1,0 +1,36 @@
+{
+  "id": "repo-facts",
+  "author": "official",
+  "summary": "Fills sitetile collection cards with a repository’s last push date and archived state.",
+  "embed": "<div data-dynamic-coral=\"repo-facts\" data-owner=\"CVERInc\" data-api-base=\"https://feelreef.com\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/repo-facts/v0/repo-facts.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-owner",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "GitHub owner whose repository cards are updated."
+    },
+    {
+      "name": "data-api-base",
+      "type": "url",
+      "required": true,
+      "default": null,
+      "description": "Origin serving the repo-facts worker."
+    },
+    {
+      "name": "data-locale",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Language override; otherwise uses the page HTML lang."
+    }
+  ]
+}

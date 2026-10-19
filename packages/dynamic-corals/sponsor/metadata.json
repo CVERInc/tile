@@ -1,0 +1,134 @@
+{
+  "id": "sponsor",
+  "author": "official",
+  "summary": "Lets a visitor enter an amount and requests a checkout link from the connected backend.",
+  "embed": "<div data-dynamic-coral=\"sponsor\" data-guild-id=\"YOUR_GUILD_ID\" data-api-base=\"YOUR_BACKEND_ORIGIN\" data-currency=\"USD\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/sponsor/v0/sponsor.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-guild-id",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "Seller receiving the amount."
+    },
+    {
+      "name": "data-api-base",
+      "type": "url",
+      "required": true,
+      "default": null,
+      "description": "Backend origin that serves the sponsor route."
+    },
+    {
+      "name": "data-currency",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "ISO 4217 currency code."
+    },
+    {
+      "name": "data-currency-symbol",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Displayed symbol; defaults to the currency code."
+    },
+    {
+      "name": "data-presets",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Comma-separated suggested amounts."
+    },
+    {
+      "name": "data-default-amount",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Initial amount when the URL has no amount."
+    },
+    {
+      "name": "data-min",
+      "type": "number",
+      "required": false,
+      "default": 1,
+      "description": "Smallest accepted amount in major units."
+    },
+    {
+      "name": "data-max",
+      "type": "number",
+      "required": false,
+      "default": 1000000,
+      "description": "Largest accepted amount in major units."
+    },
+    {
+      "name": "data-amount-param",
+      "type": "string",
+      "required": false,
+      "default": "amount",
+      "description": "URL query key used to prefill the amount."
+    },
+    {
+      "name": "data-title",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Heading override."
+    },
+    {
+      "name": "data-note",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Supporting text override."
+    },
+    {
+      "name": "data-amount-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Amount field label override."
+    },
+    {
+      "name": "data-submit-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Submit button label override."
+    },
+    {
+      "name": "data-invalid-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Invalid amount message override."
+    },
+    {
+      "name": "data-error-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Request error message override."
+    },
+    {
+      "name": "data-not-activated-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Message for a site without collection activated."
+    },
+    {
+      "name": "data-unconnected-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Message for a site without a connected payment account."
+    }
+  ]
+}

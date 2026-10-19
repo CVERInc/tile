@@ -1,0 +1,106 @@
+{
+  "id": "inbox-bubble",
+  "author": "official",
+  "summary": "Adds a visitor inbox bubble for a site or other tenant, with an optional site-answer view.",
+  "embed": "<div data-dynamic-coral=\"inbox-bubble\" data-kind=\"site\" data-id=\"YOUR_SITE_KEY\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/inbox-bubble/v0/inbox-bubble.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects this coral."
+    },
+    {
+      "name": "data-kind",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Tenant kind: site, card, cardtile, or ext."
+    },
+    {
+      "name": "data-id",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "Tenant key for the selected kind."
+    },
+    {
+      "name": "data-api-base",
+      "type": "url",
+      "required": false,
+      "default": null,
+      "description": "Backend origin override for previews."
+    },
+    {
+      "name": "data-kaito",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Set to 1 to enable the site-answer view."
+    },
+    {
+      "name": "data-assistant-name",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Baked assistant name until the platform resolves its current value."
+    },
+    {
+      "name": "data-open-on-hash",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Set to 1 to let #inbox open the panel."
+    },
+    {
+      "name": "data-ai-log",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Set to 0 to disable the deferred question log."
+    },
+    {
+      "name": "data-status",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Visible status line when the site-answer view is off."
+    },
+    {
+      "name": "data-title",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Dialog accessible-name override."
+    },
+    {
+      "name": "data-open-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Open button label override."
+    },
+    {
+      "name": "data-placeholder",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Message placeholder override."
+    },
+    {
+      "name": "data-send-label",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Send button label override."
+    },
+    {
+      "name": "data-site-name",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "Baked site name when the platform has not resolved one."
+    }
+  ]
+}
