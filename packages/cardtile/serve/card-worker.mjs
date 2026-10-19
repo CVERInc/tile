@@ -14,7 +14,7 @@ import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
-import { iconLinks, iconKind, iconFile } from '../card-icon.mjs';
+import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
@@ -54,6 +54,55 @@ async function relayImage(request, ctx, upstreams, maxAge) {
   if (!type) return NOT_RELAYED();
   const resp = new Response(up.body, {
     headers: { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': `public, max-age=${maxAge}` },
+  });
+  if (cache) {
+    const put = cache.put(key, resp.clone()).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+  }
+  return resp;
+}
+const AVATAR_MAX_BYTES = 512 * 1024;
+/** Author-supplied avatars must be HTTPS raster images, without redirects or unbounded bodies. */
+async function relayAvatar(request, ctx, upstreamUrl) {
+  try { if (new URL(upstreamUrl).protocol !== 'https:') return NOT_RELAYED(); }
+  catch { return NOT_RELAYED(); }
+  const cache = globalThis.caches && globalThis.caches.default;
+  const at = new URL(request.url);
+  const key = new Request(at.origin + at.pathname, { method: 'GET' });
+  if (cache) { const hit = await cache.match(key).catch(() => null); if (hit) return hit; }
+  const up = await fetch(upstreamUrl, { redirect: 'manual' }).catch(() => null);
+  if (!up) return NOT_RELAYED();
+  const type = allowedImageType(up.headers.get('content-type'));
+  if (!up.ok || !type || Number(up.headers.get('content-length')) > AVATAR_MAX_BYTES) {
+    if (up.body) await up.body.cancel().catch(() => {});
+    return NOT_RELAYED();
+  }
+  const chunks = [];
+  let size = 0;
+  if (up.body) {
+    const reader = up.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > AVATAR_MAX_BYTES) {
+          await reader.cancel().catch(() => {});
+          return NOT_RELAYED();
+        }
+        chunks.push(value);
+      }
+    } catch {
+      await reader.cancel().catch(() => {});
+      return NOT_RELAYED();
+    } finally { reader.releaseLock(); }
+  }
+  // Finish the bounded read before answering: an oversized stream must never start a 200.
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  const resp = new Response(body, {
+    headers: { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=3600' },
   });
   if (cache) {
     const put = cache.put(key, resp.clone()).catch(() => {});
@@ -119,6 +168,7 @@ export function resolveHandle(host, pathname, vanity = {}) {
  *
  *   'page'                  the card itself (HTML, or thin markdown by Accept)
  *   'fat'                   the whole file, assets included (/index.md, /<handle>.md)
+ *   'avatar'                the card's own avatar only, never an icon badge
  *   'ico' | 'svg' | 'apple' one of the card's icon files (card-icon.mjs)
  *   'alias'                 /<handle> on the card's own domain → 301 to its root
  *   null                    nothing lives here → 404
@@ -148,6 +198,8 @@ export function cardPath(pathname, handle, isVanity) {
     const icon = iconKind(p);
     if (icon) return icon;
     if (lower === `/${h}` || lower === `/${h}/`) return 'alias';
+    // Keep /<handle> as the page alias even when the handle itself is "avatar".
+    if (p === '/avatar' || p === `/${h}/avatar`) return 'avatar';
     return null;
   }
   const m = /^\/([^/]+)(\/.*)?$/.exec(p);
@@ -155,6 +207,7 @@ export function cardPath(pathname, handle, isVanity) {
   const seg = m[1].toLowerCase(), rest = (m[2] || '').replace(/\/+$/, '');
   if (seg === `${h}.md`) return rest ? null : 'fat';
   if (seg !== h) return null;
+  if (rest === '/avatar') return 'avatar';
   return rest ? iconKind(rest) : 'page';
 }
 
@@ -700,6 +753,25 @@ const router = {
     }
 
     if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
+
+    // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
+    // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
+    if (want === 'avatar') {
+      const avatar = cardMd ? cardAvatar(parseCard(cardMd)) : null;
+      const image = !avatar ? NOT_RELAYED()
+        : avatar.url ? await relayAvatar(request, ctx, avatar.url)
+          : new Response(Uint8Array.from(atob(avatar.b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)), {
+            headers: {
+              'Content-Type': avatar.mime,
+              'Cache-Control': 'public, max-age=3600',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          });
+      // Apply host-specific robots rules after a relay cache hit as well as a fresh response.
+      const headers = new Headers(image.headers);
+      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle))) headers.set(key, value);
+      return new Response(image.body, { status: image.status, headers });
+    }
 
     // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
     // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
