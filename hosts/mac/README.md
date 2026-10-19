@@ -126,10 +126,15 @@ as the to-do list, not as reassurance.
 
 - **The App Store build's folder grants.** A document opens, takes typing and saves in the sandboxed
   build (that is how the `network.client` entitlement was found to be required — see
-  `entitlements/appstore.entitlements`). Nothing has yet followed a wikilink through the folder panel,
-  relaunched to see the bookmark resolve, or saved a note that was reached through a grant; nor
-  checked that the accent colour still follows System Settings (it arrives as a distributed
-  notification).
+  `entitlements/appstore.entitlements`). The wikilink → folder panel → grant → relaunch path has
+  not run. It needs a real click: mouse events posted to the app's own process do not reach a link
+  inside the web view, the panel belongs to a separate system process, and posting events to the
+  whole system from the test Mac's background session could land in whoever holds its screen. By
+  hand, in the appstore build: open a note inside an Obsidian vault and ⌘-click a `[[link]]` to a
+  sibling → the panel opens at the note's folder → choose the vault folder, Allow → the sibling
+  opens; quit, relaunch, ⌘-click again → no panel; Cancel in an ungranted folder → a beep, and no
+  second panel until relaunch. Also unchecked: the accent colour following System Settings (it
+  arrives as a distributed notification).
 
 Smaller, known: the menus are English-only while the editor speaks four languages.
 
