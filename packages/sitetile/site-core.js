@@ -531,7 +531,10 @@ function parseSite(text) {
     }
     let end = source.indexOf('\n', at);
     if (end < 0) end = source.length;
-    const t = typeLineInner(source.slice(at, end));
+    // A skipped comment must end before the directive's own line; indentation is allowed.
+    const lineStart = source.lastIndexOf('\n', at - 1) + 1;
+    const t = /^[\t ]*$/.test(source.slice(lineStart, at))
+      ? typeLineInner(source.slice(at, end)) : null;
     let beforeTypeLine = '';
     if (t !== null) {
       const st = splitTypeInner(t);
