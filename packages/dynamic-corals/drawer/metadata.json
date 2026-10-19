@@ -30,5 +30,5 @@
     }
   ],
   "host": "cardtile",
-  "requirements": "Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Renderer emits DRAWER_CSS in a style element; optional .dc-drawer-close restores focus."
+  "requirements": "Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Renderer emits DRAWER_CSS in a style element. An optional .dc-drawer-close inside a panel receives focus on open."
 }

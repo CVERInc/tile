@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { CORALS } from './corals.mjs';
 import { attributeReads, sourceFor, INTERNAL, DYNAMIC_NAMES } from './catalog-source.mjs';
 import { expectedReadme, renderMetadata } from './catalog-readme.mjs';
@@ -93,4 +94,37 @@ test('collector covers literal, dataset and helper read forms', () => {
 test('drawer example includes the stylesheet emitted by Cardtile', async () => {
   const { DRAWER_CSS } = await import('./drawer/drawer-style.mjs');
   assert.ok(metadataFor('drawer').embed.includes(`<style>${DRAWER_CSS}</style>`), 'drawer: embed omits renderer stylesheet');
+});
+
+// Run the client against both possible close-control placements. The renderer uses
+// the layer sibling; only a close control inside the panel is focused on open.
+test('drawer focus documentation matches the client behaviour', () => {
+  const sentence = 'An optional .dc-drawer-close inside a panel receives focus on open.';
+  assert.ok(metadataFor('drawer').requirements.includes(sentence), 'drawer: requirements must describe panel-only focus on open');
+  assert.ok(readFileSync(join(HERE, 'drawer/README.md'), 'utf8').includes(sentence), 'drawer: README must describe panel-only focus on open');
+  const source = readFileSync(join(HERE, 'drawer/drawer-client.mjs'), 'utf8');
+  for (const insidePanel of [false, true]) {
+    let focused = 0;
+    const close = { focus() { focused++; } };
+    const panel = {
+      getAttribute: () => 'details',
+      querySelector: selector => selector === '.dc-drawer-close' && insidePanel ? close : null,
+    };
+    const layer = {
+      querySelectorAll: () => [panel],
+      querySelector: selector => selector === '.dc-drawer-close' ? close : null,
+    };
+    const location = { hash: '#details' };
+    let sync;
+    runInNewContext(source, {
+      document: { querySelectorAll: () => [layer], addEventListener() {}, removeEventListener() {} },
+      window: { addEventListener(event, callback) { if (event === 'hashchange') sync = callback; } },
+      location,
+      setTimeout(callback) { callback(); },
+    });
+    assert.equal(focused, insidePanel ? 1 : 0, `drawer: close inside panel=${insidePanel}, focus on open`);
+    location.hash = '';
+    sync();
+    assert.equal(focused, insidePanel ? 1 : 0, 'drawer: closing must not focus the close control');
+  }
 });

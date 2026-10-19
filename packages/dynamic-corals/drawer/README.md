@@ -14,7 +14,7 @@ Adds keyboard and focus handling to a Cardtile-rendered drawer; its panel and CS
 
 Author: `official`.
 
-Host: `cardtile`. Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Renderer emits DRAWER_CSS in a style element; optional .dc-drawer-close restores focus.
+Host: `cardtile`. Cardtile-only renderer output, not a standalone copy-paste embed. Cardtile supplies page CSS and the coral script. Renderer emits DRAWER_CSS in a style element. An optional .dc-drawer-close inside a panel receives focus on open.
 
 ### Embed
 
