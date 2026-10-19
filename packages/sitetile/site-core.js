@@ -2834,6 +2834,7 @@ function renderSection(s, hero, ctx) {
           successHeading: fieldCopy.successHeading,
           errorNetwork: fieldCopy.errorNetwork,
           errorServer: fieldCopy.errorServer,
+          errorNotClaimed: fieldCopy.errorNotClaimed, // reef#2204 — see Form.astro's payload
           sentWithEmail: fieldCopy.sentWithEmail,
           sentNoEmail: fieldCopy.sentNoEmail,
           emailField: fields.some(({ f }) => f.kind === 'email') ? 'visitor_email' : null,

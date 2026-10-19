@@ -7,10 +7,49 @@
 // only with `\`, backtick and `${` escaped for a template string.
 //
 // CVERInc/reef#1933 (S4b).
+//
+// reef#2204 — the outcome → sentence mapping and the "which shape did the forwarder answer in"
+// reader are ONE source text, embedded verbatim in the browser script below AND evaluated by
+// `inboxOutcomeHelpers()` for the unit tests, so what is tested is the code a page ships.
+// Plain string (no template escapes) so it can be spliced into the template literal as-is.
+//
+// Shapes, read off feelreef's `src/routes/api/inbox/+server.ts`:
+//   • form-encoded POST, no `Accept: application/json` (a no-JS submit, and this script's own
+//     `fetch(action, {body: FormData})`, which sends no Accept) → 303 `<return_to>?inbox=<reason>`.
+//     fetch() follows it, so the AJAX path reads the outcome off the FINAL response's URL;
+//   • `Accept: application/json` or a JSON body → `{ ok:false, reason }`, 404 for `not_claimed`,
+//     422 for every other refusal; `{ ok:true, … }` on success.
+// `not_claimed` = the owner never claimed Inbox; it will fail until they do, so it is the ONE
+// outcome that must not say "try again". Every other refusal keeps the generic retry sentence.
+const INBOX_OUTCOME_HELPERS_SRC = [
+  "        function inboxErrorKey(outcome) { return outcome === 'not_claimed' ? 'errorNotClaimed' : 'errorServer'; }",
+  // An older build's payload has no errorNotClaimed; fall back to errorServer rather than show nothing.
+  "        function inboxErrorCopy(copy, outcome) { return copy ? (copy[inboxErrorKey(outcome)] || copy.errorServer || null) : null; }",
+  '        function inboxOutcomeOf(res) {',
+  "          let outcome = '';",
+  "          try { outcome = new URL(res.url, location.href).searchParams.get('inbox') || ''; } catch (e) {}",
+  '          if (outcome) return Promise.resolve(outcome);',
+  "          const ct = (res.headers && typeof res.headers.get === 'function' && res.headers.get('content-type')) || '';",
+  "          if (!/application\\/json/i.test(ct) || typeof res.json !== 'function') return Promise.resolve('');",
+  "          return res.json().then((b) => (b && b.ok === true ? 'sent' : String((b && b.reason) || '')), () => '');",
+  '        }',
+].join('\n');
+
+/**
+ * The helpers above, evaluated from the same text the browser runs. `location` is the only free
+ * variable in that text; pass a `{ href }` to stand in for it. Node-only (tests).
+ */
+export function inboxOutcomeHelpers(location = { href: 'http://localhost/' }) {
+  // eslint-disable-next-line no-new-func
+  return new Function('location', INBOX_OUTCOME_HELPERS_SRC + '\nreturn { inboxErrorKey, inboxErrorCopy, inboxOutcomeOf };')(location);
+}
+inboxOutcomeHelpers.source = INBOX_OUTCOME_HELPERS_SRC;
+
 export const INBOX_FORM_SCRIPT = `
       (() => {
         const root = document.currentScript.closest('.st-form-section');
         if (!root) return;
+${INBOX_OUTCOME_HELPERS_SRC}
         // Localized required-field messages (2026-09-03, finding #9): native \`required\` already
         // blocks an empty submit with ZERO js — this only swaps the browser's own generic bubble
         // text for the site-language one baked into \`data-required-msg\` at build time. \`invalid\`
@@ -89,7 +128,7 @@ export const INBOX_FORM_SCRIPT = `
         // just without a captured FormData to enrich them with.
         const v = new URLSearchParams(location.search).get('inbox');
         if (v === 'sent') showSuccess(null);
-        else if (v) showError(copy ? copy.errorServer : null);
+        else if (v) showError(inboxErrorCopy(copy, v));
 
         // 🔑 bug #2, bullet (a) (2026-09-04): strip \`?inbox=\` the moment it has been shown once, so
         // a reload / the back button / a shared URL land on the clean page instead of re-showing
@@ -145,9 +184,9 @@ export const INBOX_FORM_SCRIPT = `
               submitting = false;
               // fetch() follows the forwarder's 303 itself — the visible page never navigates —
               // so the outcome is read off the FINAL response's own URL, the same \`?inbox=\`
-              // vocabulary a no-JS round trip would have landed the browser on.
-              let outcome = '';
-              try { outcome = new URL(res.url, location.href).searchParams.get('inbox') || ''; } catch (e) {}
+              // vocabulary a no-JS round trip would have landed the browser on. inboxOutcomeOf
+              // also reads the forwarder's JSON shape (\`{ok, reason}\`) when that is what came back.
+              return inboxOutcomeOf(res).then((outcome) => {
               if (outcome === 'sent') {
                 // \`thanks=\`: the forwarder re-validates its own \`thanks_to\` before it ever
                 // becomes a \`Location\` (shop-function-template.js), so \`res.url\` (fetch follows
@@ -170,7 +209,8 @@ export const INBOX_FORM_SCRIPT = `
                   return;
                 }
                 showSuccess(fd);
-              } else showError(copy ? copy.errorServer : null);
+              } else showError(inboxErrorCopy(copy, outcome));
+              });
             })
             .catch(() => {
               submitting = false;

@@ -182,6 +182,9 @@ const inboxCopy = isInbox ? {
   successHeading: fieldCopy.successHeading,
   errorNetwork: fieldCopy.errorNetwork,
   errorServer: fieldCopy.errorServer,
+  // reef#2204: the forwarder's `not_claimed` outcome (owner never claimed Inbox) — the script
+  // shows this instead of the retry sentence, on both the `?inbox=` reload and the AJAX path.
+  errorNotClaimed: fieldCopy.errorNotClaimed,
   // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
   // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
   sentWithEmail: fieldCopy.sentWithEmail,

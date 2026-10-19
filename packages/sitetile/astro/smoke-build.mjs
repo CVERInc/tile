@@ -1446,6 +1446,8 @@ const checks = [
       && payload.successHeading === 'Sent'
       && payload.errorNetwork === 'Your connection seems to be having trouble — check it and try again.'
       && payload.errorServer === "Couldn't send that — please try again."
+      // reef#2204: the not-claimed sentence rides the same payload — no "try again" in it.
+      && payload.errorNotClaimed === "This site isn't taking messages right now."
       && payload.sentWithEmail.includes('{email}')
       && payload.sentNoEmail.length > 0
       && payload.emailField === 'visitor_email'

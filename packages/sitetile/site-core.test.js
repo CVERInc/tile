@@ -2487,6 +2487,9 @@ test('#1933 S4b inbox: data-inbox-copy follows the site lang (one assertion per 
 });
 test('#1933 S4b inbox: the copy IS lingo\'s table, and a site with no lang gets Form.astro\'s DEFAULT_LANG copy', () => {
   assert.deepEqual(copyOf(inboxHtml('ja', INBOX_BODY)).errorServer, inboxFormCopy('ja').errorServer);
+  // reef#2204: the payload carries the not-claimed sentence too, so the script can say it.
+  assert.equal(copyOf(inboxHtml('ja', INBOX_BODY)).errorNotClaimed, inboxFormCopy('ja').errorNotClaimed);
+  assert.equal(copyOf(inboxHtml('zh-TW', INBOX_BODY)).errorNotClaimed, '這個網站目前沒有開放留言。');
   assert.equal(copyOf(inboxHtml('', INBOX_BODY)).successHeading, inboxFormCopy(DEFAULT_LANG).successHeading);
   assert.equal(copyOf(inboxHtml('', INBOX_BODY)).successHeading, '已送出');
 });
