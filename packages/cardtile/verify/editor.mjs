@@ -5,7 +5,7 @@
 // they are the conditions under which it is safe to let a human touch the file at all.
 //
 //   1. FIDELITY   the canvas is what the Worker serves, byte for byte, once the editor's own
-//                 `data-cell` attributes are removed.
+//                 `data-cell` attributes and exact edit-only placeholder stylesheet are removed.
 //   2. ROUNDTRIP  open a live card, change nothing, read the markdown back: identical bytes.
 //   3. EDIT       a form edit changes exactly the param it was pointed at, and leaves alone a param
 //                 the form has no field for.
@@ -14,6 +14,7 @@
 // 🔴 Every one has a control, because "found no problem" and "was not looking" print the same thing.
 //
 //   node packages/cardtile/verify/editor.mjs
+import { stripEditorHTML } from './editor-fidelity.js';
 import { readCard, PLAYWRIGHT } from './paths.mjs';
 import { createServer } from '../w/serve.mjs';
 import { renderCardHTML } from '../serve/card-worker.mjs';
@@ -44,13 +45,11 @@ async function open(handle) {
 
 // ── 1. FIDELITY ─────────────────────────────────────────────────────────────────────────────────
 console.log('1. FIDELITY — the canvas is the served document\n');
-console.log('card         canvas bytes   worker bytes   identical after stripping data-cell');
+console.log('card         canvas bytes   worker bytes   identical after stripping editor additions');
 for (const handle of CARDS) {
   const { ctx, page, errors } = await open(handle);
   const canvas = await page.evaluate(() => window.__cardtileW.canvasHtml());
-  const stripped = canvas
-    .replace(/<script src="[^"]*Sortable[^"]*"><\/script>/, '')
-    .replace(/ data-cell="\d+"/g, '');
+  const stripped = stripEditorHTML(canvas);
   // 🔴 compare against the URL the editor actually rendered with, read back from it. Hardcoding one
   // here would make this pass by agreeing with itself, and cardUrl is a real render input — it
   // decides which social link is the author's own site.
@@ -73,7 +72,7 @@ for (const handle of CARDS) {
     return w.canvasHtml();
   });
   const served = renderCardHTML(readCard('specimen-rich'), { handle: 'x', cardUrl: await page.evaluate(() => window.__cardtileW.cardUrl) });
-  const stripped = changed.replace(/<script src="[^"]*Sortable[^"]*"><\/script>/, '').replace(/ data-cell="\d+"/g, '');
+  const stripped = stripEditorHTML(changed);
   console.log(`\nCONTROL      an edited card differs from the served one: ${stripped !== served ? 'yes' : 'NO'}`);
   if (stripped === served) fail('CONTROL: an edited card compared EQUAL — the fidelity check above compares nothing');
   await ctx.close();
