@@ -86,6 +86,48 @@ test('section types: hero / prose(default, no type line) / grid / cta / embed / 
   assert.equal(s[5].type, 'prose');
 });
 
+// reef#1377: author notes must not hide a section's layout directive.
+const commentPrefix = '---\nsitetile-page: cohorts\ntitle: Cohorts\n---\n## Students\n';
+const commentBody = '%% sitetile: grid cols=3 %%\n- One\n- Two\n';
+test('directive control: immediately after heading', () => {
+  assert.equal(parseSite(commentPrefix + commentBody).sections[0].type, 'grid');
+});
+for (const [name, notes] of [
+  ['single comment', '<!-- owner note -->\n'],
+  ['multi-line comment', '<!-- owner note\n  keep this spacing  \n-->\n'],
+  ['two comments', '<!-- first -->\n<!-- second -->\n'],
+  ['comments and blank lines', '\n  <!-- first -->\n\n<!-- second\nline -->\n\n'],
+  ['blank lines', '\n\n'],
+]) {
+  test('directive after ' + name, () => {
+    const source = commentPrefix + notes + commentBody;
+    const site = parseSite(source);
+    assert.equal(site.sections[0].type, 'grid');
+    assert.equal(site.sections[0].params, 'cols=3');
+    const saved = serializeSite(site);
+    assert.ok(saved.includes('## Students\n' + notes + commentBody), 'notes survive byte-for-byte before directive');
+    assert.equal(serializeSite(parseSite(saved)), saved);
+    assert.equal(renderSiteToHtml(site), renderSiteToHtml(parseSite(commentPrefix + commentBody)));
+  });
+}
+test('comment after directive keeps existing body and rendering behavior', () => {
+  const note = '<!-- owner note -->\n';
+  const site = parseSite(commentPrefix + commentBody.replace('\n- One', '\n' + note + '- One'));
+  assert.equal(site.sections[0].type, 'grid');
+  assert.ok(site.sections[0].body.startsWith(note));
+  assert.ok(serializeSite(site).includes('%% sitetile: grid cols=3 %%\n' + note));
+  assert.equal(renderSiteToHtml(site), renderSiteToHtml(parseSite(commentPrefix + commentBody)));
+});
+test('comment without directive keeps existing prose behavior', () => {
+  const body = '<!-- owner note -->\nPlain text.\n';
+  const site = parseSite(commentPrefix + body);
+  assert.equal(site.sections[0].type, 'prose');
+  assert.equal(site.sections[0].hasTypeLine, false);
+  assert.equal(site.sections[0].body, body.trim());
+  assert.ok(serializeSite(site).includes(body));
+  assert.equal(renderSiteToHtml(site), renderSiteToHtml(parseSite(commentPrefix + 'Plain text.\n')));
+});
+
 test('grid: ### subheadings become cells with bodies', () => {
   const grid = parseSite(CANON).sections[2];
   assert.equal(grid.cells.length, 3);
