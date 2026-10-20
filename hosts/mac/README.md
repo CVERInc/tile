@@ -167,7 +167,13 @@ symbols blur into a smudge there. To change it, edit the script and regenerate:
 
 ```bash
 swift icon/make-icon.swift /tmp/AppIcon.iconset && iconutil -c icns /tmp/AppIcon.iconset -o icon/AppIcon.icns
+cp /tmp/AppIcon.iconset/*.png icon/AppIcon.xcassets/AppIcon.appiconset/
 ```
+
+The same PNGs are also an asset catalog (`icon/AppIcon.xcassets`), which `build-app.sh` compiles into
+`Assets.car` with Xcode's `actool` — that is how Xcode ships a Mac app's icon, and the store build carries
+both forms rather than learn at upload which one App Store Connect insists on. The generator is
+deterministic: regenerating gives a byte-identical `.icns`, so a diff here is a real change.
 
 ## Languages
 
