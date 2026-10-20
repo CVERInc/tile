@@ -7,7 +7,11 @@
 
 const EDITOR_TOOLS = [
   // fixed: always shown, not user-toggleable (essentials). tip = i18n key for the hover/aria label.
-  { key: 'search', icon: 'search', fixed: true, tip: 'edFind' }, { key: 'undo', icon: 'undo', fixed: true, tip: 'undoAction' }, { key: 'redo', icon: 'redo', fixed: true, tip: 'redoAction' }, 'sep',
+  // Undo/redo here are the TEXT editor's, so they take the platform's plain words (edUndo/edRedo — macOS's own
+  // Edit-menu strings). The board's undoAction/redoAction ("悔牌", "待った", "무르기") are a card-game joke that
+  // belongs to tugtile's board, where taking back a move is taking back a tile; in a document editor the same
+  // key read differently from the Edit menu one line above it.
+  { key: 'search', icon: 'search', fixed: true, tip: 'edFind' }, { key: 'undo', icon: 'undo', fixed: true, tip: 'edUndo' }, { key: 'redo', icon: 'redo', fixed: true, tip: 'edRedo' }, 'sep',
   // icons verified present in Obsidian's bundled Lucide subset (not all of Lucide ships); g = text fallback when no icon
   { key: 'h1', g: 'H1', icon: 'heading-1', cat: 'format', tip: 'edH1' }, { key: 'h2', g: 'H2', icon: 'heading-2', cat: 'format', tip: 'edH2' }, { key: 'h3', g: 'H3', icon: 'heading-3', cat: 'format', tip: 'edH3' }, 'sep',
   { key: 'bold', g: 'B', icon: 'bold', cat: 'format', tip: 'edBold' }, { key: 'italic', g: 'I', icon: 'italic', cat: 'format', tip: 'edItalic' }, { key: 'strike', g: 'S', icon: 'strikethrough', cat: 'format', tip: 'edStrike' }, { key: 'clear', g: 'Tx', icon: 'remove-formatting', cat: 'format', tip: 'edClear' }, 'rowbreak',   // phone: wrap to a third toolbar row here (desktop treats it as a separator)

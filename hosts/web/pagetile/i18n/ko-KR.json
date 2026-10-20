@@ -245,6 +245,8 @@
   "edDate": "날짜 삽입",
   "edTime": "시간 삽입",
   "edFind": "찾기 / 바꾸기",
+  "edUndo": "실행 취소",
+  "edRedo": "실행 복귀",
   "TBL_ALIGN": "표 소스 정렬",
   "TBL_DEL_COL": "열 삭제",
   "TBL_DEL_ROW": "행 삭제",

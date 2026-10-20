@@ -245,6 +245,8 @@
   "edDate": "Insert date",
   "edTime": "Insert time",
   "edFind": "Find / replace",
+  "edUndo": "Undo",
+  "edRedo": "Redo",
   "TBL_ALIGN": "Align table source",
   "TBL_DEL_COL": "Delete column",
   "TBL_DEL_ROW": "Delete row",

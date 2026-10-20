@@ -245,6 +245,8 @@
   "edDate": "日付を挿入",
   "edTime": "時刻を挿入",
   "edFind": "検索／置換",
+  "edUndo": "取り消す",
+  "edRedo": "やり直す",
   "TBL_ALIGN": "表のソースを整列",
   "TBL_DEL_COL": "列を削除",
   "TBL_DEL_ROW": "行を削除",
