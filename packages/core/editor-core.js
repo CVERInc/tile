@@ -1269,6 +1269,8 @@ class TileEditModal extends Modal {
       mount: this.contentEl, ctrl: this._ctrl,
       enabledModes: (this.host.plugin && this.host.plugin.settings && this.host.plugin.settings.modes) || {},
       seasonedColor: !!(this.host.plugin && this.host.plugin.settings && this.host.plugin.settings.seasonedColor),
+      seasonedPalette: this.host.plugin && this.host.plugin.settings && this.host.plugin.settings.seasonedPalette,
+      seasonedFont: this.host.plugin && this.host.plugin.settings && this.host.plugin.settings.seasonedFont,
       saveImage: (blob) => saveVaultImage(app, srcPath, blob),   // paste/drop an image → vault attachment + ![[…]]
       resolveSrc: (raw) => {
         raw = String(raw).split('|')[0].trim();
@@ -1921,7 +1923,8 @@ function wireToc(opts) {
 // literally one thing everywhere it appears.
 const EDITOR_MODES = [
   { key: 'seasoned', cls: '', icon: 'square-m', name: 'mtModeSeasoned' },
-  { key: 'rendered', cls: 'tugtile-preview', icon: 'square-pen', name: 'mtModeRendered' },
+  // book-open, not square-pen: Rendered is the mode closest to READING, and a pen says the opposite.
+  { key: 'rendered', cls: 'tugtile-preview', icon: 'book-open', name: 'mtModeRendered' },
   { key: 'plain', cls: 'tugtile-plain', icon: 'square-code', name: 'mtModePlain' },
 ];
 // Rendered mode hides the literal `[ ]` / `[x]` and puts a box glyph in its place (styles.css,
@@ -1957,6 +1960,27 @@ function wireTaskToggle(mount, ctrl) {
   return { destroy() { try { mount.removeEventListener('click', onClick, true); } catch (e) {} } };
 }
 
+// Seasoned's look, from a host's settings — two independent choices, both opt-in:
+//   seasonedPalette  'accent' (one accent tint, the default) | 'color' (a hue per token) | 'plain' (text colour;
+//                    markers faint, links still accent). 'plain' reaches Rendered headings too — they share .tg-h.
+//   seasonedFont     'mono' (the default: marktile is a markdown editor) | 'text' (prose in the body font;
+//                    code, fences, frontmatter and the [ ] box stay monospace, and Plain mode stays monospace).
+// seasonedColor is the setting 'color' replaced, read only when seasonedPalette is unset, so a vault that turned it
+// on before the three-way choice existed keeps its colours. Unknown values fall back to the defaults rather than to
+// nothing: a typo in a settings file must not strip the editor's styling.
+const SEASONED_PALETTES = ['accent', 'color', 'plain'];
+function seasonedLook(settings) {
+  const s = settings || {};
+  const palette = SEASONED_PALETTES.indexOf(s.seasonedPalette) >= 0 ? s.seasonedPalette : (s.seasonedColor ? 'color' : 'accent');
+  return { palette, font: s.seasonedFont === 'text' ? 'text' : 'mono' };
+}
+// The look is classes on the mount, so a change applies to an open editor without rebuilding it.
+function applySeasonedLook(mount, look) {
+  mount.classList.toggle('marktile-palette-color', look.palette === 'color');
+  mount.classList.toggle('marktile-palette-plain', look.palette === 'plain');
+  mount.classList.toggle('marktile-font-text', look.font === 'text');
+}
+
 function equipEditor(opts) {
   const { mount, ctrl, enabledModes, resolveSrc, toc, saveImage } = opts;
   const onModes = () => { const md = enabledModes || {}; const on = EDITOR_MODES.filter((m) => md[m.key] !== false); return on.length ? on : EDITOR_MODES; };
@@ -1974,12 +1998,13 @@ function equipEditor(opts) {
   const tocCtl = toc ? wireToc(Object.assign({ mount, ctrl }, toc)) : null;
   const paste = saveImage ? wireImagePaste(mount, ctrl, saveImage) : null;
   const taskCtl = wireTaskToggle(mount, ctrl);   // Rendered-mode checkbox click → source toggle
-  mount.classList.toggle('marktile-palette-color', !!opts.seasonedColor);   // Seasoned palette: accent (default) vs per-token colour; host passes the setting
+  applySeasonedLook(mount, seasonedLook(opts));   // host passes seasonedPalette / seasonedFont (and the legacy seasonedColor)
   applyMode();
   return {
     currentMode: current,
     applyMode,
     cycleMode() { ix = (ix + 1) % onModes().length; applyMode(); },
+    setLook(settings) { applySeasonedLook(mount, seasonedLook(settings)); },   // live re-apply from a settings change
     toc: tocCtl,
     destroy() { try { tableObs.disconnect(); } catch (e) {} if (imgObs) { try { imgObs.disconnect(); } catch (e) {} } if (tocCtl) tocCtl.destroy(); if (paste) paste.destroy(); if (taskCtl) taskCtl.destroy(); },
   };
