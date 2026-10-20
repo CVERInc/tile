@@ -63,26 +63,21 @@ let locked = false;    // survives a reload, like the mode does
 
 // ── Search every document ────────────────────────────────────────────────────────────────────────
 // The engine asks a host for this and grows no scope control without it, so the capability has to be
-// KNOWN BEFORE the editor mounts — AppKit pushes it on `ready`, ahead of the first open(). A machine
-// with no flintfind installed therefore shows no door at all, rather than one that fails when
-// pressed.
-//
-// 🔴 Interim, and named as such: this shells out to the `ff` CLI, which is a Python tool in someone's
-// homebrew and NOT part of this app. It is behind the engine's one searchAll seam precisely so the
-// Swift port replaces this function and nothing else.
+// KNOWN BEFORE the editor mounts — AppKit pushes it on `ready`, ahead of the first open(). The search
+// itself is flintfind's engine, linked into the app (EditorViewController.runSearch).
 let caps = { searchAll: false };
 let searchId = 0;
 const pending = new Map();
 
 const searchAll = (query, onPartial) => new Promise((resolve) => {
   const id = ++searchId;
-  pending.set(id, { resolve: resolve, onPartial: onPartial });
-  send("search", { id: id, query: query });
   // A host that never answers must not leave the panel spinning for ever. The engine treats an
   // empty result as an answer, which is the honest thing to show when the search itself failed.
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     if (pending.has(id)) { pending.delete(id); resolve({ hits: [], offline: [], files: 0, skipped: 0 }); }
   }, 25000);
+  pending.set(id, { resolve: resolve, onPartial: onPartial, timer: timer });
+  send("search", { id: id, query: query });
 });
 
 const EMPTY = { hits: [], offline: [], files: 0, skipped: 0 };
@@ -223,12 +218,13 @@ window.__mt = {
   // Pushed on `ready`, before the first open(), because the engine decides at MOUNT whether it has
   // a scope control to draw.
   setCapabilities: (c) => { caps = Object.assign({}, caps, c || {}); },
-  // AppKit's answer to one search. `json` is a string flintfind printed — parsed here, never
-  // evaluated. A malformed or missing answer resolves as an empty result, which is what the panel
-  // can honestly show when the search itself failed.
-  // AppKit's answer to one search — possibly several times. flintfind prints the indexed half as
-  // soon as it has it and the unindexed half ~4s later, so `partial` says whether more is coming.
-  // `json` is a string it printed: parsed here, never evaluated.
+  // The host is asking the person for a folder before it can search (App Store build, first search).
+  // A person reading that panel is not a host that stopped answering, so the timeout stands down.
+  searchHold: (id) => { const w = pending.get(id); if (w) clearTimeout(w.timer); },
+  // AppKit's answer to one search — possibly several times: the indexed half as soon as it is known
+  // and the unindexed half ~4s later, so `partial` says whether more is coming. `json` is a string,
+  // parsed here and never evaluated; a malformed or missing answer resolves as an empty result,
+  // which is what the panel can honestly show when the search itself failed.
   searchResult: (id, json) => {
     const waiting = pending.get(id);
     if (!waiting) return;                   // already timed out, or an answer to a question nobody asked
@@ -240,6 +236,7 @@ window.__mt = {
       return;                               // stays pending: the real answer has not arrived yet
     }
     pending.delete(id);
+    clearTimeout(waiting.timer);
     waiting.resolve(payload);
   },
 };

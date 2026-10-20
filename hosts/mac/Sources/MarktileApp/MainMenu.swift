@@ -70,6 +70,12 @@ func makeMainMenu() -> NSMenu {
     // ⌘F is a reflex, and until now it landed on nothing — the find bar had exactly one door, the
     // magnifier at the far left of the toolbar.
     editMenu.addItem(withTitle: L("Find…"), action: #selector(EditorViewController.showFind(_:)), keyEquivalent: "f")
+    // The same panel ⌘F reaches on a second press, given a door of its own: a second press is a habit
+    // nobody can discover, and a menu item is where a Mac person looks. ⇧⌘F is where Xcode and every
+    // code editor keep "find in all files".
+    let searchAll = editMenu.addItem(withTitle: L("Search Every Document…"),
+                                     action: #selector(EditorViewController.showSearchAll(_:)), keyEquivalent: "f")
+    searchAll.keyEquivalentModifierMask = [.command, .shift]
 
     // ── Format ─────────────────────────────────────────────────────────────────
     // Eleven of this editor's sixteen buttons had no keyboard route and no menu entry at all: the

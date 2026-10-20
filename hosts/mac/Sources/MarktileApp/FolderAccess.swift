@@ -4,10 +4,10 @@ import AppKit
 // build, asking for one.
 //
 // The two builds are ONE binary. What differs is the entitlements it is signed with
-// (`entitlements/direct.entitlements`, `entitlements/appstore.entitlements`), and the code asks the
+// (`entitlements/dev.entitlements`, `entitlements/appstore.entitlements`), and the code asks the
 // running process whether a sandbox actually applied rather than reading a compile-time label. A
 // label can disagree with the signature — an "appstore" build signed without the sandbox, or the
-// direct build re-signed with it to test — and then the app would ask for folders it can already
+// dev build re-signed with it to test — and then the app would ask for folders it can already
 // read, or skip asking for folders it cannot. The environment variable below is set by the sandbox
 // itself as it initialises the process, so it describes what happened, not what was intended.
 //
@@ -15,7 +15,7 @@ import AppKit
 // Inside it, a document opened from Finder or ⌘O grants exactly that one file. A `[[wikilink]]`
 // needs the folder around it, so the first ⌘-click in a folder nobody has granted asks once with
 // an open panel pointed at that folder, and the answer is kept as a security-scoped bookmark that
-// is resolved again on every launch.
+// is resolved again on every launch. Search asks once for the home folder (ensureSearchable).
 final class FolderAccess {
 
     static let shared = FolderAccess()
@@ -77,26 +77,56 @@ final class FolderAccess {
         let folder = folder.standardizedFileURL
         guard Self.isSandboxed, !canList(folder) else { return then(true) }
         guard !declined.contains(folder.path), !panelOpen else { return then(false) }
+        ask(at: folder, message: L("To follow links to other notes, marktile needs to read the folder this note is in. If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work."),
+            in: window) { [weak self] picked in
+            guard let self else { return }
+            if !picked { self.declined.insert(folder.path) }
+            then(picked && self.canList(folder))
+        }
+    }
 
+    private static let searchAskedKey = "MarktileSearchFolderChosen"
+
+    /// Before the first search in the App Store build: ask for the home folder, which is what makes
+    /// "search every document" mean every document. Spotlight answers a sandboxed process with only
+    /// what it may read, so whatever is chosen here IS the search's scope — and nothing else has to
+    /// carry one.
+    ///
+    /// Asked once, ever, whatever the answer was — a person who chose a smaller folder chose a scope,
+    /// and asking again at every launch would be overruling them. Cancel counts for this launch only,
+    /// the same as a wikilink's. Either way `then` runs and the search covers whatever is readable;
+    /// `willAsk` fires just before a panel appears. Main thread only.
+    func ensureSearchable(in window: NSWindow?, willAsk: () -> Void, then: @escaping () -> Void) {
+        let home = Self.realHome
+        guard Self.isSandboxed, !canList(home),
+              !UserDefaults.standard.bool(forKey: Self.searchAskedKey),
+              !declined.contains(home.path), !panelOpen else { return then() }
+        willAsk()
+        ask(at: home, message: L("To search every document, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one."),
+            in: window) { [weak self] picked in
+            if picked { UserDefaults.standard.set(true, forKey: Self.searchAskedKey) }
+            else { self?.declined.insert(home.path) }
+            then()
+        }
+    }
+
+    /// The one panel. Opens AT the folder, so Allow with nothing selected grants that folder.
+    private func ask(at folder: URL, message: String, in window: NSWindow?, then: @escaping (Bool) -> Void) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.directoryURL = folder
-        panel.prompt = "Allow"
-        panel.message = "To follow links to other notes, marktile needs to read the folder this note is in. "
-            + "If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work."
+        panel.prompt = L("Allow")
+        panel.message = message
         panelOpen = true
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self else { return }
             self.panelOpen = false
-            guard response == .OK, let picked = panel.url else {
-                self.declined.insert(folder.path)
-                return then(false)
-            }
+            guard response == .OK, let picked = panel.url else { return then(false) }
             self.grant(picked)
-            then(self.canList(folder))
+            then(true)
         }
         if let window { panel.beginSheetModal(for: window, completionHandler: finish) }
         else { finish(panel.runModal()) }

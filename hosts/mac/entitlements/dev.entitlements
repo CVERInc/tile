@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  marktile, Developer ID channel: signed with the hardened runtime and NO exceptions.
+  marktile, dev channel: the unsandboxed build for working on the app. Never released — the App
+  Store build (appstore.entitlements) is the only one that ships. Hardened runtime, NO exceptions,
+  so it fails the same way a shipped build would.
 
   Empty on purpose. The app runs no JIT of its own (WebKit's runs in WebKit's own processes), loads
   no third-party libraries, and needs no debugger attach, so every hardened-runtime exception would

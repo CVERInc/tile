@@ -36,6 +36,12 @@ if CommandLine.arguments.contains("--dump-menu") {
     exit(0)
 }
 
+// Fourth: what does search every document find, from where this binary runs — sandbox and saved
+// folder grants included (DocumentSearch). Prints the two JSON lines the page would receive.
+if let i = CommandLine.arguments.firstIndex(of: "--search") {
+    exit(DocumentSearch.runHeadless(Array(CommandLine.arguments[(i + 1)...])))
+}
+
 // No Xcode, no NIB — the app is assembled in code (see scripts/build-app.sh).
 //
 // NSDocumentController must exist before the run loop starts: the File menu's New/Open reach

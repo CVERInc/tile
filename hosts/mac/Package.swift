@@ -17,9 +17,16 @@ let package = Package(
     products: [
         .executable(name: "MarktileApp", targets: ["MarktileApp"]),
     ],
+    // Search every document. The engine behind the `ff` command, linked in rather than run as a tool:
+    // nothing to install, and it works in the App Sandbox, where a child process could not read the
+    // person's files. `main`, not a version — in-house dependencies track their latest.
+    dependencies: [
+        .package(url: "https://github.com/CVERInc/flintfind.git", branch: "main"),
+    ],
     targets: [
         .executableTarget(
             name: "MarktileApp",
+            dependencies: [.product(name: "FlintfindKit", package: "flintfind")],
             path: "Sources/MarktileApp",
             resources: [
                 .copy("Resources/Web"),
