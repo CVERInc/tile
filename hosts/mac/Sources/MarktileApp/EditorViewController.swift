@@ -114,6 +114,9 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     override func viewDidLoad() {
         super.viewDidLoad()
         observeAccent()
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: EditorSettings.didChange, object: nil, queue: .main
+        ) { [weak self] _ in self?.pushSettings() }
         guard schemeHandler != nil else { showMissingEngine(); return }
         let index = BundleSchemeHandler.baseURL.appendingPathComponent("Web/index.html")
         webView.load(URLRequest(url: index))
@@ -202,6 +205,47 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// person last chose rather than snapping back to 16 and making them set it again.
     func applyTextSize() {
         webView.evaluateJavaScript("window.__mt.setTextSize(\(Self.textSize))", completionHandler: nil)
+    }
+
+    // MARK: - Settings and the toolbar's "⋯"
+
+    private var settingsObserver: Any?
+
+    /// marktile ▸ Settings… — the stored object goes to the page as-is (EditorSettings). Before `ready` there
+    /// is no page to take it; `ready` pushes it then.
+    private func pushSettings() {
+        guard isReady else { return }
+        webView.evaluateJavaScript("window.__mt.setSettings(\(EditorSettings.json))", completionHandler: nil)
+    }
+
+    /// The buttons the toolbar had no room for, as a native menu under the "⋯". Each item is the Format
+    /// menu's own item for that tool when there is one — same title, same shortcut shown — so the two never
+    /// name a tool differently; otherwise it is the button's own label from the engine (Clear Formatting,
+    /// search, undo and redo), so no hidden button is ever missing from the menu.
+    private func showOverflow(_ items: [(key: String, label: String)], at point: NSPoint) {
+        let format = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items) ?? []
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (key, label) in items {
+            let twin = format.first { ($0.representedObject as? String) == key }
+            let item = NSMenuItem(title: twin?.title ?? label, action: #selector(runOverflowTool(_:)),
+                                  keyEquivalent: twin?.keyEquivalent ?? "")
+            item.keyEquivalentModifierMask = twin?.keyEquivalentModifierMask ?? []
+            item.target = self
+            item.representedObject = key
+            // Locked means read-only: the formatting items grey out exactly as they do in the Format menu.
+            item.isEnabled = !isLockedCache || ["search", "undo", "redo"].contains(key)
+            menu.addItem(item)
+        }
+        guard !menu.items.isEmpty else { return }
+        // The page measures from its top-left; AppKit's coordinates are flipped or not by the view.
+        let y = webView.isFlipped ? point.y : webView.bounds.height - point.y
+        menu.popUp(positioning: nil, at: NSPoint(x: point.x, y: y), in: webView)
+    }
+
+    @objc private func runOverflowTool(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        webView.evaluateJavaScript("window.__mt.tool(\(jsString(key)))", completionHandler: nil)
     }
 
     // MARK: - Search every document (FlintfindKit)
@@ -389,6 +433,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
             pushToolbarVisibility()
             applyTextSize()
             pushCapabilities()   // BEFORE the first open(): the engine decides at mount whether it has a scope control
+            pushSettings()       // same reason: which buttons and modes exist is decided at mount
             if let pending = pendingText {
                 pendingText = nil
                 load(text: pending)
@@ -403,6 +448,14 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
                let scheme = url.scheme?.lowercased(),
                ["http", "https", "mailto"].contains(scheme) {
                 NSWorkspace.shared.open(url)
+            }
+        case "overflow":
+            if let raw = body["items"] as? [[String: Any]], let x = body["x"] as? Double, let y = body["y"] as? Double {
+                let items = raw.compactMap { d -> (key: String, label: String)? in
+                    guard let k = d["key"] as? String, let l = d["label"] as? String else { return nil }
+                    return (k, l)
+                }
+                showOverflow(items, at: NSPoint(x: x, y: y))
             }
         case "search":
             if let id = body["id"] as? Int, let q = body["query"] as? String { runSearch(id: id, query: q) }

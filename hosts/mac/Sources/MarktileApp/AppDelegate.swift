@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FolderAccess.shared.restore()
     }
 
+    @objc func showSettings(_ sender: Any?) { SettingsWindowController.shared.show() }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: false)
     }
