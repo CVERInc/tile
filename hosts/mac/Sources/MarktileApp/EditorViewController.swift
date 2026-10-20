@@ -28,6 +28,12 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         // The editor is a local document, not a browser. Nothing here should be able to navigate
         // away or open a second window.
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // The editor picks its language from navigator.language, which it only recognises for zh and ja.
+        // Tell it the language the menus resolved to instead, so a Korean menu bar never sits above an
+        // English editor, and a language the app has no menus for gets English in both places.
+        config.userContentController.addUserScript(WKUserScript(
+            source: "globalThis.__TILE_LOCALE = \(jsString(AppLanguage.engineLocale));",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
         schemeHandler = BundleSchemeHandler(resourceRoot: EngineResources.resourceRoot())
         if let schemeHandler {
@@ -118,9 +124,8 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// is already looking.
     private func showMissingEngine() {
         webView.isHidden = true
-        let label = NSTextField(wrappingLabelWithString:
-            "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, "
-            + "or rebuild with scripts/build-app.sh.")
+        let label = NSTextField(wrappingLabelWithString: L(
+            "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh."))
         label.alignment = .center
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -394,7 +399,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     // finds it through the protocol.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(toggleToolbar(_:)) {
-            item.title = Self.isToolbarHidden ? "Show Toolbar" : "Hide Toolbar"
+            item.title = Self.isToolbarHidden ? L("Show Toolbar") : L("Hide Toolbar")
         }
         if item.action == #selector(toggleLock(_:)) {
             item.state = isLockedCache ? .on : .off

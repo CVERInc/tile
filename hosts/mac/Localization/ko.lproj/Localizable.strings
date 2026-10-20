@@ -1,0 +1,160 @@
+/* marktile for macOS — 한국어 */
+
+/* macOS system string, as in Safari, Mail */
+"About %@" = "%@에 관하여";
+
+/* macOS system string, as in Safari, Mail */
+"Hide %@" = "%@ 가리기";
+
+/* macOS system string, as in Mail, TextEdit */
+"Hide Others" = "기타 가리기";
+
+/* macOS system string, as in AppKit, Mail */
+"Show All" = "모두 보기";
+
+/* macOS system string, as in Safari, Mail */
+"Quit %@" = "%@ 종료";
+
+/* macOS system string, as in Mail */
+"File" = "파일";
+
+/* macOS system string, as in TextEdit */
+"New" = "신규";
+
+/* macOS system string, as in TextEdit */
+"Open…" = "열기…";
+
+/* macOS system string, as in TextEdit */
+"Open Recent" = "최근 사용 열기";
+
+/* macOS system string, as in Mail */
+"Close" = "닫기";
+
+/* macOS system string, as in Mail */
+"Save" = "저장";
+
+/* macOS system string, as in Mail, AppKit */
+"Save As…" = "별도 저장…";
+
+/* macOS system string, as in TextEdit */
+"Revert to Saved" = "저장 시점으로 복귀";
+
+/* macOS system string, as in Mail */
+"Edit" = "편집";
+
+/* macOS system string, as in TextEdit */
+"Undo" = "실행 취소";
+
+/* macOS system string, as in TextEdit */
+"Redo" = "실행 복귀";
+
+/* macOS system string, as in Mail */
+"Cut" = "오려두기";
+
+/* macOS system string, as in Mail */
+"Copy" = "복사하기";
+
+/* macOS system string, as in Mail */
+"Paste" = "붙여넣기";
+
+/* macOS system string, as in Mail */
+"Paste and Match Style" = "붙여넣고 스타일 일치";
+
+/* macOS system string, as in Mail */
+"Select All" = "전체 선택";
+
+/* macOS system string, as in TextEdit */
+"Find…" = "찾기…";
+
+/* macOS system string, as in Mail */
+"Format" = "포맷";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 1" = "머리말 1";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 2" = "머리말 2";
+
+/* macOS system string, as in AppKit Accessibility */
+"Heading 3" = "머리말 3";
+
+/* macOS system string, as in Mail */
+"Bold" = "볼드체";
+
+/* macOS system string, as in Mail */
+"Italic" = "이탤릭체";
+
+/* macOS system string, as in Notes */
+"Strikethrough" = "취소선";
+
+/* macOS system string, as in Notes */
+"Bulleted List" = "구분점 목록";
+
+/* macOS system string, as in Notes */
+"Numbered List" = "번호 목록";
+
+/* macOS system string, as in Notes */
+"Checklist" = "체크리스트";
+
+/* macOS system string, as in Notes */
+"Block Quote" = "블록 인용";
+
+/* macOS system string, as in Notes */
+"Table" = "표";
+
+/* engine wording (i18n/edCode) so the menu and the editor agree */
+"Inline Code" = "인라인 코드";
+
+/* engine wording (i18n/edLink) so the menu and the editor agree */
+"Wikilink" = "위키링크";
+
+/* macOS system string, as in Mail */
+"View" = "보기";
+
+/* engine wording (i18n/mtMode*+mtModesPick) so the menu and the editor agree */
+"Next Mode (Seasoned / Rendered / Plain)" = "다음 보기 모드(양념 / 렌더 / 담백)";
+
+/* macOS system string, as in Preview */
+"Table of Contents" = "목차";
+
+/* macOS system string, as in Notes */
+"Hide Toolbar" = "도구 막대 가리기";
+
+/* macOS system string, as in Mail */
+"Show Toolbar" = "도구 막대 보기";
+
+/* macOS system string, as in Dictionary */
+"Bigger Text" = "텍스트 크게";
+
+/* macOS system string, as in Dictionary */
+"Smaller Text" = "텍스트 작게";
+
+/* macOS system string, as in Notes, Preview */
+"Actual Size" = "실제 크기";
+
+/* engine wording (i18n/mtLockToggle) so the menu and the editor agree */
+"Lock Editor (Read-Only)" = "편집기 잠금(읽기 전용)";
+
+/* macOS system string, as in Mail */
+"Window" = "윈도우";
+
+/* macOS system string, as in Mail */
+"Minimize" = "최소화";
+
+/* macOS system string, as in TextEdit */
+"Zoom" = "확대/축소";
+
+/* macOS system string, as in TextEdit */
+"Bring All to Front" = "모두 앞으로 가져오기";
+
+/* marktile's own wording */
+"This file isn’t UTF-8 text." = "이 파일은 UTF-8 텍스트가 아닙니다.";
+
+/* marktile's own wording */
+"marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it." = "marktile은 UTF-8만 읽고 쓸 수 있습니다. 먼저 파일을 변환하거나, 인코딩을 바꿀 수 있는 편집기에서 여십시오.";
+
+/* marktile's own wording */
+"Couldn’t encode this document as UTF-8." = "이 문서를 UTF-8로 인코딩할 수 없습니다.";
+
+/* marktile's own wording */
+"marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile의 편집기 엔진을 찾을 수 없습니다.\n\n앱이 완전하지 않습니다. 다시 설치하거나 scripts/build-app.sh로 다시 빌드하십시오.";
