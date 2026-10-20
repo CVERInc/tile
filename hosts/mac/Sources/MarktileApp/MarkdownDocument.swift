@@ -8,8 +8,8 @@ import AppKit
 //
 //   1. Read the text back with ctrl.rawValue(), never ctrl.getValue() — getValue() strips trailing
 //      whitespace, which is right for a kanban card and wrong for a file.
-//   2. Line endings survive. The editor works in LF; a CRLF file is converted on the way in and
-//      converted back on the way out.
+//   2. Line endings survive, line by line. The editor works in LF; each line goes back out with the
+//      ending it came in with, so a file that mixes CRLF and LF keeps both.
 // @objc pins the Objective-C class name. Info.plist's NSDocumentClass looks the document class up by
 // string; without this it would be the mangled "MarktileApp.MarkdownDocument" and double-clicking a
 // .md would open nothing, with no error anywhere.
@@ -21,9 +21,9 @@ final class MarkdownDocument: NSDocument {
     /// (asynchronous) web view.
     private var text: String = ""
 
-    /// What the file used on disk, so we can hand it back the way we found it.
-    private enum LineEnding { case lf, crlf }
-    private var lineEnding: LineEnding = .lf
+    /// The file's lines as last read or written, and the ending each one had on disk, so we can
+    /// hand it back the way we found it.
+    private var endings = LineEndings(lf: "")
 
     private weak var editor: EditorViewController?
 
@@ -103,20 +103,22 @@ final class MarkdownDocument: NSDocument {
                     "marktile reads and writes UTF-8. Convert the file first, or open it in an editor that can re-encode it.",
             ])
         }
-        lineEnding = raw.contains("\r\n") ? .crlf : .lf
-        text = (lineEnding == .crlf) ? raw.replacingOccurrences(of: "\r\n", with: "\n") : raw
+        endings = LineEndings(disk: raw)
+        text = endings.lfText
         editor?.load(text: text)
     }
 
     // MARK: - Writing
 
     override func data(ofType typeName: String) throws -> Data {
-        let out = (lineEnding == .crlf) ? text.replacingOccurrences(of: "\n", with: "\r\n") : text
+        let out = endings.restore(text)
         guard let data = out.data(using: .utf8) else {
             throw NSError(domain: "net.cver.marktile", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Couldn’t encode this document as UTF-8.",
             ])
         }
+        // What we just wrote is what the next save compares against.
+        endings = LineEndings(disk: out)
         return data
     }
 
