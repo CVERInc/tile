@@ -1,3 +1,5 @@
 .build/
 .swiftpm/
 dist/
+# Not pinned: the one dependency is in-house and tracks its latest (Package.swift).
+Package.resolved

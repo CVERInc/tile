@@ -158,3 +158,12 @@
 
 /* marktile's own wording */
 "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile のエディタエンジンが見つかりません。\n\nこの App は不完全です。再インストールするか、scripts/build-app.sh でビルドし直してください。";
+
+/* The button in the folder panel: the same word as macOS’s own privacy prompts */
+"Allow" = "許可";
+
+/* marktile's own wording: the folder panel, App Store build, ⌘-click on a [[wikilink]] */
+"To follow links to other notes, marktile needs to read the folder this note is in. If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work." = "ほかのノートへのリンクをたどるには、marktile がこのノートのあるフォルダを読み込む必要があります。ノートが Obsidian の保管庫内にある場合は、保管庫のフォルダを選択すると、保管庫内のすべてのリンクが使えるようになります。";
+
+/* marktile's own wording: the folder panel, App Store build, first search */
+"To search all your notes, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one." = "すべてのノートを検索するには、marktile がホームフォルダを読み込む必要があります。「許可」をクリックするとホームフォルダ全体を検索します。もっと小さいフォルダを選択すると、そのフォルダだけを検索します。";

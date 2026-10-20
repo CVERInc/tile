@@ -6,19 +6,19 @@
 #   ./scripts/build-app.sh release /tmp/marktile.app
 #   ./scripts/build-app.sh --channel appstore       # sandboxed → .build/appstore/marktile.app
 #
-# Two channels, one binary. `direct` (the default) is the Developer ID build: hardened runtime, no
-# sandbox. `appstore` is the same binary signed with the App Sandbox. The only difference this script
-# makes is which file under entitlements/ goes into the signature; the code asks the running process
-# whether it is sandboxed (FolderAccess.swift), so nothing else can drift between the two.
+# Two channels, one binary. `appstore` is what ships: the App Sandbox. `dev` (the default) is the same
+# binary without it — for working on the app, never released. The only difference this script makes
+# is which file under entitlements/ goes into the signature; the code asks the running process whether
+# it is sandboxed (FolderAccess.swift), so nothing else can drift between the two.
 #
 # The signature made here is ad-hoc (`codesign -s -`): enough to run locally with the channel's real
-# entitlements, and replaced by scripts/release-direct.sh / release-appstore.sh with a real identity.
+# entitlements, and replaced by scripts/release-appstore.sh with a real identity.
 #
 # Follows the same shape as andross/scripts/build-app.sh so the two apps release the same way.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CHANNEL="direct"
+CHANNEL="dev"
 POSITIONAL=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,11 +29,11 @@ while [ $# -gt 0 ]; do
 done
 set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 case "$CHANNEL" in
-  direct)   DEFAULT_DEST="/Applications/marktile.app" ;;
+  dev)      DEFAULT_DEST="/Applications/marktile.app" ;;
   # Not /Applications: two apps with one bundle identifier in the same place is how Finder ends up
   # opening a .md in the one you did not mean to test.
   appstore) DEFAULT_DEST="$PWD/.build/appstore/marktile.app" ;;
-  *) echo "✗ --channel must be direct or appstore (got '$CHANNEL')" >&2; exit 2 ;;
+  *) echo "✗ --channel must be dev or appstore (got '$CHANNEL')" >&2; exit 2 ;;
 esac
 
 CONFIG="${1:-release}"
@@ -162,7 +162,7 @@ if ! echo "$SANDBOX_REPORT" | grep -qx "sandboxed: $WANT"; then
 fi
 
 echo "✓ built $DEST ($CHANNEL, ad-hoc signed)"
-if [ "$CHANNEL" = "direct" ]; then
+if [ "$CHANNEL" = "dev" ]; then
   echo "  Double-click it in Finder (ad-hoc signed: right-click → Open the first time on another Mac)."
 else
   echo "  Sandboxed. To ship it: scripts/release-appstore.sh (needs the certificates; see README)."

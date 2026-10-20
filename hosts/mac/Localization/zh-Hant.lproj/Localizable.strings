@@ -158,3 +158,12 @@
 
 /* marktile's own wording */
 "marktile can’t find its editor engine.\n\nThe app is incomplete — reinstall it, or rebuild with scripts/build-app.sh." = "marktile 找不到編輯器引擎。\n\n這個 App 不完整。請重新安裝，或用 scripts/build-app.sh 重新建置。";
+
+/* The button in the folder panel: the same word as macOS’s own privacy prompts */
+"Allow" = "允許";
+
+/* marktile's own wording: the folder panel, App Store build, ⌘-click on a [[wikilink]] */
+"To follow links to other notes, marktile needs to read the folder this note is in. If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work." = "若要跟隨連結前往其他筆記，marktile 需要讀取這則筆記所在的檔案夾。如果筆記位於 Obsidian 儲存庫中，請選擇儲存庫的檔案夾，儲存庫內各處的連結就都能使用。";
+
+/* marktile's own wording: the folder panel, App Store build, first search */
+"To search all your notes, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one." = "若要搜尋所有筆記，marktile 需要讀取你的個人專屬檔案夾。按一下「允許」即可搜尋其中的所有內容；若選擇較小的檔案夾，則只搜尋該檔案夾。";

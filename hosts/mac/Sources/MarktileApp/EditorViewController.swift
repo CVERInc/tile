@@ -204,79 +204,34 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.setTextSize(\(Self.textSize))", completionHandler: nil)
     }
 
-    // MARK: - Search every document (interim: the flintfind CLI)
+    // MARK: - Search every document (FlintfindKit)
 
-    /// Where `ff` is, if it is anywhere. Resolved ONCE, at the paths a Mac actually installs to —
-    /// a GUI app does not inherit the shell's PATH, so asking `which` from here answers about a
-    /// login shell that never ran.
-    ///
-    /// 🔴 INTERIM. flintfind is a Python tool in someone's homebrew and is NOT part of this app, so
-    /// this must not become the shipped answer. It sits behind the engine's one `searchAll` seam
-    /// exactly so the Swift port replaces this function and nothing else. Until then the capability
-    /// is reported honestly: no binary, no scope control, rather than a door that fails when pressed.
-    ///
-    /// Never in the App Store build. A sandboxed app cannot run a tool that lives outside its bundle
-    /// and expect it to read the person's files — the child inherits the sandbox — and a store app
-    /// may not depend on software the person installed separately. So the capability is reported as
-    /// absent there and the engine grows no search control at all, rather than one that always fails.
-    static let flintfind: String? = {
-        if FolderAccess.isSandboxed { return nil }
-        let candidates = ["/opt/homebrew/bin/ff", "/usr/local/bin/ff",
-                          NSHomeDirectory() + "/.local/bin/ff"]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }()
-
+    /// Always on. The engine is linked in (FlintfindKit, the library behind the `ff` command), so there
+    /// is no tool to find and nothing the person installs separately. In the App Store build the same
+    /// call reaches only what the app may read — Spotlight filters its own answer by the sandbox — so
+    /// the first search asks for the home folder (FolderAccess.ensureSearchable), and a person who
+    /// declines still gets their granted folders searched rather than a door that does nothing.
     private func pushCapabilities() {
-        let can = Self.flintfind != nil
-        webView.evaluateJavaScript("window.__mt.setCapabilities({searchAll: \(can)})", completionHandler: nil)
+        webView.evaluateJavaScript("window.__mt.setCapabilities({searchAll: true})", completionHandler: nil)
     }
 
-    /// Run one search and hand the JSON back to the page. Off the main thread — flintfind reads up
-    /// to 250 files and has been measured at several seconds, and doing that on the main thread
-    /// would freeze the window while it typed.
+    /// Run one search and hand the answer back to the page as it arrives (DocumentSearch). Off the
+    /// main thread, because reading the unindexed folders on it would freeze the window.
     private func runSearch(id: Int, query: String) {
-        guard let tool = Self.flintfind else { return replySearch(id: id, json: "null") }
-        // Terms split on whitespace, which is flintfind's own semantics: `ff a b` ANDs them. No
-        // shell is involved, so the query is arguments and never a command line.
+        // Terms split on whitespace, which is flintfind's own semantics: `ff a b` ANDs them.
         let terms = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard !terms.isEmpty else { return replySearch(id: id, json: "null") }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: tool)
-            // --stream: one JSON object per line. The indexed half arrives in well under a second;
-            // the half nothing has indexed takes ~4s, because covering it means opening 11,500
-            // files. Waiting for both before showing anything is what would make this feel broken.
-            p.arguments = ["--json", "--stream"] + terms
-            let out = Pipe()
-            p.standardOutput = out
-            p.standardError = Pipe()      // its diagnostics are not this window's business
-            var sawAny = false
-            do {
-                try p.run()
-                // Read by LINE rather than to EOF: readDataToEndOfFile would hold the first answer
-                // hostage until the last one was ready, which is the whole thing being avoided.
-                var buffer = Data()
-                while true {
-                    let chunk = out.fileHandleForReading.availableData
-                    if chunk.isEmpty { break }
-                    buffer.append(chunk)
-                    while let nl = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                        let line = buffer[buffer.startIndex..<nl]
-                        buffer.removeSubrange(buffer.startIndex...nl)
-                        guard let s = String(data: Data(line), encoding: .utf8), !s.isEmpty else { continue }
-                        sawAny = true
-                        DispatchQueue.main.async { self.replySearch(id: id, json: s) }
-                    }
+        // The panel can sit open for longer than the page's 25-second wait for an answer, which
+        // would turn the search the person is about to allow into an empty result.
+        let hold: () -> Void = { [weak self] in
+            self?.webView.evaluateJavaScript("window.__mt.searchHold(\(id))", completionHandler: nil)
+        }
+        FolderAccess.shared.ensureSearchable(in: view.window, willAsk: hold) { [weak self] in
+            DispatchQueue.global(qos: .userInitiated).async {
+                DocumentSearch.run(terms) { json in
+                    DispatchQueue.main.async { self?.replySearch(id: id, json: json) }
                 }
-                p.waitUntilExit()
-            } catch {
-                // Never the error itself: a subprocess failure can carry a path or an argument, and
-                // this string is about to cross into the page. Type only.
-                NSLog("marktile: search failed (\(type(of: error)))")
             }
-            // A run that printed nothing still has to end the wait, or the panel spins until its
-            // own timeout for a search that already failed.
-            if !sawAny { DispatchQueue.main.async { self.replySearch(id: id, json: "null") } }
         }
     }
 
@@ -289,7 +244,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     ///
     /// In the App Store build the folder around the document may be invisible to the app; the first
     /// ⌘-click there asks for it once (FolderAccess). Declined, the link resolves against nothing and
-    /// ends in the same beep as a link to a note that does not exist.
+    /// ends where a link to a note that does not exist ends: the search panel, with the name in it.
     private func openWikilink(_ target: String) {
         let document = documentURL?()
         guard let folder = document?.deletingLastPathComponent() else { return resolveWikilink(target, from: document) }
@@ -307,12 +262,8 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
                     self.openDocument(url)
                 case .several(let urls, let vault):
                     self.chooseAmong(urls, vault: vault)
-                case .none where Self.flintfind != nil:
-                    self.webView.evaluateJavaScript("window.__mt.searchFor(\(self.jsString(target)))", completionHandler: nil)
                 case .none:
-                    // No match and no search to hand it to. A beep is the one honest answer left:
-                    // the click was heard, and there is nothing this app can open for it.
-                    NSSound.beep()
+                    self.webView.evaluateJavaScript("window.__mt.searchFor(\(self.jsString(target)))", completionHandler: nil)
                 }
             }
         }
@@ -348,7 +299,7 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     }
 
     private func replySearch(id: Int, json: String) {
-        // The payload is JSON built by flintfind, so it goes in as a STRING the page parses — never
+        // The payload is JSON built from the engine's answer, so it goes in as a STRING the page parses — never
         // spliced into the script as source, where a stray backtick would be code.
         let quoted = String(data: (try? JSONSerialization.data(withJSONObject: [json], options: []))
                             ?? Data("[\"null\"]".utf8), encoding: .utf8) ?? "[\"null\"]"
