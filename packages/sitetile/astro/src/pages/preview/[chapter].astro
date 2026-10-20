@@ -60,6 +60,10 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
         <button type="button" class="ptr-btn ptr-btn-spread" data-act="spread" title="Two-page spread / single page">
           <span class="ptr-ico ptr-ico-twopage" aria-hidden="true" set:html={lucideSvg('book-open')} /><span class="ptr-ico ptr-ico-single" aria-hidden="true" set:html={lucideSvg('book-open-check')} />
         </button>
+        {/* page-turn animation on/off — the reader's choice, remembered per book. Only meaningful when paged. */}
+        <button type="button" class="ptr-btn ptr-btn-icon ptr-btn-turn" data-act="turn" aria-pressed="true" aria-label="Page-turn animation" title="Page-turn animation">
+          <span class="ptr-ico" aria-hidden="true" set:html={lucideSvg('sticky-note')} />
+        </button>
         <button type="button" class="ptr-btn ptr-btn-icon" data-act="mode" aria-pressed="false" aria-label="Toggle scroll / paged view" title="Toggle scroll / paged view (v)">
           <span class="ptr-ico ptr-ico-scroll" aria-hidden="true" set:html={lucideSvg('chevrons-up-down')} /><span class="ptr-ico ptr-ico-paged" aria-hidden="true" set:html={lucideSvg('chevrons-left-right')} />
         </button>
@@ -210,12 +214,41 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
   .ptr[data-mode="paged"][data-spread="on"] .ptr-page:nth-child(even) { scroll-snap-align: start; justify-content: flex-end; }
   .ptr[data-mode="paged"][data-spread="on"] .ptr-page:nth-child(odd):not(:first-child) { justify-content: flex-start; }
 
-  /* RTL: mirror the horizontal flow (cover on the right, turn leftward). The binding is still
-     central, so the inner-edge hug flips too. (LTR is the live-verified path — the only live book is
-     LTR; these RTL mirrors are correct-by-symmetry, to re-verify when an RTL book ships.) */
+  /* RTL: mirror the horizontal flow (cover on the right, turn leftward). That is all it takes —
+     the inner-edge hug above is written in flex-start / flex-end, which are LOGICAL: under
+     direction: rtl they already mean right / left, so the binding stays central by itself.
+     🩸 This used to also swap the two justify-content values "to mirror the hug", which mirrored it
+     a second time: every RTL spread hugged the OUTER edges with a page-wide gap at the spine.
+     "Correct by symmetry, to re-verify when an RTL book ships" — no RTL book had shipped, so it
+     never was; a screenshot of an RTL test book on 2026-10-20 was the first look. */
   .ptr[data-direction="rtl"][data-mode="paged"] .ptr-track { direction: rtl; }
-  .ptr[data-direction="rtl"][data-mode="paged"][data-spread="on"] .ptr-page:nth-child(even) { justify-content: flex-start; }
-  .ptr[data-direction="rtl"][data-mode="paged"][data-spread="on"] .ptr-page:nth-child(odd):not(:first-child) { justify-content: flex-end; }
+
+  .ptr[data-mode="scroll"] .ptr-btn-turn { display: none; }
+
+  /* ── page turn (reader.js turnLeaf) ──────────────────────────────────────────
+     A layer over the stage for one turn's length: the leaf (two faces back to back, hinged on the
+     spine by its transform-origin) and, in a spread, the facing page it lands on, held until it
+     lands. Below the tap zones (z 3) so a second tap still reaches them; never takes a pointer.
+     :global() because reader.js creates these at run time — they carry no Astro scope attribute, so
+     scoped rules would silently match nothing. */
+  :global(.ptr-turn) { position: absolute; inset: 0; z-index: 2; pointer-events: none; perspective: 2400px; }
+  :global(.ptr-leaf) { position: absolute; transform-style: preserve-3d; will-change: transform; }
+  :global(.ptr-leaf-face),
+  :global(.ptr-leaf-stay) { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  :global(.ptr-leaf-stay) { inset: auto; }
+  :global(.ptr-leaf-face img),
+  :global(.ptr-leaf-stay img) { width: 100%; height: 100%; object-fit: contain; display: block; }
+  :global(.ptr-leaf-back) { transform: rotateY(180deg); }
+  /* single page: the back of a turning sheet is paper, not the next page (that is already underneath) */
+  :global(.ptr-leaf-paper) { background: var(--gd-surface, #fff); }
+  :global(.ptr-leaf-shade) { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+  /* darkest along the spine, the way a lifting sheet loses the light there first. The back face is
+     mirrored by its own rotateY(180deg), so on a left-hinged leaf its spine edge is its right edge. */
+  :global(.ptr-hinge-left .ptr-leaf-front .ptr-leaf-shade),
+  :global(.ptr-hinge-right .ptr-leaf-back .ptr-leaf-shade) { background: linear-gradient(to right, rgba(0,0,0,.5), rgba(0,0,0,.12) 45%, rgba(0,0,0,0)); }
+  :global(.ptr-hinge-right .ptr-leaf-front .ptr-leaf-shade),
+  :global(.ptr-hinge-left .ptr-leaf-back .ptr-leaf-shade) { background: linear-gradient(to left, rgba(0,0,0,.5), rgba(0,0,0,.12) 45%, rgba(0,0,0,0)); }
+  :global(.ptr-leaf) { box-shadow: 0 0 24px rgba(0,0,0,.18); }
 
   /* ── tap zones (paged only) ──────────────────────────────────────────────── */
   .ptr-tap { position: absolute; top: 0; bottom: 0; border: 0; background: transparent; cursor: pointer; z-index: 3; padding: 0; }

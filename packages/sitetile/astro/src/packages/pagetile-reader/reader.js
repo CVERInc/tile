@@ -9,6 +9,7 @@
 //   • ltr / rtl reading direction (book frontmatter)
 //   • bottom thumbnail scrubber, chapter progress "page N / chapter-total · X%"
 //   • resume last-read position, immersive (chrome-hiding) mode
+//   • a page turn that turns: tapped, keyed and button turns play as a leaf turning on the spine
 const root = document.querySelector('.ptr');
 if (root) initReader(root);
 
@@ -27,6 +28,7 @@ function initReader(root) {
     mode: 'ptr-mode:' + book,
     spread: 'ptr-spread:' + book,
     pos: 'ptr-pos:' + book,
+    turn: 'ptr-turn:' + book,
   };
   const get = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } };
   const set = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
@@ -91,13 +93,145 @@ function initReader(root) {
       if (prevChapterUrl) location.href = prevChapterUrl + '#' + END_HASH;   // → prev chapter, last page
       return;                                         // first chapter → no-op (Prev is disabled)
     }
+    let target;
     if (spreadOn()) {
-      if (forward) goToIndex(cur === 0 ? 1 : pairLeft(cur) + 2, 'smooth');
-      else { const pl = pairLeft(cur); goToIndex(pl <= 1 ? 0 : pl - 2, 'smooth'); }
+      if (forward) target = cur === 0 ? 1 : pairLeft(cur) + 2;
+      else { const pl = pairLeft(cur); target = pl <= 1 ? 0 : pl - 2; }
     } else {
-      goToIndex(cur + (forward ? 1 : -1), 'smooth');
+      target = cur + (forward ? 1 : -1);
     }
+    if (!turnLeaf(target, forward)) goToIndex(target, 'smooth');
   }
+
+  // ── the page turn ──────────────────────────────────────────────────────────
+  // A turn the reader ASKED for (edge tap, arrow key, the Prev/Next buttons) plays as a leaf
+  // turning on the spine: the page on the turning side swings over in 3D, and in a spread its back
+  // is the next pair's facing page — the one it lands on, as in a real book. It is drawn over the
+  // stage while the track underneath has already jumped to the destination, so the reader's own
+  // state (cur, progress, resume, the observer) moves exactly as it did before and nothing about
+  // paging depends on the animation having run.
+  //
+  // A SWIPE is not this. A finger dragging the track is the native scroll-snap slide, which follows
+  // the finger and never makes someone who is flicking through twenty pages wait for a show.
+  //
+  // Ours, not a library: the corner-peel kind (a curl that tracks the finger) is ~125 KB of geometry
+  // in the one maintained-looking open-source option, last released 2022. A hinge turn is a
+  // rotateY, two faces and two shades; owning it costs less than depending on it.
+  //
+  // It stands down — and the old slide plays — whenever the turn has no honest shape: scroll mode,
+  // the reader's own "slide" choice, the system's Reduce Motion, a cover or a lone last page in a
+  // spread (no facing pair to turn), crossing a chapter, or an image that has not loaded yet.
+  const TURN_MS = 620;
+  let turnStyle = get(K.turn, root.dataset.turn === 'slide' ? 'slide' : 'flip');   // 'flip' | 'slide'
+  const reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const stage = root.querySelector('.ptr-stage');
+  let turning = null;   // { anims, layer } while a leaf is in the air
+
+  // Land the leaf in flight at once. A second tap mid-turn means "and the next one" — it must not
+  // wait, and it must not start from a page the reader has already left.
+  function landTurn() {
+    if (!turning) return;
+    turning.anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    turning.layer.remove();
+    turning = null;
+  }
+  const loadedImg = (i) => {
+    const im = pages[i] && pages[i].querySelector('img');
+    return im && im.complete && im.naturalWidth > 0 ? im : null;
+  };
+  // The drawn box of an <img> with object-fit: contain — the picture, not the letterboxed element —
+  // in stage coordinates, so the leaf hinges on the page's real edge rather than the stage's.
+  function pictureBox(im, stageRect) {
+    const r = im.getBoundingClientRect();
+    const k = Math.min(r.width / im.naturalWidth, r.height / im.naturalHeight);
+    const w = im.naturalWidth * k, h = im.naturalHeight * k;
+    return { left: r.left - stageRect.left + (r.width - w) / 2, top: r.top - stageRect.top + (r.height - h) / 2, width: w, height: h };
+  }
+  // The two visible pages of a spread, sorted by where they are DRAWN (direction: rtl swaps them).
+  function facing(i) {
+    const pl = pairLeft(i);
+    if (pl < 1 || pl + 1 >= pages.length) return null;   // the lone cover, or an odd last page
+    const a = loadedImg(pl), b = loadedImg(pl + 1);
+    if (!a || !b) return null;
+    return a.getBoundingClientRect().left <= b.getBoundingClientRect().left ? { left: a, right: b } : { left: b, right: a };
+  }
+  function face(cls, im) {
+    const f = document.createElement('div');
+    f.className = 'ptr-leaf-face ' + cls;
+    if (im) { const c = new Image(); c.src = im.currentSrc || im.src; c.alt = ''; f.append(c); }
+    const shade = document.createElement('div');
+    shade.className = 'ptr-leaf-shade';
+    f.append(shade);
+    return f;
+  }
+  function place(el, b) {
+    el.style.left = b.left + 'px'; el.style.top = b.top + 'px';
+    el.style.width = b.width + 'px'; el.style.height = b.height + 'px';
+  }
+
+  function turnLeaf(target, forward) {
+    landTurn();
+    if (mode !== 'paged' || turnStyle !== 'flip' || !stage) return false;
+    if (reduceMotion && reduceMotion.matches) return false;
+    if (typeof Element.prototype.animate !== 'function') return false;
+    if (target < 0 || target >= pages.length || target === cur) return false;
+    const towardRight = forward !== rtl;   // the turning page sits on this side of the spine
+    const sr = stage.getBoundingClientRect();
+    let leafImg, stayImg = null, backImg = null;
+    if (spreadOn()) {
+      const now = facing(cur), next = facing(target);
+      if (!now || !next) return false;
+      leafImg = towardRight ? now.right : now.left;     // the page that turns over…
+      stayImg = towardRight ? now.left : now.right;     // …the one it lands on, until it lands…
+      backImg = towardRight ? next.left : next.right;   // …and what is printed on its back
+    } else {
+      leafImg = loadedImg(cur);
+      if (!leafImg || !loadedImg(target)) return false;
+    }
+    const leafBox = pictureBox(leafImg, sr);
+
+    const layer = document.createElement('div');
+    layer.className = 'ptr-turn';
+    if (stayImg) {
+      const stay = face('ptr-leaf-stay', stayImg);
+      place(stay, pictureBox(stayImg, sr));
+      layer.append(stay);
+    }
+    const leaf = document.createElement('div');
+    leaf.className = 'ptr-leaf ' + (towardRight ? 'ptr-hinge-left' : 'ptr-hinge-right');
+    place(leaf, leafBox);
+    leaf.style.transformOrigin = towardRight ? 'left center' : 'right center';   // the spine
+    const front = face('ptr-leaf-front', leafImg);
+    const back = face('ptr-leaf-back' + (backImg ? '' : ' ptr-leaf-paper'), backImg);
+    leaf.append(front, back);
+    layer.append(leaf);
+    stage.append(layer);
+
+    // The layer now covers what the reader is looking at, so the track can jump under it in the
+    // same frame: nothing flashes, and from here on the reader's state is the destination's.
+    goToIndex(target, 'instant');
+
+    const end = towardRight ? -180 : 180;
+    const timing = { duration: TURN_MS, easing: 'cubic-bezier(.3,.05,.25,1)', fill: 'forwards' };
+    const anims = [
+      leaf.animate([{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(' + end + 'deg)' }], timing),
+      // light: the front darkens as it lifts away from the light, the back brightens as it lands
+      front.querySelector('.ptr-leaf-shade').animate([{ opacity: 0 }, { opacity: 0.45 }], { ...timing, duration: TURN_MS / 2 }),
+      back.querySelector('.ptr-leaf-shade').animate([{ opacity: 0.45 }, { opacity: 0 }], { ...timing, delay: TURN_MS / 2, duration: TURN_MS / 2 }),
+    ];
+    turning = { anims, layer };
+    anims[0].finished.then(() => { if (turning && turning.layer === layer) landTurn(); }, () => {});
+    return true;
+  }
+  // A finger on the track takes over: whatever is mid-air lands now.
+  track.addEventListener('pointerdown', landTurn, { passive: true });
+  if (reduceMotion && reduceMotion.addEventListener) reduceMotion.addEventListener('change', landTurn);
+  function applyTurnStyle() {
+    root.dataset.turn = turnStyle;
+    const b = root.querySelector('[data-act="turn"]');
+    if (b) b.setAttribute('aria-pressed', turnStyle === 'flip' ? 'true' : 'false');
+  }
+  applyTurnStyle();
   // follow the endcap's own link (the whole panel is the <a> to the next chapter)
   function goToNextChapter() {
     if (!endcap) return;
@@ -171,6 +305,7 @@ function initReader(root) {
   root.querySelector('.ptr-tap-center')?.addEventListener('click', () => toggleImmersive());
 
   root.querySelector('[data-act="mode"]')?.addEventListener('click', () => {
+    landTurn();
     mode = mode === 'scroll' ? 'paged' : 'scroll';
     set(K.mode, mode);
     suppressBriefly(900);       // hold position across the reflow the mode switch triggers
@@ -181,6 +316,12 @@ function initReader(root) {
     spread = spreadOn() ? 'off' : 'on';
     set(K.spread, spread);
     applyLayout();
+  });
+  root.querySelector('[data-act="turn"]')?.addEventListener('click', () => {
+    turnStyle = turnStyle === 'flip' ? 'slide' : 'flip';
+    set(K.turn, turnStyle);
+    landTurn();
+    applyTurnStyle();
   });
   root.querySelector('[data-act="immersive"]')?.addEventListener('click', toggleImmersive);
   // immersive close button (top-left, only shown in immersive) — exits full screen
