@@ -904,7 +904,10 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     await test('🔴 pageLocales: the ignored value reaches no directory and no link, and the page gets the site\'s list', () => {
       const { outDir, pages } = site('pageLocales');
       assert.deepEqual(topDirs(outDir).filter((d) => !['_astro', 'preview', 'language', 'about'].includes(d)), ['zh-tw']);
-      assert.deepEqual(walk(outDir).map((p) => relative(outDir, p)).filter((rel) => /ko|kr|kiln|\.\./i.test(rel)), [], 'a path was made from the ignored value');
+      // _astro/ holds content-hashed bundles: a name like `….C3krFgjT.js` is a hash, not a route, and
+      // matched /kr/i the day an unrelated edit to the pagetile reader changed its hash (tile#175).
+      // The ignored value could only become a page or a directory, which is every other path.
+      assert.deepEqual(walk(outDir).map((p) => relative(outDir, p)).filter((rel) => !rel.startsWith('_astro/') && /ko|kr|kiln|\.\./i.test(rel)), [], 'a path was made from the ignored value');
       const hrefs = [...allOf('pageLocales', alternates).map(([, a]) => a.href), ...allOf('pageLocales', langLinks).map(([, h]) => h)];
       assert.ok(hrefs.length >= 8, 'too few links to mean anything');
       assert.deepEqual(hrefs.filter((h) => /ko|kr|kiln|\.\.|%2F%2E|%2e%2e/i.test(h.replace('https://example.com', ''))), [], 'the ignored value reached a URL');
