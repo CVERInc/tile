@@ -24,8 +24,10 @@ case "$plugin" in
 esac
 
 # 2. copy the three install assets + license
-cp "$ROOT/packages/$plugin/main.js"      "$dest/main.js"
-cp "$ROOT/packages/$plugin/manifest.json" "$dest/manifest.json"
+# The plugins live in hosts/obsidian/<plugin>/ since the "Position says what a thing IS" move (3d7dcc7);
+# this still read packages/<plugin>/ after it, so it failed on its first cp — and nothing published since.
+cp "$ROOT/hosts/obsidian/$plugin/main.js"       "$dest/main.js"
+cp "$ROOT/hosts/obsidian/$plugin/manifest.json" "$dest/manifest.json"
 cp "$styles"                              "$dest/styles.css"
 cp "$ROOT/LICENSE"                        "$dest/LICENSE"
 
