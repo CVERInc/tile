@@ -68,6 +68,26 @@ done
 # The icon is generated (icon/make-icon.swift) and the result committed, so a build needs no drawing.
 cp icon/AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
 
+# The same icon as an asset catalog (Assets.car), which is how Xcode ships every Mac app's icon beside the
+# .icns. Whether App Store Connect rejects a Mac upload that has only the .icns is not documented anywhere
+# we could find (2026-10-20) — iOS uploads without a catalog are refused by name — so the store build
+# carries both rather than finding out at upload. actool is part of Xcode, not the Command Line Tools: the
+# dev build skips the catalog without it; the appstore build refuses to finish.
+ICON_NAME_KEY=""
+if ACTOOL="$(xcrun --find actool 2>/dev/null)"; then
+  ACTOOL_OUT="$(mktemp -d)"
+  "$ACTOOL" icon/AppIcon.xcassets --compile "$DEST/Contents/Resources" --platform macosx \
+    --minimum-deployment-target 13.0 --app-icon AppIcon \
+    --output-partial-info-plist "$ACTOOL_OUT/partial.plist" > "$ACTOOL_OUT/log" 2>&1 \
+    || { cat "$ACTOOL_OUT/log" >&2; echo "✗ actool could not compile icon/AppIcon.xcassets" >&2; exit 1; }
+  [ -f "$DEST/Contents/Resources/Assets.car" ] || { echo "✗ actool wrote no Assets.car" >&2; exit 1; }
+  ICON_NAME_KEY="<key>CFBundleIconName</key><string>AppIcon</string>"
+  rm -rf "$ACTOOL_OUT"
+elif [ "$CHANNEL" = "appstore" ]; then
+  echo "✗ the appstore build needs Xcode's actool for the icon's asset catalog (xcrun --find actool)" >&2
+  exit 1
+fi
+
 # Localizations go in the MAIN bundle: AppKit's own menu items and the system's per-app language list
 # both follow the main bundle's .lproj folders (see Localization.swift). CFBundleLocalizations is
 # derived from the same folders so the two cannot disagree.
@@ -87,6 +107,7 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>net.cver.marktile</string>
   <key>CFBundleExecutable</key><string>MarktileApp</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  ${ICON_NAME_KEY}
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array>${LOCALIZATIONS}</array>
   <key>CFBundlePackageType</key><string>APPL</string>
