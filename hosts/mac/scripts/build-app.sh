@@ -4,19 +4,50 @@
 #   ./scripts/build-app.sh                          # release → /Applications/marktile.app
 #   ./scripts/build-app.sh debug                    # faster debug build
 #   ./scripts/build-app.sh release /tmp/marktile.app
+#   ./scripts/build-app.sh --channel appstore       # sandboxed → .build/appstore/marktile.app
+#
+# Two channels, one binary. `direct` (the default) is the Developer ID build: hardened runtime, no
+# sandbox. `appstore` is the same binary signed with the App Sandbox. The only difference this script
+# makes is which file under entitlements/ goes into the signature; the code asks the running process
+# whether it is sandboxed (FolderAccess.swift), so nothing else can drift between the two.
+#
+# The signature made here is ad-hoc (`codesign -s -`): enough to run locally with the channel's real
+# entitlements, and replaced by scripts/release-direct.sh / release-appstore.sh with a real identity.
 #
 # Follows the same shape as andross/scripts/build-app.sh so the two apps release the same way.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+CHANNEL="direct"
+POSITIONAL=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --channel) CHANNEL="${2:-}"; shift 2 ;;
+    --channel=*) CHANNEL="${1#*=}"; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
+case "$CHANNEL" in
+  direct)   DEFAULT_DEST="/Applications/marktile.app" ;;
+  # Not /Applications: two apps with one bundle identifier in the same place is how Finder ends up
+  # opening a .md in the one you did not mean to test.
+  appstore) DEFAULT_DEST="$PWD/.build/appstore/marktile.app" ;;
+  *) echo "✗ --channel must be direct or appstore (got '$CHANNEL')" >&2; exit 2 ;;
+esac
+
 CONFIG="${1:-release}"
-DEST="${2:-/Applications/marktile.app}"
-VERSION="0.1.0"
+DEST="${2:-$DEFAULT_DEST}"
+ENTITLEMENTS="entitlements/$CHANNEL.entitlements"
+# CFBundleShortVersionString is the version people see; CFBundleVersion is the build number, which
+# App Store Connect requires to go up on every upload. The release scripts pass both.
+VERSION="${MARKTILE_VERSION:-0.1.0}"
+BUILD_NUMBER="${MARKTILE_BUILD_NUMBER:-1}"
 
 # The engine is never committed under Resources/ — pull it from the repo's single sources first.
 bash scripts/sync-engine.sh
 
-echo "▸ swift build -c $CONFIG --product MarktileApp"
+echo "▸ [$CHANNEL] swift build -c $CONFIG --product MarktileApp"
 swift build -c "$CONFIG" --product MarktileApp
 BIN=".build/$CONFIG/MarktileApp"
 
@@ -31,6 +62,9 @@ for bundle in ".build/$CONFIG"/*.bundle; do
   [ -e "$bundle" ] && cp -R "$bundle" "$DEST/Contents/Resources/"
 done
 
+# The icon is generated (icon/make-icon.swift) and the result committed, so a build needs no drawing.
+cp icon/AppIcon.icns "$DEST/Contents/Resources/AppIcon.icns"
+
 cat > "$DEST/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,9 +74,12 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>marktile</string>
   <key>CFBundleIdentifier</key><string>net.cver.marktile</string>
   <key>CFBundleExecutable</key><string>MarktileApp</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -83,6 +120,12 @@ PLIST
 chmod +x "$DEST/Contents/MacOS/MarktileApp"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
+# Sign BEFORE the checks below, so they run the binary as it will ship: with the hardened runtime,
+# and — for appstore — inside the sandbox. An unsigned run would pass checks the signed app fails.
+echo "▸ signing ad-hoc with $ENTITLEMENTS"
+codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$DEST"
+codesign --verify --strict --deep "$DEST"
+
 # Ask the installed binary, from its install path, whether it can find its own engine — the exact
 # lookup the app performs at launch, no window and no run loop (see EngineResources.swift).
 #
@@ -93,5 +136,19 @@ xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 echo "▸ verifying the app can load its engine from $DEST"
 "$DEST/Contents/MacOS/MarktileApp" --verify-resources
 
-echo "✓ built $DEST"
-echo "  Double-click it in Finder (unsigned for now: right-click → Open the first time)."
+# The entitlements in the signature are a claim; whether the sandbox applied is something only the
+# running process knows. Ask it, and refuse a build where the two disagree.
+SANDBOX_REPORT="$("$DEST/Contents/MacOS/MarktileApp" --report-sandbox)"
+echo "$SANDBOX_REPORT" | sed 's/^/  /'
+WANT="no"; [ "$CHANNEL" = "appstore" ] && WANT="yes"
+if ! echo "$SANDBOX_REPORT" | grep -qx "sandboxed: $WANT"; then
+  echo "✗ $CHANNEL build should run with sandboxed: $WANT" >&2
+  exit 1
+fi
+
+echo "✓ built $DEST ($CHANNEL, ad-hoc signed)"
+if [ "$CHANNEL" = "direct" ]; then
+  echo "  Double-click it in Finder (ad-hoc signed: right-click → Open the first time on another Mac)."
+else
+  echo "  Sandboxed. To ship it: scripts/release-appstore.sh (needs the certificates; see README)."
+fi

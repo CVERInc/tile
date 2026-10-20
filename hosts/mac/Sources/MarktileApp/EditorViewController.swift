@@ -209,7 +209,13 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// this must not become the shipped answer. It sits behind the engine's one `searchAll` seam
     /// exactly so the Swift port replaces this function and nothing else. Until then the capability
     /// is reported honestly: no binary, no scope control, rather than a door that fails when pressed.
+    ///
+    /// Never in the App Store build. A sandboxed app cannot run a tool that lives outside its bundle
+    /// and expect it to read the person's files — the child inherits the sandbox — and a store app
+    /// may not depend on software the person installed separately. So the capability is reported as
+    /// absent there and the engine grows no search control at all, rather than one that always fails.
     static let flintfind: String? = {
+        if FolderAccess.isSandboxed { return nil }
         let candidates = ["/opt/homebrew/bin/ff", "/usr/local/bin/ff",
                           NSHomeDirectory() + "/.local/bin/ff"]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
@@ -275,8 +281,19 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
     /// runs off the main thread. Three answers, one per thing the person can do next: the file it
     /// means; a menu of the files it might mean; or the search panel with the name in it. See
     /// WikilinkResolver for why it stops short of guessing.
+    ///
+    /// In the App Store build the folder around the document may be invisible to the app; the first
+    /// ⌘-click there asks for it once (FolderAccess). Declined, the link resolves against nothing and
+    /// ends in the same beep as a link to a note that does not exist.
     private func openWikilink(_ target: String) {
         let document = documentURL?()
+        guard let folder = document?.deletingLastPathComponent() else { return resolveWikilink(target, from: document) }
+        FolderAccess.shared.ensureReadable(folder, in: view.window) { [weak self] _ in
+            self?.resolveWikilink(target, from: document)
+        }
+    }
+
+    private func resolveWikilink(_ target: String, from document: URL?) {
         DispatchQueue.global(qos: .userInitiated).async {
             let answer = WikilinkResolver.resolve(target: target, from: document)
             DispatchQueue.main.async {

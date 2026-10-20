@@ -10,6 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // which is what every other macOS editor does.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    // Folder grants (App Store build only) are resolved before AppKit restores last session's
+    // windows, so a note that was reached through a grant can be reopened.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        FolderAccess.shared.restore()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: false)
     }

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  marktile, Mac App Store channel: the App Sandbox, and only what a one-document editor needs.
+
+  - files.user-selected.read-write: the document opened from Finder or the Open panel, and Save As.
+  - files.bookmarks.app-scope: a folder granted for [[wikilinks]] is kept as a security-scoped
+    bookmark and resolved on the next launch (FolderAccess.swift).
+
+  - network.client: NOT for the internet. The page comes from the app bundle over marktile-app://
+    and https links go to the person's browser. WKWebView needs it anyway: without it, WebKit's
+    GPU, web content and networking processes all fail to launch in the sandbox ("web process
+    failed to launch", reason=Crash), the window stays blank, keystrokes go nowhere, and ⌘Q hangs.
+    Measured on macOS 27 with the same build signed both ways (2026-10-20).
+
+  release-appstore.sh adds the application and team identifiers from the provisioning profile at
+  signing time; they are not written here.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+  <key>com.apple.security.files.bookmarks.app-scope</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+</dict>
+</plist>

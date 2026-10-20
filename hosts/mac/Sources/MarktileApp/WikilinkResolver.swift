@@ -78,7 +78,9 @@ enum WikilinkResolver {
     /// and the disk's root: a `.obsidian` there would make "the vault" every file the person owns.
     /// (A vault on an external disk is still found — it sits under /Volumes, not under home.)
     static func enclosingVault(of folder: URL, _ fm: FileManager) -> URL? {
-        let home = fm.homeDirectoryForCurrentUser.standardizedFileURL.path
+        // The REAL home: in the App Store build `homeDirectoryForCurrentUser` is the app's container,
+        // and the walk would sail past the folder it exists to stop at.
+        let home = FolderAccess.realHome.path
         var dir = folder.standardized
         while dir.path != "/" && dir.path != home {
             var isDir: ObjCBool = false
