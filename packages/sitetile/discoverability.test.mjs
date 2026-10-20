@@ -16,7 +16,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { feedXml, latestBuildDate, FEED_PATH, FEED_ALIASES } from './astro/src/lib/feed.mjs';
+import { feedXml, feedIcon, latestBuildDate, FEED_PATH, FEED_ALIASES } from './astro/src/lib/feed.mjs';
+import { ICON_PATHS } from './icon-core.mjs';
 import { pageGraph, jsonLdScript } from './astro/src/lib/structured-data.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -92,6 +93,46 @@ test('optional channel fields are OMITTED, not emptied', () => {
   assert.doesNotMatch(xml, /<language>/);
   assert.doesNotMatch(xml, /<lastBuildDate>/);
   assert.doesNotMatch(xml, /atom:link/);
+  assert.doesNotMatch(xml, /<image>/, 'no icon URL → no <image> element, not an empty one');
+  assert.doesNotMatch(xml, /<webfeeds:icon>/);
+});
+
+// tile#177 — the channel <image>. A reader (Feedly, NetNewsWire, Reeder) shows the channel's
+// <image> beside the feed title; without one the subscription wears a grey placeholder. The site
+// already builds a PNG icon for every build (icon-core's badge, or the owner's own raster mark) —
+// the feed only has to NAME it, absolutely, so a reader that fetched the document elsewhere can
+// still fetch the picture.
+test('🔴 tile#177: the channel carries an <image> and a webfeeds:icon, both absolute', () => {
+  const xml = feedXml({
+    title: 'Devlog', link: 'https://x.test/devlog', description: 'd', items: ITEMS,
+    image: 'https://x.test/apple-touch-icon.png',
+  });
+  assert.match(xml, /<image>\s*<url>https:\/\/x\.test\/apple-touch-icon\.png<\/url>\s*<title>Devlog<\/title>\s*<link>https:\/\/x\.test\/devlog<\/link>\s*<\/image>/,
+    'RSS 2.0 <image>: url, then title and link, which the spec requires to match the channel\'s own');
+  assert.match(xml, /xmlns:webfeeds="http:\/\/webfeeds\.org\/rss\/1\.0"/, 'declared, or the element is invalid');
+  assert.match(xml, /<webfeeds:icon>https:\/\/x\.test\/apple-touch-icon\.png<\/webfeeds:icon>/, 'Feedly reads this one');
+  const channelEnd = xml.indexOf('<item>');
+  assert.ok(channelEnd > 0 && xml.indexOf('<image>') < channelEnd, 'channel-level, before the first item');
+  assert.equal((xml.match(/<item>/g) || []).length, 2, 'items untouched');
+  const withXss = feedXml({ title: 'A & B', link: 'l', description: 'd', items: [], image: 'https://x.test/i.png?a=1&b=2' });
+  assert.match(withXss, /<image>\s*<url>https:\/\/x\.test\/i\.png\?a=1&amp;b=2<\/url>\s*<title>A &amp; B<\/title>/, 'escaped like every other channel field');
+});
+
+test('🔴 tile#177: the feed icon is the PNG the site already builds — the owner\'s raster mark, else the badge', () => {
+  // The same rule the layout's apple-touch-icon <link> follows (icon-core's iconHrefs), because
+  // that is the one PNG every build is guaranteed to emit. Resolved against the site origin.
+  const origin = 'https://x.test';
+  assert.equal(feedIcon({}, origin), origin + ICON_PATHS.apple, 'no mark configured → the generated badge');
+  assert.equal(feedIcon({ favicon: '/brand/mark.png' }, origin), origin + '/brand/mark.png', 'an owner\'s own PNG favicon wins');
+  assert.equal(feedIcon({ favicon: 'https://cdn.x.test/mark.png' }, origin), 'https://cdn.x.test/mark.png', 'already absolute → as written');
+  assert.equal(feedIcon({ favicon: '/brand/mark.svg' }, origin), origin + ICON_PATHS.apple,
+    'an SVG mark is not an RSS image (the spec allows GIF/JPEG/PNG) → the badge PNG, exactly as iOS gets');
+  assert.equal(feedIcon({ favicon: '/brand/mark.jpg' }, origin), origin + '/brand/mark.jpg', 'JPEG is allowed by the spec');
+  assert.equal(feedIcon({ favicon: '/brand/mark.webp' }, origin), origin + ICON_PATHS.apple, 'WebP is not → the badge');
+  assert.equal(feedIcon({ favicon: 'javascript:alert(1)' }, origin), origin + ICON_PATHS.apple, 'a disallowed scheme never reaches a reader');
+  assert.equal(feedIcon({ favicon: '/brand/mark.png', packages: 'pwa' }, origin), origin + ICON_PATHS.apple,
+    'REEF with PWA ships its own opaque set at the canonical path — the same answer the <head> gives');
+  assert.equal(feedIcon({}, ''), '', 'no origin → no absolute URL → nothing claimed');
 });
 
 test('🔴 a post is an article, in both channels at once', () => {

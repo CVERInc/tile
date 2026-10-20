@@ -14,8 +14,40 @@
 // reach it. The alias routes call the SAME builder as /rss.xml, so the two cannot drift into
 // serving different feeds under different names.
 
+// The icon rule is icon-core's (iconHrefs): the feed's <image> is the SAME PNG the apple-touch-icon
+// <link> names, so the feed cannot claim a picture the build did not emit. Relative import on
+// purpose — this module is plain-node (no Vite alias), and so is icon-core.
+import { iconHrefs, ICON_PATHS } from '../../../icon-core.mjs';
+
 /** Where this site's feed lives. One constant, referenced by the route, the aliases and the head. */
 export const FEED_PATH = '/rss.xml';
+
+/** The namespace Feedly reads `<webfeeds:icon>` from. */
+export const WEBFEEDS_NS = 'http://webfeeds.org/rss/1.0';
+
+/**
+ * tile#177 — the absolute URL of the channel's <image>, or '' when none can be claimed.
+ *
+ * RSS 2.0 says an <image> is a GIF, JPEG or PNG, so the answer is the one raster every build
+ * emits: icon-core's apple-touch-icon — the owner's own raster mark when they set one (`favicon:`
+ * → `site-logo:` → `footer-logo:`, iconHrefs' order), else the generated badge at
+ * /apple-touch-icon.png. An SVG or WebP mark falls back to the badge exactly as iOS does; a mark
+ * with a scheme other than http(s) (the layout gates these through safeSrc) never reaches a
+ * reader. No origin → no absolute URL → nothing, because a relative <image><url> is a broken
+ * picture in every reader that fetched the feed through an alias or an aggregator.
+ */
+export function feedIcon(meta, origin = '') {
+  const o = String(origin || '').replace(/\/$/, '');
+  if (!o) return '';
+  const hasPwa = String((meta && meta.packages) || '').split(/[\s,]+/).includes('pwa');
+  const href = String(iconHrefs(meta || {}, { hasPwa }).appleTouch.href || '');
+  const path = href.split(/[?#]/)[0].toLowerCase();
+  const raster = /\.(?:png|jpe?g|gif)$/.test(path);
+  if (!raster) return o + ICON_PATHS.apple;
+  if (/^https?:\/\//i.test(href)) return href;
+  if (href.startsWith('/') && !href.startsWith('//')) return o + href;
+  return o + ICON_PATHS.apple;
+}
 
 /** The paths a feed reader might already be pointed at. `/feed` is WordPress's own; the Blogger one
  *  matches the /search/label routes this renderer already reproduces. Both serve the identical
@@ -37,8 +69,11 @@ const esc = (s) => String(s == null ? '' : s).replace(/[<>&'"]/g, (c) => (
  * @param {Array}  o.items        [{ title, url, description, date, author }]
  * @param {string} [o.buildDate]  RFC-822 date for lastBuildDate; omitted when not supplied, because
  *                                a build clock this module invents would be a fact nobody measured
+ * @param {string} [o.image]      absolute URL of the channel's PNG icon (see feedIcon); omitted
+ *                                when not supplied. Emitted as RSS 2.0 <image> (title/link are the
+ *                                channel's own, as the spec requires) AND <webfeeds:icon> (Feedly).
  */
-export function feedXml({ title, link, description, language = '', selfUrl = '', items = [], buildDate = '' } = {}) {
+export function feedXml({ title, link, description, language = '', selfUrl = '', items = [], buildDate = '', image = '' } = {}) {
   const body = items.map((it) => {
     const url = String(it.url || '');
     return `    <item>
@@ -60,10 +95,13 @@ export function feedXml({ title, link, description, language = '', selfUrl = '',
     language ? `    <language>${esc(language)}</language>` : '',
     buildDate ? `    <lastBuildDate>${esc(buildDate)}</lastBuildDate>` : '',
     selfUrl ? `    <atom:link href="${esc(selfUrl)}" rel="self" type="application/rss+xml" />` : '',
+    // tile#177: the picture a reader shows beside the title. Channel-level, before any item.
+    image ? `    <image>\n      <url>${esc(image)}</url>\n      <title>${esc(title)}</title>\n      <link>${esc(link)}</link>\n    </image>` : '',
+    image ? `    <webfeeds:icon>${esc(image)}</webfeeds:icon>` : '',
   ].filter(Boolean).join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:webfeeds="${WEBFEEDS_NS}"><channel>
 ${head}
 ${body}
 </channel></rss>`;

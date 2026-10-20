@@ -301,6 +301,22 @@ const badChunks = auditChunks();
 // `astro build` emits the three routes as files and that the pages link them. The fixtures set no
 // `favicon:`, so what is being built here is the born-valid path: a site that configured nothing.
 const distFile = (p) => join(DIST, p.replace(/^\//, ''));
+// tile#177: the build's own output listing, as root-relative paths — what a URL in rss.xml is
+// checked against. Walked lazily (the icon routes are written by the same build as the pages).
+let _distFiles = null;
+function distFiles() {
+  if (_distFiles) return _distFiles;
+  const out = new Set();
+  (function walk(dir, rel) {
+    for (const e of readdirSync(dir)) {
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) walk(p, rel + '/' + e);
+      else out.add(rel + '/' + e);
+    }
+  })(DIST, '');
+  return (_distFiles = out);
+}
+const feedImageUrl = (xml) => (/<image>\s*<url>([^<]+)<\/url>/.exec(xml) || [])[1] || '';
 /** every icon href every built page claims — the dead-link gate below reads this. */
 function claimedIcons() {
   const claimed = new Set();
@@ -1307,6 +1323,26 @@ const checks = [
     rss.includes('xmlns:dc="http://purl.org/dc/elements/1.1/"') && rss.includes('<dc:creator>KITT</dc:creator>')],
   ['feed: the unsigned post contributes no dc:creator', () =>
     (rss.match(/<dc:creator>/g) || []).length === 1 && !rss.includes('<author>')],
+  // -- tile#177: the channel <image> names a PNG this build REALLY wrote. The unit test proves the
+  //    rule; only this gate can prove the URL lands on a file in dist/ — asserted against the
+  //    build's own file listing, not a string. The fixtures set no favicon, so this is the
+  //    born-valid path: the generated badge, the same file the apple-touch-icon <link> points at. --
+  ['🔴 tile#177 feed: channel <image> url is absolute, .png, and a file in this build\'s output', () => {
+    const url = feedImageUrl(rss);
+    return /^https:\/\/example\.com\/.+\.png$/.test(url) && distFiles().has(new URL(url).pathname);
+  }],
+  ['🔴 tile#177 feed: <image> is the same PNG the layout\'s apple-touch-icon <link> claims (no favicon → the badge)', () => {
+    const appleHref = (/<link rel="apple-touch-icon"[^>]*href="([^"]+)"/.exec(html) || [])[1];
+    return !!appleHref && new URL(feedImageUrl(rss)).pathname === appleHref && appleHref === '/apple-touch-icon.png';
+  }],
+  ['tile#177 feed: <image> title/link match the channel\'s own, and webfeeds:icon is declared + the same URL', () => {
+    const img = /<image>\s*<url>([^<]+)<\/url>\s*<title>([^<]*)<\/title>\s*<link>([^<]*)<\/link>\s*<\/image>/.exec(rss);
+    const chTitle = /<channel>\s*<title>([^<]*)<\/title>\s*<link>([^<]*)<\/link>/.exec(rss);
+    return !!img && !!chTitle && img[2] === chTitle[1] && img[3] === chTitle[2]
+      && rss.includes('xmlns:webfeeds="http://webfeeds.org/rss/1.0"')
+      && rss.includes(`<webfeeds:icon>${img[1]}</webfeeds:icon>`)
+      && rss.indexOf('<image>') < rss.indexOf('<item>');
+  }],
   // -- the JS accounting invariant (zero unaccounted JS) --
   ['zero framework hydration (no astro-island)', () => pages.every((p) => !readFileSync(p, 'utf8').includes('astro-island'))],
   ['every script accounted (PE allowlist)', () => unaccounted.length === 0],
