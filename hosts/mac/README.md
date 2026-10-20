@@ -141,21 +141,20 @@ as the to-do list, not as reassurance.
   mode switch, IME composition at a line boundary, a very large file, a table of
   contents drag abandoned halfway. None of these have been sat with.
 
-- **The App Store build's folder grants, and search after one.** A document opens, takes typing and
-  saves in the sandboxed build (that is how the `network.client` entitlement was found to be
-  required — see `entitlements/appstore.entitlements`). The wikilink → folder panel → grant →
-  relaunch path has not run, nor has a search after a grant made in the panel (the sandbox filtering
-  was measured with the Downloads entitlement, which grants by the same mechanism but not by a
-  click). It needs a real click: mouse events posted to the app's own process do not reach a link
-  inside the web view, the panel belongs to a separate system process, and posting events to the
-  whole system from the test Mac's background session could land in whoever holds its screen. By
-  hand, in the appstore build: open a note inside an Obsidian vault and ⌘-click a `[[link]]` to a
-  sibling → the panel opens at the note's folder → choose the vault folder, Allow → the sibling
-  opens; quit, relaunch, ⌘-click again → no panel; Cancel in an ungranted folder → no second panel
-  until relaunch. Then open Edit ▸ Search Every Document… (⇧⌘F, or ⌘F twice) and type a word from a note
-  outside the vault → the panel opens at the home folder → Allow with nothing selected → results
-  include that note; quit, relaunch, search again → no panel. Also unchecked: the accent colour following System Settings (it
-  arrives as a distributed notification).
+- **The App Store build's folder grants, and search after one — run once, by hand.** On
+  2026-10-20, in the appstore build over screen sharing: ⌘-click a `[[link]]` → the panel opened
+  at the note's folder → Allow with nothing selected → the sibling opened; ⌘F⌘F, a word from a note
+  outside the vault → the panel opened at the home folder → Allow → that note was found; relaunch →
+  no panels. Afterwards the sandboxed build's `--search` resolved the saved grant over ssh. Not
+  automated: mouse events posted to the app's own process do not reach a link inside the web view,
+  the panel belongs to a separate system process, and posting events to the whole system from the
+  test Mac's background session could land in whoever holds its screen. Not yet run: Cancel (no
+  second panel until relaunch), and choosing a folder smaller than home for search. Also unchecked:
+  the accent colour following System Settings (it arrives as a distributed notification).
+- **No network requests — checked once.** A document holding a Markdown image, an HTML `<img>`,
+  an `<iframe>` and a `<video>`, all pointed at a local server, was cycled through all three modes
+  in both builds: the server logged nothing, and a `curl` to it as a control was logged. The
+  privacy policy says marktile makes no network requests of its own; this is what that rests on.
 
 ## Icon
 
