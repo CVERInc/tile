@@ -664,6 +664,10 @@ body.is-phone .tugtile-ed-bar { padding-top: 6px; padding-bottom: 4px; }
    syntax highlighting, just on a monospace base). Scoped to .marktile-ed so tugtile's card editor
    (a board surface, not a markdown editor) stays on the proportional --font-text. */
 .marktile-ed .tugtile-ed-rich { font-family: var(--font-monospace); tab-size: 2; }   /* default tab-size is 8 — far too wide; a tab shows as 2 cells (one space · rule · one space) */
+/* …unless the person asked for prose type (seasonedFont 'text' → .marktile-font-text on the mount). Only the BASE
+   moves: code spans, fences, frontmatter and the [ ] box name their own monospace below, tables are table-cells
+   (alignment never depended on the font), and Plain mode's reset puts every line back on monospace. */
+.marktile-ed.marktile-font-text .tugtile-ed-rich { font-family: var(--font-text); }
 /* Distinguish a literal tab from spaces: a 1px accent rule drawn INSIDE each 2-cell tab (one space · rule ·
    one space) so it neither hugs the right edge nor touches the following text. A background gradient (not a
    border) lets the rule sit at an arbitrary x. marktile + Seasoned only — Plain's neutralizer strips backgrounds
@@ -796,10 +800,29 @@ body.is-phone .tugtile-ed-rich { padding-bottom: 55vh; }
 .marktile-palette-color .tugtile-ed-rich .tg-code { color: var(--color-green, #98c379); }
 .marktile-palette-color .tugtile-ed-rich .tg-tag,
 .marktile-palette-color .tugtile-ed-rich .tg-link { color: var(--color-cyan, #56b6c2); }
+/* Seasoned "plain" palette — seasonedPalette 'plain' → .marktile-palette-plain on the mount. Headings and syntax
+   tokens wear the text colour and the markers recede, so a page of headings reads like a document rather than a
+   page of blue. Links keep the accent: they are the one token you can act on. .tg-h is the same span in Rendered,
+   so Rendered headings follow — the palette is the document's, not one mode's. (0,3,0), inside the contract below. */
+.marktile-palette-plain .tugtile-ed-rich .tg-h,
+.marktile-palette-plain .tugtile-ed-rich .tg-code,
+.marktile-palette-plain .tugtile-ed-rich .tg-check,
+.marktile-palette-plain .tugtile-ed-rich .tg-tag { color: var(--text-normal); }
+.marktile-palette-plain .tugtile-ed-rich .tg-mk { color: var(--text-faint); }
+/* Rendered: inline code is a chip, never a coloured run. With its backticks hidden, accent-coloured code was the
+   same blue as a link and read as one — something to click. Text colour on the code band's background says
+   "literal" without saying "door". Comes after every palette so no palette can tint it back. */
+.tugtile-preview .tugtile-ed-rich .tg-code {
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
 /* Plain mode = a hard reset of ALL the syntax styling above to a bare monospace baseline. This used to be one
    !important block; it's now specificity-only (no !important) so styles.css is 100% !important-free.
    ⚠️ SPECIFICITY CONTRACT — do not weaken, and keep this block AFTER every syntax rule above:
-     • every syntax rule above tops out at (0,3,0) — the .marktile-palette-color and .marktile-ed .tg-hN .tg-tab rules.
+     • every syntax rule above tops out at (0,3,0) — the .marktile-palette-color/-plain, Rendered .tg-code chip,
+       .marktile-font-text and .marktile-ed .tg-hN .tg-tab rules.
      • `.tugtile-plain .tugtile-ed-rich .tg-line[ *]`            = (0,3,0): covers non-marktile hosts (tugtile card
         editor, web), where NO (0,3,0) competitor exists (palette + tab rules are all .marktile-* gated → only (0,2,0)).
      • `.marktile-ed.tugtile-plain .tugtile-ed-rich .tg-line[ *]` = (0,4,0): clears marktile's (0,3,0) palette + tab rules.

@@ -32,6 +32,8 @@ const VIEW_TYPE = 'marktile-editor';
 // marktile settings. editorTools: per-button on/off (missing key = on), same convention as tugtile — uncheck
 // everything and the toolbar disappears. defaultEditor: opt-in to register marktile as the default .md editor
 // (off by default, so Obsidian's native editor stays the no-surprise default).
+// seasonedPalette / seasonedFont: Seasoned's look (seasonedLook in the core). Unset ⇒ the legacy seasonedColor decides the
+// palette, so a vault that turned colours on before the three-way choice keeps them.
 const DEFAULTS = { editorTools: {}, defaultEditor: false, modes: {}, seasonedColor: false };
 
 // The 3-mode cycle + its decorations live in the shared core (EDITOR_MODES + equipEditor, inlined). settings.modes
@@ -183,7 +185,9 @@ class MarktileView extends TextFileView {
     this._rig = equipEditor({
       mount: this.contentEl, ctrl: this._ctrl,
       enabledModes: (this.plugin.settings && this.plugin.settings.modes) || {},
-      seasonedColor: !!(this.plugin.settings && this.plugin.settings.seasonedColor),   // Seasoned palette: accent vs colour
+      seasonedColor: !!(this.plugin.settings && this.plugin.settings.seasonedColor),   // legacy: read only when seasonedPalette is unset
+      seasonedPalette: this.plugin.settings && this.plugin.settings.seasonedPalette,
+      seasonedFont: this.plugin.settings && this.plugin.settings.seasonedFont,
       initialMode: this._modeKey,   // restore the current mode across a reload
       saveImage: (blob) => saveVaultImage(this.app, this.file ? this.file.path : '', blob),   // paste/drop an image → vault attachment + ![[…]]
       resolveSrc: (raw) => {
@@ -263,10 +267,22 @@ class MarktileSettingTab extends PluginSettingTab {
         };
       });
     });
-    new Setting(containerEl).setName(t('mtSeasonedColor')).setDesc(t('mtSeasonedColorDesc'))
-      .addToggle((tg) => tg.setValue(!!this.plugin.settings.seasonedColor).onChange(async (v) => {
-        this.plugin.settings.seasonedColor = v; await this.plugin.saveSettings(); new Notice(t('mtReloadRequired'));
-      }));
+    // Seasoned's look. Applied to every open marktile at once (the look is classes on the mount — rig.setLook), so
+    // unlike the pickers above there is nothing to reload.
+    const relook = () => this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((l) => {
+      if (l.view && l.view._rig) l.view._rig.setLook(this.plugin.settings);
+    });
+    const look = seasonedLook(this.plugin.settings);
+    new Setting(containerEl).setName(t('mtSeasonedPalette')).setDesc(t('mtSeasonedPaletteDesc'))
+      .addDropdown((dd) => dd
+        .addOptions({ accent: t('mtPaletteAccent'), color: t('mtPaletteColor'), plain: t('mtPalettePlain') })
+        .setValue(look.palette)
+        .onChange(async (v) => { this.plugin.settings.seasonedPalette = v; await this.plugin.saveSettings(); relook(); }));
+    new Setting(containerEl).setName(t('mtSeasonedFont')).setDesc(t('mtSeasonedFontDesc'))
+      .addDropdown((dd) => dd
+        .addOptions({ mono: t('mtFontMono'), text: t('mtFontText') })
+        .setValue(look.font)
+        .onChange(async (v) => { this.plugin.settings.seasonedFont = v; await this.plugin.saveSettings(); relook(); }));
     new Setting(containerEl).setName(t('mtDefaultEditor')).setDesc(t('mtDefaultEditorDesc'))
       .addToggle((tg) => tg.setValue(this.plugin.settings.defaultEditor).onChange(async (v) => {
         this.plugin.settings.defaultEditor = v; await this.plugin.saveSettings(); new Notice(t('mtReloadRequired'));
