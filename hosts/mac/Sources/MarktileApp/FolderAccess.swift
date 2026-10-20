@@ -102,7 +102,7 @@ final class FolderAccess {
               !UserDefaults.standard.bool(forKey: Self.searchAskedKey),
               !declined.contains(home.path), !panelOpen else { return then() }
         willAsk()
-        ask(at: home, message: L("To search all your notes, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one."),
+        ask(at: home, message: L("To search every document, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one."),
             in: window) { [weak self] picked in
             if picked { UserDefaults.standard.set(true, forKey: Self.searchAskedKey) }
             else { self?.declined.insert(home.path) }

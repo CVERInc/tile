@@ -152,7 +152,7 @@ as the to-do list, not as reassurance.
   hand, in the appstore build: open a note inside an Obsidian vault and ⌘-click a `[[link]]` to a
   sibling → the panel opens at the note's folder → choose the vault folder, Allow → the sibling
   opens; quit, relaunch, ⌘-click again → no panel; Cancel in an ungranted folder → no second panel
-  until relaunch. Then open the search (the toolbar's search-all) and type a word from a note
+  until relaunch. Then open Edit ▸ Search Every Document… (⇧⌘F, or ⌘F twice) and type a word from a note
   outside the vault → the panel opens at the home folder → Allow with nothing selected → results
   include that note; quit, relaunch, search again → no panel. Also unchecked: the accent colour following System Settings (it
   arrives as a distributed notification).

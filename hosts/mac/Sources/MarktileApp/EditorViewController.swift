@@ -324,6 +324,10 @@ final class EditorViewController: NSViewController, WKScriptMessageHandler, WKNa
         webView.evaluateJavaScript("window.__mt.find()", completionHandler: nil)
     }
 
+    @objc func showSearchAll(_ sender: Any?) {
+        webView.evaluateJavaScript("window.__mt.toggleSearchAll(true)", completionHandler: nil)
+    }
+
     // Toolbar visibility is a preference, not per-document state: hiding it and having it return on the
     // next file would read as the app forgetting. Swift owns the value so every window agrees.
     private static let toolbarHiddenKey = "toolbarHidden"

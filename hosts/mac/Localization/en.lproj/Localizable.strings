@@ -167,4 +167,7 @@
 "To follow links to other notes, marktile needs to read the folder this note is in. If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work." = "To follow links to other notes, marktile needs to read the folder this note is in. If the note is inside an Obsidian vault, choose the vault’s folder so links anywhere in it work.";
 
 /* marktile's own wording: the folder panel, App Store build, first search */
-"To search all your notes, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one." = "To search all your notes, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one.";
+"To search every document, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one." = "To search every document, marktile needs to read your home folder. Click Allow to search everything in it, or choose a smaller folder to search only that one.";
+
+/* The engine's own name for the panel (i18n searchAll), as a menu item */
+"Search Every Document…" = "Search Every Document…";
