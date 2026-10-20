@@ -170,3 +170,9 @@
 
 /* The engine's own name for the panel (i18n searchAll), as a menu item */
 "Search Every Document…" = "すべての書類を検索…";
+
+/* macOS system string, as in Safari, Mail: the app menu item */
+"Settings…" = "設定…";
+
+/* macOS system string: the settings window's title */
+"Settings" = "設定";

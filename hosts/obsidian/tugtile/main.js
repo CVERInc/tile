@@ -1405,7 +1405,10 @@ function mountEditor(contentEl, opts, host) {
     // its width and the fix cannot change the layout it just measured (and oscillate).
     const seps = () => [...(tools ? tools.children : [])].filter((e) => e.classList.contains('tugtile-ed-sep'));
     const tidySeps = () => {
-      const kids = [...(tools ? tools.children : [])];
+      // Neighbours are the RENDERED siblings: a host may take buttons out of the row with display:none (the
+      // Mac host moves what does not fit behind a "⋯"), and an undrawn button measures at 0,0 — which would
+      // make every divider beside one look alone on its row.
+      const kids = [...(tools ? tools.children : [])].filter((e) => e.getClientRects().length > 0);
       const mid = (e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); };
       kids.forEach((el, i) => {
         if (!el.classList.contains('tugtile-ed-sep')) return;

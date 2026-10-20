@@ -20,6 +20,9 @@ func makeMainMenu() -> NSMenu {
     appItem.submenu = appMenu
     appMenu.addItem(withTitle: L("About %@", appName), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
     appMenu.addItem(.separator())
+    // No target: the action travels the responder chain, which ends at the app delegate.
+    appMenu.addItem(withTitle: L("Settings…"), action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
+    appMenu.addItem(.separator())
     appMenu.addItem(withTitle: L("Hide %@", appName), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
     let hideOthers = appMenu.addItem(withTitle: L("Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
     hideOthers.keyEquivalentModifierMask = [.command, .option]

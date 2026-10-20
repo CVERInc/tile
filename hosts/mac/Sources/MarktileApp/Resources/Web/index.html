@@ -78,13 +78,17 @@
   }
   .tugtile-ed-find-i::placeholder { color: var(--text-faint); }
 
-  /* Narrow window: the chrome yields before the buttons do.
-     Measured on this surface — the 16 tools + 4 dividers need 720px to sit in one row, and they wrap to
-     two whenever they are given 360px. The strip is 265px, and it never gave any of it back: at the 420px
-     minimum window size that left the tools 127px, which is a SIX-row column that swallows the editor.
-     These two breakpoints are where the strip has to drop a word to keep "two rows" true, and they are
-     derived from those numbers, not chosen by eye. Nothing clickable ever goes away — the mode pill and
-     the lock both survive as icons, and both also have menu items.
+  /* One row of tools, always. The shared sheet lets the row wrap (up to three rows) because on other
+     surfaces wrapping is the only alternative to buttons falling off the edge. Here there is a better one:
+     bridge.js puts what does not fit behind a "⋯" that opens a native menu, so the row never wraps and
+     never scrolls. At the default 760px window the 17 tools used to wrap to two rows, at the 420px minimum
+     to three, with groups split across rows. */
+  .tugtile-ed-bar .tugtile-ed-tools { flex-wrap: nowrap; overflow: hidden; max-height: none; }
+  .tugtile-ed-bar .mt-overflow { display: none !important; }
+
+  /* Narrow window: the chrome yields before the buttons do. The strip used to be 265px and never gave any
+     of it back; these two breakpoints drop its words (never its controls — the mode pill and the lock
+     survive as icons, and both have menu items), so the tools keep as much of the row as possible.
      The inline min-width comes from buildEditorCtl's stableWidth reservation, which exists to stop the
      toolbar jittering on a mode switch when there is width to spare. When there isn't, room wins. */
   @media (max-width: 660px) {

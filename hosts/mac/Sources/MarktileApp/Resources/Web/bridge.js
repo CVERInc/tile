@@ -8,7 +8,7 @@
 // picker, because there is no vault — and adds nothing.
 
 import "../Engine/obsidian-shim.js";
-import { mountEditor, equipEditor, buildEditorCtl, t } from "../Engine/editor-core.js";
+import { mountEditor, equipEditor, buildEditorCtl, EDITOR_TOOLS, t } from "../Engine/editor-core.js";
 import { makeWebHost } from "../Engine/web-host.js";
 
 const send = (kind, payload) => {
@@ -61,6 +61,10 @@ let rig = null;
 let ctl = null;        // the head strip: mode cycle + lock
 let locked = false;    // survives a reload, like the mode does
 
+// The person's choices from marktile ▸ Settings… — the Obsidian plugin's shape (`editorTools`, `modes`; a
+// missing key means on), pushed by AppKit before the first open() and again whenever they change.
+let settings = {};
+
 // ── Search every document ────────────────────────────────────────────────────────────────────────
 // The engine asks a host for this and grows no scope control without it, so the capability has to be
 // KNOWN BEFORE the editor mounts — AppKit pushes it on `ready`, ahead of the first open(). The search
@@ -107,7 +111,8 @@ function teardown() {
   app.replaceChildren();
 }
 
-function open(text) {
+function open(text, keep) {
+  keep = keep || {};
   teardown();
 
   ctrl = mountEditor(
@@ -138,6 +143,11 @@ function open(text) {
         },
       });
       if (caps.searchAll) host.searchAll = searchAll;   // absent ⇒ the engine grows no scope control
+      // Which toolbar buttons exist. Date and time stay off whatever is stored: they belong to the board
+      // editor, which is why the settings page does not offer them either.
+      host.plugin = { settings: Object.assign({}, settings, {
+        editorTools: Object.assign({}, settings.editorTools, { date: false, time: false }),
+      }) };
       return host;
     })()
   );
@@ -147,6 +157,10 @@ function open(text) {
   rig = equipEditor({
     mount: app,
     ctrl: ctrl,
+    enabledModes: settings.modes || {},
+    seasonedPalette: settings.seasonedPalette,   // the engine maps an unknown or missing value to its default
+    seasonedFont: settings.seasonedFont,
+    initialMode: keep.mode,
     toc: {
       Sortable: (typeof Sortable !== "undefined" ? Sortable : undefined),
       onReorder: () => send("change", { text: ctrl.rawValue() }),
@@ -177,7 +191,101 @@ function open(text) {
   });
   applyLock();
   applyToolbar();
+  watchToolbar();
+  if (keep.scroll) { const sc = app.querySelector(".tugtile-ed-scroll"); if (sc) sc.scrollTop = keep.scroll; }
   if (!locked) ctrl.focus();
+}
+
+// A settings change rebuilds the editor around the same text: which buttons and which modes exist is
+// decided when the engine mounts. The mode and the scroll position are carried across so the window does
+// not visibly jump; the text never left the page.
+function setSettings(s) {
+  settings = (s && typeof s === "object") ? s : {};
+  if (!ctrl) return;
+  const sc = app.querySelector(".tugtile-ed-scroll");
+  const mode = rig && rig.currentMode ? rig.currentMode().key : undefined;
+  open(ctrl.rawValue(), { mode: mode, scroll: sc ? sc.scrollTop : 0 });
+}
+
+// ── One toolbar row ───────────────────────────────────────────────────────────────────────────────
+// The tools never wrap. Whatever does not fit goes behind a "⋯" at the end of the row, which opens a
+// native menu (AppKit draws it: a Mac menu, keyboard and all) listing exactly the buttons it is standing
+// in for. Nothing is lost at any width, and every one of them is also in the Format menu with its shortcut.
+// The buttons carry no key of their own, only their translated label — the same label EDITOR_TOOLS derives
+// it from — so that is what maps a hidden button back to the tool it runs.
+//
+// Which buttons go first is not "from the end of the row": that would keep undo and redo, which every Mac
+// person presses as ⌘Z without looking, and hide bold. They go in this order instead — the ones with the
+// most familiar shortcut, and the rarest, first; the row keeps its order for whatever stays.
+const keyByLabel = new Map(EDITOR_TOOLS.filter((x) => x && x.tip).map((x) => [t(x.tip), x.key]));
+const SHED_ORDER = ["redo", "undo", "clear", "h3", "quote", "table", "number", "code", "strike", "h2",
+                    "check", "link", "search", "bullet", "italic", "h1", "bold"];
+const shedRank = (b) => { const i = SHED_ORDER.indexOf(keyByLabel.get(b.getAttribute("aria-label"))); return i < 0 ? -1 : i; };
+let moreBtn = null;
+let toolbarObserver = null;
+
+function fitToolbar() {
+  const tools = app.querySelector(".tugtile-ed-tools");
+  if (!tools) return;
+  if (!moreBtn || moreBtn.parentElement !== tools) {
+    moreBtn = document.createElement("button");
+    moreBtn.className = "tugtile-iconbtn tugtile-ed-tool mt-more";
+    const ic = document.createElement("span"); setIcon(ic, "more-horizontal"); moreBtn.append(ic);
+    moreBtn.setAttribute("aria-label", t("selMoreLabel"));
+    moreBtn.addEventListener("mousedown", (e) => e.preventDefault());   // keep the caret in the text
+    moreBtn.addEventListener("click", () => {
+      // Key and label both: the menu uses the Format menu's own item when there is one, and the engine's
+      // label when there is not (Clear Formatting has no menu item), so no hidden button is ever dropped.
+      const items = Array.from(tools.querySelectorAll(".tugtile-ed-tool.mt-overflow"))
+        .filter((b) => b !== moreBtn)
+        .map((b) => ({ key: keyByLabel.get(b.getAttribute("aria-label")), label: b.getAttribute("aria-label") }))
+        .filter((x) => x.key);
+      const r = moreBtn.getBoundingClientRect();
+      send("overflow", { items: items, x: r.left, y: r.bottom + 4 });
+    });
+    tools.append(moreBtn);
+  }
+  const items = Array.from(tools.children).filter((n) => n !== moreBtn);
+  for (const n of items) n.classList.remove("mt-overflow");
+  moreBtn.classList.add("mt-overflow");
+  if (tools.scrollWidth <= tools.clientWidth) return;
+  moreBtn.classList.remove("mt-overflow");
+  const buttons = items.filter((n) => n.classList.contains("tugtile-ed-tool"))
+    .sort((a, b) => shedRank(a) - shedRank(b));   // unknown buttons (rank -1) would go first; there are none today
+  for (const b of buttons) {
+    if (tools.scrollWidth <= tools.clientWidth) break;
+    b.classList.add("mt-overflow");
+    tidySeps(items);
+  }
+}
+
+// A divider is only worth drawing between two visible buttons: hide one at either end of the row or next to
+// another divider, so shedding a whole group never leaves "| |" or a stray line before the "⋯".
+function tidySeps(items) {
+  let prevVisible = null;
+  for (const n of items) {
+    if (n.classList.contains("tugtile-ed-sep")) {
+      n.classList.remove("mt-overflow");
+      if (!prevVisible || prevVisible.classList.contains("tugtile-ed-sep")) n.classList.add("mt-overflow");
+      else prevVisible = n;
+    } else if (!n.classList.contains("mt-overflow") && getComputedStyle(n).display !== "none") {
+      prevVisible = n;
+    }
+  }
+  if (prevVisible && prevVisible.classList.contains("tugtile-ed-sep")) prevVisible.classList.add("mt-overflow");
+  // A divider kept here has a drawn button on both sides of it, in a row that cannot wrap — so it is never
+  // alone on a row, and any `visibility: hidden` the engine's own tidy left on it from an earlier layout
+  // is stale. The engine only re-tidies when the row's SIZE changes, which shedding a button does not do.
+  for (const n of items) if (n.classList.contains("tugtile-ed-sep") && !n.classList.contains("mt-overflow")) n.style.visibility = "";
+}
+
+function watchToolbar() {
+  if (toolbarObserver) toolbarObserver.disconnect();
+  const bar = app.querySelector(".tugtile-ed-bar");
+  if (!bar) return;
+  toolbarObserver = new ResizeObserver(() => fitToolbar());
+  toolbarObserver.observe(bar);
+  fitToolbar();
 }
 
 window.__mt = {
@@ -218,6 +326,7 @@ window.__mt = {
   // Pushed on `ready`, before the first open(), because the engine decides at MOUNT whether it has
   // a scope control to draw.
   setCapabilities: (c) => { caps = Object.assign({}, caps, c || {}); },
+  setSettings: setSettings,
   // The host is asking the person for a folder before it can search (App Store build, first search).
   // A person reading that panel is not a host that stopped answering, so the timeout stands down.
   searchHold: (id) => { const w = pending.get(id); if (w) clearTimeout(w.timer); },
