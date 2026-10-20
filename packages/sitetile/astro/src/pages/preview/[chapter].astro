@@ -231,7 +231,7 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
      lands. Below the tap zones (z 3) so a second tap still reaches them; never takes a pointer.
      :global() because reader.js creates these at run time — they carry no Astro scope attribute, so
      scoped rules would silently match nothing. */
-  :global(.ptr-turn) { position: absolute; inset: 0; z-index: 2; pointer-events: none; perspective: 2400px; }
+  :global(.ptr-turn) { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
   :global(.ptr-leaf) { position: absolute; transform-style: preserve-3d; will-change: transform; }
   :global(.ptr-leaf-face),
   :global(.ptr-leaf-stay) { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }

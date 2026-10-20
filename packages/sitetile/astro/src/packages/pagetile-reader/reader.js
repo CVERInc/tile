@@ -214,7 +214,10 @@ function initReader(root) {
     const end = towardRight ? -180 : 180;
     const timing = { duration: TURN_MS, easing: 'cubic-bezier(.3,.05,.25,1)', fill: 'forwards' };
     const anims = [
-      leaf.animate([{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(' + end + 'deg)' }], timing),
+      // perspective() INSIDE the transform, not `perspective` on the layer: WebKit (Safari, every
+      // iOS browser) drew the parent-perspective version flat — a page squashing sideways instead of
+      // turning. Measured in Playwright WebKit 26.5 on 2026-10-20; Chromium drew both the same.
+      leaf.animate([{ transform: 'perspective(2400px) rotateY(0deg)' }, { transform: 'perspective(2400px) rotateY(' + end + 'deg)' }], timing),
       // light: the front darkens as it lifts away from the light, the back brightens as it lands
       front.querySelector('.ptr-leaf-shade').animate([{ opacity: 0 }, { opacity: 0.45 }], { ...timing, duration: TURN_MS / 2 }),
       back.querySelector('.ptr-leaf-shade').animate([{ opacity: 0.45 }, { opacity: 0 }], { ...timing, delay: TURN_MS / 2, duration: TURN_MS / 2 }),
