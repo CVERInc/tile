@@ -245,6 +245,8 @@
   "edDate": "插入日期",
   "edTime": "插入時間",
   "edFind": "尋找／取代",
+  "edUndo": "還原",
+  "edRedo": "重做",
   "TBL_ALIGN": "對齊表格原始碼",
   "TBL_DEL_COL": "刪除欄",
   "TBL_DEL_ROW": "刪除列",
