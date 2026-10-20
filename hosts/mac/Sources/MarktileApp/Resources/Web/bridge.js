@@ -145,7 +145,9 @@ function open(text, keep) {
       if (caps.searchAll) host.searchAll = searchAll;   // absent ⇒ the engine grows no scope control
       // Which toolbar buttons exist. Date and time stay off whatever is stored: they belong to the board
       // editor, which is why the settings page does not offer them either.
-      host.plugin = { settings: { editorTools: Object.assign({}, settings.editorTools, { date: false, time: false }) } };
+      host.plugin = { settings: Object.assign({}, settings, {
+        editorTools: Object.assign({}, settings.editorTools, { date: false, time: false }),
+      }) };
       return host;
     })()
   );
@@ -156,6 +158,8 @@ function open(text, keep) {
     mount: app,
     ctrl: ctrl,
     enabledModes: settings.modes || {},
+    seasonedPalette: settings.seasonedPalette,   // the engine maps an unknown or missing value to its default
+    seasonedFont: settings.seasonedFont,
     initialMode: keep.mode,
     toc: {
       Sortable: (typeof Sortable !== "undefined" ? Sortable : undefined),

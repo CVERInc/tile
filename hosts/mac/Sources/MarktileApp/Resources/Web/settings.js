@@ -71,6 +71,27 @@ function render() {
       save();
     }));
   }
+
+  // The legacy `seasonedColor: true` (from before there were three palettes) reads as "color", as it does in
+  // the engine — so the menu shows what the editor is actually doing.
+  if (!settings.seasonedPalette && settings.seasonedColor) settings.seasonedPalette = "color";
+  choice("mtSeasonedPalette", "mtSeasonedPaletteDesc", "seasonedPalette",
+    [["accent", "mtPaletteAccent"], ["color", "mtPaletteColor"], ["plain", "mtPalettePlain"]]);
+  choice("mtSeasonedFont", "mtSeasonedFontDesc", "seasonedFont",
+    [["mono", "mtFontMono"], ["text", "mtFontText"]]);
+}
+
+// Two choices of look, as pop-up menus — the Obsidian tab's two dropdowns, same keys, same words.
+function choice(title, desc, key, options) {
+  const { g } = section(t(title), t(desc));
+  g.classList.add("single");
+  const select = el("select");
+  for (const [value, label] of options) {
+    const o = el("option", null, t(label)); o.value = value; select.append(o);
+  }
+  select.value = settings[key] || options[0][0];
+  select.addEventListener("change", () => { settings[key] = select.value; save(); });
+  g.append(select);
 }
 
 window.__settings = {
