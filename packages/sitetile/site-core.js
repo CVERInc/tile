@@ -488,7 +488,7 @@ function splitTypeInner(inner) {
 // fenced block is NOT mistaken for a section/cell (same guard as book-core / the editor's tocHeadings).
 //
 //   Site    = { title, meta, sections: [Section] }
-//   Section = { id, title, type, params, hasTypeLine, body, cells: [Cell] }   // body = lead text; cells only for grid
+//   Section = { id, title, type, params, hasTypeLine, beforeTypeLine?, body, cells: [Cell] }   // body = lead text; cells only for grid
 //   Cell    = { title, body }                                                 // a grid cell (### heading + body)
 //   Group   = { title, lead, items|people }                                   // a `collection`/`people` category
 //
@@ -518,8 +518,30 @@ function parseSite(text) {
   const sections = rawSections.map((rs, si) => {
     let type = 'prose', params = '', hasTypeLine = false;
     let rest = rs.lines;
-    const t = rest.length ? typeLineInner(rest[0]) : null;
-    if (t !== null) { const st = splitTypeInner(t); type = st.type; params = st.params; hasTypeLine = true; rest = rest.slice(1); }
+    // Locate the directive past complete author comments and whitespace, retaining the
+    // skipped source separately so saving restores it before the type line verbatim.
+    const source = rest.join('\n');
+    let at = 0;
+    while (at < source.length) {
+      if (/\s/.test(source[at])) { at++; continue; }
+      if (!source.startsWith('<!--', at)) break;
+      const end = source.indexOf('-->', at + 4);
+      if (end < 0) break;
+      at = end + 3;
+    }
+    let end = source.indexOf('\n', at);
+    if (end < 0) end = source.length;
+    // A skipped comment must end before the directive's own line; indentation is allowed.
+    const lineStart = source.lastIndexOf('\n', at - 1) + 1;
+    const t = /^[\t ]*$/.test(source.slice(lineStart, at))
+      ? typeLineInner(source.slice(at, end)) : null;
+    let beforeTypeLine = '';
+    if (t !== null) {
+      const st = splitTypeInner(t);
+      type = st.type; params = st.params; hasTypeLine = true;
+      beforeTypeLine = source.slice(0, at);
+      rest = source.slice(Math.min(end + 1, source.length)).split('\n');
+    }
 
     let body = '', cells = [], groups = [], entries = [], faqs = [], fields = [];
     if (type === 'faq') {
@@ -753,6 +775,7 @@ function parseSite(text) {
     return {
       id: 's' + (si + 1) + (rs.title ? '-' + slugify(rs.title, '') : ''),
       title: rs.title, type, params, hasTypeLine, body, cells, groups, entries, faqs, fields,
+      ...(beforeTypeLine ? { beforeTypeLine } : {}),
     };
   });
 
@@ -785,7 +808,10 @@ function serializeSite(site) {
 
   (site.sections || []).forEach((s) => {
     out.push('## ' + (s.title || ''));
-    if (s.hasTypeLine) out.push('%% sitetile: ' + s.type + (s.params ? ' ' + s.params : '') + ' %%');
+    if (s.hasTypeLine) {
+      if (s.beforeTypeLine) out.push({ verbatim: s.beforeTypeLine });
+      out.push('%% sitetile: ' + s.type + (s.params ? ' ' + s.params : '') + ' %%');
+    }
     if (s.type === 'grid' || s.type === 'gallery' || s.type === 'carousel') {
       if (s.body) out.push(s.body);
       // 🩸 `c.icon` was parsed by splitCellHeading, RENDERED (astro GridCell.astro → lucideSvg) and
@@ -849,7 +875,17 @@ function serializeSite(site) {
   // 🩸 `.trimEnd()` was `.replace(/\s+$/, '')` — the same set of characters, but unanchored on the
   // left, so every run of whitespace anywhere in the page was re-walked once per character in it:
   // one line holding 40,000 spaces cost seconds on every save.
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  // Normalize ordinary blocks as before, but never rewrite the retained author notes.
+  let saved = '', pending = '';
+  for (const part of out) {
+    if (typeof part === 'object') {
+      saved += pending.replace(/\n{3,}/g, '\n\n') + part.verbatim;
+      pending = '';
+    } else {
+      pending += part + '\n';
+    }
+  }
+  return (saved + pending.replace(/\n{3,}/g, '\n\n')).trimEnd() + '\n';
 }
 
 // isSiteFile: cheap "is this Markdown a sitetile page?" detector via the frontmatter claim flag, so a
