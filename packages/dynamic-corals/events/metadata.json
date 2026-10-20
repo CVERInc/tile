@@ -1,0 +1,53 @@
+{
+  "id": "events",
+  "author": "official",
+  "summary": "Shows an event feed from a JSON endpoint and updates countdown labels in the browser.",
+  "embed": "<div data-dynamic-coral=\"events\" data-src=\"/events.json\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/events/v0/events.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the events coral.",
+      "values": [
+        "events"
+      ]
+    },
+    {
+      "name": "data-src",
+      "type": "url",
+      "required": false,
+      "default": "/events.json",
+      "description": "JSON event feed URL."
+    },
+    {
+      "name": "data-empty",
+      "type": "string",
+      "required": false,
+      "default": "No upcoming events.",
+      "description": "Text shown for an empty feed, fetch failure, or non-ok response."
+    },
+    {
+      "name": "data-in-prefix",
+      "type": "string",
+      "required": false,
+      "default": "in ",
+      "description": "Prefix for upcoming countdowns."
+    },
+    {
+      "name": "data-live-label",
+      "type": "string",
+      "required": false,
+      "default": "Now",
+      "description": "Text for an event happening now."
+    },
+    {
+      "name": "data-countdown",
+      "type": "enum",
+      "required": false,
+      "default": null,
+      "description": "Set to always to show far-off countdowns."
+    }
+  ]
+}

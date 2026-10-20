@@ -84,6 +84,19 @@ no host-side wiring beyond dropping the container + script tag:
 
 ## Packages here
 
+Each entry in `corals.mjs`, including the Cardtile-only `qr` and `drawer`, has a
+`<coral>/metadata.json`. The catalog fields are `id`, `author` (`official`),
+`summary`, `embed`, and `attributes` (name, type, required, default, purpose).
+These describe the current mount surface; they are not a release manifest or a
+registry channel pointer. Registry versions, hashes, and module requirements
+come from the deployment registry when a catalog is assembled.
+
+The marked section of each coral README is generated from that metadata. After
+editing a metadata file, run `node packages/dynamic-corals/catalog-readme.mjs
+--write` from the repo root. `node --test
+packages/dynamic-corals/catalog-readme.test.mjs` checks metadata coverage and
+README drift. The rest of each README remains hand-written context.
+
 - `square-shop/` — REEF with Checkout's live Square Catalog widget (first dynamic
   coral, ships the pattern).
 - `repo-facts/` — fills the repository cards a page already has with the latest
