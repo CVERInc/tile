@@ -2871,6 +2871,12 @@ export async function mount(el, handoff = null) {
 	let searchLoading = null;
 	/** True once the index is known to have rows — the only state in which any search UI shows. */
 	let searchLive = false;
+	/**
+	 * 🔴 THE OWNER'S WORDS WIN (codex r1 on tile#180). `data-send-label` is a documented override;
+	 *「問 AI」/「傳給站主」are only better DEFAULTS than「Send」, so they never replace a label the
+	 * host chose — not on open, not when the index lands, not after a send.
+	 */
+	const ownSendLabel = Boolean(el.getAttribute('data-send-label'));
 	function ensureSearchIndex() {
 		if (searchRows) return Promise.resolve(searchRows);
 		if (searchLoading) return searchLoading;
@@ -2886,16 +2892,23 @@ export async function mount(el, handoff = null) {
 	 * without `data-search-index` renders exactly the markup it rendered before 0.7.14.
 	 */
 	function searchBlockHtml() {
-		if (!searchIndexUrl) return '';
-		return `  <div class="${PREFIX}-search" hidden><p class="${PREFIX}-search-note">${escHtml(copy.searchNote)}</p><ul class="${PREFIX}-results" hidden></ul></div>
-`;
+		// An index already known to be empty draws nothing on a re-render, not a block to remove.
+		if (!searchIndexUrl || (searchRows && !searchRows.length)) return '';
+		// 🔴 NO WHITESPACE OF ITS OWN. The block sits between the indent and `<form>`, so removing the
+		// one element leaves exactly the markup a mount without the attribute renders — no stray
+		// text node, byte for byte (mount.test pins the digest for `[]`, 404 and a failed fetch).
+		return `<div class="${PREFIX}-search" hidden><p class="${PREFIX}-search-note">${escHtml(copy.searchNote)}</p><ul class="${PREFIX}-results" hidden></ul></div>`;
 	}
 	/**
 	 * Typing filters; Enter and the button stay what they were (`bindCompose`). The list collapses
 	 * on a newline or past SEARCH_QUERY_MAX characters — that is a message being written — and on
 	 * submit. No results draws nothing: no「not found」line (chodaict 2026-10-18). `label` is the
-	 * button's wording once search is live:「問 AI」on the ask view,「傳給站主」on the compose view,
-	 * so the one input says what Enter does.
+	 * button's idle wording (`idleLabel` below), set once the index turns search on.
+	 *
+	 * 🩸 A SUBMIT STAYS SUBMITTED (codex r1 on tile#180). The index can arrive after the visitor
+	 * already pressed Enter; painting then filtered the still-full textarea and floated the asked
+	 * question's results back over the answer. Only an edit (`input`) re-arms the list — the late
+	 * index paints only while the visitor is still typing a query nobody has sent.
 	 */
 	function wireSearch(form, textarea, button, label) {
 		if (!searchIndexUrl) return;
@@ -2920,14 +2933,15 @@ export async function mount(el, handoff = null) {
 			list.innerHTML = items.join('');
 			list.hidden = false;
 		};
-		textarea.addEventListener('input', () => { if (searchLive) paint(); });
-		form.addEventListener('submit', collapse);
+		let editing = true;
+		textarea.addEventListener('input', () => { editing = true; if (searchLive) paint(); });
+		form.addEventListener('submit', () => { editing = false; collapse(); });
 		void ensureSearchIndex().then((rows) => {
 			if (!rows.length) { box.remove(); return; }
 			searchLive = true;
 			box.hidden = false;
 			if (!button.disabled) button.textContent = label();
-			paint();
+			if (editing) paint();
 		});
 	}
 	// 🔴 ASK-ONLY READS NO HANDLE. A handle is a conversation with a person; adopting one here would
@@ -3350,7 +3364,7 @@ export async function mount(el, handoff = null) {
 <div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(panelLabel)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
-${searchBlockHtml()}  <form class="${PREFIX}-form">
+  ${searchBlockHtml()}<form class="${PREFIX}-form">
     <textarea name="q" rows="1" placeholder="${escHtml(copy.ask)}"></textarea>
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
@@ -3363,8 +3377,9 @@ ${searchBlockHtml()}  <form class="${PREFIX}-form">
 		const log = root.querySelector(`.${PREFIX}-log`);
 		textarea.focus();
 
-		wireSearch(form, textarea, button, () => copy.askAi);
-		bindCompose(form, textarea, button, copy.asking, () => (searchLive ? copy.askAi : copy.send), async (question) => {
+		const idle = () => (searchLive && !ownSendLabel ? copy.askAi : copy.send);
+		wireSearch(form, textarea, button, idle);
+		bindCompose(form, textarea, button, copy.asking, idle, async (question) => {
 			const answer = await askKaito(apiBase, kind, id, question, copy);
 
 			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the
@@ -3427,7 +3442,7 @@ ${searchBlockHtml()}  <form class="${PREFIX}-form">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
   ${replyWithinHours ? `<p class="${PREFIX}-hint">${escHtml(copy.within(replyWithinHours))}</p>` : ''}
-${searchBlockHtml()}  <form class="${PREFIX}-form">
+  ${searchBlockHtml()}<form class="${PREFIX}-form">
     <label class="${PREFIX}-hp" aria-hidden="true" style="${HP_STYLE}">
       <span>Leave this empty</span><input type="text" name="_hp" tabindex="-1" autocomplete="off">
     </label>
@@ -3446,8 +3461,9 @@ ${searchBlockHtml()}  <form class="${PREFIX}-form">
 		const button = form.querySelector('button');
 		textarea.focus();
 
-		wireSearch(form, textarea, button, () => copy.sendOwner);
-		bindCompose(form, textarea, button, copy.sending, () => (searchLive ? copy.sendOwner : copy.send), async (text) => {
+		const idle = () => (searchLive && !ownSendLabel ? copy.sendOwner : copy.send);
+		wireSearch(form, textarea, button, idle);
+		bindCompose(form, textarea, button, copy.sending, idle, async (text) => {
 			const { status, body } = await send(apiBase, {
 				kind,
 				id,
