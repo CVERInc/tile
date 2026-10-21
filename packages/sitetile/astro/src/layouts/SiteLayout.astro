@@ -746,9 +746,14 @@ const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, rende
 // reef#2160: the bubble searches the site's posts in the visitor's browser. The attribute names the
 // index it may fetch — on FIRST OPEN, never at page load (the coral's contract) — and is absent on a
 // site without a blog or with `inbox-bubble-search: off`, so such a page's bubble is byte for byte
-// the one it had. Same `hasBlog` the header magnifier uses; the index's rows follow bubbleSearchOn
+// the one it had. 「Has a blog」is the engine's own two-arm test (blogInstalled, ../lib/blog-tenancy.mjs):
+// the site DECLARED it (`packages: blog`, the magnifier's `hasBlog`) OR its store holds posts — a
+// live site carries 632 posts under a deliberately empty _site.md, and the index endpoint emits
+// rows for it regardless of the declaration. The glob is lazy (no import, keys only) and the same
+// pattern the endpoints use, so it costs the build nothing. The index's rows follow bubbleSearchOn
 // too (../lib/public-artifacts.mjs), so the attribute never points at a file that is `[]` on purpose.
-const bubbleSearch = hasBlog && bubbleSearchOn(meta);
+const hasBlogPosts = Object.keys(import.meta.glob('../../blog/*.md')).length > 0;
+const bubbleSearch = (hasBlog || hasBlogPosts) && bubbleSearchOn(meta);
 // Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
 // already named. No new copy, no new default to get wrong in somebody else's language.
 const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;

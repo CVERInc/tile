@@ -906,7 +906,7 @@ const checks = [
     && readFileSync(join(CDIST, '_headers'), 'utf8') === collisionHeaders],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress"><\/div>\s*<script type="module">/.test(html)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress" data-search-index="\/search-index\.json"><\/div>\s*<script type="module">/.test(html)],
   // reef#1921: the page carries the loader, verbatim, and nothing that fetches the coral eagerly —
   // no <script src>, no modulepreload. The URL appears once, as the loader's argument.
   // 🩸 Not byte for byte: Vite re-prints the function the layout serialises (quotes, spacing), so the
@@ -930,7 +930,7 @@ const checks = [
   // auto-mounted (not hand-authored) bubble on, and its own title is deliberately unrelated to the
   // site's `brand:` — proving data-site-name tracks the SITE config, not whichever page renders it.
   ['inbox bubble: on a non-home page, data-site-name is the SITE\'s name, not that page\'s own title', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress" data-assistant-name="小美"><\/div>/.test(markers)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress" data-assistant-name="小美" data-search-index="\/search-index\.json"><\/div>/.test(markers)],
   // assistant-name: owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
   // applied by the coral itself). markers.md sets `assistant-name: 小美`; home.md does not, so the
   // attribute must be present on one build and wholly absent on the other.
@@ -1873,17 +1873,21 @@ const checks = [
     const rows = JSON.parse(readFileSync(join(HDIST, 'search-index.json'), 'utf8'));
     return rows.length === 4 && rows.every((r) => typeof r.u === 'string' && !r.u.includes('javascript:'));
   }],
-  // reef#2160: the bubble searches the index from the browser, so a blog site's mount names it and
-  // the index carries rows even where `blog-search` (the header magnifier) is off — the primary
-  // fixture (packages: lingo, 4 posts in blog/, no blog-search) is exactly that site.
-  ['reef#2160 hostile-blog-site (packages: blog): the bubble mount carries data-search-index="/search-index.json"', () =>
+  // reef#2160: the bubble searches the index from the browser, so a site with posts names the index
+  // on its mount and the index carries rows even where `blog-search` (the header magnifier) is off.
+  // Neither fixture declares `packages: blog`: the hostile site holds posts under a _site.md that
+  // never says so (the blogInstalled second arm — a live site is shaped like this), the primary
+  // site holds 3 base posts (+1 zh-TW translation, not a row) under `packages: lingo`.
+  ['reef#2160 hostile-blog-site (posts, no `packages: blog`): the bubble mount carries data-search-index="/search-index.json"', () =>
     /<div data-dynamic-coral="inbox-bubble"[^>]* data-search-index="\/search-index\.json"[^>]*><\/div>/.test(hostileIndex)],
-  ['reef#2160 primary build (no `packages: blog`): the mount carries NO data-search-index, and the magnifier is still off', () =>
-    !html.includes('data-search-index') && !html.includes('data-search-toggle')],
-  ['reef#2160 primary build (no blog-search, bubble default on): search-index.json carries its posts, each with t/u/d', () => {
+  ['reef#2160 primary build (posts, no blog-search): the bubble mount carries data-search-index, and the magnifier is still off', () =>
+    /<div data-dynamic-coral="inbox-bubble"[^>]* data-search-index="\/search-index\.json"[^>]*><\/div>/.test(html) && !html.includes('data-search-toggle')],
+  ['reef#2160 primary build (no blog-search, bubble default on): search-index.json carries its 3 base posts, each with t/u/d', () => {
     const rows = JSON.parse(readFileSync(join(DIST, 'search-index.json'), 'utf8'));
-    return rows.length === 4 && rows.every((r) => typeof r.t === 'string' && typeof r.u === 'string' && typeof r.d === 'string');
+    return rows.length === 3 && rows.every((r) => typeof r.t === 'string' && typeof r.u === 'string' && typeof r.d === 'string');
   }],
+  ['reef#2160 site off (ko-kr: inbox-bubble: off): no mount, so no data-search-index either', () =>
+    !siteOff.includes('data-search-index')],
   // -- #31: a safe absolute permalink is an external canonical, not a route --------------------
   ['🔴 hostile-blog-site: a post with an absolute permalink gets NO page of its own — no directory named after its scheme or host, none at its slug', () =>
     !existsSync(join(HDIST, 'https:')) && !existsSync(join(HDIST, 'https'))
