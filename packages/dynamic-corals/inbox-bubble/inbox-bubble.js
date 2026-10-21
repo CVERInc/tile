@@ -2696,8 +2696,12 @@ async function send(apiBase, payload) {
 	return { status: res.status, body };
 }
 
-/** Wire the shared one-at-a-time, keyboard-safe compose behaviour. */
-export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onSend) {
+/**
+ * Wire the shared one-at-a-time, keyboard-safe compose behaviour. `onCleared` runs after a
+ * successful send empties the draft: assigning `textarea.value` fires no `input` event, so
+ * anything that follows the box (the reef#2160 search list) is told here.
+ */
+export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onSend, onCleared) {
 	let sending = false;
 	form.addEventListener('submit', async (event) => {
 		event.preventDefault();
@@ -2712,7 +2716,10 @@ export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onS
 		let succeeded = false;
 		try {
 			succeeded = (await onSend(text)) === true;
-			if (succeeded) textarea.value = '';
+			if (succeeded) {
+				textarea.value = '';
+				if (onCleared) onCleared();
+			}
 		} finally {
 			sending = false;
 			button.disabled = false;
@@ -2909,12 +2916,18 @@ export async function mount(el, handoff = null) {
 	 * already pressed Enter; painting then filtered the still-full textarea and floated the asked
 	 * question's results back over the answer. Only an edit (`input`) re-arms the list — the late
 	 * index paints only while the visitor is still typing a query nobody has sent.
+	 *
+	 * 🩸 THE LIST FOLLOWS THE BOX, NOT ITS EVENTS (codex r2 on tile#180). A successful send empties
+	 * the textarea by assignment, which fires no `input`: an edit made while the ask was pending
+	 * left its results floating over an empty composer. `sync()` re-reads `textarea.value` through
+	 * the same `paint`; it is returned so `bindCompose` calls it after clearing the draft.
 	 */
 	function wireSearch(form, textarea, button, label) {
-		if (!searchIndexUrl) return;
+		const none = () => {};
+		if (!searchIndexUrl) return none;
 		const box = root.querySelector(`.${PREFIX}-search`);
 		const list = root.querySelector(`.${PREFIX}-results`);
-		if (!box || !list) return;
+		if (!box || !list) return none;
 		const collapse = () => { list.innerHTML = ''; list.hidden = true; };
 		const paint = () => {
 			const q = String(textarea.value || '');
@@ -2934,15 +2947,17 @@ export async function mount(el, handoff = null) {
 			list.hidden = false;
 		};
 		let editing = true;
-		textarea.addEventListener('input', () => { editing = true; if (searchLive) paint(); });
+		const sync = () => { if (searchLive && editing) paint(); else collapse(); };
+		textarea.addEventListener('input', () => { editing = true; sync(); });
 		form.addEventListener('submit', () => { editing = false; collapse(); });
 		void ensureSearchIndex().then((rows) => {
 			if (!rows.length) { box.remove(); return; }
 			searchLive = true;
 			box.hidden = false;
 			if (!button.disabled) button.textContent = label();
-			if (editing) paint();
+			sync();
 		});
+		return sync;
 	}
 	// 🔴 ASK-ONLY READS NO HANDLE. A handle is a conversation with a person; adopting one here would
 	// put the human thread, its poller and its compose box back on a tenant we were just told (or
@@ -3378,7 +3393,7 @@ export async function mount(el, handoff = null) {
 		textarea.focus();
 
 		const idle = () => (searchLive && !ownSendLabel ? copy.askAi : copy.send);
-		wireSearch(form, textarea, button, idle);
+		const syncSearch = wireSearch(form, textarea, button, idle);
 		bindCompose(form, textarea, button, copy.asking, idle, async (question) => {
 			const answer = await askKaito(apiBase, kind, id, question, copy);
 
@@ -3433,7 +3448,7 @@ export async function mount(el, handoff = null) {
 				else escalate(question, toHuman, copy);
 			});
 			return true;
-		});
+		}, syncSearch);
 	}
 
 	function renderMessages() {
@@ -3462,7 +3477,7 @@ export async function mount(el, handoff = null) {
 		textarea.focus();
 
 		const idle = () => (searchLive && !ownSendLabel ? copy.sendOwner : copy.send);
-		wireSearch(form, textarea, button, idle);
+		const syncSearch = wireSearch(form, textarea, button, idle);
 		bindCompose(form, textarea, button, copy.sending, idle, async (text) => {
 			const { status, body } = await send(apiBase, {
 				kind,
@@ -3502,7 +3517,7 @@ export async function mount(el, handoff = null) {
 			err.textContent = status === 429 ? copy.rate : copy.error;
 			form.parentNode.insertBefore(err, form);
 			return false;
-		});
+		}, syncSearch);
 
 		// 🔴 STOP FIRST, THEN READ. The old order (read, stop, restart) started a fetch and then
 		// invalidated its own generation one line later, so the first read after every re-render

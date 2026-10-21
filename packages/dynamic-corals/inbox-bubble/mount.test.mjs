@@ -1842,6 +1842,40 @@ test('2160: an index that lands AFTER Enter does not float the asked query back 
 	}
 });
 
+/**
+ * 🩸 codex r2 on tile#180: a successful send empties the textarea by assignment — no `input`
+ * event — so an edit made while the ask was pending left its results over an empty composer.
+ */
+test('2160: an edit made while the ask is pending does not outlive the answer — the cleared box hides the list', async () => {
+	const ask = deferred();
+	respond = (url) => servingIndex(SEARCH_ROWS)(url)
+		?? (url.includes('/api/kaito') ? ask.promise.then(() => ({ ok: true, status: 200, json: async () => GROUNDED })) : undefined);
+	try {
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		const submitted = form.emit('submit'); // the ask hangs on `ask`
+		await drain();
+		assert.equal(resultList(root).hidden, true, 'control: Enter did not collapse the list');
+		textarea.value = 'cafe';
+		await textarea.emit('input');
+		assert.equal(resultList(root).hidden, false, 'control: an edit during the ask did not reopen the list');
+		assert.match(resultList(root).innerHTML, /diary\/cafe/);
+		ask.release();
+		await submitted;
+		await drain();
+		assert.equal(textarea.value, '', 'control: the ask did not succeed (the draft was not cleared)');
+		assert.equal(resultList(root).hidden, true, 'the edit\'s results stayed up over the emptied composer');
+		assert.equal(resultList(root).innerHTML, '');
+	} finally {
+		respond = null;
+	}
+});
+
 test('2160: an explicit data-send-label wins over「Ask AI」/「Send to the owner」— on open, when the index lands, and after a send', async () => {
 	const index = deferred();
 	respond = (url) => (String(url).endsWith('/search-index.json')
