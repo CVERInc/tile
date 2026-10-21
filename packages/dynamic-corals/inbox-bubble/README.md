@@ -146,7 +146,8 @@ One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own m
 always「ask」— the button says「問 AI」/ Ask AI on the ask view and「傳給站主」/ Send to the owner
 on the compose view, so the input says what Enter does (an explicit `data-send-label` still
 wins over both); a person is the last rung as before. After Enter the list stays down until the
-visitor edits the text again — an index that arrives mid-ask does not bring it back.
+visitor edits the text again — an index that arrives mid-ask does not bring it back, and a
+successful send that empties the box takes down whatever an edit made during the ask had opened.
 
 - The host names the index with `data-search-index`; without it the bubble is byte for byte the
   one it was (the mount tests pin that). sitetile sets it on a blog site unless the owner writes
