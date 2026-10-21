@@ -518,6 +518,8 @@ const BADGE_COLLISION_KINDS = [
 const REAL_APPLE_TOUCH_BYTES = 'THIS-IS-THE-OWNERS-REAL-APPLE-TOUCH-ICON-NOT-A-TILE-BADGE\n';
 /** A site's own two `_headers` rules, planted in the collision fixture's public/. */
 const OWNER_HEADERS = '/*\n  X-Frame-Options: DENY\n\n/blog/*\n  Cache-Control: public, max-age=60\n';
+/** tile#177 r2: the collision build's site-level `favicon:` — relative on purpose. */
+const OWNER_FAVICON_REL = 'brand/mark.png';
 
 // The fixture directory is rsync'd from THIS `astro/` tree (excluding node_modules/.astro/
 // dist-*/the fixture dir itself) rather than hand-duplicated, so it can never silently drift from
@@ -665,6 +667,15 @@ function buildBadgeCollisionFixture() {
   // …and a site's own `_headers`, which reaches public/ the same way (a file-level replace). The
   // build must keep these two rules first, verbatim, and add `/*.svg` exactly once after them.
   writeFileSync(join(CDIR, 'public/_headers'), OWNER_HEADERS, 'utf8');
+  // tile#177 r2: the one build whose SITE configures a raster favicon — RELATIVE, the shape r1
+  // swapped for the badge — with a real file behind it. The badge-receipt pages below pass their
+  // own explicit meta, so this reaches only the content pages and rss.xml.
+  mkdirSync(join(CDIR, 'public/brand'), { recursive: true });
+  writeFileSync(join(CDIR, 'public', OWNER_FAVICON_REL), 'OWNER-FAVICON-PNG\n', 'utf8');
+  const siteMd = join(CDIR, 'content', '_site.md');
+  const withFavicon = readFileSync(siteMd, 'utf8').replace(/^---\n/, `---\nfavicon: ${OWNER_FAVICON_REL}\n`);
+  assert.ok(withFavicon.includes(`favicon: ${OWNER_FAVICON_REL}\n`), 'the favicon fixture must actually configure one');
+  writeFileSync(siteMd, withFavicon, 'utf8');
 
   writeFileSync(join(CDIR, 'src/pages/badge-receipt-[kind].astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -832,6 +843,9 @@ const collisionHtml = Object.fromEntries(Object.keys(collisionExpected).map((kin
   [kind, readFileSync(join(CDIST, `badge-receipt-${kind}`, 'index.html'), 'utf8')]));
 const builtCollisionDirs = readdirSync(CDIST).filter((e) => e.startsWith('badge-receipt-')).map((e) => e.slice('badge-receipt-'.length)).sort();
 const collisionAppleTouchBytes = readFileSync(join(CDIST, 'apple-touch-icon.png'), 'utf8');
+// tile#177 r2: the favicon-configured build's home page and feed, read side by side.
+const collisionHomeHtml = readFileSync(join(CDIST, 'index.html'), 'utf8');
+const collisionRss = readFileSync(join(CDIST, 'rss.xml'), 'utf8');
 
 // `_headers` through a real `astro build` — the primary build ships no owner file, the collision
 // build ships two owner rules in public/. Read before anything below re-merges them.
@@ -1342,6 +1356,18 @@ const checks = [
       && rss.includes('xmlns:webfeeds="http://webfeeds.org/rss/1.0"')
       && rss.includes(`<webfeeds:icon>${img[1]}</webfeeds:icon>`)
       && rss.indexOf('<image>') < rss.indexOf('<item>');
+  }],
+  // -- tile#177 r2: a site WITH a configured (relative) favicon PNG. The feed's <image><url> must
+  //    equal the rendered apple-touch-icon <link> href resolved against the page it sits on — the
+  //    owner's mark, not the badge — and land on the owner's own file in that build's output. --
+  ['🔴 tile#177 r2 feed (favicon build): <image><url> === the home page\'s apple-touch-icon href, resolved to absolute — the owner\'s PNG', () => {
+    const appleHref = (/<link rel="apple-touch-icon"[^>]*href="([^"]+)"/.exec(collisionHomeHtml) || [])[1];
+    const url = feedImageUrl(collisionRss);
+    return appleHref === OWNER_FAVICON_REL
+      && url === new URL(appleHref, 'https://example.com/').href
+      && url === 'https://example.com/' + OWNER_FAVICON_REL
+      && existsSync(join(CDIST, OWNER_FAVICON_REL))
+      && collisionRss.includes(`<webfeeds:icon>${url}</webfeeds:icon>`);
   }],
   // -- the JS accounting invariant (zero unaccounted JS) --
   ['zero framework hydration (no astro-island)', () => pages.every((p) => !readFileSync(p, 'utf8').includes('astro-island'))],
