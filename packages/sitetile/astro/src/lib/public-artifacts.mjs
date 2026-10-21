@@ -9,7 +9,7 @@ import {
   searchIndex,
 } from './blog.mjs';
 import { toBcp47 } from '../packages/lingo/locale.mjs';
-import { FEED_PATH, feedXml, latestBuildDate } from './feed.mjs';
+import { FEED_PATH, feedXml, feedIcon, latestBuildDate } from './feed.mjs';
 
 export function buildSearchIndexBody(posts, meta) {
   return blogSearchOn(meta) ? JSON.stringify(searchIndex(posts, meta)) : '[]';
@@ -36,6 +36,7 @@ export function buildFeedBody(posts, meta, origin = '') {
     language: meta.lang ? toBcp47(meta.lang) : '',
     selfUrl: origin ? origin + FEED_PATH : '',
     buildDate: latestBuildDate(items),
+    image: feedIcon(meta, origin), // tile#177 — the PNG this build emits, absolute; '' without an origin
     items,
   });
 }
