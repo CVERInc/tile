@@ -12,6 +12,8 @@
 // script-injection-safe by construction: results are built with createElement + textContent ONLY —
 // never innerHTML / set:html — so a post title carrying markup renders as literal text
 // (the same discipline as the age-gate island).
+import { fold, filterIndex } from './search-filter.mjs';
+
 (function () {
   const toggle = document.querySelector('[data-search-toggle]');
   const overlayInput = document.querySelector('[data-search-input]');
@@ -33,28 +35,9 @@
     return loading;
   }
 
-  // fold: NFC → lowercase → strip combining diacritics. CJK passes through untouched;
-  // Latin accents collapse so "café" matches "cafe".
-  function fold(s) {
-    return String(s == null ? '' : s)
-      .normalize('NFC').toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }
-
-  // substring filter over the folded corpus; title hits sort before body/tag-only hits.
-  function run(q) {
-    const nq = fold(q).trim();
-    if (!nq || !INDEX) return [];
-    const titleHits = [];
-    const rest = [];
-    for (const row of INDEX) {
-      if (fold(row.t).indexOf(nq) !== -1) { titleHits.push(row); continue; }
-      const g = fold(Array.isArray(row.g) ? row.g.join(' ') : (row.g || ''));
-      const e = fold(row.e || '');
-      if (g.indexOf(nq) !== -1 || e.indexOf(nq) !== -1) rest.push(row);
-    }
-    return titleHits.concat(rest).slice(0, MAX);
-  }
+  // reef#2159/#2160: fold + filterIndex live in ./search-filter.mjs — the ONE filter the header
+  // overlay, the /search page and the inbox bubble all run. Do not re-grow a local copy here.
+  const run = (q) => filterIndex(INDEX, q, MAX);
 
   // Bind one search UI (the header overlay OR the /search page) to the shared index.
   function bind(input, results, countEl, emptyEl, opts) {
