@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feedXml, feedIcon, latestBuildDate, FEED_PATH, FEED_ALIASES } from './astro/src/lib/feed.mjs';
 import { ICON_PATHS, iconHrefs } from './icon-core.mjs';
+import { sitePackages } from './site-packages.mjs';
 import { pageGraph, jsonLdScript } from './astro/src/lib/structured-data.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -139,7 +140,15 @@ test('🔴 tile#177 r2: the feed icon IS the layout\'s apple-touch-icon href, re
   // Each row names the href the layout links (iconHrefs().appleTouch — what SiteLayout renders as
   // <link rel="apple-touch-icon">) beside the feed's answer, so the pairing is asserted, not implied.
   const origin = 'https://x.test';
-  const pair = (meta) => [iconHrefs(meta, {}).appleTouch.href, feedIcon(meta, origin)];
+  // r3: `hasPwa` derived exactly as the layout derives it — from site-packages.mjs, which the
+  // layout itself calls (asserted below), so a package-dependent divergence shows up in a row.
+  assert.match(layout, /^const packages = sitePackages\(meta\);/m, 'the layout parses `packages:` with the shared helper');
+  assert.equal((layout.match(/meta\.packages/g) || []).length, 0, 'and has no second parse of its own');
+  const pair = (meta) => [iconHrefs(meta, { hasPwa: sitePackages(meta).includes('pwa') }).appleTouch.href, feedIcon(meta, origin)];
+  assert.deepEqual(pair({ favicon: '/brand/mark.png', packages: 'blog pwa' }), ['/brand/mark.png', origin + '/brand/mark.png'],
+    'r3: whitespace is not a package separator in the layout → PWA is off there → the owner PNG in both');
+  assert.deepEqual(pair({ favicon: '/brand/mark.png', packages: 'blog, pwa' }), [ICON_PATHS.apple, origin + ICON_PATHS.apple],
+    'r3: comma-separated `pwa` → the layout links the PWA badge → the feed names the same badge');
   assert.deepEqual(pair({ favicon: '//cdn.x.test/mark.png' }), ['//cdn.x.test/mark.png', 'https://cdn.x.test/mark.png'],
     'protocol-relative owner PNG: the layout links it → the feed names it, on the site\'s scheme');
   assert.deepEqual(pair({ favicon: 'brand/mark.png' }), ['brand/mark.png', 'https://x.test/brand/mark.png'],

@@ -13,6 +13,8 @@ import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
 import { iconHrefs, ICON_PATHS } from '@icons';
+// `packages:` parsed once, for this layout AND the feed's <image> (tile#177 r3).
+import { sitePackages } from '../../../site-packages.mjs';
 // icon-core.mjs is zero-I/O by design (node-runnable, unit-testable without a renderer) — this is
 // the one place with filesystem access, so THIS file is the "generator" the model asks about: it
 // tells iconHrefs() which canonical paths the build actually wrote, rather than letting `generated`
@@ -342,7 +344,7 @@ const fontsUrl = meta.fonts ? (safeHref(String(meta.fonts).trim()) || '') : '';
 const pkgRaw = Object.fromEntries(
   Object.entries(import.meta.glob('../packages/**/*.css', { query: '?raw', import: 'default', eager: true }))
     .map(([path, css]) => [path, stripCssComments(css)]));
-const packages = String(meta.packages || '').split(',').map((s) => s.trim()).filter(Boolean);
+const packages = sitePackages(meta); // the feed's <image> reads the same list (tile#177 r3)
 // theme-color (browser chrome tint + PWA manifest/splash). Shared by bleedblend (Safari tinting)
 // AND REEF with PWA, so it lives at the top level rather than inside one package's config.
 const themeColorLight = (meta['theme-color-light'] ? String(meta['theme-color-light']).trim() : '#aceace').replace(/^["']|["']$/g, '');

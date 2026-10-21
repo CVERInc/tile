@@ -18,6 +18,7 @@
 // <link> names, so the feed cannot claim a picture the build did not emit. Relative import on
 // purpose — this module is plain-node (no Vite alias), and so is icon-core.
 import { iconHrefs, ICON_PATHS } from '../../../icon-core.mjs';
+import { sitePackages } from '../../../site-packages.mjs';
 
 /** Where this site's feed lives. One constant, referenced by the route, the aliases and the head. */
 export const FEED_PATH = '/rss.xml';
@@ -50,7 +51,7 @@ export function feedIcon(meta, origin = '') {
   let base;
   try { base = new URL(o + '/'); } catch { return ''; }
   const badge = new URL(ICON_PATHS.apple, base).href;
-  const hasPwa = String((meta && meta.packages) || '').split(/[\s,]+/).includes('pwa');
+  const hasPwa = sitePackages(meta).includes('pwa'); // the layout's parse, not a second one
   const href = String(iconHrefs(meta || {}, { hasPwa }).appleTouch.href || '');
   let url;
   try { url = new URL(href, base); } catch { return badge; }
