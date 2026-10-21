@@ -28,25 +28,35 @@ export const WEBFEEDS_NS = 'http://webfeeds.org/rss/1.0';
 /**
  * tile#177 — the absolute URL of the channel's <image>, or '' when none can be claimed.
  *
- * RSS 2.0 says an <image> is a GIF, JPEG or PNG, so the answer is the one raster every build
- * emits: icon-core's apple-touch-icon — the owner's own raster mark when they set one (`favicon:`
- * → `site-logo:` → `footer-logo:`, iconHrefs' order), else the generated badge at
- * /apple-touch-icon.png. An SVG or WebP mark falls back to the badge exactly as iOS does; a mark
- * with a scheme other than http(s) (the layout gates these through safeSrc) never reaches a
- * reader. No origin → no absolute URL → nothing, because a relative <image><url> is a broken
- * picture in every reader that fetched the feed through an alias or an aggregator.
+ * Derived FROM the layout's own selection — icon-core's iconHrefs().appleTouch, the href
+ * SiteLayout renders as <link rel="apple-touch-icon"> (the owner's raster mark, `favicon:` →
+ * `site-logo:` → `footer-logo:`, else the generated badge at /apple-touch-icon.png) — and then
+ * narrowed by what RSS can carry, never re-derived beside it:
+ *   · resolved against the site URL, so a relative (`brand/mark.png`) or protocol-relative
+ *     (`//cdn/mark.png`) mark the layout links is named absolutely here — as the home page
+ *     resolves it;
+ *   · http(s) only after resolution; anything else (the layout gates those through safeSrc)
+ *     never reaches a reader;
+ *   · RSS 2.0 says an <image> is GIF, JPEG or PNG. icon-core also treats WebP as raster, so the
+ *     layout DOES link a WebP mark as apple-touch-icon — the feed deliberately diverges to the
+ *     generated badge PNG there (an SVG mark never gets this far: iconHrefs already gives the badge).
+ *     icon-core does not classify GIF as raster, so an owner GIF reaches neither: the badge, in both.
+ * No origin → no absolute URL → nothing, because a relative <image><url> is a broken picture in
+ * every reader that fetched the feed through an alias or an aggregator.
  */
 export function feedIcon(meta, origin = '') {
   const o = String(origin || '').replace(/\/$/, '');
   if (!o) return '';
+  let base;
+  try { base = new URL(o + '/'); } catch { return ''; }
+  const badge = new URL(ICON_PATHS.apple, base).href;
   const hasPwa = String((meta && meta.packages) || '').split(/[\s,]+/).includes('pwa');
   const href = String(iconHrefs(meta || {}, { hasPwa }).appleTouch.href || '');
-  const path = href.split(/[?#]/)[0].toLowerCase();
-  const raster = /\.(?:png|jpe?g|gif)$/.test(path);
-  if (!raster) return o + ICON_PATHS.apple;
-  if (/^https?:\/\//i.test(href)) return href;
-  if (href.startsWith('/') && !href.startsWith('//')) return o + href;
-  return o + ICON_PATHS.apple;
+  let url;
+  try { url = new URL(href, base); } catch { return badge; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return badge;
+  if (!/\.(?:png|jpe?g|gif)$/i.test(url.pathname)) return badge;
+  return url.href;
 }
 
 /** The paths a feed reader might already be pointed at. `/feed` is WordPress's own; the Blogger one

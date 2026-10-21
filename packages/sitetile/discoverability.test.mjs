@@ -17,7 +17,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feedXml, feedIcon, latestBuildDate, FEED_PATH, FEED_ALIASES } from './astro/src/lib/feed.mjs';
-import { ICON_PATHS } from './icon-core.mjs';
+import { ICON_PATHS, iconHrefs } from './icon-core.mjs';
 import { pageGraph, jsonLdScript } from './astro/src/lib/structured-data.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -133,6 +133,24 @@ test('🔴 tile#177: the feed icon is the PNG the site already builds — the ow
   assert.equal(feedIcon({ favicon: '/brand/mark.png', packages: 'pwa' }, origin), origin + ICON_PATHS.apple,
     'REEF with PWA ships its own opaque set at the canonical path — the same answer the <head> gives');
   assert.equal(feedIcon({}, ''), '', 'no origin → no absolute URL → nothing claimed');
+});
+
+test('🔴 tile#177 r2: the feed icon IS the layout\'s apple-touch-icon href, resolved — or the badge when RSS cannot carry it', () => {
+  // Each row names the href the layout links (iconHrefs().appleTouch — what SiteLayout renders as
+  // <link rel="apple-touch-icon">) beside the feed's answer, so the pairing is asserted, not implied.
+  const origin = 'https://x.test';
+  const pair = (meta) => [iconHrefs(meta, {}).appleTouch.href, feedIcon(meta, origin)];
+  assert.deepEqual(pair({ favicon: '//cdn.x.test/mark.png' }), ['//cdn.x.test/mark.png', 'https://cdn.x.test/mark.png'],
+    'protocol-relative owner PNG: the layout links it → the feed names it, on the site\'s scheme');
+  assert.deepEqual(pair({ favicon: 'brand/mark.png' }), ['brand/mark.png', 'https://x.test/brand/mark.png'],
+    'relative owner PNG: the layout links it → the feed names it, resolved against the site URL');
+  assert.deepEqual(pair({ favicon: 'https://x/mark.jpg' }), ['https://x/mark.jpg', 'https://x/mark.jpg'],
+    'absolute owner JPEG: same URL in both');
+  assert.deepEqual(pair({ favicon: '/brand/mark.webp' }), ['/brand/mark.webp', origin + ICON_PATHS.apple],
+    'the layout DOES link a WebP mark as apple-touch-icon, but RSS 2.0 <image> is GIF/JPEG/PNG only → '
+    + 'the feed deliberately diverges to the generated badge');
+  assert.equal(feedIcon({ favicon: 'ftp://x.test/mark.png' }, origin), origin + ICON_PATHS.apple,
+    'a resolved scheme other than http(s) never reaches a reader');
 });
 
 test('🔴 a post is an article, in both channels at once', () => {
