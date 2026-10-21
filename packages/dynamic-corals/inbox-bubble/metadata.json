@@ -110,6 +110,13 @@
       "required": false,
       "default": null,
       "description": "Site name: this attribute takes priority, then og:site_name, then hostname."
+    },
+    {
+      "name": "data-search-index",
+      "type": "url",
+      "required": false,
+      "default": null,
+      "description": "Path of the site's search index (sitetile sets /search-index.json on a blog site); fetched once on the first open, filtered in the browser as the visitor types. Absent, [] or unreachable: no search UI."
     }
   ]
 }

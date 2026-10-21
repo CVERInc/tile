@@ -1611,3 +1611,160 @@ test('1921: a reef-inbox:open held while the claim gate is pending reads the nam
 		&& new URL(r.url).searchParams.get('id') === 'held-1921');
 	assert.equal(mine.length, 1, 'the held open skipped the name read');
 });
+
+// ── reef#2160: in-site search inside the bubble ──────────────────────────────────────────────
+// The host names an index (`data-search-index`); the bubble fetches it on the FIRST OPEN only,
+// filters it as the visitor types, and keeps Enter as「ask」. Without the attribute, or with an
+// index that is `[]`, the bubble is today's bubble.
+
+const SEARCH_ROWS = [
+	{ t: 'Café notes', u: '/diary/cafe', g: ['coffee'], d: '2025-10-31', i: '' },
+	{ t: '深空眠的第一夜', u: '/diary/night-one', g: ['sleep'], d: '2025-11-11', i: '' },
+	{ t: 'Spring cleaning', u: 'javascript:alert(1)', g: ['home'], d: '2025-10-07', i: '' },
+];
+const indexRequests = (from) => requests.slice(from).filter((r) => String(r.url).endsWith('/search-index.json'));
+/** Serve the index with `rows`; every other URL falls through to the file's defaults. */
+const servingIndex = (rows) => (url) => (String(url).endsWith('/search-index.json')
+	? { ok: true, status: 200, json: async () => rows }
+	: undefined);
+const searchBox = (root) => root.querySelector('.dc-inbox-search');
+const resultList = (root) => root.querySelector('.dc-inbox-results');
+
+test('2160: the index is NOT fetched at mount, is fetched ONCE on the first open, and not again on a re-render', async () => {
+	respond = servingIndex(SEARCH_ROWS);
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await drain();
+		assert.equal(indexRequests(from).length, 0, 'the index was fetched at page load — the whole cost this ticket forbids');
+		await openBubble(root);
+		await drain();
+		assert.equal(indexRequests(from).length, 1, 'opening the panel did not fetch the index exactly once');
+		assert.deepEqual(Object.keys(indexRequests(from)[0].init), ['headers'], 'the index read is a plain GET');
+		// a second render of the panel (closing and reopening) reuses the memory copy
+		root.querySelector('.dc-inbox-close').emit?.('click');
+		await openBubble(root);
+		await drain();
+		assert.equal(indexRequests(from).length, 1, 'a re-render fetched the index again');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: typing floats matching articles (title + date + link), the list collapses on a newline, a long text, or an empty box, and never says「not found」', async () => {
+	respond = servingIndex(SEARCH_ROWS);
+	try {
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const box = searchBox(root);
+		const list = resultList(root);
+		assert.equal(box.hidden, false, 'the search block stayed hidden although the index has rows');
+		assert.ok(root.innerHTML.includes('Typing only searches inside your browser'), 'the privacy sentence is missing');
+		assert.equal(list.hidden, true, 'a list is showing before anybody typed');
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(list.hidden, false);
+		assert.match(list.innerHTML, /<li class="dc-inbox-result"><a href="\/diary\/cafe"><span class="dc-inbox-result-title">Café notes<\/span><time datetime="2025-10-31">2025-10-31<\/time><\/a><\/li>/);
+		assert.doesNotMatch(list.innerHTML, /night-one/, 'a non-matching row was listed');
+		textarea.value = '空眠';
+		await textarea.emit('input');
+		assert.match(list.innerHTML, /night-one/, 'a CJK substring did not match');
+		textarea.value = 'zzzz-no-such-post';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true);
+		assert.equal(list.innerHTML, '', 'no results must draw nothing');
+		assert.doesNotMatch(root.innerHTML, /not found|No matching|查無/i, 'a「not found」line was drawn');
+		textarea.value = 'caf\nI am writing to the owner';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true, 'a newline did not collapse the list');
+		textarea.value = 'caf' + 'x'.repeat(40);
+		await textarea.emit('input');
+		assert.equal(list.hidden, true, 'a long text did not collapse the list');
+		textarea.value = 'spring';
+		await textarea.emit('input');
+		assert.equal(list.innerHTML, '', 'a javascript: url from the index was rendered as a link');
+		assert.equal(list.hidden, true);
+		textarea.value = '';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true);
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: Enter still asks — the question leaves as POST /api/kaito, the list collapses, and the button says「Ask AI」', async () => {
+	respond = (url, init) => servingIndex(SEARCH_ROWS)(url)
+		?? (url.includes('/api/kaito') ? { ok: true, status: 200, json: async () => GROUNDED } : undefined);
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		const button = form.querySelector('button');
+		assert.equal(button.textContent, 'Ask AI', 'with the index live the button no longer says what Enter does');
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(resultList(root).hidden, false);
+		await form.emit('submit');
+		await drain();
+		const kaito = requests.slice(from).filter((r) => String(r.url).includes('/api/kaito'));
+		assert.equal(kaito.length, 1, 'Enter did not ask');
+		assert.equal(JSON.parse(kaito[0].init.body).query, 'caf');
+		assert.equal(resultList(root).hidden, true, 'the list stayed up over the answer');
+		assert.equal(button.textContent, 'Ask AI', 'the label reverted after the send');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: on the compose view (no KAITO) the button says「Send to the owner」once the index is live', async () => {
+	respond = servingIndex(SEARCH_ROWS);
+	try {
+		const { root } = await mountFresh({ 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		assert.equal(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Send to the owner');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160 control: an index that is [] (cver, sodaart today) draws no search UI and leaves the button alone', async () => {
+	respond = servingIndex([]);
+	try {
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		// the stand-in never reads the template's `hidden` attribute, so「never shown」is「never set false」
+		assert.notEqual(searchBox(root).hidden, false, 'the search block was shown for an empty index');
+		assert.notEqual(resultList(root).hidden, false);
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(resultList(root).innerHTML, '', 'an empty index produced a list');
+		// the label was never rewritten (the stand-in's textContent is only what the coral set), and the
+		// rendered template still says Send
+		assert.notEqual(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Ask AI');
+		assert.match(root.innerHTML, /<button type="submit">Send<\/button>/);
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160 negative control: without data-search-index the panel is byte-identical to before and nothing fetches the index, even after open and typing', async () => {
+	const from = requests.length;
+	const { root } = await mountFresh({ 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+	await openBubble(root);
+	await drain();
+	assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
+	assert.doesNotMatch(root.innerHTML, /dc-inbox-search|dc-inbox-results|Typing only searches/);
+	const textarea = composeBox(root);
+	textarea.value = 'caf';
+	await textarea.emit('input');
+	await drain();
+	assert.equal(indexRequests(from).length, 0);
+});

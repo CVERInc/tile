@@ -7,6 +7,7 @@
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": [],
   "calls": [
+    "GET <data-search-index> (same-origin site file, e.g. /search-index.json) — only when the host sets data-search-index, only the FIRST time the visitor opens the panel (never at page load), once per mount: the site's own public post list (title, url, tags, date), filtered inside the browser as the visitor types. Nothing the visitor types travels for this: the filter runs in the page, the results are links, no query is recorded anywhere (reef#2160 item 6)",
     "GET <data-api-base>/api/inbox?kind=<data-kind>&id=<data-id> — reads this visitor's own transcript; the conversation id travels in the x-inbox-conversation header, never the query string",
     "POST <data-api-base>/api/inbox — sends a visitor message",
     "POST <data-api-base>/api/kaito — only when data-kaito=\"1\": asks the site's own published content for an extractive, always-cited answer before offering to escalate to a person",

@@ -127,6 +127,54 @@ const PREFIX = 'dc-inbox';
  */
 const HP_STYLE = 'position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0';
 
+// ── in-site search (reef#2160) ───────────────────────────────────────────────
+// The bubble filters the site's own /search-index.json in the visitor's browser as they type
+// (chodaict 2026-10-18: one input; typing floats matching articles, Enter is always「ask」). The
+// index is named by the host's `data-search-index` attribute (the sitetile layout sets it only on a
+// blog site with bubble search on), fetched ONCE per mount and only on the FIRST OPEN — never at
+// page load — and an index that is `[]` or unreachable draws today's bubble, byte for byte.
+// 🔴 WHAT THE VISITOR TYPES NEVER LEAVES THE PAGE through this feature: the filter runs here, the
+// list is links, and nothing is recorded (ticket item 6 — no query analytics of any kind).
+/** Rows shown at most: the panel is 22rem wide and the list sits above the composer. */
+const SEARCH_MAX = 8;
+/**
+ * A query longer than this collapses the list: it is a message being written, not a title being
+ * looked for. 40 is above the longest title on the largest index measured (tniop, 1,410 rows:
+ * p99 title 23 characters, max 31), so no title that could match is ever cut off by the limit.
+ */
+const SEARCH_QUERY_MAX = 40;
+
+// 🔴 VERBATIM COPY of packages/sitetile/astro/src/packages/blog-search/search-filter.mjs — the ONE
+// filter the header magnifier, the /search page and this bubble run (reef#2159). A coral has no
+// imports (nothing to bundle), so it is pasted, not imported; search-filter-sync.test.mjs fails the
+// moment the two blocks differ. Edit the module, then paste it here.
+// ── SHARED-FILTER-BEGIN (verbatim in inbox-bubble.js) ──
+/** fold: NFC → lowercase → strip combining diacritics. CJK passes through untouched. */
+function fold(s) {
+	return String(s == null ? '' : s)
+		.normalize('NFC').toLowerCase()
+		.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Substring filter over an index of `{t,u,g,d,i,e?}` rows. Title hits sort before tag/excerpt-only
+ * hits; an empty or whitespace-only query, or no index, is no results. At most `max` rows.
+ */
+function filterIndex(index, q, max) {
+	const nq = fold(q).trim();
+	if (!nq || !Array.isArray(index)) return [];
+	const titleHits = [];
+	const rest = [];
+	for (const row of index) {
+		if (fold(row.t).indexOf(nq) !== -1) { titleHits.push(row); continue; }
+		const g = fold(Array.isArray(row.g) ? row.g.join(' ') : (row.g || ''));
+		const e = fold(row.e || '');
+		if (g.indexOf(nq) !== -1 || e.indexOf(nq) !== -1) rest.push(row);
+	}
+	return titleHits.concat(rest).slice(0, max);
+}
+// ── SHARED-FILTER-END ──
+
 /**
  * 0.7.2 (owner ruling 2026-09-06 #34). The AI marker used to be the literal characters
  * "(AI)"/"（AI）" baked into each locale's `statusDefault` PLAIN TEXT below. It is a
@@ -291,7 +339,11 @@ export const COPY = {
 		askAgain: (a) => `Ask ${a} again`,
 		newConversation: 'Start a new conversation',
 		backToHuman: 'Back to your conversation',
-		handoffEnded: 'Your last conversation has ended.'
+		handoffEnded: 'Your last conversation has ended.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: 'Typing only searches inside your browser. Nothing is sent until you press the button.',
+		askAi: 'Ask AI',
+		sendOwner: 'Send to the owner'
 	},
 	'zh-tw': {
 		ask: '問這個站的事…',
@@ -325,7 +377,11 @@ export const COPY = {
 		askAgain: (a) => `重新問 ${a}`,
 		newConversation: '新對話',
 		backToHuman: '回到真人對話',
-		handoffEnded: '上次的對話已結束'
+		handoffEnded: '上次的對話已結束',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: '打字時只在你的瀏覽器裡找，按下『問』才會送出。',
+		askAi: '問 AI',
+		sendOwner: '傳給站主'
 	},
 	ja: {
 		ask: 'このサイトについて質問…',
@@ -359,7 +415,11 @@ export const COPY = {
 		askAgain: (a) => `もう一度${a}に聞く`,
 		newConversation: '新しい会話を始める',
 		backToHuman: 'やり取りに戻る',
-		handoffEnded: '前回のやり取りは終了しました。'
+		handoffEnded: '前回のやり取りは終了しました。',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
+		askAi: 'AI に聞く',
+		sendOwner: '店主に送る'
 	},
 	'zh-cn': {
 		ask: '问这个网站的事…',
@@ -393,7 +453,11 @@ export const COPY = {
 		askAgain: (a) => `重新问 ${a}`,
 		newConversation: '新对话',
 		backToHuman: '回到真人对话',
-		handoffEnded: '上次的对话已结束'
+		handoffEnded: '上次的对话已结束',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: '打字时只在你的浏览器里找，按下按钮才会送出。',
+		askAi: '问 AI',
+		sendOwner: '传给站主'
 	},
 	// 🔴 The five below arrived 2026-09-27 (tile #14): a German site set its own title and
 	// placeholder through data-*, and every other word in the panel — Send, the errors, the status
@@ -433,7 +497,11 @@ export const COPY = {
 		askAgain: (a) => `${a} noch einmal fragen`,
 		newConversation: 'Neues Gespräch beginnen',
 		backToHuman: 'Zurück zu Ihrem Gespräch',
-		handoffEnded: 'Ihr letztes Gespräch ist beendet.'
+		handoffEnded: 'Ihr letztes Gespräch ist beendet.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: 'Beim Tippen wird nur in Ihrem Browser gesucht. Erst mit dem Knopf wird etwas gesendet.',
+		askAi: 'KI fragen',
+		sendOwner: 'An den Betreiber senden'
 	},
 	fr: {
 		ask: 'Une question sur ce site…',
@@ -467,7 +535,11 @@ export const COPY = {
 		askAgain: (a) => `Redemander à ${a}`,
 		newConversation: 'Nouvelle conversation',
 		backToHuman: 'Revenir à votre conversation',
-		handoffEnded: 'Votre dernière conversation est terminée.'
+		handoffEnded: 'Votre dernière conversation est terminée.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: 'En tapant, la recherche reste dans votre navigateur. Rien n’est envoyé avant d’appuyer sur le bouton.',
+		askAi: 'Demander à l’IA',
+		sendOwner: 'Envoyer au responsable du site'
 	},
 	es: {
 		ask: 'Pregunta sobre este sitio…',
@@ -501,7 +573,11 @@ export const COPY = {
 		askAgain: (a) => `Volver a preguntar a ${a}`,
 		newConversation: 'Empezar una conversación nueva',
 		backToHuman: 'Volver a tu conversación',
-		handoffEnded: 'Tu última conversación ha terminado.'
+		handoffEnded: 'Tu última conversación ha terminado.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: 'Al escribir, solo se busca en tu navegador. No se envía nada hasta que pulses el botón.',
+		askAi: 'Preguntar a la IA',
+		sendOwner: 'Enviar al responsable del sitio'
 	},
 	'pt-br': {
 		ask: 'Pergunte sobre este site…',
@@ -535,7 +611,11 @@ export const COPY = {
 		askAgain: (a) => `Perguntar de novo a ${a}`,
 		newConversation: 'Começar uma nova conversa',
 		backToHuman: 'Voltar para a sua conversa',
-		handoffEnded: 'Sua última conversa foi encerrada.'
+		handoffEnded: 'Sua última conversa foi encerrada.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: 'Ao digitar, a busca fica só no seu navegador. Nada é enviado até você apertar o botão.',
+		askAi: 'Perguntar à IA',
+		sendOwner: 'Enviar ao responsável pelo site'
 	},
 	ko: {
 		ask: '이 사이트에 대해 물어보세요…',
@@ -571,7 +651,11 @@ export const COPY = {
 		askAgain: (a) => `${a}에게 다시 묻기`,
 		newConversation: '새 대화 시작하기',
 		backToHuman: '대화로 돌아가기',
-		handoffEnded: '지난 대화는 종료되었어요.'
+		handoffEnded: '지난 대화는 종료되었어요.',
+		// reef#2160 in-site search (only rendered where the host names an index with rows)
+		searchNote: '입력하는 동안은 브라우저 안에서만 찾아요. 버튼을 누르기 전에는 아무것도 보내지 않아요.',
+		askAi: 'AI에게 묻기',
+		sendOwner: '운영자에게 보내기'
 	}
 };
 
@@ -2442,11 +2526,27 @@ function styleElement() {
 .${PREFIX}-form button[disabled]{opacity:.5;cursor:default}
 .${PREFIX}-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 .${PREFIX}-error{margin:0 .9rem .6rem;font-size:.85rem;color:#b3261e}
+/* reef#2160: the in-site search block above the composer. A LIST of links, not bubbles: no
+   rounded message shape, an accent rule on the left, title and date on one row — so an old post
+   is never read as the assistant's answer. Hidden until the index is known to have rows. */
+.${PREFIX}-search{padding:.5rem .9rem 0;border-top:1px solid rgba(0,0,0,.08)}
+.${PREFIX}-search[hidden]{display:none}
+.${PREFIX}-search-note{margin:0 0 .35rem;font-size:.72rem;opacity:.65;line-height:1.4}
+.${PREFIX}-results{list-style:none;margin:0;padding:0;max-height:9.5rem;overflow-y:auto}
+.${PREFIX}-results[hidden]{display:none}
+.${PREFIX}-result a{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;
+  margin:0 0 .15rem;padding:.3rem .5rem;border-left:3px solid var(--reef-inbox-accent,#111);
+  border-radius:0 .35rem .35rem 0;color:inherit;text-decoration:none;font-size:.85rem;line-height:1.35}
+.${PREFIX}-result a:hover,.${PREFIX}-result a:focus{background:rgba(0,0,0,.06)}
+.${PREFIX}-result-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.${PREFIX}-result time{flex:none;font-size:.72rem;opacity:.6;font-variant-numeric:tabular-nums}
 @media (prefers-color-scheme:dark){
   .${PREFIX}-panel{background:var(--reef-inbox-bg,#1c1c1e);color:var(--reef-inbox-fg,#f2f2f7)}
   .${PREFIX}-msg-owner{background:rgba(255,255,255,.10)}
   .${PREFIX}-head,.${PREFIX}-form{border-color:rgba(255,255,255,.12)}
   .${PREFIX}-form textarea{border-color:rgba(255,255,255,.2)}
+  .${PREFIX}-search{border-color:rgba(255,255,255,.12)}
+  .${PREFIX}-result a:hover,.${PREFIX}-result a:focus{background:rgba(255,255,255,.10)}
 }
 @media (prefers-reduced-motion:no-preference){.${PREFIX}-panel{animation:${PREFIX}-in .16s ease-out}}
 @keyframes ${PREFIX}-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -2616,7 +2716,9 @@ export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onS
 		} finally {
 			sending = false;
 			button.disabled = false;
-			button.textContent = idleLabel;
+			// reef#2160: a function, so a label that depends on state the search wiring learns after
+			// the first open (「問 AI」/「傳給站主」once the index has rows) survives a send.
+			button.textContent = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
 			textarea.removeAttribute('aria-busy');
 			textarea.focus();
 		}
@@ -2657,6 +2759,8 @@ export async function mount(el, handoff = null) {
 	const id = el.getAttribute('data-id') || '';
 	const kaitoOn = el.getAttribute('data-kaito') === '1';
 	const apiBase = (el.getAttribute('data-api-base') || DEFAULT_API_BASE).replace(/\/$/, '');
+	// reef#2160: the index this bubble may search, or '' — see the SEARCH_* constants' header.
+	const searchIndexUrl = String(el.getAttribute('data-search-index') || '').trim();
 	if (!kind || !id) {
 		// Named, and visible only to whoever embedded it — a silent no-op here
 		// means an owner who thinks they installed a bubble and has not.
@@ -2755,6 +2859,75 @@ export async function mount(el, handoff = null) {
 			if (!platformName || platformName === assistantName) return;
 			assistantName = platformName;
 			applyAssistantName();
+		});
+	}
+
+	// ── in-site search (reef#2160) ──
+	// 🔴 NO REQUEST BEFORE THE FIRST OPEN. `ensureSearchIndex` is reached only from `wireSearch`,
+	// which only a rendered panel calls — the same discipline as `readName` above: a visitor who
+	// never opens the bubble (nearly all of them) costs no fetch. Once per mount; a failed or empty
+	// read is `[]`, which draws today's bubble and is not retried by every re-render.
+	let searchRows = null;
+	let searchLoading = null;
+	/** True once the index is known to have rows — the only state in which any search UI shows. */
+	let searchLive = false;
+	function ensureSearchIndex() {
+		if (searchRows) return Promise.resolve(searchRows);
+		if (searchLoading) return searchLoading;
+		searchLoading = fetch(searchIndexUrl, { headers: { accept: 'application/json' } })
+			.then((r) => (r.ok ? r.json() : []))
+			.then((d) => { searchRows = Array.isArray(d) ? d : []; return searchRows; })
+			.catch(() => { searchRows = []; return searchRows; });
+		return searchLoading;
+	}
+	/**
+	 * The search block between the log and the composer — rendered only where the host named an
+	 * index, hidden until that index is known to have rows, removed when it has none. A mount
+	 * without `data-search-index` renders exactly the markup it rendered before 0.7.14.
+	 */
+	function searchBlockHtml() {
+		if (!searchIndexUrl) return '';
+		return `  <div class="${PREFIX}-search" hidden><p class="${PREFIX}-search-note">${escHtml(copy.searchNote)}</p><ul class="${PREFIX}-results" hidden></ul></div>
+`;
+	}
+	/**
+	 * Typing filters; Enter and the button stay what they were (`bindCompose`). The list collapses
+	 * on a newline or past SEARCH_QUERY_MAX characters — that is a message being written — and on
+	 * submit. No results draws nothing: no「not found」line (chodaict 2026-10-18). `label` is the
+	 * button's wording once search is live:「問 AI」on the ask view,「傳給站主」on the compose view,
+	 * so the one input says what Enter does.
+	 */
+	function wireSearch(form, textarea, button, label) {
+		if (!searchIndexUrl) return;
+		const box = root.querySelector(`.${PREFIX}-search`);
+		const list = root.querySelector(`.${PREFIX}-results`);
+		if (!box || !list) return;
+		const collapse = () => { list.innerHTML = ''; list.hidden = true; };
+		const paint = () => {
+			const q = String(textarea.value || '');
+			const writing = q.indexOf('\n') !== -1 || Array.from(q).length > SEARCH_QUERY_MAX;
+			const rows = writing ? [] : filterIndex(searchRows, q, SEARCH_MAX);
+			const items = rows.map((r) => {
+				// Index rows are site-relative (`/devlog/slug`) or an absolute permalink; `safeHref` alone
+				// knows only the second. A root-relative path (one slash, not `//host`) is the site's own.
+				const href = /^\/(?!\/)/.test(String(r.u || '')) ? String(r.u) : safeHref(r.u);
+				if (!href) return '';
+				const when = r.d ? `<time datetime="${escHtml(r.d)}">${escHtml(r.d)}</time>` : '';
+				return `<li class="${PREFIX}-result"><a href="${escHtml(href)}"><span class="${PREFIX}-result-title">${escHtml(r.t)}</span>${when}</a></li>`;
+			}).filter(Boolean);
+			// A hit whose only link was dropped is no hit: an empty list is never shown.
+			if (!items.length) { collapse(); return; }
+			list.innerHTML = items.join('');
+			list.hidden = false;
+		};
+		textarea.addEventListener('input', () => { if (searchLive) paint(); });
+		form.addEventListener('submit', collapse);
+		void ensureSearchIndex().then((rows) => {
+			if (!rows.length) { box.remove(); return; }
+			searchLive = true;
+			box.hidden = false;
+			if (!button.disabled) button.textContent = label();
+			paint();
 		});
 	}
 	// 🔴 ASK-ONLY READS NO HANDLE. A handle is a conversation with a person; adopting one here would
@@ -3177,7 +3350,7 @@ export async function mount(el, handoff = null) {
 <div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(panelLabel)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
-  <form class="${PREFIX}-form">
+${searchBlockHtml()}  <form class="${PREFIX}-form">
     <textarea name="q" rows="1" placeholder="${escHtml(copy.ask)}"></textarea>
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
@@ -3190,7 +3363,8 @@ export async function mount(el, handoff = null) {
 		const log = root.querySelector(`.${PREFIX}-log`);
 		textarea.focus();
 
-		bindCompose(form, textarea, button, copy.asking, copy.send, async (question) => {
+		wireSearch(form, textarea, button, () => copy.askAi);
+		bindCompose(form, textarea, button, copy.asking, () => (searchLive ? copy.askAi : copy.send), async (question) => {
 			const answer = await askKaito(apiBase, kind, id, question, copy);
 
 			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the
@@ -3253,7 +3427,7 @@ export async function mount(el, handoff = null) {
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
   ${replyWithinHours ? `<p class="${PREFIX}-hint">${escHtml(copy.within(replyWithinHours))}</p>` : ''}
-  <form class="${PREFIX}-form">
+${searchBlockHtml()}  <form class="${PREFIX}-form">
     <label class="${PREFIX}-hp" aria-hidden="true" style="${HP_STYLE}">
       <span>Leave this empty</span><input type="text" name="_hp" tabindex="-1" autocomplete="off">
     </label>
@@ -3272,7 +3446,8 @@ export async function mount(el, handoff = null) {
 		const button = form.querySelector('button');
 		textarea.focus();
 
-		bindCompose(form, textarea, button, copy.sending, copy.send, async (text) => {
+		wireSearch(form, textarea, button, () => copy.sendOwner);
+		bindCompose(form, textarea, button, copy.sending, () => (searchLive ? copy.sendOwner : copy.send), async (text) => {
 			const { status, body } = await send(apiBase, {
 				kind,
 				id,

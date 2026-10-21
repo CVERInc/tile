@@ -20,6 +20,7 @@ a support department, and nearly every REEF customer is one person.
 | `data-ai-log` | `"0"` opts this mount out of the deferred question log entirely — see "What the visitor asked the machine". Anything else, including the attribute being absent, leaves it on |
 | `data-api-base` | override the feelreef origin (previews) |
 | `data-status` | the one visible sentence under the site name on a mount **without** KAITO (tile#20) — replaces the locale default「真人會看」/ 'A person reads what you send'. Plain text: HTML-escaped, first line only, trimmed, capped at **80 grapheme clusters** (and 400 UTF-16 units), bidi/format controls removed. **Ignored when `data-kaito="1"`**: that line carries the AI disclosure, and no attribute may replace it |
+| `data-search-index` | the site's search index to filter in the browser as the visitor types (0.7.14, reef#2160) — the sitetile layout sets `/search-index.json` on a blog site with bubble search on. Fetched **once, on the first open**, never at page load; `[]` or unreachable draws today's bubble. See「Searching the site from the bubble」|
 | `data-open-label` / `data-title` / `data-placeholder` / `data-send-label` | copy overrides. 🔴 `data-title` is the dialog's `aria-label` **only** (ruling 2026-09-07) — it is never shown; the visible heading is the site name. For a visible sentence, use `data-status` |
 
 Words default from the PAGE's `<html lang>` — the site's own statement about who
@@ -137,6 +138,31 @@ nothing answering at `data-api-base` drew nothing in 0.7.10 (the gate could not 
 0.7.11 it draws the ask-only bubble, and every question gets the existing error line (`That didn't
 go through. Please try again.`) — the gate cannot tell「no backend」from「could not ask this time」.
 If you do not want that, do not set `data-kaito`.
+
+## Searching the site from the bubble (0.7.14, reef#2160)
+
+One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own matching posts
+(title + date, as links) above the composer, filtered inside the visitor's browser; **Enter** is
+always「ask」— the button says「問 AI」/ Ask AI on the ask view and「傳給站主」/ Send to the owner
+on the compose view, so the input says what Enter does; a person is the last rung as before.
+
+- The host names the index with `data-search-index`; without it the bubble is byte for byte the
+  one it was (the mount tests pin that). sitetile sets it on a blog site unless the owner writes
+  `inbox-bubble-search: off` (one line, site-level), and emits rows into `/search-index.json` on
+  the same switch — independent of `blog-search`, which still governs the header magnifier alone.
+- The index is fetched **once per mount and only on the first open** — a visitor who never opens
+  the bubble costs nothing. The filter is the SAME code the header magnifier and `/search` run
+  (`packages/sitetile/astro/src/packages/blog-search/search-filter.mjs`, pasted verbatim —
+  `search-filter-sync.test.mjs` fails on drift): substring over NFC-folded, lowercased,
+  diacritic-stripped text, title hits first, CJK-safe, at most 8 rows.
+- No results draws nothing — no「not found」line. A newline, or more than 40 characters, collapses
+  the list (that is a message being written; 40 is above the longest title on the largest index
+  measured, tniop's 1,410 rows, max 31). Submitting collapses it too.
+- The results are a list with an accent rule, not message bubbles, so an old post is never read as
+  the assistant's answer. The privacy sentence (`searchNote`, nine locales) shows once the index is
+  known to have rows:「打字時只在你的瀏覽器裡找，按下『問』才會送出。」
+- 🔴 What the visitor types never leaves the page through this feature and is never recorded —
+  ticket item 6 forbids query analytics of any kind. A result link is an ordinary link.
 
 ## Opening the panel programmatically
 
@@ -415,5 +441,6 @@ Author: `official`.
 | `data-placeholder` | string | no | — | Message placeholder override. |
 | `data-send-label` | string | no | — | Send button label override. |
 | `data-site-name` | string | no | — | Site name: this attribute takes priority, then og:site_name, then hostname. |
+| `data-search-index` | url | no | — | Path of the site's search index (sitetile sets /search-index.json on a blog site); fetched once on the first open, filtered in the browser as the visitor types. Absent, [] or unreachable: no search UI. |
 
 <!-- coral metadata: end -->
