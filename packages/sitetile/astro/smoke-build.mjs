@@ -542,8 +542,8 @@ function buildHostileBlogFixture() {
   // EVERY post, not just the one with its own override — the R4-P1-1 finding's own "one hostile
   // post poisons other posts' pages" shape, here from the site config instead), hostile
   // `blog-category-base`/`blog-tag-base` with the term routes turned on, and `blog-search: true`
-  // so search-index.json actually carries content (the primary build's own search stays off,
-  // so this is the one build that exercises that file with real rows).
+  // so search-index.json carries content under the magnifier's own switch (reef#2160: the primary
+  // build now carries rows too, through the bubble's switch — see the reef#2160 checks below).
   rmSync(join(HDIR, 'content'), { recursive: true, force: true });
   mkdirSync(join(HDIR, 'content'), { recursive: true });
   writeFileSync(join(HDIR, 'content', '_site.md'), `---
@@ -1872,6 +1872,17 @@ const checks = [
   ['hostile-blog-site: search-index.json (blog-search: true here) carries a safe `u` for every row', () => {
     const rows = JSON.parse(readFileSync(join(HDIST, 'search-index.json'), 'utf8'));
     return rows.length === 4 && rows.every((r) => typeof r.u === 'string' && !r.u.includes('javascript:'));
+  }],
+  // reef#2160: the bubble searches the index from the browser, so a blog site's mount names it and
+  // the index carries rows even where `blog-search` (the header magnifier) is off — the primary
+  // fixture (packages: lingo, 4 posts in blog/, no blog-search) is exactly that site.
+  ['reef#2160 hostile-blog-site (packages: blog): the bubble mount carries data-search-index="/search-index.json"', () =>
+    /<div data-dynamic-coral="inbox-bubble"[^>]* data-search-index="\/search-index\.json"[^>]*><\/div>/.test(hostileIndex)],
+  ['reef#2160 primary build (no `packages: blog`): the mount carries NO data-search-index, and the magnifier is still off', () =>
+    !html.includes('data-search-index') && !html.includes('data-search-toggle')],
+  ['reef#2160 primary build (no blog-search, bubble default on): search-index.json carries its posts, each with t/u/d', () => {
+    const rows = JSON.parse(readFileSync(join(DIST, 'search-index.json'), 'utf8'));
+    return rows.length === 4 && rows.every((r) => typeof r.t === 'string' && typeof r.u === 'string' && typeof r.d === 'string');
   }],
   // -- #31: a safe absolute permalink is an external canonical, not a route --------------------
   ['🔴 hostile-blog-site: a post with an absolute permalink gets NO page of its own — no directory named after its scheme or host, none at its slug', () =>
