@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
-import { inboxBubbleOn } from '../lib/inbox-bubble.mjs';
+import { inboxBubbleOn, bubbleSearchOn } from '../lib/inbox-bubble.mjs';
 import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
@@ -743,6 +743,17 @@ const assistantName = String(meta['assistant-name'] || '').trim().split('\n')[0]
 // host), not whether `kaito-corpus` — a scope setting — happens to be written. See ../lib/bubble-kaito.mjs.
 const bubbleKaito = bubbleKaitoOn(meta, process.env);
 const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, renderedPageBody);
+// reef#2160: the bubble searches the site's posts in the visitor's browser. The attribute names the
+// index it may fetch — on FIRST OPEN, never at page load (the coral's contract) — and is absent on a
+// site without a blog or with `inbox-bubble-search: off`, so such a page's bubble is byte for byte
+// the one it had. 「Has a blog」is the engine's own two-arm test (blogInstalled, ../lib/blog-tenancy.mjs):
+// the site DECLARED it (`packages: blog`, the magnifier's `hasBlog`) OR its store holds posts — a
+// live site carries 632 posts under a deliberately empty _site.md, and the index endpoint emits
+// rows for it regardless of the declaration. The glob is lazy (no import, keys only) and the same
+// pattern the endpoints use, so it costs the build nothing. The index's rows follow bubbleSearchOn
+// too (../lib/public-artifacts.mjs), so the attribute never points at a file that is `[]` on purpose.
+const hasBlogPosts = Object.keys(import.meta.glob('../../blog/*.md')).length > 0;
+const bubbleSearch = (hasBlog || hasBlogPosts) && bubbleSearchOn(meta);
 // Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
 // already named. No new copy, no new default to get wrong in somebody else's language.
 const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
@@ -1389,7 +1400,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     </footer>
     {bubbleOn && (
       <>
-        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined}></div>
+        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined} data-search-index={bubbleSearch ? '/search-index.json' : undefined}></div>
         {/* reef#1921: a loader in place of `<script src>` — it fetches the 159 KB coral (same URL,
             same host) only when the coral would draw something. See ../lib/inbox-bubble-loader.mjs. */}
         <script is:inline type="module" set:html={bubbleLoaderScript(`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`)}></script>

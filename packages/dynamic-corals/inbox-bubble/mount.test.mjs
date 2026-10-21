@@ -55,10 +55,22 @@ class El {
 	}
 	insertAdjacentHTML(_where, value) { this.html += value; }
 	/**
-	 * Browser semantics: the node leaves its parent's children and nothing else does. A node that
-	 * was never appended (a memoised `querySelector` result) has no children list to leave — no-op.
+	 * Browser semantics: the node leaves its parent's children and nothing else does.
+	 *
+	 * 🩸 A memoised `querySelector` result used to be a no-op here, so `box.remove()` on the search
+	 * block was invisible to every digest — codex r1 on tile#180 deleted it and the suite stayed
+	 * green. Now a class-selected node that is still part of the markup it was found in leaves that
+	 * markup: its element (open tag to matching close) is cut out of the owner's `innerHTML`, which
+	 * is what a browser's serialisation would show. A node from a panel since re-rendered is
+	 * detached (`memoOf` cleared) and its removal is the browser's no-op.
 	 */
 	remove() {
+		removed.push(this);
+		if (this.memoOf) {
+			this.memoOf.html = cutElement(this.memoOf.html, this.selector);
+			this.memoOf = null;
+			return;
+		}
 		const siblings = this.parentNode?.children;
 		const at = siblings ? siblings.indexOf(this) : -1;
 		if (at < 0) return;
@@ -69,13 +81,18 @@ class El {
 	set innerHTML(value) {
 		this.html = value;
 		// A re-render replaces the panel, so the nodes handed out for the old one go with it.
+		for (const node of this.nodes.values()) node.memoOf = null;
 		this.nodes.clear();
 	}
 
 	get innerHTML() { return this.html; }
 
 	querySelector(selector) {
-		if (!this.nodes.has(selector)) this.nodes.set(selector, new El());
+		if (!this.nodes.has(selector)) {
+			const node = new El();
+			if (/^\.[\w-]+$/.test(selector)) { node.memoOf = this; node.selector = selector; }
+			this.nodes.set(selector, node);
+		}
 		return this.nodes.get(selector);
 	}
 
@@ -84,6 +101,30 @@ class El {
 	async emit(type) {
 		for (const fn of this.listeners[type] ?? []) await fn({ preventDefault() {} });
 	}
+}
+
+/** Every node `remove()` was called on, in order — so a test can see a removal happened at all. */
+const removed = [];
+/**
+ * `html` without the first element whose class attribute is exactly `selector`'s class: from its
+ * open tag to the matching close tag of the same name (nesting counted). Unchanged if none.
+ */
+function cutElement(html, selector) {
+	const cls = selector.slice(1);
+	const open = new RegExp(`<([a-z][a-z0-9]*) class="${cls}"[\\s>]`).exec(html);
+	if (!open) return html;
+	const tag = open[1];
+	const re = new RegExp(`<(/?)${tag}[\\s>]`, 'g');
+	re.lastIndex = open.index + 1;
+	let depth = 1;
+	for (let m; (m = re.exec(html));) {
+		depth += m[1] ? -1 : 1;
+		if (depth === 0) {
+			const end = html.indexOf('>', m.index) + 1;
+			return html.slice(0, open.index) + html.slice(end);
+		}
+	}
+	return html;
 }
 
 let focused = null;
@@ -1610,4 +1651,311 @@ test('1921: a reef-inbox:open held while the claim gate is pending reads the nam
 	const mine = requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/assistant'
 		&& new URL(r.url).searchParams.get('id') === 'held-1921');
 	assert.equal(mine.length, 1, 'the held open skipped the name read');
+});
+
+// ── reef#2160: in-site search inside the bubble ──────────────────────────────────────────────
+// The host names an index (`data-search-index`); the bubble fetches it on the FIRST OPEN only,
+// filters it as the visitor types, and keeps Enter as「ask」. Without the attribute, or with an
+// index that is `[]`, the bubble is today's bubble.
+
+const SEARCH_ROWS = [
+	{ t: 'Café notes', u: '/diary/cafe', g: ['coffee'], d: '2025-10-31', i: '' },
+	{ t: '深空眠的第一夜', u: '/diary/night-one', g: ['sleep'], d: '2025-11-11', i: '' },
+	{ t: 'Spring cleaning', u: 'javascript:alert(1)', g: ['home'], d: '2025-10-07', i: '' },
+];
+/**
+ * Rows the collapse guards are measured on. 🩸 codex r1 on tile#180: the first cut typed queries
+ * that matched NO row, so plain filtering hid the list and the newline / length guard could be
+ * deleted with every test green. Each guard's query here DOES match a row — the multiline one in
+ * an excerpt, the long one in a title — so only the guard can hide it.
+ */
+const LONG_TITLE = 'caf' + 'x'.repeat(45);
+const WRITING_ROWS = [
+	...SEARCH_ROWS,
+	{ t: 'Letters', u: '/diary/letters', g: [], d: '2025-12-01', i: '', e: 'caf\nI am writing to the owner about the menu' },
+	{ t: LONG_TITLE, u: '/diary/long', g: [], d: '2025-12-02', i: '' },
+];
+const indexRequests = (from) => requests.slice(from).filter((r) => String(r.url).endsWith('/search-index.json'));
+/** Serve the index with `rows`; every other URL falls through to the file's defaults. */
+const servingIndex = (rows) => (url) => (String(url).endsWith('/search-index.json')
+	? { ok: true, status: 200, json: async () => rows }
+	: undefined);
+/** A response that arrives only when the test says so: `{ promise, release(value) }`. */
+function deferred() {
+	let release;
+	const promise = new Promise((r) => { release = r; });
+	return { promise, release };
+}
+const searchBox = (root) => root.querySelector('.dc-inbox-search');
+const resultList = (root) => root.querySelector('.dc-inbox-results');
+
+test('2160: the index is NOT fetched at mount, is fetched ONCE on the first open, and not again on a re-render', async () => {
+	respond = servingIndex(SEARCH_ROWS);
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await drain();
+		assert.equal(indexRequests(from).length, 0, 'the index was fetched at page load — the whole cost this ticket forbids');
+		await openBubble(root);
+		await drain();
+		assert.equal(indexRequests(from).length, 1, 'opening the panel did not fetch the index exactly once');
+		assert.deepEqual(Object.keys(indexRequests(from)[0].init), ['headers'], 'the index read is a plain GET');
+		// a second render of the panel (closing and reopening) reuses the memory copy
+		root.querySelector('.dc-inbox-close').emit?.('click');
+		await openBubble(root);
+		await drain();
+		assert.equal(indexRequests(from).length, 1, 'a re-render fetched the index again');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: typing floats matching articles (title + date + link), the list collapses on a newline, a long text, or an empty box, and never says「not found」', async () => {
+	respond = servingIndex(WRITING_ROWS);
+	try {
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const box = searchBox(root);
+		const list = resultList(root);
+		assert.equal(box.hidden, false, 'the search block stayed hidden although the index has rows');
+		assert.ok(root.innerHTML.includes('Typing only searches inside your browser'), 'the privacy sentence is missing');
+		assert.equal(list.hidden, true, 'a list is showing before anybody typed');
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(list.hidden, false);
+		assert.match(list.innerHTML, /<li class="dc-inbox-result"><a href="\/diary\/cafe"><span class="dc-inbox-result-title">Café notes<\/span><time datetime="2025-10-31">2025-10-31<\/time><\/a><\/li>/);
+		assert.doesNotMatch(list.innerHTML, /night-one/, 'a non-matching row was listed');
+		textarea.value = '空眠';
+		await textarea.emit('input');
+		assert.match(list.innerHTML, /night-one/, 'a CJK substring did not match');
+		textarea.value = 'zzzz-no-such-post';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true);
+		assert.equal(list.innerHTML, '', 'no results must draw nothing');
+		assert.doesNotMatch(root.innerHTML, /not found|No matching|查無/i, 'a「not found」line was drawn');
+		// control: the excerpt row IS findable on one line, so only the newline can hide it below
+		textarea.value = 'I am writing to the owner';
+		await textarea.emit('input');
+		assert.equal(list.hidden, false, 'control: the excerpt row is not findable at all');
+		assert.match(list.innerHTML, /diary\/letters/);
+		textarea.value = 'caf\nI am writing to the owner';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true, 'a newline did not collapse the list');
+		assert.equal(list.innerHTML, '');
+		// control: forty characters (the limit) still finds the long title; forty-one is a message
+		textarea.value = LONG_TITLE.slice(0, 40);
+		await textarea.emit('input');
+		assert.equal(list.hidden, false, 'control: forty characters no longer searches');
+		assert.match(list.innerHTML, /diary\/long/);
+		textarea.value = LONG_TITLE.slice(0, 41);
+		await textarea.emit('input');
+		assert.equal(list.hidden, true, 'a long text did not collapse the list');
+		assert.equal(list.innerHTML, '');
+		textarea.value = 'spring';
+		await textarea.emit('input');
+		assert.equal(list.innerHTML, '', 'a javascript: url from the index was rendered as a link');
+		assert.equal(list.hidden, true);
+		textarea.value = '';
+		await textarea.emit('input');
+		assert.equal(list.hidden, true);
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: Enter still asks — the question leaves as POST /api/kaito, the list collapses, and the button says「Ask AI」', async () => {
+	respond = (url, init) => servingIndex(SEARCH_ROWS)(url)
+		?? (url.includes('/api/kaito') ? { ok: true, status: 200, json: async () => GROUNDED } : undefined);
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		const button = form.querySelector('button');
+		assert.equal(button.textContent, 'Ask AI', 'with the index live the button no longer says what Enter does');
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(resultList(root).hidden, false);
+		await form.emit('submit');
+		await drain();
+		const kaito = requests.slice(from).filter((r) => String(r.url).includes('/api/kaito'));
+		assert.equal(kaito.length, 1, 'Enter did not ask');
+		assert.equal(JSON.parse(kaito[0].init.body).query, 'caf');
+		assert.equal(resultList(root).hidden, true, 'the list stayed up over the answer');
+		assert.equal(button.textContent, 'Ask AI', 'the label reverted after the send');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: on the compose view (no KAITO) the button says「Send to the owner」once the index is live', async () => {
+	respond = servingIndex(SEARCH_ROWS);
+	try {
+		const { root } = await mountFresh({ 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		assert.equal(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Send to the owner');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: an index that lands AFTER Enter does not float the asked query back — the list waits for the next edit', async () => {
+	const index = deferred();
+	const ask = deferred();
+	respond = (url) => (String(url).endsWith('/search-index.json')
+		? index.promise.then(() => ({ ok: true, status: 200, json: async () => SEARCH_ROWS }))
+		: url.includes('/api/kaito') ? ask.promise.then(() => ({ ok: true, status: 200, json: async () => GROUNDED })) : undefined);
+	try {
+		const from = requests.length;
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		assert.equal(indexRequests(from).length, 1, 'the index read was not in flight');
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		const submitted = form.emit('submit'); // the ask hangs on `ask` — not awaited yet
+		await drain();
+		assert.equal(requests.slice(from).filter((r) => String(r.url).includes('/api/kaito')).length, 1, 'Enter did not ask');
+		index.release();
+		await drain();
+		assert.equal(searchBox(root).hidden, false, 'control: the late index did not turn search on');
+		assert.equal(resultList(root).hidden, true, 'the late index floated the asked query\'s results back during the ask');
+		assert.equal(resultList(root).innerHTML, '');
+		ask.release();
+		await submitted;
+		await drain();
+		assert.equal(textarea.value, '', 'control: the ask did not succeed');
+		assert.equal(resultList(root).hidden, true, 'the list came back after the answer');
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		assert.equal(resultList(root).hidden, false, 'an edit after the ask did not re-arm the list');
+		assert.match(resultList(root).innerHTML, /diary\/cafe/);
+	} finally {
+		respond = null;
+	}
+});
+
+/**
+ * 🩸 codex r2 on tile#180: a successful send empties the textarea by assignment — no `input`
+ * event — so an edit made while the ask was pending left its results over an empty composer.
+ */
+test('2160: an edit made while the ask is pending does not outlive the answer — the cleared box hides the list', async () => {
+	const ask = deferred();
+	respond = (url) => servingIndex(SEARCH_ROWS)(url)
+		?? (url.includes('/api/kaito') ? ask.promise.then(() => ({ ok: true, status: 200, json: async () => GROUNDED })) : undefined);
+	try {
+		const { root } = await mountFresh({ 'data-kaito': '1', 'data-search-index': '/search-index.json' });
+		await openBubble(root);
+		await drain();
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		textarea.value = 'caf';
+		await textarea.emit('input');
+		const submitted = form.emit('submit'); // the ask hangs on `ask`
+		await drain();
+		assert.equal(resultList(root).hidden, true, 'control: Enter did not collapse the list');
+		textarea.value = 'cafe';
+		await textarea.emit('input');
+		assert.equal(resultList(root).hidden, false, 'control: an edit during the ask did not reopen the list');
+		assert.match(resultList(root).innerHTML, /diary\/cafe/);
+		ask.release();
+		await submitted;
+		await drain();
+		assert.equal(textarea.value, '', 'control: the ask did not succeed (the draft was not cleared)');
+		assert.equal(resultList(root).hidden, true, 'the edit\'s results stayed up over the emptied composer');
+		assert.equal(resultList(root).innerHTML, '');
+	} finally {
+		respond = null;
+	}
+});
+
+test('2160: an explicit data-send-label wins over「Ask AI」/「Send to the owner」— on open, when the index lands, and after a send', async () => {
+	const index = deferred();
+	respond = (url) => (String(url).endsWith('/search-index.json')
+		? index.promise.then(() => ({ ok: true, status: 200, json: async () => SEARCH_ROWS }))
+		: url.includes('/api/kaito') ? { ok: true, status: 200, json: async () => GROUNDED }
+		: url.includes('/api/inbox') && !url.includes('/api/inbox/session') ? { ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'c-2160-label' }) }
+		: undefined);
+	try {
+		for (const [view, attrs] of [['ask', { 'data-kaito': '1' }], ['compose', {}]]) {
+			const { root } = await mountFresh({ ...attrs, 'data-send-label': 'Ask the archive', 'data-search-index': '/search-index.json' });
+			await openBubble(root);
+			await drain();
+			const form = root.querySelector('.dc-inbox-form');
+			const button = form.querySelector('button');
+			assert.match(root.innerHTML, /<button type="submit">Ask the archive<\/button>/, `${view}: open`);
+			index.release();
+			await drain();
+			assert.equal(searchBox(root).hidden, false, `${view}: control — the index did not turn search on`);
+			assert.equal(button.textContent, 'Ask the archive', `${view}: the index landing overwrote the owner's label`);
+			const textarea = composeBox(root);
+			textarea.value = 'caf';
+			await textarea.emit('input');
+			await form.emit('submit');
+			await drain();
+			const now = root.querySelector('.dc-inbox-form').querySelector('button');
+			assert.equal(now.textContent, 'Ask the archive', `${view}: a send overwrote the owner's label`);
+		}
+	} finally {
+		respond = null;
+	}
+});
+
+// The fallback contract: an index that is `[]`, a 404, or a fetch that fails draws EXACTLY the panel
+// a mount without the attribute draws — measured against that pinned digest, not against itself —
+// and keeps drawing it after a close and reopen. The stand-in's `remove()` cuts the block out of
+// the markup (see `El.remove`), so deleting `box.remove()` turns these red.
+for (const [name, route] of [
+	['[] (cver, sodaart today)', () => ({ ok: true, status: 200, json: async () => [] })],
+	['404', () => ({ ok: false, status: 404, json: async () => ({}) })],
+	['a rejected fetch', () => Promise.reject(new TypeError('Failed to fetch'))],
+]) {
+	test(`2160 control: an index that is ${name} draws the no-attribute panel byte for byte, after a reopen too, and leaves the button alone`, async () => {
+		respond = (url) => (String(url).endsWith('/search-index.json') ? route() : undefined);
+		try {
+			const from = requests.length;
+			const removedBefore = removed.length;
+			const { root } = await mountFresh({ 'data-kaito': '1', 'data-site-name': 'Example Shop', 'data-search-index': '/search-index.json' });
+			await openBubble(root);
+			await drain();
+			assert.equal(indexRequests(from).length, 1, 'control: the index was not read');
+			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel is not the no-attribute panel');
+			assert.equal(removed.length - removedBefore, 1, 'the search block was not removed exactly once');
+			const textarea = composeBox(root);
+			textarea.value = 'caf';
+			await textarea.emit('input');
+			assert.notEqual(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Ask AI');
+			await root.querySelector('.dc-inbox-close').emit('click');
+			await drain();
+			assert.ok(!isOpen(root), 'control: the panel did not close, so the reopen below is not one');
+			await openBubble(root);
+			await drain();
+			assert.ok(isOpen(root));
+			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the reopened panel is not the no-attribute panel');
+			assert.equal(indexRequests(from).length, 1, 'a reopen read the index again');
+		} finally {
+			respond = null;
+		}
+	});
+}
+
+test('2160 negative control: without data-search-index the panel is byte-identical to before and nothing fetches the index, even after open and typing', async () => {
+	const from = requests.length;
+	const { root } = await mountFresh({ 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+	await openBubble(root);
+	await drain();
+	assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
+	assert.doesNotMatch(root.innerHTML, /dc-inbox-search|dc-inbox-results|Typing only searches/);
+	const textarea = composeBox(root);
+	textarea.value = 'caf';
+	await textarea.emit('input');
+	await drain();
+	assert.equal(indexRequests(from).length, 0);
 });
