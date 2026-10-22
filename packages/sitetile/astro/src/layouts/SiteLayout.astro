@@ -815,6 +815,19 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
 // means no route can get this wrong, including one written after this comment.
 const dynamicCoralCss = dynamicCoralCssMode(
   (loadSite(contentGlob) || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
+// CVERInc/reef#2302 — the SITE-WIDE embed slot: the `embed:` key of content/_site.md, emitted
+// VERBATIM as the last thing before </body> on every page this layout renders. It is the per-page
+// `embed` coral's escape hatch one level up (sections/Embed.astro: `set:html` of the owner's raw
+// string) and deliberately nothing more: no validation, no rewriting, no wrapper element, no named
+// integration (no GA / pixel field — owner ruling 2026-10-21). Read from the content glob like the
+// cascade declaration above, so it is the BASE _site.md's value only: a page's own frontmatter or a
+// locale's _site.md cannot add, change or remove it. Absent or blank ⇒ the page gains nothing.
+// 🔴 The emit is glued to `</body>` (no whitespace, no comment line beside it): Astro collapses
+// each whitespace run between nodes to one space, so a line break there would put a space between
+// the slot and </body> (site-embed.test.mjs holds the adjacency). The cost, measured: a site
+// without the key gains ONE collapsed space before the hoisted header-overlay script — no markup.
+const siteEmbedRaw = (loadSite(contentGlob) || {}).embed;
+const siteEmbed = typeof siteEmbedRaw === 'string' && siteEmbedRaw.trim() !== '' ? siteEmbedRaw : '';
 // The cascade order this page declares, chosen by that same value. A declaring site names the
 // coral layer between the renderer's base layer and the theme; every other site gets the exact
 // statement it has always had, character for character — the layer names are the whole of what a
@@ -1471,5 +1484,5 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       </script>
     )}
     <script>import '../packages/header-overlay/header-overlay.js';</script>
-  </body>
+    <Fragment set:html={siteEmbed} /></body>
 </html>
