@@ -1115,3 +1115,90 @@ test('an unknown preview_checkout value renders exactly the pre-preview bytes', 
     assert.equal(detail.html, OLD_SHAPE_DETAIL, String(value));
   }
 });
+
+// ── payment rail presentation ───────────────────────────────────────────────────────────────
+// The native projection may add, per product, `commerce.rail_refused: "currency"` (no payment
+// method of the site can charge the product's currency) and `commerce.checkout_rail` (the method
+// the Buy press must name). Both are additive: an answer without them is today's page and today's body.
+const CURRENCY_SENTENCE = "This item can't be paid for with this site's payment method.";
+const withCommerce = (extra) => ({ ...product, commerce: { ...product.commerce, ...extra } });
+
+test('a rail_refused currency item renders a disabled Buy with the currency sentence and no sold-out label, grid and detail', async () => {
+  for (const [name, path] of [['grid', '/shop'], ['detail', '/shop/reef-tee']]) {
+    const page = await serveNative(`native-rail-refused-${name}`, { shell, path, projection: nativeOk(withCommerce({ rail_refused: 'currency' })) });
+    assert.equal(page.status, 200);
+    assert.ok(page.html.includes('<button type="button" class="dc-native-buy" disabled>Buy now</button>'), `${name}: disabled Buy`);
+    assert.doesNotMatch(page.html, /data-native-sku="tee-sku"/, `${name}: no actionable control`);
+    assert.ok(page.html.includes(`<p data-native-status role="status" class="st-runtime-status" data-ejecta-status-tone="error">${CURRENCY_SENTENCE}</p>`), `${name}: sentence with error tone`);
+    assert.doesNotMatch(page.html.split('<script>')[0], />(Sold out|Unavailable)</, `${name}: not a sold-out item`);
+  }
+});
+
+test('an out-of-stock item that also carries rail_refused still reads sold out, without the currency sentence', async () => {
+  const oos = withCommerce({ rail_refused: 'currency', available: 0, status: 'OUT_OF_STOCK' });
+  for (const path of ['/shop', '/shop/reef-tee']) {
+    const page = await serveNative('native-rail-refused-oos' + path.length, { shell, path, projection: nativeOk(oos) });
+    assert.match(page.html, /class="dc-native-buy" disabled>Sold out</, path);
+    assert.doesNotMatch(page.html.split('<script>')[0], /payment method/, path);
+  }
+});
+
+test('an item with both a live_refused preview and rail_refused shows the preview line', async () => {
+  for (const path of ['/shop', '/shop/reef-tee']) {
+    const page = await serveNative('native-rail-refused-preview' + path.length, { shell, path, projection: withPreview('live_refused', withCommerce({ rail_refused: 'currency' })) });
+    assert.ok(page.html.includes('class="st-runtime-status" data-ejecta-status-tone="error">This is a preview.'), path);
+    assert.doesNotMatch(page.html.split('<script>')[0], /payment method/, path);
+  }
+});
+
+test('rail_refused with any value other than "currency" is today\'s page', async () => {
+  for (const value of ['', 'other', true, 1, null]) {
+    const grid = await serveNative('native-rail-unknown-grid', { shell, path: '/shop', projection: nativeOk(withCommerce({ rail_refused: value })) });
+    assert.equal(grid.html, OLD_SHAPE_GRID, String(value));
+  }
+});
+
+test('Buy on an item with checkout_rail posts payment_rail with that value', async () => {
+  const { html } = await serveNative('native-checkout-rail', { shell, path: '/shop/reef-tee', projection: nativeOk(withCommerce({ checkout_rail: 'stripe' })) });
+  assert.match(html, /data-native-sku="tee-sku" data-native-rail="stripe"/);
+  const respond = async (url) => (url === '/api/cart/items' ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] }) : Response.json({ redirect_url: 'https://pay.example/session' }));
+  const plain = driveNativeCheckout(html, respond);
+  plain.button.attrs['data-native-rail'] = 'stripe';
+  await plain.click();
+  const checkout = plain.calls.find((call) => call.url === '/api/checkout');
+  assert.deepEqual(JSON.parse(checkout.init.body), { payment_rail: 'stripe' });
+  assert.equal(checkout.init.method, 'POST');
+
+  const withLang = driveNativeCheckout(html, respond, { lang: 'en-US' });
+  withLang.button.attrs['data-native-rail'] = 'stripe';
+  await withLang.click();
+  assert.equal(withLang.calls.find((call) => call.url === '/api/checkout').init.body, JSON.stringify({ lang: 'en-US', payment_rail: 'stripe' }));
+});
+
+test('without checkout_rail the page and the checkout body are today\'s, byte for byte', async () => {
+  for (const extra of [{}, { checkout_rail: '' }, { checkout_rail: 7 }]) {
+    const grid = await serveNative('native-no-rail-grid', { shell, path: '/shop', projection: nativeOk(withCommerce(extra)) });
+    const detail = await serveNative('native-no-rail-detail', { shell, path: '/shop/reef-tee', projection: nativeOk(withCommerce(extra)) });
+    assert.equal(grid.html, OLD_SHAPE_GRID, JSON.stringify(extra));
+    assert.equal(detail.html, OLD_SHAPE_DETAIL, JSON.stringify(extra));
+  }
+  const respond = async (url) => (url === '/api/cart/items' ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] }) : Response.json({ redirect_url: 'https://pay.example/session' }));
+  const { html } = await serveNative('native-no-rail-body', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });
+  const bare = driveNativeCheckout(html, respond);
+  await bare.click();
+  const first = bare.calls.find((call) => call.url === '/api/checkout');
+  assert.equal(first.init.body, undefined, 'no lang and no email: body-less');
+  const lang = driveNativeCheckout(html, respond, { lang: 'en-US' });
+  await lang.click();
+  assert.equal(lang.calls.find((call) => call.url === '/api/checkout').init.body, JSON.stringify({ lang: 'en-US' }));
+});
+
+test('a checkout_rail page with no lang and no email still posts only payment_rail, and the C2 conflict line is unchanged', async () => {
+  const { html } = await serveNative('native-rail-conflict', { shell, path: '/shop/reef-tee', projection: nativeOk(withCommerce({ checkout_rail: 'stripe' })) });
+  const ui = driveNativeCheckout(html, conflictResponder);
+  ui.button.attrs['data-native-rail'] = 'stripe';
+  await ui.click();
+  assert.equal(JSON.stringify(JSON.parse(ui.calls.find((call) => call.url === '/api/checkout').init.body)), '{"payment_rail":"stripe"}');
+  assert.equal(ui.status.textContent, 'A checkout is already in progress. Another one cannot be started right now.');
+  assert.equal(ui.button.disabled, true);
+});
