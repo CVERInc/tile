@@ -355,20 +355,44 @@ function splitFrontmatter(text) {
     // YAML block scalar: `key: |` (literal — keep newlines) or `key: >` (folded — newlines→spaces).
     // Collect the more-indented block beneath, stripping its common indent — so nav / footer / any
     // key can be an indented tree instead of one cramped line. Any other value stays single-line.
-    if (marker === '|' || marker === '>') {
+    //
+    // The two YAML block-scalar INDICATORS (tile#183), in either order, `|2+` / `|+2`:
+    //   · an explicit indentation `1`–`9`: the block's base is that many columns, NOT inferred from
+    //     the first non-blank line — so a first line that itself starts with spaces keeps them, and
+    //     a whitespace-only line keeps whatever it holds beyond the indent;
+    //   · a chomping `+` (keep): trailing blank lines stay part of the value; `-` (strip) and no
+    //     indicator both drop them, which is what this reader has always done.
+    // 🔴 A bare `|` / `>` is byte-for-byte the reader it was before the indicators existed — the
+    // inferred base, emptied whitespace-only lines, dropped trailing blanks (block-scalar-golden.json
+    // pins it over every fixture). The indicators exist so the site-wide `embed` slot (reef#2302) can
+    // store raw HTML VERBATIM: `"  <pre>  keep</pre>"` and `"<pre>hello\n\n"` are unwritable with a
+    // bare `|`, and before this a writer that reached for `|2+` got the string "|2+" back as the value.
+    // Value model, unchanged: the block's lines joined by "\n" with no final newline (serializeSite
+    // splits on "\n" and re-indents, so parse→serialize is the identity). `+` keeps the trailing
+    // blank lines as elements of that join — pure YAML would add one more line break for the last
+    // line; this reader never has, and none of the family's writers emit one.
+    const bs = /^([|>])(?:([1-9])([+-])?|([+-])([1-9])?)?$/.exec(marker);
+    if (bs) {
+      const explicit = bs[2] || bs[5] ? Number(bs[2] || bs[5]) : null;
+      const keep = (bs[3] || bs[4]) === '+';
       const block = [];
-      let base = null;
+      let base = explicit;
       while (i + 1 < lines.length) {
         const nxt = lines[i + 1];
-        if (nxt.trim() === '') { block.push(''); i++; continue; }
+        if (nxt.trim() === '') {
+          // Inferred base: a blank-or-whitespace line is empty, as it always was. Explicit base: it
+          // keeps its bytes beyond the indent (a line shorter than the indent is empty).
+          block.push(explicit === null ? '' : nxt.slice(explicit));
+          i++; continue;
+        }
         const ind = (nxt.match(/^[ \t]*/)[0] || '').length;
         if (base === null) base = ind;
         if (ind < base) break;
         block.push(nxt.slice(base));
         i++;
       }
-      while (block.length && block[block.length - 1] === '') block.pop();
-      meta[key] = marker === '>' ? block.join(' ') : block.join('\n');
+      if (!keep) while (block.length && block[block.length - 1] === '') block.pop();
+      meta[key] = bs[1] === '>' ? block.join(' ') : block.join('\n');
     } else {
       meta[key] = marker;
     }
