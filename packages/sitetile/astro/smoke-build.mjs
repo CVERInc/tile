@@ -1237,7 +1237,24 @@ const checks = [
   ['nav-mobile: the open header is lifted above an unlayered theme z-index with !important, not just a specific selector (live-site regression)', () => {
     const css = allCss().replace(/\s+/g, '');
     return css.includes('@media(width<=64rem)')
-      && css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked).rf-header{z-index:2147483002!important}');
+      && css.includes('body[data-nav-mobile]:has(#rf-nav-toggle:checked).rf-header{z-index:var(--rf-z-overlay-nav)!important}');
+  }],
+  // -- reef#2161: the search overlay and the open-nav header share ONE z-index scale (`--rf-z-*`
+  // on :root), nav one step above search, both relative to the same floor. The literal that
+  // used to sit in each rule is gone from the emitted CSS; the relation survives minification as
+  // the tokens themselves. Which of the two is open is state (blog-search.js), not stacking.
+  // 🩸 The floor is asserted in its EMITTED form: lightningcss prints a custom-property number
+  // with six significant digits, so a plain `2147483000` shipped as `2147480000` — this line is
+  // what caught it. `calc(2147480000 + 3000)` is two six-digit operands and survives verbatim. --
+  ['reef#2161: search layer + open-nav header z-index are --rf-z-* tokens on one scale, nav above search; the floor survives minification exactly', () => {
+    const css = allCss().replace(/\s+/g, '');
+    return css.includes('--rf-z-overlay:calc(2147480000+3000)')
+      && !/--rf-z-overlay:\d/.test(css)
+      && css.includes('--rf-z-overlay-panel:calc(var(--rf-z-overlay)+1)')
+      && css.includes('--rf-z-overlay-nav:calc(var(--rf-z-overlay)+2)')
+      && /\.st-search\{[^}]*z-index:var\(--rf-z-overlay-panel\)/.test(css)
+      && !/\.st-search\{[^}]*z-index:\d/.test(css)
+      && !css.includes('.rf-header{z-index:2147483002');
   }],
   ['nav-mobile (hamburger): the open panel scrolls itself when taller than the viewport (952px panel vs 720px viewport, measured live — body is scroll-locked above, so without this the tail of the menu is unreachable), and the position/z-index FACTS that keep it a floating panel stay !important', () => {
     const css = allCss().replace(/\s+/g, '');
