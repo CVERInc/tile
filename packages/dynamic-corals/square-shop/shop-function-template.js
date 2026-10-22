@@ -1573,6 +1573,30 @@ function verdictBlockedResponse() {
 	return transportJsonResponse({ error: 'blocked' }, 404, 'private, no-store');
 }
 
+// ─── GONE PAGES: CF PAGES' PRESERVED COPY ─────────────────────────────────────
+// Pages' asset server keeps every asset it has served in a cache keyed by request URL
+// alone (no deployment), and when a later deployment no longer has the file it answers
+// that URL with the preserved copy: a 200 carrying exactly this cache-control (and
+// `x-robots-tag: noindex`). A page the owner took off therefore kept answering 200 with
+// the old body for up to 7 days. A real miss is a 404 with `no-store`, never this value,
+// and no page of the site is ever built with it, so seeing it means "gone".
+const PAGES_PRESERVED_COPY_CACHE_CONTROL = 'public, s-maxage=604800';
+
+// The one place a visitor's answer is checked, whichever branch produced it (the static
+// fall-through, the markdown-negotiated page, a verdict-allowed file). Anything else is
+// returned untouched (the same Response object); a preserved copy is answered as the
+// not-found it is, uncacheable like Pages' own 404. Shell-donor fetches are not visitor
+// answers (their bytes are only the chrome of a page this worker renders) and stay as they are.
+function withoutPreservedCopy(request, res) {
+	if (res && res.status === 200 && res.headers.get('cache-control') === PAGES_PRESERVED_COPY_CACHE_CONTROL) {
+		return new Response(request.method === 'HEAD' ? null : 'Not found', {
+			status: 404,
+			headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+		});
+	}
+	return res;
+}
+
 // A renderer-generated private-post path: the BYTES are this site's own build output,
 // the PAYWALL is RSP's. The path is not inferred here; it entered this branch only because
 // the renderer put its exact canonical URL in the generated manifest.
@@ -1745,7 +1769,7 @@ async function negotiateMarkdown(request, env, markdown) {
 	return withVaryAccept(res, request, MARKDOWN_CONTENT_TYPE);
 }
 
-export default {
+const siteWorker = {
 	async fetch(request, env, ctx) {
 		const CFG = __SHOP_CONFIG__;
 /*__CANONICAL_FETCH__*/		const shopDescriptors = CFG.shops || [];
@@ -1821,6 +1845,12 @@ export default {
 		const negotiated = await negotiateMarkdown(request, env, CFG.markdown);
 		if (negotiated) return negotiated;
 		return env.ASSETS.fetch(request); // everything else: the static site, untouched
+	}
+};
+
+export default {
+	async fetch(request, env, ctx) {
+		return withoutPreservedCopy(request, await siteWorker.fetch(request, env, ctx));
 	}
 };
 
