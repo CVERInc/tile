@@ -403,10 +403,10 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 // here. Every built site has a root document.
 
 const BUYER_PAGE_COPY = {
-	'en-US': { membership: 'Membership', membershipEmpty: 'No membership plans are available right now.', unavailable: 'This page is unavailable right now. Please try again later.', notFound: 'Not found', subscribe: 'Join', authState: 'Checking…', account: 'Account', signIn: 'Sign in', signInIntro: 'Enter your email address and we will send you a sign-in link.', email: 'Email address', sendLink: 'Send sign-in link', newEmail: 'New email address', sendVerification: 'Send verification email', signOut: 'Sign out', signOutError: "We couldn't sign you out. Please try again.", subscribeResultTitle: 'Subscription', subscribeThanks: 'Thank you for subscribing', subscribeActive: 'Your subscription is active.', subscribeConfirming: 'We are confirming your payment. This can take a moment, and we will email you when it is done.', subscribeUnknown: "We can't confirm this subscription here", subscribeUnknownBody: 'This page appears after you complete a subscription. If you subscribed, sign in to your account or check your subscription confirmation email, or go back home.', backHome: 'Back to home', interval: { day: 'day', week: 'week', month: 'month', year: 'year' } },
-	'ja-JP': { membership: 'メンバーシップ', membershipEmpty: '現在ご利用いただけるメンバーシッププランはありません。', unavailable: '現在このページを表示できません。しばらくしてから再度お試しください。', notFound: 'ページが見つかりません', subscribe: '加入する', authState: '確認中...', account: 'アカウント', signIn: 'ログイン', signInIntro: 'メールアドレスを入力すると、ログイン用のリンクをお送りします。', email: 'メールアドレス', sendLink: 'ログインリンクを送る', newEmail: '新しいメールアドレス', sendVerification: '確認メールを送信', signOut: 'ログアウト', signOutError: 'ログアウトできませんでした。もう一度お試しください。', subscribeResultTitle: 'サブスクリプション', subscribeThanks: 'ご登録ありがとうございます', subscribeActive: 'サブスクリプションは有効です。', subscribeConfirming: 'お支払いを確認しています。少しお時間がかかる場合があり、完了しましたらメールでお知らせします。', subscribeUnknown: 'このサブスクリプションを確認できません', subscribeUnknownBody: 'このページはご登録の完了後に表示されます。ご登録済みの場合は、アカウントにログインするか、確認メールでサブスクリプションをご確認いただくか、ホームにお戻りください。', backHome: 'ホームに戻る', interval: { day: '日額', week: '週額', month: '月額', year: '年額' } },
-	'zh-TW': { membership: '會員方案', membershipEmpty: '目前沒有可加入的會員方案。', unavailable: '目前無法顯示這個頁面，請稍後再試。', notFound: '找不到這個頁面', subscribe: '加入', authState: '確認中…', account: '帳戶', signIn: '登入', signInIntro: '輸入你的電子郵件，我們會寄一封登入連結給你。', email: '電子郵件', sendLink: '寄送登入連結', newEmail: '新的電子郵件', sendVerification: '寄送驗證信', signOut: '登出', signOutError: '無法登出，請再試一次。', subscribeResultTitle: '訂閱', subscribeThanks: '感謝您的訂閱', subscribeActive: '您的訂閱已生效。', subscribeConfirming: '正在確認您的付款，可能需要一點時間，完成後我們會以 email 通知您。', subscribeUnknown: '在這裡無法確認這筆訂閱', subscribeUnknownBody: '這一頁會在訂閱完成後顯示。若您已訂閱，請登入帳戶或查看訂閱確認信來確認，或返回首頁。', backHome: '返回首頁', interval: { day: '每日', week: '每週', month: '每月', year: '每年' } },
-	'zh-CN': { membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', signOut: '退出登录', signOutError: '无法退出登录，请再试一次。', subscribeResultTitle: '订阅', subscribeThanks: '感谢您的订阅', subscribeActive: '您的订阅已生效。', subscribeConfirming: '正在确认您的付款，可能需要一点时间，完成后我们会以 email 通知您。', subscribeUnknown: '在这里无法确认这笔订阅', subscribeUnknownBody: '这一页会在订阅完成后显示。若您已订阅，请登录账户或查看订阅确认信来确认，或返回首页。', backHome: '返回首页', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
+	'en-US': { gatePendingTitle: 'Your access is on its way', gatePendingBody: 'We received your payment. Reload this page in a moment.', gateReload: 'Reload', gateRetryTitle: "We can't check your access right now", gateRetryBody: 'Please try again.', gateRetry: 'Try again', gateMembersTitle: 'Members only', gateMembersBody: 'Sign in or join to view this page.', membership: 'Membership', membershipEmpty: 'No membership plans are available right now.', unavailable: 'This page is unavailable right now. Please try again later.', notFound: 'Not found', subscribe: 'Join', authState: 'Checking…', account: 'Account', signIn: 'Sign in', signInIntro: 'Enter your email address and we will send you a sign-in link.', email: 'Email address', sendLink: 'Send sign-in link', newEmail: 'New email address', sendVerification: 'Send verification email', signOut: 'Sign out', signOutError: "We couldn't sign you out. Please try again.", subscribeResultTitle: 'Subscription', subscribeThanks: 'Thank you for subscribing', subscribeActive: 'Your subscription is active.', subscribeConfirming: 'We are confirming your payment. This can take a moment, and we will email you when it is done.', subscribeUnknown: "We can't confirm this subscription here", subscribeUnknownBody: 'This page appears after you complete a subscription. If you subscribed, sign in to your account or check your subscription confirmation email, or go back home.', backHome: 'Back to home', interval: { day: 'day', week: 'week', month: 'month', year: 'year' } },
+	'ja-JP': { gatePendingTitle: 'アクセスの準備中です', gatePendingBody: 'お支払いを確認しました。しばらくしてからページを再読み込みしてください。', gateReload: '再読み込み', gateRetryTitle: '現在アクセス権を確認できません', gateRetryBody: 'もう一度お試しください。', gateRetry: '再試行', gateMembersTitle: 'メンバー限定', gateMembersBody: 'このページを見るには、ログインまたは加入してください。', membership: 'メンバーシップ', membershipEmpty: '現在ご利用いただけるメンバーシッププランはありません。', unavailable: '現在このページを表示できません。しばらくしてから再度お試しください。', notFound: 'ページが見つかりません', subscribe: '加入する', authState: '確認中...', account: 'アカウント', signIn: 'ログイン', signInIntro: 'メールアドレスを入力すると、ログイン用のリンクをお送りします。', email: 'メールアドレス', sendLink: 'ログインリンクを送る', newEmail: '新しいメールアドレス', sendVerification: '確認メールを送信', signOut: 'ログアウト', signOutError: 'ログアウトできませんでした。もう一度お試しください。', subscribeResultTitle: 'サブスクリプション', subscribeThanks: 'ご登録ありがとうございます', subscribeActive: 'サブスクリプションは有効です。', subscribeConfirming: 'お支払いを確認しています。少しお時間がかかる場合があり、完了しましたらメールでお知らせします。', subscribeUnknown: 'このサブスクリプションを確認できません', subscribeUnknownBody: 'このページはご登録の完了後に表示されます。ご登録済みの場合は、アカウントにログインするか、確認メールでサブスクリプションをご確認いただくか、ホームにお戻りください。', backHome: 'ホームに戻る', interval: { day: '日額', week: '週額', month: '月額', year: '年額' } },
+	'zh-TW': { gatePendingTitle: '存取權限準備中', gatePendingBody: '我們已收到你的付款。請稍後重新整理這個頁面。', gateReload: '重新整理', gateRetryTitle: '目前無法確認你的存取權限', gateRetryBody: '請再試一次。', gateRetry: '再試一次', gateMembersTitle: '會員專屬', gateMembersBody: '登入或加入後即可查看這個頁面。', membership: '會員方案', membershipEmpty: '目前沒有可加入的會員方案。', unavailable: '目前無法顯示這個頁面，請稍後再試。', notFound: '找不到這個頁面', subscribe: '加入', authState: '確認中…', account: '帳戶', signIn: '登入', signInIntro: '輸入你的電子郵件，我們會寄一封登入連結給你。', email: '電子郵件', sendLink: '寄送登入連結', newEmail: '新的電子郵件', sendVerification: '寄送驗證信', signOut: '登出', signOutError: '無法登出，請再試一次。', subscribeResultTitle: '訂閱', subscribeThanks: '感謝您的訂閱', subscribeActive: '您的訂閱已生效。', subscribeConfirming: '正在確認您的付款，可能需要一點時間，完成後我們會以 email 通知您。', subscribeUnknown: '在這裡無法確認這筆訂閱', subscribeUnknownBody: '這一頁會在訂閱完成後顯示。若您已訂閱，請登入帳戶或查看訂閱確認信來確認，或返回首頁。', backHome: '返回首頁', interval: { day: '每日', week: '每週', month: '每月', year: '每年' } },
+	'zh-CN': { gatePendingTitle: '访问权限准备中', gatePendingBody: '我们已收到你的付款。请稍后刷新这个页面。', gateReload: '刷新', gateRetryTitle: '目前无法确认你的访问权限', gateRetryBody: '请再试一次。', gateRetry: '再试一次', gateMembersTitle: '会员专属', gateMembersBody: '登录或加入后即可查看这个页面。', membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', signOut: '退出登录', signOutError: '无法退出登录，请再试一次。', subscribeResultTitle: '订阅', subscribeThanks: '感谢您的订阅', subscribeActive: '您的订阅已生效。', subscribeConfirming: '正在确认您的付款，可能需要一点时间，完成后我们会以 email 通知您。', subscribeUnknown: '在这里无法确认这笔订阅', subscribeUnknownBody: '这一页会在订阅完成后显示。若您已订阅，请登录账户或查看订阅确认信来确认，或返回首页。', backHome: '返回首页', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
 };
 
 // Exact path AND method, from the contract entry — the same posture the forward
@@ -1577,9 +1577,81 @@ async function serveVerdictGatedPath(request, env, binding, transport, pathname)
 	} catch (e) {
 		verdict = null;
 	}
-	if (!verdict || typeof verdict !== 'object') return verdictUnavailableResponse();
-	if (verdict.allow !== true) return verdictBlockedResponse();
+	if (!verdict || typeof verdict !== 'object') return verdictRefusal(request, env, transport, 'retry', verdictUnavailableResponse());
+	if (verdict.allow !== true) {
+		const state = verdict.reason === 'membership_pending' ? 'pending'
+			: verdict.reason === 'undecidable' ? 'retry' : 'members-only';
+		return verdictRefusal(request, env, transport, state, verdictBlockedResponse());
+	}
 	return env.ASSETS.fetch(request);
+}
+
+// ─── GATED-PATH REFUSAL PAGE ──────────────────────────────────────────────────
+// A browser that is refused a gated path sees the site's own page, not JSON. Only a
+// request whose Accept names text/html is offered it; every other caller, and every
+// case where the site's shell cannot be composed into, gets exactly the JSON
+// refusal passed in (status and cache-control are that response's, never new ones).
+// The gated file is never fetched: only the root shell is.
+function acceptsHtml(request) {
+	for (const part of (request.headers.get('accept') || '').split(',')) {
+		const [type, ...params] = part.split(';');
+		if (type.trim().toLowerCase() !== 'text/html') continue;
+		const q = params.map((p) => p.trim().toLowerCase()).find((p) => p.startsWith('q='));
+		const weight = q === undefined ? 1 : Number(q.slice(2));
+		if (Number.isFinite(weight) && weight > 0) return true;
+	}
+	return false;
+}
+
+// Sign-in and join links come from the contract's site-owned buyer pages by kind;
+// a contract without that entry simply has no such link.
+function buyerPageLinkPath(transport, kind) {
+	const routes = Array.isArray(transport.siteOwnedBuyerPages) ? transport.siteOwnedBuyerPages : [];
+	const route = routes.find((r) => r && r.kind === kind && r.method === 'GET' && typeof r.path === 'string');
+	return route ? route.path : '';
+}
+
+function verdictRefusalBody(state, copy, transport, selfHref) {
+	const link = (href, label) => `<a class="st-runtime-action" href="${escHtml(href)}">${escHtml(label)}</a>`;
+	let title, text, links;
+	if (state === 'pending') {
+		title = copy.gatePendingTitle; text = copy.gatePendingBody; links = [link(selfHref, copy.gateReload)];
+	} else if (state === 'retry') {
+		title = copy.gateRetryTitle; text = copy.gateRetryBody; links = [link(selfHref, copy.gateRetry)];
+	} else {
+		title = copy.gateMembersTitle; text = copy.gateMembersBody; links = [];
+		const account = buyerPageLinkPath(transport, 'account');
+		const membership = buyerPageLinkPath(transport, 'membership');
+		if (account) links.push(link(account, copy.signIn));
+		if (membership) links.push(link(membership, copy.subscribe));
+	}
+	return `<section class="st-runtime" data-ejecta-gate="" data-ejecta-gate-state="${state}">
+<h1>${escHtml(title)}</h1>
+<p class="st-runtime-status" role="status">${escHtml(text)}</p>
+${links.length ? '<p>' + links.join(' ') + '</p>\n' : ''}</section>`;
+}
+
+async function verdictRefusal(request, env, transport, state, jsonResponse) {
+	if (!acceptsHtml(request)) return jsonResponse;
+	try {
+		const url = new URL(request.url);
+		// A root that is itself gated is not a shell to borrow.
+		if (matchVerdictRule(transport.verdict, '/')) return jsonResponse;
+		const shellRes = await env.ASSETS.fetch(new Request(url.origin + '/'));
+		if (!shellRes || !shellRes.ok) return jsonResponse;
+		const shell = await shellRes.text();
+		const copy = BUYER_PAGE_COPY[localeFromHint(shellLang(shell))];
+		const title = state === 'members-only' ? copy.gateMembersTitle : state === 'pending' ? copy.gatePendingTitle : copy.gateRetryTitle;
+		const head = injectHead(stripDonorHead(shell), `<title>${escHtml(title)}</title><meta name="robots" content="noindex">`);
+		const composed = replaceMain(head, verdictRefusalBody(state, copy, transport, url.pathname + url.search));
+		if (composed === head) return jsonResponse;
+		return new Response(composed, {
+			status: jsonResponse.status,
+			headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': jsonResponse.headers.get('cache-control') }
+		});
+	} catch (e) {
+		return jsonResponse;
+	}
 }
 
 // ─── PUBLIC MARKDOWN NEGOTIATION ──────────────────────────────────────────────
@@ -1717,7 +1789,7 @@ export default {
 				if (!binding) return bindingMissingResponse(transport);
 				return binding.fetch(request);   // verbatim: method, path, query, headers, body
 			}
-			if (gated && !binding) return verdictBindingMissingResponse();
+			if (gated && !binding) return verdictRefusal(request, env, transport, 'retry', verdictBindingMissingResponse());
 			if (gated && binding) return serveVerdictGatedPath(request, env, binding, transport, normalizeVerdictPath(pathname));
 		}
 

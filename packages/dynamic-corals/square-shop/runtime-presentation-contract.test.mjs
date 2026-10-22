@@ -430,6 +430,35 @@ async function renderSubscribeUnavailableHtml() {
 	return (await subscribeWorker.default.fetch(subGet(SUB_PAGE + '?' + SUB_PARAM + '=cs1'), env)).text();
 }
 
+// ── gated-path refusal pages (verdict gate): a worker with a gated path and the buyer-page links ──
+const gateTemp = mkdtempSync(path.join(os.tmpdir(), 'runtime-presentation-contract-gate-'));
+const GATE_BINDING = 'SEAMLINK';
+const gateContractPath = path.join(gateTemp, 'fixture.contract.json');
+writeFileSync(gateContractPath, JSON.stringify({
+	schemaVersion: 2,
+	bindingName: GATE_BINDING,
+	verdictEndpoint: { version: 2, path: '/seam/site-verdict-v2', param: 'path' },
+	onBindingMissing: { status: 599, cacheControl: 'private, no-store, fixture-marker' },
+	siteOwnedBuyerPages: [
+		{ path: '/tiers', method: 'GET', kind: 'membership', factsPath: '/zapi/tier-facts' },
+		{ path: '/hub', method: 'GET', kind: 'account', factsPath: '/zapi/hub-facts' },
+	],
+	forward: [{ match: 'prefix', value: '/zapi/', methods: ['GET', 'POST'] }],
+	excluded: [{ match: 'prefix', value: '/vault/', disposition: 'verdict-required' }],
+}, null, 2));
+const gateManifestPath = path.join(gateTemp, 'gated.json');
+writeFileSync(gateManifestPath, JSON.stringify({ schemaVersion: 1, paths: ['/vault/post-1'] }));
+const gateOutPath = path.join(gateTemp, 'worker.mjs');
+execFileSync('node', [emitterPath, '--site-id', 'site-1', '--api-contract', gateContractPath, '--gated-manifest', gateManifestPath, '--api', 'https://api.example', '--out', gateOutPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+const gateWorker = await import(pathToFileURL(gateOutPath).href);
+async function renderGateRefusalHtml(verdict) {
+	const env = {
+		ASSETS: { fetch: async (req) => new Response(new URL(req.url).pathname === '/' ? MEMBER_SHELL : 'GATED-FILE', { status: 200 }) },
+		[GATE_BINDING]: { fetch: async () => Response.json(verdict) },
+	};
+	return (await gateWorker.default.fetch(new Request('https://s.example/vault/post-1', { headers: { accept: 'text/html' } }), env)).text();
+}
+
 // ── the registry ─────────────────────────────────────────────────────────────────────────────
 // `presentation`: renderer-owned `st-*` classes only, each required to carry its own reef.base
 // rule (enforced below). `contextPresentation`: renderer-owned `st-*` classes that instead style
@@ -440,6 +469,24 @@ async function renderSubscribeUnavailableHtml() {
 // assertions unique to that state (a pinned byte-exact shape, a negative control, …) that do not
 // fit the presentation/hook/CSS shape above.
 const STATES = [
+	{
+		id: 'gated refusal: payment received, access pending',
+		render: () => renderGateRefusalHtml({ allow: false, reason: 'membership_pending' }),
+		presentation: ['st-runtime', 'st-runtime-status', 'st-runtime-action'],
+		hooks: [/data-ejecta-gate-state="pending"/, /<h1>Your access is on its way<\/h1>/],
+	},
+	{
+		id: 'gated refusal: access could not be checked',
+		render: () => renderGateRefusalHtml({ allow: false, reason: 'undecidable' }),
+		presentation: ['st-runtime', 'st-runtime-status', 'st-runtime-action'],
+		hooks: [/data-ejecta-gate-state="retry"/, /<h1>We can&#39;t check your access right now<\/h1>|<h1>We can't check your access right now<\/h1>/],
+	},
+	{
+		id: 'gated refusal: members only',
+		render: () => renderGateRefusalHtml({ allow: false, reason: 'members_only' }),
+		presentation: ['st-runtime', 'st-runtime-status', 'st-runtime-action'],
+		hooks: [/data-ejecta-gate-state="members-only"/, /href="\/hub">Sign in</, /href="\/tiers">Join</],
+	},
 	{
 		id: 'native listing: items',
 		render: () => serveNative('c-native-listing-items', { projection: listOk([nativeProduct]) }).then((r) => r.html),
