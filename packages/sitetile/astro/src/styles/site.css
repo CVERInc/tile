@@ -58,6 +58,25 @@
   --gd-font: ui-sans-serif, system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
   --gd-radius: 12px;
   --gd-maxw: 72ch;
+  /* Overlay stacking scale (reef#2161). Every full-viewport overlay the renderer owns sits at the
+     top of the z-index range, ONE scale, ordered here and nowhere else:
+       --rf-z-overlay        backdrops + the age gate (the floor of the scale)
+       --rf-z-overlay-panel  a panel above its backdrop: the search layer, side drawers
+       --rf-z-overlay-nav    the header while the nav-mobile menu is open — above the search
+                             layer by one, so the SAME control that opened the menu stays
+                             reachable; which of the two is open is decided by state (each closes
+                             the other on open — blog-search.js), never by these numbers.
+     Relative, not literal, so the relation cannot drift when one side is edited alone.
+     🩸 The floor is written as `calc(2147480000 + 3000)`, NOT `2147483000`: lightningcss prints a
+     number inside a custom property with six significant digits (a `z-index: 2147483000` on a
+     real property is kept exact), so the plain literal shipped as 2147480000 — the smoke build
+     caught it the first time this token was emitted. Each operand here has six digits, so the sum
+     survives minification and the browser folds it to the exact integer. The value itself is the
+     one every overlay already used, so the inbox bubble (its own coral CSS, same literal) keeps
+     the relation it had: level with the floor, under every panel. */
+  --rf-z-overlay: calc(2147480000 + 3000);
+  --rf-z-overlay-panel: calc(var(--rf-z-overlay) + 1);
+  --rf-z-overlay-nav: calc(var(--rf-z-overlay) + 2);
   --gd-gap: clamp(1rem, 2.5vw, 2rem);
 
   /* ── treatment-axis tokens — the theme treatment axes (see the block near the end of this file) ──
@@ -869,7 +888,7 @@ span.st-code { overflow-wrap: anywhere; }
    page via CSS `:has(:checked)` (zero JS), plus an optional sessionStorage-persistence
    island (`html[data-age-confirmed]`) that also hides it with no flash. Token-driven so
    every theme skins it from its --gd-* surface; absent frontmatter → nothing renders. ── */
-.st-age-gate { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .82); box-sizing: border-box; }
+.st-age-gate { position: fixed; inset: 0; z-index: var(--rf-z-overlay); display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .82); box-sizing: border-box; }
 .st-age-gate-check { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 body:has(#st-age-gate-check:checked) .st-age-gate,
 html[data-age-confirmed] .st-age-gate { display: none; }
@@ -898,7 +917,7 @@ html[data-age-confirmed] .st-age-gate { display: none; }
 }
 .rf-search-toggle:hover { color: var(--gd-text); border-color: var(--gd-accent); }
 
-.st-search { display: none; position: fixed; inset: 0; z-index: 2147483001; }
+.st-search { display: none; position: fixed; inset: 0; z-index: var(--rf-z-overlay-panel); }
 html[data-search-open] .st-search { display: block; }
 .st-search-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .5); }
 .st-search-panel {
@@ -1049,9 +1068,9 @@ html[data-search-open] .st-search { display: block; }
 }
 
 /* shared side-drawer + backdrop (cart drawer; the sidebar offcanvas reuses .st-sidebar below) */
-.rf-ha-overlay { display: none; position: fixed; inset: 0; z-index: 2147483000; background: rgba(0, 0, 0, .4); }
+.rf-ha-overlay { display: none; position: fixed; inset: 0; z-index: var(--rf-z-overlay); background: rgba(0, 0, 0, .4); }
 .rf-ha-drawer {
-  position: fixed; top: 0; height: 100dvh; width: min(420px, 100vw); z-index: 2147483001;
+  position: fixed; top: 0; height: 100dvh; width: min(420px, 100vw); z-index: var(--rf-z-overlay-panel);
   display: flex; flex-direction: column; box-sizing: border-box;
   background: var(--gd-surface, #fff); color: var(--gd-text);
   box-shadow: 0 0 40px rgba(0, 0, 0, .28); transition: transform .28s ease;
@@ -1175,7 +1194,7 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
      `!important` declaration outranks any unlayered *normal* one. This is a stacking-order FACT
      the menu's open state depends on, not a look a theme should get to keep — hence important
      here where the same block's colour/typography declarations stay plain. */
-  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header { z-index: 2147483002 !important; }
+  body[data-nav-mobile]:has(#rf-nav-toggle:checked) .rf-header { z-index: var(--rf-z-overlay-nav) !important; }
   /* An open menu and the header it hangs from are ONE panel — so a TRANSPARENT header adopts the
      panel surface while open, or the two read as two materials butted together. Scoped to the
      overlay header on purpose: a header that already has its
@@ -1283,7 +1302,7 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
      `body[data-ha-sidebar]` (only a site with a `sidebar` header-action), so other sidebar sites
      keep the stacked mobile layout. More specific than the generic `.st-sidebar` static rule above. */
   body[data-ha-sidebar] .st-sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; height: 100dvh; z-index: 2147483001;
+    position: fixed; top: 0; left: 0; bottom: 0; height: 100dvh; z-index: var(--rf-z-overlay-panel);
     width: min(320px, 85vw); max-height: none; overflow-y: auto;
     border-right: 1px solid var(--gd-border); border-bottom: none;
     box-shadow: 0 0 40px rgba(0, 0, 0, .28); transform: translateX(-100%); transition: transform .28s ease;

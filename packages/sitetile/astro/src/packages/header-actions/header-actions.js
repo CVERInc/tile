@@ -25,7 +25,12 @@
       if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
       e.preventDefault();
       const cb = document.getElementById(this.getAttribute('for'));
-      if (cb) cb.checked = !cb.checked;
+      if (!cb) return;
+      cb.checked = !cb.checked;
+      // A programmatic flip fires no `change`, a tap does. Anything keyed off the checkbox's
+      // state (the blog-search overlay closes when the nav drawer OPENS — reef#2161) must see the
+      // keyboard open as the same event as the tap, so emit the one the tap would have.
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
 })();

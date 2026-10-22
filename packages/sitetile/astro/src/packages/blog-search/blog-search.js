@@ -88,16 +88,22 @@ import { fold, filterIndex } from './search-filter.mjs';
       const emptyEl = document.querySelector('[data-search-empty]');
       overlayUi = bind(overlayInput, results, countEl, emptyEl, { navigate: true });
       const root = document.documentElement;
+      // reef#2161: the nav-mobile drawer and this overlay are two overlays with ONE rule — only one
+      // is open. The drawer's state IS the `#rf-nav-toggle` checkbox (pure CSS, body:has(:checked));
+      // ours is `html[data-search-open]`. Each side closes the other on OPEN, and only on open:
+      //   open()  unchecks the drawer — its header outranks us in z-index (same --rf-z-* scale in
+      //           site.css), so a drawer left open would sit on top of the search it launched;
+      //   drawer `change` → checked  closes us — a tap on the hamburger, or header-actions.js's
+      //           Enter/Space shim (which dispatches the same `change`), is the one open path.
+      const drawer = document.getElementById('rf-nav-toggle');
       const open = () => {
-        // Close the nav-mobile drawer first: its header outranks the overlay in z-index, so a
-        // drawer left open would sit on top of the search it just launched.
-        const drawer = document.getElementById('rf-nav-toggle');
         if (drawer && drawer.checked) drawer.checked = false;
         root.setAttribute('data-search-open', '');
         ensureIndex();
         requestAnimationFrame(() => overlayInput.focus());
       };
       const close = () => root.removeAttribute('data-search-open');
+      if (drawer) drawer.addEventListener('change', () => { if (drawer.checked) close(); });
       if (toggle) toggle.addEventListener('click', open);
       for (const el of document.querySelectorAll('[data-search-close]')) el.addEventListener('click', close);
       document.addEventListener('keydown', (e) => {
