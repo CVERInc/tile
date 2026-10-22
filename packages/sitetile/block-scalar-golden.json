@@ -1,0 +1,261 @@
+{
+ "packages/build/fixtures/ir/_query-redirects.md": {
+  "meta": {},
+  "bodyLength": 427,
+  "bodyHead": "# query-string redirects — compiled into"
+ },
+ "packages/build/fixtures/ir/_site.md": {
+  "meta": {
+   "brand": "Paper Kite Atelier",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW, ja-JP",
+   "theme": "paperkite"
+  },
+  "bodyLength": 0,
+  "bodyHead": ""
+ },
+ "packages/build/fixtures/ir/_theme.md": {
+  "meta": {
+   "palette-ink": "\"#241f1c\"",
+   "palette-paper": "\"#f7f3ec\"",
+   "type-display": "serif"
+  },
+  "bodyLength": 342,
+  "bodyHead": "\nThe structured theme SOURCE. The platfo"
+ },
+ "packages/build/fixtures/ir/home.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "Paper Kite Atelier — kites cut, folded and flown by hand",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW, ja-JP"
+  },
+  "bodyLength": 469,
+  "bodyHead": "\n## A workshop for paper that wants to l"
+ },
+ "packages/build/fixtures/ir/ja-jp/home.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "紙鳶工房 — 手で裁ち、折り、飛ばす凧",
+   "lang": "ja",
+   "locales": "en-US, zh-TW, ja-JP"
+  },
+  "bodyLength": 90,
+  "bodyHead": "\n## 地を離れたい紙\n%% sitetile: hero %%\n\n二つ目のロケ"
+ },
+ "packages/build/fixtures/ir/legal/terms.md": {
+  "meta": {
+   "sitetile-page": "terms",
+   "title": "Terms — Paper Kite Atelier",
+   "lang": "en-US"
+  },
+  "bodyLength": 293,
+  "bodyHead": "\n## Terms\n\nA nested page. Its path must "
+ },
+ "packages/build/fixtures/ir/our team & friends.md": {
+  "meta": {
+   "sitetile-page": "team",
+   "title": "Our team & friends — Paper Kite Atelier",
+   "lang": "en-US"
+  },
+  "bodyLength": 303,
+  "bodyHead": "\n## The people and the birds\n\nThis page'"
+ },
+ "packages/build/fixtures/ir/posts/a-first-flight.md": {
+  "meta": {
+   "title": "\"A first flight\"",
+   "description": "\"Fixture: the blog corpus is not the page corpus.\"",
+   "pubDate": "2026-08-14",
+   "tags": "[\"fixture\"]"
+  },
+  "bodyLength": 177,
+  "bodyHead": "\nA post. It lives under `posts/` and is "
+ },
+ "packages/build/fixtures/ir/zh-tw/home.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "紙鳶工坊 — 手裁、手摺、手放的風箏",
+   "lang": "zh-Hant",
+   "locales": "en-US, zh-TW, ja-JP"
+  },
+  "bodyLength": 109,
+  "bodyHead": "\n## 想離地的紙\n%% sitetile: hero %%\n\n這是語系首頁。`"
+ },
+ "packages/build/fixtures/ir/zh-tw/關於.md": {
+  "meta": {
+   "sitetile-page": "about",
+   "title": "關於 — 紙鳶工坊",
+   "lang": "zh-Hant"
+  },
+  "bodyLength": 108,
+  "bodyHead": "\n## 關於\n\n這一頁的檔名本身就是測試：CJK slug 是真實網站上活著的網"
+ },
+ "packages/sitetile/astro/content/_site.md": {
+  "meta": {
+   "inbox-bubble-except": "/blocks, /markers",
+   "brand": "Yamada Letterpress",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW",
+   "blog-category-routes": "true",
+   "blog-tag-routes": "true",
+   "blog-category-names": "press=Press",
+   "blog-categories": "Press|2|/category/press",
+   "blog-category-sidebar": "true"
+  },
+  "bodyLength": 1,
+  "bodyHead": "\n"
+ },
+ "packages/sitetile/astro/content/blocks.md": {
+  "meta": {
+   "sitetile-page": "blocks",
+   "title": "Base content blocks",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "packages": "lingo"
+  },
+  "bodyLength": 1298,
+  "bodyHead": "\n## Everything a real page body needs\nA "
+ },
+ "packages/sitetile/astro/content/custom-theme.md": {
+  "meta": {
+   "sitetile-page": "custom-theme",
+   "title": "Lilac collection fixture",
+   "theme": "lilac"
+  },
+  "bodyLength": 481,
+  "bodyHead": "\n## Workshop tools\n%% sitetile: collecti"
+ },
+ "packages/sitetile/astro/content/form-thanks.md": {
+  "meta": {
+   "sitetile-page": "form-thanks",
+   "title": "Form coral — thanks= (an editable page after a successful submit)",
+   "lang": "en-US"
+  },
+  "bodyLength": 1632,
+  "bodyHead": "\n## Thanks page configured\n%% sitetile: "
+ },
+ "packages/sitetile/astro/content/forms.md": {
+  "meta": {
+   "sitetile-page": "forms",
+   "title": "Form coverage — wired to an inbox, wired to the reef, and deliberately not",
+   "lang": "en-US"
+  },
+  "bodyLength": 1894,
+  "bodyHead": "\n## Wired with the escape hatch\n%% sitet"
+ },
+ "packages/sitetile/astro/content/home.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "Yamada Letterpress — one character, one piece of lead",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "packages": "lingo",
+   "nav": "- Home /\n- Products /products\n  - Apps /apps\n  - Games /games\n    - Puzzle /games/puzzle\n    - Action /games/action\n- About /about"
+  },
+  "bodyLength": 1242,
+  "bodyHead": "\n## One character, one piece of lead\n%% "
+ },
+ "packages/sitetile/astro/content/ja-jp.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "山田活版所 — 一字、一鉛",
+   "lang": "ja",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "packages": "lingo",
+   "nav": "- ホーム /\n- プロダクト /products\n- 概要 /about"
+  },
+  "bodyLength": 218,
+  "bodyHead": "\n## いろはにほへと　ちりぬるを\n%% sitetile: hero bg=/"
+ },
+ "packages/sitetile/astro/content/ko-kr.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "야마다 활판소 — 한 글자, 한 조각의 납",
+   "lang": "ko-KR",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "nav": "- 홈 /\n- 제품 /products\n- 소개 /about"
+  },
+  "bodyLength": 337,
+  "bodyHead": "\n## 나랏말싸미 듕귁에 달아\n%% sitetile: hero bg=/i"
+ },
+ "packages/sitetile/astro/content/ko-kr/_site.md": {
+  "meta": {
+   "inbox-bubble": "off"
+  },
+  "bodyLength": 1,
+  "bodyHead": "\n"
+ },
+ "packages/sitetile/astro/content/markers.md": {
+  "meta": {
+   "sitetile-page": "markers",
+   "title": "Marker coverage — hero variants + linked cells",
+   "lang": "en-US",
+   "locales": "en-US, zh-TW",
+   "inbox-bubble": "on",
+   "assistant-name": "小美"
+  },
+  "bodyLength": 999,
+  "bodyHead": "\n## Logo hero, uncropped\n%% sitetile: he"
+ },
+ "packages/sitetile/astro/content/scheme-check.md": {
+  "meta": {
+   "sitetile-page": "scheme-check",
+   "title": "Scheme check — disallowed destinations must never reach a live sink",
+   "lang": "en-US",
+   "favicon": "javascript:void(0)",
+   "fonts": "javascript:void(0)",
+   "header-cta": "Buy now=javascript:void(0)",
+   "header-actions": "Cart=cart toggle cart",
+   "header-actions-cart-guild": "scheme-check-cart",
+   "header-actions-cart-href": "javascript:void(0)",
+   "share-image": "javascript:void(0)"
+  },
+  "bodyLength": 5062,
+  "bodyHead": "\n## Contact — disallowed scheme in the f"
+ },
+ "packages/sitetile/astro/content/zh-tw.md": {
+  "meta": {
+   "sitetile-page": "home",
+   "title": "山田活版所 — 一個字，一塊鉛",
+   "lang": "zh-Hant",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "packages": "lingo",
+   "nav": "- 首頁 /\n- 產品 /products\n- 關於 /about"
+  },
+  "bodyLength": 238,
+  "bodyHead": "\n## 天地玄黃　宇宙洪荒\n%% sitetile: hero bg=/img/"
+ },
+ "packages/sitetile/astro/content/zh-tw/_site.md": {
+  "meta": {
+   "blog-category-names": "press=新聞稿"
+  },
+  "bodyLength": 0,
+  "bodyHead": ""
+ },
+ "packages/sitetile/astro/content/zh-tw/blocks.md": {
+  "meta": {
+   "sitetile-page": "blocks",
+   "title": "基本內容區塊",
+   "lang": "zh-Hant",
+   "locales": "en-US, zh-TW, ja-JP, ko-KR",
+   "packages": "lingo"
+  },
+  "bodyLength": 114,
+  "bodyHead": "\n## 段落與行內標記\n一段普通的文字，帶 **粗體**、*斜體*、`程式碼`、"
+ },
+ "packages/sitetile/astro/content/zh-tw/form-thanks.md": {
+  "meta": {
+   "sitetile-page": "form-thanks",
+   "title": "表單 coral — thanks=（送出成功後可編輯的頁面）",
+   "lang": "zh-Hant",
+   "packages": "lingo"
+  },
+  "bodyLength": 197,
+  "bodyHead": "\n## 設定了 thanks 頁\n%% sitetile: form actio"
+ },
+ "packages/sitetile/examples/README.md": {
+  "meta": {},
+  "bodyLength": 1926,
+  "bodyHead": "# examples/\n\nWorked examples of the thin"
+ }
+}

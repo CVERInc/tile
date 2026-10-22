@@ -355,6 +355,15 @@ function splitFrontmatter(text) {
     // YAML block scalar: `key: |` (literal — keep newlines) or `key: >` (folded — newlines→spaces).
     // Collect the more-indented block beneath, stripping its common indent — so nav / footer / any
     // key can be an indented tree instead of one cramped line. Any other value stays single-line.
+    //
+    // 🔴 A bare `|` / `>` is byte-for-byte the reader it was before the indicators existed — the
+    // inferred base, emptied whitespace-only lines, dropped trailing blanks, `>` joined with spaces,
+    // no final newline (block-scalar-golden.json pins it over every fixture).
+    //
+    // Any spelling WITH an indicator (tile#183) — `|2`, `|+`, `|-`, `|2+` / `|+2`, `>` likewise —
+    // is YAML 1.2 exactly (blockScalar below). They exist so the site-wide `embed` slot (reef#2302)
+    // can store raw HTML VERBATIM: `"  <pre>  keep</pre>"` and `"<pre>hello\n\n"` are unwritable with
+    // a bare `|`, and before this a writer that reached for `|2+` got the string "|2+" back as the value.
     if (marker === '|' || marker === '>') {
       const block = [];
       let base = null;
@@ -369,11 +378,74 @@ function splitFrontmatter(text) {
       }
       while (block.length && block[block.length - 1] === '') block.pop();
       meta[key] = marker === '>' ? block.join(' ') : block.join('\n');
+      continue;
+    }
+    const bs = /^([|>])(?:([1-9])([+-])?|([+-])([1-9])?)$/.exec(marker);
+    if (bs) {
+      const r = blockScalar(lines, i + 1, bs[1] === '>', bs[2] || bs[5] ? Number(bs[2] || bs[5]) : null, bs[3] || bs[4] || '');
+      meta[key] = r.value;
+      i = r.next - 1;
     } else {
       meta[key] = marker;
     }
   }
   return { meta, body: text.slice(m[0].length) };
+}
+
+// A YAML 1.2 block scalar whose header carries an indicator, read from lines[from…] for a key at
+// column 0. Every frontmatter line ends in a line break (the last one's is the break before `---`).
+//   §8.1.1.1 indentation: `explicit` columns, else the deepest of the leading empty lines and the
+//     first non-empty line — never below 1, so an unindented sibling ends even an empty block.
+//     Only spaces indent. A line of spaces no deeper than the indent is empty; anything beyond the
+//     indent — spaces included — is content.
+//   §8.1.1.2 chomping: '-' strip (no final break), '' clip (one), '+' keep (all trailing breaks).
+//   §8.1.3 folding (`>`): a break between two normal lines becomes a space when nothing separates
+//     them, else each empty line between them is a "\n"; a break touching a more-indented line
+//     (one starting with a space or tab) is kept as well. Leading empty lines are "\n" each.
+// Returns the value and the index of the first line not consumed.
+function blockScalar(lines, from, folded, explicit, chomp) {
+  let n = explicit;
+  if (n === null) {
+    n = 1;
+    for (let j = from; j < lines.length; j++) {
+      const sp = lines[j].match(/^ */)[0].length;
+      if (sp > n) n = sp;
+      if (sp < lines[j].length) break; // the first non-empty line settles it
+    }
+  }
+  const rows = []; // a string for a content line (its text past the indent), null for an empty line
+  let j = from;
+  for (; j < lines.length; j++) {
+    const ln = lines[j];
+    const sp = ln.match(/^ */)[0].length;
+    if (sp === ln.length && sp <= n) rows.push(null);
+    else if (sp >= n) rows.push(ln.slice(n));
+    else break;
+  }
+  // Trailing empty lines are chomping's to keep or drop, whether the block ends at `---` or a sibling.
+  let last = rows.length - 1;
+  while (last >= 0 && rows[last] === null) last--;
+  const trailing = rows.length - 1 - last;
+  let text = '';
+  if (folded) {
+    let prev = null; // the previous content line, null before the first
+    let empties = 0;
+    for (let k = 0; k <= last; k++) {
+      const row = rows[k];
+      if (row === null) { empties++; continue; }
+      if (prev === null) text += '\n'.repeat(empties);
+      else if (/^[ \t]/.test(prev) || /^[ \t]/.test(row)) text += '\n' + '\n'.repeat(empties);
+      else text += empties ? '\n'.repeat(empties) : ' ';
+      text += row;
+      prev = row;
+      empties = 0;
+    }
+  } else {
+    text = rows.slice(0, last + 1).map((r) => (r === null ? '' : r)).join('\n');
+  }
+  if (last < 0) return { value: chomp === '+' ? '\n'.repeat(trailing) : '', next: j };
+  if (chomp === '-') return { value: text, next: j };
+  return { value: text + '\n' + (chomp === '+' ? '\n'.repeat(trailing) : ''), next: j };
 }
 
 // Trim leading/trailing blank lines off a buffer, join to a raw block (matches book-core caption).
