@@ -1,6 +1,6 @@
 // CVERInc/tile#183 — splitFrontmatter honours YAML block-scalar INDICATORS, so a value can be stored
-// verbatim: `key: |2+` (explicit indent 2, keep trailing blank lines), `key: |2` (explicit indent,
-// trailing blank lines stripped), `|2-` (same as `|2` in this reader's model — see below).
+// verbatim: `key: |2+` (explicit indent 2, keep every trailing line break), `key: |2` (explicit
+// indent, clip: exactly one final line break), `|2-` (strip: none) — and `>` likewise, folded.
 //   run: node packages/sitetile/block-scalar-indicators.test.mjs   (globbed into scripts/test.sh)
 //
 // WHY. The site-wide `embed` slot (tile#179, reef#2302) promises the owner's raw HTML byte for byte,
@@ -17,15 +17,19 @@
 // whitespace-only lines, dropped trailing blanks, a shallower line ending the block) are pinned
 // explicitly too, so the golden cannot pass by never having met them.
 //
-// THE MODEL. This reader has always returned a block scalar as its lines joined by "\n" with NO
-// final newline (serializeSite splits on "\n" and re-indents; parse→serialize is the identity on
-// that string). The indicators are defined on the same model: `+` keeps the trailing blank lines
-// as elements of that join, so `"<pre>hello\n\n"` is written as the line `<pre>hello` followed by
-// two blank lines and reads back as exactly that string. (Pure YAML would add one more "\n" for the
-// final line break; this reader never has, and the family's writers never emit one.) Hence `-`
-// (strip) and the absence of a chomping indicator are the same thing here, and both are accepted.
+// THE MODEL. Two readers in one function. A bare `|` / `>` is the legacy reader (lines joined by
+// "\n", no final newline, quirks above). Every spelling WITH an indicator is YAML 1.2, exactly:
+// §8.1.1.1 indentation (explicit, or inferred from the first non-empty line and never below 1, so
+// an unindented sibling ends even an empty block), §8.1.1.2 chomping (clip = one final line break,
+// strip = none, keep = all of them), §8.1.3 folding for `>` (a single break between two normal
+// lines is a space, each blank line a newline, more-indented lines keep their breaks). A standard
+// YAML writer's output therefore reads back as the value it wrote. 🩸 r1 of this file asserted a
+// home-grown "lines joined, `-` ≡ clip, `>` joins with spaces" model for the indicators — codex
+// r1 on tile#184 showed it shortened `|2` values, flattened `>2-` paragraphs, and let an empty
+// `|+` swallow the keys after it. The expected values below are PyYAML 6.0.1's, and the oracle
+// test re-asks PyYAML live whenever python3 has it, so the table is not just my reading of §8.1.
 //
-// END TO END: the same two probes written to a real site's _site.md, built with packages/build, and
+// END TO END: the probes written to a real site's _site.md, built with packages/build, and
 // read off the emitted page: the slot's bytes immediately before </body> are the stored bytes, and
 // a site without the key builds the same page with only those bytes taken out. Needs the renderer's
 // dependencies and SAYS SO when they are absent — same shape as site-embed.test.mjs.
@@ -49,10 +53,10 @@ const test = async (name, fn) => {
 };
 
 const fm = (...lines) => `---\n${lines.join('\n')}\n---\n`;
-// The writer's convention (serializeSite, reef-mcp's blockEntryLines): split on "\n", indent every
-// non-empty line by two spaces, leave empty lines empty. With an explicit `2` the reader slices
-// exactly two columns, so a line that itself starts with spaces keeps them.
-const asBlock = (key, indicator, text) => `${key}: ${indicator}\n${text.split('\n').map((l) => (l === '' ? '' : `  ${l}`)).join('\n')}`;
+// A YAML writer: the value's final line break is the last line's own break (so it is not a line of
+// its own), every non-empty line indented two spaces, empty lines left empty. With an explicit `2`
+// the reader slices exactly two columns, so a line that itself starts with spaces keeps them.
+const asBlock = (key, indicator, text) => `${key}: ${indicator}\n${(text.endsWith('\n') ? text.slice(0, -1) : text).split('\n').map((l) => (l === '' ? '' : `  ${l}`)).join('\n')}`;
 
 // ── the golden: indicator-less block scalars are byte-identical to the reader before this change ──
 
@@ -87,41 +91,107 @@ await test('🔴 indicator-less `|` keeps its quirks: first-line inference, empt
 const LEADING = '  <pre>  keep</pre>';
 const TRAILING = '<pre>hello\n\n';
 
-await test('🔴 `|2+` — explicit indent: a value whose first line starts with spaces keeps them', () => {
-  assert.equal(splitFrontmatter(fm('brand: x', asBlock('embed', '|2+', LEADING))).meta.embed, LEADING);
+// A YAML document `y` (ending in "\n") as this reader sees it: between `---` fences.
+const doc = (y) => `---\n${y}---\n`;
+const read = (y) => splitFrontmatter(doc(y)).meta;
+
+// Every row: [YAML text, PyYAML 6.0.1's safe_load of it]. Inputs YAML rejects (a shallower line
+// inside an explicit block, leading spaces deeper than the first line) are left out on purpose —
+// there is no value to agree with.
+const ORACLE = [
+  // P2-1 — an empty inferred block ends at the unindented sibling; the siblings survive
+  ['embed: |+\nbrand: Example\nlang: en\n', { embed: '', brand: 'Example', lang: 'en' }],
+  ['embed: |-\nbrand: Example\nlang: en\n', { embed: '', brand: 'Example', lang: 'en' }],
+  ['embed: >+\nbrand: Example\n', { embed: '', brand: 'Example' }],
+  ['embed: >-\nbrand: Example\n', { embed: '', brand: 'Example' }],
+  ['embed: |2+\nbrand: x\n', { embed: '', brand: 'x' }],
+  ['embed: |+\n\n\nbrand: x\n', { embed: '\n\n', brand: 'x' }],
+  ['embed: >+\n\n', { embed: '\n' }],
+  // P2-2 — clip / strip / keep
+  ['embed: |2\n  a\n\n', { embed: 'a\n' }],
+  ['embed: |2-\n  a\n\n', { embed: 'a' }],
+  ['embed: |2+\n  a\n\n', { embed: 'a\n\n' }],
+  ['embed: |+2\n  a\n\n', { embed: 'a\n\n' }],
+  ['embed: |+\n  a\n\n', { embed: 'a\n\n' }],
+  ['embed: |2+\n  <pre>hello\n\n', { embed: '<pre>hello\n\n' }],
+  ['embed: |2-\n    <pre>  keep</pre>\n', { embed: '  <pre>  keep</pre>' }],
+  ['embed: |2+\n    <pre>  keep</pre>\n', { embed: '  <pre>  keep</pre>\n' }],
+  // P2-3 — folding
+  ['embed: >2-\n  one\n\n  two\n', { embed: 'one\ntwo' }],
+  ['embed: >2-\n  one\n    code\n  two\n', { embed: 'one\n  code\ntwo' }],
+  ['embed: >2+\n  one\n  two\n\n', { embed: 'one two\n\n' }],
+  ['embed: >2\n  one\n  two\n\n\n  three\n', { embed: 'one two\n\nthree\n' }],
+  ['embed: >-\n\n  a\n  b\n', { embed: '\na b' }],
+  ['embed: >-\n  a\n\n    b\n\n  c\n', { embed: 'a\n\n  b\n\nc' }],
+  ['embed: >-\n  a\n    b\n  c\n', { embed: 'a\n  b\nc' }],
+  ['embed: >2-\n  a\n     \n  b\n', { embed: 'a\n   \nb' }],
+  // P2-4 — inferred indent keeps a whitespace-only line's bytes beyond the indent
+  ['embed: |-\n  a\n     \n  b\n', { embed: 'a\n   \nb' }],
+  ['embed: |+\n  a\n     \n  b\n', { embed: 'a\n   \nb\n' }],
+  ['embed: |+\n  a\n     \n', { embed: 'a\n   \n' }],
+  ['embed: |-\n\n    a\n', { embed: '\na' }],
+];
+
+await test('🔴 P2-1 — an empty `|+` / `|-` / `>-` is "" and the keys after it are still read', () => {
+  assert.deepEqual(read('embed: |+\nbrand: Example\nlang: en\n'), { embed: '', brand: 'Example', lang: 'en' });
+  assert.deepEqual(read('embed: |-\nbrand: Example\nlang: en\n'), { embed: '', brand: 'Example', lang: 'en' });
+  assert.deepEqual(read('embed: >-\nbrand: Example\n'), { embed: '', brand: 'Example' });
 });
 
-await test('🔴 `|2+` — keep chomping: trailing blank lines are the value\'s, before `---` and before the next key alike', () => {
-  assert.equal(splitFrontmatter(fm('brand: x', asBlock('embed', '|2+', TRAILING))).meta.embed, TRAILING);
-  const next = splitFrontmatter(fm(asBlock('embed', '|2+', TRAILING), 'brand: x'));
-  assert.equal(next.meta.embed, TRAILING);
-  assert.equal(next.meta.brand, 'x', 'the key after a kept block is still read');
+await test('🔴 P2-2 — clip keeps one final break, strip none, keep all', () => {
+  assert.equal(read('embed: |2\n  a\n\n').embed, 'a\n', '`|2` is clip');
+  assert.equal(read('embed: |2-\n  a\n\n').embed, 'a', '`|2-` is strip');
+  assert.equal(read('embed: |2+\n  a\n\n').embed, 'a\n\n', '`|2+` is keep');
+  assert.equal(read('embed: |+2\n  a\n\n').embed, 'a\n\n', 'chomping-then-indent order');
+  assert.equal(read('embed: |+\n  a\n\n').embed, 'a\n\n', 'inferred indent, keep');
 });
 
-await test('`|2+` — whitespace-only lines keep their bytes beyond the indent', () => {
-  // a 5-space line: 2 are the indent, 3 are content
-  assert.equal(splitFrontmatter(fm('embed: |2+', '    <a>', '     ', '    <b>')).meta.embed, '  <a>\n   \n  <b>');
-  assert.equal(splitFrontmatter(fm('embed: |2+', '  <a>', ' ', '  <b>')).meta.embed, '<a>\n\n<b>', 'a whitespace-only line SHORTER than the indent is empty');
+await test('🔴 P2-3 — `>` with indicators folds per §8.1.3', () => {
+  assert.equal(read('embed: >2-\n  one\n\n  two\n').embed, 'one\ntwo', 'a blank line is a newline');
+  assert.equal(read('embed: >2-\n  one\n    code\n  two\n').embed, 'one\n  code\ntwo', 'a more-indented line keeps its breaks');
+  assert.equal(read('embed: >2+\n  one\n  two\n\n').embed, 'one two\n\n', 'kept breaks are not folded');
 });
 
-await test('🔴 `|2` (no chomping indicator) — explicit indent, trailing blank lines stripped', () => {
-  assert.equal(splitFrontmatter(fm('brand: x', asBlock('embed', '|2', TRAILING))).meta.embed, '<pre>hello');
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '|2', LEADING), 'brand: x')).meta.embed, LEADING);
+await test('🔴 P2-4 — inferred indent: a whitespace-only line keeps its bytes beyond the indent', () => {
+  assert.equal(read('embed: |-\n  a\n     \n  b\n').embed, 'a\n   \nb');
+  assert.equal(read('embed: |+\n  a\n     \n  b\n').embed, 'a\n   \nb\n');
 });
 
-await test('`|2-`, `|+`, `|-`, `|+2` — the other spellings read, and `-` is strip', () => {
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '|2-', TRAILING))).meta.embed, '<pre>hello');
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '|-', TRAILING))).meta.embed, '<pre>hello');
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '|+', TRAILING))).meta.embed, TRAILING, '`|+` alone: inferred indent, kept chomping');
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '|+2', LEADING))).meta.embed, LEADING, 'chomping-then-indent order');
-  assert.equal(splitFrontmatter(fm(asBlock('embed', '>2+', 'one\ntwo\n'))).meta.embed, 'one two ', 'folded with indicators folds the kept blank too');
+await test('every oracle row reads as PyYAML 6.0.1 read it', () => {
+  const wrong = ORACLE.filter(([y, want]) => JSON.stringify(read(y)) !== JSON.stringify(want))
+    .map(([y, want]) => `${JSON.stringify(y)}\n      want ${JSON.stringify(want)}\n      got  ${JSON.stringify(read(y))}`);
+  assert.deepEqual(wrong, [], `disagreements:\n    ${wrong.join('\n    ')}`);
 });
 
-await test('an explicit indent still ends the block at a shallower non-blank line, and a value with no lines is empty', () => {
+// The table above is my transcription; this asks PyYAML itself, so a typo in it cannot bless a bug.
+const py = spawnSync('python3', ['-I', '-c', 'import json,sys,yaml\nprint(json.dumps([yaml.safe_load(y) for y in json.load(sys.stdin)]))'], { input: JSON.stringify(ORACLE.map(([y]) => y)), encoding: 'utf8' });
+if (py.status !== 0) {
+  console.log('  · block-scalar-indicators PyYAML ORACLE SKIPPED — python3 with yaml is not available here');
+} else {
+  await test('the oracle table is PyYAML\'s, asked live', () => {
+    assert.deepEqual(JSON.parse(py.stdout), ORACLE.map(([, want]) => want));
+  });
+}
+
+await test('a YAML writer\'s output reads back as the value it wrote, before `---` and before the next key alike', () => {
+  for (const [ind, value] of [['|2-', LEADING], ['|2+', LEADING + '\n'], ['|2+', TRAILING], ['|2', '<pre>hello\n'], ['|-', 'a\n\nb']]) {
+    assert.equal(splitFrontmatter(fm('brand: x', asBlock('embed', ind, value))).meta.embed, value, `${ind} ${JSON.stringify(value)} before ---`);
+    const next = splitFrontmatter(fm(asBlock('embed', ind, value), 'brand: x'));
+    assert.equal(next.meta.embed, value, `${ind} ${JSON.stringify(value)} before a key`);
+    assert.equal(next.meta.brand, 'x', 'the key after the block is still read');
+  }
+});
+
+await test('explicit indent: a whitespace-only line keeps its bytes beyond the indent; shorter than the indent it is empty', () => {
+  assert.equal(splitFrontmatter(fm('embed: |2-', '    <a>', '     ', '    <b>')).meta.embed, '  <a>\n   \n  <b>');
+  assert.equal(splitFrontmatter(fm('embed: |2-', '  <a>', ' ', '  <b>')).meta.embed, '<a>\n\n<b>');
+});
+
+await test('a shallower non-blank line ends an indicator block; a block with no lines is empty', () => {
+  // (YAML itself rejects ` b: 1` here; this reader ends the block at it and reads on, as bare `|` does)
   const r = splitFrontmatter(fm('embed: |2+', '  <a>', ' b: 1', 'brand: x'));
-  assert.equal(r.meta.embed, '<a>');
+  assert.equal(r.meta.embed, '<a>\n');
   assert.equal(r.meta.brand, 'x');
-  assert.equal(splitFrontmatter(fm('embed: |2+', 'brand: x')).meta.embed, '');
   assert.equal(splitFrontmatter(fm('embed: |2+')).meta.embed, '');
 });
 
@@ -137,11 +207,14 @@ const page = (fm, heading) => `---\n${fm}\n---\n\n## ${heading}\n%% sitetile: he
 const pages = { 'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes') };
 const CONTROL = '<script async src="https://example.com/tag.js?id=1&x=2"></script>\n<div id="chat-button" data-x=\'1\'>';
 const ARMS = {
-  leading:  { stored: LEADING,  site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|2+', LEADING)}\n---\n` },
+  // `|2+` keeps the final break: the slot carries LEADING and the line break after it.
+  leading:  { stored: LEADING + '\n', site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|2+', LEADING + '\n')}\n---\n` },
   trailing: { stored: TRAILING, site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|2+', TRAILING)}\n---\n` },
   control:  { stored: CONTROL,  site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|', CONTROL)}\n---\n` },
-  // `|2` with trailing blank lines in the file: the slot carries the value WITHOUT them.
-  stripped: { stored: '<pre>hello', site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|2', TRAILING)}\n---\n` },
+  // `|2-` strips every final break: LEADING byte for byte.
+  stripped: { stored: LEADING, site: `---\nbrand: Tsuru Paper\n${asBlock('embed', '|2-', LEADING)}\n---\n` },
+  // `|2` with two blank lines in the file: clip keeps exactly one final break.
+  clipped:  { stored: '<pre>hello\n', site: '---\nbrand: Tsuru Paper\nembed: |2\n  <pre>hello\n\n\n---\n' },
 };
 const WITHOUT = '---\nbrand: Tsuru Paper\n---\n';
 
