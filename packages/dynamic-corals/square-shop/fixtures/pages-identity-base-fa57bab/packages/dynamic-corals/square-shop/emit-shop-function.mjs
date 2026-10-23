@@ -1,0 +1,604 @@
+// Emit a self-contained CF Pages advanced-mode _worker.js by concatenating the
+// render core + the worker template with baked config. Both source files are ES
+// modules with no imports, so concatenation yields one valid module; CF uses its
+// `export default { fetch }`, the named exports are inert.
+//
+// Usage:
+//   node emit-shop-function.mjs \
+//     [--site-id <siteId> --guild <guildId> --api <apiBase> --name <siteName> --shops '[…]'] \
+//     [--storefronts '[…]']  ← --api is REQUIRED once any storefront is declared \
+//     [--api-contract <path to site-api-transport.contract.json>] \
+//     [--gated-manifest <path to renderer-generated private URL manifest>] \
+//     [--markdown-manifest <path to renderer-generated public route→markdown map>] \
+//     [--query-redirects <path to the site's IR _query-redirects.md>] \
+//     [--platform-origin <origin>] \
+//     [--canonical-host <host>] \
+//     [--dynamic-coral-css layered] \
+//     [--emitter-commit <sha>] \
+//     --out <dist>/_worker.js
+//
+// 🔴 EVERY site gets one of these now, not only shops. The shop flags are the
+// OPTIONAL half: a site with no shop passes none of them and still needs this
+// file, because /api/* and the buyer face reach RSP only through it (see
+// build-deploy-sitetile.sh's "emit the site's dist/_worker.js — EVERY site").
+// That is why --guild no longer exits 2 when absent.
+//
+// 🔴 --api-contract is the ONLY source of the RSP binding name, the forwarded
+// path set and the binding-missing response. The verdict path set comes from
+// the renderer-generated gated manifest, because only the build knows the
+// source-faithful URL actually emitted for each private post.
+// Nothing here restates any of those values; a contract that is passed but
+// malformed is fatal rather than silently degraded, because degrading means
+// shipping a site whose buyer face is missing while the build stays green.
+//
+// 🔴 --platform-origin also has nothing conditional about it: EVERY emitted
+// worker serves `POST /__reef/inbox` (the form coral's `action=inbox` same-
+// origin forwarder — see sitetile's Form.astro), on every site, shop or not.
+// The flag only tells that route which platform origin to relay to; omitted,
+// it defaults to https://platform.invalid — the same default the route falls back
+// to when the flag is absent, so a build invoked by a stale caller (build-
+// deploy-sitetile.sh before it started passing this flag) still serves a
+// working route instead of a 404.
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+// The ONE canonicaliser for query-string 301s (reef#1882). Imported here to compile the site's
+// file, and read as SOURCE below to be concatenated into the worker, so the build that compiles a
+// rule and the worker that matches a request execute the same bytes.
+import { compile as compileQueryRedirects, countRules as countQueryRedirects, QueryRedirectError } from '../../sitetile/query-redirects.mjs';
+// The worker's own route matchers — the same functions the emitted fetch runs — so the build's
+// reserved_path refusal asks them rather than a re-derived list (workerClaims below).
+import {
+	matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchSiteOwnedBuyerPage,
+	matchSubscribeResult, matchForwardRule, matchVerdictRule, YT_POSTER_PATH
+} from './shop-function-template.js';
+
+function arg(name, def = '') {
+	const i = process.argv.indexOf('--' + name);
+	return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
+}
+
+function die(msg) {
+	console.error('emit-shop-function: ' + msg);
+	process.exit(2);
+}
+
+const here = dirname(fileURLToPath(import.meta.url));
+const core = readFileSync(join(here, 'product-page-core.js'), 'utf8');
+const tmpl = readFileSync(join(here, 'shop-function-template.js'), 'utf8');
+const QUERY_REDIRECTS_MODULE = join(here, '..', '..', 'sitetile', 'query-redirects.mjs');
+
+function readRule(rule, where, wantMethods) {
+	if (!rule || typeof rule !== 'object') die(where + ': entry is not an object');
+	if (rule.match !== 'exact' && rule.match !== 'prefix') {
+		die(where + ': match must be "exact" or "prefix", got ' + JSON.stringify(rule.match));
+	}
+	if (typeof rule.value !== 'string' || !rule.value.startsWith('/')) {
+		die(where + ': value must be a site-absolute path, got ' + JSON.stringify(rule.value));
+	}
+	const out = { match: rule.match, value: rule.value };
+	if (wantMethods) {
+		if (!Array.isArray(rule.methods) || rule.methods.length === 0 ||
+			rule.methods.some((m) => typeof m !== 'string' || !m)) {
+			die(where + ' (' + rule.value + '): methods must be a non-empty array of strings');
+		}
+		out.methods = rule.methods.slice();
+	}
+	return out;
+}
+
+function normalizeSitePath(value, where) {
+	if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) {
+		die(where + ': path must be site-absolute, got ' + JSON.stringify(value));
+	}
+	let pathname;
+	try { pathname = new URL(value, 'http://site.invalid').pathname; } catch { die(where + ': invalid path'); }
+	if (pathname.length > 1 && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+	if (pathname.endsWith('/index.html')) pathname = pathname.slice(0, -'/index.html'.length) || '/';
+	return pathname;
+}
+
+function loadGatedManifest(path) {
+	if (!path) return [];
+	let raw;
+	try { raw = readFileSync(path); } catch { die('--gated-manifest not readable: ' + path); }
+	let manifest;
+	try { manifest = JSON.parse(raw.toString('utf8')); } catch { die('--gated-manifest is not valid JSON: ' + path); }
+	const paths = Array.isArray(manifest) ? manifest : manifest && manifest.paths;
+	if (!Array.isArray(paths)) die('--gated-manifest needs a paths array');
+	return [...new Set(paths.map((value, i) => normalizeSitePath(value, 'gated-manifest.paths[' + i + ']')))]
+		.map((value) => ({ match: 'exact', value }));
+}
+
+// The build's own public-static-route → markdown-asset map (the renderer writes it;
+// see sitetile's agent-artifacts `buildMarkdownMapping`). Only the bounded
+// `{path: asset}` pairs are baked: the worker looks a path up, it never rebuilds a
+// URL family from them.
+//
+// 🔴 A route that is ALSO in the gated manifest is FATAL, by path, at emit time.
+// A private post whose markdown twin were mapped would hand the paywalled body out
+// on a path the verdict branch never sees, and it would do it with the build green.
+// Both sides go through normalizeSitePath first, so the two sets are compared in one
+// spelling and a trailing slash cannot hide a collision. The gated set is read here
+// rather than taken from the contract, so the refusal does not depend on --api-contract
+// also being present.
+//
+// 🔴 An EDGE-RENDERED route is DROPPED here, not refused. The renderer's mapping is
+// built from the build's public content pages, and a storefront page IS a content
+// page — so a storefront site's mapping legitimately arrives carrying `/shop` (and
+// each locale's `/xx/shop`). The generator cannot know which of its pages the worker
+// will answer itself; this emitter is where both facts meet, so this is where the
+// mapping is reduced to the routes ASSETS really serves. Dropping rather than dying
+// is the point: a storefront site must still build, and a stale markdown twin of a
+// shop page would otherwise answer a markdown Accept with build-time HTML the shop
+// branch has since replaced. Every drop is named on stderr — silently shrinking the
+// mapping would make a missing twin look like a renderer bug.
+//
+// An empty routes array bakes nothing at all, so a site with the flag but no public
+// page keeps the config a flagless build would have produced.
+function loadMarkdownManifest(path, edgeRendered) {
+	if (!path) return null;
+	let raw;
+	try { raw = readFileSync(path); } catch { die('--markdown-manifest not readable: ' + path); }
+	let manifest;
+	try { manifest = JSON.parse(raw.toString('utf8')); } catch { die('--markdown-manifest is not valid JSON: ' + path); }
+	if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) die('--markdown-manifest is not an object: ' + path);
+	if (manifest.schemaVersion !== 1) {
+		die('--markdown-manifest schemaVersion must be 1, got ' + JSON.stringify(manifest.schemaVersion));
+	}
+	if (!Array.isArray(manifest.routes)) die('--markdown-manifest needs a routes array');
+	const gated = new Set(loadGatedManifest(arg('gated-manifest')).map((rule) => rule.value));
+	// Both already normalized by the descriptor/contract loaders above, so the shop
+	// path is compared in the one spelling normalizeSitePath produces — `/shop`, never
+	// `/shop/`. `<shopPath>/…` is the same prefix the worker's own shop branch owns.
+	const shopPaths = (edgeRendered && edgeRendered.shopPaths) || [];
+	const buyerPages = new Set((edgeRendered && edgeRendered.buyerPagePaths) || []);
+	const isEdgeRendered = (value) => buyerPages.has(value) ||
+		shopPaths.some((shopPath) => value === shopPath || value.startsWith(shopPath + '/'));
+	const routes = {};
+	const dropped = [];
+	manifest.routes.forEach((entry, i) => {
+		const where = 'markdown-manifest.routes[' + i + ']';
+		if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
+		const value = normalizeSitePath(entry.path, where + '.path');
+		const asset = normalizeSitePath(entry.asset, where + '.asset');
+		if (gated.has(value)) {
+			die('--markdown-manifest maps the gated path ' + value + ' (also in --gated-manifest); a private route must have no markdown twin');
+		}
+		if (isEdgeRendered(value)) {
+			if (!dropped.includes(value)) dropped.push(value);
+			return;
+		}
+		if (routes[value] !== undefined && routes[value] !== asset) {
+			die(where + ': ' + value + ' is already mapped to ' + routes[value]);
+		}
+		routes[value] = asset;
+	});
+	if (dropped.length) {
+		console.error('emit-shop-function: dropped ' + dropped.length + ' edge-rendered route(s) from --markdown-manifest: ' +
+			dropped.join(', ') + ' (this worker answers them itself; ASSETS has no twin to negotiate)');
+	}
+	return Object.keys(routes).length > 0 ? { routes } : null;
+}
+
+// The site's query-string 301 table (reef#1882): `_query-redirects.md` from the site's IR, in the
+// three-column `_redirects` grammar with `?k=v` allowed in `from`. Cloudflare never reads that
+// file — `_redirects` cannot match a query string — so it is compiled HERE into a map the worker
+// consults before the static assets.
+//
+// Same posture as --markdown-manifest: absent flag ⇒ absent key ⇒ byte-identical worker; a file
+// with no rules bakes nothing either; malformed or refused ⇒ FATAL, with the refusal's name and
+// line, because a build that silently dropped a rule would ship a site that lost a 301 while
+// staying green. Every refusal lives in packages/sitetile/query-redirects.mjs — this loader only
+// adds what the module cannot know: which requests THIS worker answers itself (workerClaims,
+// below). A rule on one of those could never fire, so it is refused by path, early and by name.
+function loadQueryRedirects(path, reserved) {
+	if (!path) return null;
+	let text;
+	try { text = readFileSync(path, 'utf8'); } catch { die('--query-redirects not readable: ' + path); }
+	let map;
+	try {
+		map = compileQueryRedirects(text, reserved);
+	} catch (e) {
+		if (e instanceof QueryRedirectError) die('--query-redirects ' + path + ': ' + e.message);
+		throw e;
+	}
+	return countQueryRedirects(map) > 0 ? map : null;
+}
+
+// Which worker branch claims this request, or null when it would reach env.ASSETS — asked with the
+// worker's OWN matchers, imported from the template, against the config it bakes. 🩸 tile#158 r3/r4:
+// the reservation used to be lists re-derived here (storefront prefixes, contract values), and each
+// round found a matcher the lists spelled or scoped differently — `/api` forwards `/apix` by
+// startsWith, the completion matcher claims `/fr/shop/complete` with no `/fr/shop` storefront.
+// The order is fetch's own, up to the ASSETS fall-through. Unlike fetch, a match counts even when
+// its handler may still decline (a subscribe-result candidate RSP does not confirm, a completion
+// asked with HEAD): refusing such a rule early is friendlier than shipping one that half-fires.
+function workerClaims(request, cfg) {
+	let pathname;
+	try { pathname = new URL(request.url).pathname; } catch { return null; }
+	const shopDescriptors = cfg.shops || [];
+	const shops = shopDescriptors.slice().sort((a, b) => b.shopPath.length - a.shopPath.length);
+	const transport = cfg.apiTransport;
+	if (pathname === '/__reef/inbox') return 'the inbox';
+	if (YT_POSTER_PATH.test(pathname)) return 'the YouTube poster relay';
+	if (matchNativeCheckoutSuccess(request, shopDescriptors, transport && transport.checkoutResult)) return 'the checkout result';
+	if (matchSiteOwnedBuyerPage(request, transport && transport.siteOwnedBuyerPages)) return 'a site-owned buyer page';
+	if (matchSubscribeResult(request, transport && transport.subscribeResult)) return 'the subscribe result';
+	if (transport && matchForwardRule(transport.forward, pathname, request.method)) return 'a forward to ' + transport.bindingName;
+	if (transport && matchVerdictRule(transport.verdict, pathname)) return 'the verdict gate';
+	if (matchShopComplete(pathname, shops)) return 'checkout completion';
+	let product = null;
+	try { product = matchShop(pathname, shops); } catch { product = null; }
+	if (product || matchShopIndex(pathname, shops)) return 'a storefront';
+	return null;
+}
+
+// Reduce the contract to exactly the fields the worker executes. The prose
+// (reason/ruling/notes) stays in the contract file and out of the bundle; the
+// sha256 below is over the WHOLE file, so the bundle still names the exact
+// contract it was baked from.
+function loadApiTransport(path) {
+	let raw;
+	try { raw = readFileSync(path); } catch (e) { die('--api-contract not readable: ' + path); }
+	let contract;
+	try { contract = JSON.parse(raw.toString('utf8')); } catch (e) { die('--api-contract is not valid JSON: ' + path); }
+	if (!contract || typeof contract !== 'object') die('--api-contract is not an object: ' + path);
+
+	if (typeof contract.bindingName !== 'string' || !contract.bindingName) {
+		die('--api-contract has no bindingName');
+	}
+	if (!Array.isArray(contract.forward) || contract.forward.length === 0) {
+		die('--api-contract has no forward rules');
+	}
+	const obm = contract.onBindingMissing;
+	if (!obm || typeof obm !== 'object') die('--api-contract has no onBindingMissing');
+	if (typeof obm.status !== 'number' || !Number.isInteger(obm.status)) {
+		die('--api-contract onBindingMissing.status must be an integer');
+	}
+	if (typeof obm.cacheControl !== 'string' || !obm.cacheControl) {
+		die('--api-contract onBindingMissing.cacheControl must be a non-empty string');
+	}
+
+	const forward = contract.forward.map((r, i) => readRule(r, 'forward[' + i + ']', true));
+	const verdict = loadGatedManifest(arg('gated-manifest'));
+
+	const ve = contract.verdictEndpoint;
+	if (!ve || typeof ve !== 'object') {
+		die('--api-contract has no verdictEndpoint');
+	}
+	if (ve.version !== 2) {
+		die('--api-contract verdictEndpoint.version must be supported v2 (2), got ' + JSON.stringify(ve.version));
+	}
+	if (ve.path !== '/seam/site-verdict-v2') {
+		die('--api-contract verdictEndpoint.path must be /seam/site-verdict-v2, got ' + JSON.stringify(ve.path));
+	}
+	if (ve.param !== 'path') {
+		die('--api-contract verdictEndpoint.param must be path, got ' + JSON.stringify(ve.param));
+	}
+	const verdictEndpoint = { version: ve.version, path: ve.path, param: ve.param };
+	let checkoutResult = null;
+	if (contract.checkoutResult != null) {
+		const cr = contract.checkoutResult;
+		if (!cr || typeof cr !== 'object') die('--api-contract checkoutResult is not an object');
+		const path = normalizeSitePath(cr.path, 'checkoutResult.path');
+		const outcomePath = normalizeSitePath(cr.outcomePath, 'checkoutResult.outcomePath');
+		if (cr.method !== 'GET') die('--api-contract checkoutResult.method must be GET');
+		if (typeof cr.orderParam !== 'string' || !/^[A-Za-z0-9_]+$/.test(cr.orderParam)) {
+			die('--api-contract checkoutResult.orderParam must be a non-empty query parameter name');
+		}
+		checkoutResult = { path, method: cr.method, orderParam: cr.orderParam, outcomePath };
+	}
+
+	// The pages the contract assigns to the SITE's own presentation: which path,
+	// which facts endpoint behind the binding, and which body renderer serves it.
+	// Absent (an older contract) bakes nothing, so those paths keep the generic
+	// forward behaviour already-emitted workers have.
+	let siteOwnedBuyerPages = [];
+	if (contract.siteOwnedBuyerPages != null) {
+		if (!Array.isArray(contract.siteOwnedBuyerPages)) die('--api-contract siteOwnedBuyerPages must be an array');
+		siteOwnedBuyerPages = contract.siteOwnedBuyerPages.map((entry, i) => {
+			const where = 'siteOwnedBuyerPages[' + i + ']';
+			if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
+			if (entry.method !== 'GET') die(where + ': method must be GET, got ' + JSON.stringify(entry.method));
+			// `kind` names the body renderer this emitter HAS. An unknown one would
+			// ship a page with nothing in it while the build stayed green, so it is
+			// fatal here — a new kind arrives with the renderer that serves it.
+			if (entry.kind !== 'membership' && entry.kind !== 'account') {
+				die(where + ': kind must be a renderer this emitter has (membership|account), got ' + JSON.stringify(entry.kind));
+			}
+			return {
+				path: normalizeSitePath(entry.path, where + '.path'),
+				method: entry.method,
+				kind: entry.kind,
+				factsPath: normalizeSitePath(entry.factsPath, where + '.factsPath')
+			};
+		});
+	}
+
+	// The subscribe result landing — the same site-owned presentation class as the
+	// pages above, but one entry rather than a list because there is one such page
+	// and it selects no renderer by `kind`. Absent (every contract before this
+	// capability) bakes nothing, so the path keeps the generic forward.
+	let subscribeResult = null;
+	if (contract.subscribeResult != null) {
+		const sr = contract.subscribeResult;
+		if (!sr || typeof sr !== 'object') die('--api-contract subscribeResult is not an object');
+		const path = normalizeSitePath(sr.path, 'subscribeResult.path');
+		const factsPath = normalizeSitePath(sr.factsPath, 'subscribeResult.factsPath');
+		if (sr.method !== 'GET') die('--api-contract subscribeResult.method must be GET, got ' + JSON.stringify(sr.method));
+		// The worker puts this name straight into the facts query string, so a value
+		// that is not a bare parameter name would be a different request than the
+		// contract declared. Fatal here rather than silently escaped there.
+		if (typeof sr.sessionParam !== 'string' || !/^[A-Za-z0-9_]+$/.test(sr.sessionParam)) {
+			die('--api-contract subscribeResult.sessionParam must be a non-empty query parameter name, got ' + JSON.stringify(sr.sessionParam));
+		}
+		subscribeResult = { path, method: sr.method, sessionParam: sr.sessionParam, factsPath };
+	}
+
+	return {
+		transport: {
+			bindingName: contract.bindingName,
+			forward,
+			verdictEndpoint,
+			...(checkoutResult ? { checkoutResult } : {}),
+			...(siteOwnedBuyerPages.length > 0 ? { siteOwnedBuyerPages } : {}),
+			...(subscribeResult ? { subscribeResult } : {}),
+			...(verdict.length > 0 ? { verdict } : {}),
+			onBindingMissing: { status: obm.status, cacheControl: obm.cacheControl }
+		},
+		verdictTransport: 'exact-v2',
+		sha256: createHash('sha256').update(raw).digest('hex'),
+		path
+	};
+}
+
+function emitterCommit() {
+	const given = arg('emitter-commit');
+	if (given) return given;
+	try {
+		return execFileSync('git', ['-C', here, 'rev-parse', 'HEAD'], {
+			encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+		}).trim() || 'unknown';
+	} catch (e) {
+		// git archive / a runner image has no .git — say so instead of guessing.
+		return 'unknown';
+	}
+}
+
+const contractPath = arg('api-contract');
+const loaded = contractPath ? loadApiTransport(contractPath) : null;
+
+const guildId = arg('guild');
+const siteId = arg('site-id');
+// Build-only input: never put signing keys in argv, logs, or provenance.
+const inboxForwardKey = (process.env.INBOX_FORWARD_SITE_KEY || '').trim();
+if (inboxForwardKey && !arg('out')) die('INBOX_FORWARD_SITE_KEY requires --out to keep the key out of stdout');
+let legacyShops = [];
+try { legacyShops = JSON.parse(arg('shops', '[]')); } catch { legacyShops = []; }
+if (!Array.isArray(legacyShops)) legacyShops = [];
+
+// A locator names a site; it does not declare a buyer surface. Structured page
+// descriptors are the only input that can put a path in this dispatch table.
+// `--shops` supplies locale/label metadata only after a descriptor selected it.
+let storefronts = [];
+try { storefronts = JSON.parse(arg('storefronts', '[]')); } catch { die('--storefronts must be valid JSON'); }
+if (!Array.isArray(storefronts)) die('--storefronts must be an array');
+const shops = storefronts.flatMap((entry, index) => {
+	if (!entry || typeof entry !== 'object' || typeof entry.path !== 'string') die(`--storefronts[${index}] needs a path`);
+	const shopPath = normalizeSitePath(entry.path, `--storefronts[${index}]`);
+	const legacy = legacyShops.find((shop) => shop && typeof shop.shopPath === 'string' && normalizeSitePath(shop.shopPath, '--shops') === shopPath) || {};
+	if (entry.source !== 'native' && entry.source !== 'provider') {
+		if (entry.source == null) die(`--storefronts[${index}] source is required`);
+		die(`--storefronts[${index}] source must be native or provider, got ${JSON.stringify(entry.source)}`);
+	}
+	if (entry.source === 'provider' && (entry.provider !== 'stripe' && entry.provider !== 'square')) {
+		die(`--storefronts[${index}] provider must be stripe or square`);
+	}
+	const descriptor = {
+		shopPath,
+		source: entry.source,
+		...(entry.source === 'provider' ? { provider: entry.provider } : {}),
+		labels: legacy.labels || {},
+		...(legacy.locale ? { locale: legacy.locale } : {})
+	};
+	return [descriptor];
+});
+
+// 🔴 The site's OWN inbox forwarder route (`POST /__reef/inbox`) is baked into
+// EVERY emitted worker regardless of any flag — see shop-function-template.js.
+// `--platform-origin` only names where that route relays to; it always defaults
+// to https://platform.invalid so a stale invocation (no flag at all) still serves
+// the route correctly instead of 404ing the form. Never omitted from config: an
+// absent flag must bake the SAME default the route falls back to on its own, so
+// the two can never read differently.
+// The origin the SHOP branch falls back to when a site does not proxy /api itself
+// (shop-function-template.js#fetchProductJson tries same-origin first, then this).
+//
+// 🔴 It used to be a baked default naming one deployment's legacy backend. That literal cannot
+// live in this repo: this is public and MIT, and which backend a particular deployment runs is a
+// fact about somebody's infrastructure, not about this emitter. It comes from the caller now —
+// `--api`, or `SQUARE_SHOP_API_BASE` for a caller that would rather configure than pass a flag.
+//
+// 🔴 FATAL when a storefront is configured and no base was given, rather than emitting an empty
+// one. An empty base is not "no fallback": in a Worker, `fetch('/api/…')` with a relative URL
+// THROWS, so a shop whose same-origin proxy is absent would lose its product pages while the
+// build stayed green. This file's own rule (see --api-contract above) is that a missing input is
+// fatal rather than silently degraded, because degrading ships a site with no buyer face. A
+// shopless site never reads apiBase — that branch is unreachable for it — so it still builds
+// with the empty value, exactly as inert as the baked hostname was.
+const apiBase = arg('api', process.env.SQUARE_SHOP_API_BASE || '');
+if (!apiBase && shops.length) {
+	die('a storefront is configured but no shop API base was given — pass --api <origin> '
+		+ '(or set SQUARE_SHOP_API_BASE). Emitting an empty one would lose the product-detail '
+		+ 'fallback on any site that does not proxy /api itself.');
+}
+
+const platformOrigin = arg('platform-origin', 'https://platform.invalid');
+const canonicalHostArg = arg('canonical-host');
+let canonicalHost = '';
+if (canonicalHostArg) {
+	canonicalHost = canonicalHostArg.trim().toLowerCase();
+	if (canonicalHost !== canonicalHostArg || canonicalHost.includes('://') || canonicalHost.includes('/') ||
+		canonicalHost.includes(':') || !canonicalHost.includes('.')) {
+		die('--canonical-host must be a lowercase bare host, got ' + JSON.stringify(canonicalHostArg));
+	}
+}
+
+// 🔴 Where this site's dynamic-coral package CSS sits in the cascade, baked so the Worker's own
+// emitted <style> blocks land in the same layer the statically-built pages declared. The caller
+// derives it from the site's BASE `_site.md` — the same read the renderer's document-root stamp
+// comes from — so the stamp and this config cannot disagree; a site is wholly legacy or wholly
+// layered. Flag absent ⇒ key absent from the baked config ⇒ today's unlayered bytes, so a site
+// that never declares is emitted exactly as it was before this flag existed.
+//
+// Fatal on an unrecognised value rather than defaulted: the renderer already fails its own build
+// closed on one, and if this side quietly chose legacy instead, a typo would ship a worker whose
+// CSS layer contradicts the very document root it injects into, with the build green.
+const DYNAMIC_CORAL_CSS_LAYERED = 'layered';
+const dynamicCoralCss = arg('dynamic-coral-css');
+if (dynamicCoralCss && dynamicCoralCss !== DYNAMIC_CORAL_CSS_LAYERED) {
+	die('--dynamic-coral-css: invalid value ' + JSON.stringify(dynamicCoralCss) +
+		'. The only accepted value is ' + JSON.stringify(DYNAMIC_CORAL_CSS_LAYERED) +
+		'; omit the flag for the legacy unlayered default.');
+}
+
+// The two sets of paths this worker answers ITSELF, read from what was already
+// resolved above: the storefront descriptors and the contract's site-owned buyer
+// pages. Nothing else reaches the mapping — the gated set is read inside.
+const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
+	shopPaths: shops.map((shop) => shop.shopPath),
+	buyerPagePaths: [
+		...((loaded && loaded.transport.siteOwnedBuyerPages) || []).map((entry) => entry.path),
+		// Claimed unconditionally when the capability is baked, so ASSETS has no twin
+		// to negotiate for it either.
+		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : [])
+	]
+});
+
+const config = {
+	guildId,
+	// Omitted entirely when absent, so a guild-only site's baked config is the
+	// same bytes it was before site identity reached this emitter.
+	...(siteId ? { siteId } : {}),
+	...(inboxForwardKey ? { inboxForwardKey } : {}),
+	// 🔴 A **SITE** coral — no Card can embed it. See ./README.md before concluding otherwise.
+	// 🔴 Belongs to the SHOP branch only. The forward/verdict branches never read
+	// it: they go over the service binding, whose target is the contract's
+	// bindingName and nothing else.
+	//
+	// 🔴 NO HOSTNAME LIVES HERE, and the empty string is not a fallback — it is the
+	// absence of one. See `apiBase` above the config for why a shop that names none
+	// is fatal rather than degraded.
+	apiBase,
+	siteName: arg('name', ''),
+	shops,
+	verdictTransport: loaded ? loaded.verdictTransport : null,
+	apiTransport: loaded ? loaded.transport : null,
+	platformOrigin,
+	...(canonicalHost ? { canonicalHost } : {}),
+	// Absent flag ⇒ absent key, so an undeclared site's baked config is the same bytes it was
+	// before this flag existed. Only the coral-CSS emission sites read it.
+	...(dynamicCoralCss ? { dynamicCoralCss } : {}),
+	// Absent flag ⇒ absent key, so a worker emitted without --markdown-manifest is
+	// the same bytes this emitter produced before the flag existed.
+	...(markdown ? { markdown } : {})
+};
+
+// Compiled against the config just assembled, so the refusal asks the worker's matchers about the
+// exact shops and transport it will bake: a `from` the worker would claim for GET or HEAD is
+// `reserved_path`. Appended LAST — absent flag (or a file with no rules) ⇒ absent key ⇒ the same
+// bytes as before the flag existed.
+const claimedBy = (href) => workerClaims(new Request(href), config) || workerClaims(new Request(href, { method: 'HEAD' }), config);
+const queryRedirects = loadQueryRedirects(arg('query-redirects'), { claimedBy });
+if (queryRedirects) config.queryRedirects = queryRedirects;
+
+// Keep flagless output byte-for-byte unchanged: both placeholders disappear.
+// The redirect implementation only enters workers explicitly emitted with the flag.
+const canonicalHelpers = canonicalHost ? `function canonicalRedirect(request, canonicalHost) {
+\tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
+\tconst url = new URL(request.url);
+\tconst normalize = (value) => String(value || '').trim().toLowerCase().split(':')[0];
+\tconst host = normalize(request.headers.get('host') || url.hostname);
+\tconst canonical = normalize(canonicalHost);
+\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview');
+\tif (!host || !canonical || preview(host) || preview(canonical) || host === 'localhost' || host === '127.0.0.1') return null;
+\tif (host === canonical) return null;
+\tif (host !== 'www.' + canonical && !host.endsWith('.' + canonical)) return null;
+\treturn new Response(null, { status: 301, headers: { location: 'https://' + canonical + url.pathname + url.search } });
+}
+
+` : '';
+const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalRedirect(request, CFG.canonicalHost);
+\t\tif (canonicalResponse) return canonicalResponse;
+` : '';
+
+// Query-string 301s (reef#1882). Same discipline as the canonical-host pair above: both
+// placeholders disappear when nothing was baked, so a flagless worker is byte-identical to one
+// emitted before this existed. When rules ARE baked, the shared module is concatenated in as a
+// third source (it is an import-free ES module like the other two), the glue below turns its
+// `lookupQueryRedirect` into a Response, and the branch runs LAST in fetch: at the one point where
+// the request would otherwise be handed to env.ASSETS (before markdown negotiation, which only
+// re-serves the same static page), after every worker-owned matcher — inbox, YouTube poster,
+// checkout and subscribe results, buyer pages, forwards of every match kind, the verdict gate,
+// storefronts and checkout completion, locale fallback included — has declined. 🔴 That placement
+// IS the guarantee that a rule can never take a page away from the worker (tile#158 r4): two rounds
+// of reservation-list holes showed a list compiled beside the matchers cannot keep up with them.
+// The compile-time `reserved_path` refusal (workerClaims, above) is the early, friendly half and
+// asks those same matchers; this half holds even when it misses. The completion family is skipped
+// for every method, not only the GET it renders, so one path never answers HEAD with a 301 and GET
+// with a page. The canonical-host hop is still first, so the 301 lands on the canonical host, and
+// nothing before this point rewrites `request`, so the key is still read off the ORIGINAL request.
+// Cost on a request with no query: one string scan of request.url, no URL constructed (a
+// serialised URL can only carry `?` as the query delimiter). On a path not in the map: one URL
+// parse and one object index. GET/HEAD only, like the canonical-host 301. The
+// query is the KEY and is not re-appended to Location — doing so would mint a second URL for the
+// target. 🔴 This branch never turns a request into an error: anything that throws while building
+// the 301 (a baked Location no Headers accepts, tile#158 r2) falls through to the static path.
+const queryRedirectHelpers = queryRedirects ? `function matchQueryRedirect(request, byPath) {
+\tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
+\tconst q = request.url.indexOf('?');
+\tif (q === -1 || q === request.url.length - 1) return null;
+\ttry {
+\t\tconst url = new URL(request.url);
+\t\tconst to = lookupQueryRedirect(url.pathname, url.search, byPath);
+\t\treturn to === null ? null : new Response(null, { status: 301, headers: { location: to } });
+\t} catch (e) { return null; }
+}
+
+` : '';
+const queryRedirectFetch = queryRedirects ? `\t\tconst queryRedirectResponse = complete ? null : matchQueryRedirect(request, CFG.queryRedirects.byPath);
+\t\tif (queryRedirectResponse) return queryRedirectResponse;
+` : '';
+const queryRedirectRuntime = queryRedirects ? readFileSync(QUERY_REDIRECTS_MODULE, 'utf8') + '\n' : '';
+
+// A function replacement, so a `$&` / `$'` / `$$` inside a baked value (a site
+// name, a label, a contract path) is inserted literally instead of being read as
+// a replacement pattern.
+const body = tmpl
+	.replace('/*__CANONICAL_HELPERS__*/', () => canonicalHelpers)
+	.replace('/*__QUERY_REDIRECT_HELPERS__*/', () => queryRedirectHelpers)
+	.replace('/*__CANONICAL_FETCH__*/', () => canonicalFetch)
+	.replace('/*__QUERY_REDIRECT_FETCH__*/', () => queryRedirectFetch)
+	.replaceAll('__SHOP_CONFIG__', () => JSON.stringify(config));
+const provenance =
+	'// GENERATED — do not edit. Source: tile/packages/dynamic-corals/square-shop/{product-page-core,shop-function-template}.js\n' +
+	'// emitter commit: ' + emitterCommit() + '\n' +
+	'// api contract: ' + (loaded ? loaded.path + ' sha256=' + loaded.sha256 : 'none (no --api-contract given; this site forwards nothing to RSP)') + '\n';
+const out = provenance + core + '\n' + queryRedirectRuntime + body;
+
+const outFile = arg('out');
+if (!outFile) {
+	process.stdout.write(out);
+} else {
+	mkdirSync(dirname(outFile), { recursive: true });
+	writeFileSync(outFile, out);
+	console.error('emit-shop-function: wrote ' + outFile +
+		' (site=' + (siteId || 'none') + ', guild=' + (guildId || 'none') +
+		', shops=' + (shops.map((s) => s.shopPath).join(',') || 'none') +
+		', transport=' + (loaded ? loaded.transport.bindingName + ' ' + loaded.transport.forward.length + ' forward/' + (loaded.transport.verdict || []).length + ' verdict' : 'none') +
+		', markdown=' + (markdown ? Object.keys(markdown.routes).length + ' routes' : 'none') +
+		(queryRedirects ? ', queryRedirects=' + countQueryRedirects(queryRedirects) + ' rules' : '') + ')');
+}

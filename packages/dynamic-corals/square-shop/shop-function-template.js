@@ -66,10 +66,99 @@ function shopLocatorParam(cfg) {
 		: `site_id=${encodeURIComponent(cfg.siteId || '')}`;
 }
 
+// ─── PLATFORM READS ───────────────────────────────────────────────────────────
+// Every SERVER-SIDE read this worker makes of the platform while composing a page
+// (buyer-page facts, the private-path verdict, the native catalog projection) goes
+// through ONE reader, chosen per request, in order. The provider catalog reads are
+// not among them: they stay the own-host fetch (see fetchProductJson).
+//
+//   1. the RSP service binding, env[bindingName] — today's Pages path. The reader IS
+//      the binding object itself, so that path makes exactly the calls it always did.
+//   2. a request-scoped capability stub the dispatcher handed this request in
+//      ctx.props.CONNECTOR (Workers for Platforms; GET-only, read routes only).
+//      Selected only on a worker baked with a transport contract, like tier 1.
+//      🔴 Read off THIS request's ctx every time and never kept anywhere else: a
+//      stub used outside the request that carried it throws a cross-request I/O error.
+//   3. a per-Site read token baked into the config as readToken: { origin, token }:
+//      a public GET to that origin, carrying the token in PLATFORM_READ_TOKEN_HEADER
+//      only on the routes RSP accepts it for (PLATFORM_READ_TOKEN_PATHS); RSP refuses
+//      the token on any other route. Absent by default; nothing in this file issues or
+//      rotates one.
+//
+// The first tier present is THE tier: a selected tier that fails is that read
+// failing, never a cue to try the next one. None present → null, and each caller
+// answers its own honest unavailability exactly as it does today when the binding
+// is missing — never a 200.
+//
+// 🔴 Browser-facing forwards (the contract's `forward` set) are NOT reads and never
+// come here: they keep the binding and nothing else (see fetch below), because the
+// visitor's own request — cookies, body, Origin — must not ride a read capability.
+const PLATFORM_READ_STUB_PROP = 'CONNECTOR';
+const PLATFORM_READ_TOKEN_HEADER = 'x-site-read-token';
+const PLATFORM_READ_TOKEN_PATHS = ['/api/membership/plans', '/api/account/surface', '/api/subscribe/result', '/seam/site-verdict-v2', '/api/v2/storefront/native'];
+function platformReader(env, ctx, cfg) {
+	const transport = cfg && cfg.apiTransport;
+	const name = transport && transport.bindingName;
+	const binding = name && env ? env[name] : null;
+	if (binding) return binding;
+	const props = ctx && ctx.props;
+	const stub = name && props ? props[PLATFORM_READ_STUB_PROP] : null;
+	if (stub && typeof stub.fetch === 'function') return stub;
+	const rt = cfg && cfg.readToken;
+	if (rt && typeof rt.origin === 'string' && rt.origin && typeof rt.token === 'string' && rt.token) {
+		return platformTokenReader(rt.origin, rt.token);
+	}
+	return null;
+}
+
+// Tier 3: the same Request a binding would have been handed, re-addressed to the
+// token's origin. The path and query travel as the caller built them, and the
+// visitor's own headers (cookie included) ride along as on the other tiers; `host` is
+// the Worker's own and is dropped so the fetch addresses the token's origin. Whatever
+// token header the visitor sent is always dropped; the Site's token is added only on a
+// route RSP accepts it for. (An outbound REQUEST's headers, built as a fresh object; no
+// response header is touched.)
+function platformTokenReader(origin, token) {
+	return {
+		fetch(req) {
+			const url = new URL(req.url);
+			const outbound = {};
+			for (const [k, v] of req.headers) if (k !== 'host' && k !== PLATFORM_READ_TOKEN_HEADER) outbound[k] = v;
+			if (PLATFORM_READ_TOKEN_PATHS.includes(url.pathname)) outbound[PLATFORM_READ_TOKEN_HEADER] = token;
+			return fetch(new Request(origin + url.pathname + url.search, { method: 'GET', headers: outbound }));
+		}
+	};
+}
+
+// ─── EDGE CACHE ───────────────────────────────────────────────────────────────
+// caches.default is an optimisation, never a dependency. Where it is absent, or where the
+// runtime refuses it (a Workers-for-Platforms namespace answers "not permitted"), every use
+// below degrades to a cache MISS and the response is never put — the page is still served.
+// Where it works, the calls are the same ones the worker always made.
+function edgeCache() {
+	try { return (typeof caches !== 'undefined' && caches.default) ? caches.default : null; } catch (e) { return null; }
+}
+// A lookup that threw marks the cache unusable for this request (cache: null), so no put follows.
+async function edgeCacheLookup(cache, key) {
+	if (!cache) return { cache: null, hit: null };
+	try { return { cache, hit: await cache.match(key) }; } catch (e) { return { cache: null, hit: null }; }
+}
+// A put that throws, synchronously or later, is dropped; it never decides the response.
+function edgeCachePut(cache, key, res) {
+	try { return Promise.resolve(cache.put(key, res)).catch(() => {}); } catch (e) { return Promise.resolve(); }
+}
+
 // Resolve the product JSON. Prefer SAME-ORIGIN /api (proxied through CF's backbone, ~0.08s) over
 // the raw backend origin (cross-region public internet + dyno wake, ~1s+ — verified live). Validate
 // it's actually JSON: CF Pages serves a 200 HTML SPA-fallback for unknown paths, so `ok` isn't
 // enough. Fall back to the configured apiBase so a site that doesn't proxy /api still works.
+//
+// The catalog reads (this one and fetchCatalogList) stay the own-host fetch on EVERY tier and
+// never use the platform reader, binding, stub or token: the serving-topology owner
+// (plan/canonical/site/platform.md) limits server-side read routes to buyer-page facts, the
+// private-path verdict and the native catalog projection, and excludes any route rate-limited
+// per visitor, because a server-side hop does not carry the visitor's address. Under a
+// platform namespace the own-host GET reaches the dispatch Worker, which forwards it to RSP.
 async function fetchProductJson(origin, apiBase, locator, slug, rail) {
 	const path = `/api/v2/shop/catalog/item?${locator}&slug=${encodeURIComponent(slug)}&payment_rail=${encodeURIComponent(rail)}`;
 	try {
@@ -92,9 +181,9 @@ async function renderProduct(request, env, ctx, cfg, match) {
 
 	// Edge-cache the rendered product HTML (public, max-age 60). Key on path only so query strings
 	// don't fragment it; a warm hit skips the API + shell round-trips entirely.
-	const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+	let cache = edgeCache();
 	const cacheKey = cache ? new Request(origin + url.pathname) : null;
-	if (cache) { const hit = await cache.match(cacheKey); if (hit) return hit; }
+	if (cache) { const looked = await edgeCacheLookup(cache, cacheKey); cache = looked.cache; if (looked.hit) return looked.hit; }
 
 	try {
 		// product data + shell donor are independent → fetch them IN PARALLEL
@@ -123,7 +212,7 @@ async function renderProduct(request, env, ctx, cfg, match) {
 			body = shell;
 		}
 		const res = htmlResponse(body);
-		if (cache && ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cacheKey, res.clone()));
+		if (cache && ctx && ctx.waitUntil) ctx.waitUntil(edgeCachePut(cache, cacheKey, res.clone()));
 		return res;
 	} catch (e) {
 		return Response.redirect(shopUrl + '/', 302);
@@ -591,13 +680,13 @@ async function readBuyerPageFacts(request, binding, transport, factsUrl) {
 	return { ok: true, status: 200, data };
 }
 
-async function renderSiteOwnedBuyerPage(request, env, cfg, route) {
+async function renderSiteOwnedBuyerPage(request, env, cfg, route, ctx) {
 	const transport = cfg.apiTransport;
 	let origin;
 	try { origin = new URL(request.url).origin; } catch (e) { return buyerPageErrorResponse(503); }
 	try {
 		const [facts, shellRes] = await Promise.all([
-			readBuyerPageFacts(request, env[transport.bindingName], transport, origin + route.factsPath),
+			readBuyerPageFacts(request, platformReader(env, ctx, cfg), transport, origin + route.factsPath),
 			env.ASSETS.fetch(new Request(origin + '/', request))
 		]);
 		if (!shellRes || !shellRes.ok) return buyerPageErrorResponse(503);
@@ -713,7 +802,7 @@ function subscribeResultUnavailableBody(copy) {
 		'<p class="st-runtime-status" data-ejecta-subscribe-unavailable="" role="status">' + escHtml(copy.unavailable) + '</p>\n</section>';
 }
 
-async function renderSubscribeResult(request, env, cfg, route) {
+async function renderSubscribeResult(request, env, cfg, route, ctx) {
 	const transport = cfg.apiTransport;
 	let url;
 	try { url = new URL(request.url); } catch (e) { return buyerPageErrorResponse(503); }
@@ -736,7 +825,7 @@ async function renderSubscribeResult(request, env, cfg, route) {
 		// No locator means there is nothing to ask about — the answer is already
 		// "we couldn't find this subscription" — so the seam is not called at all.
 		// Only the locator is sent: the plan is RSP's to name, never the query's.
-		const readFacts = () => locator ? readBuyerPageFacts(request, env[transport.bindingName], transport, factsUrl.toString()) : null;
+		const readFacts = () => locator ? readBuyerPageFacts(request, platformReader(env, ctx, cfg), transport, factsUrl.toString()) : null;
 		const readHome = () => env.ASSETS.fetch(new Request(url.origin + homePath, request));
 		let facts;
 		let shellRes;
@@ -953,9 +1042,8 @@ function nativeCatalogItem(item) {
 	};
 }
 
-async function fetchNativeProjection(request, env, cfg, slug) {
-	const transport = cfg.apiTransport;
-	const binding = transport && env[transport.bindingName];
+async function fetchNativeProjection(request, env, cfg, slug, ctx) {
+	const binding = platformReader(env, ctx, cfg);
 	if (!binding || !cfg.siteId) return { kind: 'unavailable' };
 	const url = new URL('/api/v2/storefront/native', new URL(request.url).origin);
 	url.searchParams.set('site_id', cfg.siteId);
@@ -1110,10 +1198,10 @@ function nativeProductBody(item, shop, copy, locale, preview) {
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note just above: native has no author
 // coral div to preserve today.
-async function renderNativeGridPage(request, env, cfg, shop) {
+async function renderNativeGridPage(request, env, cfg, shop, ctx) {
 	const origin = new URL(request.url).origin;
 	const [projection, shellRes] = await Promise.all([
-		fetchNativeProjection(request, env, cfg),
+		fetchNativeProjection(request, env, cfg, undefined, ctx),
 		env.ASSETS.fetch(new Request(origin + shop.shopPath + '/', request))
 	]);
 	if (!shellRes.ok) return htmlResponse(nativeUnavailableDocument(), 503);
@@ -1134,10 +1222,10 @@ async function renderNativeGridPage(request, env, cfg, shop) {
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note above: native has no author
 // coral div to preserve today.
-async function renderNativeProduct(request, env, cfg, match) {
+async function renderNativeProduct(request, env, cfg, match, ctx) {
 	const origin = new URL(request.url).origin;
 	const [projection, shellRes] = await Promise.all([
-		fetchNativeProjection(request, env, cfg, match.slug),
+		fetchNativeProjection(request, env, cfg, match.slug, ctx),
 		env.ASSETS.fetch(new Request(origin + match.shop.shopPath + '/', request))
 	]);
 	if (!shellRes.ok) return htmlResponse(nativeUnavailableDocument(), 503);
@@ -1181,9 +1269,9 @@ async function fetchCatalogList(origin, apiBase, locator, rail) {
 async function renderGridPage(request, env, ctx, cfg, shop) {
 	const url = new URL(request.url);
 	const origin = url.origin;
-	const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+	let cache = edgeCache();
 	const cacheKey = cache ? new Request(origin + url.pathname) : null;
-	if (cache) { const hit = await cache.match(cacheKey); if (hit) return hit; }
+	if (cache) { const looked = await edgeCacheLookup(cache, cacheKey); cache = looked.cache; if (looked.hit) return looked.hit; }
 
 	let shellRes;
 	try {
@@ -1214,7 +1302,7 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 		let body = injectHead(shell, `<style>${gridCss}</style>`);
 		body = injectCoralGrid(body, coral.tag, gridHtml);
 		const res = htmlResponse(body);
-		if (cache && ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cacheKey, res.clone()));
+		if (cache && ctx && ctx.waitUntil) ctx.waitUntil(edgeCachePut(cache, cacheKey, res.clone()));
 		return res;
 	} catch (e) {
 		return htmlResponse('<!doctype html><main><section data-storefront-source="provider" data-storefront-state="unavailable"><h1>Storefront unavailable</h1><p>Please try again later.</p></section></main>', 503);
@@ -1351,12 +1439,13 @@ async function relayYoutubePoster(request, ctx, id) {
 	if (request.method !== 'GET' && request.method !== 'HEAD') {
 		return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8' } });
 	}
-	const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+	let cache = edgeCache();
 	const at = new URL(request.url);
 	const key = new Request(at.origin + at.pathname, { method: 'GET' });
 	if (cache) {
-		const hit = await cache.match(key).catch(() => null);
-		if (hit) return hit;
+		const looked = await edgeCacheLookup(cache, key);
+		cache = looked.cache;
+		if (looked.hit) return looked.hit;
 	}
 	const up = await fetch('https://i.ytimg.com/vi/' + id + '/hqdefault.jpg').catch(() => null);
 	if (!up || !up.ok) return ytPosterMiss();
@@ -1366,7 +1455,7 @@ async function relayYoutubePoster(request, ctx, id) {
 		headers: { 'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=86400' }
 	});
 	if (cache) {
-		const put = cache.put(key, resp.clone()).catch(() => {});
+		const put = edgeCachePut(cache, key, resp.clone());
 		if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
 	}
 	return resp;
@@ -1799,7 +1888,7 @@ const siteWorker = {
 		// moves who renders them; a contract without siteOwnedBuyerPages forwards
 		// them exactly as before.
 		const siteOwnedBuyerPage = matchSiteOwnedBuyerPage(request, transport && transport.siteOwnedBuyerPages);
-		if (siteOwnedBuyerPage) return renderSiteOwnedBuyerPage(request, env, CFG, siteOwnedBuyerPage);
+		if (siteOwnedBuyerPage) return renderSiteOwnedBuyerPage(request, env, CFG, siteOwnedBuyerPage, ctx);
 
 		// The subscribe result landing, claimed BEFORE the generic forward for the
 		// same reason and on the same terms: the contract keeps its path in `forward`
@@ -1809,7 +1898,7 @@ const siteWorker = {
 		if (subscribeResult) {
 			// null: a prefixed candidate RSP did not confirm, on a path the site has its
 			// own page for — fall through as if unmatched (see renderSubscribeResult).
-			const rendered = await renderSubscribeResult(request, env, CFG, subscribeResult);
+			const rendered = await renderSubscribeResult(request, env, CFG, subscribeResult, ctx);
 			if (rendered) return rendered;
 		}
 
@@ -1820,7 +1909,10 @@ const siteWorker = {
 		if (transport) {
 			const forwarded = matchForwardRule(transport.forward, pathname, request.method);
 			const gated = forwarded ? null : matchVerdictRule(transport.verdict, pathname);
-			const binding = (forwarded || gated) ? env[transport.bindingName] : null;
+			// The forward takes the binding and only the binding; the verdict is a READ
+			// and takes the platform reader (see platformReader).
+			const binding = forwarded ? env[transport.bindingName] : null;
+			const reader = gated ? platformReader(env, ctx, CFG) : null;
 			if (forwarded) {
 				// No binding on a FORWARDED path: those paths have no file behind them,
 				// so today they reach ASSETS and 404. Both answers are "unusable", and
@@ -1828,18 +1920,18 @@ const siteWorker = {
 				if (!binding) return bindingMissingResponse(transport);
 				return binding.fetch(request);   // verbatim: method, path, query, headers, body
 			}
-			if (gated && !binding) return verdictRefusal(request, env, transport, 'retry', verdictBindingMissingResponse());
-			if (gated && binding) return serveVerdictGatedPath(request, env, binding, transport, normalizeVerdictPath(pathname));
+			if (gated && !reader) return verdictRefusal(request, env, transport, 'retry', verdictBindingMissingResponse());
+			if (gated && reader) return serveVerdictGatedPath(request, env, reader, transport, normalizeVerdictPath(pathname));
 		}
 
 		let match = null;
 		try { match = matchShop(pathname, shops); } catch (e) { match = null; }
 		const complete = matchShopComplete(pathname, shops);
 		if (complete && request.method === 'GET') return renderCompletion(request, env, CFG, complete);
-		if (match && match.shop.source === 'native') return renderNativeProduct(request, env, CFG, match);
+		if (match && match.shop.source === 'native') return renderNativeProduct(request, env, CFG, match, ctx);
 		if (match && match.shop.source === 'provider') return renderProduct(request, env, ctx, CFG, match);
 		const idx = matchShopIndex(pathname, shops);
-		if (idx && idx.source === 'native') return renderNativeGridPage(request, env, CFG, idx);
+		if (idx && idx.source === 'native') return renderNativeGridPage(request, env, CFG, idx, ctx);
 		if (idx && idx.source === 'provider') return renderGridPage(request, env, ctx, CFG, idx);
 /*__QUERY_REDIRECT_FETCH__*/		// Last, and only for a route the build itself mapped: same page, markdown.
 		const negotiated = await negotiateMarkdown(request, env, CFG.markdown);
@@ -1861,5 +1953,6 @@ export {
 	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
-	YT_POSTER_PATH, relayYoutubePoster
+	YT_POSTER_PATH, relayYoutubePoster,
+	platformReader
 };

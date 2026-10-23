@@ -102,6 +102,7 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              packages/dynamic-corals/*.test.mjs
              packages/dynamic-corals/drawer/*.test.mjs packages/dynamic-corals/events/*.test.mjs
              packages/dynamic-corals/inbox-bubble/*.test.mjs packages/dynamic-corals/qr/*.test.mjs
+             packages/dynamic-corals/platform-dispatch/*.test.mjs
              packages/dynamic-corals/registry/*.test.mjs packages/dynamic-corals/repo-facts/*.test.mjs
              packages/dynamic-corals/shared/*.test.mjs
              packages/dynamic-corals/sponsor/*.test.mjs packages/dynamic-corals/square-shop/*.test.mjs

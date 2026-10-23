@@ -1,0 +1,12 @@
+// Example only. Names use RFC 2606 domains; no real zone or account.
+{
+  "name": "platform-dispatch-example",
+  "main": "entry.mjs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["enable_ctx_exports"],
+  "kv_namespaces": [{ "binding": "HOST_ROUTES", "id": "00000000000000000000000000000000" }],
+  "dispatch_namespaces": [{ "binding": "DISPATCHER", "namespace": "example-sites" }],
+  "services": [{ "binding": "RSP", "service": "example-rsp" }],
+  "vars": { "DISPATCH_BYPASS": "" }
+  // Route (example): "sites.example.com/*"
+}

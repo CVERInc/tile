@@ -15,7 +15,20 @@
 //     [--canonical-host <host>] \
 //     [--dynamic-coral-css layered] \
 //     [--emitter-commit <sha>] \
+//     [--split-out <dir outside dist>] \
+//     [--static-exclusions '["/_astro/*"]'] \
 //     --out <dist>/_worker.js
+//
+// --split-out is OPT-IN and changes nothing in --out: the same `_worker.js` bytes are written either
+// way. It additionally writes, into a directory that must NOT be the Pages upload directory (a
+// `_routes.json` there would be uploaded and would change which requests reach the worker):
+//   <dir>/site-config.json          the baked per-Site config + provenance + input digests
+//   <dir>/shared/<source>           product-page-core.js, shop-function-template.js,
+//                                   query-redirects.mjs — byte-identical copies of the shared code
+//   <dir>/_routes.json              Pages spelling of the route table (route-table.mjs)
+//   <dir>/run-worker-first.json     the same table as a Workers Static Assets run_worker_first array
+// worker-assembly.mjs#assembleWorkerFromSiteConfig rebuilds `_worker.js` from those files alone.
+// --static-exclusions overrides the table's static carve-outs (only read with --split-out).
 //
 // 🔴 EVERY site gets one of these now, not only shops. The shop flags are the
 // OPTIONAL half: a site with no shop passes none of them and still needs this
@@ -42,7 +55,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The ONE canonicaliser for query-string 301s (reef#1882). Imported here to compile the site's
 // file, and read as SOURCE below to be concatenated into the worker, so the build that compiles a
@@ -54,6 +67,10 @@ import {
 	matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchSiteOwnedBuyerPage,
 	matchSubscribeResult, matchForwardRule, matchVerdictRule, YT_POSTER_PATH
 } from './shop-function-template.js';
+import { assembleWorker, SITE_CONFIG_KIND, SITE_CONFIG_SCHEMA_VERSION } from './worker-assembly.mjs';
+import {
+	buildRouteTable, toPagesRoutes, toRunWorkerFirst, runWorkerFirstInvokesWorker, probePaths, RouteTableError
+} from './route-table.mjs';
 
 function arg(name, def = '') {
 	const i = process.argv.indexOf('--' + name);
@@ -66,8 +83,10 @@ function die(msg) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const core = readFileSync(join(here, 'product-page-core.js'), 'utf8');
-const tmpl = readFileSync(join(here, 'shop-function-template.js'), 'utf8');
+const CORE_FILE = 'product-page-core.js';
+const TEMPLATE_FILE = 'shop-function-template.js';
+const core = readFileSync(join(here, CORE_FILE), 'utf8');
+const tmpl = readFileSync(join(here, TEMPLATE_FILE), 'utf8');
 const QUERY_REDIRECTS_MODULE = join(here, '..', '..', 'sitetile', 'query-redirects.mjs');
 
 function readRule(rule, where, wantMethods) {
@@ -515,30 +534,13 @@ const claimedBy = (href) => workerClaims(new Request(href), config) || workerCla
 const queryRedirects = loadQueryRedirects(arg('query-redirects'), { claimedBy });
 if (queryRedirects) config.queryRedirects = queryRedirects;
 
-// Keep flagless output byte-for-byte unchanged: both placeholders disappear.
-// The redirect implementation only enters workers explicitly emitted with the flag.
-const canonicalHelpers = canonicalHost ? `function canonicalRedirect(request, canonicalHost) {
-\tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
-\tconst url = new URL(request.url);
-\tconst normalize = (value) => String(value || '').trim().toLowerCase().split(':')[0];
-\tconst host = normalize(request.headers.get('host') || url.hostname);
-\tconst canonical = normalize(canonicalHost);
-\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview');
-\tif (!host || !canonical || preview(host) || preview(canonical) || host === 'localhost' || host === '127.0.0.1') return null;
-\tif (host === canonical) return null;
-\tif (host !== 'www.' + canonical && !host.endsWith('.' + canonical)) return null;
-\treturn new Response(null, { status: 301, headers: { location: 'https://' + canonical + url.pathname + url.search } });
-}
-
-` : '';
-const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalRedirect(request, CFG.canonicalHost);
-\t\tif (canonicalResponse) return canonicalResponse;
-` : '';
-
-// Query-string 301s (reef#1882). Same discipline as the canonical-host pair above: both
-// placeholders disappear when nothing was baked, so a flagless worker is byte-identical to one
-// emitted before this existed. When rules ARE baked, the shared module is concatenated in as a
-// third source (it is an import-free ES module like the other two), the glue below turns its
+// The canonical-host and query-string 301 fragments, and the concatenation itself, live in
+// worker-assembly.mjs#assembleWorker now (the same text, moved, so a Site's split output can be
+// reassembled without this script). Both keep their flagless discipline there: nothing baked ⇒ the
+// placeholder disappears ⇒ the same bytes as before the capability existed.
+//
+// Query-string 301s (reef#1882): when rules ARE baked, the shared module is concatenated in as a
+// third source (it is an import-free ES module like the other two), the glue turns its
 // `lookupQueryRedirect` into a Response, and the branch runs LAST in fetch: at the one point where
 // the request would otherwise be handed to env.ASSETS (before markdown negotiation, which only
 // re-serves the same static page), after every worker-owned matcher — inbox, YouTube poster,
@@ -557,39 +559,16 @@ const canonicalFetch = canonicalHost ? `\t\tconst canonicalResponse = canonicalR
 // query is the KEY and is not re-appended to Location — doing so would mint a second URL for the
 // target. 🔴 This branch never turns a request into an error: anything that throws while building
 // the 301 (a baked Location no Headers accepts, tile#158 r2) falls through to the static path.
-const queryRedirectHelpers = queryRedirects ? `function matchQueryRedirect(request, byPath) {
-\tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
-\tconst q = request.url.indexOf('?');
-\tif (q === -1 || q === request.url.length - 1) return null;
-\ttry {
-\t\tconst url = new URL(request.url);
-\t\tconst to = lookupQueryRedirect(url.pathname, url.search, byPath);
-\t\treturn to === null ? null : new Response(null, { status: 301, headers: { location: to } });
-\t} catch (e) { return null; }
-}
-
-` : '';
-const queryRedirectFetch = queryRedirects ? `\t\tconst queryRedirectResponse = complete ? null : matchQueryRedirect(request, CFG.queryRedirects.byPath);
-\t\tif (queryRedirectResponse) return queryRedirectResponse;
-` : '';
-const queryRedirectRuntime = queryRedirects ? readFileSync(QUERY_REDIRECTS_MODULE, 'utf8') + '\n' : '';
-
-// A function replacement, so a `$&` / `$'` / `$$` inside a baked value (a site
-// name, a label, a contract path) is inserted literally instead of being read as
-// a replacement pattern.
-const body = tmpl
-	.replace('/*__CANONICAL_HELPERS__*/', () => canonicalHelpers)
-	.replace('/*__QUERY_REDIRECT_HELPERS__*/', () => queryRedirectHelpers)
-	.replace('/*__CANONICAL_FETCH__*/', () => canonicalFetch)
-	.replace('/*__QUERY_REDIRECT_FETCH__*/', () => queryRedirectFetch)
-	.replaceAll('__SHOP_CONFIG__', () => JSON.stringify(config));
-const provenance =
-	'// GENERATED — do not edit. Source: tile/packages/dynamic-corals/square-shop/{product-page-core,shop-function-template}.js\n' +
-	'// emitter commit: ' + emitterCommit() + '\n' +
-	'// api contract: ' + (loaded ? loaded.path + ' sha256=' + loaded.sha256 : 'none (no --api-contract given; this site forwards nothing to RSP)') + '\n';
-const out = provenance + core + '\n' + queryRedirectRuntime + body;
+const queryRedirectsSource = readFileSync(QUERY_REDIRECTS_MODULE, 'utf8');
+const provenance = {
+	emitterCommit: emitterCommit(),
+	apiContract: loaded ? { path: loaded.path, sha256: loaded.sha256 } : null
+};
+const out = assembleWorker({ core, template: tmpl, queryRedirectsRuntime: queryRedirectsSource, provenance, config });
 
 const outFile = arg('out');
+const splitOut = arg('split-out');
+if (splitOut) writeSplit(splitOut);
 if (!outFile) {
 	process.stdout.write(out);
 } else {
@@ -601,4 +580,119 @@ if (!outFile) {
 		', transport=' + (loaded ? loaded.transport.bindingName + ' ' + loaded.transport.forward.length + ' forward/' + (loaded.transport.verdict || []).length + ' verdict' : 'none') +
 		', markdown=' + (markdown ? Object.keys(markdown.routes).length + ' routes' : 'none') +
 		(queryRedirects ? ', queryRedirects=' + countQueryRedirects(queryRedirects) + ' rules' : '') + ')');
+}
+
+// ─── --split-out (opt-in; WfP preparation) ────────────────────────────────────────────────────────
+// writeSplit runs only when --split-out is given (called just after `outFile` is read, so a refused
+// split fails the build before any file is written), and it never touches `out` or --out: a build
+// that does not pass the flag writes exactly what it wrote before the flag existed.
+
+function sha256(bytes) {
+	return createHash('sha256').update(bytes).digest('hex');
+}
+
+function fileDigest(path) {
+	if (!path) return null;
+	return sha256(readFileSync(path));
+}
+
+function argDigest(name) {
+	const i = process.argv.indexOf('--' + name);
+	return i >= 0 && process.argv[i + 1] ? sha256(process.argv[i + 1]) : null;
+}
+
+// Every path this Site's worker answers itself, as concrete request paths: what the route table must
+// send to the worker before the assets. Read from the config just baked plus the gated set.
+function workerClaimedPaths() {
+	const paths = new Set(['/__reef/inbox', '/_yt/AAAAAAAAAAA.jpg']);
+	const transport = config.apiTransport;
+	if (transport) {
+		for (const rule of transport.forward) paths.add(rule.match === 'prefix' ? rule.value + 'probe' : rule.value);
+		for (const rule of transport.verdict || []) paths.add(rule.value);
+		for (const page of transport.siteOwnedBuyerPages || []) paths.add(page.path);
+		if (transport.subscribeResult) paths.add(transport.subscribeResult.path);
+		if (transport.checkoutResult) paths.add(transport.checkoutResult.path);
+	}
+	for (const rule of loadGatedManifest(arg('gated-manifest'))) paths.add(rule.value);
+	for (const shop of config.shops || []) {
+		paths.add(shop.shopPath);
+		paths.add(shop.shopPath + '/probe');
+		paths.add(shop.shopPath + '/complete');
+	}
+	if (config.markdown) for (const p of Object.keys(config.markdown.routes)) paths.add(p);
+	if (config.queryRedirects && config.queryRedirects.byPath) for (const p of Object.keys(config.queryRedirects.byPath)) paths.add(p);
+	return [...paths];
+}
+
+function writeSplit(dir) {
+	if (!outFile) die('--split-out requires --out (the split output is written beside a real _worker.js, never instead of it)');
+	const splitDir = resolve(dir);
+	const distDir = resolve(dirname(outFile));
+	const rel = relative(distDir, splitDir);
+	if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+		die('--split-out ' + dir + ' is inside the --out directory ' + distDir + '; everything there is uploaded to Pages, '
+			+ 'and a _routes.json in the upload changes which requests reach the worker. Write it elsewhere.');
+	}
+
+	let exclusions;
+	const exclusionsArg = arg('static-exclusions');
+	if (exclusionsArg) {
+		try { exclusions = JSON.parse(exclusionsArg); } catch { die('--static-exclusions must be a JSON array of globs'); }
+		if (!Array.isArray(exclusions)) die('--static-exclusions must be a JSON array of globs');
+	}
+	let table;
+	try {
+		table = buildRouteTable(exclusions ? { staticExclusions: exclusions } : {});
+	} catch (e) {
+		if (e instanceof RouteTableError) die('route table: ' + e.message);
+		throw e;
+	}
+	const runWorkerFirst = toRunWorkerFirst(table);
+	// A static exclusion that hides a path the worker answers would ship a Site whose verdict gate,
+	// buyer page or forward is bypassed by the assets. Refused here, by path, rather than shipped.
+	const claimed = workerClaimedPaths();
+	for (const p of claimed) {
+		if (!runWorkerFirstInvokesWorker(runWorkerFirst, p)) {
+			die('route table: static exclusion hides ' + p + ', which this worker answers itself');
+		}
+	}
+	for (const p of probePaths(table)) {
+		if (runWorkerFirstInvokesWorker(runWorkerFirst, p)) continue;
+		const by = workerClaims(new Request('https://site.invalid' + p), config) ||
+			workerClaims(new Request('https://site.invalid' + p, { method: 'HEAD' }), config);
+		if (by) die('route table: static exclusion hides ' + p + ', which ' + by + ' claims');
+	}
+
+	const shared = {
+		[CORE_FILE]: core,
+		[TEMPLATE_FILE]: tmpl,
+		'query-redirects.mjs': queryRedirectsSource
+	};
+	const siteConfig = {
+		schemaVersion: SITE_CONFIG_SCHEMA_VERSION,
+		kind: SITE_CONFIG_KIND,
+		provenance,
+		// sha256 hex of each input exactly as this run received it; null = not given.
+		inputs: {
+			apiContract: loaded ? loaded.sha256 : null,
+			gatedManifest: fileDigest(arg('gated-manifest')),
+			markdownManifest: fileDigest(arg('markdown-manifest')),
+			queryRedirects: fileDigest(arg('query-redirects')),
+			storefronts: argDigest('storefronts'),
+			shops: argDigest('shops')
+		},
+		shared: Object.fromEntries(Object.entries(shared).map(([name, text]) => [name, sha256(text)])),
+		routes: table,
+		workerDigest: sha256(out),
+		config
+	};
+	siteConfig.configDigest = sha256(JSON.stringify(siteConfig));
+
+	mkdirSync(join(splitDir, 'shared'), { recursive: true });
+	for (const [name, text] of Object.entries(shared)) writeFileSync(join(splitDir, 'shared', name), text);
+	writeFileSync(join(splitDir, 'site-config.json'), JSON.stringify(siteConfig, null, 2) + '\n');
+	writeFileSync(join(splitDir, '_routes.json'), JSON.stringify(toPagesRoutes(table), null, 2) + '\n');
+	writeFileSync(join(splitDir, 'run-worker-first.json'), JSON.stringify(runWorkerFirst, null, 2) + '\n');
+	console.error('emit-shop-function: wrote split output ' + splitDir + ' (configDigest=' + siteConfig.configDigest +
+		', workerDigest=' + siteConfig.workerDigest + ', exclusions=' + (table.staticExclusions.join(',') || 'none') + ')');
 }
