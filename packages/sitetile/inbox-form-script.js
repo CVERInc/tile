@@ -18,12 +18,16 @@
 //     `fetch(action, {body: FormData})`, which sends no Accept) → 303 `<return_to>?inbox=<reason>`.
 //     fetch() follows it, so the AJAX path reads the outcome off the FINAL response's URL;
 //   • `Accept: application/json` or a JSON body → `{ ok:false, reason }`, 404 for `not_claimed`,
-//     422 for every other refusal; `{ ok:true, … }` on success.
-// `not_claimed` = the owner never claimed Inbox; it will fail until they do, so it is the ONE
-// outcome that must not say "try again". Every other refusal keeps the generic retry sentence.
+//     507 for `inbox_storage_full`, 422 for other refusals; `{ ok:true, … }` on success.
+// Neither an unclaimed inbox nor a full inbox can be fixed by a visitor retrying.
+// Literal source keeps the embedded name stable even when the surrounding bundle is minified.
 const INBOX_OUTCOME_HELPERS_SRC = [
-  "        function inboxErrorKey(outcome) { return outcome === 'not_claimed' ? 'errorNotClaimed' : 'errorServer'; }",
-  // An older build's payload has no errorNotClaimed; fall back to errorServer rather than show nothing.
+  '        function inboxErrorKey(outcome) {',
+  "          if (outcome === 'not_claimed') return 'errorNotClaimed';",
+  "          if (outcome === 'inbox_storage_full') return 'errorInboxStorageFull';",
+  "          return 'errorServer';",
+  '        }',
+  // An older build's payload may lack the reason-specific key; fall back to errorServer rather than show nothing.
   "        function inboxErrorCopy(copy, outcome) { return copy ? (copy[inboxErrorKey(outcome)] || copy.errorServer || null) : null; }",
   '        function inboxOutcomeOf(res) {',
   "          let outcome = '';",
@@ -134,7 +138,17 @@ ${INBOX_OUTCOME_HELPERS_SRC}
         // No-JS-equivalent fallback: a real submit navigated away and the browser came back here
         // with \`?inbox=<outcome>\` — the forwarder's own 303 contract, unchanged. Same two states,
         // just without a captured FormData to enrich them with.
-        const v = new URLSearchParams(location.search).get('inbox');
+        let v = new URLSearchParams(location.search).get('inbox');
+        // A fragment identifies the submitting section. Leave the query for its script to
+        // consume; without a fragment the first form keeps handling the outcome as before.
+        if (v && location.hash) {
+          let fragments = null;
+          try {
+            const field = form && form.elements.namedItem('return_fragment');
+            fragments = field && JSON.parse(field.value);
+          } catch (e) {}
+          if (!fragments || fragments[v] !== location.hash.slice(1)) v = null;
+        }
         if (v === 'sent') showSuccess(null);
         else if (v) showError(inboxErrorCopy(copy, v));
 

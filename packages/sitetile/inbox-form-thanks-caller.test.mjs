@@ -27,16 +27,31 @@ function el(extra = {}) {
   return { hidden: true, textContent: '', focus() {}, scrollIntoView() {}, setAttribute() {}, removeAttribute() {}, addEventListener() {}, ...extra };
 }
 
-// Run the shipped script once against a fresh stub page; return what it did.
-async function run({ thanksTo = null, response }) {
+// All section scripts share the browser URL, including replaceState's immediate mutation.
+function browserAt(page) {
+  const location = new URL(page);
+  const replaced = [];
+  const history = { state: null, replaceState(state, title, url) {
+    replaced.push(url);
+    location.href = new URL(url, location.href).href;
+  } };
+  return { location, history, replaced };
+}
+
+// Run one section's shipped script; optionally share its browser with sibling sections.
+async function run({ thanksTo = null, response, page = PAGE, submit = true, sectionIndex = 0, browser = browserAt(page) }) {
   const copy = { ...inboxFormCopy('en'), emailField: null, excerptField: null };
   if (thanksTo != null) copy.redirectsToThanks = true;
-  const did = { assign: [], reload: 0, fetched: [] };
+  const did = { assign: [], reload: 0, fetched: [], reset: 0, replaced: [] };
   const listeners = {};
   const btn = el({ disabled: false });
   const form = el({
     hidden: false,
-    reset() {},
+    elements: { namedItem: (name) => name === 'return_fragment' ? { value: JSON.stringify({
+      inbox_storage_full: `inbox-storage-full-${sectionIndex}`,
+      not_claimed: `inbox-not-claimed-${sectionIndex}`,
+    }) } : null },
+    reset() { did.reset++; },
     getAttribute: (k) => (k === 'action' ? '/__reef/inbox' : null),
     addEventListener: (type, fn) => { listeners[type] = fn; },
     querySelector: (sel) => {
@@ -54,21 +69,20 @@ async function run({ thanksTo = null, response }) {
     querySelectorAll: () => [],
   };
   const document = { currentScript: { closest: () => root } };
-  const location = {
-    href: PAGE, origin: new URL(PAGE).origin, search: '',
-    assign: (u) => { did.assign.push(u); },
-    reload: () => { did.reload++; },
-  };
+  const location = browser.location;
+  location.assign = (u) => { did.assign.push(u); };
+  location.reload = () => { did.reload++; };
+  did.replaced = browser.replaced;
   const fetch = (url, init) => { did.fetched.push(url); return Promise.resolve(response); };
-  const window = { fetch, history: { state: null, replaceState() {} } };
+  const window = { fetch, history: browser.history };
   // A real `new FormData(form)` carries the hidden inputs; for a `thanks=` form that includes `thanks_to`.
   class FormData { constructor() {} get(k) { return k === 'thanks_to' && thanksTo != null ? thanksTo : null; } }
   // eslint-disable-next-line no-new-func
   new Function('document', 'window', 'location', 'fetch', 'FormData', INBOX_FORM_SCRIPT)(document, window, location, fetch, FormData);
   assert.equal(typeof listeners.submit, 'function', 'the script did not wire a submit handler');
-  listeners.submit({ preventDefault() {} });
+  if (submit) listeners.submit({ preventDefault() {} });
   for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
-  return { did, successShown: successEl.hidden === false, errorShown: errorEl.hidden === false };
+  return { did, errorText: errorEl.textContent, formShown: !form.hidden, buttonDisabled: btn.disabled, successShown: successEl.hidden === false, errorShown: errorEl.hidden === false };
 }
 
 const jsonOk = { url: INBOX, status: 200, headers: { get: (k) => (/content-type/i.test(k) ? 'application/json' : null) }, json: () => Promise.resolve({ ok: true, id: 'm1' }) };
@@ -122,5 +136,57 @@ await atest('JSON refusal on a thanks= form still shows the error, no navigation
   assert.equal(r.did.reload, 0);
   assert.equal(r.errorShown, true);
 });
+
+for (const [reason, fragment, key] of [
+  ['inbox_storage_full', 'inbox-storage-full-2', 'errorInboxStorageFull'],
+  ['not_claimed', 'inbox-not-claimed-2', 'errorNotClaimed'],
+]) {
+  await atest(`scripted native return: query plus ${fragment} still shows the right sentence`, async () => {
+    const r = await run({ page: `${PAGE}?inbox=${reason}#${fragment}`, submit: false, sectionIndex: 2 });
+    assert.equal(r.errorShown, true);
+    assert.equal(r.errorText, inboxFormCopy('en')[key]);
+    assert.equal(r.formShown, true);
+    assert.equal(r.did.reset, 0, 'failure must preserve the typed fields');
+    assert.equal(r.did.fetched.length, 0);
+    assert.equal(r.did.replaced.length, 1);
+    assert.equal(new URL(r.did.replaced[0], PAGE).searchParams.has('inbox'), false);
+  });
+  for (const hash of [`#${fragment}`, '', '#unrelated']) {
+    await atest(`three sections: ${reason}${hash} shows only in its destination (no hash uses first form)`, async () => {
+      const browser = browserAt(`${PAGE}?keep=1&inbox=${reason}${hash}`);
+      const sections = [];
+      for (const sectionIndex of [0, 1, 2]) {
+        sections.push(await run({ browser, sectionIndex, submit: false }));
+      }
+      const shown = sections.flatMap((r, i) => r.errorShown ? [i] : []);
+      const expected = hash === '#unrelated' ? [] : hash ? [2] : [0];
+      assert.deepEqual(shown, expected, `${reason}${hash}: only the destination section may show the outcome`);
+      for (const r of sections) {
+        assert.equal(r.formShown, true);
+        assert.equal(r.did.reset, 0);
+        assert.equal(r.did.fetched.length, 0);
+        assert.equal(r.successShown, false);
+        if (r.errorShown) assert.equal(r.errorText, inboxFormCopy('en')[key]);
+      }
+      assert.deepEqual(browser.replaced, expected.length ? [`/contact/?keep=1${hash}`] : []);
+      assert.equal(browser.location.searchParams.has('inbox'), expected.length === 0);
+    });
+  }
+  for (const shape of ['redirect', 'json']) {
+    await atest(`AJAX ${shape}: ${reason} still shows the right sentence`, async () => {
+      const response = shape === 'redirect'
+        ? followed(`${PAGE}?inbox=${reason}#${fragment}`)
+        : { ...jsonOk, status: reason === 'not_claimed' ? 404 : 507,
+            json: async () => ({ ok: false, reason }) };
+      const r = await run({ response });
+      assert.equal(r.errorShown, true);
+      assert.equal(r.errorText, inboxFormCopy('en')[key]);
+      assert.equal(r.formShown, true);
+      assert.equal(r.buttonDisabled, false);
+      assert.equal(r.did.reset, 0, 'failure must preserve the typed fields');
+      assert.deepEqual(r.did.assign, []);
+    });
+  }
+}
 
 console.log('\ninbox-form-thanks-caller: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

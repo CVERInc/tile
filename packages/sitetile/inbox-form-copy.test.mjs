@@ -23,7 +23,7 @@ const test = (name, fn) => {
 // below rather than assumed here.
 const KEYS = [
   'fieldRequired', 'sentWithEmail', 'sentWithEmailGeneric', 'sentNoEmail',
-  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'errorNotClaimed', 'sendAnother',
+  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'errorNotClaimed', 'errorInboxStorageFull', 'sendAnother',
 ];
 const LANGS = { ja: 'ja-JP', 'zh-tw': 'zh-TW', 'zh-cn': 'zh-CN', ko: 'ko-KR', en: 'en-US' };
 
@@ -124,3 +124,24 @@ test('🔴 routes every lang a site could plausibly write, including Simplified 
   same('fr-FR', 'en-US'); // an unmapped language still gets a full row, never a hole
   same('', 'en-US');
 });
+
+
+test('reef#2357 full inbox copy is distinct and never asks for a retry in any locale', () => {
+  assert.equal(inboxFormCopy('en-US').errorInboxStorageFull, "This site's inbox is full and can't take new messages right now.");
+  const fullState = {
+    'zh-TW': '這個網站的收件匣已滿，目前無法接收新訊息。',
+    'zh-CN': '这个网站的收件箱已满，目前无法接收新消息。',
+    'ja-JP': 'このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。',
+    'ko-KR': '이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.',
+  };
+  for (const [lang, expected] of Object.entries(fullState)) assert.equal(inboxFormCopy(lang).errorInboxStorageFull, expected);
+  const retryWords = { ja: /もう一度|再試行/, 'zh-tw': /再試|重試/, 'zh-cn': /再试|重试/, ko: /다시/, en: /try again|retry/i };
+  for (const [key, lang] of Object.entries(LANGS)) {
+    const c = inboxFormCopy(lang);
+    assert.notEqual(c.errorInboxStorageFull, c.errorServer);
+    assert.notEqual(c.errorInboxStorageFull, c.errorNotClaimed);
+    assert.doesNotMatch(c.errorInboxStorageFull, retryWords[key]);
+  }
+});
+
+console.log('inbox-form-copy: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

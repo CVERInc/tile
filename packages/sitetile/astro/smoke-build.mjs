@@ -22,6 +22,7 @@
 // client JS must be added here CONSCIOUSLY, with its doctrine, or the build goes red.
 
 import assert from 'node:assert/strict';
+import { parse as parseHtml } from 'parse5';
 import { execFileSync } from 'node:child_process';
 import {
   copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
@@ -1481,6 +1482,68 @@ const checks = [
   // carries a `[hidden]` override for every element the script's `.hidden = true/false` toggles
   // (Form.astro: `form.hidden`, `successEl.hidden`, `excerptEl.hidden`). `.st-form-error` is
   // deliberately not asserted here — it sets no `display` of its own, so the UA rule already wins.
+  ['form: static HTML carries both hidden native inbox reasons inside noscript', () => {
+    const native = /<noscript>([\s\S]*?)<\/noscript>/.exec(forms);
+    assert.ok(native, 'static inbox reasons must be rendered inside noscript');
+    for (const [id, sentence] of [
+      ['inbox-storage-full-1', "This site's inbox is full and can't take new messages right now."],
+      ['inbox-not-claimed-1', "This site isn't taking messages right now."],
+    ]) {
+      const paragraphs = [...native[1].matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)];
+      const reasons = paragraphs.filter((p) => p[1].includes(`id="${id}"`));
+      assert.equal(reasons.length, 1, `${id} must occur exactly once in emitted HTML`);
+      assert.match(reasons[0][1], /\bhidden\b/);
+      assert.equal(reasons[0][2], sentence);
+    }
+    return true;
+  }],
+  ['forms and form-thanks: DOM id census and per-form return fragments', () => {
+    for (const [markup, count] of [[formThanks, 3], [forms, 1]]) {
+      // Scripting disabled makes noscript children real DOM nodes, as on a native return.
+      const doc = parseHtml(markup, { scriptingEnabled: false });
+      const all = (node) => [node, ...(node.childNodes || []).flatMap(all)];
+      const attr = (node, name) => node.attrs?.find((a) => a.name === name)?.value;
+      const nodes = all(doc);
+      const ids = nodes.map((n) => attr(n, 'id')).filter(Boolean);
+      const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
+      assert.deepEqual(duplicates, [], 'form-thanks DOM must contain no duplicate ids');
+      const inboxes = nodes.filter((n) => n.tagName === 'form' && attr(n, 'action') === '/__reef/inbox');
+      assert.equal(inboxes.length, count);
+      for (const [index, form] of inboxes.entries()) {
+        const children = all(form);
+        const hidden = children.filter((n) => n.tagName === 'input' && attr(n, 'name') === 'return_fragment');
+        assert.equal(hidden.length, 1, `form ${index} must post one return_fragment`);
+        assert.equal(attr(hidden[0], 'type'), 'hidden');
+        const fragments = JSON.parse(attr(hidden[0], 'value'));
+        const suffix = /^inbox-storage-full-(0|[1-9][0-9]*)$/.exec(fragments.inbox_storage_full)?.[1];
+        assert.ok(suffix != null, 'return_fragment must contain a section-indexed full-inbox id');
+        assert.deepEqual(fragments, {
+          inbox_storage_full: `inbox-storage-full-${suffix}`,
+          not_claimed: `inbox-not-claimed-${suffix}`,
+        });
+        for (const id of Object.values(fragments)) {
+          const reason = children.filter((n) => attr(n, 'id') === id);
+          assert.equal(reason.length, 1, `${id} must belong to its submitting form`);
+          assert.equal(reason[0].tagName, 'p');
+          assert.equal(reason[0].parentNode.tagName, 'noscript');
+          assert.equal(attr(reason[0], 'hidden'), '');
+        }
+        for (const label of children.filter((n) => n.tagName === 'label')) {
+          assert.equal(children.filter((n) => attr(n, 'id') === attr(label, 'for')).length, 1,
+            'each label must name a field inside its own form');
+        }
+      }
+    }
+    return true;
+  }],
+  ['form: emitted CSS reveals each native inbox reason only when targeted', () => {
+    const css = allCss().replace(/\s+/g, '');
+    for (const id of ['inbox-storage-full', 'inbox-not-claimed']) {
+      assert.match(css, new RegExp(`\\[id\\^=["\']?${id}["\']?\\]:target[^{}]*\\{display:block;?\\}`),
+        `${id} :target reveal rule must be in emitted CSS`);
+    }
+    return true;
+  }],
   ['form: CSS makes `hidden` win over every `display:` rule the inbox script toggles (.st-form, .st-form-success, .st-form-success-excerpt)', () => {
     const css = allCss().replace(/\s+/g, '');
     return css.includes('.st-form[hidden]{display:none}')
@@ -1527,6 +1590,7 @@ const checks = [
       && payload.errorServer === "Couldn't send that — please try again."
       // reef#2204: the not-claimed sentence rides the same payload — no "try again" in it.
       && payload.errorNotClaimed === "This site isn't taking messages right now."
+      && payload.errorInboxStorageFull === "This site's inbox is full and can't take new messages right now."
       && payload.sentWithEmail.includes('{email}')
       && payload.sentNoEmail.length > 0
       && payload.emailField === 'visitor_email'
@@ -1588,20 +1652,20 @@ const checks = [
   // -- required fields (2026-09-03, cold-read findings #9/#10) --
   ['form: action=inbox defaults its {email} field to required — native attr, marker, localized message', () =>
     /<span>Email<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
-    && /<input class="st-form-input" id="st-form-f2" name="visitor_email" type="email" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
+    && /<input class="st-form-input" id="st-form-1-f2" name="visitor_email" type="email" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
   ['form: action=inbox defaults its {textarea} message field to required the same way', () =>
     /<span>Tell us more<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
-    && /<textarea class="st-form-input st-form-textarea" id="st-form-f4" name="Tell us more" rows="5" required aria-required="true" data-required-msg="This field is required\."><\/textarea>/.test(forms)],
+    && /<textarea class="st-form-input st-form-textarea" id="st-form-1-f4" name="Tell us more" rows="5" required aria-required="true" data-required-msg="This field is required\."><\/textarea>/.test(forms)],
   ['form: action=inbox leaves a plain field (no email/textarea kind, no explicit required) optional', () =>
-    /<label class="st-form-label" for="st-form-f3">Text<\/label> <input class="st-form-input" id="st-form-f3" name="field_Text" type="text">/.test(forms)],
+    /<label class="st-form-label" for="st-form-1-f3">Text<\/label> <input class="st-form-input" id="st-form-1-f3" name="field_Text" type="text">/.test(forms)],
   ['form: an explicit {required} on a non-inbox form field still renders native required + marker', () =>
     /<span>Your name<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span>/.test(forms)
-    && /<input class="st-form-input" id="st-form-f1" name="Your name" type="text" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
+    && /<input class="st-form-input" id="st-form-0-f1" name="Your name" type="text" required aria-required="true" data-required-msg="This field is required\.">/.test(forms)],
   // Control for the marker being OPT-IN, not the field grammar suddenly defaulting everything:
   // this form's own "Your name" (unwired, not action=inbox, no `{required}`) renders BYTE-IDENTICAL
   // to before — no marker wrapper, no attribute, same as every pre-existing site's forms today.
-  ['form: an unwired form with no explicit required stays byte-identical (no marker, no attr)', () =>
-    /<label class="st-form-label" for="st-form-f1">Your name<\/label> <input class="st-form-input" id="st-form-f1" name="Your name" type="text">/.test(forms)],
+  ['form: an unwired form with no explicit required stays optional (no marker, no attr)', () =>
+    /<label class="st-form-label" for="st-form-2-f1">Your name<\/label> <input class="st-form-input" id="st-form-2-f1" name="Your name" type="text">/.test(forms)],
   ['form: the non-inbox forms emit no return_to/honeypot (fixed contract, action=inbox only)', () => {
     const general = forms.slice(0, forms.indexOf('Wired to the reef inbox'));
     const unwired = forms.slice(forms.lastIndexOf('<form class="st-form"'));

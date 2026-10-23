@@ -14,7 +14,7 @@
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
-const { section, hero, lang, meta } = Astro.props;
+const { section, index = 0, hero, lang, meta } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every other
@@ -24,7 +24,12 @@ const pm = parseParams(section.params);
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const submit = pm.submit || 'Send';
 const fields = section.fields || [];
-const idOf = (i) => 'st-form-f' + (i + 1);
+const idOf = (i) => `st-form-${index}-f${i + 1}`;
+// JSON outcome → fragment IDs (without #), echoed by the forwarder on refusal.
+const returnFragments = {
+  inbox_storage_full: `inbox-storage-full-${index}`,
+  not_claimed: `inbox-not-claimed-${index}`,
+};
 
 // ── 🩸 `inbox=` IS BACK, 2026-09-03 — the same-origin route it needed exists now ──
 //
@@ -43,9 +48,10 @@ const idOf = (i) => 'st-form-f' + (i + 1);
 //
 //   • `action=inbox` → `<form action="/__reef/inbox" method="post">`. `method=` is
 //     ignored for this value — the forwarder only accepts POST.
-//   • Three hidden inputs the forwarder reads: `return_to` (this page's own path,
+//   • Hidden inputs the forwarder reads: `return_to` (this page's own path,
 //     locale-aware — Astro.url.pathname already carries the locale segment), an
-//     opt-in `thanks_to` (see `thanks=`, below), and a honeypot `_hp` (visually
+//     opt-in `thanks_to` (see `thanks=`, below), `return_fragment` (the JSON
+//     outcome-to-fragment map for this form), and a honeypot `_hp` (visually
 //     hidden, NOT `display:none`, so a bot's autofill still reaches it — a
 //     display:none field is exactly what a scripted filler is taught to skip;
 //     kept out of the tab order and off-screen instead).
@@ -101,7 +107,7 @@ const thanksPath = safeInternalPath(pm.thanks);
 // Checked case-insensitively (the forwarder's own keys are all lowercase) so a field
 // authored as "Kind" or "Text" cannot collide either. The visible label is untouched;
 // only the wire `name=` gets `field_` prefixed.
-const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp', 'visitor_email', 'email_field']);
+const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'return_fragment', 'thanks_to', '_hp', 'visitor_email', 'email_field']);
 const inboxNameFor = (label, kind) => {
   if (kind === 'email') return 'visitor_email';
   const s = String(label);
@@ -163,8 +169,8 @@ const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCo
 // ── post-submit feedback: submitting / success card / inline retry error ───────────────────────
 // (owner ruling, 2026-09-03: a same-size paragraph under a form that STAYS is too weak a signal —
 // measured as visitors resubmitting because nothing told them it had already worked). The
-// STATIC markup above (inboxSentText, the disabled-by-default success card, the error line) is
-// the full experience for a no-JS visitor after the real POST → 303 → reload round trip; the
+// STATIC markup includes hidden reason paragraphs inside noscript. A native POST
+// returns with this form's reason fragment; :target reveals that paragraph without JS. The
 // `is:inline` script below is a progressive AJAX enhancement over the exact same `formAction` —
 // same contract, same `/__reef/inbox` forwarder, same `?inbox=<outcome>` vocabulary — that avoids
 // the reload entirely so it can show a "submitting…" state, keep the visitor's typed values on
@@ -185,6 +191,7 @@ const inboxCopy = isInbox ? {
   // reef#2204: the forwarder's `not_claimed` outcome (owner never claimed Inbox) — the script
   // shows this instead of the retry sentence, on both the `?inbox=` reload and the AJAX path.
   errorNotClaimed: fieldCopy.errorNotClaimed,
+  errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
   // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
   // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
   sentWithEmail: fieldCopy.sentWithEmail,
@@ -241,11 +248,12 @@ const inboxCopy = isInbox ? {
   <form class="st-form" action={formAction} method={method}>
     {/* `thanks_to` (frontmatter's own note on `thanksPath`, above) rides alongside `return_to`
         inside this SAME conditional, never a second one of its own, so a plain `action=inbox`
-        form with no `thanks=` — every pre-existing one — keeps byte-identical output. */
+        form with no `thanks=` posts only the return path and its reason fragments. */
     isInbox && (thanksPath
       ? <Fragment><input type="hidden" name="return_to" value={returnTo} /><input type="hidden" name="thanks_to" value={thanksPath} /></Fragment>
       : <input type="hidden" name="return_to" value={returnTo} />
     )}
+    {isInbox && <input type="hidden" name="return_fragment" value={JSON.stringify(returnFragments)} />}
     {isInbox && (
       // Honeypot: a real visitor never sees or tabs to this, so it stays empty; a
       // bot's autofill routine — which reads the DOM, not computed CSS — still finds
@@ -289,8 +297,15 @@ const inboxCopy = isInbox ? {
       // visitor already typed — nothing here is inside a `hidden` ancestor that would also hide
       // the fields — and the button re-enables so "再試一次" is just pressing it again, not
       // re-typing anything. Static default is the generic server-refusal sentence; the script
-      // swaps in the network-vs-server distinction it alone can tell apart.
-      <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
+      // swaps in the network-vs-server distinction it alone can tell apart. The native
+      // redirect fragment reveals a prebuilt reason with CSS when JavaScript is disabled.
+      <Fragment>
+        <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
+        <noscript>
+          <p class="st-form-error" id={returnFragments.inbox_storage_full} hidden set:html={inlineHtml(fieldCopy.errorInboxStorageFull)} />
+          <p class="st-form-error" id={returnFragments.not_claimed} hidden set:html={inlineHtml(fieldCopy.errorNotClaimed)} />
+        </noscript>
+      </Fragment>
     )}
     <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>

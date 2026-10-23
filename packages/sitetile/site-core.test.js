@@ -2467,11 +2467,11 @@ test('#1933 form: no action → disabled submit, post form with no action attrib
   assert.match(h, /<form class="st-form" method="post">/);
   assert.doesNotMatch(h, /<form[^>]* action=/);
   assert.match(h, /<button class="st-form-submit" type="submit" disabled>Send<\/button>/);
-  assert.match(h, /<label class="st-form-label" for="st-form-f1"><span>Name<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span><\/label><input class="st-form-input" id="st-form-f1" name="Name" type="text" required aria-required="true">/);
-  assert.match(h, /<input class="st-form-input" id="st-form-f2" name="Email" type="email">/);
-  assert.match(h, /<select class="st-form-input st-form-select" id="st-form-f3" name="Topic"><option value="" disabled selected>—<\/option><option value="A">A<\/option><option value="B">B<\/option><\/select>/);
-  assert.match(h, /<textarea class="st-form-input st-form-textarea" id="st-form-f4" name="Message" rows="5"><\/textarea>/);
-  assert.ok(h.indexOf('st-form-f1') < h.indexOf('st-form-f2') && h.indexOf('st-form-f3') < h.indexOf('st-form-f4'));
+  assert.match(h, /<label class="st-form-label" for="st-form-1-f1"><span>Name<\/span><span class="st-form-required-mark" aria-hidden="true"> \*<\/span><\/label><input class="st-form-input" id="st-form-1-f1" name="Name" type="text" required aria-required="true">/);
+  assert.match(h, /<input class="st-form-input" id="st-form-1-f2" name="Email" type="email">/);
+  assert.match(h, /<select class="st-form-input st-form-select" id="st-form-1-f3" name="Topic"><option value="" disabled selected>—<\/option><option value="A">A<\/option><option value="B">B<\/option><\/select>/);
+  assert.match(h, /<textarea class="st-form-input st-form-textarea" id="st-form-1-f4" name="Message" rows="5"><\/textarea>/);
+  assert.ok(h.indexOf('st-form-1-f1') < h.indexOf('st-form-1-f2') && h.indexOf('st-form-1-f3') < h.indexOf('st-form-1-f4'));
 });
 test('#1933 form: first section titles with <h1>; a later one with <h2>', () => {
   assert.match(formHtml('form', '### Name', true), /<div class="st-form-head"><h1>Contact<\/h1>/);
@@ -2490,10 +2490,10 @@ test('#1933 form: an unsafe action is dropped (submit stays disabled)', () => {
 test('#1933 form: action=inbox → /__reef/inbox, visitor_email name, message/email required by default, reserved names prefixed', () => {
   const h = formHtml('form action=inbox', '### Your email {email}\n### Message {textarea}\n### Text\n### Notes {required: false}');
   assert.match(h, /<form class="st-form" action="\/__reef\/inbox" method="post">/);
-  assert.match(h, /id="st-form-f1" name="visitor_email" type="email" required aria-required="true" data-required-msg="[^"]+">/);
-  assert.match(h, /id="st-form-f2" name="Message" rows="5" required aria-required="true" data-required-msg="[^"]+"><\/textarea>/);
-  assert.match(h, /id="st-form-f3" name="field_Text" type="text">/);
-  assert.match(h, /id="st-form-f4" name="Notes" type="text">/);
+  assert.match(h, /id="st-form-1-f1" name="visitor_email" type="email" required aria-required="true" data-required-msg="[^"]+">/);
+  assert.match(h, /id="st-form-1-f2" name="Message" rows="5" required aria-required="true" data-required-msg="[^"]+"><\/textarea>/);
+  assert.match(h, /id="st-form-1-f3" name="field_Text" type="text">/);
+  assert.match(h, /id="st-form-1-f4" name="Notes" type="text">/);
   assert.match(h, /type="submit">Send<\/button>/);
 });
 test('#1933 form: no longer falls through to prose', () => {
@@ -2559,7 +2559,7 @@ test('#1933 S4b inbox: the copy IS lingo\'s table, and a site with no lang gets 
 test('#1933 S4b inbox: data-required-msg on each required control, in the site language; none on an optional one', () => {
   const h = inboxHtml('ja', '### Email {email}\n### Name {required: false}\n### Message {textarea}');
   assert.equal(h.match(/data-required-msg="この項目は必須です。"/g).length, 2);
-  assert.match(h, /id="st-form-f2" name="Name" type="text"><\/div>/);
+  assert.match(h, /id="st-form-0-f2" name="Name" type="text"><\/div>/);
   assert.doesNotMatch(inboxHtml('en', '### Name', {}, 'form'), /data-required-msg|data-inbox/);
 });
 test('#1933 S4b inbox: success sentence is the generic one when an email is guaranteed, else the no-email one; script text is the shared constant', () => {
