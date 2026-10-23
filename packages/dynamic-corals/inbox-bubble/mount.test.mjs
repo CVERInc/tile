@@ -2031,3 +2031,45 @@ test('reef#2357: unrelated and missing reasons retain the existing status mappin
 			status === 429 ? coral.COPY.en.rate : coral.COPY.en.error);
 	}
 });
+
+
+test('reef#2357: both handoff paths use the response reason and preserve the 500 mapping', async () => {
+	for (const kind of ['grounded', 'refused']) {
+		for (const status of [507, 500]) {
+			respond = (url, init) => {
+				if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({
+					kind, text: 'An answer', source_url: 'https://example.test/source'
+				}) };
+				if (url.endsWith('/api/inbox') && init.method === 'POST') return {
+					ok: false, status, json: async () => ({ ok: false, reason: 'inbox_storage_full' })
+				};
+			};
+			let el;
+			try {
+				const mounted = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+				el = mounted.el;
+				const { root } = mounted;
+				await openBubble(root);
+				composeBox(root).value = 'Please ask a person';
+				await root.querySelector('.dc-inbox-form').emit('submit');
+				const toHuman = root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman');
+				await toHuman.emit('click');
+				if (kind === 'refused') {
+					const handoff = root.querySelector('.dc-inbox-handoff');
+					handoff.querySelector('textarea').value = 'Please ask a person';
+					await handoff.emit('submit');
+					assert.equal(handoff.querySelector('button[type="submit"]').disabled, false);
+				}
+				await settle(); // the grounded-answer click starts its async escalation
+				const errors = root.querySelector('.dc-inbox-panel').children.filter((n) => n.className === 'dc-inbox-error');
+				assert.equal(errors.length, 1, `${kind} / ${status}`);
+				assert.equal(errors[0].textContent, status === 507
+					? "This site's inbox is full and can't take new messages right now."
+					: "That didn't go through. Please try again.", `${kind} / ${status}`);
+			} finally {
+				if (el) coral.unmount(el);
+				respond = null;
+			}
+		}
+	}
+});
