@@ -1486,7 +1486,7 @@ const checks = [
     const native = /<noscript>([\s\S]*?)<\/noscript>/.exec(forms);
     assert.ok(native, 'static inbox reasons must be rendered inside noscript');
     for (const [id, sentence] of [
-      ['inbox-storage-full-1', "This site's inbox can't take new messages right now."],
+      ['inbox-storage-full-1', "This site's inbox is full and can't take new messages right now."],
       ['inbox-not-claimed-1', "This site isn't taking messages right now."],
     ]) {
       const paragraphs = [...native[1].matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)];
@@ -1586,7 +1586,7 @@ const checks = [
       && payload.errorServer === "Couldn't send that — please try again."
       // reef#2204: the not-claimed sentence rides the same payload — no "try again" in it.
       && payload.errorNotClaimed === "This site isn't taking messages right now."
-      && payload.errorInboxStorageFull === "This site's inbox can't take new messages right now."
+      && payload.errorInboxStorageFull === "This site's inbox is full and can't take new messages right now."
       && payload.sentWithEmail.includes('{email}')
       && payload.sentNoEmail.length > 0
       && payload.emailField === 'visitor_email'

@@ -124,8 +124,8 @@ await atest('JSON refusal on a thanks= form still shows the error, no navigation
 });
 
 for (const [reason, fragment, key] of [
-  ['inbox_storage_full', 'inbox-storage-full', 'errorInboxStorageFull'],
-  ['not_claimed', 'inbox-not-claimed', 'errorNotClaimed'],
+  ['inbox_storage_full', 'inbox-storage-full-2', 'errorInboxStorageFull'],
+  ['not_claimed', 'inbox-not-claimed-2', 'errorNotClaimed'],
 ]) {
   await atest(`scripted native return: query plus ${fragment} still shows the right sentence`, async () => {
     const r = await run({ page: `${PAGE}?inbox=${reason}#${fragment}`, submit: false });

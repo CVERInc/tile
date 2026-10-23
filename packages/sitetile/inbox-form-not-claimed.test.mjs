@@ -87,7 +87,7 @@ test('🔴 the shipped script uses the mapping on BOTH paths — the ?inbox= rel
 
 
 // reef#2357: the database is full; neither a native submit nor AJAX should invite a retry.
-const fullSentence = "This site's inbox can't take new messages right now.";
+const fullSentence = "This site's inbox is full and can't take new messages right now.";
 const formSite = (lang = 'en-US') => parseSite(`---
 sitetile-page: contact
 lang: ${lang}

@@ -44,7 +44,7 @@ import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 // reads (CVERInc/reef#1933 S4b), never a second copy of the strings.
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { localeHomePath } from './locale.mjs';
-import { INBOX_FORM_SCRIPT, inboxErrorKey } from './inbox-form-script.js';
+import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 // tile#148: a YouTube line. The address rules and the poster path are cardtile's (yt.mjs, no imports
 // of its own), so a Card's video cell and a post's YouTube line read a link the same way and point at
 // the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
@@ -3248,7 +3248,7 @@ export {
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
-  INBOX_FORM_SCRIPT, inboxErrorKey,
+  INBOX_FORM_SCRIPT,
   // tile#148: the YouTube line — the paragraph test and the list of a body's videos (blog featured image).
   youtubeLine, youtubeLines,
   // the editing door's view of the dialogue convention — see quoteRunReport's own comment.
