@@ -3114,9 +3114,9 @@ function _stampDropWarnings(site, before) {
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
  *   gets `return_to="/"` and a visitor is sent back to the wrong page.
- *   `search` — the request's query string, for visible native inbox failure feedback. A query
- *   included in `path` is also accepted; return links keep only the pathname. Static builds
- *   have no visitor query, so their serving layer must apply request-time feedback separately.
+ *   `search` — accepted for compatibility; HTML stays independent of the request query.
+ *   Native inbox feedback uses the redirect fragment and CSS; the script reads the query.
+ *   A query included in `path` is also accepted; return links keep only the pathname.
  *   `contentRels` — contentRelsOf()'s set, which makes the form's "Back to homepage" MEASURED the
  *   way the built page's is (a locale prefix is used only when that locale's home file exists);
  *   absent → the locale prefix of `path` alone decides.
