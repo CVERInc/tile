@@ -371,12 +371,36 @@ aimed at `.dc-inbox-*` no longer applies. A script that needs a node reaches it 
 through `host.shadowRoot`; `shape.smoke.mjs` measures the shape, the colours and the font in
 chromium.
 
+## Full inbox (0.7.14, reef#2357)
+
+A send refused with HTTP 507 and `reason: "inbox_storage_full"` shows “This site's inbox is
+full and can't take new messages right now.” in the page's locale. The five locales shared
+with the site form use its exact sentence; the other four bubble locales carry the same
+meaning. The draft and ordinary Send button remain, without a retry instruction. Direct
+compose, the handoff form and the send-to-a-person action use the same mapping; all other
+statuses and reasons keep their existing messages.
+
 ## Publishing
 
 Registry pipeline, same as every coral — bump `package.json`, `node
 packages/dynamic-corals/build.mjs inbox-bubble`, repoint `registry/manifest.json`,
 `registry/deploy.sh`. 🔴 Never `cp` a fix somewhere; the URL above is the only copy
 anyone consumes.
+
+`package.json` owns the version the build uses. The source `manifest.json` records the same
+version and source URL; the build normalizes both in the registry copy. A local build of
+just this coral, without changing any deployment's channels:
+
+```sh
+node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.14/inbox-bubble.js
+```
+
+The registry directory passed to the build belongs to the caller. `out/` above is ignored
+scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
+repository described in [the registry README](../registry/README.md). A published version
+is immutable: if that deployment already has different bytes at 0.7.14, stop and choose a
+new version before publishing.
 
 ### 🔴 Rolling out the loader handoff (0.7.12) — coral first, in this order
 

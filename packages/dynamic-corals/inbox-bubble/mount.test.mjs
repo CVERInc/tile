@@ -1959,3 +1959,117 @@ test('2160 negative control: without data-search-index the panel is byte-identic
 	await drain();
 	assert.equal(indexRequests(from).length, 0);
 });
+
+// reef#2357: exercise the response body through the mounted compose form, not only a mapper.
+async function failedCompose(status, body, locale = 'en') {
+	const previousLang = document.documentElement.getAttribute('lang');
+	document.documentElement.setAttribute('lang', locale);
+	respond = (url, init) => url.endsWith('/api/inbox') && init.method === 'POST'
+		? { ok: false, status, json: async () => body } : undefined;
+	let el;
+	try {
+		const mounted = await mountFresh();
+		el = mounted.el;
+		const { root } = mounted;
+		await openBubble(root);
+		const form = root.querySelector('.dc-inbox-form');
+		const textarea = composeBox(root);
+		const button = form.querySelector('button');
+		const errors = [];
+		form.parentNode = { insertBefore(node, before) {
+			assert.equal(before, form);
+			errors.push(node);
+		} };
+		textarea.value = '  Please keep my draft.  ';
+		await form.emit('submit');
+		assert.equal(errors.length, 1, 'the failed send must show one error');
+		assert.equal(errors[0].className, 'dc-inbox-error');
+		assert.equal(textarea.value, '  Please keep my draft.  ');
+		assert.equal(button.disabled, false, 'keep the send button available');
+		assert.equal(button.textContent, coral.COPY[locale].send, 'keep the ordinary send label');
+		return errors[0].textContent;
+	} finally {
+		if (el) coral.unmount(el);
+		respond = null;
+		document.documentElement.setAttribute('lang', previousLang);
+	}
+}
+
+test('reef#2357: compose 507 inbox_storage_full names the full inbox without retry wording', async () => {
+	const shown = await failedCompose(507, { ok: false, reason: 'inbox_storage_full' });
+	assert.equal(shown, "This site's inbox is full and can't take new messages right now.");
+	assert.doesNotMatch(shown, /try again|retry/i);
+});
+
+test('reef#2357: compose 500 keeps the existing retry error, even with the storage-full reason', async () => {
+	assert.equal(await failedCompose(500, { ok: false, reason: 'inbox_storage_full' }),
+		"That didn't go through. Please try again.");
+});
+
+
+test('reef#2357: every bubble locale renders the storage-full copy; shared locales match the form', async () => {
+	const { inboxFormCopy } = await import('../../sitetile/inbox-form-copy.js');
+	for (const [locale, copy] of Object.entries(coral.COPY)) {
+		const shown = await failedCompose(507, { ok: false, reason: 'inbox_storage_full' }, locale);
+		assert.equal(shown, copy.errorInboxStorageFull, locale);
+		assert.ok(shown?.length > 0, `${locale}: missing storage-full copy`);
+		assert.notEqual(shown, copy.error, locale);
+		if (['en', 'ja', 'ko', 'zh-tw', 'zh-cn'].includes(locale)) {
+			assert.equal(shown, inboxFormCopy(locale).errorInboxStorageFull, `${locale}: form parity`);
+		} else {
+			assert.notEqual(shown, coral.COPY.en.errorInboxStorageFull, `${locale}: untranslated copy`);
+		}
+	}
+});
+
+test('reef#2357: unrelated and missing reasons retain the existing status mapping', async () => {
+	for (const body of [null, {}, { reason: 'other_reason' }]) {
+		assert.equal(await failedCompose(507, body), coral.COPY.en.error);
+	}
+	for (const status of [0, 400, 403, 429, 503]) {
+		assert.equal(await failedCompose(status, { reason: 'inbox_storage_full' }),
+			status === 429 ? coral.COPY.en.rate : coral.COPY.en.error);
+	}
+});
+
+
+test('reef#2357: both handoff paths use the response reason and preserve the 500 mapping', async () => {
+	for (const kind of ['grounded', 'refused']) {
+		for (const status of [507, 500]) {
+			respond = (url, init) => {
+				if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({
+					kind, text: 'An answer', source_url: 'https://example.test/source'
+				}) };
+				if (url.endsWith('/api/inbox') && init.method === 'POST') return {
+					ok: false, status, json: async () => ({ ok: false, reason: 'inbox_storage_full' })
+				};
+			};
+			let el;
+			try {
+				const mounted = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+				el = mounted.el;
+				const { root } = mounted;
+				await openBubble(root);
+				composeBox(root).value = 'Please ask a person';
+				await root.querySelector('.dc-inbox-form').emit('submit');
+				const toHuman = root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman');
+				await toHuman.emit('click');
+				if (kind === 'refused') {
+					const handoff = root.querySelector('.dc-inbox-handoff');
+					handoff.querySelector('textarea').value = 'Please ask a person';
+					await handoff.emit('submit');
+					assert.equal(handoff.querySelector('button[type="submit"]').disabled, false);
+				}
+				await settle(); // the grounded-answer click starts its async escalation
+				const errors = root.querySelector('.dc-inbox-panel').children.filter((n) => n.className === 'dc-inbox-error');
+				assert.equal(errors.length, 1, `${kind} / ${status}`);
+				assert.equal(errors[0].textContent, status === 507
+					? "This site's inbox is full and can't take new messages right now."
+					: "That didn't go through. Please try again.", `${kind} / ${status}`);
+			} finally {
+				if (el) coral.unmount(el);
+				respond = null;
+			}
+		}
+	}
+});
