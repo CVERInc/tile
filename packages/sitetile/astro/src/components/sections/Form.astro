@@ -12,7 +12,7 @@
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
-import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT, inboxErrorKey } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang, meta } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
@@ -158,8 +158,6 @@ const renderFields = fields.map((f, i) => ({ ...f, id: idOf(i), name: nameFor(f)
 // that is present but explicitly opted OUT of the default (`required: false`) may or may not have
 // been filled, so it gets the same safe fallback as having no email field at all.
 const emailGuaranteed = isInbox && renderFields.some((f) => f.kind === 'email' && f.required);
-const errorKey = inboxErrorKey(Astro.url.searchParams.get('inbox'));
-const visibleError = errorKey !== 'errorServer';
 const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCopy.sentNoEmail;
 
 // ── post-submit feedback: submitting / success card / inline retry error ───────────────────────
@@ -293,9 +291,15 @@ const inboxCopy = isInbox ? {
       // visitor already typed — nothing here is inside a `hidden` ancestor that would also hide
       // the fields — and the button re-enables so "再試一次" is just pressing it again, not
       // re-typing anything. Static default is the generic server-refusal sentence; the script
-      // swaps in the network-vs-server distinction it alone can tell apart. Request-time
-      // rendering reveals the non-retry outcomes before any script runs.
-      <p class="st-form-error" data-inbox-error hidden={!visibleError} set:html={inlineHtml(fieldCopy[errorKey])} />
+      // swaps in the network-vs-server distinction it alone can tell apart. The native
+      // redirect fragment reveals a prebuilt reason with CSS when JavaScript is disabled.
+      <Fragment>
+        <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
+        <noscript>
+          <p class="st-form-error" id="inbox-storage-full" hidden set:html={inlineHtml(fieldCopy.errorInboxStorageFull)} />
+          <p class="st-form-error" id="inbox-not-claimed" hidden set:html={inlineHtml(fieldCopy.errorNotClaimed)} />
+        </noscript>
+      </Fragment>
     )}
     <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>

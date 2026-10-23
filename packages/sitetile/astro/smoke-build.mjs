@@ -1481,6 +1481,29 @@ const checks = [
   // carries a `[hidden]` override for every element the script's `.hidden = true/false` toggles
   // (Form.astro: `form.hidden`, `successEl.hidden`, `excerptEl.hidden`). `.st-form-error` is
   // deliberately not asserted here — it sets no `display` of its own, so the UA rule already wins.
+  ['form: static HTML carries both hidden native inbox reasons inside noscript', () => {
+    const native = /<noscript>([\s\S]*?)<\/noscript>/.exec(forms);
+    assert.ok(native, 'static inbox reasons must be rendered inside noscript');
+    for (const [id, sentence] of [
+      ['inbox-storage-full', "This site's inbox can't take new messages right now."],
+      ['inbox-not-claimed', "This site isn't taking messages right now."],
+    ]) {
+      const paragraphs = [...native[1].matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)];
+      const reasons = paragraphs.filter((p) => p[1].includes(`id="${id}"`));
+      assert.equal(reasons.length, 1, `${id} must occur exactly once in emitted HTML`);
+      assert.match(reasons[0][1], /\bhidden\b/);
+      assert.equal(reasons[0][2], sentence);
+    }
+    return true;
+  }],
+  ['form: emitted CSS reveals each native inbox reason only when targeted', () => {
+    const css = allCss().replace(/\s+/g, '');
+    for (const id of ['inbox-storage-full', 'inbox-not-claimed']) {
+      assert.match(css, new RegExp(`#${id}:target[^{}]*\\{display:block;?\\}`),
+        `${id} :target reveal rule must be in emitted CSS`);
+    }
+    return true;
+  }],
   ['form: CSS makes `hidden` win over every `display:` rule the inbox script toggles (.st-form, .st-form-success, .st-form-success-excerpt)', () => {
     const css = allCss().replace(/\s+/g, '');
     return css.includes('.st-form[hidden]{display:none}')

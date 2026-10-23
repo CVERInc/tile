@@ -2964,9 +2964,11 @@ function renderSection(s, hero, ctx) {
         hiddenInputs = '<input type="hidden" name="return_to" value="' + escAttr(returnTo) + '">' +
           (thanksPath ? '<input type="hidden" name="thanks_to" value="' + escAttr(thanksPath) + '">' : '') +
           '<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">';
-        const errorKey = inboxErrorKey(new URLSearchParams(fCtx.search || '').get('inbox'));
-        const visibleError = errorKey !== 'errorServer';
-        errorLine = '<p class="st-form-error" data-inbox-error' + (visibleError ? '' : ' hidden') + '>' + inlineHtml(fieldCopy[errorKey]) + '</p>';
+        // Static pages cannot see the return query at build time. The redirect fragment
+        // reveals the native reason via CSS; scripts use their own error line instead.
+        errorLine = '<p class="st-form-error" data-inbox-error hidden>' + inlineHtml(fieldCopy.errorServer) + '</p>' +
+          '<noscript><p class="st-form-error" id="inbox-storage-full" hidden>' + inlineHtml(fieldCopy.errorInboxStorageFull) + '</p>' +
+          '<p class="st-form-error" id="inbox-not-claimed" hidden>' + inlineHtml(fieldCopy.errorNotClaimed) + '</p></noscript>';
         inboxScript = '<script>' + INBOX_FORM_SCRIPT + '</script>';
       }
       return '<section class="st-form-section"' + inboxAttr + '><div class="st-form-head">' +

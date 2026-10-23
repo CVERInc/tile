@@ -1387,6 +1387,11 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
    typed, so the error is the only thing that changes; no colour token exists for this concept
    yet (see the required-marker note above), so a plain accessible red carries it alone. */
 .st-form-error { margin: 0; color: #c0392b; font-size: .95rem; }
+/* A native POST returns to prebuilt HTML. Its fragment selects the localized reason
+   inside noscript; author CSS overrides the hidden attribute only for that target. */
+#inbox-storage-full:target,
+#inbox-not-claimed:target { display: block; }
+
 
 /* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (CVERInc/reef#47) ──────────
    Every rule in this block styles DOM a native storefront / /membership / /account / result page

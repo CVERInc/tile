@@ -28,15 +28,15 @@ function el(extra = {}) {
 }
 
 // Run the shipped script once against a fresh stub page; return what it did.
-async function run({ thanksTo = null, response }) {
+async function run({ thanksTo = null, response, page = PAGE, submit = true }) {
   const copy = { ...inboxFormCopy('en'), emailField: null, excerptField: null };
   if (thanksTo != null) copy.redirectsToThanks = true;
-  const did = { assign: [], reload: 0, fetched: [] };
+  const did = { assign: [], reload: 0, fetched: [], reset: 0, replaced: [] };
   const listeners = {};
   const btn = el({ disabled: false });
   const form = el({
     hidden: false,
-    reset() {},
+    reset() { did.reset++; },
     getAttribute: (k) => (k === 'action' ? '/__reef/inbox' : null),
     addEventListener: (type, fn) => { listeners[type] = fn; },
     querySelector: (sel) => {
@@ -55,20 +55,20 @@ async function run({ thanksTo = null, response }) {
   };
   const document = { currentScript: { closest: () => root } };
   const location = {
-    href: PAGE, origin: new URL(PAGE).origin, search: '',
+    href: page, origin: new URL(page).origin, search: new URL(page).search,
     assign: (u) => { did.assign.push(u); },
     reload: () => { did.reload++; },
   };
   const fetch = (url, init) => { did.fetched.push(url); return Promise.resolve(response); };
-  const window = { fetch, history: { state: null, replaceState() {} } };
+  const window = { fetch, history: { state: null, replaceState(state, title, url) { did.replaced.push(url); } } };
   // A real `new FormData(form)` carries the hidden inputs; for a `thanks=` form that includes `thanks_to`.
   class FormData { constructor() {} get(k) { return k === 'thanks_to' && thanksTo != null ? thanksTo : null; } }
   // eslint-disable-next-line no-new-func
   new Function('document', 'window', 'location', 'fetch', 'FormData', INBOX_FORM_SCRIPT)(document, window, location, fetch, FormData);
   assert.equal(typeof listeners.submit, 'function', 'the script did not wire a submit handler');
-  listeners.submit({ preventDefault() {} });
+  if (submit) listeners.submit({ preventDefault() {} });
   for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
-  return { did, successShown: successEl.hidden === false, errorShown: errorEl.hidden === false };
+  return { did, errorText: errorEl.textContent, formShown: !form.hidden, buttonDisabled: btn.disabled, successShown: successEl.hidden === false, errorShown: errorEl.hidden === false };
 }
 
 const jsonOk = { url: INBOX, status: 200, headers: { get: (k) => (/content-type/i.test(k) ? 'application/json' : null) }, json: () => Promise.resolve({ ok: true, id: 'm1' }) };
@@ -122,5 +122,36 @@ await atest('JSON refusal on a thanks= form still shows the error, no navigation
   assert.equal(r.did.reload, 0);
   assert.equal(r.errorShown, true);
 });
+
+for (const [reason, fragment, key] of [
+  ['inbox_storage_full', 'inbox-storage-full', 'errorInboxStorageFull'],
+  ['not_claimed', 'inbox-not-claimed', 'errorNotClaimed'],
+]) {
+  await atest(`scripted native return: query plus ${fragment} still shows the right sentence`, async () => {
+    const r = await run({ page: `${PAGE}?inbox=${reason}#${fragment}`, submit: false });
+    assert.equal(r.errorShown, true);
+    assert.equal(r.errorText, inboxFormCopy('en')[key]);
+    assert.equal(r.formShown, true);
+    assert.equal(r.did.reset, 0, 'failure must preserve the typed fields');
+    assert.equal(r.did.fetched.length, 0);
+    assert.equal(r.did.replaced.length, 1);
+    assert.equal(new URL(r.did.replaced[0], PAGE).searchParams.has('inbox'), false);
+  });
+  for (const shape of ['redirect', 'json']) {
+    await atest(`AJAX ${shape}: ${reason} still shows the right sentence`, async () => {
+      const response = shape === 'redirect'
+        ? followed(`${PAGE}?inbox=${reason}#${fragment}`)
+        : { ...jsonOk, status: reason === 'not_claimed' ? 404 : 507,
+            json: async () => ({ ok: false, reason }) };
+      const r = await run({ response });
+      assert.equal(r.errorShown, true);
+      assert.equal(r.errorText, inboxFormCopy('en')[key]);
+      assert.equal(r.formShown, true);
+      assert.equal(r.buttonDisabled, false);
+      assert.equal(r.did.reset, 0, 'failure must preserve the typed fields');
+      assert.deepEqual(r.did.assign, []);
+    });
+  }
+}
 
 console.log('\ninbox-form-thanks-caller: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

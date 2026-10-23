@@ -113,34 +113,32 @@ await atest('reef#2357 followed 303 inbox_storage_full uses the same non-retry c
   assert.equal(H.inboxErrorCopy({ errorServer: 'older build' }, outcome), 'older build');
 });
 
-for (const [reason, key, english] of [
-  ['inbox_storage_full', 'errorInboxStorageFull', fullSentence],
-  ['not_claimed', 'errorNotClaimed', "This site isn't taking messages right now."],
+for (const [id, key] of [
+  ['inbox-storage-full', 'errorInboxStorageFull'],
+  ['inbox-not-claimed', 'errorNotClaimed'],
 ]) {
   for (const lang of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN', 'ko-KR']) {
-    test(`no-script SSR: ${reason} is visible in ${lang} before any script runs`, () => {
-      const html = renderSiteToHtml(formSite(lang), { path: `/contact/?inbox=${reason}` });
-      const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>([\s\S]*?)<\/p>/.exec(html);
-      assert.ok(error, 'SSR must emit the inbox error paragraph');
-      assert.doesNotMatch(error[1], /\bhidden\b/, `${reason} SSR error paragraph must be visible without JavaScript`);
-      assert.equal(error[2], lang === 'en-US' ? english : inboxFormCopy(lang)[key]);
-      assert.match(html, /name="return_to" value="\/contact\/"/, 'return_to must not retain the outcome query');
+    test(`static no-script SSR: ${id} exists in ${lang} without a request query`, () => {
+      const html = renderSiteToHtml(formSite(lang), { path: '/contact/' });
+      const native = /<noscript>([\s\S]*?)<\/noscript>/.exec(html);
+      assert.ok(native, 'static inbox reasons must be rendered inside noscript');
+      const paragraphs = [...native[1].matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)];
+      const reasons = paragraphs.filter((p) => p[1].includes(`id="${id}"`));
+      assert.equal(reasons.length, 1, `${id} must occur exactly once`);
+      assert.match(reasons[0][1], /\bhidden\b/, `${id} must be hidden until targeted`);
+      assert.equal(reasons[0][2], inboxFormCopy(lang)[key]);
     });
   }
 }
 
-test('SSR accepts the request query separately from its pathname', () => {
-  const html = renderSiteToHtml(formSite(), { path: '/contact/', search: '?inbox=inbox_storage_full' });
-  const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>([\s\S]*?)<\/p>/.exec(html);
-  assert.doesNotMatch(error[1], /\bhidden\b/, 'request search must reach the SSR error paragraph');
-  assert.equal(error[2], fullSentence);
-});
-
-test('SSR keeps the error hidden on clean, sent, unknown, and unrelated query requests', () => {
-  for (const query of ['', '?inbox=sent', '?inbox=made_up', '?unrelated=inbox_storage_full']) {
-    const html = renderSiteToHtml(formSite(), { path: '/contact/' + query });
+test('static markup is independent of the request outcome; the scripted error starts hidden', () => {
+  const clean = renderSiteToHtml(formSite(), { path: '/contact/' });
+  for (const reason of ['inbox_storage_full', 'not_claimed', 'sent', 'made_up']) {
+    const html = renderSiteToHtml(formSite(), { path: '/contact/', search: `?inbox=${reason}` });
+    assert.equal(html, clean, 'static HTML must not depend on a future visitor query');
     const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>/.exec(html);
-    assert.match(error[1], /\bhidden\b/, `unexpected error on ${query || 'clean page'}`);
+    assert.match(error[1], /\bhidden\b/);
+    assert.match(html, /name="return_to" value="\/contact\/"/);
   }
 });
 
