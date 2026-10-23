@@ -24,4 +24,4 @@ const Cmp = MAP[section.type] || Prose;
 // semantic/SEO), the rest stay <h2>. Components opt in by honouring the `hero` prop.
 const hero = index === 0;
 ---
-<Cmp section={section} hero={hero} lang={lang} blogPosts={blogPosts} meta={meta} />
+<Cmp section={section} index={index} hero={hero} lang={lang} blogPosts={blogPosts} meta={meta} />

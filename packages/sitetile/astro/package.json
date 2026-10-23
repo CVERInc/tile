@@ -23,7 +23,8 @@
     "@fontsource/noto-sans-tc": "^5.1.0"
   },
   "devDependencies": {
-    "lucide-static": "^1.23.0"
+    "lucide-static": "^1.23.0",
+    "parse5": "^7.3.0"
   },
   "overrides": {
     "sharp": "^0.35.0",

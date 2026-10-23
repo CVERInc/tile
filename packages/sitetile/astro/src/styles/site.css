@@ -1389,8 +1389,8 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 .st-form-error { margin: 0; color: #c0392b; font-size: .95rem; }
 /* A native POST returns to prebuilt HTML. Its fragment selects the localized reason
    inside noscript; author CSS overrides the hidden attribute only for that target. */
-#inbox-storage-full:target,
-#inbox-not-claimed:target { display: block; }
+[id^="inbox-storage-full"]:target,
+[id^="inbox-not-claimed"]:target { display: block; }
 
 
 /* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (CVERInc/reef#47) ──────────

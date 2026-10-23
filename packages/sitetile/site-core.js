@@ -2904,7 +2904,7 @@ function renderSection(s, hero, ctx) {
       const isInbox = pm.action === 'inbox';
       const fAction = isInbox ? '/__reef/inbox' : (safeHref(pm.action) || undefined);
       const fMethod = isInbox ? 'post' : String(pm.method || 'post').toLowerCase();
-      const reserved = ['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp', 'visitor_email', 'email_field'];
+      const reserved = ['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'return_fragment', 'thanks_to', '_hp', 'visitor_email', 'email_field'];
       const nameFor = (f) => {
         if (!isInbox) return f.label;
         if (f.kind === 'email') return 'visitor_email';
@@ -2916,7 +2916,12 @@ function renderSection(s, hero, ctx) {
       const fieldCopy = isInbox ? inboxFormCopy(fCtx.lang || DEFAULT_LANG) : null;
       const returnTo = fCtx.path || '/';
       const thanksPath = safeInternalPath(pm.thanks);
-      const fields = (s.fields || []).map((f, i) => ({ f, id: 'st-form-f' + (i + 1), r: req(f), nm: nameFor(f) }));
+      // JSON outcome → fragment IDs (without #), echoed by the forwarder on refusal.
+      const returnFragments = {
+        inbox_storage_full: 'inbox-storage-full-' + (fCtx.index ?? 0),
+        not_claimed: 'inbox-not-claimed-' + (fCtx.index ?? 0),
+      };
+      const fields = (s.fields || []).map((f, i) => ({ f, id: 'st-form-' + (fCtx.index ?? 0) + '-f' + (i + 1), r: req(f), nm: nameFor(f) }));
       const fieldsHtml = fields.map(({ f, id, r, nm: wire }) => {
         const nm = escAttr(wire);
         const ra = r ? ' required aria-required="true"' + (isInbox ? ' data-required-msg="' + escAttr(fieldCopy.fieldRequired) + '"' : '') : '';
@@ -2963,12 +2968,13 @@ function renderSection(s, hero, ctx) {
           '<p class="st-form-success-back"><a href="' + escAttr(homeHref) + '">' + escHtml(fieldCopy.backHome) + '</a></p></div>';
         hiddenInputs = '<input type="hidden" name="return_to" value="' + escAttr(returnTo) + '">' +
           (thanksPath ? '<input type="hidden" name="thanks_to" value="' + escAttr(thanksPath) + '">' : '') +
+          '<input type="hidden" name="return_fragment" value="' + escAttr(JSON.stringify(returnFragments)) + '">' +
           '<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">';
         // Static pages cannot see the return query at build time. The redirect fragment
         // reveals the native reason via CSS; scripts use their own error line instead.
         errorLine = '<p class="st-form-error" data-inbox-error hidden>' + inlineHtml(fieldCopy.errorServer) + '</p>' +
-          '<noscript><p class="st-form-error" id="inbox-storage-full" hidden>' + inlineHtml(fieldCopy.errorInboxStorageFull) + '</p>' +
-          '<p class="st-form-error" id="inbox-not-claimed" hidden>' + inlineHtml(fieldCopy.errorNotClaimed) + '</p></noscript>';
+          '<noscript><p class="st-form-error" id="' + returnFragments.inbox_storage_full + '" hidden>' + inlineHtml(fieldCopy.errorInboxStorageFull) + '</p>' +
+          '<p class="st-form-error" id="' + returnFragments.not_claimed + '" hidden>' + inlineHtml(fieldCopy.errorNotClaimed) + '</p></noscript>';
         inboxScript = '<script>' + INBOX_FORM_SCRIPT + '</script>';
       }
       return '<section class="st-form-section"' + inboxAttr + '><div class="st-form-head">' +
@@ -3109,12 +3115,11 @@ function _stampDropWarnings(site, before) {
  * Render a parsed site to the reference HTML string.
  *
  * @param {object} site  parseSite() output.
- * @param {{path?: string, search?: string, contentRels?: Set<string>}} [opts]
+ * @param {{path?: string, contentRels?: Set<string>}} [opts]
  *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
  *   gets `return_to="/"` and a visitor is sent back to the wrong page.
- *   `search` — accepted for compatibility; HTML stays independent of the request query.
  *   Native inbox feedback uses the redirect fragment and CSS; the script reads the query.
  *   A query included in `path` is also accepted; return links keep only the pathname.
  *   `contentRels` — contentRelsOf()'s set, which makes the form's "Back to homepage" MEASURED the
@@ -3125,10 +3130,10 @@ function _stampDropWarnings(site, before) {
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};
-  const [pathname, query = ''] = String(o.path || '/').split('#')[0].split('?');
+  const pathname = String(o.path || '/').split(/[?#]/)[0];
   const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
-    search: o.search ?? query, contentRels: o.contentRels };
-  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0, ctx), s.id)).join('\n');
+    contentRels: o.contentRels };
+  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0, { ...ctx, index: i }), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
   if (String((site.meta || {}).layout || '').trim() === 'sidebar') {
