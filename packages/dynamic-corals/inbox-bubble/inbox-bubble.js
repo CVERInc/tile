@@ -329,6 +329,7 @@ export const COPY = {
 		you: 'You',
 		them: 'Reply',
 		error: "That didn't go through. Please try again.",
+		errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
 		rate: "That's a lot of messages — please try again in a minute.",
 		closed: 'Close',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
@@ -367,6 +368,7 @@ export const COPY = {
 		you: '你',
 		them: '回覆',
 		error: '沒有送出去，請再試一次。',
+		errorInboxStorageFull: "這個網站的收件匣已滿，目前無法接收新訊息。",
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closed: '關閉',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
@@ -405,6 +407,7 @@ export const COPY = {
 		you: 'あなた',
 		them: '返信',
 		error: '送信できませんでした。もう一度お試しください。',
+		errorInboxStorageFull: "このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。",
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closed: '閉じる',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
@@ -443,6 +446,7 @@ export const COPY = {
 		you: '你',
 		them: '回复',
 		error: '没有发送出去，请再试一次。',
+		errorInboxStorageFull: "这个网站的收件箱已满，目前无法接收新消息。",
 		rate: '消息有点多，请稍等一分钟再试。',
 		closed: '关闭',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
@@ -487,6 +491,7 @@ export const COPY = {
 		you: 'Sie',
 		them: 'Antwort',
 		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
+		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closed: 'Schließen',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
@@ -525,6 +530,7 @@ export const COPY = {
 		you: 'Vous',
 		them: 'Réponse',
 		error: 'L’envoi a échoué. Veuillez réessayer.',
+		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closed: 'Fermer',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
@@ -563,6 +569,7 @@ export const COPY = {
 		you: 'Tú',
 		them: 'Respuesta',
 		error: 'No se ha podido enviar. Inténtalo de nuevo.',
+		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closed: 'Cerrar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
@@ -601,6 +608,7 @@ export const COPY = {
 		you: 'Você',
 		them: 'Resposta',
 		error: 'Não foi possível enviar. Tente de novo.',
+		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closed: 'Fechar',
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
@@ -639,6 +647,7 @@ export const COPY = {
 		you: '나',
 		them: '답장',
 		error: '보내지 못했어요. 다시 시도해 주세요.',
+		errorInboxStorageFull: "이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.",
 		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
 		closed: '닫기',
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
@@ -2681,6 +2690,11 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	return null;
 }
 
+function inboxErrorText(status, body, copy) {
+	if (status === 507 && body?.reason === 'inbox_storage_full') return copy.errorInboxStorageFull;
+	return status === 429 ? copy.rate : copy.error;
+}
+
 async function send(apiBase, payload) {
 	const res = await fetch(`${apiBase}/api/inbox`, {
 		method: 'POST',
@@ -3304,7 +3318,7 @@ export async function mount(el, handoff = null) {
 		}
 		button.disabled = false;
 		button.textContent = copyRef.toHumanAfterRefusal;
-		showError(status, copyRef);
+		showError(status, copyRef, body);
 	}
 
 	function showHandoffForm(question, button, copyRef) {
@@ -3352,17 +3366,17 @@ export async function mount(el, handoff = null) {
 				await refresh();
 				return true;
 			}
-			showError(status, copyRef);
+			showError(status, copyRef, body);
 			return false;
 		});
 	}
 
-	function showError(status, copyRef) {
+	function showError(status, copyRef, body) {
 		const existing = root.querySelector(`.${PREFIX}-error`);
 		if (existing) existing.remove();
 		const err = document.createElement('p');
 		err.className = `${PREFIX}-error`;
-		err.textContent = status === 429 ? copyRef.rate : copyRef.error;
+		err.textContent = inboxErrorText(status, body, copyRef);
 		const panel = root.querySelector(`.${PREFIX}-panel`);
 		if (panel) panel.appendChild(err);
 	}
@@ -3514,7 +3528,7 @@ export async function mount(el, handoff = null) {
 			if (existing) existing.remove();
 			const err = document.createElement('p');
 			err.className = `${PREFIX}-error`;
-			err.textContent = status === 429 ? copy.rate : copy.error;
+			err.textContent = inboxErrorText(status, body, copy);
 			form.parentNode.insertBefore(err, form);
 			return false;
 		}, syncSearch);
