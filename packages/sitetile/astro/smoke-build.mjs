@@ -1497,37 +1497,41 @@ const checks = [
     }
     return true;
   }],
-  ['form-thanks: DOM id census and per-form return fragments (three inbox forms)', () => {
-    // Scripting disabled makes noscript children real DOM nodes, as on a native return.
-    const doc = parseHtml(formThanks, { scriptingEnabled: false });
-    const all = (node) => [node, ...(node.childNodes || []).flatMap(all)];
-    const attr = (node, name) => node.attrs?.find((a) => a.name === name)?.value;
-    const nodes = all(doc);
-    const ids = nodes.map((n) => attr(n, 'id')).filter(Boolean);
-    const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
-    assert.deepEqual(duplicates, [], 'form-thanks DOM must contain no duplicate ids');
-    const inboxes = nodes.filter((n) => n.tagName === 'form' && attr(n, 'action') === '/__reef/inbox');
-    assert.equal(inboxes.length, 3);
-    for (const [index, form] of inboxes.entries()) {
-      const children = all(form);
-      const hidden = children.filter((n) => n.tagName === 'input' && attr(n, 'name') === 'return_fragment');
-      assert.equal(hidden.length, 1, `form ${index} must post one return_fragment`);
-      assert.equal(attr(hidden[0], 'type'), 'hidden');
-      const fragments = JSON.parse(attr(hidden[0], 'value'));
-      assert.deepEqual(fragments, {
-        inbox_storage_full: `inbox-storage-full-${index}`,
-        not_claimed: `inbox-not-claimed-${index}`,
-      });
-      for (const id of Object.values(fragments)) {
-        const reason = children.filter((n) => attr(n, 'id') === id);
-        assert.equal(reason.length, 1, `${id} must belong to its submitting form`);
-        assert.equal(reason[0].tagName, 'p');
-        assert.equal(reason[0].parentNode.tagName, 'noscript');
-        assert.equal(attr(reason[0], 'hidden'), '');
-      }
-      for (const label of children.filter((n) => n.tagName === 'label')) {
-        assert.equal(children.filter((n) => attr(n, 'id') === attr(label, 'for')).length, 1,
-          'each label must name a field inside its own form');
+  ['forms and form-thanks: DOM id census and per-form return fragments', () => {
+    for (const [markup, count] of [[formThanks, 3], [forms, 1]]) {
+      // Scripting disabled makes noscript children real DOM nodes, as on a native return.
+      const doc = parseHtml(markup, { scriptingEnabled: false });
+      const all = (node) => [node, ...(node.childNodes || []).flatMap(all)];
+      const attr = (node, name) => node.attrs?.find((a) => a.name === name)?.value;
+      const nodes = all(doc);
+      const ids = nodes.map((n) => attr(n, 'id')).filter(Boolean);
+      const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
+      assert.deepEqual(duplicates, [], 'form-thanks DOM must contain no duplicate ids');
+      const inboxes = nodes.filter((n) => n.tagName === 'form' && attr(n, 'action') === '/__reef/inbox');
+      assert.equal(inboxes.length, count);
+      for (const [index, form] of inboxes.entries()) {
+        const children = all(form);
+        const hidden = children.filter((n) => n.tagName === 'input' && attr(n, 'name') === 'return_fragment');
+        assert.equal(hidden.length, 1, `form ${index} must post one return_fragment`);
+        assert.equal(attr(hidden[0], 'type'), 'hidden');
+        const fragments = JSON.parse(attr(hidden[0], 'value'));
+        const suffix = /^inbox-storage-full-(0|[1-9][0-9]*)$/.exec(fragments.inbox_storage_full)?.[1];
+        assert.ok(suffix != null, 'return_fragment must contain a section-indexed full-inbox id');
+        assert.deepEqual(fragments, {
+          inbox_storage_full: `inbox-storage-full-${suffix}`,
+          not_claimed: `inbox-not-claimed-${suffix}`,
+        });
+        for (const id of Object.values(fragments)) {
+          const reason = children.filter((n) => attr(n, 'id') === id);
+          assert.equal(reason.length, 1, `${id} must belong to its submitting form`);
+          assert.equal(reason[0].tagName, 'p');
+          assert.equal(reason[0].parentNode.tagName, 'noscript');
+          assert.equal(attr(reason[0], 'hidden'), '');
+        }
+        for (const label of children.filter((n) => n.tagName === 'label')) {
+          assert.equal(children.filter((n) => attr(n, 'id') === attr(label, 'for')).length, 1,
+            'each label must name a field inside its own form');
+        }
       }
     }
     return true;
