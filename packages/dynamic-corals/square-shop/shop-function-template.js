@@ -1326,7 +1326,7 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 
 const INBOX_RESERVED_FIELDS = new Set([
 	'kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'thanks_to', '_hp',
-	'visitor_email', 'email_field'
+	'visitor_email', 'email_field', 'return_fragment'
 ]);
 
 // Trusted as a redirect target only when it is unambiguously a path on THIS site: a leading
@@ -1404,7 +1404,19 @@ function resolveInboxReturnPath(returnTo, referer, origin) {
 // slash resolves to some OTHER origin, caught the same way), and the resolved pathname must not
 // start with `//`. Either failing falls back to the site root, never to the untrusted value.
 const REDIRECT_BASE = 'http://site.invalid';
-function inboxRedirectResponse(returnPath, outcome) {
+
+// Match reef's inbox boundary exactly: only the renderer's bounded, ordered table
+// can select a refusal paragraph. Never use the posted string itself as a hash.
+function inboxReturnFragment(raw, outcome) {
+	if (outcome !== 'inbox_storage_full' && outcome !== 'not_claimed') return '';
+	if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > 128) return '';
+	const match = /^\{"inbox_storage_full":"(inbox-storage-full-(?:0|[1-9][0-9]{0,3}))","not_claimed":"(inbox-not-claimed-(?:0|[1-9][0-9]{0,3}))"\}$/.exec(raw);
+	if (!match) return '';
+	const id = match[outcome === 'inbox_storage_full' ? 1 : 2];
+	return /^inbox-(storage-full|not-claimed)-(0|[1-9][0-9]{0,3})$/.test(id) ? id : '';
+}
+
+function inboxRedirectResponse(returnPath, outcome, returnFragment) {
 	let url;
 	try {
 		url = new URL(returnPath, REDIRECT_BASE);
@@ -1415,6 +1427,8 @@ function inboxRedirectResponse(returnPath, outcome) {
 		url = new URL('/', REDIRECT_BASE);
 	}
 	url.searchParams.set('inbox', outcome);
+	const fragment = inboxReturnFragment(returnFragment, outcome);
+	if (fragment) url.hash = fragment;
 	return new Response(null, { status: 303, headers: { location: url.pathname + url.search + url.hash } });
 }
 
@@ -1565,7 +1579,7 @@ async function handleInboxForward(request, CFG) {
 			const body = await res.json();
 			if (body && typeof body.reason === 'string' && body.reason) reason = body.reason;
 		} catch (e) { /* non-JSON error body → the generic reason stands */ }
-		return inboxRedirectResponse(returnPath, reason);
+		return inboxRedirectResponse(returnPath, reason, raw.return_fragment);
 	} catch (e) {
 		// network failure OR the 8s AbortController timeout above — indistinguishable
 		// to the visitor, and both mean the platform could not be reached in time.
