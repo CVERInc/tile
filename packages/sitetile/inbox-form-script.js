@@ -138,7 +138,17 @@ ${INBOX_OUTCOME_HELPERS_SRC}
         // No-JS-equivalent fallback: a real submit navigated away and the browser came back here
         // with \`?inbox=<outcome>\` — the forwarder's own 303 contract, unchanged. Same two states,
         // just without a captured FormData to enrich them with.
-        const v = new URLSearchParams(location.search).get('inbox');
+        let v = new URLSearchParams(location.search).get('inbox');
+        // A fragment identifies the submitting section. Leave the query for its script to
+        // consume; without a fragment the first form keeps handling the outcome as before.
+        if (v && location.hash) {
+          let fragments = null;
+          try {
+            const field = form && form.elements.namedItem('return_fragment');
+            fragments = field && JSON.parse(field.value);
+          } catch (e) {}
+          if (!fragments || fragments[v] !== location.hash.slice(1)) v = null;
+        }
         if (v === 'sent') showSuccess(null);
         else if (v) showError(inboxErrorCopy(copy, v));
 
