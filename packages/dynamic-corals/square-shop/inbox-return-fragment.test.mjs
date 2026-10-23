@@ -97,8 +97,8 @@ for (const [name, fragment] of [
   ['wrong prefix', table.replace('not-claimed-0', 'storage-full-0')],
   ['encoded fragment', table.replace('storage-full-0', 'storage-full-%30')],
   ['raw fragment injection', table.replace('storage-full-0', 'storage-full-0#other')],
-  ['over 128 bytes', table + ' '.repeat(129)],
-  ['multibyte input over cap', table.replace('storage-full-0', 'storage-full-' + '界'.repeat(20))],
+  ['trailing whitespace', table + ' '.repeat(129)],
+  ['non-digit multibyte index', table.replace('storage-full-0', 'storage-full-' + '界'.repeat(20))],
 ]) {
   test(`generated worker rejects ${name} without adding a fragment`, async (t) => {
     for (const reason of ['inbox_storage_full', 'not_claimed']) {
