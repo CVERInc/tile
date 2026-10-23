@@ -12,7 +12,7 @@
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
-import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT, inboxErrorKey } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
 const { section, hero, lang, meta } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
@@ -158,13 +158,16 @@ const renderFields = fields.map((f, i) => ({ ...f, id: idOf(i), name: nameFor(f)
 // that is present but explicitly opted OUT of the default (`required: false`) may or may not have
 // been filled, so it gets the same safe fallback as having no email field at all.
 const emailGuaranteed = isInbox && renderFields.some((f) => f.kind === 'email' && f.required);
+const errorKey = inboxErrorKey(Astro.url.searchParams.get('inbox'));
+const visibleError = errorKey !== 'errorServer';
 const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCopy.sentNoEmail;
 
 // ── post-submit feedback: submitting / success card / inline retry error ───────────────────────
 // (owner ruling, 2026-09-03: a same-size paragraph under a form that STAYS is too weak a signal —
 // measured as visitors resubmitting because nothing told them it had already worked). The
 // STATIC markup above (inboxSentText, the disabled-by-default success card, the error line) is
-// the full experience for a no-JS visitor after the real POST → 303 → reload round trip; the
+// query-driven feedback when rendered per request. Static builds need the serving layer to
+// apply the returned outcome for no-JS visitors; the
 // `is:inline` script below is a progressive AJAX enhancement over the exact same `formAction` —
 // same contract, same `/__reef/inbox` forwarder, same `?inbox=<outcome>` vocabulary — that avoids
 // the reload entirely so it can show a "submitting…" state, keep the visitor's typed values on
@@ -185,6 +188,7 @@ const inboxCopy = isInbox ? {
   // reef#2204: the forwarder's `not_claimed` outcome (owner never claimed Inbox) — the script
   // shows this instead of the retry sentence, on both the `?inbox=` reload and the AJAX path.
   errorNotClaimed: fieldCopy.errorNotClaimed,
+  errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
   // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
   // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
   sentWithEmail: fieldCopy.sentWithEmail,
@@ -289,8 +293,9 @@ const inboxCopy = isInbox ? {
       // visitor already typed — nothing here is inside a `hidden` ancestor that would also hide
       // the fields — and the button re-enables so "再試一次" is just pressing it again, not
       // re-typing anything. Static default is the generic server-refusal sentence; the script
-      // swaps in the network-vs-server distinction it alone can tell apart.
-      <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
+      // swaps in the network-vs-server distinction it alone can tell apart. Request-time
+      // rendering reveals the non-retry outcomes before any script runs.
+      <p class="st-form-error" data-inbox-error hidden={!visibleError} set:html={inlineHtml(fieldCopy[errorKey])} />
     )}
     <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
   </form>

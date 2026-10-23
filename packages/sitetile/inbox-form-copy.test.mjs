@@ -23,7 +23,7 @@ const test = (name, fn) => {
 // below rather than assumed here.
 const KEYS = [
   'fieldRequired', 'sentWithEmail', 'sentWithEmailGeneric', 'sentNoEmail',
-  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'errorNotClaimed', 'sendAnother',
+  'submitting', 'successHeading', 'backHome', 'errorNetwork', 'errorServer', 'errorNotClaimed', 'errorInboxStorageFull', 'sendAnother',
 ];
 const LANGS = { ja: 'ja-JP', 'zh-tw': 'zh-TW', 'zh-cn': 'zh-CN', ko: 'ko-KR', en: 'en-US' };
 
@@ -123,4 +123,16 @@ test('🔴 routes every lang a site could plausibly write, including Simplified 
   assert.notDeepEqual(inboxFormCopy('zh-Hans'), inboxFormCopy('zh-Hant'), 'the two scripts must not collapse to one row');
   same('fr-FR', 'en-US'); // an unmapped language still gets a full row, never a hole
   same('', 'en-US');
+});
+
+
+test('reef#2357 full inbox copy is distinct and never asks for a retry in any locale', () => {
+  assert.equal(inboxFormCopy('en-US').errorInboxStorageFull, "This site's inbox can't take new messages right now.");
+  const retryWords = { ja: /もう一度|再試行/, 'zh-tw': /再試|重試/, 'zh-cn': /再试|重试/, ko: /다시/, en: /try again|retry/i };
+  for (const [key, lang] of Object.entries(LANGS)) {
+    const c = inboxFormCopy(lang);
+    assert.notEqual(c.errorInboxStorageFull, c.errorServer);
+    assert.notEqual(c.errorInboxStorageFull, c.errorNotClaimed);
+    assert.doesNotMatch(c.errorInboxStorageFull, retryWords[key]);
+  }
 });

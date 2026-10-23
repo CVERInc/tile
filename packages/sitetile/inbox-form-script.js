@@ -18,12 +18,17 @@
 //     `fetch(action, {body: FormData})`, which sends no Accept) → 303 `<return_to>?inbox=<reason>`.
 //     fetch() follows it, so the AJAX path reads the outcome off the FINAL response's URL;
 //   • `Accept: application/json` or a JSON body → `{ ok:false, reason }`, 404 for `not_claimed`,
-//     422 for every other refusal; `{ ok:true, … }` on success.
-// `not_claimed` = the owner never claimed Inbox; it will fail until they do, so it is the ONE
-// outcome that must not say "try again". Every other refusal keeps the generic retry sentence.
+//     507 for `inbox_storage_full`, 422 for other refusals; `{ ok:true, … }` on success.
+// Neither an unclaimed inbox nor a full inbox can be fixed by a visitor retrying.
+// Export the same mapping the browser embeds so request-time rendering selects the same copy.
+export function inboxErrorKey(outcome) {
+  if (outcome === 'not_claimed') return 'errorNotClaimed';
+  if (outcome === 'inbox_storage_full') return 'errorInboxStorageFull';
+  return 'errorServer';
+}
 const INBOX_OUTCOME_HELPERS_SRC = [
-  "        function inboxErrorKey(outcome) { return outcome === 'not_claimed' ? 'errorNotClaimed' : 'errorServer'; }",
-  // An older build's payload has no errorNotClaimed; fall back to errorServer rather than show nothing.
+  inboxErrorKey.toString(),
+  // An older build's payload may lack the reason-specific key; fall back to errorServer rather than show nothing.
   "        function inboxErrorCopy(copy, outcome) { return copy ? (copy[inboxErrorKey(outcome)] || copy.errorServer || null) : null; }",
   '        function inboxOutcomeOf(res) {',
   "          let outcome = '';",

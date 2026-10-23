@@ -1527,6 +1527,7 @@ const checks = [
       && payload.errorServer === "Couldn't send that — please try again."
       // reef#2204: the not-claimed sentence rides the same payload — no "try again" in it.
       && payload.errorNotClaimed === "This site isn't taking messages right now."
+      && payload.errorInboxStorageFull === "This site's inbox can't take new messages right now."
       && payload.sentWithEmail.includes('{email}')
       && payload.sentNoEmail.length > 0
       && payload.emailField === 'visitor_email'

@@ -44,7 +44,7 @@ import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 // reads (CVERInc/reef#1933 S4b), never a second copy of the strings.
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { localeHomePath } from './locale.mjs';
-import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
+import { INBOX_FORM_SCRIPT, inboxErrorKey } from './inbox-form-script.js';
 // tile#148: a YouTube line. The address rules and the poster path are cardtile's (yt.mjs, no imports
 // of its own), so a Card's video cell and a post's YouTube line read a link the same way and point at
 // the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
@@ -2943,6 +2943,7 @@ function renderSection(s, hero, ctx) {
           errorNetwork: fieldCopy.errorNetwork,
           errorServer: fieldCopy.errorServer,
           errorNotClaimed: fieldCopy.errorNotClaimed, // reef#2204 — see Form.astro's payload
+          errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
           sentWithEmail: fieldCopy.sentWithEmail,
           sentNoEmail: fieldCopy.sentNoEmail,
           emailField: fields.some(({ f }) => f.kind === 'email') ? 'visitor_email' : null,
@@ -2963,7 +2964,9 @@ function renderSection(s, hero, ctx) {
         hiddenInputs = '<input type="hidden" name="return_to" value="' + escAttr(returnTo) + '">' +
           (thanksPath ? '<input type="hidden" name="thanks_to" value="' + escAttr(thanksPath) + '">' : '') +
           '<input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">';
-        errorLine = '<p class="st-form-error" data-inbox-error hidden>' + inlineHtml(fieldCopy.errorServer) + '</p>';
+        const errorKey = inboxErrorKey(new URLSearchParams(fCtx.search || '').get('inbox'));
+        const visibleError = errorKey !== 'errorServer';
+        errorLine = '<p class="st-form-error" data-inbox-error' + (visibleError ? '' : ' hidden') + '>' + inlineHtml(fieldCopy[errorKey]) + '</p>';
         inboxScript = '<script>' + INBOX_FORM_SCRIPT + '</script>';
       }
       return '<section class="st-form-section"' + inboxAttr + '><div class="st-form-head">' +
@@ -3104,11 +3107,14 @@ function _stampDropWarnings(site, before) {
  * Render a parsed site to the reference HTML string.
  *
  * @param {object} site  parseSite() output.
- * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ * @param {{path?: string, search?: string, contentRels?: Set<string>}} [opts]
  *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
  *   gets `return_to="/"` and a visitor is sent back to the wrong page.
+ *   `search` — the request's query string, for visible native inbox failure feedback. A query
+ *   included in `path` is also accepted; return links keep only the pathname. Static builds
+ *   have no visitor query, so their serving layer must apply request-time feedback separately.
  *   `contentRels` — contentRelsOf()'s set, which makes the form's "Back to homepage" MEASURED the
  *   way the built page's is (a locale prefix is used only when that locale's home file exists);
  *   absent → the locale prefix of `path` alone decides.
@@ -3117,7 +3123,9 @@ function _stampDropWarnings(site, before) {
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};
-  const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: o.path, contentRels: o.contentRels };
+  const [pathname, query = ''] = String(o.path || '/').split('#')[0].split('?');
+  const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
+    search: o.search ?? query, contentRels: o.contentRels };
   const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0, ctx), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
@@ -3233,7 +3241,7 @@ export {
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
-  INBOX_FORM_SCRIPT,
+  INBOX_FORM_SCRIPT, inboxErrorKey,
   // tile#148: the YouTube line — the paragraph test and the list of a body's videos (blog featured image).
   youtubeLine, youtubeLines,
   // the editing door's view of the dialogue convention — see quoteRunReport's own comment.

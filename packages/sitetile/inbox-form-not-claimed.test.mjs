@@ -14,6 +14,7 @@
 import assert from 'node:assert/strict';
 import { INBOX_FORM_SCRIPT, inboxOutcomeHelpers } from './inbox-form-script.js';
 import { inboxFormCopy } from './inbox-form-copy.js';
+import { parseSite, renderSiteToHtml } from './site-core.js';
 
 let passed = 0;
 const test = (name, fn) => {
@@ -28,7 +29,7 @@ const atest = async (name, fn) => {
 const H = inboxOutcomeHelpers({ href: 'https://tniop.tw/contact/' });
 const copy = inboxFormCopy('zh-TW');
 
-test('🔴 reef#2204 mapping: not_claimed → errorNotClaimed; every other refusal keeps errorServer', () => {
+test('🔴 reef#2204 mapping: not_claimed → errorNotClaimed; other refusals keep errorServer', () => {
   assert.equal(H.inboxErrorKey('not_claimed'), 'errorNotClaimed');
   for (const other of ['error', 'too_long', 'rate_limited', 'invalid_body', 'bad_kind', 'site_closed', '', undefined, null]) {
     assert.equal(H.inboxErrorKey(other), 'errorServer', `outcome ${JSON.stringify(other)} should still be the generic retry sentence`);
@@ -81,6 +82,66 @@ test('🔴 the shipped script uses the mapping on BOTH paths — the ?inbox= rel
   assert.doesNotMatch(s, /showError\(copy \? copy\.errorServer : null\)/);
   // The network branch is untouched: a fetch() rejection is still "check your connection".
   assert.match(s, /showError\(copy \? copy\.errorNetwork : null\)/);
+});
+
+
+// reef#2357: the database is full; neither a native submit nor AJAX should invite a retry.
+const fullSentence = "This site's inbox can't take new messages right now.";
+const formSite = (lang = 'en-US') => parseSite(`---
+sitetile-page: contact
+lang: ${lang}
+---
+
+## Contact
+%% sitetile: form action=inbox %%
+### Message {textarea}
+`);
+
+await atest('reef#2357 JSON 507 inbox_storage_full shows the distinct non-retry sentence', async () => {
+  const outcome = await H.inboxOutcomeOf({
+    url: 'https://tniop.tw/__reef/inbox', status: 507,
+    headers: { get: () => 'application/json' },
+    json: async () => ({ ok: false, reason: 'inbox_storage_full' }),
+  });
+  assert.equal(H.inboxErrorKey(outcome), 'errorInboxStorageFull');
+  assert.equal(H.inboxErrorCopy(inboxFormCopy('en-US'), outcome), fullSentence);
+});
+
+await atest('reef#2357 followed 303 inbox_storage_full uses the same non-retry copy', async () => {
+  const outcome = await H.inboxOutcomeOf({ url: 'https://tniop.tw/contact/?inbox=inbox_storage_full' });
+  assert.equal(H.inboxErrorCopy(inboxFormCopy('en-US'), outcome), fullSentence);
+  assert.equal(H.inboxErrorCopy({ errorServer: 'older build' }, outcome), 'older build');
+});
+
+for (const [reason, key, english] of [
+  ['inbox_storage_full', 'errorInboxStorageFull', fullSentence],
+  ['not_claimed', 'errorNotClaimed', "This site isn't taking messages right now."],
+]) {
+  for (const lang of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN', 'ko-KR']) {
+    test(`no-script SSR: ${reason} is visible in ${lang} before any script runs`, () => {
+      const html = renderSiteToHtml(formSite(lang), { path: `/contact/?inbox=${reason}` });
+      const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>([\s\S]*?)<\/p>/.exec(html);
+      assert.ok(error, 'SSR must emit the inbox error paragraph');
+      assert.doesNotMatch(error[1], /\bhidden\b/, `${reason} SSR error paragraph must be visible without JavaScript`);
+      assert.equal(error[2], lang === 'en-US' ? english : inboxFormCopy(lang)[key]);
+      assert.match(html, /name="return_to" value="\/contact\/"/, 'return_to must not retain the outcome query');
+    });
+  }
+}
+
+test('SSR accepts the request query separately from its pathname', () => {
+  const html = renderSiteToHtml(formSite(), { path: '/contact/', search: '?inbox=inbox_storage_full' });
+  const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>([\s\S]*?)<\/p>/.exec(html);
+  assert.doesNotMatch(error[1], /\bhidden\b/, 'request search must reach the SSR error paragraph');
+  assert.equal(error[2], fullSentence);
+});
+
+test('SSR keeps the error hidden on clean, sent, unknown, and unrelated query requests', () => {
+  for (const query of ['', '?inbox=sent', '?inbox=made_up', '?unrelated=inbox_storage_full']) {
+    const html = renderSiteToHtml(formSite(), { path: '/contact/' + query });
+    const error = /<p\b([^>]*\bdata-inbox-error\b[^>]*)>/.exec(html);
+    assert.match(error[1], /\bhidden\b/, `unexpected error on ${query || 'clean page'}`);
+  }
 });
 
 console.log('\ninbox-form-not-claimed: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
