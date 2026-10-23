@@ -62,6 +62,20 @@ for (const [status, reason, id] of [
   });
 }
 
+test('generated worker replaces an existing hash only for a valid refusal fragment', async (t) => {
+  const fragment = table.replace('storage-full-0', 'storage-full-2');
+  for (const [options, expected] of [
+    [{ fragment }, '/contact?inbox=inbox_storage_full#inbox-storage-full-2'],
+    [{ fragment: null }, '/contact?inbox=inbox_storage_full#top'],
+    [{ fragment: '{' }, '/contact?inbox=inbox_storage_full#top'],
+    [{ fragment, status: 200 }, '/contact?inbox=sent#top'],
+    [{ fragment, status: 429, reason: 'rate_limited' }, '/contact?inbox=rate_limited#top'],
+  ]) {
+    const { location } = await submit(t, { ...options, fields: { return_to: '/contact#top' } });
+    assert.equal(location, expected);
+  }
+});
+
 test('generated worker selects each capture independently through index 9999', async (t) => {
   const fragment = table.replace('storage-full-0', 'storage-full-9999').replace('not-claimed-0', 'not-claimed-1');
   for (const [reason, id] of [['inbox_storage_full', 'inbox-storage-full-9999'], ['not_claimed', 'inbox-not-claimed-1']]) {
