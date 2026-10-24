@@ -15,7 +15,7 @@ import { FEED_PATH, feedXml, feedIcon, latestBuildDate } from './feed.mjs';
 // reef#2160: the index serves TWO readers — the header magnifier (`blog-search`, blogSearchOn) and
 // the inbox bubble's in-browser search (bubbleSearchOn, on by default). Either switch alone is
 // enough; a site with both off, or with no posts at all, still ships the inert `[]`.
-// 🩸 Measured 2026-10-18: cver and sodaart (a blog, a bubble, no `blog-search`) served `[]`, so the
+// 🩸 Measured 2026-10-18: cver and another live site (a blog, a bubble, no `blog-search`) served `[]`, so the
 // bubble had nothing to filter. The gate was the magnifier's switch, not "does this site have posts".
 export function buildSearchIndexBody(posts, meta) {
   return (blogSearchOn(meta) || bubbleSearchOn(meta)) ? JSON.stringify(searchIndex(posts, meta)) : '[]';

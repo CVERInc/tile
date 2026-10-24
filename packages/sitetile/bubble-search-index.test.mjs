@@ -2,7 +2,7 @@
 // must exist whenever the bubble can draw, not only when the header magnifier is on.
 //   run: node --test packages/sitetile/bubble-search-index.test.mjs
 //
-// 🩸 Measured 2026-10-18: tniop's /search-index.json carried 1,410 rows; cver's and sodaart's were
+// 🩸 Measured 2026-10-18: tniop's /search-index.json carried 1,410 rows; cver's and another live site's were
 // `[]`. All three have a blog and all three draw the bubble. The index was gated on `blog-search`
 // (the header magnifier's switch) alone, so a bubble opened on cver had nothing to filter.
 //
