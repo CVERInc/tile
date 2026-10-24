@@ -270,6 +270,29 @@ test('🩸 CONTROL: the markup still gates the tag filter with `hidden`', () => 
     'BlogIndexView must still render the tag filter hidden until JS reveals it');
 });
 
+test('top share defaults exist once at zero specificity (tile#195)', () => {
+  const links = rulesFor('bl-share-btn').filter(r => r.selector === ':where(.bl-share-top .bl-share-btn)');
+  assert.equal(links.length, 1, 'top share links require exactly one :where(.bl-share-top .bl-share-btn) rule');
+  assert.equal(links[0].css.replace(/\s+/g, ''), 'font-size:0.85em;');
+  const nav = rulesFor('bl-share-top').filter(r => r.selector === ':where(.bl-share-top)');
+  assert.equal(nav.length, 1, 'top share navigation requires exactly one :where(.bl-share-top) rule');
+  assert.equal(nav[0].css.replace(/\s+/g, ''), 'display:flex;gap:0.6rem;margin-top:0.5rem;');
+});
+
+test('share markup carries localized names and no inline styles (tile#195/#196)', () => {
+  const markup = BLOG.post.split('---').slice(2).join('---').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  const links = [...markup.matchAll(/<a\b[^>]*class="bl-share-btn"[^>]*>/g)];
+  const navs = [...markup.matchAll(/<nav\b[^>]*class="bl-share(?: bl-share-top)?"[^>]*>/g)];
+  assert.equal(links.length, 2, 'top and bottom share link emitters must be checked');
+  assert.equal(navs.length, 2, 'top and bottom share navigation must be checked');
+  for (const [tag] of [...links, ...navs]) assert.doesNotMatch(tag, /\bstyle(?:[:=\s]|$)/,
+    'share links and navigation must not carry inline styles');
+  for (const [tag] of links) assert.match(tag, /aria-label=\{shareTo\(s.label\)\}/,
+    'share links must carry localized accessible names');
+  for (const [tag] of navs) assert.match(tag, /aria-label=\{shareThisPost\}/,
+    'share navigation must carry a localized accessible name');
+});
+
 test('🔴 the blog floor adds no look beyond the migrated top-share defaults (tile#195)', () => {
   // The drift this exists to stop: we decided NOT to ship a default blog look, and the cheapest
   // way to break that decision is to add `color:` to a rule that is already here for box-model
@@ -286,9 +309,9 @@ test('🔴 the blog floor adds no look beyond the migrated top-share defaults (t
   }
   for (const r of floor) {
     // tile#195 explicitly preserves the top pair's former inline paint while making it
-    // theme-overridable. Permit only those two exact declarations on that exact selector.
+    // theme-overridable. Permit only the exact font-size declaration on that exact selector.
     if (r.selector === ':where(.bl-share-top .bl-share-btn)') {
-      assert.equal(r.css.replace(/\s+/g, ''), 'font-size:0.85em;text-decoration:underline;');
+      assert.equal(r.css.replace(/\s+/g, ''), 'font-size:0.85em;');
       continue;
     }
     const hit = r.css.match(LOOK);

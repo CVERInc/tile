@@ -3,13 +3,18 @@
 // scripts/test.sh discovers this alongside the other real-render browser smokes.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LINGO_LOCALES } from '../locale.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ASTRO = path.resolve(HERE, '../astro');
+if (!existsSync(path.join(ASTRO, 'node_modules/astro'))) {
+  console.log('SKIPPED share-buttons smoke — run npm ci --prefix packages/sitetile/astro');
+  process.exit(0);
+}
 // A sibling of astro/ keeps the config aliases and lingo re-export pointing at this checkout.
 const FIX = mkdtempSync(path.resolve(HERE, '../.smoke-share-buttons-'));
 let browser, server;
@@ -24,24 +29,28 @@ try {
   rmSync(path.join(FIX, 'src/pages'), { recursive: true });
   mkdirSync(path.join(FIX, 'src/pages'));
   writeFileSync(path.join(FIX, 'src/pages/[fixture].astro'), `---
-import SiteLayout from '../layouts/SiteLayout.astro';
-import PostArticle from '../components/PostArticle.astro';
+import PostView from '../components/PostView.astro';
+import { LINGO_LOCALES } from '../packages/lingo/locale.mjs';
 export function getStaticPaths() {
-  return ['en-US', 'zh-TW', 'ja-JP', 'ko-KR'].flatMap(lang =>
-    ['top', 'bottom', 'off'].map(row => ({ params: { fixture: lang + '-' + row }, props: { row, lang } })));
+  return LINGO_LOCALES.flatMap(lang =>
+    ['top', 'bottom', 'off'].map(row => ({ params: { fixture: lang + '-' + row }, props: { row, lang } }))).concat(
+      ['no-lang', 'conflicting-lang'].flatMap(mismatch =>
+        [false, true].map(sidebarOn => ({ params: { fixture: mismatch + (sidebarOn ? '-sidebar' : '') },
+          props: { row: 'top', mismatch, sidebarOn } }))));
 }
-const { row, lang } = Astro.props;
-const meta = { title: 'Share fixture', lang, 'footer-social': 'Facebook=https://www.facebook.com/example; X=https://x.com/example',
+const { row, lang, mismatch, sidebarOn } = Astro.props;
+const meta = { title: 'Share fixture', lang, locales: lang, 'footer-social': 'Facebook=https://www.facebook.com/example; X=https://x.com/example',
   ...(row === 'bottom' ? { 'blog-share': 'email,facebook,twitter,x,linkedin,tumblr,pinterest' } : {}),
   ...(row === 'off' ? { 'blog-share-top': 'none' } : {}) };
+if (mismatch === 'no-lang') { delete meta.lang; meta.locales = 'zh-TW, en-US'; }
+if (mismatch === 'conflicting-lang') { meta.lang = 'ja-JP'; meta.locales = 'en-US, ja-JP'; }
+const sidebar = sidebarOn ? { side: 'right', categories: [], related: [], archive: [], tags: [] } : null;
 const post = { title: 'Article', body: 'A shareable article.', slug: 'article' };
 ---
-<SiteLayout meta={meta}>
-  <PostArticle post={post} meta={meta} keepReadingCards={[]} relatedCards={[]} />
-</SiteLayout>
+<PostView post={post} meta={meta} sidebar={sidebar} keepReadingCards={[]} relatedCards={[]} />
 `);
   execFileSync(process.execPath, [path.join(ASTRO, 'node_modules/astro/bin/astro.mjs'), 'build', '--root', FIX],
-    { stdio: 'pipe', env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' } });
+    { cwd: FIX, stdio: 'pipe', env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' } });
   const dist = path.join(FIX, 'dist');
   server = http.createServer((req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
@@ -73,6 +82,26 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     assert.equal((await styles())[0].fontSize, parentSize, 'theme font-size: 1em must win over the 0.85em default');
   });
   await check('normal theme specificity overrides share decoration', async () => assert.equal((await styles())[0].textDecoration, 'none', 'theme text-decoration: none must win'));
+  await page.addStyleTag({ content: '.bl-share-top { gap: 2rem; margin-top: 3rem; }' });
+  await check('normal theme specificity overrides top row spacing', async () => {
+    const spacing = await page.locator('.bl-share-top').evaluate(nav => {
+      const s = getComputedStyle(nav); return { gap: s.gap, marginTop: s.marginTop };
+    });
+    assert.deepEqual(spacing, { gap: '32px', marginTop: '48px' });
+  });
+  for (const [fixture, lang, label] of [
+    ['no-lang', 'zh-Hant', '分享到 Facebook'],
+    ['conflicting-lang', 'en', 'Share to Facebook'],
+  ]) {
+    for (const suffix of ['', '-sidebar']) {
+      await page.goto(`${origin}/${fixture}${suffix}/`);
+      await check(`${fixture}${suffix}: share name matches resolved document language`, async () => {
+        assert.equal(await page.locator('html').getAttribute('lang'), lang);
+        assert.equal(await page.locator('.bl-share-btn').first().getAttribute('aria-label'), label,
+          `${fixture}${suffix}: share label must follow html lang=${lang}`);
+      });
+    }
+  }
   await page.goto(`${origin}/en-US-bottom/`);
   await check('configured bottom row retains all seven destinations without the top row', async () => {
     assert.equal(await page.locator('.bl-share-btn').count(), 7);
@@ -93,7 +122,9 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     'ja-JP': brand => `${brand}でシェア`,
     'ko-KR': brand => `${brand}에 공유`,
   };
-  for (const [lang, shareName] of Object.entries(names)) {
+  const navNames = { 'en-US': 'Share this post', 'zh-TW': '分享這篇文章', 'ja-JP': 'この記事をシェア', 'ko-KR': '이 글 공유' };
+  for (const lang of LINGO_LOCALES) {
+    const shareName = names[lang];
     for (const row of ['top', 'bottom']) {
       await page.goto(`${origin}/${lang}-${row}/`);
       await check(`${lang} ${row}: share names differ from footer social names`, async () => {
@@ -101,6 +132,8 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
           'only the footer link should be named Facebook');
         assert.equal(await page.getByRole('link', { name: 'X', exact: true }).count(), 1,
           'only the footer link should be named X');
+        assert.equal(await page.getByRole('navigation', { name: navNames[lang], exact: true }).count(), 1,
+          'share navigation must use the resolved page language');
         const labels = row === 'top' ? ['Facebook', 'X'] : ['Email', 'Facebook', 'Twitter', 'X', 'LinkedIn', 'Tumblr', 'Pinterest'];
         assert.deepEqual(await page.locator('.bl-share-btn').allTextContents(), labels, 'visible labels stay unchanged');
         for (const label of labels) {

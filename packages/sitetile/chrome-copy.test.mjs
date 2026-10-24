@@ -22,7 +22,7 @@ import { registerHooks } from 'node:module';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { uiCopy, dateHeading } from './astro/src/packages/lingo/locale.mjs';
+import { uiCopy, dateHeading, LINGO_LOCALES } from './astro/src/packages/lingo/locale.mjs';
 import { unquote, archivePrefixes, dateBadgeParts } from './astro/src/lib/chrome-copy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ registerHooks({
     return next(spec, ctx);
   },
 });
-const { fmtDate } = await import('./astro/src/lib/blog.mjs');
+const { fmtDate, siteMeta, blogViewLang } = await import('./astro/src/lib/blog.mjs');
 
 // Every `fmtDate(...)` call in `src` that does not pass a language as its third argument.
 // tile#36: a `[^)]*` regex split on `,` stopped at the first `)` and counted commas inside a nested
@@ -72,12 +72,18 @@ const test = (name, fn) => {
 
 // tile#196: a formatter keeps the platform name in the locale's natural word order.
 test('article share names cover every engine UI locale', () => {
-  for (const [lang, expected] of [
-    ['en-US', 'Share to Facebook'], ['zh-TW', '分享到 Facebook'],
-    ['ja-JP', 'Facebookでシェア'], ['ko-KR', 'Facebook에 공유'],
-  ]) {
+  const names = {
+    'en-US': ['Share to Facebook', 'Share this post'],
+    'zh-TW': ['分享到 Facebook', '分享這篇文章'],
+    'ja-JP': ['Facebookでシェア', 'この記事をシェア'],
+    'ko-KR': ['Facebook에 공유', '이 글 공유'],
+  };
+  for (const lang of LINGO_LOCALES) {
+    assert.ok(names[lang], `add share-copy expectations for ${lang}`);
+    const [expected, nav] = names[lang];
     assert.equal(uiCopy(lang).shareTo('Facebook'), expected, lang);
     assert.equal(uiCopy(lang).shareTo('X'), expected.replace('Facebook', 'X'), lang);
+    assert.equal(uiCopy(lang).shareThisPost, nav, lang);
   }
 });
 test('article share names follow the existing locale aliases', () => {
@@ -89,6 +95,30 @@ test('article share names use neutral English for absent or unsupported locales'
   for (const lang of [undefined, '', 'xx-XX', 'fr-FR']) {
     assert.equal(uiCopy(lang).shareTo('Facebook'), 'Share to Facebook');
   }
+});
+
+for (const [config, expectedLang, expectedLabel] of [
+  ['locales: zh-TW, en-US', 'zh-TW', '分享到 Facebook'],
+  ['lang: ja-JP\nlocales: en-US, ja-JP', 'en-US', 'Share to Facebook'],
+]) {
+  test(`article share copy follows resolved page language: ${config.replaceAll('\n', '; ')}`, () => {
+    const files = { '../../content/_site.md': `---\n${config}\n---\n` };
+    const lang = blogViewLang(siteMeta(files), files);
+    assert.equal(lang, expectedLang);
+    assert.equal(uiCopy(lang).shareTo('Facebook'), expectedLabel);
+  });
+}
+test('both PostView branches pass the document language to article share copy', () => {
+  const view = readFileSync(join(SRC, 'components/PostView.astro'), 'utf8');
+  const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
+  const markup = view.split('---').slice(2).join('---').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  const tags = [...markup.matchAll(/<(?:SiteLayout|PostArticle)\b[^>]*>/g)];
+  assert.equal(tags.length, 3, 'document layout and both article branches must be checked');
+  for (const [tag] of tags) assert.match(tag, /lang=\{blogViewLang\(meta, viewFiles\)\}/,
+    'PostView must pass its resolved document language to both article branches');
+  assert.match(article, /const\s*\{[^}]*\blang\b[^}]*\}\s*=\s*Astro.props/);
+  assert.match(article, /const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*uiCopy\(lang\)/,
+    'share copy must consume the resolved lang prop');
 });
 
 const walk = (dir) => readdirSync(dir).flatMap((n) => {
@@ -105,7 +135,7 @@ const stripComments = (t) => t
 const CJK = /[一-鿿぀-ヿ가-힯]/;
 
 test('every locale has a full set of chrome copy', () => {
-  for (const l of ['en-US', 'zh-TW', 'ja-JP', 'ko-KR']) {
+  for (const l of LINGO_LOCALES) {
     const u = uiCopy(l);
     for (const k of ['recent', 'tags', 'archive', 'search', 'tagPrefix', 'datePrefix']) {
       assert.ok(u[k] && String(u[k]).trim(), `${l} is missing ${k}`);
