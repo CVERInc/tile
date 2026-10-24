@@ -39,7 +39,7 @@ registerHooks({
     return next(spec, ctx);
   },
 });
-const { fmtDate, siteMeta, blogViewLang } = await import('./astro/src/lib/blog.mjs');
+const { fmtDate, siteMeta, blogViewLang, siteDefaultLang, LOCALE_VIEW } = await import('./astro/src/lib/blog.mjs');
 
 // Every `fmtDate(...)` call in `src` that does not pass a language as its third argument.
 // tile#36: a `[^)]*` regex split on `,` stopped at the first `)` and counted commas inside a nested
@@ -97,6 +97,16 @@ test('article share names use neutral English for absent or unsupported locales'
   }
 });
 
+// Evaluate both actual article prop expressions, so a disconnected branch fails in CI.
+function articleLanguages(meta, viewFiles) {
+  const view = readFileSync(join(SRC, 'components/PostView.astro'), 'utf8');
+  const expressions = [...view.matchAll(/<PostArticle\s+lang=\{([^}]+)\}/g)];
+  assert.equal(expressions.length, 2, 'both article branches must pass a language');
+  return expressions.map(([, expression]) => new Function(
+    'meta', 'viewFiles', 'blogViewLang', 'siteDefaultLang', 'LOCALE_VIEW', 'NEUTRAL_UI_LANG',
+    `return (${expression});`)(meta, viewFiles, blogViewLang, siteDefaultLang, LOCALE_VIEW, NEUTRAL_UI_LANG));
+}
+
 // Execute the component's actual copy initializer so CI covers its fallback, not a duplicate.
 function articleShareCopy(meta, lang) {
   const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
@@ -117,9 +127,34 @@ for (const [config, expectedLang, expectedLabel, expectedNav] of [
     const meta = siteMeta(files);
     const lang = blogViewLang(meta, files);
     assert.equal(lang, expectedLang);
-    const copy = articleShareCopy(meta, lang);
-    assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must respect neutral UI fallback`);
-    assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must respect neutral UI fallback`);
+    for (const articleLang of articleLanguages(meta, files)) {
+      const copy = articleShareCopy(meta, articleLang);
+      assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must respect neutral UI fallback`);
+      assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must respect neutral UI fallback`);
+    }
+  });
+}
+// Page frontmatter is also a language declaration, even when site metadata is silent.
+for (const [name, config, homeLang, pageLang, expectedLang, expectedLabel, expectedNav] of [
+  ['site without language, Japanese pages', 'title: Share fixture', 'ja-JP', 'ja-JP', 'ja-JP', 'Facebookでシェア', 'この記事をシェア'],
+  ['no site, neutral home, Chinese pages', null, '', 'zh-TW', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+  ['no site, Chinese home', null, 'zh-TW', 'zh-TW', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+]) {
+  test(`article share copy respects page language: ${name}`, () => {
+    const page = lang => `---\nsitetile-page: true\n${lang ? `lang: ${lang}\n` : ''}---\n`;
+    const files = {
+      '../../content/home.md': page(homeLang),
+      '../../content/about.md': page(pageLang),
+      ...(config === null ? {} : { '../../content/_site.md': `---\n${config}\n---\n` }),
+    };
+    const meta = siteMeta(files);
+    const lang = blogViewLang(meta, files);
+    assert.equal(lang, expectedLang);
+    for (const articleLang of articleLanguages(meta, files)) {
+      const copy = articleShareCopy(meta, articleLang);
+      assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must follow page-declared language`);
+      assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must follow page-declared language`);
+    }
   });
 }
 test('both PostView branches pass the resolved language to article share copy', () => {
@@ -128,8 +163,12 @@ test('both PostView branches pass the resolved language to article share copy', 
   const markup = view.split('---').slice(2).join('---').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
   const tags = [...markup.matchAll(/<(?:SiteLayout|PostArticle)\b[^>]*>/g)];
   assert.equal(tags.length, 3, 'document layout and both article branches must be checked');
-  for (const [tag] of tags) assert.match(tag, /lang=\{blogViewLang\(meta, viewFiles\)\}/,
-    'PostView must pass its resolved document language to both article branches');
+  assert.match(tags[0][0], /lang=\{blogViewLang\(meta, viewFiles\)\}/,
+    'document language keeps its document fallback');
+  for (const lang of articleLanguages({ lang: 'ja-JP', locales: 'en-US, ja-JP', [LOCALE_VIEW]: true }, {})) {
+    const copy = articleShareCopy({}, lang);
+    assert.equal(copy.shareTo('Facebook'), 'Facebookでシェア', 'locale view must preserve its own language');
+  }
   assert.match(article, /const\s*\{[^}]*\blang\b[^}]*\}\s*=\s*Astro.props/);
   assert.match(article, /const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*uiCopy\([^;]*\blang\b[^;]*\)/,
     'share copy must consume the resolved lang prop');

@@ -9,7 +9,8 @@
 // post's rail and its index's rail read as one thing; content is corpus-derived (buildPostSidebar).
 import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from './PostArticle.astro';
-import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy, blogViewLang, blogAlternates } from '../lib/blog.mjs';
+import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy, blogViewLang, blogAlternates, siteDefaultLang, LOCALE_VIEW } from '../lib/blog.mjs';
+import { NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
 import { safeHref } from '@sitetile';
 
 const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null, bannerLocales = null } = Astro.props;
@@ -69,7 +70,7 @@ const headMeta = {
 <SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)}>
   {sidebar ? (
     <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
-      <PostArticle lang={blogViewLang(meta, viewFiles)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
+      <PostArticle lang={meta[LOCALE_VIEW] ? meta.lang : (siteDefaultLang(meta, viewFiles) || NEUTRAL_UI_LANG)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
       <aside class="bl-sidebar bl-post-sidebar">
         {sidebar.categories.length > 0 && (
           <div class="bl-side-widget bl-side-categories">
@@ -137,7 +138,7 @@ const headMeta = {
       </aside>
     </div>
   ) : (
-    <PostArticle lang={blogViewLang(meta, viewFiles)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
+    <PostArticle lang={meta[LOCALE_VIEW] ? meta.lang : (siteDefaultLang(meta, viewFiles) || NEUTRAL_UI_LANG)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
   )}
   {/* Post-end donate CTA (opt-in `blog-post-cta`) — a single per-site card (e.g. a
       "贊助成為 VIP 會員"), reusing the same .st-cta belt so it inherits the theme's belt look. */}
