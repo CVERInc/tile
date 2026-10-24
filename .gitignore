@@ -77,5 +77,7 @@ lab/
 packages/sitetile/.smoke-search-drawer/
 # the announce-card narrow-viewport smoke build (throwaway sibling of astro/; see real-render/announce-card.smoke.mjs)
 packages/sitetile/.smoke-announce-card/
+# the surface= band smoke build (throwaway sibling of astro/; see real-render/surface-band.smoke.mjs)
+packages/sitetile/.smoke-surface-band/
 
 packages/sitetile/.smoke-share-buttons-*/

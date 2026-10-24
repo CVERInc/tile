@@ -385,6 +385,27 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
   margin-inline: auto;
 }
 
+/* `surface=<token>` — a BAND by default (reef#1869, ruled 2026-10-20). prose / grid / timeline emit
+   `data-surface` for the theme to paint; until now the section was still caged at its width, so a
+   painted surface was a box in the middle of the page, not a band. The section now spans its
+   container and the cage moves into the side padding: `(100% - cap) / 2` on top of the usual inset,
+   never less than the inset. Same numbers as the cage, so the content box — prose of any shape, a
+   grid's cells, a timeline's rows — lands exactly where it was, and nothing about the children has
+   to be named. The cap is each section's own: --gd-maxw, and 80rem for the grid (its rule above).
+   Not `:where()`: it has to beat `.st-prose, .st-grid, …` (0,1,0) and `.st-grid` (0,1,0), and
+   it is still reef.base, so any theme rule on these sections wins without a fight.
+   🔴 Percent padding resolves against the CONTAINER, not the section. A theme that re-cages a
+   surface section with `max-width` alone keeps this inset as well; one that sets its own padding
+   too (or makes the section full-width itself, as the two sites using surface= on 10-24 do) is
+   unaffected. */
+section[data-surface]:not(.st-full-bleed) {
+  max-width: none;
+  padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - var(--gd-maxw)) / 2 + clamp(1rem, 4vw, 3rem)));
+}
+section.st-grid[data-surface]:not(.st-full-bleed) {
+  padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - 80rem) / 2 + clamp(1rem, 4vw, 3rem)));
+}
+
 /* hero — full-bleed, optional background image */
 .st-hero {
   display: grid; place-content: center; gap: 1rem; text-align: center;
