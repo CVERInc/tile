@@ -196,6 +196,14 @@ function initReader(root) {
       if (fig.dataset.kind) f.dataset.kind = fig.dataset.kind;
       const focus = fig.style.getPropertyValue('--ptr-focus');
       if (focus) f.style.setProperty('--ptr-focus', focus);
+      // A mat photo keeps the box it lies in on its paper. Refitted to the face, a photo smaller than
+      // the mat would grow for the length of the turn. A face is its page's size (sheetBox; the back
+      // face is the next pair's page, which in a spread is the same size), so the photo's offset on
+      // its page is its offset on the face.
+      if (f.dataset.kind === 'mat') {
+        const pr = fig.getBoundingClientRect(), ir = im.getBoundingClientRect();
+        place(f.firstChild, { left: ir.left - pr.left, top: ir.top - pr.top, width: ir.width, height: ir.height });
+      }
     }
     const shade = document.createElement('div');
     shade.className = 'ptr-leaf-shade';
