@@ -67,7 +67,7 @@
       "type": "boolean",
       "required": false,
       "default": true,
-      "description": "Set to 0 to disable the deferred question log."
+      "description": "Set to 0 to disable the deferred question log and the guidance funnel."
     },
     {
       "name": "data-status",

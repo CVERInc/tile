@@ -17,7 +17,7 @@ a support department, and nearly every REEF customer is one person.
 | `data-kaito` | `"1"` asks the site first (needs REEF with KAITO on that tenant) |
 | `data-assistant-name` | what VISITORS see the assistant called instead of "KAITO" (owner-chosen; the panel still marks the reply with the non-removable **AI** chip — the name can change, the AI identity cannot). The BAKED opening answer only: from 0.7.2 the bubble also reads the platform's current value once per mount (`GET /api/inbox/assistant`) and patches the two nodes that carry the name, so an owner's rename reaches visitors without a republish. That read only beats the baked value when the proxy says it actually asked the platform (`resolved: true` in the body) — which is also how CLEARING the name works: a resolved empty answer means「no override」and falls back to KAITO, while an empty answer without `resolved` means「we could not ask」and this attribute stands. Whichever value wins is trimmed to one line and capped at **40 grapheme clusters and 200 UTF-16 units** — a cluster has no length of its own, so both halves are needed for「40 characters」to also mean「not a wall of text」— and bidi/format controls (U+202A–202E, U+2066–2069, U+061C, U+200E/F) are removed, since a name is not allowed to change the direction the rest of the status line reads in |
 | `data-open-on-hash` | `"1"` lets `#inbox` in the URL open the panel at load. Off by default — see "Opening the panel programmatically" |
-| `data-ai-log` | `"0"` opts this mount out of the deferred question log entirely — see "What the visitor asked the machine". Anything else, including the attribute being absent, leaves it on |
+| `data-ai-log` | `"0"` opts this mount out of the deferred question log entirely, and the guidance funnel with it — see "What the visitor asked the machine" and "The guidance funnel". Anything else, including the attribute being absent, leaves it on |
 | `data-api-base` | override the feelreef origin (previews) |
 | `data-status` | the one visible sentence under the site name on a mount **without** KAITO (tile#20) — replaces the locale default「真人會看」/ 'A person reads what you send'. Plain text: HTML-escaped, first line only, trimmed, capped at **80 grapheme clusters** (and 400 UTF-16 units), bidi/format controls removed. **Ignored when `data-kaito="1"`**: that line carries the AI disclosure, and no attribute may replace it |
 | `data-search-index` | the site's search index to filter in the browser as the visitor types (0.7.14, reef#2160) — the sitetile layout sets `/search-index.json` on a blog site with bubble search on. Fetched **once, on the first open**, never at page load; `[]` or unreachable draws today's bubble. See「Searching the site from the bubble」|
@@ -326,6 +326,41 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
 
 The escalation press stays the only thing that notifies the owner. This log does not.
 
+## The guidance funnel (0.7.15, reef#422)
+
+What the owner sees per page is「被引導 → 到達 → 解決」: how many visitors KAITO pointed at a page,
+how many then reached it, and how many of those did not ask again or go to a person. The bubble
+sends the events; the receiver is `POST <data-api-base>/api/inbox/funnel` (reef PR #2310), one
+event per request:
+
+| stage | sent when | `page` | `cited_page` | `section` |
+|---|---|---|---|---|
+| `guided` | KAITO's answer is drawn **with a citation** — a refusal or an uncited answer guides nowhere and sends nothing | where the bubble is | the cited page's path | the citation's fragment, or `none` |
+| `arrived` | a page mounts that KAITO cited earlier in this journey — or the visitor clicks a citation into the page they are already on, since no new mount will see that one. Once per guidance: a reload is not a second arrival | the cited page | — | the cited fragment |
+| `followed_up` | the visitor presses Ask again inside a guided journey (the press, not the answer) | where the bubble is | — | `none` |
+| `handed_off` | a message reaches a person inside a guided journey (any of the three sends to `/api/inbox` answered `ok`) | where the bubble is | — | `none` |
+
+- **Nothing until KAITO guides.** A journey is minted by the first `guided` and by nothing else, so a
+  visit that never asks, or whose questions were all refused, costs no request and no storage
+  write. The other three stages exist only inside a guided journey.
+- **No words, by shape.** A body is `kind`, `id`, `journey`, `stage`, `page`, `cited_page` (on
+  `guided` only), `section` and `locale` — nothing else: no question, no answer, no time (the
+  server stamps it), no session id, no conversation handle. Paths only, never a query string. A
+  locale the receiver would refuse travels as `''`.
+- **`journey` is not the question log's `session_id`.** It is `f_` + 16 random hex, minted for
+  itself and kept under its own key (`reef-inbox:funnel:<kind>:<id>`), a namespace the server
+  refuses as a session id — the two rows cannot be joined. Thirty idle minutes end a journey, the
+  same boundary the log draws; it remembers at most 20 cited pages while waiting for an arrival.
+- **The same switch as the question log.** Off on the ask-only bubble, off with `data-ai-log="0"`,
+  off while the log holds a definite「no Inbox」. The full bubble is only drawn after the mount's
+  gate heard yes, which is the claim the funnel stands on; the receiver drops every event for a
+  tenant without an Inbox anyway, with the same 204 and zero writes.
+- **Best effort.** Each event is one `fetch` with `keepalive: true`, a JSON body and no
+  credentials — not `sendBeacon`, whose `text/plain` body reef's cross-site form check lets through
+  for `/api/inbox/session` alone. None of the four happens at `pagehide`, so the preflighted
+  request has a live document to run in. Nothing is awaited, retried or shown: a failure costs the
+  visitor nothing and the owner one event.
+
 ## The three things not to break
 
 **It never claims anyone is there.** The panel shows a reply window only when the
@@ -393,13 +428,13 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.14/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.15/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.7.14, stop and choose a
+is immutable: if that deployment already has different bytes at 0.7.15, stop and choose a
 new version before publishing.
 
 ### 🔴 Rolling out the loader handoff (0.7.12) — coral first, in this order
@@ -461,7 +496,7 @@ Author: `official`.
 | `data-kaito` | boolean | no | `false` | Set to 1 to enable the site-answer view. |
 | `data-assistant-name` | string | no | — | Baked assistant name until the platform resolves its current value. |
 | `data-open-on-hash` | boolean | no | `false` | Set to 1 to let #inbox open the panel. |
-| `data-ai-log` | boolean | no | `true` | Set to 0 to disable the deferred question log. |
+| `data-ai-log` | boolean | no | `true` | Set to 0 to disable the deferred question log and the guidance funnel. |
 | `data-status` | string | no | — | Visible status line when the site-answer view is off. |
 | `data-title` | string | no | — | Dialog accessible-name override; also the visible panel label in the ask-only view. |
 | `data-open-label` | string | no | — | Open button label override. |

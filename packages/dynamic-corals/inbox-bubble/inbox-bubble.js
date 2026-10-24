@@ -1393,6 +1393,8 @@ export function createAiLog(opts) {
 	return {
 		/** Whether this mount is logging at all — `data-ai-log="0"` turns everything below off. */
 		enabled: () => !!state,
+		/** Whether a definite「this site has no Inbox」is in force — the funnel reads it (reef#422). */
+		unclaimed: () => unclaimedStands(),
 		/** For tests and for the mount's own reads. Never a live reference. */
 		state: () => (state ? JSON.parse(JSON.stringify(state)) : null),
 
@@ -1564,6 +1566,298 @@ export function createAiLog(opts) {
 			return payload;
 		}
 	};
+}
+
+// ── the guidance funnel (reef#422) ──────────────────────────────────────────
+//
+// 「被引導 → 到達 → 解決」, as events: KAITO cited a page (`guided`), the visitor then reached
+// that page (`arrived`), asked again (`followed_up`) or went to a person (`handed_off`). The
+// contract is reef `apps/feelreef/src/lib/inbox/funnel.ts`'s header and SPEC-inbox-bubble-position
+// 五; the endpoint is `POST /api/inbox/funnel`, one event per request.
+//
+// 🔴 NO WORDS, BY SHAPE. A funnel body is assembled from `FUNNEL_FIELDS` and nothing else — no
+// question, no answer, no text of any kind, no time (the server stamps it), no session id, no
+// handle. The endpoint refuses an unknown key with a 400, so a field added here without the
+// contract changing is a bug that shows.
+//
+// 🔴 THE SAME POSTURE AS THE QUESTION LOG, NOT A NEW ONE. The funnel runs exactly where the log
+// runs — the full bubble, with `data-ai-log` not "0" — and stops where the log's own definite
+// 「no Inbox」stands. The full bubble is only ever drawn after the mount's gate heard yes (or, when
+// it cannot be asked, a yes this browser heard within 30 days), so that is the claim the funnel
+// stands on; it does not wait for the log's second probe, because it carries no words to hold
+// back. The ask-only bubble creates neither, and writes nothing (ruling 54). The server drops
+// every event for an unclaimed tenant as well, with the same 204 and zero writes.
+//
+// 🔴 NOTHING UNTIL KAITO GUIDES. A journey is minted by the first `guided` and by nothing else, so
+// a visitor who never asks — or whose questions were all refused — costs no request and no storage
+// write. `arrived`, `followed_up` and `handed_off` exist only inside a journey that was guided:
+// without one there is no funnel for them to be a step of.
+//
+// 🔴 `journey` IS NOT `session_id`, and cannot be. The log's `session_id` is a UUID; a journey is
+// `f_` + 16 lowercase hex, the namespace the server reserves for it on both routes, minted by its
+// own call and kept under its own key — so the two rows can never be joined.
+
+/** The four stages, in contract order. */
+export const FUNNEL_STAGES = ['guided', 'arrived', 'followed_up', 'handed_off'];
+/** Every key a funnel body may carry — reef's `FUNNEL_BODY_FIELDS`, the same eight. */
+export const FUNNEL_FIELDS = ['kind', 'id', 'journey', 'stage', 'page', 'cited_page', 'section', 'locale'];
+/** The journey namespace the server accepts: `f_` + 16 lowercase hex, nothing else. */
+export const FUNNEL_JOURNEY = /^f_[0-9a-f]{16}$/;
+/** What `section` holds when the stage has none, or the citation named no usable anchor. */
+export const FUNNEL_NO_SECTION = 'none';
+/** The server's section shape: letters, digits, `-`, `_`, at most 80. */
+const FUNNEL_SECTION = /^[\p{L}\p{N}_-]{1,80}$/u;
+/** The server's locale shape: '' (the site's primary locale) or a lowercase `xx` / `xx-yy` tag. */
+const FUNNEL_LOCALE = /^([a-z]{2,3}(-[a-z0-9]{2,8})?)?$/;
+/** Most guidances one journey remembers while waiting for an arrival; the oldest go first. */
+export const FUNNEL_MAX_GUIDED = 20;
+const FUNNEL_PREFIX = 'reef-inbox:funnel:';
+
+/** The journey's own key — beside the log's and the handle's, never inside either. */
+export function funnelKey(tenant) {
+	return FUNNEL_PREFIX + tenant;
+}
+
+/**
+ * A fresh journey id. `getRandomValues` where there is one; the fallback is only ever reached by a
+ * browser without Web Crypto, and is still shaped for the namespace.
+ */
+export function mintJourney(fill) {
+	const bytes = new Uint8Array(8);
+	try {
+		(fill || ((b) => crypto.getRandomValues(b)))(bytes);
+	} catch {
+		for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+	}
+	return 'f_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Which page an address is, for「did the visitor reach the cited page」— a COMPARISON key, never
+ * sent. The same identities reef's `inboxPageKey` applies (path only, percent-decoded, slashes
+ * collapsed, case folded), so a citation spelled `/FAQ/` and a page at `/faq` are one page here
+ * exactly as they are one row there.
+ */
+export function funnelPageKey(raw) {
+	let path = aiPagePath(raw);
+	try {
+		path = decodeURIComponent(path);
+	} catch {
+		// A truncated `%E5` stays as it was.
+	}
+	path = (path.split(/[?#]/)[0] || '').replace(/\/{2,}/g, '/').replace(/\/+$/, '');
+	return path.toLowerCase() || '/';
+}
+
+/** The cited section: the citation's fragment, when it is a shape the server accepts, else `none`. */
+export function funnelSection(url) {
+	if (typeof url !== 'string') return FUNNEL_NO_SECTION;
+	let hash = '';
+	try {
+		hash = new URL(url, 'https://x.invalid').hash.slice(1);
+		hash = decodeURIComponent(hash);
+	} catch {
+		return FUNNEL_NO_SECTION;
+	}
+	return FUNNEL_SECTION.test(hash) ? hash : FUNNEL_NO_SECTION;
+}
+
+/**
+ * One event's wire body, ASSEMBLED FROM NAMED FIELDS. `cited_page` exists on `guided` and only
+ * there — the server requires it there and refuses it anywhere else.
+ */
+export function funnelPayload(kind, id, journey, stage, fields = {}) {
+	const body = {
+		kind,
+		id,
+		journey,
+		stage,
+		page: aiPagePath(fields.page)
+	};
+	if (stage === 'guided') body.cited_page = aiPagePath(fields.cited_page);
+	body.section = typeof fields.section === 'string' && FUNNEL_SECTION.test(fields.section)
+		? fields.section
+		: FUNNEL_NO_SECTION;
+	// The server's locale shape, checked here so a page segment it would refuse travels as the
+	// primary locale ('') rather than costing the whole event a 400.
+	const locale = typeof fields.locale === 'string' ? aiLine(fields.locale, 16).toLowerCase() : '';
+	body.locale = FUNNEL_LOCALE.test(locale) ? locale : '';
+	return body;
+}
+
+/**
+ * Hand one event to the network and forget it.
+ *
+ * 🔴 A KEEPALIVE `fetch` WITH A JSON BODY, NOT `sendBeacon`. The session beacon is a `text/plain`
+ * string because it leaves on `pagehide`, where Safari runs no CORS preflight — and reef's
+ * cross-site form check lets `text/plain` through for `/api/inbox/session` ALONE (hooks.server.ts
+ * `CSRF_EXEMPT_PATHS`), so the same string sent here would be refused 403 before the route ran.
+ * None of the four stages happens at `pagehide`: each one is a moment the document is alive (an
+ * answer drawn, a page mounted, a link clicked, a send answered), so the preflighted JSON request
+ * has time to run, and `keepalive` carries it past a navigation that starts right after.
+ *
+ * Never throws and never waits: the endpoint answers 204 whatever happened, and an event that did
+ * not arrive is not retried — the funnel is bookkeeping, and the visitor never sees it.
+ */
+export function sendFunnelEvent(url, body, env = {}) {
+	const f = 'fetch' in env ? env.fetch : typeof fetch === 'undefined' ? null : fetch;
+	if (!f) return false;
+	try {
+		const p = f(url, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(body),
+			credentials: 'omit',
+			keepalive: true
+		});
+		if (p && typeof p.catch === 'function') p.catch(() => {});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Read a journey back out of this browser's own storage. Malformed, or idle past the log's own
+ * thirty minutes, is no journey — the same session boundary the question log draws.
+ */
+export function parseFunnel(raw, at) {
+	if (!raw || typeof raw !== 'object') return null;
+	if (typeof raw.journey !== 'string' || !FUNNEL_JOURNEY.test(raw.journey)) return null;
+	if (!Number.isFinite(raw.last) || at - raw.last > AI_LOG_IDLE_MS) return null;
+	const guided = (Array.isArray(raw.guided) ? raw.guided : [])
+		.filter((g) => g && typeof g.page === 'string')
+		.map((g) => ({
+			page: aiLine(g.page, AI_LOG_MAX_FIELD) || '/',
+			section: typeof g.section === 'string' && FUNNEL_SECTION.test(g.section) ? g.section : FUNNEL_NO_SECTION
+		}))
+		.slice(-FUNNEL_MAX_GUIDED);
+	return { journey: raw.journey, last: raw.last, guided };
+}
+
+/**
+ * The funnel, as a thing that can be tested without a DOM — every side effect injected, like
+ * `createAiLog`. Each method sends at most one event and returns the body it sent, or `null`.
+ */
+export function createFunnel(opts) {
+	const {
+		tenant,
+		kind,
+		id,
+		storage,
+		now = () => Date.now(),
+		newJourney = () => mintJourney(),
+		send,
+		enabled = true,
+		unclaimed = () => false
+	} = opts;
+	const key = funnelKey(tenant);
+	/** The copy this document holds — the whole story when storage is missing or stops taking writes. */
+	let mem = null;
+	let readOnly = false;
+
+	function read(at) {
+		if (storage && !readOnly) {
+			try {
+				const raw = storage.getItem(key);
+				return raw ? parseFunnel(JSON.parse(raw), at) : null;
+			} catch {
+				// An unreadable cell is no journey; the copy in memory still is one.
+			}
+		}
+		return mem ? parseFunnel(mem, at) : null;
+	}
+	function write(state) {
+		mem = state;
+		if (!storage) return;
+		try {
+			storage.setItem(key, JSON.stringify(state));
+			readOnly = false;
+		} catch {
+			readOnly = true;
+		}
+	}
+	const on = () => {
+		if (!enabled || !send) return false;
+		try {
+			return !unclaimed();
+		} catch {
+			return false;
+		}
+	};
+	function emit(journey, stage, fields) {
+		const body = funnelPayload(kind, id, journey, stage, fields);
+		try {
+			send(body);
+		} catch {
+			// Best effort: a transport that throws costs the visitor nothing.
+		}
+		return body;
+	}
+
+	return {
+		enabled: on,
+		/** For tests. Never a live reference. */
+		state: () => {
+			const held = read(now());
+			return held ? JSON.parse(JSON.stringify(held)) : null;
+		},
+
+		/** KAITO's answer cited `citedUrl`, and the visitor was shown it, on `page`. */
+		guided(page, citedUrl, locale) {
+			if (!on()) return null;
+			const at = now();
+			const held = read(at) ?? { journey: newJourney(), last: at, guided: [] };
+			if (!FUNNEL_JOURNEY.test(held.journey)) return null;
+			const section = funnelSection(citedUrl);
+			held.guided = [...held.guided, { page: funnelPageKey(citedUrl), section }].slice(-FUNNEL_MAX_GUIDED);
+			held.last = at;
+			write(held);
+			return emit(held.journey, 'guided', { page, cited_page: citedUrl, section, locale });
+		},
+
+		/**
+		 * The visitor is on `page` — a mount, or a click on a citation that points at the page they
+		 * are already on. Sends `arrived` only when this journey was guided to this page and has not
+		 * arrived there since; the guidance it answers is used up, so a reload is not a second arrival.
+		 */
+		arrived(page, locale) {
+			if (!on()) return null;
+			const at = now();
+			const held = read(at);
+			if (!held) return null;
+			const here = funnelPageKey(page);
+			const matches = held.guided.filter((g) => g.page === here);
+			held.last = at;
+			if (!matches.length) {
+				write(held);
+				return null;
+			}
+			held.guided = held.guided.filter((g) => g.page !== here);
+			write(held);
+			return emit(held.journey, 'arrived', { page, section: matches[matches.length - 1].section, locale });
+		},
+
+		/** The visitor asked KAITO again, inside a guided journey. */
+		followedUp(page, locale) {
+			return step('followed_up', page, locale);
+		},
+
+		/** A message reached a person, inside a guided journey. */
+		handedOff(page, locale) {
+			return step('handed_off', page, locale);
+		}
+	};
+
+	function step(stage, page, locale) {
+		if (!on()) return null;
+		const at = now();
+		const held = read(at);
+		if (!held) return null;
+		held.last = at;
+		write(held);
+		return emit(held.journey, stage, { page, locale });
+	}
 }
 
 // ── the panel's title ───────────────────────────────────────────────────────
@@ -3049,6 +3343,28 @@ export async function mount(el, handoff = null) {
 		probeClaim: () => probeInboxClaim(apiBase, kind, id)
 	});
 	/**
+	 * The guidance funnel (reef#422) — see its header above `FUNNEL_STAGES`. Switched by the log's
+	 * own switch, so there is still one path to audit: off on ask-only, off with `data-ai-log="0"`,
+	 * off while the log holds a definite「no Inbox」.
+	 */
+	const funnel = createFunnel({
+		tenant,
+		kind,
+		id,
+		enabled: aiLog.enabled(),
+		unclaimed: () => aiLog.unclaimed(),
+		storage: (() => {
+			try {
+				return window.localStorage;
+			} catch {
+				return null;
+			}
+		})(),
+		send: (payload) => sendFunnelEvent(`${apiBase}/api/inbox/funnel`, payload)
+	});
+	/** Where the visitor is, as the funnel names it — the path and the page's locale segment. */
+	const funnelHere = () => [aiPagePath(location.href), pageLocale()];
+	/**
 	 * Set only by `renderOpen()`, only when it auto-returns to ask mode because
 	 * the human thread concluded — never by a deliberate "ask again" click.
 	 * Read fresh at render time so it can't drift from a `messages` array that
@@ -3296,6 +3612,7 @@ export async function mount(el, handoff = null) {
 			// was ever offered on this path.
 			hasEmail = false;
 			storeHandle(conv, hasEmail, storedMode);
+			funnel.handedOff(...funnelHere());
 			// The press is the flush. This session now belongs to a conversation the owner is
 			// about to open, so the questions that led to it travel with it rather than waiting
 			// for the visitor to close the tab.
@@ -3346,6 +3663,7 @@ export async function mount(el, handoff = null) {
 				hasEmail = emailGiven;
 				storeHandle(conv, hasEmail, storedMode);
 				// Same press, the other door — see `escalate`.
+				funnel.handedOff(...funnelHere());
 				void aiLog.escalated(conv);
 				replyWithinHours = body.reply_within_hours ?? null;
 				// 🩸 The confirmation used to render AFTER `await refresh()` — a real
@@ -3409,6 +3727,9 @@ export async function mount(el, handoff = null) {
 		const idle = () => (searchLive && !ownSendLabel ? copy.askAi : copy.send);
 		const syncSearch = wireSearch(form, textarea, button, idle);
 		bindCompose(form, textarea, button, copy.asking, idle, async (question) => {
+			// Asking again inside a guided journey is the funnel's「not resolved」. Before the ask, so
+			// it is the press that counts — not whatever the engine then answers.
+			funnel.followedUp(...funnelHere());
 			const answer = await askKaito(apiBase, kind, id, question, copy);
 
 			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the
@@ -3439,6 +3760,16 @@ export async function mount(el, handoff = null) {
 						`<a class="${PREFIX}-src" href="${escHtml(src)}" rel="noopener noreferrer">${escHtml(copy.source)}</a></div>` +
 						(askOnly ? '' : `<button type="button" class="${PREFIX}-tohuman ${PREFIX}-quiet">${escHtml(copy.toHuman)}</button>`)
 				);
+				// `guided` at the moment the citation is ON SCREEN — the link drawn above is the
+				// guidance. A refusal or an uncited answer guides nowhere and sends nothing.
+				if (funnel.enabled()) {
+					funnel.guided(aiPagePath(location.href), src, pageLocale());
+					// A citation into the page the visitor is already on navigates nowhere, so no mount
+					// will see the arrival: the click is it. Any other page's mount reports its own.
+					log.querySelector(`.${PREFIX}-src`).addEventListener('click', () => {
+						if (funnelPageKey(src) === funnelPageKey(location.href)) funnel.arrived(...funnelHere());
+					});
+				}
 			} else {
 				// A refusal, an uncited answer, and an engine we could not reach all
 				// land here — and they land the same way ON PURPOSE. From the
@@ -3509,6 +3840,7 @@ export async function mount(el, handoff = null) {
 				// whatever `hasEmail` already recorded (from an earlier hand-off,
 				// or never-set) stands.
 				storeHandle(conv, hasEmail, storedMode);
+				funnel.handedOff(...funnelHere());
 				// Trust our own copy, not the local one: the server has just told us
 				// what it stored, and a locally-appended message that silently failed
 				// to save is the exact lie this product cannot tell.
@@ -3594,6 +3926,9 @@ export async function mount(el, handoff = null) {
 	// the row's page SEQUENCE a sequence rather than a single entry, and it is why the buffer is
 	// in `localStorage` rather than scoped to this document.
 	aiLog.page(aiPagePath(location.href));
+	// The funnel's `arrived`, when this page is one KAITO cited earlier in this journey. Without a
+	// guided journey it reads one storage key and sends nothing.
+	funnel.arrived(...funnelHere());
 
 	// 🔴 `pagehide`, NOT `beforeunload` OR `unload`. Both of the others are ignored or actively
 	// penalised on mobile Safari (a page that registers `unload` is excluded from the back/forward

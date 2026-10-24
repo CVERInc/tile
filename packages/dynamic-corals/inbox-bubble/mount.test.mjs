@@ -1290,14 +1290,16 @@ test('#1866 row 1 — KAITO + an Inbox: the full bubble, unchanged, and the ques
 	assert.match(v.exchange, /dc-inbox-tohuman/, 'the answer lost its way to a person');
 	// 🔴 THE CONTROL FOR ROWS 2 AND 3: the same visit, on a site with an Inbox, does write — so the
 	// empty lists below are measured by a ruler that can read something.
+	// reef#422: the cited answer is KAITO guiding, so the funnel's one `guided` event is on this
+	// list too — the only request the funnel adds to a visit that asked once and left.
 	assert.deepEqual(v.wire, [
 		'GET /api/inbox/session', 'GET /api/inbox/assistant', 'POST /api/kaito',
-		'GET /api/inbox/session', 'BEACON /api/inbox/session'
+		'POST /api/inbox/funnel', 'GET /api/inbox/session', 'BEACON /api/inbox/session'
 	]);
 	assert.equal(JSON.parse(beacons[0].body).questions.at(-1).text, 'do you ship to Japan?');
 	assert.equal(v.hiders, 1);
 	assert.equal(v.listeners, 2);
-	assert.deepEqual(v.keys, ['reef-inbox:ai:site:r1-on', 'reef-inbox:claim:site:r1-on']);
+	assert.deepEqual(v.keys, ['reef-inbox:ai:site:r1-on', 'reef-inbox:claim:site:r1-on', 'reef-inbox:funnel:site:r1-on']);
 });
 
 test('#1866 row 2 — KAITO, no Inbox: the ask-only bubble is drawn, offers no person, writes nothing', async () => {
@@ -2071,5 +2073,161 @@ test('reef#2357: both handoff paths use the response reason and preserve the 500
 				respond = null;
 			}
 		}
+	}
+});
+
+// ── reef#422: the guidance funnel, observed from the outside ────────────────────────────────
+//
+// funnel.test.mjs pins `createFunnel`'s arithmetic. What is measured HERE is the wiring, against
+// the real `mount()`: which request leaves at which moment of a real visit — mount, ask, follow the
+// citation to a new page, reload it, ask again, press for a person, leave — and that a visit which
+// never uses the bubble sends none at all.
+
+const funnelPosts = (from) => requests.slice(from).filter((r) => new URL(r.url).pathname === '/api/inbox/funnel');
+const funnelBodies = (from) => funnelPosts(from).map((r) => JSON.parse(r.init.body));
+/** A claimed site whose KAITO cites a passage on ANOTHER page, and whose Inbox takes a message. */
+const funnelSite = (url, init) => {
+	const path = new URL(url).pathname;
+	if (path === '/api/kaito') {
+		return { ok: true, status: 200, json: async () => ({ kind: 'grounded', text: AI_ANSWER, source_url: 'https://example.test/faq#shipping' }) };
+	}
+	if (path === '/api/inbox' && init.method === 'POST') {
+		return { ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'conv-422' }) };
+	}
+	return undefined;
+};
+
+test('reef#422: one funnel beacon per stage through the real mount(), under one journey that is not the session id', async () => {
+	const href = location.href;
+	const id = `f422-${++seq}`;
+	const mounted = [];
+	const from = requests.length;
+	beacons.length = 0;
+	beaconResult = true;
+	respond = funnelSite;
+	try {
+		// The landing page. A mount with no journey in this browser sends nothing.
+		location.href = 'https://example.test/';
+		const first = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		mounted.push(first);
+		await mount(first);
+		await drain();
+		assert.deepEqual(funnelPosts(from), [], 'a mount with no journey sent a funnel event');
+
+		// Ask; KAITO cites /faq#shipping — `guided`, once, the moment the citation is drawn.
+		const root = panelOf(first);
+		await openBubble(root);
+		composeBox(root).value = 'do you ship to Japan?';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await drain();
+		assert.deepEqual(funnelBodies(from).map((b) => b.stage), ['guided']);
+
+		// The visitor follows the citation: a new document, a new mount — `arrived`, once.
+		location.href = 'https://example.test/faq#shipping';
+		const second = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		mounted.push(second);
+		await mount(second);
+		await drain();
+		assert.deepEqual(funnelBodies(from).map((b) => b.stage), ['guided', 'arrived']);
+
+		// A reload of the same page is not a second arrival.
+		const reload = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		mounted.push(reload);
+		await mount(reload);
+		await drain();
+		assert.equal(funnelPosts(from).length, 2, 'a reload counted as a second arrival');
+
+		// Asked again on the cited page: `followed_up` at the press, then the new citation guides.
+		const root2 = panelOf(second);
+		await openBubble(root2);
+		composeBox(root2).value = 'and to Korea?';
+		await root2.querySelector('.dc-inbox-form').emit('submit');
+		await drain();
+		assert.deepEqual(funnelBodies(from).map((b) => b.stage), ['guided', 'arrived', 'followed_up', 'guided']);
+		// The second citation is the page the visitor is on, so no mount will see it: the click is it.
+		await root2.querySelector('.dc-inbox-log').querySelector('.dc-inbox-src').emit('click');
+		assert.deepEqual(funnelBodies(from).map((b) => b.stage), ['guided', 'arrived', 'followed_up', 'guided', 'arrived']);
+
+		// Pressed for a person: `handed_off`, once the message reached one.
+		await root2.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		await drain();
+		const bodies = funnelBodies(from);
+		assert.deepEqual(bodies.map((b) => b.stage), ['guided', 'arrived', 'followed_up', 'guided', 'arrived', 'handed_off']);
+
+		// 🔴 THE SHAPE, per stage, exactly as the receiver takes it.
+		for (const [i, body] of bodies.entries()) {
+			const keys = body.stage === 'guided'
+				? ['kind', 'id', 'journey', 'stage', 'page', 'cited_page', 'section', 'locale']
+				: ['kind', 'id', 'journey', 'stage', 'page', 'section', 'locale'];
+			assert.deepEqual(Object.keys(body), keys, `event ${i} (${body.stage})`);
+			assert.deepEqual([body.kind, body.id, body.locale], ['site', id, ''], `event ${i}`);
+		}
+		assert.deepEqual(bodies[0], {
+			kind: 'site', id, journey: bodies[0].journey, stage: 'guided',
+			page: '/', cited_page: '/faq', section: 'shipping', locale: ''
+		});
+		assert.deepEqual([bodies[1].page, bodies[1].section], ['/faq', 'shipping']);
+		assert.deepEqual([bodies[5].page, bodies[5].section], ['/faq', 'none']);
+		// Transport: a keepalive JSON fetch, never a beacon (the funnel is not in `beacons`).
+		for (const r of funnelPosts(from)) {
+			assert.equal(r.init.method, 'POST');
+			assert.equal(r.init.keepalive, true);
+			assert.deepEqual(r.init.headers, { 'content-type': 'application/json' });
+		}
+
+		// One journey, in the server's namespace…
+		assert.equal(new Set(bodies.map((b) => b.journey)).size, 1, 'the journey changed mid-visit');
+		const journey = bodies[0].journey;
+		assert.match(journey, /^f_[0-9a-f]{16}$/);
+		// …and never the question log's session id, which the escalation just sent.
+		const sessionPosts = requests.slice(from).filter((r) => r.init.method === 'POST' && new URL(r.url).pathname === '/api/inbox/session');
+		const sessionIds = [...sessionPosts.map((r) => JSON.parse(r.init.body).session_id), ...beacons.map((b) => JSON.parse(b.body).session_id)];
+		assert.ok(sessionIds.length > 0, 'no session id left — the comparison below would be empty');
+		for (const sid of sessionIds) {
+			assert.notEqual(sid, journey, 'the journey IS the session id');
+			assert.notEqual(sid.slice(0, 2).toLowerCase(), 'f_', 'a session id is in the funnel namespace');
+		}
+		// No funnel body carries the machine's answer or the visitor's words.
+		for (const r of funnelPosts(from)) {
+			assert.equal(r.init.body.includes(AI_ANSWER), false);
+			assert.equal(r.init.body.includes('Japan'), false);
+			assert.equal(r.init.body.includes('Korea'), false);
+		}
+	} finally {
+		location.href = href;
+		respond = null;
+		for (const el of mounted) coral.unmount(el);
+	}
+});
+
+test('reef#422: a visit that never uses the bubble sends no funnel event (the control)', async () => {
+	const from = requests.length;
+	beacons.length = 0;
+	const { el } = await mountFresh({ 'data-kaito': '1' });
+	await drain();
+	firePagehide();
+	await drain();
+	assert.deepEqual(funnelPosts(from), [], 'a page view nobody asked anything on sent a funnel event');
+	assert.equal(storage.has(`reef-inbox:funnel:site:${el.attrs['data-id']}`), false, 'an unused bubble wrote a journey');
+	coral.unmount(el);
+});
+
+test('reef#422: data-ai-log="0" turns the funnel off with the log — a cited answer sends no event', async () => {
+	const from = requests.length;
+	respond = funnelSite;
+	try {
+		const { el, root } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+		await openBubble(root);
+		composeBox(root).value = 'do you ship to Japan?';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await drain();
+		// The ruler can read something: the question did go, and it was answered with a citation.
+		assert.ok(requests.slice(from).some((r) => new URL(r.url).pathname === '/api/kaito'));
+		assert.match(root.querySelector('.dc-inbox-log').innerHTML, /dc-inbox-src/);
+		assert.deepEqual(funnelPosts(from), []);
+		assert.equal(storage.has(`reef-inbox:funnel:site:${el.attrs['data-id']}`), false);
+		coral.unmount(el);
+	} finally {
+		respond = null;
 	}
 });
