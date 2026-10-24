@@ -94,56 +94,64 @@ test('🔴 the Astro components emit data-surface on the section itself', () => 
   }
 });
 
-// ── the rule: where it lives, and that its numbers are the cage's numbers ───────────────────────
+// ── the rule: paint only, and where it lives ────────────────────────────────────────────────────
 
-const BAND = 'section[data-surface]:not(.st-full-bleed)';
-const GRID_BAND = 'section.st-grid[data-surface]:not(.st-full-bleed)';
-const WRAPPER = RULES.find((r) => r.selector === '.st-prose, .st-grid, .st-cta, .st-people');
-const GRID_CAP = RULES.filter((r) => r.selector === '.st-grid' && decl(r.css, 'max-width') !== null);
-const INSET = WRAPPER ? decl(WRAPPER.css, 'padding').replace(/^\S+ /, '') : null;
-const band = (cap) => `max(${INSET}, calc((100% - ${cap}) / 2 + ${INSET}))`;
+const SUPPORTS = '@supports (overflow-x: clip) and selector(:has(*))';
+const SECTION = ':where(section[data-surface]:not(.st-full-bleed))';
+const PAINT = `${SECTION}::before`;
+const PARENT = ':where(:has(> section[data-surface]:not(.st-full-bleed)))';
+const GEOMETRY = /(^|;)\s*(max-width|min-width|width|inline-size|max-inline-size|padding|padding-[a-z-]+|margin|margin-[a-z-]+)\s*:/;
 
-test('CONTROL: the cages this rule mirrors are where this file thinks, with the values it reads', () => {
-  assert.ok(WRAPPER, 'the shared wrapper rule `.st-prose, .st-grid, .st-cta, .st-people` is gone — everything below is vacuous');
-  assert.equal(decl(WRAPPER.css, 'max-width'), 'var(--gd-maxw)');
-  assert.match(INSET, /^clamp\([^)]*\)$/, `wrapper side padding is no longer a clamp(): ${INSET}`);
-  assert.equal(GRID_CAP.length, 1, `expected one \`.st-grid { max-width }\`, found ${GRID_CAP.length}`);
-  assert.deepEqual(WRAPPER.context, ['@layer reef.base']);
+test('🔴 no rule touches a surface section\'s geometry — the band is paint (tile#200 review)', () => {
+  // r1 un-caged the box and moved the cage into percent padding; a theme capping the section with
+  // `max-width` alone then got padding wider than the section and 0px of content. Any rule naming
+  // data-surface that sizes or pads something is that shape coming back.
+  const hits = RULES.filter((r) => /data-surface/.test(r.selector) && GEOMETRY.test(r.css));
+  assert.deepEqual(hits.map((r) => `${r.selector} { ${r.css} }`), [], 'a data-surface rule sets geometry again');
 });
 
-test('🔴 both band rules exist once each, directly in `@layer reef.base`', () => {
-  // Count, not existence: a second copy later in the file would win by source order.
-  for (const sel of [BAND, GRID_BAND]) {
+test('🔴 the three band rules exist once each, in `@layer reef.base` behind the clip/:has() @supports', () => {
+  // Count, not existence: a second copy later in the file would win by source order. The @supports
+  // matters: without `clip` the copy would overhang the page; without `:has()` nothing clips it.
+  for (const sel of [SECTION, PAINT, PARENT]) {
     const found = RULES.filter((r) => r.selector === sel);
     assert.equal(found.length, 1, `expected ${sel} once, found ${found.length}`);
-    assert.deepEqual(found[0].context, ['@layer reef.base'],
-      `${sel} sits in [${found[0].context.join(' > ')}] — in reef.responsive or unlayered no theme could override it`);
+    assert.deepEqual(found[0].context, ['@layer reef.base', SUPPORTS],
+      `${sel} sits in [${found[0].context.join(' > ')}]`);
   }
 });
 
-test('🔴 the band un-cages the box and puts the SAME cap and inset into its side padding', () => {
-  const b = RULES.find((r) => r.selector === BAND);
-  assert.equal(decl(b.css, 'max-width'), 'none');
-  assert.equal(decl(b.css, 'padding-inline'), band('var(--gd-maxw)'), 'prose/timeline band padding drifted from the wrapper cage');
-  const g = RULES.find((r) => r.selector === GRID_BAND);
-  assert.equal(decl(g.css, 'padding-inline'), band(decl(GRID_CAP[0].css, 'max-width')),
-    'the grid band must use the grid\'s own cap — --gd-maxw would narrow every grid wider than 72ch');
-  assert.equal(decl(g.css, 'max-width'), null, 'the grid band inherits max-width: none from the general rule; a second one is a second opinion');
+test('🔴 the paint layer copies the section\'s own background, one viewport wide, behind the content', () => {
+  const b = RULES.find((r) => r.selector === PAINT);
+  assert.equal(decl(b.css, 'content'), '""');
+  assert.equal(decl(b.css, 'position'), 'absolute');
+  // One viewport, centred: a gradient spans the band as drawn. A wider copy (-100vmax) shows only
+  // the gradient's middle — the smoke measured rgb(80,97,140) at the edge of a blue→orange band.
+  assert.equal(decl(b.css, 'inset'), '0 calc(50% - 50vw)');
+  assert.equal(decl(b.css, 'z-index'), '-1');
+  // The only paint in base is `inherit`: the colour, gradient or image is the theme's.
+  assert.equal(decl(b.css, 'background'), 'inherit');
+  const LOOK = /(^|;)\s*(color|background-[a-z]+|border|border-[a-z-]+|box-shadow|opacity|filter)\s*:/;
+  const hit = b.css.match(LOOK);
+  assert.ok(!hit, `look property "${hit?.[2]}" on the paint layer — the surface belongs to the theme`);
 });
 
-test('🔴 no zero-specificity data-surface rule in base — it would lose to the (0,1,0) cage and do nothing', () => {
-  // The census's first try (`:where([data-surface])`) was inert for exactly this reason; that it beats
-  // the cage at all is measured in the smoke, where the pre-fix band is still 733.9px wide.
-  const soft = RULES.filter((r) => /:where\([^)]*data-surface/.test(r.selector));
-  assert.deepEqual(soft.map((r) => r.selector), [], 'a :where(…[data-surface]…) rule is back');
+test('🔴 the section only becomes the paint layer\'s positioned, isolated parent', () => {
+  // isolation keeps z-index:-1 inside the section: above its own background, below its content, and
+  // never behind an ancestor's background (a theme painting .rf-main would otherwise hide the band).
+  const s = RULES.find((r) => r.selector === SECTION);
+  assert.equal(s.css.replace(/;\s*$/, ''), 'position: relative; isolation: isolate');
 });
 
-test('the band rules carry box model only — paint is the theme\'s', () => {
-  const LOOK = /(^|[;\s])(color|background|background-[a-z]+|font|font-[a-z]+|border|border-[a-z-]+|box-shadow|text-decoration)\s*:/;
-  for (const sel of [BAND, GRID_BAND]) {
-    const hit = RULES.find((r) => r.selector === sel).css.match(LOOK);
-    assert.ok(!hit, `look property "${hit?.[2]}" in ${sel} — the surface colour belongs to the theme`);
-  }
+test('🔴 the parent clips with overflow-x: clip — not hidden (no scroll container), not missing (page scrolls)', () => {
+  // 100vw counts a classic scrollbar: without this the page scrolls sideways by half of one (the
+  // smoke: scrollWidth 1273 vs clientWidth 1265).
+  const p = RULES.find((r) => r.selector === PARENT);
+  assert.equal(p.css.replace(/;\s*$/, ''), 'overflow-x: clip');
+});
+
+test('the band rules are zero-specificity floors, so any theme rule wins them', () => {
+  for (const sel of [SECTION, PAINT, PARENT]) assert.match(sel, /^:where\(/, `${sel} is not a :where() floor`);
 });
 
 console.log(`${passed} passed`);

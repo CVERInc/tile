@@ -386,24 +386,41 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
 }
 
 /* `surface=<token>` — a BAND by default (reef#1869, ruled 2026-10-20). prose / grid / timeline emit
-   `data-surface` for the theme to paint; until now the section was still caged at its width, so a
-   painted surface was a box in the middle of the page, not a band. The section now spans its
-   container and the cage moves into the side padding: `(100% - cap) / 2` on top of the usual inset,
-   never less than the inset. Same numbers as the cage, so the content box — prose of any shape, a
-   grid's cells, a timeline's rows — lands exactly where it was, and nothing about the children has
-   to be named. The cap is each section's own: --gd-maxw, and 80rem for the grid (its rule above).
-   Not `:where()`: it has to beat `.st-prose, .st-grid, …` (0,1,0) and `.st-grid` (0,1,0), and
-   it is still reef.base, so any theme rule on these sections wins without a fight.
-   🔴 Percent padding resolves against the CONTAINER, not the section. A theme that re-cages a
-   surface section with `max-width` alone keeps this inset as well; one that sets its own padding
-   too (or makes the section full-width itself, as the two sites using surface= on 10-24 do) is
-   unaffected. */
-section[data-surface]:not(.st-full-bleed) {
-  max-width: none;
-  padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - var(--gd-maxw)) / 2 + clamp(1rem, 4vw, 3rem)));
-}
-section.st-grid[data-surface]:not(.st-full-bleed) {
-  padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - 80rem) / 2 + clamp(1rem, 4vw, 3rem)));
+   `data-surface` for the theme to paint, and the section is caged at its width, so a painted
+   surface was a box in the middle of the page. The band is the PAINT, not the box: the section's
+   width, padding and content box stay exactly what the cage (or the theme) makes them, and only
+   its background is carried out to the edges of the column it sits in.
+   🩸 tile#200 review: the first version moved the cage into percent padding instead. Percent
+   padding resolves against the container, so a theme that capped the section with `max-width`
+   alone got padding wider than the section — content 0px wide, and the cap broken. Never touch the
+   geometry here.
+   How: a `::before` that copies the section's own background (`background: inherit` — whatever
+   the theme wrote for that token: a colour, a gradient, an image) and sits behind the content
+   (`z-index: -1` inside the section's own stacking context). It is one viewport wide, centred on
+   the section (`calc(50% - 50vw)` each side), so a gradient or a `cover` image spans the band the
+   way the theme drew it — a copy reaching further would show only the gradient's middle. `100vw`
+   counts a classic scrollbar, so on its own it overhangs the page by half a scrollbar on each side
+   (the .st-embed.is-wide bug below); the section's PARENT clips that with `overflow-x: clip`, so
+   the band ends exactly at the column's edges (the viewport minus the scrollbar in the normal
+   one-column page, the content column in a sidebar layout) and adds nothing to the page's scroll
+   width. `clip`, not `hidden`: no scroll container, so `position: sticky` below it keeps working.
+   The same clip also cuts anything else in that parent that was wider than it — the page used to
+   scroll sideways for that. A section a theme has moved off-centre gets a band that stops short of
+   the far edge by the offset.
+   Not `box-shadow`: a shadow needs a colour, and base cannot read the theme's background into one.
+   Known edge: the copy is drawn OVER the section's own background, so a translucent surface
+   colour is twice as strong inside the section's box as in the band beside it. Opaque colours,
+   gradients and images match.
+   Zero specificity and reef.base: a theme turns the band off with `…::before { content: none }`,
+   or replaces any part of it, without a fight. Behind @supports so a browser without `clip` or
+   `:has()` keeps the old box instead of a page that scrolls 100vmax sideways. */
+@supports (overflow-x: clip) and selector(:has(*)) {
+  :where(section[data-surface]:not(.st-full-bleed)) { position: relative; isolation: isolate; }
+  :where(section[data-surface]:not(.st-full-bleed))::before {
+    content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1;
+    background: inherit; pointer-events: none;
+  }
+  :where(:has(> section[data-surface]:not(.st-full-bleed))) { overflow-x: clip; }
 }
 
 /* hero — full-bleed, optional background image */
