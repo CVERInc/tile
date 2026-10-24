@@ -336,7 +336,7 @@ event per request:
 | stage | sent when | `page` | `cited_page` | `section` |
 |---|---|---|---|---|
 | `guided` | KAITO's answer is drawn **with a citation** — a refusal or an uncited answer guides nowhere and sends nothing | where the bubble is | the cited page's path | the citation's fragment, or `none` |
-| `arrived` | a page mounts that KAITO cited earlier in this journey — or the visitor clicks a citation into the page they are already on, since no new mount will see that one. Once per guidance: a reload is not a second arrival | the cited page | — | the cited fragment |
+| `arrived` | a page mounts that KAITO cited earlier in this journey, or comes back from the back/forward cache (a `pageshow` with `persisted: true` — no mount runs then) — or the visitor clicks a citation into the page they are already on, since no new mount will see that one. Once per guidance: a reload is not a second arrival | the cited page | — | the cited fragment |
 | `followed_up` | the visitor presses Ask again inside a guided journey (the press, not the answer) | where the bubble is | — | `none` |
 | `handed_off` | a message reaches a person inside a guided journey (any of the three sends to `/api/inbox` answered `ok`) | where the bubble is | — | `none` |
 

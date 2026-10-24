@@ -377,12 +377,14 @@ test('B11: the event is inert where the coral is not mounted', async () => {
 test('B11: the window listeners per successful mount are the two there may be', async () => {
 	const before = listenerCount();
 	await mountFresh();
-	// Two since 0.7.6: `reef-inbox:open` and ruling 54's `pagehide`.
-	assert.equal(listenerCount(), before + 2, 'a mount installs a listener nobody named');
+	// Two since 0.7.6: `reef-inbox:open` and ruling 54's `pagehide`; three since 0.7.15, with the
+	// funnel's `pageshow` (tile#193: a back/forward-cache restore is an arrival no mount sees).
+	assert.equal(listenerCount(), before + 3, 'a mount installs a listener nobody named');
 	// 🔴 B3, round 2: `reef-inbox:handle` is gone. A page script can ask a panel to OPEN — that
 	// names no conversation — and there is no event through which it can name one. `pagehide` is
-	// the browser's own event and carries nothing a page script chooses.
-	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide']);
+	// the browser's own event and carries nothing a page script chooses, and so is `pageshow`, whose
+	// handler reads `persisted` and nothing else.
+	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide', 'pageshow']);
 });
 
 test('B11: #inbox opens the panel only for a site that opted in', async () => {
@@ -484,8 +486,8 @@ test('B3: the only window listener names no conversation, and no export takes a 
 	await mount(el);
 	const root = panelOf(el);
 
-	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide'],
-		'a window event type nobody named exists — neither of the two may name a conversation');
+	assert.deepEqual([...windowListeners.keys()], ['reef-inbox:open', 'pagehide', 'pageshow'],
+		'a window event type nobody named exists — none of the three may name a conversation');
 
 	// Round 2's payload, addressed to this mount and unaddressed, exactly as the review dispatched
 	// it. There is nobody to receive either, and the visitor's own handle does not move.
@@ -902,7 +904,8 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await settle();
 		assert.equal(el.children.length, 1, name);
 		assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
-		assert.equal(listenerCount(), before + 2, `${name}: not the two window listeners a mount had`);
+		// The two a mount had, plus the funnel's `pageshow` (0.7.15) — a listener, not markup or a request.
+		assert.equal(listenerCount(), before + 3, `${name}: not the three window listeners a mount has`);
 		// Apart from the probe, the same requests as before — except the assistant-name read, which
 		// moved from mount to the first open (reef#1921).
 		assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname),
@@ -1045,7 +1048,7 @@ test('gate: a reef-inbox:open sent while the probe is still out is held, and ope
 	assert.equal(el.children.length, 1);
 	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito,
 		'the open asked for before the answer was dropped (panel still closed)');
-	assert.equal(listenerCount(), before + 2, 'the holding listener outlived the answer');
+	assert.equal(listenerCount(), before + 3, 'the holding listener outlived the answer');
 
 	// On a no the held request goes nowhere, and the holding listener is gone with the answer.
 	const before2 = listenerCount();
@@ -1298,7 +1301,7 @@ test('#1866 row 1 — KAITO + an Inbox: the full bubble, unchanged, and the ques
 	]);
 	assert.equal(JSON.parse(beacons[0].body).questions.at(-1).text, 'do you ship to Japan?');
 	assert.equal(v.hiders, 1);
-	assert.equal(v.listeners, 2);
+	assert.equal(v.listeners, 3);
 	assert.deepEqual(v.keys, ['reef-inbox:ai:site:r1-on', 'reef-inbox:claim:site:r1-on', 'reef-inbox:funnel:site:r1-on']);
 });
 
@@ -1409,7 +1412,7 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	await drain();
 	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
 	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
-	assert.equal(listenerCount(), before + 2);
+	assert.equal(listenerCount(), before + 3);
 	await openBubble(panelOf(el));
 	await drain();
 	assert.equal(assistantReads(from).length, 1);
@@ -2230,4 +2233,66 @@ test('reef#422: data-ai-log="0" turns the funnel off with the log — a cited an
 	} finally {
 		respond = null;
 	}
+});
+
+// tile#193 review P2: a cited page the visitor returns to from the back/forward cache is not a new
+// document — no module runs and `mount()` does not run again — so the only signal that the visitor
+// is on it is a `pageshow` with `persisted: true`. The guidance is written here by the real
+// `createFunnel`, the way another document of the same journey would have written it.
+test('tile#193: a cited page restored from the back/forward cache records exactly one arrival', async () => {
+	const href = location.href;
+	const id = `f193-${++seq}`;
+	const guideFromElsewhere = () => coral.createFunnel({
+		tenant: `site:${id}`, kind: 'site', id, storage: window.localStorage, send: () => {}
+	}).guided('/', 'https://example.test/faq#shipping', '');
+	const before = new Set(windowListeners.get('pageshow') ?? []);
+	const mine = () => (windowListeners.get('pageshow') ?? []).filter((fn) => !before.has(fn));
+	const pageshow = (persisted) => { for (const fn of mine()) fn({ persisted }); };
+	const els = [];
+	try {
+		// The visitor first opened /faq (no journey yet: the mount sends nothing)…
+		location.href = 'https://example.test/faq';
+		const el = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		els.push(el);
+		await mount(el);
+		await drain();
+		const from = requests.length;
+		assert.equal(mine().length, 1, 'no pageshow listener on a bubble with the funnel on');
+		// …went to `/`, asked, and was cited /faq#shipping; then pressed Back.
+		guideFromElsewhere();
+		// An ordinary (non-persisted) pageshow is the first load's own, and the mount handled it.
+		pageshow(false);
+		assert.equal(funnelPosts(from).length, 0, 'a non-persisted pageshow sent an arrival');
+		pageshow(true);
+		const bodies = funnelBodies(from);
+		assert.equal(bodies.length, 1, `restored cited page sent no arrival: ${bodies.length} !== 1`);
+		assert.deepEqual([bodies[0].stage, bodies[0].page, bodies[0].section], ['arrived', '/faq', 'shipping']);
+		// Once per guidance: a second restore with no new guidance sends nothing.
+		pageshow(true);
+		assert.equal(funnelPosts(from).length, 1, 'a second restore counted a second arrival');
+
+		// A normal load that already recorded the arrival is not double-counted by a later restore.
+		guideFromElsewhere();
+		const reload = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		els.push(reload);
+		await mount(reload);
+		await drain();
+		assert.equal(funnelPosts(from).length, 2, 'the normal load did not record its arrival');
+		pageshow(true);
+		assert.equal(funnelPosts(from).length, 2, 'a restore after a recorded arrival counted it again');
+
+		// Unmount takes the listener with it.
+		for (const e of els) coral.unmount(e);
+		assert.equal(mine().length, 0, 'unmount left a pageshow listener behind');
+	} finally {
+		location.href = href;
+		for (const e of els) coral.unmount(e);
+	}
+});
+
+test('tile#193: data-ai-log="0" installs no pageshow listener', async () => {
+	const before = (windowListeners.get('pageshow') ?? []).length;
+	const { el } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+	assert.equal((windowListeners.get('pageshow') ?? []).length, before);
+	coral.unmount(el);
 });

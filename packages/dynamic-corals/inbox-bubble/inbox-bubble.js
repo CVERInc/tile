@@ -3907,9 +3907,10 @@ export async function mount(el, handoff = null) {
 	// (`renderAsk`/`renderMessages`) fires the same way it does for a click, with no new code path
 	// to keep in sync.
 	//
-	// 🔴 ONE OF THE TWO `window` LISTENERS A DRAWN BUBBLE KEEPS (the other is ruling 54's `pagehide`,
-	// at the bottom of `mount`; the claim gate's `heldOpen` exists only while it asks, and is gone
-	// before this line runs). Both are removed by `unmount(el)` (review B9, closed in 0.7.9):
+	// 🔴 ONE OF THE `window` LISTENERS A DRAWN BUBBLE KEEPS (the others are ruling 54's `pagehide`
+	// and the funnel's `pageshow`, at the bottom of `mount`, both only where the question log is on;
+	// the claim gate's `heldOpen` exists only while it asks, and is gone before this line runs).
+	// All are removed by `unmount(el)` (review B9, closed in 0.7.9):
 	// an SPA that tears the container out calls it, and neither listener is left holding `root`
 	// and `el`, nor re-rendering into a node nobody can see. A host that never calls it gets what
 	// every version before 0.7.9 did — `mountAll`'s `data-dynamic-coral-mounted` guard stops the
@@ -3941,6 +3942,17 @@ export async function mount(el, handoff = null) {
 	// anything, reaches the network exactly as often as it did before this existed: never.
 	const onPagehide = () => aiLog.flush();
 	if (aiLog.enabled()) window.addEventListener('pagehide', onPagehide);
+	// 🩸 A PAGE RESTORED FROM THE BACK/FORWARD CACHE IS NOT A NEW DOCUMENT (tile#193 review P2). The
+	// visitor on /faq goes to /, asks, is cited /faq#shipping and presses Back: the browser hands
+	// back the /faq it kept, module and `mount()` both already run, so the `arrived` line above never
+	// sees that guidance and the owner's funnel undercounts. A persisted `pageshow` is the one signal
+	// that this document is being looked at again; it re-asks the same consume-once question, so a
+	// restore after an arrival already recorded — or a second restore — sends nothing. A
+	// non-persisted `pageshow` is the first load's own, which the line above already answered.
+	const onPageshow = (event) => {
+		if (event && event.persisted === true) funnel.arrived(...funnelHere());
+	};
+	if (aiLog.enabled()) window.addEventListener('pageshow', onPageshow);
 
 	// 🔴 REGISTERED HERE, SYNCHRONOUSLY, BESIDE THE TWO LISTENERS IT UNDOES (review B9). The only
 	// await above this line is the claim gate's, and the one thing installed across it — `heldOpen`
@@ -3952,6 +3964,7 @@ export async function mount(el, handoff = null) {
 	mounted.set(el, () => {
 		window.removeEventListener('reef-inbox:open', openPanel);
 		window.removeEventListener('pagehide', onPagehide);
+		window.removeEventListener('pageshow', onPageshow);
 		stopPolling();
 		host.remove();
 	});
