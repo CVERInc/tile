@@ -1913,7 +1913,7 @@ test('2160: an explicit data-send-label wins over「Ask AI」/「Send to the own
 // and keeps drawing it after a close and reopen. The stand-in's `remove()` cuts the block out of
 // the markup (see `El.remove`), so deleting `box.remove()` turns these red.
 for (const [name, route] of [
-	['[] (cver, sodaart today)', () => ({ ok: true, status: 200, json: async () => [] })],
+	['[] (cver and another live site today)', () => ({ ok: true, status: 200, json: async () => [] })],
 	['404', () => ({ ok: false, status: 404, json: async () => ({}) })],
 	['a rejected fetch', () => Promise.reject(new TypeError('Failed to fetch'))],
 ]) {
