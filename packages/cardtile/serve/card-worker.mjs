@@ -16,6 +16,7 @@ import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from 
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
+import { isTemplateOnly } from '../card-blank.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -356,8 +357,13 @@ const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 // So the noindex follows the HANDLE, not the deployment. `demo-` is a reserved prefix.
 const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 
-const ROBOTS_HEADERS = (env, handle, isVanity) =>
-  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {};
+// reef#2044 ④ — `blank` = the card is still only the blank template (card-blank.mjs says what that
+// means, from the code that writes blank cards). Not indexed until its author puts something on it;
+// the moment they do, the next request answers without the header. Judged on CONTENT, never on
+// account age. It only ever ADDS a header: the stricter rule above it is never weakened.
+const ROBOTS_HEADERS = (env, handle, isVanity, blank = false) =>
+  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' }
+    : blank ? { 'X-Robots-Tag': 'noindex' } : {};
 
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
@@ -366,17 +372,17 @@ const ROBOTS_HEADERS = (env, handle, isVanity) =>
 // for up to a minute, at random. Putting it only on the markdown response is the version that looks
 // right and still breaks — the HTML response is the one that gets cached first, because that is what
 // people request.
-const CARD_HEADERS = (env, handle, isVanity) => ({
+const CARD_HEADERS = (env, handle, isVanity, blank = false) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
   // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
-  ...ROBOTS_HEADERS(env, handle, isVanity),
+  ...ROBOTS_HEADERS(env, handle, isVanity, blank),
 });
 
-const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
+const html = (body, status = 200, env = null, handle = '', isVanity = false, blank = false) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity, blank) },
   });
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
@@ -391,7 +397,7 @@ const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
+const markdown = (body, { env, originalLength, alternate, handle, isVanity, blank }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -399,7 +405,7 @@ const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
-      ...CARD_HEADERS(env, handle, isVanity),
+      ...CARD_HEADERS(env, handle, isVanity, blank),
     },
   });
 
@@ -787,6 +793,9 @@ const router = {
       });
     }
 
+    // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
+    const blank = cardMd != null && isTemplateOnly(cardMd);
+
     if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
@@ -804,7 +813,7 @@ const router = {
           });
       // Apply host-specific robots rules after a relay cache hit as well as a fresh response.
       const headers = new Headers(image.headers);
-      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle))) headers.set(key, value);
+      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank))) headers.set(key, value);
       return new Response(image.body, { status: image.status, headers });
     }
 
@@ -822,7 +831,7 @@ const router = {
           'Cache-Control': 'public, max-age=3600',
           // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
           'X-Content-Type-Options': 'nosniff',
-          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle),
+          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank),
         },
       });
     }
@@ -846,7 +855,7 @@ const router = {
     // the download link, in the form this host actually uses
     const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle, blank });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -854,7 +863,7 @@ const router = {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle, blank });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -868,7 +877,7 @@ const router = {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle, blank);
   },
 };
 
