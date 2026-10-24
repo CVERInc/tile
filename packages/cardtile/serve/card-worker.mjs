@@ -318,6 +318,31 @@ export function renderCardHTML(cardMd, ctx = {}) {
 // deployment-wide valve (Search Console warns → flip it the same day); it is NOT a per-card state.
 export const noindexAll = (env) => !!env && /^(1|true)$/i.test(String(env.CARD_NOINDEX_ALL ?? '').trim());
 
+// reef#2044 ③ — `card.feelreef.com/.well-known/security.txt` (RFC 9116), so a problem on a Card is
+// reported by whoever finds it rather than discovered by us late.
+//
+// 🔴 Contact is the PUBLIC REPORT FORM, and there is no mailbox in this file. The ticket's two lines
+// are 「指向檢舉表單」 and 「不放客服信箱（零客服原則）」: feelreef.com/report is public, needs no
+// login, and writes into the same inbox feelreef's own pages report into. (feelreef.com's own
+// security.txt lists mailboxes; that is a different host with a different ruling.)
+//
+// 🔴 Canonical host ONLY — never a creator's vanity domain. The ticket names this exact URL, and the
+// same ruling says no report element goes on an author's card; our contact on THEIR domain would be
+// one. A vanity host keeps the ordinary 404.
+//
+// 🔴 Expires is mandatory, so this constant is BORN TO ROT. card-security-txt.test.mjs goes red 90
+// days before the date: re-check that the form still answers, then move the date (≤ 1 year out).
+// No Preferred-Languages: the ticket does not ask for it, and the form itself speaks nine.
+const SECURITY_TXT_PATH = '/.well-known/security.txt';
+const SECURITY_TXT = [
+  '# REEF with Card — report a problem with a Card on this host (RFC 9116).',
+  '# The form is public and needs no account.',
+  'Contact: https://feelreef.com/report',
+  `Canonical: https://${CANON_HOST}${SECURITY_TXT_PATH}`,
+  'Expires: 2027-10-01T00:00:00.000Z',
+  '',
+].join('\n');
+
 const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 
 // 🔴 A DEMO of somebody else's page is never indexed, on ANY deployment.
@@ -516,6 +541,16 @@ const router = {
     // hostname means. One door, one host-independent path.
     const api = await handleApi(request, env, url);
     if (api) return api;
+
+    // reef#2044 ③ — security.txt, on the canonical host only. A constant: no store read, no handle.
+    // `.well-known` can never be a handle (the grammar starts a handle with a letter or digit), so
+    // without this it fell through to handle routing and 404'd. See SECURITY_TXT for what it says.
+    if (url.pathname === SECURITY_TXT_PATH
+      && (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '') === CANON_HOST) {
+      return new Response(request.method === 'HEAD' ? null : SECURITY_TXT, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+      });
+    }
 
     // The sandbox editor's own vendored Sortable.min.js — see canvasHtml()'s SORTABLE_SRC override
     // ── the engine's table, under the locale it will be read in ──────────────────────────────────
