@@ -8,7 +8,7 @@
 // the drawn half (computed styles on a phone and a desktop, and the page turn) was measured in
 // Chromium against a real build — see LANE report for reef#2283.
 //
-// 🔴 The other half matters as much: a comic or PDF (pajicomic is live) must come out EXACTLY as it
+// 🔴 The other half matters as much: a comic or PDF (a live comic site depends on it) must come out EXACTLY as it
 // did. The golden below was captured from the tree BEFORE this vocabulary existed, as a literal,
 // not recomputed — a golden produced by the code under test agrees with any change to it.
 //   run: node packages/sitetile/pagetile-photobook.test.mjs
