@@ -25,6 +25,9 @@ async function check(name, fn) {
 }
 try {
   cpSync(ASTRO, FIX, { recursive: true, filter: (s) => !/[\\/](node_modules|\.astro|dist[^\\/]*|\.tile-build[^\\/]*)(?:[\\/]|$)/.test(s) });
+  // No inherited demo _site.md or page languages in the no-language fixture.
+  rmSync(path.join(FIX, 'content'), { recursive: true });
+  mkdirSync(path.join(FIX, 'content'));
   symlinkSync(path.join(ASTRO, 'node_modules'), path.join(FIX, 'node_modules'), 'dir');
   rmSync(path.join(FIX, 'src/pages'), { recursive: true });
   mkdirSync(path.join(FIX, 'src/pages'));
@@ -34,7 +37,7 @@ import { LINGO_LOCALES } from '../packages/lingo/locale.mjs';
 export function getStaticPaths() {
   return LINGO_LOCALES.flatMap(lang =>
     ['top', 'bottom', 'off'].map(row => ({ params: { fixture: lang + '-' + row }, props: { row, lang } }))).concat(
-      ['no-lang', 'conflicting-lang'].flatMap(mismatch =>
+      ['no-lang', 'locales-only', 'conflicting-lang'].flatMap(mismatch =>
         [false, true].map(sidebarOn => ({ params: { fixture: mismatch + (sidebarOn ? '-sidebar' : '') },
           props: { row: 'top', mismatch, sidebarOn } }))));
 }
@@ -42,7 +45,8 @@ const { row, lang, mismatch, sidebarOn } = Astro.props;
 const meta = { title: 'Share fixture', lang, locales: lang, 'footer-social': 'Facebook=https://www.facebook.com/example; X=https://x.com/example',
   ...(row === 'bottom' ? { 'blog-share': 'email,facebook,twitter,x,linkedin,tumblr,pinterest' } : {}),
   ...(row === 'off' ? { 'blog-share-top': 'none' } : {}) };
-if (mismatch === 'no-lang') { delete meta.lang; meta.locales = 'zh-TW, en-US'; }
+if (mismatch === 'no-lang') { delete meta.lang; delete meta.locales; }
+if (mismatch === 'locales-only') { delete meta.lang; meta.locales = 'zh-TW, en-US'; }
 if (mismatch === 'conflicting-lang') { meta.lang = 'ja-JP'; meta.locales = 'en-US, ja-JP'; }
 const sidebar = sidebarOn ? { side: 'right', categories: [], related: [], archive: [], tags: [] } : null;
 const post = { title: 'Article', body: 'A shareable article.', slug: 'article' };
@@ -89,16 +93,19 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     });
     assert.deepEqual(spacing, { gap: '32px', marginTop: '48px' });
   });
-  for (const [fixture, lang, label] of [
-    ['no-lang', 'zh-Hant', '分享到 Facebook'],
-    ['conflicting-lang', 'en', 'Share to Facebook'],
+  for (const [fixture, lang, label, navLabel] of [
+    ['no-lang', 'zh-Hant', 'Share to Facebook', 'Share this post'],
+    ['locales-only', 'zh-Hant', '分享到 Facebook', '分享這篇文章'],
+    ['conflicting-lang', 'en', 'Share to Facebook', 'Share this post'],
   ]) {
     for (const suffix of ['', '-sidebar']) {
       await page.goto(`${origin}/${fixture}${suffix}/`);
-      await check(`${fixture}${suffix}: share name matches resolved document language`, async () => {
+      await check(`${fixture}${suffix}: share and navigation names respect declared language`, async () => {
         assert.equal(await page.locator('html').getAttribute('lang'), lang);
         assert.equal(await page.locator('.bl-share-btn').first().getAttribute('aria-label'), label,
-          `${fixture}${suffix}: share label must follow html lang=${lang}`);
+          `${fixture}${suffix}: share label must respect neutral UI fallback`);
+        assert.equal(await page.locator('.bl-share').getAttribute('aria-label'), navLabel,
+          `${fixture}${suffix}: navigation label must respect neutral UI fallback`);
       });
     }
   }

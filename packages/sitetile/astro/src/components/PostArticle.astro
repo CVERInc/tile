@@ -10,7 +10,7 @@ import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase, dialogueAuthorRight } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
-import { localeHomePath, uiCopy } from '../packages/lingo/locale.mjs';
+import { localeHomePath, uiCopy, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
 
 const { post, meta, lang, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
@@ -57,7 +57,9 @@ const SHARE = {
   pinterest: { label: 'Pinterest', href: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(canonical)}&description=${encodeURIComponent(post.title)}` },
 };
 const shareLinks = shareTokens.map((t) => SHARE[t]).filter(Boolean);
-const { shareTo, shareThisPost } = uiCopy(lang);
+// No declared language uses neutral UI copy, independently of the document fallback.
+// Declared lang/locales still use the resolved page language passed by PostView.
+const { shareTo, shareThisPost } = uiCopy((meta.lang || meta.locales) ? lang : NEUTRAL_UI_LANG);
 
 // top-of-post share pair (Facebook + X), placed by the byline — a WP/Astra theme-share
 // convention a live WP blog carries on EVERY post (verified via playwright: live shows exactly

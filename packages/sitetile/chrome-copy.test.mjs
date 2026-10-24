@@ -22,7 +22,7 @@ import { registerHooks } from 'node:module';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { uiCopy, dateHeading, LINGO_LOCALES } from './astro/src/packages/lingo/locale.mjs';
+import { uiCopy, dateHeading, LINGO_LOCALES, NEUTRAL_UI_LANG } from './astro/src/packages/lingo/locale.mjs';
 import { unquote, archivePrefixes, dateBadgeParts } from './astro/src/lib/chrome-copy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -97,18 +97,32 @@ test('article share names use neutral English for absent or unsupported locales'
   }
 });
 
-for (const [config, expectedLang, expectedLabel] of [
-  ['locales: zh-TW, en-US', 'zh-TW', '分享到 Facebook'],
-  ['lang: ja-JP\nlocales: en-US, ja-JP', 'en-US', 'Share to Facebook'],
+// Execute the component's actual copy initializer so CI covers its fallback, not a duplicate.
+function articleShareCopy(meta, lang) {
+  const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
+  const initializer = article.match(/const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*([^;]+);/);
+  assert.ok(initializer, 'PostArticle must resolve link and navigation copy together');
+  return new Function('uiCopy', 'meta', 'lang', 'NEUTRAL_UI_LANG', `return (${initializer[1]});`)(
+    uiCopy, meta, lang, NEUTRAL_UI_LANG);
+}
+for (const [config, expectedLang, expectedLabel, expectedNav] of [
+  [null, 'zh-Hant', 'Share to Facebook', 'Share this post'],
+  ['', 'zh-Hant', 'Share to Facebook', 'Share this post'],
+  ['locales: zh-TW, en-US', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+  ['lang: ja-JP\nlocales: en-US, ja-JP', 'en-US', 'Share to Facebook', 'Share this post'],
 ]) {
-  test(`article share copy follows resolved page language: ${config.replaceAll('\n', '; ')}`, () => {
-    const files = { '../../content/_site.md': `---\n${config}\n---\n` };
-    const lang = blogViewLang(siteMeta(files), files);
+  const name = config === null ? 'no _site.md / no language' : config || '_site.md without language';
+  test(`article share copy respects declared language: ${name.replaceAll('\n', '; ')}`, () => {
+    const files = config === null ? {} : { '../../content/_site.md': `---\n${config}\n---\n` };
+    const meta = siteMeta(files);
+    const lang = blogViewLang(meta, files);
     assert.equal(lang, expectedLang);
-    assert.equal(uiCopy(lang).shareTo('Facebook'), expectedLabel);
+    const copy = articleShareCopy(meta, lang);
+    assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must respect neutral UI fallback`);
+    assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must respect neutral UI fallback`);
   });
 }
-test('both PostView branches pass the document language to article share copy', () => {
+test('both PostView branches pass the resolved language to article share copy', () => {
   const view = readFileSync(join(SRC, 'components/PostView.astro'), 'utf8');
   const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
   const markup = view.split('---').slice(2).join('---').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
@@ -117,7 +131,7 @@ test('both PostView branches pass the document language to article share copy', 
   for (const [tag] of tags) assert.match(tag, /lang=\{blogViewLang\(meta, viewFiles\)\}/,
     'PostView must pass its resolved document language to both article branches');
   assert.match(article, /const\s*\{[^}]*\blang\b[^}]*\}\s*=\s*Astro.props/);
-  assert.match(article, /const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*uiCopy\(lang\)/,
+  assert.match(article, /const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*uiCopy\([^;]*\blang\b[^;]*\)/,
     'share copy must consume the resolved lang prop');
 });
 
