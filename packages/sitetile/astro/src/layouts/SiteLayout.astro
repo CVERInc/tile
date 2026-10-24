@@ -1063,7 +1063,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       <>
       <aside class="rf-announce-card" role="note" data-until={announceM.until}>{announceM.href
         ? <a class="rf-announce-t" href={announceM.href} {...ext(announceM.href)}>{announceM.text}</a>
-        : <span class="rf-announce-t">{announceM.text}</span>}<span class="rf-announce-cd" data-until={announceM.until} data-prefix={announceCopy.announceEndsIn}></span><button type="button" class="rf-announce-x" aria-label={announceCopy.announceClose} hidden>×</button></aside>
+        : <span class="rf-announce-t" role="region" tabindex="0" aria-label={announceCopy.announceLabel}>{announceM.text}</span>}<span class="rf-announce-cd" data-until={announceM.until} data-prefix={announceCopy.announceEndsIn}></span><button type="button" class="rf-announce-x" aria-label={announceCopy.announceClose} hidden>×</button></aside>
       <script is:inline set:html={ANNOUNCE_GUARD_SCRIPT}></script>
       </>
     )}

@@ -141,6 +141,35 @@ try {
     assert.ok(f.docOverflow <= 0, `${where}: the page scrolls sideways by ${f.docOverflow}px`);
     assert.match(f.cdText, /^Ends in /, `${where}: the countdown was not filled — ${show}`);
     console.log(`  ${where}: card y ${f.card.t.toFixed(1)}…${f.card.b.toFixed(1)}, × y ${f.x.t.toFixed(1)}…${f.x.b.toFixed(1)}, ${f.lines} line(s)${f.scrolls ? ', text scrolls' : ''}`);
+    // Keyboard (WCAG 2.1.1; the review's P2): Tab from the top of the page walks the card's tab stops.
+    // Exactly two — the text (the link, or the unlinked scroll area itself) then the × — so a linked
+    // card has no second stop for the same words, and a tall unlinked one has a stop to scroll from.
+    const linked = await pg.evaluate(() => !!document.querySelector('.rf-announce-card a.rf-announce-t'));
+    await pg.evaluate(() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); });
+    const stops = [];
+    for (let i = 0; i < 30; i++) {
+      await pg.keyboard.press('Tab');
+      const s = await pg.evaluate(() => { const e = document.activeElement; return e && e.closest('.rf-announce-card') ? (e.classList.contains('rf-announce-x') ? 'x' : e.tagName.toLowerCase()) : null; });
+      if (s) stops.push(s);
+      if (s === 'x') break;
+    }
+    assert.deepEqual(stops, [linked ? 'a' : 'span', 'x'], `${where}: the card's tab stops are ${JSON.stringify(stops)} — expected the text once, then the ×`);
+    if (f.scrolls) {
+      // Back to the text stop, then scroll with the keys a keyboard user has.
+      await pg.keyboard.press('Shift+Tab');
+      const name = await pg.evaluate(() => document.activeElement.closest('.rf-announce-t, .rf-announce-t *') ? document.activeElement.getAttribute('aria-label') : null);
+      if (!linked) assert.ok(name && name.trim(), `${where}: the focusable scroll area has no accessible name`);
+      // Keyboard scrolling may be animated; poll until it settles rather than guess a delay.
+      const top = async () => { let v = -1, n = 0; for (let i = 0; i < 20 && n < 3; i++) { await pg.waitForTimeout(50); const c = await pg.evaluate(() => document.querySelector('.rf-announce-t').scrollTop); n = c === v ? n + 1 : 0; v = c; } return v; };
+      assert.equal(await top(), 0, `${where}: the text did not start at the top`);
+      await pg.keyboard.press('ArrowDown');
+      const afterArrow = await top();
+      assert.ok(afterArrow > 0, `${where}: ArrowDown on the focused text did not scroll it (scrollTop ${afterArrow})`);
+      await pg.keyboard.press('PageDown');
+      assert.ok(await top() > afterArrow, `${where}: PageDown did not scroll the text further`);
+      await pg.keyboard.press('Tab');
+      assert.equal(await pg.evaluate(() => document.activeElement.className), 'rf-announce-x', `${where}: Tab from the text did not reach the ×`);
+    }
     // …and it works: the × takes the card down, and a reload remembers it.
     await pg.click('.rf-announce-x');
     assert.equal(await pg.locator('.rf-announce-card').count(), 0, `${where}: pressing × left the card up`);

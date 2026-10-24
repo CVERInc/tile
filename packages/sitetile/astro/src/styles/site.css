@@ -1760,6 +1760,9 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
    scrolled back to. The text's height is capped — never more than a third of the screen — and it
    scrolls inside the card, so the card stays short and the × stays in its top-right corner. */
 .rf-announce-t { max-height: min(12em, 33vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Unlinked text is a scroll container with nothing focusable in it, so it takes the tab stop itself
+   (WCAG 2.1.1; WebKit won't focus a scroller). Linked text is already a tab stop — no second one. */
+span.rf-announce-t:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
 a.rf-announce-t { color: inherit; text-decoration: underline; text-decoration-color: var(--gd-accent); text-underline-offset: 0.15em; }
 .rf-announce-cd { grid-column: 1; color: var(--gd-muted, var(--gd-text)); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .rf-announce-cd:empty { display: none; }

@@ -138,6 +138,7 @@ test('× label and countdown words exist in every sitetile locale, in that local
     const u = uiCopy(l);
     assert.ok(u.announceClose && u.announceClose.trim(), `${l} has no announceClose`);
     assert.ok(u.announceEndsIn && u.announceEndsIn.trim(), `${l} has no announceEndsIn`);
+    assert.ok(u.announceLabel && u.announceLabel.trim(), `${l} has no announceLabel`);
     if (l !== 'en-US') assert.notEqual(u.announceClose, uiCopy('en-US').announceClose, `${l} borrows the English ×`);
   }
 });
