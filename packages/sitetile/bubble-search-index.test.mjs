@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -120,23 +121,35 @@ test('the bubble matrix is the full cross product, both-off included', () => {
   assert.ok(BUBBLE_MATRIX.some((b) => Object.keys(b).length === 0), 'the all-default bubble is missing');
 });
 
+// 🩸 tile#194 confirm review: the expectation was still derived from searchIndex(), so a change to a
+// field VALUE inside it (ignoring `blog-search-excerpt-chars`, cutting excerpts to one character)
+// moved both sides and stayed green. The expectation is now a committed literal.
+//
+// Regenerate ONLY when the header index's shape or values change on purpose (a new field, a new
+// default excerpt cap): run this file once with REGEN_HEADER_GOLDEN=1, read `git diff` on the golden
+// row by row, and commit it with the change that moved it. A golden that moves in a "bubble" or
+// "test-only" commit is exactly the regression this guard exists to catch.
+const GOLDEN_PATH = join(HERE, 'fixtures/header-search-index.golden.json');
+if (process.env.REGEN_HEADER_GOLDEN === '1') {
+  const out = {};
+  for (const [name, header] of Object.entries(HEADER_CONFIGS)) out[name] = rows(JSON.stringify(blog.searchIndex(bigCorpus(), header)));
+  writeFileSync(GOLDEN_PATH, JSON.stringify(out, null, 2) + '\n');
+}
+const GOLDEN = JSON.parse(readFileSync(GOLDEN_PATH, 'utf8'));
+
+test('the golden covers exactly the four header configs, twelve rows each', () => {
+  assert.deepEqual(Object.keys(GOLDEN), Object.keys(HEADER_CONFIGS));
+  for (const [name, g] of Object.entries(GOLDEN)) assert.equal(g.length, 12, `golden ${name} lost rows`);
+});
+
 for (const [name, header] of Object.entries(HEADER_CONFIGS)) {
-  test(`blog-search on, ${name}: the index is byte-identical under every bubble-switch combination`, () => {
-    const { searchIndex } = blog;
+  test(`blog-search on, ${name}: the index equals the committed golden under every bubble-switch combination`, () => {
     for (const k of Object.keys(header)) assert.ok(!k.startsWith('inbox-bubble'), `header fixture ${name} carries a bubble switch: ${k}`);
-    const before = JSON.stringify(searchIndex(bigCorpus(), header));
-    // An expectation that does not come from searchIndex, so a change inside it cannot move both sides.
-    const withBody = header['blog-search-body'] === 'true';
-    const expected = rows(before);
-    assert.equal(expected.length, 12, 'the reference index lost rows');
-    for (const r of expected) {
-      assert.deepEqual(Object.keys(r).sort(), withBody ? ['d', 'e', 'g', 'i', 't', 'u'] : ['d', 'g', 'i', 't', 'u'],
-        `reference row shape for ${name}: ${JSON.stringify(r)}`);
-    }
+    const expected = JSON.stringify(GOLDEN[name]);
     for (const bubble of BUBBLE_MATRIX) {
       const body = buildSearchIndexBody(bigCorpus(), { ...header, ...bubble });
-      assert.equal(body, before,
-        `the header magnifier's index (${name}) changed under bubble switches ${JSON.stringify(bubble)}`);
+      assert.equal(body, expected,
+        `the header magnifier's index (${name}) differs from the golden under bubble switches ${JSON.stringify(bubble)}`);
     }
   });
 }

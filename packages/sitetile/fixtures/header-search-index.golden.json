@@ -1,0 +1,466 @@
+{
+  "default (blog-search alone, titles only)": [
+    {
+      "t": "Post 01",
+      "u": "/devlog/post-01",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 02",
+      "u": "/devlog/post-02",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 03",
+      "u": "/devlog/post-03",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 04",
+      "u": "/devlog/post-04",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 05",
+      "u": "/devlog/post-05",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 06",
+      "u": "/devlog/post-06",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 07",
+      "u": "/devlog/post-07",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 08",
+      "u": "/devlog/post-08",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 09",
+      "u": "/devlog/post-09",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 10",
+      "u": "/devlog/post-10",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 11",
+      "u": "/devlog/post-11",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 12",
+      "u": "/devlog/post-12",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    }
+  ],
+  "body search explicitly off": [
+    {
+      "t": "Post 01",
+      "u": "/devlog/post-01",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 02",
+      "u": "/devlog/post-02",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 03",
+      "u": "/devlog/post-03",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 04",
+      "u": "/devlog/post-04",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 05",
+      "u": "/devlog/post-05",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 06",
+      "u": "/devlog/post-06",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 07",
+      "u": "/devlog/post-07",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 08",
+      "u": "/devlog/post-08",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 09",
+      "u": "/devlog/post-09",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 10",
+      "u": "/devlog/post-10",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 11",
+      "u": "/devlog/post-11",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    },
+    {
+      "t": "Post 12",
+      "u": "/devlog/post-12",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": ""
+    }
+  ],
+  "body search on, default excerpt length": [
+    {
+      "t": "Post 01",
+      "u": "/devlog/post-01",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-01 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 02",
+      "u": "/devlog/post-02",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-02 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 03",
+      "u": "/devlog/post-03",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-03 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 04",
+      "u": "/devlog/post-04",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-04 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 05",
+      "u": "/devlog/post-05",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-05 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 06",
+      "u": "/devlog/post-06",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-06 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 07",
+      "u": "/devlog/post-07",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-07 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 08",
+      "u": "/devlog/post-08",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-08 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 09",
+      "u": "/devlog/post-09",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-09 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 10",
+      "u": "/devlog/post-10",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-10 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 11",
+      "u": "/devlog/post-11",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-11 words that run past twenty characters body paragraph."
+    },
+    {
+      "t": "Post 12",
+      "u": "/devlog/post-12",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-12 words that run past twenty characters body paragraph."
+    }
+  ],
+  "body search on, 20-char excerpts": [
+    {
+      "t": "Post 01",
+      "u": "/devlog/post-01",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-01 words that r"
+    },
+    {
+      "t": "Post 02",
+      "u": "/devlog/post-02",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-02 words that r"
+    },
+    {
+      "t": "Post 03",
+      "u": "/devlog/post-03",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-03 words that r"
+    },
+    {
+      "t": "Post 04",
+      "u": "/devlog/post-04",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-04 words that r"
+    },
+    {
+      "t": "Post 05",
+      "u": "/devlog/post-05",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-05 words that r"
+    },
+    {
+      "t": "Post 06",
+      "u": "/devlog/post-06",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-06 words that r"
+    },
+    {
+      "t": "Post 07",
+      "u": "/devlog/post-07",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-07 words that r"
+    },
+    {
+      "t": "Post 08",
+      "u": "/devlog/post-08",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-08 words that r"
+    },
+    {
+      "t": "Post 09",
+      "u": "/devlog/post-09",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-09 words that r"
+    },
+    {
+      "t": "Post 10",
+      "u": "/devlog/post-10",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-10 words that r"
+    },
+    {
+      "t": "Post 11",
+      "u": "/devlog/post-11",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-11 words that r"
+    },
+    {
+      "t": "Post 12",
+      "u": "/devlog/post-12",
+      "g": [
+        "alpha"
+      ],
+      "d": "2026-08-20",
+      "i": "",
+      "e": "body-12 words that r"
+    }
+  ]
+}
