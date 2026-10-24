@@ -13,7 +13,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import worker from './card-worker.mjs';
+import worker, { renderCardHTML } from './card-worker.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
 import { BLANKS, blankCell } from '../ai-ops.mjs';
 import { buildSandboxCard, LOCALE_KEYS } from '../w/sandbox-i18n.mjs';
@@ -163,4 +163,49 @@ test('preview deployments and demo- handles keep noindex, nofollow on a blank ca
   assert.equal(await exitHeader(starter({ handle: 'demo-maple' }), '/', { handle: 'demo-maple' }), 'noindex, nofollow', 'demo- handle');
   // control: the same blank card on production, ordinary handle → the blank rule's plain noindex
   assert.equal(await exitHeader(starter(), '/'), 'noindex');
+});
+
+// ── tile#191 re-review P2: whitespace the author typed is content ────────────────────────────────
+// The comparison is BYTE-EXACT against the parsed body — the very value the renderer is handed
+// (renderCardHTML → parseCard → renderPage). The only whitespace that may differ is what parseCard
+// itself drops before anything renders it (card-core.js extractCell: trailing whitespace of the body,
+// leading newlines, the continuation lines' tab indent; CRLF line ends). Each such case is proven
+// INVISIBLE below by rendering both cards and comparing the HTML, not by argument.
+const BIO = 'Family doctor in a small town. I write about rest, worry, and the small things that help — appointments and notes below.';
+const bioAs = (body) => SANDBOX.replace(BIO, body);
+const AUTHORED_WS = {
+  'markdown hard line break (two spaces + newline)': BIO.replace('small town. I write', 'small town.  \n\tI write'),
+  'backslash line break': BIO.replace('small town. I write', 'small town.\\\n\tI write'),
+  'an added blank line (a second paragraph)': BIO.replace('small town. I write', 'small town.\n\n\tI write'),
+  'changed spacing inside a sentence': BIO.replace('small town. I write', 'small town.   I write'),
+};
+test('whitespace the author typed inside a template body makes the card authored (no blank-card header)', async () => {
+  assert.ok(SANDBOX.includes(BIO), 'fixture drifted: the en persona bio is not in the sandbox card');
+  assert.equal(await robots(SANDBOX), 'noindex', 'control: the untouched sandbox card is blank');
+  for (const [name, body] of Object.entries(AUTHORED_WS)) {
+    const md = bioAs(body);
+    assert.notEqual(parseCard(md).cells[0].body, BIO, `${name}: the fixture did not reach the parsed body`);
+    assert.equal(await robots(md), null, `${name} — html`);
+    assert.equal(await robots(md, { headers: { accept: 'text/markdown' } }), null, `${name} — thin markdown`);
+  }
+});
+
+// Decisions, each with its proof: the renderer cannot see these, so the card is still blank.
+//  · trailing whitespace only — extractCell strips it (`.replace(/\s+$/, '')`) before rendering.
+//  · CRLF vs LF — the store keeps whatever bytes save_card was given (card-api.mjs does not rewrite
+//    line ends), so a CRLF card is a real possibility; parseCard reads both to the same model.
+test('trailing whitespace only, and CRLF line ends, render byte-identical HTML — so the card stays blank', async () => {
+  const cases = {
+    'trailing spaces after the bio': bioAs(BIO + '   '),
+    'trailing tab after the social row': starter().replace('[Instagram](https://instagram.com/)', '[Instagram](https://instagram.com/)\t'),
+    'whole card CRLF (sandbox)': SANDBOX.replace(/\n/g, '\r\n'),
+    'whole card CRLF (create_card)': starter().replace(/\n/g, '\r\n'),
+  };
+  for (const [name, md] of Object.entries(cases)) {
+    const base = name.includes('create_card') || name.includes('social') ? starter() : SANDBOX;
+    const ctx = { handle: 'maple', cardUrl: `https://${OWN}` };
+    assert.notEqual(md, base, `${name}: fixture is identical to its base`);
+    assert.equal(renderCardHTML(md, ctx), renderCardHTML(base, ctx), `${name}: the renderer CAN see this difference — it must count as authored`);
+    assert.equal(await robots(md), 'noindex', `${name}`);
+  }
 });

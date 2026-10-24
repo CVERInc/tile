@@ -27,7 +27,9 @@ import { BLANKS } from './ai-ops.mjs';
 import { SANDBOX_LOCALES } from './w/sandbox-i18n.mjs';
 import { CELL_STRINGS_BY_KEY } from './w/cell-i18n.mjs';
 
-const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+// `blankish` is ONLY for "is there anything here at all" (a section label, text around the lanes).
+// Template bodies are never normalised: see TEMPLATE_BODIES.
+const blankish = (s) => !String(s ?? '').trim();
 const resolved = (key) => [key, ...Object.values(CELL_STRINGS_BY_KEY[key] || {})];
 const personas = Object.values(SANDBOX_LOCALES);
 
@@ -40,14 +42,23 @@ const linkForms = (labels) => labels.flatMap((l) => [l, `[${l}]()`, `[${l}](http
  * 🩸 A MAP, not an object (tile#191 review P2). The type word is author input, and the parser accepts
  * any word: as a plain object, `TEMPLATE_BODIES['constructor']` handed back Object's constructor, the
  * `.has` call threw, and a card that had rendered 200 the day before took the request down with it.
- * A Map has no inherited keys, so an unknown type — however it is spelled — is simply not template. */
+ * A Map has no inherited keys, so an unknown type — however it is spelled — is simply not template.
+ *
+ * 🩸 BYTE-EXACT, no whitespace normalisation (tile#191 re-review P2). Collapsing whitespace made
+ * `small town.  \n\tI write` — a Markdown hard line break, a visible <br> — compare equal to the
+ * template, so an edited card stayed noindex. The value compared is `cell.body` as parseCard returns
+ * it, which is exactly what the renderer is handed (renderCardHTML → parseCard → renderPage). The
+ * only whitespace that may differ from the raw file is what parseCard itself drops before anything
+ * renders it (card-core.js extractCell: the body's trailing whitespace, leading newlines, the
+ * continuation lines' indent; CRLF line ends) — card-blank-noindex.test.mjs proves those render
+ * byte-identical HTML. Anything else, a single space included, counts as authored. */
 export const TEMPLATE_BODIES = new Map(Object.entries({
   profile: [...resolved('blank.profile'), ...personas.map((p) => p.bio)],
   link: linkForms([...resolved('blank.link.text'), ...personas.map((p) => p.linkLabel)]),
   text: [...resolved('blank.text'), ...personas.map((p) => p.textBody)],
   social: [BLANKS.social.body],
-}).map(([type, bodies]) => [type, new Set(['', BLANKS[type]?.body, ...bodies].filter((b) => b != null).map(norm))]));
-for (const type of Object.keys(BLANKS)) if (!TEMPLATE_BODIES.has(type)) TEMPLATE_BODIES.set(type, new Set(['', norm(BLANKS[type].body)]));
+}).map(([type, bodies]) => [type, new Set(['', BLANKS[type]?.body, ...bodies].filter((b) => b != null).map(String))]));
+for (const type of Object.keys(BLANKS)) if (!TEMPLATE_BODIES.has(type)) TEMPLATE_BODIES.set(type, new Set(['', String(BLANKS[type].body)]));
 
 // Params that only arrange a tile (ai-ops.mjs UNIVERSAL: width, bleed, the retired h). Any other
 // param — avatar, chips, sub, icon, src, … — is something the author set.
@@ -58,7 +69,7 @@ const TEMPLATE_PARAMS = new Map(Object.entries(BLANKS).map(([t, b]) => [t, param
 
 const isTemplateCell = (cell) => {
   const bodies = TEMPLATE_BODIES.get(cell.type);
-  if (!bodies || !bodies.has(norm(cell.body))) return false;
+  if (!bodies || !bodies.has(String(cell.body ?? ''))) return false;
   const own = TEMPLATE_PARAMS.get(cell.type) || new Map();
   return Object.entries(cell.params || {}).every(([k, v]) => LAYOUT.has(k) || (own.has(k) && own.get(k) === v));
 };
@@ -74,8 +85,8 @@ export function isTemplateOnly(cardMd) {
 function judge(m) {
   if (Object.keys(m.assets || {}).length) return false;
   if ((m.drawers || []).length) return false;
-  if (norm(m.post)) return false;
-  if (norm(String(m.pre || '').replace(/^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/, ''))) return false;   // prose before the first lane
-  if ((m.blocks || []).some((b) => norm(b.label))) return false;
+  if (!blankish(m.post)) return false;
+  if (!blankish(String(m.pre || '').replace(/^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/, ''))) return false;   // prose before the first lane
+  if ((m.blocks || []).some((b) => !blankish(b.label))) return false;
   return (m.cells || []).every(isTemplateCell);
 }
