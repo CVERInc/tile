@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import vm from 'node:vm';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { buildSite, RENDERER_SUBPATH } from './index.mjs';
@@ -114,6 +115,54 @@ if (existsSync(join(ASTRO, 'node_modules'))) {
     assert.match(html('future'), /<\/aside>\s*<script>\(function\(\)\{var s=document\.currentScript/, 'the guard does not follow the card');
     // …and only a card page carries any of it.
     assert.doesNotMatch(html(''), /rf-announce-x:|announce-card/, 'a band page ships the card\'s script');
+
+    // 🩸 The runtime is a separate wire from the markup: drop SiteLayout's
+    // `<script>import '…/announce-card.js'</script>` and every assertion above stayed green (tile#192
+    // review), while the page shipped a card whose countdown never fills, whose × stays hidden, and
+    // which a page left open past its deadline never takes down. So this RUNS what the built page
+    // ships — the module script that mounts the card — against a stand-in card under a chosen clock,
+    // and asserts the three things only that module does.
+    const future = html('future');
+    const modules = [...future.matchAll(/<script type="module">([\s\S]*?)<\/script>/g)];
+    const mount = modules.filter((m) => m[1].includes('.rf-announce-card'));
+    assert.equal(mount.length, 1, 'the card page does not ship exactly one module that mounts .rf-announce-card');
+    assert.ok(mount[0].index > future.indexOf('</aside>'), 'the card\'s module comes before the card it mounts');
+    const until = Date.parse('2099-12-01T14:59:00.000Z');
+    let now = until - 2 * 864e5;
+    const timers = [];
+    const store = new Map();
+    let removed = false;
+    let onClick = null;
+    const text = { textContent: 'Spring class enrolling' };
+    const cd = { textContent: '', getAttribute: (n) => (n === 'data-prefix' ? 'Ends in ' : null) };
+    const x = { hidden: true, addEventListener: (type, fn) => { if (type === 'click') onClick = fn; } };
+    const fakeCard = {
+      getAttribute: (n) => (n === 'data-until' ? '2099-12-01T14:59:00.000Z' : null),
+      querySelector: (s) => ({ '.rf-announce-t': text, '.rf-announce-cd': cd, '.rf-announce-x': x })[s] || null,
+      remove: () => { removed = true; },
+    };
+    const run = () => {
+      const FakeDate = class extends Date { static now() { return now; } };
+      vm.runInNewContext(mount[0][1], {
+        Date: FakeDate,
+        setTimeout: (f, ms) => { timers.push({ f, ms }); return timers.length; },
+        localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) },
+        document: { querySelectorAll: (s) => (s === '.rf-announce-card' ? [fakeCard] : []), querySelector: () => null },
+      });
+    };
+    run();
+    assert.equal(x.hidden, false, 'the shipped module did not unhide the ×');
+    assert.match(cd.textContent, /^Ends in /, 'the shipped module did not fill the countdown');
+    assert.ok(timers.length > 0, 'the shipped module scheduled no tick — a page left open never reaches the deadline');
+    onClick();
+    assert.equal(removed, true, 'the shipped module\'s × did not take the card down');
+    assert.equal(store.get('rf-announce-x:2099-12-01T14:59:00.000Z:Spring class enrolling'), '1',
+      'the shipped module\'s × did not remember the dismissal under the guard\'s key');
+    // A fresh mount, then the clock passes the deadline with the page still open.
+    removed = false; timers.length = 0; run();
+    now = until;
+    timers.at(-1).f();
+    assert.equal(removed, true, 'the shipped module left the card up past its deadline');
   });
 }
 
