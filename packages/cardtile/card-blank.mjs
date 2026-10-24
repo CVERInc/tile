@@ -35,34 +35,43 @@ const personas = Object.values(SANDBOX_LOCALES);
 // sandbox's `[label](https://example.com)` — all three, for every label any writer seeds
 const linkForms = (labels) => labels.flatMap((l) => [l, `[${l}]()`, `[${l}](https://example.com)`]);
 
-/** type → the bodies a blank-card writer puts in a cell of that type. '' is always one of them. */
-export const TEMPLATE_BODIES = Object.fromEntries(Object.entries({
+/** type → the bodies a blank-card writer puts in a cell of that type. '' is always one of them.
+ *
+ * 🩸 A MAP, not an object (tile#191 review P2). The type word is author input, and the parser accepts
+ * any word: as a plain object, `TEMPLATE_BODIES['constructor']` handed back Object's constructor, the
+ * `.has` call threw, and a card that had rendered 200 the day before took the request down with it.
+ * A Map has no inherited keys, so an unknown type — however it is spelled — is simply not template. */
+export const TEMPLATE_BODIES = new Map(Object.entries({
   profile: [...resolved('blank.profile'), ...personas.map((p) => p.bio)],
   link: linkForms([...resolved('blank.link.text'), ...personas.map((p) => p.linkLabel)]),
   text: [...resolved('blank.text'), ...personas.map((p) => p.textBody)],
   social: [BLANKS.social.body],
 }).map(([type, bodies]) => [type, new Set(['', BLANKS[type]?.body, ...bodies].filter((b) => b != null).map(norm))]));
-for (const type of Object.keys(BLANKS)) TEMPLATE_BODIES[type] ||= new Set(['', norm(BLANKS[type].body)]);
+for (const type of Object.keys(BLANKS)) if (!TEMPLATE_BODIES.has(type)) TEMPLATE_BODIES.set(type, new Set(['', norm(BLANKS[type].body)]));
 
 // Params that only arrange a tile (ai-ops.mjs UNIVERSAL: width, bleed, the retired h). Any other
 // param — avatar, chips, sub, icon, src, … — is something the author set.
 const LAYOUT = new Set(['w', 'bleed', 'h']);
-const paramsOf = (raw) => Object.fromEntries(String(raw || '').split(/\s+/).filter(Boolean)
+const paramsOf = (raw) => new Map(String(raw || '').split(/\s+/).filter(Boolean)
   .map((t) => { const i = t.indexOf('='); return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 1)]; }));
-const TEMPLATE_PARAMS = Object.fromEntries(Object.entries(BLANKS).map(([t, b]) => [t, paramsOf(b.rawParams)]));
+const TEMPLATE_PARAMS = new Map(Object.entries(BLANKS).map(([t, b]) => [t, paramsOf(b.rawParams)]));   // Map: same reason
 
 const isTemplateCell = (cell) => {
-  const bodies = TEMPLATE_BODIES[cell.type];
+  const bodies = TEMPLATE_BODIES.get(cell.type);
   if (!bodies || !bodies.has(norm(cell.body))) return false;
-  const own = TEMPLATE_PARAMS[cell.type] || {};
-  return Object.entries(cell.params || {}).every(([k, v]) => LAYOUT.has(k) || own[k] === v);
+  const own = TEMPLATE_PARAMS.get(cell.type) || new Map();
+  return Object.entries(cell.params || {}).every(([k, v]) => LAYOUT.has(k) || (own.has(k) && own.get(k) === v));
 };
 
 /** isTemplateOnly: card markdown → true only when nothing on it was written by its author. */
 export function isTemplateOnly(cardMd) {
   if (typeof cardMd !== 'string') return false;   // no card is not a blank card
-  let m;
-  try { m = parseCard(cardMd); } catch { return false; }
+  // 🔴 The WHOLE judgement is inside the try, not only the parse: anything unexpected answers "not
+  // blank" (today's behaviour, indexable) — never a thrown request on a card that renders.
+  try { return judge(parseCard(cardMd)); } catch { return false; }
+}
+
+function judge(m) {
   if (Object.keys(m.assets || {}).length) return false;
   if ((m.drawers || []).length) return false;
   if (norm(m.post)) return false;
