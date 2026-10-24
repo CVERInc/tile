@@ -22,7 +22,7 @@ import { registerHooks } from 'node:module';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { uiCopy, dateHeading } from './astro/src/packages/lingo/locale.mjs';
+import { uiCopy, dateHeading, LINGO_LOCALES, NEUTRAL_UI_LANG } from './astro/src/packages/lingo/locale.mjs';
 import { unquote, archivePrefixes, dateBadgeParts } from './astro/src/lib/chrome-copy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ registerHooks({
     return next(spec, ctx);
   },
 });
-const { fmtDate } = await import('./astro/src/lib/blog.mjs');
+const { fmtDate, siteMeta, blogViewLang, siteDefaultLang, LOCALE_VIEW } = await import('./astro/src/lib/blog.mjs');
 
 // Every `fmtDate(...)` call in `src` that does not pass a language as its third argument.
 // tile#36: a `[^)]*` regex split on `,` stopped at the first `)` and counted commas inside a nested
@@ -70,6 +70,110 @@ const test = (name, fn) => {
   catch (e) { console.error('  ✗ ' + name + '\n    ' + (e && e.message ? e.message : e)); process.exitCode = 1; }
 };
 
+// tile#196: a formatter keeps the platform name in the locale's natural word order.
+test('article share names cover every engine UI locale', () => {
+  const names = {
+    'en-US': ['Share to Facebook', 'Share this post'],
+    'zh-TW': ['分享到 Facebook', '分享這篇文章'],
+    'ja-JP': ['Facebookでシェア', 'この記事をシェア'],
+    'ko-KR': ['Facebook에 공유', '이 글 공유'],
+  };
+  for (const lang of LINGO_LOCALES) {
+    assert.ok(names[lang], `add share-copy expectations for ${lang}`);
+    const [expected, nav] = names[lang];
+    assert.equal(uiCopy(lang).shareTo('Facebook'), expected, lang);
+    assert.equal(uiCopy(lang).shareTo('X'), expected.replace('Facebook', 'X'), lang);
+    assert.equal(uiCopy(lang).shareThisPost, nav, lang);
+  }
+});
+test('article share names follow the existing locale aliases', () => {
+  for (const [alias, canonical] of [['zh-Hant', 'zh-TW'], ['zh-tw', 'zh-TW'], ['ja', 'ja-JP'], ['ko', 'ko-KR'], ['en-GB', 'en-US']]) {
+    assert.equal(uiCopy(alias).shareTo('Facebook'), uiCopy(canonical).shareTo('Facebook'), alias);
+  }
+});
+test('article share names use neutral English for absent or unsupported locales', () => {
+  for (const lang of [undefined, '', 'xx-XX', 'fr-FR']) {
+    assert.equal(uiCopy(lang).shareTo('Facebook'), 'Share to Facebook');
+  }
+});
+
+// Evaluate both actual article prop expressions, so a disconnected branch fails in CI.
+function articleLanguages(meta, viewFiles) {
+  const view = readFileSync(join(SRC, 'components/PostView.astro'), 'utf8');
+  const expressions = [...view.matchAll(/<PostArticle\s+lang=\{([^}]+)\}/g)];
+  assert.equal(expressions.length, 2, 'both article branches must pass a language');
+  return expressions.map(([, expression]) => new Function(
+    'meta', 'viewFiles', 'blogViewLang', 'siteDefaultLang', 'LOCALE_VIEW', 'NEUTRAL_UI_LANG',
+    `return (${expression});`)(meta, viewFiles, blogViewLang, siteDefaultLang, LOCALE_VIEW, NEUTRAL_UI_LANG));
+}
+
+// Execute the component's actual copy initializer so CI covers its fallback, not a duplicate.
+function articleShareCopy(meta, lang) {
+  const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
+  const initializer = article.match(/const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*([^;]+);/);
+  assert.ok(initializer, 'PostArticle must resolve link and navigation copy together');
+  return new Function('uiCopy', 'meta', 'lang', 'NEUTRAL_UI_LANG', `return (${initializer[1]});`)(
+    uiCopy, meta, lang, NEUTRAL_UI_LANG);
+}
+for (const [config, expectedLang, expectedLabel, expectedNav] of [
+  [null, 'zh-Hant', 'Share to Facebook', 'Share this post'],
+  ['', 'zh-Hant', 'Share to Facebook', 'Share this post'],
+  ['locales: zh-TW, en-US', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+  ['lang: ja-JP\nlocales: en-US, ja-JP', 'en-US', 'Share to Facebook', 'Share this post'],
+]) {
+  const name = config === null ? 'no _site.md / no language' : config || '_site.md without language';
+  test(`article share copy respects declared language: ${name.replaceAll('\n', '; ')}`, () => {
+    const files = config === null ? {} : { '../../content/_site.md': `---\n${config}\n---\n` };
+    const meta = siteMeta(files);
+    const lang = blogViewLang(meta, files);
+    assert.equal(lang, expectedLang);
+    for (const articleLang of articleLanguages(meta, files)) {
+      const copy = articleShareCopy(meta, articleLang);
+      assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must respect neutral UI fallback`);
+      assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must respect neutral UI fallback`);
+    }
+  });
+}
+// Page frontmatter is also a language declaration, even when site metadata is silent.
+for (const [name, config, homeLang, pageLang, expectedLang, expectedLabel, expectedNav] of [
+  ['site without language, Japanese pages', 'title: Share fixture', 'ja-JP', 'ja-JP', 'ja-JP', 'Facebookでシェア', 'この記事をシェア'],
+  ['no site, neutral home, Chinese pages', null, '', 'zh-TW', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+  ['no site, Chinese home', null, 'zh-TW', 'zh-TW', 'zh-TW', '分享到 Facebook', '分享這篇文章'],
+]) {
+  test(`article share copy respects page language: ${name}`, () => {
+    const page = lang => `---\nsitetile-page: true\n${lang ? `lang: ${lang}\n` : ''}---\n`;
+    const files = {
+      '../../content/home.md': page(homeLang),
+      '../../content/about.md': page(pageLang),
+      ...(config === null ? {} : { '../../content/_site.md': `---\n${config}\n---\n` }),
+    };
+    const meta = siteMeta(files);
+    const lang = blogViewLang(meta, files);
+    assert.equal(lang, expectedLang);
+    for (const articleLang of articleLanguages(meta, files)) {
+      const copy = articleShareCopy(meta, articleLang);
+      assert.equal(copy.shareTo('Facebook'), expectedLabel, `${name}: share label must follow page-declared language`);
+      assert.equal(copy.shareThisPost, expectedNav, `${name}: navigation label must follow page-declared language`);
+    }
+  });
+}
+test('both PostView branches pass the resolved language to article share copy', () => {
+  const view = readFileSync(join(SRC, 'components/PostView.astro'), 'utf8');
+  const article = readFileSync(join(SRC, 'components/PostArticle.astro'), 'utf8');
+  const markup = view.split('---').slice(2).join('---').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  const tags = [...markup.matchAll(/<(?:SiteLayout|PostArticle)\b[^>]*>/g)];
+  assert.equal(tags.length, 3, 'document layout and both article branches must be checked');
+  assert.match(tags[0][0], /lang=\{blogViewLang\(meta, viewFiles\)\}/,
+    'document language keeps its document fallback');
+  for (const lang of articleLanguages({ lang: 'ja-JP', locales: 'en-US, ja-JP', [LOCALE_VIEW]: true }, {})) {
+    const copy = articleShareCopy({}, lang);
+    assert.equal(copy.shareTo('Facebook'), 'Facebookでシェア', 'locale view must preserve its own language');
+  }
+  assert.match(article, /const\s*\{[^}]*\blang\b[^}]*\}\s*=\s*Astro.props/);
+  assert.match(article, /const\s*\{\s*shareTo,\s*shareThisPost\s*\}\s*=\s*uiCopy\([^;]*\blang\b[^;]*\)/,
+    'share copy must consume the resolved lang prop');
+});
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => {
   const p = join(dir, n);
   if (statSync(p).isDirectory()) return n === 'node_modules' ? [] : walk(p);
@@ -84,7 +188,7 @@ const stripComments = (t) => t
 const CJK = /[一-鿿぀-ヿ가-힯]/;
 
 test('every locale has a full set of chrome copy', () => {
-  for (const l of ['en-US', 'zh-TW', 'ja-JP', 'ko-KR']) {
+  for (const l of LINGO_LOCALES) {
     const u = uiCopy(l);
     for (const k of ['recent', 'tags', 'archive', 'search', 'tagPrefix', 'datePrefix']) {
       assert.ok(u[k] && String(u[k]).trim(), `${l} is missing ${k}`);

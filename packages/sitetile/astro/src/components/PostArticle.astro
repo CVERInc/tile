@@ -10,9 +10,9 @@ import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase, dialogueAuthorRight } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
-import { localeHomePath } from '../packages/lingo/locale.mjs';
+import { localeHomePath, uiCopy } from '../packages/lingo/locale.mjs';
 
-const { post, meta, newer, older, keepReadingCards, relatedCards } = Astro.props;
+const { post, meta, lang, newer, older, keepReadingCards, relatedCards } = Astro.props;
 // blog-date-format (home meta): cjk-badge falls back to cjk-full's full string here —
 // the three-span badge layout is index-cards-only (see blog.mjs fmtDate()). Absent/unrecognised
 // (cjk is an alias of cjk-full) falls to fmtDate's own locale default, which is why this page's
@@ -57,6 +57,8 @@ const SHARE = {
   pinterest: { label: 'Pinterest', href: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(canonical)}&description=${encodeURIComponent(post.title)}` },
 };
 const shareLinks = shareTokens.map((t) => SHARE[t]).filter(Boolean);
+// PostView resolves declared site/page language separately from the document fallback.
+const { shareTo, shareThisPost } = uiCopy(lang);
 
 // top-of-post share pair (Facebook + X), placed by the byline — a WP/Astra theme-share
 // convention a live WP blog carries on EVERY post (verified via playwright: live shows exactly
@@ -105,24 +107,20 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
     {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat, meta.lang)}</time>}
     <h1>{post.title}</h1>
     {author && <p class="bl-byline">{bylineLabel} {author}</p>}
-    {/* 🩸 added 2026-07-13: top-of-post share pair (see topShareLinks above) — matches live
-        the live placement directly under the title/byline. A site's theme typically has no
-        `.bl-share`/`.bl-share-btn` CSS at all (bottom-row styling lives in the themes that use it), so a minimal
-        inline style keeps this legible as plain static anchors, per the fix's "static anchor
-        tags are fine" note — no JS, no new stylesheet touched. */}
+    {/* The top pair keeps its original plain-link defaults in site.css, where themes can override them. */}
     {topShareLinks.length > 0 && (
-      <nav class="bl-share bl-share-top" aria-label="Share this post" style="display:flex;gap:0.6rem;margin-top:0.5rem;">
+      <nav class="bl-share bl-share-top" aria-label={shareThisPost}>
         {topShareLinks.map((s) => (
-          <a class="bl-share-btn" href={s.href} rel="noopener" target="_blank" style="font-size:0.85em;text-decoration:underline;">{s.label}</a>
+          <a class="bl-share-btn" aria-label={shareTo(s.label)} href={s.href} rel="noopener" target="_blank">{s.label}</a>
         ))}
       </nav>
     )}
   </header>
   <div class="bl-body" set:html={html}></div>
   {shareLinks.length > 0 && (
-    <nav class="bl-share" aria-label="Share this post">
+    <nav class="bl-share" aria-label={shareThisPost}>
       {shareLinks.map((s) => (
-        <a class="bl-share-btn" href={s.href} rel="noopener" target="_blank">{s.label}</a>
+        <a class="bl-share-btn" aria-label={shareTo(s.label)} href={s.href} rel="noopener" target="_blank">{s.label}</a>
       ))}
     </nav>
   )}
