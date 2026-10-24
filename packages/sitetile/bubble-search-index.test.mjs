@@ -29,7 +29,8 @@ register(
   import.meta.url,
 );
 
-const { allPosts } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const blog = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const { allPosts } = blog;
 const { buildSearchIndexBody } = await import(pathToFileURL(join(SRC, 'lib/public-artifacts.mjs')).href);
 const { bubbleSearchOn } = await import(pathToFileURL(join(SRC, 'lib/inbox-bubble.mjs')).href);
 
@@ -80,6 +81,21 @@ test('the owner can turn the bubble search off in one line, and an off bubble em
   assert.equal(buildSearchIndexBody(corpus(), { ...BUBBLE_ONLY, 'inbox-bubble': 'off' }), '[]');
   // but the header magnifier's own switch still wins on its own, as before
   assert.notEqual(buildSearchIndexBody(corpus(), { ...BUBBLE_ONLY, 'inbox-bubble': 'off', 'blog-search': 'true' }), '[]');
+});
+
+// The header magnifier's index must not notice the bubble: with `blog-search` on, every bubble
+// switch yields the bytes the magnifier alone produced before reef#2160 (searchIndex, stringified).
+// A later change that trims rows "for the bubble" (drops `e`, caps rows) would fail here first.
+test('blog-search on: the index is byte-identical whatever the bubble switches say', () => {
+  const { searchIndex } = blog;
+  for (const extra of [{}, { 'blog-search-body': 'true', 'blog-search-excerpt-chars': '20' }]) {
+    const header = { ...BUBBLE_ONLY, 'blog-search': 'true', ...extra };
+    const before = JSON.stringify(searchIndex(corpus(), header));
+    for (const bubble of [{}, { 'inbox-bubble': 'off' }, { 'inbox-bubble-search': 'off' }, { 'inbox-bubble': 'on', 'inbox-bubble-search': 'on' }]) {
+      assert.equal(buildSearchIndexBody(corpus(), { ...header, ...bubble }), before,
+        `the header magnifier's index changed under bubble switches ${JSON.stringify(bubble)}`);
+    }
+  }
 });
 
 test('a site without a blog still emits []', () => {
