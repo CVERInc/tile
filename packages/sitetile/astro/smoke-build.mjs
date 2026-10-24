@@ -210,6 +210,13 @@ const ALLOWED_INLINE = [
   // that link for a youtube-nocookie iframe on press. Idempotent per page (window.__stYt), and a
   // no-op with no `a.st-video-yt[data-yt]` on the page.
   ['YouTube line click-to-play (swap the poster link for a youtube-nocookie player on press)', 'a.st-video-yt[data-yt]'],
+  // reef#2301 announce card (announce-card.md is the fixture). Only a page whose `announce-until`
+  // is still ahead at build draws the card, and only that page carries either script. Progressive:
+  // JS-off, the card is plain server markup (text + link) and its × ships `hidden`, so nothing dead
+  // is shown. The inline guard removes an expired or dismissed card before first paint (a static
+  // page outlives its deadline); the module ticks the countdown, removes the card at the deadline,
+  // and unhides/wires the ×. Both carry the dismiss-key literal, so one signature admits both.
+  ['announce card (deadline guard + countdown/× module, only on a page with a future announce-until)', 'rf-announce-x:'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
@@ -2036,6 +2043,17 @@ const checks = [
   }],
   ['🔴 dynamic-coral-css: the coral layer is not named anywhere on an undeclared site — not in the statement, not in any style it emits', () =>
     undeclaredOrder.polluted.length === 0],
+  // reef#2301 — the announce card, script off: real markup, × hidden, the guard right after it,
+  // and no other fixture page pays for any of it.
+  ['announce card: server markup is whole with JS off, × ships hidden, the guard follows the card', () => {
+    const page = readFileSync(join(DIST, 'announce-card/index.html'), 'utf8');
+    const card = /<aside class="rf-announce-card"[^>]*>[\s\S]*?<\/aside>\s*<script>/.exec(page);
+    assert.ok(card, 'no card, or the guard is not its next sibling');
+    assert.match(card[0], /<a class="rf-announce-t" href="\/blocks\/">Spring class now enrolling<\/a>/);
+    assert.match(card[0], /<button type="button" class="rf-announce-x" aria-label="Close" hidden>/);
+    assert.equal(occIn(html, 'rf-announce'), 0, 'the home fixture (no announce) carries announce markup or script');
+    return true;
+  }],
   // 🔴 THE CONTROL ARM (R3-P2-2's identity-swap experiment, per the review): this suite cannot
   // prove it is a check rather than a tautology from its own green run alone — round 3 measured
   // the opposite failure (13 files' worth of gates reverted to the identity function and the
