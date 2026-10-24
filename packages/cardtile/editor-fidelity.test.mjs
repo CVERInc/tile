@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderCardHTML } from './serve/card-worker.mjs';
+import { EDIT_ONLY_CSS } from './card-render.mjs';
 import { stripEditorHTML } from './verify/editor-fidelity.js';
 
 for (const specimen of ['specimen-plain', 'specimen-assets', 'specimen-rich']) {
@@ -20,3 +21,11 @@ for (const specimen of ['specimen-plain', 'specimen-assets', 'specimen-rich']) {
     assert.notEqual(stripEditorHTML(canvas.replace('<style>', '<style>/* CONTROL */')), normalized);
   });
 }
+
+test('only the exact edit-only stylesheet is excluded', () => {
+  const injected = `<style>${EDIT_ONLY_CSS}</style>`;
+  const served = '<style>.st-cell-unset { color: red; }</style>';
+  const changed = `<style>${EDIT_ONLY_CSS}\n.st-cell-unset { color: red; }</style>`;
+  assert.equal(stripEditorHTML(`${served}${injected}${changed}${injected}`),
+    `${served}${changed}`, 'styles sharing the placeholder selector must remain comparable');
+});
