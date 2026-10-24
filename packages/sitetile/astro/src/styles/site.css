@@ -1734,6 +1734,54 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
   background: var(--gd-text); color: var(--gd-bg);
 }
 .rf-announce a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+/* reef#2301 · the announcement with a deadline (`announce-until`) — a small card in the bottom-left
+   corner instead of the band: the text (a link with `announce-href`), a countdown the client fills,
+   and a × the client unhides. Bottom-left because the inbox bubble owns bottom-right. Theme tokens
+   only — the site's own surface, ink, accent and radius; no colour of its own. Above sticky chrome
+   (20), far below the platform overlays (--rf-z-overlay). */
+.rf-announce-card {
+  position: fixed; left: 1rem; bottom: 1rem; z-index: 30;
+  max-width: min(20rem, calc(100vw - 2rem)); box-sizing: border-box;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.25rem 0.75rem;
+  padding: 0.75rem 0.85rem 0.75rem 1rem;
+  background: var(--gd-surface, var(--gd-bg)); color: var(--gd-text);
+  border: 1px solid var(--gd-border, currentColor); border-left: 4px solid var(--gd-accent);
+  border-radius: var(--gd-radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  font-size: 0.9rem; line-height: 1.35;
+}
+.rf-announce-t { grid-column: 1; font-weight: 600; }
+/* A pasted checkout URL is one unbroken token: a plain `1fr` track keeps its min-content (the whole
+   URL) as its floor, so the card's text ran past the card and pushed the × off-screen at 320px.
+   The track may shrink (minmax(0,1fr) above) and the text breaks anywhere when it must. */
+.rf-announce-t, .rf-announce-cd { min-width: 0; overflow-wrap: anywhere; }
+/* …and a TALL one (nothing caps `announce`'s length in frontmatter): the card is bottom-anchored, so
+   unbounded text grew it upward and carried the × above the viewport, where a fixed box cannot be
+   scrolled back to. The text's height is capped — never more than a third of the screen — and it
+   scrolls inside the card, so the card stays short and the × stays in its top-right corner. */
+.rf-announce-t { max-height: min(12em, 33vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Unlinked text is a scroll container with nothing focusable in it, so it takes the tab stop itself
+   (WCAG 2.1.1; WebKit won't focus a scroller). Linked text is already a tab stop — no second one. */
+span.rf-announce-t:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; }
+a.rf-announce-t { color: inherit; text-decoration: underline; text-decoration-color: var(--gd-accent); text-underline-offset: 0.15em; }
+.rf-announce-cd { grid-column: 1; color: var(--gd-muted, var(--gd-text)); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.rf-announce-cd:empty { display: none; }
+.rf-announce-x {
+  grid-column: 2; grid-row: 1 / span 2; align-self: start;
+  margin: -0.25rem -0.35rem 0 0; padding: 0.25rem 0.45rem;
+  border: 0; background: none; color: inherit; font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer;
+  border-radius: var(--gd-radius);
+}
+.rf-announce-x[hidden] { display: none; }
+.rf-announce-x:focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: no-preference) {
+  .rf-announce-card { animation: rf-announce-in 0.35s ease-out both; }
+  @keyframes rf-announce-in { from { opacity: 0; transform: translateY(0.75rem); } }
+}
+/* Narrow screens: smaller, hugging the corner, so it never sits over the reading column's text. */
+@media (max-width: 40rem) {
+  .rf-announce-card { left: 0.5rem; bottom: 0.5rem; max-width: min(16rem, calc(100vw - 5rem)); padding: 0.55rem 0.7rem 0.55rem 0.8rem; font-size: 0.82rem; }
+}
 
 /* A.2 #4 · Button shape — `pill` (999px) is the only override; `rect` (the default) is the token's own
    --gd-radius, i.e. the absent state, so it needs no rule. Drives every token-routed button

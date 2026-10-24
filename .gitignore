@@ -75,3 +75,5 @@ lab/
 .wrangler/
 # the search-vs-drawer smoke build (throwaway sibling of astro/; see real-render/search-drawer.smoke.mjs)
 packages/sitetile/.smoke-search-drawer/
+# the announce-card narrow-viewport smoke build (throwaway sibling of astro/; see real-render/announce-card.smoke.mjs)
+packages/sitetile/.smoke-announce-card/
