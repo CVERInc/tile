@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -29,7 +30,8 @@ register(
   import.meta.url,
 );
 
-const { allPosts } = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const blog = await import(pathToFileURL(join(SRC, 'lib/blog.mjs')).href);
+const { allPosts } = blog;
 const { buildSearchIndexBody } = await import(pathToFileURL(join(SRC, 'lib/public-artifacts.mjs')).href);
 const { bubbleSearchOn } = await import(pathToFileURL(join(SRC, 'lib/inbox-bubble.mjs')).href);
 
@@ -81,6 +83,76 @@ test('the owner can turn the bubble search off in one line, and an off bubble em
   // but the header magnifier's own switch still wins on its own, as before
   assert.notEqual(buildSearchIndexBody(corpus(), { ...BUBBLE_ONLY, 'inbox-bubble': 'off', 'blog-search': 'true' }), '[]');
 });
+
+// The header magnifier's index must not notice the bubble: with `blog-search` on, every bubble
+// switch yields the bytes the magnifier alone produced before reef#2160 (searchIndex, stringified).
+// A later change that trims rows "for the bubble" (drops `e`, caps rows) or widens them (turns
+// excerpts on) would fail here first.
+//
+// 🩸 tile#194 review: the first version of this guard built its header fixture by spreading
+// BUBBLE_ONLY, which carries `blog-search-body: true` — so the DEFAULT header index (titles only, no
+// `e`) was never exercised, and forcing excerpts on "for the bubble" stayed green. It also tried each
+// bubble switch off alone but never both off together, so an early `[]` for that case stayed green.
+// The header fixtures below start from nothing but `blog-search`, and the bubble matrix is the full
+// cross product of both switches over absent / on / off.
+//
+// Twelve posts, not two: a row cap ("the bubble only needs a few") must have rows to cut.
+const BIG = Object.fromEntries(Array.from({ length: 12 }, (_, i) => {
+  const n = String(i + 1).padStart(2, '0');
+  return [`../../blog/post-${n}.md`, post(`Post ${n}`, '', `body-${n} words that run past twenty characters`)];
+}));
+const bigCorpus = () => allPosts(BIG);
+
+const HEADER_CONFIGS = {
+  'default (blog-search alone, titles only)': { title: 'Fixture Site', packages: 'blog', 'blog-search': 'true' },
+  'body search explicitly off': { title: 'Fixture Site', packages: 'blog', 'blog-search': 'true', 'blog-search-body': 'false' },
+  'body search on, default excerpt length': { title: 'Fixture Site', packages: 'blog', 'blog-search': 'true', 'blog-search-body': 'true' },
+  'body search on, 20-char excerpts': { title: 'Fixture Site', packages: 'blog', 'blog-search': 'true', 'blog-search-body': 'true', 'blog-search-excerpt-chars': '20' },
+};
+const SWITCH_VALUES = [undefined, 'on', 'off'];
+const BUBBLE_MATRIX = SWITCH_VALUES.flatMap((bubble) => SWITCH_VALUES.map((search) => ({
+  ...(bubble === undefined ? {} : { 'inbox-bubble': bubble }),
+  ...(search === undefined ? {} : { 'inbox-bubble-search': search }),
+})));
+
+test('the bubble matrix is the full cross product, both-off included', () => {
+  assert.equal(BUBBLE_MATRIX.length, 9);
+  assert.ok(BUBBLE_MATRIX.some((b) => b['inbox-bubble'] === 'off' && b['inbox-bubble-search'] === 'off'), 'both-off is missing');
+  assert.ok(BUBBLE_MATRIX.some((b) => Object.keys(b).length === 0), 'the all-default bubble is missing');
+});
+
+// 🩸 tile#194 confirm review: the expectation was still derived from searchIndex(), so a change to a
+// field VALUE inside it (ignoring `blog-search-excerpt-chars`, cutting excerpts to one character)
+// moved both sides and stayed green. The expectation is now a committed literal.
+//
+// Regenerate ONLY when the header index's shape or values change on purpose (a new field, a new
+// default excerpt cap): run this file once with REGEN_HEADER_GOLDEN=1, read `git diff` on the golden
+// row by row, and commit it with the change that moved it. A golden that moves in a "bubble" or
+// "test-only" commit is exactly the regression this guard exists to catch.
+const GOLDEN_PATH = join(HERE, 'fixtures/header-search-index.golden.json');
+if (process.env.REGEN_HEADER_GOLDEN === '1') {
+  const out = {};
+  for (const [name, header] of Object.entries(HEADER_CONFIGS)) out[name] = rows(JSON.stringify(blog.searchIndex(bigCorpus(), header)));
+  writeFileSync(GOLDEN_PATH, JSON.stringify(out, null, 2) + '\n');
+}
+const GOLDEN = JSON.parse(readFileSync(GOLDEN_PATH, 'utf8'));
+
+test('the golden covers exactly the four header configs, twelve rows each', () => {
+  assert.deepEqual(Object.keys(GOLDEN), Object.keys(HEADER_CONFIGS));
+  for (const [name, g] of Object.entries(GOLDEN)) assert.equal(g.length, 12, `golden ${name} lost rows`);
+});
+
+for (const [name, header] of Object.entries(HEADER_CONFIGS)) {
+  test(`blog-search on, ${name}: the index equals the committed golden under every bubble-switch combination`, () => {
+    for (const k of Object.keys(header)) assert.ok(!k.startsWith('inbox-bubble'), `header fixture ${name} carries a bubble switch: ${k}`);
+    const expected = JSON.stringify(GOLDEN[name]);
+    for (const bubble of BUBBLE_MATRIX) {
+      const body = buildSearchIndexBody(bigCorpus(), { ...header, ...bubble });
+      assert.equal(body, expected,
+        `the header magnifier's index (${name}) differs from the golden under bubble switches ${JSON.stringify(bubble)}`);
+    }
+  });
+}
 
 test('a site without a blog still emits []', () => {
   assert.equal(buildSearchIndexBody(allPosts({}), BUBBLE_ONLY), '[]');
