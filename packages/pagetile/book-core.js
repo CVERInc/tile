@@ -36,14 +36,35 @@
 // Image embeds accepted (so it round-trips with Obsidian + the web alike, like the editor's
 // canonical ![[…]]): `![[name]]` (Obsidian wikilink) and `![alt](src)` (CommonMark). A page may
 // hold zero or many images; the first image is the page's lead (cover/thumbnail candidate).
+//
+// ── Photobook source (reef docs/SPEC-pagetile-photobook-source.md) ─────────────────────────
+// A comic or PDF page IS its image. A photobook page is COMPOSED at view time from a photo, a
+// layout kind and a focus point, so it needs words the fixed source never had. A book opts in
+// with `source: photobook` in its frontmatter, and its pages may then open with two lines:
+//
+//   ## Harbour
+//   kind: full          # full = full-bleed (cropped to the page);  mat = the whole photo on a mat
+//   focus: 50% 38%      # the point a crop keeps; default the centre
+//   ![[harbour.jpg]]
+//
+// Both are optional and the absent kind is NOT a third value: the reader decides it from the
+// photo's own shape (portrait → mat, landscape → full — `defaultKind`), which is the spec's "make
+// the taste the default". They are read only before the page's first caption line, and only in a
+// photobook: in every other book they are ordinary caption text, so a comic's model is exactly
+// what it was before this vocabulary existed. The spec's other two kinds (`duo`, `text`) and the
+// cover/back pages are not here yet — `kind: duo` stays caption text rather than being guessed at.
 
 const FRONTMATTER_KEY = 'pagetile-book';
+const PHOTOBOOK_SOURCE = 'photobook';
+const LAYOUT_KINDS = ['full', 'mat'];
+const DEFAULT_FOCUS = '50% 50%';
 
 // ── Model shape (what parseBook returns / serializeBook consumes) ─────────────────────────
 //
 //   Book    = { title, meta, chapters: [Chapter] }
 //   Chapter = { id, title, pages: [Page] }
 //   Page    = { id, title, images: [Image], caption }   // caption = the page's markdown body
+//             + { kind, focus } in a photobook only     // '' = not declared (see resolveLayout)
 //   Image   = { src, alt, embed }                       // embed: 'wikilink' | 'markdown'
 //
 // `id` is a stable slug derived from order+title (chapter index, page index) so a reader/preview
@@ -75,6 +96,27 @@ function serializeImage(img) {
   return '![[' + img.src + (img.alt ? '|' + img.alt : '') + ']]';
 }
 
+// parseFocus: "50% 38%" (quotes allowed, as the spec writes it in YAML) → normalized "50% 38%", or
+// '' if it isn't two percentages in 0–100. The value reaches a style attribute, so anything that
+// is not exactly this shape is refused rather than passed through.
+function parseFocus(value) {
+  const m = /^\s*["']?\s*(\d{1,3}(?:\.\d+)?)%\s+(\d{1,3}(?:\.\d+)?)%\s*["']?\s*$/.exec(String(value == null ? '' : value));
+  if (!m) return '';
+  const x = Number(m[1]), y = Number(m[2]);
+  if (x > 100 || y > 100) return '';
+  return x + '% ' + y + '%';
+}
+
+// parseLayoutLine: one photobook page-head line → { kind } | { focus } | null. A line with the right
+// key but a value outside the vocabulary is null (it stays caption text, visible, not swallowed).
+function parseLayoutLine(line) {
+  const m = /^(kind|focus):\s*(.*?)\s*$/.exec(line);
+  if (!m) return null;
+  if (m[1] === 'kind') return LAYOUT_KINDS.includes(m[2]) ? { kind: m[2] } : null;
+  const focus = parseFocus(m[2]);
+  return focus ? { focus } : null;
+}
+
 // Split a raw file into { meta, body } — a minimal frontmatter reader (key: value pairs only; the
 // family avoids a YAML dependency, same as tugtile's frontmatter handling).
 function splitFrontmatter(text) {
@@ -92,10 +134,13 @@ function splitFrontmatter(text) {
 // block is NOT mistaken for a page break (same guard as the editor's tocHeadings).
 function parseBook(text) {
   const { meta, body } = splitFrontmatter(String(text || ''));
+  const photobook = meta.source === PHOTOBOOK_SOURCE;
   const lines = body.split('\n');
   const chapters = [];
   let chapter = null, page = null, fence = false;
   let captionBuf = [];
+  // the page head: layout lines are read only until the caption has said something
+  const inPageHead = () => !captionBuf.some((l) => l.trim() !== '');
 
   const flushCaption = () => {
     if (page) page.caption = captionBuf.join('\n').replace(/\n+$/,'').replace(/^\n+/,'');
@@ -105,7 +150,9 @@ function parseBook(text) {
     chapter = { id: '', title: title, pages: [] }; chapters.push(chapter); };
   const newPage = (title) => { flushCaption();
     if (!chapter) newChapter('');   // a page before any chapter → an implicit untitled chapter
-    page = { id: '', title: title, images: [], caption: '' }; chapter.pages.push(page); };
+    page = { id: '', title: title, images: [], caption: '' };
+    if (photobook) { page.kind = ''; page.focus = ''; }
+    chapter.pages.push(page); };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -114,6 +161,11 @@ function parseBook(text) {
       const hc = /^#\s+(.*)$/.exec(line);   if (hc) { newChapter(hc[1].trim()); continue; }
       const hp = /^##\s+(.*)$/.exec(line);  if (hp) { newPage(hp[1].trim()); continue; }
       const img = parseImageLine(line);     if (img && page) { page.images.push(img); continue; }
+      if (photobook && page && inPageHead()) {
+        // a key the page already has is not read twice — the repeat stays caption, so nothing is lost
+        const lay = parseLayoutLine(line);
+        if (lay && !page[Object.keys(lay)[0]]) { Object.assign(page, lay); continue; }
+      }
     }
     if (page) captionBuf.push(line);
     // lines before the first page (and not a heading) are book-level preamble → dropped on
@@ -143,6 +195,8 @@ function serializeBook(book) {
     out.push('# ' + (c.title || ''), '');
     (c.pages || []).forEach((p) => {
       out.push('## ' + (p.title || ''));
+      if (p.kind) out.push('kind: ' + p.kind);
+      if (p.focus) out.push('focus: ' + p.focus);
       (p.images || []).forEach((img) => out.push(serializeImage(img)));
       if (p.caption) out.push(p.caption);
       out.push('');
@@ -156,6 +210,28 @@ function serializeBook(book) {
 function isBookFile(text) {
   const { meta } = splitFrontmatter(String(text || ''));
   return meta[FRONTMATTER_KEY] === 'true' || meta[FRONTMATTER_KEY] === true;
+}
+
+// ── Photobook composition (the reader resolves each page with these) ─────────────────────
+function isPhotobook(book) {
+  return !!(book && book.meta && book.meta.source === PHOTOBOOK_SOURCE);
+}
+
+// defaultKind: the spec's taste-as-default, from the photo's own pixel size. Landscape → full;
+// portrait → mat. A SQUARE photo is neither, and goes on a mat: full-bleed would crop half of it
+// on a phone held upright, and a mat loses nothing. '' when the size is not known yet.
+function defaultKind(width, height) {
+  const w = Number(width), h = Number(height);
+  if (!(w > 0) || !(h > 0)) return '';
+  return w > h ? 'full' : 'mat';
+}
+
+// resolveLayout: a page + its lead photo's size → what the reader draws. A declared kind or focus
+// always wins; only what the author left out is decided here. Same answer on a phone and a desktop
+// — the viewport changes the crop that `focus` anchors, not the kind.
+function resolveLayout(page, size) {
+  const s = size || {};
+  return { kind: (page && page.kind) || defaultKind(s.width, s.height), focus: (page && page.focus) || DEFAULT_FOCUS };
 }
 
 // ── Reading-order helpers (the reader/preview surface uses these) ─────────────────────────
@@ -184,5 +260,6 @@ export {
   parseBook, serializeBook, isBookFile,
   flattenPages, pageById, allImageSrcs,
   parseImageLine, serializeImage, slugify,
-  FRONTMATTER_KEY,
+  isPhotobook, defaultKind, resolveLayout, parseFocus, parseLayoutLine,
+  FRONTMATTER_KEY, PHOTOBOOK_SOURCE, LAYOUT_KINDS, DEFAULT_FOCUS,
 };

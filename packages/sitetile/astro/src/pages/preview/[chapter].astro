@@ -21,7 +21,7 @@ export function getStaticPaths() {
       params: { chapter: chapter.id },
       props: {
         chapter,
-        book: { title: book.title, direction: book.direction, mode: book.mode, totalPages: book.totalPages },
+        book: { title: book.title, direction: book.direction, mode: book.mode, totalPages: book.totalPages, source: book.source },
         prevChapter: book.chapters[i - 1] ? book.chapters[i - 1].id : null,
         nextChapter: next ? next.id : null,
         // richer next-chapter meta powers the end-of-chapter endcap (blurred cover + title)
@@ -45,6 +45,7 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
     data-chapter={chapter.id}
     data-direction={book.direction}
     data-mode={book.mode}
+    data-source={book.source}
     data-prev-chapter={prevChapter ? `/preview/${prevChapter}/` : ''}
   >
     <button type="button" class="ptr-close" data-act="close" aria-label="Exit full screen" title="Exit full screen (Esc)">
@@ -75,8 +76,12 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
     <div class="ptr-stage">
       <div class="ptr-track">
+        {/* a photobook page carries its DECLARED kind/focus; an undeclared kind is decided by
+            reader.js from the photo's shape. Both attributes are absent on every other book, so a
+            comic's markup is what it was (undefined renders no attribute). focus is parseFocus-
+            validated — two percentages — before it gets anywhere near a style attribute. */}
         {chapter.pages.map((p) => (
-          <figure class="ptr-page" data-page={p.id} data-idx={p.pageInChapter - 1}>
+          <figure class="ptr-page" data-page={p.id} data-idx={p.pageInChapter - 1} data-kind={p.kind || undefined} style={p.focus ? `--ptr-focus: ${p.focus}` : undefined}>
             {p.imageSrc && (
               <img
                 src={p.imageSrc}
@@ -223,6 +228,26 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
      never was; a screenshot of an RTL test book on 2026-10-20 was the first look. */
   .ptr[data-direction="rtl"][data-mode="paged"] .ptr-track { direction: rtl; }
 
+  /* ── photobook composition (book-core: kind full | mat, focus) ─────────────────
+     Every rule is under [data-source="photobook"], which only a photobook's root carries — a
+     comic or PDF matches none of them. full = the photo fills its page and is cropped, keeping
+     the focus point; mat = the whole photo, centred on paper with a margin round it. Written after
+     the spread rules on purpose: the mat's centring has the same specificity as their inner-edge
+     hug and must win, because a matted page is a sheet of paper, not a picture pushed to the spine. */
+  .ptr[data-source="photobook"] { --ptr-mat: clamp(14px, 5vmin, 48px); }
+  .ptr[data-source="photobook"] .ptr-page img { object-position: var(--ptr-focus, 50% 50%); }
+  /* reader.js sets data-compose once it is running: until a page's kind is known it is not drawn,
+     so a landscape photo never flashes letterboxed before it goes full-bleed. Without JS nothing
+     is hidden (no data-compose) and the declared kinds still apply. */
+  .ptr[data-source="photobook"][data-compose="on"] .ptr-page:not([data-kind]) img { visibility: hidden; }
+  .ptr[data-source="photobook"][data-mode="paged"] .ptr-page[data-kind="full"] img {
+    width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover;
+  }
+  .ptr[data-source="photobook"] .ptr-page[data-kind="mat"] {
+    box-sizing: border-box; padding: var(--ptr-mat); background: var(--gd-surface, #fff);
+  }
+  .ptr[data-source="photobook"][data-mode="paged"] .ptr-page[data-kind="mat"] { justify-content: center; }
+
   .ptr[data-mode="scroll"] .ptr-btn-turn { display: none; }
 
   /* ── page turn (reader.js turnLeaf) ──────────────────────────────────────────
@@ -238,6 +263,10 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
   :global(.ptr-leaf-stay) { inset: auto; }
   :global(.ptr-leaf-face img),
   :global(.ptr-leaf-stay img) { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* a photobook leaf is the whole composed page (reader.js copies data-kind + --ptr-focus onto the
+     face), so the sheet that turns is the sheet that was lying there — not its photo letterboxed */
+  :global(.ptr-leaf-face[data-kind="full"] img) { object-fit: cover; object-position: var(--ptr-focus, 50% 50%); }
+  :global(.ptr-leaf-face[data-kind="mat"]) { box-sizing: border-box; padding: var(--ptr-mat); background: var(--gd-surface, #fff); }
   :global(.ptr-leaf-back) { transform: rotateY(180deg); }
   /* single page: the back of a turning sheet is paper, not the next page (that is already underneath) */
   :global(.ptr-leaf-paper) { background: var(--gd-surface, #fff); }

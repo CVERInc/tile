@@ -10,6 +10,9 @@
 //   • bottom thumbnail scrubber, chapter progress "page N / chapter-total · X%"
 //   • resume last-read position, immersive (chrome-hiding) mode
 //   • a page turn that turns: tapped, keyed and button turns play as a leaf turning on the spine
+//   • a photobook's pages composed at view time: the kind the author left out is decided by the
+//     photo's own shape, through the same book-core rule the model documents
+import { defaultKind } from '../../../../../pagetile/book-core.js';
 const root = document.querySelector('.ptr');
 if (root) initReader(root);
 
@@ -32,6 +35,27 @@ function initReader(root) {
   };
   const get = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } };
   const set = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+  // ── photobook composition ──────────────────────────────────────────────────
+  // A comic page IS its image; a photobook page is composed from photo + kind + focus. The server
+  // rendered what the author declared; a page without a kind gets one here, from the photo itself,
+  // the moment its pixels are known — `defaultKind` is book-core's, so the rule lives in one place.
+  // A photo that fails to load is put on a mat: nothing to crop, and the page must not stay hidden.
+  const photobook = root.dataset.source === 'photobook';
+  if (photobook) {
+    root.dataset.compose = 'on';
+    pages.forEach((fig) => {
+      if (fig.dataset.kind) return;
+      const im = fig.querySelector('img');
+      if (!im) { fig.dataset.kind = 'mat'; return; }
+      const decide = () => { if (!fig.dataset.kind) fig.dataset.kind = defaultKind(im.naturalWidth, im.naturalHeight) || 'mat'; };
+      if (im.complete) decide();   // loaded (or already broken: no size → mat) before this ran
+      else {
+        im.addEventListener('load', decide, { once: true });
+        im.addEventListener('error', () => { if (!fig.dataset.kind) fig.dataset.kind = 'mat'; }, { once: true });
+      }
+    });
+  }
 
   let mode = get(K.mode, root.dataset.mode || 'paged');   // 'paged' | 'scroll'
   let spread = get(K.spread, 'auto');                     // 'on' | 'off' | 'auto'
@@ -147,6 +171,13 @@ function initReader(root) {
     const w = im.naturalWidth * k, h = im.naturalHeight * k;
     return { left: r.left - stageRect.left + (r.width - w) / 2, top: r.top - stageRect.top + (r.height - h) / 2, width: w, height: h };
   }
+  // What a turn lifts: on a comic the picture; on a photobook the whole composed page — a full page
+  // IS its box (the photo is cropped to it), and a mat page is the paper, margin included.
+  function sheetBox(im, stageRect) {
+    if (!photobook) return pictureBox(im, stageRect);
+    const r = im.closest('.ptr-page').getBoundingClientRect();
+    return { left: r.left - stageRect.left, top: r.top - stageRect.top, width: r.width, height: r.height };
+  }
   // The two visible pages of a spread, sorted by where they are DRAWN (direction: rtl swaps them).
   function facing(i) {
     const pl = pairLeft(i);
@@ -159,6 +190,13 @@ function initReader(root) {
     const f = document.createElement('div');
     f.className = 'ptr-leaf-face ' + cls;
     if (im) { const c = new Image(); c.src = im.currentSrc || im.src; c.alt = ''; f.append(c); }
+    const fig = photobook && im && im.closest('.ptr-page');
+    if (fig) {
+      // the face is drawn the way its page is: same kind, same focus
+      if (fig.dataset.kind) f.dataset.kind = fig.dataset.kind;
+      const focus = fig.style.getPropertyValue('--ptr-focus');
+      if (focus) f.style.setProperty('--ptr-focus', focus);
+    }
     const shade = document.createElement('div');
     shade.className = 'ptr-leaf-shade';
     f.append(shade);
@@ -188,13 +226,13 @@ function initReader(root) {
       leafImg = loadedImg(cur);
       if (!leafImg || !loadedImg(target)) return false;
     }
-    const leafBox = pictureBox(leafImg, sr);
+    const leafBox = sheetBox(leafImg, sr);
 
     const layer = document.createElement('div');
     layer.className = 'ptr-turn';
     if (stayImg) {
       const stay = face('ptr-leaf-stay', stayImg);
-      place(stay, pictureBox(stayImg, sr));
+      place(stay, sheetBox(stayImg, sr));
       layer.append(stay);
     }
     const leaf = document.createElement('div');
