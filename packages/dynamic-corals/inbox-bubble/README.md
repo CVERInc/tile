@@ -420,20 +420,31 @@ owner knobs, which a theme or `custom_css` can set like the colours:
 - Each is clamped to 0…50% of the viewport (`50vh` up, `50vw` in from the right). A negative value
   counts as 0, so the knob cannot push the bubble into the safe area. A huge value cannot push it
   off the screen.
-- They are registered as `<length>` (`CSS.registerProperty`), so anything that is not a length
-  (`up`, `12`, a percentage) counts as `0px`. Unregistered, a typo would invalidate the
-  root's `bottom` and the fixed box would drop to its static position somewhere in the page.
-  The registration is document-wide and covers only these two names.
+- Any length works (`80px`, `5em`, `calc(2.5em + 40px)`). Anything that is not a length (`up`,
+  `12`, a percentage) counts as `0px`, so a typo leaves the bubble at its base, never somewhere
+  in the page. The coral reads each knob from its host's computed style, resolves it to px, and
+  writes the result to its own private `--_reef-inbox-ox` / `--_reef-inbox-oy`; only those reach
+  its stylesheet.
+- The coral never registers the two names. A theme may declare them with `@property` (an
+  `initial-value` then counts like a set value) or not at all, and its own uses of them are left
+  as they are. The values are read again on every open and close and on `resize`. A runtime
+  change to the knobs alone shows on the next of those.
 - On a page without `<meta name="viewport" content="…, viewport-fit=cover">` the browser reports
   every `env(safe-area-inset-*)` as 0, because the viewport itself is already inset. There the
   bubble sits exactly where it did before 0.7.16, which is harmless.
 - The open panel grows up and left from the same corner and sizes itself to the room left there
-  (minus 1rem and the opposite inset), so it stays fully on screen at any offset. On a phone held
-  sideways with a large offset it gets shorter and scrolls. With no offset and no inset its
-  bounds are the old `calc(100vw - 2rem)` × `min(30rem, 70vh)`.
+  (minus 1rem and the opposite inset), so it stays fully on screen at any offset. When it is
+  short, only the conversation gives way and scrolls: the header and the composer (the text box
+  and Send) keep their full size. If the room above the raised corner cannot hold the header,
+  the composer and about 5rem of conversation (a phone held sideways with a large `-y`), the
+  open panel sits lower, by just the missing height. The closed bubble keeps the offset. On a
+  screen too short for the header and the composer even at offset 0, the panel itself scrolls. With no offset and no
+  inset its bounds are the old `calc(100vw - 2rem)` × `min(30rem, 70vh)`.
 
 `position.smoke.mjs` measures all of this in chromium with a real inset
-(`Emulation.setSafeAreaInsetsOverride`), every move against a control arm. A bubble over a
+(`Emulation.setSafeAreaInsetsOverride`), every move against a control arm. That includes the
+composer's own controls (inside the panel and hit-testable) and the log scrolling, not only the
+panel's box. A bubble over a
 cookie banner (reef#2265) is a different case and not handled here.
 
 ## Full inbox (0.7.14, reef#2357)
