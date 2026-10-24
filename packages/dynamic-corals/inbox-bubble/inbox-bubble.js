@@ -2721,6 +2721,197 @@ const OPEN_ICON =
 	'<path fill="currentColor" d="M12 3.255c-5.08 0-9.2 3.4-9.2 7.6 0 2.4 1.34 4.54 3.42 5.94-.12 1.06-.6 2.36-1.66 3.42-.22.22-.02.6.28.52 1.9-.3 3.56-1.08 4.76-2.16.76.18 1.56.28 2.4.28 5.08 0 9.2-3.4 9.2-7.6S17.08 3.4 12 3.4z"/>' +
 	'</svg>';
 
+/** The owner's two public position knobs, and the private properties this file writes them to. */
+const OFFSET_KNOBS = [
+	{ axis: 'x', knob: '--reef-inbox-offset-x', own: '--_reef-inbox-ox' },
+	{ axis: 'y', knob: '--reef-inbox-offset-y', own: '--_reef-inbox-oy' }
+];
+/** The conversation keeps at least this much height before the open panel is moved down to make room. */
+const MIN_LOG_REM = 5;
+
+/**
+ * Reads the owner's position knobs, validates them, and places the bubble and its open panel
+ * (0.7.16, reef#2418; reworked after the tile#199 review).
+ *
+ * 🩸 THE KNOBS ARE READ, NEVER REGISTERED. r1 typed them with a global `CSS.registerProperty`
+ * `<length>`, so that a typo computed to 0px instead of invalidating the root's `bottom` (a fixed box
+ * with both insets invalid drops to its static position: measured at (8,8), top-left). Three ways that
+ * went wrong, all measured: a browser without the API, and a theme that had already registered the
+ * names (`syntax:'*'`), both skipped the registration and put a typo'd bubble at (8,8) again; and
+ * where it did succeed, a JS registration OUTRANKS a stylesheet's `@property` document-wide — a theme
+ * that declared `--reef-inbox-offset-y` with `initial-value:80px` lost that 80px on its own elements
+ * the moment the bubble mounted. A registration cannot be scoped to a shadow tree, so the coral does
+ * not make one. The public names stay the page's, whatever (if anything) the page registered.
+ *
+ * 🔴 WHAT THE STYLESHEET CONSUMES IS PRIVATE AND ALWAYS VALID. Each knob is read from the host's
+ * computed style (so a registered `@property` initial value counts like a set value, and an
+ * unregistered one arrives as text), resolved to px through a hidden probe in the shadow root —
+ * `outline-offset` takes a `<length>` and nothing else (no percentage, no keyword), resolves `em`
+ * against the panel's own font and `calc()` too, and CSSOM silently refuses anything it cannot
+ * parse — and written to `--_reef-inbox-ox/-oy` on the host as `<n>px`. Anything that is not a
+ * length (`banana`, `12`, `10%`) is 0px. The stylesheet clamps those to 0..50% of the viewport.
+ * Outside a browser (no `getComputedStyle`, or an element without `style.setProperty`) every call
+ * here does nothing and the stylesheet's own fallbacks (0px) stand.
+ *
+ * 🩸 A HIGH OFFSET USED TO CUT THE COMPOSER OFF (tile#199 review P2-1). The panel grows up from the
+ * raised corner, and its max-height is the room left above it; on a phone held sideways with a large
+ * `-y` that room (142px, 128px) was shorter than the header plus the composer, and the panel's
+ * `overflow:hidden` cut the textarea and Send button off. The stylesheet now gives every part but the
+ * log its natural height (the log takes what is left and scrolls), and `fit()` checks the room: when
+ * the header, the composer and `MIN_LOG_REM` of conversation do not fit at the owner's offset, the
+ * OPEN panel's offset is lowered by exactly the shortfall (to 0 at most). The closed bubble keeps the
+ * owner's offset. If even 0 is too little (a viewport under ~15rem tall), the panel itself scrolls
+ * rather than clipping. position.smoke.mjs measures the controls themselves, not the panel's box.
+ *
+ * WHEN IT RUNS: at mount, on every render (open, close, a re-render), on window `resize` (which is
+ * also how a rotation arrives), and while the panel is open, whenever one of the panel's fixed parts
+ * changes size (a ResizeObserver: the search block appearing, a results list growing). A theme that
+ * changes the knobs at runtime without any of those is picked up on the next open or close; there is
+ * no cheap way to be told a custom property changed, and polling for it would cost every page.
+ */
+function createPlacement(host, shadow, root) {
+	const live =
+		typeof getComputedStyle === 'function' &&
+		!!host.style &&
+		typeof host.style.setProperty === 'function' &&
+		typeof document.createElement === 'function';
+	if (!live) return { update() {}, dispose() {} };
+	const probe = document.createElement('span');
+	probe.setAttribute('aria-hidden', 'true');
+	probe.style.setProperty('display', 'none');
+	shadow.appendChild(probe);
+
+	/** Where the probe cannot answer: a bare px number (or 0) and nothing else. */
+	const manualPx = (raw) => {
+		const m = /^(-?(?:\d+\.?\d*|\.\d+))(px)?$/i.exec(raw);
+		if (!m) return null;
+		const n = parseFloat(m[1]);
+		return m[2] || n === 0 ? n : null;
+	};
+
+	/** A CSS length → px, or null when it is not a length. */
+	function px(value) {
+		const raw = String(value ?? '').trim();
+		if (!raw) return null;
+		if (typeof probe.style.getPropertyValue !== 'function') return manualPx(raw);
+		probe.style.removeProperty('outline-offset');
+		probe.style.setProperty('outline-offset', raw);
+		// Refused by CSSOM: not a length.
+		if (!probe.style.getPropertyValue('outline-offset')) return null;
+		const resolved = getComputedStyle(probe).outlineOffset;
+		if (typeof resolved !== 'string' || !resolved) return manualPx(raw);
+		const out = parseFloat(resolved);
+		return Number.isFinite(out) ? out : null;
+	}
+
+	function want() {
+		const cs = getComputedStyle(host);
+		const out = {};
+		for (const { axis, knob } of OFFSET_KNOBS) out[axis] = px(cs.getPropertyValue(knob)) ?? 0;
+		return out;
+	}
+
+	function write(o) {
+		for (const { axis, own } of OFFSET_KNOBS) host.style.setProperty(own, `${o[axis]}px`);
+	}
+
+	let observer = null;
+	let observed = null;
+	function unobserve() {
+		if (observer) observer.disconnect();
+		observer = null;
+		observed = null;
+	}
+
+	/** Width the composer still lacks at the panel's current width: 10ch of text, a gap, the whole button. */
+	function composerShort(panel) {
+		const form = panel.querySelector(`.${PREFIX}-form`);
+		const ta = form && form.querySelector('textarea');
+		const btn = form && form.querySelector('button[type="submit"]');
+		if (!ta || !btn) return 0;
+		const num = (cs, ...k) => k.reduce((n, key) => n + (parseFloat(cs[key]) || 0), 0);
+		const fcs = getComputedStyle(form);
+		const tcs = getComputedStyle(ta);
+		// The button at its one-line width — the size it has wherever it is not forced to wrap.
+		btn.style.setProperty('max-width', 'none');
+		btn.style.setProperty('white-space', 'nowrap');
+		const button = btn.getBoundingClientRect().width;
+		btn.style.removeProperty('max-width');
+		btn.style.removeProperty('white-space');
+		const need =
+			num(fcs, 'paddingLeft', 'paddingRight') +
+			num(tcs, 'minWidth', 'paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth') +
+			num(fcs, 'columnGap') +
+			button;
+		return Math.ceil(need - form.clientWidth);
+	}
+
+	/**
+	 * Lowers the open panel's offsets until its parts fit: `-y` until the header, the composer and
+	 * some conversation fit above the corner, `-x` until the composer's 10ch of text and its whole
+	 * button fit left of it (tile#199 review r3: a 50vw `-x` on a 390px phone left a 163px panel, and
+	 *「Send to the owner」took all of it). The two interact — a narrower composer wraps and gets taller —
+	 * so it is a few passes, each lowering either by exactly its shortfall, and never below 0.
+	 */
+	function fit(panel, o) {
+		const log = panel.querySelector(`.${PREFIX}-log`);
+		const rem = px('1rem') || 16;
+		let x = Math.min(Math.max(o.x, 0), px('50vw') ?? Infinity);
+		let y = Math.min(Math.max(o.y, 0), px('50vh') ?? Infinity);
+		for (let pass = 0; pass < 4; pass++) {
+			write({ x, y });
+			const shortX = composerShort(panel);
+			// The room this corner leaves is the panel's max-height; a forced height reads it back.
+			panel.style.setProperty('height', '100000px');
+			const room = panel.getBoundingClientRect().height;
+			panel.style.removeProperty('height');
+			let fixed = 0;
+			for (const part of panel.children) {
+				if (part === log) continue;
+				const cs = getComputedStyle(part);
+				if (cs.position === 'absolute' || cs.position === 'fixed' || cs.display === 'none') continue;
+				fixed += part.getBoundingClientRect().height + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+			}
+			const shortY = Math.ceil(fixed + MIN_LOG_REM * rem - room);
+			const nx = shortX > 0 ? Math.max(0, x - shortX) : x;
+			const ny = shortY > 0 ? Math.max(0, y - shortY) : y;
+			if (nx === x && ny === y) break;
+			x = nx;
+			y = ny;
+		}
+		write({ x, y });
+		if (typeof ResizeObserver === 'function' && observed !== panel) {
+			unobserve();
+			observed = panel;
+			observer = new ResizeObserver(() => update());
+			// The composer is one of these: a button relabelled after open (「Send」→「Send to the owner」
+			// once search loads) no longer fits its row, wraps, and the form's new height is the signal.
+			for (const part of panel.children) if (part !== log) observer.observe(part);
+		}
+	}
+
+	function update() {
+		const o = want();
+		const panel = root.querySelector(`.${PREFIX}-panel`);
+		if (!panel) {
+			unobserve();
+			write(o);
+			return;
+		}
+		fit(panel, o);
+	}
+
+	const onResize = () => update();
+	window.addEventListener('resize', onResize);
+	return {
+		update,
+		dispose() {
+			unobserve();
+			window.removeEventListener('resize', onResize);
+		}
+	};
+}
+
 /**
  * The panel's stylesheet, written into the mount's OWN shadow root (0.7.13, reef#2139).
  *
@@ -2747,7 +2938,20 @@ function styleElement() {
 	const style = document.createElement('style');
 	const css = `
 :host{font:inherit}
-.${PREFIX}-root{position:fixed;right:1rem;bottom:1rem;z-index:2147483000;font:inherit}
+/* WHERE IT SITS (0.7.16, reef#2418). A field report: on a phone the bubble covered a page title in
+   the bottom-right corner. The base is still 1rem from the corner; to it are ADDED the safe-area
+   inset (a home indicator, a notch side) and the owner's own offset, clamped to 0..50% of the
+   viewport so neither a negative value nor a huge one can push it into the inset or off the screen.
+   On a page without viewport-fit=cover the browser reports every env(safe-area-inset-*) as 0 (the
+   viewport is already inset), so there this is exactly the old 1rem. The two sums are kept as
+   properties because the panel below sizes itself against them.
+   🔴 NOT var(--reef-inbox-offset-*): the public knobs are the page's, unvalidated text (a typo would
+   invalidate right/bottom). createPlacement() reads and validates them and writes these two private
+   px values on the host; 0px when it has not (yet) run. */
+.${PREFIX}-root{position:fixed;z-index:2147483000;font:inherit;
+  --${PREFIX}-right:calc(1rem + clamp(0px,var(--_reef-inbox-ox,0px),50vw) + env(safe-area-inset-right,0px));
+  --${PREFIX}-bottom:calc(1rem + clamp(0px,var(--_reef-inbox-oy,0px),50vh) + env(safe-area-inset-bottom,0px));
+  right:var(--${PREFIX}-right);bottom:var(--${PREFIX}-bottom)}
 /* 🔴 EVERY SHAPE PROPERTY IS SET, not only the four that draw it (reef#2139). The shadow root keeps
    the page's selectors out; the one stylesheet that still reaches this button is the browser's
    own, and its button defaults are exactly these properties, differently per engine. So the shape
@@ -2762,8 +2966,13 @@ function styleElement() {
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
   box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
 .${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
-.${PREFIX}-panel{width:min(22rem,calc(100vw - 2rem));max-height:min(30rem,70vh);
-  display:flex;flex-direction:column;border-radius:.9rem;overflow:hidden;
+/* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
+   room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
+   both reduce to the old calc(100vw - 2rem) and min(30rem,70vh). dvh after vh: a phone's toolbar. */
+.${PREFIX}-panel{width:min(22rem,calc(100vw - var(--${PREFIX}-right) - 1rem - env(safe-area-inset-left,0px)));
+  max-height:min(30rem,70vh,calc(100vh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
+  max-height:min(30rem,70dvh,calc(100dvh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
+  display:flex;flex-direction:column;border-radius:.9rem;overflow-x:hidden;overflow-y:auto;
   background:var(--reef-inbox-bg,#fff);color:var(--reef-inbox-fg,#111);
   box-shadow:0 12px 40px rgba(0,0,0,.22)}
 .${PREFIX}-head{display:flex;align-items:flex-start;justify-content:space-between;
@@ -2788,7 +2997,14 @@ function styleElement() {
 .${PREFIX}-ended{margin:.3rem 0 0;text-align:left}
 .${PREFIX}-close{border:0;background:none;cursor:pointer;font-size:1.1rem;line-height:1;
   padding:.25rem;color:inherit;opacity:.6}
-.${PREFIX}-log{flex:1;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
+/* 🩸 WHEN THE PANEL IS SHORT, ONLY THE LOG GIVES (tile#199 review P2-1). Every other part (header,
+   hint, search, error, composer) keeps its content height: a flex item does not shrink below it. The
+   log takes what is left and scrolls (min-height:0 is a scroll container's automatic minimum anyway;
+   written out because it is the point). r1's clip was the room itself being shorter than the header
+   plus the composer, so the panel's own overflow cut the Send button off; createPlacement() now keeps
+   that room, and the panel's overflow-y:auto is the last resort for a viewport too short even at
+   offset 0, so a control is scrolled to, never cut off. */
+.${PREFIX}-log{flex:1;min-height:0;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
 .${PREFIX}-msg{max-width:85%;padding:.5rem .7rem;border-radius:.7rem;font-size:.9rem;
   line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
 .${PREFIX}-msg-visitor{align-self:flex-end;background:var(--reef-inbox-accent,#111);
@@ -2820,11 +3036,19 @@ function styleElement() {
 /* After a real answer the offer is a quieter afterthought, not a second CTA
    competing with the answer the visitor just got. */
 .${PREFIX}-quiet{border-color:transparent;opacity:.6;padding-left:0}
-.${PREFIX}-form{display:flex;gap:.5rem;padding:.7rem;border-top:1px solid rgba(0,0,0,.08)}
-.${PREFIX}-form textarea{flex:1;resize:none;border:1px solid rgba(0,0,0,.15);border-radius:.5rem;
+/* 🩸 THE COMPOSER NEVER GIVES ITS TEXT AWAY (tile#199 review r3). In a narrow panel the button used to
+   keep its width and the textarea took whatever was left — 0px of text under「Send to the owner」.
+   The textarea keeps at least 10ch of CONTENT width (box-sizing stated, so min-width is the text
+   area itself): about two words, enough to see what one is typing and where the caret is; less is
+   a slot, not a box. createPlacement() moves the open panel in from a high -x so that 10ch and the
+   whole button fit on one line; where even offset 0 is too narrow, the row wraps and the button
+   drops below the textarea, its own label wrapping before it would ever leave the panel. */
+.${PREFIX}-form{display:flex;flex-wrap:wrap;gap:.5rem;padding:.7rem;border-top:1px solid rgba(0,0,0,.08)}
+.${PREFIX}-form textarea{flex:1 1 10ch;box-sizing:content-box;min-width:10ch;resize:none;border:1px solid rgba(0,0,0,.15);border-radius:.5rem;
   padding:.45rem .55rem;font:inherit;font-size:max(1rem,16px);min-height:2.6rem;max-height:7rem;
   background:transparent;color:inherit}
-.${PREFIX}-form button{border:0;border-radius:.5rem;padding:0 .9rem;cursor:pointer;
+.${PREFIX}-form button{flex:none;max-width:100%;min-height:2.6rem;margin-left:auto;white-space:normal;
+  overflow-wrap:anywhere;border:0;border-radius:.5rem;padding:0 .9rem;cursor:pointer;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);font-size:.9rem}
 .${PREFIX}-form button[disabled]{opacity:.5;cursor:default}
 .${PREFIX}-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
@@ -3496,6 +3720,8 @@ export async function mount(el, handoff = null) {
 	root.className = `${PREFIX}-root`;
 	shadow.appendChild(root);
 	el.appendChild(host);
+	// Where it sits: the owner's offset, read and validated, and room for the composer (see the function).
+	const placement = createPlacement(host, shadow, root);
 
 	/** See `pollGeneration` — what makes `stopPolling()` reach the requests already in the air. */
 	const generation = pollGeneration();
@@ -3578,6 +3804,7 @@ export async function mount(el, handoff = null) {
 		// while the corner shows a glyph.
 		root.innerHTML =
 			`<button type="button" class="${PREFIX}-open" aria-label="${escHtml(openLabel)}">${OPEN_ICON}</button>`;
+		placement.update();
 		root.querySelector(`.${PREFIX}-open`).addEventListener('click', () => {
 			open = true;
 			renderOpen();
@@ -3716,6 +3943,7 @@ export async function mount(el, handoff = null) {
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
 </div>`;
+		placement.update();
 		wireHead();
 
 		const form = root.querySelector(`.${PREFIX}-form`);
@@ -3813,6 +4041,7 @@ export async function mount(el, handoff = null) {
 
 		const log = root.querySelector(`.${PREFIX}-log`);
 		renderLog(log, messages);
+		placement.update();
 
 		wireHead();
 
@@ -3966,6 +4195,7 @@ export async function mount(el, handoff = null) {
 		window.removeEventListener('pagehide', onPagehide);
 		window.removeEventListener('pageshow', onPageshow);
 		stopPolling();
+		placement.dispose();
 		host.remove();
 	});
 

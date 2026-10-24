@@ -719,7 +719,10 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	// stand-in for `reef-inbox:open` while it waits for an answer: same event, and it only records
 	// that an open was asked for (`openRequested = true`), naming nothing. The fourth (0.7.15,
 	// tile#193) is the funnel's `pageshow` — the browser's own event, read for `persisted` only.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 4);
+	// The fifth (0.7.16, tile#199) is `createPlacement`'s `resize`: the browser's own event, which
+	// re-reads the owner's offset knobs and takes no argument.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 5);
+	assert.match(CORAL_CODE, /const onResize = \(\) => update\(\);\s*window\.addEventListener\('resize', onResize\);/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', heldOpen\);/);
 	assert.match(CORAL_CODE, /const heldOpen = \(\) => \{\s*openRequested = true;\s*\};/);
@@ -757,10 +760,13 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 // a THIRD listener stays a deliberate act, and a check that each one has a matching removal.
 
 test('B9: every window listener mount() adds has a removal beside it', () => {
-	// Four registrations, five removals: the claim gate's stand-in is removed on two paths — when
-	// the answer arrives and on an `unmount` before it does (mount.test.mjs measures both).
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 4);
-	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 5);
+	// Five registrations, six removals: the claim gate's stand-in is removed on two paths — when
+	// the answer arrives and on an `unmount` before it does (mount.test.mjs measures both). The
+	// placement's `resize` (0.7.16) is removed by its `dispose()`, which the unmount calls.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 5);
+	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 6);
+	assert.match(CORAL_CODE, /window\.removeEventListener\('resize', onResize\);/);
+	assert.match(CORAL_CODE, /stopPolling\(\);\s*placement\.dispose\(\);\s*host\.remove\(\);/);
 	assert.match(CORAL_CODE, /window\.removeEventListener\('pageshow', onPageshow\);/);
 	assert.equal((CORAL_CODE.match(/window\.removeEventListener\('reef-inbox:open', heldOpen\);/g) || []).length, 2);
 	assert.match(CORAL_CODE, /window\.removeEventListener\('reef-inbox:open', openPanel\);/);
