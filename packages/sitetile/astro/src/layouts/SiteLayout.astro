@@ -28,6 +28,7 @@ import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn, bubbleSearchOn } from '../lib/inbox-bubble.mjs';
 import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
+import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
@@ -298,7 +299,11 @@ const tBand = String(meta.band || '').trim();
 const tCard = String(meta.card || '').trim();
 const tCellCta = String(meta['cell-cta'] || '').trim();
 const tCorner = String(meta.corner || '').trim();
-const announce = String(meta.announce || '').trim();
+// reef#2301: `announce-href` + `announce-until` turn the band into a corner card with a deadline.
+// No until ⇒ the band, byte-identical; past until ⇒ nothing; see lib/announce.mjs. The build's own
+// clock is the "now" — the page then takes the card down itself at the deadline (guard + module).
+const announceM = announceModel(meta, { now: Date.now(), safeHref });
+const announceCopy = lingo.uiCopy(meta.lang || lingo.NEUTRAL_UI_LANG);
 // `breadcrumb-label: <page name>` — opt-in "Home » <page>" trail (WP-theme convention on
 // sub-pages; the home page itself never carries this field so it stays trail-free). General —
 // `breadcrumb-home:` overrides the "Home" label (defaults to "Home"), no href customization
@@ -1048,7 +1053,20 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     {toggleActions.length > 0 && (
       <script is:inline>requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('rf-preload');});});</script>
     )}
-    {announce && <div class="rf-announce" role="note">{announce}</div>}
+    {announceM.mode === 'band' && (announceM.href
+      ? <div class="rf-announce" role="note"><a href={announceM.href} {...ext(announceM.href)}>{announceM.text}</a></div>
+      : <div class="rf-announce" role="note">{announceM.text}</div>)}
+    {/* The card (reef#2301). The × starts `hidden` — without script it could not close anything —
+        and the module unhides it. The inline guard must stay the card's NEXT sibling: it removes
+        an expired or dismissed card before first paint, which a deferred module cannot promise. */}
+    {announceM.mode === 'card' && (
+      <>
+      <aside class="rf-announce-card" role="note" data-until={announceM.until}>{announceM.href
+        ? <a class="rf-announce-t" href={announceM.href} {...ext(announceM.href)}>{announceM.text}</a>
+        : <span class="rf-announce-t">{announceM.text}</span>}<span class="rf-announce-cd" data-until={announceM.until} data-prefix={announceCopy.announceEndsIn}></span><button type="button" class="rf-announce-x" aria-label={announceCopy.announceClose} hidden>×</button></aside>
+      <script is:inline set:html={ANNOUNCE_GUARD_SCRIPT}></script>
+      </>
+    )}
     {ageGate && (
       <div class="st-age-gate" role="dialog" aria-modal="true" aria-labelledby="st-age-gate-title">
         {/* CONFIRM checkbox — CSS `:has(:checked)` reveal makes the gate work with zero JS. */}
@@ -1422,6 +1440,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     {/* package runtimes (body-end, module). Astro bundles <script> imports that live
         in src/, so the vendored bleedblend auto-runtime ships hashed + tree-shaken. */}
     {bleed && bleed.bodyScript && <script>import '../packages/bleedblend/auto.mjs';</script>}
+    {announceM.mode === 'card' && <script>import '../packages/announce-card/announce-card.js';</script>}
     {localeBanner && <script>import '@cvernet/signet/locale-banner.js';</script>}
     {themeToggle && <script>import '../packages/theme-toggle/theme-toggle.js';</script>}
     {blogSearch && <script>import '../packages/blog-search/blog-search.js';</script>}
