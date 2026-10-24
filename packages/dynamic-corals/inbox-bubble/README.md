@@ -401,10 +401,40 @@ the coral appends to the container), with its stylesheet inside it — nothing g
 `document.head`. A page's selectors, and a browser extension's cosmetic CSS, no longer reach
 the bubble: reef#2139 measured one `button{min-width:88px}` turning it into an 88×56 capsule.
 What crosses the boundary is what inherits, on purpose: the `--reef-inbox-*` custom properties
-and the site's `font`. So the colour knobs above are the whole styling surface — a site rule
-aimed at `.dc-inbox-*` no longer applies. A script that needs a node reaches it deliberately
-through `host.shadowRoot`; `shape.smoke.mjs` measures the shape, the colours and the font in
-chromium.
+and the site's `font`. So the colour knobs above, and the two position knobs below, are the
+whole styling surface — a site rule aimed at `.dc-inbox-*` no longer applies. A script that
+needs a node reaches it deliberately through `host.shadowRoot`; `shape.smoke.mjs` measures the
+shape, the colours and the font in chromium.
+
+### Where it sits (0.7.16, reef#2418)
+
+A field report: on a phone the bubble covered a page title in the bottom-right corner. The
+bubble is still 1rem from the corner; added to that are the phone's safe area
+(`env(safe-area-inset-right/bottom)`: the home indicator, the notch side in landscape) and two
+owner knobs, which a theme or `custom_css` can set like the colours:
+
+```css
+:root { --reef-inbox-offset-y: 80px; --reef-inbox-offset-x: 0px; }  /* 80px higher */
+```
+
+- Each is clamped to 0…50% of the viewport (`50vh` up, `50vw` in from the right). A negative value
+  counts as 0, so the knob cannot push the bubble into the safe area. A huge value cannot push it
+  off the screen.
+- They are registered as `<length>` (`CSS.registerProperty`), so anything that is not a length
+  (`up`, `12`, a percentage) counts as `0px`. Unregistered, a typo would invalidate the
+  root's `bottom` and the fixed box would drop to its static position somewhere in the page.
+  The registration is document-wide and covers only these two names.
+- On a page without `<meta name="viewport" content="…, viewport-fit=cover">` the browser reports
+  every `env(safe-area-inset-*)` as 0, because the viewport itself is already inset. There the
+  bubble sits exactly where it did before 0.7.16, which is harmless.
+- The open panel grows up and left from the same corner and sizes itself to the room left there
+  (minus 1rem and the opposite inset), so it stays fully on screen at any offset. On a phone held
+  sideways with a large offset it gets shorter and scrolls. With no offset and no inset its
+  bounds are the old `calc(100vw - 2rem)` × `min(30rem, 70vh)`.
+
+`position.smoke.mjs` measures all of this in chromium with a real inset
+(`Emulation.setSafeAreaInsetsOverride`), every move against a control arm. A bubble over a
+cookie banner (reef#2265) is a different case and not handled here.
 
 ## Full inbox (0.7.14, reef#2357)
 
@@ -428,13 +458,13 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.15/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.16/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.7.15, stop and choose a
+is immutable: if that deployment already has different bytes at 0.7.16, stop and choose a
 new version before publishing.
 
 ### 🔴 Rolling out the loader handoff (0.7.12) — coral first, in this order
