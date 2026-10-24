@@ -2823,14 +2823,44 @@ function createPlacement(host, shadow, root) {
 		observed = null;
 	}
 
-	/** Lowers the open panel's `-y` until the header, the composer and some conversation fit. */
+	/** Width the composer still lacks at the panel's current width: 10ch of text, a gap, the whole button. */
+	function composerShort(panel) {
+		const form = panel.querySelector(`.${PREFIX}-form`);
+		const ta = form && form.querySelector('textarea');
+		const btn = form && form.querySelector('button[type="submit"]');
+		if (!ta || !btn) return 0;
+		const num = (cs, ...k) => k.reduce((n, key) => n + (parseFloat(cs[key]) || 0), 0);
+		const fcs = getComputedStyle(form);
+		const tcs = getComputedStyle(ta);
+		// The button at its one-line width — the size it has wherever it is not forced to wrap.
+		btn.style.setProperty('max-width', 'none');
+		btn.style.setProperty('white-space', 'nowrap');
+		const button = btn.getBoundingClientRect().width;
+		btn.style.removeProperty('max-width');
+		btn.style.removeProperty('white-space');
+		const need =
+			num(fcs, 'paddingLeft', 'paddingRight') +
+			num(tcs, 'minWidth', 'paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth') +
+			num(fcs, 'columnGap') +
+			button;
+		return Math.ceil(need - form.clientWidth);
+	}
+
+	/**
+	 * Lowers the open panel's offsets until its parts fit: `-y` until the header, the composer and
+	 * some conversation fit above the corner, `-x` until the composer's 10ch of text and its whole
+	 * button fit left of it (tile#199 review r3: a 50vw `-x` on a 390px phone left a 163px panel, and
+	 *「Send to the owner」took all of it). The two interact — a narrower composer wraps and gets taller —
+	 * so it is a few passes, each lowering either by exactly its shortfall, and never below 0.
+	 */
 	function fit(panel, o) {
 		const log = panel.querySelector(`.${PREFIX}-log`);
 		const rem = px('1rem') || 16;
-		const half = px('50vh') ?? Infinity;
-		let y = Math.min(Math.max(o.y, 0), half);
-		for (let pass = 0; pass < 3; pass++) {
-			write({ x: o.x, y });
+		let x = Math.min(Math.max(o.x, 0), px('50vw') ?? Infinity);
+		let y = Math.min(Math.max(o.y, 0), px('50vh') ?? Infinity);
+		for (let pass = 0; pass < 4; pass++) {
+			write({ x, y });
+			const shortX = composerShort(panel);
 			// The room this corner leaves is the panel's max-height; a forced height reads it back.
 			panel.style.setProperty('height', '100000px');
 			const room = panel.getBoundingClientRect().height;
@@ -2842,15 +2872,20 @@ function createPlacement(host, shadow, root) {
 				if (cs.position === 'absolute' || cs.position === 'fixed' || cs.display === 'none') continue;
 				fixed += part.getBoundingClientRect().height + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
 			}
-			const short = Math.ceil(fixed + MIN_LOG_REM * rem - room);
-			if (short <= 0 || y <= 0) break;
-			y = Math.max(0, y - short);
+			const shortY = Math.ceil(fixed + MIN_LOG_REM * rem - room);
+			const nx = shortX > 0 ? Math.max(0, x - shortX) : x;
+			const ny = shortY > 0 ? Math.max(0, y - shortY) : y;
+			if (nx === x && ny === y) break;
+			x = nx;
+			y = ny;
 		}
-		write({ x: o.x, y });
+		write({ x, y });
 		if (typeof ResizeObserver === 'function' && observed !== panel) {
 			unobserve();
 			observed = panel;
 			observer = new ResizeObserver(() => update());
+			// The composer is one of these: a button relabelled after open (「Send」→「Send to the owner」
+			// once search loads) no longer fits its row, wraps, and the form's new height is the signal.
 			for (const part of panel.children) if (part !== log) observer.observe(part);
 		}
 	}
@@ -3001,11 +3036,19 @@ function styleElement() {
 /* After a real answer the offer is a quieter afterthought, not a second CTA
    competing with the answer the visitor just got. */
 .${PREFIX}-quiet{border-color:transparent;opacity:.6;padding-left:0}
-.${PREFIX}-form{display:flex;gap:.5rem;padding:.7rem;border-top:1px solid rgba(0,0,0,.08)}
-.${PREFIX}-form textarea{flex:1;min-width:0;resize:none;border:1px solid rgba(0,0,0,.15);border-radius:.5rem;
+/* 🩸 THE COMPOSER NEVER GIVES ITS TEXT AWAY (tile#199 review r3). In a narrow panel the button used to
+   keep its width and the textarea took whatever was left — 0px of text under「Send to the owner」.
+   The textarea keeps at least 10ch of CONTENT width (box-sizing stated, so min-width is the text
+   area itself): about two words, enough to see what one is typing and where the caret is; less is
+   a slot, not a box. createPlacement() moves the open panel in from a high -x so that 10ch and the
+   whole button fit on one line; where even offset 0 is too narrow, the row wraps and the button
+   drops below the textarea, its own label wrapping before it would ever leave the panel. */
+.${PREFIX}-form{display:flex;flex-wrap:wrap;gap:.5rem;padding:.7rem;border-top:1px solid rgba(0,0,0,.08)}
+.${PREFIX}-form textarea{flex:1 1 10ch;box-sizing:content-box;min-width:10ch;resize:none;border:1px solid rgba(0,0,0,.15);border-radius:.5rem;
   padding:.45rem .55rem;font:inherit;font-size:max(1rem,16px);min-height:2.6rem;max-height:7rem;
   background:transparent;color:inherit}
-.${PREFIX}-form button{flex:none;border:0;border-radius:.5rem;padding:0 .9rem;cursor:pointer;
+.${PREFIX}-form button{flex:none;max-width:100%;min-height:2.6rem;margin-left:auto;white-space:normal;
+  overflow-wrap:anywhere;border:0;border-radius:.5rem;padding:0 .9rem;cursor:pointer;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);font-size:.9rem}
 .${PREFIX}-form button[disabled]{opacity:.5;cursor:default}
 .${PREFIX}-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}

@@ -438,7 +438,13 @@ owner knobs, which a theme or `custom_css` can set like the colours:
   and Send) keep their full size. If the room above the raised corner cannot hold the header,
   the composer and about 5rem of conversation (a phone held sideways with a large `-y`), the
   open panel sits lower, by just the missing height. The closed bubble keeps the offset. On a
-  screen too short for the header and the composer even at offset 0, the panel itself scrolls. With no offset and no
+  screen too short for the header and the composer even at offset 0, the panel itself scrolls.
+- The same holds sideways. The text box keeps at least 10ch of text width (about two words, so a
+  visitor can see what they are typing), and the button keeps its whole label. If the room left
+  of the raised corner cannot hold both on one line (a large `-x` on a phone, a large root font,
+  or the longer「Send to the owner」label once search is on), the open panel moves in by just the
+  missing width. Where even offset 0 is too narrow, the button drops below the text box, and its
+  label wraps before it would leave the panel. With no offset and no
   inset its bounds are the old `calc(100vw - 2rem)` × `min(30rem, 70vh)`.
 
 `position.smoke.mjs` measures all of this in chromium with a real inset

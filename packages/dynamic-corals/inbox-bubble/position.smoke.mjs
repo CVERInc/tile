@@ -32,12 +32,12 @@ const DESKTOP = { width: 1200, height: 900 };
 // A home indicator below and, uneven on purpose, a notch-side inset on the right.
 const INSET = { top: 0, left: 0, bottom: 34, right: 20 };
 
-const hostPage = (hostCss, bodyHtml = '') => `<!doctype html>
+const hostPage = (hostCss, bodyHtml = '', hostAttrs = '') => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>${hostCss}</style></head><body>
 ${bodyHtml}
-<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="position-smoke"
+<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="position-smoke" ${hostAttrs}
   data-api-base="${new URL('.', fixtureUrl).origin}"></div>
 <script type="module">await import(${JSON.stringify(coralUrl)});</script>
 </body></html>`;
@@ -46,7 +46,7 @@ const b = await chromium.launch();
 const failures = [];
 
 /** Mounts the bubble and returns the closed bubble's box, then (optionally) the open panel's. */
-async function measure({ viewport, mobile = false, inset = null, hostCss = '', bodyHtml = '', initScript = null, openPanel = false, composer = false, grow = 0, lastResort = false }) {
+async function measure({ viewport, mobile = false, inset = null, hostCss = '', bodyHtml = '', initScript = null, openPanel = false, composer = false, grow = 0, lastResort = false, hostAttrs = '', searchIndex = null, waitLabel = null, width = false }) {
 	const ctx = await b.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 3 : 1 });
 	const p = await ctx.newPage();
 	// Runs before any page script: a theme's own JS (a prior registration), or a browser without an API.
@@ -57,12 +57,13 @@ async function measure({ viewport, mobile = false, inset = null, hostCss = '', b
 		const cdp = await ctx.newCDPSession(p);
 		await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: inset });
 	}
-	await p.route(fixtureUrl, (r) => r.fulfill({ contentType: 'text/html', body: hostPage(hostCss, bodyHtml) }));
+	await p.route(fixtureUrl, (r) => r.fulfill({ contentType: 'text/html', body: hostPage(hostCss, bodyHtml, hostAttrs) }));
 	await p.route('**/api/**', (r) => {
 		const u = r.request().url();
 		if (u.includes('/api/inbox/session') && r.request().method() === 'GET') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, claimed: true }) });
 		return r.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
 	});
+	if (searchIndex) await p.route('**/search.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(searchIndex) }));
 	await p.goto(fixtureUrl, { waitUntil: 'load', timeout: 20000 });
 	await p.waitForSelector('.dc-inbox-open', { timeout: 10000 });
 	const rect = (sel) => p.evaluate((sel) => {
@@ -96,8 +97,15 @@ async function measure({ viewport, mobile = false, inset = null, hostCss = '', b
 		await p.waitForSelector('.dc-inbox-panel', { timeout: 10000 });
 		// Past the .16s entrance animation, which translates the panel 6px.
 		await p.waitForTimeout(400);
+		if (waitLabel) {
+			// The search index loads on the first open and THEN relabels the button: wait for that.
+			await p.waitForFunction((label) => document.querySelector('.dc-inbox-host').shadowRoot
+				.querySelector('.dc-inbox-form button[type="submit"]').textContent === label, waitLabel, { timeout: 10000 });
+			await p.waitForTimeout(200);
+		}
 		panel = await rect('.dc-inbox-panel');
 	}
+	const widthProbe = openPanel && width ? await p.evaluate(composerWidth) : null;
 	const controls = openPanel && composer ? await p.evaluate(composerProbe, grow) : null;
 	let lastResortProbe = null;
 	if (openPanel && lastResort) {
@@ -128,7 +136,7 @@ async function measure({ viewport, mobile = false, inset = null, hostCss = '', b
 		return el ? { before: window.__themeProbeBefore ?? null, after: getComputedStyle(el).height } : null;
 	});
 	await ctx.close();
-	return { bubble, panel, controls, lastResort: lastResortProbe, pageProbe, envBottom, errs };
+	return { bubble, panel, controls, width: widthProbe, lastResort: lastResortProbe, pageProbe, envBottom, errs };
 }
 
 /**
@@ -188,6 +196,44 @@ async function composerProbe(grow) {
 		out.grown = { ...controlsNow(), logHeight: log.clientHeight };
 	}
 	return out;
+}
+
+/** The composer's widths: the textarea's CONTENT box (what the visitor sees their text in) and the button. */
+function composerWidth() {
+	const sr = document.querySelector('.dc-inbox-host').shadowRoot;
+	const ta = sr.querySelector('.dc-inbox-form textarea');
+	const btn = sr.querySelector('.dc-inbox-form button[type="submit"]');
+	const panel = sr.querySelector('.dc-inbox-panel').getBoundingClientRect();
+	const cs = getComputedStyle(ta);
+	const content = ta.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+	// 10ch in the textarea's own font, measured rather than assumed.
+	const probe = document.createElement('div');
+	probe.style.cssText = `position:absolute;visibility:hidden;width:10ch;font:${cs.font}`;
+	ta.parentNode.appendChild(probe);
+	const tenCh = probe.getBoundingClientRect().width;
+	probe.remove();
+	const b = btn.getBoundingClientRect();
+	const hit = sr.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+	return {
+		label: btn.textContent,
+		textareaBottom: ta.getBoundingClientRect().bottom,
+		textareaContent: content,
+		tenCh,
+		panel: { left: panel.left, right: panel.right, top: panel.top, bottom: panel.bottom, width: panel.width },
+		button: { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width },
+		buttonInPanel: b.left >= panel.left - 0.5 && b.right <= panel.right + 0.5 && b.top >= panel.top - 0.5 && b.bottom <= panel.bottom + 0.5,
+		buttonHit: hit === btn || btn.contains(hit),
+		buttonInViewport: b.left >= 0 && b.right <= innerWidth + 0.5 && b.top >= 0 && b.bottom <= innerHeight + 0.5
+	};
+}
+
+function widthProblems(w, label) {
+	const problems = [];
+	if (label && w.label !== label) problems.push(`control: the button reads ${JSON.stringify(w.label)}, not ${JSON.stringify(label)}`);
+	if (!(w.textareaContent >= w.tenCh - 0.5)) problems.push(`the textarea's content width is ${w.textareaContent.toFixed(1)}px, under 10ch (${w.tenCh.toFixed(1)}px)`);
+	if (!w.buttonInPanel) problems.push(`the button leaves the panel: ${JSON.stringify(w.button)} vs ${JSON.stringify(w.panel)}`);
+	if (!w.buttonHit || !w.buttonInViewport) problems.push(`the button is not reachable: ${JSON.stringify(w.button)}`);
+	return problems;
 }
 
 /** Problems with a `composerProbe` result: the controls in both states, and the log's scroll. */
@@ -303,6 +349,38 @@ for (const arm of [
 	if (!(m.panel.bottom > requestedBottom + 1)) problems.push(`control: the panel sits at the requested offset (bottom ${m.panel.bottom}, requested ${requestedBottom}), so the composer never had to be made room for`);
 	check(arm.label, problems, m);
 }
+// 🩸 THE SAME SHORTFALL SIDEWAYS (tile#199 review r3). A 5000px `-x` clamps to 50vw, so on a 390px
+// phone the panel was 163px wide; once the search index loads the button reads「Send to the owner」
+// (145px), and the textarea was left with no content width at all while the button ran past the
+// panel's edge. A 24px root font does the same with the plain「Send」. The open panel's `-x` is now
+// lowered by the shortfall like its `-y`, so each arm requires 10ch of text and the whole button,
+// and the control requires that the panel really had to move in from the requested offset.
+const searchIndex = [{ t: 'example', u: '/example', d: '2026-01-01' }];
+for (const arm of [
+	{ label: 'phone, offset-x 5000px, search loaded (Send to the owner)', hostCss: ':root{--reef-inbox-offset-x:5000px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to the owner' },
+	{ label: 'phone, offset-x 5000px, 24px root font', hostCss: ':root{--reef-inbox-offset-x:5000px;font-size:24px}', waitLabel: 'Send' }
+]) {
+	const m = await measure({ viewport: PHONE, mobile: true, hostCss: arm.hostCss, hostAttrs: arm.hostAttrs ?? '', searchIndex: arm.searchIndex ?? null, waitLabel: arm.waitLabel, openPanel: true, width: true });
+	const problems = widthProblems(m.width, arm.waitLabel);
+	if (!inside(m.panel, PHONE)) problems.push(`the open panel leaves the screen: ${JSON.stringify(m.panel)}`);
+	const requestedRight = PHONE.width - parseFloat(/font-size:(\d+)px/.exec(arm.hostCss)?.[1] ?? 16) - PHONE.width / 2;
+	if (!(m.width.panel.right > requestedRight + 1)) problems.push(`control: the panel sits at the requested offset (right ${m.width.panel.right}, requested ${requestedRight}), so it never had to make room`);
+	check(arm.label, problems, m);
+}
+// And where even offset 0 is too narrow (a 280px screen at a 24px root font, search loaded): the
+// button wraps below the textarea, still whole and inside the panel, and the text keeps its 10ch.
+// Tall on purpose: at 640px the wrapped composer plus the header and search block outgrow the
+// panel's 70dvh, and the panel's own scroll (the last-resort arm below) is what answers that — this
+// arm is about the width alone. The control requires that the row really did wrap.
+{
+	const NARROW = { width: 280, height: 900 };
+	const m = await measure({ viewport: NARROW, mobile: true, hostCss: ':root{font-size:24px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to the owner', openPanel: true, width: true });
+	const problems = widthProblems(m.width, 'Send to the owner');
+	if (!(m.width.button.top >= m.width.textareaBottom - 0.5)) problems.push(`control: the button did not wrap below the textarea: ${JSON.stringify(m.width)}`);
+	if (!inside(m.panel, NARROW)) problems.push(`the open panel leaves the screen: ${JSON.stringify(m.panel)}`);
+	check('narrow 280px, 24px root font, search loaded: the button wraps', problems, m);
+}
+
 // The last resort: a viewport too short for the header and the composer even at offset 0 (the
 // panel's own 70dvh cap is under them). Nothing can make room, so the PANEL scrolls: the composer is
 // reachable by scrolling it, never cut off behind an overflow that cannot be scrolled.
