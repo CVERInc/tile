@@ -3,7 +3,7 @@
 // engine the pagetile web host's authoring editor uses). This file adds ONLY the read-only reader
 // projection (prev/next, chapter table of contents, image URL resolution) — it does NOT
 // reimplement parsing, per the family rule (one model, every surface consumes it).
-import { parseBook, flattenPages } from '../../../../../packages/pagetile/book-core.js';
+import { parseBook, flattenPages, isPhotobook, PHOTOBOOK_SOURCE } from '../../../../../packages/pagetile/book-core.js';
 // Relative, not the `@sitetile` alias, so plain `node` can still import this file (pagetile-blurb.test.mjs).
 import { bracketMatches, BRACKET_SHAPES } from '../../../site-core.js';
 
@@ -76,6 +76,7 @@ export function loadFirstBook(glob) {
 //   { title, direction: 'ltr'|'rtl', mode: 'paged'|'scroll', totalPages,
 //     chapters: [{ id, title, index, pageCount, startGlobalIndex, coverSrc,
 //                  pages: [{ id, pageInChapter, globalIndex, imageSrc, caption }] }] }
+//   + a photobook only: source: 'photobook' on the book, { kind, focus } on each page ('' = undeclared)
 // A book's one-line blurb, with at most ONE inline `[label](href)` — split into the three pieces a
 // template can render without ever handing raw markup to the page.
 //
@@ -115,6 +116,10 @@ export function loadReaderBook(raw) {
   // Absent `notice` means no interstitial at all, not an empty one.
   const notice = String(meta.notice || '').trim();
   const blurb = parseBlurb(meta.blurb);
+  // A photobook's pages carry what the author declared of their composition; the rest is decided
+  // by reader.js from the photo itself (book-core resolveLayout). Added ONLY for a photobook, so a
+  // comic's projection is the same object it was before the vocabulary existed (pagetile-photobook.test.mjs).
+  const photobook = isPhotobook(book);
   let g = 0;
   const chapters = (book.chapters || []).map((c, ci) => {
     const startGlobalIndex = g;
@@ -131,6 +136,7 @@ export function loadReaderBook(raw) {
         thumbSrc: imageSrc.replace(/^\/pagetile\//, '/pagetile-thumbs/'),
         caption: p.caption || '',
       };
+      if (photobook) { entry.kind = p.kind || ''; entry.focus = p.focus || ''; }
       g += 1;
       return entry;
     });
@@ -145,7 +151,9 @@ export function loadReaderBook(raw) {
       pages,
     };
   });
-  return { title: book.title, direction, mode, totalPages: g, chapters, notice, blurb };
+  const out = { title: book.title, direction, mode, totalPages: g, chapters, notice, blurb };
+  if (photobook) out.source = PHOTOBOOK_SOURCE;
+  return out;
 }
 
 // loadFirstReaderBook: the one-site-one-book convenience, mirroring loadFirstBook.
