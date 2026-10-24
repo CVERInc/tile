@@ -16,6 +16,7 @@ import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from 
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
+import { isTemplateOnly } from '../card-blank.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -318,6 +319,31 @@ export function renderCardHTML(cardMd, ctx = {}) {
 // deployment-wide valve (Search Console warns → flip it the same day); it is NOT a per-card state.
 export const noindexAll = (env) => !!env && /^(1|true)$/i.test(String(env.CARD_NOINDEX_ALL ?? '').trim());
 
+// reef#2044 ③ — `card.feelreef.com/.well-known/security.txt` (RFC 9116), so a problem on a Card is
+// reported by whoever finds it rather than discovered by us late.
+//
+// 🔴 Contact is the PUBLIC REPORT FORM, and there is no mailbox in this file. The ticket's two lines
+// are 「指向檢舉表單」 and 「不放客服信箱（零客服原則）」: feelreef.com/report is public, needs no
+// login, and writes into the same inbox feelreef's own pages report into. (feelreef.com's own
+// security.txt lists mailboxes; that is a different host with a different ruling.)
+//
+// 🔴 Canonical host ONLY — never a creator's vanity domain. The ticket names this exact URL, and the
+// same ruling says no report element goes on an author's card; our contact on THEIR domain would be
+// one. A vanity host keeps the ordinary 404.
+//
+// 🔴 Expires is mandatory, so this constant is BORN TO ROT. card-security-txt.test.mjs goes red 90
+// days before the date: re-check that the form still answers, then move the date (≤ 1 year out).
+// No Preferred-Languages: the ticket does not ask for it, and the form itself speaks nine.
+const SECURITY_TXT_PATH = '/.well-known/security.txt';
+const SECURITY_TXT = [
+  '# REEF with Card — report a problem with a Card on this host (RFC 9116).',
+  '# The form is public and needs no account.',
+  'Contact: https://feelreef.com/report',
+  `Canonical: https://${CANON_HOST}${SECURITY_TXT_PATH}`,
+  'Expires: 2027-10-01T00:00:00.000Z',
+  '',
+].join('\n');
+
 const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 
 // 🔴 A DEMO of somebody else's page is never indexed, on ANY deployment.
@@ -331,8 +357,13 @@ const isPreview = (env) => !env || String(env.PREVIEW ?? 'true') !== 'false';
 // So the noindex follows the HANDLE, not the deployment. `demo-` is a reserved prefix.
 const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 
-const ROBOTS_HEADERS = (env, handle, isVanity) =>
-  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {};
+// reef#2044 ④ — `blank` = the card is still only the blank template (card-blank.mjs says what that
+// means, from the code that writes blank cards). Not indexed until its author puts something on it;
+// the moment they do, the next request answers without the header. Judged on CONTENT, never on
+// account age. It only ever ADDS a header: the stricter rule above it is never weakened.
+const ROBOTS_HEADERS = (env, handle, isVanity, blank = false) =>
+  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' }
+    : blank ? { 'X-Robots-Tag': 'noindex' } : {};
 
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
@@ -341,17 +372,17 @@ const ROBOTS_HEADERS = (env, handle, isVanity) =>
 // for up to a minute, at random. Putting it only on the markdown response is the version that looks
 // right and still breaks — the HTML response is the one that gets cached first, because that is what
 // people request.
-const CARD_HEADERS = (env, handle, isVanity) => ({
+const CARD_HEADERS = (env, handle, isVanity, blank = false) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
   // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
-  ...ROBOTS_HEADERS(env, handle, isVanity),
+  ...ROBOTS_HEADERS(env, handle, isVanity, blank),
 });
 
-const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
+const html = (body, status = 200, env = null, handle = '', isVanity = false, blank = false) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity, blank) },
   });
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
@@ -366,7 +397,7 @@ const html = (body, status = 200, env = null, handle = '', isVanity = false) =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
+const markdown = (body, { env, originalLength, alternate, handle, isVanity, blank }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -374,7 +405,7 @@ const markdown = (body, { env, originalLength, alternate, handle, isVanity }) =>
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
-      ...CARD_HEADERS(env, handle, isVanity),
+      ...CARD_HEADERS(env, handle, isVanity, blank),
     },
   });
 
@@ -516,6 +547,16 @@ const router = {
     // hostname means. One door, one host-independent path.
     const api = await handleApi(request, env, url);
     if (api) return api;
+
+    // reef#2044 ③ — security.txt, on the canonical host only. A constant: no store read, no handle.
+    // `.well-known` can never be a handle (the grammar starts a handle with a letter or digit), so
+    // without this it fell through to handle routing and 404'd. See SECURITY_TXT for what it says.
+    if (url.pathname === SECURITY_TXT_PATH
+      && (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '') === CANON_HOST) {
+      return new Response(request.method === 'HEAD' ? null : SECURITY_TXT, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+      });
+    }
 
     // The sandbox editor's own vendored Sortable.min.js — see canvasHtml()'s SORTABLE_SRC override
     // ── the engine's table, under the locale it will be read in ──────────────────────────────────
@@ -752,6 +793,9 @@ const router = {
       });
     }
 
+    // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
+    const blank = cardMd != null && isTemplateOnly(cardMd);
+
     if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
@@ -769,7 +813,7 @@ const router = {
           });
       // Apply host-specific robots rules after a relay cache hit as well as a fresh response.
       const headers = new Headers(image.headers);
-      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle))) headers.set(key, value);
+      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank))) headers.set(key, value);
       return new Response(image.body, { status: image.status, headers });
     }
 
@@ -787,7 +831,7 @@ const router = {
           'Cache-Control': 'public, max-age=3600',
           // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
           'X-Content-Type-Options': 'nosniff',
-          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle),
+          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank),
         },
       });
     }
@@ -811,7 +855,7 @@ const router = {
     // the download link, in the form this host actually uses
     const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle, blank });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -819,7 +863,7 @@ const router = {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle, blank });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -833,7 +877,7 @@ const router = {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle, blank);
   },
 };
 
