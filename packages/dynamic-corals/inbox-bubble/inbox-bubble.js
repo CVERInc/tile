@@ -2722,6 +2722,31 @@ const OPEN_ICON =
 	'</svg>';
 
 /**
+ * Types the owner's two position knobs as lengths (0.7.16, reef#2418).
+ *
+ * 🩸 WITHOUT THIS, A TYPO MOVES THE BUBBLE INTO THE PAGE. An unregistered custom property is
+ * substituted as text, so `--reef-inbox-offset-y: 2em;` is fine but `--reef-inbox-offset-y: up`
+ * makes the root's whole `bottom` invalid at computed-value time — not "ignored", unset — and a
+ * fixed box with `right`/`bottom` both `auto` sits at its static position, wherever the host div is
+ * in the page's flow. Registered as `<length>`, anything that is not a length computes to the
+ * initial 0px and the bubble stays at its base. position.smoke.mjs has an arm for exactly this.
+ *
+ * Document-wide by nature (a registration cannot be scoped to a shadow tree), and only for these two
+ * names, which are the coral's own. It throws once already registered (a second mount, or a page
+ * that registered them itself) and is absent outside a browser; both leave things as they are.
+ */
+function registerOffsetProperties() {
+	if (typeof CSS === 'undefined' || typeof CSS.registerProperty !== 'function') return;
+	for (const name of ['--reef-inbox-offset-x', '--reef-inbox-offset-y']) {
+		try {
+			CSS.registerProperty({ name, syntax: '<length>', inherits: true, initialValue: '0px' });
+		} catch {
+			// Already registered — by an earlier mount, or by the page on purpose. Either way it stands.
+		}
+	}
+}
+
+/**
  * The panel's stylesheet, written into the mount's OWN shadow root (0.7.13, reef#2139).
  *
  * 🩸 WHY A SHADOW ROOT. Up to 0.7.12 this `<style>` went into `document.head` and the bubble sat in
@@ -2744,10 +2769,21 @@ const OPEN_ICON =
  * rule dynamic-coral-css-registry.test.mjs holds every coral to.
  */
 function styleElement() {
+	registerOffsetProperties();
 	const style = document.createElement('style');
 	const css = `
 :host{font:inherit}
-.${PREFIX}-root{position:fixed;right:1rem;bottom:1rem;z-index:2147483000;font:inherit}
+/* WHERE IT SITS (0.7.16, reef#2418). A field report: on a phone the bubble covered a page title in
+   the bottom-right corner. The base is still 1rem from the corner; to it are ADDED the safe-area
+   inset (a home indicator, a notch side) and the owner's own offset, clamped to 0..50% of the
+   viewport so neither a negative value nor a huge one can push it into the inset or off the screen.
+   On a page without viewport-fit=cover the browser reports every env(safe-area-inset-*) as 0 (the
+   viewport is already inset), so there this is exactly the old 1rem. The two sums are kept as
+   properties because the panel below sizes itself against them. */
+.${PREFIX}-root{position:fixed;z-index:2147483000;font:inherit;
+  --${PREFIX}-right:calc(1rem + clamp(0px,var(--reef-inbox-offset-x,0px),50vw) + env(safe-area-inset-right,0px));
+  --${PREFIX}-bottom:calc(1rem + clamp(0px,var(--reef-inbox-offset-y,0px),50vh) + env(safe-area-inset-bottom,0px));
+  right:var(--${PREFIX}-right);bottom:var(--${PREFIX}-bottom)}
 /* 🔴 EVERY SHAPE PROPERTY IS SET, not only the four that draw it (reef#2139). The shadow root keeps
    the page's selectors out; the one stylesheet that still reaches this button is the browser's
    own, and its button defaults are exactly these properties, differently per engine. So the shape
@@ -2762,7 +2798,12 @@ function styleElement() {
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
   box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
 .${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
-.${PREFIX}-panel{width:min(22rem,calc(100vw - 2rem));max-height:min(30rem,70vh);
+/* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
+   room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
+   both reduce to the old calc(100vw - 2rem) and min(30rem,70vh). dvh after vh: a phone's toolbar. */
+.${PREFIX}-panel{width:min(22rem,calc(100vw - var(--${PREFIX}-right) - 1rem - env(safe-area-inset-left,0px)));
+  max-height:min(30rem,70vh,calc(100vh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
+  max-height:min(30rem,70dvh,calc(100dvh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
   display:flex;flex-direction:column;border-radius:.9rem;overflow:hidden;
   background:var(--reef-inbox-bg,#fff);color:var(--reef-inbox-fg,#111);
   box-shadow:0 12px 40px rgba(0,0,0,.22)}
