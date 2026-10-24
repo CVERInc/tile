@@ -1755,6 +1755,11 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
    URL) as its floor, so the card's text ran past the card and pushed the × off-screen at 320px.
    The track may shrink (minmax(0,1fr) above) and the text breaks anywhere when it must. */
 .rf-announce-t, .rf-announce-cd { min-width: 0; overflow-wrap: anywhere; }
+/* …and a TALL one (nothing caps `announce`'s length in frontmatter): the card is bottom-anchored, so
+   unbounded text grew it upward and carried the × above the viewport, where a fixed box cannot be
+   scrolled back to. The text's height is capped — never more than a third of the screen — and it
+   scrolls inside the card, so the card stays short and the × stays in its top-right corner. */
+.rf-announce-t { max-height: min(12em, 33vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 a.rf-announce-t { color: inherit; text-decoration: underline; text-decoration-color: var(--gd-accent); text-underline-offset: 0.15em; }
 .rf-announce-cd { grid-column: 1; color: var(--gd-muted, var(--gd-text)); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .rf-announce-cd:empty { display: none; }
