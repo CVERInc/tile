@@ -270,7 +270,7 @@ test('🩸 CONTROL: the markup still gates the tag filter with `hidden`', () => 
     'BlogIndexView must still render the tag filter hidden until JS reveals it');
 });
 
-test('🔴 the floor stays a floor — no look properties in any bl-* :where() rule', () => {
+test('🔴 the blog floor adds no look beyond the migrated top-share defaults (tile#195)', () => {
   // The drift this exists to stop: we decided NOT to ship a default blog look, and the cheapest
   // way to break that decision is to add `color:` to a rule that is already here for box-model
   // reasons. Colour/type/border/decoration belong to the theme; if one of these is genuinely
@@ -285,6 +285,12 @@ test('🔴 the floor stays a floor — no look properties in any bl-* :where() r
     assert.ok(covered.includes(cls), `no :where() floor rule names .${cls} — nothing to scan`);
   }
   for (const r of floor) {
+    // tile#195 explicitly preserves the top pair's former inline paint while making it
+    // theme-overridable. Permit only those two exact declarations on that exact selector.
+    if (r.selector === ':where(.bl-share-top .bl-share-btn)') {
+      assert.equal(r.css.replace(/\s+/g, ''), 'font-size:0.85em;text-decoration:underline;');
+      continue;
+    }
     const hit = r.css.match(LOOK);
     assert.ok(!hit, `look property "${hit?.[2]}" in a floor rule — that is a template: ${r.selector}`);
   }

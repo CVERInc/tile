@@ -1003,6 +1003,10 @@ html[data-search-open] .st-search { display: block; }
   display: flex; flex-wrap: wrap; gap: 0.5em;
 }
 
+/* tile#195: preserve the top pair's former inline paint, at zero specificity so themes
+   can replace it. The configurable bottom row has never carried these defaults. */
+:where(.bl-share-top .bl-share-btn) { font-size: 0.85em; text-decoration: underline; }
+
 /* Month/day/year are three adjacent spans inside one <time>. */
 :where(.bl-date-badge) { display: flex; flex-direction: column; }
 
