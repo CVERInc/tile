@@ -1742,7 +1742,7 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
 .rf-announce-card {
   position: fixed; left: 1rem; bottom: 1rem; z-index: 30;
   max-width: min(20rem, calc(100vw - 2rem)); box-sizing: border-box;
-  display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 0.25rem 0.75rem;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.25rem 0.75rem;
   padding: 0.75rem 0.85rem 0.75rem 1rem;
   background: var(--gd-surface, var(--gd-bg)); color: var(--gd-text);
   border: 1px solid var(--gd-border, currentColor); border-left: 4px solid var(--gd-accent);
@@ -1751,6 +1751,10 @@ body[data-header-sticky] .rf-header { position: sticky; top: 0; z-index: 20; }
   font-size: 0.9rem; line-height: 1.35;
 }
 .rf-announce-t { grid-column: 1; font-weight: 600; }
+/* A pasted checkout URL is one unbroken token: a plain `1fr` track keeps its min-content (the whole
+   URL) as its floor, so the card's text ran past the card and pushed the × off-screen at 320px.
+   The track may shrink (minmax(0,1fr) above) and the text breaks anywhere when it must. */
+.rf-announce-t, .rf-announce-cd { min-width: 0; overflow-wrap: anywhere; }
 a.rf-announce-t { color: inherit; text-decoration: underline; text-decoration-color: var(--gd-accent); text-underline-offset: 0.15em; }
 .rf-announce-cd { grid-column: 1; color: var(--gd-muted, var(--gd-text)); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .rf-announce-cd:empty { display: none; }
