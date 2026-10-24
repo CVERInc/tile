@@ -32,6 +32,12 @@ export function getStaticPaths() {
 }
 
 const { chapter, book, prevChapter, nextChapter, nextMeta } = Astro.props;
+// Photobook (book.source === 'photobook'): each page figure carries its DECLARED kind/focus as
+// data-kind / --ptr-focus; an undeclared kind is decided by reader.js from the photo's shape. On
+// every other book source/kind/focus are undefined, which renders NO attribute, so a comic's markup
+// is byte-for-byte what it was. (This note lives here and not beside the figure: a {/* */} comment
+// in the template emits a space, and that space was the only diff in a comic's built HTML.)
+// focus is parseFocus-validated — two percentages — before it gets near a style attribute.
 const sysFiles = import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true });
 const meta = siteMeta(
   import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })
@@ -76,10 +82,6 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
     <div class="ptr-stage">
       <div class="ptr-track">
-        {/* a photobook page carries its DECLARED kind/focus; an undeclared kind is decided by
-            reader.js from the photo's shape. Both attributes are absent on every other book, so a
-            comic's markup is what it was (undefined renders no attribute). focus is parseFocus-
-            validated — two percentages — before it gets anywhere near a style attribute. */}
         {chapter.pages.map((p) => (
           <figure class="ptr-page" data-page={p.id} data-idx={p.pageInChapter - 1} data-kind={p.kind || undefined} style={p.focus ? `--ptr-focus: ${p.focus}` : undefined}>
             {p.imageSrc && (
