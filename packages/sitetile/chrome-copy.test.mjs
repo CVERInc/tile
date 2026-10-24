@@ -70,6 +70,27 @@ const test = (name, fn) => {
   catch (e) { console.error('  ✗ ' + name + '\n    ' + (e && e.message ? e.message : e)); process.exitCode = 1; }
 };
 
+// tile#196: a formatter keeps the platform name in the locale's natural word order.
+test('article share names cover every engine UI locale', () => {
+  for (const [lang, expected] of [
+    ['en-US', 'Share to Facebook'], ['zh-TW', '分享到 Facebook'],
+    ['ja-JP', 'Facebookでシェア'], ['ko-KR', 'Facebook에 공유'],
+  ]) {
+    assert.equal(uiCopy(lang).shareTo('Facebook'), expected, lang);
+    assert.equal(uiCopy(lang).shareTo('X'), expected.replace('Facebook', 'X'), lang);
+  }
+});
+test('article share names follow the existing locale aliases', () => {
+  for (const [alias, canonical] of [['zh-Hant', 'zh-TW'], ['zh-tw', 'zh-TW'], ['ja', 'ja-JP'], ['ko', 'ko-KR'], ['en-GB', 'en-US']]) {
+    assert.equal(uiCopy(alias).shareTo('Facebook'), uiCopy(canonical).shareTo('Facebook'), alias);
+  }
+});
+test('article share names use neutral English for absent or unsupported locales', () => {
+  for (const lang of [undefined, '', 'xx-XX', 'fr-FR']) {
+    assert.equal(uiCopy(lang).shareTo('Facebook'), 'Share to Facebook');
+  }
+});
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => {
   const p = join(dir, n);
   if (statSync(p).isDirectory()) return n === 'node_modules' ? [] : walk(p);

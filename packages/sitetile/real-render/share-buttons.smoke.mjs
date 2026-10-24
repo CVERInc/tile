@@ -1,4 +1,4 @@
-// tile#195: render the real article and footer, then measure share-link defaults and theme overrides.
+// tile#195/#196: render the real article and footer, then measure share-link defaults and theme overrides.
 // PLAYWRIGHT=/path/to/playwright/index.mjs node packages/sitetile/real-render/share-buttons.smoke.mjs
 // scripts/test.sh discovers this alongside the other real-render browser smokes.
 import assert from 'node:assert/strict';
@@ -27,10 +27,11 @@ try {
 import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from '../components/PostArticle.astro';
 export function getStaticPaths() {
-  return ['top', 'bottom', 'off'].map(row => ({ params: { fixture: row }, props: { row } }));
+  return ['en-US', 'zh-TW', 'ja-JP', 'ko-KR'].flatMap(lang =>
+    ['top', 'bottom', 'off'].map(row => ({ params: { fixture: lang + '-' + row }, props: { row, lang } })));
 }
-const { row } = Astro.props;
-const meta = { title: 'Share fixture', lang: 'en-US', 'footer-social': 'Facebook=https://www.facebook.com/example; X=https://x.com/example',
+const { row, lang } = Astro.props;
+const meta = { title: 'Share fixture', lang, 'footer-social': 'Facebook=https://www.facebook.com/example; X=https://x.com/example',
   ...(row === 'bottom' ? { 'blog-share': 'email,facebook,twitter,x,linkedin,tumblr,pinterest' } : {}),
   ...(row === 'off' ? { 'blog-share-top': 'none' } : {}) };
 const post = { title: 'Article', body: 'A shareable article.', slug: 'article' };
@@ -59,7 +60,7 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     const s = getComputedStyle(a);
     return { fontSize: s.fontSize, textDecoration: s.textDecorationLine };
   }));
-  await page.goto(`${origin}/top/`);
+  await page.goto(`${origin}/en-US-top/`);
   await check('default top row has two share links', async () => assert.equal(await page.locator('.bl-share-btn').count(), 2));
   const defaults = await styles();
   await page.locator('.bl-share-btn').evaluateAll(links => links.forEach(a => a.style.cssText = 'font-size:0.85em;text-decoration:underline;'));
@@ -72,7 +73,7 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     assert.equal((await styles())[0].fontSize, parentSize, 'theme font-size: 1em must win over the 0.85em default');
   });
   await check('normal theme specificity overrides share decoration', async () => assert.equal((await styles())[0].textDecoration, 'none', 'theme text-decoration: none must win'));
-  await page.goto(`${origin}/bottom/`);
+  await page.goto(`${origin}/en-US-bottom/`);
   await check('configured bottom row retains all seven destinations without the top row', async () => {
     assert.equal(await page.locator('.bl-share-btn').count(), 7);
     assert.equal(await page.locator('.bl-share-top').count(), 0);
@@ -84,8 +85,36 @@ const post = { title: 'Article', body: 'A shareable article.', slug: 'article' }
     });
     for (const actual of await styles()) assert.deepEqual(actual, control);
   });
-  await page.goto(`${origin}/off/`);
+  await page.goto(`${origin}/en-US-off/`);
   await check('explicit opt-out emits no share links', async () => assert.equal(await page.locator('.bl-share-btn').count(), 0));
+  const names = {
+    'en-US': brand => `Share to ${brand}`,
+    'zh-TW': brand => `分享到 ${brand}`,
+    'ja-JP': brand => `${brand}でシェア`,
+    'ko-KR': brand => `${brand}에 공유`,
+  };
+  for (const [lang, shareName] of Object.entries(names)) {
+    for (const row of ['top', 'bottom']) {
+      await page.goto(`${origin}/${lang}-${row}/`);
+      await check(`${lang} ${row}: share names differ from footer social names`, async () => {
+        assert.equal(await page.getByRole('link', { name: 'Facebook', exact: true }).count(), 1,
+          'only the footer link should be named Facebook');
+        assert.equal(await page.getByRole('link', { name: 'X', exact: true }).count(), 1,
+          'only the footer link should be named X');
+        const labels = row === 'top' ? ['Facebook', 'X'] : ['Email', 'Facebook', 'Twitter', 'X', 'LinkedIn', 'Tumblr', 'Pinterest'];
+        assert.deepEqual(await page.locator('.bl-share-btn').allTextContents(), labels, 'visible labels stay unchanged');
+        for (const label of labels) {
+          const link = page.getByRole('link', { name: shareName(label), exact: true });
+          assert.equal(await link.count(), 1, `missing accessible name: ${shareName(label)}`);
+          assert.equal(await link.getAttribute('target'), '_blank');
+          assert.equal(await link.getAttribute('rel'), 'noopener');
+        }
+        const facebook = page.getByRole('link', { name: shareName('Facebook'), exact: true });
+        assert.equal(await facebook.getAttribute('href'),
+          `https://www.facebook.com/sharer.php?u=${encodeURIComponent(`https://example.com/${lang}-${row}/`)}`);
+      });
+    }
+  }
 } finally {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
