@@ -408,9 +408,15 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
    scroll sideways for that. A section a theme has moved off-centre gets a band that stops short of
    the far edge by the offset.
    Not `box-shadow`: a shadow needs a colour, and base cannot read the theme's background into one.
-   Known edge: the copy is drawn OVER the section's own background, so a translucent surface
-   colour is twice as strong inside the section's box as in the band beside it. Opaque colours,
-   gradients and images match.
+   Known edges, both from the stacking context `isolation` makes:
+   · the copy is drawn OVER the section's own background, so a translucent surface colour is twice
+     as strong inside the section's box as in the band beside it. Opaque colours, gradients and
+     images match.
+   · the section now paints in the positioned layer, so positioned content of the section ABOVE
+     that spills into it (a hover-lift card's shadow) goes under the band, where it used to sit on
+     the plain background. Measured on a live site 10-25: 12px of card shadow at one boundary.
+   Without `isolation` the copy would fall into the root stacking context instead: hidden under
+   any ancestor a theme paints, and a gradient would jump at the section's edges.
    Zero specificity and reef.base: a theme turns the band off with `…::before { content: none }`,
    or replaces any part of it, without a fight. Behind @supports so a browser without `clip` or
    `:has()` keeps the old box instead of a page that scrolls 100vmax sideways. */
