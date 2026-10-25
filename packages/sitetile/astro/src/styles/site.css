@@ -389,44 +389,38 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
    `data-surface` for the theme to paint, and the section is caged at its width, so a painted
    surface was a box in the middle of the page. The band is the PAINT, not the box: the section's
    width, padding and content box stay exactly what the cage (or the theme) makes them, and only
-   its background is carried out to the edges of the column it sits in.
+   its surface colour is carried out to the edges of the page.
    🩸 tile#200 review: the first version moved the cage into percent padding instead. Percent
    padding resolves against the container, so a theme that capped the section with `max-width`
    alone got padding wider than the section — content 0px wide, and the cap broken. Never touch the
    geometry here.
-   How: a `::before` that copies the section's own background (`background: inherit` — whatever
-   the theme wrote for that token: a colour, a gradient, an image) and sits behind the content
-   (`z-index: -1` inside the section's own stacking context). It is one viewport wide, centred on
-   the section (`calc(50% - 50vw)` each side), so a gradient or a `cover` image spans the band the
-   way the theme drew it — a copy reaching further would show only the gradient's middle. `100vw`
-   counts a classic scrollbar, so on its own it overhangs the page by half a scrollbar on each side
-   (the .st-embed.is-wide bug below); the section's PARENT clips that with `overflow-x: clip`, so
-   the band ends exactly at the column's edges (the viewport minus the scrollbar in the normal
-   one-column page, the content column in a sidebar layout) and adds nothing to the page's scroll
-   width. `clip`, not `hidden`: no scroll container, so `position: sticky` below it keeps working.
-   The same clip also cuts anything else in that parent that was wider than it — the page used to
-   scroll sideways for that. A section a theme has moved off-centre gets a band that stops short of
-   the far edge by the offset.
-   Not `box-shadow`: a shadow needs a colour, and base cannot read the theme's background into one.
-   Known edges, both from the stacking context `isolation` makes:
-   · the copy is drawn OVER the section's own background, so a translucent surface colour is twice
-     as strong inside the section's box as in the band beside it. Opaque colours, gradients and
-     images match.
-   · the section now paints in the positioned layer, so positioned content of the section ABOVE
-     that spills into it (a hover-lift card's shadow) goes under the band, where it used to sit on
-     the plain background. Measured on a live site 10-25: 12px of card shadow at one boundary.
-   Without `isolation` the copy would fall into the root stacking context instead: hidden under
-   any ancestor a theme paints, and a gradient would jump at the section's edges.
-   Zero specificity and reef.base: a theme turns the band off with `…::before { content: none }`,
-   or replaces any part of it, without a fight. Behind @supports so a browser without `clip` or
-   `:has()` keeps the old box instead of a page that scrolls 100vmax sideways. */
-@supports (overflow-x: clip) and selector(:has(*)) {
-  :where(section[data-surface]:not(.st-full-bleed)) { position: relative; isolation: isolate; }
-  :where(section[data-surface]:not(.st-full-bleed))::before {
-    content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1;
-    background: inherit; pointer-events: none;
-  }
-  :where(:has(> section[data-surface]:not(.st-full-bleed))) { overflow-x: clip; }
+   🩸 tile#200 review r2: the second version painted a `::before` copy of the background, which
+   needed `isolation: isolate` on the section and `overflow-x: clip` on its parent. The clip made a
+   wide table in a SIBLING section unreachable (the page stopped scrolling to its last column), the
+   stacking context put a theme's fixed booking button under the next section, and a translucent
+   colour was painted twice inside the box. The band must have no side effects: no clip on any
+   ancestor, no stacking context, no scroll width, no geometry.
+   How: `border-image` with an outset. `fill` paints the image's middle over the whole border-image
+   area, widths 0 leave no border, and the outset grows that area 100vmax to each side. Outset is ink
+   overflow: it does not add to scrollable overflow, does not lay anything out, and paints in the
+   section's own background phase — so nothing about scrolling, stacking or hit-testing changes,
+   and a classic scrollbar needs no compensation (the paint past the viewport is just not seen).
+   The colour comes from `--gd-band`, which the theme sets on the token INSTEAD of `background`:
+     @layer reef.theme { [data-surface="cream"] { --gd-band: #f3e9dc; } }
+   The fill then paints the box too, once, so a translucent colour is the same inside and outside.
+   A theme that paints a token with `background` (no `--gd-band`) keeps the box exactly as before:
+   `var()` with nothing behind it makes the declaration invalid at computed-value time, every
+   border-image longhand computes to its initial value, and the section is byte-identical to one
+   without this rule. Setting both paints the box twice — don't. Colour only: the image is a
+   one-colour gradient stretched over 100vmax, so a gradient or a picture would not survive it.
+   Known edges: an ancestor a theme gives `overflow: hidden` cuts the band at its own edge. Nothing
+   clips it to its column any more, so in the sidebar layout it runs across the sidebar's column
+   too: the sidebar's own box (sticky, so it paints later, on its own background) covers it, and
+   the column below a sidebar shorter than the band shows it (measured 10-25, both sides).
+   Zero specificity and reef.base: a theme turns the band off with `border-image: none`, or
+   replaces it, without a fight. */
+:where(section[data-surface]:not(.st-full-bleed)) {
+  border-image: linear-gradient(var(--gd-band) 0 0) fill 0 / 0 / 0 100vmax;
 }
 
 /* hero — full-bleed, optional background image */

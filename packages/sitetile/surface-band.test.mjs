@@ -6,10 +6,9 @@
 // 🩸 CVERInc/reef#1869, part 2 (ruled 2026-10-20). prose / grid / timeline emit `data-surface` for
 // the theme to paint, and base caged the section twice: `.st-prose, .st-grid, .st-cta, .st-people`
 // at (0,1,0) (plus `.st-grid { max-width: 80rem }`), and the `:where()` floor. A painted surface was
-// a box in the middle of the page. The band rule moves the cage into the side padding with the
-// SAME numbers, so what this file pins is that the numbers stay the same numbers: the cap and the
-// inset are read from the cage rules, not restated here, and the rule stays in reef.base at a
-// specificity that beats (0,1,0).
+// a box in the middle of the page. The band is paint only: a `border-image` outset in the colour
+// the theme puts in `--gd-band`. What this file pins is that it stays paint — no geometry (tile#200
+// review), no clip, stacking context or pseudo-element (review r2) — and stays a reef.base floor.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -96,11 +95,12 @@ test('🔴 the Astro components emit data-surface on the section itself', () => 
 
 // ── the rule: paint only, and where it lives ────────────────────────────────────────────────────
 
-const SUPPORTS = '@supports (overflow-x: clip) and selector(:has(*))';
 const SECTION = ':where(section[data-surface]:not(.st-full-bleed))';
-const PAINT = `${SECTION}::before`;
-const PARENT = ':where(:has(> section[data-surface]:not(.st-full-bleed)))';
+const BAND = 'linear-gradient(var(--gd-band) 0 0) fill 0 / 0 / 0 100vmax';
 const GEOMETRY = /(^|;)\s*(max-width|min-width|width|inline-size|max-inline-size|padding|padding-[a-z-]+|margin|margin-[a-z-]+)\s*:/;
+// What r2 needed and the tile#200 r2 review measured as side effects: a clip on the parent cut a
+// sibling's wide table off, a stacking context put a fixed control under the next section.
+const SIDE_EFFECT = /(^|;)\s*(overflow|overflow-[a-z]+|isolation|z-index|position|transform|filter|clip-path|contain|opacity|will-change)\s*:/;
 
 test('🔴 no rule touches a surface section\'s geometry — the band is paint (tile#200 review)', () => {
   // r1 un-caged the box and moved the cage into percent padding; a theme capping the section with
@@ -110,48 +110,31 @@ test('🔴 no rule touches a surface section\'s geometry — the band is paint (
   assert.deepEqual(hits.map((r) => `${r.selector} { ${r.css} }`), [], 'a data-surface rule sets geometry again');
 });
 
-test('🔴 the three band rules exist once each, in `@layer reef.base` behind the clip/:has() @supports', () => {
-  // Count, not existence: a second copy later in the file would win by source order. The @supports
-  // matters: without `clip` the copy would overhang the page; without `:has()` nothing clips it.
-  for (const sel of [SECTION, PAINT, PARENT]) {
-    const found = RULES.filter((r) => r.selector === sel);
-    assert.equal(found.length, 1, `expected ${sel} once, found ${found.length}`);
-    assert.deepEqual(found[0].context, ['@layer reef.base', SUPPORTS],
-      `${sel} sits in [${found[0].context.join(' > ')}]`);
-  }
+test('🔴 no rule naming data-surface clips, stacks or positions anything (tile#200 review r2)', () => {
+  // Covers the section, its pseudo-elements AND any `:has(> section[data-surface])` parent rule.
+  const hits = RULES.filter((r) => /data-surface/.test(r.selector) && (SIDE_EFFECT.test(r.css) || /::?(before|after)\b/.test(r.selector)));
+  assert.deepEqual(hits.map((r) => `${r.selector} { ${r.css} }`), [], 'a data-surface rule has a side effect beyond paint');
 });
 
-test('🔴 the paint layer copies the section\'s own background, one viewport wide, behind the content', () => {
-  const b = RULES.find((r) => r.selector === PAINT);
-  assert.equal(decl(b.css, 'content'), '""');
-  assert.equal(decl(b.css, 'position'), 'absolute');
-  // One viewport, centred: a gradient spans the band as drawn. A wider copy (-100vmax) shows only
-  // the gradient's middle — the smoke measured rgb(80,97,140) at the edge of a blue→orange band.
-  assert.equal(decl(b.css, 'inset'), '0 calc(50% - 50vw)');
-  assert.equal(decl(b.css, 'z-index'), '-1');
-  // The only paint in base is `inherit`: the colour, gradient or image is the theme's.
-  assert.equal(decl(b.css, 'background'), 'inherit');
-  const LOOK = /(^|;)\s*(color|background-[a-z]+|border|border-[a-z-]+|box-shadow|opacity|filter)\s*:/;
-  const hit = b.css.match(LOOK);
-  assert.ok(!hit, `look property "${hit?.[2]}" on the paint layer — the surface belongs to the theme`);
+test('🔴 the band rule exists once, directly in `@layer reef.base`, and is only the border-image', () => {
+  // Count, not existence: a second copy later in the file would win by source order.
+  const found = RULES.filter((r) => r.selector === SECTION);
+  assert.equal(found.length, 1, `expected ${SECTION} once, found ${found.length}`);
+  assert.deepEqual(found[0].context, ['@layer reef.base'], `${SECTION} sits in [${found[0].context.join(' > ')}]`);
+  assert.equal(found[0].css.replace(/;\s*$/, ''), `border-image: ${BAND}`);
 });
 
-test('🔴 the section only becomes the paint layer\'s positioned, isolated parent', () => {
-  // isolation keeps z-index:-1 inside the section: above its own background, below its content, and
-  // never behind an ancestor's background (a theme painting .rf-main would otherwise hide the band).
-  const s = RULES.find((r) => r.selector === SECTION);
-  assert.equal(s.css.replace(/;\s*$/, ''), 'position: relative; isolation: isolate');
+test('🔴 the band reads only --gd-band, and base never sets it', () => {
+  // A base default would paint every surface= section, including tokens a theme paints with
+  // `background` — the r2 double-composite. No --gd-band ⇒ invalid at computed-value time ⇒ no-op.
+  const sets = RULES.filter((r) => /(^|;)\s*--gd-band\s*:/.test(r.css));
+  assert.deepEqual(sets.map((r) => r.selector), [], 'base sets --gd-band');
+  assert.ok(!/var\(--gd-band\s*,/.test(CSS), 'the band has a var() fallback — it would paint without a theme');
 });
 
-test('🔴 the parent clips with overflow-x: clip — not hidden (no scroll container), not missing (page scrolls)', () => {
-  // 100vw counts a classic scrollbar: without this the page scrolls sideways by half of one (the
-  // smoke: scrollWidth 1273 vs clientWidth 1265).
-  const p = RULES.find((r) => r.selector === PARENT);
-  assert.equal(p.css.replace(/;\s*$/, ''), 'overflow-x: clip');
-});
-
-test('the band rules are zero-specificity floors, so any theme rule wins them', () => {
-  for (const sel of [SECTION, PAINT, PARENT]) assert.match(sel, /^:where\(/, `${sel} is not a :where() floor`);
+test('the band rule is a zero-specificity floor, so any theme rule wins it', () => {
+  assert.ok(RULES.some((r) => r.selector === SECTION), `${SECTION} is missing`);
+  assert.match(SECTION, /^:where\(/);
 });
 
 console.log(`${passed} passed`);
