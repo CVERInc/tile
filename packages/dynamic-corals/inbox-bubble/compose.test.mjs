@@ -82,9 +82,24 @@ test('handoff details appear only for a refusal and prefill the asked question',
 });
 
 test('handoff explains optional email in every locale', () => {
-	assert.match(handoffFormHtml(COPY.ja, '質問'), /メールアドレスを残していただくと、店主からの返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。/);
-	assert.match(handoffFormHtml(COPY['zh-tw'], '問題'), /留下 email 才收得到店家的回覆；不留的話，只有回到這個網頁才看得到。/);
-	assert.match(handoffFormHtml(COPY.en, 'Question'), /Leave your email to get the owner&#39;s reply by email. Without it, you can only see replies by coming back to this page./);
+	const expected = {
+		en: ["Leave your email to get a reply by email. Without it, you can only see replies by coming back to this page.", 'Passed to a person — the reply will come by email.', 'Passed to a person — the reply will show here.', 'Send to a person'],
+		'zh-tw': ['留下 email 才收得到回覆；不留的話，只有回到這個網頁才看得到。', '已轉給真人，回覆會寄到你填的信箱', '已轉給真人，回覆會顯示在這裡', '傳給真人'],
+		ja: ['メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。', '担当者に取り次ぎました。返信はメールで届きます。', '担当者に取り次ぎました。返信はここに表示されます。', '担当者に送る'],
+		'zh-cn': ['留下 email 才收得到回复；不留的话，只有回到这个网页才看得到。', '已转给真人，回复会发送到你填写的邮箱', '已转给真人，回复会显示在这里', '传给真人'],
+		de: ['Hinterlassen Sie Ihre E-Mail-Adresse, um eine Antwort per E-Mail zu erhalten. Ohne sie sehen Sie Antworten nur, wenn Sie auf diese Seite zurückkehren.', 'An eine Person weitergegeben — die Antwort kommt per E-Mail.', 'An eine Person weitergegeben — die Antwort erscheint hier.', 'An eine Person senden'],
+		fr: ['Laissez votre e-mail pour recevoir la réponse par e-mail. Sans lui, vous ne verrez les réponses qu’en revenant sur cette page.', 'Transmis à une personne — la réponse arrivera par e-mail.', 'Transmis à une personne — la réponse s’affichera ici.', 'Envoyer à une personne'],
+		es: ['Deja tu correo para recibir la respuesta por email. Sin él, solo verás las respuestas si vuelves a esta página.', 'Enviado a una persona: la respuesta llegará por correo.', 'Enviado a una persona: la respuesta aparecerá aquí.', 'Enviar a una persona'],
+		'pt-br': ['Deixe seu e-mail para receber a resposta por e-mail. Sem ele, você só vê as respostas voltando a esta página.', 'Enviado para uma pessoa — a resposta chega por e-mail.', 'Enviado para uma pessoa — a resposta vai aparecer aqui.', 'Enviar para uma pessoa'],
+		ko: ['이메일을 남기면 답장을 이메일로 받을 수 있어요. 남기지 않으면 이 페이지에 다시 와야만 답장을 볼 수 있어요.', '사람에게 전달했어요. 답장은 이메일로 와요.', '사람에게 전달했어요. 답장은 여기에 표시돼요.', '사람에게 보내기']
+	};
+	for (const [locale, [emailNote, withEmail, withoutEmail, sendLabel]] of Object.entries(expected)) {
+		assert.equal(COPY[locale].emailNote, emailNote, `${locale}.emailNote`);
+		assert.equal(COPY[locale].statusHandedOffEmail, withEmail, `${locale}.statusHandedOffEmail`);
+		assert.equal(COPY[locale].statusHandedOffNoEmail, withoutEmail, `${locale}.statusHandedOffNoEmail`);
+		assert.equal(COPY[locale].sendOwner, sendLabel, `${locale}.sendOwner`);
+		assert.match(handoffFormHtml(COPY[locale], 'Question'), new RegExp(emailNote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, '&#39;')));
+	}
 });
 
 test('handoff payload omits blank identity and includes supplied identity', () => {
@@ -479,11 +494,11 @@ test('askAgain threads a custom assistant name through, in every locale', () => 
 test('statusFor switches to the hand-off wording once a conversation exists, by email presence', () => {
 	assert.equal(
 		statusFor(COPY['zh-tw'], { hasConv: true, hasEmail: true, kaitoOn: true }),
-		'已交給店家，會透過信箱回覆'
+		'已轉給真人，回覆會寄到你填的信箱'
 	);
 	assert.equal(
 		statusFor(COPY['zh-tw'], { hasConv: true, hasEmail: false, kaitoOn: true }),
-		'已交給店家，回覆會顯示在這裡'
+		'已轉給真人，回覆會顯示在這裡'
 	);
 });
 
