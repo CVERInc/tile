@@ -1797,13 +1797,13 @@ test('2160: Enter still asks — the question leaves as POST /api/kaito, the lis
 	}
 });
 
-test('2160: on the compose view (no KAITO) the button says「Send to the owner」once the index is live', async () => {
+test('2160: on the compose view (no KAITO) the button says「Send to a person」once the index is live', async () => {
 	respond = servingIndex(SEARCH_ROWS);
 	try {
 		const { root } = await mountFresh({ 'data-search-index': '/search-index.json' });
 		await openBubble(root);
 		await drain();
-		assert.equal(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Send to the owner');
+		assert.equal(root.querySelector('.dc-inbox-form').querySelector('button').textContent, 'Send to a person');
 	} finally {
 		respond = null;
 	}
@@ -1881,7 +1881,7 @@ test('2160: an edit made while the ask is pending does not outlive the answer �
 	}
 });
 
-test('2160: an explicit data-send-label wins over「Ask AI」/「Send to the owner」— on open, when the index lands, and after a send', async () => {
+test('2160: an explicit data-send-label wins over「Ask AI」/「Send to a person」— on open, when the index lands, and after a send', async () => {
 	const index = deferred();
 	respond = (url) => (String(url).endsWith('/search-index.json')
 		? index.promise.then(() => ({ ok: true, status: 200, json: async () => SEARCH_ROWS }))

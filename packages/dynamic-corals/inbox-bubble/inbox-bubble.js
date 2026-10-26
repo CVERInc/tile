@@ -317,7 +317,7 @@ export const COPY = {
 		sentToHuman: "Passed to a person — you'll get a reply here.",
 		name: 'Name (optional)',
 		email: 'Email (optional)',
-		emailNote: "Leave your email to get the owner's reply by email. Without it, you can only see replies by coming back to this page.",
+		emailNote: "Leave your email to get a reply by email. Without it, you can only see replies by coming back to this page.",
 		cancel: 'Cancel',
 		open: 'Message us',
 		title: 'Leave a message',
@@ -335,8 +335,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
 		statusNoAi: 'A person reads what you send',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}answers from this site's content`,
-		statusHandedOffEmail: "Passed to the owner — they'll reply by email.",
-		statusHandedOffNoEmail: 'Passed to the owner — the reply will show here.',
+		statusHandedOffEmail: "Passed to a person — the reply will come by email.",
+		statusHandedOffNoEmail: 'Passed to a person — the reply will show here.',
 		askAgain: (a) => `Ask ${a} again`,
 		newConversation: 'Start a new conversation',
 		backToHuman: 'Back to your conversation',
@@ -344,7 +344,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Typing only searches inside your browser. Nothing is sent until you press the button.',
 		askAi: 'Ask AI',
-		sendOwner: 'Send to the owner'
+		sendOwner: 'Send to a person'
 	},
 	'zh-tw': {
 		ask: '問這個站的事…',
@@ -356,7 +356,7 @@ export const COPY = {
 		sentToHuman: '已經轉給真人了，回覆會出現在這裡。',
 		name: '姓名（選填）',
 		email: 'Email（選填）',
-		emailNote: '留下 email 才收得到店家的回覆；不留的話，只有回到這個網頁才看得到。',
+		emailNote: '留下 email 才收得到回覆；不留的話，只有回到這個網頁才看得到。',
 		cancel: '取消',
 		open: '傳訊息',
 		title: '留言給我們',
@@ -374,8 +374,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusNoAi: '真人會看',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用這個站的內容回答`,
-		statusHandedOffEmail: '已交給店家，會透過信箱回覆',
-		statusHandedOffNoEmail: '已交給店家，回覆會顯示在這裡',
+		statusHandedOffEmail: '已轉給真人，回覆會寄到你填的信箱',
+		statusHandedOffNoEmail: '已轉給真人，回覆會顯示在這裡',
 		askAgain: (a) => `重新問 ${a}`,
 		newConversation: '新對話',
 		backToHuman: '回到真人對話',
@@ -383,7 +383,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '打字時只在你的瀏覽器裡找，按下『問』才會送出。',
 		askAi: '問 AI',
-		sendOwner: '傳給站主'
+		sendOwner: '傳給真人'
 	},
 	ja: {
 		ask: 'このサイトについて質問…',
@@ -395,7 +395,7 @@ export const COPY = {
 		sentToHuman: '担当者に取り次ぎました。返信はここに表示されます。',
 		name: 'お名前（任意）',
 		email: 'メールアドレス（任意）',
-		emailNote: 'メールアドレスを残していただくと、店主からの返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。',
+		emailNote: 'メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。',
 		cancel: 'キャンセル',
 		open: 'メッセージ',
 		title: 'メッセージを残す',
@@ -413,7 +413,7 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
-		statusHandedOffEmail: '担当者に取り次ぎました。メールで返信します。',
+		statusHandedOffEmail: '担当者に取り次ぎました。返信はメールで届きます。',
 		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
 		newConversation: '新しい会話を始める',
@@ -422,7 +422,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
 		askAi: 'AI に聞く',
-		sendOwner: '店主に送る'
+		sendOwner: '担当者に送る'
 	},
 	'zh-cn': {
 		ask: '问这个网站的事…',
@@ -434,7 +434,7 @@ export const COPY = {
 		sentToHuman: '已经转给真人了，回复会出现在这里。',
 		name: '姓名（选填）',
 		email: 'Email（选填）',
-		emailNote: '留下 email 才收得到店家的回复；不留的话，只有回到这个网页才看得到。',
+		emailNote: '留下 email 才收得到回复；不留的话，只有回到这个网页才看得到。',
 		cancel: '取消',
 		open: '发消息',
 		title: '留言给我们',
@@ -452,8 +452,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusNoAi: '真人会看',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用这个网站的内容回答`,
-		statusHandedOffEmail: '已交给店家，会通过邮箱回复',
-		statusHandedOffNoEmail: '已交给店家，回复会显示在这里',
+		statusHandedOffEmail: '已转给真人，回复会发送到你填写的邮箱',
+		statusHandedOffNoEmail: '已转给真人，回复会显示在这里',
 		askAgain: (a) => `重新问 ${a}`,
 		newConversation: '新对话',
 		backToHuman: '回到真人对话',
@@ -461,7 +461,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '打字时只在你的浏览器里找，按下按钮才会送出。',
 		askAi: '问 AI',
-		sendOwner: '传给站主'
+		sendOwner: '传给真人'
 	},
 	// 🔴 The five below arrived 2026-09-27 (tile #14): a German site set its own title and
 	// placeholder through data-*, and every other word in the panel — Send, the errors, the status
@@ -479,7 +479,7 @@ export const COPY = {
 		sentToHuman: 'An einen Menschen weitergegeben — die Antwort erscheint hier.',
 		name: 'Name (optional)',
 		email: 'E-Mail (optional)',
-		emailNote: 'Hinterlassen Sie Ihre E-Mail-Adresse, um die Antwort des Betreibers per E-Mail zu erhalten. Ohne sie sehen Sie Antworten nur, wenn Sie auf diese Seite zurückkehren.',
+		emailNote: 'Hinterlassen Sie Ihre E-Mail-Adresse, um eine Antwort per E-Mail zu erhalten. Ohne sie sehen Sie Antworten nur, wenn Sie auf diese Seite zurückkehren.',
 		cancel: 'Abbrechen',
 		open: 'Nachricht senden',
 		title: 'Nachricht hinterlassen',
@@ -497,8 +497,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
 		statusNoAi: 'Was Sie senden, liest ein Mensch',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}antwortet mit den Inhalten dieser Website`,
-		statusHandedOffEmail: 'An den Betreiber weitergegeben — die Antwort kommt per E-Mail.',
-		statusHandedOffNoEmail: 'An den Betreiber weitergegeben — die Antwort erscheint hier.',
+		statusHandedOffEmail: 'An eine Person weitergegeben — die Antwort kommt per E-Mail.',
+		statusHandedOffNoEmail: 'An eine Person weitergegeben — die Antwort erscheint hier.',
 		askAgain: (a) => `${a} noch einmal fragen`,
 		newConversation: 'Neues Gespräch beginnen',
 		backToHuman: 'Zurück zu Ihrem Gespräch',
@@ -506,7 +506,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Beim Tippen wird nur in Ihrem Browser gesucht. Erst mit dem Knopf wird etwas gesendet.',
 		askAi: 'KI fragen',
-		sendOwner: 'An den Betreiber senden'
+		sendOwner: 'An eine Person senden'
 	},
 	fr: {
 		ask: 'Une question sur ce site…',
@@ -518,7 +518,7 @@ export const COPY = {
 		sentToHuman: 'Transmis à une personne — la réponse s’affichera ici.',
 		name: 'Nom (facultatif)',
 		email: 'E-mail (facultatif)',
-		emailNote: 'Laissez votre e-mail pour recevoir la réponse du responsable du site par e-mail. Sans lui, vous ne verrez les réponses qu’en revenant sur cette page.',
+		emailNote: 'Laissez votre e-mail pour recevoir la réponse par e-mail. Sans lui, vous ne verrez les réponses qu’en revenant sur cette page.',
 		cancel: 'Annuler',
 		open: 'Nous écrire',
 		title: 'Laisser un message',
@@ -536,8 +536,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
 		statusNoAi: 'Une personne lit ce que vous envoyez',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}répond à partir du contenu de ce site`,
-		statusHandedOffEmail: 'Transmis au responsable du site — la réponse arrivera par e-mail.',
-		statusHandedOffNoEmail: 'Transmis au responsable du site — la réponse s’affichera ici.',
+		statusHandedOffEmail: 'Transmis à une personne — la réponse arrivera par e-mail.',
+		statusHandedOffNoEmail: 'Transmis à une personne — la réponse s’affichera ici.',
 		askAgain: (a) => `Redemander à ${a}`,
 		newConversation: 'Nouvelle conversation',
 		backToHuman: 'Revenir à votre conversation',
@@ -545,7 +545,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'En tapant, la recherche reste dans votre navigateur. Rien n’est envoyé avant d’appuyer sur le bouton.',
 		askAi: 'Demander à l’IA',
-		sendOwner: 'Envoyer au responsable du site'
+		sendOwner: 'Envoyer à une personne'
 	},
 	es: {
 		ask: 'Pregunta sobre este sitio…',
@@ -557,7 +557,7 @@ export const COPY = {
 		sentToHuman: 'Enviado a una persona: la respuesta aparecerá aquí.',
 		name: 'Nombre (opcional)',
 		email: 'Correo (opcional)',
-		emailNote: 'Deja tu correo para recibir por email la respuesta del responsable del sitio. Sin él, solo verás las respuestas si vuelves a esta página.',
+		emailNote: 'Deja tu correo para recibir la respuesta por email. Sin él, solo verás las respuestas si vuelves a esta página.',
 		cancel: 'Cancelar',
 		open: 'Escríbenos',
 		title: 'Deja un mensaje',
@@ -575,8 +575,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
 		statusNoAi: 'Lo que envíes lo lee una persona',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde con el contenido de este sitio`,
-		statusHandedOffEmail: 'Enviado al responsable del sitio: te responderá por correo.',
-		statusHandedOffNoEmail: 'Enviado al responsable del sitio: la respuesta aparecerá aquí.',
+		statusHandedOffEmail: 'Enviado a una persona: la respuesta llegará por correo.',
+		statusHandedOffNoEmail: 'Enviado a una persona: la respuesta aparecerá aquí.',
 		askAgain: (a) => `Volver a preguntar a ${a}`,
 		newConversation: 'Empezar una conversación nueva',
 		backToHuman: 'Volver a tu conversación',
@@ -584,7 +584,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Al escribir, solo se busca en tu navegador. No se envía nada hasta que pulses el botón.',
 		askAi: 'Preguntar a la IA',
-		sendOwner: 'Enviar al responsable del sitio'
+		sendOwner: 'Enviar a una persona'
 	},
 	'pt-br': {
 		ask: 'Pergunte sobre este site…',
@@ -596,7 +596,7 @@ export const COPY = {
 		sentToHuman: 'Enviado para uma pessoa — a resposta vai aparecer aqui.',
 		name: 'Nome (opcional)',
 		email: 'E-mail (opcional)',
-		emailNote: 'Deixe seu e-mail para receber a resposta do responsável pelo site por e-mail. Sem ele, você só vê as respostas voltando a esta página.',
+		emailNote: 'Deixe seu e-mail para receber a resposta por e-mail. Sem ele, você só vê as respostas voltando a esta página.',
 		cancel: 'Cancelar',
 		open: 'Fale conosco',
 		title: 'Deixe uma mensagem',
@@ -614,8 +614,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
 		statusNoAi: 'Uma pessoa lê o que você envia',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde com o conteúdo deste site`,
-		statusHandedOffEmail: 'Enviado ao responsável pelo site — a resposta chega por e-mail.',
-		statusHandedOffNoEmail: 'Enviado ao responsável pelo site — a resposta vai aparecer aqui.',
+		statusHandedOffEmail: 'Enviado para uma pessoa — a resposta chega por e-mail.',
+		statusHandedOffNoEmail: 'Enviado para uma pessoa — a resposta vai aparecer aqui.',
 		askAgain: (a) => `Perguntar de novo a ${a}`,
 		newConversation: 'Começar uma nova conversa',
 		backToHuman: 'Voltar para a sua conversa',
@@ -623,7 +623,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Ao digitar, a busca fica só no seu navegador. Nada é enviado até você apertar o botão.',
 		askAi: 'Perguntar à IA',
-		sendOwner: 'Enviar ao responsável pelo site'
+		sendOwner: 'Enviar para uma pessoa'
 	},
 	ko: {
 		ask: '이 사이트에 대해 물어보세요…',
@@ -635,7 +635,7 @@ export const COPY = {
 		sentToHuman: '사람에게 전달했어요. 답장은 여기에 표시돼요.',
 		name: '이름 (선택)',
 		email: '이메일 (선택)',
-		emailNote: '이메일을 남기면 운영자의 답장을 이메일로 받을 수 있어요. 남기지 않으면 이 페이지에 다시 와야만 답장을 볼 수 있어요.',
+		emailNote: '이메일을 남기면 답장을 이메일로 받을 수 있어요. 남기지 않으면 이 페이지에 다시 와야만 답장을 볼 수 있어요.',
 		cancel: '취소',
 		open: '메시지 보내기',
 		title: '메시지 남기기',
@@ -655,8 +655,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}먼저 답하고, 보내면 사람이 읽어요`,
 		statusNoAi: '보내면 사람이 읽어요',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}이 사이트의 내용으로 답해요`,
-		statusHandedOffEmail: '운영자에게 전달했어요. 답장은 이메일로 와요.',
-		statusHandedOffNoEmail: '운영자에게 전달했어요. 답장은 여기에 표시돼요.',
+		statusHandedOffEmail: '사람에게 전달했어요. 답장은 이메일로 와요.',
+		statusHandedOffNoEmail: '사람에게 전달했어요. 답장은 여기에 표시돼요.',
 		askAgain: (a) => `${a}에게 다시 묻기`,
 		newConversation: '새 대화 시작하기',
 		backToHuman: '대화로 돌아가기',
@@ -664,7 +664,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '입력하는 동안은 브라우저 안에서만 찾아요. 버튼을 누르기 전에는 아무것도 보내지 않아요.',
 		askAi: 'AI에게 묻기',
-		sendOwner: '운영자에게 보내기'
+		sendOwner: '사람에게 보내기'
 	}
 };
 
@@ -2884,7 +2884,7 @@ function createPlacement(host, shadow, root) {
 			unobserve();
 			observed = panel;
 			observer = new ResizeObserver(() => update());
-			// The composer is one of these: a button relabelled after open (「Send」→「Send to the owner」
+			// The composer is one of these: a button relabelled after open (「Send」→「Send to a person」
 			// once search loads) no longer fits its row, wraps, and the form's new height is the signal.
 			for (const part of panel.children) if (part !== log) observer.observe(part);
 		}
@@ -3256,7 +3256,7 @@ export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onS
 			sending = false;
 			button.disabled = false;
 			// reef#2160: a function, so a label that depends on state the search wiring learns after
-			// the first open (「問 AI」/「傳給站主」once the index has rows) survives a send.
+			// the first open (「問 AI」/「傳給真人」once the index has rows) survives a send.
 			button.textContent = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
 			textarea.removeAttribute('aria-busy');
 			textarea.focus();
@@ -3412,7 +3412,7 @@ export async function mount(el, handoff = null) {
 	let searchLive = false;
 	/**
 	 * 🔴 THE OWNER'S WORDS WIN (codex r1 on tile#180). `data-send-label` is a documented override;
-	 *「問 AI」/「傳給站主」are only better DEFAULTS than「Send」, so they never replace a label the
+	 *「問 AI」/「傳給真人」are only better DEFAULTS than「Send」, so they never replace a label the
 	 * host chose — not on open, not when the index lands, not after a send.
 	 */
 	const ownSendLabel = Boolean(el.getAttribute('data-send-label'));
