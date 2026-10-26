@@ -2884,7 +2884,7 @@ function createPlacement(host, shadow, root) {
 			unobserve();
 			observed = panel;
 			observer = new ResizeObserver(() => update());
-			// The composer is one of these: a button relabelled after open (「Send」→「Send to the owner」
+			// The composer is one of these: a button relabelled after open (「Send」→「Send to a person」
 			// once search loads) no longer fits its row, wraps, and the form's new height is the signal.
 			for (const part of panel.children) if (part !== log) observer.observe(part);
 		}
@@ -3256,7 +3256,7 @@ export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onS
 			sending = false;
 			button.disabled = false;
 			// reef#2160: a function, so a label that depends on state the search wiring learns after
-			// the first open (「問 AI」/「傳給站主」once the index has rows) survives a send.
+			// the first open (「問 AI」/「傳給真人」once the index has rows) survives a send.
 			button.textContent = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
 			textarea.removeAttribute('aria-busy');
 			textarea.focus();
@@ -3412,7 +3412,7 @@ export async function mount(el, handoff = null) {
 	let searchLive = false;
 	/**
 	 * 🔴 THE OWNER'S WORDS WIN (codex r1 on tile#180). `data-send-label` is a documented override;
-	 *「問 AI」/「傳給站主」are only better DEFAULTS than「Send」, so they never replace a label the
+	 *「問 AI」/「傳給真人」are only better DEFAULTS than「Send」, so they never replace a label the
 	 * host chose — not on open, not when the index lands, not after a send.
 	 */
 	const ownSendLabel = Boolean(el.getAttribute('data-send-label'));
