@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
+import { encodePng } from '../icon-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -747,6 +748,59 @@ console.log('▸ astro build → .smoke-badge-collision/dist-badge-collision/ (r
 const CDIST = buildBadgeCollisionFixture();
 console.log('▸ astro build → .smoke-coral-css-declared/dist-coral-css-declared/ (the same fixture site, declaring dynamic-coral-css)…');
 const DDIST = buildCoralCssDeclaredFixture();
+
+// A site whose `_site.md` sets `favicon:` to a real square PNG in public/, and nothing else about
+// icons. 🩸 Before this build existed, such a site served our generated badge at /favicon.ico,
+// /favicon.svg and /apple-touch-icon.png, and a manifest naming three PNGs nobody wrote. Every
+// other fixture here either sets no site-level favicon or plants a file AT a well-known path, so
+// none of them could see it. A minimal site of its own, built the way the hostile-blog one is.
+const OWNER_MARK_REL = 'brand/owner-mark.png';
+const OWNER_MARK_PX = 96;
+const OWNER_MARK_BYTES = (() => {
+  const px = new Uint8Array(OWNER_MARK_PX * OWNER_MARK_PX * 4);
+  for (let i = 0; i < OWNER_MARK_PX * OWNER_MARK_PX; i++) { px[i * 4] = 200; px[i * 4 + 2] = 40; px[i * 4 + 3] = 255; }
+  return encodePng(px, OWNER_MARK_PX);
+})();
+function buildOwnerFaviconFixture() {
+  const ODIR = join(HERE, '..', '.smoke-owner-favicon');
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision|dist-coral-css-declared|\.smoke-coral-css-declared|dist-owner-favicon|\.smoke-owner-favicon)(?:[\\/]|$)/;
+  rmSync(ODIR, { recursive: true, force: true });
+  cpSync(HERE, ODIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(ODIR, 'node_modules'), 'dir');
+  for (const d of ['content', 'blog']) {
+    rmSync(join(ODIR, d), { recursive: true, force: true });
+    mkdirSync(join(ODIR, d), { recursive: true });
+  }
+  writeFileSync(join(ODIR, 'content', '_site.md'), `---
+sitetile-page: _site
+brand: Example Studio
+lang: en-US
+favicon: /${OWNER_MARK_REL}
+---
+`, 'utf8');
+  writeFileSync(join(ODIR, 'content', 'home.md'), `---
+sitetile-page: home
+title: Example Studio — home
+lang: en-US
+---
+
+## Home
+%% sitetile: prose %%
+Home page body.
+`, 'utf8');
+  mkdirSync(join(ODIR, 'public', dirname(OWNER_MARK_REL)), { recursive: true });
+  writeFileSync(join(ODIR, 'public', OWNER_MARK_REL), OWNER_MARK_BYTES);
+  const ODIST = join(ODIR, 'dist-owner-favicon');
+  execFileSync('npx', ['astro', 'build', '--outDir', ODIST], {
+    cwd: ODIR, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: 'owner-favicon-smoke', PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  });
+  return ODIST;
+}
+console.log('▸ astro build → .smoke-owner-favicon/dist-owner-favicon/ (a site-level `favicon:` PNG reaches the icon files and the manifest)…');
+const ODIST = buildOwnerFaviconFixture();
+const ownerHome = readFileSync(join(ODIST, 'index.html'), 'utf8');
+const manifestIconSrcs = (dist) => JSON.parse(readFileSync(join(dist, 'manifest.webmanifest'), 'utf8')).icons.map((i) => i.src);
 // Every .html the build emitted — not only index.html, because 404.html is exactly the kind of
 // page a per-route stamp forgets.
 function allHtmlPages(root) {
@@ -900,6 +954,19 @@ const checks = [
     JSON.stringify(builtCollisionDirs) === JSON.stringify(BADGE_COLLISION_KINDS.map(([kind]) => kind).slice().sort())],
   ['🔴 icons: the owner\'s real apple-touch-icon.png is NEVER overwritten by the badge route (P2-1/P2-2 — "must not overwrite it")', () =>
     collisionAppleTouchBytes === REAL_APPLE_TOUCH_BYTES],
+  // -- a site-level `favicon:` PNG (buildOwnerFaviconFixture) --
+  ['🔴 icons: with `favicon:` set to a PNG, /apple-touch-icon.png IS the owner\'s PNG, byte for byte', () =>
+    readFileSync(join(ODIST, 'apple-touch-icon.png')).equals(OWNER_MARK_BYTES)],
+  ['🔴 icons: with `favicon:` set, no generated /favicon.ico or /favicon.svg is written (the <link> names the mark)', () =>
+    !existsSync(join(ODIST, 'favicon.ico')) && !existsSync(join(ODIST, 'favicon.svg'))
+    && ownerHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)],
+  ['icons: with `favicon:` set, no icon link on the page is labelled our badge', () =>
+    !/<link rel="(?:icon|apple-touch-icon)"[^>]*data-generated/.test(ownerHome)],
+  ['🔴 manifest: lists the owner\'s PNG at its real size, and only it', () =>
+    JSON.stringify(JSON.parse(readFileSync(join(ODIST, 'manifest.webmanifest'), 'utf8')).icons)
+      === JSON.stringify([{ src: `/${OWNER_MARK_REL}`, sizes: `${OWNER_MARK_PX}x${OWNER_MARK_PX}`, type: 'image/png', purpose: 'any' }])],
+  ['🔴 manifest: every icon it names exists in that build (primary and owner-favicon builds)', () =>
+    [DIST, ODIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
   // -- CVERInc/reef#596: every *.svg the site serves is an attachment --
   ['🔴 _headers: a site with no _headers of its own gets dist/_headers carrying exactly the platform /*.svg attachment rule', () =>
     primaryHeaders === PLATFORM_RULE && svgRuleCount(primaryHeaders) === 1],
