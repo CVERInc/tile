@@ -11,13 +11,16 @@
 import { siteMeta } from '../lib/blog.mjs';
 import { badgeSvg, badgePaths, ICON_PATHS } from '@icons';
 
+// The layout's own src gate: a mark it would refuse to link keeps this file (icon-core's linkedMark).
+import { safeSrc } from '../../../site-core.js';
+
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
 
 export function GET() {
   // An owner who set `favicon:` gets no generated file here (icon-core's badgePaths). An endpoint
   // response with no body is a file Astro does not write, so the path is simply absent and the
   // browser uses the page's <link rel=icon>, which names the owner's mark.
-  if (!badgePaths(meta).has(ICON_PATHS.svg)) return new Response(null, { status: 404 });
+  if (!badgePaths(meta, null, safeSrc).has(ICON_PATHS.svg)) return new Response(null, { status: 404 });
   return new Response(badgeSvg(meta), {
     headers: { 'Content-Type': 'image/svg+xml; charset=utf-8' },
   });

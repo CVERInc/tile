@@ -16,11 +16,12 @@
 import { siteMeta } from '../lib/blog.mjs';
 import { appleTouchFile } from '@icons';
 import { readPublic } from '../lib/public-file.mjs';
+import { safeSrc } from '../../../site-core.js';
 
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
 
 export function GET() {
-  return new Response(appleTouchFile(meta, readPublic), {
+  return new Response(appleTouchFile(meta, readPublic, safeSrc), {
     headers: { 'Content-Type': 'image/png' },
   });
 }

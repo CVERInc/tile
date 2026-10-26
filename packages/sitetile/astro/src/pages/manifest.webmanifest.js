@@ -9,11 +9,12 @@ import { siteMeta } from '../lib/blog.mjs';
 import { manifestJson, manifestIcons, PWA_ICON_FILES } from '@pwa';
 import { ownerPng } from '@icons';
 import { readPublic, publicHas } from '../lib/public-file.mjs';
+import { safeSrc } from '../../../site-core.js';
 
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
 
 export function GET() {
-  const icons = manifestIcons(PWA_ICON_FILES.filter(publicHas), ownerPng(meta, readPublic));
+  const icons = manifestIcons(PWA_ICON_FILES.filter(publicHas), ownerPng(meta, readPublic, safeSrc));
   return new Response(manifestJson(meta, { icons }), {
     headers: { 'Content-Type': 'application/manifest+json; charset=utf-8' },
   });

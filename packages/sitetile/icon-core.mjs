@@ -155,7 +155,9 @@ export function badgeColors(meta) {
  * `opts.written`: the set of canonical paths the build actually produced. No I/O happens here.
  */
 export function iconHrefs(meta, opts) {
-  const mark = siteMark(meta);
+  // `opts.safe`: the layout's src gate. A mark it refuses is no mark, so the generated pair is
+  // linked, and badgePaths (handed the same gate) writes them. See linkedMark.
+  const mark = linkedMark(meta, opts && opts.safe);
   const type = markType(mark);
   const raster = /^image\/(png|jpeg|webp)$/.test(type);
   // Absent an explicit written-set, assume every canonical path was written — the naive answer a
@@ -194,11 +196,33 @@ export function iconHrefs(meta, opts) {
 //     visited. The badge there costs a wrong brand on every visit.
 // With `favicon:` unset, every function below returns exactly what the routes returned before.
 
-/** The owner's `favicon:` when it is a value the platform links: a same-origin root path or an
- *  https URL. Anything else returns '': the layout's safeSrc gate falls back to the generated links
- *  for a value it refuses, so the generated files must still exist in that case. */
-export function ownerFavicon(meta) {
-  const v = unquote((meta || {}).favicon);
+/**
+ * The mark <head> actually links, or '' when it links the generated files instead. The ONE
+ * decision both the <link>s (iconHrefs) and the files (badgePaths, ownerPng) read.
+ *
+ * 🩸 tile#203 review r1: these used to be two decisions. The layout ran siteMark through its
+ * safeSrc gate, and the routes ran `favicon:` through a regex of their own. `favicon: https://[`
+ * passed the regex and failed safeSrc, so the routes skipped /favicon.ico and /favicon.svg while
+ * the layout linked exactly those two files. A quoted value split the other way: the regex side
+ * stripped the quotes, the <link> kept them.
+ *
+ * `safe` is the caller's src gate (SiteLayout and the routes pass site-core's safeSrc). It returns
+ * the value to link, or a falsy value to refuse it. With no gate, the mark is linked as written,
+ * which is what a caller with no gate has always got.
+ */
+export function linkedMark(meta, safe) {
+  const v = unquote(siteMark(meta));
+  if (!v) return '';
+  const out = typeof safe === 'function' ? safe(v) : v;
+  return out ? String(out) : '';
+}
+
+/** The linked mark when it came from `favicon:` itself and is a same-origin root path or an https
+ *  URL, else ''. Only this can suppress a generated file. A relative path is linked but resolves
+ *  per page, and `site-logo:` is often a wide wordmark, so neither takes the files away. */
+export function ownerFavicon(meta, safe) {
+  if (!str((meta || {}).favicon)) return '';
+  const v = linkedMark(meta, safe);
   return /^(?:\/(?!\/)|https:\/\/)[^\s\\]+$/.test(v) ? v : '';
 }
 
@@ -227,8 +251,8 @@ export function pngSize(bytes) {
  * The owner's favicon as a PNG this build ships: `{ href, bytes, width, height }`, or null.
  * `readPublic(relPath)` returns the file's bytes or null. It is handed in so this stays zero-I/O.
  */
-export function ownerPng(meta, readPublic) {
-  const rel = publicFilePath(ownerFavicon(meta));
+export function ownerPng(meta, readPublic, safe) {
+  const rel = publicFilePath(ownerFavicon(meta, safe));
   if (!rel || typeof readPublic !== 'function') return null;
   const bytes = readPublic(rel);
   const size = pngSize(bytes);
@@ -237,16 +261,16 @@ export function ownerPng(meta, readPublic) {
 
 /** Which of the three well-known paths carry OUR badge in this build, before any public/ file
  *  shadows a route. The routes and the layout's `generated` flag both read this. */
-export function badgePaths(meta, readPublic) {
+export function badgePaths(meta, readPublic, safe) {
   const out = new Set();
-  if (!ownerFavicon(meta)) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.svg); }
-  if (!ownerPng(meta, readPublic)) out.add(ICON_PATHS.apple);
+  if (!ownerFavicon(meta, safe)) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.svg); }
+  if (!ownerPng(meta, readPublic, safe)) out.add(ICON_PATHS.apple);
   return out;
 }
 
 /** The /apple-touch-icon.png body: the owner's PNG when there is one, else the badge. */
-export function appleTouchFile(meta, readPublic) {
-  const own = ownerPng(meta, readPublic);
+export function appleTouchFile(meta, readPublic, safe) {
+  const own = ownerPng(meta, readPublic, safe);
   return own ? own.bytes : appleTouchPng(meta);
 }
 

@@ -24,6 +24,7 @@ import {
   badgeSvg, badgePixels, appleTouchPng, faviconIco,
   ownerFavicon, publicFilePath, pngSize, ownerPng, badgePaths, appleTouchFile,
 } from './icon-core.mjs';
+import { safeSrc } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASTRO = join(HERE, 'astro');
@@ -278,12 +279,11 @@ test('🔴 the three routes exist and are the paths <head> names', () => {
 });
 
 test('🔴 the icon links are UNCONDITIONAL in the layout', () => {
-  // round 4 (R3-P3-1): `iconHrefs(meta, …)`'s raw result is gated (`safeSrc`, falling back to
-  // the model's own generated paths) before it becomes `iconLinks`, because `favicon:`/
-  // `site-logo:`/`footer-logo:` (the model's own `siteMark`) is an author-controlled destination
-  // reaching this file's `<link>` hrefs unfiltered — the call to the model is still the ONE,
-  // unconditional source of truth this test protects; only the variable name changed.
-  assert.match(layout, /const iconLinksRaw = iconHrefs\(meta, \{ hasPwa, written: iconWritten \}\)/, 'the rule comes from the model');
+  // round 4 (R3-P3-1): `favicon:`/`site-logo:`/`footer-logo:` is an author-controlled destination,
+  // so it is gated by `safeSrc`. tile#203 r1: the gate is handed INTO the model (iconHrefs'
+  // `safe`, icon-core's linkedMark) rather than applied to its result, so the routes can ask the
+  // same question. The call to the model is still the ONE, unconditional source of truth.
+  assert.match(layout, /const iconLinks = iconHrefs\(meta, \{ hasPwa, written: iconWritten, safe: safeSrc \}\)/, 'the rule comes from the model');
   // 🔴 P2-1/P2-2: `generated` must be driven by what THIS build actually wrote, not by `hasPwa`
   // alone or by an href that merely looks like one of the three canonical paths — the layout is
   // the one place with filesystem access, so it must be the one computing that set.
@@ -367,6 +367,37 @@ test('a `favicon:` that is not a root path or an https URL changes no file', () 
   }
 });
 
+// 🩸 tile#203 review r1, P1. `favicon: https://[` passed ownerFavicon's regex, so the .ico/.svg
+// routes skipped themselves, while the layout's safeSrc refused the same value and fell back to
+// linking /favicon.ico + /favicon.svg: two links to files the build had just declined to write. A
+// quoted value went the other way: ownerFavicon stripped the quotes, the <link> kept them. Both now
+// read linkedMark, with the layout's own gate handed in.
+test('🔴 the .ico/.svg are suppressed ONLY when <head> links the owner mark in their place', () => {
+  const read = publicDir({ 'brand/mark.png': OWNER_PNG });
+  const inputs = ['https://[', '"/brand/mark.png"', "'/brand/mark.png'", '/brand/mark.png', 'javascript:void(0)',
+    '"javascript:void(0)"', 'https://cdn.example/mark.png', 'relative.png', '""', 'http://plain.example/x.png'];
+  for (const favicon of inputs) {
+    const meta = { brand: 'Example Studio', favicon };
+    const icon = iconHrefs(meta, { safe: safeSrc }).icon;
+    const suppressed = !badgePaths(meta, read, safeSrc).has(ICON_PATHS.ico);
+    assert.equal(!badgePaths(meta, read, safeSrc).has(ICON_PATHS.svg), suppressed, `${favicon}: .ico and .svg move together`);
+    if (suppressed) {
+      assert.deepEqual(icon.map((l) => l.href), [ownerFavicon(meta, safeSrc)], `${favicon}: suppressed, so <head> must link the mark`);
+    }
+    if (icon.some((l) => l.href === ICON_PATHS.ico || l.href === ICON_PATHS.svg)) {
+      assert.ok(!suppressed, `${favicon}: <head> links a generated file, so it must be written`);
+    }
+  }
+  // the reviewer's two inputs, by name
+  const bad = { favicon: 'https://[' };
+  assert.deepEqual(iconHrefs(bad, { safe: safeSrc }).icon.map((l) => l.href), [ICON_PATHS.ico, ICON_PATHS.svg]);
+  assert.equal(badgePaths(bad, read, safeSrc).size, 3, 'a mark the layout refuses keeps all three generated files');
+  const quoted = { favicon: '"/brand/mark.png"' };
+  assert.deepEqual(iconHrefs(quoted, { safe: safeSrc }).icon.map((l) => l.href), ['/brand/mark.png'], 'the <link> carries no quotes');
+  assert.equal(iconHrefs(quoted, { safe: safeSrc }).appleTouch.href, '/brand/mark.png');
+  assert.deepEqual([...badgePaths(quoted, read, safeSrc)], [], 'and that linked mark is what suppresses the badge');
+});
+
 test('publicFilePath never leaves public/', () => {
   assert.equal(publicFilePath('/img/mark.png?v=2#x'), 'img/mark.png');
   for (const bad of ['/../secret.png', '/img/../../x.png', '/./x.png', '//host/x.png', 'x.png', '/a//b.png', '/a\\..\\b.png', 'https://h/x.png', ''])
@@ -384,10 +415,18 @@ test('pngSize reads IHDR and refuses what is not a PNG', () => {
 
 test('🔴 the routes and the layout read the rule from the model', () => {
   const route = (p) => readFileSync(join(ASTRO, 'src/pages', p), 'utf8');
-  assert.match(route('apple-touch-icon.png.js'), /appleTouchFile\(meta, readPublic\)/, 'apple-touch route serves appleTouchFile');
-  assert.match(route('favicon.ico.js'), /if \(!badgePaths\(meta\)\.has\(ICON_PATHS\.ico\)\) return new Response\(null/, '.ico skips itself');
-  assert.match(route('favicon.svg.js'), /if \(!badgePaths\(meta\)\.has\(ICON_PATHS\.svg\)\) return new Response\(null/, '.svg skips itself');
+  assert.match(route('apple-touch-icon.png.js'), /appleTouchFile\(meta, readPublic, safeSrc\)/, 'apple-touch route serves appleTouchFile');
+  assert.match(route('favicon.ico.js'), /if \(!badgePaths\(meta, null, safeSrc\)\.has\(ICON_PATHS\.ico\)\) return new Response\(null/, '.ico skips itself');
+  assert.match(route('favicon.svg.js'), /if \(!badgePaths\(meta, null, safeSrc\)\.has\(ICON_PATHS\.svg\)\) return new Response\(null/, '.svg skips itself');
+  assert.match(route('manifest.webmanifest.js'), /ownerPng\(meta, readPublic, safeSrc\)/, 'manifest lists the same owner PNG');
   assert.match(layout, /\.filter\(\(p\) => iconBadge\.has\(p\)\)/, '`generated` follows badgePaths, so an owner PNG is never labelled a badge');
+  // tile#203 r1 P1: the SAME gate on both sides. A layout that gated its links any other way could
+  // link a file a route skipped.
+  assert.match(layout, /badgePaths\(meta, readPublic, safeSrc\)/, 'the layout hands badgePaths its own gate');
+  assert.match(layout, /iconHrefs\(meta, \{ hasPwa, written: iconWritten, safe: safeSrc \}\)/, 'the layout links what linkedMark decides');
+  assert.equal((layout.match(/= iconHrefs\(/g) || []).length, 1, 'one iconHrefs call: no second fallback decision');
+  for (const p of ['favicon.ico.js', 'favicon.svg.js', 'apple-touch-icon.png.js', 'manifest.webmanifest.js'])
+    assert.match(route(p), /import \{ safeSrc \} from '\.\.\/\.\.\/\.\.\/site-core\.js';/, `${p} uses the layout's safeSrc`);
 });
 
 console.log(`\n${process.exitCode ? '❌' : '✅'} icon-core: ${passed} checks`);
