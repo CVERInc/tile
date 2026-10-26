@@ -248,6 +248,24 @@ function matchNativeCheckoutSuccess(request, shops, route) {
 	return native.find(shop => shop.shopPath === '/shop') || native[0] || null;
 }
 
+// The checkout return a Site Worker WITHOUT the RSP binding answers itself (Workers for Platforms:
+// the platform read arrives as the dispatcher's stub or the baked token, never as a binding). On
+// Pages these requests are the generic forward to RSP's whole-page fallback; here there is no
+// binding to forward to, so the same completion page the native return gets is composed in the
+// site's shell instead: no order id → its "can't confirm this order here" state, an order id on a
+// site whose shops are all provider shops → its pending state, settled by the outcome read the page
+// itself makes over /api/. A site with no shop at all gets the same page in its root document's
+// shell, its "Back to the shop" link pointing at / (where RSP's whole-page fallback sends it on Pages).
+function matchCheckoutResultFallback(request, shops, route) {
+	if (!route || request.method !== route.method) return null;
+	let url;
+	try { url = new URL(request.url); } catch (e) { return null; }
+	if (url.pathname !== route.path) return null;
+	const native = shops.filter(shop => shop.source === 'native');
+	return native.find(shop => shop.shopPath === '/shop') || native[0] ||
+		shops.find(shop => shop.shopPath === '/shop') || shops[0] || { shopPath: '', backPath: '/' };
+}
+
 const COMPLETE_COPY = {
 	'en-US': { paid: 'Thank you for your order', receipt: 'A receipt was emailed to you.', pending: 'Confirming your payment', pendingBody: 'Payment processing', waiting: "Still confirming — we'll email you the result.", canceled: 'Payment not completed', canceledBody: 'Your cart is unchanged.', refunded: 'This order was refunded', refundedBody: 'The payment for this order has been returned to you.', unknown: "We can't confirm this order here", unknownBody: 'This page appears after you complete a payment. If you paid, sign in to your account or check your confirmation email for the order, or return to the shop.', back: 'Back to the shop', order: 'Order reference', total: 'Total', tax: 'incl. tax' },
 	'ja-JP': { paid: 'ご注文ありがとうございます', receipt: '領収書をメールでお送りしました。', pending: 'お支払いを確認しています', pendingBody: 'お支払いを処理中です', waiting: 'まだ確認中です。結果はメールでお知らせします。', canceled: 'お支払いは完了していません', canceledBody: 'カートの内容はそのままです。', refunded: 'このご注文は返金されました', refundedBody: 'このご注文のお支払いは返金されています。', unknown: 'ご注文を確認できません', unknownBody: 'このページはお支払いの後に表示されます。お支払い済みの場合は、アカウントにログインするか、確認メールでご注文をご確認いただくか、ショップにお戻りください。', back: 'ショップに戻る', order: '注文番号', total: '合計', tax: '税込' },
@@ -438,7 +456,7 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	const orderId = checkoutResult ? url.searchParams.get(checkoutResult.orderParam) || '' : '';
 	const hasOutcomeKey = Boolean(ref || orderId);
 	const shopPath = shop.completionShopPath || shop.shopPath;
-	let shellShopPath = shopPath;
+	let shellShopPath = shop.backPath || shopPath;
 	const pathLocale = (url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)\/shop\/complete\/?$/) || [])[1] || '';
 	let shellRes = await env.ASSETS.fetch(new Request(url.origin + shopPath + '/', request));
 	// A locale path (e.g. /ja/shop/complete) can name a shop page that was never built —
@@ -1931,7 +1949,14 @@ const siteWorker = {
 				// No binding on a FORWARDED path: those paths have no file behind them,
 				// so today they reach ASSETS and 404. Both answers are "unusable", and
 				// the honest error takes nothing working away. Never ASSETS, never 200.
-				if (!binding) return bindingMissingResponse(transport);
+				if (!binding) {
+					// Behind the dispatcher (a platform reader and no binding) the checkout return the
+					// native claim above declined is composed here, never the binding-missing error.
+					const checkoutFallback = platformReader(env, ctx, CFG)
+						? matchCheckoutResultFallback(request, shopDescriptors, transport.checkoutResult) : null;
+					if (checkoutFallback) return renderCompletion(request, env, CFG, checkoutFallback, transport.checkoutResult);
+					return bindingMissingResponse(transport);
+				}
 				return binding.fetch(request);   // verbatim: method, path, query, headers, body
 			}
 			if (gated && !reader) return verdictRefusal(request, env, transport, 'retry', verdictBindingMissingResponse());
@@ -1962,7 +1987,7 @@ export default {
 
 // Exported for Node unit tests (the deployed bundle just uses the default).
 export {
-	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
+	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
