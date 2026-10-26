@@ -70,6 +70,44 @@ test('sentWithEmailGeneric never leaks the {email} placeholder — it is the bui
   }
 });
 
+test('success panel describes the reply address without assuming a shop or a role', () => {
+  const expected = {
+    ja: [
+      '確認メールを {email} にお送りしました。返信もご入力のメールアドレスに届きます。',
+      '確認メールをお送りしました。返信もご入力のメールアドレスに届きます。',
+      '返信をご希望の場合はメールアドレスをご記入ください。',
+    ],
+    'zh-tw': [
+      '確認信已寄到 {email}。回覆會寄到你剛才填的信箱。',
+      '確認信已寄到你填的信箱。回覆會寄到同一個信箱。',
+      '如需回覆，請留下 email。',
+    ],
+    'zh-cn': [
+      '确认信已发送到 {email}。回复会发送到你刚才填写的邮箱。',
+      '确认信已发送到你填写的邮箱。回复会发送到同一个邮箱。',
+      '如需回复，请留下 email。',
+    ],
+    ko: [
+      '확인 메일을 {email}(으)로 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
+      '확인 메일을 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
+      '답변을 받고 싶다면 이메일을 남겨 주세요.',
+    ],
+    en: [
+      "We've sent a confirmation to {email}. The reply will go to the address you entered.",
+      "We've sent a confirmation to your email. The reply will go to the address you entered.",
+      "Leave an email if you'd like a reply.",
+    ],
+  };
+  for (const [key, lang] of Object.entries(LANGS)) {
+    const copy = inboxFormCopy(lang);
+    assert.deepEqual(
+      [copy.sentWithEmail, copy.sentWithEmailGeneric, copy.sentNoEmail],
+      expected[key],
+      `${key} success panel copy`,
+    );
+  }
+});
+
 test('errorNetwork and errorServer are two different sentences, in every locale', () => {
   for (const lang of Object.values(LANGS)) {
     const c = inboxFormCopy(lang);
