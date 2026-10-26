@@ -1475,7 +1475,7 @@ const checks = [
     const c = card[1];
     return /<svg class="st-form-success-check"/.test(c)
       && /<p class="st-form-success-heading" role="heading" aria-level="3">Sent<\/p>/.test(c)
-      && /<p class="st-form-success-next" data-inbox-next>We've sent a confirmation to your email — the owner's reply will go to the same address\.<\/p>/.test(c)
+      && /<p class="st-form-success-next" data-inbox-next>We've sent a confirmation to your email\. The reply will go to the address you entered\.<\/p>/.test(c)
       && /<p class="st-form-success-excerpt" data-inbox-excerpt hidden><\/p>/.test(c)
       && /<p class="st-form-success-again"><a href="\/forms\/" data-inbox-again>Send another<\/a><\/p>/.test(c)
       && /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/.test(c);
