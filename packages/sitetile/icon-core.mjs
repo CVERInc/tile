@@ -172,6 +172,84 @@ export function iconHrefs(meta, opts) {
   return { icon, appleTouch: { href: appleTouch, generated: written.has(appleTouch) } };
 }
 
+// ── what the three FILES carry when the owner set `favicon:` ─────────────────────────────────────
+//
+// 🩸 THE ROUTES IGNORED `favicon:`. The <link>s above always honoured it, but the three routes drew
+// the badge from brand + colour alone. An owner mark only reached a well-known path if its file was
+// AT that path (a public/ file shadows the route). A site that set `favicon: /favicon.png` therefore
+// served its own PNG in <head> and our generated badge at /favicon.ico, /favicon.svg and
+// /apple-touch-icon.png: same bytes with or without the key, measured on a fixture build. Browsers
+// that ask /favicon.ico unprompted (bookmarks, history, search-result icons) showed a brand the
+// owner never chose.
+//
+// The rule, when `favicon:` is set:
+//   · /apple-touch-icon.png is the owner's own file, byte for byte, when it is a PNG this build can
+//     read from public/. Nothing is resampled, because iOS scales whatever it is given. When it cannot
+//     be read (an https URL, a JPEG, a missing file) the badge stays. The <link> already points iOS at the mark
+//     whenever the mark is a raster, so the badge is only what a bare probe of the path finds.
+//   · /favicon.ico and /favicon.svg are NOT written. Neither can be derived from the owner's PNG
+//     without an image library (an .ico wants a 32px resample, and an SVG wrapper around a PNG
+//     is a raster in disguise). A browser that finds no /favicon.ico uses the page's
+//     <link rel=icon>, which names the mark. A 404 there costs a bookmark icon until the page is
+//     visited. The badge there costs a wrong brand on every visit.
+// With `favicon:` unset, every function below returns exactly what the routes returned before.
+
+/** The owner's `favicon:` when it is a value the platform links: a same-origin root path or an
+ *  https URL. Anything else returns '': the layout's safeSrc gate falls back to the generated links
+ *  for a value it refuses, so the generated files must still exist in that case. */
+export function ownerFavicon(meta) {
+  const v = unquote((meta || {}).favicon);
+  return /^(?:\/(?!\/)|https:\/\/)[^\s\\]+$/.test(v) ? v : '';
+}
+
+/** '/img/mark.png?v=2' → 'img/mark.png', the path under public/. Returns '' for anything that is
+ *  not a plain same-origin path, or that would climb out of public/. */
+export function publicFilePath(href) {
+  const p = str(href).split(/[?#]/)[0];
+  if (!/^\/(?!\/)/.test(p)) return '';
+  const segs = p.slice(1).split('/');
+  if (segs.some((s) => s === '' || s === '.' || s === '..' || s.includes('\\'))) return '';
+  return segs.join('/');
+}
+
+/** A PNG's pixel size, read from its IHDR, or null when the bytes are not a PNG. */
+export function pngSize(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : null;
+  const SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (!b || b.length < 24 || SIG.some((v, i) => b[i] !== v)) return null;
+  if (String.fromCharCode(b[12], b[13], b[14], b[15]) !== 'IHDR') return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.length);
+  const width = dv.getUint32(16), height = dv.getUint32(20);
+  return width && height ? { width, height } : null;
+}
+
+/**
+ * The owner's favicon as a PNG this build ships: `{ href, bytes, width, height }`, or null.
+ * `readPublic(relPath)` returns the file's bytes or null. It is handed in so this stays zero-I/O.
+ */
+export function ownerPng(meta, readPublic) {
+  const rel = publicFilePath(ownerFavicon(meta));
+  if (!rel || typeof readPublic !== 'function') return null;
+  const bytes = readPublic(rel);
+  const size = pngSize(bytes);
+  return size ? { href: '/' + rel, bytes, ...size } : null;
+}
+
+/** Which of the three well-known paths carry OUR badge in this build, before any public/ file
+ *  shadows a route. The routes and the layout's `generated` flag both read this. */
+export function badgePaths(meta, readPublic) {
+  const out = new Set();
+  if (!ownerFavicon(meta)) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.svg); }
+  if (!ownerPng(meta, readPublic)) out.add(ICON_PATHS.apple);
+  return out;
+}
+
+/** The /apple-touch-icon.png body: the owner's PNG when there is one, else the badge. */
+export function appleTouchFile(meta, readPublic) {
+  const own = ownerPng(meta, readPublic);
+  return own ? own.bytes : appleTouchPng(meta);
+}
+
 // ── the SVG badge ────────────────────────────────────────────────────────────────────────────────
 
 const escXml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

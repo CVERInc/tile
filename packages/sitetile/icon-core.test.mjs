@@ -16,11 +16,13 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inflateSync, crc32 } from 'node:zlib';
+import { inflateSync, deflateSync, crc32 } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import {
   ICON_PATHS, APPLE_TOUCH_PX, ICO_PX, DEFAULT_BADGE_BG,
   siteMark, markType, siteInitial, badgeColors, iconHrefs, monogramKey,
   badgeSvg, badgePixels, appleTouchPng, faviconIco,
+  ownerFavicon, publicFilePath, pngSize, ownerPng, badgePaths, appleTouchFile,
 } from './icon-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -291,6 +293,101 @@ test('🔴 the icon links are UNCONDITIONAL in the layout', () => {
     'apple-touch-icon is emitted on every page, not gated on a site having set `favicon:`');
   // the shape of the original defect: an icon link that only exists when frontmatter did.
   assert.ok(!/\{favicon && <link rel="icon"/.test(layout), 'no conditional favicon link is left');
+});
+
+// ── `favicon:` reaches the FILES, not only the <link> ───────────────────────────────────────────
+//
+// 🩸 Measured on a fixture build: a site with `favicon: /favicon.png` and one without it served the
+// SAME md5 at /favicon.ico, /favicon.svg and /apple-touch-icon.png. The routes never read the key.
+
+/** A real PNG the owner might ship: 64×48 so its size cannot be mistaken for any size we draw. */
+const OWNER_PNG = (() => {
+  const w = 64, h = 48;
+  // encodePng is square-only, so build the container by hand: signature, IHDR, IDAT, IEND.
+  const raw = Buffer.alloc(h * (w * 4 + 1));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = y * (w * 4 + 1) + 1 + x * 4; raw[o] = 200; raw[o + 3] = 255;
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+})();
+/** A public/ dir as a map; records what was asked so a test can see the path that was read. */
+const publicDir = (files) => {
+  const asked = [];
+  const read = (rel) => { asked.push(rel); return Object.prototype.hasOwnProperty.call(files, rel) ? files[rel] : null; };
+  return Object.assign(read, { asked });
+};
+const md5 = (b) => createHash('md5').update(b).digest('hex');
+
+test('🔴 CONTROL: with no `favicon:`, the three files are exactly what the routes wrote before', () => {
+  const meta = { brand: 'Example Studio', lang: 'en-US' };
+  const read = publicDir({ 'favicon.png': OWNER_PNG });          // a file on disk is not a setting
+  assert.deepEqual([...badgePaths(meta, read)].sort(), Object.values(ICON_PATHS).sort(), 'all three still carry the badge');
+  assert.ok(appleTouchFile(meta, read).equals(appleTouchPng(meta)), 'apple-touch-icon body is the badge, byte for byte');
+  // pinned from tile 466a0ece (before this change): the same md5 its build wrote at /favicon.svg
+  assert.equal(md5(badgeSvg(meta)), 'b26d7ff9e6762387f4a3e3febf2b6de5', 'favicon.svg bytes unchanged');
+  // site-logo alone is a <link> fallback, not `favicon:`, and changes no file
+  assert.equal(badgePaths({ ...meta, 'site-logo': '/logo.png' }, read).size, 3);
+});
+
+test("🔴 `favicon:` naming a PNG in public/ → apple-touch-icon IS that PNG, and no generated .ico/.svg", () => {
+  const meta = { brand: 'Example Studio', favicon: '/favicon.png' };
+  const read = publicDir({ 'favicon.png': OWNER_PNG });
+  const body = appleTouchFile(meta, read);
+  assert.ok(Buffer.from(body).equals(OWNER_PNG), `apple-touch-icon must be the owner's bytes (got md5 ${md5(body)}, owner ${md5(OWNER_PNG)})`);
+  assert.deepEqual([...badgePaths(meta, read)], [], 'no path carries the badge');
+  assert.deepEqual(ownerPng(meta, read) && { ...ownerPng(meta, read), bytes: '…' },
+    { href: '/favicon.png', bytes: '…', width: 64, height: 48 }, 'the real size, read from IHDR');
+  // quotes and a cache-buster are the same file
+  assert.ok(Buffer.from(appleTouchFile({ favicon: '"/favicon.png?v=3"' }, read)).equals(OWNER_PNG));
+});
+
+test('`favicon:` the build cannot read as a PNG → no .ico/.svg, apple-touch-icon keeps the badge', () => {
+  const read = publicDir({ 'mark.svg': Buffer.from('<svg/>'), 'fake.png': Buffer.from('not a png') });
+  for (const favicon of ['https://cdn.example/mark.png', '/mark.svg', '/missing.png', '/fake.png']) {
+    const meta = { brand: 'Example Studio', favicon };
+    assert.deepEqual([...badgePaths(meta, read)], [ICON_PATHS.apple], favicon);
+    assert.ok(appleTouchFile(meta, read).equals(appleTouchPng(meta)), `${favicon}: badge, not someone's bytes`);
+  }
+});
+
+// ownerFavicon accepts a strict subset of what the layout's safeSrc links. A value safeSrc refuses
+// makes the layout fall back to the generated links, so those files must still exist.
+test('a `favicon:` that is not a root path or an https URL changes no file', () => {
+  for (const favicon of ['javascript:void(0)', '//evil.example/x.png', 'http://plain.example/x.png', 'relative.png']) {
+    assert.equal(ownerFavicon({ favicon }), '', favicon);
+    assert.equal(badgePaths({ favicon }, publicDir({})).size, 3, favicon);
+  }
+});
+
+test('publicFilePath never leaves public/', () => {
+  assert.equal(publicFilePath('/img/mark.png?v=2#x'), 'img/mark.png');
+  for (const bad of ['/../secret.png', '/img/../../x.png', '/./x.png', '//host/x.png', 'x.png', '/a//b.png', '/a\\..\\b.png', 'https://h/x.png', ''])
+    assert.equal(publicFilePath(bad), '', bad);
+  const read = publicDir({});
+  ownerPng({ favicon: '/../../etc/passwd.png' }, read);
+  assert.deepEqual(read.asked, [], 'a climbing path is never even read');
+});
+
+test('pngSize reads IHDR and refuses what is not a PNG', () => {
+  assert.deepEqual(pngSize(OWNER_PNG), { width: 64, height: 48 });
+  assert.deepEqual(pngSize(appleTouchPng({})), { width: APPLE_TOUCH_PX, height: APPLE_TOUCH_PX });
+  for (const bad of [null, Buffer.from('GIF89a'), faviconIco({}), OWNER_PNG.subarray(0, 20)]) assert.equal(pngSize(bad), null);
+});
+
+test('🔴 the routes and the layout read the rule from the model', () => {
+  const route = (p) => readFileSync(join(ASTRO, 'src/pages', p), 'utf8');
+  assert.match(route('apple-touch-icon.png.js'), /appleTouchFile\(meta, readPublic\)/, 'apple-touch route serves appleTouchFile');
+  assert.match(route('favicon.ico.js'), /if \(!badgePaths\(meta\)\.has\(ICON_PATHS\.ico\)\) return new Response\(null/, '.ico skips itself');
+  assert.match(route('favicon.svg.js'), /if \(!badgePaths\(meta\)\.has\(ICON_PATHS\.svg\)\) return new Response\(null/, '.svg skips itself');
+  assert.match(layout, /\.filter\(\(p\) => iconBadge\.has\(p\)\)/, '`generated` follows badgePaths, so an owner PNG is never labelled a badge');
 });
 
 console.log(`\n${process.exitCode ? '❌' : '✅'} icon-core: ${passed} checks`);

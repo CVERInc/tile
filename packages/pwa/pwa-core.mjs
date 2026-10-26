@@ -18,12 +18,42 @@ export function hasPwa(packages) {
     .includes('pwa');
 }
 
+/** The manifest entries for gen-icons.sh's output, in the order the manifest lists them. */
+export const MANIFEST_ICONS = [
+  { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+  { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+  { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+];
+
+/**
+ * The icons a manifest may list: only files this build ships.
+ *
+ * 🩸 The manifest used to list MANIFEST_ICONS unconditionally. Those files exist only where
+ * someone ran gen-icons.sh (ImageMagick) and placed its output in public/. Nothing in a
+ * normal build does that, so a built site served a manifest whose three icons all answered 404.
+ *
+ *   `present`: the PWA_ICON_FILES names found in public/ (a Set or an array).
+ *   `owner`:   the owner's favicon as a shipped PNG, `{ href, width, height }`, or null.
+ * gen-icons.sh output wins wherever it exists. Without any of it, the owner's PNG is listed at its
+ * real size. Without that either, the list is empty: a manifest with no icons is valid, and a
+ * manifest that names missing files is not.
+ */
+export function manifestIcons(present, owner) {
+  const have = new Set(present || []);
+  const generated = MANIFEST_ICONS.filter((i) => have.has(i.src.slice(1)));
+  if (generated.length) return generated;
+  if (owner && owner.href && owner.width && owner.height) {
+    return [{ src: owner.href, sizes: `${owner.width}x${owner.height}`, type: 'image/png', purpose: 'any' }];
+  }
+  return [];
+}
+
 /**
  * Build the web app manifest object from site frontmatter.
  * `meta` = the site's frontmatter (brand / title / theme-color-dark …). Missing values fall back
  * to safe defaults so a half-configured site still produces a valid manifest.
  */
-export function buildManifest(meta = {}) {
+export function buildManifest(meta = {}, opts) {
   const m = meta || {};
   const name = String(m.title || m.brand || 'App').trim();
   const short = String(m.brand || m.title || name).trim().slice(0, 12) || name;
@@ -40,15 +70,13 @@ export function buildManifest(meta = {}) {
     display: 'standalone',
     theme_color: theme,
     background_color: theme,
-    icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ],
+    // `opts.icons` is what the build ships (manifestIcons). A caller with no filesystem gets
+    // the gen-icons.sh convention, which is what this function always returned.
+    icons: (opts && Array.isArray(opts.icons) ? opts.icons : MANIFEST_ICONS).map((i) => ({ ...i })),
   };
 }
 
 /** Serialize the manifest (drops undefined keys). */
-export function manifestJson(meta) {
-  return JSON.stringify(buildManifest(meta), (_k, v) => (v === undefined ? undefined : v), 2);
+export function manifestJson(meta, opts) {
+  return JSON.stringify(buildManifest(meta, opts), (_k, v) => (v === undefined ? undefined : v), 2);
 }
