@@ -78,6 +78,6 @@ test('buildManifest: opts.icons is what the manifest lists; without it, the gen-
 
 test('🔴 the manifest route lists manifestIcons, not the bare convention', () => {
   const src = readFileSync(new URL('../sitetile/astro/src/pages/manifest.webmanifest.js', import.meta.url), 'utf8');
-  assert.match(src, /manifestIcons\(PWA_ICON_FILES\.filter\(publicHas\), ownerPng\(meta, readPublic\)\)/);
+  assert.match(src, /manifestIcons\(PWA_ICON_FILES\.filter\(publicHas\), ownerPng\(meta, readPublic, safeSrc\)\)/);
   assert.match(src, /manifestJson\(meta, \{ icons \}\)/);
 });
