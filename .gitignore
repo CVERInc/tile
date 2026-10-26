@@ -45,6 +45,9 @@ packages/sitetile/.smoke-badge-collision/
 # added to its content/_site.md (the tracked fixture is never edited; see smoke-build.mjs's
 # buildCoralCssDeclaredFixture). Rebuilt every smoke run, never committed.
 packages/sitetile/.smoke-coral-css-declared/
+# the smoke's SIXTH, isolated build — a minimal site whose `_site.md` sets `favicon:` to a real
+# PNG in public/ (see smoke-build.mjs's buildOwnerFaviconFixture). Rebuilt every smoke run.
+packages/sitetile/.smoke-owner-favicon*/
 # @tile/build stashes the renderer's own content/, blog/, pagetile/ and public/ HERE while it builds
 # somebody's site, and moves them back afterwards — including when the build throws. The directory
 # should never outlive a build; it is ignored because the one time it does (a killed process) the

@@ -2,7 +2,8 @@
 //   run: node --test packages/pwa/pwa-core.test.mjs
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildManifest, manifestJson, hasPwa, PWA_ICON_FILES } from './pwa-core.mjs';
+import { readFileSync } from 'node:fs';
+import { buildManifest, manifestJson, hasPwa, PWA_ICON_FILES, manifestIcons, MANIFEST_ICONS } from './pwa-core.mjs';
 
 const META = {
   title: 'Lilac — The Long Way Home',
@@ -52,4 +53,31 @@ test('PWA_ICON_FILES: the convention gen-icons.sh emits', () => {
   assert.ok(PWA_ICON_FILES.includes('icon-maskable-512.png'));
   assert.ok(PWA_ICON_FILES.includes('apple-touch-icon.png'));
   assert.ok(PWA_ICON_FILES.includes('favicon.png'));
+});
+
+// 🩸 A built site served a manifest naming /icon-192.png, /icon-512.png and /icon-maskable-512.png,
+// and all three answered 404: they exist only where gen-icons.sh was run by hand.
+test('🔴 manifestIcons: names only files the build ships', () => {
+  assert.deepEqual(manifestIcons([], null), [], 'nothing shipped → no icons, never a 404');
+  assert.deepEqual(manifestIcons(new Set(['favicon.png']), null), [], 'favicon.png alone is not a manifest icon without its size');
+  const owner = { href: '/favicon.png', width: 96, height: 96 };
+  assert.deepEqual(manifestIcons([], owner),
+    [{ src: '/favicon.png', sizes: '96x96', type: 'image/png', purpose: 'any' }], "the owner's PNG at its real size");
+  assert.deepEqual(manifestIcons(PWA_ICON_FILES, owner), MANIFEST_ICONS, 'gen-icons.sh output wins where it exists');
+  assert.deepEqual(manifestIcons(['icon-512.png'], owner).map((i) => i.src), ['/icon-512.png'], 'only the ones present');
+});
+
+test('buildManifest: opts.icons is what the manifest lists; without it, the gen-icons.sh convention', () => {
+  assert.deepEqual(buildManifest(META, { icons: [] }).icons, []);
+  assert.deepEqual(buildManifest(META).icons, MANIFEST_ICONS);
+  assert.deepEqual(JSON.parse(manifestJson(META, { icons: [] })).icons, []);
+  const mf = buildManifest(META);
+  mf.icons[0].src = '/mutated.png';
+  assert.equal(MANIFEST_ICONS[0].src, '/icon-192.png', 'a caller cannot mutate the shared constant');
+});
+
+test('🔴 the manifest route lists manifestIcons, not the bare convention', () => {
+  const src = readFileSync(new URL('../sitetile/astro/src/pages/manifest.webmanifest.js', import.meta.url), 'utf8');
+  assert.match(src, /manifestIcons\(PWA_ICON_FILES\.filter\(publicHas\), ownerPng\(meta, readPublic, safeSrc\)\)/);
+  assert.match(src, /manifestJson\(meta, \{ icons \}\)/);
 });

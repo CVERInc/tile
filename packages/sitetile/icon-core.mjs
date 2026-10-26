@@ -155,7 +155,9 @@ export function badgeColors(meta) {
  * `opts.written`: the set of canonical paths the build actually produced. No I/O happens here.
  */
 export function iconHrefs(meta, opts) {
-  const mark = siteMark(meta);
+  // `opts.safe`: the layout's src gate. A mark it refuses is no mark, so the generated pair is
+  // linked, and badgePaths (handed the same gate) writes them. See linkedMark.
+  const mark = linkedMark(meta, opts && opts.safe);
   const type = markType(mark);
   const raster = /^image\/(png|jpeg|webp)$/.test(type);
   // Absent an explicit written-set, assume every canonical path was written — the naive answer a
@@ -170,6 +172,138 @@ export function iconHrefs(meta, opts) {
   // about which HREF to link, independent of whether THIS build actually wrote a file there.
   const appleTouch = (opts && opts.hasPwa) || !raster ? ICON_PATHS.apple : mark;
   return { icon, appleTouch: { href: appleTouch, generated: written.has(appleTouch) } };
+}
+
+// ── what the three FILES carry when the owner set `favicon:` ─────────────────────────────────────
+//
+// 🩸 THE ROUTES IGNORED `favicon:`. The <link>s above always honoured it, but the three routes drew
+// the badge from brand + colour alone. An owner mark only reached a well-known path if its file was
+// AT that path (a public/ file shadows the route). A site that set `favicon: /favicon.png` therefore
+// served its own PNG in <head> and our generated badge at /favicon.ico, /favicon.svg and
+// /apple-touch-icon.png: same bytes with or without the key, measured on a fixture build. Browsers
+// that ask /favicon.ico unprompted (bookmarks, history, search-result icons) showed a brand the
+// owner never chose.
+//
+// The rule, when `favicon:` is set:
+//   · /apple-touch-icon.png is the owner's own file, byte for byte, when it is a PNG this build can
+//     read from public/. Nothing is resampled, because iOS scales whatever it is given. When it cannot
+//     be read (an https URL, a JPEG, a missing file) the badge stays. The <link> already points iOS at the mark
+//     whenever the mark is a raster, so the badge is only what a bare probe of the path finds.
+//   · /favicon.ico and /favicon.svg are NOT written. Neither can be derived from the owner's PNG
+//     without an image library (an .ico wants a 32px resample, and an SVG wrapper around a PNG
+//     is a raster in disguise). A browser that finds no /favicon.ico uses the page's
+//     <link rel=icon>, which names the mark. A 404 there costs a bookmark icon until the page is
+//     visited. The badge there costs a wrong brand on every visit.
+// With `favicon:` unset, every function below returns exactly what the routes returned before.
+//
+// PRECEDENCE at a well-known path (tile#203 review r1): a file someone placed AT that path in
+// public/ is the owner's explicit choice, and it wins over everything here, `favicon:` included.
+// Astro serves a public/ file before the route of the same name, so the route never runs. The usual
+// case is gen-icons.sh output left in public/: its apple-touch-icon.png keeps the path even after
+// `favicon:` names a newer PNG, and its icon-*.png files stay the manifest's icons (pwa-core's
+// manifestIcons). <head> still names the `favicon:` mark, because a <link> is not a path. To have
+// the new mark at the path, remove or regenerate the old file.
+
+/**
+ * The mark <head> actually links, or '' when it links the generated files instead. The ONE
+ * decision both the <link>s (iconHrefs) and the files (badgePaths, ownerPng) read.
+ *
+ * 🩸 tile#203 review r1: these used to be two decisions. The layout ran siteMark through its
+ * safeSrc gate, and the routes ran `favicon:` through a regex of their own. `favicon: https://[`
+ * passed the regex and failed safeSrc, so the routes skipped /favicon.ico and /favicon.svg while
+ * the layout linked exactly those two files. A quoted value split the other way: the regex side
+ * stripped the quotes, the <link> kept them.
+ *
+ * `safe` is the caller's src gate (SiteLayout and the routes pass site-core's safeSrc). It returns
+ * the value to link, or a falsy value to refuse it. With no gate, the mark is linked as written,
+ * which is what a caller with no gate has always got.
+ */
+export function linkedMark(meta, safe) {
+  const v = unquote(siteMark(meta));
+  if (!v) return '';
+  const out = typeof safe === 'function' ? safe(v) : v;
+  return out ? String(out) : '';
+}
+
+/** The linked mark when it came from `favicon:` itself and is a same-origin root path or an https
+ *  URL, else ''. Only this can suppress a generated file. A relative path is linked but resolves
+ *  per page, and `site-logo:` is often a wide wordmark, so neither takes the files away. */
+export function ownerFavicon(meta, safe) {
+  if (!str((meta || {}).favicon)) return '';
+  const v = linkedMark(meta, safe);
+  return /^(?:\/(?!\/)|https:\/\/)[^\s\\]+$/.test(v) ? v : '';
+}
+
+/** '/img/mark.png?v=2' → 'img/mark.png', the path under public/. Returns '' for anything that is
+ *  not a plain same-origin path, or that would climb out of public/. */
+export function publicFilePath(href) {
+  const p = str(href).split(/[?#]/)[0];
+  if (!/^\/(?!\/)/.test(p)) return '';
+  const segs = p.slice(1).split('/');
+  if (segs.some((s) => s === '' || s === '.' || s === '..' || s.includes('\\'))) return '';
+  return segs.join('/');
+}
+
+/**
+ * A PNG's pixel size, read from its IHDR, or null when the bytes are not a complete PNG.
+ *
+ * 🩸 tile#203 review r1: this used to read the signature and the IHDR label only, so a 24-byte
+ * stub passed, was served as image/png and listed in the manifest at a size it never had. Now the
+ * chunk sequence is walked: a first IHDR of length 13, every chunk inside the file, at least one
+ * IDAT, an IEND, and a matching CRC on each of those critical chunks. Ancillary chunks are skipped
+ * unchecked, and bytes after IEND are ignored, as decoders ignore them. The pixel data itself is
+ * not inflated: a structurally sound file with a bad zlib stream still passes.
+ */
+export function pngSize(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : null;
+  const SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (!b || b.length < 8 + 25 + 12 || SIG.some((v, i) => b[i] !== v)) return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.length);
+  const CRITICAL = new Set(['IHDR', 'IDAT', 'IEND']);
+  let off = 8, idat = false, size = null;
+  while (off + 12 <= b.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(b[off + 4], b[off + 5], b[off + 6], b[off + 7]);
+    if (len > b.length - off - 12) return null;                    // runs past the end of the file
+    if (CRITICAL.has(type) && crc32(b.subarray(off + 4, off + 8 + len)) !== dv.getUint32(off + 8 + len)) return null;
+    if (off === 8) {
+      if (type !== 'IHDR' || len !== 13) return null;
+      const width = dv.getUint32(16), height = dv.getUint32(20);
+      if (!width || !height) return null;
+      size = { width, height };
+    } else if (type === 'IHDR') return null;
+    if (type === 'IDAT') idat = true;
+    if (type === 'IEND') return idat && len === 0 ? size : null;
+    off += 12 + len;
+  }
+  return null;                                                      // no IEND
+}
+
+/**
+ * The owner's favicon as a PNG this build ships: `{ href, bytes, width, height }`, or null.
+ * `readPublic(relPath)` returns the file's bytes or null. It is handed in so this stays zero-I/O.
+ */
+export function ownerPng(meta, readPublic, safe) {
+  const rel = publicFilePath(ownerFavicon(meta, safe));
+  if (!rel || typeof readPublic !== 'function') return null;
+  const bytes = readPublic(rel);
+  const size = pngSize(bytes);
+  return size ? { href: '/' + rel, bytes, ...size } : null;
+}
+
+/** Which of the three well-known paths carry OUR badge in this build, before any public/ file
+ *  shadows a route. The routes and the layout's `generated` flag both read this. */
+export function badgePaths(meta, readPublic, safe) {
+  const out = new Set();
+  if (!ownerFavicon(meta, safe)) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.svg); }
+  if (!ownerPng(meta, readPublic, safe)) out.add(ICON_PATHS.apple);
+  return out;
+}
+
+/** The /apple-touch-icon.png body: the owner's PNG when there is one, else the badge. */
+export function appleTouchFile(meta, readPublic, safe) {
+  const own = ownerPng(meta, readPublic, safe);
+  return own ? own.bytes : appleTouchPng(meta);
 }
 
 // ── the SVG badge ────────────────────────────────────────────────────────────────────────────────

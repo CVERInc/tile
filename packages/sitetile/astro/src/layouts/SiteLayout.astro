@@ -12,7 +12,8 @@ import { LOCALE_BANNER_RADIUS_CSS } from '../packages/lingo/banner-radius-css.mj
 import { BRAND_ICON } from '../lib/brands.mjs';
 // The site icon set — ONE model behind both the emitted files (the three icon routes) and the
 // <link> tags below. See packages/sitetile/icon-core.mjs.
-import { iconHrefs, ICON_PATHS } from '@icons';
+import { iconHrefs, ICON_PATHS, badgePaths } from '@icons';
+import { readPublic } from '../lib/public-file.mjs';
 // `packages:` parsed once, for this layout AND the feed's <image> (tile#177 r3).
 import { sitePackages } from '../../../site-packages.mjs';
 // icon-core.mjs is zero-I/O by design (node-runnable, unit-testable without a renderer) — this is
@@ -713,20 +714,21 @@ const shareImage = absUrl(authoredShareImage
 // or REEF with PWA's gen-icons.sh output — shadows the route (Astro skips a route a public/ file
 // already claims) and must never be marked as ours, regardless of what `packages:` declares.
 const ICON_PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
+// …and only the paths where the route drew the BADGE: with `favicon:` set, /apple-touch-icon.png
+// carries the owner's own PNG and the .ico/.svg are not written at all (icon-core's badgePaths).
+const iconBadge = badgePaths(meta, readPublic, safeSrc);
 const iconWritten = new Set(Object.values(ICON_PATHS).filter((p) => {
   try { return !existsSync(join(ICON_PUBLIC_DIR, p)); } catch { return true; }
-}));
-const iconLinksRaw = iconHrefs(meta, { hasPwa, written: iconWritten });
-// round 4 (R3-P3-1): iconHrefs() hands back `favicon:`/`site-logo:`/`footer-logo:` (icon-core's
-// siteMark) UNFILTERED as a live `<link>` href when the site set one — the gate that already
-// covers site-logo's three <img src> consumers (safeSrc, above) never touches this path, because
-// iconHrefs() reads `meta` directly rather than the gated variable. Gate here, the one place both
-// `<link>` consumers below read the result, falling back to icon-core's own generated paths — the
-// same fallback the "no mark" branch already emits — rather than a live link with a disallowed
-// scheme. `<link rel=icon>`/`apple-touch-icon` are not a script-execution context (a browser
-// fetches an image, it does not navigate them), so this is defense-in-depth, not the P2 fix.
-const iconMarkSafe = iconLinksRaw.icon.every((l) => safeSrc(l.href));
-const iconLinks = iconMarkSafe ? iconLinksRaw : iconHrefs({}, { hasPwa, written: iconWritten });
+}).filter((p) => iconBadge.has(p)));
+// round 4 (R3-P3-1): iconHrefs() hands back `favicon:`/`site-logo:`/`footer-logo:` as a live
+// `<link>` href, and the gate that covers site-logo's three <img src> consumers (safeSrc, above)
+// never touched it. A mark safeSrc refuses is now no mark at all: iconHrefs links the generated
+// pair instead, the same fallback the "no mark" branch emits. tile#203 r1: the gate is applied
+// INSIDE icon-core (linkedMark), with the same safeSrc handed to badgePaths above and to the
+// routes, so the mark this layout links and the files the routes skip are one decision.
+// `<link rel=icon>`/`apple-touch-icon` are not a script-execution context, so the gate is
+// defense-in-depth here.
+const iconLinks = iconHrefs(meta, { hasPwa, written: iconWritten, safe: safeSrc });
 // Public per-site beacon id, compiled from ir/_site.md. Validate hand-edited IR too.
 const rawAnalyticsToken = String(meta['analytics-token'] || '').trim().toLowerCase();
 const analyticsToken = /^[0-9a-f]{32}$/.test(rawAnalyticsToken) ? rawAnalyticsToken : '';
