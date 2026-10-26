@@ -3,5 +3,5 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Dispatch Worker for Workers for Platforms Sites: host lookup, verbatim /api/ forward to RSP, cf-worker header rule, request-scoped capability stub. Inert: nothing imports or deploys it."
+  "description": "Dispatch Worker for Workers for Platforms Sites: host lookup, verbatim /api/ and contract rsp-direct forward to RSP, cf-worker header rule, request-scoped capability stub. Inert: nothing imports or deploys it."
 }

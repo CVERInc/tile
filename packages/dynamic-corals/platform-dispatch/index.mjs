@@ -6,7 +6,8 @@
 //   HOST_ROUTES      KV-shaped binding. get(host, 'json') -> mapping entry or null.
 //   DISPATCHER       dispatch namespace binding. get(name, { props }) -> Fetcher.
 //   RSP              service binding to the RSP Worker (same name as the Pages
-//                    transport contract's bindingName).
+//                    transport contract's bindingName). Carries /api/ and
+//                    DIRECT_FORWARD_RULES verbatim, and the stub's reads.
 //   DISPATCH_BYPASS  optional var. "1" | "true" | "on" serves the generated
 //                    Worker's missing-binding 503 for every request.
 //
@@ -27,6 +28,31 @@ export const STUB_PROP = 'CONNECTOR';
 // Browser-facing prefix answered here and never entered into a Site Worker.
 // Compared WITH the trailing slash so /apix is not matched.
 export const API_PREFIX = '/api/';
+
+// The other browser-facing RSP paths a Site Worker hands verbatim to its RSP binding on Pages:
+// the transport contract's forward rules with rsp "direct" (RSP's own seam scripts and styles,
+// its checkout-unavailable page, the billing returns and the uploaded-asset proxy). A Site
+// Worker here has no RSP binding, so these are answered here, with the same verbatim forward as
+// API_PREFIX. Same vocabulary and methods as the contract: `exact` or `prefix` (whole prefix,
+// trailing slash included), GET and HEAD only; any other method still goes to the Site Worker,
+// as on Pages. The contract's rsp "site" pages (/membership, /account, /checkout/success,
+// /subscribe/success) are deliberately absent: the Site Worker composes them itself.
+export const DIRECT_FORWARD_METHODS = Object.freeze(['GET', 'HEAD']);
+export const DIRECT_FORWARD_RULES = Object.freeze([
+	{ match: 'exact', value: '/billing/success' },
+	{ match: 'exact', value: '/billing/cancel' },
+	{ match: 'exact', value: '/seam/island.js' },
+	{ match: 'exact', value: '/seam/checkout-unavailable' },
+	{ match: 'exact', value: '/seam/listing-filter.js' },
+	{ match: 'exact', value: '/seam/wix-sidecart.css' },
+	{ match: 'prefix', value: '/asset/' }
+].map((rule) => Object.freeze(rule)));
+
+export function isDirectForward(method, pathname) {
+	if (!DIRECT_FORWARD_METHODS.includes(method)) return false;
+	return DIRECT_FORWARD_RULES.some((rule) =>
+		rule.match === 'exact' ? pathname === rule.value : pathname.startsWith(rule.value));
+}
 
 // Public catalog reads a Site Worker may make over its own host (these arrive
 // here carrying cf-worker). Derived from the template's self-origin reads:
@@ -125,7 +151,7 @@ export async function handleRequest(request, env, ctx) {
 	if (found.error) return found.error;
 	const entry = found.entry;
 
-	if (url.pathname.startsWith(API_PREFIX)) {
+	if (url.pathname.startsWith(API_PREFIX) || isDirectForward(request.method, url.pathname)) {
 		const rsp = env[RSP_BINDING];
 		if (!rsp) return bypassResponse();
 		return rsp.fetch(request); // verbatim: method, URL, Host, Origin, headers, body
