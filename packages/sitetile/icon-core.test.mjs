@@ -13,7 +13,8 @@
 // returned a Buffer" is exactly what a broken encoder also does. The PNG chunk CRCs are checked
 // against node:zlib's own crc32, which is an implementation this file does not own.
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync, deflateSync, crc32 } from 'node:zlib';
@@ -447,6 +448,40 @@ test('🔴 a PNG must be structurally complete: full IHDR, an IDAT, IEND, valid 
   // CONTROL: the intact file, and trailing bytes after IEND (which decoders ignore), still pass
   assert.deepEqual(pngSize(OWNER_PNG), { width: 64, height: 48 });
   assert.deepEqual(pngSize(Buffer.concat([OWNER_PNG, Buffer.from('trailer')])), { width: 64, height: 48 });
+});
+
+// 🩸 tile#203 review r1, P2: publicFilePath refuses a literal `..`, but readFileSync follows a
+// symlink, so public/brand/mark.png → /anywhere/else.png was served at /apple-touch-icon.png and
+// listed in the manifest as a file this site ships. The reader is measured on a real directory,
+// with the cwd it reads public/ from, because that is what the routes run with.
+const PUBLIC_FILE = join(ASTRO, 'src/lib/public-file.mjs');
+const reader = await (async () => {
+  const root = mkdtempSync(join(tmpdir(), 'icon-public-'));
+  mkdirSync(join(root, 'site/public/brand'), { recursive: true });
+  writeFileSync(join(root, 'outside.png'), OWNER_PNG);
+  writeFileSync(join(root, 'site/public/brand/inside.png'), OWNER_PNG);
+  symlinkSync(join(root, 'outside.png'), join(root, 'site/public/brand/escape.png'));
+  symlinkSync(join(root, 'site/public/brand/inside.png'), join(root, 'site/public/brand/alias.png'));
+  symlinkSync(root, join(root, 'site/public/up'));
+  mkdirSync(join(root, 'site/public/dir.png'));
+  const was = process.cwd();
+  process.chdir(join(root, 'site'));
+  try { return { root, mod: await import(PUBLIC_FILE + '?cwd=' + encodeURIComponent(root)) }; }
+  finally { process.chdir(was); }
+})();
+test('🔴 the public/ reader stays inside public/ and reads only regular files', () => {
+  const { readPublic, publicHas } = reader.mod;
+  assert.ok(Buffer.from(readPublic('brand/inside.png')).equals(OWNER_PNG), 'CONTROL: a real file inside public/ is read');
+  assert.ok(Buffer.from(readPublic('brand/alias.png')).equals(OWNER_PNG), 'a symlink that stays inside public/ is read');
+  for (const rel of ['brand/escape.png', 'up/outside.png', 'dir.png', 'missing.png', '../outside.png']) {
+    assert.equal(readPublic(rel), null, `${rel}: not read`);
+    assert.equal(publicHas(rel), false, `${rel}: not a shipped file`);
+  }
+  assert.equal(publicHas('brand/inside.png'), true);
+  const meta = { favicon: '/brand/escape.png' };
+  assert.ok(appleTouchFile(meta, readPublic).equals(appleTouchPng(meta)), 'an escaping symlink falls back to the badge');
+  assert.equal(ownerPng(meta, readPublic), null, 'and is never listed in the manifest');
+  rmSync(reader.root, { recursive: true, force: true });
 });
 
 test('🔴 the routes and the layout read the rule from the model', () => {
