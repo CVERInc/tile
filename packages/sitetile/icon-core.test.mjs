@@ -413,6 +413,42 @@ test('pngSize reads IHDR and refuses what is not a PNG', () => {
   for (const bad of [null, Buffer.from('GIF89a'), faviconIco({}), OWNER_PNG.subarray(0, 20)]) assert.equal(pngSize(bad), null);
 });
 
+// 🩸 tile#203 review r1, P2: a 24-byte signature + "IHDR" + width/height was accepted as a PNG,
+// served as image/png at /apple-touch-icon.png and listed in the manifest at the invented size.
+test('🔴 a PNG must be structurally complete: full IHDR, an IDAT, IEND, valid CRCs', () => {
+  const stub = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(stub, 0);
+  stub.writeUInt32BE(13, 8); stub.write('IHDR', 12, 'latin1'); stub.writeUInt32BE(64, 16); stub.writeUInt32BE(48, 20);
+  assert.equal(pngSize(stub), null, "the reviewer's 24-byte stub");
+  // walk the real file's chunks, then break it one way at a time
+  const chunks = [];
+  for (let off = 8; off < OWNER_PNG.length;) {
+    const len = OWNER_PNG.readUInt32BE(off);
+    chunks.push([off, len]);
+    off += 12 + len;
+  }
+  const [ihdr, idat, iend] = chunks;
+  const without = (c) => Buffer.concat([OWNER_PNG.subarray(0, c[0]), OWNER_PNG.subarray(c[0] + 12 + c[1])]);
+  const edit = (fn) => { const b = Buffer.from(OWNER_PNG); fn(b); return b; };
+  const broken = {
+    'no IDAT': without(idat),
+    'no IEND': without(iend),
+    'cut inside IDAT': OWNER_PNG.subarray(0, idat[0] + 20),
+    'IHDR length 12': edit((b) => b.writeUInt32BE(12, ihdr[0])),
+    'IDAT length past EOF': edit((b) => b.writeUInt32BE(0x7fffffff, idat[0])),
+    'IHDR CRC wrong': edit((b) => { b[ihdr[0] + 8 + 13] ^= 0xff; }),
+    'IDAT CRC wrong': edit((b) => { b[idat[0] + 8 + idat[1]] ^= 0xff; }),
+  };
+  for (const [name, b] of Object.entries(broken)) {
+    assert.equal(pngSize(b), null, name);
+    const meta = { favicon: '/mark.png' };
+    assert.ok(appleTouchFile(meta, publicDir({ 'mark.png': b })).equals(appleTouchPng(meta)), `${name}: falls back to the badge`);
+  }
+  // CONTROL: the intact file, and trailing bytes after IEND (which decoders ignore), still pass
+  assert.deepEqual(pngSize(OWNER_PNG), { width: 64, height: 48 });
+  assert.deepEqual(pngSize(Buffer.concat([OWNER_PNG, Buffer.from('trailer')])), { width: 64, height: 48 });
+});
+
 test('🔴 the routes and the layout read the rule from the model', () => {
   const route = (p) => readFileSync(join(ASTRO, 'src/pages', p), 'utf8');
   assert.match(route('apple-touch-icon.png.js'), /appleTouchFile\(meta, readPublic, safeSrc\)/, 'apple-touch route serves appleTouchFile');

@@ -236,15 +236,39 @@ export function publicFilePath(href) {
   return segs.join('/');
 }
 
-/** A PNG's pixel size, read from its IHDR, or null when the bytes are not a PNG. */
+/**
+ * A PNG's pixel size, read from its IHDR, or null when the bytes are not a complete PNG.
+ *
+ * 🩸 tile#203 review r1: this used to read the signature and the IHDR label only, so a 24-byte
+ * stub passed, was served as image/png and listed in the manifest at a size it never had. Now the
+ * chunk sequence is walked: a first IHDR of length 13, every chunk inside the file, at least one
+ * IDAT, an IEND, and a matching CRC on each of those critical chunks. Ancillary chunks are skipped
+ * unchecked, and bytes after IEND are ignored, as decoders ignore them. The pixel data itself is
+ * not inflated: a structurally sound file with a bad zlib stream still passes.
+ */
 export function pngSize(bytes) {
   const b = bytes instanceof Uint8Array ? bytes : null;
   const SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (!b || b.length < 24 || SIG.some((v, i) => b[i] !== v)) return null;
-  if (String.fromCharCode(b[12], b[13], b[14], b[15]) !== 'IHDR') return null;
+  if (!b || b.length < 8 + 25 + 12 || SIG.some((v, i) => b[i] !== v)) return null;
   const dv = new DataView(b.buffer, b.byteOffset, b.length);
-  const width = dv.getUint32(16), height = dv.getUint32(20);
-  return width && height ? { width, height } : null;
+  const CRITICAL = new Set(['IHDR', 'IDAT', 'IEND']);
+  let off = 8, idat = false, size = null;
+  while (off + 12 <= b.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(b[off + 4], b[off + 5], b[off + 6], b[off + 7]);
+    if (len > b.length - off - 12) return null;                    // runs past the end of the file
+    if (CRITICAL.has(type) && crc32(b.subarray(off + 4, off + 8 + len)) !== dv.getUint32(off + 8 + len)) return null;
+    if (off === 8) {
+      if (type !== 'IHDR' || len !== 13) return null;
+      const width = dv.getUint32(16), height = dv.getUint32(20);
+      if (!width || !height) return null;
+      size = { width, height };
+    } else if (type === 'IHDR') return null;
+    if (type === 'IDAT') idat = true;
+    if (type === 'IEND') return idat && len === 0 ? size : null;
+    off += 12 + len;
+  }
+  return null;                                                      // no IEND
 }
 
 /**
