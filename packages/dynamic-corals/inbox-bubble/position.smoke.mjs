@@ -350,14 +350,14 @@ for (const arm of [
 	check(arm.label, problems, m);
 }
 // 🩸 THE SAME SHORTFALL SIDEWAYS (tile#199 review r3). A 5000px `-x` clamps to 50vw, so on a 390px
-// phone the panel was 163px wide; once the search index loads the button reads「Send to the owner」
+// phone the panel was 163px wide; once the search index loads the button reads「Send to a person」
 // (145px), and the textarea was left with no content width at all while the button ran past the
 // panel's edge. A 24px root font does the same with the plain「Send」. The open panel's `-x` is now
 // lowered by the shortfall like its `-y`, so each arm requires 10ch of text and the whole button,
 // and the control requires that the panel really had to move in from the requested offset.
 const searchIndex = [{ t: 'example', u: '/example', d: '2026-01-01' }];
 for (const arm of [
-	{ label: 'phone, offset-x 5000px, search loaded (Send to the owner)', hostCss: ':root{--reef-inbox-offset-x:5000px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to the owner' },
+	{ label: 'phone, offset-x 5000px, search loaded (Send to a person)', hostCss: ':root{--reef-inbox-offset-x:5000px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to a person' },
 	{ label: 'phone, offset-x 5000px, 24px root font', hostCss: ':root{--reef-inbox-offset-x:5000px;font-size:24px}', waitLabel: 'Send' }
 ]) {
 	const m = await measure({ viewport: PHONE, mobile: true, hostCss: arm.hostCss, hostAttrs: arm.hostAttrs ?? '', searchIndex: arm.searchIndex ?? null, waitLabel: arm.waitLabel, openPanel: true, width: true });
@@ -374,8 +374,8 @@ for (const arm of [
 // arm is about the width alone. The control requires that the row really did wrap.
 {
 	const NARROW = { width: 280, height: 900 };
-	const m = await measure({ viewport: NARROW, mobile: true, hostCss: ':root{font-size:24px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to the owner', openPanel: true, width: true });
-	const problems = widthProblems(m.width, 'Send to the owner');
+	const m = await measure({ viewport: NARROW, mobile: true, hostCss: ':root{font-size:24px}', hostAttrs: 'data-search-index="/search.json"', searchIndex, waitLabel: 'Send to a person', openPanel: true, width: true });
+	const problems = widthProblems(m.width, 'Send to a person');
 	if (!(m.width.button.top >= m.width.textareaBottom - 0.5)) problems.push(`control: the button did not wrap below the textarea: ${JSON.stringify(m.width)}`);
 	if (!inside(m.panel, NARROW)) problems.push(`the open panel leaves the screen: ${JSON.stringify(m.panel)}`);
 	check('narrow 280px, 24px root font, search loaded: the button wraps', problems, m);
