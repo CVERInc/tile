@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
-import { encodePng } from '../icon-core.mjs';
+import { encodePng, APPLE_TOUCH_PX } from '../icon-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -761,9 +761,11 @@ const OWNER_MARK_BYTES = (() => {
   for (let i = 0; i < OWNER_MARK_PX * OWNER_MARK_PX; i++) { px[i * 4] = 200; px[i * 4 + 2] = 40; px[i * 4 + 3] = 255; }
   return encodePng(px, OWNER_MARK_PX);
 })();
-function buildOwnerFaviconFixture() {
-  const ODIR = join(HERE, '..', '.smoke-owner-favicon');
-  const SKIP_RE = /[\\/](node_modules|\.astro|dist-smoke|dist-hostile-blog|\.smoke-hostile-blog|dist-badge-collision|\.smoke-badge-collision|dist-coral-css-declared|\.smoke-coral-css-declared|dist-owner-favicon|\.smoke-owner-favicon)(?:[\\/]|$)/;
+// `name` picks the sibling directory, `favicon` is the value written into `_site.md` verbatim, and
+// `files` are extra public/ files planted before the build.
+function buildOwnerFaviconFixture(name, favicon, files = {}) {
+  const ODIR = join(HERE, '..', `.smoke-${name}`);
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
   rmSync(ODIR, { recursive: true, force: true });
   cpSync(HERE, ODIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
   symlinkSync(join(HERE, 'node_modules'), join(ODIR, 'node_modules'), 'dir');
@@ -775,7 +777,7 @@ function buildOwnerFaviconFixture() {
 sitetile-page: _site
 brand: Example Studio
 lang: en-US
-favicon: /${OWNER_MARK_REL}
+favicon: ${favicon}
 ---
 `, 'utf8');
   writeFileSync(join(ODIR, 'content', 'home.md'), `---
@@ -788,17 +790,35 @@ lang: en-US
 %% sitetile: prose %%
 Home page body.
 `, 'utf8');
-  mkdirSync(join(ODIR, 'public', dirname(OWNER_MARK_REL)), { recursive: true });
-  writeFileSync(join(ODIR, 'public', OWNER_MARK_REL), OWNER_MARK_BYTES);
-  const ODIST = join(ODIR, 'dist-owner-favicon');
+  for (const [rel, bytes] of Object.entries({ [OWNER_MARK_REL]: OWNER_MARK_BYTES, ...files })) {
+    mkdirSync(join(ODIR, 'public', dirname(rel)), { recursive: true });
+    writeFileSync(join(ODIR, 'public', rel), bytes);
+  }
+  const ODIST = join(ODIR, `dist-${name}`);
   execFileSync('npx', ['astro', 'build', '--outDir', ODIST], {
     cwd: ODIR, stdio: 'inherit',
-    env: { ...process.env, SITE_ID: 'owner-favicon-smoke', PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+    env: { ...process.env, SITE_ID: `${name}-smoke`, PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
   });
   return ODIST;
 }
 console.log('▸ astro build → .smoke-owner-favicon/dist-owner-favicon/ (a site-level `favicon:` PNG reaches the icon files and the manifest)…');
-const ODIST = buildOwnerFaviconFixture();
+const ODIST = buildOwnerFaviconFixture('owner-favicon', `/${OWNER_MARK_REL}`);
+// tile#203 review r1, P2: the same site, QUOTED (the P1 quote split), with an older
+// public/apple-touch-icon.png still in place. The hand-placed file is the owner's explicit choice and
+// keeps the path (icon-core's PRECEDENCE note); <head> still names the `favicon:` mark.
+const STALE_APPLE_TOUCH = (() => {
+  const px = new Uint8Array(APPLE_TOUCH_PX * APPLE_TOUCH_PX * 4);
+  for (let i = 0; i < APPLE_TOUCH_PX * APPLE_TOUCH_PX; i++) { px[i * 4 + 1] = 160; px[i * 4 + 3] = 255; }
+  return encodePng(px, APPLE_TOUCH_PX);
+})();
+console.log('▸ astro build → .smoke-owner-favicon-handplaced/ (quoted `favicon:` + a hand-placed public/apple-touch-icon.png)…');
+const HPDIST = buildOwnerFaviconFixture('owner-favicon-handplaced', `"/${OWNER_MARK_REL}"`, { 'apple-touch-icon.png': STALE_APPLE_TOUCH });
+const handPlacedHome = readFileSync(join(HPDIST, 'index.html'), 'utf8');
+// tile#203 review r1, P1: a `favicon:` the layout's safeSrc refuses. <head> links the generated
+// pair, so the build must write it.
+console.log('▸ astro build → .smoke-owner-favicon-malformed/ (`favicon: https://[`, refused by the layout)…');
+const MFDIST = buildOwnerFaviconFixture('owner-favicon-malformed', 'https://[');
+const malformedHome = readFileSync(join(MFDIST, 'index.html'), 'utf8');
 const ownerHome = readFileSync(join(ODIST, 'index.html'), 'utf8');
 const manifestIconSrcs = (dist) => JSON.parse(readFileSync(join(dist, 'manifest.webmanifest'), 'utf8')).icons.map((i) => i.src);
 // Every .html the build emitted — not only index.html, because 404.html is exactly the kind of
@@ -966,7 +986,24 @@ const checks = [
     JSON.stringify(JSON.parse(readFileSync(join(ODIST, 'manifest.webmanifest'), 'utf8')).icons)
       === JSON.stringify([{ src: `/${OWNER_MARK_REL}`, sizes: `${OWNER_MARK_PX}x${OWNER_MARK_PX}`, type: 'image/png', purpose: 'any' }])],
   ['🔴 manifest: every icon it names exists in that build (primary and owner-favicon builds)', () =>
-    [DIST, ODIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
+    [DIST, ODIST, HPDIST, MFDIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
+  ['🔴 icons: a hand-placed public/apple-touch-icon.png keeps the path even with `favicon:` set to a PNG (precedence)', () =>
+    readFileSync(join(HPDIST, 'apple-touch-icon.png')).equals(STALE_APPLE_TOUCH)],
+  ['🔴 icons: a QUOTED `favicon:` is linked without its quotes, and still replaces the generated .ico/.svg', () =>
+    handPlacedHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)
+    && handPlacedHome.includes(`<link rel="apple-touch-icon" href="/${OWNER_MARK_REL}">`)
+    && !/href="(?:&quot;|&#34;)/.test(handPlacedHome)
+    && !existsSync(join(HPDIST, 'favicon.ico')) && !existsSync(join(HPDIST, 'favicon.svg'))],
+  ['manifest: with a hand-placed apple-touch-icon.png but no gen-icons.sh output, the owner PNG is the icon', () =>
+    JSON.stringify(manifestIconSrcs(HPDIST)) === JSON.stringify([`/${OWNER_MARK_REL}`])],
+  ['🔴 icons: `favicon: https://[` (refused by the layout) → <head> links the generated pair AND the build wrote both', () =>
+    malformedHome.includes('<link rel="icon" sizes="32x32" href="/favicon.ico" data-generated="badge">')
+    && malformedHome.includes('<link rel="icon" type="image/svg+xml" href="/favicon.svg" data-generated="badge">')
+    && existsSync(join(MFDIST, 'favicon.ico')) && existsSync(join(MFDIST, 'favicon.svg'))
+    && !malformedHome.includes('https://[')],
+  ['🔴 icons: every icon <link> on every owner-favicon build names a file that build ships', () =>
+    [[ODIST, ownerHome], [HPDIST, handPlacedHome], [MFDIST, malformedHome]].every(([d, h]) =>
+      [...h.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]*\bhref="([^"]+)"/g)].every(([, href]) => existsSync(join(d, href.slice(1)))))],
   // -- CVERInc/reef#596: every *.svg the site serves is an attachment --
   ['🔴 _headers: a site with no _headers of its own gets dist/_headers carrying exactly the platform /*.svg attachment rule', () =>
     primaryHeaders === PLATFORM_RULE && svgRuleCount(primaryHeaders) === 1],

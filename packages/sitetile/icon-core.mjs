@@ -195,6 +195,14 @@ export function iconHrefs(meta, opts) {
 //     <link rel=icon>, which names the mark. A 404 there costs a bookmark icon until the page is
 //     visited. The badge there costs a wrong brand on every visit.
 // With `favicon:` unset, every function below returns exactly what the routes returned before.
+//
+// PRECEDENCE at a well-known path (tile#203 review r1): a file someone placed AT that path in
+// public/ is the owner's explicit choice, and it wins over everything here, `favicon:` included.
+// Astro serves a public/ file before the route of the same name, so the route never runs. The usual
+// case is gen-icons.sh output left in public/: its apple-touch-icon.png keeps the path even after
+// `favicon:` names a newer PNG, and its icon-*.png files stay the manifest's icons (pwa-core's
+// manifestIcons). <head> still names the `favicon:` mark, because a <link> is not a path. To have
+// the new mark at the path, remove or regenerate the old file.
 
 /**
  * The mark <head> actually links, or '' when it links the generated files instead. The ONE

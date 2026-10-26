@@ -34,7 +34,9 @@ export const MANIFEST_ICONS = [
  *
  *   `present`: the PWA_ICON_FILES names found in public/ (a Set or an array).
  *   `owner`:   the owner's favicon as a shipped PNG, `{ href, width, height }`, or null.
- * gen-icons.sh output wins wherever it exists. Without any of it, the owner's PNG is listed at its
+ * gen-icons.sh output wins wherever it exists, even when `favicon:` names a newer PNG: a file placed in
+ * public/ is the owner's explicit choice, the same precedence Astro gives it at /apple-touch-icon.png
+ * (sitetile icon-core's PRECEDENCE note). Without any of it, the owner's PNG is listed at its
  * real size. Without that either, the list is empty: a manifest with no icons is valid, and a
  * manifest that names missing files is not.
  */
