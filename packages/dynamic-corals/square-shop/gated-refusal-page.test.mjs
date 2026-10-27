@@ -51,7 +51,8 @@ const rootGated = await emitWorker(BASE_CONTRACT, rootManifestPath);
 const shellOf = (lang) => '<!doctype html><html' + (lang ? ' lang="' + lang + '"' : '') + '><head><title>Donor</title>' +
 	'<meta name="description" content="donor"></head><body><header>NAV</header><main><p>HOME</p></main><footer>FOOT</footer></body></html>';
 
-function makeEnv({ verdict, shell = shellOf('en-US'), shellStatus = 200, binding = true } = {}) {
+function makeEnv({ verdict, shell = shellOf('en-US'), shellStatus = 200, binding = true, facts } = {}) {
+	const factsSeen = [];
 	const seenByAssets = [];
 	const env = {
 		ASSETS: { fetch: async (req) => {
@@ -61,11 +62,17 @@ function makeEnv({ verdict, shell = shellOf('en-US'), shellStatus = 200, binding
 			return new Response('GATED-FILE-BYTES', { status: 200 });
 		} }
 	};
-	if (binding) env[BINDING] = { fetch: async () => {
+	if (binding) env[BINDING] = { fetch: async (req) => {
+		if (new URL(req.url).pathname === '/zapi/hub-facts') {
+			factsSeen.push(req.headers.get('cookie'));
+			if (facts === 'throw') throw new Error('facts down');
+			if (facts === undefined) return new Response('{}', { status: 404 });
+			return new Response(JSON.stringify(facts), { status: 200, headers: { 'content-type': 'application/json' } });
+		}
 		if (verdict === 'throw') throw new Error('down');
 		return new Response(JSON.stringify(verdict), { status: 200, headers: { 'content-type': 'application/json' } });
 	} };
-	return { env, seenByAssets };
+	return { env, seenByAssets, factsSeen };
 }
 const HTML = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
 const ask = (worker, env, headers = HTML, path = '/vault/post-1') =>
@@ -123,6 +130,48 @@ test('members_only and an unrecognised reason: members-only page with links take
 		assert.match(html, /<a class="st-runtime-action" href="\/tiers">Join<\/a>/);
 		assert.deepEqual(seenByAssets, ['/']);
 	}
+});
+
+test('members_only for a signed-in reader: no sign-in prompt, join link kept', async () => {
+	const { env, seenByAssets, factsSeen } = makeEnv({ verdict: MEMBERS, facts: { signed_in: true } });
+	const res = await withPages.fetch(new Request('https://s.example/vault/post-1', { headers: { ...HTML, cookie: 'sid=1' } }), env);
+	const html = await res.text();
+	assert.equal(res.status, 404);
+	assert.match(html, /data-ejecta-gate-state="members-only"/);
+	assert.match(html, /<title>Members only<\/title>/);
+	assert.match(html, /Your account doesn't have access to this page yet\. If you've already paid, it opens once the site confirms your membership; if not, join to view it\./);
+	assert.doesNotMatch(html, /Sign in/);
+	assert.match(html, /<a class="st-runtime-action" href="\/tiers">Join<\/a>/);
+	assert.deepEqual(factsSeen, ['sid=1'], 'the visitor headers ride along on the facts read');
+	assert.deepEqual(seenByAssets, ['/']);
+});
+
+test('members_only signed-in copy follows the site language', async () => {
+	const { env } = makeEnv({ verdict: MEMBERS, facts: { signed_in: true }, shell: shellOf('zh-TW') });
+	const html = await (await ask(withPages, env)).text();
+	assert.match(html, /目前登入的帳號還沒有這個頁面的存取權。如果你已經付款，網站確認你的會員資格後就能查看；還沒加入的話，加入後即可查看。/);
+	assert.doesNotMatch(html, /登入<\/a>/);
+});
+
+test('members_only: unreadable, malformed or signed-out facts keep the sign-in copy', async () => {
+	for (const [name, facts] of [['throws', 'throw'], ['non-2xx', undefined], ['signed_in false', { signed_in: false }], ['signed_in not boolean', { signed_in: 'true' }], ['missing', {}]]) {
+		const { env } = makeEnv({ verdict: MEMBERS, facts });
+		const html = await (await ask(withPages, env)).text();
+		assert.match(html, /Sign in or join to view this page\./, name);
+		assert.match(html, /href="\/hub">Sign in<\/a>/, name);
+		assert.doesNotMatch(html, /doesn't have access/, name);
+	}
+});
+
+test('facts are read only for a members-only refusal', async () => {
+	for (const verdict of [PENDING, UNDECIDABLE]) {
+		const { env, factsSeen } = makeEnv({ verdict, facts: { signed_in: true } });
+		await (await ask(withPages, env)).text();
+		assert.deepEqual(factsSeen, []);
+	}
+	const { env, factsSeen } = makeEnv({ verdict: MEMBERS, facts: { signed_in: true } });
+	await ask(withPages, env, { accept: 'application/json' });
+	assert.deepEqual(factsSeen, []);
 });
 
 test('a contract without the buyer pages omits the sign-in and join links', async () => {

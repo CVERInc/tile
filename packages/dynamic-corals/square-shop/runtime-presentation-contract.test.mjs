@@ -451,10 +451,10 @@ writeFileSync(gateManifestPath, JSON.stringify({ schemaVersion: 1, paths: ['/vau
 const gateOutPath = path.join(gateTemp, 'worker.mjs');
 execFileSync('node', [emitterPath, '--site-id', 'site-1', '--api-contract', gateContractPath, '--gated-manifest', gateManifestPath, '--api', 'https://api.example', '--out', gateOutPath], { stdio: ['ignore', 'ignore', 'pipe'] });
 const gateWorker = await import(pathToFileURL(gateOutPath).href);
-async function renderGateRefusalHtml(verdict) {
+async function renderGateRefusalHtml(verdict, accountFacts) {
 	const env = {
 		ASSETS: { fetch: async (req) => new Response(new URL(req.url).pathname === '/' ? MEMBER_SHELL : 'GATED-FILE', { status: 200 }) },
-		[GATE_BINDING]: { fetch: async () => Response.json(verdict) },
+		[GATE_BINDING]: { fetch: async (req) => (accountFacts && new URL(req.url).pathname === '/zapi/hub-facts' ? Response.json(accountFacts) : Response.json(verdict)) },
 	};
 	return (await gateWorker.default.fetch(new Request('https://s.example/vault/post-1', { headers: { accept: 'text/html' } }), env)).text();
 }
@@ -486,6 +486,13 @@ const STATES = [
 		render: () => renderGateRefusalHtml({ allow: false, reason: 'members_only' }),
 		presentation: ['st-runtime', 'st-runtime-status', 'st-runtime-action'],
 		hooks: [/data-ejecta-gate-state="members-only"/, /href="\/hub">Sign in</, /href="\/tiers">Join</],
+	},
+	{
+		id: 'gated refusal: members only, signed in',
+		render: () => renderGateRefusalHtml({ allow: false, reason: 'members_only' }, { signed_in: true }),
+		presentation: ['st-runtime', 'st-runtime-status', 'st-runtime-action'],
+		hooks: [/data-ejecta-gate-state="members-only"/, /href="\/tiers">Join</],
+		extra: (html) => assert.doesNotMatch(html, /Sign in/),
 	},
 	{
 		id: 'native listing: items',
