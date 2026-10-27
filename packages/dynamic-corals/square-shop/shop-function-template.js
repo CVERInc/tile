@@ -285,7 +285,7 @@ function shellLang(shell) {
 // declaration, or adding one when the donor had none. Used only when the copy
 // composed into the shell is known to be in a language the donor did not declare.
 function withShellLang(shell, lang) {
-	const safe = escHtml(lang);
+	const safe = String(lang).replace(/[^A-Za-z0-9-]/g, '');
 	return shell.replace(/<html\b[^>]*>/i, function (open) {
 		return /\blang=["'][^"']*["']/i.test(open)
 			? open.replace(/\blang=["'][^"']*["']/i, 'lang="' + safe + '"')
@@ -489,6 +489,9 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	}
 	const shell = shellRes.ok ? await shellRes.text() : '<!doctype html><html><head></head><body><main></main></body></html>';
 	const locale = completionLocale(shop, shell, pathLocale, url.searchParams.get('lang'));
+	// The copy below is in `locale`; when the shell declares a different language (or none), the
+	// document must say so. A shell whose declared language already maps to `locale` is left alone.
+	const renderedShell = copyLocaleOf(shellLang(shell)) === locale ? shell : withShellLang(shell, locale);
 	const copy = { ...COMPLETE_COPY[locale] };
 	const coral = parseCoralDiv(shell);
 	if (coral) for (const key of Object.keys(copy)) if (coral.completionLabels[key]) copy[key] = coral.completionLabels[key];
@@ -499,7 +502,7 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	// Opt in to the extended state set (`refunded`). An RSP that predates it ignores the marker and
 	// answers the legacy set, which this client still renders.
 	outcome.searchParams.set('states', 'extended');
-	let body = stripDonorHead(shell);
+	let body = stripDonorHead(renderedShell);
 	const initialHeading = hasOutcomeKey ? copy.pending : copy.unknown;
 	body = injectHead(body, `<title>${initialHeading}</title><meta name="robots" content="noindex">`);
 	// 🔴 `ref` and NOT `orderId`: the sold-lines record the coral writes is keyed by the
