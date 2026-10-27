@@ -143,7 +143,7 @@ If you do not want that, do not set `data-kaito`.
 
 One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own matching posts
 (title + date, as links) above the composer, filtered inside the visitor's browser; **Enter** is
-always「ask」— the button says「問 AI」/ Ask AI on the ask view and「傳給站主」/ Send to the owner
+always「ask」— the button says「問 AI」/ Ask AI on the ask view and「傳給真人」/ Send to a person
 on the compose view, so the input says what Enter does (an explicit `data-send-label` still
 wins over both); a person is the last rung as before. After Enter the list stays down until the
 visitor edits the text again — an index that arrives mid-ask does not bring it back, and a
@@ -442,7 +442,7 @@ owner knobs, which a theme or `custom_css` can set like the colours:
 - The same holds sideways. The text box keeps at least 10ch of text width (about two words, so a
   visitor can see what they are typing), and the button keeps its whole label. If the room left
   of the raised corner cannot hold both on one line (a large `-x` on a phone, a large root font,
-  or the longer「Send to the owner」label once search is on), the open panel moves in by just the
+  or the longer「Send to a person」label once search is on), the open panel moves in by just the
   missing width. Where even offset 0 is too narrow, the button drops below the text box, and its
   label wraps before it would leave the panel. With no offset and no
   inset its bounds are the old `calc(100vw - 2rem)` × `min(30rem, 70vh)`.
@@ -475,14 +475,24 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.16/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.17/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.7.16, stop and choose a
+is immutable: if that deployment already has different bytes at 0.7.17, stop and choose a
 new version before publishing.
+
+**0.7.17 is 0.7.16 plus tile#202's copy** (reef#2418). After 0.7.16 was merged (tile#199),
+tile#202 made the visitor copy site-neutral in all nine locales, matching the site form's
+success panel (tile#201): the email note, the two hand-off status lines and the compose
+button's label once search is on (「傳給真人」/ Send to a person) no longer name a shop or an
+owner. It did not bump, so main's bytes stopped being the 0.7.16 that was reviewed and merged,
+and one version names one set of bytes. No behaviour besides the copy changed. Neither 0.7.15
+nor 0.7.16 was ever published, so 0.7.17 is the first version after 0.7.14 to be published: a
+channel moving up from 0.7.14 brings the guidance funnel (0.7.15), the safe-area inset and
+offset knobs (0.7.16) and this copy together.
 
 ### 🔴 Rolling out the loader handoff (0.7.12) — coral first, in this order
 
