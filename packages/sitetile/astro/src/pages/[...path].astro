@@ -21,12 +21,26 @@ import { contentPageRel } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
-import { noindexUrls } from '../lib/noindex.mjs';
-import { contentUrls } from '../lib/sitemap.mjs';
+import { noindexPolicy } from '../lib/noindex.mjs';
 
 
 export function getStaticPaths() {
   const paths = [];
+  // reef#2554: noindex is decided over the FINAL inventory — every route this function emits,
+  // whatever its kind (content page, blog index at any mount incl. `/`, post, locale edition) — by
+  // the path it lands at, the same question sitemap.xml asks (lib/noindex.mjs). Only a noindex
+  // route gets a `robots` prop; every other route's props, and so its bytes, are what they were.
+  // (Called at both returns below, after `files` — the content glob — is loaded.)
+  const markNoindex = (out) => {
+    const isNoindex = noindexPolicy(files);
+    // date archives are generated lists like the tag/category ones — not pages anyone is sent to,
+    // and not in this decision's inventory (sitemap.xml marks the same three kinds `page`).
+    for (const r of out) {
+      if (r.props.kind === 'date-archive') continue;
+      if (isNoindex('/' + (r.params.path || ''))) r.props.robots = 'noindex';
+    }
+    return out;
+  };
 
   // ── blog (index + pager + posts) ──
   // Loaded with the SAME globs/meta the old devlog/* routes used, so with the default blog-path
@@ -55,10 +69,6 @@ export function getStaticPaths() {
   // ── content pages ── (verbatim from the old pages/[...slug].astro)
   // Recursive glob so NESTED pages route faithfully: content/legal/terms.md → /legal/terms.
   const files = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
-  // reef#2554: `noindex: true`, or the page a form's thanks= lands on — the same list sitemap.xml
-  // leaves out (lib/noindex.mjs). Only a noindex page gets a `robots` prop; every other page's
-  // props, and so its bytes, are what they were.
-  const noindex = noindexUrls(files, meta);
   // site-config layer: `content/_site.md` chrome (+ `content/<locale>/_site.md` override),
   // inherited UNDER each page's own frontmatter (page keys win). null when absent → legacy
   // per-page behavior (SPEC-site-data-model). loadSite is called PER PAGE with its rel path so a
@@ -115,9 +125,7 @@ export function getStaticPaths() {
     // Section, and one that disagreed with the document root would mislead whatever reads it next.
     if (siteConfig && siteConfig[DYNAMIC_CORAL_CSS_KEY]) site.meta[DYNAMIC_CORAL_CSS_KEY] = siteConfig[DYNAMIC_CORAL_CSS_KEY];
     else delete site.meta[DYNAMIC_CORAL_CSS_KEY];
-    const props = { kind: 'page', site };
-    if (noindex.has(contentUrls({ [path]: raw }, meta)[0])) props.robots = 'noindex';
-    paths.push({ params: { path: slug }, props });
+    paths.push({ params: { path: slug }, props: { kind: 'page', site } });
   }
 
   // ── everything below this line is the blog; a site without one emits none of it ──
@@ -129,7 +137,7 @@ export function getStaticPaths() {
   // "Devlog" + "Short build logs and hard-won tricks from the workshop."
   // blogInstalled() qualifies a site by DECLARATION or by CONTENT, so a site with 632 posts and a
   // deliberately empty _site.md — keeps every one of its URLs.
-  if (!blogInstalled(meta, posts)) return paths;
+  if (!blogInstalled(meta, posts)) return markNoindex(paths);
 
   // Which other editions of each blog url exist — resolved ONCE, before any route is pushed, from
   // every locale's whole corpus (so both directions agree, and an incremental build that emits a
@@ -281,7 +289,7 @@ export function getStaticPaths() {
     });
   }
 
-  return paths;
+  return markNoindex(paths);
 }
 
 const props = Astro.props;

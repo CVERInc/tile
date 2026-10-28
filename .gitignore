@@ -84,3 +84,5 @@ packages/sitetile/.smoke-announce-card/
 packages/sitetile/.smoke-surface-band/
 
 packages/sitetile/.smoke-share-buttons-*/
+# the reef#2554 noindex smoke builds (throwaway siblings of astro/; see astro/smoke-build.mjs buildNoindexFixture)
+packages/sitetile/.smoke-noindex-*/

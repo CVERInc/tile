@@ -837,6 +837,78 @@ function allHtmlPages(root) {
   })(root);
   return out.sort();
 }
+// reef#2554 r2 — noindex is decided over every route the build emits, by the page's emitted
+// identity, not only over content files. Two minimal sites, the codex r1 review's own inputs: one
+// with a /devlog blog whose posts (base and zh-tw) are forms' thanks= targets, plus every spelling
+// of a destination that lands on one page (`/./x`, `/x/?q#f`, `/x/index.html`, a `.fr` suffix);
+// one with the blog mounted at the root, `noindex: true` on home, and every other page noindex
+// too — so its sitemap must come out a valid, empty urlset.
+const NOINDEX_PAGE = (name, fm = '', body = '## Body\n%% sitetile: prose %%\nHello.\n') =>
+  `---\nsitetile-page: ${name}\ntitle: ${name}\n${fm}---\n\n${body}`;
+const NOINDEX_FORM = (target) => `## Contact ${target}\n%% sitetile: form action=inbox thanks="${target}" %%\n### Name\n`;
+const NOINDEX_POST = '---\ntitle: Thank you\npubDate: 2026-01-01\n---\nYour response is received.\n';
+const NOINDEX_ROUTE_TARGETS = ['/plain/?x=1#top', '/./dot-thanks', '/thanks.zh-tw/', '/zh-tw/thanks/', '/missing',
+  '/devlog/thank-post/', '/zh-tw/devlog/thank-post/', '/thanks.fr/', '/index-thanks/index.html', '/kept/?from=order#top'];
+function buildNoindexFixture(name, files) {
+  const NDIR = join(HERE, '..', `.smoke-${name}`);
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
+  rmSync(NDIR, { recursive: true, force: true });
+  cpSync(HERE, NDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(NDIR, 'node_modules'), 'dir');
+  for (const d of ['content', 'blog']) {
+    rmSync(join(NDIR, d), { recursive: true, force: true });
+    mkdirSync(join(NDIR, d), { recursive: true });
+  }
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(NDIR, dirname(rel)), { recursive: true });
+    writeFileSync(join(NDIR, rel), text, 'utf8');
+  }
+  const NDIST = join(NDIR, `dist-${name}`);
+  execFileSync('npx', ['astro', 'build', '--outDir', NDIST], {
+    cwd: NDIR, stdio: 'inherit',
+    env: { ...process.env, SITE_ID: `${name}-smoke`, PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  });
+  return NDIST;
+}
+console.log('▸ astro build → .smoke-noindex-routes/ (thanks= targets on blog posts, locale-suffixed and dot/index.html spellings)…');
+const NRDIST = buildNoindexFixture('noindex-routes', {
+  // A site-layer `noindex:` must not blanket `ordinary` (own frontmatter only).
+  'content/_site.md': '---\ntitle: Review\nlocales: en-US, zh-TW\nlang: en-US\nnoindex: true\n---\n',
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/zh-tw.md': NOINDEX_PAGE('zh-tw', 'lang: zh-TW\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_ROUTE_TARGETS.map(NOINDEX_FORM).join('')),
+  ...Object.fromEntries(['plain', 'dot-thanks', 'thanks.zh-tw', 'zh-tw/thanks', 'ordinary', 'index-thanks']
+    .map((n) => [`content/${n}.md`, NOINDEX_PAGE(n)])),
+  'content/thanks.fr.md': NOINDEX_PAGE('thanks.fr', 'lang: fr\n'),
+  'content/kept.md': NOINDEX_PAGE('kept', 'noindex: false\n'),
+  'content/explicit.zh-tw.md': NOINDEX_PAGE('explicit.zh-tw', 'noindex: true\n'),
+  'blog/thank-post.md': NOINDEX_POST,
+  'blog/zh-tw/thank-post.md': NOINDEX_POST,
+  'blog/other-post.md': '---\ntitle: Other\npubDate: 2026-01-02\n---\nAn ordinary post.\n',
+});
+console.log('▸ astro build → .smoke-noindex-root-blog/ (blog mounted at /, home `noindex: true`, every page noindex)…');
+const NBDIST = buildNoindexFixture('noindex-root-blog', {
+  'content/home.md': NOINDEX_PAGE('home', 'packages: blog\nblog-path: /\nnoindex: true\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', 'noindex: true\n', NOINDEX_FORM('/') + NOINDEX_FORM('/post/')),
+  'blog/post.md': '---\ntitle: Post\npubDate: 2026-01-01\n---\nHello.\n',
+});
+const noindexAt = (dist, p) => readFileSync(join(dist, p, 'index.html'), 'utf8').includes(ROBOTS_NOINDEX);
+const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${p}</loc>`);
+/** The two consumers must agree on every page a build emits: no page carries robots noindex while
+ *  its sitemap still lists it (in either slash spelling — the sitemap writes `/thanks.fr`). */
+function noindexDisagreements(dist) {
+  const xml = readFileSync(join(dist, 'sitemap.xml'), 'utf8');
+  const out = [];
+  for (const f of allHtmlPages(dist)) {
+    const rel = f.slice(dist.length + 1);
+    if (!rel.endsWith('index.html')) continue;
+    const id = '/' + rel.slice(0, -'index.html'.length);
+    const listed = xml.includes(`<loc>https://example.com${id}</loc>`)
+      || (id !== '/' && xml.includes(`<loc>https://example.com${id.slice(0, -1)}</loc>`));
+    if (listed && readFileSync(f, 'utf8').includes(ROBOTS_NOINDEX)) out.push(id);
+  }
+  return out;
+}
 const CORAL_CSS_ATTR = 'data-dynamic-coral-css';
 /** Pages split by whether their <html> tag carries the declaration. */
 function coralCssStamp(root) {
@@ -1943,6 +2015,34 @@ const checks = [
     && !noindexPage('form-thanks').includes('name="robots"') && inSitemap('form-thanks')],
   ['🔴 #2554 robots meta appears exactly once on a noindex page', () =>
     noindexPage('noindex-on').split('name="robots"').length === 2],
+  // -- reef#2554 r2: the decision follows the emitted page, on every route kind --
+  ['🔴 #2554 r2 a thanks= on a base blog post → that post is noindex and out of sitemap.xml; its sibling post is not', () =>
+    noindexAt(NRDIST, 'devlog/thank-post') && !listedAt(NRDIST, '/devlog/thank-post/')
+    && !noindexAt(NRDIST, 'devlog/other-post') && listedAt(NRDIST, '/devlog/other-post/')],
+  ['🔴 #2554 r2 a thanks= on a zh-tw blog post → noindex, out of sitemap.xml', () =>
+    noindexAt(NRDIST, 'zh-tw/devlog/thank-post') && !listedAt(NRDIST, '/zh-tw/devlog/thank-post/')],
+  ['🔴 #2554 r2 thanks=/thanks.fr/ lands on content/thanks.fr.md (emitted thanks.fr/index.html) → noindex, out of sitemap.xml in either spelling', () =>
+    noindexAt(NRDIST, 'thanks.fr') && !listedAt(NRDIST, '/thanks.fr') && !listedAt(NRDIST, '/thanks.fr/')],
+  ['🔴 #2554 r2 thanks=/./dot-thanks and thanks=/index-thanks/index.html resolve to the page a browser lands on', () =>
+    noindexAt(NRDIST, 'dot-thanks') && !listedAt(NRDIST, '/dot-thanks/')
+    && noindexAt(NRDIST, 'index-thanks') && !listedAt(NRDIST, '/index-thanks/')],
+  ['🔴 #2554 r2 a query/fragment target with NO noindex key → noindex, out of sitemap.xml (the `kept` control says noindex: false and stays)', () =>
+    noindexAt(NRDIST, 'plain') && !listedAt(NRDIST, '/plain/')
+    && !noindexAt(NRDIST, 'kept') && listedAt(NRDIST, '/kept/')],
+  ['🔴 #2554 r2 locale and suffix targets, own noindex: true, and a site-layer noindex that blankets nothing', () =>
+    noindexAt(NRDIST, 'zh-tw/thanks') && noindexAt(NRDIST, 'thanks.zh-tw') && noindexAt(NRDIST, 'explicit.zh-tw')
+    && !noindexAt(NRDIST, 'ordinary') && listedAt(NRDIST, '/ordinary/')
+    && !noindexAt(NRDIST, '') && listedAt(NRDIST, '/') && !noindexAt(NRDIST, 'contact') && listedAt(NRDIST, '/contact/')],
+  ['🔴 #2554 r2 a thanks= at a page that does not exist builds, emits no page there and lists none', () =>
+    !existsSync(join(NRDIST, 'missing')) && !readFileSync(join(NRDIST, 'sitemap.xml'), 'utf8').includes('/missing')],
+  ['🔴 #2554 r2 root-mounted blog: home `noindex: true` reaches `/` (the blog index), the post a form thanks to is noindex too', () =>
+    noindexAt(NBDIST, '') && noindexAt(NBDIST, 'post') && noindexAt(NBDIST, 'contact')],
+  ['🔴 #2554 r2 a site whose every page is noindex → sitemap.xml is a valid, empty urlset', () => {
+    const xml = readFileSync(join(NBDIST, 'sitemap.xml'), 'utf8');
+    return !xml.includes('<url>') && /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n\n<\/urlset>\n$/.test(xml);
+  }],
+  ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + both noindex builds)', () =>
+    [DIST, NRDIST, NBDIST].every((d) => noindexDisagreements(d).length === 0)],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing

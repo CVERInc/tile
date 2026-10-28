@@ -12,7 +12,8 @@ import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
-const { posts, meta, pageNum, bannerLocales = null } = Astro.props;
+// `robots` is set only on a noindex route (reef#2554, pages/[...path].astro); '' emits nothing.
+const { posts, meta, pageNum, bannerLocales = null, robots = '' } = Astro.props;
 const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
 // 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
 // one destination, two affordances, and the chip was the one readers actually reach for
@@ -57,7 +58,7 @@ const title = isHome
   ? (meta.title || meta['blog-title'] || 'Blog')
   : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
 ---
-<SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)}>
+<SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)} robots={robots}>
   <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
     <div class="bl-main">
     {!isHome && (

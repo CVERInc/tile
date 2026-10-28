@@ -16,7 +16,8 @@
 //   • /language — a chooser; the pages it points at are already listed
 //   • /preview — a working surface
 //   • paginated /page/<n> — the same posts again, one rank-diluting step away from the index
-//   • a noindex content page — `noindex: true`, or a form's thanks= target (reef#2554)
+//   • a noindex page — content, blog index or post: its content file says `noindex: true`, or a
+//     form's thanks= lands on it (reef#2554)
 //
 // The list is DERIVED from the same globs the routers use, so it cannot claim a page that was
 // never built. That is the whole point of it: the previous defect on this site was an index
@@ -24,7 +25,7 @@
 import { allPosts, listedPosts, siteMeta, postUrl, postHasPage, blogBase, tagSlugMap, localeBlogCorpora } from '../lib/blog.mjs';
 import { contentUrls, tagUrls, categoryUrls, canonicalPath } from '../lib/sitemap.mjs';
 import { isSiteFile } from '@sitetile';
-import { noindexUrls } from '../lib/noindex.mjs';
+import { noindexPolicy } from '../lib/noindex.mjs';
 
 const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
@@ -45,15 +46,12 @@ const esc = (s) => String(s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>
 export function GET({ site }) {
   const origin = site ? String(site).replace(/\/$/, '') : '';
   const entries = [];
-  // reef#2554: a noindex page (its own `noindex: true`, or a form's thanks= target) is built but
-  // not handed to crawlers — the same list its <meta name="robots"> reads (lib/noindex.mjs).
-  const noindex = noindexUrls(contentGlob, meta);
-  for (const u of contentUrls(contentGlob, meta, isSiteFile)) if (!noindex.has(u)) entries.push({ loc: u });
+  for (const u of contentUrls(contentGlob, meta, isSiteFile)) entries.push({ loc: u, page: true });
   if (posts.length) {
-    entries.push({ loc: canonicalPath(blogBase(meta) || '/') });
+    entries.push({ loc: canonicalPath(blogBase(meta) || '/'), page: true });
     // #31: a post whose permalink points off this site has no page here, and a sitemap may only
     // name URLs on its own host — so it is left out, not written as origin + permalink.
-    for (const p of posts) if (postHasPage(p, meta)) entries.push({ loc: canonicalPath(postUrl(p, meta)), lastmod: p.date || '' });
+    for (const p of posts) if (postHasPage(p, meta)) entries.push({ loc: canonicalPath(postUrl(p, meta)), lastmod: p.date || '', page: true });
   }
   for (const u of tagUrls(posts, meta, tagSlugMap(meta))) entries.push({ loc: u });
   for (const u of categoryUrls(posts, meta)) entries.push({ loc: u });
@@ -66,14 +64,20 @@ export function GET({ site }) {
   // prefix is applied HERE, on the returned path, not inside those two shared functions.
   for (const { url, meta: metaL, listed: listedL } of localeCorpora) {
     if (!listedL.length) continue;
-    entries.push({ loc: canonicalPath(blogBase(metaL) || `/${url}/`) });
-    for (const p of listedL) if (postHasPage(p, metaL)) entries.push({ loc: canonicalPath(postUrl(p, metaL)), lastmod: p.date || '' });
+    entries.push({ loc: canonicalPath(blogBase(metaL) || `/${url}/`), page: true });
+    for (const p of listedL) if (postHasPage(p, metaL)) entries.push({ loc: canonicalPath(postUrl(p, metaL)), lastmod: p.date || '', page: true });
     for (const u of tagUrls(listedL, metaL, tagSlugMap(metaL))) entries.push({ loc: `/${url}${u}` });
     for (const u of categoryUrls(listedL, metaL)) entries.push({ loc: `/${url}${u}` });
   }
 
+  // reef#2554: a noindex page (its content file's `noindex: true`, or a form's thanks= target —
+  // a content page, the blog index, a post, any locale's) is built but not handed to crawlers. The
+  // same decision its <meta name="robots"> reads, asked about the page each entry lands on
+  // (lib/noindex.mjs). `page` marks the entries pages/[...path].astro emits — the routes that
+  // carry the head half; term archives are other routes, generated lists nobody is sent to.
+  const isNoindex = noindexPolicy(contentGlob);
   const seen = new Set();
-  const body = entries.filter((e) => e.loc && !seen.has(e.loc) && seen.add(e.loc)).map((e) => {
+  const body = entries.filter((e) => e.loc && !(e.page && isNoindex(e.loc)) && !seen.has(e.loc) && seen.add(e.loc)).map((e) => {
     const lastmod = e.lastmod ? `\n    <lastmod>${new Date(e.lastmod).toISOString().slice(0, 10)}</lastmod>` : '';
     return `  <url>\n    <loc>${esc(origin + e.loc)}</loc>${lastmod}\n  </url>`;
   }).join('\n');

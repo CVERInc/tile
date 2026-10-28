@@ -13,7 +13,8 @@ import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy, blogViewLang
 import { NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
 import { safeHref } from '@sitetile';
 
-const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null, bannerLocales = null } = Astro.props;
+// `robots` is set only on a noindex route (reef#2554, pages/[...path].astro); '' emits nothing.
+const { post, meta, newer, older, keepReadingCards, relatedCards, sidebar = null, bannerLocales = null, robots = '' } = Astro.props;
 const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
 // Sidebar chrome copy — locale defaults + this site's overrides, resolved in ONE place.
 // These strings used to be Chinese literals inline in this file AND in two sibling
@@ -67,7 +68,7 @@ const headMeta = {
   'share-title': post.title,
 };
 ---
-<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)}>
+<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)} robots={robots}>
   {sidebar ? (
     <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
       <PostArticle lang={meta[LOCALE_VIEW] ? meta.lang : (siteDefaultLang(meta, viewFiles) || NEUTRAL_UI_LANG)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />
