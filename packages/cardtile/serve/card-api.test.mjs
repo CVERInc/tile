@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, bindVanity, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -655,8 +655,9 @@ test('delete a handle that never existed: deleted:false, no marker, still the or
   const res = await call(env, 'DELETE', '/_api/card/never');
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { handle: 'never', deleted: false });
-  // a marker here would make the public page claim a card that never was
-  assert.deepEqual([...env.CARDS._m.keys()], ['other']);
+  // a marker here would make the public page claim a card that never was. The generation is written
+  // anyway (r4): DELETE rotates whatever it saw, so the price of a no-op delete is this one small key.
+  assert.deepEqual([...env.CARDS._m.keys()], ['other', genKey('never')]);
   assert.equal((await page(env, '/never')).status, 404);
 });
 
@@ -897,18 +898,102 @@ test("🔴 a save paused at ANY of its gen: reads writes only its admitted gener
   }
 });
 
-test('a DELETE that reads nothing but a gone marker still starts a new generation', async () => {
-  // The listing can lag too. A marker is evidence enough that a lifetime ended here and a later one may
-  // be live where these reads cannot see; a fresh generation costs one small put.
+test('🔴 a DELETE every one of whose reads misses still ends the lifetime (r4: rotation is unconditional)', async () => {
+  // Every read can be another location's stale view — gen:, the body, the marker, the listing. Rotation
+  // used to hang on "did I see a lifetime"; here the DELETE sees nothing at all, and still ends it.
   const env = await reborn();
+  const base = (await (await call(env, 'GET', '/_api/card/t')).json()).version;
+  const held = holdPut(env, (k) => k.startsWith('card:t:'));
+  const pending = call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'late words'), base_version: base });
+  await held.started;
   const before = env.CARDS._m.get(genKey('t'));
-  env.CARDS._m.set(goneKey('t'), JSON.stringify({ deleted_at: new Date().toISOString() }));
-  const blind = { ...env, CARDS: { ...env.CARDS,
-    get: async (k) => (k === goneKey('t') ? env.CARDS._m.get(k) : null),
+  const blind = { ...env, CARDS: { ...env.CARDS, get: async () => null, list: async () => ({ keys: [], list_complete: true }) } };
+  assert.deepEqual(await (await call(blind, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: false });
+  assert.notEqual(env.CARDS._m.get(genKey('t')), before, 'a DELETE that saw nothing skipped the new generation');
+  held.release();
+  assert.equal((await pending).status, 409);
+  const res = await page(env, '/t');
+  assert.notEqual(res.status, 200, 'the save admitted in the ended lifetime is live after convergence');
+  assert.ok(!(await res.text()).includes('late words'));
+});
+
+test('🔴 codex r3#1 a DELETE that sees only a legacy body beside a later generation still ends it', async () => {
+  // A legacy handle, deleted and created again (generation G). Another location still caches the bare
+  // pre-r3 body and misses card:t:G, gone:t and the listing. The bare body is never SERVED outside
+  // generation 0, but it is evidence a card was here: the answer says so, and the lifetime ends.
+  const env = envWith({ t: CARD });
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) })).status, 200);
+  const G = env.CARDS._m.get(genKey('t'));
+  const base = (await (await call(env, 'GET', '/_api/card/t')).json()).version;
+  const held = holdPut(env, (k) => k === cardKey('t', G));
+  const pending = call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'late words'), base_version: base });
+  await held.started;
+  const get = env.CARDS.get.bind(env.CARDS);
+  const mixed = { ...env, CARDS: { ...env.CARDS,
+    get: async (k) => (k === 't' ? CARD : k === cardKey('t', G) || k === goneKey('t') ? null : get(k)),
     list: async () => ({ keys: [], list_complete: true }) } };
-  await call(blind, 'DELETE', '/_api/card/t');
-  assert.notEqual(env.CARDS._m.get(genKey('t')), before);
-  assert.equal((await page(env, '/t')).status, 410);
+  assert.deepEqual(await (await call(mixed, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: true });
+  assert.notEqual(env.CARDS._m.get(genKey('t')), G, 'the mixed view let DELETE skip the new generation');
+  held.release();
+  assert.equal((await pending).status, 409);
+  const res = await page(env, '/t');
+  assert.equal(res.status, 410, 'the save admitted in the ended lifetime is live after convergence');
+  assert.ok(!(await res.text()).includes('late words'));
+});
+
+test('🔴 codex r3#2 a binding DELETE missed is inert: the former domain never serves the next owner', async () => {
+  const env = envWith({ t: CARD });
+  await bindVanity(env.CARDS, 't', 'former.example');
+  // CONTROL: bound, the domain serves the card and the canonical address 301s there.
+  assert.equal((await host(env, 'former.example', '/')).status, 200);
+  assert.equal((await page(env, '/t')).status, 301);
+  // a location still caching "no such key" for vanityof:t from before the binding was made
+  const get = env.CARDS.get.bind(env.CARDS);
+  const stale = { ...env, CARDS: { ...env.CARDS, get: async (k) => (k === vanityOfKey('t') ? null : get(k)) } };
+  assert.deepEqual(await (await call(stale, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: true });
+  assert.equal(env.CARDS._m.get(vanityKey('former.example')), 't', 'CONTROL: the DELETE did miss the bindings');
+  assert.equal(env.CARDS._m.get(vanityOfKey('t')), 'former.example');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  for (const path of ['/', '/t', '/index.md', '/t.md']) {
+    const res = await host(env, 'former.example', path);
+    assert.equal(res.status, 404, `former.example${path}`);
+    assert.ok(!(await res.text()).includes('Next owner'), `former.example${path} served the next owner`);
+  }
+  const canon = await page(env, '/t');
+  assert.equal(canon.status, 200, "the next owner's canonical address 301s to the former owner's domain");
+  assert.ok((await canon.text()).includes('Next owner'));
+});
+
+test('🔴 a binding is honoured only in its own lifetime — stamped by bindVanity, unstamped = generation 0', async () => {
+  const env = await reborn(NEXT);
+  const G = env.CARDS._m.get(genKey('t'));
+  // unstamped (made before r4): generation 0's, so inert once the handle has a later generation
+  env.CARDS._m.set(vanityKey('old.example'), 't');
+  env.CARDS._m.set(vanityOfKey('t'), 'old.example');
+  assert.equal((await host(env, 'old.example', '/')).status, 404, 'an unstamped binding outlived generation 0');
+  assert.equal((await page(env, '/t')).status, 200, 'an unstamped inverse binding 301d a later lifetime');
+  // stamped with an ended generation: inert
+  env.CARDS._meta.set(vanityKey('old.example'), { gen: 'd'.repeat(24) });
+  env.CARDS._meta.set(vanityOfKey('t'), { gen: 'd'.repeat(24) });
+  assert.equal((await host(env, 'old.example', '/')).status, 404);
+  assert.equal((await page(env, '/t')).status, 200);
+  // CONTROL: bindVanity stamps the current generation, and that binding is honoured
+  assert.deepEqual(await bindVanity(env.CARDS, 't', 'new.example'), { handle: 't', host: 'new.example', gen: G });
+  assert.deepEqual(env.CARDS._meta.get(vanityKey('new.example')), { gen: G });
+  assert.deepEqual(env.CARDS._meta.get(vanityOfKey('t')), { gen: G });
+  const res = await host(env, 'new.example', '/');
+  assert.equal(res.status, 200);
+  assert.ok((await res.text()).includes('Next owner'));
+  assert.equal((await page(env, '/t')).headers.get('location'), 'https://new.example/');
+  // a forward-only binding (no redirect) has no inverse for DELETE to find; the rotation retires it
+  await bindVanity(env.CARDS, 't', 'side.example', { redirect: false });
+  assert.equal((await host(env, 'side.example', '/')).status, 200);
+  env.CARDS._m.delete(vanityOfKey('t'));
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(env.CARDS._m.get(vanityKey('side.example')), 't', 'CONTROL: DELETE could not see it');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  assert.equal((await host(env, 'side.example', '/')).status, 404, 'a forward-only binding outlived its lifetime');
 });
 
 test('🔴 a preview in a later lifetime renders, and one held mid-put across the delete is never shown', async () => {

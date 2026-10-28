@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, vanityOfKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -141,8 +141,12 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // was live for several minutes once — the plumbing was right and nothing pointed the apex at the
 // card. A missing key is now the same failure, so seeding is part of binding a domain, not an
 // afterthought: see lab/vanity-bindings.mjs.
-const VANITY_KEY = (host) => `vanity:${host}`;
-const VANITY_OF_KEY = (handle) => `vanityof:${handle}`;
+//
+// 🔴 And each binding is honoured only in the lifetime it was made in (reef#2618 r4, card-api
+// vanityKey): its metadata `{ gen }` must equal the handle's current `gen:`. A binding a DELETE missed
+// would otherwise hand the former owner's domain to the next owner of the handle.
+const VANITY_KEY = (host) => vanityKey(host); // card-api's, called late: the two modules import each other
+const VANITY_OF_KEY = (handle) => vanityOfKey(handle);
 
 // canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
 const CANON_HOST = 'card.feelreef.com';
@@ -790,7 +794,11 @@ const router = {
 
     // Vanity routing uses the forward binding here or the inverse below:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
-    const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
+    // next owner's card. The generation read here is the one the card is read under.
+    const bound = host && host !== CANON_HOST ? await store.getWithMetadata(VANITY_KEY(host)) : null;
+    const boundGen = bound && bound.value != null ? await generationOf(store, bound.value) : null;
+    const vanityHandle = boundGen != null && isCurrentGen(bound.metadata, boundGen) ? bound.value : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) {
@@ -807,7 +815,7 @@ const router = {
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // 410/404 below exactly as a missing body does.
-    const { md: cardMd, stopped } = await liveCard(store, resolved.handle, { stop: true });
+    const { md: cardMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
     if (stopped != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
         status: 404,
@@ -887,7 +895,9 @@ const router = {
     // working on both hosts because a download link somebody already has must not break.
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
-    const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
+    // the inverse binding, likewise only from this lifetime (card-api vanityKey)
+    const inverse = wouldRedirect ? await store.getWithMetadata(VANITY_OF_KEY(resolved.handle)) : null;
+    const ownHost = inverse && inverse.value != null && isCurrentGen(inverse.metadata, gen) ? inverse.value : null;
     if (ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
