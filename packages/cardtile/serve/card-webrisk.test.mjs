@@ -21,8 +21,8 @@ const fakeKv = () => {
     _m: m, puts: 0,
     async get(k) { return m.has(k) ? m.get(k) : null; },
     async getWithMetadata(k) { return { value: await this.get(k), metadata: meta.get(k) ?? null }; },
-    // `puts` counts CARD writes: the generation nonce a create also writes (card-api genKey) is not one
-    async put(k, v, opts) { if (!k.startsWith('gen:')) this.puts++; m.set(k, v); if (opts?.metadata !== undefined) meta.set(k, opts.metadata); else meta.delete(k); },
+    // `puts` counts EVERY write: since r3 a save writes its body and nothing else (card-api genKey)
+    async put(k, v, opts) { this.puts++; m.set(k, v); if (opts?.metadata !== undefined) meta.set(k, opts.metadata); else meta.delete(k); },
   };
 };
 const mk = (...cells) => ['---', 'card-page: t', 'title: T', '---', '', '## grid', '', ...cells, ''].join('\n');
