@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, ENDED_KEEP_MS, ENDED_MAX, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -96,14 +96,28 @@ const call = (env, method, path, body, token = TOKEN) => {
  * delivered concurrently — what the runtime does once a request awaits anything outside the object
  * (every KV call does). 🔴 It adds NO ordering of its own, so any order a test sees is HostBindings'
  * own queue. `busy(name)` counts the requests inside that object now, queued ones included.
+ * Each object has its own `state.storage` (a Map behind the Durable Object storage calls it uses);
+ * `storageOf(name)` is that storage, made before the object if a test needs to hold one of its calls.
+ * `objectEnv` is the env the OBJECT sees: another location's view of the same KV (codex r6), or env.
  */
-const hostBindingsNs = (env) => {
-  const objects = new Map(), inside = new Map();
+const doStorage = () => {
+  const m = new Map();
   return {
+    _m: m,
+    async get(k) { return m.has(k) ? structuredClone(m.get(k)) : undefined; },
+    async put(k, v) { m.set(k, structuredClone(v)); },
+    async delete(k) { return m.delete(k); },
+  };
+};
+const hostBindingsNs = (env, objectEnv = env) => {
+  const objects = new Map(), inside = new Map(), storages = new Map();
+  const storageOf = (name) => { if (!storages.has(name)) storages.set(name, doStorage()); return storages.get(name); };
+  return {
+    storageOf,
     idFromName: (name) => ({ name }),
     get: ({ name }) => ({
       async fetch(url, init) {
-        if (!objects.has(name)) objects.set(name, new HostBindings({}, env));
+        if (!objects.has(name)) objects.set(name, new HostBindings({ storage: storageOf(name) }, objectEnv));
         inside.set(name, (inside.get(name) || 0) + 1);
         try { return await objects.get(name).fetch(new Request(url, init)); } finally { inside.set(name, inside.get(name) - 1); }
       },
@@ -1134,18 +1148,26 @@ const heldOrDone = (held, pending) => Promise.race([held.started, pending.then((
  * the hold goes ON that store rather than on a view of it. Counts every call from now; the n-th waits
  * for release and the store is put back as it was, so nothing after it is counted or held.
  */
-const holdIn = (store, n) => {
-  const started = deferred(), release = deferred(), own = {};
+const holdIn = (stores, n) => {
+  const started = deferred(), release = deferred(), own = [];
   const methods = ['get', 'getWithMetadata', 'put', 'delete', 'list'];
-  for (const m of methods) own[m] = store[m];
-  const restore = () => { for (const m of methods) store[m] = own[m]; };
+  for (const [label, store] of stores) {
+    const saved = {};
+    for (const m of methods) if (store[m]) saved[m] = store[m];
+    own.push([store, saved]);
+  }
+  const restore = () => { for (const [store, saved] of own) Object.assign(store, saved); };
   let i = 0;
-  for (const m of methods) store[m] = async (...a) => {
-    if (i++ === n) { restore(); started.resolve(`${m} ${typeof a[0] === 'string' ? a[0] : JSON.stringify(a[0])}`); await release.promise; }
-    return own[m].apply(store, a);
-  };
+  for (const [[label, store], [, saved]] of stores.map((s, j) => [s, own[j]])) {
+    for (const m of Object.keys(saved)) store[m] = async (...a) => {
+      if (i++ === n) { restore(); started.resolve(`${label}${m} ${typeof a[0] === 'string' ? a[0] : JSON.stringify(a[0])}`); await release.promise; }
+      return saved[m].apply(store, a);
+    };
+  }
   return { started: started.promise, release: () => release.resolve(), restore };
 };
+/** the stores a bind of OWNER touches: KV, and the host object's own storage (labelled `object `) */
+const bindStores = (env) => [['', env.CARDS], ['object ', env.HOST_BINDINGS.storageOf(OWNER)]];
 const settledWithin = (p, ms) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
 
 /**
@@ -1158,16 +1180,26 @@ const settledWithin = (p, ms) => Promise.race([p.then(() => true), new Promise((
  * rulers' order runs as written. → { where, inside, staleResult, freshResult } or null past the last call.
  */
 async function rebindRace(env, n, stale, fresh) {
-  const held = n < 0 ? null : holdIn(env.CARDS, n);
+  const held = n < 0 ? null : holdIn(bindStores(env), n);
   const staleBind = bindVanity(env, stale, OWNER);
   const where = held ? await heldOrDone(held, staleBind) : (await staleBind, null);
   if (held && where === null) return null;
   const inside = env.HOST_BINDINGS.busy(OWNER) > 0;
-  assert.equal((await call(env, 'DELETE', `/_api/card/${stale}`)).status, 200);
+  // r7: a DELETE that has to end `stale` on OWNER queues behind the held request inside the object,
+  // so it finishes only after the release; `fresh` exists only after the DELETE, as in the rulers.
+  const deleting = call(env, 'DELETE', `/_api/card/${stale}`);
+  const waited = !(await settledWithin(deleting, 50));
+  if (waited) {
+    assert.ok(inside, `held at ${where}: the DELETE waited on a hold outside the object`);
+    held.release();
+  }
+  assert.equal((await deleting).status, 200);
   assert.equal((await call(env, 'PUT', `/_api/card/${fresh}`, { markdown: NEXT })).status, 200);
   const freshBind = bindVanity(env, fresh, OWNER);
-  if (inside) {
-    assert.equal(await settledWithin(freshBind, 50), false, `held at ${where}: "${fresh}"'s pointer write went through while "${stale}"'s was in flight — two writers for one host`);
+  if (waited) {
+    await freshBind;
+  } else if (inside) {
+    assert.equal(await settledWithin(freshBind, 50), false, `held at ${where}: "${fresh}"'s bind went through while "${stale}"'s was in flight inside the object — two writers for one host`);
   } else {
     await freshBind;
     assert.equal((await host(env, OWNER, '/')).status, 200, `CONTROL (held at ${where}): the replacement binding serves`);
@@ -1175,7 +1207,7 @@ async function rebindRace(env, n, stale, fresh) {
   held?.release();
   const [staleResult, freshResult] = await Promise.all([staleBind, freshBind]);
   assert.ok(!freshResult.stale_generation, `held at ${where}: the replacement's own bind was refused`);
-  return { where, inside, staleResult, freshResult };
+  return { where, inside, waited, staleResult, freshResult };
 }
 /** after a rebind race: the domain serves `fresh`'s card, and `fresh`'s canonical address 301s there */
 async function assertServesFresh(env, fresh, where) {
@@ -1193,7 +1225,7 @@ async function assertServesFresh(env, fresh, where) {
 
 test("🔴 codex r4#1 a bind admitted in an ended lifetime, held before ANY of its store calls, never undoes the next lifetime's binding", async () => {
   const seen = [];
-  for (let n = 1; ; n++) { // n = 0 would read the generation after the DELETE: not admitted in the ended one
+  for (let n = 0; ; n++) {
     const env = envWith({ t: CARD });
     const race = await rebindRace(env, n, 't', 't');
     if (race === null) break;
@@ -1204,18 +1236,18 @@ test("🔴 codex r4#1 a bind admitted in an ended lifetime, held before ANY of i
   assert.ok(seen.some((r) => r.inside) && seen.some((r) => !r.inside), 'CONTROL: held both before and inside HostBindings');
 });
 
-test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (20 rows)', async () => {
+test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (36 rows)', async () => {
   // R/cross-handle-probe.mjs: generation 0 / a later generation, for each handle independently, × the
   // sequential control and every store call after admission. r5 failed the four final-pointer holds.
   // Every row runs and every failing row is named (one failure must not hide the other three).
   const failures = [];
   let rows = 0, pointerHolds = 0;
-  for (const oldReborn of [false, true]) for (const newReborn of [false, true]) for (const n of [-1, 1, 2, 3, 4]) {
+  for (const oldReborn of [false, true]) for (const newReborn of [false, true]) for (let n = -1; ; n++) {
     const env = envWith({ a: CARD });
     if (oldReborn) { await call(env, 'DELETE', '/_api/card/a'); await call(env, 'PUT', '/_api/card/a', { markdown: CARD }); }
     if (newReborn) await call(env, 'DELETE', '/_api/card/b');
     const race = await rebindRace(env, n, 'a', 'b');
-    assert.ok(race, `CONTROL: the bind never reached store call ${n}`);
+    if (race === null) break;
     rows++;
     const where = `${race.where} [a ${oldReborn ? 'reborn' : 'gen 0'}, b ${newReborn ? 'reborn' : 'gen 0'}]`;
     const isPointer = !!race.where?.startsWith(`put ${vanityKey(OWNER)}`);
@@ -1227,8 +1259,130 @@ test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never 
     } catch (e) { failures.push(e.message); }
   }
   assert.deepEqual(failures, []);
-  assert.equal(rows, 20);
+  // r7: 4 generation pairs × (the control + 8 store calls: admit get/put, gen:, vanitybind:, vanityof:,
+  // point get/put in the object's storage, the pointer). r5/r6 had 5 calls per pair (20 rows).
+  assert.equal(rows, 36);
   assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
+});
+
+test("🔴 codex r6 a bind admitted in an ended lifetime never overwrites a later binding, even where the object's KV view of gen: is cached (8 rows)", async () => {
+  // R/cached-generation-probe.mjs: generation 0 / a later generation for a and b independently, × a
+  // fresh object-side view (the control) and one where HostBindings' location serves gen:a from a cache
+  // warmed by a's first bind (a cached miss in generation 0) — within KV's contract. r6 failed the four
+  // cached rows 200 → 404 → 404 after convergence. Every row runs; every failing row is named.
+  const failures = [];
+  let rows = 0;
+  for (const oldReborn of [false, true]) for (const newReborn of [false, true]) for (const cached of [false, true]) {
+    const env = envWith({ a: CARD });
+    const cache = new Map();
+    const objectStore = {
+      async get(k) {
+        if (cached && k === genKey('a')) { if (!cache.has(k)) cache.set(k, await env.CARDS.get(k)); return cache.get(k); }
+        return env.CARDS.get(k);
+      },
+      getWithMetadata: (...a) => env.CARDS.getWithMetadata(...a),
+      put: (...a) => env.CARDS.put(...a), delete: (...a) => env.CARDS.delete(...a), list: (...a) => env.CARDS.list(...a),
+    };
+    env.HOST_BINDINGS = hostBindingsNs(env, { ...env, CARDS: objectStore });
+    if (oldReborn) { await call(env, 'DELETE', '/_api/card/a'); await call(env, 'PUT', '/_api/card/a', { markdown: CARD }); }
+    if (newReborn) await call(env, 'DELETE', '/_api/card/b');
+    await bindVanity(env, 'a', OWNER); // warms the object's view of gen:a
+    const admitted = (await env.CARDS.get(genKey('a'))) || '0';
+    const started = deferred(), release = deferred();
+    const caller = { ...env, CARDS: { ...objectStore, get: (k) => env.CARDS.get(k), async put(k, v, o) {
+      if (k === vanityOfKey('a', admitted)) { started.resolve(); await release.promise; }
+      return env.CARDS.put(k, v, o);
+    } } };
+    const stale = bindVanity(caller, 'a', OWNER);
+    await started.promise;
+    assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200);
+    assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: NEXT })).status, 200);
+    const freshResult = await bindVanity(env, 'b', OWNER);
+    const where = `[a ${oldReborn ? 'reborn' : 'gen 0'}, b ${newReborn ? 'reborn' : 'gen 0'}, ${cached ? 'cached' : 'fresh'} gen:a at the object]`;
+    rows++;
+    try {
+      assert.ok(!freshResult.stale_generation, `${where}: b's own bind was refused`);
+      assert.equal((await host(env, OWNER, '/')).status, 200, `${where} CONTROL: b serves before the release`);
+      release.resolve();
+      const staleResult = await stale;
+      assert.equal((await host(env, OWNER, '/')).status, 200, `${where} (before convergence): the ended lifetime's bind undid b's binding`);
+      cache.clear(); // every view converges
+      await assertServesFresh(env, 'b', `${where} (converged)`);
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'b', `${where}: the pointer`);
+      assert.ok(staleResult.stale_generation, `${where}: the ended lifetime's bind reported success`);
+    } catch (e) { release.resolve(); failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 8);
+});
+
+/** a view of env's KV whose `gen:<handle>` read answers `gen` (a location that cached it), all else current */
+const cachedGenView = (env, handle, gen) => ({ ...env, CARDS: {
+  get: (k) => (k === genKey(handle) ? Promise.resolve(gen) : env.CARDS.get(k)),
+  getWithMetadata: (...a) => env.CARDS.getWithMetadata(...a),
+  put: (...a) => env.CARDS.put(...a), delete: (...a) => env.CARDS.delete(...a), list: (...a) => env.CARDS.list(...a),
+} });
+
+test('🔴 r7 a bind admitted AFTER the DELETE where gen: is still cached is refused by the end the object was told — order alone would let it through', async () => {
+  for (const oldReborn of [false, true]) {
+    const env = envWith({ a: CARD });
+    if (oldReborn) { await call(env, 'DELETE', '/_api/card/a'); await call(env, 'PUT', '/_api/card/a', { markdown: CARD }); }
+    await bindVanity(env, 'a', OWNER);
+    const before = await env.CARDS.get(genKey('a'));
+    assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200);
+    assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: NEXT })).status, 200);
+    await bindVanity(env, 'b', OWNER);
+    const where = `[a ${oldReborn ? 'reborn' : 'gen 0'}] late admission`;
+    assert.equal((await host(env, OWNER, '/')).status, 200, `${where} CONTROL: b serves`);
+    // admitted after b's bind (a later ticket), at a location still serving a's pre-DELETE gen:
+    const late = await bindVanity(cachedGenView(env, 'a', before), 'a', OWNER);
+    await assertServesFresh(env, 'b', where);
+    assert.ok(late.stale_generation, `${where}: the ended lifetime's bind reported success`);
+  }
+});
+
+test('🔴 r7 an end its host does not acknowledge fails the DELETE before the rotation: the card stays live, and a retry ends it', async () => {
+  const env = envWith({ t: CARD });
+  await bindVanity(env, 't', OWNER);
+  const gen = await env.CARDS.get(genKey('t'));
+  const ns = env.HOST_BINDINGS;
+  env.HOST_BINDINGS = { ...ns, get: (id) => ({ fetch: (url, init) =>
+    new URL(url).pathname === '/end' ? Promise.resolve(new Response('unavailable', { status: 503 })) : ns.get(id).fetch(url, init) }) };
+  const res = await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'delete_failed');
+  assert.equal(await env.CARDS.get(genKey('t')), gen, 'the generation rotated before every end was acknowledged');
+  assert.equal((await host(env, OWNER, '/')).status, 200, 'a DELETE that failed took the card off its domain');
+  assert.equal((await page(env, '/t')).headers.get('location'), `https://${OWNER}/`);
+  // CONTROL: the object answers again → the retry ends it, clears the pointer, and rotates
+  env.HOST_BINDINGS = ns;
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.notEqual(await env.CARDS.get(genKey('t')), gen);
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, 'the end left the pointer of the lifetime it ended');
+  assert.equal((await host(env, OWNER, '/')).status, 404);
+});
+
+test('HostBindings keeps its ended set bounded: entries older than ENDED_KEEP_MS go on the next end, and never more than ENDED_MAX', async () => {
+  const storage = doStorage(), o = new HostBindings({ storage }, { CARDS: fakeKv({}) });
+  const post = async (op, body) => (await o.fetch(new Request(`https://host-bindings/${op}`, { method: 'POST', body: JSON.stringify({ host: OWNER, ...body }) }))).json();
+  const ended = () => Object.keys(storage._m.get('host').ended);
+  const realNow = Date.now;
+  try {
+    let now = 1_000;
+    Date.now = () => now;
+    await post('end', { handle: 'old', gens: ['g'] });
+    const { ticket } = await post('admit', { handle: 'old' });
+    assert.ok((await post('point', { handle: 'old', gen: 'g', ticket })).stale_generation, 'CONTROL: an ended lifetime is refused');
+    now += ENDED_KEEP_MS - 1;
+    await post('end', { handle: 'x', gens: ['1'] });
+    assert.deepEqual(ended().sort(), ['old:g', 'x:1'], 'an entry younger than ENDED_KEEP_MS was dropped');
+    now += 1;
+    await post('end', { handle: 'x', gens: ['2'] });
+    assert.deepEqual(ended().sort(), ['x:1', 'x:2']);
+    for (let i = 0; i < ENDED_MAX + 10; i++) { now += 1; await post('end', { handle: `h${i}`, gens: ['g'] }); }
+    assert.equal(ended().length, ENDED_MAX);
+    assert.ok(ended().includes(`h${ENDED_MAX + 9}:g`) && !ended().includes('x:1'), 'the cap dropped the newest, not the oldest');
+  } finally { Date.now = realNow; }
 });
 
 test('🔴 no HostBindings, no binding: the pointer is never written from outside its one writer', async () => {

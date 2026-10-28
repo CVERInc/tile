@@ -99,19 +99,30 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  * rotation and deleted the binding the next lifetime had just made. KV has no compare-and-swap, so no
  * read around a put to a shared key can stop either. Here the stale bind writes its own dead
  * generation's keys, and the pointer it writes names the same handle the live binding's pointer does.
- * DELETE never touches the pointer (see deleteCard).
+ * DELETE never writes the pointer itself: it asks the host's object to end its lifetimes (see deleteCard),
+ * and the object clears the pointer only if its owner is exactly one of them.
  *
- * The pointer is written LAST, and only if the handle's generation is still the admitted one. That
- * re-read matters only when the domain has moved to ANOTHER handle meanwhile (a's bind, admitted before
- * a was deleted, must not point the domain back at a after it was bound to b).
+ * The pointer is written LAST, by HostBindings (one Durable Object per host, its only writer), and
+ * only if the object has not been told that the admitted lifetime ended. That matters only when the
+ * domain has moved to ANOTHER handle meanwhile (a's bind, admitted before a was deleted, must not
+ * point the domain back at a after it was bound to b).
  *
- * 🔴 One writer per host (codex r5): the re-read and the put are one step, run by HostBindings, the
- * Durable Object named by the host, one at a time. In r5 they ran in the caller: a's put, held after a
- * re-read that still saw a's lifetime, landed after b's bind and the domain went 404 for good (and
- * card.feelreef.com/b kept 301ing into it). KV has no compare-and-swap, so a check beside the put cannot
- * close that; only nobody else writing `vanity:<host>` meanwhile can. The keys before the pointer
- * belong to one lifetime and are written by the caller, as in r5. The same-handle races above do not
- * depend on the object.
+ * 🔴 The object is TOLD when a lifetime ends; it never asks KV whether one is current (codex r5, r6).
+ * r5 re-read `gen:` beside the put in the caller; r6 moved that re-read into the object's queue. Both
+ * still asked KV, and KV answers from a per-location cache: an object whose view of `gen:a` was warmed
+ * before a's DELETE let a's held bind through after b's, and the domain went 404 for good (while
+ * card.feelreef.com/b kept 301ing into it). Now DELETE sends `end(a, gen)` to every host a is bound to
+ * and rotates `gen:a` only after each has answered (see deleteCard). The object's own storage — strongly
+ * consistent, one per host — holds the owner `{ handle, gen }` and the lifetimes it was told ended. A
+ * bind of an ended lifetime that reaches it after the end is refused; one that reached it before is
+ * cleared by the end. b exists only after the DELETE, so b's bind is the last word either way.
+ *
+ * 🔴 And an end can only reach hosts DELETE can list. A bind held before it wrote `vanitybind:` is in
+ * no listing, so no end tells its host. For that the object also orders binds by ADMISSION: a bind
+ * takes a ticket from the object before it reads `gen:`, and a pointer write never replaces one with a
+ * later ticket (`superseded`). b's bind starts after the DELETE, so it holds the later ticket. The end
+ * covers the other side: a bind admitted after b's (a later ticket) where `gen:a` is still cached. The
+ * keys before the pointer belong to one lifetime and are written by the caller, as in r5.
  *
  * Migration: bindings made before generations are `vanity:<host>` → handle and bare `vanityof:<handle>`
  * → host. They are generation 0's: in generation 0 the pointer alone is a binding and the bare inverse
@@ -121,8 +132,8 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  *
  * bindVanity(env, …) is the one way to make a binding: it needs `env.CARDS` and `env.HOST_BINDINGS`.
  * A `redirect: false` binding writes no `vanityof:` (the canonical address keeps serving). Returns
- * `stale_generation` when the handle's lifetime ended while it ran: its keys are dead and the pointer
- * was not written.
+ * `stale_generation` when the handle's lifetime ended while it ran (its keys are dead), or `superseded`
+ * when a bind that started later already took the host; in both the pointer was not written.
  */
 export const vanityKey = (host) => `vanity:${host}`;
 const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
@@ -132,11 +143,15 @@ export const vanityOfKey = (handle, gen) => `vanityof:${handle}:${gen}`;
 const legacyVanityOfKey = (handle) => `vanityof:${handle}`;
 export async function bindVanity(env, handle, host, { redirect = true } = {}) {
   const store = env.CARDS, writer = hostWriter(env, host);
+  // the ticket BEFORE the generation read: every bind that starts after this one is admitted later
+  const admitted = await writer.fetch('https://host-bindings/admit', { method: 'POST', body: JSON.stringify({ handle, host }) });
+  if (!admitted.ok) throw new Error(`HostBindings answered ${admitted.status} for ${host}`);
+  const { ticket } = await admitted.json();
   const gen = await generationOf(store, handle);
   await store.put(vanityBindKey(handle, gen, host), handle);
   if (redirect) await store.put(vanityOfKey(handle, gen), host);
   const pointed = await writer.fetch('https://host-bindings/point', {
-    method: 'POST', body: JSON.stringify({ handle, gen, host }),
+    method: 'POST', body: JSON.stringify({ handle, gen, host, ticket }),
   });
   if (!pointed.ok) throw new Error(`HostBindings answered ${pointed.status} for ${host}`);
   return { handle, host, gen, ...(await pointed.json()) };
@@ -153,36 +168,89 @@ function hostWriter(env, host) {
   return ns.get(ns.idFromName(host));
 }
 
+/** ask the host's object to end these lifetimes of `handle` there. Throws unless it answered. */
+class EndNotAcknowledged extends Error {}
+async function endOnHost(env, handle, gens, host) {
+  let res;
+  try {
+    res = await hostWriter(env, host).fetch('https://host-bindings/end', {
+      method: 'POST', body: JSON.stringify({ handle, gens, host }),
+    });
+  } catch (e) { throw new EndNotAcknowledged(`ending "${handle}" on ${host}: ${e && e.message}`); }
+  if (!res.ok) throw new EndNotAcknowledged(`HostBindings answered ${res.status} ending "${handle}" on ${host}`);
+}
+
 /**
- * HostBindings — the Durable Object that writes `vanity:<host>` (one object per host, reef#2618 r6).
+ * HostBindings — the Durable Object that owns `vanity:<host>` (one object per host, reef#2618 r6, r7).
  *
- * It holds no state of its own: KV stays the truth and readers stay on KV. What it adds is ORDER. A
- * Durable Object lets a second request in while the first awaits anything outside it (a KV get or put
- * is outside), so the order is this object's own queue: each request's re-read and put finish before
- * the next one's re-read starts. Then a bind admitted in an ended lifetime either re-reads after the
- * DELETE (stale, nothing written) or lands its put before the next bind's, which replaces it.
+ * Its storage is the truth for the host; the KV pointer is the cache readers use, and this object is
+ * its only writer. Storage key `host`:
+ *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms } }
+ *   POST /admit { handle, host }        → { ticket: ++seq }, taken before the bind reads `gen:`
+ *   POST /point { handle, gen, host, ticket }
+ *                                       refused (`stale_generation`) if (handle, gen) is in `ended`;
+ *                                       refused (`superseded`) if ticket < landed (a later-admitted bind
+ *                                       already wrote; the same owner again is a no-op); otherwise
+ *                                       owner = { handle, gen }, landed = ticket, then KV pointer = handle
+ *   POST /end   { handle, gens, host }  every (handle, gen) goes into `ended`; if the owner is one of
+ *                                       them, owner = null and KV `vanity:<host>` is deleted
+ * It never reads KV. A Durable Object lets a second request in while the first awaits anything
+ * outside it (every KV call is outside), so each request runs whole in this object's own queue.
  *
- * Why not keep the pointer in the object's storage with KV as a cache: that is a second copy, and
- * the cache writes would need the same ordering anyway. Here there is one copy and one queue.
+ * 🔴 `ended` is bounded: an entry only has to outlive the binds admitted in its lifetime that are still
+ * in flight — one request each, plus a location's cached `gen:` read (about a minute). Entries older
+ * than ENDED_KEEP_MS go on every end, and past ENDED_MAX (only a host whose handles are deleted
+ * hundreds of times a day) the oldest go first. Only handles bound to THIS host ever get an entry.
  */
+export const ENDED_KEEP_MS = 86400000; // a day. A literal: `24 * 3600 * 1000` survives into the editor bundle
+export const ENDED_MAX = 512;
 export class HostBindings {
-  constructor(state, env) { this.env = env; this.tail = Promise.resolve(); }
+  constructor(state, env) { this.storage = state && state.storage; this.env = env; this.tail = Promise.resolve(); }
   async fetch(request) {
-    const { handle, gen, host } = await request.json();
-    if (!VALID_HANDLE.test(String(handle)) || typeof gen !== 'string' || typeof host !== 'string' || !host) {
+    const op = new URL(request.url).pathname;
+    const body = (await request.json().catch(() => null)) || {};
+    const { handle, host, ticket } = body;
+    const gens = op === '/end' ? body.gens : op === '/point' ? [body.gen] : ['-'];
+    if (!['/admit', '/point', '/end'].includes(op) || !VALID_HANDLE.test(String(handle)) || typeof host !== 'string' || !host
+      || !Array.isArray(gens) || !gens.length || gens.some((g) => typeof g !== 'string' || !g)
+      || (op === '/point' && !Number.isSafeInteger(ticket))) {
       return Response.json({ error: 'bad_request' }, { status: 400 });
     }
-    const turn = this.tail.then(() => pointHost(this.env.CARDS, handle, gen, host));
+    if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
+    const step = op === '/admit' ? () => this.admit()
+      : op === '/point' ? () => this.point(handle, gens[0], host, ticket) : () => this.end(handle, gens, host);
+    const turn = this.tail.then(step);
     this.tail = turn.catch(() => {}); // a failed write must not wedge the host
     try { return Response.json(await turn); } catch (e) { return Response.json({ error: 'store_failed' }, { status: 500 }); }
   }
-}
-
-/** the pointer step. Run ONLY inside HostBindings' queue. */
-async function pointHost(store, handle, gen, host) {
-  if ((await generationOf(store, handle)) !== gen) return staleWrite(handle);
-  await store.put(vanityKey(host), handle);
-  return {};
+  async load() { return (await this.storage.get('host')) || { seq: 0, landed: 0, owner: null, ended: {} }; }
+  async admit() {
+    const s = await this.load();
+    s.seq += 1;
+    await this.storage.put('host', s);
+    return { ticket: s.seq };
+  }
+  async point(handle, gen, host, ticket) {
+    const s = await this.load();
+    if (s.ended[`${handle}:${gen}`] != null) return staleWrite(handle);
+    if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? {} : superseded(host);
+    s.owner = { handle, gen };
+    s.landed = ticket;
+    await this.storage.put('host', s); // the truth first: a failed KV put leaves the cache behind, never ahead
+    await this.env.CARDS.put(vanityKey(host), handle);
+    return {};
+  }
+  async end(handle, gens, host) {
+    const s = await this.load(), now = Date.now();
+    for (const g of gens) s.ended[`${handle}:${g}`] = now;
+    const kept = Object.entries(s.ended).filter(([, t]) => now - t < ENDED_KEEP_MS).sort((x, y) => y[1] - x[1]);
+    s.ended = Object.fromEntries(kept.slice(0, ENDED_MAX));
+    const cleared = !!s.owner && s.owner.handle === handle && gens.includes(s.owner.gen);
+    if (cleared) s.owner = null;
+    await this.storage.put('host', s);
+    if (cleared) await this.env.CARDS.delete(vanityKey(host));
+    return { cleared };
+  }
 }
 
 /** a key, or for generation 0 the legacy key when the new one is absent. */
@@ -216,6 +284,12 @@ export async function liveCard(store, handle, { stop = false, gen: read } = {}) 
  * The answer to a write whose lifetime ended while it was in flight — best effort, from a re-read of
  * `gen:` after the put. Correctness does not depend on it: what the write landed on is dead either way.
  */
+/** a bind admitted before the host's current one landed: the later bind keeps the domain */
+const superseded = (host) => ({
+  conflict: true,
+  superseded: true,
+  why: `${host} was bound again by a bind that started after this one. That later binding stands; bind again to take the domain.`,
+});
 const staleWrite = (handle) => ({
   conflict: true,
   stale_generation: true,
@@ -371,7 +445,8 @@ async function writeCard(store, handle, md, admitted) {
  * decides it now. `deleted` still reports what was found; the lifetime ends regardless. A DELETE on a
  * handle that never had a card costs one small `gen:` key and ends nothing anyone was served.
  */
-async function deleteCard(store, handle) {
+async function deleteCard(env, handle) {
+  const store = env.CARDS;
   const { md, gen } = await liveCard(store, handle);
   // 🔴 Collect each whole listing BEFORE deleting: deleting under a live cursor shifts what the next
   // page starts from, and the keys it skips are exactly the ones this promised were gone.
@@ -391,14 +466,29 @@ async function deleteCard(store, handle) {
   // after the rotation reads the store to decide what to delete. Previews are keyed by a random id, so
   // they are found by the handle in their metadata (one parked before that stamp has none and expires
   // within PREVIEW_TTL). The bare legacy body counts as found in any generation (only SERVED in 0).
-  const [bodies, stops, bindings, inverses, drafts, marked, bare] = await Promise.all([
+  const [bodies, stops, bindings, inverses, drafts, marked, bare, bareInverse] = await Promise.all([
     listed(cardKey(handle, '')), listed(stopKey(handle, '')),
     listed(vanityBindPrefix(handle)), listed(vanityOfKey(handle, '')),
     listed(previewKey(''), (k) => k.metadata && k.metadata.handle === handle),
     store.get(goneKey(handle)).then((v) => v != null), store.get(legacyCardKey(handle)),
+    store.get(legacyVanityOfKey(handle)),
   ]);
   const had = md != null || bodies.length > 0 || bare != null;
   if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
+  // 🔴 Tell every host this handle is bound to that its lifetimes ended, and rotate only once each has
+  // answered (r7, see vanityKey). The hosts and generations come from the lifetime-scoped keys listed
+  // above, plus the generation this read; each host is told every one of them, so a stale read of
+  // `gen:` here still ends the lifetime a listing saw. An end that is not acknowledged fails the
+  // DELETE before the rotation: the card stays live, and a retry tells the hosts again.
+  const hosts = new Set(), gens = new Set([gen]);
+  for (const k of bindings) {
+    const rest = k.slice(vanityBindPrefix(handle).length), i = rest.indexOf(':');
+    if (i > 0) { gens.add(rest.slice(0, i)); hosts.add(rest.slice(i + 1)); }
+  }
+  const inverseHosts = await Promise.all(inverses.map((k) => store.get(k)));
+  inverses.forEach((k, i) => { gens.add(k.slice(vanityOfKey(handle, '').length)); if (inverseHosts[i]) hosts.add(inverseHosts[i]); });
+  if (bareInverse) { gens.add(GEN0); hosts.add(bareInverse); }
+  await Promise.all([...hosts].map((h) => endOnHost(env, handle, [...gens], h)));
   await store.put(genKey(handle), newGen());
   // every listed key, the read generation's body and stop even if the listing has not caught up, and
   // the legacy keys (read in generation 0 only, which this handle has now left for good)
@@ -406,7 +496,8 @@ async function deleteCard(store, handle) {
     ...bodies, ...stops, cardKey(handle, gen), stopKey(handle, gen), legacyCardKey(handle), legacyStopKey(handle),
     ...bindings, ...inverses, legacyVanityOfKey(handle), ...drafts,
   ]);
-  // 🔴 Not `vanity:<host>`: that pointer is shared with whatever lifetime binds the host next, and is
+  // 🔴 Not `vanity:<host>` from here: the object cleared it above if its owner was this lifetime; the
+  // pointer is shared with whatever lifetime binds the host next, and is
   // inert without a binding of the current one (see vanityKey). Rebinding the host replaces it.
   for (const k of doomed) await store.delete(k);
   return had;
@@ -687,7 +778,15 @@ export async function handleApi(request, env, url) {
     }
 
     // ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────
-    if (method === 'DELETE') return json({ handle, deleted: await deleteCard(store, handle) });
+    if (method === 'DELETE') {
+      let deleted;
+      try { deleted = await deleteCard(env, handle); } catch (e) {
+        if (!(e instanceof EndNotAcknowledged)) throw e;
+        // an end its host did not acknowledge: nothing was rotated, the card is still live
+        return json({ error: 'delete_failed', why: `"${handle}" was not deleted: its domain binding could not be ended. Try again.` }, 503);
+      }
+      return json({ handle, deleted });
+    }
     return json({ error: `${method} not allowed here.` }, 405);
   }
 
