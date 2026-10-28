@@ -28,16 +28,18 @@ export function getStaticPaths() {
   const paths = [];
   // reef#2554: noindex is decided over the FINAL inventory — every route this function emits,
   // whatever its kind (content page, blog index at any mount incl. `/`, post, locale edition) — by
-  // the path it lands at, the same question sitemap.xml asks (lib/noindex.mjs). Only a noindex
-  // route gets a `robots` prop; every other route's props, and so its bytes, are what they were.
-  // (Called at both returns below, after `files` — the content glob — is loaded.)
+  // the file its route param is written to, the same question sitemap.xml asks (lib/noindex.mjs).
+  // A post's own flag is its own frontmatter; every other route's is the content file writing the
+  // same file. Only a noindex route gets a `robots` prop; every other route's props, and so its
+  // bytes, are what they were. (Called at both returns below, after `files` is loaded.)
   const markNoindex = (out) => {
-    const isNoindex = noindexPolicy(files);
+    const policy = noindexPolicy(files);
     // date archives are generated lists like the tag/category ones — not pages anyone is sent to,
     // and not in this decision's inventory (sitemap.xml marks the same three kinds `page`).
     for (const r of out) {
       if (r.props.kind === 'date-archive') continue;
-      if (isNoindex('/' + (r.params.path || ''))) r.props.robots = 'noindex';
+      const no = r.props.kind === 'post' ? policy.post(r.params.path, r.props.post) : policy.page(r.params.path);
+      if (no) r.props.robots = 'noindex';
     }
     return out;
   };

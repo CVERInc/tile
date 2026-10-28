@@ -205,6 +205,9 @@ export function parsePost(slug, raw, excerptMax = 180) {
   return {
     slug: effectiveSlug,
     ...(fmStr(meta.permalink) ? { permalink: fmStr(meta.permalink) } : {}),
+    // reef#2554: the post's own `noindex:` as written, for lib/noindex.mjs (which reads it with
+    // noindexFlag). Only when said, like permalink, so a post that never says it is the same object.
+    ...(meta.noindex != null ? { noindex: meta.noindex } : {}),
     title: fmStr(meta.title) || effectiveSlug,
     description: fmStr(meta.description),
     date: fmStr(meta.pubDate || meta.date),

@@ -3,18 +3,25 @@
 // sitemap.xml. A page whose head says noindex while the sitemap still hands it to crawlers is two
 // declarations about one URL, differing — the defect the sitemap's own header is about.
 //
-// The decision is keyed by the page's EMITTED IDENTITY — the directory its index.html lands in
-// (pageIdentity) — not by which source file produced it. That is what lets one rule cover every
-// route kind: a content page, the blog index (including a blog mounted at `/`, where home.md's
-// frontmatter is the one that mounts it), a blog post, a locale edition. Both consumers hand it the
-// identity of what they emit; neither keeps a list of its own.
+// A page's identity is its OUTPUT FILE: the file the build writes for its route, computed by
+// routeOutputFile() — Astro's own route → file steps, not a guess at what spellings mean the same
+// page. Both consumers hand the policy the route param they emit (the `[...path]` value), so the
+// head and the sitemap entry of one page are decided by one file name. Nothing is folded: two
+// routes the build writes to two files are two pages, whatever their URLs look like.
 //
-// A page is noindex when the content file that lands at its identity says `noindex: true`, or — by
-// default — when it is where an `action=inbox` form's `thanks=` sends a visitor after a successful
-// submit. An explicit `noindex: false` on that content file wins: some owners want their thanks
-// page found. Own frontmatter only, not the `_site.md` layer: a site-wide `noindex:` would quietly
-// take every page out of search, which is not something one line in a config file should be able
-// to do by accident. A thanks= at a page nobody emits is harmless: nothing asks about it.
+// A page is noindex when its OWN source says `noindex: true`, or — by default — when it is where an
+// `action=inbox` form's `thanks=` sends a visitor after a successful submit. An explicit
+// `noindex: false` on that source wins: some owners want their thanks page found. The own source is
+// the one that produces the page: a content page's content file; a post's own frontmatter; the blog
+// index's — the content file that lands at the same file (home.md for a blog mounted at `/`, which
+// the router displaces in the index's favour). Own frontmatter only, not the `_site.md` layer: a
+// site-wide `noindex:` would quietly take every page out of search, which is not something one line
+// in a config file should be able to do by accident.
+//
+// A thanks= target is resolved to the file a static host serves for it: the path exactly as a file
+// (`/x/index.html` → x/index.html), or its directory's index.html (`/x`, `/x/` → x/index.html).
+// A target whose file no route writes matches nothing (`/INDEX.HTML` is not index.html;
+// `/done/` is not done/index.html/index.html).
 //
 // Like sitemap.mjs, no `@sitetile` alias here, so plain `node` can test it (noindex.test.mjs).
 import { parseSite, parseParams, isSiteFile, safeInternalPathQuiet } from '../../../site-core.js';
@@ -30,64 +37,75 @@ export function noindexFlag(v) {
   return s !== 'false';
 }
 
-/** A site path → the identity of the page it lands on: the directory, with a trailing slash, that
- *  holds its index.html. `/thanks.fr`, `/thanks.fr/` and `/thanks.fr/index.html` are one page —
- *  every route [...path].astro emits is a directory, so a dotted last segment is not a file here
- *  (sitemap.mjs's canonicalPath guesses otherwise; it is a URL speller, not an identity). */
-export function pageIdentity(p) {
-  let s = String(p == null ? '' : p).split(/[?#]/, 1)[0];
-  if (!s.startsWith('/')) s = '/' + s;
-  s = s.replace(/\/index\.html$/i, '/');
-  return s.endsWith('/') ? s : s + '/';
+/** A `[...path]` route param → the file the build writes for it, relative to the output dir.
+ *  The same steps astro 7.3.5 takes (static output, default build.format 'directory'):
+ *  routing/params.js stringifyParams (one leading and one trailing slash trimmed off the value),
+ *  routing/generator.js (NFC, `#` → %23, `?` → %3F, a leading `/`, duplicate leading slashes
+ *  collapsed, `/` for the empty path), core/output-filename.js getOutputFilename (`/` →
+ *  index.html, `/404` and `/500` → <name>.html, else <pathname minus one trailing slash>/index.html).
+ *  noindex.test.mjs runs Astro's own functions beside this one over the same params. */
+export function routeOutputFile(param) {
+  const v = param == null ? '' : String(param).replace(/^\/|\/$/g, '');
+  const seg = v.normalize().replace(/#/g, '%23').replace(/\?/g, '%3F');
+  const pathname = seg ? ('/' + seg).replace(/^\/+/, '/') : '/';
+  if (pathname === '/') return 'index.html';
+  if (pathname === '/404' || pathname === '/500') return pathname.slice(1) + '.html';
+  return pathname.slice(1).replace(/\/$/, '') + '/index.html';
 }
 
-/** content/<rel>.md → the identity [...path].astro emits it at. Mirrors contentPageRel
+/** content/<rel>.md → its route param, or null when it is no page. Mirrors contentPageRel
  *  (lib/locale-editions.mjs, which this file cannot import without the alias): `_site`/`_theme`
  *  are data, a non-site file is not a page, `home` is the root, every other rel is its own path. */
-function contentIdentity(path, raw) {
+function contentParam(path, raw) {
   if (/(^|\/)_(site|theme)\.md$/.test(path)) return null;
   if (typeof raw !== 'string' || !isSiteFile(raw)) return null;
   const rel = String(path).split('/content/')[1];
   if (!rel) return null;
   const bare = rel.replace(/\.md$/, '');
-  return bare === 'home' ? '/' : pageIdentity('/' + bare);
+  return bare === 'home' ? undefined : bare;
 }
 
 const NAV_BASE = 'http://sitetile.invalid/';
-/** Where a form's `thanks=` lands, as a page identity — or null when Form.astro would not wire it:
- *  only `action=inbox` forms redirect to `thanks=`, and only a value safeInternalPath accepts
- *  reaches the page. After that check the value is resolved the way the browser's navigation
- *  resolves it (`/./x` → `/x`, `\` → `/`, query and fragment dropped), then decoded so it compares
- *  with the raw file names a page identity is built from. */
-function thanksTarget(section) {
-  if (section.type !== 'form') return null;
+/** The files a form's `thanks=` can land on — none when Form.astro would not wire it: only
+ *  `action=inbox` forms redirect to `thanks=`, and only a value safeInternalPath accepts reaches
+ *  the page. The value is resolved the way the browser's navigation resolves it (`/./x` → `/x`,
+ *  `\` → `/`, query and fragment dropped), then each path segment is decoded on its own with
+ *  decodeURIComponent, so `/thank%26you/` names the file thank&you/index.html — a decoded `?` or
+ *  `#` is part of a file name, never a new query or fragment, and a segment that decodes to a `/`
+ *  names no file at all. No case folding: a host matches file names exactly. */
+function thanksFiles(section) {
+  if (section.type !== 'form') return [];
   const pm = parseParams(section.params);
-  if (pm.action !== 'inbox') return null;
+  if (pm.action !== 'inbox') return [];
   const p = safeInternalPathQuiet(pm.thanks);
-  if (!p) return null;
-  let path;
-  try { path = new URL(p, NAV_BASE).pathname; } catch { return null; }
-  try { path = decodeURI(path); } catch { /* keep the encoded form */ }
-  return pageIdentity(path);
+  if (!p) return [];
+  let segs;
+  try { segs = new URL(p, NAV_BASE).pathname.slice(1).split('/').map(decodeURIComponent); } catch { return []; }
+  if (segs.some((s) => s.includes('/'))) return [];
+  const path = segs.join('/');
+  const files = [];
+  if (path !== '' && !path.endsWith('/')) files.push(path);      // the path, as a file
+  files.push(path.replace(/\/$/, '') ? path.replace(/\/$/, '') + '/index.html' : 'index.html');
+  return files;
 }
 
-/** content/**.md glob → isNoindex(pathOrIdentity). Ask it about every page you emit or list. */
+/** content/**.md glob → the decision, asked by route param:
+ *    page(param)        — a content page, the blog index or its pager: the own flag is the content
+ *                         file that writes the same file;
+ *    post(param, post)  — a post: the own flag is the post's own `noindex:` (post.noindex). */
 export function noindexPolicy(glob) {
-  const own = new Map();          // identity → the flag of the content file that lands there
-  const targets = new Set();      // every identity some form's thanks= lands on
+  const own = new Map();          // output file → the flag of the content file that writes it
+  const targets = new Set();      // every file some form's thanks= lands on
   for (const [path, raw] of Object.entries(glob || {})) {
-    const id = contentIdentity(path, raw);
-    if (!id) continue;
+    const param = contentParam(path, raw);
+    if (param === null) continue;
     const site = parseSite(raw);
-    own.set(id, noindexFlag(site.meta.noindex));
-    for (const s of site.sections) {
-      const t = thanksTarget(s);
-      if (t) targets.add(t);
-    }
+    own.set(routeOutputFile(param), noindexFlag(site.meta.noindex));
+    for (const s of site.sections) for (const f of thanksFiles(s)) targets.add(f);
   }
-  return (p) => {
-    const id = pageIdentity(p);
-    const flag = own.get(id);
-    return flag === true || (flag === undefined && targets.has(id));
+  const decide = (file, flag) => flag === true || (flag === undefined && targets.has(file));
+  return {
+    page: (param) => { const f = routeOutputFile(param); return decide(f, own.get(f)); },
+    post: (param, post) => decide(routeOutputFile(param), noindexFlag(post && post.noindex)),
   };
 }

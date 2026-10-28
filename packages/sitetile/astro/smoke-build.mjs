@@ -892,8 +892,25 @@ const NBDIST = buildNoindexFixture('noindex-root-blog', {
   'content/contact.md': NOINDEX_PAGE('contact', 'noindex: true\n', NOINDEX_FORM('/') + NOINDEX_FORM('/post/')),
   'blog/post.md': '---\ntitle: Post\npubDate: 2026-01-01\n---\nHello.\n',
 });
+// reef#2554 r3 — the codex r2 review's inputs. A page is the file its route is written to: a post
+// opting out of (and into) noindex in its own frontmatter; a post at /done/index.html/ that a form
+// thanks to exactly, and one at /fin/index.html/ that a form names as /fin/ (a file no route
+// writes); a content page at parent/index.html likewise; thanks=/INDEX.HTML, which is not the home
+// page; and thanks=/thank%26you/, which is the file thank&you/index.html.
+console.log('▸ astro build → .smoke-noindex-identity/ (own flags on posts; identity = the output file)…');
+const NIDIST = buildNoindexFixture('noindex-identity', {
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', ['/devlog/kept/', '/done/index.html/', '/fin/', '/parent/', '/INDEX.HTML', '/thank%26you/'].map(NOINDEX_FORM).join('')),
+  'content/thank&you.md': NOINDEX_PAGE('thank-you'),
+  'content/parent/index.html.md': NOINDEX_PAGE('parent-index'),
+  'blog/kept.md': '---\ntitle: Kept\npubDate: 2026-01-01\nnoindex: false\n---\nReceived, and findable.\n',
+  'blog/private.md': '---\ntitle: Private\npubDate: 2026-01-02\nnoindex: true\n---\nNot for search.\n',
+  'blog/done.md': '---\ntitle: Done\npubDate: 2026-01-03\npermalink: /done/index.html/\n---\nReceived.\n',
+  'blog/fin.md': '---\ntitle: Fin\npubDate: 2026-01-04\npermalink: /fin/index.html/\n---\nAn ordinary post.\n',
+});
 const noindexAt = (dist, p) => readFileSync(join(dist, p, 'index.html'), 'utf8').includes(ROBOTS_NOINDEX);
-const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${p}</loc>`);
+const xmlEsc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${xmlEsc(p)}</loc>`);
 /** The two consumers must agree on every page a build emits: no page carries robots noindex while
  *  its sitemap still lists it (in either slash spelling — the sitemap writes `/thanks.fr`). */
 function noindexDisagreements(dist) {
@@ -902,7 +919,7 @@ function noindexDisagreements(dist) {
   for (const f of allHtmlPages(dist)) {
     const rel = f.slice(dist.length + 1);
     if (!rel.endsWith('index.html')) continue;
-    const id = '/' + rel.slice(0, -'index.html'.length);
+    const id = xmlEsc('/' + rel.slice(0, -'index.html'.length));
     const listed = xml.includes(`<loc>https://example.com${id}</loc>`)
       || (id !== '/' && xml.includes(`<loc>https://example.com${id.slice(0, -1)}</loc>`));
     if (listed && readFileSync(f, 'utf8').includes(ROBOTS_NOINDEX)) out.push(id);
@@ -2041,8 +2058,22 @@ const checks = [
     const xml = readFileSync(join(NBDIST, 'sitemap.xml'), 'utf8');
     return !xml.includes('<url>') && /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n\n<\/urlset>\n$/.test(xml);
   }],
-  ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + both noindex builds)', () =>
-    [DIST, NRDIST, NBDIST].every((d) => noindexDisagreements(d).length === 0)],
+  ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + every noindex build)', () =>
+    [DIST, NRDIST, NBDIST, NIDIST].every((d) => noindexDisagreements(d).length === 0)],
+  // -- reef#2554 r3: a page is the file its route is written to; a post's own flag is its own --
+  ['🔴 #2554 r3 a post\'s own noindex: false wins over the thanks= that lands on it (indexed, listed); its own noindex: true needs no form', () =>
+    !noindexAt(NIDIST, 'devlog/kept') && listedAt(NIDIST, '/devlog/kept/')
+    && noindexAt(NIDIST, 'devlog/private') && !listedAt(NIDIST, '/devlog/private/')],
+  ['🔴 #2554 r3 thanks=/done/index.html/ reaches the post written to done/index.html/index.html: head and sitemap both', () =>
+    noindexAt(NIDIST, 'done/index.html') && !listedAt(NIDIST, '/done/index.html/')],
+  ['🔴 #2554 r3 thanks=/fin/ and thanks=/parent/ name a file no route writes → the /fin/index.html/ post and the parent/index.html page stay indexed and listed', () =>
+    !noindexAt(NIDIST, 'fin/index.html') && listedAt(NIDIST, '/fin/index.html/')
+    // (sitemap.mjs's canonicalPath spells this content page's <loc> without the slash: `.html` reads as a file)
+    && !noindexAt(NIDIST, 'parent/index.html') && (listedAt(NIDIST, '/parent/index.html/') || listedAt(NIDIST, '/parent/index.html'))],
+  ['🔴 #2554 r3 thanks=/INDEX.HTML is not the home page: `/` stays indexed and listed', () =>
+    !noindexAt(NIDIST, '') && listedAt(NIDIST, '/')],
+  ['🔴 #2554 r3 thanks=/thank%26you/ lands on thank&you/index.html → noindex, out of sitemap.xml', () =>
+    noindexAt(NIDIST, 'thank&you') && !listedAt(NIDIST, '/thank&you/')],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing
