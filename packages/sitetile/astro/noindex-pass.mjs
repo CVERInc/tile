@@ -383,9 +383,14 @@ export function noindexFiles(dir, pages, thanks) {
 // c2 a0 in UTF-8, trim() took the a0 and left a lone c2 (codex r8); and a value parse5 decoded from
 // `&nbsp;` has no byte at all in a UTF-8 page. So the merge reads the value's SOURCE text (the raw
 // bytes between its quotes, character references still written out) and does only what the robots
-// grammar does: split on ASCII whitespace and commas, compare tokens ASCII-case-insensitively. A
-// byte ≥ 0x80 is part of the token beside it. Kept tokens keep their bytes and the separators
-// before them; `noindex` goes after the last one with `, `. A directive spelled with a character
+// grammar does: a COMMA-separated list of directives, each `name` or `name: value`, ASCII whitespace
+// around them ignored, names compared ASCII-case-insensitively. A byte ≥ 0x80 is part of the
+// directive it sits in. Kept directives keep their bytes and the separators before them; `noindex`
+// goes after the last one with `, `.
+// 🩸 r9 split on whitespace too, so `max-image-preview: none` held a token `none`, read as the none
+// directive: the page was decided noindex and said nothing (codex r9). Whitespace and colons inside
+// a directive separate nothing; only its NAME (before the first colon) is `none`, `noindex`,
+// `index` or `all`. A directive spelled with a character
 // reference (`no&#105;ndex`) is not recognised and is kept as written — at worst the value says
 // noindex twice, never not at all.
 const ATTR = /^[^\t\n\f\r =\/>][^\t\n\f\r =\/>]*[\t\n\f\r ]*(?:=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'|([^\t\n\f\r >]+)))?$/d;
@@ -408,8 +413,14 @@ function robotsMeta(el, html) {
  *  already does and nothing contradicts it; otherwise `index` dropped, `all` → `follow`, `noindex`
  *  appended once, every other directive kept in its place, byte for byte. */
 export function mergeRobots(raw) {
-  const toks = [...String(raw).matchAll(/[^\t\n\f\r ,]+/g)].map((m) => ({ t: m[0], a: m.index, z: m.index + m[0].length }));
-  const l = (d) => asciiLower(d.t);
+  // a directive is the ASCII-trimmed text between commas; an empty one (`a,,b`) is none at all
+  const toks = [...String(raw).matchAll(/[^,]+/g)].flatMap((m) => {
+    const t = asciiTrim(m[0]);
+    if (!t) return [];
+    const a = m.index + m[0].indexOf(t);
+    return [{ t, a, z: a + t.length }];
+  });
+  const l = (d) => asciiLower(asciiTrim(d.t.split(':')[0]));
   const says = toks.some((d) => l(d) === 'noindex' || l(d) === 'none');
   if (says && !toks.some((d) => l(d) === 'index' || l(d) === 'all')) return raw;
   if (!toks.length) return 'noindex';

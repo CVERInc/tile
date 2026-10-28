@@ -227,6 +227,34 @@ test('an existing permissive robots meta on a thanks target is merged into noind
   assert.equal(s.read('done.html'), pub('noindex, nofollow'));
 });
 
+// codex r9 P2 (a value's `none`): a robots content is a comma-separated list of directives, each
+// `name` or `name: value`. `none` as a VALUE (max-image-preview: none) is not the `none` directive,
+// and a value's spaces and colons (unavailable_after: <date>) separate nothing.
+test('a robots directive is `name[: value]` split on commas only: a value\'s none is not the none directive', () => {
+  const pub = (content) => `<!DOCTYPE html><html><head><title>Thanks</title><meta name="robots" content="${content}"></head><body>Thank you.</body></html>`;
+  const given = {
+    'preview-none.html': 'max-image-preview: none',                          // codex's input, verbatim
+    'index-preview-none.html': 'index, max-image-preview: none',
+    'already.html': 'noindex , max-snippet: 20',
+    'none.html': 'NONE',
+    'index-preview-large.html': 'index , max-image-preview: large',
+    'after.html': 'unavailable_after: 25 Jun 2026 15:00:00 PST',
+  };
+  const want = {
+    'preview-none.html': 'max-image-preview: none, noindex',
+    'index-preview-none.html': 'max-image-preview: none, noindex',
+    'already.html': 'noindex , max-snippet: 20',
+    'none.html': 'NONE',
+    'index-preview-large.html': 'max-image-preview: large, noindex',
+    'after.html': 'unavailable_after: 25 Jun 2026 15:00:00 PST, noindex',
+  };
+  const pages = Object.fromEntries(Object.entries(given).map(([f, c]) => [f, pub(c)]));
+  const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
+  assert.deepEqual(s.decided, Object.keys(pages).sort());
+  const wrong = Object.keys(want).filter((f) => s.read(f) !== pub(want[f])).map((f) => `${f}: got ${JSON.stringify(s.read(f).match(/content="([^"]*)"/)[1])} want ${JSON.stringify(want[f])}`);
+  assert.deepEqual(wrong, [], wrong.join('; '));
+});
+
 test('a robots meta is found however a public/ page writes it, merged in place; never a second tag; an opted-out page keeps its own', () => {
   const s = site({
     'c/index.html': html({ body: form('/a.html', '/b.html', '/kept/') }),
