@@ -455,9 +455,9 @@ test('a Shift_JIS page whose head characters end in ASCII-range bytes (U+3000 81
 
 // codex r8 P2 (nbsp): the merge trimmed and lowercased the byte view, where each byte ≥ 0x80 is a
 // character of its own: U+00A0 after `nofollow` is c2 a0 in UTF-8, trim() took the a0 and left a
-// lone c2. A robots value is split the way the robots grammar splits it — on ASCII whitespace and
-// commas — and a byte ≥ 0x80 is part of the token beside it. Kept tokens keep their bytes and
-// their separators; `noindex` is appended with `, `.
+// lone c2. A robots value is split the way the robots grammar splits it — on commas, ASCII
+// whitespace trimmed around each directive (r10) — and a byte ≥ 0x80 is part of the directive it
+// sits in. Kept directives keep their bytes and their separators; `noindex` is appended with `, `.
 test('a robots value is edited byte for byte: U+00A0 (UTF-8 or windows-1252, literal or &nbsp;) is part of its token, never trimmed', () => {
   const nbsp = Buffer.from('3c68746d6c3e3c686561643e3c6d65746120636861727365743d227574662d38223e3c6d657461206e616d653d22726f626f74732220636f6e74656e743d22696e6465782c206e6f666f6c6c6f77c2a0223e3c2f686561643e3c626f64793e5468616e6b733c2f626f64793e3c2f68746d6c3e', 'hex');
   const robots = (content, cs = 'utf-8') => Buffer.concat([b(`<html><head><meta charset="${cs}"><meta name="robots" content="`), content, b('"></head><body>Thanks</body></html>')]);
