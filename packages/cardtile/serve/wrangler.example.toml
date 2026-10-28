@@ -47,7 +47,7 @@ PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outr
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
 
-# The ONE writer of vanity:<host> (card-api HostBindings, reef#2618 r6): one Durable Object per host.
+# The ONE writer of vanity:<host> (card-api HostBindings, reef#2618 r6, r7): one Durable Object per host.
 # 🔴 Preview binds PRODUCTION's class, not one of its own. Both Workers write the same CARDS store, so
 # two namespaces would be two writers per host, which is the race the object exists to remove. It
 # follows that `cardtile` (with its migration below) must be deployed before this Worker can bind.
@@ -102,7 +102,9 @@ id = "<your-cards-kv-namespace-id>"
 # an environment, so it is declared again. The migration creates the class: the first deploy that
 # carries it IS the migration, and the tag is never edited or reused once deployed.
 # SQLite-backed (`new_sqlite_classes`) because Cloudflare offers only that kind on the Free plan and
-# recommends it for every new class; the object stores nothing, so the backend never holds data.
+# recommends it for every new class. Since r7 each object stores one small record (the host's owner,
+# its admission ticket counter and the lifetimes it was told ended) through the storage get/put API,
+# which the SQLite backend serves too. Never deploy `deleted_classes` for it: that erases those records.
 [[env.production.durable_objects.bindings]]
 name = "HOST_BINDINGS"
 class_name = "HostBindings"
