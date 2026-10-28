@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { applyNoindex, fileForPath } from './astro/noindex-pass.mjs';
@@ -238,6 +239,58 @@ test('a robots meta is found however a public/ page writes it, merged in place; 
   assert.equal(s.read('b.html'), '<html><head><meta name="robots" content="noindex"></head><body></body></html>');
   assert.match(s.read('kept/index.html'), /<meta name="robots" content="index"><\/head>/);
   for (const f of ['a.html', 'b.html']) assert.equal((s.read(f).match(/robots/gi) || []).length, 1);
+});
+
+// codex r6 P2 ×2 (comment, uppercase): the pass read the head as a string — a robots tag inside a
+// comment counted as the page's robots meta (so none was inserted), and `</HEAD>` was not
+// `</head>` (so nothing was). The page is HTML: these are read with an HTML parser that is not the
+// pass's own (parse5 straight from the renderer's deps, walked here), and each output must be the
+// input plus exactly the robots bytes — the comment, script and template text untouched.
+const require5 = createRequire(new URL('./astro/package.json', import.meta.url));
+const { parse: parseHtml } = require5('parse5');
+/** The `content` of every robots <meta> ELEMENT in the document (comments, script text and
+ *  <template> contents are not elements of it). */
+const activeRobots = (text) => {
+  const out = [];
+  (function walk(n) {
+    if (n.tagName === 'meta' && n.attrs.some((a) => a.name === 'name' && a.value.trim().toLowerCase() === 'robots'))
+      out.push(n.attrs.find((a) => a.name === 'content')?.value ?? null);
+    for (const c of n.childNodes || []) walk(c);
+  })(parseHtml(text));
+  return out;
+};
+test('a robots tag in a comment, in script text or in a <template> is not a robots meta: the page still gets one', () => {
+  const pages = {
+    'comment.html': '<html><head><!-- <meta name="robots" content="index,follow"> --></head><body>Thanks</body></html>',
+    'script.html': '<html><head><script>document.write(\'<meta name="robots" content="index">\')</script></head><body>Thanks</body></html>',
+    'template.html': '<html><head><template><meta name="robots" content="index"></template></head><body>Thanks</body></html>',
+  };
+  const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
+  assert.deepEqual(s.decided, Object.keys(pages));
+  for (const [f, src] of Object.entries(pages)) {
+    assert.deepEqual(activeRobots(src), [], `${f}: the input has no robots element`);
+    assert.equal(s.read(f), src.replace('</head>', ROBOTS + '</head>'), `${f}: input + one robots meta before </head>`);
+    assert.deepEqual(activeRobots(s.read(f)), ['noindex'], `${f}: one active robots meta`);
+  }
+});
+
+test('the head is found whatever its case or however it ends: </HEAD>, <META NAME="ROBOTS">, no </head> at all', () => {
+  const pages = {
+    'upper.html': '<!DOCTYPE html><HTML><HEAD><TITLE>Thanks</TITLE></HEAD><BODY>Thanks</BODY></HTML>',
+    'upper-meta.html': '<!DOCTYPE html><HTML><HEAD><META NAME="ROBOTS" CONTENT="INDEX"></HEAD><BODY>Thanks</BODY></HTML>',
+    'open.html': '<head><title>x</title><body>Thanks',
+    'implied.html': '<!DOCTYPE html><title>x</title><p>Thanks',
+    // a byte-order mark, which the HTML decoder strips and parse5 (given a string) does not
+    'bom.html': String.fromCharCode(0xfeff) + '<html><head><title>x</title></head><body>Thanks</body></html>',
+  };
+  const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
+  assert.deepEqual(s.decided, Object.keys(pages).sort());
+  assert.equal(s.read('upper.html'), pages['upper.html'].replace('</HEAD>', ROBOTS + '</HEAD>'));
+  assert.equal(s.read('upper-meta.html'), pages['upper-meta.html'].replace('CONTENT="INDEX"', 'content="noindex"'));
+  assert.equal(s.read('open.html'), '<head><title>x</title>' + ROBOTS + '<body>Thanks');
+  assert.equal(s.read('implied.html'), '<!DOCTYPE html><title>x</title>' + ROBOTS + '<p>Thanks');
+  assert.equal(s.read('bom.html'), pages['bom.html'].replace('</head>', ROBOTS + '</head>'));
+  for (const f of Object.keys(pages)) assert.deepEqual(activeRobots(s.read(f)), ['noindex'], `${f}: one active robots meta`);
 });
 
 test('the thanks mark is removed from every emitted form; a form recorded but never emitted counts for nothing', () => {

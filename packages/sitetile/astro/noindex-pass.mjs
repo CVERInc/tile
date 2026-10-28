@@ -53,12 +53,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'parse5';
 
 const NAV_BASE = 'http://sitetile.invalid/';
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const ROBOTS = '<meta name="robots" content="noindex">';
-// An empty attribute is written bare (`content`), so the value is optional.
-const NOINDEX_STAMP = /<meta name="sitetile:noindex" content(?:="([^"]*)")?>/;
-const SITEMAP_STAMP = /<meta name="sitetile:sitemap" content(?:="([^"]*)")?>/;
 const MANIFEST = Symbol.for('sitetile.noindex.thanks-manifest');
 const markOf = (id) => ` data-sitetile-thanks="${id}"`;
 
@@ -73,9 +72,6 @@ export function recordThanks(thanks) {
   manifest.push({ id, thanks: String(thanks) });
   return id;
 }
-
-const unescAttr = (s) => s.replace(/&(amp|quot|#39|#x27|apos|lt|gt);/g, (_, e) =>
-  ({ amp: '&', quot: '"', '#39': "'", '#x27': "'", apos: "'", lt: '<', gt: '>' }[e]));
 
 /** Every *.html file under `dir`, as `/`-separated paths relative to it, sorted. */
 export function htmlFiles(dir) {
@@ -112,20 +108,75 @@ const listingOf = (s) => {
   return m ? { lastmod: m[1] || '' } : null;
 };
 
+// 🩸 r6 read the head as a string: `indexOf('</head>')` and a <meta> regex over the text before it.
+// A robots tag inside `<!-- -->` was taken for the page's robots meta, so the real one was never
+// inserted, and `</HEAD>` (valid HTML, copied verbatim from public/) was no head at all, so nothing
+// was inserted (codex r6). A public/ page is whatever HTML its author wrote, so the head is read the
+// way a crawler reads it: parsed (parse5, the WHATWG algorithm). The head is the parser's head
+// element, whatever its case and whether or not either of its tags is written; a robots meta is a
+// <meta> ELEMENT in it — a comment, script text or a <template>'s contents are not elements of the
+// head. Writing goes back through the same tree's source offsets: each edit replaces exactly the
+// bytes of the tag (or attribute) it changes, so the rest of the file is byte-identical — parse5's
+// serializer would normalise markup nobody asked us to touch.
+
+/** `<meta>` elements under `node` in the parse tree, in document order. `childNodes` only, so a
+ *  <template>'s contents (its own fragment) are not walked. */
+function metasUnder(node, out = []) {
+  for (const c of node.childNodes || []) {
+    if (c.tagName === 'meta' && c.namespaceURI === HTML_NS) out.push(c);
+    metasUnder(c, out);
+  }
+  return out;
+}
+const attrOf = (el, name) => el.attrs.find((a) => a.name === name);
+
+/** The parsed head of a page: its <meta> elements, and the offset a new head element goes at —
+ *  before </head> when written; else after the head's last child, or after <head>; for a head
+ *  neither of whose tags is written, before the first thing the parser put after it. Offsets index
+ *  `html` (a leading BOM, which the HTML decoder strips, is skipped before parsing). */
+function parseHead(html) {
+  const bom = html.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const doc = parse(html.slice(bom), { sourceCodeLocationInfo: true });
+  const root = doc.childNodes.find((n) => n.tagName === 'html');
+  const head = root.childNodes.find((n) => n.tagName === 'head');
+  const loc = head.sourceCodeLocation;
+  const last = [...head.childNodes].reverse().find((c) => c.sourceCodeLocation);
+  let at = loc?.endTag?.startOffset ?? last?.sourceCodeLocation.endOffset ?? loc?.startTag?.endOffset;
+  if (at === undefined) {
+    const after = root.childNodes.slice(root.childNodes.indexOf(head) + 1);
+    const first = (function find(ns) {
+      for (const n of ns) {
+        const o = n.sourceCodeLocation?.startTag?.startOffset ?? (n.nodeName === '#text' || n.nodeName === '#comment' ? n.sourceCodeLocation?.startOffset : undefined);
+        if (o !== undefined) return o;
+        const d = find(n.childNodes || []);
+        if (d !== undefined) return d;
+      }
+    })(after);
+    at = first ?? root.sourceCodeLocation?.endTag?.startOffset ?? root.sourceCodeLocation?.startTag?.endOffset
+      ?? doc.childNodes.find((n) => n.nodeName === '#documentType')?.sourceCodeLocation?.endOffset ?? html.length - bom;
+  }
+  const span = (el) => [bom + el.sourceCodeLocation.startOffset, bom + el.sourceCodeLocation.endOffset];
+  return { metas: metasUnder(head).filter((m) => m.sourceCodeLocation), insertAt: bom + at, span, bom };
+}
+
 /** Read every emitted page: its stamps and robots metas (head only — a body can quote anything). */
 export function readPages(dir) {
   const pages = new Map();
   for (const rel of htmlFiles(dir)) {
     const html = readFileSync(join(dir, rel), 'utf8');
-    const headEnd = html.indexOf('</head>');
-    const head = headEnd < 0 ? html : html.slice(0, headEnd);
-    const n = NOINDEX_STAMP.exec(head);
-    const s = SITEMAP_STAMP.exec(head);
+    const { metas, insertAt, span, bom } = parseHead(html);
+    const named = (n) => metas.filter((m) => (attrOf(m, 'name')?.value || '').trim().toLowerCase() === n);
+    const stamp = (n) => {
+      const m = metas.find((e) => attrOf(e, 'name')?.value === n);
+      return m ? { span: span(m), content: attrOf(m, 'content')?.value ?? '' } : null;
+    };
+    const n = stamp('sitetile:noindex');
+    const s = stamp('sitetile:sitemap');
     pages.set(rel, {
-      html, headEnd,
-      noindexStamp: n ? n[0] : null, flag: n ? flagOf(n[1]) : undefined,
-      sitemapStamp: s ? s[0] : null, listing: s ? listingOf(unescAttr(s[1] || '')) : undefined,
-      robots: robotsMetas(head),
+      html, insertAt,
+      noindexStamp: n?.span || null, flag: n ? flagOf(n.content) : undefined,
+      sitemapStamp: s?.span || null, listing: s ? listingOf(s.content) : undefined,
+      robots: named('robots').map((m) => robotsMeta(html, m, bom)),
     });
   }
   return pages;
@@ -157,22 +208,15 @@ export function noindexFiles(dir, pages, thanks) {
   return out;
 }
 
-// A <meta> tag and its attributes as an author may write them in a public/ page: any order, any
-// case, quoted either way or not at all.
-const META_TAG = /<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
-const ATTR = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
-function attrsOf(tag) {
-  const out = new Map();
-  for (const m of tag.slice(5, -1).matchAll(ATTR)) {
-    const k = m[1].toLowerCase();
-    if (!out.has(k)) out.set(k, { raw: m[0], value: unescAttr(m[2] ?? m[3] ?? m[4] ?? '') });
-  }
-  return out;
-}
-/** Every `<meta name="robots">` in a head: the tag as written and its attributes. */
-function robotsMetas(head) {
-  return [...head.matchAll(META_TAG)].map((m) => ({ tag: m[0], attrs: attrsOf(m[0]) }))
-    .filter((r) => (r.attrs.get('name')?.value || '').trim().toLowerCase() === 'robots');
+/** A robots <meta> element, located in `html`: the span of its tag, and of its (first) `content`
+ *  attribute with the parser's value — any order, any case, quoted either way or not at all. */
+function robotsMeta(html, el, bom) {
+  const loc = el.sourceCodeLocation;
+  const c = loc.attrs?.content;
+  return {
+    tag: [bom + loc.startOffset, bom + loc.endOffset],
+    content: c ? { span: [bom + c.startOffset, bom + c.endOffset], value: attrOf(el, 'content').value } : null,
+  };
 }
 /** A robots `content` made to say noindex: returned as is when it already does and nothing
  *  contradicts it; otherwise `index` dropped, `all` → `follow`, `noindex` appended once, every
@@ -190,23 +234,28 @@ const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
 /** The page's bytes with its stamps and thanks marks removed and, when decided noindex: each robots
  *  meta it already has merged to say noindex (mergeRobots) — never a second tag — or, with none,
- *  the robots meta in the noindex stamp's place (before </head> for a page that has no stamp). */
+ *  the robots meta in the noindex stamp's place (where the head ends, for a page that has no
+ *  stamp). Every edit is a splice at the parser's source offsets (see parseHead). */
 export function rewritePage(p, noindex) {
-  let html = p.html;
+  const html = p.html;
   const robots = p.robots || [];
-  if (p.noindexStamp) html = html.replace(p.noindexStamp, noindex && !robots.length ? ROBOTS : '');
-  else if (noindex && !robots.length && p.headEnd >= 0) html = html.replace('</head>', ROBOTS + '</head>');
+  const edits = [];   // [start, end, text], non-overlapping
+  if (p.noindexStamp) edits.push([...p.noindexStamp, noindex && !robots.length ? ROBOTS : '']);
+  else if (noindex && !robots.length) edits.push([p.insertAt, p.insertAt, ROBOTS]);
   if (noindex) for (const r of robots) {
-    const c = r.attrs.get('content');
-    const merged = mergeRobots(c ? c.value : '');
-    if (c && merged === c.value) continue;
-    const tag = c ? r.tag.replace(c.raw, `content="${escAttr(merged)}"`)
-      : r.tag.replace(/\s*\/?>$/, (end) => ` content="${escAttr(merged)}"${end}`);
-    html = html.replace(r.tag, tag);
+    const merged = mergeRobots(r.content ? r.content.value : '');
+    if (r.content && merged === r.content.value) continue;
+    if (r.content) edits.push([...r.content.span, `content="${escAttr(merged)}"`]);
+    else {
+      const end = r.tag[0] + /\s*\/?>$/.exec(html.slice(...r.tag)).index;
+      edits.push([end, end, ` content="${escAttr(merged)}"`]);
+    }
   }
-  if (p.sitemapStamp) html = html.replace(p.sitemapStamp, '');
-  for (const id of p.marks || []) html = html.replaceAll(markOf(id), '');
-  return html;
+  if (p.sitemapStamp) edits.push([...p.sitemapStamp, '']);
+  let out = html;
+  for (const [a, b, text] of edits.sort((x, y) => y[0] - x[0])) out = out.slice(0, a) + text + out.slice(b);
+  for (const id of p.marks || []) out = out.replaceAll(markOf(id), '');
+  return out;
 }
 
 const SITEMAP_URL = /  <url>\n    <loc>([^<]*)<\/loc>(?:\n    <lastmod>([^<]*)<\/lastmod>)?\n  <\/url>/g;
