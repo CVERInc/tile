@@ -726,6 +726,93 @@ test('🔴 If-Generation: a delete checked in an ended lifetime is refused 412 a
   assert.equal((await page(env, '/t')).status, 200);
 });
 
+/** DELETE with If-Generation, through `env` (a test may hand it a view of the real env) */
+const deleteIn = (env, gen, handle = 't') => {
+  const url = new URL(`https://card.feelreef.com/_api/card/${handle}`);
+  return handleApi(new Request(url, { method: 'DELETE', headers: { authorization: `Bearer ${TOKEN}`, 'if-generation': gen } }), env, url);
+};
+/** everything a refused DELETE must leave byte-identical: KV (values and metadata) and the object's storage and alarm */
+const everyKey = (env, handle = 't') => {
+  const life = env.CARD_LIFETIMES.storageOf(handle);
+  return { kv: new Map(env.CARDS._m), meta: new Map(env.CARDS._meta), life: new Map(life._m), alarm: life._alarm };
+};
+
+test('🔴 r15 the fence is the first write: a DELETE whose lifetime ends while it runs is refused with every key untouched, at each step up to /end (reef#2618, tile#207 codex r1 #1)', async () => {
+  // A reads the generation and starts its DELETE; at its k-th call (a KV call or an object call) it
+  // stalls while B deletes that same lifetime and the next owner saves a card; then A goes on. Every k
+  // up to and including A's /end is a stale DELETE, and must answer 412 having written nothing. HEAD
+  // (r4) checked /current first and /end second, and wrote `gone:` between them: rotated between
+  // the two, A put the marker back over the next owner's card and only then was refused.
+  let rows = 0, fence = false;
+  for (let k = 1; ; k++) {
+    const env = envWith({ t: CARD });
+    const checked = (await (await call(env, 'GET', '/_api/card/t/lifetime')).json()).gen;
+    let n = 0, armed = true, at = null, after = null;
+    const step = async (what) => {
+      if (!armed || ++n !== k) return;
+      armed = false; at = what;
+      const b = await deleteIn(env, checked);
+      assert.equal(b.status, 200, `[step ${k}: ${what}] CONTROL: B deletes the lifetime A checked`);
+      assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+      after = everyKey(env);
+    };
+    const store = env.CARDS;
+    const viewOf = (ns) => ({ ...ns, get: (id) => {
+      const o = ns.get(id);
+      return { async fetch(url, init) {
+        const op = new URL(url).pathname;
+        await step(`${op} ${id.name}`);
+        const res = await o.fetch(url, init);
+        if (op === '/end') armed = false; // past A's fence A is no longer stale: B would be
+        return res;
+      } };
+    } });
+    const viewA = { ...env, CARD_LIFETIMES: viewOf(env.CARD_LIFETIMES), HOST_BINDINGS: viewOf(env.HOST_BINDINGS),
+      CARDS: Object.fromEntries(['get', 'getWithMetadata', 'put', 'delete', 'list'].map((m) =>
+        [m, async (...args) => { await step(`${m} ${typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0])}`); return store[m](...args); }])) };
+    const a = await deleteIn(viewA, checked);
+    if (at == null) break; // A reached its /end before step k
+    rows += 1;
+    if (at.startsWith('/end ')) fence = true;
+    const where = `[step ${k}: ${at}]`;
+    assert.equal(a.status, 412, `${where} a DELETE checked in an ended lifetime was not refused`);
+    assert.equal((await a.json()).error, 'stale_generation', where);
+    assert.deepEqual(everyKey(env), after, `${where} a refused DELETE wrote a key`);
+    assert.ok((await bodyOf(env)).includes('Next owner'), `${where} a refused DELETE erased the next lifetime's card`);
+    assert.equal((await page(env, '/t')).status, 200, where);
+  }
+  assert.ok(fence, `CONTROL: no row stalled A at its /end (${rows} rows)`);
+});
+
+test('🔴 r15 /current reads only, and a stale DELETE refuses without reconciling: a pending inverse stays pending, KV untouched (reef#2618, tile#207 codex r1 #2)', async () => {
+  // a real failed write-through: the bind is accepted, its inverse put to KV fails, CardLifetime keeps
+  // `cache: 'pending'` and schedules its alarm. r4's /current (and /end before its fence) ran load(),
+  // which flushed: a read wrote `vanityof:t:0` and the object's storage.
+  const env = envWith({ t: CARD });
+  const put = env.CARDS.put.bind(env.CARDS);
+  let fail = true;
+  env.CARDS.put = async (k, ...rest) => {
+    if (fail && k === vanityOfKey('t', '0')) throw new Error('injected inverse put failure');
+    return put(k, ...rest);
+  };
+  await bindVanity(env, 't', 'card.example');
+  fail = false;
+  assert.equal(env.CARD_LIFETIMES.storageOf('t')._m.get('life').cache, 'pending', 'CONTROL: the injected failure left the inverse pending');
+  assert.equal(env.CARDS._m.has(vanityOfKey('t', '0')), false, 'CONTROL: the inverse is not in KV');
+  env.CARD_LIFETIMES.storageOf('t')._alarm = null; // the retry is due; nothing but the alarm may run it now
+  const before = everyKey(env);
+  const current = await call(env, 'GET', '/_api/card/t/lifetime');
+  assert.equal(current.status, 200);
+  assert.deepEqual(await current.json(), { handle: 't', gen: '0' });
+  assert.deepEqual(everyKey(env), before, 'GET /lifetime (/current) wrote a key');
+  const stale = await deleteIn(env, 'not-the-current-one');
+  assert.equal(stale.status, 412);
+  assert.deepEqual(everyKey(env), before, 'a stale DELETE wrote a key before refusing');
+  // CONTROL: the write path still reconciles — the alarm delivers the pending inverse
+  await env.CARD_LIFETIMES.alarm('t');
+  assert.equal(env.CARDS._m.get(vanityOfKey('t', '0')), 'card.example', 'CONTROL: the alarm did not deliver the pending inverse');
+});
+
 test('delete a handle that never existed: deleted:false, no marker, still the ordinary 404', async () => {
   const env = envWith({ other: CARD });
   const res = await call(env, 'DELETE', '/_api/card/never');
@@ -1554,7 +1641,8 @@ test('🔴 r8 no CardLifetime, no lifetime change: DELETE answers 503 and touche
   const res = await call(env, 'DELETE', '/_api/card/t');
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error, 'delete_failed');
-  assert.deepEqual([...env.CARDS._m.keys()].filter((k) => !before.has(k)), [goneKey('t')], 'only the (invisible) marker may be new');
+  // r15: the marker follows /end (the fence comes before every write), so not even it is new
+  assert.deepEqual(new Map(env.CARDS._m), before, 'a DELETE whose /end never answered wrote a key');
   assert.equal((await page(env, '/t')).status, 200, 'a DELETE without its lifetime authority took the card down');
   await assert.rejects(bindVanity(env, 't', OWNER), /CARD_LIFETIMES is not bound/);
   assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined);

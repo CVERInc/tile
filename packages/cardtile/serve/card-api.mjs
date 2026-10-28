@@ -310,7 +310,8 @@ async function retryLater(storage) {
  * cache of it (codex r8 #2). Each change is written to storage first with `cache: 'pending'` — that
  * write IS the change (for HostBindings, the acceptance of the bind) — and then put to KV; a KV failure
  * leaves `pending` in storage, schedules the alarm, and still answers success (`cache: 'pending'`).
- * Every request to the object, and its alarm, first re-puts a pending cache from storage. So the object
+ * Every request to the object, and its alarm, first re-puts a pending cache from storage — except
+ * CardLifetime's reads (/current, and a refused /end), which write nothing at all (r15). So the object
  * knows whether KV differs from it without ever reading KV (r6: an object reading KV reads a cache).
  */
 export class HostBindings {
@@ -452,9 +453,10 @@ export class HostBindings {
  *                                        ticket; lost[host] = ticket, and every inverse naming it that an
  *                                        OLDER acceptance wrote is cleared: its own if inverse.ticket <
  *                                        ticket (KV key deleted; in gen 0 written empty), and the bare one
- *   POST /current  { handle }            → { gen } (reads only)
+ *   POST /current  { handle }            → { gen } (reads only: no flush, no write, no alarm — r15)
  *   POST /end      { handle, gen? }      refused (`stale_generation`) when `gen` is given and is not the
- *                                        current one (r4, DELETE's If-Generation); otherwise
+ *                                        current one (r4, DELETE's If-Generation; r15: before
+ *                                        any write, its flush included); otherwise
  *                                        `hosts` moves to pending[gen], gen = a fresh one, `hosts` = []
  *                                        → { ended, gen, pending }: every host still owed an end
  *   POST /settle   { handle, delivered: { '<gen>': [host…] } }
@@ -483,12 +485,22 @@ export class CardLifetime {
       : op === '/confirm' ? () => this.confirm(handle, host, gen, order, ticket)
         : op === '/lost' ? () => this.lost(handle, host, gen, ticket)
           : op === '/end' ? () => this.end(handle, gen)
-            : op === '/current' ? async () => ({ gen: (await this.load(handle)).gen }) : () => this.settle(handle, delivered));
+            : op === '/current' ? async () => ({ gen: (await this.read(handle)).gen }) : () => this.settle(handle, delivered));
   }
   /** the runtime's call when the retry alarm comes due */
   async alarm() { await inTurn(this, async () => { const s = await this.storage.get('life'); if (s && s.handle) await this.flush(s); return {}; }); }
-  /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings) */
+  /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings): the WRITE paths' read */
   async load(handle) {
+    const s = await this.read(handle);
+    await this.flush(s);
+    return s;
+  }
+  /**
+   * 🔴 r15: the lifetime as stored, and nothing else — no flush, no adoption, no storage write, no alarm.
+   * /current and a refused /end use only this (codex tile#207 r1 #2: /current flushed a pending
+   * inverse, so a read wrote KV and storage). A pending cache waits for the alarm or the next write.
+   */
+  async read(handle) {
     const s = (await this.storage.get('life')) || { gen: GEN0, hosts: [], pending: {} };
     s.handle = handle;
     s.seq = s.seq || 0;
@@ -498,7 +510,6 @@ export class CardLifetime {
     // the inverse's acceptance is one this lifetime has seen (a life stored before r13 has no highWater)
     if (s.inverse && s.inverse.host && s.inverse.ticket != null && !(s.highWater[s.inverse.host] >= s.inverse.ticket)) s.highWater[s.inverse.host] = s.inverse.ticket;
     s.cache = s.cache || 'written';
-    await this.flush(s);
     return s;
   }
   /**
@@ -607,9 +618,11 @@ export class CardLifetime {
     return {};
   }
   async end(handle, meant) {
-    const s = await this.load(handle), ended = s.gen;
-    // reef#2618 r4: a DELETE names the lifetime it checked. Not the current one ⇒ refused, nothing moves.
+    const s = await this.read(handle), ended = s.gen;
+    // reef#2618 r4: a DELETE names the lifetime it checked. Not the current one ⇒ refused, nothing moves
+    // (r15: checked on the bare read, before the flush, which is a write)
     if (meant != null && meant !== s.gen) return { stale_generation: true };
+    await this.flush(s);
     if (s.hosts.length) s.pending[ended] = [...new Set([...(s.pending[ended] || []), ...s.hosts])];
     s.gen = newGen();
     s.hosts = [];
@@ -825,8 +838,9 @@ async function writeCard(store, handle, md, admitted) {
  * hand-made legacy pointer no object knows stays, inert. (The Cloudflare-for-SaaS hostname itself is
  * outside this store; unbinding it stays an operator act.)
  *
- * The marker is written FIRST: the renderer only reads it when the card body is missing, so it is
- * invisible until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
+ * The marker is written first (r15: first after the lifetime's fence, below, and before `gen:` moves
+ * or any body goes): the renderer only reads it when the card body is missing, so it is invisible
+ * until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
  * Returns whether there was a card to delete; a handle that never had one gets no marker, because a
  * 410 there would claim a card that never was.
  *
@@ -846,10 +860,11 @@ async function writeCard(store, handle, md, admitted) {
  */
 async function deleteCard(env, handle, meant = null) {
   const store = env.CARDS;
-  // 🔴 reef#2618 r4: `meant` is the generation the caller checked ownership in (If-Generation). A stale
-  // one is refused before anything is written here; /end checks it again in the object's own turn,
-  // which is the exact check (the object is the generation's only writer).
-  if (meant != null && (await askLifetime(env, handle, 'current', { handle })).gen !== meant) throw new StaleLifetime();
+  // 🔴 reef#2618 r4: `meant` is the generation the caller checked ownership in (If-Generation). r15: it
+  // is checked ONCE, by /end in the object's own turn (the object is the generation's only writer), and
+  // nothing here writes before that answer. Only reads come first; a refusal has written no key (codex
+  // tile#207 r1 #1: r4 also read /current up front, then wrote the marker, then /end refused — a lifetime
+  // that ended between those two checks got the marker anyway). A read is not a reservation.
   const { md, gen } = await liveCard(store, handle);
   // 🔴 Collect each whole listing BEFORE deleting: deleting under a live cursor shifts what the next
   // page starts from, and the keys it skips are exactly the ones this promised were gone.
@@ -876,7 +891,6 @@ async function deleteCard(env, handle, meant = null) {
     store.get(goneKey(handle)).then((v) => v != null), store.get(legacyCardKey(handle)),
   ]);
   const had = md != null || bodies.length > 0 || bare != null;
-  if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
   // 🔴 The lifetime ends in the handle's own object FIRST (r8, see CardLifetime): it rotates the
   // generation in its storage and only then answers with the hosts registered under the ended one —
   // the authoritative list, never a KV listing. Every host on it is told, and the KV side (the `gen:`
@@ -887,6 +901,10 @@ async function deleteCard(env, handle, meant = null) {
   const ending = await askLifetime(env, handle, 'end', { handle, ...(meant != null ? { gen: meant } : {}) });
   if (ending.stale_generation) throw new StaleLifetime();
   const { ended, pending } = ending;
+  // The marker is this DELETE's first write (r15: after the fence). It still precedes every key that
+  // could make it visible: `gen:` moves at /settle and the body goes after that, so until both the card
+  // still serves from KV, and a delete that dies after here leaves a 410, never a resurrected card.
+  if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
   const gensOf = new Map();
   for (const [g, hosts] of Object.entries(pending)) for (const h of hosts) gensOf.set(h, [...(gensOf.get(h) || []), g]);
   await Promise.all([...gensOf].map(([h, gens]) => endOnHost(env, handle, gens, h)));
