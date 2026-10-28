@@ -23,8 +23,9 @@
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv namespace create CARDS
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS card:<handle>:0 --path=<card.md>   # a new handle
 # A domain binding lives under the same generation's keys (vanitybind:<handle>:<gen>:<host>,
-# vanityof:<handle>:<gen>); vanity:<host> → handle is only a pointer, written last — see vanityKey,
-# and cards/README.md for the commands.
+# vanityof:<handle>:<gen>); vanity:<host> → handle is only a pointer, written last and only by the
+# HostBindings Durable Object for that host (below) — see vanityKey, and cards/README.md for the
+# commands and the deploy order.
 #   preview (default): npx wrangler deploy                 → cardtile-preview.<your-subdomain>.workers.dev
 #   production:        npx wrangler deploy --env production → cardtile + its custom domains
 # Same code, same CARDS store; they differ only in PREVIEW (which gates the noindex header) and in

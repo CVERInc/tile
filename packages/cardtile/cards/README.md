@@ -63,16 +63,31 @@ write `gen:<handle>` by hand either — only DELETE does, and a new value there 
 
 A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`):
 
-| key | value | meaning |
-|---|---|---|
-| `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` |
-| `vanityof:<handle>:<gen>` | host | in this lifetime, the canonical address 301s to `<host>` |
-| `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped |
+| key | value | meaning | who writes it |
+|---|---|---|---|
+| `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` | `bindVanity`, in the caller |
+| `vanityof:<handle>:<gen>` | host | in this lifetime, the canonical address 301s to `<host>` | `bindVanity`, in the caller (not for `redirect: false`) |
+| `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped | **only `HostBindings`**, the Durable Object named `<host>` (r6) |
 
 The renderer follows the pointer, reads that handle's `gen:`, and serves the host only if the
-`vanitybind:` key of that generation exists. DELETE deletes the `vanitybind:`/`vanityof:` keys it
-listed before rotating and leaves the pointer, which is inert without them. In code,
-`bindVanity(store, handle, host)` writes them in this order; by hand, the same order, pointer LAST:
+`vanitybind:` key of that generation exists. Readers read KV only; the object stores nothing.
+DELETE deletes the `vanitybind:`/`vanityof:` keys it listed before rotating, and nothing else of
+the binding. Those keys belong to one lifetime, so they have one writer already and DELETE does
+not go through the object. It leaves the pointer, which is inert without them.
+
+`bindVanity(env, handle, host)` writes the two lifetime keys, then asks `HostBindings` for
+`<host>` to write the pointer. The object re-reads `gen:<handle>` and puts the pointer only if it
+still equals the generation the bind was admitted in, and it does that for one request at a time
+per host. 🔴 Why (codex r5): with the re-read and the put in the caller, a bind of `a` held
+between them landed after `a` was deleted and `b` was bound to the same host. The pointer went
+back to `a`, the domain went 404 for good, and `card.feelreef.com/b` kept 301ing into it. KV has
+no compare-and-swap, so only "nobody else writes this key meanwhile" closes that. With
+`HOST_BINDINGS` unbound, `bindVanity` refuses and writes nothing.
+
+By hand, the same order, pointer LAST. This is allowed only while no deployed route calls
+`bindVanity`, because then the person typing is the host's only writer. Once tile#122's PUT is
+live, a hand `put vanity:<host>` is a second writer, and that is exactly the r5 race. Bind through
+the API instead.
 
     npx wrangler kv key put --remote --namespace-id=<CARDS id> vanitybind:<handle>:<gen>:<host> <handle>
     npx wrangler kv key put --remote --namespace-id=<CARDS id> vanityof:<handle>:<gen> <host>   # omit for no redirect
@@ -84,17 +99,40 @@ A binding made before generations (`vanity:<host>` plus a bare `vanityof:<handle
 again. Never copy an old binding into a later generation's keys: if a DELETE missed it, that hands
 the former owner's domain to the next owner.
 
-What this does not close: the pointer is one key per host, and KV has no compare-and-swap. If a
-domain moves from handle `a` to handle `b` while a bind of `a` is between its `gen:` re-read and
-its pointer put, and `a` is deleted in that gap, the late pointer names `a` and the domain 404s
-until it is bound again. It can never serve the wrong card. Closing it needs one writer per
-host (a Durable Object); the same-handle races do not depend on it.
+What the object does not close: its `gen:` re-read is a KV read at the object's location, and KV
+may serve that location a cached value for up to about 60 s. A bind of a deleted handle that
+reaches the object after a later bind, while that location still caches the old `gen:`, can still
+put the old pointer. The domain then 404s until it is bound again; it can never serve the wrong
+card. Closing that needs `gen:` itself to have a strongly consistent home. That has not been
+measured live.
 
-**tile#122's PUT `/_api/vanity/<handle>`** must call `bindVanity` and nothing else — no direct
-`vanity:`/`vanityof:` writes, no metadata stamp (r4's shape is gone). Answer 409 when it returns
-`stale_generation`. Its unbind deletes the current generation's `vanitybind:`/`vanityof:` keys;
-it may delete the pointer only if it still names this handle, and that check-then-delete has the
-window above.
+**Deploying r6 (AGEN / maplefeng's ship step).** The next production deploy of cardtile carries a
+Durable Object migration (`[[env.production.migrations]]`, tag `v1-host-bindings`,
+`new_sqlite_classes = ["HostBindings"]`; see `serve/wrangler.example.toml`). Copy into the real
+config:
+
+1. Under `[env.production]`: the `HOST_BINDINGS` binding and the migration, exactly as in the
+   example. Do not edit or reuse the tag after it has been deployed.
+2. At the top level (the preview Worker): `HOST_BINDINGS` with `script_name = "cardtile"`. Both
+   Workers write one CARDS store, so they must share production's objects. A namespace of their
+   own would give each host two writers.
+3. Deploy production first (`npx wrangler deploy --env production`), then preview. Preview's
+   binding names a class that exists only after production's migration.
+4. Rollback: redeploying the previous code without the binding is safe for reads, because nothing
+   is stored in the object. Never deploy a `deleted_classes` migration for it while any route
+   calls `bindVanity`.
+
+No route calls `bindVanity` in this repo today, so before tile#122 the deploy changes nothing a
+visitor sees.
+
+**tile#122's PUT `/_api/vanity/<handle>`** must call `bindVanity(env, handle, host)` and nothing
+else: no direct `vanity:`/`vanityof:` writes, and no metadata stamp (r4's shape is gone). Answer 409
+when it returns `stale_generation`. Its unbind deletes the current generation's
+`vanitybind:`/`vanityof:` keys itself. If it also deletes the pointer, that delete must be a
+second operation on `HostBindings`, run in the object's queue: "delete `vanity:<host>` if it still
+names this handle AND that handle's `gen:` is still the one the unbind was admitted in". The pointer
+names only a handle, so without the second check a late unbind deletes the next lifetime's pointer. It must never be a check-then-delete in the caller, which has the same window r5
+had. That operation is not written yet; tile#122 adds it next to `pointHost`.
 
 🔴 `--remote` is not optional. Without it wrangler writes to the local miniflare simulator and
 reports success, so a "deployed" change silently never leaves the machine.
