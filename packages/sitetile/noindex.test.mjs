@@ -1,9 +1,10 @@
 // reef#2554 — which emitted pages are noindex, decided after the build over the files it wrote.
 //   run: node packages/sitetile/noindex.test.mjs
 //
-// noindex-pass.mjs reads ONLY an output dir: each page's stamps (what its own source said, put in
-// its head by SiteLayout), the `thanks_to` fields of the inbox forms in the emitted HTML, and the
-// route's sitemap.xml for order and spelling. These tests hand it output dirs written the way the
+// noindex-pass.mjs reads an output dir — each page's stamps (what its own source said, put in its
+// head by SiteLayout), its robots metas, and the route's sitemap.xml for order and spelling — and
+// the thanks manifest the build's inbox forms recorded (counted only for a form whose mark reached
+// an emitted file). These tests hand it output dirs written the way the
 // build writes them and read back what it wrote. The built-site half (real Astro builds, every
 // review's inputs, the byte comparison) is in astro/smoke-build.mjs.
 
@@ -27,11 +28,19 @@ const html = ({ flag = '', sitemap = 'list', stamp = true, robots = false, body 
   + (stamp && !robots ? (flag === '' ? '<meta name="sitetile:noindex" content>' : `<meta name="sitetile:noindex" content="${flag}">`) : '')
   + (stamp ? `<meta name="sitetile:sitemap" content="${sitemap}">` : '')
   + `<meta property="og:type" content="website"></head><body>${body}</body></html>`;
-/** Form.astro's inbox form: `thanks_to` rides beside `return_to` only when thanks= was accepted. */
-const form = (...targets) => targets.map((t) => '<form class="st-form" action="/__reef/inbox" method="post">'
-  + '<input type="hidden" name="return_to" value="/c/">'
-  + (t == null ? '' : `<input type="hidden" name="thanks_to" value="${t.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`)
-  + '</form>').join('');
+/** Form.astro's inbox form: `thanks_to` rides beside `return_to` only when thanks= was accepted, and
+ *  then the form recorded `{ id, thanks }` in the build's manifest and carries the id. The next
+ *  site() hands the recorded entries to the pass. */
+let recorded = [];
+let nextId = 0;
+const form = (...targets) => targets.map((t) => {
+  const id = t == null ? null : `id-${++nextId}`;
+  if (id) recorded.push({ id, thanks: t });
+  return `<form class="st-form" action="/__reef/inbox" method="post"${id ? ` data-sitetile-thanks="${id}"` : ''}>`
+    + '<input type="hidden" name="return_to" value="/c/">'
+    + (t == null ? '' : `<input type="hidden" name="thanks_to" value="${t.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`)
+    + '</form>';
+}).join('');
 const sitemapOf = (dir, files) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${files.map(([loc, lastmod]) => `  <url>\n    <loc>https://example.com${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}\n  </url>`).join('\n')}
@@ -47,7 +56,8 @@ function site(files, routeSitemap) {
     writeFileSync(join(dir, rel), text);
   }
   if (routeSitemap) writeFileSync(join(dir, 'sitemap.xml'), sitemapOf(dir, routeSitemap));
-  const out = applyNoindex(dir);
+  const out = applyNoindex(dir, recorded);
+  recorded = [];
   const read = (rel) => readFileSync(join(dir, rel), 'utf8');
   return { dir, decided: out.noindex, read, sitemap: () => read('sitemap.xml'),
     listed: () => [...read('sitemap.xml').matchAll(/<loc>https:\/\/example\.com([^<]*)<\/loc>/g)].map((m) => m[1]) };
@@ -126,7 +136,7 @@ test('percent-encoded reserved characters name the file: /thank%26you/ → thank
   }), ['a=b/index.html', 'devlog/café/index.html', 'thank&you/index.html']);
 });
 
-test('the thanks_to value is read as the visitor gets it: attribute entities decoded once', () => {
+test('the target is the path the form recorded, not its attribute spelling: /a&b/ is the file a&b', () => {
   assert.deepEqual(which({ 'c/index.html': html({ body: form('/a&b/') }), 'a&b/index.html': html() }), ['a&b/index.html']);
 });
 
@@ -184,6 +194,58 @@ test('sitemap: every page noindex → a valid, empty urlset in the route\'s form
 test('no sitemap.xml in the output → none is written', () => {
   const s = site({ 'index.html': html() });
   assert.equal(existsSync(join(s.dir, 'sitemap.xml')), false);
+});
+
+// codex r5 P2 (template / third-party): a `thanks_to` spelling in markup sitetile did not emit as an
+// inbox form — an embed's inert <template>, another service's form — is text, not a thanks target.
+// The control is the same target named by a real inbox form.
+test('a thanks_to inside a <template> or a third-party form takes no page out of search', () => {
+  const inbox = '<form action="/__reef/inbox" method="post"><input type="hidden" name="thanks_to" value="/template-target/"></form>';
+  assert.deepEqual(which({ 'e/index.html': html({ body: `<template>${inbox}</template>` }), 'template-target/index.html': html() }), []);
+  assert.deepEqual(which({
+    'e/index.html': html({ body: '<form action="https://forms.example/submit" method="post"><input type="hidden" name="thanks_to" value="/template-target/"><button>Send</button></form>' }),
+    'template-target/index.html': html(),
+  }), []);
+  assert.deepEqual(which({ 'c/index.html': html({ body: form('/template-target/') }), 'template-target/index.html': html() }), ['template-target/index.html']);
+});
+
+// codex r5 P2 (permissive robots): a robots meta already on a thanks target is MERGED — `noindex`
+// in, a contradicting `index`/`all` out, every other directive kept, still one robots meta. The only
+// opt-out is the page's own `noindex: false`.
+test('an existing permissive robots meta on a thanks target is merged into noindex, never obeyed', () => {
+  const pub = (content) => `<!DOCTYPE html><html><head><title>Thanks</title><meta name="robots" content="${content}"></head><body>Thank you.</body></html>`;
+  const s = site({
+    'c/index.html': html({ body: form('/indexable.html', '/preview.html', '/all.html', '/done.html') }),
+    'indexable.html': pub('index,follow'), 'preview.html': pub('max-image-preview:large'),
+    'all.html': pub('all'), 'done.html': pub('noindex, nofollow'),
+  });
+  assert.deepEqual(s.decided, ['all.html', 'done.html', 'indexable.html', 'preview.html']);
+  assert.equal(s.read('indexable.html'), pub('follow,noindex'));
+  assert.equal(s.read('preview.html'), pub('max-image-preview:large,noindex'));
+  assert.equal(s.read('all.html'), pub('follow,noindex'));
+  assert.equal(s.read('done.html'), pub('noindex, nofollow'));
+});
+
+test('a robots meta is found however a public/ page writes it, merged in place; never a second tag; an opted-out page keeps its own', () => {
+  const s = site({
+    'c/index.html': html({ body: form('/a.html', '/b.html', '/kept/') }),
+    'a.html': '<html><head><META CONTENT=\'INDEX, max-snippet:-1\' NAME=Robots></head><body></body></html>',
+    'b.html': '<html><head><meta name="robots"></head><body></body></html>',
+    'kept/index.html': html({ flag: 'false' }).replace('</head>', '<meta name="robots" content="index"></head>'),
+  });
+  assert.deepEqual(s.decided, ['a.html', 'b.html']);
+  assert.equal(s.read('a.html'), '<html><head><META content="max-snippet:-1,noindex" NAME=Robots></head><body></body></html>');
+  assert.equal(s.read('b.html'), '<html><head><meta name="robots" content="noindex"></head><body></body></html>');
+  assert.match(s.read('kept/index.html'), /<meta name="robots" content="index"><\/head>/);
+  for (const f of ['a.html', 'b.html']) assert.equal((s.read(f).match(/robots/gi) || []).length, 1);
+});
+
+test('the thanks mark is removed from every emitted form; a form recorded but never emitted counts for nothing', () => {
+  const body = form('/t/');
+  recorded.push({ id: 'never-emitted', thanks: '/u/' });
+  const s = site({ 'c/index.html': html({ body }), 't/index.html': html(), 'u/index.html': html() });
+  assert.deepEqual(s.decided, ['t/index.html']);
+  assert.doesNotMatch(s.read('c/index.html'), /data-sitetile-thanks/);
 });
 
 test('routeOutputFile (build-log collision naming): one file per route param; x//y is the file x/y', () => {

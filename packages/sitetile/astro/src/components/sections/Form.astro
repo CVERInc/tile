@@ -14,6 +14,7 @@
 // grow a GENERAL coral).
 import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT } from '@sitetile';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
+import { recordThanks } from '../../../noindex-pass.mjs';
 const { section, index = 0, hero, lang, meta } = Astro.props;
 const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
@@ -101,6 +102,11 @@ const formAction = isInbox ? '/__reef/inbox' : (safeHref(action) || undefined);
 // the copy the script reads) when `isInbox` — `thanks=` is meaningless outside the one route that
 // can act on it.
 const thanksPath = safeInternalPath(pm.thanks);
+// reef#2554: a thanks page is noindex by default. This form is the one place that knows a
+// `thanks_to` is ours, so it records the target in the build's thanks manifest and marks itself
+// with the id; the post-build pass (noindex-pass.mjs) counts the entry only if that id reached an
+// emitted file, then removes the mark. Not recorded outside a build: no attribute at all.
+const thanksMark = isInbox && thanksPath ? recordThanks(thanksPath) : undefined;
 
 // The forwarder's reserved field names — an owner field must never land on the wire
 // under one of these, or it would be read as routing data instead of message content.
@@ -245,7 +251,7 @@ const inboxCopy = isInbox ? {
       <p class="st-form-success-back"><a href={homeHref}>{fieldCopy.backHome}</a></p>
     </div>
   )}
-  <form class="st-form" action={formAction} method={method}>
+  <form class="st-form" action={formAction} method={method} data-sitetile-thanks={thanksMark}>
     {/* `thanks_to` (frontmatter's own note on `thanksPath`, above) rides alongside `return_to`
         inside this SAME conditional, never a second one of its own, so a plain `action=inbox`
         form with no `thanks=` posts only the return path and its reason fragments. */

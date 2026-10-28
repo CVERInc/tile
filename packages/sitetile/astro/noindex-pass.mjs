@@ -16,14 +16,27 @@
 //       <meta name="sitetile:noindex" content="true|false|">  its own `noindex:` ('' = not said)
 //       <meta name="sitetile:sitemap" content="list[ <date>]|omit">  whether the old sitemap lists
 //                                                                  this kind of page, and its lastmod
-//   • the hidden `thanks_to` field of every inbox form in the emitted HTML — the path the forwarder
-//     redirects to (Form.astro writes it only for `action=inbox` with a `thanks=` safeInternalPath
-//     accepted), read from the markup the visitor gets, so a form on a page nobody can open counts
-//     for nothing;
+//   • the thanks manifest: one entry per inbox form Form.astro EMITTED with a `thanks=`
+//     safeInternalPath accepted — `{ id, thanks }` — and the `data-sitetile-thanks="<id>"` it put on
+//     that <form>. An entry counts only when its id is in an emitted file, so a form on a page
+//     nobody can open (displaced, codex r4) counts for nothing;
 //   • the sitemap.xml the route wrote (pages/sitemap.xml.js) — read for its ORDER, its spelling of
 //     each URL and the lastmod of pages that carry no stamp (term archives), never for membership.
-// Outputs: each stamp removed (a page's bytes are what they were before noindex existed), a robots
-// meta where a stamp was on a noindex page, and sitemap.xml rewritten from the file list.
+// Outputs: each stamp and thanks mark removed (a page's bytes are what they were before noindex
+// existed), a robots meta where a stamp was on a noindex page, and sitemap.xml rewritten from the
+// file list.
+//
+// 🩸 r5 read the targets by grepping every emitted file for `<input type="hidden" name="thanks_to"
+// value=…>`. That spelling is reserved among the fields Form.astro generates, not in the HTML an
+// author pastes: an embed's inert <template>, or another service's form with a field of that name,
+// took a page out of search (codex r5). Only the emitter knows a form is ours, so the emitter says
+// so — the pass never reads a thanks target out of markup. The random id is only how it learns the
+// form reached a file; no author can spell one ahead of the build.
+//
+// 🩸 r5 also left a page alone when it had ANY robots meta, so `index,follow` on a public/ page
+// beat the thanks default. A robots meta already there is merged, not obeyed: `noindex` goes in,
+// a contradicting `index`/`all` goes out (`all` keeps its `follow`), every other directive stays,
+// and there is still one tag. The only opt-out is the page's own `noindex: false`.
 //
 // A thanks target (and a sitemap <loc>) names a file the way a static host maps a URL: resolved
 // like the browser resolves it (`new URL` — `/./x` → `/x`, query and fragment dropped), each segment
@@ -33,6 +46,10 @@
 //
 // WHY a post-build hook, like locale-404.mjs: production runs a plain `npx astro build` and nothing
 // after it, so a post-step anywhere else would be absent from every real site.
+// WHY a global for the manifest, like locale-404.mjs: Form.astro runs inside Astro's bundled SSR
+// build and this hook inside the config's own module graph — two copies of this file, one process.
+// A `Symbol.for` key is the one slot both resolve to; `astro:build:start` resets it.
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,9 +59,20 @@ const ROBOTS = '<meta name="robots" content="noindex">';
 // An empty attribute is written bare (`content`), so the value is optional.
 const NOINDEX_STAMP = /<meta name="sitetile:noindex" content(?:="([^"]*)")?>/;
 const SITEMAP_STAMP = /<meta name="sitetile:sitemap" content(?:="([^"]*)")?>/;
-// Form.astro: `<input type="hidden" name="thanks_to" value={thanksPath} />`. `thanks_to` is a
-// reserved inbox field name (RESERVED_INBOX_NAMES), so no author field can carry it.
-const THANKS_FIELD = /<input type="hidden" name="thanks_to" value="([^"]*)">/g;
+const MANIFEST = Symbol.for('sitetile.noindex.thanks-manifest');
+const markOf = (id) => ` data-sitetile-thanks="${id}"`;
+
+/** Form.astro, for an `action=inbox` form whose `thanks=` safeInternalPath accepted: record the
+ *  target and return the id to put on the <form> as `data-sitetile-thanks`. Outside a build (no
+ *  manifest: `astro dev`, a test render) it records nothing and returns undefined, so the form
+ *  renders without the attribute. */
+export function recordThanks(thanks) {
+  const manifest = globalThis[MANIFEST];
+  if (!manifest) return undefined;
+  const id = randomUUID();
+  manifest.push({ id, thanks: String(thanks) });
+  return id;
+}
 
 const unescAttr = (s) => s.replace(/&(amp|quot|#39|#x27|apos|lt|gt);/g, (_, e) =>
   ({ amp: '&', quot: '"', '#39': "'", '#x27': "'", apos: "'", lt: '<', gt: '>' }[e]));
@@ -84,8 +112,7 @@ const listingOf = (s) => {
   return m ? { lastmod: m[1] || '' } : null;
 };
 
-/** Read every emitted page: its stamps (head only — a body can quote anything) and the thanks
- *  targets of its forms. */
+/** Read every emitted page: its stamps and robots metas (head only — a body can quote anything). */
 export function readPages(dir) {
   const pages = new Map();
   for (const rel of htmlFiles(dir)) {
@@ -94,22 +121,34 @@ export function readPages(dir) {
     const head = headEnd < 0 ? html : html.slice(0, headEnd);
     const n = NOINDEX_STAMP.exec(head);
     const s = SITEMAP_STAMP.exec(head);
-    const thanks = [...html.matchAll(THANKS_FIELD)].map((m) => unescAttr(m[1]));
     pages.set(rel, {
       html, headEnd,
       noindexStamp: n ? n[0] : null, flag: n ? flagOf(n[1]) : undefined,
       sitemapStamp: s ? s[0] : null, listing: s ? listingOf(unescAttr(s[1] || '')) : undefined,
-      robots: /<meta name="robots"/.test(head),
-      thanks,
+      robots: robotsMetas(head),
     });
   }
   return pages;
 }
 
-/** The files decided noindex: own flag true, or — not said — some emitted form's thanks target. */
-export function noindexFiles(dir, pages) {
+/** The manifest entries whose form reached an emitted file. Sets each page's `marks` (the ids it
+ *  carries, removed by rewritePage). */
+export function emittedThanks(pages, manifest) {
+  const out = [];
+  for (const p of pages.values()) p.marks = [];
+  for (const e of manifest || []) {
+    let seen = false;
+    for (const p of pages.values()) if (p.html.includes(markOf(e.id))) { p.marks.push(e.id); seen = true; }
+    if (seen) out.push(e);
+  }
+  return out;
+}
+
+/** The files decided noindex: own flag true, or — not said — the target of an inbox form that
+ *  reached an emitted file. */
+export function noindexFiles(dir, pages, thanks) {
   const targets = new Set();
-  for (const p of pages.values()) for (const t of p.thanks) {
+  for (const { thanks: t } of thanks) {
     const f = fileForPath(dir, t);
     if (f) targets.add(f);
   }
@@ -118,13 +157,55 @@ export function noindexFiles(dir, pages) {
   return out;
 }
 
-/** The page's bytes with its stamps removed and, when decided noindex, the robots meta in the
- *  noindex stamp's place (or before </head> for a page that has no stamp and no robots meta). */
+// A <meta> tag and its attributes as an author may write them in a public/ page: any order, any
+// case, quoted either way or not at all.
+const META_TAG = /<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const ATTR = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+function attrsOf(tag) {
+  const out = new Map();
+  for (const m of tag.slice(5, -1).matchAll(ATTR)) {
+    const k = m[1].toLowerCase();
+    if (!out.has(k)) out.set(k, { raw: m[0], value: unescAttr(m[2] ?? m[3] ?? m[4] ?? '') });
+  }
+  return out;
+}
+/** Every `<meta name="robots">` in a head: the tag as written and its attributes. */
+function robotsMetas(head) {
+  return [...head.matchAll(META_TAG)].map((m) => ({ tag: m[0], attrs: attrsOf(m[0]) }))
+    .filter((r) => (r.attrs.get('name')?.value || '').trim().toLowerCase() === 'robots');
+}
+/** A robots `content` made to say noindex: returned as is when it already does and nothing
+ *  contradicts it; otherwise `index` dropped, `all` → `follow`, `noindex` appended once, every
+ *  other directive kept in its place. */
+export function mergeRobots(content) {
+  const ds = String(content).split(',').map((d) => d.trim()).filter(Boolean);
+  const l = (d) => d.toLowerCase();
+  const says = ds.some((d) => l(d) === 'noindex' || l(d) === 'none');
+  if (says && !ds.some((d) => l(d) === 'index' || l(d) === 'all')) return content;
+  const out = ds.flatMap((d) => l(d) === 'index' ? [] : l(d) === 'all' ? ['follow'] : [d]);
+  if (!says) out.push('noindex');
+  return out.join(',');
+}
+const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+/** The page's bytes with its stamps and thanks marks removed and, when decided noindex: each robots
+ *  meta it already has merged to say noindex (mergeRobots) — never a second tag — or, with none,
+ *  the robots meta in the noindex stamp's place (before </head> for a page that has no stamp). */
 export function rewritePage(p, noindex) {
   let html = p.html;
-  if (p.noindexStamp) html = html.replace(p.noindexStamp, noindex && !p.robots ? ROBOTS : '');
-  else if (noindex && !p.robots && p.headEnd >= 0) html = html.replace('</head>', ROBOTS + '</head>');
+  const robots = p.robots || [];
+  if (p.noindexStamp) html = html.replace(p.noindexStamp, noindex && !robots.length ? ROBOTS : '');
+  else if (noindex && !robots.length && p.headEnd >= 0) html = html.replace('</head>', ROBOTS + '</head>');
+  if (noindex) for (const r of robots) {
+    const c = r.attrs.get('content');
+    const merged = mergeRobots(c ? c.value : '');
+    if (c && merged === c.value) continue;
+    const tag = c ? r.tag.replace(c.raw, `content="${escAttr(merged)}"`)
+      : r.tag.replace(/\s*\/?>$/, (end) => ` content="${escAttr(merged)}"${end}`);
+    html = html.replace(r.tag, tag);
+  }
   if (p.sitemapStamp) html = html.replace(p.sitemapStamp, '');
+  for (const id of p.marks || []) html = html.replaceAll(markOf(id), '');
   return html;
 }
 
@@ -167,10 +248,11 @@ ${body.join('\n')}
 </urlset>\n`;
 }
 
-/** The whole pass over an output dir. Returns what it decided, for tests and the build log. */
-export function applyNoindex(dir) {
+/** The whole pass over an output dir, with the thanks manifest this build's forms recorded.
+ *  Returns what it decided, for tests and the build log. */
+export function applyNoindex(dir, manifest = []) {
   const pages = readPages(dir);
-  const noindex = noindexFiles(dir, pages);
+  const noindex = noindexFiles(dir, pages, emittedThanks(pages, manifest));
   for (const [rel, p] of pages) {
     const html = rewritePage(p, noindex.has(rel));
     if (html !== p.html) writeFileSync(join(dir, rel), html);
@@ -184,6 +266,13 @@ export function applyNoindex(dir) {
 export function noindexPass() {
   return {
     name: 'sitetile-noindex',
-    hooks: { 'astro:build:done': ({ dir }) => { applyNoindex(fileURLToPath(dir)); } },
+    hooks: {
+      'astro:build:start': () => { globalThis[MANIFEST] = []; },
+      'astro:build:done': ({ dir }) => {
+        const manifest = globalThis[MANIFEST] || [];
+        delete globalThis[MANIFEST];
+        applyNoindex(fileURLToPath(dir), manifest);
+      },
+    },
   };
 }

@@ -951,6 +951,20 @@ const N4DIST = buildNoindexFixture('noindex-r4', {
   'content/public.md': NOINDEX_PAGE('public'),
   'blog/shared.md': '---\ntitle: Shared post\npubDate: 2026-01-02\n---\nPost.\n',
 });
+// reef#2554 r6 — the codex r5 review's inputs, one site. `embedded` holds an embed whose markup
+// spells an inbox form's `thanks_to` for /template-target/ inside an inert <template>, and
+// `third-party` a form posting to another service with that field — neither is a form sitetile
+// emitted, so /template-target/ stays indexed and listed. `contact`'s real inbox form thanks to
+// public/indexable.html, whose own `<meta name="robots" content="index,follow">` is merged, not obeyed.
+console.log('▸ astro build → .smoke-noindex-r5/ (thanks_to spellings sitetile never emitted; a permissive robots meta on a thanks target)…');
+const N5DIST = buildNoindexFixture('noindex-r5', {
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/template-target.md': NOINDEX_PAGE('template-target'),
+  'content/embedded.md': NOINDEX_PAGE('embedded', '', '## Embed\n%% sitetile: embed %%\n<template><form action="/__reef/inbox" method="post"><input type="hidden" name="thanks_to" value="/template-target/"></form></template>\n'),
+  'content/third-party.md': NOINDEX_PAGE('third-party', '', '## Embed\n%% sitetile: embed %%\n<form action="https://forms.example/submit" method="post"><input type="hidden" name="thanks_to" value="/template-target/"><button>Send</button></form>\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_FORM('/indexable.html')),
+  'public/indexable.html': '<!DOCTYPE html><html><head><title>Thanks</title><meta name="robots" content="index,follow"></head><body>Thank you.</body></html>',
+});
 const noindexAt = (dist, p) => readFileSync(join(dist, p, 'index.html'), 'utf8').includes(ROBOTS_NOINDEX);
 const xmlEsc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
 const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${xmlEsc(p)}</loc>`);
@@ -970,6 +984,7 @@ function noindexDisagreements(dist) {
     if (f) files.add(f);
   }
   for (const f of allHtmlPages(dist)) if (/sitetile:(noindex|sitemap)/.test(readFileSync(f, 'utf8').split('</head>')[0])) out.push(`${f}: render stamp left in`);
+  for (const f of allHtmlPages(dist)) if (readFileSync(f, 'utf8').includes('data-sitetile-thanks')) out.push(`${f}: thanks mark left in`);
   return out;
 }
 const CORAL_CSS_ATTR = 'data-dynamic-coral-css';
@@ -2105,7 +2120,7 @@ const checks = [
     return !xml.includes('<url>') && /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n\n<\/urlset>\n$/.test(xml);
   }],
   ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + every noindex build)', () =>
-    [DIST, NRDIST, NBDIST, NIDIST, NCDIST, N4DIST].every((d) => noindexDisagreements(d).length === 0)],
+    [DIST, NRDIST, NBDIST, NIDIST, NCDIST, N4DIST, N5DIST].every((d) => noindexDisagreements(d).length === 0)],
   // -- reef#2554 r3: a page is the file its route is written to; a post's own flag is its own --
   ['🔴 #2554 r3 a post\'s own noindex: false wins over the thanks= that lands on it (indexed, listed); its own noindex: true needs no form', () =>
     !noindexAt(NIDIST, 'devlog/kept') && listedAt(NIDIST, '/devlog/kept/')
@@ -2149,6 +2164,16 @@ const checks = [
   ['🔴 #2554 r5 the displaced page\'s post is the file\'s producer: listed once with its own lastmod', () => {
     const xml = readFileSync(join(N4DIST, 'sitemap.xml'), 'utf8');
     return xml.includes('<loc>https://example.com/devlog/shared/</loc>\n    <lastmod>2026-01-02</lastmod>') && xml.split('/devlog/shared/').length === 2;
+  }],
+  // -- reef#2554 r6: targets come from the forms sitetile emitted; a robots meta is merged --
+  ['🔴 #2554 r6 a thanks_to inside an embed\'s <template> or a third-party form is not a thanks target: /template-target/ stays indexed and listed (a control: both embeds reached the page)', () =>
+    readFileSync(join(N5DIST, 'embedded/index.html'), 'utf8').includes('<template><form action="/__reef/inbox"')
+    && readFileSync(join(N5DIST, 'third-party/index.html'), 'utf8').includes('action="https://forms.example/submit"')
+    && !noindexAt(N5DIST, 'template-target') && listedAt(N5DIST, '/template-target/')],
+  ['🔴 #2554 r6 a real inbox form\'s thanks target with its own `index,follow` robots meta → one robots meta, `follow,noindex`', () => {
+    const h = readFileSync(join(N5DIST, 'indexable.html'), 'utf8');
+    return h.includes('<meta name="robots" content="follow,noindex">') && (h.match(/name="robots"/g) || []).length === 1
+      && readFileSync(join(N5DIST, 'contact/index.html'), 'utf8').includes('name="thanks_to" value="/indexable.html"');
   }],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
