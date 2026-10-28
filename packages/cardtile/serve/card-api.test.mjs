@@ -1856,3 +1856,63 @@ test('r10 a legacy owner that binds another host without a redirect keeps its le
   assert.equal((await page(env, '/b')).headers.get('location'), `https://${OWNER}/`, 'a redirect:false bind dropped the legacy redirect');
   assert.equal((await host(env, 'second.example', '/')).status, 200, 'CONTROL: the new binding serves');
 });
+
+test('🔴 codex r10 a delayed /lost never clears a newer accepted rebind of the same host: a loss names the acceptance it ends (4 rows)', async () => {
+  // R/late-loss.mjs: b binds OWNER; a takes it while b's /lost answers 503; b binds it back (published,
+  // 301) while the notice still fails; then delivery returns and the host's alarm retries. r10's lost()
+  // matched only the host, so the notice about a's OLDER take cleared b's newer inverse: /b 301 → 200
+  // while the domain still served b. Rows: generation 0 and a recreated lifetime, each with the notice
+  // failing (the regression) and delivered at once (the control).
+  const failures = [];
+  let rows = 0;
+  for (const reborn of [false, true]) for (const fail of [false, true]) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    const where = `[${reborn ? 'reborn' : 'gen0'}${fail ? ', /lost failing' : ', control'}]`;
+    rows++;
+    try {
+      if (reborn) {
+        assert.equal((await call(env, 'DELETE', '/_api/card/b')).status, 200, where);
+        assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: B_CARD })).status, 200, where);
+      }
+      const lives = env.CARD_LIFETIMES;
+      let blocked = fail, refused = 0;
+      env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+        if (blocked && id.name === 'b' && new URL(url).pathname === '/lost') { refused++; return new Response('unavailable', { status: 503 }); }
+        return lives.get(id).fetch(url, init);
+      } }) };
+      await bindVanity(env, 'b', OWNER);
+      await bindVanity(env, 'a', OWNER);
+      const rebound = await bindVanity(env, 'b', OWNER);
+      assert.equal(rebound.redirect, 'published', `${where}: the rebind was not published`);
+      assert.equal((await page(env, '/b')).status, 301, `${where} CONTROL: /b redirects after the rebind`);
+      assert.equal(refused > 0, fail, `${where} CONTROL: the injected /lost failure took effect`);
+      blocked = false;
+      await env.HOST_BINDINGS.alarm(OWNER);
+      assert.deepEqual(env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').losers, [], `${where} CONTROL: the retried notices were delivered`);
+      const after = await page(env, '/b');
+      assert.equal(after.status, 301, `${where}: a delayed loss cleared the newer rebind: /b ${after.status} → ${after.headers.get('location')}`);
+      assert.equal(after.headers.get('location'), `https://${OWNER}/`, where);
+      assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), `${where} CONTROL: the domain serves b`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 4);
+});
+
+test('🔴 r11 the loss rule at its boundary: a loss carrying the ticket of the acceptance that wrote the inverse is stale, the next ticket clears it', async () => {
+  // A /lost carries the ticket of the acceptance that DISPLACED the loser; the inverse keeps the ticket
+  // of the acceptance that wrote it, and is cleared only if that ticket < the loss's. Sent to b's object
+  // directly, with the accepted ticket read from the host's object (its `landed`), not from b's state.
+  for (const delta of [0, 1]) {
+    const env = envWith({ b: B_CARD });
+    assert.equal((await bindVanity(env, 'b', OWNER)).redirect, 'published');
+    const accepted = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
+    const res = await env.CARD_LIFETIMES.get({ name: 'b' }).fetch('https://card-lifetime/lost', {
+      method: 'POST', body: JSON.stringify({ handle: 'b', gen: '0', host: OWNER, ticket: accepted + delta }),
+    });
+    assert.equal(res.status, 200, `[+${delta}] the loss was not acknowledged`);
+    const canon = await page(env, '/b');
+    if (delta === 0) assert.equal(canon.status, 301, '[+0] a loss about the acceptance that wrote the inverse cleared it');
+    else assert.equal(canon.status, 200, `[+1] a later loss left the inverse: /b → ${canon.headers.get('location')}`);
+  }
+});

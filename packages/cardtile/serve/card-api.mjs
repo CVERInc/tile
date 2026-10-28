@@ -426,7 +426,7 @@ export class HostBindings {
  * later bind of the dead lifetime then took a domain from the next owner (codex r7). Nothing here is
  * discovered from KV. Storage key `life`:
  *   { gen, hosts: [host…] (bound in gen), pending: { '<ended gen>': [host…] } (ends not yet delivered),
- *     seq, inverse: { host | null, order } | null, lost: { host: ticket }, cache: 'written' | 'pending',
+ *     seq, inverse: { host | null, order, ticket } | null, lost: { host: ticket }, cache: 'written' | 'pending',
  *     adopted, legacy: host | null, dropLegacy }   (r10: the bare legacy inverse, see adopt)
  *   POST /register { handle, host, gen } refused (`stale_generation`) unless gen is the current one;
  *                                        otherwise host joins `hosts` → { gen, order: ++seq }
@@ -435,9 +435,10 @@ export class HostBindings {
  *                                        a newer `order` holds it or `lost[host]` > ticket; then KV
  *                                        `vanityof:<handle>:<gen>` → { published, cache?: 'pending' }
  *   POST /lost     { handle, host, gen, ticket }
- *                                        HostBindings: the host went to another handle; lost[host] =
- *                                        ticket, and every inverse naming it is cleared: its own (KV key
- *                                        deleted; in generation 0 written empty) and the bare legacy one
+ *                                        HostBindings: the host went to another handle with the taker's
+ *                                        ticket; lost[host] = ticket, and every inverse naming it that an
+ *                                        OLDER acceptance wrote is cleared: its own if inverse.ticket <
+ *                                        ticket (KV key deleted; in gen 0 written empty), and the bare one
  *   POST /end      { handle }            `hosts` moves to pending[gen], gen = a fresh one, `hosts` = []
  *                                        → { ended, gen, pending }: every host still owed an end
  *   POST /settle   { handle, delivered: { '<gen>': [host…] } }
@@ -534,20 +535,29 @@ export class CardLifetime {
     await this.adopt(s); // a no-op after /register adopted
     if (s.lost[host] != null && s.lost[host] > ticket) return { published: false, why: `${host} was bound to another card after this bind.` };
     if (s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
-    s.inverse = { host, order };
+    s.inverse = { host, order, ticket }; // the acceptance that wrote it: only a later loss clears it (r11)
     s.cache = 'pending';
     await this.storage.put('life', s);
     await this.flush(s);
     return { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
-  /** HostBindings: `host` went to another handle with `ticket`. If it is this card's address, the card
-   *  has none again, and canonical /<handle> serves its page rather than 301 into someone else's domain. */
+  /**
+   * HostBindings: `host` went to another handle with `ticket`. If it is this card's address, the card
+   * has none again, and canonical /<handle> serves its page rather than 301 into someone else's domain.
+   * 🔴 r11: `ticket` is the acceptance that DISPLACED this handle, and the inverse keeps the ticket of the
+   * acceptance that wrote it (none = the adopted legacy one, older than any). Cleared only if that
+   * ticket < this one: a retried notice about an older take arrives after a newer rebind of the same
+   * host, and is acknowledged without effect (codex r10).
+   */
   async lost(handle, host, gen, ticket) {
     const s = await this.load(handle);
     if (gen !== s.gen) return {}; // an ended lifetime's inverse is DELETE's to remove (it is on `pending`)
     await this.adopt(s); // a legacy owner HostBindings adopted may never have bound through here
     s.lost[host] = Math.max(s.lost[host] || 0, ticket);
-    if (s.inverse && s.inverse.host === host) { s.inverse = { host: null, order: s.inverse.order }; s.cache = 'pending'; }
+    if (s.inverse && s.inverse.host === host && (s.inverse.ticket || 0) < ticket) {
+      s.inverse = { host: null, order: s.inverse.order };
+      s.cache = 'pending';
+    }
     // 🔴 r10 rule 1: losing a host clears EVERY inverse that names it, the bare legacy one included
     if (s.legacy === host) { s.legacy = null; s.dropLegacy = true; s.cache = 'pending'; }
     await this.storage.put('life', s);
