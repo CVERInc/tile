@@ -22,6 +22,8 @@
 # see genKey in card-api.mjs). Create once, then paste the id below:
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv namespace create CARDS
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS card:<handle>:0 --path=<card.md>   # a new handle
+# A domain binding (vanity:<host> / vanityof:<handle>) carries metadata {"gen":"<gen>"} of the same
+# generation, or the renderer ignores it — see vanityKey, and cards/README.md for the commands.
 #   preview (default): npx wrangler deploy                 → cardtile-preview.<your-subdomain>.workers.dev
 #   production:        npx wrangler deploy --env production → cardtile + its custom domains
 # Same code, same CARDS store; they differ only in PREVIEW (which gates the noindex header) and in

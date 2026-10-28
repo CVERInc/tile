@@ -61,6 +61,17 @@ goes under the handle's CURRENT generation (reef#2618 r3 — see `genKey` in `se
 never been deleted; on any handle that has, the write lands and nothing ever serves it. Never
 write `gen:<handle>` by hand either — only DELETE does, and a new value there takes the card down.
 
+A domain binding belongs to the same generation (reef#2618 r4 — see `vanityKey`): both keys carry
+`{"gen":"<gen>"}` as metadata, and the renderer ignores a binding whose `gen` is not the handle's
+current one. In code, `bindVanity(store, handle, host)` stamps it; by hand:
+
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanity:<host> <handle> --metadata='{"gen":"<gen>"}'
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanityof:<handle> <host> --metadata='{"gen":"<gen>"}'
+
+A binding without metadata counts as generation 0 — every binding made before r4. Never stamp an
+old one with its handle's current generation: if a DELETE missed it, that hands the former owner's
+domain to the next owner.
+
 🔴 `--remote` is not optional. Without it wrangler writes to the local miniflare simulator and
 reports success, so a "deployed" change silently never leaves the machine.
 
