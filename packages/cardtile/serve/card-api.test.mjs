@@ -107,6 +107,9 @@ const doStorage = () => {
     async get(k) { return m.has(k) ? structuredClone(m.get(k)) : undefined; },
     async put(k, v) { m.set(k, structuredClone(v)); },
     async delete(k) { return m.delete(k); },
+    // r9: the retry an object schedules when a KV write-through fails; `alarm(name)` below fires it
+    _alarm: null,
+    async setAlarm(t) { this._alarm = t; },
   };
 };
 const objectNs = (Class) => (env, objectEnv = env) => {
@@ -123,6 +126,8 @@ const objectNs = (Class) => (env, objectEnv = env) => {
       },
     }),
     busy: (name) => inside.get(name) || 0,
+    /** what the runtime does when the alarm the object set comes due */
+    alarm: (name) => { storageOf(name)._alarm = null; return objects.get(name).alarm(); },
   };
 };
 const hostBindingsNs = objectNs(HostBindings);
@@ -1027,7 +1032,8 @@ test('🔴 a binding is honoured only in its own lifetime — keyed by generatio
   assert.equal((await host(env, 'old.example', '/')).status, 404);
   assert.equal((await page(env, '/t')).status, 200);
   // CONTROL: bindVanity writes the current generation's keys and then the pointer, and is honoured
-  assert.deepEqual(await bindVanity(env, 't', 'new.example'), { handle: 't', host: 'new.example', gen: G });
+  // (r9: accepted by the host's object, then its redirect published by the handle's)
+  assert.deepEqual(await bindVanity(env, 't', 'new.example'), { handle: 't', host: 'new.example', gen: G, accepted: true, redirect: 'published' });
   assert.equal(env.CARDS._m.get(vanityBindKey('t', G, 'new.example')), 't');
   assert.equal(env.CARDS._m.get(vanityOfKey('t', G)), 'new.example');
   assert.equal(env.CARDS._m.get(vanityKey('new.example')), 't');
@@ -1267,10 +1273,11 @@ test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never 
     } catch (e) { failures.push(e.message); }
   }
   assert.deepEqual(failures, []);
-  // r8: 4 generation pairs × (the control + 10 store calls: admit get/put, gen:, register get/put in
-  // CardLifetime's storage, vanitybind:, vanityof:, point get/put, the pointer). r7 had 8 (36 rows),
-  // r5/r6 had 5 (20 rows).
-  assert.equal(rows, 44);
+  // r9: 4 generation pairs × (the control + 14 store calls: admit get/put, gen:, register get/put in
+  // CardLifetime's storage, vanitybind:, point get/put, the pointer, point's cache-written put, then —
+  // only once accepted (rule A) — confirm get/put, vanityof:, confirm's cache-written put). r8 had 10
+  // (44 rows: vanityof: was written before /point), r7 had 8 (36 rows), r5/r6 had 5 (20 rows).
+  assert.equal(rows, 60);
   assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
 });
 
@@ -1298,8 +1305,10 @@ test("🔴 codex r6 a bind admitted in an ended lifetime never overwrites a late
     await bindVanity(env, 'a', OWNER); // warms the object's view of gen:a
     const admitted = (await env.CARDS.get(genKey('a'))) || '0';
     const started = deferred(), release = deferred();
+    // held at the caller's last write before /point. r9: that is the binding key — the inverse is now
+    // written after acceptance, by CardLifetime (rule A), so the probe's original hold never fires
     const caller = { ...env, CARDS: { ...objectStore, get: (k) => env.CARDS.get(k), async put(k, v, o) {
-      if (k === vanityOfKey('a', admitted)) { started.resolve(); await release.promise; }
+      if (k === vanityBindKey('a', admitted, OWNER)) { started.resolve(); await release.promise; }
       return env.CARDS.put(k, v, o);
     } } };
     const stale = bindVanity(caller, 'a', OWNER);
@@ -1578,4 +1587,198 @@ test("🔴 codex r4#3 a former domain's generation read held across delete + reu
   const res = await request;
   assert.ok(!(await res.text()).includes('Next owner'), 'the binding was judged by one generation and the body read from another');
   assert.equal(res.status, 404);
+});
+
+// ── publish after accept; the durable owner is the truth (codex r8, reef#2618 r9) ─────────────────
+
+const B_CARD = CARD.replace('Tester', 'Next owner');
+
+test('🔴 codex r8#1 a refused bind publishes nothing: the canonical address keeps the binding that was accepted (4 rows)', async () => {
+  // R/refused-bind.mjs: a serves at a.example; a's bind of b.example passes registration and is held
+  // before /point; then the ticket expires (to b's domain / to an empty one) or b binds b.example again
+  // (superseded); release. r8 wrote `vanityof:a:0 = b.example` in that gap, so /a 301'd to b's content
+  // or to a 404 while a.example still served a. The reviewer held the inverse put; r9 no longer makes it
+  // there, so the hold is on the binding key, the write that still sits between register and /point.
+  const failures = [];
+  let rows = 0;
+  const realNow = Date.now;
+  for (const mode of ['control', 'expired', 'expired-empty', 'superseded']) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    await bindVanity(env, 'a', 'a.example');
+    if (mode !== 'expired-empty') await bindVanity(env, 'b', 'b.example');
+    const started = deferred(), release = deferred(), put = env.CARDS.put.bind(env.CARDS);
+    let once = true;
+    env.CARDS.put = async (k, v, o) => {
+      if (once && k === vanityBindKey('a', '0', 'b.example')) { once = false; started.resolve(); await release.promise; }
+      return put(k, v, o);
+    };
+    const pending = bindVanity(env, 'a', 'b.example');
+    await started.promise;
+    if (mode.startsWith('expired')) Date.now = () => realNow() + TICKET_TTL_MS + 1000;
+    if (mode === 'superseded') await bindVanity(env, 'b', 'b.example');
+    release.resolve();
+    let result;
+    try { result = await pending; } finally { Date.now = realNow; }
+    rows++;
+    const where = `[${mode}]`;
+    try {
+      const canonA = await page(env, '/a'), canonB = await page(env, '/b');
+      const dest = await host(env, 'b.example', '/'), destText = await dest.text();
+      if (mode === 'control') {
+        assert.ok(!result.conflict, `${where} CONTROL: the bind was accepted`);
+        assert.equal(env.CARDS._m.get(vanityKey('b.example')), 'a', `${where} CONTROL: the pointer`);
+        assert.equal(canonA.headers.get('location'), 'https://b.example/', `${where} CONTROL: an accepted bind publishes its redirect`);
+        assert.ok(destText.includes('Tester'), `${where} CONTROL: b.example serves a`);
+        // rule B: b lost b.example, so b's canonical address is its own page again, not a 301 into a's
+        assert.equal(canonB.status, 200, `${where}: the handle that lost the host still 301s to it`);
+      } else {
+        assert.ok(result[mode === 'superseded' ? 'superseded' : 'expired'], `${where}: the bind was not refused`);
+        assert.equal(canonA.status, 301, where);
+        assert.equal(canonA.headers.get('location'), 'https://a.example/', `${where}: a refused bind replaced the canonical redirect`);
+        assert.notEqual(env.CARDS._m.get(vanityOfKey('a', '0')), 'b.example', `${where}: a refused bind published its inverse`);
+        const own = await host(env, 'a.example', '/');
+        assert.equal(own.status, 200, `${where}: a's accepted binding`);
+        assert.ok((await own.text()).includes('Tester'), where);
+        if (mode === 'expired-empty') {
+          assert.equal(env.CARDS._m.get(vanityKey('b.example')), undefined, `${where}: the pointer`);
+          assert.equal(dest.status, 404, where);
+        } else {
+          assert.equal(env.CARDS._m.get(vanityKey('b.example')), 'b', `${where}: the pointer`);
+          assert.ok(destText.includes('Next owner'), `${where}: b.example serves b`);
+          assert.equal(canonB.headers.get('location'), 'https://b.example/', `${where}: b's own redirect`);
+        }
+      }
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 4);
+});
+
+test('🔴 codex r8#2 a pointer put that fails after acceptance: the bind IS accepted, the object reconciles KV to its owner, and the handle that lost the host stops redirecting to it', async () => {
+  // R/failed-point.mjs: b serves on OWNER; a binds OWNER (redirect:false) and the object's KV pointer
+  // put is rejected once. r8 answered 500 while the durable owner already named a, so a later DELETE of
+  // a cleared the pointer b was still being served under, and /b 301'd into the 404 for good. r9 rule B:
+  // the owner write IS the acceptance, the KV put is write-through, and a failure leaves the cache
+  // pending for the object to reconcile (its alarm, or the next request it gets). b lost the host the
+  // moment a was accepted, so b's inverse is cleared through b's CardLifetime: /b serves b's own page.
+  // Rows: the control; the failure reconciled by the alarm before the DELETE; the failure reconciled by
+  // the DELETE's own /end (no alarm has fired).
+  const failures = [];
+  let rows = 0;
+  for (const mode of ['control', 'alarm', 'delete']) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    await bindVanity(env, 'b', OWNER);
+    const put = env.CARDS.put.bind(env.CARDS);
+    let once = mode !== 'control';
+    env.CARDS.put = async (k, v, o) => {
+      if (once && k === vanityKey(OWNER)) { once = false; throw new Error('injected pointer put failure'); }
+      return put(k, v, o);
+    };
+    let result = null, error = null;
+    try { result = await bindVanity(env, 'a', OWNER, { redirect: false }); } catch (e) { error = e.message; }
+    rows++;
+    const where = `[${mode}]`;
+    try {
+      assert.equal(error, null, `${where}: an accepted bind reported failure`);
+      assert.ok(result && !result.conflict, `${where}: the bind was refused`);
+      assert.equal(env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').owner.handle, 'a', `${where}: the durable owner`);
+      if (mode === 'control') {
+        assert.equal(result.cache, undefined, `${where} CONTROL: a written cache reported pending`);
+        assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'a', `${where} CONTROL: the pointer`);
+      } else {
+        assert.equal(result.cache, 'pending', `${where}: the failed write-through was not reported`);
+        // the cache is behind (never ahead), and the object has scheduled its own retry
+        assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'b', `${where}: the cache`);
+        assert.ok(env.HOST_BINDINGS.storageOf(OWNER)._alarm != null, `${where}: no retry was scheduled`);
+      }
+      if (mode === 'alarm') await env.HOST_BINDINGS.alarm(OWNER);
+      if (mode !== 'delete') {
+        assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'a', `${where}: KV was not reconciled to the owner`);
+        const res = await host(env, OWNER, '/');
+        assert.equal(res.status, 200, where);
+        assert.ok((await res.text()).includes('Tester'), `${where}: a read of the host does not serve its owner`);
+      }
+      // b lost the host when a was accepted: its canonical address no longer 301s there
+      const canonB = await page(env, '/b');
+      assert.equal(canonB.status, 200, `${where}: /b still 301s to the host b lost (${canonB.headers.get('location')})`);
+      assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200, where);
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, `${where}: the ended owner's pointer survived`);
+      assert.equal((await host(env, OWNER, '/')).status, 404, where);
+      assert.equal((await page(env, '/b')).status, 200, `${where}: /b 301s to a domain that serves nothing`);
+      assert.ok((await (await page(env, '/b')).text()).includes('Next owner'), `${where}: /b serves b's card`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 3);
+});
+
+test('🔴 r9 a reader that misses the pointer in KV asks the host\'s object, once: an accepted bind whose write-through failed still serves, and the read reconciles KV', async () => {
+  const env = envWith({ a: CARD });
+  const put = env.CARDS.put.bind(env.CARDS);
+  let once = true;
+  env.CARDS.put = async (k, v, o) => {
+    if (once && k === vanityKey(OWNER)) { once = false; throw new Error('injected pointer put failure'); }
+    return put(k, v, o);
+  };
+  const result = await bindVanity(env, 'a', OWNER);
+  assert.equal(result.cache, 'pending');
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, 'CONTROL: the pointer put failed');
+  const ns = env.HOST_BINDINGS, asked = [];
+  env.HOST_BINDINGS = { ...ns, get: (id) => ({ fetch: (url, init) => { asked.push(`${id.name} ${new URL(url).pathname}`); return ns.get(id).fetch(url, init); } }) };
+  const res = await host(env, OWNER, '/');
+  assert.equal(res.status, 200, 'an accepted binding 404s while its KV pointer is missing');
+  assert.ok((await res.text()).includes('Tester'));
+  assert.deepEqual(asked, [`${OWNER} /owner`], 'the miss is answered by one call to the host\'s object');
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'a', 'the object did not reconcile KV on that call');
+  // a hit costs no object call
+  asked.length = 0;
+  assert.equal((await host(env, OWNER, '/')).status, 200);
+  assert.deepEqual(asked, []);
+  // CONTROL: an unbound creator domain is still 404 after its one call, and writes nothing; our own
+  // hosts never ask
+  assert.equal((await host(env, 'nobody.example', '/')).status, 404);
+  assert.deepEqual(asked, ['nobody.example /owner']);
+  assert.equal(env.CARDS._m.has(vanityKey('nobody.example')), false);
+  assert.equal(ns.storageOf('nobody.example')._m.size, 0, 'a read of an unbound host stored state');
+  asked.length = 0;
+  assert.equal((await page(env, '/a')).status, 301);
+  assert.deepEqual(asked, []);
+});
+
+test('🔴 r9 an accepted bind\'s late redirect never clobbers a newer accepted host, and never points the card at a host it has lost', async () => {
+  // rule A's ordering: CardLifetime publishes the inverse only for the newest-registered accepted bind
+  // of the lifetime, and only if the host was not taken from the handle after that bind's ticket.
+  for (const later of ['own', 'taken']) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    const lives = env.CARD_LIFETIMES, started = deferred(), release = deferred();
+    let once = true;
+    env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+      if (once && id.name === 'a' && new URL(url).pathname === '/confirm') { once = false; started.resolve(); await release.promise; }
+      return lives.get(id).fetch(url, init);
+    } }) };
+    const held = bindVanity(env, 'a', 'x.example'); // accepted, its /confirm held
+    await started.promise;
+    env.CARD_LIFETIMES = lives;
+    const where = `[${later}]`;
+    if (later === 'own') {
+      // a binds y.example after it, start to finish; then x's late confirm arrives
+      assert.equal((await bindVanity(env, 'a', 'y.example')).redirect, 'published');
+      release.resolve();
+      assert.equal((await held).redirect, 'not_published', `${where}: the older bind's redirect was published`);
+      assert.equal((await page(env, '/a')).headers.get('location'), 'https://y.example/', `${where}: a late confirm clobbered the newer host`);
+      assert.equal((await host(env, 'x.example', '/')).status, 200, `${where} CONTROL: x stays bound (forward)`);
+    } else {
+      // b takes x.example from a; then a's late confirm arrives
+      await bindVanity(env, 'b', 'x.example');
+      release.resolve();
+      assert.equal((await held).redirect, 'not_published', `${where}: the redirect to a lost host was published`);
+      const canon = await page(env, '/a');
+      assert.equal(canon.status, 200, `${where}: /a 301s to a host that serves b (${canon.headers.get('location')})`);
+      assert.ok((await (await host(env, 'x.example', '/')).text()).includes('Next owner'), `${where} CONTROL: x serves b`);
+      // CONTROL: a takes it back with a fresh bind, and its redirect is published again
+      assert.equal((await bindVanity(env, 'a', 'x.example')).redirect, 'published');
+      assert.equal((await page(env, '/a')).headers.get('location'), 'https://x.example/');
+      assert.equal((await page(env, '/b')).status, 200, `${where}: b kept a redirect to the host it lost`);
+    }
+  }
 });

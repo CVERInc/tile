@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -797,7 +797,10 @@ const router = {
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
     // next owner's card. The generation read here is the one the card is read under.
-    const pointer = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    let pointer = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // 🔴 r9: `vanity:<host>` is HostBindings' write-through cache, so a MISS on a creator's domain may be
+    // a put that failed after the bind was accepted: ask the host's object, once (card-api hostOwner)
+    if (pointer == null && host && !routesByPath(host)) pointer = await hostOwner(env, host);
     const boundGen = pointer != null ? await generationOf(store, pointer) : null;
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,

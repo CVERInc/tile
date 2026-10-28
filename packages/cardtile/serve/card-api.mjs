@@ -163,14 +163,44 @@ export async function bindVanity(env, handle, host, { redirect = true, gen: mean
   if (!registered.ok) throw new Error(`CardLifetime answered ${registered.status} for ${handle}`);
   const reg = await registered.json();
   if (reg.stale_generation) return { handle, host, gen: expected, ...reg };
-  const { gen } = reg;
+  const { gen, order } = reg;
+  // the binding key is not public: the renderer reaches it only through a pointer naming this handle
   await store.put(vanityBindKey(handle, gen, host), handle);
-  if (redirect) await store.put(vanityOfKey(handle, gen), host);
   const pointed = await writer.fetch('https://host-bindings/point', {
     method: 'POST', body: JSON.stringify({ handle, gen, host, ticket }),
   });
   if (!pointed.ok) throw new Error(`HostBindings answered ${pointed.status} for ${host}`);
-  return { handle, host, gen, ...(await pointed.json()) };
+  const point = await pointed.json();
+  // 🔴 r9 rule A: the inverse (what canonical /<handle> 301s to) is published only AFTER the host's
+  // object accepted, and by the handle's object, which keeps only the newest accepted bind's host. A
+  // refused bind (expired, superseded) wrote nothing public, so the previous redirect stands.
+  if (point.conflict || !redirect) return { handle, host, gen, ...point };
+  const confirmed = await life.fetch('https://card-lifetime/confirm', {
+    method: 'POST', body: JSON.stringify({ handle, host, gen, order, ticket }),
+  });
+  if (!confirmed.ok) throw new Error(`CardLifetime answered ${confirmed.status} confirming ${host} for ${handle}: the binding stands, its redirect is not published; bind again`);
+  const inverse = await confirmed.json();
+  return { handle, host, gen, ...point, redirect: inverse.published ? 'published' : 'not_published',
+    ...(inverse.cache === 'pending' ? { redirect_cache: 'pending' } : {}) };
+}
+
+/**
+ * hostOwner(env, host): the handle the host's object names as owner, or null. For a reader whose KV
+ * read of `vanity:<host>` MISSED (r9): KV is HostBindings' write-through cache, so a miss can be a put
+ * that failed after the bind was accepted. One call to one object, and the call itself makes the object
+ * reconcile KV. A KV HIT is not re-checked: the cache is behind for at most one retry interval, and a
+ * pointer of an ended lifetime is inert anyway (the renderer checks the binding key of the current gen).
+ * Any failure reads as unbound, which is what a miss meant before r9.
+ */
+export async function hostOwner(env, host) {
+  const ns = env && env.HOST_BINDINGS;
+  if (!ns) return null;
+  try {
+    const res = await ns.get(ns.idFromName(host)).fetch('https://host-bindings/owner', { method: 'POST', body: JSON.stringify({ host }) });
+    if (!res.ok) return null;
+    const { handle } = await res.json();
+    return typeof handle === 'string' && VALID_HANDLE.test(handle) ? handle : null;
+  } catch { return null; }
 }
 
 /**
@@ -240,12 +270,28 @@ async function askLifetime(env, handle, op, body) {
  */
 export const TICKET_TTL_MS = 60000; // a minute: one bind is a handful of requests
 export const ENDED_KEEP_MS = TICKET_TTL_MS;
+/** how soon an object retries a KV write-through that failed (its alarm; any request to it retries sooner) */
+export const CACHE_RETRY_MS = 5000;
 /** run `step` alone in the object: a Durable Object lets a request in while another awaits anything outside it */
 function inTurn(object, step) {
   const turn = object.tail.then(step);
   object.tail = turn.catch(() => {}); // a failed write must not wedge the object
   return turn.then((r) => Response.json(r), () => Response.json({ error: 'store_failed' }, { status: 500 }));
 }
+/** a failed write-through is retried by the object's alarm (the runtime calls `alarm()`), and sooner by
+ *  any request the object gets. A storage without alarms (a test double) relies on the requests alone. */
+async function retryLater(storage) {
+  if (storage && typeof storage.setAlarm === 'function') await storage.setAlarm(Date.now() + CACHE_RETRY_MS);
+}
+
+/**
+ * 🔴 r9 rule B, for both objects: the object's storage is the truth and its KV keys are a WRITE-THROUGH
+ * cache of it (codex r8 #2). Each change is written to storage first with `cache: 'pending'` — that
+ * write IS the change (for HostBindings, the acceptance of the bind) — and then put to KV; a KV failure
+ * leaves `pending` in storage, schedules the alarm, and still answers success (`cache: 'pending'`).
+ * Every request to the object, and its alarm, first re-puts a pending cache from storage. So the object
+ * knows whether KV differs from it without ever reading KV (r6: an object reading KV reads a cache).
+ */
 export class HostBindings {
   constructor(state, env) { this.storage = state && state.storage; this.env = env; this.tail = Promise.resolve(); }
   async fetch(request) {
@@ -253,46 +299,91 @@ export class HostBindings {
     const body = (await request.json().catch(() => null)) || {};
     const { handle, host, ticket } = body;
     const gens = op === '/end' ? body.gens : op === '/point' ? [body.gen] : ['-'];
-    if (!['/admit', '/point', '/end'].includes(op) || !VALID_HANDLE.test(String(handle)) || typeof host !== 'string' || !host
+    if (!['/admit', '/point', '/end', '/owner'].includes(op) || (op !== '/owner' && !VALID_HANDLE.test(String(handle)))
+      || typeof host !== 'string' || !host
       || !Array.isArray(gens) || !gens.length || gens.some((g) => typeof g !== 'string' || !g)
       || (op === '/point' && !Number.isSafeInteger(ticket))) {
       return Response.json({ error: 'bad_request' }, { status: 400 });
     }
     if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
-    return inTurn(this, op === '/admit' ? () => this.admit()
+    return inTurn(this, op === '/admit' ? () => this.admit(host) : op === '/owner' ? () => this.owner(host)
       : op === '/point' ? () => this.point(handle, gens[0], host, ticket) : () => this.end(handle, gens, host));
   }
-  async load() {
+  /** the runtime's call when the retry alarm comes due */
+  async alarm() { await inTurn(this, async () => { const s = await this.storage.get('host'); if (s) await this.flush(s); return {}; }); }
+  /** the host's state, its pending cache reconciled first (rule B) */
+  async load(host) {
     const s = (await this.storage.get('host')) || { seq: 0, landed: 0, owner: null, ended: {} }, now = Date.now();
     s.ended = Object.fromEntries(Object.entries(s.ended).filter(([, t]) => now - t < ENDED_KEEP_MS));
+    s.host = host;
+    s.cache = s.cache || 'written';
+    s.losers = s.losers || [];
+    await this.flush(s);
     return s;
   }
-  async admit() {
-    const s = await this.load();
+  /**
+   * Bring KV and the handles that lost this host in line with storage: the pointer is put (or deleted)
+   * from `owner`, and every handle the host was taken from is told (CardLifetime `/lost`, so its
+   * canonical address stops redirecting here). What fails stays in storage for the next try.
+   */
+  async flush(s) {
+    let changed = false;
+    if (s.cache === 'pending') {
+      try {
+        if (s.owner) await this.env.CARDS.put(vanityKey(s.host), s.owner.handle);
+        else await this.env.CARDS.delete(vanityKey(s.host));
+        s.cache = 'written';
+        changed = true;
+      } catch { /* stays pending */ }
+    }
+    if (s.losers && s.losers.length) {
+      const left = [];
+      for (const l of s.losers) {
+        try {
+          const res = await lifetimeOf(this.env, l.handle).fetch('https://card-lifetime/lost', {
+            method: 'POST', body: JSON.stringify({ handle: l.handle, gen: l.gen, host: s.host, ticket: l.ticket }),
+          });
+          if (!res.ok) left.push(l);
+        } catch { left.push(l); }
+      }
+      if (left.length !== s.losers.length) { s.losers = left; changed = true; }
+    }
+    if (changed) await this.storage.put('host', s);
+    if (s.cache === 'pending' || s.losers.length) await retryLater(this.storage);
+  }
+  async admit(host) {
+    const s = await this.load(host);
     s.seq = Math.max(s.seq + 1, Date.now());
     await this.storage.put('host', s);
     return { ticket: s.seq };
   }
+  async owner(host) {
+    const s = await this.load(host);
+    return { handle: s.owner ? s.owner.handle : null };
+  }
   async point(handle, gen, host, ticket) {
-    const s = await this.load();
+    const s = await this.load(host);
     if (Date.now() - ticket >= TICKET_TTL_MS) return expired(host);
     if (s.ended[`${handle}:${gen}`] != null) return staleWrite(handle);
-    if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? {} : superseded(host);
+    if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? { accepted: true } : superseded(host);
+    const lost = s.owner && (s.owner.handle !== handle || s.owner.gen !== gen) ? s.owner : null;
+    if (lost) s.losers.push({ handle: lost.handle, gen: lost.gen, ticket });
     s.owner = { handle, gen };
     s.landed = ticket;
-    await this.storage.put('host', s); // the truth first: a failed KV put leaves the cache behind, never ahead
-    await this.env.CARDS.put(vanityKey(host), handle);
-    return {};
+    s.cache = 'pending';
+    await this.storage.put('host', s); // THE acceptance: from here the bind stands, whatever KV does next
+    await this.flush(s);
+    return { accepted: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
   async end(handle, gens, host) {
     // stamped no earlier than any ticket issued so far, so an entry is never older than a ticket it must refuse
-    const s = await this.load(), at = Math.max(Date.now(), s.seq);
+    const s = await this.load(host), at = Math.max(Date.now(), s.seq);
     for (const g of gens) s.ended[`${handle}:${g}`] = at;
     const cleared = !!s.owner && s.owner.handle === handle && gens.includes(s.owner.gen);
-    if (cleared) s.owner = null;
+    if (cleared) { s.owner = null; s.cache = 'pending'; }
     await this.storage.put('host', s);
-    if (cleared) await this.env.CARDS.delete(vanityKey(host));
-    return { cleared };
+    if (cleared) await this.flush(s); // a pointer left behind names an ended lifetime: inert, and retried
+    return { cleared, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
 }
 
@@ -319,34 +410,96 @@ export class CardLifetime {
   async fetch(request) {
     const op = new URL(request.url).pathname;
     const body = (await request.json().catch(() => null)) || {};
-    const { handle, host, gen, delivered } = body;
+    const { handle, host, gen, delivered, order, ticket } = body;
     const hostList = (v) => Array.isArray(v) && v.every((h) => typeof h === 'string' && h);
-    if (!['/register', '/end', '/settle'].includes(op) || !VALID_HANDLE.test(String(handle))
-      || (op === '/register' && (typeof host !== 'string' || !host || typeof gen !== 'string' || !gen))
+    const hostGen = typeof host === 'string' && host && typeof gen === 'string' && gen;
+    if (!['/register', '/confirm', '/lost', '/end', '/settle'].includes(op) || !VALID_HANDLE.test(String(handle))
+      || (['/register', '/confirm', '/lost'].includes(op) && !hostGen)
+      || (op === '/confirm' && !(Number.isSafeInteger(order) && Number.isSafeInteger(ticket)))
+      || (op === '/lost' && !Number.isSafeInteger(ticket))
       || (op === '/settle' && !(delivered && typeof delivered === 'object' && Object.values(delivered).every(hostList)))) {
       return Response.json({ error: 'bad_request' }, { status: 400 });
     }
     if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
     return inTurn(this, op === '/register' ? () => this.register(handle, host, gen)
-      : op === '/end' ? () => this.end() : () => this.settle(handle, delivered));
+      : op === '/confirm' ? () => this.confirm(handle, host, gen, order, ticket)
+        : op === '/lost' ? () => this.lost(handle, host, gen, ticket)
+          : op === '/end' ? () => this.end(handle) : () => this.settle(handle, delivered));
   }
-  async load() { return (await this.storage.get('life')) || { gen: GEN0, hosts: [], pending: {} }; }
+  /** the runtime's call when the retry alarm comes due */
+  async alarm() { await inTurn(this, async () => { const s = await this.storage.get('life'); if (s && s.handle) await this.flush(s); return {}; }); }
+  /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings) */
+  async load(handle) {
+    const s = (await this.storage.get('life')) || { gen: GEN0, hosts: [], pending: {} };
+    s.handle = handle;
+    s.seq = s.seq || 0;
+    s.inverse = s.inverse || null;
+    s.lost = s.lost || {};
+    s.cache = s.cache || 'written';
+    await this.flush(s);
+    return s;
+  }
+  /** put (or delete) `vanityof:<handle>:<gen>` from `inverse`; a failure stays pending for the next try */
+  async flush(s) {
+    if (s.cache !== 'pending') return;
+    try {
+      const key = vanityOfKey(s.handle, s.gen);
+      if (s.inverse && s.inverse.host) await this.env.CARDS.put(key, s.inverse.host);
+      else await this.env.CARDS.delete(key);
+      s.cache = 'written';
+      await this.storage.put('life', s);
+    } catch { await retryLater(this.storage); }
+  }
   async register(handle, host, gen) {
-    const s = await this.load();
+    const s = await this.load(handle);
     if (gen !== s.gen) return staleWrite(handle);
-    if (!s.hosts.includes(host)) { s.hosts.push(host); await this.storage.put('life', s); }
-    return { gen: s.gen };
+    if (!s.hosts.includes(host)) s.hosts.push(host);
+    s.seq += 1; // the bind's place among this lifetime's binds: the newest accepted one owns the redirect
+    await this.storage.put('life', s);
+    return { gen: s.gen, order: s.seq };
   }
-  async end() {
-    const s = await this.load(), ended = s.gen;
+  /**
+   * 🔴 r9 rule A: a bind the host's object ACCEPTED asks to become the card's one address. Published
+   * only if it is still this lifetime, no bind registered after it was already published (`order`), and
+   * the host was not taken from this handle after this bind's ticket (`lost`): so a late confirm never
+   * clobbers a newer accepted host, and never points the card at a host it no longer has.
+   */
+  async confirm(handle, host, gen, order, ticket) {
+    const s = await this.load(handle);
+    if (gen !== s.gen || !s.hosts.includes(host)) return staleWrite(handle);
+    if (s.lost[host] != null && s.lost[host] > ticket) return { published: false, why: `${host} was bound to another card after this bind.` };
+    if (s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
+    s.inverse = { host, order };
+    s.cache = 'pending';
+    await this.storage.put('life', s);
+    await this.flush(s);
+    return { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
+  }
+  /** HostBindings: `host` went to another handle with `ticket`. If it is this card's address, the card
+   *  has none again, and canonical /<handle> serves its page rather than 301 into someone else's domain. */
+  async lost(handle, host, gen, ticket) {
+    const s = await this.load(handle);
+    if (gen !== s.gen) return {}; // an ended lifetime's inverse is DELETE's to remove (it is on `pending`)
+    s.lost[host] = Math.max(s.lost[host] || 0, ticket);
+    if (s.inverse && s.inverse.host === host) { s.inverse = { host: null, order: s.inverse.order }; s.cache = 'pending'; }
+    await this.storage.put('life', s);
+    await this.flush(s);
+    return {};
+  }
+  async end(handle) {
+    const s = await this.load(handle), ended = s.gen;
     if (s.hosts.length) s.pending[ended] = [...new Set([...(s.pending[ended] || []), ...s.hosts])];
     s.gen = newGen();
     s.hosts = [];
+    // the ended lifetime's inverse key is on `pending` (it needs a registered host), so DELETE removes it
+    s.inverse = null;
+    s.lost = {};
+    s.cache = 'written';
     await this.storage.put('life', s); // the lifetime ends HERE, before any host is told
     return { ended, gen: s.gen, pending: s.pending };
   }
   async settle(handle, delivered) {
-    const s = await this.load();
+    const s = await this.load(handle);
     for (const [g, hosts] of Object.entries(delivered)) {
       const left = (s.pending[g] || []).filter((h) => !hosts.includes(h));
       if (left.length) s.pending[g] = left; else delete s.pending[g];
