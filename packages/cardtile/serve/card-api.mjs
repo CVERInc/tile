@@ -103,9 +103,15 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  *
  * The pointer is written LAST, and only if the handle's generation is still the admitted one. That
  * re-read matters only when the domain has moved to ANOTHER handle meanwhile (a's bind, admitted before
- * a was deleted, must not point the domain back at a after it was bound to b). It is a check, not a
- * lock: a pointer put held between that re-read and its landing still wins. Closing that needs one
- * writer per host (a Durable Object); see cards/README.md. The same-handle races above do not depend on it.
+ * a was deleted, must not point the domain back at a after it was bound to b).
+ *
+ * 🔴 One writer per host (codex r5): the re-read and the put are one step, run by HostBindings, the
+ * Durable Object named by the host, one at a time. In r5 they ran in the caller: a's put, held after a
+ * re-read that still saw a's lifetime, landed after b's bind and the domain went 404 for good (and
+ * card.feelreef.com/b kept 301ing into it). KV has no compare-and-swap, so a check beside the put cannot
+ * close that; only nobody else writing `vanity:<host>` meanwhile can. The keys before the pointer
+ * belong to one lifetime and are written by the caller, as in r5. The same-handle races above do not
+ * depend on the object.
  *
  * Migration: bindings made before generations are `vanity:<host>` → handle and bare `vanityof:<handle>`
  * → host. They are generation 0's: in generation 0 the pointer alone is a binding and the bare inverse
@@ -113,9 +119,10 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  * never been deleted, so no ended lifetime can have made its pointer. After its first DELETE neither is
  * honoured again.
  *
- * bindVanity is the one way to make a binding. A `redirect: false` binding writes no `vanityof:` (the
- * canonical address keeps serving). Returns `stale_generation` when the handle's lifetime ended while
- * it ran: its keys are dead and the pointer was not written.
+ * bindVanity(env, …) is the one way to make a binding: it needs `env.CARDS` and `env.HOST_BINDINGS`.
+ * A `redirect: false` binding writes no `vanityof:` (the canonical address keeps serving). Returns
+ * `stale_generation` when the handle's lifetime ended while it ran: its keys are dead and the pointer
+ * was not written.
  */
 export const vanityKey = (host) => `vanity:${host}`;
 const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
@@ -123,13 +130,59 @@ export const vanityBindKey = (handle, gen, host) => `${vanityBindPrefix(handle)}
 export const vanityOfKey = (handle, gen) => `vanityof:${handle}:${gen}`;
 /** LEGACY inverse binding, read for generation 0 only. */
 const legacyVanityOfKey = (handle) => `vanityof:${handle}`;
-export async function bindVanity(store, handle, host, { redirect = true } = {}) {
+export async function bindVanity(env, handle, host, { redirect = true } = {}) {
+  const store = env.CARDS, writer = hostWriter(env, host);
   const gen = await generationOf(store, handle);
   await store.put(vanityBindKey(handle, gen, host), handle);
   if (redirect) await store.put(vanityOfKey(handle, gen), host);
-  if ((await generationOf(store, handle)) !== gen) return { handle, host, gen, ...staleWrite(handle) };
+  const pointed = await writer.fetch('https://host-bindings/point', {
+    method: 'POST', body: JSON.stringify({ handle, gen, host }),
+  });
+  if (!pointed.ok) throw new Error(`HostBindings answered ${pointed.status} for ${host}`);
+  return { handle, host, gen, ...(await pointed.json()) };
+}
+
+/**
+ * The host's one writer. 🔴 Named by the SAME string the pointer key is built from (vanityKey(host)),
+ * so one key can never have two objects. No fallback when the binding is missing: writing the pointer
+ * from here instead is exactly the r5 race, so a worker deployed without the object refuses to bind.
+ */
+function hostWriter(env, host) {
+  const ns = env.HOST_BINDINGS;
+  if (!ns) throw new Error('HOST_BINDINGS is not bound: a domain pointer has one writer per host (wrangler.example.toml)');
+  return ns.get(ns.idFromName(host));
+}
+
+/**
+ * HostBindings — the Durable Object that writes `vanity:<host>` (one object per host, reef#2618 r6).
+ *
+ * It holds no state of its own: KV stays the truth and readers stay on KV. What it adds is ORDER. A
+ * Durable Object lets a second request in while the first awaits anything outside it (a KV get or put
+ * is outside), so the order is this object's own queue: each request's re-read and put finish before
+ * the next one's re-read starts. Then a bind admitted in an ended lifetime either re-reads after the
+ * DELETE (stale, nothing written) or lands its put before the next bind's, which replaces it.
+ *
+ * Why not keep the pointer in the object's storage with KV as a cache: that is a second copy, and
+ * the cache writes would need the same ordering anyway. Here there is one copy and one queue.
+ */
+export class HostBindings {
+  constructor(state, env) { this.env = env; this.tail = Promise.resolve(); }
+  async fetch(request) {
+    const { handle, gen, host } = await request.json();
+    if (!VALID_HANDLE.test(String(handle)) || typeof gen !== 'string' || typeof host !== 'string' || !host) {
+      return Response.json({ error: 'bad_request' }, { status: 400 });
+    }
+    const turn = this.tail.then(() => pointHost(this.env.CARDS, handle, gen, host));
+    this.tail = turn.catch(() => {}); // a failed write must not wedge the host
+    try { return Response.json(await turn); } catch (e) { return Response.json({ error: 'store_failed' }, { status: 500 }); }
+  }
+}
+
+/** the pointer step. Run ONLY inside HostBindings' queue. */
+async function pointHost(store, handle, gen, host) {
+  if ((await generationOf(store, handle)) !== gen) return staleWrite(handle);
   await store.put(vanityKey(host), handle);
-  return { handle, host, gen };
+  return {};
 }
 
 /** a key, or for generation 0 the legacy key when the new one is absent. */

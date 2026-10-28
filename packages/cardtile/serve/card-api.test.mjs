@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -91,7 +91,31 @@ const call = (env, method, path, body, token = TOKEN) => {
   return handleApi(req, env, url);
 };
 
-const envWith = (seed) => ({ CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH });
+/**
+ * A Durable Object namespace holding the real HostBindings class: one object per name, its requests
+ * delivered concurrently — what the runtime does once a request awaits anything outside the object
+ * (every KV call does). 🔴 It adds NO ordering of its own, so any order a test sees is HostBindings'
+ * own queue. `busy(name)` counts the requests inside that object now, queued ones included.
+ */
+const hostBindingsNs = (env) => {
+  const objects = new Map(), inside = new Map();
+  return {
+    idFromName: (name) => ({ name }),
+    get: ({ name }) => ({
+      async fetch(url, init) {
+        if (!objects.has(name)) objects.set(name, new HostBindings({}, env));
+        inside.set(name, (inside.get(name) || 0) + 1);
+        try { return await objects.get(name).fetch(new Request(url, init)); } finally { inside.set(name, inside.get(name) - 1); }
+      },
+    }),
+    busy: (name) => inside.get(name) || 0,
+  };
+};
+const envWith = (seed) => {
+  const env = { CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH };
+  env.HOST_BINDINGS = hostBindingsNs(env);
+  return env;
+};
 /** the body every door serves — NOT a raw `get('<handle>')`: a save writes `card:<handle>:<gen>` (r3),
  *  and a raw read would keep finding the untouched legacy seed and pass without measuring anything. */
 const bodyOf = async (env, handle = 't') => (await liveCard(env.CARDS, handle)).md;
@@ -948,7 +972,7 @@ test('🔴 codex r3#1 a DELETE that sees only a legacy body beside a later gener
 
 test('🔴 codex r3#2 a binding DELETE missed is inert: the former domain never serves the next owner', async () => {
   const env = envWith({ t: CARD });
-  await bindVanity(env.CARDS, 't', 'former.example');
+  await bindVanity(env, 't', 'former.example');
   // CONTROL: bound, the domain serves the card and the canonical address 301s there.
   assert.equal((await host(env, 'former.example', '/')).status, 200);
   assert.equal((await page(env, '/t')).status, 301);
@@ -984,7 +1008,7 @@ test('🔴 a binding is honoured only in its own lifetime — keyed by generatio
   assert.equal((await host(env, 'old.example', '/')).status, 404);
   assert.equal((await page(env, '/t')).status, 200);
   // CONTROL: bindVanity writes the current generation's keys and then the pointer, and is honoured
-  assert.deepEqual(await bindVanity(env.CARDS, 't', 'new.example'), { handle: 't', host: 'new.example', gen: G });
+  assert.deepEqual(await bindVanity(env, 't', 'new.example'), { handle: 't', host: 'new.example', gen: G });
   assert.equal(env.CARDS._m.get(vanityBindKey('t', G, 'new.example')), 't');
   assert.equal(env.CARDS._m.get(vanityOfKey('t', G)), 'new.example');
   assert.equal(env.CARDS._m.get(vanityKey('new.example')), 't');
@@ -993,7 +1017,7 @@ test('🔴 a binding is honoured only in its own lifetime — keyed by generatio
   assert.ok((await res.text()).includes('Next owner'));
   assert.equal((await page(env, '/t')).headers.get('location'), 'https://new.example/');
   // a forward-only binding (no redirect) writes no inverse; the rotation retires it like any other
-  await bindVanity(env.CARDS, 't', 'side.example', { redirect: false });
+  await bindVanity(env, 't', 'side.example', { redirect: false });
   assert.equal(env.CARDS._m.get(vanityOfKey('t', G)), 'new.example', 'a forward-only binding wrote an inverse');
   assert.equal((await host(env, 'side.example', '/')).status, 200);
   await call(env, 'DELETE', '/_api/card/t');
@@ -1105,57 +1129,132 @@ const holdAt = (store, n, { after } = {}) => {
 /** the held call, or null when `pending` finished without reaching it */
 const heldOrDone = (held, pending) => Promise.race([held.started, pending.then(() => null)]);
 
+/**
+ * holdAt for a bind: a bind's last store calls are made by HostBindings, on the env's own store, so
+ * the hold goes ON that store rather than on a view of it. Counts every call from now; the n-th waits
+ * for release and the store is put back as it was, so nothing after it is counted or held.
+ */
+const holdIn = (store, n) => {
+  const started = deferred(), release = deferred(), own = {};
+  const methods = ['get', 'getWithMetadata', 'put', 'delete', 'list'];
+  for (const m of methods) own[m] = store[m];
+  const restore = () => { for (const m of methods) store[m] = own[m]; };
+  let i = 0;
+  for (const m of methods) store[m] = async (...a) => {
+    if (i++ === n) { restore(); started.resolve(`${m} ${typeof a[0] === 'string' ? a[0] : JSON.stringify(a[0])}`); await release.promise; }
+    return own[m].apply(store, a);
+  };
+  return { started: started.promise, release: () => release.resolve(), restore };
+};
+const settledWithin = (p, ms) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
+
+/**
+ * The cross-lifetime rebind (codex r4#1, r5): bind `stale` held before its n-th store call (n < 0: not
+ * held, the sequential control), DELETE `stale`, create `fresh`, bind `fresh` to the same host, release.
+ *
+ * 🔴 The one change from the reviewers' rulers: held INSIDE HostBindings, `fresh`'s bind cannot finish
+ * until the release — that wait is the fix (one writer per host), so the rulers' control "`fresh`
+ * serves before the release" becomes "`fresh`'s bind is still waiting". Held before the object, the
+ * rulers' order runs as written. → { where, inside, staleResult, freshResult } or null past the last call.
+ */
+async function rebindRace(env, n, stale, fresh) {
+  const held = n < 0 ? null : holdIn(env.CARDS, n);
+  const staleBind = bindVanity(env, stale, OWNER);
+  const where = held ? await heldOrDone(held, staleBind) : (await staleBind, null);
+  if (held && where === null) return null;
+  const inside = env.HOST_BINDINGS.busy(OWNER) > 0;
+  assert.equal((await call(env, 'DELETE', `/_api/card/${stale}`)).status, 200);
+  assert.equal((await call(env, 'PUT', `/_api/card/${fresh}`, { markdown: NEXT })).status, 200);
+  const freshBind = bindVanity(env, fresh, OWNER);
+  if (inside) {
+    assert.equal(await settledWithin(freshBind, 50), false, `held at ${where}: "${fresh}"'s pointer write went through while "${stale}"'s was in flight — two writers for one host`);
+  } else {
+    await freshBind;
+    assert.equal((await host(env, OWNER, '/')).status, 200, `CONTROL (held at ${where}): the replacement binding serves`);
+  }
+  held?.release();
+  const [staleResult, freshResult] = await Promise.all([staleBind, freshBind]);
+  assert.ok(!freshResult.stale_generation, `held at ${where}: the replacement's own bind was refused`);
+  return { where, inside, staleResult, freshResult };
+}
+/** after a rebind race: the domain serves `fresh`'s card, and `fresh`'s canonical address 301s there */
+async function assertServesFresh(env, fresh, where) {
+  for (const read of ['after', 'repeat']) {
+    const res = await host(env, OWNER, '/');
+    assert.equal(res.status, 200, `held at ${where} (${read}): the ended lifetime's bind undid the replacement binding`);
+    const text = await res.text();
+    assert.ok(text.includes('Next owner'), `held at ${where} (${read})`);
+    assert.ok(!text.includes('Tester'), `held at ${where} (${read}): the former card is served`);
+  }
+  const canon = await page(env, `/${fresh}`);
+  assert.equal(canon.status, 301, `held at ${where}`);
+  assert.equal(canon.headers.get('location'), `https://${OWNER}/`, `held at ${where}: the canonical address lost its redirect`);
+}
+
 test("🔴 codex r4#1 a bind admitted in an ended lifetime, held before ANY of its store calls, never undoes the next lifetime's binding", async () => {
-  let positions = 0;
+  const seen = [];
   for (let n = 1; ; n++) { // n = 0 would read the generation after the DELETE: not admitted in the ended one
     const env = envWith({ t: CARD });
-    const held = holdAt(env.CARDS, n);
-    const pending = bindVanity(held.store, 't', OWNER);
-    const where = await heldOrDone(held, pending);
-    if (where === null) break;
-    positions++;
-    await call(env, 'DELETE', '/_api/card/t');
-    assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
-    await bindVanity(env.CARDS, 't', OWNER);
-    assert.equal((await host(env, OWNER, '/')).status, 200, `CONTROL (held at ${where}): the replacement binding serves`);
-    held.release();
-    await pending;
-    const res = await host(env, OWNER, '/');
-    assert.equal(res.status, 200, `held at ${where}: the ended lifetime's bind undid the replacement binding`);
-    assert.ok((await res.text()).includes('Next owner'), `held at ${where}`);
-    assert.equal((await page(env, '/t')).headers.get('location'), `https://${OWNER}/`, `held at ${where}: the canonical address lost its redirect`);
+    const race = await rebindRace(env, n, 't', 't');
+    if (race === null) break;
+    seen.push(race);
+    await assertServesFresh(env, 't', race.where);
   }
-  assert.ok(positions >= 2, `CONTROL: the bind was held at only ${positions} positions`);
+  assert.ok(seen.length >= 4, `CONTROL: the bind was held at only ${seen.length} positions`);
+  assert.ok(seen.some((r) => r.inside) && seen.some((r) => !r.inside), 'CONTROL: held both before and inside HostBindings');
 });
 
-test("🔴 a bind admitted in another handle's ended lifetime does not take a domain since bound elsewhere", async () => {
-  const env = envWith({ a: CARD });
-  const held = holdAt(env.CARDS, 1); // its generation read is done: admitted in a's first lifetime
-  const pending = bindVanity(held.store, 'a', OWNER);
-  assert.ok(await heldOrDone(held, pending), 'CONTROL: the bind was not held');
-  await call(env, 'DELETE', '/_api/card/a');
-  assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: NEXT })).status, 200);
-  await bindVanity(env.CARDS, 'b', OWNER);
-  assert.equal((await host(env, OWNER, '/')).status, 200, 'CONTROL: the domain serves its new card');
-  held.release();
-  await pending;
-  const res = await host(env, OWNER, '/');
-  assert.equal(res.status, 200, "a bind from a's ended lifetime took the domain from b");
-  assert.ok((await res.text()).includes('Next owner'));
+test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (20 rows)', async () => {
+  // R/cross-handle-probe.mjs: generation 0 / a later generation, for each handle independently, × the
+  // sequential control and every store call after admission. r5 failed the four final-pointer holds.
+  // Every row runs and every failing row is named (one failure must not hide the other three).
+  const failures = [];
+  let rows = 0, pointerHolds = 0;
+  for (const oldReborn of [false, true]) for (const newReborn of [false, true]) for (const n of [-1, 1, 2, 3, 4]) {
+    const env = envWith({ a: CARD });
+    if (oldReborn) { await call(env, 'DELETE', '/_api/card/a'); await call(env, 'PUT', '/_api/card/a', { markdown: CARD }); }
+    if (newReborn) await call(env, 'DELETE', '/_api/card/b');
+    const race = await rebindRace(env, n, 'a', 'b');
+    assert.ok(race, `CONTROL: the bind never reached store call ${n}`);
+    rows++;
+    const where = `${race.where} [a ${oldReborn ? 'reborn' : 'gen 0'}, b ${newReborn ? 'reborn' : 'gen 0'}]`;
+    const isPointer = !!race.where?.startsWith(`put ${vanityKey(OWNER)}`);
+    if (isPointer) pointerHolds++;
+    try {
+      await assertServesFresh(env, 'b', where);
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'b', `${where}: the pointer`);
+      if (isPointer) assert.ok(race.inside, `${where}: the pointer was written outside HostBindings`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 20);
+  assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
+});
+
+test('🔴 no HostBindings, no binding: the pointer is never written from outside its one writer', async () => {
+  const env = envWith({ t: CARD });
+  delete env.HOST_BINDINGS;
+  await assert.rejects(bindVanity(env, 't', OWNER), /HOST_BINDINGS is not bound/);
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined);
+  assert.equal((await host(env, OWNER, '/')).status, 404);
+  // CONTROL: the same bind with the object serves
+  env.HOST_BINDINGS = hostBindingsNs(env);
+  await bindVanity(env, 't', OWNER);
+  assert.equal((await host(env, OWNER, '/')).status, 200);
 });
 
 test("🔴 codex r4#2 a DELETE held before ANY store call after its rotation leaves the next lifetime's binding and preview alone", async () => {
   let positions = 0;
   for (let n = 0; ; n++) {
     const env = envWith({ t: CARD });
-    await bindVanity(env.CARDS, 't', OWNER);
+    await bindVanity(env, 't', OWNER);
     const held = holdAt(env.CARDS, n, { after: (method, k) => method === 'put' && k === genKey('t') });
     const pending = call({ ...env, CARDS: held.store }, 'DELETE', '/_api/card/t');
     const where = await heldOrDone(held, pending);
     if (where === null) break;
     positions++;
     assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
-    await bindVanity(env.CARDS, 't', OWNER);
+    await bindVanity(env, 't', OWNER);
     const preview = (await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: NEXT })).json()).url;
     assert.equal((await host(env, OWNER, '/')).status, 200, `CONTROL (held at ${where}): the new binding serves`);
     assert.equal((await worker.fetch(new Request(preview), env)).status, 200, `CONTROL (held at ${where}): the new preview renders`);

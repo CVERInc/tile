@@ -951,3 +951,7 @@ export default {
     return withNoindexAll(await router.fetch(request, env, ctx), env);
   },
 };
+
+// The Durable Object that is each host's one pointer writer (card-api HostBindings). The runtime finds
+// a Durable Object class by its export from the main module, so it is re-exported here.
+export { HostBindings } from './card-api.mjs';
