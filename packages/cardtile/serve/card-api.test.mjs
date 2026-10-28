@@ -1957,7 +1957,10 @@ test('🔴 codex r11 a late same-owner registration never lowers the inverse\'s 
       assert.equal(rebound.redirect, 'published', `${where}: the rebind was not published`);
       assert.equal((await page(env, '/b')).status, 301, `${where} CONTROL: /b redirects after the rebind`);
       release.resolve();
-      assert.equal((await older).accepted, true, `${where} CONTROL: the late bind is a same-owner no-op`);
+      const late = await older;
+      assert.equal(late.accepted, true, `${where} CONTROL: the late bind is a same-owner no-op`);
+      // its host is b's and is the card's address, by the acceptance that owns it: that IS published
+      assert.equal(late.redirect, 'published', `${where}: the late no-op of the host b owns reported ${late.redirect}`);
       const inverse = lives.storageOf('b')._m.get('life').inverse;
       // recorded, not thrown, so a red row also shows what the lowered ticket does to /b below
       if (inverse.ticket !== t4) failures.push(`${where}: the late registration lowered the inverse's ticket ${t4} → ${inverse.ticket}`);
