@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, ENDED_KEEP_MS, ENDED_MAX, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -109,7 +109,7 @@ const doStorage = () => {
     async delete(k) { return m.delete(k); },
   };
 };
-const hostBindingsNs = (env, objectEnv = env) => {
+const objectNs = (Class) => (env, objectEnv = env) => {
   const objects = new Map(), inside = new Map(), storages = new Map();
   const storageOf = (name) => { if (!storages.has(name)) storages.set(name, doStorage()); return storages.get(name); };
   return {
@@ -117,7 +117,7 @@ const hostBindingsNs = (env, objectEnv = env) => {
     idFromName: (name) => ({ name }),
     get: ({ name }) => ({
       async fetch(url, init) {
-        if (!objects.has(name)) objects.set(name, new HostBindings({ storage: storageOf(name) }, objectEnv));
+        if (!objects.has(name)) objects.set(name, new Class({ storage: storageOf(name) }, objectEnv));
         inside.set(name, (inside.get(name) || 0) + 1);
         try { return await objects.get(name).fetch(new Request(url, init)); } finally { inside.set(name, inside.get(name) - 1); }
       },
@@ -125,9 +125,13 @@ const hostBindingsNs = (env, objectEnv = env) => {
     busy: (name) => inside.get(name) || 0,
   };
 };
+const hostBindingsNs = objectNs(HostBindings);
+/** the same, holding the real CardLifetime class: one object per handle (r8) */
+const cardLifetimesNs = objectNs(CardLifetime);
 const envWith = (seed) => {
   const env = { CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH };
   env.HOST_BINDINGS = hostBindingsNs(env);
+  env.CARD_LIFETIMES = cardLifetimesNs(env);
   return env;
 };
 /** the body every door serves — NOT a raw `get('<handle>')`: a save writes `card:<handle>:<gen>` (r3),
@@ -984,7 +988,7 @@ test('🔴 codex r3#1 a DELETE that sees only a legacy body beside a later gener
   assert.ok(!(await res.text()).includes('late words'));
 });
 
-test('🔴 codex r3#2 a binding DELETE missed is inert: the former domain never serves the next owner', async () => {
+test('🔴 codex r3#2 a binding the listings miss is still ended (r8): the former domain never serves the next owner', async () => {
   const env = envWith({ t: CARD });
   await bindVanity(env, 't', 'former.example');
   // CONTROL: bound, the domain serves the card and the canonical address 301s there.
@@ -994,9 +998,10 @@ test('🔴 codex r3#2 a binding DELETE missed is inert: the former domain never 
   const list = env.CARDS.list.bind(env.CARDS);
   const stale = { ...env, CARDS: { ...env.CARDS, list: async (o) => (o.prefix.startsWith('vanity') ? { keys: [], list_complete: true } : list(o)) } };
   assert.deepEqual(await (await call(stale, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: true });
-  assert.equal(env.CARDS._m.get(vanityBindKey('t', '0', 'former.example')), 't', 'CONTROL: the DELETE did miss the bindings');
-  assert.equal(env.CARDS._m.get(vanityOfKey('t', '0')), 'former.example');
-  assert.equal(env.CARDS._m.get(vanityKey('former.example')), 't');
+  // r5–r7 found the hosts by those listings and left all three keys; the hosts now come from CardLifetime
+  assert.equal(env.CARDS._m.get(vanityKey('former.example')), undefined, 'the end never reached the host the listings missed');
+  assert.equal(env.CARDS._m.get(vanityBindKey('t', '0', 'former.example')), undefined, "the ended lifetime's binding key stayed");
+  assert.equal(env.CARDS._m.get(vanityOfKey('t', '0')), undefined);
   assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
   for (const path of ['/', '/t', '/index.md', '/t.md']) {
     const res = await host(env, 'former.example', path);
@@ -1127,9 +1132,9 @@ const OWNER = 'owner.example';
  * A view of `store` that stops before its n-th call (0-based; any method), counting from the call
  * after the first one `after(method, key)` matches when given. `started` resolves naming the held call.
  */
-const holdAt = (store, n, { after } = {}) => {
+const holdAt = (store, n, { after, armed } = {}) => {
   const started = deferred(), release = deferred();
-  let i = after ? -Infinity : 0;
+  let i = after || armed ? -Infinity : 0;
   const wrap = (method) => async (...a) => {
     const k = typeof a[0] === 'string' ? a[0] : JSON.stringify(a[0]);
     if (i++ === n) { started.resolve(`${method} ${k}`); await release.promise; }
@@ -1138,7 +1143,8 @@ const holdAt = (store, n, { after } = {}) => {
   };
   const view = {};
   for (const m of ['get', 'getWithMetadata', 'put', 'delete', 'list']) view[m] = wrap(m);
-  return { store: view, started: started.promise, release: () => release.resolve() };
+  // `armed`: counting starts at `arm()` instead (r8: a step another object takes, not a call on this store)
+  return { store: view, started: started.promise, release: () => release.resolve(), arm: () => { i = 0; } };
 };
 /** the held call, or null when `pending` finished without reaching it */
 const heldOrDone = (held, pending) => Promise.race([held.started, pending.then(() => null)]);
@@ -1166,8 +1172,10 @@ const holdIn = (stores, n) => {
   }
   return { started: started.promise, release: () => release.resolve(), restore };
 };
-/** the stores a bind of OWNER touches: KV, and the host object's own storage (labelled `object `) */
-const bindStores = (env) => [['', env.CARDS], ['object ', env.HOST_BINDINGS.storageOf(OWNER)]];
+/** the stores a bind of `handle` to OWNER touches: KV, the host object's own storage (labelled
+ *  `object `) and, since r8, the handle's CardLifetime storage (labelled `lifetime `) */
+const bindStores = (env, handle) => [['', env.CARDS], ['object ', env.HOST_BINDINGS.storageOf(OWNER)],
+  ['lifetime ', env.CARD_LIFETIMES.storageOf(handle)]];
 const settledWithin = (p, ms) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
 
 /**
@@ -1180,11 +1188,11 @@ const settledWithin = (p, ms) => Promise.race([p.then(() => true), new Promise((
  * rulers' order runs as written. → { where, inside, staleResult, freshResult } or null past the last call.
  */
 async function rebindRace(env, n, stale, fresh) {
-  const held = n < 0 ? null : holdIn(bindStores(env), n);
+  const held = n < 0 ? null : holdIn(bindStores(env, stale), n);
   const staleBind = bindVanity(env, stale, OWNER);
   const where = held ? await heldOrDone(held, staleBind) : (await staleBind, null);
   if (held && where === null) return null;
-  const inside = env.HOST_BINDINGS.busy(OWNER) > 0;
+  const inside = env.HOST_BINDINGS.busy(OWNER) > 0 || env.CARD_LIFETIMES.busy(stale) > 0;
   // r7: a DELETE that has to end `stale` on OWNER queues behind the held request inside the object,
   // so it finishes only after the release; `fresh` exists only after the DELETE, as in the rulers.
   const deleting = call(env, 'DELETE', `/_api/card/${stale}`);
@@ -1236,7 +1244,7 @@ test("🔴 codex r4#1 a bind admitted in an ended lifetime, held before ANY of i
   assert.ok(seen.some((r) => r.inside) && seen.some((r) => !r.inside), 'CONTROL: held both before and inside HostBindings');
 });
 
-test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (36 rows)', async () => {
+test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (44 rows)', async () => {
   // R/cross-handle-probe.mjs: generation 0 / a later generation, for each handle independently, × the
   // sequential control and every store call after admission. r5 failed the four final-pointer holds.
   // Every row runs and every failing row is named (one failure must not hide the other three).
@@ -1259,9 +1267,10 @@ test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never 
     } catch (e) { failures.push(e.message); }
   }
   assert.deepEqual(failures, []);
-  // r7: 4 generation pairs × (the control + 8 store calls: admit get/put, gen:, vanitybind:, vanityof:,
-  // point get/put in the object's storage, the pointer). r5/r6 had 5 calls per pair (20 rows).
-  assert.equal(rows, 36);
+  // r8: 4 generation pairs × (the control + 10 store calls: admit get/put, gen:, register get/put in
+  // CardLifetime's storage, vanitybind:, vanityof:, point get/put, the pointer). r7 had 8 (36 rows),
+  // r5/r6 had 5 (20 rows).
+  assert.equal(rows, 44);
   assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
 });
 
@@ -1341,8 +1350,44 @@ test('🔴 r7 a bind admitted AFTER the DELETE where gen: is still cached is ref
   }
 });
 
-test('🔴 r7 an end its host does not acknowledge fails the DELETE before the rotation: the card stays live, and a retry ends it', async () => {
-  const env = envWith({ t: CARD });
+test("🔴 codex r7 a DELETE whose binding listings have not caught up still ends every bound host: a later bind of the ended lifetime never takes the domain (8 rows)", async () => {
+  // R/discovery-probe.mjs: generation 0 / a later generation for a × DELETE's `vanitybind:a:` and
+  // `vanityof:a:` listings fresh (the control) / not caught up × redirect off/on. r7 found its hosts by
+  // those listings: the four missing-listing rows sent no end, and a's late bind (a newer ticket than
+  // b's, from a location still caching a's pre-DELETE gen:) took the domain, 200 → 404 → 404 after
+  // convergence while /b 301'd into it. Every row runs; every failing row is named.
+  const failures = [];
+  let rows = 0;
+  for (const oldReborn of [false, true]) for (const missing of [false, true]) for (const redirect of [false, true]) {
+    const env = envWith({ a: CARD });
+    if (oldReborn) { assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200); assert.equal((await call(env, 'PUT', '/_api/card/a', { markdown: CARD })).status, 200); }
+    const before = await env.CARDS.get(genKey('a'));
+    await bindVanity(env, 'a', OWNER, { redirect });
+    const where = `[a ${oldReborn ? 'reborn' : 'gen 0'}, ${missing ? 'missing' : 'fresh'} listings, redirect:${redirect}]`;
+    rows++;
+    try {
+      assert.equal((await host(env, OWNER, '/')).status, 200, `${where} CONTROL: a serves on its domain`);
+      // only the two binding prefix listings lag; every other DELETE read is fresh
+      const list = env.CARDS.list.bind(env.CARDS);
+      const lagging = { ...env, CARDS: { ...env.CARDS, list: async (o) =>
+        (missing && ['vanitybind:a:', 'vanityof:a:'].includes(o.prefix) ? { keys: [], list_complete: true } : list(o)) } };
+      assert.equal((await call(lagging, 'DELETE', '/_api/card/a')).status, 200, `${where}: DELETE`);
+      assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: NEXT })).status, 200);
+      await bindVanity(env, 'b', OWNER);
+      assert.equal((await host(env, OWNER, '/')).status, 200, `${where} CONTROL: b serves`);
+      // admitted after b's bind (a later ticket), at a location still serving a's pre-DELETE gen:
+      const late = await bindVanity(cachedGenView(env, 'a', before), 'a', OWNER, { redirect });
+      await assertServesFresh(env, 'b', where);
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), 'b', `${where}: the pointer`);
+      assert.ok(late.stale_generation, `${where}: the ended lifetime's bind reported success`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 8);
+});
+
+test('🔴 r8 an end its host does not acknowledge fails the DELETE with the lifetime already ended: KV and the card are untouched, no bind of it registers, and a retry delivers the owed end', async () => {
+  const env = await reborn();
   await bindVanity(env, 't', OWNER);
   const gen = await env.CARDS.get(genKey('t'));
   const ns = env.HOST_BINDINGS;
@@ -1351,38 +1396,101 @@ test('🔴 r7 an end its host does not acknowledge fails the DELETE before the r
   const res = await call(env, 'DELETE', '/_api/card/t');
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error, 'delete_failed');
-  assert.equal(await env.CARDS.get(genKey('t')), gen, 'the generation rotated before every end was acknowledged');
+  assert.equal(await env.CARDS.get(genKey('t')), gen, 'the gen: cache was written before every end was acknowledged');
+  assert.equal(env.CARDS._m.get(vanityBindKey('t', gen, OWNER)), 't', 'the cleanup ran before every end was acknowledged');
   assert.equal((await host(env, OWNER, '/')).status, 200, 'a DELETE that failed took the card off its domain');
   assert.equal((await page(env, '/t')).headers.get('location'), `https://${OWNER}/`);
-  // CONTROL: the object answers again → the retry ends it, clears the pointer, and rotates
+  // the lifetime did end in its object: a bind of it (KV still names it) is refused before any write
   env.HOST_BINDINGS = ns;
+  const late = await bindVanity(env, 't', 'other.example');
+  assert.ok(late.stale_generation, 'a bind of a lifetime CardLifetime ended registered');
+  assert.equal(env.CARDS._m.get(vanityKey('other.example')), undefined);
+  // CONTROL: the host answers again → the retry delivers the owed end, clears the pointer, and rotates
   assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
   assert.notEqual(await env.CARDS.get(genKey('t')), gen);
-  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, 'the end left the pointer of the lifetime it ended');
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, 'the retry did not deliver the end the first DELETE owed');
+  assert.equal(env.CARDS._m.get(vanityBindKey('t', gen, OWNER)), undefined);
   assert.equal((await host(env, OWNER, '/')).status, 404);
+  assert.deepEqual(env.CARD_LIFETIMES.storageOf('t')._m.get('life').pending, {}, 'an end is still owed after it was delivered');
 });
 
-test('HostBindings keeps its ended set bounded: entries older than ENDED_KEEP_MS go on the next end, and never more than ENDED_MAX', async () => {
+test('HostBindings prunes an ended entry only once it is older than the ticket TTL, and never by count', async () => {
   const storage = doStorage(), o = new HostBindings({ storage }, { CARDS: fakeKv({}) });
   const post = async (op, body) => (await o.fetch(new Request(`https://host-bindings.example/${op}`, { method: 'POST', body: JSON.stringify({ host: OWNER, ...body }) }))).json();
   const ended = () => Object.keys(storage._m.get('host').ended);
   const realNow = Date.now;
   try {
-    let now = 1_000;
+    let now = 1_000_000;
     Date.now = () => now;
+    assert.equal(ENDED_KEEP_MS, TICKET_TTL_MS);
     await post('end', { handle: 'old', gens: ['g'] });
     const { ticket } = await post('admit', { handle: 'old' });
     assert.ok((await post('point', { handle: 'old', gen: 'g', ticket })).stale_generation, 'CONTROL: an ended lifetime is refused');
     now += ENDED_KEEP_MS - 1;
     await post('end', { handle: 'x', gens: ['1'] });
-    assert.deepEqual(ended().sort(), ['old:g', 'x:1'], 'an entry younger than ENDED_KEEP_MS was dropped');
+    assert.deepEqual(ended().sort(), ['old:g', 'x:1'], 'an entry younger than the ticket TTL was dropped');
     now += 1;
     await post('end', { handle: 'x', gens: ['2'] });
     assert.deepEqual(ended().sort(), ['x:1', 'x:2']);
-    for (let i = 0; i < ENDED_MAX + 10; i++) { now += 1; await post('end', { handle: `h${i}`, gens: ['g'] }); }
-    assert.equal(ended().length, ENDED_MAX);
-    assert.ok(ended().includes(`h${ENDED_MAX + 9}:g`) && !ended().includes('x:1'), 'the cap dropped the newest, not the oldest');
+    // r7 capped the set at 512 and dropped the oldest; a cap can drop an entry a live ticket needs
+    for (let i = 0; i < 600; i++) await post('end', { handle: `h${i}`, gens: ['g'] });
+    assert.equal(ended().length, 602, 'an entry inside the TTL was dropped by count');
   } finally { Date.now = realNow; }
+});
+
+test('🔴 r8 a bind paused before its pointer write, across its DELETE and a long wait, never lands: a ticket expires, and an ended entry outlives every live ticket', async () => {
+  // A bind of a admitted and registered (so the DELETE ends a on OWNER), then paused before its /point
+  // for `pause`. Half the TTL: the ticket is live, so the ended entry must still be there. Past the TTL:
+  // the entry may be gone, so the ticket must be refused on its own. Either alone leaves a hole.
+  const realNow = Date.now;
+  try {
+    for (const pause of [TICKET_TTL_MS / 2, TICKET_TTL_MS + 1000]) {
+      let now = 5_000_000;
+      Date.now = () => now;
+      const env = envWith({ a: CARD });
+      const ns = env.HOST_BINDINGS, started = deferred(), release = deferred();
+      env.HOST_BINDINGS = { ...ns, get: (id) => ({ async fetch(url, init) {
+        if (new URL(url).pathname === '/point' && JSON.parse(init.body).handle === 'a') { started.resolve(); await release.promise; }
+        return ns.get(id).fetch(url, init);
+      } }) };
+      const paused = bindVanity(env, 'a', OWNER);
+      await started.promise;
+      assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200);
+      now += pause;
+      release.resolve();
+      const result = await paused;
+      const where = `paused ${pause} ms`;
+      assert.ok(result.conflict, `${where}: the ended lifetime's bind reported success`);
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, `${where}: the ended lifetime's bind took the domain`);
+      assert.equal(ns.storageOf(OWNER)._m.get('host').owner, null, `${where}: the object's owner`);
+    }
+  } finally { Date.now = realNow; }
+});
+
+test('🔴 r8 a bind registers its host BEFORE it writes anything: a DELETE that runs while the registration is in flight leaves no pointer behind', async () => {
+  // Held just before /register reaches the handle's object. The DELETE ends a there first, so the
+  // registration is refused and nothing is written; a bind that pointed first and registered after
+  // would leave the pointer of a lifetime whose DELETE never knew the host.
+  for (const oldReborn of [false, true]) {
+    const env = envWith({ a: CARD });
+    if (oldReborn) { await call(env, 'DELETE', '/_api/card/a'); await call(env, 'PUT', '/_api/card/a', { markdown: CARD }); }
+    const lives = env.CARD_LIFETIMES, started = deferred(), release = deferred();
+    env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+      if (new URL(url).pathname === '/register') { started.resolve(); await release.promise; }
+      return lives.get(id).fetch(url, init);
+    } }) };
+    const bind = bindVanity(env, 'a', OWNER);
+    const where = `[a ${oldReborn ? 'reborn' : 'gen 0'}]`;
+    const reached = await Promise.race([started.promise.then(() => true), bind.then(() => false)]);
+    assert.ok(reached, `${where} CONTROL: the bind reached /register`);
+    env.CARD_LIFETIMES = lives;
+    assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200);
+    release.resolve();
+    const result = await bind;
+    assert.ok(result.stale_generation, `${where}: a bind registered after its lifetime ended reported success`);
+    assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, `${where}: a pointer the DELETE never knew about survived it`);
+    assert.equal(env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').owner, null, `${where}: the object's owner`);
+  }
 });
 
 test('🔴 no HostBindings, no binding: the pointer is never written from outside its one writer', async () => {
@@ -1397,13 +1505,39 @@ test('🔴 no HostBindings, no binding: the pointer is never written from outsid
   assert.equal((await host(env, OWNER, '/')).status, 200);
 });
 
+test('🔴 r8 no CardLifetime, no lifetime change: DELETE answers 503 and touches nothing, and no bind is made', async () => {
+  const env = envWith({ t: CARD });
+  const lives = env.CARD_LIFETIMES;
+  delete env.CARD_LIFETIMES;
+  const before = new Map(env.CARDS._m);
+  const res = await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'delete_failed');
+  assert.deepEqual([...env.CARDS._m.keys()].filter((k) => !before.has(k)), [goneKey('t')], 'only the (invisible) marker may be new');
+  assert.equal((await page(env, '/t')).status, 200, 'a DELETE without its lifetime authority took the card down');
+  await assert.rejects(bindVanity(env, 't', OWNER), /CARD_LIFETIMES is not bound/);
+  assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined);
+  // CONTROL: bound again, the same DELETE goes through
+  env.CARD_LIFETIMES = lives;
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.equal((await page(env, '/t')).status, 410);
+});
+
 test("🔴 codex r4#2 a DELETE held before ANY store call after its rotation leaves the next lifetime's binding and preview alone", async () => {
   let positions = 0;
   for (let n = 0; ; n++) {
     const env = envWith({ t: CARD });
     await bindVanity(env, 't', OWNER);
-    const held = holdAt(env.CARDS, n, { after: (method, k) => method === 'put' && k === genKey('t') });
-    const pending = call({ ...env, CARDS: held.store }, 'DELETE', '/_api/card/t');
+    // r8: the rotation and its `gen:` put are CardLifetime's; the DELETE's own calls after it start
+    // once its /settle has answered
+    const held = holdAt(env.CARDS, n, { armed: true });
+    const lives = env.CARD_LIFETIMES;
+    const deleting = { ...env, CARDS: held.store, CARD_LIFETIMES: { ...lives, get: (id) => ({ async fetch(url, init) {
+      const res = await lives.get(id).fetch(url, init);
+      if (new URL(url).pathname === '/settle') held.arm();
+      return res;
+    } }) } };
+    const pending = call(deleting, 'DELETE', '/_api/card/t');
     const where = await heldOrDone(held, pending);
     if (where === null) break;
     positions++;

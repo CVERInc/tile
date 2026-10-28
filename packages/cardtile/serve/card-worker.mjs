@@ -952,6 +952,7 @@ export default {
   },
 };
 
-// The Durable Object that is each host's one pointer writer (card-api HostBindings). The runtime finds
-// a Durable Object class by its export from the main module, so it is re-exported here.
-export { HostBindings } from './card-api.mjs';
+// The Durable Objects: each host's one pointer writer (card-api HostBindings) and each handle's one
+// lifetime authority (CardLifetime). The runtime finds a Durable Object class by its export from the
+// main module, so they are re-exported here.
+export { HostBindings, CardLifetime } from './card-api.mjs';
