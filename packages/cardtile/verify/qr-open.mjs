@@ -32,7 +32,7 @@ if (!CARDS.length) throw new Error('no specimen states an avatar — this harnes
 const VIEWS = [{ width: 390, height: 844 }, { width: 1200, height: 900 }];
 const OLD = 'window.__qrPinOld = true;';
 
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
   const b = Buffer.from(await r.arrayBuffer());

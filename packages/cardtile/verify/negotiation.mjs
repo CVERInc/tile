@@ -20,7 +20,7 @@ import { parseCard, serializeCard } from '../card-core.js';
 const CARDS = ['specimen-plain', 'specimen-assets', 'specimen-rich'];
 const LIVE = process.argv.find((a) => a.startsWith('http'));
 const EXPECT_CROSSOVER = process.argv.includes('--expect-crossover');
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const env = { CARDS: store, PREVIEW: 'false' };
 
 let bad = 0;

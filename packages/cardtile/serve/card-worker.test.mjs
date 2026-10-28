@@ -44,6 +44,15 @@ test('resolveHandle: a path segment still wins on a host with no binding', () =>
     { handle: 'inkbrush', cardUrl: 'https://card.feelreef.com/inkbrush' });
 });
 
+test('🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef#2618 r2)', () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'cardtile-preview.acct.workers.dev', 'localhost:8787', 'x', '127.0.0.1']) {
+    assert.equal(resolveHandle(host, '/inkbrush')?.handle, 'inkbrush', host);
+  }
+  for (const host of ['card.inkbrush.com', 'former.example', 'feelreef.com.evil.example', 'workers.dev.example']) {
+    for (const path of ['/inkbrush', '/inkbrush.md', '/inkbrush/favicon.ico']) assert.equal(resolveHandle(host, path), null, host + path);
+  }
+});
+
 test('resolveHandle: bare canonical host (no handle) → null (a directory, not a card)', () => {
   assert.equal(resolveHandle('card.feelreef.com', '/'), null);
 });

@@ -52,7 +52,7 @@ let bad = 0;
 /** Serve the three cards from a given checkout of the renderer. */
 async function serverFor(root) {
   const worker = (await import(root ? join(root, 'packages/cardtile/serve/card-worker.mjs') : '../serve/card-worker.mjs')).default;
-  const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+  const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
   const server = http.createServer(async (req, res) => {
     const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
     const b = Buffer.from(await r.arrayBuffer());

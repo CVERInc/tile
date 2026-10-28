@@ -29,7 +29,7 @@ const pw = (await import(PLAYWRIGHT)).default;
 const browser = await pw.chromium.launch();
 let bad = 0;
 
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
   const b = Buffer.from(await r.arrayBuffer());

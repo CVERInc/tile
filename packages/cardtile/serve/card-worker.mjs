@@ -160,14 +160,15 @@ const FALLBACK_HOST = 'saas.feelreef.com';
  *
  * 🔴 Path routing (`/<handle>`) answers on OUR hosts only (reef#2618 r2): the canonical card host, the
  * Cloudflare-for-SaaS fallback origin (a creator's hostname CNAMEs to it, but their requests carry
- * their own Host), Cloudflare's `*.workers.dev`, and local dev. Any other host is a
+ * their own Host), Cloudflare's `*.workers.dev`, and local dev (a host with no dot — `localhost`, a
+ * harness's `x` — can never be a public custom hostname; plus `127.0.0.1`). Any other host is a
  * creator's domain, and there the handle comes from its binding and nothing else — no binding, no
  * card, on every path. Before this, a domain whose binding was removed fell through to path routing,
  * so `<former-domain>/<handle>` served whoever owned that handle next.
  */
 export const routesByPath = (host) =>
   !host || host === CANON_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
-  || host === 'localhost' || host === '127.0.0.1';
+  || !host.includes('.') || host === '127.0.0.1';
 
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
