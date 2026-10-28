@@ -1907,7 +1907,7 @@ test('🔴 r11 the loss rule at its boundary: a loss carrying the ticket of the 
     const env = envWith({ b: B_CARD });
     assert.equal((await bindVanity(env, 'b', OWNER)).redirect, 'published');
     const accepted = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
-    const res = await env.CARD_LIFETIMES.get({ name: 'b' }).fetch('https://card-lifetime/lost', {
+    const res = await env.CARD_LIFETIMES.get({ name: 'b' }).fetch('https://card-lifetime.example/lost', {
       method: 'POST', body: JSON.stringify({ handle: 'b', gen: '0', host: OWNER, ticket: accepted + delta }),
     });
     assert.equal(res.status, 200, `[+${delta}] the loss was not acknowledged`);
