@@ -23,7 +23,7 @@
 
 import assert from 'node:assert/strict';
 import { parse as parseHtml } from 'parse5';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
   cpSync, mkdirSync, symlinkSync, writeFileSync,
@@ -31,6 +31,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
+import { fileForPath } from './noindex-pass.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
 import { encodePng, APPLE_TOUCH_PX } from '../icon-core.mjs';
 
@@ -97,6 +98,10 @@ const zhCategoryPress = readFileSync(join(DIST, 'zh-tw/category/press/index.html
 const tagFixture = readFileSync(join(DIST, 'tag/fixture/index.html'), 'utf8');
 const zhTagFixture = readFileSync(join(DIST, 'zh-tw/tag/fixture/index.html'), 'utf8');
 const sitemapXml = readFileSync(join(DIST, 'sitemap.xml'), 'utf8');
+// reef#2554 — the noindex fixtures (content/noindex-*.md, content/form-thanks-landing.md).
+const noindexPage = (p) => readFileSync(join(DIST, p, 'index.html'), 'utf8');
+const ROBOTS_NOINDEX = '<meta name="robots" content="noindex">';
+const inSitemap = (p) => sitemapXml.includes(`<loc>https://example.com/${p}/</loc>`);
 const siteOff = readFileSync(join(DIST, 'ko-kr/index.html'), 'utf8');
 // round 4 (R3-P2-2): scheme-check.md — the hostile fixture the Astro half of the escape-link-
 // destinations fix never had. See its own file header for what each slot exercises; the checks
@@ -832,6 +837,155 @@ function allHtmlPages(root) {
     }
   })(root);
   return out.sort();
+}
+// reef#2554 r2 — noindex is decided over every route the build emits, by the page's emitted
+// identity, not only over content files. Two minimal sites, the codex r1 review's own inputs: one
+// with a /devlog blog whose posts (base and zh-tw) are forms' thanks= targets, plus every spelling
+// of a destination that lands on one page (`/./x`, `/x/?q#f`, `/x/index.html`, a `.fr` suffix);
+// one with the blog mounted at the root, `noindex: true` on home, and every other page noindex
+// too — so its sitemap must come out a valid, empty urlset.
+const NOINDEX_PAGE = (name, fm = '', body = '## Body\n%% sitetile: prose %%\nHello.\n') =>
+  `---\nsitetile-page: ${name}\ntitle: ${name}\n${fm}---\n\n${body}`;
+const NOINDEX_FORM = (target) => `## Contact ${target}\n%% sitetile: form action=inbox thanks="${target}" %%\n### Name\n`;
+const NOINDEX_POST = '---\ntitle: Thank you\npubDate: 2026-01-01\n---\nYour response is received.\n';
+const NOINDEX_ROUTE_TARGETS = ['/plain/?x=1#top', '/./dot-thanks', '/thanks.zh-tw/', '/zh-tw/thanks/', '/missing',
+  '/devlog/thank-post/', '/zh-tw/devlog/thank-post/', '/thanks.fr/', '/index-thanks/index.html', '/kept/?from=order#top'];
+function buildNoindexFixture(name, files, { stderr } = {}) {
+  const NDIR = join(HERE, '..', `.smoke-${name}`);
+  const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
+  rmSync(NDIR, { recursive: true, force: true });
+  cpSync(HERE, NDIR, { recursive: true, filter: (src) => !SKIP_RE.test(src) });
+  symlinkSync(join(HERE, 'node_modules'), join(NDIR, 'node_modules'), 'dir');
+  for (const d of ['content', 'blog']) {
+    rmSync(join(NDIR, d), { recursive: true, force: true });
+    mkdirSync(join(NDIR, d), { recursive: true });
+  }
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(NDIR, dirname(rel)), { recursive: true });
+    writeFileSync(join(NDIR, rel), text, 'utf8');
+  }
+  const NDIST = join(NDIR, `dist-${name}`);
+  const opts = {
+    cwd: NDIR,
+    env: { ...process.env, SITE_ID: `${name}-smoke`, PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
+  };
+  if (!stderr) { execFileSync('npx', ['astro', 'build', '--outDir', NDIST], { ...opts, stdio: 'inherit' }); return NDIST; }
+  // `stderr`: the build's stderr is kept for the checks (and still shown), for a build-log warning.
+  const run = spawnSync('npx', ['astro', 'build', '--outDir', NDIST], { ...opts, stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' });
+  process.stderr.write(run.stderr || '');
+  if (run.status !== 0) throw new Error(`astro build (${name}) exited ${run.status}`);
+  stderr.text = run.stderr || '';
+  return NDIST;
+}
+console.log('▸ astro build → .smoke-noindex-routes/ (thanks= targets on blog posts, locale-suffixed and dot/index.html spellings)…');
+const NRDIST = buildNoindexFixture('noindex-routes', {
+  // A site-layer `noindex:` must not blanket `ordinary` (own frontmatter only).
+  'content/_site.md': '---\ntitle: Review\nlocales: en-US, zh-TW\nlang: en-US\nnoindex: true\n---\n',
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/zh-tw.md': NOINDEX_PAGE('zh-tw', 'lang: zh-TW\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_ROUTE_TARGETS.map(NOINDEX_FORM).join('')),
+  ...Object.fromEntries(['plain', 'dot-thanks', 'thanks.zh-tw', 'zh-tw/thanks', 'ordinary', 'index-thanks']
+    .map((n) => [`content/${n}.md`, NOINDEX_PAGE(n)])),
+  'content/thanks.fr.md': NOINDEX_PAGE('thanks.fr', 'lang: fr\n'),
+  'content/kept.md': NOINDEX_PAGE('kept', 'noindex: false\n'),
+  'content/explicit.zh-tw.md': NOINDEX_PAGE('explicit.zh-tw', 'noindex: true\n'),
+  'blog/thank-post.md': NOINDEX_POST,
+  'blog/zh-tw/thank-post.md': NOINDEX_POST,
+  'blog/other-post.md': '---\ntitle: Other\npubDate: 2026-01-02\n---\nAn ordinary post.\n',
+});
+console.log('▸ astro build → .smoke-noindex-root-blog/ (blog mounted at /, home `noindex: true`, every page noindex)…');
+const NBDIST = buildNoindexFixture('noindex-root-blog', {
+  'content/home.md': NOINDEX_PAGE('home', 'packages: blog\nblog-path: /\nnoindex: true\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', 'noindex: true\n', NOINDEX_FORM('/') + NOINDEX_FORM('/post/')),
+  'blog/post.md': '---\ntitle: Post\npubDate: 2026-01-01\n---\nHello.\n',
+});
+// reef#2554 r3 — the codex r2 review's inputs. A page is the file its route is written to: a post
+// opting out of (and into) noindex in its own frontmatter; a post at /done/index.html/ that a form
+// thanks to exactly, and one at /fin/index.html/ that a form names as /fin/ (a file no route
+// writes); a content page at parent/index.html likewise; thanks=/INDEX.HTML, which is not the home
+// page; and thanks=/thank%26you/, which is the file thank&you/index.html.
+console.log('▸ astro build → .smoke-noindex-identity/ (own flags on posts; identity = the output file)…');
+const NIDIST = buildNoindexFixture('noindex-identity', {
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', ['/devlog/kept/', '/done/index.html/', '/fin/', '/parent/', '/INDEX.HTML', '/thank%26you/'].map(NOINDEX_FORM).join('')),
+  'content/thank&you.md': NOINDEX_PAGE('thank-you'),
+  'content/parent/index.html.md': NOINDEX_PAGE('parent-index'),
+  'blog/kept.md': '---\ntitle: Kept\npubDate: 2026-01-01\nnoindex: false\n---\nReceived, and findable.\n',
+  'blog/private.md': '---\ntitle: Private\npubDate: 2026-01-02\nnoindex: true\n---\nNot for search.\n',
+  'blog/done.md': '---\ntitle: Done\npubDate: 2026-01-03\npermalink: /done/index.html/\n---\nReceived.\n',
+  'blog/fin.md': '---\ntitle: Fin\npubDate: 2026-01-04\npermalink: /fin/index.html/\n---\nAn ordinary post.\n',
+});
+// reef#2554 r4 — the codex r3 review's inputs. A content page and a post routed to ONE file: the
+// build writes the post, so the post alone decides that file's head and its sitemap entry
+// (noindex-pass.mjs reads the file on disk), and the displaced content page — whatever its own
+// noindex: says — decides nothing: `shared` (content false, post true), `thanked` (content
+// false, post unflagged but a form's thanks= target), `opened` (content true, post false),
+// `hidden` (content false, the post unlisted: nothing at that file is listed). The collision is
+// named in the build log. `alone` is an uncollided page beside them.
+console.log('▸ astro build → .smoke-noindex-collide/ (content pages and posts routed to one file)…');
+const NCLOG = {};
+const NCDIST = buildNoindexFixture('noindex-collide', {
+  'content/home.md': NOINDEX_PAGE('home', 'blog-unlisted-categories: secret\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_FORM('/devlog/thanked/')),
+  'content/devlog/shared.md': NOINDEX_PAGE('shared-page', 'noindex: false\n'),
+  'content/devlog/thanked.md': NOINDEX_PAGE('thanked-page', 'noindex: false\n'),
+  'content/devlog/opened.md': NOINDEX_PAGE('opened-page', 'noindex: true\n'),
+  'content/devlog/hidden.md': NOINDEX_PAGE('hidden-page', 'noindex: false\n'),
+  'content/alone.md': NOINDEX_PAGE('alone'),
+  'blog/shared.md': '---\ntitle: Shared post\npubDate: 2026-01-01\nnoindex: true\n---\nPost.\n',
+  'blog/thanked.md': '---\ntitle: Thanked post\npubDate: 2026-01-02\n---\nReceived.\n',
+  'blog/opened.md': '---\ntitle: Opened post\npubDate: 2026-01-03\nnoindex: false\n---\nFindable.\n',
+  'blog/hidden.md': '---\ntitle: Hidden post\npubDate: 2026-01-04\ncategories: [secret]\n---\nUnlisted.\n',
+}, { stderr: NCLOG });
+// reef#2554 r5 — the codex r4 review's inputs, one site. `x/y`: a content page `noindex: true` and a
+// post at permalink /x//y/ (`noindex: false`) are ONE file, x/y/index.html, and Astro renders the
+// content page there (it normalises the request to /x/y/) — so that file is noindex and neither
+// spelling is listed. `devlog/shared`: a content page whose form says thanks=/public/ is displaced
+// by a post, so the form reaches no HTML and /public/ stays indexed and listed.
+console.log('▸ astro build → .smoke-noindex-r4/ (a double-slash alias of one file; a form on a displaced page)…');
+const N4DIST = buildNoindexFixture('noindex-r4', {
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/x/y.md': NOINDEX_PAGE('xy-page', 'noindex: true\n'),
+  'blog/xy.md': '---\ntitle: XY post\npubDate: 2026-01-01\npermalink: /x//y/\nnoindex: false\n---\nPost.\n',
+  'content/devlog/shared.md': NOINDEX_PAGE('shared-page', '', NOINDEX_FORM('/public/')),
+  'content/public.md': NOINDEX_PAGE('public'),
+  'blog/shared.md': '---\ntitle: Shared post\npubDate: 2026-01-02\n---\nPost.\n',
+});
+// reef#2554 r6 — the codex r5 review's inputs, one site. `embedded` holds an embed whose markup
+// spells an inbox form's `thanks_to` for /template-target/ inside an inert <template>, and
+// `third-party` a form posting to another service with that field — neither is a form sitetile
+// emitted, so /template-target/ stays indexed and listed. `contact`'s real inbox form thanks to
+// public/indexable.html, whose own `<meta name="robots" content="index,follow">` is merged, not obeyed.
+console.log('▸ astro build → .smoke-noindex-r5/ (thanks_to spellings sitetile never emitted; a permissive robots meta on a thanks target)…');
+const N5DIST = buildNoindexFixture('noindex-r5', {
+  'content/home.md': NOINDEX_PAGE('home'),
+  'content/template-target.md': NOINDEX_PAGE('template-target'),
+  'content/embedded.md': NOINDEX_PAGE('embedded', '', '## Embed\n%% sitetile: embed %%\n<template><form action="/__reef/inbox" method="post"><input type="hidden" name="thanks_to" value="/template-target/"></form></template>\n'),
+  'content/third-party.md': NOINDEX_PAGE('third-party', '', '## Embed\n%% sitetile: embed %%\n<form action="https://forms.example/submit" method="post"><input type="hidden" name="thanks_to" value="/template-target/"><button>Send</button></form>\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_FORM('/indexable.html')),
+  'public/indexable.html': '<!DOCTYPE html><html><head><title>Thanks</title><meta name="robots" content="index,follow"></head><body>Thank you.</body></html>',
+});
+const noindexAt = (dist, p) => readFileSync(join(dist, p, 'index.html'), 'utf8').includes(ROBOTS_NOINDEX);
+const xmlEsc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${xmlEsc(p)}</loc>`);
+/** The two consumers must agree on every page a build emits — read from the output alone: every
+ *  <loc> in sitemap.xml names an emitted file (resolved the way a host maps a URL, so `/x//y/` and
+ *  `/thanks.fr` name x/y/index.html and thanks.fr/index.html), at most one <loc> per file, and no
+ *  listed file carries robots noindex. And no page keeps a render stamp the pass should have removed. */
+function noindexDisagreements(dist) {
+  const xml = readFileSync(join(dist, 'sitemap.xml'), 'utf8');
+  const out = [];
+  const files = new Set();
+  for (const [, loc] of xml.matchAll(/<loc>https:\/\/example\.com([^<]*)<\/loc>/g)) {
+    const f = fileForPath(dist, loc.replace(/&amp;/g, '&').replace(/&apos;/g, "'"));
+    if (!f) out.push(`${loc}: names no emitted file`);
+    else if (files.has(f)) out.push(`${loc}: a second <loc> for ${f}`);
+    else if (readFileSync(join(dist, f), 'utf8').includes(ROBOTS_NOINDEX)) out.push(`${loc}: listed, but ${f} is robots noindex`);
+    if (f) files.add(f);
+  }
+  for (const f of allHtmlPages(dist)) if (/sitetile:(noindex|sitemap)/.test(readFileSync(f, 'utf8').split('</head>')[0])) out.push(`${f}: render stamp left in`);
+  for (const f of allHtmlPages(dist)) if (readFileSync(f, 'utf8').includes('data-sitetile-thanks')) out.push(`${f}: thanks mark left in`);
+  return out;
 }
 const CORAL_CSS_ATTR = 'data-dynamic-coral-css';
 /** Pages split by whether their <html> tag carries the declaration. */
@@ -1923,6 +2077,104 @@ const checks = [
   ['sitemap: the locale blog index + its own posts are listed too', () =>
     sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/</loc>')
     && sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/a-signed-post/</loc>')],
+  // -- reef#2554: `noindex:` frontmatter, and a form's thanks= target is noindex by default --
+  ['🔴 #2554 noindex: true → robots noindex in the head, left out of sitemap.xml', () =>
+    noindexPage('noindex-on').includes(ROBOTS_NOINDEX) && !inSitemap('noindex-on')],
+  ['🔴 #2554 noindex: false (no form points here) → no robots meta, listed in sitemap.xml', () =>
+    !noindexPage('noindex-off').includes('name="robots"') && inSitemap('noindex-off')],
+  ['🔴 #2554 a form\'s thanks= target with no noindex key → noindex by default, out of sitemap.xml', () =>
+    noindexPage('form-thanks-landing').includes(ROBOTS_NOINDEX) && !inSitemap('form-thanks-landing')],
+  ['🔴 #2554 a thanks= target that says noindex: false → the explicit key wins (indexed, listed)', () =>
+    !noindexPage('noindex-thanks-kept').includes('name="robots"') && inSitemap('noindex-thanks-kept')],
+  ['🔴 #2554 a thanks= on a form without action=inbox is never wired → its page stays indexed', () =>
+    !noindexPage('noindex-plain-target').includes('name="robots"') && inSitemap('noindex-plain-target')],
+  ['🔴 #2554 the form page itself is not noindex — only the page it sends people to', () =>
+    !noindexPage('noindex-forms').includes('name="robots"') && inSitemap('noindex-forms')
+    && !noindexPage('form-thanks').includes('name="robots"') && inSitemap('form-thanks')],
+  ['🔴 #2554 robots meta appears exactly once on a noindex page', () =>
+    noindexPage('noindex-on').split('name="robots"').length === 2],
+  // -- reef#2554 r2: the decision follows the emitted page, on every route kind --
+  ['🔴 #2554 r2 a thanks= on a base blog post → that post is noindex and out of sitemap.xml; its sibling post is not', () =>
+    noindexAt(NRDIST, 'devlog/thank-post') && !listedAt(NRDIST, '/devlog/thank-post/')
+    && !noindexAt(NRDIST, 'devlog/other-post') && listedAt(NRDIST, '/devlog/other-post/')],
+  ['🔴 #2554 r2 a thanks= on a zh-tw blog post → noindex, out of sitemap.xml', () =>
+    noindexAt(NRDIST, 'zh-tw/devlog/thank-post') && !listedAt(NRDIST, '/zh-tw/devlog/thank-post/')],
+  ['🔴 #2554 r2 thanks=/thanks.fr/ lands on content/thanks.fr.md (emitted thanks.fr/index.html) → noindex, out of sitemap.xml in either spelling', () =>
+    noindexAt(NRDIST, 'thanks.fr') && !listedAt(NRDIST, '/thanks.fr') && !listedAt(NRDIST, '/thanks.fr/')],
+  ['🔴 #2554 r2 thanks=/./dot-thanks and thanks=/index-thanks/index.html resolve to the page a browser lands on', () =>
+    noindexAt(NRDIST, 'dot-thanks') && !listedAt(NRDIST, '/dot-thanks/')
+    && noindexAt(NRDIST, 'index-thanks') && !listedAt(NRDIST, '/index-thanks/')],
+  ['🔴 #2554 r2 a query/fragment target with NO noindex key → noindex, out of sitemap.xml (the `kept` control says noindex: false and stays)', () =>
+    noindexAt(NRDIST, 'plain') && !listedAt(NRDIST, '/plain/')
+    && !noindexAt(NRDIST, 'kept') && listedAt(NRDIST, '/kept/')],
+  ['🔴 #2554 r2 locale and suffix targets, own noindex: true, and a site-layer noindex that blankets nothing', () =>
+    noindexAt(NRDIST, 'zh-tw/thanks') && noindexAt(NRDIST, 'thanks.zh-tw') && noindexAt(NRDIST, 'explicit.zh-tw')
+    && !noindexAt(NRDIST, 'ordinary') && listedAt(NRDIST, '/ordinary/')
+    && !noindexAt(NRDIST, '') && listedAt(NRDIST, '/') && !noindexAt(NRDIST, 'contact') && listedAt(NRDIST, '/contact/')],
+  ['🔴 #2554 r2 a thanks= at a page that does not exist builds, emits no page there and lists none', () =>
+    !existsSync(join(NRDIST, 'missing')) && !readFileSync(join(NRDIST, 'sitemap.xml'), 'utf8').includes('/missing')],
+  ['🔴 #2554 r2 root-mounted blog: home `noindex: true` reaches `/` (the blog index), the post a form thanks to is noindex too', () =>
+    noindexAt(NBDIST, '') && noindexAt(NBDIST, 'post') && noindexAt(NBDIST, 'contact')],
+  ['🔴 #2554 r2 a site whose every page is noindex → sitemap.xml is a valid, empty urlset', () => {
+    const xml = readFileSync(join(NBDIST, 'sitemap.xml'), 'utf8');
+    return !xml.includes('<url>') && /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n\n<\/urlset>\n$/.test(xml);
+  }],
+  ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + every noindex build)', () =>
+    [DIST, NRDIST, NBDIST, NIDIST, NCDIST, N4DIST, N5DIST].every((d) => noindexDisagreements(d).length === 0)],
+  // -- reef#2554 r3: a page is the file its route is written to; a post's own flag is its own --
+  ['🔴 #2554 r3 a post\'s own noindex: false wins over the thanks= that lands on it (indexed, listed); its own noindex: true needs no form', () =>
+    !noindexAt(NIDIST, 'devlog/kept') && listedAt(NIDIST, '/devlog/kept/')
+    && noindexAt(NIDIST, 'devlog/private') && !listedAt(NIDIST, '/devlog/private/')],
+  ['🔴 #2554 r3 thanks=/done/index.html/ reaches the post written to done/index.html/index.html: head and sitemap both', () =>
+    noindexAt(NIDIST, 'done/index.html') && !listedAt(NIDIST, '/done/index.html/')],
+  ['🔴 #2554 r3 thanks=/fin/ and thanks=/parent/ name a file no route writes → the /fin/index.html/ post and the parent/index.html page stay indexed and listed', () =>
+    !noindexAt(NIDIST, 'fin/index.html') && listedAt(NIDIST, '/fin/index.html/')
+    // (sitemap.mjs's canonicalPath spells this content page's <loc> without the slash: `.html` reads as a file)
+    && !noindexAt(NIDIST, 'parent/index.html') && (listedAt(NIDIST, '/parent/index.html/') || listedAt(NIDIST, '/parent/index.html'))],
+  ['🔴 #2554 r3 thanks=/INDEX.HTML is not the home page: `/` stays indexed and listed', () =>
+    !noindexAt(NIDIST, '') && listedAt(NIDIST, '/')],
+  ['🔴 #2554 r3 thanks=/thank%26you/ lands on thank&you/index.html → noindex, out of sitemap.xml', () =>
+    noindexAt(NIDIST, 'thank&you') && !listedAt(NIDIST, '/thank&you/')],
+  // -- reef#2554 r4: one route is written per file; it alone decides head and sitemap --
+  ['🔴 #2554 r4 a collided file is the post the build writes there (not the content page), for all four collisions — a control on the fixture, not on noindex', () =>
+    ['shared', 'thanked', 'opened', 'hidden'].every((n) => readFileSync(join(NCDIST, 'devlog', n, 'index.html'), 'utf8').includes(`<title>${n[0].toUpperCase()}${n.slice(1)} post`))],
+  ['🔴 #2554 r4 a post noindex: true over a content page noindex: false → noindex, out of sitemap.xml', () =>
+    noindexAt(NCDIST, 'devlog/shared') && !listedAt(NCDIST, '/devlog/shared/')],
+  ['🔴 #2554 r4 a thanks= on a post over a content page noindex: false → the post\'s thanks default wins: noindex, out of sitemap.xml', () =>
+    noindexAt(NCDIST, 'devlog/thanked') && !listedAt(NCDIST, '/devlog/thanked/')],
+  ['🔴 #2554 r4 a post noindex: false over a content page noindex: true → indexed and listed', () =>
+    !noindexAt(NCDIST, 'devlog/opened') && listedAt(NCDIST, '/devlog/opened/')],
+  ['🔴 #2554 r4 an unlisted post over a content page → the file is not listed by the page it displaced', () =>
+    !listedAt(NCDIST, '/devlog/hidden/') && !listedAt(NCDIST, '/devlog/hidden')],
+  ['🔴 #2554 r4 every collided file is listed at most once, and the uncollided page beside them is untouched', () => {
+    const xml = readFileSync(join(NCDIST, 'sitemap.xml'), 'utf8');
+    return ['shared', 'thanked', 'opened', 'hidden'].every((n) => xml.split(`/devlog/${n}`).length <= 2)
+      && !noindexAt(NCDIST, 'alone') && listedAt(NCDIST, '/alone/');
+  }],
+  ['🔴 #2554 r4 the build log names each collision: both sources and the file', () =>
+    ['shared', 'thanked', 'opened', 'hidden'].every((n) => NCLOG.text.includes(
+      `sitetile: content/devlog/${n}.md and blog post "${n}" are both routed to devlog/${n}/index.html — only one of them is published there`))],
+  // -- reef#2554 r5: decided after the build, over the files it wrote --
+  ['🔴 #2554 r5 /x//y/ and /x/y/ are one file: the content page Astro rendered there is noindex, and neither spelling is listed', () =>
+    readFileSync(join(N4DIST, 'x/y/index.html'), 'utf8').includes('<title>xy-page') && noindexAt(N4DIST, 'x/y')
+    && !listedAt(N4DIST, '/x/y/') && !listedAt(N4DIST, '/x//y/')],
+  ['🔴 #2554 r5 a form on a displaced page reaches no HTML, so its thanks= target stays indexed and listed', () =>
+    !readFileSync(join(N4DIST, 'devlog/shared/index.html'), 'utf8').includes('name="thanks_to"')
+    && !noindexAt(N4DIST, 'public') && listedAt(N4DIST, '/public/')],
+  ['🔴 #2554 r5 the displaced page\'s post is the file\'s producer: listed once with its own lastmod', () => {
+    const xml = readFileSync(join(N4DIST, 'sitemap.xml'), 'utf8');
+    return xml.includes('<loc>https://example.com/devlog/shared/</loc>\n    <lastmod>2026-01-02</lastmod>') && xml.split('/devlog/shared/').length === 2;
+  }],
+  // -- reef#2554 r6: targets come from the forms sitetile emitted; a robots meta is merged --
+  ['🔴 #2554 r6 a thanks_to inside an embed\'s <template> or a third-party form is not a thanks target: /template-target/ stays indexed and listed (a control: both embeds reached the page)', () =>
+    readFileSync(join(N5DIST, 'embedded/index.html'), 'utf8').includes('<template><form action="/__reef/inbox"')
+    && readFileSync(join(N5DIST, 'third-party/index.html'), 'utf8').includes('action="https://forms.example/submit"')
+    && !noindexAt(N5DIST, 'template-target') && listedAt(N5DIST, '/template-target/')],
+  ['🔴 #2554 r6 a real inbox form\'s thanks target with its own `index,follow` robots meta → one robots meta, `follow, noindex`', () => {
+    const h = readFileSync(join(N5DIST, 'indexable.html'), 'utf8');
+    return h.includes('<meta name="robots" content="follow, noindex">') && (h.match(/name="robots"/g) || []).length === 1
+      && readFileSync(join(N5DIST, 'contact/index.html'), 'utf8').includes('name="thanks_to" value="/indexable.html"');
+  }],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing

@@ -21,10 +21,43 @@ import { contentPageRel } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
+import { noindexFlag, routeOutputFile } from '../lib/noindex.mjs';
 
 
 export function getStaticPaths() {
   const paths = [];
+  // reef#2554: noindex is decided AFTER the build, over the files it wrote (noindex-pass.mjs). Here
+  // each route only carries what its OWN source says, for SiteLayout to stamp into the page's head:
+  // `noindex` — the source's own `noindex:` (a content page's own frontmatter, not the `_site.md`
+  // layer: a site-wide line must not quietly take every page out of search; a post's own; the blog
+  // index's none, except home.md's for a blog mounted at `/`, where home is never emitted as a page)
+  // — and `sitemap` — whether sitemap.xml lists this kind of page (`list`, with a post's date as its
+  // lastmod) or not (`omit`: pagers, an empty index, unlisted posts, date archives). The pass removes
+  // both stamps. Whichever route's page is on disk at a file is the one whose stamps count.
+  // The collision itself predates noindex; it is named in the build log, like loadSite's and
+  // language.astro's warnings. Astro decides which of the two is published — this does not guess.
+  const sourceOf = (r) => r.props.kind === 'page' ? `content/${r.params.path ?? 'home'}.md`
+    : r.props.kind === 'post' ? `blog post "${r.props.post.slug}"`
+    : r.props.kind === 'blog-index' ? `the blog index${r.props.pageNum > 1 ? ` page ${r.props.pageNum}` : ''}`
+    : 'a date archive';
+  const warnCollisions = (out) => {
+    const first = new Map();
+    for (const r of out) {
+      const file = routeOutputFile(r.params.path);
+      const w = first.get(file);
+      if (!w) first.set(file, r);
+      else console.warn(`sitetile: ${sourceOf(w)} and ${sourceOf(r)} are both routed to ${file} — only one of them is published there; the other's noindex:, forms and sitemap entry count for nothing. Give one of them another path.`);
+    }
+    return out;
+  };
+  // A post's stamp: its own flag; listed in the sitemap only when its corpus lists it and it has a
+  // page on this host (#31), with its date as lastmod — the same rule sitemap.xml.js applies.
+  const postStamp = (post, shown, m) => ({ noindex: noindexFlag(post.noindex),
+    sitemap: shown.includes(post) && postHasPage(post, m) ? `list${post.date ? ' ' + post.date : ''}` : 'omit' });
+  const homeFlag = () => {
+    const raw = Object.entries(files).find(([p]) => /\/content\/home\.md$/.test(p))?.[1];
+    return typeof raw === 'string' ? noindexFlag(parseSite(raw).meta.noindex) : undefined;
+  };
 
   // ── blog (index + pager + posts) ──
   // Loaded with the SAME globs/meta the old devlog/* routes used, so with the default blog-path
@@ -109,7 +142,7 @@ export function getStaticPaths() {
     // Section, and one that disagreed with the document root would mislead whatever reads it next.
     if (siteConfig && siteConfig[DYNAMIC_CORAL_CSS_KEY]) site.meta[DYNAMIC_CORAL_CSS_KEY] = siteConfig[DYNAMIC_CORAL_CSS_KEY];
     else delete site.meta[DYNAMIC_CORAL_CSS_KEY];
-    paths.push({ params: { path: slug }, props: { kind: 'page', site } });
+    paths.push({ params: { path: slug }, props: { kind: 'page', site, stamp: { noindex: noindexFlag(ownMeta.noindex), sitemap: 'list' } } });
   }
 
   // ── everything below this line is the blog; a site without one emits none of it ──
@@ -121,7 +154,7 @@ export function getStaticPaths() {
   // "Devlog" + "Short build logs and hard-won tricks from the workshop."
   // blogInstalled() qualifies a site by DECLARATION or by CONTENT, so a site with 632 posts and a
   // deliberately empty _site.md — keeps every one of its URLs.
-  if (!blogInstalled(meta, posts)) return paths;
+  if (!blogInstalled(meta, posts)) return warnCollisions(paths);
 
   // Which other editions of each blog url exist — resolved ONCE, before any route is pushed, from
   // every locale's whole corpus (so both directions agree, and an incremental build that emits a
@@ -133,7 +166,7 @@ export function getStaticPaths() {
   const switchable = blogSwitchLocales(meta, posts, localeCorpora);
 
   // index page 1 at the blog base (default /devlog → "devlog"; root mount → undefined).
-  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: 1, bannerLocales: switchable(indexUrl(meta, 1)) } });
+  paths.push({ params: { path: toPath(blogBase(meta)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: 1, bannerLocales: switchable(indexUrl(meta, 1)), stamp: { noindex: rootMount ? homeFlag() : undefined, sitemap: listed.length ? 'list' : 'omit' } } });
 
   // pager pages 2..N — only when blog-page-size is set; else zero extra routes (as before).
   // 🔴 Counted over `listed`, not `posts`: buildIndexView paginates what it will actually show, so
@@ -143,7 +176,7 @@ export function getStaticPaths() {
   if (pageSize) {
     const totalPages = Math.ceil(listed.length / pageSize) || 1;
     for (let n = 2; n <= totalPages; n++) {
-      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: n, bannerLocales: switchable(indexUrl(meta, n)) } });
+      paths.push({ params: { path: toPath(indexUrl(meta, n)) }, props: { kind: 'blog-index', posts: listed, meta, pageNum: n, bannerLocales: switchable(indexUrl(meta, n)), stamp: { sitemap: 'omit' } } });
     }
   }
 
@@ -197,7 +230,7 @@ export function getStaticPaths() {
     const sidebar = buildPostSidebar(listed, meta, post);
     paths.push({
       params: { path: toPath(postUrl(post, meta)) },
-      props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, meta)) },
+      props: { kind: 'post', post, meta, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, meta)), stamp: postStamp(post, listed, meta) },
     });
   });
 
@@ -223,11 +256,11 @@ export function getStaticPaths() {
       if (/^\d{2}$/.test(mo)) months.set(`${y}/${mo}`, (months.get(`${y}/${mo}`) || 0) + 1);
     }
     const emit = (path, year, month, count) => {
-      paths.push({ params: { path }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: 1 } });
+      paths.push({ params: { path }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: 1, stamp: { sitemap: 'omit' } } });
       if (pageSize) {
         const totalPages = Math.ceil(count / pageSize) || 1;
         for (let n = 2; n <= totalPages; n++) {
-          paths.push({ params: { path: `${path}/page/${n}` }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: n } });
+          paths.push({ params: { path: `${path}/page/${n}` }, props: { kind: 'date-archive', posts: listed, meta, year, month, pageNum: n, stamp: { sitemap: 'omit' } } });
         }
       }
     };
@@ -249,11 +282,11 @@ export function getStaticPaths() {
   // corpus can't drift between what this route builds and what those list/advertise.
   // (`localeBlogFiles` / `localeCorpora` are resolved above, next to `switchable`, which needs them.)
   for (const { url: urlL, meta: metaL, posts: postsL, listed: listedL } of localeCorpora) {
-    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1, bannerLocales: switchable(indexUrl(metaL, 1), urlL) } });
+    paths.push({ params: { path: toPath(indexUrl(metaL, 1)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: 1, bannerLocales: switchable(indexUrl(metaL, 1), urlL), stamp: { sitemap: listedL.length ? 'list' : 'omit' } } });
     const psL = Number(metaL['blog-page-size']) || 0;
     if (psL) {
       const tpL = Math.ceil(listedL.length / psL) || 1;
-      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: n, bannerLocales: switchable(indexUrl(metaL, n), urlL) } });
+      for (let n = 2; n <= tpL; n++) paths.push({ params: { path: toPath(indexUrl(metaL, n)) }, props: { kind: 'blog-index', posts: listedL, meta: metaL, pageNum: n, bannerLocales: switchable(indexUrl(metaL, n), urlL), stamp: { sitemap: 'omit' } } });
     }
     // Every translated post keeps its page; every link off it stays in this locale's listed set.
     const seqL = new Map(listedL.map((p, i) => [p.slug, i]));
@@ -269,11 +302,11 @@ export function getStaticPaths() {
       const keepReadingCards = postCards(keepReading, metaL);
       const relatedCards = postCards(related, metaL);
       const sidebar = buildPostSidebar(listedL, metaL, post);
-      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, metaL), urlL) } });
+      paths.push({ params: { path: toPath(postUrl(post, metaL)) }, props: { kind: 'post', post, meta: metaL, newer, older, keepReadingCards, relatedCards, sidebar, bannerLocales: switchable(postUrl(post, metaL), urlL), stamp: postStamp(post, listedL, metaL) } });
     });
   }
 
-  return paths;
+  return warnCollisions(paths);
 }
 
 const props = Astro.props;

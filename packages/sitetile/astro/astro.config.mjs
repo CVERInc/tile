@@ -11,9 +11,12 @@ import { svgAttachmentHeaders } from './svg-attachment-headers.mjs';
 // because Cloudflare Pages reads a locale's 404 only at that path and Astro only writes the ROOT
 // 404 as a bare file. Here, not in packages/build: production runs a plain `npx astro build`.
 import { locale404Pages } from './locale-404.mjs';
+// reef#2554: noindex is decided over the files the build wrote — each page's robots meta and
+// sitemap.xml — after locale-404 has put every file where it will be served.
+import { noindexPass } from './noindex-pass.mjs';
 
 export default defineConfig({
-  integrations: [svgAttachmentHeaders(), locale404Pages()],
+  integrations: [svgAttachmentHeaders(), locale404Pages(), noindexPass()],
   // Absolute-URL base for the site being rendered. Lingo emits ABSOLUTE hreflang/canonical
   // from this (a real <head> uses absolute URLs). Per-build overridable via SITE_URL so the ONE
   // renderer stays general across sites; the fallback is a placeholder, never a real host — a
