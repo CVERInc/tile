@@ -2095,3 +2095,97 @@ test('🔴 r12 an accepted bind\'s late /confirm never lowers the inverse\'s tic
   assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), 'CONTROL: the domain serves b');
   assert.deepEqual(failures, []);
 });
+
+test('🔴 codex r12 a host published in between never discards the first host\'s ticket: an older acceptance of it stays unpublished, and the loss between them keeps a redirect (8 rows)', async () => {
+  // R/cross-host-reset.mjs, four binds of b. b-old admits T1 at X and is held before /register; a admits
+  // T2 at X and is held before /point; b-new admits T3 at X, registers (order 1) and is held before
+  // /point; [Y] b → Y registers (order 2), is accepted and held before /confirm. b-old then registers
+  // (order 3, or 2 without Y), is accepted at X with T1 and held before /confirm; a takes X with T2 (b's
+  // /lost answers 503 in the failing rows); b-new takes X back with T3 and is published (301 → X); Y's
+  // confirm wins on order (301 → Y). b-old's /confirm arrives last: r12 compared tickets only while the
+  // inverse named X, so with Y in between it wrote X/T1, and the retried T2 loss cleared it: /b 301 →
+  // 200 while both domains served b. Rows: generation 0 / recreated × loss failing / delivered × with /
+  // without the Y bind; the six rows that are not (failing, Y) are controls.
+  const Y = 'second.example', failures = [];
+  let rows = 0;
+  for (const reborn of [false, true]) for (const fail of [false, true]) for (const cross of [false, true]) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    const where = `[${reborn ? 'reborn' : 'gen0'}, ${fail ? '/lost failing' : 'delivered'}, ${cross ? 'Y in between' : 'X only'}]`;
+    rows++;
+    try {
+      if (reborn) {
+        assert.equal((await call(env, 'DELETE', '/_api/card/b')).status, 200, where);
+        assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: B_CARD })).status, 200, where);
+      }
+      const lives = env.CARD_LIFETIMES, ns = env.HOST_BINDINGS;
+      const gate = () => ({ reached: deferred(), go: deferred() });
+      const reg = gate(), aPoint = gate(), newPoint = gate(), oldConfirm = gate(), yConfirm = gate();
+      const oldOrder = cross ? 3 : 2;
+      let blocked = fail, holdReg = true, holdA = true, holdNew = false, holdConfirm = true, refused = 0;
+      env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+        const op = new URL(url).pathname, data = JSON.parse(init.body);
+        if (holdReg && id.name === 'b' && op === '/register') { holdReg = false; reg.reached.resolve(); await reg.go.promise; }
+        if (id.name === 'b' && op === '/confirm' && data.host === Y) { yConfirm.reached.resolve(); await yConfirm.go.promise; }
+        if (holdConfirm && id.name === 'b' && op === '/confirm' && data.host === OWNER && data.order === oldOrder) { holdConfirm = false; oldConfirm.reached.resolve(); await oldConfirm.go.promise; }
+        if (blocked && id.name === 'b' && op === '/lost') { refused++; return new Response('unavailable', { status: 503 }); }
+        return lives.get(id).fetch(url, init);
+      } }) };
+      env.HOST_BINDINGS = { ...ns, get: (id) => ({ async fetch(url, init) {
+        if (new URL(url).pathname === '/point' && id.name === OWNER) {
+          const { handle } = JSON.parse(init.body);
+          if (holdA && handle === 'a') { holdA = false; aPoint.reached.resolve(); await aPoint.go.promise; }
+          if (holdNew && handle === 'b') { holdNew = false; newPoint.reached.resolve(); await newPoint.go.promise; }
+        }
+        return ns.get(id).fetch(url, init);
+      } }) };
+      const hostState = () => ns.storageOf(OWNER)._m.get('host');
+      const inverse = () => structuredClone(lives.storageOf('b')._m.get('life').inverse);
+      const older = bindVanity(env, 'b', OWNER); // T1
+      await reg.reached.promise;
+      const t1 = hostState().seq;
+      const taker = bindVanity(env, 'a', OWNER); // T2
+      await aPoint.reached.promise;
+      const t2 = hostState().seq;
+      holdNew = true;
+      const newer = bindVanity(env, 'b', OWNER); // T3, order 1
+      await newPoint.reached.promise;
+      const t3 = hostState().seq;
+      let other;
+      if (cross) { other = bindVanity(env, 'b', Y); await yConfirm.reached.promise; } // order 2
+      reg.go.resolve(); // b-old: order 3 (2 without Y), accepted at X with T1
+      await oldConfirm.reached.promise;
+      assert.equal(hostState().landed, t1, `${where} CONTROL: the older bind was accepted with its own ticket`);
+      assert.ok(t1 < t2 && t2 < t3, `${where} CONTROL: tickets T1 < T2 < T3 (${t1}, ${t2}, ${t3})`);
+      aPoint.go.resolve();
+      assert.equal((await taker).accepted, true, `${where} CONTROL: a took X`);
+      newPoint.go.resolve();
+      assert.equal((await newer).redirect, 'published', `${where} CONTROL: b-new was published`);
+      assert.equal(inverse().ticket, t3, `${where} CONTROL: the inverse holds X/T3`);
+      assert.equal((await page(env, '/b')).headers.get('location'), `https://${OWNER}/`, `${where} CONTROL: /b → X`);
+      if (cross) {
+        yConfirm.go.resolve();
+        assert.equal((await other).redirect, 'published', `${where} CONTROL: Y was published on order`);
+        assert.equal((await page(env, '/b')).headers.get('location'), `https://${Y}/`, `${where} CONTROL: /b → Y`);
+      }
+      const before = inverse();
+      oldConfirm.go.resolve();
+      const late = await older;
+      if (late.redirect !== 'not_published') failures.push(`${where}: the older acceptance's late redirect was published: ${late.redirect}`);
+      const afterLate = inverse();
+      if (afterLate.host !== before.host || afterLate.ticket !== before.ticket) failures.push(`${where}: the late /confirm rewrote the inverse ${before.host}/${before.ticket} → ${afterLate.host}/${afterLate.ticket}`);
+      assert.equal(refused > 0, fail, `${where} CONTROL: the injected /lost failure took effect`);
+      blocked = false;
+      await ns.alarm(OWNER);
+      assert.deepEqual(hostState().losers, [], `${where} CONTROL: the retried notices were delivered`);
+      const after = await page(env, '/b'), want = `https://${cross ? Y : OWNER}/`;
+      if (after.status !== 301 || after.headers.get('location') !== want) failures.push(`${where}: the T2 loss cleared the card's address: /b ${after.status} → ${after.headers.get('location')}`);
+      assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), `${where} CONTROL: X serves b`);
+      if (cross) assert.ok((await (await host(env, Y, '/')).text()).includes('Next owner'), `${where} CONTROL: Y serves b`);
+      assert.equal(lives.storageOf('b')._m.get('life').cache, 'written', `${where} CONTROL: the cache was written`);
+      await lives.alarm('b');
+      assert.equal((await page(env, '/b')).status, after.status, `${where} CONTROL: reconciliation keeps the result`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 8);
+});

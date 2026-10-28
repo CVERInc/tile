@@ -433,14 +433,17 @@ export class HostBindings {
  * discovered from KV. Storage key `life`:
  *   { gen, hosts: [host…] (bound in gen), pending: { '<ended gen>': [host…] } (ends not yet delivered),
  *     seq, inverse: { host | null, order, ticket } | null, lost: { host: ticket }, cache: 'written' | 'pending',
+ *     highWater: { host: ticket } (r13: the newest acceptance of each host this lifetime confirmed; its
+ *     keys are a subset of `hosts`, and /end empties it with them),
  *     adopted, legacy: host | null, dropLegacy }   (r10: the bare legacy inverse, see adopt)
  *   POST /register { handle, host, gen } refused (`stale_generation`) unless gen is the current one;
  *                                        otherwise host joins `hosts` → { gen, order: ++seq }
  *   POST /confirm  { handle, host, gen, order, ticket }
  *                                        after HostBindings accepted (r9 rule A), with the ticket /point
- *                                        answered: inverse = host unless `lost[host]` > ticket, or the
- *                                        inverse names this host with a ticket ≥ this one (r12: it only
- *                                        goes up), or names another host with a newer `order`; then KV
+ *                                        answered: inverse = host unless `lost[host]` > ticket, or
+ *                                        `highWater[host]` > ticket (r13: per host, whatever the inverse
+ *                                        names now), or the inverse already is this acceptance, or names
+ *                                        another host with a newer `order`; then KV
  *                                        `vanityof:<handle>:<gen>` → { published, cache?: 'pending' }
  *   POST /lost     { handle, host, gen, ticket }
  *                                        HostBindings: the host went to another handle with the taker's
@@ -484,6 +487,9 @@ export class CardLifetime {
     s.seq = s.seq || 0;
     s.inverse = s.inverse || null;
     s.lost = s.lost || {};
+    s.highWater = s.highWater || {};
+    // the inverse's acceptance is one this lifetime has seen (a life stored before r13 has no highWater)
+    if (s.inverse && s.inverse.host && s.inverse.ticket != null && !(s.highWater[s.inverse.host] >= s.inverse.ticket)) s.highWater[s.inverse.host] = s.inverse.ticket;
     s.cache = s.cache || 'written';
     await this.flush(s);
     return s;
@@ -533,7 +539,8 @@ export class CardLifetime {
   }
   /**
    * 🔴 r9 rule A: a bind the host's object ACCEPTED asks to become the card's one address. Published
-   * only if it is still this lifetime, no newer acceptance of the same host (`ticket`, r12) or later
+   * only if it is still this lifetime, no newer acceptance of the same host reached here (`highWater`,
+   * r13: whatever the inverse names now) or later
    * registered bind of another host (`order`) was already published, and
    * the host was not taken from this handle after this bind's ticket (`lost`): so a late confirm never
    * clobbers a newer accepted host, and never points the card at a host it no longer has.
@@ -543,17 +550,24 @@ export class CardLifetime {
     if (gen !== s.gen || !s.hosts.includes(host)) return staleWrite(handle);
     await this.adopt(s); // a no-op after /register adopted
     if (s.lost[host] != null && s.lost[host] > ticket) return { published: false, why: `${host} was bound to another card after this bind.` };
-    // 🔴 r12: for the host the inverse already names, the inverse's ticket only goes up. Tickets are the
-    // order the host's object and this one share, so an older acceptance never overwrites a newer one,
-    // whatever its registration order (codex r11: a late registration wrote T2 over T4, and the T3 loss
-    // then cleared it). The same ticket is the acceptance already published. Another host's tickets come
-    // from another object's clock, so between hosts the registration order still decides.
+    // 🔴 r13: an acceptance older than the newest one this lifetime has seen for the host is never
+    // published, whatever the inverse names now. Tickets are the order the host's object and this one
+    // share; the newest is a fact about the HOST, so it is kept per host (`highWater`) and survives the
+    // inverse moving to another host (codex r12: X/T3 published, then Y, then X/T1 wrote over Y, and the
+    // T2 loss cleared it). r12 compared against the inverse, and so forgot X once Y replaced it. Every
+    // acceptance that reaches here raises it, published or not: one refused on order below is still
+    // newer than any acceptance of the host before it. The same ticket is that newest acceptance (or a
+    // same-owner no-op answering it), so it may still publish: binding X again after Y is one.
+    const high = s.highWater[host];
+    if (high != null && high > ticket) return { published: false, why: 'A newer bind of this address already set it.' };
+    if (high == null || ticket > high) s.highWater[host] = ticket; // stored by whichever branch returns below
     const same = !!s.inverse && s.inverse.host === host;
-    if (same && (s.inverse.ticket || 0) >= ticket) {
-      return s.inverse.ticket === ticket ? { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) }
-        : { published: false, why: 'A newer bind of this address already set it.' };
+    if (same && s.inverse.ticket === ticket) return { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
+    // Another host's tickets come from another object's clock, so between hosts the registration order decides.
+    if (!same && s.inverse && s.inverse.order > order) {
+      if (s.highWater[host] !== high) await this.storage.put('life', s);
+      return { published: false, why: 'A bind that started later already set this card\'s address.' };
     }
-    if (!same && s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
     // the acceptance that wrote it: only a later loss clears it (r11); its order never goes back either
     s.inverse = { host, order: same ? Math.max(order, s.inverse.order) : order, ticket };
     s.cache = 'pending';
@@ -592,6 +606,7 @@ export class CardLifetime {
     // the ended lifetime's inverse key is on `pending` (it needs a registered host), so DELETE removes it
     s.inverse = null;
     s.lost = {};
+    s.highWater = {}; // a fresh lifetime's binds are all newer: its hosts' objects issue increasing tickets
     s.legacy = null; // the bare key is generation 0's: DELETE removes it with the legacy keys
     s.dropLegacy = false;
     s.cache = 'written';
