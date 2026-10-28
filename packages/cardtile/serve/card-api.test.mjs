@@ -2189,3 +2189,87 @@ test('🔴 codex r12 a host published in between never discards the first host\'
   assert.deepEqual(failures, []);
   assert.equal(rows, 8);
 });
+
+test('r13 binding a host again after another host moves the card back: X\'s high water from the first bind never strands the card on Y', async () => {
+  // X/T, then Y, then X again. The rebind is a fresh acceptance at X (a newer ticket than T, which is
+  // highWater[X]), so it publishes on its ticket and its order. CONTROL for the per-host refusal.
+  const env = envWith({ b: B_CARD }), Y = 'second.example';
+  assert.equal((await bindVanity(env, 'b', OWNER)).redirect, 'published');
+  const tx = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
+  assert.equal((await bindVanity(env, 'b', Y)).redirect, 'published');
+  assert.equal((await page(env, '/b')).headers.get('location'), `https://${Y}/`, 'CONTROL: /b → Y');
+  const back = await bindVanity(env, 'b', OWNER);
+  assert.ok(env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed > tx, 'CONTROL: the rebind of X is a fresh acceptance');
+  assert.equal(back.redirect, 'published', 'binding X again after Y was refused');
+  assert.equal((await page(env, '/b')).headers.get('location'), `https://${OWNER}/`, 'the card stayed on Y');
+});
+
+test('🔴 r13 an acceptance refused on order still raises its host\'s high water: an older acceptance of that host with a newer order stays unpublished', async () => {
+  // b-old admits T1 at X, held before /register; a admits T2 at X, held before /point; b-new admits T3,
+  // registers (order 1), held before /point; b → Y registers (order 2) and is published. b-old registers
+  // (order 3), is accepted with T1 and held before /confirm; a takes X with T2 (b's /lost 503); b-new
+  // takes X back with T3, but its /confirm is refused: Y's order 2 is newer. b-old's /confirm then
+  // carries the newest order and T1. Had only PUBLISHED tickets counted, X/T1 would be written and the
+  // retried T2 loss would clear /b while Y serves b.
+  const env = envWith({ a: CARD, b: B_CARD }), Y = 'second.example';
+  const lives = env.CARD_LIFETIMES, ns = env.HOST_BINDINGS;
+  const gate = () => ({ reached: deferred(), go: deferred() });
+  const reg = gate(), aPoint = gate(), newPoint = gate(), oldConfirm = gate();
+  let blocked = true, holdReg = true, holdA = true, holdNew = false, holdConfirm = true;
+  env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+    const op = new URL(url).pathname, data = JSON.parse(init.body);
+    if (holdReg && id.name === 'b' && op === '/register') { holdReg = false; reg.reached.resolve(); await reg.go.promise; }
+    if (holdConfirm && id.name === 'b' && op === '/confirm' && data.host === OWNER && data.order === 3) { holdConfirm = false; oldConfirm.reached.resolve(); await oldConfirm.go.promise; }
+    if (blocked && id.name === 'b' && op === '/lost') return new Response('unavailable', { status: 503 });
+    return lives.get(id).fetch(url, init);
+  } }) };
+  env.HOST_BINDINGS = { ...ns, get: (id) => ({ async fetch(url, init) {
+    if (new URL(url).pathname === '/point' && id.name === OWNER) {
+      const { handle } = JSON.parse(init.body);
+      if (holdA && handle === 'a') { holdA = false; aPoint.reached.resolve(); await aPoint.go.promise; }
+      if (holdNew && handle === 'b') { holdNew = false; newPoint.reached.resolve(); await newPoint.go.promise; }
+    }
+    return ns.get(id).fetch(url, init);
+  } }) };
+  const hostState = () => ns.storageOf(OWNER)._m.get('host');
+  const life = () => lives.storageOf('b')._m.get('life');
+  const older = bindVanity(env, 'b', OWNER); // T1
+  await reg.reached.promise;
+  const taker = bindVanity(env, 'a', OWNER); // T2
+  await aPoint.reached.promise;
+  holdNew = true;
+  const newer = bindVanity(env, 'b', OWNER); // T3, order 1
+  await newPoint.reached.promise;
+  const t3 = hostState().seq;
+  assert.equal((await bindVanity(env, 'b', Y)).redirect, 'published', 'CONTROL: Y published (order 2)');
+  reg.go.resolve(); // b-old: order 3
+  await oldConfirm.reached.promise;
+  aPoint.go.resolve();
+  assert.equal((await taker).accepted, true, 'CONTROL: a took X');
+  newPoint.go.resolve();
+  assert.equal((await newer).redirect, 'not_published', 'CONTROL: b-new was refused on order (Y is newer)');
+  const failures = [];
+  if (life().highWater?.[OWNER] !== t3) failures.push(`the acceptance refused on order did not raise X's high water: ${life().highWater?.[OWNER]}, T3 ${t3}`);
+  oldConfirm.go.resolve();
+  const late = await older;
+  if (late.redirect !== 'not_published') failures.push(`the older acceptance's late redirect was published: ${late.redirect}`);
+  blocked = false;
+  await ns.alarm(OWNER);
+  assert.deepEqual(hostState().losers, [], 'CONTROL: the retried notices were delivered');
+  const after = await page(env, '/b');
+  if (after.headers.get('location') !== `https://${Y}/`) failures.push(`the T2 loss cleared the card's address: /b ${after.status} → ${after.headers.get('location')}`);
+  assert.deepEqual(failures, []);
+});
+
+test('r13 the per-host high water is bounded by the lifetime: one entry per host bound in it, and a DELETE empties it with the hosts', async () => {
+  const env = envWith({ b: B_CARD }), hosts = ['h1.example', 'h2.example', 'h3.example'];
+  for (let round = 0; round < 3; round++) for (const h of hosts) assert.equal((await bindVanity(env, 'b', h)).redirect, 'published');
+  const life = () => env.CARD_LIFETIMES.storageOf('b')._m.get('life');
+  assert.deepEqual(Object.keys(life().highWater).sort(), hosts, 'one entry per bound host, however many binds');
+  assert.ok(Object.keys(life().highWater).every((h) => life().hosts.includes(h)), 'an entry for a host the lifetime does not hold');
+  assert.equal((await call(env, 'DELETE', '/_api/card/b')).status, 200);
+  assert.deepEqual(life().highWater, {}, 'the ended lifetime\'s high water outlived it');
+  assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: B_CARD })).status, 200);
+  assert.equal((await bindVanity(env, 'b', 'h1.example')).redirect, 'published', 'CONTROL: the next lifetime binds');
+  assert.deepEqual(Object.keys(life().highWater), ['h1.example'], 'CONTROL: the next lifetime keeps its own');
+});

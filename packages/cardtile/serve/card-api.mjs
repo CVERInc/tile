@@ -556,16 +556,17 @@ export class CardLifetime {
     // inverse moving to another host (codex r12: X/T3 published, then Y, then X/T1 wrote over Y, and the
     // T2 loss cleared it). r12 compared against the inverse, and so forgot X once Y replaced it. Every
     // acceptance that reaches here raises it, published or not: one refused on order below is still
-    // newer than any acceptance of the host before it. The same ticket is that newest acceptance (or a
-    // same-owner no-op answering it), so it may still publish: binding X again after Y is one.
-    const high = s.highWater[host];
-    if (high != null && high > ticket) return { published: false, why: 'A newer bind of this address already set it.' };
-    if (high == null || ticket > high) s.highWater[host] = ticket; // stored by whichever branch returns below
-    const same = !!s.inverse && s.inverse.host === host;
-    if (same && s.inverse.ticket === ticket) return { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
+    // newer than any acceptance of the host before it. A ticket ≤ it writes nothing; the same ticket
+    // the inverse holds is the acceptance already published (a same-owner no-op answers it).
+    const high = s.highWater[host], same = !!s.inverse && s.inverse.host === host;
+    if (high != null && ticket <= high) {
+      return same && s.inverse.ticket === ticket ? { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) }
+        : { published: false, why: 'A newer bind of this address already set it.' };
+    }
+    s.highWater[host] = ticket;
     // Another host's tickets come from another object's clock, so between hosts the registration order decides.
     if (!same && s.inverse && s.inverse.order > order) {
-      if (s.highWater[host] !== high) await this.storage.put('life', s);
+      await this.storage.put('life', s); // the high water, raised by an acceptance that does not publish
       return { published: false, why: 'A bind that started later already set this card\'s address.' };
     }
     // the acceptance that wrote it: only a later loss clears it (r11); its order never goes back either
