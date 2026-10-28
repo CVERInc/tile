@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -51,9 +51,28 @@ const fakeKv = (seed = {}) => {
   return {
     _m: m,
     _ttl: new Map(),
+    _meta: new Map(),
+    /** the real KV pages at 1000; a test shrinks it to prove the caller walks the cursor. */
+    _pageSize: 1000,
     async get(k) { return m.has(k) ? m.get(k) : null; },
-    async put(k, v, opts) { m.set(k, v); if (opts?.expirationTtl) this._ttl.set(k, opts.expirationTtl); },
-    async delete(k) { m.delete(k); },
+    async put(k, v, opts) {
+      m.set(k, v);
+      if (opts?.expirationTtl) this._ttl.set(k, opts.expirationTtl);
+      if (opts?.metadata !== undefined) this._meta.set(k, opts.metadata); else this._meta.delete(k);
+    },
+    async delete(k) { m.delete(k); this._meta.delete(k); },
+    // KV.list's shape: { keys: [{ name, metadata? }], list_complete, cursor? }, in key order.
+    async list({ prefix = '', cursor } = {}) {
+      const names = [...m.keys()].filter((k) => k.startsWith(prefix)).sort();
+      const from = cursor ? Number(cursor) : 0;
+      const slice = names.slice(from, from + this._pageSize);
+      const done = from + slice.length >= names.length;
+      return {
+        keys: slice.map((name) => (this._meta.has(name) ? { name, metadata: this._meta.get(name) } : { name })),
+        list_complete: done,
+        ...(done ? {} : { cursor: String(from + slice.length) }),
+      };
+    },
   };
 };
 
@@ -508,4 +527,131 @@ test('assembleSave IGNORES an assets lane the caller sent — the store is the s
 test('thinCard is idempotent and assetManifest counts decoded bytes', () => {
   assert.equal(thinCard(thinCard(CARD)), thinCard(CARD));
   assert.equal(assetManifest(thinCard(CARD)).length, 0);
+});
+
+// ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────────
+//
+// chodaict's ruling: an owner may delete their Card — nothing kept, the handle free at once. What IS
+// kept is one fact with no content in it: that this handle had a card and when it went, so the
+// public address answers 410 Gone instead of pretending it never existed.
+
+const page = (env, path) => worker.fetch(new Request('https://card.feelreef.com' + path), env);
+const previewIdOf = async (env, handle) => {
+  const body = await (await call(env, 'POST', '/_api/preview', { handle, markdown: thinCard(CARD) })).json();
+  return /\/_preview\/([0-9a-f]{32})$/.exec(body.url)[1];
+};
+
+test('🔴 delete → 410 → PUT → 200: the handle is released, and the next save brings it back', async () => {
+  const env = envWith({ t: CARD });
+  // CONTROL: the card serves before the delete, so the 410 below is about the delete.
+  assert.equal((await page(env, '/t')).status, 200);
+
+  const res = await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { handle: 't', deleted: true });
+  assert.equal(env.CARDS._m.has('t'), false, 'the card body survived its delete');
+
+  for (const path of ['/t', '/t.md', '/t/favicon.ico']) {
+    const gone = await page(env, path);
+    assert.equal(gone.status, 410, `${path} after delete`);
+    const text = await gone.text();
+    assert.ok(!text.includes('Tester') && !text.includes(GIF), `${path}: the 410 leaked the old card`);
+  }
+  assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404, 'the API still sees a card');
+
+  const created = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('Tester', 'Next') });
+  assert.equal(created.status, 200);
+  assert.equal((await created.json()).created, true);
+  assert.equal(env.CARDS._m.has(goneKey('t')), false, 'the save left the gone marker behind');
+  const back = await page(env, '/t');
+  assert.equal(back.status, 200);
+  assert.ok((await back.text()).includes('Next'));
+});
+
+test('🔴 the gone marker holds no content — only that it was deleted, and when', async () => {
+  const env = envWith({ t: CARD, 'stop:t': JSON.stringify({ stopped_at: 'x', reason: 'private words' }) });
+  const before = Date.now();
+  await call(env, 'DELETE', '/_api/card/t');
+  const raw = env.CARDS._m.get(goneKey('t'));
+  assert.equal(typeof raw, 'string');
+  const marker = JSON.parse(raw);
+  // the WHOLE shape, not "has deleted_at": an extra field is exactly how content creeps back in
+  assert.deepEqual(Object.keys(marker), ['deleted_at']);
+  assert.match(marker.deleted_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  assert.ok(Date.parse(marker.deleted_at) >= before - 1000);
+  assert.ok(raw.length < 64, `a ${raw.length}-byte marker is carrying something`);
+  assert.equal(env.CARDS._meta.has(goneKey('t')), false, 'the marker carries metadata');
+});
+
+test('🔴 delete sweeps stop:<handle> and EVERY preview of that handle — and only that handle', async () => {
+  const env = envWith({ t: CARD, other: CARD, 'stop:t': '{}', 'stop:other': '{}' });
+  env.CARDS._pageSize = 2; // more previews than one page: the sweep must follow the cursor
+  const mine = [await previewIdOf(env, 't'), await previewIdOf(env, 't'), await previewIdOf(env, 't')];
+  const theirs = [await previewIdOf(env, 'other'), await previewIdOf(env, 'other')];
+  // CONTROL: the previews exist and render before the delete.
+  for (const id of mine) assert.equal((await page(env, `/_preview/${id}`)).status, 200);
+
+  await call(env, 'DELETE', '/_api/card/t');
+  for (const id of mine) {
+    assert.equal(env.CARDS._m.has(previewKey(id)), false, `preview ${id} of a deleted card survived`);
+    assert.equal((await page(env, `/_preview/${id}`)).status, 404);
+  }
+  assert.equal(env.CARDS._m.has('stop:t'), false);
+  // the neighbour is untouched
+  for (const id of theirs) assert.equal(env.CARDS._m.has(previewKey(id)), true, "swept another handle's preview");
+  assert.equal(env.CARDS._m.get('other'), CARD);
+  assert.equal(env.CARDS._m.get('stop:other'), '{}');
+});
+
+test("🔴 delete unbinds the card's own domain, so the next owner of the handle does not inherit it", async () => {
+  const env = envWith({
+    t: CARD, 'vanity:me.example': 't', 'vanityof:t': 'me.example',
+    other: CARD, 'vanity:else.example': 'other', 'vanityof:other': 'else.example',
+  });
+  // CONTROL: bound, the canonical address 301s to the creator's domain.
+  assert.equal((await page(env, '/t')).status, 301);
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(env.CARDS._m.has('vanity:me.example'), false);
+  assert.equal(env.CARDS._m.has('vanityof:t'), false);
+  assert.equal(env.CARDS._m.get('vanity:else.example'), 'other');
+  assert.equal(env.CARDS._m.get('vanityof:other'), 'else.example');
+  // a reused handle is served at its own address, not 301'd to the previous owner's domain
+  await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
+  assert.equal((await page(env, '/t')).status, 200);
+});
+
+test('delete twice: the second answers deleted:false and keeps the first marker as it was', async () => {
+  const env = envWith({ t: CARD });
+  await call(env, 'DELETE', '/_api/card/t');
+  const first = env.CARDS._m.get(goneKey('t'));
+  const again = await call(env, 'DELETE', '/_api/card/t');
+  assert.equal(again.status, 200);
+  assert.deepEqual(await again.json(), { handle: 't', deleted: false });
+  assert.equal(env.CARDS._m.get(goneKey('t')), first);
+  assert.equal((await page(env, '/t')).status, 410);
+});
+
+test('delete a handle that never existed: deleted:false, no marker, still the ordinary 404', async () => {
+  const env = envWith({ other: CARD });
+  const res = await call(env, 'DELETE', '/_api/card/never');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { handle: 'never', deleted: false });
+  // a marker here would make the public page claim a card that never was
+  assert.deepEqual([...env.CARDS._m.keys()], ['other']);
+  assert.equal((await page(env, '/never')).status, 404);
+});
+
+test('delete_card uses the bearer guard and refuses bad handles before touching the store', async () => {
+  const env = envWith({ t: CARD });
+  assert.equal((await call(env, 'DELETE', '/_api/card/t', null, null)).status, 401);
+  assert.equal((await call(env, 'DELETE', '/_api/card/t', null, 'wrong')).status, 401);
+  assert.equal((await call(env, 'DELETE', '/_api/card/Bad_Handle!')).status, 400);
+  assert.deepEqual([...env.CARDS._m], [['t', CARD]], 'a refused delete changed the store');
+  // CONTROL: the authorised call does delete.
+  assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
+});
+
+test('a gone marker WITH a card body is not 410 — the card wins (a save that raced the delete)', async () => {
+  const env = envWith({ t: CARD, [goneKey('t')]: JSON.stringify({ deleted_at: new Date().toISOString() }) });
+  assert.equal((await page(env, '/t')).status, 200);
 });

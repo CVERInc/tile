@@ -39,6 +39,13 @@ const KV_MAX_BYTES = 25 * 1024 * 1024;
 /** A preview is a look at an unsaved draft, not a publication. One hour is longer than any edit. */
 export const PREVIEW_TTL = 3600;
 
+/**
+ * A deleted card's tombstone (reef#2618). Holds `{ deleted_at }` and nothing else — no content, no
+ * account — so the public address can say 410 Gone rather than "never existed". The next save clears
+ * it. `:` is not in VALID_HANDLE, so it can never be a handle.
+ */
+export const goneKey = (handle) => `gone:${handle}`;
+
 /** where a parked draft lives. Prefixed so it can never collide with a handle (`:` is not in VALID_HANDLE). */
 export const previewKey = (id) => `_preview:${id}`;
 
@@ -148,6 +155,52 @@ async function writeCard(store, handle, md) {
 }
 
 /**
+ * delete_card: everything this store holds under a handle goes, and one content-free fact stays.
+ *
+ * chodaict ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
+ * handle is free at once. So this removes the card, its serving stop, every parked preview of it, and
+ * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` so the public address answers
+ * 410 instead of an ordinary 404. The tombstone does not reserve the handle: the next save clears it.
+ *
+ * 🔴 The domain binding goes too. Left behind, `vanityof:<handle>` would 301 whoever creates this
+ * handle next to the previous owner's domain, and that domain would serve the new stranger's card.
+ * (The Cloudflare-for-SaaS hostname itself is outside this store; unbinding it stays an operator act.)
+ *
+ * The marker is written FIRST: the renderer only reads it when the card body is missing, so it is
+ * invisible until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
+ * Returns whether there was a card to delete; a handle that never had one gets no marker, because a
+ * 410 there would claim a card that never was.
+ */
+async function deleteCard(store, handle) {
+  const had = (await store.get(handle)) != null;
+  const marked = (await store.get(goneKey(handle))) != null;
+  if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
+  await store.delete(handle);
+  await store.delete(`stop:${handle}`);
+
+  const host = await store.get(`vanityof:${handle}`);
+  if (host != null) {
+    // only the forward binding that still points HERE — a domain since re-bound elsewhere is not ours
+    if ((await store.get(`vanity:${host}`)) === handle) await store.delete(`vanity:${host}`);
+    await store.delete(`vanityof:${handle}`);
+  }
+
+  // Previews are keyed by a random id, so they are found by the handle stamped in their metadata.
+  // A preview parked before that stamp existed has none and expires within PREVIEW_TTL on its own.
+  // 🔴 Collect the whole listing BEFORE deleting: deleting under a live cursor shifts what the next
+  // page starts from, and the drafts it skips are exactly the ones this promised were gone.
+  const drafts = [];
+  let cursor;
+  do {
+    const page = await store.list({ prefix: previewKey(''), ...(cursor ? { cursor } : {}) });
+    for (const k of page.keys) if (k.metadata && k.metadata.handle === handle) drafts.push(k.name);
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  for (const name of drafts) await store.delete(name);
+  return had;
+}
+
+/**
  * handleApi: the `/_api/*` surface, or null when the request is not ours (the card renderer takes it).
  *
  * Routes:
@@ -155,6 +208,7 @@ async function writeCard(store, handle, md) {
  *   GET    /_api/card/<handle>               get_card      thin markdown + manifest + version
  *   GET    /_api/card/<handle>/full          —             full markdown for the owner
  *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run }
+ *   DELETE /_api/card/<handle>               delete_card   → { handle, deleted } (reef#2618)
  *   PUT    /_api/card/<handle>/stop          —             { reason? } → stop serving
  *   DELETE /_api/card/<handle>/stop          —             resume serving
  *   PUT    /_api/card/<handle>/asset/<id>    put_asset     { base64, mime }
@@ -212,7 +266,9 @@ export async function handleApi(request, env, url) {
     const current = await readCard(store, handle);
     const { md } = assembleSave(body.markdown, current && current.md);
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL });
+    // The handle rides as METADATA so delete_card can find this draft from `list()` alone, without
+    // reading a megabyte of someone's pictures per key to learn whose it was (reef#2618).
+    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle } });
     return json({
       url: `https://${url.host}/_preview/${id}`,
       expires_in_seconds: PREVIEW_TTL,
@@ -386,6 +442,11 @@ export async function handleApi(request, env, url) {
 
       const res = await writeCard(store, handle, md);
       if (res.conflict) return json(res, 409);
+      // the handle lives again: a deleted card's tombstone goes the moment a card is back under it
+      // (after the write landed, so a failed save never un-says the old delete)
+      // A read, not a blind delete: a read is the cheaper KV operation, and almost every create
+      // finds no tombstone.
+      if (!current && (await store.get(goneKey(handle))) != null) await store.delete(goneKey(handle));
       return json({
         handle,
         version: res.version,
@@ -401,6 +462,9 @@ export async function handleApi(request, env, url) {
         orphans,
       });
     }
+
+    // ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────
+    if (method === 'DELETE') return json({ handle, deleted: await deleteCard(store, handle) });
     return json({ error: `${method} not allowed here.` }, 405);
   }
 

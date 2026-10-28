@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -784,6 +784,21 @@ const router = {
     if (stopped != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
         status: 404,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow',
+          Vary: 'Accept',
+        },
+      });
+    }
+    // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
+    // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
+    // and the page names nothing from the old card. no-store: the handle is free, and the next
+    // save must show at once.
+    if (cardMd == null && (await store.get(goneKey(resolved.handle))) != null) {
+      return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
+        status: 410,
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
