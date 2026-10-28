@@ -83,29 +83,52 @@ export const generationOf = async (store, handle) => (await store.get(genKey(han
 export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen) || GEN0) === String(gen || GEN0);
 
 /**
- * A domain binding belongs to a lifetime too (reef#2618 r4). `vanity:<host>` → handle and
- * `vanityof:<handle>` → host keep their plain values, and carry `{ gen }` as METADATA: the generation
- * the handle was in when the binding was made. The renderer honours a binding only while that equals
- * the handle's current `gen:` (`isCurrentGen`, absent ⇒ 0).
+ * A domain binding belongs to a lifetime, and lives under that lifetime's keys (reef#2618 r5):
  *
- * 🔴 Why: DELETE removes the bindings it can see, but a cached miss for `vanityof:<handle>` (or a
- * forward-only binding, which has no inverse to find) leaves them stored. A binding that named only
- * the handle then pointed the former owner's domain at the NEXT owner's card (codex r3 finding 2).
- * Stamped, a binding DELETE missed belongs to the generation DELETE ended, and nothing honours it.
+ *   vanitybind:<handle>:<gen>:<host>   the binding itself: in this lifetime, <host> serves <handle>
+ *   vanityof:<handle>:<gen>            → host: in this lifetime the card's one address is <host> (301)
+ *   vanity:<host>                      → handle: a POINTER, the only thing a request for <host> can look up
  *
- * Migration: an unstamped binding is generation 0's — every binding written before this shipped, when
- * no `gen:` key existed yet. That reading is permanent, not a fallback: a one-off copy must NOT stamp
- * old bindings with their handle's current generation (that would revive one a DELETE missed).
+ * The renderer follows the pointer to a handle, reads that handle's `gen:`, and serves the host only
+ * if `vanitybind:<handle>:<gen>:<host>` exists. The pointer names a handle and nothing else; whether
+ * the binding is live is decided by a key of the current lifetime.
  *
- * bindVanity is the one way to make a binding: it reads the generation and stamps both keys. A
- * `redirect: false` binding writes only the forward key (the canonical address keeps serving).
+ * 🔴 Why keys and not a stamp (codex r4 findings 1, 2): r4 kept the two shared keys and stamped them
+ * with `{ gen }`. A bind admitted in an ended lifetime then landed its stale stamp on top of the next
+ * lifetime's binding, and the domain went dark; DELETE's cleanup read the shared keys after its
+ * rotation and deleted the binding the next lifetime had just made. KV has no compare-and-swap, so no
+ * read around a put to a shared key can stop either. Here the stale bind writes its own dead
+ * generation's keys, and the pointer it writes names the same handle the live binding's pointer does.
+ * DELETE never touches the pointer (see deleteCard).
+ *
+ * The pointer is written LAST, and only if the handle's generation is still the admitted one. That
+ * re-read matters only when the domain has moved to ANOTHER handle meanwhile (a's bind, admitted before
+ * a was deleted, must not point the domain back at a after it was bound to b). It is a check, not a
+ * lock: a pointer put held between that re-read and its landing still wins. Closing that needs one
+ * writer per host (a Durable Object); see cards/README.md. The same-handle races above do not depend on it.
+ *
+ * Migration: bindings made before generations are `vanity:<host>` → handle and bare `vanityof:<handle>`
+ * → host. They are generation 0's: in generation 0 the pointer alone is a binding and the bare inverse
+ * is read as `vanityof:<handle>:0` (the same fallback as a legacy body). A handle in generation 0 has
+ * never been deleted, so no ended lifetime can have made its pointer. After its first DELETE neither is
+ * honoured again.
+ *
+ * bindVanity is the one way to make a binding. A `redirect: false` binding writes no `vanityof:` (the
+ * canonical address keeps serving). Returns `stale_generation` when the handle's lifetime ended while
+ * it ran: its keys are dead and the pointer was not written.
  */
 export const vanityKey = (host) => `vanity:${host}`;
-export const vanityOfKey = (handle) => `vanityof:${handle}`;
+const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
+export const vanityBindKey = (handle, gen, host) => `${vanityBindPrefix(handle)}${gen}:${host}`;
+export const vanityOfKey = (handle, gen) => `vanityof:${handle}:${gen}`;
+/** LEGACY inverse binding, read for generation 0 only. */
+const legacyVanityOfKey = (handle) => `vanityof:${handle}`;
 export async function bindVanity(store, handle, host, { redirect = true } = {}) {
   const gen = await generationOf(store, handle);
-  await store.put(vanityKey(host), handle, { metadata: { gen } });
-  if (redirect) await store.put(vanityOfKey(handle), host, { metadata: { gen } });
+  await store.put(vanityBindKey(handle, gen, host), handle);
+  if (redirect) await store.put(vanityOfKey(handle, gen), host);
+  if ((await generationOf(store, handle)) !== gen) return { handle, host, gen, ...staleWrite(handle) };
+  await store.put(vanityKey(host), handle);
   return { handle, host, gen };
 }
 
@@ -114,6 +137,12 @@ async function readGen(store, key, legacy, gen) {
   const [v, old] = await Promise.all([store.get(key), gen === GEN0 ? store.get(legacy) : null]);
   return v != null ? v : (old != null ? old : null);
 }
+
+/** is `host` bound to `handle` in generation `gen`? In generation 0 the pointer alone is (see vanityKey). */
+export const isBound = async (store, handle, gen, host) =>
+  gen === GEN0 || (await store.get(vanityBindKey(handle, gen, host))) != null;
+/** the host generation `gen` of `handle` redirects to, or null */
+export const boundHostOf = (store, handle, gen) => readGen(store, vanityOfKey(handle, gen), legacyVanityOfKey(handle), gen);
 
 /**
  * liveCard: the current lifetime's card body (and stop) under a handle. The ONE read every exit uses
@@ -267,9 +296,10 @@ async function writeCard(store, handle, md, admitted) {
  * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` so the public address answers
  * 410 instead of an ordinary 404. The tombstone does not reserve the handle: the next save clears it.
  *
- * 🔴 The domain binding goes too. Left behind, `vanityof:<handle>` would 301 whoever creates this
- * handle next to the previous owner's domain, and that domain would serve the new stranger's card.
- * (The Cloudflare-for-SaaS hostname itself is outside this store; unbinding it stays an operator act.)
+ * 🔴 The domain binding goes too: its keys are the ended lifetime's (see vanityKey), so the next owner
+ * of this handle is neither 301'd to the previous owner's domain nor served on it. The shared
+ * `vanity:<host>` pointer stays, inert. (The Cloudflare-for-SaaS hostname itself is outside this
+ * store; unbinding it stays an operator act.)
  *
  * The marker is written FIRST: the renderer only reads it when the card body is missing, so it is
  * invisible until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
@@ -290,49 +320,42 @@ async function writeCard(store, handle, md, admitted) {
  */
 async function deleteCard(store, handle) {
   const { md, gen } = await liveCard(store, handle);
-  const listed = async (prefix) => {
+  // 🔴 Collect each whole listing BEFORE deleting: deleting under a live cursor shifts what the next
+  // page starts from, and the keys it skips are exactly the ones this promised were gone.
+  const listed = async (prefix, keep = () => true) => {
     const names = [];
     let cursor;
     do {
       const page = await store.list({ prefix, ...(cursor ? { cursor } : {}) });
-      for (const k of page.keys) names.push(k.name);
+      for (const k of page.keys) if (keep(k)) names.push(k.name);
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
     return names;
   };
-  // the bare legacy body counts as found in any generation (it is only SERVED in generation 0)
-  const [bodies, stops, marked, bare] = await Promise.all([
-    listed(cardKey(handle, '')), listed(stopKey(handle, '')), store.get(goneKey(handle)).then((v) => v != null),
-    store.get(legacyCardKey(handle)),
+  // 🔴 Everything this deletes is listed BEFORE the rotation (r5, codex r4 finding 2). A key that
+  // existed then was written under a generation read before this rotation, so the rotation ends it.
+  // A key the next lifetime writes while this is still deleting is not in these lists, and nothing
+  // after the rotation reads the store to decide what to delete. Previews are keyed by a random id, so
+  // they are found by the handle in their metadata (one parked before that stamp has none and expires
+  // within PREVIEW_TTL). The bare legacy body counts as found in any generation (only SERVED in 0).
+  const [bodies, stops, bindings, inverses, drafts, marked, bare] = await Promise.all([
+    listed(cardKey(handle, '')), listed(stopKey(handle, '')),
+    listed(vanityBindPrefix(handle)), listed(vanityOfKey(handle, '')),
+    listed(previewKey(''), (k) => k.metadata && k.metadata.handle === handle),
+    store.get(goneKey(handle)).then((v) => v != null), store.get(legacyCardKey(handle)),
   ]);
   const had = md != null || bodies.length > 0 || bare != null;
   if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
   await store.put(genKey(handle), newGen());
-  // every lifetime's keys, the read generation's even if the listing has not caught up, and the legacy pair
-  const doomed = new Set([...bodies, ...stops, cardKey(handle, gen), stopKey(handle, gen), legacyCardKey(handle), legacyStopKey(handle)]);
+  // every listed key, the read generation's body and stop even if the listing has not caught up, and
+  // the legacy keys (read in generation 0 only, which this handle has now left for good)
+  const doomed = new Set([
+    ...bodies, ...stops, cardKey(handle, gen), stopKey(handle, gen), legacyCardKey(handle), legacyStopKey(handle),
+    ...bindings, ...inverses, legacyVanityOfKey(handle), ...drafts,
+  ]);
+  // 🔴 Not `vanity:<host>`: that pointer is shared with whatever lifetime binds the host next, and is
+  // inert without a binding of the current one (see vanityKey). Rebinding the host replaces it.
   for (const k of doomed) await store.delete(k);
-
-  // Tidying, not protection: the rotation above already made every binding of the ended lifetime inert
-  // (see vanityKey). One this read misses stays stored, and nothing honours it.
-  const host = await store.get(vanityOfKey(handle));
-  if (host != null) {
-    // only the forward binding that still points HERE — a domain since re-bound elsewhere is not ours
-    if ((await store.get(vanityKey(host))) === handle) await store.delete(vanityKey(host));
-    await store.delete(vanityOfKey(handle));
-  }
-
-  // Previews are keyed by a random id, so they are found by the handle stamped in their metadata.
-  // A preview parked before that stamp existed has none and expires within PREVIEW_TTL on its own.
-  // 🔴 Collect the whole listing BEFORE deleting: deleting under a live cursor shifts what the next
-  // page starts from, and the drafts it skips are exactly the ones this promised were gone.
-  const drafts = [];
-  let cursor;
-  do {
-    const page = await store.list({ prefix: previewKey(''), ...(cursor ? { cursor } : {}) });
-    for (const k of page.keys) if (k.metadata && k.metadata.handle === handle) drafts.push(k.name);
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  for (const name of drafts) await store.delete(name);
   return had;
 }
 

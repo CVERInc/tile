@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, vanityOfKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -142,11 +142,12 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // card. A missing key is now the same failure, so seeding is part of binding a domain, not an
 // afterthought: see lab/vanity-bindings.mjs.
 //
-// 🔴 And each binding is honoured only in the lifetime it was made in (reef#2618 r4, card-api
-// vanityKey): its metadata `{ gen }` must equal the handle's current `gen:`. A binding a DELETE missed
-// would otherwise hand the former owner's domain to the next owner of the handle.
+// 🔴 And a binding belongs to one lifetime of the handle (reef#2618 r4, r5; card-api vanityKey).
+// `vanity:<host>` is only a pointer to a handle; the host serves that handle only while
+// `vanitybind:<handle>:<gen>:<host>` exists for its CURRENT `gen:`, and the inverse is
+// `vanityof:<handle>:<gen>`. A binding of an ended lifetime would otherwise hand the former owner's
+// domain to the next owner of the handle. Pre-generation bindings are generation 0's.
 const VANITY_KEY = (host) => vanityKey(host); // card-api's, called late: the two modules import each other
-const VANITY_OF_KEY = (handle) => vanityOfKey(handle);
 
 // canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
 const CANON_HOST = 'card.feelreef.com';
@@ -796,9 +797,9 @@ const router = {
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
     // next owner's card. The generation read here is the one the card is read under.
-    const bound = host && host !== CANON_HOST ? await store.getWithMetadata(VANITY_KEY(host)) : null;
-    const boundGen = bound && bound.value != null ? await generationOf(store, bound.value) : null;
-    const vanityHandle = boundGen != null && isCurrentGen(bound.metadata, boundGen) ? bound.value : null;
+    const pointer = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    const boundGen = pointer != null ? await generationOf(store, pointer) : null;
+    const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
     if (!resolved) {
@@ -896,8 +897,7 @@ const router = {
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
-    const inverse = wouldRedirect ? await store.getWithMetadata(VANITY_OF_KEY(resolved.handle)) : null;
-    const ownHost = inverse && inverse.value != null && isCurrentGen(inverse.metadata, gen) ? inverse.value : null;
+    const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
     if (ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
