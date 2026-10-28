@@ -1364,7 +1364,7 @@ test('🔴 r7 an end its host does not acknowledge fails the DELETE before the r
 
 test('HostBindings keeps its ended set bounded: entries older than ENDED_KEEP_MS go on the next end, and never more than ENDED_MAX', async () => {
   const storage = doStorage(), o = new HostBindings({ storage }, { CARDS: fakeKv({}) });
-  const post = async (op, body) => (await o.fetch(new Request(`https://host-bindings/${op}`, { method: 'POST', body: JSON.stringify({ host: OWNER, ...body }) }))).json();
+  const post = async (op, body) => (await o.fetch(new Request(`https://host-bindings.example/${op}`, { method: 'POST', body: JSON.stringify({ host: OWNER, ...body }) }))).json();
   const ended = () => Object.keys(storage._m.get('host').ended);
   const realNow = Date.now;
   try {
