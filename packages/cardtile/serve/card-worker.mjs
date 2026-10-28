@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, genKey, isCurrentGen, liveCard, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -704,11 +704,12 @@ const router = {
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
       // A preview stamped with a generation that is no longer its handle's (the card was deleted while
-      // it was being parked, reef#2618 r2) is expired. One unstamped (parked before r1) keeps its hour.
+      // it was being parked, reef#2618) is expired. One stamped with no handle (parked before r1)
+      // keeps its hour; a handle without a generation is generation 0, as everywhere (r3).
       const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(pv[1])) : null;
       const meta = row && row.metadata;
-      const stale = row && row.value != null && meta && meta.handle && 'gen' in meta
-        && !isCurrentGen(meta, await env.CARDS.get(genKey(meta.handle)));
+      const stale = row && row.value != null && meta && meta.handle
+        && !isCurrentGen(meta, await generationOf(env.CARDS, meta.handle));
       const draft = row && !stale ? row.value : null;
       if (!draft) {
         return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
@@ -803,12 +804,10 @@ const router = {
     // Card exits read the body and stop marker in parallel before any exit or redirect.
     const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
     if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
-    // liveCard: a body written in a deleted lifetime (reef#2618 r2, card-api genKey) reads as absent here,
-    // so it falls through to the 410/404 below exactly as a missing body does.
-    const [{ md: cardMd }, stopped] = await Promise.all([
-      liveCard(store, resolved.handle),
-      store.get(`stop:${resolved.handle}`),
-    ]);
+    // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
+    // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
+    // 410/404 below exactly as a missing body does.
+    const { md: cardMd, stopped } = await liveCard(store, resolved.handle, { stop: true });
     if (stopped != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
         status: 404,

@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -92,6 +92,9 @@ const call = (env, method, path, body, token = TOKEN) => {
 };
 
 const envWith = (seed) => ({ CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH });
+/** the body every door serves — NOT a raw `get('<handle>')`: a save writes `card:<handle>:<gen>` (r3),
+ *  and a raw read would keep finding the untouched legacy seed and pass without measuring anything. */
+const bodyOf = async (env, handle = 't') => (await liveCard(env.CARDS, handle)).md;
 
 test.before(async () => { TOKEN_HASH = await _internal.sha256Hex(TOKEN); });
 
@@ -239,8 +242,8 @@ test('full owner read refuses bad handles before touching the store', async () =
   const res = await call(env, 'GET', '/_api/card/%54/full');
   assert.equal(res.status, 200);
   assert.equal(await res.text(), CARD);
-  // the body, and the generation that says it is the live one (reef#2618 r2)
-  assert.deepEqual(reads.sort(), ['gen:t', 't']);
+  // the generation, that generation's body, and — generation 0 only — the pre-r3 bare key (reef#2618 r3)
+  assert.deepEqual(reads.sort(), ['card:t:0', 'gen:t', 't']);
 });
 
 // ── serving stop ─────────────────────────────────────────────────────────────────────────────────
@@ -254,26 +257,29 @@ test('stop and resume only set and clear the marker, with or without a card body
     const env = envWith(seed);
     const writes = [], deletes = [];
     const put = env.CARDS.put.bind(env.CARDS);
-    env.CARDS.get = async () => { throw new Error('stop must never read the card body'); };
+    // the generation is the one read a stop makes (r3: the stop belongs to a lifetime); never the body
+    const get = env.CARDS.get.bind(env.CARDS);
+    env.CARDS.get = async (k) => { if (k !== 'gen:t') throw new Error(`stop must never read ${k}`); return get(k); };
     env.CARDS.put = async (k, v, opts) => { writes.push(k); await put(k, v, opts); };
     env.CARDS.delete = async (k) => { deletes.push(k); env.CARDS._m.delete(k); };
     const reason = hasCard ? 'Review requested' : '';
     const stopped = await call(env, 'PUT', '/_api/card/T/stop', hasCard ? { reason } : undefined);
     assert.equal(stopped.status, 200);
     assert.deepEqual(await stopped.json(), { handle: 't', stopped: true });
-    const marker = JSON.parse(env.CARDS._m.get('stop:t'));
+    const marker = JSON.parse(env.CARDS._m.get('stop:t:0'));
     assert.deepEqual(Object.keys(marker).sort(), ['reason', 'stopped_at']);
     assert.equal(marker.reason, reason);
     assert.equal(new Date(marker.stopped_at).toISOString(), marker.stopped_at);
-    assert.deepEqual(writes, ['stop:t']);
-    assert.deepEqual([...env.CARDS._m].filter(([k]) => k !== 'stop:t'), Object.entries(seed));
+    assert.deepEqual(writes, ['stop:t:0']);
+    assert.deepEqual([...env.CARDS._m].filter(([k]) => k !== 'stop:t:0'), Object.entries(seed));
     for (let i = 0; i < 2; i++) {
       const resumed = await call(env, 'DELETE', '/_api/card/t/stop');
       assert.equal(resumed.status, 200);
       assert.deepEqual(await resumed.json(), { handle: 't', stopped: false });
-      assert.equal(env.CARDS._m.has('stop:t'), false);
+      assert.equal(env.CARDS._m.has('stop:t:0'), false);
     }
-    assert.deepEqual(deletes, ['stop:t', 'stop:t']);
+    // generation 0 also clears the pre-r3 `stop:<handle>`, so a legacy stop can always be lifted
+    assert.deepEqual(deletes, ['stop:t:0', 'stop:t', 'stop:t:0', 'stop:t']);
     assert.deepEqual([...env.CARDS._m], Object.entries(seed));
   }
 });
@@ -290,7 +296,8 @@ test('stop and resume use the existing bearer guard, including an authorized con
     assert.equal((await call({ ...env, MCP_TOKEN_HASH: null }, method, '/_api/card/t/stop')).status, 503);
     assert.deepEqual([...env.CARDS._m], before, 'a refused serving action changed the store');
     assert.equal((await call(env, method, '/_api/card/t/stop')).status, 200);
-    assert.equal(env.CARDS._m.has('stop:t'), method === 'PUT');
+    assert.equal(env.CARDS._m.has('stop:t:0'), method === 'PUT');
+    if (method === 'DELETE') assert.equal(env.CARDS._m.has('stop:t'), false, 'resume left the pre-r3 stop behind');
     assert.equal(env.CARDS._m.get('t'), CARD);
   }
 });
@@ -329,7 +336,7 @@ test('🔴 a save sent WITHOUT assets keeps the pictures — this is the whole t
   const thin = thinCard(CARD).replace('hello', 'hello there');
   const res = await call(env, 'PUT', '/_api/card/t', { markdown: thin });
   assert.equal(res.status, 200);
-  const stored = await env.CARDS.get('t');
+  const stored = await bodyOf(env);
   assert.ok(stored.includes(GIF), 'the assets were dropped');
   assert.equal(Object.keys(parseCard(stored).assets).length, 2);
   assert.ok(stored.includes('hello there'), 'the edit did not land');
@@ -339,7 +346,7 @@ test('CONTROL: the same round trip with NO edit is byte-identical to what was st
   // If this drifts, every "the edit landed" assertion above is measuring serialization noise.
   const env = envWith({ t: CARD });
   await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
-  assert.equal(await env.CARDS.get('t'), CARD);
+  assert.equal(await bodyOf(env), CARD);
 });
 
 test('🔴 a NON-canonical card is normalised ONCE and then stops moving', async () => {
@@ -349,10 +356,10 @@ test('🔴 a NON-canonical card is normalised ONCE and then stops moving', async
   assert.notEqual(HAND_TYPED, CARD, 'the fixture is already canonical — this test proves nothing');
   const env = envWith({ t: HAND_TYPED });
   await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(HAND_TYPED) });
-  const first = await env.CARDS.get('t');
+  const first = await bodyOf(env);
   assert.notEqual(first, HAND_TYPED, 'nothing was normalised');
   await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(first) });
-  assert.equal(await env.CARDS.get('t'), first, 'the card is still drifting on the second save');
+  assert.equal(await bodyOf(env), first, 'the card is still drifting on the second save');
 });
 
 test('🔴 orphans are REPORTED, and the bytes are still there afterwards', async () => {
@@ -361,7 +368,7 @@ test('🔴 orphans are REPORTED, and the bytes are still there afterwards', asyn
   assert.deepEqual(body.orphans, ['unused']);
   assert.equal(body.assets_carried, 2);
   // the report is not a deletion
-  assert.ok((await env.CARDS.get('t')).includes('id=unused'), 'reporting an orphan collected it');
+  assert.ok((await bodyOf(env)).includes('id=unused'), 'reporting an orphan collected it');
 });
 
 test('CONTROL: an orphan that becomes referenced stops being reported', async () => {
@@ -382,7 +389,7 @@ test('🔴 base_version guards the write, and the conflict names both sides', as
   assert.equal(body.conflict, true);
   assert.equal(body.expected, stale);
   assert.equal(body.current, await cardVersion(CARD));
-  assert.equal(await env.CARDS.get('t'), CARD, 'a refused save wrote anyway');
+  assert.equal(await bodyOf(env), CARD, 'a refused save wrote anyway');
   // CONTROL: the CORRECT base_version passes. Otherwise the 409 might just mean "guard always fires".
   const ok = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD), base_version: await cardVersion(CARD) });
   assert.equal(ok.status, 200);
@@ -406,7 +413,7 @@ test('dry_run validates and writes nothing', async () => {
   })).json();
   assert.equal(body.dry_run, true);
   assert.equal(body.wouldChange, true);
-  assert.equal(await env.CARDS.get('t'), CARD, 'dry_run wrote');
+  assert.equal(await bodyOf(env), CARD, 'dry_run wrote');
   // CONTROL: an unchanged dry_run reports wouldChange:false — so the flag tracks the content.
   const same = await (await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD), dry_run: true })).json();
   assert.equal(same.wouldChange, false);
@@ -416,7 +423,7 @@ test('an empty markdown is refused — a save is never how a card gets deleted',
   const env = envWith({ t: CARD });
   assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: '' })).status, 400);
   assert.equal((await call(env, 'PUT', '/_api/card/t', {})).status, 400);
-  assert.equal(await env.CARDS.get('t'), CARD);
+  assert.equal(await bodyOf(env), CARD);
 });
 
 test('the structural diff shows what the write actually changed', async () => {
@@ -439,14 +446,14 @@ test('put_asset adds bytes and bumps the version', async () => {
   const body = await (await call(env, 'PUT', '/_api/card/t/asset/two', { base64: GIF, mime: 'image/gif' })).json();
   assert.equal(body.id, 'two');
   assert.notEqual(body.version, before);
-  assert.equal(Object.keys(parseCard(await env.CARDS.get('t')).assets).length, 3);
+  assert.equal(Object.keys(parseCard(await bodyOf(env)).assets).length, 3);
 });
 
 test('put_asset refuses input that is not base64, and a bad id', async () => {
   const env = envWith({ t: CARD });
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/two', { base64: 'not base64!!' })).status, 400);
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/' + encodeURIComponent('a/b'), { base64: GIF })).status, 400);
-  assert.equal(Object.keys(parseCard(await env.CARDS.get('t')).assets).length, 2, 'a refused put wrote anyway');
+  assert.equal(Object.keys(parseCard(await bodyOf(env)).assets).length, 2, 'a refused put wrote anyway');
   // CONTROL: valid base64 under a valid id lands.
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/two', { base64: GIF })).status, 200);
 });
@@ -456,11 +463,11 @@ test('🔴 delete_asset REFUSES while the card still points at it', async () => 
   const res = await call(env, 'DELETE', '/_api/card/t/asset/pic');
   assert.equal(res.status, 409);
   assert.equal((await res.json()).referenced, true);
-  assert.ok((await env.CARDS.get('t')).includes('id=pic'));
+  assert.ok((await bodyOf(env)).includes('id=pic'));
   // CONTROL: the UNreferenced one deletes. So the 409 is about the reference, not about DELETE.
   const gone = await call(env, 'DELETE', '/_api/card/t/asset/unused');
   assert.equal(gone.status, 200);
-  assert.equal(Object.keys(parseCard(await env.CARDS.get('t')).assets).length, 1);
+  assert.equal(Object.keys(parseCard(await bodyOf(env)).assets).length, 1);
 });
 
 test('delete_asset on an id that is not there → 404', async () => {
@@ -491,7 +498,7 @@ test('preview_card parks a draft with a TTL and hands back a URL', async () => {
   // 🔴 the draft carries the pictures — a preview without them answers a different question
   assert.ok((await env.CARDS.get(previewKey(id))).includes(GIF));
   // and the live card is untouched
-  assert.equal(await env.CARDS.get('t'), CARD);
+  assert.equal(await bodyOf(env), CARD);
 });
 
 test('an unknown endpoint under /_api/ is a 404 WITH a token — not a silent pass to the renderer', async () => {
@@ -623,20 +630,22 @@ test("🔴 delete unbinds the card's own domain, so the next owner of the handle
   assert.equal((await page(env, '/t')).status, 200);
 });
 
-test('delete twice: the second answers deleted:false and writes nothing — the first marker stays as it was', async () => {
+test('delete twice: the second answers deleted:false, rewrites no marker, and only starts a new generation', async () => {
   const env = envWith({ t: CARD });
   await call(env, 'DELETE', '/_api/card/t');
   const first = env.CARDS._m.get(goneKey('t'));
   // 🔴 Count the writes, don't compare timestamps: two calls inside one millisecond serialize the same
   // `deleted_at`, so "the marker reads the same" passes even when the second call rewrote it (r1 review
-  // P3: the `had || marked` mutant survived exactly that way). No put at all is the claim.
+  // P3: the `had || marked` mutant survived exactly that way). The claim is the exact list of puts:
+  // the marker is never rewritten, and the generation always is (r3, codex r2 finding 4) — a marker
+  // means a lifetime ended here, and a later one may be live where this request's reads cannot see.
   const puts = [];
   const put = env.CARDS.put.bind(env.CARDS);
   env.CARDS.put = async (k, v, opts) => { puts.push(k); return put(k, v, opts); };
   const again = await call(env, 'DELETE', '/_api/card/t');
   assert.equal(again.status, 200);
   assert.deepEqual(await again.json(), { handle: 't', deleted: false });
-  assert.deepEqual(puts, [], 'the second delete wrote to the store');
+  assert.deepEqual(puts, [genKey('t')], 'the second delete wrote something other than a new generation');
   assert.equal(env.CARDS._m.get(goneKey('t')), first);
   assert.equal((await page(env, '/t')).status, 410);
 });
@@ -662,18 +671,18 @@ test('delete_card uses the bearer guard and refuses bad handles before touching 
 });
 
 test('a gone marker WITH a live card body is not 410 — the live card wins', async () => {
-  // A body of the CURRENT lifetime (here: one from before generations, no tag and no gen key) is the
-  // card. A save that raced the delete is not this case any more — it lands tagged dead (below).
+  // A body of the CURRENT lifetime (here: one from before generations, generation 0's legacy key) is
+  // the card. A save that raced the delete is not this case — it lands on a dead generation's key (below).
   const env = envWith({ t: CARD, [goneKey('t')]: JSON.stringify({ deleted_at: new Date().toISOString() }) });
   assert.equal((await page(env, '/t')).status, 200);
 });
 
-// ── lifetimes (reef#2618 r2) ─────────────────────────────────────────────────────────────────────
+// ── lifetimes (reef#2618 r2, r3) ─────────────────────────────────────────────────────────────────
 //
 // KV has no compare-and-swap, so a write admitted before a delete can still land after it. These
-// reproduce the r1 review's sequences with PROMISE BARRIERS (the write is held at a named await and
-// released after the delete), never with timing — and assert the stale write is not served and the
-// next owner's card is what it was.
+// reproduce the r1 and r2 reviews' sequences with PROMISE BARRIERS (the write is held at a named await
+// and released after the delete), never with timing — and assert the stale write is not served, and
+// the next owner's card is what it was. r3: what makes that true is the KEY, not a check.
 
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 const NEXT = thinCard(CARD).replace('Tester', 'Next owner');
@@ -717,13 +726,14 @@ test('🔴 an old save held on Web Risk across delete + reuse is refused, and th
     assert.deepEqual(await (await call(env, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: true });
     assert.equal((await page(env, '/t')).status, 410);
     assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
-    const nextBody = env.CARDS._m.get('t');
+    const nextBody = await bodyOf(env);
+    assert.ok(nextBody.includes('Next owner'));
     release.resolve();
 
     const stale = await pending;
     assert.equal(stale.status, 409, 'a save from the deleted lifetime was accepted');
     assert.equal((await stale.json()).stale_generation, true);
-    assert.equal(env.CARDS._m.get('t'), nextBody, "the stale save touched the next owner's bytes");
+    assert.equal(await bodyOf(env), nextBody, "the stale save touched the next owner's bytes");
     const res = await page(env, '/t');
     assert.equal(res.status, 200);
     const text = await res.text();
@@ -734,25 +744,40 @@ test('🔴 an old save held on Web Risk across delete + reuse is refused, and th
   }
 });
 
-test('🔴 a save whose put lands AFTER the delete is tagged dead: 410, never the deleted card; the next delete sweeps it', async () => {
-  // The window the before-check cannot close: held INSIDE the put, after every check passed.
-  const env = envWith({ t: CARD });
+/** hold the FIRST put whose key passes `match` until released; `started` resolves to that key. */
+const holdPut = (env, match) => {
   const started = deferred(), release = deferred();
   const put = env.CARDS.put.bind(env.CARDS);
   let hold = true;
   env.CARDS.put = async (k, v, opts) => {
-    if (hold && k === 't') { hold = false; started.resolve(); await release.promise; }
+    if (hold && match(k)) { hold = false; started.resolve(k); await release.promise; }
     return put(k, v, opts);
   };
+  return { started: started.promise, release: () => release.resolve() };
+};
+/** a handle in a lifetime that is not its first: created, deleted, created again. */
+const reborn = async (md = thinCard(CARD)) => {
+  const env = envWith({});
+  await call(env, 'PUT', '/_api/card/t', { markdown: md });
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: md })).status, 200);
+  assert.match(env.CARDS._m.get(genKey('t')), /^[0-9a-f]{24}$/);
+  return env;
+};
+
+test('🔴 a save whose put lands AFTER the delete lands on the dead generation: 410, never the deleted card; the next delete sweeps it', async () => {
+  // The window no check can close: held INSIDE the put, after every check passed.
+  const env = envWith({ t: CARD });
+  const held = holdPut(env, (k) => k === cardKey('t', '0'));
   const pending = call(env, 'PUT', '/_api/card/t',
     { markdown: thinCard(CARD).replace('hello', 'late words'), base_version: await cardVersion(CARD) });
-  await started.promise;
+  await held.started;
   assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
-  release.resolve();
+  held.release();
 
   const stale = await pending;
   assert.equal(stale.status, 409, 'the writer was told "saved" for a write that is never served');
-  assert.ok(env.CARDS._m.get('t').includes('late words'), 'CONTROL: the stale body did land in the store');
+  assert.ok(env.CARDS._m.get(cardKey('t', '0')).includes('late words'), 'CONTROL: the stale body did land in the store');
   for (const path of ['/t', '/t.md', '/t/favicon.ico']) {
     const res = await page(env, path);
     assert.equal(res.status, 410, `${path} resurrected the deleted card`);
@@ -760,64 +785,174 @@ test('🔴 a save whose put lands AFTER the delete is tagged dead: 410, never th
   }
   assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404);
   assert.equal((await call(env, 'GET', '/_api/card/t/full')).status, 404);
-  // the sweep: a dead body is removed, and was never "the card", so nothing new is claimed
-  assert.deepEqual(await (await call(env, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: false });
-  assert.equal(env.CARDS._m.has('t'), false);
+  // the sweep: the next delete removes every lifetime's body
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.deepEqual([...env.CARDS._m.keys()].filter((k) => k.startsWith('card:t:') || k === 't'), []);
 });
 
-test('🔴 a preview held mid-put across the delete is never shown, and removes itself', async () => {
+// ── codex r2's four interleavings (reef#2618 r3) ─────────────────────────────────────────────────
+
+test('🔴 r2#1 a create whose write is held across a second create + delete does not bring either back', async () => {
+  const env = envWith({});
+  const held = holdPut(env, (k) => k.startsWith('card:t:') || k === genKey('t'));
+  const pending = call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'create A') });
+  const key = await held.started;
+  assert.equal(key, cardKey('t', '0'), 'a create wrote something before its body — it must never write gen:');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
+  assert.equal((await page(env, '/t')).status, 410);
+  held.release();
+  assert.equal((await pending).status, 409);
+  const res = await page(env, '/t');
+  assert.equal(res.status, 410, 'the held create resurrected the deleted handle');
+  const text = await res.text();
+  assert.ok(!text.includes('create A') && !text.includes('Next owner'));
+  assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404);
+});
+
+test("🔴 r2#2 an old owner's body put held across delete + reuse leaves the next owner's bytes intact", async () => {
   const env = envWith({ t: CARD });
-  const started = deferred(), release = deferred();
-  const put = env.CARDS.put.bind(env.CARDS);
-  let parked;
-  env.CARDS.put = async (k, v, opts) => {
-    if (k.startsWith(previewKey(''))) { parked = k; started.resolve(); await release.promise; }
-    return put(k, v, opts);
-  };
-  const pending = call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) });
-  await started.promise;
+  const held = holdPut(env, (k) => k === 't' || k.startsWith('card:t:'));
+  const pending = call(env, 'PUT', '/_api/card/t',
+    { markdown: thinCard(CARD).replace('hello', 'former words'), base_version: await cardVersion(CARD) });
+  await held.started;
   await call(env, 'DELETE', '/_api/card/t');
-  release.resolve();
-  const res = await pending;
-  assert.equal(res.status, 409);
-  assert.equal(env.CARDS._m.has(parked), false, 'the late preview stayed in the store');
+  const created = await call(env, 'PUT', '/_api/card/t', { markdown: NEXT });
+  assert.equal(created.status, 200);
+  const nextBody = await bodyOf(env);
+  held.release();
+  assert.equal((await pending).status, 409);
+  assert.equal(await bodyOf(env), nextBody, "the former owner's put overwrote the next owner's body");
+  const full = await call(env, 'GET', '/_api/card/t/full');
+  assert.equal(full.status, 200);
+  assert.equal(await full.text(), nextBody);
+  const res = await page(env, '/t');
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  assert.ok(text.includes('Next owner') && !text.includes('former words'));
+});
+
+test("🔴 r2#3 a stop held across delete + reuse is inert: the next owner's card keeps serving", async () => {
+  const env = envWith({ t: CARD });
+  const held = holdPut(env, (k) => k.startsWith('stop:t'));
+  const pending = call(env, 'PUT', '/_api/card/t/stop', { reason: 'former owner' });
+  await held.started;
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  assert.equal((await page(env, '/t')).status, 200);
+  held.release();
+  assert.equal((await pending).status, 409);
+  assert.ok(env.CARDS._m.has(stopKey('t', '0')), 'CONTROL: the stale stop did land in the store');
+  assert.equal((await page(env, '/t')).status, 200, "a former owner's stop disabled the next owner's card");
+  // CONTROL: a stop in the current lifetime does stop it
+  assert.equal((await call(env, 'PUT', '/_api/card/t/stop', {})).status, 200);
+  assert.equal((await page(env, '/t')).status, 404);
+});
+
+test('🔴 r2#4 a DELETE whose gen: read is a cached negative still ends the lifetime', async () => {
+  const env = await reborn();
+  const base = (await (await call(env, 'GET', '/_api/card/t')).json()).version;
+  const held = holdPut(env, (k) => k.startsWith('card:t:'));
+  const pending = call(env, 'PUT', '/_api/card/t',
+    { markdown: thinCard(CARD).replace('hello', 'late words'), base_version: base });
+  await held.started;
+  const before = env.CARDS._m.get(genKey('t'));
+  // another location: everything current, except a cached "no such key" for gen:t
+  const get = env.CARDS.get.bind(env.CARDS);
+  const remote = { ...env, CARDS: { ...env.CARDS, get: async (k) => (k === genKey('t') ? null : get(k)) } };
+  await call(remote, 'DELETE', '/_api/card/t');
+  assert.notEqual(env.CARDS._m.get(genKey('t')), before, 'the stale read let DELETE skip the new generation');
+  held.release();
+  await pending;
+  const res = await page(env, '/t');
+  assert.equal(res.status, 410, 'the save admitted in the deleted lifetime is live after convergence');
+  assert.ok(!(await res.text()).includes('late words'));
+});
+
+test('a DELETE that reads nothing but a gone marker still starts a new generation', async () => {
+  // The listing can lag too. A marker is evidence enough that a lifetime ended here and a later one may
+  // be live where these reads cannot see; a fresh generation costs one small put.
+  const env = await reborn();
+  const before = env.CARDS._m.get(genKey('t'));
+  env.CARDS._m.set(goneKey('t'), JSON.stringify({ deleted_at: new Date().toISOString() }));
+  const blind = { ...env, CARDS: { ...env.CARDS,
+    get: async (k) => (k === goneKey('t') ? env.CARDS._m.get(k) : null),
+    list: async () => ({ keys: [], list_complete: true }) } };
+  await call(blind, 'DELETE', '/_api/card/t');
+  assert.notEqual(env.CARDS._m.get(genKey('t')), before);
+  assert.equal((await page(env, '/t')).status, 410);
+});
+
+test('🔴 a preview in a later lifetime renders, and one held mid-put across the delete is never shown', async () => {
+  // API-made, not hand-seeded (codex r2 finding 6): the stamp is what is under test, so it is the
+  // API's own stamp. A later lifetime, because generation 0 is also what an absent stamp means.
+  const env = await reborn();
+  const live = await previewIdOf(env, 't');
+  assert.equal((await page(env, `/_preview/${live}`)).status, 200, 'a preview of the live lifetime did not render');
+  const held = holdPut(env, (k) => k.startsWith(previewKey('')));
+  const pending = call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) });
+  const parked = await held.started;
+  await call(env, 'DELETE', '/_api/card/t');
+  held.release();
+  assert.equal((await pending).status, 409);
+  assert.ok(env.CARDS._m.has(parked), 'CONTROL: the late preview did land (its TTL removes it)');
   assert.equal((await page(env, '/' + parked.replace(':', '/'))).status, 404);
 });
 
-test('🔴 the renderer checks the generation itself: a dead-lifetime body or preview is absent', async () => {
-  // Seeded directly, so this holds even if every API-side check were skipped.
+test("🔴 the renderer reads only the current generation's keys — seeded directly, no API involved", async () => {
   const DEAD = 'a'.repeat(24), NOW = 'b'.repeat(24), ID = 'c'.repeat(32);
-  const env = envWith({ t: CARD, 'gen:t': NOW, [previewKey(ID)]: CARD });
-  env.CARDS._meta.set('t', { gen: DEAD });
+  const env = envWith({ [cardKey('t', DEAD)]: CARD, 'gen:t': NOW, [previewKey(ID)]: CARD });
   env.CARDS._meta.set(previewKey(ID), { handle: 't', gen: DEAD });
   assert.equal((await page(env, '/t')).status, 404);
   assert.equal((await page(env, '/t.md')).status, 404);
   assert.equal((await page(env, `/_preview/${ID}`)).status, 404);
   env.CARDS._m.set(goneKey('t'), JSON.stringify({ deleted_at: new Date().toISOString() }));
   assert.equal((await page(env, '/t')).status, 410, 'a dead body hid the gone marker');
-  // CONTROL: the same rows tagged with the CURRENT generation serve.
-  env.CARDS._meta.set('t', { gen: NOW });
+  // a pre-r3 bare body is generation 0's — never read once the handle has been deleted
+  env.CARDS._m.set('t', CARD);
+  assert.equal((await page(env, '/t')).status, 410, 'a legacy body was served in a later lifetime');
+  // CONTROL: the current generation's body and preview serve
+  env.CARDS._m.set(cardKey('t', NOW), CARD);
   env.CARDS._meta.set(previewKey(ID), { handle: 't', gen: NOW });
   assert.equal((await page(env, '/t')).status, 200);
   assert.equal((await page(env, `/_preview/${ID}`)).status, 200);
-  // and a body from before generations (no tag, no gen key) is the card
-  assert.equal((await page(envWith({ t: CARD }), '/t')).status, 200);
+  // stops: a dead lifetime's is inert, a legacy one is too, the current one stops
+  env.CARDS._m.set(stopKey('t', DEAD), '{}');
+  env.CARDS._m.set('stop:t', '{}');
+  assert.equal((await page(env, '/t')).status, 200, 'a stop from another lifetime stopped this one');
+  env.CARDS._m.set(stopKey('t', NOW), '{}');
+  assert.equal((await page(env, '/t')).status, 404);
 });
 
-test('a create starts a new lifetime; an update keeps it; a delete ends it', async () => {
-  const env = envWith({});
-  await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
-  const born = env.CARDS._m.get('gen:t');
-  assert.match(born, /^[0-9a-f]{24}$/);
-  assert.deepEqual(env.CARDS._meta.get('t'), { gen: born });
+test("migration: a pre-r3 body and stop are generation 0's, and the new key wins once written", async () => {
+  const env = envWith({ t: CARD, 'stop:t': '{}' });
+  assert.equal((await page(env, '/t')).status, 404, 'a legacy stop no longer stops');
+  await call(env, 'DELETE', '/_api/card/t/stop');
+  assert.equal((await page(env, '/t')).status, 200, 'a legacy body is not served');
   const v = (await (await call(env, 'GET', '/_api/card/t')).json()).version;
   assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT, base_version: v })).status, 200);
-  assert.equal(env.CARDS._m.get('gen:t'), born, 'an update started a new lifetime');
-  assert.deepEqual(env.CARDS._meta.get('t'), { gen: born });
-  await call(env, 'DELETE', '/_api/card/t');
-  assert.notEqual(env.CARDS._m.get('gen:t'), born);
+  assert.ok(env.CARDS._m.get(cardKey('t', '0')).includes('Next owner'), 'the first save did not write the new shape');
+  assert.equal(env.CARDS._m.has(genKey('t')), false, 'a save wrote gen:');
+  assert.ok((await (await page(env, '/t')).text()).includes('Next owner'), 'the legacy body shadowed the new one');
+});
+
+test('only DELETE writes gen: — a create, an update and an asset write never do', async () => {
+  const env = envWith({});
+  const puts = [];
+  const put = env.CARDS.put.bind(env.CARDS);
+  env.CARDS.put = async (k, v, opts) => { puts.push(k); return put(k, v, opts); };
   await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
-  const reborn = env.CARDS._m.get('gen:t');
-  assert.ok(reborn !== born && /^[0-9a-f]{24}$/.test(reborn));
-  assert.deepEqual(env.CARDS._meta.get('t'), { gen: reborn });
+  const v = (await (await call(env, 'GET', '/_api/card/t')).json()).version;
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT, base_version: v })).status, 200);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: GIF, mime: 'image/gif' })).status, 200);
+  assert.deepEqual([...new Set(puts)], [cardKey('t', '0')]);
+  await call(env, 'DELETE', '/_api/card/t');
+  const g1 = env.CARDS._m.get(genKey('t'));
+  assert.match(g1, /^[0-9a-f]{24}$/);
+  puts.length = 0;
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) })).status, 200);
+  assert.deepEqual(puts, [cardKey('t', g1)], 'the create in a later lifetime wrote elsewhere');
+  assert.equal(env.CARDS._m.get(genKey('t')), g1);
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.notEqual(env.CARDS._m.get(genKey('t')), g1);
 });
