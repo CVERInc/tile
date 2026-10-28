@@ -10,7 +10,8 @@ import ArchiveView from './ArchiveView.astro';
 import { dateHeading } from '../packages/lingo/locale.mjs';
 import { archivePrefixes } from '../lib/blog.mjs';
 
-const { posts, meta, year, month, pageNum = 1 } = Astro.props;
+// `stamp`: reef#2554, passed through to SiteLayout (pages/[...path].astro, noindex-pass.mjs).
+const { posts, meta, year, month, pageNum = 1, stamp = null } = Astro.props;
 const base = month ? `/${year}/${month}` : `/${year}`;
 const prefix = month ? `${year}-${month}` : `${year}`;          // pubDate is YYYY-MM-DD
 const filtered = posts.filter((p) => (p.date || '').startsWith(prefix));
@@ -21,4 +22,4 @@ const subhead = archivePrefixes(meta).date + heading;
 const pageHref = (n) => (n === 1 ? base : `${base}/page/${n}`);
 ---
 <ArchiveView posts={filtered} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
-  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />
+  heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} stamp={stamp} />

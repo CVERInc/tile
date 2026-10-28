@@ -58,7 +58,7 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // `languageReturn: '<path>'` — where the language chooser sends a visitor back to, for a page whose
 // own address is not a place to return to (the 404: built at /404/, served everywhere). Default:
 // this page.
-const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '', routeCss = '', languageReturn = '' } = Astro.props;
+const { title = '', lang = DEFAULT_LANG, meta = {}, blogPosts = [], alternates = '', bannerLocales = null, robots = '', routeCss = '', languageReturn = '', stamp = null } = Astro.props;
 // Render once so the layout can dedupe a legacy hand-mounted embed before deciding whether to add
 // the born-on site bubble. set:html below emits Astro's already-rendered slot, not author input.
 const renderedPageBody = await Astro.slots.render('default');
@@ -882,6 +882,12 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
     {robots && <meta name="robots" content={robots} />}
+    {/* reef#2554: what this page's own source says — its `noindex:` ('' = not said) and whether
+        sitemap.xml lists it — for noindex-pass.mjs, which decides noindex over the files the build
+        wrote, puts the robots meta in the first stamp's place and removes both. Only the
+        [...path] views pass a `stamp`; every other page renders exactly as before. */}
+    {!robots && stamp && <meta name="sitetile:noindex" content={stamp.noindex === undefined ? '' : String(stamp.noindex)} />}
+    {stamp && <meta name="sitetile:sitemap" content={stamp.sitemap} />}
     <meta property="og:type" content={ogType} />
     {ogType === 'article' && meta['article-published-time'] && <meta property="article:published_time" content={String(meta['article-published-time'])} />}
     {ogType === 'article' && (meta['article-author'] || meta['blog-author']) && <meta property="article:author" content={String(meta['article-author'] || meta['blog-author'])} />}
