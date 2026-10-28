@@ -2283,8 +2283,8 @@ test('🔴 r13 the equal ticket is refused once the inverse names another host: 
   const tx = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
   assert.equal((await bindVanity(env, 'b', Y)).redirect, 'published');
   const lives = env.CARD_LIFETIMES, life = () => lives.storageOf('b')._m.get('life');
-  const confirm = (body) => lives.get(lives.idFromName('b')).fetch('https://card-lifetime/confirm', { method: 'POST', body: JSON.stringify({ handle: 'b', gen: life().gen, ...body }) });
-  const reg = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime/register', { method: 'POST', body: JSON.stringify({ handle: 'b', host: OWNER, gen: life().gen }) })).json();
+  const confirm = (body) => lives.get(lives.idFromName('b')).fetch('https://card-lifetime.example/confirm', { method: 'POST', body: JSON.stringify({ handle: 'b', gen: life().gen, ...body }) });
+  const reg = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime.example/register', { method: 'POST', body: JSON.stringify({ handle: 'b', host: OWNER, gen: life().gen }) })).json();
   assert.equal(reg.order, 3, 'CONTROL: a later registration');
   const res = await (await confirm({ host: OWNER, order: reg.order, ticket: tx })).json();
   assert.equal(res.published, false, `the equal ticket of X was published over Y: ${JSON.stringify(res)}`);
@@ -2302,7 +2302,7 @@ test('🔴 r13 a lifetime stored before highWater existed takes its inverse\'s t
   assert.ok(highWater, 'CONTROL: r13 stores highWater');
   store.set('life', structuredClone(r12));
   const tx = r12.inverse.ticket;
-  const res = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime/confirm', { method: 'POST',
+  const res = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime.example/confirm', { method: 'POST',
     body: JSON.stringify({ handle: 'b', host: OWNER, gen: r12.gen, order: r12.inverse.order + 5, ticket: tx - 1 }) })).json();
   assert.equal(res.published, false, `an older acceptance overwrote an r12 inverse: ${JSON.stringify(res)}`);
   assert.equal(store.get('life').inverse.ticket, tx, 'the r12 inverse\'s ticket went down');
