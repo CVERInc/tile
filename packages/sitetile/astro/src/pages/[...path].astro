@@ -21,7 +21,7 @@ import { contentPageRel } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
-import { noindexPolicy } from '../lib/noindex.mjs';
+import { noindexPolicy, writtenRoutes, routeOutputFile } from '../lib/noindex.mjs';
 
 
 export function getStaticPaths() {
@@ -29,16 +29,32 @@ export function getStaticPaths() {
   // reef#2554: noindex is decided over the FINAL inventory — every route this function emits,
   // whatever its kind (content page, blog index at any mount incl. `/`, post, locale edition) — by
   // the file its route param is written to, the same question sitemap.xml asks (lib/noindex.mjs).
-  // A post's own flag is its own frontmatter; every other route's is the content file writing the
-  // same file. Only a noindex route gets a `robots` prop; every other route's props, and so its
+  // A post's own flag is its own frontmatter, a content page's its content file, the blog index's
+  // home.md when it is mounted at `/` (lib/noindex.mjs). Only a noindex route gets a `robots` prop; every other route's props, and so its
   // bytes, are what they were. (Called at both returns below, after `files` is loaded.)
+  // r4: only the route the build WRITES at a file is decided (writtenRoutes — astro renders the last
+  // of the routes that share a file); a displaced route is unpublished, so it decides nothing, and
+  // the collision itself — which predates noindex — is named in the build log, like loadSite's and
+  // language.astro's warnings, with both sources and the one that was written.
+  const sourceOf = (r) => r.props.kind === 'page' ? `content/${r.params.path ?? 'home'}.md`
+    : r.props.kind === 'post' ? `blog post "${r.props.post.slug}"`
+    : r.props.kind === 'blog-index' ? `the blog index${r.props.pageNum > 1 ? ` page ${r.props.pageNum}` : ''}`
+    : 'a date archive';
   const markNoindex = (out) => {
     const policy = noindexPolicy(files);
-    // date archives are generated lists like the tag/category ones — not pages anyone is sent to,
-    // and not in this decision's inventory (sitemap.xml marks the same three kinds `page`).
+    const written = writtenRoutes(out, (r) => r.params.path);
     for (const r of out) {
+      const file = routeOutputFile(r.params.path);
+      const w = written.get(file);
+      if (w !== r) {
+        console.warn(`sitetile: ${sourceOf(r)} and ${sourceOf(w)} are both routed to ${file} — the build writes ${sourceOf(w)}; ${sourceOf(r)} is not published, and its noindex: and sitemap entry count for nothing. Give one of them another path.`);
+        continue;
+      }
+      // date archives are generated lists like the tag/category ones — not pages anyone is sent
+      // to, and not in this decision's inventory (sitemap.xml marks the same three kinds `page`).
       if (r.props.kind === 'date-archive') continue;
-      const no = r.props.kind === 'post' ? policy.post(r.params.path, r.props.post) : policy.page(r.params.path);
+      const no = r.props.kind === 'post' ? policy.post(r.params.path, r.props.post)
+        : r.props.kind === 'blog-index' ? policy.index(r.params.path) : policy.page(r.params.path);
       if (no) r.props.robots = 'noindex';
     }
     return out;

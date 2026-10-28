@@ -23,7 +23,7 @@
 
 import assert from 'node:assert/strict';
 import { parse as parseHtml } from 'parse5';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
   cpSync, mkdirSync, symlinkSync, writeFileSync,
@@ -849,7 +849,7 @@ const NOINDEX_FORM = (target) => `## Contact ${target}\n%% sitetile: form action
 const NOINDEX_POST = '---\ntitle: Thank you\npubDate: 2026-01-01\n---\nYour response is received.\n';
 const NOINDEX_ROUTE_TARGETS = ['/plain/?x=1#top', '/./dot-thanks', '/thanks.zh-tw/', '/zh-tw/thanks/', '/missing',
   '/devlog/thank-post/', '/zh-tw/devlog/thank-post/', '/thanks.fr/', '/index-thanks/index.html', '/kept/?from=order#top'];
-function buildNoindexFixture(name, files) {
+function buildNoindexFixture(name, files, { stderr } = {}) {
   const NDIR = join(HERE, '..', `.smoke-${name}`);
   const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
   rmSync(NDIR, { recursive: true, force: true });
@@ -864,10 +864,16 @@ function buildNoindexFixture(name, files) {
     writeFileSync(join(NDIR, rel), text, 'utf8');
   }
   const NDIST = join(NDIR, `dist-${name}`);
-  execFileSync('npx', ['astro', 'build', '--outDir', NDIST], {
-    cwd: NDIR, stdio: 'inherit',
+  const opts = {
+    cwd: NDIR,
     env: { ...process.env, SITE_ID: `${name}-smoke`, PLATFORM_ORIGIN: 'https://feelreef.com', SITE_URL: 'https://example.com' },
-  });
+  };
+  if (!stderr) { execFileSync('npx', ['astro', 'build', '--outDir', NDIST], { ...opts, stdio: 'inherit' }); return NDIST; }
+  // `stderr`: the build's stderr is kept for the checks (and still shown), for a build-log warning.
+  const run = spawnSync('npx', ['astro', 'build', '--outDir', NDIST], { ...opts, stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' });
+  process.stderr.write(run.stderr || '');
+  if (run.status !== 0) throw new Error(`astro build (${name}) exited ${run.status}`);
+  stderr.text = run.stderr || '';
   return NDIST;
 }
 console.log('▸ astro build → .smoke-noindex-routes/ (thanks= targets on blog posts, locale-suffixed and dot/index.html spellings)…');
@@ -908,6 +914,28 @@ const NIDIST = buildNoindexFixture('noindex-identity', {
   'blog/done.md': '---\ntitle: Done\npubDate: 2026-01-03\npermalink: /done/index.html/\n---\nReceived.\n',
   'blog/fin.md': '---\ntitle: Fin\npubDate: 2026-01-04\npermalink: /fin/index.html/\n---\nAn ordinary post.\n',
 });
+// reef#2554 r4 — the codex r3 review's inputs. A content page and a post routed to ONE file: the
+// build writes the post (the router emits it last; lib/noindex.mjs writtenRoutes), so the post
+// alone decides that file's head and its sitemap entry, and the displaced content page — whatever
+// its own noindex: says — decides nothing: `shared` (content false, post true), `thanked` (content
+// false, post unflagged but a form's thanks= target), `opened` (content true, post false),
+// `hidden` (content false, the post unlisted: nothing at that file is listed). The collision is
+// named in the build log. `alone` is an uncollided page beside them.
+console.log('▸ astro build → .smoke-noindex-collide/ (content pages and posts routed to one file)…');
+const NCLOG = {};
+const NCDIST = buildNoindexFixture('noindex-collide', {
+  'content/home.md': NOINDEX_PAGE('home', 'blog-unlisted-categories: secret\n'),
+  'content/contact.md': NOINDEX_PAGE('contact', '', NOINDEX_FORM('/devlog/thanked/')),
+  'content/devlog/shared.md': NOINDEX_PAGE('shared-page', 'noindex: false\n'),
+  'content/devlog/thanked.md': NOINDEX_PAGE('thanked-page', 'noindex: false\n'),
+  'content/devlog/opened.md': NOINDEX_PAGE('opened-page', 'noindex: true\n'),
+  'content/devlog/hidden.md': NOINDEX_PAGE('hidden-page', 'noindex: false\n'),
+  'content/alone.md': NOINDEX_PAGE('alone'),
+  'blog/shared.md': '---\ntitle: Shared post\npubDate: 2026-01-01\nnoindex: true\n---\nPost.\n',
+  'blog/thanked.md': '---\ntitle: Thanked post\npubDate: 2026-01-02\n---\nReceived.\n',
+  'blog/opened.md': '---\ntitle: Opened post\npubDate: 2026-01-03\nnoindex: false\n---\nFindable.\n',
+  'blog/hidden.md': '---\ntitle: Hidden post\npubDate: 2026-01-04\ncategories: [secret]\n---\nUnlisted.\n',
+}, { stderr: NCLOG });
 const noindexAt = (dist, p) => readFileSync(join(dist, p, 'index.html'), 'utf8').includes(ROBOTS_NOINDEX);
 const xmlEsc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
 const listedAt = (dist, p) => readFileSync(join(dist, 'sitemap.xml'), 'utf8').includes(`<loc>https://example.com${xmlEsc(p)}</loc>`);
@@ -2059,7 +2087,7 @@ const checks = [
     return !xml.includes('<url>') && /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n\n<\/urlset>\n$/.test(xml);
   }],
   ['🔴 #2554 r2 head and sitemap never disagree: no emitted page is both robots noindex and listed (main + every noindex build)', () =>
-    [DIST, NRDIST, NBDIST, NIDIST].every((d) => noindexDisagreements(d).length === 0)],
+    [DIST, NRDIST, NBDIST, NIDIST, NCDIST].every((d) => noindexDisagreements(d).length === 0)],
   // -- reef#2554 r3: a page is the file its route is written to; a post's own flag is its own --
   ['🔴 #2554 r3 a post\'s own noindex: false wins over the thanks= that lands on it (indexed, listed); its own noindex: true needs no form', () =>
     !noindexAt(NIDIST, 'devlog/kept') && listedAt(NIDIST, '/devlog/kept/')
@@ -2074,6 +2102,25 @@ const checks = [
     !noindexAt(NIDIST, '') && listedAt(NIDIST, '/')],
   ['🔴 #2554 r3 thanks=/thank%26you/ lands on thank&you/index.html → noindex, out of sitemap.xml', () =>
     noindexAt(NIDIST, 'thank&you') && !listedAt(NIDIST, '/thank&you/')],
+  // -- reef#2554 r4: one route is written per file; it alone decides head and sitemap --
+  ['🔴 #2554 r4 a collided file is the post the build writes there (not the content page), for all four collisions', () =>
+    ['shared', 'thanked', 'opened', 'hidden'].every((n) => readFileSync(join(NCDIST, 'devlog', n, 'index.html'), 'utf8').includes(`<title>${n[0].toUpperCase()}${n.slice(1)} post`))],
+  ['🔴 #2554 r4 a post noindex: true over a content page noindex: false → noindex, out of sitemap.xml', () =>
+    noindexAt(NCDIST, 'devlog/shared') && !listedAt(NCDIST, '/devlog/shared/')],
+  ['🔴 #2554 r4 a thanks= on a post over a content page noindex: false → the post\'s thanks default wins: noindex, out of sitemap.xml', () =>
+    noindexAt(NCDIST, 'devlog/thanked') && !listedAt(NCDIST, '/devlog/thanked/')],
+  ['🔴 #2554 r4 a post noindex: false over a content page noindex: true → indexed and listed', () =>
+    !noindexAt(NCDIST, 'devlog/opened') && listedAt(NCDIST, '/devlog/opened/')],
+  ['🔴 #2554 r4 an unlisted post over a content page → the file is not listed by the page it displaced', () =>
+    !listedAt(NCDIST, '/devlog/hidden/') && !listedAt(NCDIST, '/devlog/hidden')],
+  ['🔴 #2554 r4 every collided file is listed at most once, and the uncollided page beside them is untouched', () => {
+    const xml = readFileSync(join(NCDIST, 'sitemap.xml'), 'utf8');
+    return ['shared', 'thanked', 'opened', 'hidden'].every((n) => xml.split(`/devlog/${n}`).length <= 2)
+      && !noindexAt(NCDIST, 'alone') && listedAt(NCDIST, '/alone/');
+  }],
+  ['🔴 #2554 r4 the build log names each collision: both sources and the one written', () =>
+    ['shared', 'thanked', 'opened', 'hidden'].every((n) => NCLOG.text.includes(
+      `sitetile: content/devlog/${n}.md and blog post "${n}" are both routed to devlog/${n}/index.html — the build writes blog post "${n}"`))],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing

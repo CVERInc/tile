@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { noindexPolicy, noindexFlag, routeOutputFile } from './astro/src/lib/noindex.mjs';
+import { noindexPolicy, noindexFlag, routeOutputFile, writtenRoutes } from './astro/src/lib/noindex.mjs';
 import { takeDropWarnings } from './site-core.js';
 
 let passed = 0;
@@ -125,6 +125,24 @@ test('a root-mounted blog index is decided at index.html, where home.md would be
   assert.equal(noindexPolicy({ '/b/content/home.md': page('packages: blog\nblog-path: /\nnoindex: true\n') }).page(undefined), true);
   assert.equal(noindexPolicy({ '/b/content/home.md': page('packages: blog\nblog-path: /\n') }).page(undefined), false);
   assert.equal(noindexPolicy({ '/b/content/home.md': page('noindex: false\n'), '/b/content/c.md': page('', thanks('/')) }).page(undefined), false);
+});
+
+// codex r3 P2 (collisions): when routes share a file the build writes the LAST one the router emits
+// (astro's route-cache keys getStaticPaths' entries by params, a later one overwriting an earlier),
+// and only that route decides; a content page a post or the blog index displaced decides nothing.
+test('writtenRoutes: one route per output file, the last emitted; distinct files untouched', () => {
+  const routes = [{ id: 'page', path: 'devlog/shared' }, { id: 'alone', path: 'alone' }, { id: 'post', path: 'devlog/shared/' }, { id: 'home', path: undefined }];
+  const w = writtenRoutes(routes, (r) => r.path);
+  assert.deepEqual([...w].map(([f, r]) => [f, r.id]), [['devlog/shared/index.html', 'post'], ['alone/index.html', 'alone'], ['index.html', 'home']]);
+});
+
+test('the blog index has no content file of its own except home.md at index.html', () => {
+  const glob = { '/b/content/devlog.md': page('noindex: true\n'), '/b/content/home.md': page('noindex: true\n') };
+  const p = noindexPolicy(glob);
+  assert.equal(p.page('devlog'), true, 'control: as a content page, devlog.md is its own flag');
+  assert.equal(p.index('devlog'), false, 'the index that displaced devlog.md is not decided by it');
+  assert.equal(p.index(undefined), true, 'a blog mounted at `/` keeps home.md\'s flag (home is not emitted there)');
+  assert.equal(noindexPolicy({ '/b/content/c.md': page('', thanks('/devlog/')) }).index('devlog'), true, 'the thanks default still reaches the index');
 });
 
 test('a thanks= naming the home page noindexes `/`; /index.html is that same file', () => {

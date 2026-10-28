@@ -13,8 +13,10 @@
 // `action=inbox` form's `thanks=` sends a visitor after a successful submit. An explicit
 // `noindex: false` on that source wins: some owners want their thanks page found. The own source is
 // the one that produces the page: a content page's content file; a post's own frontmatter; the blog
-// index's — the content file that lands at the same file (home.md for a blog mounted at `/`, which
-// the router displaces in the index's favour). Own frontmatter only, not the `_site.md` layer: a
+// index's — home.md for a blog mounted at `/` (the router never emits home there), else none. And
+// only the route the build actually WRITES at a file decides it (writtenRoutes): when a post or the
+// blog index lands on a content page's file, the content page is displaced, unpublished, and its
+// flag, thanks default and sitemap entry all count for nothing. Own frontmatter only, not the `_site.md` layer: a
 // site-wide `noindex:` would quietly take every page out of search, which is not something one line
 // in a config file should be able to do by accident.
 //
@@ -89,9 +91,30 @@ function thanksFiles(section) {
   return files;
 }
 
-/** content/**.md glob → the decision, asked by route param:
- *    page(param)        — a content page, the blog index or its pager: the own flag is the content
- *                         file that writes the same file;
+/** Routes, in the order pages/[...path].astro emits them → output file → the ONE route written
+ *  there. When two routes land on one file the build writes the LAST of them: astro 7.3.5's
+ *  core/build/generate.js keeps the first pathname's slot (and warns PrerenderRouteConflict for the
+ *  rest), but renders it with the props core/render/route-cache.js keyed for that pathname —
+ *  `keyed.set(paramsKey, sp)` over getStaticPaths' result, a later entry overwriting an earlier one —
+ *  and render/params-and-props.js reads them back through findPathItemByKey. Two params whose
+ *  pathnames differ but whose files agree both render, in order, the later one over the earlier.
+ *  Every other route at that file is DISPLACED: nothing of it is published, so nothing of it may
+ *  decide anything — not its noindex: and not a sitemap entry (reef#2554 r4). */
+export function writtenRoutes(routes, paramOf) {
+  const written = new Map();
+  for (const r of routes) written.set(routeOutputFile(paramOf(r)), r);
+  return written;
+}
+
+/** content/**.md glob → the decision for the route WRITTEN at a file (writtenRoutes), asked by its
+ *  route param:
+ *    page(param)        — a content page: the own flag is its content file's (two content files at
+ *                         one file: the later in glob order, which is the one the router emits later);
+ *    index(param)       — the blog index or its pager: no content file of its own, except home.md
+ *                         for the index written at index.html — a blog mounted at `/`, where the
+ *                         router does not emit home as a page at all and hands `/` to the index.
+ *                         Any other content file at an index's file is an emitted route the index
+ *                         displaced, so its flag counts for nothing;
  *    post(param, post)  — a post: the own flag is the post's own `noindex:` (post.noindex). */
 export function noindexPolicy(glob) {
   const own = new Map();          // output file → the flag of the content file that writes it
@@ -106,6 +129,7 @@ export function noindexPolicy(glob) {
   const decide = (file, flag) => flag === true || (flag === undefined && targets.has(file));
   return {
     page: (param) => { const f = routeOutputFile(param); return decide(f, own.get(f)); },
+    index: (param) => { const f = routeOutputFile(param); return decide(f, f === 'index.html' ? own.get(f) : undefined); },
     post: (param, post) => decide(routeOutputFile(param), noindexFlag(post && post.noindex)),
   };
 }
