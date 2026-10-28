@@ -61,7 +61,7 @@ const ALL = ['---', 'card-page: all', 'title: All', 'accent: #0556ff', 'arrows: 
   '- [ ] %% card: link w=6 icon=shop %% [Three](https://example.com)',
 ].join('\n');
 
-const store = { get: async (h) => (h === 'all' ? ALL : REAL.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (h === 'all' ? ALL : REAL.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
   const b = Buffer.from(await r.arrayBuffer());

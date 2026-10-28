@@ -50,7 +50,7 @@ const withCell = (md, cell) => {
 
 const envFor = (md, extra = {}) => {
   const kv = new Map([['maple', md], [`vanity:${OWN}`, 'maple']]);
-  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null }, ...extra };
+  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra };
 };
 const robots = async (md, { url = `https://${OWN}/`, headers = {}, extra } = {}) => {
   const res = await worker.fetch(new Request(url, { redirect: 'manual', headers }), envFor(md, extra));
@@ -144,7 +144,7 @@ test('a cell typed after an Object.prototype member still serves 200 and counts 
 // ── the other exits the blank rule reaches, and the rules it must lose to ───────────────────────
 const exitHeader = async (md, path, { handle = 'maple', extra } = {}) => {
   const kv = new Map([[handle, md], [`vanity:${OWN}`, handle]]);
-  const env = { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null }, ...extra };
+  const env = { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra };
   return (await worker.fetch(new Request(`https://${OWN}${path}`, { redirect: 'manual' }), env)).headers.get('x-robots-tag');
 };
 test('the avatar and every icon exit of a blank card carry noindex; a real card\'s do not', async () => {

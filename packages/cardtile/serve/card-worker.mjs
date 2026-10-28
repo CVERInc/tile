@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -141,11 +141,18 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // was live for several minutes once — the plumbing was right and nothing pointed the apex at the
 // card. A missing key is now the same failure, so seeding is part of binding a domain, not an
 // afterthought: see lab/vanity-bindings.mjs.
-const VANITY_KEY = (host) => `vanity:${host}`;
-const VANITY_OF_KEY = (handle) => `vanityof:${handle}`;
+//
+// 🔴 And a binding belongs to one lifetime of the handle (reef#2618 r4, r5; card-api vanityKey).
+// `vanity:<host>` is only a pointer to a handle; the host serves that handle only while
+// `vanitybind:<handle>:<gen>:<host>` exists for its CURRENT `gen:`, and the inverse is
+// `vanityof:<handle>:<gen>`. A binding of an ended lifetime would otherwise hand the former owner's
+// domain to the next owner of the handle. Pre-generation bindings are generation 0's.
+const VANITY_KEY = (host) => vanityKey(host); // card-api's, called late: the two modules import each other
 
 // canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
 const CANON_HOST = 'card.feelreef.com';
+// the Cloudflare-for-SaaS fallback origin (wrangler.example.toml routes): ours, never a creator's.
+const FALLBACK_HOST = 'saas.feelreef.com';
 
 /**
  * resolveHandle: (host, pathname, vanity) → { handle, cardUrl } | null. Pure.
@@ -155,11 +162,24 @@ const CANON_HOST = 'card.feelreef.com';
  * piece of the routing that is worth unit-testing, and it stays synchronous and pure so it can be.
  * The default is empty, so a caller that forgets it gets canonical-path routing and never a
  * silently wrong card.
+ *
+ * 🔴 Path routing (`/<handle>`) answers on OUR hosts only (reef#2618 r2): the canonical card host, the
+ * Cloudflare-for-SaaS fallback origin (a creator's hostname CNAMEs to it, but their requests carry
+ * their own Host), Cloudflare's `*.workers.dev`, and local dev (a host with no dot — `localhost`, a
+ * harness's `x` — can never be a public custom hostname; plus `127.0.0.1`). Any other host is a
+ * creator's domain, and there the handle comes from its binding and nothing else — no binding, no
+ * card, on every path. Before this, a domain whose binding was removed fell through to path routing,
+ * so `<former-domain>/<handle>` served whoever owned that handle next.
  */
+export const routesByPath = (host) =>
+  !host || host === CANON_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
+  || !host.includes('.') || host === '127.0.0.1';
+
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
   const seg = (pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0] || '';
   if (vanity[host]) return { handle: vanity[host], cardUrl: 'https://' + host };            // vanity domain = one card
+  if (!routesByPath(host)) return null;                                                       // a creator's domain, unbound → nothing
   if (seg) return { handle: seg.toLowerCase(), cardUrl: 'https://' + (host || CANON_HOST) + '/' + seg.toLowerCase() };
   return null;                                                                                // canonical host, no handle → directory
 }
@@ -688,7 +708,14 @@ const router = {
     // is reachable on PRODUCTION and that is the whole point of it.
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
-      const draft = env && env.CARDS ? await env.CARDS.get(previewKey(pv[1])) : null;
+      // A preview stamped with a generation that is no longer its handle's (the card was deleted while
+      // it was being parked, reef#2618) is expired. One stamped with no handle (parked before r1)
+      // keeps its hour; a handle without a generation is generation 0, as everywhere (r3).
+      const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(pv[1])) : null;
+      const meta = row && row.metadata;
+      const stale = row && row.value != null && meta && meta.handle
+        && !isCurrentGen(meta, await generationOf(env.CARDS, meta.handle));
+      const draft = row && !stale ? row.value : null;
       if (!draft) {
         return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
           status: 404,
@@ -761,29 +788,56 @@ const router = {
     const host = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
     const md = /^(.*)\.md$/.exec(url.pathname);
 
-    // CARDS store: handle → card.md, plus the vanity bindings. Missing binding (local/misconfig) is
-    // a clear 500, not a crash. Read before routing now, because routing needs it.
+    // CARDS store: card:<handle>:<gen> → card.md (card-api genKey), plus the vanity bindings. Missing
+    // binding (local/misconfig) is a clear 500, not a crash. Read before routing now, because routing needs it.
     const store = env && env.CARDS;
     if (!store) return html('<!doctype html><meta charset=utf-8><p>card store not bound</p>', 500, env);
 
     // Vanity routing uses the forward binding here or the inverse below:
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
-    const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
+    // next owner's card. The generation read here is the one the card is read under.
+    let pointer = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // 🔴 r9: `vanity:<host>` is HostBindings' write-through cache, so a MISS on a creator's domain may be
+    // a put that failed after the bind was accepted: ask the host's object, once (card-api hostOwner)
+    if (pointer == null && host && !routesByPath(host)) pointer = await hostOwner(env, host);
+    const boundGen = pointer != null ? await generationOf(store, pointer) : null;
+    const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
-    if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);
+    if (!resolved) {
+      // the directory hint only where a path can name a card; an unbound creator's domain names nothing
+      return routesByPath(host)
+        ? html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env)
+        : html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env);
+    }
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
     const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
     if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
-    const [cardMd, stopped] = await Promise.all([
-      store.get(resolved.handle),
-      store.get(`stop:${resolved.handle}`),
-    ]);
+    // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
+    // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
+    // 410/404 below exactly as a missing body does.
+    const { md: cardMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
     if (stopped != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
         status: 404,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow',
+          Vary: 'Accept',
+        },
+      });
+    }
+    // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
+    // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
+    // and the page names nothing from the old card. no-store: the handle is free, and the next
+    // save must show at once.
+    if (cardMd == null && (await store.get(goneKey(resolved.handle))) != null) {
+      return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
+        status: 410,
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -845,7 +899,8 @@ const router = {
     // working on both hosts because a download link somebody already has must not break.
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
-    const ownHost = wouldRedirect ? await store.get(VANITY_OF_KEY(resolved.handle)) : null;
+    // the inverse binding, likewise only from this lifetime (card-api vanityKey)
+    const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
     if (ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
@@ -899,3 +954,8 @@ export default {
     return withNoindexAll(await router.fetch(request, env, ctx), env);
   },
 };
+
+// The Durable Objects: each host's one pointer writer (card-api HostBindings) and each handle's one
+// lifetime authority (CardLifetime). The runtime finds a Durable Object class by its export from the
+// main module, so they are re-exported here.
+export { HostBindings, CardLifetime } from './card-api.mjs';

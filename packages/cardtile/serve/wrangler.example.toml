@@ -18,9 +18,14 @@
 
 # REEF with Card — the multi-tenant edge renderer. Deploy:
 #   CLOUDFLARE_API_TOKEN=<your token> npx wrangler deploy
-# The CARDS KV holds handle → card.md. Create once, then paste the id below:
+# The CARDS KV holds card:<handle>:<gen> → card.md (gen = the value of gen:<handle>, absent ⇒ 0;
+# see genKey in card-api.mjs). Create once, then paste the id below:
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv namespace create CARDS
-#   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS <handle> --path=<card.md>
+#   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS card:<handle>:0 --path=<card.md>   # a new handle
+# A domain binding lives under the same generation's keys (vanitybind:<handle>:<gen>:<host>,
+# vanityof:<handle>:<gen>); vanity:<host> → handle is only a pointer, written last and only by the
+# HostBindings Durable Object for that host, after the bind registered with the handle's CardLifetime
+# object (below) — see vanityKey, and cards/README.md for the commands and the deploy order.
 #   preview (default): npx wrangler deploy                 → cardtile-preview.<your-subdomain>.workers.dev
 #   production:        npx wrangler deploy --env production → cardtile + its custom domains
 # Same code, same CARDS store; they differ only in PREVIEW (which gates the noindex header) and in
@@ -37,10 +42,27 @@ PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outr
 #                         # card response, vanity hosts included. Default off. Per-environment: set it under
 #                         # [env.production.vars] too. Remove it (or "0") to resume indexing.
 
-# handle → card.md store. Create it once (see the header) and paste its id here.
+# card store (card:<handle>:<gen> → card.md). Create it once (see the header) and paste its id here.
 [[kv_namespaces]]
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
+
+# The ONE writer of vanity:<host> (card-api HostBindings, reef#2618 r6, r7): one Durable Object per host.
+# 🔴 Preview binds PRODUCTION's class, not one of its own. Both Workers write the same CARDS store, so
+# two namespaces would be two writers per host, which is the race the object exists to remove. It
+# follows that `cardtile` (with its migration below) must be deployed before this Worker can bind.
+[[durable_objects.bindings]]
+name = "HOST_BINDINGS"
+class_name = "HostBindings"
+script_name = "cardtile"
+
+# The ONE authority for a handle's lifetime (card-api CardLifetime, reef#2618 r8): one Durable Object
+# per handle, holding its generation and the hosts bound in it; it is the only writer of gen:<handle>.
+# Production's class, for the same reason as above: two namespaces would be two lifetimes per handle.
+[[durable_objects.bindings]]
+name = "CARD_LIFETIMES"
+class_name = "CardLifetime"
+script_name = "cardtile"
 
 # ── production ─────────────────────────────────────────────────────────────────────────────────
 # The native replacement for the legacy Python renderer. A creator's own host is a VANITY host (see the
@@ -83,6 +105,33 @@ PREVIEW = "false"
 [[env.production.kv_namespaces]]
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
+
+# The class lives here (see the preview binding above). Durable Object bindings are not inherited by
+# an environment, so it is declared again. The migration creates the class: the first deploy that
+# carries it IS the migration, and the tag is never edited or reused once deployed.
+# SQLite-backed (`new_sqlite_classes`) because Cloudflare offers only that kind on the Free plan and
+# recommends it for every new class. Since r7 each object stores one small record (the host's owner,
+# its admission ticket counter and the lifetimes it was told ended) through the storage get/put API,
+# which the SQLite backend serves too. Never deploy `deleted_classes` for it: that erases those records.
+[[env.production.durable_objects.bindings]]
+name = "HOST_BINDINGS"
+class_name = "HostBindings"
+
+[[env.production.durable_objects.bindings]]
+name = "CARD_LIFETIMES"
+class_name = "CardLifetime"
+
+[[env.production.migrations]]
+tag = "v1-host-bindings"
+new_sqlite_classes = ["HostBindings"]
+
+# r8: CardLifetime has a tag of its own rather than joining v1. Cloudflare applies each tag once, so
+# a tag that may already be deployed must never change; whether v1 is cannot be known from here, and
+# a new tag is right either way (deployed: only v2 runs; not yet: both run, in order). Same storage
+# API and the same "never deleted_classes" rule: deleting it forgets every handle's generation.
+[[env.production.migrations]]
+tag = "v2-card-lifetime"
+new_sqlite_classes = ["CardLifetime"]
 
 # ── Secrets (set with `wrangler secret put`, never in this file) ──────────────────────────────────
 # WEB_RISK_API_KEY — Google Web Risk API key. card save (PUT /_api/card/<handle>) looks up every

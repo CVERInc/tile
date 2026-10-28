@@ -30,7 +30,7 @@ console.log('RESOLVE vanity host       :', JSON.stringify(u2));
 console.log('RESOLVE bare canonical     :', JSON.stringify(u3), '(null = directory)');
 
 // fake store — this is the ONLY per-card state; adding a card = one more entry, no repo/deploy
-const env = { CARDS: { get: async (h) => (h === HANDLE ? cardMd : null) } };
+const env = { CARDS: { get: async (h) => (h === HANDLE ? cardMd : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
 
 const server = http.createServer(async (req, res) => {
   const reqUrl = 'http://' + (req.headers.host || 'localhost') + req.url;

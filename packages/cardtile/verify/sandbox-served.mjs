@@ -29,6 +29,7 @@ const env = {
   PREVIEW: 'true',
   CARDS: {
     get: async (k) => (kv.has(k) ? kv.get(k) : null),
+    async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; },
     put: async (k, v) => { kv.set(k, v); },
     delete: async (k) => { kv.delete(k); },
   },

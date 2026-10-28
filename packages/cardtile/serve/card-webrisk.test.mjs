@@ -16,7 +16,14 @@ test.before(async () => { TOKEN_HASH = await _internal.sha256Hex(TOKEN); });
 
 const fakeKv = () => {
   const m = new Map();
-  return { _m: m, puts: 0, async get(k) { return m.has(k) ? m.get(k) : null; }, async put(k, v) { this.puts++; m.set(k, v); } };
+  const meta = new Map();
+  return {
+    _m: m, puts: 0,
+    async get(k) { return m.has(k) ? m.get(k) : null; },
+    async getWithMetadata(k) { return { value: await this.get(k), metadata: meta.get(k) ?? null }; },
+    // `puts` counts EVERY write: since r3 a save writes its body and nothing else (card-api genKey)
+    async put(k, v, opts) { this.puts++; m.set(k, v); if (opts?.metadata !== undefined) meta.set(k, opts.metadata); else meta.delete(k); },
+  };
 };
 const mk = (...cells) => ['---', 'card-page: t', 'title: T', '---', '', '## grid', '', ...cells, ''].join('\n');
 

@@ -81,7 +81,7 @@ const OLD_QR = (() => {
 })();
 
 let PIN_OLD = false;
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
   let body = Buffer.from(await r.arrayBuffer());

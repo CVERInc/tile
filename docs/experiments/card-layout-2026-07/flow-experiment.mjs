@@ -46,7 +46,7 @@ ${[1, 2, 3, 4, 5, 6].map((w) => `[data-span^="${w}x"]{grid-column:span ${w}!impo
 [data-span^="6x"].st-cell-tile{min-height:64px!important}
 `;
 
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url, { headers: req.headers }), { CARDS: store, PREVIEW: 'true' });
   const b = Buffer.from(await r.arrayBuffer());

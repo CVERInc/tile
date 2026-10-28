@@ -24,7 +24,7 @@ const WIDTHS = [320, 390, 430, 768, 1200];
 // columns come out identical no matter what changed. The control below is what caught that.
 const OLD = '.st-card .st-hero .cp-icon{width:78px!important;height:78px!important}';
 
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });
   const b = Buffer.from(await r.arrayBuffer());

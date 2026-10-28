@@ -44,6 +44,15 @@ test('resolveHandle: a path segment still wins on a host with no binding', () =>
     { handle: 'inkbrush', cardUrl: 'https://card.feelreef.com/inkbrush' });
 });
 
+test('🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef#2618 r2)', () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'cardtile-preview.acct.workers.dev', 'localhost:8787', 'x', '127.0.0.1']) {
+    assert.equal(resolveHandle(host, '/inkbrush')?.handle, 'inkbrush', host);
+  }
+  for (const host of ['card.inkbrush.com', 'former.example', 'feelreef.com.evil.example', 'workers.dev.example']) {
+    for (const path of ['/inkbrush', '/inkbrush.md', '/inkbrush/favicon.ico']) assert.equal(resolveHandle(host, path), null, host + path);
+  }
+});
+
 test('resolveHandle: bare canonical host (no handle) → null (a directory, not a card)', () => {
   assert.equal(resolveHandle('card.feelreef.com', '/'), null);
 });
@@ -718,7 +727,7 @@ test('🔴 sandbox: a bare /try (no /edit) is NOT special-cased — same 404 as 
   // RSP reserves the handle `try`; this Worker's own CARDS store is a separate namespace where
   // "try" must never be a real key. get() returning null here is what proves that: the route falls
   // through to ordinary handle resolution instead of being caught by the sandbox branch.
-  const res = await worker.fetch(new Request('https://card.feelreef.com/try'), { CARDS: { get: async () => null } });
+  const res = await worker.fetch(new Request('https://card.feelreef.com/try'), { CARDS: { get: async () => null, getWithMetadata: async () => ({ value: null, metadata: null }) } });
   assert.equal(res.status, 404);
 });
 
@@ -740,6 +749,7 @@ function recordingStore(seed = {}) {
     kv,
     puts,
     get: async (k) => (kv.has(k) ? kv.get(k) : null),
+    async getWithMetadata(k) { return { value: await this.get(k), metadata: puts.findLast((p) => p.key === k)?.opts?.metadata ?? null }; },
     put: async (k, v, opts) => { kv.set(k, v); puts.push({ key: k, bytes: v.length, opts }); },
   };
 }
@@ -1247,8 +1257,8 @@ const responseBytes = async (res) => ({
   status: res.status, headers: [...res.headers], body: Buffer.from(await res.arrayBuffer()),
 });
 
-test('production Cards on canonical, fallback and unbound hosts carry noindex on every representation', async () => {
-  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'unbound.example']) {
+test('production Cards on canonical and fallback hosts carry noindex on every representation; an unbound host serves none', async () => {
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com']) {
     const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }) };
     for (const [url, init] of servingRequests(host)) {
       const res = await worker.fetch(new Request(url, init), env);
@@ -1258,6 +1268,15 @@ test('production Cards on canonical, fallback and unbound hosts carry noindex on
       assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
       assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
     }
+  }
+  // reef#2618 r2: a creator's domain routes by its binding only, so with none it names no card on
+  // any path — this used to be 200 for every representation, which is how a former domain served the
+  // handle's next owner.
+  const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }) };
+  for (const [url, init] of servingRequests('unbound.example')) {
+    const res = await worker.fetch(new Request(url, init), env);
+    assert.equal(res.status, 404, url);
+    assert.doesNotMatch(await res.text(), /Test Card|Pick a card/, url);
   }
 });
 
@@ -1299,7 +1318,8 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
 });
 
 test('stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes', async () => {
-  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'unbound.example', 'card.example']) {
+  // (an unbound creator's host serves no card at all — reef#2618 r2 — so it has nothing to stop)
+  for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'card.example']) {
     const vanity = host === 'card.example';
     const seed = { t: SERVING_CARD, ...(vanity ? { 'vanity:card.example': 't' } : {}) };
     const store = recordingStore(seed), deletes = [];
@@ -1347,7 +1367,7 @@ test('the card body and stop marker reads start in parallel for pages, markdown 
         if (k === 't') return cardRead;
         if (k === 'stop:t') return stopRead;
         return k === 'vanity:card.example' ? 't' : null;
-      } };
+      }, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
       const pending = worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: store });
       await new Promise((resolve) => setImmediate(resolve));
       const started = [...reads];
