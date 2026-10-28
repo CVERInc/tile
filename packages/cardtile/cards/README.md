@@ -106,7 +106,7 @@ put the old pointer. The domain then 404s until it is bound again; it can never 
 card. Closing that needs `gen:` itself to have a strongly consistent home. That has not been
 measured live.
 
-**Deploying r6 (AGEN / maplefeng's ship step).** The next production deploy of cardtile carries a
+**Deploying r6 (the ship step: release owner).** The next production deploy of cardtile carries a
 Durable Object migration (`[[env.production.migrations]]`, tag `v1-host-bindings`,
 `new_sqlite_classes = ["HostBindings"]`; see `serve/wrangler.example.toml`). Copy into the real
 config:
