@@ -2273,3 +2273,37 @@ test('r13 the per-host high water is bounded by the lifetime: one entry per host
   assert.equal((await bindVanity(env, 'b', 'h1.example')).redirect, 'published', 'CONTROL: the next lifetime binds');
   assert.deepEqual(Object.keys(life().highWater), ['h1.example'], 'CONTROL: the next lifetime keeps its own');
 });
+
+test('🔴 r13 the equal ticket is refused once the inverse names another host: the acceptance X already had published does not take the card back from Y', async () => {
+  // b → X (T, order 1) published, b → Y (order 2) published. A same-owner no-op of X registered later
+  // (order 3) answers X's T, which is highWater[X]: an acceptance this lifetime already confirmed, and
+  // one the newer Y replaced. It writes nothing. Sent straight to the object, as bindVanity would.
+  const env = envWith({ b: B_CARD }), Y = 'second.example';
+  assert.equal((await bindVanity(env, 'b', OWNER)).redirect, 'published');
+  const tx = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
+  assert.equal((await bindVanity(env, 'b', Y)).redirect, 'published');
+  const lives = env.CARD_LIFETIMES, life = () => lives.storageOf('b')._m.get('life');
+  const confirm = (body) => lives.get(lives.idFromName('b')).fetch('https://card-lifetime/confirm', { method: 'POST', body: JSON.stringify({ handle: 'b', gen: life().gen, ...body }) });
+  const reg = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime/register', { method: 'POST', body: JSON.stringify({ handle: 'b', host: OWNER, gen: life().gen }) })).json();
+  assert.equal(reg.order, 3, 'CONTROL: a later registration');
+  const res = await (await confirm({ host: OWNER, order: reg.order, ticket: tx })).json();
+  assert.equal(res.published, false, `the equal ticket of X was published over Y: ${JSON.stringify(res)}`);
+  assert.equal(life().inverse.host, Y, 'the inverse left Y');
+  assert.equal((await page(env, '/b')).headers.get('location'), `https://${Y}/`);
+});
+
+test('🔴 r13 a lifetime stored before highWater existed takes its inverse\'s ticket as that host\'s high water: an older acceptance of it is refused', async () => {
+  // r12 storage: inverse { host, order, ticket } and no highWater. Its inverse is an acceptance it
+  // confirmed, so the load counts it; without that, the first older /confirm after the upgrade wins.
+  const env = envWith({ b: B_CARD });
+  assert.equal((await bindVanity(env, 'b', OWNER)).redirect, 'published');
+  const lives = env.CARD_LIFETIMES, store = lives.storageOf('b')._m;
+  const { highWater, ...r12 } = store.get('life');
+  assert.ok(highWater, 'CONTROL: r13 stores highWater');
+  store.set('life', structuredClone(r12));
+  const tx = r12.inverse.ticket;
+  const res = await (await lives.get(lives.idFromName('b')).fetch('https://card-lifetime/confirm', { method: 'POST',
+    body: JSON.stringify({ handle: 'b', host: OWNER, gen: r12.gen, order: r12.inverse.order + 5, ticket: tx - 1 }) })).json();
+  assert.equal(res.published, false, `an older acceptance overwrote an r12 inverse: ${JSON.stringify(res)}`);
+  assert.equal(store.get('life').inverse.ticket, tx, 'the r12 inverse\'s ticket went down');
+});
