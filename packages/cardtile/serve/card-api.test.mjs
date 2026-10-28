@@ -1277,7 +1277,10 @@ test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never 
   // CardLifetime's storage, vanitybind:, point get/put, the pointer, point's cache-written put, then —
   // only once accepted (rule A) — confirm get/put, vanityof:, confirm's cache-written put). r8 had 10
   // (44 rows: vanityof: was written before /point), r7 had 8 (36 rows), r5/r6 had 5 (20 rows).
-  assert.equal(rows, 60);
+  // r10 adds the adoptions: every pair's first /point reads the legacy pointer once (+1), and a's
+  // generation-0 lifetime adopts its bare inverse at /register (bare get, the gen-0 key put, its
+  // cache-written put: +3). So 2 × 19 + 2 × 16 = 70.
+  assert.equal(rows, 70);
   assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
 });
 
@@ -1781,4 +1784,75 @@ test('🔴 r9 an accepted bind\'s late redirect never clobbers a newer accepted 
       assert.equal((await page(env, '/b')).status, 200, `${where}: b kept a redirect to the host it lost`);
     }
   }
+});
+
+test('🔴 codex r9 a legacy inverse is part of the lifetime: the handle that loses the host stops redirecting, whether it rebound it or never touched it (3 rows)', async () => {
+  // R/legacy-loss.mjs: b owns OWNER from before generations (`vanity:<host>` = b, bare `vanityof:b`).
+  // a binds OWNER (redirect:false), then a is DELETEd. r9 cleared only `vanityof:b:0` on the loss and
+  // the reader fell back to the bare key, so /b 301'd to a's content and then to a 404 for good.
+  // Rows: the new-format control; b rebound OWNER through bindVanity first; b never touched it (the
+  // host's object has no durable owner, so it adopts b from its pointer before replacing it).
+  const failures = [];
+  let rows = 0;
+  for (const mode of ['new-control', 'legacy-rebound', 'legacy-untouched']) {
+    const legacy = mode.startsWith('legacy') ? { [vanityKey(OWNER)]: 'b', 'vanityof:b': OWNER } : {};
+    const env = envWith({ a: CARD, b: B_CARD, ...legacy });
+    rows++;
+    const where = `[${mode}]`;
+    try {
+      if (mode !== 'legacy-untouched') await bindVanity(env, 'b', OWNER);
+      const before = await page(env, '/b');
+      assert.equal(before.headers.get('location'), `https://${OWNER}/`, `${where} CONTROL: /b redirects to its domain`);
+      assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), `${where} CONTROL: the domain serves b`);
+      const taken = await bindVanity(env, 'a', OWNER, { redirect: false });
+      assert.equal(taken.accepted, true, `${where}: a's bind was not accepted`);
+      // each check below records its own failure, so a red row shows the whole path, not its first step
+      const check = (fn) => { try { fn(); } catch (e) { failures.push(e.message); } };
+      const afterTake = await page(env, '/b');
+      check(() => assert.equal(afterTake.status, 200, `${where}: after the take /b ${afterTake.status} → ${afterTake.headers.get('location')}`));
+      // rule 1: losing the host cleared every inverse that named it, the bare one included
+      check(() => assert.equal(env.CARDS._m.get('vanityof:b'), undefined, `${where}: the bare legacy inverse survived the loss`));
+      assert.equal((await call(env, 'DELETE', '/_api/card/a')).status, 200, where);
+      const canon = await page(env, '/b'), canonText = await canon.text(), domain = await host(env, OWNER, '/');
+      check(() => assert.equal(canon.status, 200, `${where}: after a's DELETE /b ${canon.status} → ${canon.headers.get('location')} (domain ${domain.status})`));
+      check(() => assert.ok(canonText.includes('Next owner'), `${where}: /b serves b's card`));
+      check(() => assert.equal(domain.status, 404, `${where}: the domain`));
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 3);
+});
+
+test('🔴 r10 an authoritative "none" is not a missing key: once the lifetime has written its inverse, the bare legacy key is never asked', async () => {
+  // a legacy owner loses its host while the bare key's delete fails: the generation-scoped tombstone
+  // (empty value) already says "no address", so /b serves its page; the object retries the delete.
+  const env = envWith({ a: CARD, b: B_CARD, [vanityKey(OWNER)]: 'b', 'vanityof:b': OWNER });
+  const del = env.CARDS.delete.bind(env.CARDS);
+  let once = true;
+  env.CARDS.delete = async (k) => {
+    if (once && k === 'vanityof:b') { once = false; throw new Error('injected bare-inverse delete failure'); }
+    return del(k);
+  };
+  assert.equal((await bindVanity(env, 'a', OWNER, { redirect: false })).accepted, true);
+  assert.equal(env.CARDS._m.get('vanityof:b'), OWNER, 'CONTROL: the injected delete failure took effect');
+  assert.equal(env.CARDS._m.get(vanityOfKey('b', '0')), '', 'the loss wrote no tombstone');
+  const canon = await page(env, '/b');
+  assert.equal(canon.status, 200, `a cleared inverse fell back to the bare key: /b ${canon.status} → ${canon.headers.get('location')}`);
+  await env.CARD_LIFETIMES.alarm('b');
+  assert.equal(env.CARDS._m.get('vanityof:b'), undefined, 'the object did not retry the bare delete');
+
+  // the reader rule, seeded directly: a present gen-0 key is the whole answer, empty means none; the
+  // bare key is read only when no lifetime has written one
+  const seeded = (rows) => envWith({ b: B_CARD, [vanityKey(OWNER)]: 'b', 'vanityof:b': OWNER, ...rows });
+  assert.equal((await page(seeded({ [vanityOfKey('b', '0')]: '' }), '/b')).status, 200, 'a tombstone was read as missing');
+  assert.equal((await page(seeded({ [vanityOfKey('b', '0')]: 'other.example' }), '/b')).headers.get('location'), 'https://other.example/');
+  assert.equal((await page(seeded({}), '/b')).headers.get('location'), `https://${OWNER}/`, 'CONTROL: no lifetime record, the legacy redirect stands');
+});
+
+test('r10 a legacy owner that binds another host without a redirect keeps its legacy redirect (its lifetime adopts the bare inverse)', async () => {
+  const env = envWith({ b: B_CARD, [vanityKey(OWNER)]: 'b', 'vanityof:b': OWNER });
+  assert.equal((await bindVanity(env, 'b', 'second.example', { redirect: false })).accepted, true);
+  assert.equal(env.CARDS._m.get(vanityOfKey('b', '0')), OWNER, 'the lifetime did not adopt the bare inverse');
+  assert.equal((await page(env, '/b')).headers.get('location'), `https://${OWNER}/`, 'a redirect:false bind dropped the legacy redirect');
+  assert.equal((await host(env, 'second.example', '/')).status, 200, 'CONTROL: the new binding serves');
 });

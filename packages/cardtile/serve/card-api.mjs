@@ -378,6 +378,15 @@ export class HostBindings {
     if (Date.now() - ticket >= TICKET_TTL_MS) return expired(host);
     if (s.ended[`${handle}:${gen}`] != null) return staleWrite(handle);
     if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? { accepted: true } : superseded(host);
+    // 🔴 r10 rule 3: a host bound before generations has a KV pointer and no durable owner. Its first
+    // accepted /point adopts that handle as the owner at generation 0, once, so the loser notice below
+    // reaches it and its canonical address stops redirecting here. The pointer is the migration's only
+    // source, so this is the one KV read the object makes; `adopted` keeps it from ever re-reading the
+    // cache it writes. Readers (/owner) never adopt.
+    if (!s.adopted) {
+      if (!s.owner) s.owner = await this.adoptLegacy(host);
+      s.adopted = true;
+    }
     const lost = s.owner && (s.owner.handle !== handle || s.owner.gen !== gen) ? s.owner : null;
     if (lost) s.losers.push({ handle: lost.handle, gen: lost.gen, ticket });
     s.owner = { handle, gen };
@@ -386,6 +395,11 @@ export class HostBindings {
     await this.storage.put('host', s); // THE acceptance: from here the bind stands, whatever KV does next
     await this.flush(s);
     return { accepted: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
+  }
+  /** the legacy pointer's handle as a generation-0 owner, or null (see point) */
+  async adoptLegacy(host) {
+    const legacy = await this.env.CARDS.get(vanityKey(host));
+    return typeof legacy === 'string' && VALID_HANDLE.test(legacy) ? { handle: legacy, gen: GEN0 } : null;
   }
   async end(handle, gens, host) {
     // stamped no earlier than any ticket issued so far, so an entry is never older than a ticket it must refuse
@@ -459,23 +473,47 @@ export class CardLifetime {
     await this.flush(s);
     return s;
   }
-  /** put (or delete) `vanityof:<handle>:<gen>` from `inverse`; a failure stays pending for the next try */
+  /**
+   * put `vanityof:<handle>:<gen>` from `inverse`; a failure stays pending for the next try. In generation
+   * 0 "no address" is written as an EMPTY value, not a delete (r10 rule 2): a missing gen-0 key sends the
+   * reader to the bare legacy key, and once this object exists its answer is the whole answer. Then the
+   * bare key, if a loss named it (rule 1), is deleted — after the tombstone, so no reader sees it alone.
+   */
   async flush(s) {
     if (s.cache !== 'pending') return;
     try {
       const key = vanityOfKey(s.handle, s.gen);
       if (s.inverse && s.inverse.host) await this.env.CARDS.put(key, s.inverse.host);
+      else if (s.gen === GEN0) await this.env.CARDS.put(key, '');
       else await this.env.CARDS.delete(key);
+      if (s.dropLegacy) { await this.env.CARDS.delete(legacyVanityOfKey(s.handle)); s.dropLegacy = false; }
       s.cache = 'written';
       await this.storage.put('life', s);
     } catch { await retryLater(this.storage); }
   }
+  /**
+   * 🔴 r10: in generation 0 the bare `vanityof:<handle>` (written before generations) is this object's
+   * too. The first time it needs the inverse it ADOPTS the bare key's host as its own (read once; the
+   * migration's only source, and nothing writes that key any more), and from then on its gen-0 key is
+   * the reader's whole answer. `legacy` remembers what the bare key named, so a loss of that host knows
+   * to delete it without reading it again.
+   */
+  async adopt(s) {
+    if (s.adopted || s.gen !== GEN0) return;
+    const bare = await this.env.CARDS.get(legacyVanityOfKey(s.handle));
+    s.legacy = typeof bare === 'string' && bare ? bare : null;
+    if (!s.inverse) s.inverse = { host: s.legacy, order: 0 };
+    s.adopted = true;
+    s.cache = 'pending';
+  }
   async register(handle, host, gen) {
     const s = await this.load(handle);
     if (gen !== s.gen) return staleWrite(handle);
+    await this.adopt(s);
     if (!s.hosts.includes(host)) s.hosts.push(host);
     s.seq += 1; // the bind's place among this lifetime's binds: the newest accepted one owns the redirect
     await this.storage.put('life', s);
+    await this.flush(s);
     return { gen: s.gen, order: s.seq };
   }
   /**
@@ -487,6 +525,7 @@ export class CardLifetime {
   async confirm(handle, host, gen, order, ticket) {
     const s = await this.load(handle);
     if (gen !== s.gen || !s.hosts.includes(host)) return staleWrite(handle);
+    await this.adopt(s); // a no-op after /register adopted
     if (s.lost[host] != null && s.lost[host] > ticket) return { published: false, why: `${host} was bound to another card after this bind.` };
     if (s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
     s.inverse = { host, order };
@@ -500,8 +539,11 @@ export class CardLifetime {
   async lost(handle, host, gen, ticket) {
     const s = await this.load(handle);
     if (gen !== s.gen) return {}; // an ended lifetime's inverse is DELETE's to remove (it is on `pending`)
+    await this.adopt(s); // a legacy owner HostBindings adopted may never have bound through here
     s.lost[host] = Math.max(s.lost[host] || 0, ticket);
     if (s.inverse && s.inverse.host === host) { s.inverse = { host: null, order: s.inverse.order }; s.cache = 'pending'; }
+    // 🔴 r10 rule 1: losing a host clears EVERY inverse that names it, the bare legacy one included
+    if (s.legacy === host) { s.legacy = null; s.dropLegacy = true; s.cache = 'pending'; }
     await this.storage.put('life', s);
     await this.flush(s);
     return {};
@@ -514,6 +556,8 @@ export class CardLifetime {
     // the ended lifetime's inverse key is on `pending` (it needs a registered host), so DELETE removes it
     s.inverse = null;
     s.lost = {};
+    s.legacy = null; // the bare key is generation 0's: DELETE removes it with the legacy keys
+    s.dropLegacy = false;
     s.cache = 'written';
     await this.storage.put('life', s); // the lifetime ends HERE, before any host is told
     return { ended, gen: s.gen, pending: s.pending };
@@ -539,8 +583,16 @@ async function readGen(store, key, legacy, gen) {
 /** is `host` bound to `handle` in generation `gen`? In generation 0 the pointer alone is (see vanityKey). */
 export const isBound = async (store, handle, gen, host) =>
   gen === GEN0 || (await store.get(vanityBindKey(handle, gen, host))) != null;
-/** the host generation `gen` of `handle` redirects to, or null */
-export const boundHostOf = (store, handle, gen) => readGen(store, vanityOfKey(handle, gen), legacyVanityOfKey(handle), gen);
+/**
+ * the host generation `gen` of `handle` redirects to, or null. 🔴 r10 rule 2: an authoritative "none" is
+ * not a missing key. The gen-scoped key, once present, is the whole answer — CardLifetime writes it the
+ * first time it touches the inverse, and in generation 0 writes "none" as an empty value. Only when it is
+ * absent (no lifetime has ever spoken for this handle) is the bare legacy key asked.
+ */
+export async function boundHostOf(store, handle, gen) {
+  const v = await readGen(store, vanityOfKey(handle, gen), legacyVanityOfKey(handle), gen);
+  return v || null;
+}
 
 /**
  * liveCard: the current lifetime's card body (and stop) under a handle. The ONE read every exit uses
