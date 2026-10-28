@@ -146,24 +146,154 @@ const attrOf = (el, name) => el.attrs.find((a) => a.name === name);
 // same order. A UTF-32 BOM (00 00 FE FF, FF FE 00 00), which no browser decodes as UTF-32, is not
 // edited at all: the file stays as it is, a noindex decision on it keeps it out of the sitemap, and
 // the build prints one warning naming it.
+//
+// 🩸 r8 took "no BOM" to mean "ASCII-compatible". In ISO-2022-JP, 、紹 is 21 22 3e 52 — a quote and
+// a `>` to a byte reader — so the robots meta went in between the two bytes of 紹, inside the
+// description (codex r8). The byte view is valid only once the encoding is KNOWN to be
+// ASCII-compatible, so the pass first sniffs it the way a browser does (sniffEncoding): the BOM;
+// else a <meta charset> / <meta http-equiv=content-type> in the first 1024 bytes, found by the
+// WHATWG prescan (ASCII-only and safe: a declaration precedes any shift sequence); else UTF-8. The
+// label is resolved by the WHATWG label table (Node's TextDecoder). A page whose encoding is not
+// ASCII-compatible — UTF-16 named by a meta or betrayed by NUL bytes, ISO-2022-JP, x-user-defined,
+// the `replacement` labels — or whose label resolves to nothing is not edited at all, exactly like
+// UTF-32: Node writes no such encoding, and a guess is how r8 broke the description.
+// (Stricter than a browser on purpose: the prescan of a browser reads a meta `utf-16` as UTF-8 and
+// skips a label it cannot resolve. The pass cannot know which the author meant, so it refuses.)
+// Measured, not assumed (noindex.test.mjs): every multi-byte character of Shift_JIS, Big5, GBK,
+// GB18030, EUC-KR and EUC-JP has its ASCII-range bytes at ≥ 0x40 (GB18030's four-byte form: digits),
+// never a byte the HTML tokenizer acts on — so for those the byte view is the browser's tokens.
 const BOMS = [
   [[0x00, 0x00, 0xfe, 0xff], null], [[0xff, 0xfe, 0x00, 0x00], null],
   [[0xef, 0xbb, 0xbf], 'bytes'], [[0xff, 0xfe], 'utf16le'], [[0xfe, 0xff], 'utf16be'],
 ];
+/** Encodings whose bytes do not mean ASCII where they look like it, by the name the pass reports. */
+const NOT_ASCII = { 'utf-16le': 'UTF-16LE', 'utf-16be': 'UTF-16BE', 'iso-2022-jp': 'ISO-2022-JP' };
+
+/** The page's encoding, sniffed like a browser (see above): `{ bom, kind }` with kind 'bytes' /
+ *  'utf16le' / 'utf16be' for a view the pass can edit, or `{ refused: <name for the warning> }`. */
+export function sniffEncoding(bytes) {
+  const hit = BOMS.find(([s]) => s.every((x, i) => bytes[i] === x));
+  if (hit) return hit[1] ? { bom: hit[0].length, kind: hit[1] } : { refused: 'UTF-32' };
+  const head = bytes.subarray(0, 1024);
+  if (head.includes(0)) return { refused: 'UTF-16 without a byte-order mark' };
+  const label = prescan(head);
+  if (label === null) return { bom: 0, kind: 'bytes' };
+  const l = asciiLower(asciiTrim(label));
+  if (l === 'x-user-defined') return { refused: 'x-user-defined' };
+  let enc;
+  try { enc = new TextDecoder(l).encoding; } catch { return { refused: `${asciiTrim(label)} (not an encoding this pass can read)` }; }
+  return NOT_ASCII[enc] ? { refused: NOT_ASCII[enc] } : { bom: 0, kind: 'bytes' };
+}
+
+// The WHATWG "prescan a byte stream to determine its encoding", over the first 1024 bytes as ASCII
+// (latin1 string, one byte per character): the label of the first <meta> that declares one, or null.
+const WS = '\t\n\f\r ';
+const isWs = (c) => WS.includes(c) && c !== '';
+const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+const asciiTrim = (s) => s.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+function prescan(buf) {
+  const s = buf.toString('latin1');
+  const n = s.length;
+  let p = 0;
+  /** "get an attribute": [name, value] at p (advancing it), or null at `>` / the end. */
+  const attr = () => {
+    while (p < n && (isWs(s[p]) || s[p] === '/')) p++;
+    if (p >= n || s[p] === '>') return null;
+    let name = '';
+    let value = '';
+    for (;; p++) {
+      if (p >= n) return null;
+      const c = s[p];
+      if (c === '=' && name) { p++; break; }
+      if (isWs(c)) {
+        while (p < n && isWs(s[p])) p++;
+        if (s[p] !== '=') return [name, ''];
+        p++; break;
+      }
+      if (c === '/' || c === '>') return [name, ''];
+      name += asciiLower(c);
+    }
+    while (p < n && isWs(s[p])) p++;
+    if (p >= n) return null;
+    const q = s[p];
+    if (q === '"' || q === "'") {
+      const e = s.indexOf(q, p + 1);
+      if (e === -1) return null;
+      value = s.slice(p + 1, e); p = e + 1;
+      return [name, value];
+    }
+    if (q === '>') return [name, ''];
+    for (; p < n && !isWs(s[p]) && s[p] !== '>'; p++) value += asciiLower(s[p]);
+    return [name, value];
+  };
+  const at = (lit) => asciiLower(s.slice(p, p + lit.length)) === lit;
+  for (; p < n; p++) {
+    if (at('<!--')) { const e = s.indexOf('-->', p + 2); if (e === -1) return null; p = e + 2; continue; }
+    if (at('<meta') && (isWs(s[p + 5] || '') || s[p + 5] === '/')) {
+      p += 6;
+      const names = new Set();
+      let pragma = false;
+      let need = null;
+      let charset = null;
+      for (let a; (a = attr());) {
+        const [k, v] = a;
+        if (names.has(k)) continue;
+        names.add(k);
+        if (k === 'http-equiv' && asciiLower(v) === 'content-type') pragma = true;
+        else if (k === 'content' && charset === null) { const c = charsetFromContent(v); if (c !== null) { charset = c; need = true; } }
+        else if (k === 'charset') { charset = v; need = false; }
+      }
+      if (need === null || (need && !pragma) || charset === null) continue;
+      return charset;
+    }
+    if (/^<\/?[A-Za-z]/.test(s.slice(p, p + 3))) {
+      p += s[p + 1] === '/' ? 2 : 1;
+      while (p < n && !isWs(s[p]) && s[p] !== '>') p++;
+      while (attr());
+      continue;
+    }
+    if (at('<!') || at('</') || at('<?')) { const e = s.indexOf('>', p); if (e === -1) return null; p = e; }
+  }
+  return null;
+}
+/** WHATWG "extract a character encoding from a meta element", on a `content` value. */
+function charsetFromContent(v) {
+  let i = 0;
+  for (;;) {
+    const j = asciiLower(v).indexOf('charset', i);
+    if (j === -1) return null;
+    i = j + 7;
+    while (i < v.length && isWs(v[i])) i++;
+    if (v[i] !== '=') continue;
+    i++;
+    while (i < v.length && isWs(v[i])) i++;
+    const q = v[i];
+    if (q === '"' || q === "'") { const e = v.indexOf(q, i + 1); return e === -1 ? null : v.slice(i + 1, e); }
+    if (i >= v.length) return null;
+    let e = i;
+    while (e < v.length && !isWs(v[e]) && v[e] !== ';') e++;
+    return v.slice(i, e);
+  }
+}
+
 /** The view of a page's bytes: { bom (bytes), unit (bytes per code unit), text (from after the
- *  BOM), encode (text → bytes) }, or null for a file not edited (UTF-32). */
+ *  BOM), encode (text → bytes) }, or { refused } for a file not edited (sniffEncoding). */
 export function viewOf(bytes) {
-  const [sig, kind] = BOMS.find(([s]) => s.every((x, i) => bytes[i] === x)) || [[], 'bytes'];
-  if (!kind) return null;
-  const body = bytes.subarray(sig.length);
-  if (kind === 'bytes') return { bom: sig.length, unit: 1, text: body.toString('latin1'), encode: (s) => Buffer.from(latin1Safe(s), 'latin1') };
+  const sniffed = sniffEncoding(bytes);
+  if (sniffed.refused) return sniffed;
+  const { bom, kind } = sniffed;
+  const body = bytes.subarray(bom);
+  if (kind === 'bytes') return { bom, unit: 1, text: body.toString('latin1'), encode: latin1Bytes };
   const le = kind === 'utf16le' ? body : Buffer.from(body.subarray(0, body.length & ~1)).swap16();
   const encode = (s) => kind === 'utf16le' ? Buffer.from(s, 'utf16le') : Buffer.from(s, 'utf16le').swap16();
-  return { bom: sig.length, unit: 2, text: le.toString('utf16le'), encode };
+  return { bom, unit: 2, text: le.toString('utf16le'), encode };
 }
-/** Text for the byte view: a character the view cannot hold (one parse5 decoded from a character
- *  reference above U+00FF) goes back as a reference, so latin1 never truncates it. */
-const latin1Safe = (s) => s.replace(/[^\0-\xff]/gu, (c) => `&#x${c.codePointAt(0).toString(16)};`);
+/** Text for the byte view → its bytes. Every edit is ASCII or a slice of the view itself, so a
+ *  character above U+00FF here is a bug, not a page to write. */
+const latin1Bytes = (s) => {
+  if (/[^\0-\xff]/.test(s)) throw new Error('noindex-pass: a byte-view edit is not latin1');
+  return Buffer.from(s, 'latin1');
+};
 
 /** The parsed head of a page: its <meta> elements, and the offset a new head element goes at —
  *  before </head> when written; else after the head's last child, or after <head>; for a head
@@ -200,10 +330,12 @@ export function readPages(dir) {
   for (const rel of htmlFiles(dir)) {
     const bytes = readFileSync(join(dir, rel));
     const view = viewOf(bytes);
-    if (!view) { pages.set(rel, { bytes, html: '', untouchable: true, robots: [] }); continue; }
+    if (view.refused) { pages.set(rel, { bytes, html: '', untouchable: view.refused, robots: [] }); continue; }
     const html = view.text;
     const { metas, insertAt, span } = parseHead(html);
-    const named = (n) => metas.filter((m) => (attrOf(m, 'name')?.value || '').trim().toLowerCase() === n);
+    // ASCII trim and case only: in the byte view a byte ≥ 0x80 is a character trim() and
+    // toLowerCase() have opinions about (U+00A0 is whitespace to trim(), not to HTML)
+    const named = (n) => metas.filter((m) => asciiLower(asciiTrim(attrOf(m, 'name')?.value || '')) === n);
     const stamp = (n) => {
       const m = metas.find((e) => attrOf(e, 'name')?.value === n);
       return m ? { span: span(m), content: attrOf(m, 'content')?.value ?? '' } : null;
@@ -214,7 +346,7 @@ export function readPages(dir) {
       bytes, view, html, insertAt,
       noindexStamp: n?.span || null, flag: n ? flagOf(n.content) : undefined,
       sitemapStamp: s?.span || null, listing: s ? listingOf(s.content) : undefined,
-      robots: named('robots').map(robotsMeta),
+      robots: named('robots').map((m) => robotsMeta(m, html)),
     });
   }
   return pages;
@@ -246,29 +378,47 @@ export function noindexFiles(dir, pages, thanks) {
   return out;
 }
 
+// 🩸 r8 merged the parser's DECODED value — trim(), toLowerCase(), split(',') — and wrote it back
+// through the byte view. There a byte ≥ 0x80 is a character of its own: U+00A0 after `nofollow` is
+// c2 a0 in UTF-8, trim() took the a0 and left a lone c2 (codex r8); and a value parse5 decoded from
+// `&nbsp;` has no byte at all in a UTF-8 page. So the merge reads the value's SOURCE text (the raw
+// bytes between its quotes, character references still written out) and does only what the robots
+// grammar does: split on ASCII whitespace and commas, compare tokens ASCII-case-insensitively. A
+// byte ≥ 0x80 is part of the token beside it. Kept tokens keep their bytes and the separators
+// before them; `noindex` goes after the last one with `, `. A directive spelled with a character
+// reference (`no&#105;ndex`) is not recognised and is kept as written — at worst the value says
+// noindex twice, never not at all.
+const ATTR = /^[^\t\n\f\r =\/>][^\t\n\f\r =\/>]*[\t\n\f\r ]*(?:=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'|([^\t\n\f\r >]+)))?$/d;
 /** A robots <meta> element, located in the view: the span of its tag, and of its (first) `content`
- *  attribute with the parser's value — any order, any case, quoted either way or not at all. */
-function robotsMeta(el) {
+ *  attribute — the whole attribute, and the raw value's span and text inside it (`quoted`: whether
+ *  that span sits between quotes) — any order, any case, quoted either way or not at all. */
+function robotsMeta(el, html) {
   const loc = el.sourceCodeLocation;
   const c = loc.attrs?.content;
-  return {
-    tag: [loc.startOffset, loc.endOffset],
-    content: c ? { span: [c.startOffset, c.endOffset], value: attrOf(el, 'content').value } : null,
-  };
+  let content = null;
+  if (c) {
+    const m = ATTR.exec(html.slice(c.startOffset, c.endOffset));
+    const g = m && [1, 2, 3].find((k) => m[k] !== undefined);
+    const [a, z] = g ? m.indices[g].map((o) => c.startOffset + o) : [c.endOffset, c.endOffset];
+    content = { span: [c.startOffset, c.endOffset], raw: g ? m[g] : '', value: [a, z], quoted: g === 1 || g === 2 };
+  }
+  return { tag: [loc.startOffset, loc.endOffset], content };
 }
-/** A robots `content` made to say noindex: returned as is when it already does and nothing
- *  contradicts it; otherwise `index` dropped, `all` → `follow`, `noindex` appended once, every
- *  other directive kept in its place. */
-export function mergeRobots(content) {
-  const ds = String(content).split(',').map((d) => d.trim()).filter(Boolean);
-  const l = (d) => d.toLowerCase();
-  const says = ds.some((d) => l(d) === 'noindex' || l(d) === 'none');
-  if (says && !ds.some((d) => l(d) === 'index' || l(d) === 'all')) return content;
-  const out = ds.flatMap((d) => l(d) === 'index' ? [] : l(d) === 'all' ? ['follow'] : [d]);
-  if (!says) out.push('noindex');
-  return out.join(',');
+/** A robots `content`, as written in the source, made to say noindex: returned as is when it
+ *  already does and nothing contradicts it; otherwise `index` dropped, `all` → `follow`, `noindex`
+ *  appended once, every other directive kept in its place, byte for byte. */
+export function mergeRobots(raw) {
+  const toks = [...String(raw).matchAll(/[^\t\n\f\r ,]+/g)].map((m) => ({ t: m[0], a: m.index, z: m.index + m[0].length }));
+  const l = (d) => asciiLower(d.t);
+  const says = toks.some((d) => l(d) === 'noindex' || l(d) === 'none');
+  if (says && !toks.some((d) => l(d) === 'index' || l(d) === 'all')) return raw;
+  if (!toks.length) return 'noindex';
+  const kept = toks.flatMap((d, i) => l(d) === 'index' ? [] : [{ i, t: l(d) === 'all' ? 'follow' : d.t }]);
+  const lead = raw.slice(0, toks[0].a);
+  const trail = raw.slice(toks[toks.length - 1].z);
+  const body = kept.map(({ i, t }, j) => (j ? raw.slice(toks[i - 1].z, toks[i].a) : '') + t).join('');
+  return lead + (says ? body : body ? body + ', noindex' : 'noindex') + trail;
 }
-const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
 /** The page's bytes with its stamps and thanks marks removed and, when decided noindex: each robots
  *  meta it already has merged to say noindex (mergeRobots) — never a second tag — or, with none,
@@ -284,12 +434,15 @@ export function rewritePage(p, noindex) {
   if (p.noindexStamp) edits.push([...p.noindexStamp, noindex && !robots.length ? ROBOTS : '']);
   else if (noindex && !robots.length) edits.push([p.insertAt, p.insertAt, ROBOTS]);
   if (noindex) for (const r of robots) {
-    const merged = mergeRobots(r.content ? r.content.value : '');
-    if (r.content && merged === r.content.value) continue;
-    if (r.content) edits.push([...r.content.span, `content="${escAttr(merged)}"`]);
+    const c = r.content;
+    const merged = mergeRobots(c ? c.raw : '');
+    if (c && merged === c.raw) continue;
+    if (c?.quoted) edits.push([...c.value, merged]);
+    // unquoted or bare: the attribute is rewritten double-quoted (", " would end an unquoted value)
+    else if (c) edits.push([...c.span, `${html.slice(c.span[0], c.span[0] + 7)}="${merged.replace(/"/g, '&quot;')}"`]);
     else {
-      const end = r.tag[0] + /\s*\/?>$/.exec(html.slice(...r.tag)).index;
-      edits.push([end, end, ` content="${escAttr(merged)}"`]);
+      const end = r.tag[0] + /[\t\n\f\r ]*\/?>$/.exec(html.slice(...r.tag)).index;
+      edits.push([end, end, ' content="noindex"']);
     }
   }
   if (p.sitemapStamp) edits.push([...p.sitemapStamp, '']);
@@ -358,7 +511,7 @@ export function applyNoindex(dir, manifest = []) {
   }
   const sitemap = join(dir, 'sitemap.xml');
   if (existsSync(sitemap)) writeFileSync(sitemap, rebuildSitemap(dir, readFileSync(sitemap, 'utf8'), pages, noindex));
-  return { noindex: [...noindex].sort(), untouched: [...noindex].filter((rel) => pages.get(rel).untouchable).sort() };
+  return { noindex: [...noindex].sort(), untouched: [...noindex].sort().filter((rel) => pages.get(rel).untouchable).map((file) => ({ file, encoding: pages.get(file).untouchable })) };
 }
 
 /** Astro integration: runs after the static output is written (after locale-404's renames). */
@@ -371,8 +524,8 @@ export function noindexPass() {
         const manifest = globalThis[MANIFEST] || [];
         delete globalThis[MANIFEST];
         const { untouched } = applyNoindex(fileURLToPath(dir), manifest);
-        for (const rel of untouched) {
-          const msg = `${rel} is noindex but saved as UTF-32, which no browser reads: left unchanged without a robots meta, and out of sitemap.xml. Save it as UTF-8 to have one written.`;
+        for (const { file, encoding } of untouched) {
+          const msg = `${file} is noindex but saved as ${encoding}, which this build cannot edit without corrupting it: left unchanged with no robots meta, and out of sitemap.xml. Set noindex in the page itself (<meta name="robots" content="noindex">), or save it as UTF-8 to have one written.`;
           logger ? logger.warn(msg) : console.warn(msg);
         }
       },

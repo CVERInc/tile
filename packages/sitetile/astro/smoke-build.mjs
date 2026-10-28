@@ -2170,9 +2170,9 @@ const checks = [
     readFileSync(join(N5DIST, 'embedded/index.html'), 'utf8').includes('<template><form action="/__reef/inbox"')
     && readFileSync(join(N5DIST, 'third-party/index.html'), 'utf8').includes('action="https://forms.example/submit"')
     && !noindexAt(N5DIST, 'template-target') && listedAt(N5DIST, '/template-target/')],
-  ['🔴 #2554 r6 a real inbox form\'s thanks target with its own `index,follow` robots meta → one robots meta, `follow,noindex`', () => {
+  ['🔴 #2554 r6 a real inbox form\'s thanks target with its own `index,follow` robots meta → one robots meta, `follow, noindex`', () => {
     const h = readFileSync(join(N5DIST, 'indexable.html'), 'utf8');
-    return h.includes('<meta name="robots" content="follow,noindex">') && (h.match(/name="robots"/g) || []).length === 1
+    return h.includes('<meta name="robots" content="follow, noindex">') && (h.match(/name="robots"/g) || []).length === 1
       && readFileSync(join(N5DIST, 'contact/index.html'), 'utf8').includes('name="thanks_to" value="/indexable.html"');
   }],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,

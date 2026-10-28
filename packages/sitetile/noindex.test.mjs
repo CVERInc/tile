@@ -221,9 +221,9 @@ test('an existing permissive robots meta on a thanks target is merged into noind
     'all.html': pub('all'), 'done.html': pub('noindex, nofollow'),
   });
   assert.deepEqual(s.decided, ['all.html', 'done.html', 'indexable.html', 'preview.html']);
-  assert.equal(s.read('indexable.html'), pub('follow,noindex'));
-  assert.equal(s.read('preview.html'), pub('max-image-preview:large,noindex'));
-  assert.equal(s.read('all.html'), pub('follow,noindex'));
+  assert.equal(s.read('indexable.html'), pub('follow, noindex'));
+  assert.equal(s.read('preview.html'), pub('max-image-preview:large, noindex'));
+  assert.equal(s.read('all.html'), pub('follow, noindex'));
   assert.equal(s.read('done.html'), pub('noindex, nofollow'));
 });
 
@@ -235,7 +235,7 @@ test('a robots meta is found however a public/ page writes it, merged in place; 
     'kept/index.html': html({ flag: 'false' }).replace('</head>', '<meta name="robots" content="index"></head>'),
   });
   assert.deepEqual(s.decided, ['a.html', 'b.html']);
-  assert.equal(s.read('a.html'), '<html><head><META content="max-snippet:-1,noindex" NAME=Robots></head><body></body></html>');
+  assert.equal(s.read('a.html'), '<html><head><META CONTENT=\'max-snippet:-1, noindex\' NAME=Robots></head><body></body></html>');
   assert.equal(s.read('b.html'), '<html><head><meta name="robots" content="noindex"></head><body></body></html>');
   assert.match(s.read('kept/index.html'), /<meta name="robots" content="index"><\/head>/);
   for (const f of ['a.html', 'b.html']) assert.equal((s.read(f).match(/robots/gi) || []).length, 1);
@@ -286,7 +286,7 @@ test('the head is found whatever its case or however it ends: </HEAD>, <META NAM
   const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
   assert.deepEqual(s.decided, Object.keys(pages).sort());
   assert.equal(s.read('upper.html'), pages['upper.html'].replace('</HEAD>', ROBOTS + '</HEAD>'));
-  assert.equal(s.read('upper-meta.html'), pages['upper-meta.html'].replace('CONTENT="INDEX"', 'content="noindex"'));
+  assert.equal(s.read('upper-meta.html'), pages['upper-meta.html'].replace('CONTENT="INDEX"', 'CONTENT="noindex"'));
   assert.equal(s.read('open.html'), '<head><title>x</title>' + ROBOTS + '<body>Thanks');
   assert.equal(s.read('implied.html'), '<!DOCTYPE html><title>x</title>' + ROBOTS + '<p>Thanks');
   assert.equal(s.read('bom.html'), pages['bom.html'].replace('</head>', ROBOTS + '</head>'));
@@ -344,8 +344,114 @@ test('a UTF-16 page (by its BOM) is edited in UTF-16; a UTF-32 page is left unto
   assert.ok(s.bytes('le.html').equals(want), `le.html: UTF-16LE input + one robots meta in UTF-16LE\n      got  ${s.bytes('le.html').toString('hex')}`);
   assert.ok(s.bytes('be.html').equals(Buffer.from(want).swap16()), `be.html: UTF-16BE input + one robots meta in UTF-16BE\n      got  ${s.bytes('be.html').toString('hex')}`);
   assert.ok(s.bytes('u32.html').equals(u32), 'u32.html: untouched');
-  assert.deepEqual(s.untouched, ['u32.html']);
+  assert.deepEqual(s.untouched, [{ file: 'u32.html', encoding: 'UTF-32' }]);
   assert.deepEqual(s.listed(), ['/', '/c/'], 'the three noindex pages are not listed');
+});
+
+// codex r8 P2 (ISO-2022-JP): the byte view is only a view of an ASCII-COMPATIBLE encoding. In
+// ISO-2022-JP the bytes of 、紹 are 21 22 3e 52 — a quote and a `>` to anyone reading bytes — so r8
+// wrote the robots meta between the two bytes of 紹, inside the description. The pass sniffs the
+// encoding first, as a browser does (BOM, else a <meta> charset in the first 1024 bytes, else
+// UTF-8); for one that is not ASCII-compatible, or a label that names no encoding, it leaves the
+// bytes alone, keeps the page out of the sitemap, and reports it.
+test('a page in an encoding that is not ASCII-compatible keeps every byte, is unlisted, and is reported: ISO-2022-JP, BOM-less UTF-16, unknown labels', () => {
+  const iso = Buffer.from('3c21646f63747970652068746d6c3e3c68746d6c3e3c686561643e3c6d65746120636861727365743d2269736f2d323032322d6a70223e3c6d657461206e616d653d226465736372697074696f6e2220636f6e74656e743d221b244224332473244b2441244f21223e5232702437245e24391b2842223e3c7469746c653e1b24422422246a242c244824261b28423c2f7469746c653e3c2f686561643e3c626f64793e1b24422422246a242c24482426243424362424245e2437243f21231b28423c2f626f64793e3c2f68746d6c3e', 'hex');
+  const page = (meta) => b(`<html><head>${meta}<title>Thanks</title></head><body>Thanks</body></html>`);
+  const pages = {
+    'iso2022jp.html': iso,                                                           // codex's input, verbatim
+    'iso-pragma.html': page('<meta http-equiv="Content-Type" content="text/html; charset=ISO-2022-JP">'),
+    'u16-meta.html': b('<html><head><meta charset="utf-16le"><title>Merci</title></head><body>reçu</body></html>', 'utf16le'),  // no BOM
+    'u16-label.html': page('<meta charset="UTF-16">'),
+    'replacement.html': page('<meta charset="iso-2022-kr">'),
+    'user-defined.html': page('<meta charset=x-user-defined>'),
+    'unknown.html': page('<meta charset="x-no-such-encoding">'),
+  };
+  const files = { 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), 'index.html': html(), ...pages };
+  const s = site(files, [['/'], ...Object.keys(pages).map((f) => ['/' + f])]);
+  const names = Object.keys(pages).sort();
+  assert.deepEqual(s.decided, names);
+  const changed = names.filter((f) => !s.bytes(f).equals(pages[f])).map((f) => `${f}\n      got  ${s.bytes(f).toString('hex')}\n      want ${pages[f].toString('hex')}`);
+  assert.deepEqual(changed, [], `left byte-identical:\n    ${changed.join('\n    ')}`);
+  assert.deepEqual(s.untouched.map((u) => u.file), names);
+  assert.deepEqual(Object.fromEntries(s.untouched.map((u) => [u.file, u.encoding])), {
+    'iso2022jp.html': 'ISO-2022-JP', 'iso-pragma.html': 'ISO-2022-JP', 'u16-meta.html': 'UTF-16 without a byte-order mark',
+    'u16-label.html': 'UTF-16LE', 'replacement.html': 'iso-2022-kr (not an encoding this pass can read)',
+    'user-defined.html': 'x-user-defined', 'unknown.html': 'x-no-such-encoding (not an encoding this pass can read)',
+  });
+  assert.deepEqual(s.listed(), ['/', '/c/'], 'none of them is listed');
+});
+
+// Shift_JIS, Big5, GBK/GB18030, EUC-KR and EUC-JP put ASCII-range bytes inside a character (ソ is
+// 83 5C) — but never one the HTML tokenizer acts on. Measured over every character, not assumed:
+// each byte of every multi-byte character is ≥ 0x40, except GB18030's four-byte form whose second
+// and fourth bytes are digits — and a digit only means something after an ASCII `&#`.
+test('every multi-byte character of the ASCII-compatible CJK encodings is free of HTML delimiters (measured over all of them)', () => {
+  const found = {};
+  for (const enc of ['shift_jis', 'big5', 'gbk', 'gb18030', 'euc-kr', 'euc-jp']) {
+    const td = new TextDecoder(enc, { fatal: true });
+    const seen = new Set();
+    let n = 0;
+    const tryBytes = (bs) => {
+      let s;
+      try { s = td.decode(Uint8Array.from(bs)); } catch { return; }
+      if ([...s].length !== 1 || s.charCodeAt(0) < 0x80) return;
+      n++;
+      for (const x of bs) if (x < 0x80) seen.add(x);
+    };
+    for (let a = 0x80; a < 0x100; a++) for (let c = 0; c < 0x100; c++) tryBytes([a, c]);
+    if (enc === 'euc-jp') for (let a = 0xa1; a < 0xff; a++) for (let c = 0xa1; c < 0xff; c++) tryBytes([0x8f, a, c]);
+    if (enc === 'gb18030') for (let a = 0x81; a < 0xff; a++) for (const d of [0x30, 0x39]) tryBytes([a, d, 0x81, 0x30]);
+    const low = [...seen].sort((x, y) => x - y);
+    found[enc] = { chars: n > 0, min: low.length ? low[0] : null, delimiters: low.filter((x) => x < 0x30 || x === 0x3c || x === 0x3d || x === 0x3e || x === 0x3f || x === 0x3b) };
+  }
+  for (const [enc, f] of Object.entries(found)) {
+    assert.ok(f.chars, `${enc}: decoded some characters`);
+    assert.deepEqual(f.delimiters, [], `${enc}: no byte of a character is one of \\t \\n \\f \\r space ! " # & ' - / ; < = > ?`);
+  }
+  assert.equal(found.gb18030.min, 0x30, 'GB18030 four-byte characters carry digits');
+  assert.equal(found.shift_jis.min, 0x40);
+});
+
+const SJ = (...xs) => Buffer.from(xs);
+test('a Shift_JIS page whose head characters end in ASCII-range bytes (U+3000 81 40, ソ 83 5C, ヽ 81 52, × 81 7E) gets its robots meta at the head boundary', () => {
+  const desc = SJ(0x81, 0x40, 0x83, 0x5c, 0x81, 0x52, 0x81, 0x7e, 0x95, 0x5c);
+  const src = Buffer.concat([b('<html><head><meta charset="Shift_JIS"><meta name="description" content="'), desc, b('"><title>'), desc, b('</title></head><body>'), desc, b('</body></html>')]);
+  const robots = Buffer.concat([b('<html><head><meta charset="shift_jis"><meta name="robots" content="index, '), SJ(0x83, 0x5c), b('"></head><body></body></html>')]);
+  const s = site({ 'c/index.html': html({ body: form('/sjis.html', '/sjis-robots.html') }), 'sjis.html': src, 'sjis-robots.html': robots });
+  assert.deepEqual(s.decided, ['sjis-robots.html', 'sjis.html']);
+  assert.ok(s.bytes('sjis.html').equals(insertedBefore(src)), `sjis.html\n      got  ${s.bytes('sjis.html').toString('hex')}`);
+  const want = Buffer.concat([b('<html><head><meta charset="shift_jis"><meta name="robots" content="'), SJ(0x83, 0x5c), b(', noindex"></head><body></body></html>')]);
+  assert.ok(s.bytes('sjis-robots.html').equals(want), `sjis-robots.html\n      got  ${s.bytes('sjis-robots.html').toString('hex')}\n      want ${want.toString('hex')}`);
+  assert.deepEqual(s.untouched, []);
+});
+
+// codex r8 P2 (nbsp): the merge trimmed and lowercased the byte view, where each byte ≥ 0x80 is a
+// character of its own: U+00A0 after `nofollow` is c2 a0 in UTF-8, trim() took the a0 and left a
+// lone c2. A robots value is split the way the robots grammar splits it — on ASCII whitespace and
+// commas — and a byte ≥ 0x80 is part of the token beside it. Kept tokens keep their bytes and
+// their separators; `noindex` is appended with `, `.
+test('a robots value is edited byte for byte: U+00A0 (UTF-8 or windows-1252, literal or &nbsp;) is part of its token, never trimmed', () => {
+  const nbsp = Buffer.from('3c68746d6c3e3c686561643e3c6d65746120636861727365743d227574662d38223e3c6d657461206e616d653d22726f626f74732220636f6e74656e743d22696e6465782c206e6f666f6c6c6f77c2a0223e3c2f686561643e3c626f64793e5468616e6b733c2f626f64793e3c2f68746d6c3e', 'hex');
+  const robots = (content, cs = 'utf-8') => Buffer.concat([b(`<html><head><meta charset="${cs}"><meta name="robots" content="`), content, b('"></head><body>Thanks</body></html>')]);
+  const pages = {
+    'nbsp-utf8.html': nbsp,                                                 // codex's input, verbatim
+    'nbsp-1252.html': robots(b('INDEX,\tnofollow\xa0'), 'windows-1252'),
+    'nbsp-ref.html': robots(b('index, nofollow&nbsp;')),
+    'unquoted.html': b('<html><head><meta name=robots content=index,nofollow\xc2\xa0></head><body></body></html>'),
+    'name-nbsp.html': b('<html><head><meta charset="windows-1252"><meta name="\xa0robots" content="index"></head><body></body></html>'),
+  };
+  const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
+  const want = {
+    'nbsp-utf8.html': robots(b('nofollow\xc2\xa0, noindex')),
+    'nbsp-1252.html': robots(b('nofollow\xa0, noindex'), 'windows-1252'),
+    'nbsp-ref.html': robots(b('nofollow&nbsp;, noindex')),
+    'unquoted.html': b('<html><head><meta name=robots content="nofollow\xc2\xa0, noindex"></head><body></body></html>'),
+    // U+00A0 is not ASCII whitespace: this meta is not named robots, so the page gets one
+    'name-nbsp.html': insertedBefore(pages['name-nbsp.html']),
+  };
+  const wrong = Object.keys(pages).filter((f) => !s.bytes(f).equals(want[f])).map((f) => `${f}\n      got  ${s.bytes(f).toString('hex')}\n      want ${want[f].toString('hex')}`);
+  assert.deepEqual(wrong, [], wrong.join('\n    '));
+  assert.equal(new TextDecoder('utf-8', { fatal: true }).decode(s.bytes('nbsp-utf8.html')).includes('nofollow , noindex'), true, 'valid UTF-8, nofollow kept');
 });
 
 test('the thanks mark is removed from every emitted form; a form recorded but never emitted counts for nothing', () => {
