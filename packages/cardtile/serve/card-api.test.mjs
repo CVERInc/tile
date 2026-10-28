@@ -1372,6 +1372,10 @@ test("🔴 codex r7 a DELETE whose binding listings have not caught up still end
       const lagging = { ...env, CARDS: { ...env.CARDS, list: async (o) =>
         (missing && ['vanitybind:a:', 'vanityof:a:'].includes(o.prefix) ? { keys: [], list_complete: true } : list(o)) } };
       assert.equal((await call(lagging, 'DELETE', '/_api/card/a')).status, 200, `${where}: DELETE`);
+      // r8: every bound host was told, not every LISTED one — and the late bind below is refused by
+      // CardLifetime anyway, so this is the assertion that sees which hosts DELETE reached
+      assert.equal(env.CARDS._m.get(vanityKey(OWNER)), undefined, `${where}: DELETE did not end a host a was bound to`);
+      assert.equal(env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').owner, null, `${where}: the host object still names a`);
       assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: NEXT })).status, 200);
       await bindVanity(env, 'b', OWNER);
       assert.equal((await host(env, OWNER, '/')).status, 200, `${where} CONTROL: b serves`);
