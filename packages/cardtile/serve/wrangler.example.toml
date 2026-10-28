@@ -46,6 +46,15 @@ PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outr
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
 
+# The ONE writer of vanity:<host> (card-api HostBindings, reef#2618 r6): one Durable Object per host.
+# 🔴 Preview binds PRODUCTION's class, not one of its own. Both Workers write the same CARDS store, so
+# two namespaces would be two writers per host, which is the race the object exists to remove. It
+# follows that `cardtile` (with its migration below) must be deployed before this Worker can bind.
+[[durable_objects.bindings]]
+name = "HOST_BINDINGS"
+class_name = "HostBindings"
+script_name = "cardtile"
+
 # ── production ─────────────────────────────────────────────────────────────────────────────────
 # The native replacement for the legacy Python renderer. A creator's own host is a VANITY host (see the
 # worker's VANITY map) — the canonical form is card.feelreef.com/<handle>, added once that hostname
@@ -87,6 +96,19 @@ PREVIEW = "false"
 [[env.production.kv_namespaces]]
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
+
+# The class lives here (see the preview binding above). Durable Object bindings are not inherited by
+# an environment, so it is declared again. The migration creates the class: the first deploy that
+# carries it IS the migration, and the tag is never edited or reused once deployed.
+# SQLite-backed (`new_sqlite_classes`) because Cloudflare offers only that kind on the Free plan and
+# recommends it for every new class; the object stores nothing, so the backend never holds data.
+[[env.production.durable_objects.bindings]]
+name = "HOST_BINDINGS"
+class_name = "HostBindings"
+
+[[env.production.migrations]]
+tag = "v1-host-bindings"
+new_sqlite_classes = ["HostBindings"]
 
 # ── Secrets (set with `wrangler secret put`, never in this file) ──────────────────────────────────
 # WEB_RISK_API_KEY — Google Web Risk API key. card save (PUT /_api/card/<handle>) looks up every
