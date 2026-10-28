@@ -124,6 +124,8 @@ existed:
 1. **Losing a host clears every inverse that names it.** `CardLifetime`'s `/lost` clears its own
    inverse and, when the bare legacy key named that host, deletes the bare key too (after writing the
    tombstone below, so no reader sees the bare key alone).
+   (r11) A `/lost` carries the ticket of the acceptance that displaced the handle (retries keep it), and the inverse keeps the ticket of the acceptance that wrote it.
+   It is cleared only if `inverse.ticket < loss ticket`: a retried notice about an older take never clears a newer rebind of the same host.
 2. **An authoritative "none" is not a missing key.** In generation 0 the object writes "no address"
    as an EMPTY `vanityof:<handle>:0` instead of deleting it. The reader (`boundHostOf`) asks the bare
    key only when the generation-0 key is ABSENT, i.e. no lifetime has ever spoken for the handle.
