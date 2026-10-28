@@ -48,7 +48,8 @@ export const goneKey = (handle) => `gone:${handle}`;
 
 /**
  * A handle's lifetime (reef#2618 r3). `gen:<handle>` holds the current generation; absent means the
- * first lifetime, generation `0`. Only DELETE writes it. The lifetime is part of every key a write
+ * first lifetime, generation `0`. Since r8 it is the cache of CardLifetime's storage, which is the
+ * authority, and CardLifetime writes it at the end of each DELETE. The lifetime is part of every key a write
  * lands on:
  *
  *   card:<handle>:<gen>   the card body          stop:<handle>:<gen>   its serving stop
@@ -111,29 +112,36 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  * r5 re-read `gen:` beside the put in the caller; r6 moved that re-read into the object's queue. Both
  * still asked KV, and KV answers from a per-location cache: an object whose view of `gen:a` was warmed
  * before a's DELETE let a's held bind through after b's, and the domain went 404 for good (while
- * card.feelreef.com/b kept 301ing into it). Now DELETE sends `end(a, gen)` to every host a is bound to
- * and rotates `gen:a` only after each has answered (see deleteCard). The object's own storage — strongly
- * consistent, one per host — holds the owner `{ handle, gen }` and the lifetimes it was told ended. A
- * bind of an ended lifetime that reaches it after the end is refused; one that reached it before is
- * cleared by the end. b exists only after the DELETE, so b's bind is the last word either way.
+ * card.feelreef.com/b kept 301ing into it). DELETE sends `end(a, gen)` to every host a is bound to; the
+ * object's own storage holds the owner `{ handle, gen }` and the lifetimes it was told ended. A bind of
+ * an ended lifetime that reaches it after the end is refused; one that reached it before is cleared.
  *
- * 🔴 And an end can only reach hosts DELETE can list. A bind held before it wrote `vanitybind:` is in
- * no listing, so no end tells its host. For that the object also orders binds by ADMISSION: a bind
- * takes a ticket from the object before it reads `gen:`, and a pointer write never replaces one with a
- * later ticket (`superseded`). b's bind starts after the DELETE, so it holds the later ticket. The end
- * covers the other side: a bind admitted after b's (a later ticket) where `gen:a` is still cached. The
- * keys before the pointer belong to one lifetime and are written by the caller, as in r5.
- *
+ * 🔴 And WHICH hosts a is bound to is not a KV fact either (codex r7, r8). r7 found them by listing
+ * `vanitybind:a:` / `vanityof:a:`; a listing that had not caught up ended none, and a's later bind took
+ * the domain from b. Now the handle's lifetime lives in CardLifetime (one object per handle): a bind
+ * REGISTERS its host there — checked against the lifetime it means, in one turn — before it writes any
+ * key or pointer, and DELETE rotates the generation there first and only then reads back the hosts
+ * registered under the ended one. So:
+ *   a bind registers its host before it checks anything, and the check is the registration itself;
+ *   DELETE reads the host list after it rotates, in the same object, so it cannot miss an earlier one;
+ *   any bind whose check passed is on that list and gets an end before DELETE touches KV;
+ *   any bind that checks after the rotation is refused, and one that outlives its ticket is refused.
+ * The admission ticket stays: a bind admitted before b's never replaces b's (`superseded`), and since
+ * r8 a ticket lives TICKET_TTL_MS, which is what lets HostBindings forget an end (see there).
+
  * Migration: bindings made before generations are `vanity:<host>` → handle and bare `vanityof:<handle>`
  * → host. They are generation 0's: in generation 0 the pointer alone is a binding and the bare inverse
  * is read as `vanityof:<handle>:0` (the same fallback as a legacy body). A handle in generation 0 has
  * never been deleted, so no ended lifetime can have made its pointer. After its first DELETE neither is
  * honoured again.
  *
- * bindVanity(env, …) is the one way to make a binding: it needs `env.CARDS` and `env.HOST_BINDINGS`.
- * A `redirect: false` binding writes no `vanityof:` (the canonical address keeps serving). Returns
- * `stale_generation` when the handle's lifetime ended while it ran (its keys are dead), or `superseded`
- * when a bind that started later already took the host; in both the pointer was not written.
+ * bindVanity(env, …) is the one way to make a binding: it needs `env.CARDS`, `env.HOST_BINDINGS` and
+ * `env.CARD_LIFETIMES`. `gen` is the lifetime the caller means (a save's admitted generation); absent,
+ * it is read from the `gen:` cache, which can only make a bind be refused, never let one through. A
+ * `redirect: false` binding writes no `vanityof:` (the canonical address keeps serving). Returns
+ * `stale_generation` when that lifetime is not (or no longer) the current one, `superseded` when a bind
+ * that started later already took the host, or `expired` when it outlived its ticket; in all three
+ * the pointer was not written.
  */
 export const vanityKey = (host) => `vanity:${host}`;
 const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
@@ -210,8 +218,9 @@ async function askLifetime(env, handle, op, body) {
  * Its storage is the truth for the host; the KV pointer is the cache readers use, and this object is
  * its only writer. Storage key `host`:
  *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms } }
- *   POST /admit { handle, host }        → { ticket: ++seq }, taken before the bind reads `gen:`
+ *   POST /admit { handle, host }        → { ticket: seq = max(seq + 1, now) }, the bind's first step
  *   POST /point { handle, gen, host, ticket }
+ *                                       refused (`expired`) if the ticket is TICKET_TTL_MS old;
  *                                       refused (`stale_generation`) if (handle, gen) is in `ended`;
  *                                       refused (`superseded`) if ticket < landed (a later-admitted bind
  *                                       already wrote; the same owner again is a no-op); otherwise
@@ -525,26 +534,29 @@ async function writeCard(store, handle, md, admitted) {
  * 410 instead of an ordinary 404. The tombstone does not reserve the handle: the next save clears it.
  *
  * 🔴 The domain binding goes too: its keys are the ended lifetime's (see vanityKey), so the next owner
- * of this handle is neither 301'd to the previous owner's domain nor served on it. The shared
- * `vanity:<host>` pointer stays, inert. (The Cloudflare-for-SaaS hostname itself is outside this
- * store; unbinding it stays an operator act.)
+ * of this handle is neither 301'd to the previous owner's domain nor served on it. Each host the
+ * lifetime registered is told, and its object clears `vanity:<host>` if it still names this lifetime; a
+ * hand-made legacy pointer no object knows stays, inert. (The Cloudflare-for-SaaS hostname itself is
+ * outside this store; unbinding it stays an operator act.)
  *
  * The marker is written FIRST: the renderer only reads it when the card body is missing, so it is
  * invisible until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
  * Returns whether there was a card to delete; a handle that never had one gets no marker, because a
  * 410 there would claim a card that never was.
  *
- * 🔴 Then the lifetime ends: a fresh `gen:<handle>` (see genKey). From that put on, every write
- * admitted before it — a save waiting on Web Risk, a body or stop mid-put, a preview — lands on the
- * old generation's keys, which nothing reads. DELETE is the ONLY writer of `gen:`.
+ * 🔴 Then the lifetime ends: a fresh generation in CardLifetime, and then in the `gen:<handle>` cache
+ * (see genKey). From that put on, every write admitted before it — a save waiting on Web Risk, a body
+ * or stop mid-put, a preview — lands on the old generation's keys, which nothing reads. Only DELETE
+ * changes a generation, and only CardLifetime writes `gen:`.
  *
  * 🔴 And it writes it EVERY time (r4), whatever its reads saw. Any read here can be a stale view from
  * another location: a cached negative for `gen:` (codex r2 finding 4), for the body, the listing, the
  * marker — or, for a legacy handle, a current-format miss beside a bare body nobody reads outside
  * generation 0 (codex r3 finding 1). Each time rotation hung on "did I see a lifetime", some mixed view
  * made it skip, and a save admitted in the real lifetime landed live after convergence. Nothing read
- * decides it now. `deleted` still reports what was found; the lifetime ends regardless. A DELETE on a
- * handle that never had a card costs one small `gen:` key and ends nothing anyone was served.
+ * decides it now (and since r8 the rotation is the object's, which reads nothing from KV). `deleted`
+ * still reports what was found; the lifetime ends regardless. A DELETE on a handle that never had a
+ * card costs one small `gen:` key and one object, and ends nothing anyone was served.
  */
 async function deleteCard(env, handle) {
   const store = env.CARDS;

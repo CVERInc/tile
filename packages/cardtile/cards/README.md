@@ -59,40 +59,68 @@ goes under the handle's CURRENT generation (reef#2618 r3 — see `genKey` in `se
 
 🔴 Not the bare `<handle>` key. That is the pre-generation shape, read only while a handle has
 never been deleted; on any handle that has, the write lands and nothing ever serves it. Never
-write `gen:<handle>` by hand either — only DELETE does, and a new value there takes the card down.
+write `gen:<handle>` by hand either. It is a cache of the handle's `CardLifetime` object, which
+writes it at the end of each DELETE. A hand value there takes the card down and disagrees with
+the object, which then refuses every bind until the next DELETE rewrites it.
 
-A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`):
+A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`). Two
+Durable Objects hold the facts KV cannot be trusted with (r8):
 
 | key | value | meaning | who writes it |
 |---|---|---|---|
-| `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` | `bindVanity`, in the caller |
+| object storage `life` (inside `CardLifetime`, one per handle) | `{ gen, hosts, pending }` | the truth for `<handle>`: its generation, the hosts bound in it, the ends still owed | only that object |
+| `gen:<handle>` | generation | the cache of `life.gen` that readers and saves use | **only `CardLifetime`**, at the end of each DELETE |
+| `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` | `bindVanity`, in the caller, after it registered |
 | `vanityof:<handle>:<gen>` | host | in this lifetime, the canonical address 301s to `<host>` | `bindVanity`, in the caller (not for `redirect: false`) |
-| `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped | **only `HostBindings`**, the Durable Object named `<host>` |
-| object storage `host` (inside `HostBindings`) | `{ seq, landed, owner, ended }` | the truth for `<host>`: who owns it, which lifetimes ended | only that object |
+| object storage `host` (inside `HostBindings`, one per host) | `{ seq, landed, owner, ended }` | the truth for `<host>`: who owns it, which lifetimes ended | only that object |
+| `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped | **only `HostBindings`** |
 
 The renderer follows the pointer, reads that handle's `gen:`, and serves the host only if the
-`vanitybind:` key of that generation exists. Readers read KV only and never call the object; if
-KV and the object's storage disagree, the object is right and the next bind or end rewrites KV.
+`vanitybind:` key of that generation exists. Readers read KV only and never call an object. If
+KV and an object's storage disagree, the object is right, and the next bind, end or DELETE rewrites KV.
 
-The protocol (r7, codex r6). The object is TOLD when a lifetime ends; it never reads KV:
+The protocol (r8, codex r7). No lifetime fact is read from KV on a write path:
 
-1. `bindVanity` takes a ticket from the object (`/admit`), reads `gen:`, writes the two lifetime keys, then asks the object to point (`/point`).
-2. The object refuses a lifetime it was told ended (`stale_generation`) and a ticket older than the last one it wrote (`superseded`); otherwise it records the owner, then writes `vanity:<host>`.
-3. DELETE sends `/end` (every generation it saw) to every host its `vanitybind:`/`vanityof:` keys name; each object records them and clears the pointer if its owner is one. DELETE rotates `gen:` only after every end answered, and otherwise answers 503 and rotates nothing.
-4. So a bind admitted in an ended lifetime never overwrites a later binding: the ticket stops one that started before the replacement, and the end stops one admitted later where `gen:` was still cached.
+1. `bindVanity` takes a ticket from `HostBindings(host)` (`/admit`).
+   - It then registers with `CardLifetime(handle)` (`/register`), naming the generation it means.
+   - The object refuses a generation that is not the current one (`stale_generation`). Otherwise it records the host under that generation.
+   - Only then does the bind write the two lifetime keys and ask `HostBindings` to point (`/point`).
+2. `HostBindings` refuses three kinds of `/point`:
+   - a ticket older than `TICKET_TTL_MS` (60 s; `expired`);
+   - a lifetime it was told ended (`stale_generation`);
+   - a ticket older than the last one it wrote (`superseded`).
 
-🔴 Why (codex r5, r6): r5 re-read `gen:` beside the put in the caller; r6 moved that re-read into the
-object's queue. Both asked KV, which answers each location from a cache. A bind of `a`, held while
-`a` was deleted and `b` bound the host, landed after `b` and pointed the domain back at `a`. The
-domain went 404 for good, and `card.feelreef.com/b` kept 301ing into it. With `HOST_BINDINGS`
-unbound, `bindVanity` refuses and writes nothing. The object's `ended` set keeps a day of
-entries, at most 512 per host, and only for handles bound to that host.
+   Otherwise it records the owner, then writes `vanity:<host>`.
+3. DELETE asks `CardLifetime` to end (`/end`).
+   - The object rotates the generation in its own storage FIRST. It then answers with every host registered under the ended generation, plus any end an earlier DELETE still owes.
+   - DELETE sends `/end` to each of those `HostBindings`. Each records the lifetime as ended, and clears the pointer if its owner is that lifetime.
+   - Only when every end has answered does DELETE call `/settle`. The object drops what was delivered and writes the `gen:` cache; then DELETE removes the lifetime's KV keys.
+   - No KV listing is used to find a host.
+4. `ended` entries are kept exactly `TICKET_TTL_MS`, with no count cap. A bind that can still land took its ticket less than that long ago. Its end was recorded after its ticket, so that entry is still there.
+
+Why this is airtight (the four lines):
+- A bind registers its host before it checks anything; the check is the registration itself, one turn of the handle's object.
+- DELETE reads the host list after it rotates, in that same object, so every registration that passed is on the list.
+- Every bind on the list gets an end before DELETE touches KV. One that reaches its host after the end is refused; one that reached it before is cleared.
+- Any bind that checks after the rotation is refused, and a bind that outlives its ticket is refused whatever the `ended` set still holds.
+
+🔴 Why (codex r5, r6, r7):
+- r5 and r6 asked KV whether `gen:` was current. A cached view let a's held bind point the domain back at a after b had bound it.
+- r7 told each host when a lifetime ended, but it found the hosts by listing `vanitybind:a:` / `vanityof:a:`. A listing that had not caught up ended no host. A bind of a admitted after b's then took the domain: 200 → 404 → 404 after convergence, while `card.feelreef.com/b` kept 301ing into it.
+
+With `HOST_BINDINGS` or `CARD_LIFETIMES` unbound, `bindVanity` refuses and writes nothing.
+
+If a host does not acknowledge its end, DELETE answers 503.
+- The lifetime has already ended in `CardLifetime`, so no bind of it can register.
+- KV is untouched: `gen:` still names the old generation, and the card still serves.
+- The host stays in `pending`, and a retry of the DELETE delivers its end. The retry rotates once more, which ends nothing anyone can see.
 
 By hand, the same order, pointer LAST. This is allowed only while no deployed route calls
-`bindVanity`, because then the person typing is the host's only writer. A hand pointer is outside
-the object: it never learns the owner, so a DELETE's end will not clear that pointer. The pointer
-stays inert, because DELETE removes the `vanitybind:` key. Once tile#122's PUT is live, a hand
-`put vanity:<host>` is a second writer. Bind through the API instead.
+`bindVanity`, because then the person typing is the host's only writer. A hand binding is outside
+both objects. `CardLifetime` never registered its host, so a DELETE never sends it an end, and its
+pointer stays behind. It is inert: the renderer needs a `vanitybind:` key of the current
+generation, and the DELETE rotated it. Once tile#122's PUT is live, a hand `put vanity:<host>` is a
+second writer. Bind through the API instead.
 
     npx wrangler kv key put --remote --namespace-id=<CARDS id> vanitybind:<handle>:<gen>:<host> <handle>
     npx wrangler kv key put --remote --namespace-id=<CARDS id> vanityof:<handle>:<gen> <host>   # omit for no redirect
@@ -101,48 +129,58 @@ stays inert, because DELETE removes the `vanitybind:` key. Once tile#122's PUT i
 
 A binding made before generations (`vanity:<host>` plus a bare `vanityof:<handle>`) belongs to
 generation 0. In generation 0 the pointer alone binds. After the handle's first DELETE it never
-does again, and that DELETE ends generation 0 on the host the bare `vanityof:` names. Never copy
-an old binding into a later generation's keys: if a DELETE missed it, that hands the former owner's
-domain to the next owner.
+does again. No object knows that host, so no end is sent, and a bind that still means generation 0
+is refused by `CardLifetime`. Never copy an old binding into a later generation's keys: that hands
+the former owner's domain to the next owner.
 
 What this does not close:
-- A bind admitted after the DELETE, from a location still caching the old `gen:`, for a host the DELETE's listings did not show. No end reached that host, and its ticket is the newest, so it can point the domain at the deleted handle. The domain then 404s until it is bound again; it never serves the wrong card.
-- A fresh bind of a deleted handle (its next, empty lifetime) is an ordinary bind and takes the host. Whether it may is the caller's authorisation question, not this object's.
+- A fresh bind of a deleted handle (its next, empty lifetime) is an ordinary bind and takes the host. Whether it may is the caller's authorisation question, not either object's.
+- A bind of the live card is refused (`stale_generation`) in two windows: between a DELETE's rotation and its `/settle`, and wherever a location still caches the old `gen:`. It stays refused until the cache catches up. That is the safe direction, and a retry succeeds.
+- A hung storage or KV call inside an object stalls that handle's or host's queue. There is no timeout.
 
-Neither has been measured live.
+None of this has been measured live.
 
-**Deploying (the ship step: the release owner).** The next production deploy of cardtile carries a
-Durable Object migration (`[[env.production.migrations]]`, tag `v1-host-bindings`,
-`new_sqlite_classes = ["HostBindings"]`; see `serve/wrangler.example.toml`). The class keeps the
-r6 name and tag. If r6's migration was already deployed, there is nothing new to migrate, and its
-objects start from empty storage. Copy into the real config:
+**Deploying (the ship step: the release owner).** The next production deploy of cardtile carries
+two Durable Object migrations (see `serve/wrangler.example.toml`):
+- `v1-host-bindings`: `new_sqlite_classes = ["HostBindings"]`, unchanged since r6;
+- then `v2-card-lifetime`: `new_sqlite_classes = ["CardLifetime"]`, new in r8.
 
-1. Under `[env.production]`: the `HOST_BINDINGS` binding and the migration, exactly as in the
-   example. Do not edit or reuse the tag after it has been deployed.
-2. At the top level (the preview Worker): `HOST_BINDINGS` with `script_name = "cardtile"`. Both
-   Workers write one CARDS store, so they must share production's objects. A namespace of their
-   own would give each host two writers.
-3. Deploy production first (`npx wrangler deploy --env production`), then preview. Preview's
-   binding names a class that exists only after production's migration.
-4. Rollback: redeploying the previous code without the binding is safe for reads, because readers
-   read KV only. Never deploy a `deleted_classes` migration while any route calls `bindVanity`.
-   It erases every host's owner, tickets and ended lifetimes, and a bind in flight across that can
-   roll a domain back.
-5. From r7 on, DELETE of a card with a domain binding needs the object. If it cannot reach the
-   object, it answers 503 and deletes nothing.
+CardLifetime gets its own tag instead of joining v1, because Cloudflare applies a tag once and
+never again. A tag that might already be deployed must not change, and whether v1 has gone out
+cannot be known from this repository. A new tag is right either way: if v1 is deployed, only v2
+runs; if not, both run in order.
+
+Copy into the real config:
+
+1. Under `[env.production]`: both bindings (`HOST_BINDINGS`, `CARD_LIFETIMES`) and both migrations, exactly as in the example. Do not edit or reuse a tag after it has been deployed.
+2. At the top level (the preview Worker): both bindings, with `script_name = "cardtile"`.
+   - Both Workers write one CARDS store, so they must share production's objects.
+   - A namespace of their own would give each host two writers and each handle two lifetimes.
+3. Before the first deploy, check that `npx wrangler kv key list --remote --namespace-id=<CARDS id> --prefix gen:` is empty.
+   - An object with empty storage is generation 0, which is right only if nothing ever wrote a `gen:` key.
+   - If the list is not empty, stop and ask: each such handle needs its object seeded first.
+4. Deploy production first (`npx wrangler deploy --env production`), then preview. Preview's bindings name classes that exist only after production's migrations.
+5. Rollback: redeploying the previous code without the bindings is safe for reads, because readers read KV only.
+   - Never deploy a `deleted_classes` migration for either class while any route calls `bindVanity` or DELETE.
+   - It erases every handle's lifetime, or every host's owner, tickets and ended lifetimes. A bind in flight across that can roll a domain back.
+6. From r8 on, EVERY DELETE needs `CARD_LIFETIMES`. A DELETE whose lifetime has a registered host needs `HOST_BINDINGS` as well.
+   - Without them DELETE answers 503 and deletes nothing.
+   - The gone marker may already be written, but it is invisible while the body exists.
 
 No route calls `bindVanity` in this repo today, so before tile#122 the deploy changes nothing a
-visitor sees. The only exception is that DELETE of a card with a hand-made binding now calls the
-object.
+visitor sees. The one exception: every DELETE now calls `CardLifetime`.
 
-**tile#122's PUT `/_api/vanity/<handle>`** must call `bindVanity(env, handle, host)` and nothing
-else: no direct `vanity:`/`vanityof:` writes. Answer 409 when it returns `stale_generation` or
-`superseded`.
+**tile#122's PUT `/_api/vanity/<handle>`** must call `bindVanity(env, handle, host, { gen })` and
+nothing else: no direct `vanity:`/`vanityof:`/`gen:` writes.
+- `gen` is the generation of the card the request checked exists (`liveCard(...).gen`), so the binding is of that lifetime or of none.
+- Answer 409 when it returns `stale_generation`, `superseded` or `expired`.
 
-Its unbind deletes the current generation's `vanitybind:`/`vanityof:` keys itself. If it also
-removes the pointer, it does so through a new object operation (`/unbind`, next to `point`):
+Its unbind deletes the current generation's `vanitybind:`/`vanityof:` keys itself. It leaves the
+`CardLifetime` registration alone: an extra host on DELETE's list costs one end, which clears
+nothing it does not own. If the unbind also removes the pointer, it does so through a new
+`HostBindings` operation (`/unbind`, next to `point`):
 - Take a ticket like a bind.
-- Clear the owner and the KV pointer only if the owner is exactly `{ handle, gen }` and the ticket is not older than `landed`.
+- Clear the owner and the KV pointer only if three things hold: the owner is exactly `{ handle, gen }`, the ticket is not older than `landed`, and the ticket has not expired.
 - Record nothing in `ended`: the lifetime goes on, and it may bind the host again.
 
 It must never be a check-then-delete in the caller. That operation is not written yet.
