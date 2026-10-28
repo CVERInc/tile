@@ -16,6 +16,7 @@
 //   • /language — a chooser; the pages it points at are already listed
 //   • /preview — a working surface
 //   • paginated /page/<n> — the same posts again, one rank-diluting step away from the index
+//   • a noindex content page — `noindex: true`, or a form's thanks= target (reef#2554)
 //
 // The list is DERIVED from the same globs the routers use, so it cannot claim a page that was
 // never built. That is the whole point of it: the previous defect on this site was an index
@@ -23,6 +24,7 @@
 import { allPosts, listedPosts, siteMeta, postUrl, postHasPage, blogBase, tagSlugMap, localeBlogCorpora } from '../lib/blog.mjs';
 import { contentUrls, tagUrls, categoryUrls, canonicalPath } from '../lib/sitemap.mjs';
 import { isSiteFile } from '@sitetile';
+import { noindexUrls } from '../lib/noindex.mjs';
 
 const contentGlob = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
 const meta = siteMeta(import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true }));
@@ -43,7 +45,10 @@ const esc = (s) => String(s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>
 export function GET({ site }) {
   const origin = site ? String(site).replace(/\/$/, '') : '';
   const entries = [];
-  for (const u of contentUrls(contentGlob, meta, isSiteFile)) entries.push({ loc: u });
+  // reef#2554: a noindex page (its own `noindex: true`, or a form's thanks= target) is built but
+  // not handed to crawlers — the same list its <meta name="robots"> reads (lib/noindex.mjs).
+  const noindex = noindexUrls(contentGlob, meta);
+  for (const u of contentUrls(contentGlob, meta, isSiteFile)) if (!noindex.has(u)) entries.push({ loc: u });
   if (posts.length) {
     entries.push({ loc: canonicalPath(blogBase(meta) || '/') });
     // #31: a post whose permalink points off this site has no page here, and a sitemap may only

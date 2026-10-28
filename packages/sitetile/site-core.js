@@ -1165,15 +1165,27 @@ function safeSrc(dest) {
 // `?`/`#`) rather than left to a resolver to quietly walk away — an author who wrote `/a/../b`
 // gets refused, not silently rewritten to `/b`.
 const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
-function isSafeInternalPath(dest) {
+function internalPathOk(dest) {
   const raw = decodeEntitiesOnce(dest).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
-  if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
-  if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
-  return true;
+  if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) return false;
+  return !RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0]);
+}
+function isSafeInternalPath(dest) {
+  if (internalPathOk(dest)) return true;
+  recordDrop(dest);
+  return false;
 }
 function safeInternalPath(dest) {
   if (dest == null || dest === '') return null;
   return isSafeInternalPath(dest) ? decodeEntitiesOnce(dest) : null;
+}
+// reef#2554: the same decision as safeInternalPath, without the drop record. For a build-time
+// reader that is NOT the value's declaration point (lib/noindex.mjs asks "where does this form's
+// thanks= land?"): Form.astro already records the drop once; a second reader recording it again
+// would double every warning in the queue.
+function safeInternalPathQuiet(dest) {
+  if (dest == null || dest === '') return null;
+  return internalPathOk(dest) ? decodeEntitiesOnce(dest) : null;
 }
 
 // round 4 (R3-P3-3): this file's OWN href/src emitters below used to escAttr() the RAW,
@@ -3246,7 +3258,7 @@ export {
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
-  safeInternalPath,
+  safeInternalPath, safeInternalPathQuiet,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
   INBOX_FORM_SCRIPT,
   // tile#148: the YouTube line — the paragraph test and the list of a body's videos (blog featured image).

@@ -97,6 +97,10 @@ const zhCategoryPress = readFileSync(join(DIST, 'zh-tw/category/press/index.html
 const tagFixture = readFileSync(join(DIST, 'tag/fixture/index.html'), 'utf8');
 const zhTagFixture = readFileSync(join(DIST, 'zh-tw/tag/fixture/index.html'), 'utf8');
 const sitemapXml = readFileSync(join(DIST, 'sitemap.xml'), 'utf8');
+// reef#2554 — the noindex fixtures (content/noindex-*.md, content/form-thanks-landing.md).
+const noindexPage = (p) => readFileSync(join(DIST, p, 'index.html'), 'utf8');
+const ROBOTS_NOINDEX = '<meta name="robots" content="noindex">';
+const inSitemap = (p) => sitemapXml.includes(`<loc>https://example.com/${p}/</loc>`);
 const siteOff = readFileSync(join(DIST, 'ko-kr/index.html'), 'utf8');
 // round 4 (R3-P2-2): scheme-check.md — the hostile fixture the Astro half of the escape-link-
 // destinations fix never had. See its own file header for what each slot exercises; the checks
@@ -1923,6 +1927,22 @@ const checks = [
   ['sitemap: the locale blog index + its own posts are listed too', () =>
     sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/</loc>')
     && sitemapXml.includes('<loc>https://example.com/zh-tw/devlog/a-signed-post/</loc>')],
+  // -- reef#2554: `noindex:` frontmatter, and a form's thanks= target is noindex by default --
+  ['🔴 #2554 noindex: true → robots noindex in the head, left out of sitemap.xml', () =>
+    noindexPage('noindex-on').includes(ROBOTS_NOINDEX) && !inSitemap('noindex-on')],
+  ['🔴 #2554 noindex: false (no form points here) → no robots meta, listed in sitemap.xml', () =>
+    !noindexPage('noindex-off').includes('name="robots"') && inSitemap('noindex-off')],
+  ['🔴 #2554 a form\'s thanks= target with no noindex key → noindex by default, out of sitemap.xml', () =>
+    noindexPage('form-thanks-landing').includes(ROBOTS_NOINDEX) && !inSitemap('form-thanks-landing')],
+  ['🔴 #2554 a thanks= target that says noindex: false → the explicit key wins (indexed, listed)', () =>
+    !noindexPage('noindex-thanks-kept').includes('name="robots"') && inSitemap('noindex-thanks-kept')],
+  ['🔴 #2554 a thanks= on a form without action=inbox is never wired → its page stays indexed', () =>
+    !noindexPage('noindex-plain-target').includes('name="robots"') && inSitemap('noindex-plain-target')],
+  ['🔴 #2554 the form page itself is not noindex — only the page it sends people to', () =>
+    !noindexPage('noindex-forms').includes('name="robots"') && inSitemap('noindex-forms')
+    && !noindexPage('form-thanks').includes('name="robots"') && inSitemap('form-thanks')],
+  ['🔴 #2554 robots meta appears exactly once on a noindex page', () =>
+    noindexPage('noindex-on').split('name="robots"').length === 2],
   // -- non-Lingo / non-archive pages stay byte-identical — the other 90 checks above (home,
   //    blocks, markers, forms, custom-theme, byline, feed, icons, nav …) never changed and all
   //    still pass unmodified against this same build, which is the byte-identical proof: nothing

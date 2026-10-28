@@ -21,6 +21,8 @@ import { contentPageRel } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
+import { noindexUrls } from '../lib/noindex.mjs';
+import { contentUrls } from '../lib/sitemap.mjs';
 
 
 export function getStaticPaths() {
@@ -53,6 +55,10 @@ export function getStaticPaths() {
   // ── content pages ── (verbatim from the old pages/[...slug].astro)
   // Recursive glob so NESTED pages route faithfully: content/legal/terms.md → /legal/terms.
   const files = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
+  // reef#2554: `noindex: true`, or the page a form's thanks= lands on — the same list sitemap.xml
+  // leaves out (lib/noindex.mjs). Only a noindex page gets a `robots` prop; every other page's
+  // props, and so its bytes, are what they were.
+  const noindex = noindexUrls(files, meta);
   // site-config layer: `content/_site.md` chrome (+ `content/<locale>/_site.md` override),
   // inherited UNDER each page's own frontmatter (page keys win). null when absent → legacy
   // per-page behavior (SPEC-site-data-model). loadSite is called PER PAGE with its rel path so a
@@ -109,7 +115,9 @@ export function getStaticPaths() {
     // Section, and one that disagreed with the document root would mislead whatever reads it next.
     if (siteConfig && siteConfig[DYNAMIC_CORAL_CSS_KEY]) site.meta[DYNAMIC_CORAL_CSS_KEY] = siteConfig[DYNAMIC_CORAL_CSS_KEY];
     else delete site.meta[DYNAMIC_CORAL_CSS_KEY];
-    paths.push({ params: { path: slug }, props: { kind: 'page', site } });
+    const props = { kind: 'page', site };
+    if (noindex.has(contentUrls({ [path]: raw }, meta)[0])) props.robots = 'noindex';
+    paths.push({ params: { path: slug }, props });
   }
 
   // ── everything below this line is the blog; a site without one emits none of it ──

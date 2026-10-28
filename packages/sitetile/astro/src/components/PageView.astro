@@ -10,7 +10,9 @@ import Section from './Section.astro';
 import { allPosts, listedPosts } from '../lib/blog.mjs';
 import { deriveDescription } from '../../../site-core.js';
 
-const { site } = Astro.props;
+// `robots` is set only on a noindex page (reef#2554, pages/[...path].astro); SiteLayout's own
+// default ('') emits no robots meta, so every other page renders exactly as before.
+const { site, robots = '' } = Astro.props;
 // The <title> is the page's own frontmatter title, but a page may omit it and inherit the
 // site-default from the `_site` config layer (SPEC-site-data-model: effective = Site ⊕ page).
 // parseSite exposes the page's raw title as `site.title` (NOT merged with _site), so fall back to
@@ -32,6 +34,6 @@ const headMeta = site.meta.description
   ? site.meta
   : { ...site.meta, description: deriveDescription(site.sections) };
 ---
-<SiteLayout title={pageTitle} lang={site.meta.lang || DEFAULT_LANG} meta={headMeta} blogPosts={blogPosts}>
+<SiteLayout title={pageTitle} lang={site.meta.lang || DEFAULT_LANG} meta={headMeta} blogPosts={blogPosts} robots={robots}>
   {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
 </SiteLayout>
