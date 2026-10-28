@@ -869,6 +869,34 @@ test('🔴 r2#4 a DELETE whose gen: read is a cached negative still ends the lif
   assert.ok(!(await res.text()).includes('late words'));
 });
 
+test("🔴 a save paused at ANY of its gen: reads writes only its admitted generation — the next owner's bytes stay", async () => {
+  // Not one hand-picked pause: every read of gen:t the save makes after admission, in turn. A key
+  // computed from a later read (instead of the one taken at admission) would be the new lifetime's.
+  for (let n = 2; ; n++) {
+    const env = envWith({ t: CARD });
+    const get = env.CARDS.get.bind(env.CARDS);
+    const started = deferred(), release = deferred();
+    let reads = 0, held = false, mine = true;
+    env.CARDS.get = async (k) => {
+      if (mine && k === genKey('t') && ++reads === n) { held = true; started.resolve(); await release.promise; }
+      return get(k);
+    };
+    const pending = call(env, 'PUT', '/_api/card/t',
+      { markdown: thinCard(CARD).replace('hello', 'former words'), base_version: await cardVersion(CARD) })
+      .then((r) => { started.resolve(); return r; });
+    await started.promise;
+    if (!held) { await pending; assert.ok(n > 3, `the save read gen:t only ${n - 1} times`); break; }
+    mine = false;
+    await call(env, 'DELETE', '/_api/card/t');
+    assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+    const nextBody = await bodyOf(env);
+    release.resolve();
+    await pending;
+    assert.equal(await bodyOf(env), nextBody, `paused at gen:t read #${n}, the old save overwrote the next owner`);
+    assert.ok((await (await page(env, '/t')).text()).includes('Next owner'));
+  }
+});
+
 test('a DELETE that reads nothing but a gone marker still starts a new generation', async () => {
   // The listing can lag too. A marker is evidence enough that a lifetime ended here and a later one may
   // be live where these reads cannot see; a fresh generation costs one small put.
