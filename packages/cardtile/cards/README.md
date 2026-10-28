@@ -180,6 +180,8 @@ If a host does not acknowledge its end, DELETE answers 503.
 
 A DELETE names the lifetime it is about (reef#2618 r4). The caller reads `GET /_api/card/<handle>/lifetime` (`{ handle, gen }`, from `CardLifetime`) in the same step as its ownership check, and sends that value as `If-Generation`. When it is not the current generation, DELETE answers 412 `stale_generation` and writes nothing. It is checked once, by `/end` in the object's own turn, and DELETE writes no key before that answer: the `gone:` marker comes right after it (still before `gen:` moves and before any body goes). `/lifetime` only reads: it never reconciles a pending inverse (that waits for the object's alarm or its next write), and neither does a refused `/end` (r15). A retry reads the generation again (after a 503 the object has already rotated, so the new value is the one to send).
 
+`If-Generation` is either absent or a generation (r16). A DELETE without the header is the legacy path, and no fence applies: it ends whatever lifetime is current when it runs. A header that is present must be a value `/lifetime` can return: `0`, or 24 lowercase hex characters. Anything else (empty, whitespace, non-hex, negative) answers 400 `bad_generation` and touches nothing. An empty value is never read as "no header".
+
 By hand, the same order, pointer LAST (and the inverse after it, rule A).
 A hand `vanityof:` is unknown to `CardLifetime`: its next accepted bind overwrites it, and a lost host does not clear it. This is allowed only while no deployed route calls
 `bindVanity`, because then the person typing is the host's only writer. A hand binding is outside

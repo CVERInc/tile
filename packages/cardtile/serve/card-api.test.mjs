@@ -805,12 +805,40 @@ test('🔴 r15 /current reads only, and a stale DELETE refuses without reconcili
   assert.equal(current.status, 200);
   assert.deepEqual(await current.json(), { handle: 't', gen: '0' });
   assert.deepEqual(everyKey(env), before, 'GET /lifetime (/current) wrote a key');
-  const stale = await deleteIn(env, 'not-the-current-one');
+  const stale = await deleteIn(env, '0123456789abcdef01234567'); // well-formed (r16), not the current one
   assert.equal(stale.status, 412);
   assert.deepEqual(everyKey(env), before, 'a stale DELETE wrote a key before refusing');
   // CONTROL: the write path still reconciles — the alarm delivers the pending inverse
   await env.CARD_LIFETIMES.alarm('t');
   assert.equal(env.CARDS._m.get(vanityOfKey('t', '0')), 'card.example', 'CONTROL: the alarm did not deliver the pending inverse');
+});
+
+test('🔴 r16 an If-Generation that is present but not a generation is 400 bad_generation, with every key untouched — only an ABSENT header skips the fence (reef#2618, tile#207 codex r2 #1)', async () => {
+  // HEAD passed `meant || null`: an empty value (or whitespace, which Headers trims to empty) became
+  // "no header", /end rotated the current lifetime, and the next owner's card went 410.
+  const env = envWith({ t: CARD });
+  for (const bad of ['', '   ', 'abc', '-1', '00', '0123456789ABCDEF01234567', '0123456789abcdef0123456']) {
+    const before = everyKey(env);
+    const res = await deleteIn(env, bad);
+    assert.equal(res.status, 400, `If-Generation ${JSON.stringify(bad)} was not refused as a bad request`);
+    assert.equal((await res.json()).error, 'bad_generation', JSON.stringify(bad));
+    assert.deepEqual(everyKey(env), before, `If-Generation ${JSON.stringify(bad)} wrote a key`);
+    assert.equal((await page(env, '/t')).status, 200, JSON.stringify(bad));
+  }
+  // CONTROL: a well-formed current generation still deletes (and a stale one still fences: r4, r15)
+  const ok = await deleteIn(env, '0');
+  assert.equal(ok.status, 200, 'CONTROL: the current generation did not delete');
+  assert.deepEqual(await ok.json(), { handle: 't', deleted: true });
+  // CONTROL: the generation a delete rotates to is itself well-formed — the next DELETE can name it
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  const next = (await (await call(env, 'GET', '/_api/card/t/lifetime')).json()).gen;
+  assert.notEqual(next, '0');
+  assert.equal((await deleteIn(env, next)).status, 200, 'CONTROL: a rotated generation was refused as malformed');
+  // CONTROL: an absent header is the documented legacy path — no fence, the delete goes through
+  const legacy = envWith({ t: CARD });
+  const absent = await call(legacy, 'DELETE', '/_api/card/t');
+  assert.equal(absent.status, 200, 'CONTROL: a DELETE without If-Generation was refused');
+  assert.deepEqual(await absent.json(), { handle: 't', deleted: true });
 });
 
 test('delete a handle that never existed: deleted:false, no marker, still the ordinary 404', async () => {

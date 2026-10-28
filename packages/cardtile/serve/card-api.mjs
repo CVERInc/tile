@@ -78,6 +78,8 @@ export const GEN0 = '0';
 const legacyCardKey = (handle) => handle;
 const legacyStopKey = (handle) => `stop:${handle}`;
 const newGen = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+/** every generation there is: GEN0 or a `newGen` (r16: DELETE refuses any other If-Generation) */
+const VALID_GEN = /^(?:0|[0-9a-f]{24})$/;
 /** the handle's current generation. Read once per request, at admission. */
 export const generationOf = async (store, handle) => (await store.get(genKey(handle))) || GEN0;
 /** does a preview's metadata belong to the handle's current lifetime? (absent gen ⇒ 0, as everywhere) */
@@ -1215,8 +1217,14 @@ export async function handleApi(request, env, url) {
     // ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────
     if (method === 'DELETE') {
       let deleted;
+      // 🔴 r16 (codex r2 #1): only an ABSENT header is the unfenced legacy path. A header that is
+      // present must be a generation — `0` or what `newGen` makes — or nothing is touched: HEAD's
+      // `meant || null` read an empty value as "no header" and rotated whatever lifetime was current.
       const meant = request.headers.get('if-generation');
-      try { deleted = await deleteCard(env, handle, meant || null); } catch (e) {
+      if (meant != null && !VALID_GEN.test(meant)) {
+        return json({ error: 'bad_generation', why: `If-Generation must be the "gen" GET /_api/card/${handle}/lifetime returned (or be left out). Nothing was deleted.` }, 400);
+      }
+      try { deleted = await deleteCard(env, handle, meant); } catch (e) {
         if (e instanceof StaleLifetime) {
           return json({ error: 'stale_generation', why: `"${handle}" is no longer in the lifetime this delete was checked against. Nothing was deleted.` }, 412);
         }
