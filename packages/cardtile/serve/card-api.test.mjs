@@ -2261,6 +2261,30 @@ test('🔴 r13 an acceptance refused on order still raises its host\'s high wate
   assert.deepEqual(failures, []);
 });
 
+test('🔴 r14 a loss of a host the inverse does not name never clears it, even when the loss ticket is newer: /b keeps its redirect to Y and the loss is still recorded', async () => {
+  // codex r13: b → Y (ticket TY) published; b → X with redirect:false (TX1); a takes X (TX2). The /lost
+  // for X carries TX2 > TY, so only the host comparison keeps it off Y's inverse. The clock steps one
+  // millisecond per reading, so TY < TX1 < TX2 by construction, not by how fast this machine runs.
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => ++now;
+  try {
+    const env = envWith({ a: CARD, b: B_CARD }), Y = 'second.example';
+    const life = () => env.CARD_LIFETIMES.storageOf('b')._m.get('life');
+    assert.equal((await bindVanity(env, 'b', Y)).redirect, 'published', 'CONTROL: /b → Y');
+    const ty = life().inverse.ticket;
+    assert.equal((await bindVanity(env, 'b', OWNER, { redirect: false })).accepted, true, 'CONTROL: b holds X without a redirect');
+    assert.equal(life().inverse.host, Y, 'CONTROL: the redirect:false bind left the inverse on Y');
+    assert.equal((await bindVanity(env, 'a', OWNER)).accepted, true, 'CONTROL: a took X');
+    const loss = env.HOST_BINDINGS.storageOf(OWNER)._m.get('host').landed;
+    assert.ok(loss > ty, `CONTROL: the X loss ticket ${loss} is newer than Y's ${ty}`);
+    const after = await page(env, '/b');
+    assert.equal(after.status, 301, `the loss of X cleared the inverse on Y: /b ${after.status}`);
+    assert.equal(after.headers.get('location'), `https://${Y}/`);
+    assert.equal(life().lost[OWNER], loss, 'the X loss was not recorded: a delayed X /confirm would be accepted');
+  } finally { Date.now = realNow; }
+});
+
 test('r13 the per-host high water is bounded by the lifetime: one entry per host bound in it, and a DELETE empties it with the hosts', async () => {
   const env = envWith({ b: B_CARD }), hosts = ['h1.example', 'h2.example', 'h3.example'];
   for (let round = 0; round < 3; round++) for (const h of hosts) assert.equal((await bindVanity(env, 'b', h)).redirect, 'published');
