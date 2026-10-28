@@ -139,7 +139,7 @@ const attrOf = (el, name) => el.attrs.find((a) => a.name === name);
 // bytes of `<`, `>`, `=`, quotes and ASCII letters mean those characters and no trail byte of a
 // multi-byte character is one of `<>"'=/` — so the tags parse5 finds are the tags a browser finds,
 // and the robots meta written (pure ASCII) is the same bytes in all of them.
-// The one family that is not ASCII-compatible is UTF-16, and a browser recognises it only by its BOM
+// UTF-16 is the family that is edited anyway, and a browser recognises it only by its BOM
 // (FF FE / FE FF): WHATWG's prescan maps a <meta charset="utf-16"> it can read to UTF-8, since it
 // read it as ASCII. So for a UTF-16 BOM the view is the code units (Buffer's utf16le, also lossless;
 // big-endian swapped) — an offset is half a byte offset — and the edit is written in UTF-16 of the
