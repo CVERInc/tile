@@ -701,6 +701,31 @@ test('delete twice: the second answers deleted:false, rewrites no marker, and on
   assert.equal((await page(env, '/t')).status, 410);
 });
 
+test('🔴 If-Generation: a delete checked in an ended lifetime is refused 412 and leaves the next card alone (reef#2618 r4)', async () => {
+  const env = envWith({ t: CARD });
+  const lifetimeOfT = async () => (await (await call(env, 'GET', '/_api/card/t/lifetime')).json()).gen;
+  const withGen = (gen) => {
+    const url = new URL('https://card.feelreef.com/_api/card/t');
+    return handleApi(new Request(url, { method: 'DELETE', headers: { authorization: `Bearer ${TOKEN}`, 'if-generation': gen } }), env, url);
+  };
+  // request A checks ownership and reads its lifetime, then stalls; request B deletes the same lifetime
+  const checkedByA = await lifetimeOfT();
+  const b = await withGen(checkedByA);
+  assert.equal(b.status, 200, 'CONTROL: the current lifetime deletes');
+  assert.deepEqual(await b.json(), { handle: 't', deleted: true });
+  // the handle is released; the next owner saves a new card into the next lifetime
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('Tester', 'Next') })).status, 200);
+  assert.notEqual(await lifetimeOfT(), checkedByA);
+  const before = new Map(env.CARDS._m);
+  // A arrives with the lifetime it checked
+  const a = await withGen(checkedByA);
+  assert.equal(a.status, 412);
+  assert.equal((await a.json()).error, 'stale_generation');
+  assert.deepEqual(new Map(env.CARDS._m), before, 'a stale delete wrote to the store');
+  assert.ok((await bodyOf(env)).includes('Next'), 'a stale delete erased the next lifetime\'s card');
+  assert.equal((await page(env, '/t')).status, 200);
+});
+
 test('delete a handle that never existed: deleted:false, no marker, still the ordinary 404', async () => {
   const env = envWith({ other: CARD });
   const res = await call(env, 'DELETE', '/_api/card/never');

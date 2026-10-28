@@ -178,6 +178,8 @@ If a host does not acknowledge its end, DELETE answers 503.
 - KV is untouched: `gen:` still names the old generation, and the card still serves.
 - The host stays in `pending`, and a retry of the DELETE delivers its end. The retry rotates once more, which ends nothing anyone can see.
 
+A DELETE names the lifetime it is about (reef#2618 r4). The caller reads `GET /_api/card/<handle>/lifetime` (`{ handle, gen }`, from `CardLifetime`) in the same step as its ownership check, and sends that value as `If-Generation`. When it is not the current generation, DELETE answers 412 `stale_generation` and writes nothing; `/end` checks it again in the object's own turn. A retry reads the generation again (after a 503 the object has already rotated, so the new value is the one to send).
+
 By hand, the same order, pointer LAST (and the inverse after it, rule A).
 A hand `vanityof:` is unknown to `CardLifetime`: its next accepted bind overwrites it, and a lost host does not clear it. This is allowed only while no deployed route calls
 `bindVanity`, because then the person typing is the host's only writer. A hand binding is outside
