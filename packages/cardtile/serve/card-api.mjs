@@ -418,7 +418,7 @@ async function writeCard(store, handle, md, admitted) {
 /**
  * delete_card: everything this store holds under a handle goes, and one content-free fact stays.
  *
- * chodaict ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
+ * The product owner ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
  * handle is free at once. So this removes the card, its serving stop, every parked preview of it, and
  * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` so the public address answers
  * 410 instead of an ordinary 404. The tombstone does not reserve the handle: the next save clears it.
