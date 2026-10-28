@@ -2031,3 +2031,64 @@ test('🔴 r12 between two hosts the registration order still decides: a later b
     assert.equal((await page(env, '/b')).headers.get('location'), 'https://y.example/', 'the card kept the older host');
   } finally { Date.now = realNow; }
 });
+
+test('🔴 r12 an accepted bind\'s late /confirm never lowers the inverse\'s ticket for the same host, whatever its registration order: the loss between them keeps the newer rebind', async () => {
+  // Not a no-op this time: the older bind (T1) was ACCEPTED at /point, so the ticket it confirms with is
+  // its own and right; only /confirm's ticket rule stands between it and the inverse. Order of events:
+  // b-old admits T1 and is held before /register; a admits T2 and is held before /point; b-new admits
+  // T3, registers FIRST (order 1) and is held before /point; b-old registers (order 2), points (accepted,
+  // landed T1) and is held before /confirm; a points (accepted, landed T2; b's /lost answers 503); b-new
+  // points (accepted, landed T3) and confirms; then b-old's /confirm arrives with the NEWER order and the
+  // OLDER ticket. Order alone (r11) writes T1 over T3, and the retried T2 loss clears /b.
+  const env = envWith({ a: CARD, b: B_CARD });
+  const lives = env.CARD_LIFETIMES, ns = env.HOST_BINDINGS;
+  const gate = () => ({ reached: deferred(), go: deferred() });
+  const reg = gate(), aPoint = gate(), newPoint = gate(), oldConfirm = gate();
+  let blocked = true, holdReg = true, holdA = true, holdNew = false, holdConfirm = true;
+  env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+    const op = new URL(url).pathname;
+    if (holdReg && id.name === 'b' && op === '/register') { holdReg = false; reg.reached.resolve(); await reg.go.promise; }
+    if (holdConfirm && id.name === 'b' && op === '/confirm' && JSON.parse(init.body).order === 2) { holdConfirm = false; oldConfirm.reached.resolve(); await oldConfirm.go.promise; }
+    if (blocked && id.name === 'b' && op === '/lost') return new Response('unavailable', { status: 503 });
+    return lives.get(id).fetch(url, init);
+  } }) };
+  env.HOST_BINDINGS = { ...ns, get: (id) => ({ async fetch(url, init) {
+    if (new URL(url).pathname === '/point') {
+      const { handle } = JSON.parse(init.body);
+      if (holdA && handle === 'a') { holdA = false; aPoint.reached.resolve(); await aPoint.go.promise; }
+      if (holdNew && handle === 'b') { holdNew = false; newPoint.reached.resolve(); await newPoint.go.promise; }
+    }
+    return ns.get(id).fetch(url, init);
+  } }) };
+  const hostState = () => ns.storageOf(OWNER)._m.get('host');
+  const older = bindVanity(env, 'b', OWNER); // T1
+  await reg.reached.promise;
+  const t1 = hostState().seq;
+  const taker = bindVanity(env, 'a', OWNER); // T2
+  await aPoint.reached.promise;
+  holdNew = true;
+  const newer = bindVanity(env, 'b', OWNER); // T3, order 1
+  await newPoint.reached.promise;
+  const t3 = hostState().seq;
+  reg.go.resolve(); // b-old: order 2, accepted at T1
+  await oldConfirm.reached.promise;
+  assert.equal(hostState().landed, t1, 'CONTROL: the older bind was accepted with its own ticket');
+  aPoint.go.resolve();
+  assert.equal((await taker).accepted, true, 'CONTROL: a took the host');
+  newPoint.go.resolve();
+  assert.equal((await newer).redirect, 'published', 'the newest bind was not published');
+  assert.equal(hostState().landed, t3, 'CONTROL: b owns the host with T3');
+  const failures = [];
+  oldConfirm.go.resolve();
+  const late = await older;
+  if (late.redirect !== 'not_published') failures.push(`the older acceptance's late redirect was published: ${late.redirect}`);
+  const written = lives.storageOf('b')._m.get('life').inverse.ticket;
+  if (written !== t3) failures.push(`the late /confirm lowered the inverse's ticket ${t3} → ${written}`);
+  blocked = false;
+  await ns.alarm(OWNER);
+  assert.deepEqual(hostState().losers, [], 'CONTROL: the retried notices were delivered');
+  const after = await page(env, '/b');
+  if (after.status !== 301) failures.push(`the T2 loss cleared the newer rebind: /b ${after.status} → ${after.headers.get('location')}`);
+  assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), 'CONTROL: the domain serves b');
+  assert.deepEqual(failures, []);
+});
