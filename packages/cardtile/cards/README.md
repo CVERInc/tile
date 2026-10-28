@@ -93,8 +93,9 @@ behind a pointer naming the handle). The inverse is: canonical `/<handle>` 301s 
 `/point` answers `accepted`, `bindVanity` asks `CardLifetime(handle)` to `/confirm`, and the object
 publishes the inverse only if
 - it is still that lifetime,
-- no bind registered after this one has already been published (`order`, from `/register`), and
-- the host was not taken from this handle after this bind's ticket (`lost`, below).
+- no bind registered after this one has already been published for another host (`order`, from `/register`),
+- the host was not taken from this handle after this bind's ticket (`lost`, below), and
+- (r12) for the host it already names, the inverse's ticket only goes up: an older acceptance never overwrites a newer one, and a same-owner no-op at `/point` answers with the owner's ticket, not its own.
 
 A refused bind (`expired`, `superseded`, `stale_generation`) never reaches `/confirm`, so the
 previous redirect stands. A late confirm never clobbers a newer accepted host. r8 wrote the inverse
