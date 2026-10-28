@@ -59,7 +59,7 @@ test('the exception is not a loophole: on the canonical host a same-host link is
 const envWith = (extra = {}) => {
   // maple has no vanityof: binding, so the canonical URL serves (a bound one 301s to its own host)
   const kv = new Map([['maple', CARD], [`vanity:${OWN}`, 'maple']]);
-  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null }, ...extra };
+  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra };
 };
 const robots = async (url, extra, headers = {}) =>
   (await worker.fetch(new Request(url, { redirect: 'manual', headers }), envWith(extra))).headers.get('x-robots-tag');
@@ -123,7 +123,7 @@ const kvWith = (extra = {}) => {
     ['bound', CARD], ['vanityof:bound', OWN],
     ...Object.entries(extra),
   ]);
-  return { ...ALT, CARDS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => { kv.set(k, v); } } };
+  return { ...ALT, CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; }, put: async (k, v) => { kv.set(k, v); } } };
 };
 const hit = async (url, { headers = {}, method = 'GET', body, env = kvWith(), upstream = 'miss' } = {}) => {
   const real = globalThis.fetch;

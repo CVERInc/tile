@@ -111,7 +111,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, goneKey, genKey, isCurrentGen, liveCard, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -146,6 +146,8 @@ const VANITY_OF_KEY = (handle) => `vanityof:${handle}`;
 
 // canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
 const CANON_HOST = 'card.feelreef.com';
+// the Cloudflare-for-SaaS fallback origin (wrangler.example.toml routes): ours, never a creator's.
+const FALLBACK_HOST = 'saas.feelreef.com';
 
 /**
  * resolveHandle: (host, pathname, vanity) → { handle, cardUrl } | null. Pure.
@@ -155,11 +157,23 @@ const CANON_HOST = 'card.feelreef.com';
  * piece of the routing that is worth unit-testing, and it stays synchronous and pure so it can be.
  * The default is empty, so a caller that forgets it gets canonical-path routing and never a
  * silently wrong card.
+ *
+ * 🔴 Path routing (`/<handle>`) answers on OUR hosts only (reef#2618 r2): the canonical card host, the
+ * Cloudflare-for-SaaS fallback origin (a creator's hostname CNAMEs to it, but their requests carry
+ * their own Host), Cloudflare's `*.workers.dev`, and local dev. Any other host is a
+ * creator's domain, and there the handle comes from its binding and nothing else — no binding, no
+ * card, on every path. Before this, a domain whose binding was removed fell through to path routing,
+ * so `<former-domain>/<handle>` served whoever owned that handle next.
  */
+export const routesByPath = (host) =>
+  !host || host === CANON_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
+  || host === 'localhost' || host === '127.0.0.1';
+
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
   const seg = (pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0] || '';
   if (vanity[host]) return { handle: vanity[host], cardUrl: 'https://' + host };            // vanity domain = one card
+  if (!routesByPath(host)) return null;                                                       // a creator's domain, unbound → nothing
   if (seg) return { handle: seg.toLowerCase(), cardUrl: 'https://' + (host || CANON_HOST) + '/' + seg.toLowerCase() };
   return null;                                                                                // canonical host, no handle → directory
 }
@@ -688,7 +702,13 @@ const router = {
     // is reachable on PRODUCTION and that is the whole point of it.
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
-      const draft = env && env.CARDS ? await env.CARDS.get(previewKey(pv[1])) : null;
+      // A preview stamped with a generation that is no longer its handle's (the card was deleted while
+      // it was being parked, reef#2618 r2) is expired. One unstamped (parked before r1) keeps its hour.
+      const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(pv[1])) : null;
+      const meta = row && row.metadata;
+      const stale = row && row.value != null && meta && meta.handle && 'gen' in meta
+        && !isCurrentGen(meta, await env.CARDS.get(genKey(meta.handle)));
+      const draft = row && !stale ? row.value : null;
       if (!draft) {
         return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
           status: 404,
@@ -771,14 +791,21 @@ const router = {
     const vanityHandle = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
-    if (!resolved) return html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env);
+    if (!resolved) {
+      // the directory hint only where a path can name a card; an unbound creator's domain names nothing
+      return routesByPath(host)
+        ? html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env)
+        : html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env);
+    }
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
     const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
     if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
-    const [cardMd, stopped] = await Promise.all([
-      store.get(resolved.handle),
+    // liveCard: a body written in a deleted lifetime (reef#2618 r2, card-api genKey) reads as absent here,
+    // so it falls through to the 410/404 below exactly as a missing body does.
+    const [{ md: cardMd }, stopped] = await Promise.all([
+      liveCard(store, resolved.handle),
       store.get(`stop:${resolved.handle}`),
     ]);
     if (stopped != null) {

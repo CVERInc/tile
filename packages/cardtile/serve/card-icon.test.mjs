@@ -39,7 +39,7 @@ const BARE_CARD = card();
 function envWith(md) {
   const kv = new Map([[HANDLE, md], [`vanity:${HOST}`, HANDLE], [`vanityof:${HANDLE}`, HOST]]);
   const reads = [];
-  return { env: { PREVIEW: 'false', CARDS: { get: async (k) => { reads.push(k); return kv.get(k) ?? null; } } }, reads };
+  return { env: { PREVIEW: 'false', CARDS: { get: async (k) => { reads.push(k); return kv.get(k) ?? null; }, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } }, reads };
 }
 const get = async (md, url, headers = {}) => {
   const { env, reads } = envWith(md);

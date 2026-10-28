@@ -42,7 +42,7 @@ const SVG_CARD = card();
 /** a CARDS store holding the card; with `vanity`, the card is bound to VHOST */
 const envWith = (md, vanity = false) => {
   const kv = new Map([[HANDLE, md], ...(vanity ? [[`vanity:${VHOST}`, HANDLE], [`vanityof:${HANDLE}`, VHOST]] : [])]);
-  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null } };
+  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
 };
 const get = async (md, url, { headers = {}, vanity = false } = {}) => {
   const res = await worker.fetch(new Request(url, { headers, redirect: 'manual' }), envWith(md, vanity));

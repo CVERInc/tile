@@ -23,7 +23,7 @@ const STORED_CARD = card({ avatar: `asset:${ID}` });
 function envWith(md, { stopped = false, handle = HANDLE } = {}) {
   const kv = new Map([[handle, md], [`vanity:${HOST}`, handle], [`vanityof:${handle}`, HOST]]);
   if (stopped) kv.set(`stop:${handle}`, 'stopped');
-  return { PREVIEW: 'false', CARDS: { get: async (key) => kv.get(key) ?? null } };
+  return { PREVIEW: 'false', CARDS: { get: async (key) => kv.get(key) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
 }
 const get = (url, env) => worker.fetch(new Request(url, { redirect: 'manual' }), env);
 const bytesOf = async (res) => Buffer.from(await res.arrayBuffer());
@@ -176,11 +176,13 @@ test('avatar path returns 404 when the remote avatar is unavailable', async () =
 
 test('avatar path applies the icon robots policy on platform and bound hosts', async () => {
   const env = envWith(STORED_CARD);
-  for (const url of [URLS[0], `https://saas.feelreef.com/${HANDLE}/avatar`, `https://unbound.example/${HANDLE}/avatar`]) {
+  for (const url of [URLS[0], `https://saas.feelreef.com/${HANDLE}/avatar`]) {
     const res = await get(url, env);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
   }
+  // reef#2618 r2: an unbound creator's domain routes no handle by path, the avatar included
+  assert.equal((await get(`https://unbound.example/${HANDLE}/avatar`, env)).status, 404);
   assert.equal((await get(URLS[1], env)).headers.get('x-robots-tag'), null);
   assert.equal((await get(URLS[1], { ...env, PREVIEW: 'true' })).headers.get('x-robots-tag'), 'noindex, nofollow');
   for (const md of [card(), null]) {

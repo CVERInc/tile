@@ -50,7 +50,7 @@ const vanity = (md) => renderCardHTML(md, { handle: HANDLE, cardUrl: `https://${
 
 function envWith(md) {
   const kv = new Map([[HANDLE, md], [`vanity:${HOST}`, HANDLE], [`vanityof:${HANDLE}`, HOST]]);
-  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null } };
+  return { PREVIEW: 'false', CARDS: { get: async (k) => kv.get(k) ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
 }
 const get = async (md, url) => {
   const res = await worker.fetch(new Request(url, { redirect: 'manual' }), envWith(md));

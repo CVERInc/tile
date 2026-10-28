@@ -12,7 +12,7 @@ const CARD = ['---', 'card-page: maple', 'title: Maple', '---', '', '## grid', '
 const envWith = (extra = {}) => {
   const kv = new Map([['maple', CARD], [`vanity:${OWN}`, 'maple']]);
   const reads = [];
-  return { reads, PREVIEW: 'false', CARDS: { get: async (k) => { reads.push(k); return kv.get(k) ?? null; } }, ...extra };
+  return { reads, PREVIEW: 'false', CARDS: { get: async (k) => { reads.push(k); return kv.get(k) ?? null; }, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra };
 };
 const get = (url, env = envWith(), init = {}) => worker.fetch(new Request(url, { redirect: 'manual', ...init }), env);
 

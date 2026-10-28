@@ -46,6 +46,41 @@ export const PREVIEW_TTL = 3600;
  */
 export const goneKey = (handle) => `gone:${handle}`;
 
+/**
+ * A handle's lifetime (reef#2618 r2). `gen:<handle>` holds a random nonce; DELETE and the save that
+ * creates a card again each write a new one. Everything written for a handle — the card body, a
+ * parked preview — carries the generation it was admitted under, in its KV metadata, and anything
+ * whose generation is not the current one is ABSENT to every reader.
+ *
+ * 🔴 Why not a lock: KV has no compare-and-swap, so a write that passed its checks before a delete can
+ * still land after it. That cannot be prevented here, only made harmless: it lands tagged with a dead
+ * generation and is never served, and the next delete removes it. A card written before generations
+ * existed has no tag and no `gen:` key, and null === null keeps it live.
+ */
+export const genKey = (handle) => `gen:${handle}`;
+const newGen = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+/** does a stored row's metadata belong to the handle's current lifetime? */
+export const isCurrentGen = (metadata, gen) => ((metadata && metadata.gen) || null) === (gen || null);
+
+/**
+ * liveCard: the card body under a handle, or null when there is none OR it was written in a lifetime
+ * that has since been deleted. The ONE read every exit uses — renderer and API alike — so a stale
+ * body cannot be absent on one door and present on another.
+ */
+export async function liveCard(store, handle) {
+  const [row, gen] = await Promise.all([store.getWithMetadata(handle), store.get(genKey(handle))]);
+  const md = row && row.value;
+  if (md === null || md === undefined) return { md: null, gen };
+  return isCurrentGen(row.metadata, gen) ? { md, gen } : { md: null, gen, stale: true };
+}
+
+/** the answer to a write whose lifetime ended while it was in flight. Nothing it wrote is served. */
+const staleWrite = (handle) => ({
+  conflict: true,
+  stale_generation: true,
+  why: `"${handle}" was deleted or created again while this write was in flight. Nothing it wrote is served; read the card again.`,
+});
+
 /** where a parked draft lives. Prefixed so it can never collide with a handle (`:` is not in VALID_HANDLE). */
 export const previewKey = (id) => `_preview:${id}`;
 
@@ -124,12 +159,18 @@ const readJson = async (request) => {
   }
 };
 
-/** get: handle → { md, version } | null. Null is "no such card", never an error. */
+/**
+ * get: handle → { md, version, gen } | null. Null is "no such card", never an error — and a body from
+ * a deleted lifetime is no such card (see genKey).
+ */
 async function readCard(store, handle) {
-  const md = await store.get(handle);
-  if (md === null || md === undefined) return null;
-  return { md, version: await cardVersion(md) };
+  const { md, gen } = await liveCard(store, handle);
+  if (md === null) return null;
+  return { md, version: await cardVersion(md), gen };
 }
+
+/** the generation as it stands NOW, for a write's before/after check. */
+const currentGen = async (store, handle) => (await store.get(genKey(handle))) || null;
 
 /**
  * write + READ BACK + assert.
@@ -140,8 +181,20 @@ async function readCard(store, handle) {
  * which means a silent write failure would then look like a version conflict somewhere else
  * entirely. Carried over from reef's card-store.js, which is retired in favour of this file.
  */
-async function writeCard(store, handle, md) {
-  await store.put(handle, md);
+//
+// 🔴 And every write carries the generation it was ADMITTED under (reef#2618 r2, see genKey). The
+// generation is checked again just before the put — a write whose lifetime ended while it waited on
+// Web Risk writes nothing, so the next owner's card stays as it is — and once more after it, because
+// between those two reads a delete can still land: then the body is tagged dead, is never served, and
+// the caller is told so instead of "saved". `create` starts a new lifetime: the card was absent.
+async function writeCard(store, handle, md, admitted, { create = false } = {}) {
+  if ((await currentGen(store, handle)) !== (admitted || null)) return staleWrite(handle);
+  let gen = admitted || null;
+  if (create) {
+    gen = newGen();
+    await store.put(genKey(handle), gen);
+  }
+  await store.put(handle, md, { metadata: { gen } });
   const stored = await store.get(handle);
   if (stored !== md) {
     return {
@@ -151,6 +204,7 @@ async function writeCard(store, handle, md) {
       why: 'The store did not read back what was written. Nothing has been confirmed; do not treat this as saved.',
     };
   }
+  if ((await currentGen(store, handle)) !== gen) return staleWrite(handle);
   return { version: await cardVersion(md), bytes: md.length };
 }
 
@@ -170,11 +224,17 @@ async function writeCard(store, handle, md) {
  * invisible until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
  * Returns whether there was a card to delete; a handle that never had one gets no marker, because a
  * 410 there would claim a card that never was.
+ *
+ * 🔴 Then the lifetime ends: a new `gen:<handle>` (see genKey), written only when a live card was here.
+ * From that put on, every write admitted before it — a save waiting on Web Risk, a preview mid-put —
+ * either refuses or lands tagged dead and unserved. A body from a dead lifetime is removed here like
+ * any other, but it does not count as "had": it was never the card.
  */
 async function deleteCard(store, handle) {
-  const had = (await store.get(handle)) != null;
+  const had = (await liveCard(store, handle)).md != null;
   const marked = (await store.get(goneKey(handle))) != null;
   if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
+  if (had) await store.put(genKey(handle), newGen());
   await store.delete(handle);
   await store.delete(`stop:${handle}`);
 
@@ -263,12 +323,19 @@ export async function handleApi(request, env, url) {
     const handle = String(body.handle || '').trim().toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(body.handle)}.` }, 400);
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
-    const current = await readCard(store, handle);
-    const { md } = assembleSave(body.markdown, current && current.md);
+    const { md: currentMd, gen } = await liveCard(store, handle);
+    const { md } = assembleSave(body.markdown, currentMd);
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
     // The handle rides as METADATA so delete_card can find this draft from `list()` alone, without
-    // reading a megabyte of someone's pictures per key to learn whose it was (reef#2618).
-    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle } });
+    // reading a megabyte of someone's pictures per key to learn whose it was (reef#2618). The
+    // generation rides with it: a preview whose put lands after the delete's sweep is never shown,
+    // and this request removes it itself once it sees the lifetime ended (r2, see genKey).
+    if ((await currentGen(store, handle)) !== (gen || null)) return json(staleWrite(handle), 409);
+    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle, gen: gen || null } });
+    if ((await currentGen(store, handle)) !== (gen || null)) {
+      await store.delete(previewKey(id));
+      return json(staleWrite(handle), 409);
+    }
     return json({
       url: `https://${url.host}/_preview/${id}`,
       expires_in_seconds: PREVIEW_TTL,
@@ -305,7 +372,7 @@ export async function handleApi(request, env, url) {
     try { handle = decodeURIComponent(full[1]).toLowerCase(); } catch { handle = ''; }
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(full[1])}.` }, 400);
     if (method !== 'GET') return json({ error: `${method} not allowed here.` }, 405);
-    const md = await store.get(handle);
+    const { md } = await liveCard(store, handle);
     if (md == null) return json({ error: `No card at "${handle}".` }, 404);
     return new Response(md, {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -352,7 +419,7 @@ export async function handleApi(request, env, url) {
       if (md.length > KV_MAX_BYTES) {
         return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
       }
-      const res = await writeCard(store, handle, md);
+      const res = await writeCard(store, handle, md, current.gen);
       if (res.conflict) return json(res, 409);
       return json({ handle, id, bytes: Math.floor(b64.replace(/=+$/, '').length * 3 / 4), version: res.version });
     }
@@ -371,7 +438,7 @@ export async function handleApi(request, env, url) {
       }
       if (!(id in model.assets)) return json({ error: `No asset "${id}" on "${handle}".` }, 404);
       delete model.assets[id];
-      const res = await writeCard(store, handle, serializeCard(model));
+      const res = await writeCard(store, handle, serializeCard(model), current.gen);
       if (res.conflict) return json(res, 409);
       return json({ handle, id, deleted: true, version: res.version });
     }
@@ -405,7 +472,9 @@ export async function handleApi(request, env, url) {
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
         return json({ error: 'save_card needs `markdown` — refusing to write an empty card.' }, 400);
       }
-      const current = await readCard(store, handle);
+      // the generation is captured HERE, at admission, before Web Risk's network wait (see writeCard)
+      const live = await liveCard(store, handle);
+      const current = live.md == null ? null : { md: live.md, version: await cardVersion(live.md) };
 
       // 🔴 The lock is checked BEFORE the assembly, so a conflicted save costs nothing and — more to
       // the point — cannot half-happen.
@@ -440,7 +509,7 @@ export async function handleApi(request, env, url) {
         });
       }
 
-      const res = await writeCard(store, handle, md);
+      const res = await writeCard(store, handle, md, live.gen, { create: !current });
       if (res.conflict) return json(res, 409);
       // the handle lives again: a deleted card's tombstone goes the moment a card is back under it
       // (after the write landed, so a failed save never un-says the old delete)
