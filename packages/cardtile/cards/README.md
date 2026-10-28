@@ -61,16 +61,40 @@ goes under the handle's CURRENT generation (reef#2618 r3 — see `genKey` in `se
 never been deleted; on any handle that has, the write lands and nothing ever serves it. Never
 write `gen:<handle>` by hand either — only DELETE does, and a new value there takes the card down.
 
-A domain binding belongs to the same generation (reef#2618 r4 — see `vanityKey`): both keys carry
-`{"gen":"<gen>"}` as metadata, and the renderer ignores a binding whose `gen` is not the handle's
-current one. In code, `bindVanity(store, handle, host)` stamps it; by hand:
+A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`):
 
-    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanity:<host> <handle> --metadata='{"gen":"<gen>"}'
-    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanityof:<handle> <host> --metadata='{"gen":"<gen>"}'
+| key | value | meaning |
+|---|---|---|
+| `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` |
+| `vanityof:<handle>:<gen>` | host | in this lifetime, the canonical address 301s to `<host>` |
+| `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped |
 
-A binding without metadata counts as generation 0 — every binding made before r4. Never stamp an
-old one with its handle's current generation: if a DELETE missed it, that hands the former owner's
-domain to the next owner.
+The renderer follows the pointer, reads that handle's `gen:`, and serves the host only if the
+`vanitybind:` key of that generation exists. DELETE deletes the `vanitybind:`/`vanityof:` keys it
+listed before rotating and leaves the pointer, which is inert without them. In code,
+`bindVanity(store, handle, host)` writes them in this order; by hand, the same order, pointer LAST:
+
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanitybind:<handle>:<gen>:<host> <handle>
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanityof:<handle>:<gen> <host>   # omit for no redirect
+    npx wrangler kv key get --remote --namespace-id=<CARDS id> gen:<handle>   # still <gen>? if not, stop: the card was deleted
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> vanity:<host> <handle>
+
+A binding made before generations (`vanity:<host>` plus a bare `vanityof:<handle>`) is generation
+0's: in generation 0 the pointer alone binds, and after the handle's first DELETE it never does
+again. Never copy an old binding into a later generation's keys: if a DELETE missed it, that hands
+the former owner's domain to the next owner.
+
+What this does not close: the pointer is one key per host, and KV has no compare-and-swap. If a
+domain moves from handle `a` to handle `b` while a bind of `a` is between its `gen:` re-read and
+its pointer put, and `a` is deleted in that gap, the late pointer names `a` and the domain 404s
+until it is bound again. It can never serve the wrong card. Closing it needs one writer per
+host (a Durable Object); the same-handle races do not depend on it.
+
+**tile#122's PUT `/_api/vanity/<handle>`** must call `bindVanity` and nothing else — no direct
+`vanity:`/`vanityof:` writes, no metadata stamp (r4's shape is gone). Answer 409 when it returns
+`stale_generation`. Its unbind deletes the current generation's `vanitybind:`/`vanityof:` keys;
+it may delete the pointer only if it still names this handle, and that check-then-delete has the
+window above.
 
 🔴 `--remote` is not optional. Without it wrangler writes to the local miniflare simulator and
 reports success, so a "deployed" change silently never leaves the machine.
