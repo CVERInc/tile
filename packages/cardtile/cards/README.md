@@ -68,11 +68,12 @@ Durable Objects hold the facts KV cannot be trusted with (r8):
 
 | key | value | meaning | who writes it |
 |---|---|---|---|
-| object storage `life` (inside `CardLifetime`, one per handle) | `{ gen, hosts, pending, seq, inverse, lost, cache }` | the truth for `<handle>`: its generation, the hosts bound in it, the ends still owed, and (r9) which accepted host is its address | only that object |
+| object storage `life` (inside `CardLifetime`, one per handle) | `{ gen, hosts, pending, seq, inverse, lost, cache, adopted, legacy, dropLegacy }` | the truth for `<handle>`: its generation, the hosts bound in it, the ends still owed, (r9) which accepted host is its address, and (r10) what the bare legacy inverse named when it adopted it | only that object |
 | `gen:<handle>` | generation | the cache of `life.gen` that readers and saves use | **only `CardLifetime`**, at the end of each DELETE |
 | `vanitybind:<handle>:<gen>:<host>` | handle | in this lifetime, `<host>` serves `<handle>` | `bindVanity`, in the caller, after it registered |
-| `vanityof:<handle>:<gen>` | host | in this lifetime, the canonical address 301s to `<host>` | **only `CardLifetime`** (r9), the cache of `life.inverse`, written only after `HostBindings` accepted (not for `redirect: false`) |
-| object storage `host` (inside `HostBindings`, one per host) | `{ seq, landed, owner, ended, cache, losers }` | the truth for `<host>`: who owns it, which lifetimes ended | only that object |
+| `vanityof:<handle>:<gen>` | host, or (generation 0) empty | in this lifetime, the canonical address 301s to `<host>`; empty = no address. Once present it is the reader's whole answer (r10) | **only `CardLifetime`** (r9), the cache of `life.inverse`, written only after `HostBindings` accepted (not for `redirect: false`); since r10 also when the object adopts, and on a loss |
+| `vanityof:<handle>` (bare, legacy) | host | a pre-generation inverse: generation 0's, read only while `vanityof:<handle>:0` is absent | nobody writes it any more. **Owned by `CardLifetime`** (r10): adopted (read once) the first time the object needs the inverse in generation 0, deleted when that host is lost, and by DELETE |
+| object storage `host` (inside `HostBindings`, one per host) | `{ seq, landed, owner, ended, cache, losers, adopted }` | the truth for `<host>`: who owns it, which lifetimes ended, and (r10) whether its legacy pointer was adopted | only that object |
 | `vanity:<host>` | handle | a pointer only: which handle to look at. Shared, never generation-scoped | **only `HostBindings`**, the cache of `host.owner` |
 
 The renderer follows the pointer, reads that handle's `gen:`, and serves the host only if the
@@ -115,6 +116,26 @@ object tells that handle's `CardLifetime` (`/lost`, retried like the pointer). I
 card's inverse, the object clears it, and canonical `/<loser>` serves its own page again, never a
 301 into another card's domain or into a 404. `HostBindings` calls `CardLifetime`, never the other
 way, so the two queues cannot wait on each other.
+
+**A legacy inverse is part of the lifetime (r10, codex r9).** r9 cleared only `vanityof:<loser>:0`;
+the reader then fell back to the bare `vanityof:<loser>`, and `/<loser>` 301'd to the other card's
+domain, and to a 404 once that card was deleted. Three rules, each inside an authority that already
+existed:
+1. **Losing a host clears every inverse that names it.** `CardLifetime`'s `/lost` clears its own
+   inverse and, when the bare legacy key named that host, deletes the bare key too (after writing the
+   tombstone below, so no reader sees the bare key alone).
+2. **An authoritative "none" is not a missing key.** In generation 0 the object writes "no address"
+   as an EMPTY `vanityof:<handle>:0` instead of deleting it. The reader (`boundHostOf`) asks the bare
+   key only when the generation-0 key is ABSENT, i.e. no lifetime has ever spoken for the handle.
+   Present means it is the whole answer; empty means none. A failed bare delete is therefore harmless
+   until the object's retry removes it.
+3. **A legacy owner is adopted before it is replaced.** A host bound before generations has a KV
+   pointer and no durable owner. Its first accepted `/point` reads that pointer once and makes the
+   handle the owner at generation 0, so the ordinary loser notice reaches it. Likewise
+   `CardLifetime` reads the bare inverse once, the first time it needs the inverse in generation 0
+   (`/register`, `/confirm`, `/lost`), adopts its host as its own and writes the generation-0 key.
+   Both reads are of keys nothing writes any more, and both are flagged `adopted` so the object never
+   reads the cache it writes. Readers never adopt: `/owner` does not, and the renderer reads KV only.
 
 The protocol (r8, codex r7). No lifetime fact is read from KV on a write path:
 
@@ -168,7 +189,8 @@ second writer. Bind through the API instead.
 
 A binding made before generations (`vanity:<host>` plus a bare `vanityof:<handle>`) belongs to
 generation 0. In generation 0 the pointer alone binds. After the handle's first DELETE it never
-does again. No object knows that host, so no end is sent, and a bind that still means generation 0
+does again. No object knows that host until someone binds it (then it is adopted, rule 3 above), so
+a DELETE of a legacy owner that never rebound sends no end, and a bind that still means generation 0
 is refused by `CardLifetime`. Never copy an old binding into a later generation's keys: that hands
 the former owner's domain to the next owner.
 
@@ -177,7 +199,8 @@ What this does not close:
 - A bind of the live card is refused (`stale_generation`) in two windows: between a DELETE's rotation and its `/settle`, and wherever a location still caches the old `gen:`. It stays refused until the cache catches up. That is the safe direction, and a retry succeeds.
 - A hung storage or KV call inside an object stalls that handle's or host's queue. There is no timeout. Since r9 a `HostBindings` turn that replaces an owner also waits on the loser's `CardLifetime`.
 - While a write-through is pending, a KV HIT can be behind the object for up to one retry: the domain may serve the previous owner for that long (a miss asks the object and is right).
-- A binding made before generations has a bare `vanityof:<handle>` no object knows. Losing that host does not clear it.
+- A bare `vanityof:<handle>` whose handle never meets a `CardLifetime` (never binds, never loses a host) is read as before. Whether it is still true is the legacy data's question: nothing that happens through the objects can make it stale without clearing it.
+- An empty generation-0 tombstone outlives the handle's first DELETE when no host was registered (DELETE's listing of `vanityof:<handle>:` normally removes it). It is never read again: later generations do not fall back.
 
 None of this has been measured live.
 
@@ -207,6 +230,7 @@ Copy into the real config:
 6. r9 needs no new binding or migration. Both classes now have an `alarm()` handler (SQLite-backed objects support alarms), and `HostBindings` calls `CardLifetime` through the same `CARD_LIFETIMES` binding the Worker has.
    - So both Workers need both bindings (step 1 and 2), as before.
    - Rolling back to r8 code leaves a pending cache unretried until the next bind or end on that object; storage written by r9 (`cache`, `losers`, `inverse`, `lost`, `seq`) is ignored by r8.
+   - r10 needs no binding or migration either. Its new storage fields (`adopted`, `legacy`, `dropLegacy`) are ignored by r9 code, and an empty `vanityof:<handle>:0` reads as "no redirect" there too (r9's reader returns a present empty value without asking the bare key, and the renderer treats it as no host). Rolled back, the objects delete that key on the next change instead of writing it empty, so the r9 finding returns for any legacy owner that loses a host afterwards.
 7. From r8 on, EVERY DELETE needs `CARD_LIFETIMES`. A DELETE whose lifetime has a registered host needs `HOST_BINDINGS` as well.
    - Without them DELETE answers 503 and deletes nothing.
    - The gone marker may already be written, but it is invisible while the body exists.

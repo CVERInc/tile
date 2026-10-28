@@ -131,9 +131,13 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
 
  * Migration: bindings made before generations are `vanity:<host>` → handle and bare `vanityof:<handle>`
  * → host. They are generation 0's: in generation 0 the pointer alone is a binding and the bare inverse
- * is read as `vanityof:<handle>:0` (the same fallback as a legacy body). A handle in generation 0 has
- * never been deleted, so no ended lifetime can have made its pointer. After its first DELETE neither is
- * honoured again.
+ * is read as `vanityof:<handle>:0` (the same fallback as a legacy body) — but only while that key is
+ * ABSENT (r10 rule 2): CardLifetime writes it, empty for "none", the first time it touches the inverse,
+ * and from then on it is the whole answer. A handle in generation 0 has never been deleted, so no ended
+ * lifetime can have made its pointer. After its first DELETE neither is honoured again. Both legacy keys
+ * are adopted by the objects that own their successors (r10 rule 3: HostBindings at its first accepted
+ * /point, CardLifetime the first time it needs the inverse), and losing the host clears the bare
+ * inverse (rule 1).
  *
  * bindVanity(env, …) is the one way to make a binding: it needs `env.CARDS`, `env.HOST_BINDINGS` and
  * `env.CARD_LIFETIMES`. `gen` is the lifetime the caller means (a save's admitted generation); absent,
@@ -255,7 +259,7 @@ async function askLifetime(env, handle, op, body) {
  * Its storage is the truth for the host; the KV pointer is the cache readers use, and this object is
  * its only writer (r9: a write-through cache it reconciles, see rule B below). Storage key `host`:
  *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms },
- *     host, cache: 'written' | 'pending', losers: [{ handle, gen, ticket }] }
+ *     host, cache: 'written' | 'pending', losers: [{ handle, gen, ticket }], adopted: bool (r10) }
  *   POST /admit { handle, host }        → { ticket: seq = max(seq + 1, now) }, the bind's first step
  *   POST /point { handle, gen, host, ticket }
  *                                       refused (`expired`) if the ticket is TICKET_TTL_MS old;
@@ -422,7 +426,8 @@ export class HostBindings {
  * later bind of the dead lifetime then took a domain from the next owner (codex r7). Nothing here is
  * discovered from KV. Storage key `life`:
  *   { gen, hosts: [host…] (bound in gen), pending: { '<ended gen>': [host…] } (ends not yet delivered),
- *     seq, inverse: { host | null, order } | null, lost: { host: ticket }, cache: 'written' | 'pending' }
+ *     seq, inverse: { host | null, order } | null, lost: { host: ticket }, cache: 'written' | 'pending',
+ *     adopted, legacy: host | null, dropLegacy }   (r10: the bare legacy inverse, see adopt)
  *   POST /register { handle, host, gen } refused (`stale_generation`) unless gen is the current one;
  *                                        otherwise host joins `hosts` → { gen, order: ++seq }
  *   POST /confirm  { handle, host, gen, order, ticket }
@@ -431,7 +436,8 @@ export class HostBindings {
  *                                        `vanityof:<handle>:<gen>` → { published, cache?: 'pending' }
  *   POST /lost     { handle, host, gen, ticket }
  *                                        HostBindings: the host went to another handle; lost[host] =
- *                                        ticket, and an inverse naming it is cleared (KV key deleted)
+ *                                        ticket, and every inverse naming it is cleared: its own (KV key
+ *                                        deleted; in generation 0 written empty) and the bare legacy one
  *   POST /end      { handle }            `hosts` moves to pending[gen], gen = a fresh one, `hosts` = []
  *                                        → { ended, gen, pending }: every host still owed an end
  *   POST /settle   { handle, delivered: { '<gen>': [host…] } }
