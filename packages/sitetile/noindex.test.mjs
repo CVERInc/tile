@@ -60,7 +60,7 @@ function site(files, routeSitemap) {
   const out = applyNoindex(dir, recorded);
   recorded = [];
   const read = (rel) => readFileSync(join(dir, rel), 'utf8');
-  return { dir, decided: out.noindex, read, sitemap: () => read('sitemap.xml'),
+  return { dir, decided: out.noindex, untouched: out.untouched, read, bytes: (rel) => readFileSync(join(dir, rel)), sitemap: () => read('sitemap.xml'),
     listed: () => [...read('sitemap.xml').matchAll(/<loc>https:\/\/example\.com([^<]*)<\/loc>/g)].map((m) => m[1]) };
 }
 const which = (files) => site(files).decided;
@@ -291,6 +291,58 @@ test('the head is found whatever its case or however it ends: </HEAD>, <META NAM
   assert.equal(s.read('implied.html'), '<!DOCTYPE html><title>x</title>' + ROBOTS + '<p>Thanks');
   assert.equal(s.read('bom.html'), pages['bom.html'].replace('</head>', ROBOTS + '</head>'));
   for (const f of Object.keys(pages)) assert.deepEqual(activeRobots(s.read(f)), ['noindex'], `${f}: one active robots meta`);
+});
+
+// codex r7 P2: the pass read every file as UTF-8 and wrote it back, so a windows-1252 public/ page
+// came out with ef bf bd where each é was — in the body too. A page is bytes; the only bytes that
+// may change are the robots edit in its head.
+const b = (s, enc = 'latin1') => Buffer.from(s, enc);
+const ROBOTS_BYTES = b(ROBOTS);
+/** `src` with ROBOTS_BYTES (or `ins`) spliced in at the first `</head>` (located as `at` bytes). */
+const insertedBefore = (src, at = b('</head>'), ins = ROBOTS_BYTES) => {
+  const i = src.indexOf(at);
+  assert.ok(i > 0, 'fixture has the anchor');
+  return Buffer.concat([src.subarray(0, i), ins, src.subarray(i)]);
+};
+test('a page not in UTF-8 keeps every byte but the head edit: windows-1252, Shift_JIS, a 4-byte emoji, a UTF-8 BOM', () => {
+  const pages = {
+    // codex's input, verbatim bytes (Café / André — reçu, em dash 0x97)
+    'cp1252.html': b('<!doctype html><html><head><meta charset="windows-1252"><title>Caf\xe9</title></head><body>Merci, Andr\xe9 \x97 re\xe7u.</body></html>'),
+    // ありがとう・ソ表 — ソ (83 5C) and 表 (95 5C) end in an ASCII byte; all of it before </head>
+    'sjis.html': Buffer.concat([b('<html><head><meta charset="shift_jis"><title>'),
+      Buffer.from([0x82, 0xa0, 0x82, 0xe8, 0x82, 0xaa, 0x82, 0xc6, 0x82, 0xa4, 0x81, 0x45, 0x83, 0x5c, 0x95, 0x5c]),
+      b('</title><meta name="description" content="'), Buffer.from([0x83, 0x5c, 0x95, 0x5c]), b('"></head><body>'),
+      Buffer.from([0x82, 0xa0]), b('</body></html>')]),
+    'emoji.html': b('<html><head><title>Thanks 🙏 ✓ ü</title></head><body>🙏</body></html>', 'utf8'),
+    'bom8.html': Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), b('<html><head><title>Merci André</title></head><body>é</body></html>', 'utf8')]),
+  };
+  const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
+  assert.deepEqual(s.decided, Object.keys(pages).sort());
+  for (const [f, src] of Object.entries(pages)) {
+    const want = insertedBefore(src);
+    assert.ok(s.bytes(f).equals(want), `${f}: input bytes + one robots meta before </head>\n      got  ${s.bytes(f).toString('hex')}\n      want ${want.toString('hex')}`);
+  }
+  assert.deepEqual([...s.bytes('bom8.html').subarray(0, 3)], [0xef, 0xbb, 0xbf], 'the UTF-8 BOM stays first');
+});
+
+// UTF-16 is the one family where an ASCII meta is not ASCII bytes. A browser takes it only from a BOM
+// (WHATWG: a <meta charset="utf-16"> found by the ASCII prescan means UTF-8), so the BOM decides; the
+// edit is made in UTF-16 (each code unit is two bytes, so a parser offset is half a byte offset).
+// UTF-32 no browser decodes: left as it is, out of the sitemap, and reported.
+test('a UTF-16 page (by its BOM) is edited in UTF-16; a UTF-32 page is left untouched, unlisted, and reported', () => {
+  const doc = '<html><head><title>Merci André 🙏</title></head><body>reçu</body></html>';
+  const le = Buffer.concat([Buffer.from([0xff, 0xfe]), b(doc, 'utf16le')]);
+  const be = Buffer.from(le).swap16();          // FE FF + big-endian units
+  const u32 = Buffer.concat([Buffer.from([0xff, 0xfe, 0, 0]), ...[...doc].map((ch) => { const x = Buffer.alloc(4); x.writeUInt32LE(ch.codePointAt(0)); return x; })]);
+  const s = site({ 'c/index.html': html({ body: form('/le.html', '/be.html', '/u32.html') }), 'le.html': le, 'be.html': be, 'u32.html': u32, 'index.html': html() },
+    [['/'], ['/le.html'], ['/be.html'], ['/u32.html']]);
+  assert.deepEqual(s.decided, ['be.html', 'le.html', 'u32.html']);
+  const want = insertedBefore(le, b('</head>', 'utf16le'), b(ROBOTS, 'utf16le'));
+  assert.ok(s.bytes('le.html').equals(want), `le.html: UTF-16LE input + one robots meta in UTF-16LE\n      got  ${s.bytes('le.html').toString('hex')}`);
+  assert.ok(s.bytes('be.html').equals(Buffer.from(want).swap16()), `be.html: UTF-16BE input + one robots meta in UTF-16BE\n      got  ${s.bytes('be.html').toString('hex')}`);
+  assert.ok(s.bytes('u32.html').equals(u32), 'u32.html: untouched');
+  assert.deepEqual(s.untouched, ['u32.html']);
+  assert.deepEqual(s.listed(), ['/', '/c/'], 'the three noindex pages are not listed');
 });
 
 test('the thanks mark is removed from every emitted form; a form recorded but never emitted counts for nothing', () => {

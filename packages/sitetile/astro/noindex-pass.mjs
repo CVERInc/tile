@@ -130,13 +130,47 @@ function metasUnder(node, out = []) {
 }
 const attrOf = (el, name) => el.attrs.find((a) => a.name === name);
 
+// 🩸 r7 read each file with readFileSync(…, 'utf8') and wrote the string back, so a windows-1252
+// public/ page came out with ef bf bd where every é had been — the body too (codex r7). A page is
+// BYTES, in whatever encoding its author saved, and the pass never decodes it. It parses a
+// byte-transparent VIEW: the bytes as latin1, one byte ⇔ one code unit, lossless both ways. Every
+// offset parse5 reports in that view IS a byte offset, and the edits are spliced into the Buffer. In
+// every ASCII-compatible encoding (UTF-8, windows-1252, ISO-8859-x, Shift_JIS, Big5, GBK, EUC-*) the
+// bytes of `<`, `>`, `=`, quotes and ASCII letters mean those characters and no trail byte of a
+// multi-byte character is one of `<>"'=/` — so the tags parse5 finds are the tags a browser finds,
+// and the robots meta written (pure ASCII) is the same bytes in all of them.
+// The one family that is not ASCII-compatible is UTF-16, and a browser recognises it only by its BOM
+// (FF FE / FE FF): WHATWG's prescan maps a <meta charset="utf-16"> it can read to UTF-8, since it
+// read it as ASCII. So for a UTF-16 BOM the view is the code units (Buffer's utf16le, also lossless;
+// big-endian swapped) — an offset is half a byte offset — and the edit is written in UTF-16 of the
+// same order. A UTF-32 BOM (00 00 FE FF, FF FE 00 00), which no browser decodes as UTF-32, is not
+// edited at all: the file stays as it is, a noindex decision on it keeps it out of the sitemap, and
+// the build prints one warning naming it.
+const BOMS = [
+  [[0x00, 0x00, 0xfe, 0xff], null], [[0xff, 0xfe, 0x00, 0x00], null],
+  [[0xef, 0xbb, 0xbf], 'bytes'], [[0xff, 0xfe], 'utf16le'], [[0xfe, 0xff], 'utf16be'],
+];
+/** The view of a page's bytes: { bom (bytes), unit (bytes per code unit), text (from after the
+ *  BOM), encode (text → bytes) }, or null for a file not edited (UTF-32). */
+export function viewOf(bytes) {
+  const [sig, kind] = BOMS.find(([s]) => s.every((x, i) => bytes[i] === x)) || [[], 'bytes'];
+  if (!kind) return null;
+  const body = bytes.subarray(sig.length);
+  if (kind === 'bytes') return { bom: sig.length, unit: 1, text: body.toString('latin1'), encode: (s) => Buffer.from(latin1Safe(s), 'latin1') };
+  const le = kind === 'utf16le' ? body : Buffer.from(body.subarray(0, body.length & ~1)).swap16();
+  const encode = (s) => kind === 'utf16le' ? Buffer.from(s, 'utf16le') : Buffer.from(s, 'utf16le').swap16();
+  return { bom: sig.length, unit: 2, text: le.toString('utf16le'), encode };
+}
+/** Text for the byte view: a character the view cannot hold (one parse5 decoded from a character
+ *  reference above U+00FF) goes back as a reference, so latin1 never truncates it. */
+const latin1Safe = (s) => s.replace(/[^\0-\xff]/gu, (c) => `&#x${c.codePointAt(0).toString(16)};`);
+
 /** The parsed head of a page: its <meta> elements, and the offset a new head element goes at —
  *  before </head> when written; else after the head's last child, or after <head>; for a head
  *  neither of whose tags is written, before the first thing the parser put after it. Offsets index
- *  `html` (a leading BOM, which the HTML decoder strips, is skipped before parsing). */
+ *  `html`, the view's text (the BOM, which the HTML decoder strips, is not in it). */
 function parseHead(html) {
-  const bom = html.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const doc = parse(html.slice(bom), { sourceCodeLocationInfo: true });
+  const doc = parse(html, { sourceCodeLocationInfo: true });
   const root = doc.childNodes.find((n) => n.tagName === 'html');
   const head = root.childNodes.find((n) => n.tagName === 'head');
   const loc = head.sourceCodeLocation;
@@ -153,18 +187,22 @@ function parseHead(html) {
       }
     })(after);
     at = first ?? root.sourceCodeLocation?.endTag?.startOffset ?? root.sourceCodeLocation?.startTag?.endOffset
-      ?? doc.childNodes.find((n) => n.nodeName === '#documentType')?.sourceCodeLocation?.endOffset ?? html.length - bom;
+      ?? doc.childNodes.find((n) => n.nodeName === '#documentType')?.sourceCodeLocation?.endOffset ?? html.length;
   }
-  const span = (el) => [bom + el.sourceCodeLocation.startOffset, bom + el.sourceCodeLocation.endOffset];
-  return { metas: metasUnder(head).filter((m) => m.sourceCodeLocation), insertAt: bom + at, span, bom };
+  const span = (el) => [el.sourceCodeLocation.startOffset, el.sourceCodeLocation.endOffset];
+  return { metas: metasUnder(head).filter((m) => m.sourceCodeLocation), insertAt: at, span };
 }
 
-/** Read every emitted page: its stamps and robots metas (head only — a body can quote anything). */
+/** Read every emitted page: its bytes, its view (viewOf), and — from the view's head only, a body
+ *  can quote anything — its stamps and robots metas. A page with no view is `untouchable`. */
 export function readPages(dir) {
   const pages = new Map();
   for (const rel of htmlFiles(dir)) {
-    const html = readFileSync(join(dir, rel), 'utf8');
-    const { metas, insertAt, span, bom } = parseHead(html);
+    const bytes = readFileSync(join(dir, rel));
+    const view = viewOf(bytes);
+    if (!view) { pages.set(rel, { bytes, html: '', untouchable: true, robots: [] }); continue; }
+    const html = view.text;
+    const { metas, insertAt, span } = parseHead(html);
     const named = (n) => metas.filter((m) => (attrOf(m, 'name')?.value || '').trim().toLowerCase() === n);
     const stamp = (n) => {
       const m = metas.find((e) => attrOf(e, 'name')?.value === n);
@@ -173,10 +211,10 @@ export function readPages(dir) {
     const n = stamp('sitetile:noindex');
     const s = stamp('sitetile:sitemap');
     pages.set(rel, {
-      html, insertAt,
+      bytes, view, html, insertAt,
       noindexStamp: n?.span || null, flag: n ? flagOf(n.content) : undefined,
       sitemapStamp: s?.span || null, listing: s ? listingOf(s.content) : undefined,
-      robots: named('robots').map((m) => robotsMeta(html, m, bom)),
+      robots: named('robots').map(robotsMeta),
     });
   }
   return pages;
@@ -208,14 +246,14 @@ export function noindexFiles(dir, pages, thanks) {
   return out;
 }
 
-/** A robots <meta> element, located in `html`: the span of its tag, and of its (first) `content`
+/** A robots <meta> element, located in the view: the span of its tag, and of its (first) `content`
  *  attribute with the parser's value — any order, any case, quoted either way or not at all. */
-function robotsMeta(html, el, bom) {
+function robotsMeta(el) {
   const loc = el.sourceCodeLocation;
   const c = loc.attrs?.content;
   return {
-    tag: [bom + loc.startOffset, bom + loc.endOffset],
-    content: c ? { span: [bom + c.startOffset, bom + c.endOffset], value: attrOf(el, 'content').value } : null,
+    tag: [loc.startOffset, loc.endOffset],
+    content: c ? { span: [c.startOffset, c.endOffset], value: attrOf(el, 'content').value } : null,
   };
 }
 /** A robots `content` made to say noindex: returned as is when it already does and nothing
@@ -235,8 +273,11 @@ const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 /** The page's bytes with its stamps and thanks marks removed and, when decided noindex: each robots
  *  meta it already has merged to say noindex (mergeRobots) — never a second tag — or, with none,
  *  the robots meta in the noindex stamp's place (where the head ends, for a page that has no
- *  stamp). Every edit is a splice at the parser's source offsets (see parseHead). */
+ *  stamp). Every edit is a splice into the page's BYTES at the parser's offsets in the view
+ *  (byte = BOM + offset × unit), its text encoded the way the view was decoded; the bytes between
+ *  edits are copied, never decoded. A page with no view is returned as it is. */
 export function rewritePage(p, noindex) {
+  if (p.untouchable) return p.bytes;
   const html = p.html;
   const robots = p.robots || [];
   const edits = [];   // [start, end, text], non-overlapping
@@ -252,10 +293,19 @@ export function rewritePage(p, noindex) {
     }
   }
   if (p.sitemapStamp) edits.push([...p.sitemapStamp, '']);
-  let out = html;
-  for (const [a, b, text] of edits.sort((x, y) => y[0] - x[0])) out = out.slice(0, a) + text + out.slice(b);
-  for (const id of p.marks || []) out = out.replaceAll(markOf(id), '');
-  return out;
+  for (const id of p.marks || []) {
+    const mark = markOf(id);
+    for (let i = html.indexOf(mark); i !== -1; i = html.indexOf(mark, i + mark.length)) edits.push([i, i + mark.length, '']);
+  }
+  const { bytes, view: { bom, unit, encode } } = p;
+  const parts = [];
+  let at = 0;
+  for (const [a, b, text] of edits.sort((x, y) => x[0] - y[0])) {
+    parts.push(bytes.subarray(at, bom + a * unit), encode(text));
+    at = bom + b * unit;
+  }
+  parts.push(bytes.subarray(at));
+  return Buffer.concat(parts);
 }
 
 const SITEMAP_URL = /  <url>\n    <loc>([^<]*)<\/loc>(?:\n    <lastmod>([^<]*)<\/lastmod>)?\n  <\/url>/g;
@@ -303,12 +353,12 @@ export function applyNoindex(dir, manifest = []) {
   const pages = readPages(dir);
   const noindex = noindexFiles(dir, pages, emittedThanks(pages, manifest));
   for (const [rel, p] of pages) {
-    const html = rewritePage(p, noindex.has(rel));
-    if (html !== p.html) writeFileSync(join(dir, rel), html);
+    const bytes = rewritePage(p, noindex.has(rel));
+    if (!bytes.equals(p.bytes)) writeFileSync(join(dir, rel), bytes);
   }
   const sitemap = join(dir, 'sitemap.xml');
   if (existsSync(sitemap)) writeFileSync(sitemap, rebuildSitemap(dir, readFileSync(sitemap, 'utf8'), pages, noindex));
-  return { noindex: [...noindex].sort() };
+  return { noindex: [...noindex].sort(), untouched: [...noindex].filter((rel) => pages.get(rel).untouchable).sort() };
 }
 
 /** Astro integration: runs after the static output is written (after locale-404's renames). */
@@ -317,10 +367,14 @@ export function noindexPass() {
     name: 'sitetile-noindex',
     hooks: {
       'astro:build:start': () => { globalThis[MANIFEST] = []; },
-      'astro:build:done': ({ dir }) => {
+      'astro:build:done': ({ dir, logger }) => {
         const manifest = globalThis[MANIFEST] || [];
         delete globalThis[MANIFEST];
-        applyNoindex(fileURLToPath(dir), manifest);
+        const { untouched } = applyNoindex(fileURLToPath(dir), manifest);
+        for (const rel of untouched) {
+          const msg = `${rel} is noindex but saved as UTF-32, which no browser reads: left unchanged without a robots meta, and out of sitemap.xml. Save it as UTF-8 to have one written.`;
+          logger ? logger.warn(msg) : console.warn(msg);
+        }
       },
     },
   };
