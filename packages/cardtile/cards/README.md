@@ -49,8 +49,17 @@ Recoverable, checked before they moved: all three answer 200 on their public URL
 
 ## Deploying a change
 
-    CLOUDFLARE_API_TOKEN=$(security find-generic-password -w -s cver-cf-kv) \
-      npx wrangler kv key put --remote --namespace-id=<CARDS id> <handle> --path=<file>
+Prefer the write API (`PUT /_api/card/<handle>`): it checks the version, carries the stored
+assets and runs Web Risk. A direct KV write skips all three. When it has to be direct, the body
+goes under the handle's CURRENT generation (reef#2618 r3 — see `genKey` in `serve/card-api.mjs`):
+
+    export CLOUDFLARE_API_TOKEN=$(security find-generic-password -w -s cver-cf-kv)
+    npx wrangler kv key get --remote --namespace-id=<CARDS id> gen:<handle>   # no value ⇒ the generation is 0
+    npx wrangler kv key put --remote --namespace-id=<CARDS id> card:<handle>:<gen> --path=<file>
+
+🔴 Not the bare `<handle>` key. That is the pre-generation shape, read only while a handle has
+never been deleted; on any handle that has, the write lands and nothing ever serves it. Never
+write `gen:<handle>` by hand either — only DELETE does, and a new value there takes the card down.
 
 🔴 `--remote` is not optional. Without it wrangler writes to the local miniflare simulator and
 reports success, so a "deployed" change silently never leaves the machine.

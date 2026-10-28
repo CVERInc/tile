@@ -783,8 +783,8 @@ const router = {
     const host = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
     const md = /^(.*)\.md$/.exec(url.pathname);
 
-    // CARDS store: handle → card.md, plus the vanity bindings. Missing binding (local/misconfig) is
-    // a clear 500, not a crash. Read before routing now, because routing needs it.
+    // CARDS store: card:<handle>:<gen> → card.md (card-api genKey), plus the vanity bindings. Missing
+    // binding (local/misconfig) is a clear 500, not a crash. Read before routing now, because routing needs it.
     const store = env && env.CARDS;
     if (!store) return html('<!doctype html><meta charset=utf-8><p>card store not bound</p>', 500, env);
 

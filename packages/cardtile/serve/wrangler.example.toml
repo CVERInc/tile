@@ -18,9 +18,10 @@
 
 # REEF with Card — the multi-tenant edge renderer. Deploy:
 #   CLOUDFLARE_API_TOKEN=<your token> npx wrangler deploy
-# The CARDS KV holds handle → card.md. Create once, then paste the id below:
+# The CARDS KV holds card:<handle>:<gen> → card.md (gen = the value of gen:<handle>, absent ⇒ 0;
+# see genKey in card-api.mjs). Create once, then paste the id below:
 #   CLOUDFLARE_API_TOKEN=… npx wrangler kv namespace create CARDS
-#   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS <handle> --path=<card.md>
+#   CLOUDFLARE_API_TOKEN=… npx wrangler kv key put --binding=CARDS card:<handle>:0 --path=<card.md>   # a new handle
 #   preview (default): npx wrangler deploy                 → cardtile-preview.<your-subdomain>.workers.dev
 #   production:        npx wrangler deploy --env production → cardtile + its custom domains
 # Same code, same CARDS store; they differ only in PREVIEW (which gates the noindex header) and in
@@ -37,7 +38,7 @@ PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outr
 #                         # card response, vanity hosts included. Default off. Per-environment: set it under
 #                         # [env.production.vars] too. Remove it (or "0") to resume indexing.
 
-# handle → card.md store. Create it once (see the header) and paste its id here.
+# card store (card:<handle>:<gen> → card.md). Create it once (see the header) and paste its id here.
 [[kv_namespaces]]
 binding = "CARDS"
 id = "<your-cards-kv-namespace-id>"
