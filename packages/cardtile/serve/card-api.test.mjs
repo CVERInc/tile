@@ -1250,7 +1250,7 @@ test("🔴 codex r4#1 a bind admitted in an ended lifetime, held before ANY of i
   assert.ok(seen.some((r) => r.inside) && seen.some((r) => !r.inside), 'CONTROL: held both before and inside HostBindings');
 });
 
-test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (44 rows)', async () => {
+test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never undoes another handle\'s binding of the domain (60 rows)', async () => {
   // R/cross-handle-probe.mjs: generation 0 / a later generation, for each handle independently, × the
   // sequential control and every store call after admission. r5 failed the four final-pointer holds.
   // Every row runs and every failing row is named (one failure must not hide the other three).

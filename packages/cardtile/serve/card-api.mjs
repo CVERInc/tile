@@ -141,7 +141,14 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  * `redirect: false` binding writes no `vanityof:` (the canonical address keeps serving). Returns
  * `stale_generation` when that lifetime is not (or no longer) the current one, `superseded` when a bind
  * that started later already took the host, or `expired` when it outlived its ticket; in all three
- * the pointer was not written.
+ * neither the pointer nor the inverse was written. Accepted: `{ accepted: true }`, plus `cache:
+ * 'pending'` when the KV pointer put failed (the object retries it; the bind stands), and for a
+ * redirecting bind `redirect: 'published' | 'not_published'` (not: a newer bind holds the address, or
+ * the host was taken meanwhile) and `redirect_cache: 'pending'` likewise.
+ *
+ * 🔴 r9 (codex r8): nothing public is written between /register and HostBindings' acceptance. The
+ * binding key is not public (it is honoured only behind a pointer naming the handle); the inverse is,
+ * since canonical /<handle> 301s to it, so CardLifetime publishes it only after the accept (/confirm).
  */
 export const vanityKey = (host) => `vanity:${host}`;
 const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
@@ -246,18 +253,23 @@ async function askLifetime(env, handle, op, body) {
  * HostBindings — the Durable Object that owns `vanity:<host>` (one object per host, reef#2618 r6, r7).
  *
  * Its storage is the truth for the host; the KV pointer is the cache readers use, and this object is
- * its only writer. Storage key `host`:
- *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms } }
+ * its only writer (r9: a write-through cache it reconciles, see rule B below). Storage key `host`:
+ *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms },
+ *     host, cache: 'written' | 'pending', losers: [{ handle, gen, ticket }] }
  *   POST /admit { handle, host }        → { ticket: seq = max(seq + 1, now) }, the bind's first step
  *   POST /point { handle, gen, host, ticket }
  *                                       refused (`expired`) if the ticket is TICKET_TTL_MS old;
  *                                       refused (`stale_generation`) if (handle, gen) is in `ended`;
  *                                       refused (`superseded`) if ticket < landed (a later-admitted bind
- *                                       already wrote; the same owner again is a no-op); otherwise
- *                                       owner = { handle, gen }, landed = ticket, then KV pointer = handle
+ *                                       already wrote; the same owner again is `accepted`, a no-op);
+ *                                       otherwise owner = { handle, gen }, landed = ticket, the previous
+ *                                       owner joins `losers` — that storage write IS the acceptance —
+ *                                       then KV pointer = handle → { accepted, cache?: 'pending' }
  *   POST /end   { handle, gens, host }  every (handle, gen) goes into `ended`; if the owner is one of
  *                                       them, owner = null and KV `vanity:<host>` is deleted
- * It never reads KV. A Durable Object lets a second request in while the first awaits anything
+ *   POST /owner { host }                → { handle | null }: for a reader whose KV read missed (hostOwner)
+ * Every request (and the alarm) first puts a pending pointer from `owner` and tells each loser's
+ * CardLifetime (`/lost`). It never reads KV. A Durable Object lets a second request in while the first awaits anything
  * outside it (every KV call is outside), so each request runs whole in this object's own queue.
  *
  * 🔴 A ticket lives TICKET_TTL_MS (r8): a /point whose ticket is older is refused (`expired`), whatever
@@ -395,9 +407,17 @@ export class HostBindings {
  * by listing `vanitybind:` / `vanityof:`, and a listing that had not caught up ended none of them: a
  * later bind of the dead lifetime then took a domain from the next owner (codex r7). Nothing here is
  * discovered from KV. Storage key `life`:
- *   { gen, hosts: [host…] (bound in gen), pending: { '<ended gen>': [host…] } (ends not yet delivered) }
+ *   { gen, hosts: [host…] (bound in gen), pending: { '<ended gen>': [host…] } (ends not yet delivered),
+ *     seq, inverse: { host | null, order } | null, lost: { host: ticket }, cache: 'written' | 'pending' }
  *   POST /register { handle, host, gen } refused (`stale_generation`) unless gen is the current one;
- *                                        otherwise host joins `hosts` → { gen }
+ *                                        otherwise host joins `hosts` → { gen, order: ++seq }
+ *   POST /confirm  { handle, host, gen, order, ticket }
+ *                                        after HostBindings accepted (r9 rule A): inverse = host unless
+ *                                        a newer `order` holds it or `lost[host]` > ticket; then KV
+ *                                        `vanityof:<handle>:<gen>` → { published, cache?: 'pending' }
+ *   POST /lost     { handle, host, gen, ticket }
+ *                                        HostBindings: the host went to another handle; lost[host] =
+ *                                        ticket, and an inverse naming it is cleared (KV key deleted)
  *   POST /end      { handle }            `hosts` moves to pending[gen], gen = a fresh one, `hosts` = []
  *                                        → { ended, gen, pending }: every host still owed an end
  *   POST /settle   { handle, delivered: { '<gen>': [host…] } }
