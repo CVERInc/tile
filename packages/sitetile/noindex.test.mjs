@@ -308,6 +308,10 @@ test('a page not in UTF-8 keeps every byte but the head edit: windows-1252, Shif
   const pages = {
     // codex's input, verbatim bytes (Café / André — reçu, em dash 0x97)
     'cp1252.html': b('<!doctype html><html><head><meta charset="windows-1252"><title>Caf\xe9</title></head><body>Merci, Andr\xe9 \x97 re\xe7u.</body></html>'),
+    // „Gruß“: ß“ is df 93, also a valid two-byte UTF-8 sequence — read as UTF-8 it is ONE code
+    // unit for two bytes, so offsets taken in a UTF-8 decoding land one byte early (each lone é
+    // above is one U+FFFD for one byte, which hides that)
+    'cp1252-de.html': b('<html><head><meta charset="windows-1252"><title>\x84Gru\xdf\x93</title></head><body>Gr\xfc\xdfe</body></html>'),
     // ありがとう・ソ表 — ソ (83 5C) and 表 (95 5C) end in an ASCII byte; all of it before </head>
     'sjis.html': Buffer.concat([b('<html><head><meta charset="shift_jis"><title>'),
       Buffer.from([0x82, 0xa0, 0x82, 0xe8, 0x82, 0xaa, 0x82, 0xc6, 0x82, 0xa4, 0x81, 0x45, 0x83, 0x5c, 0x95, 0x5c]),
@@ -318,10 +322,9 @@ test('a page not in UTF-8 keeps every byte but the head edit: windows-1252, Shif
   };
   const s = site({ 'c/index.html': html({ body: form(...Object.keys(pages).map((f) => '/' + f)) }), ...pages });
   assert.deepEqual(s.decided, Object.keys(pages).sort());
-  for (const [f, src] of Object.entries(pages)) {
-    const want = insertedBefore(src);
-    assert.ok(s.bytes(f).equals(want), `${f}: input bytes + one robots meta before </head>\n      got  ${s.bytes(f).toString('hex')}\n      want ${want.toString('hex')}`);
-  }
+  const wrong = Object.entries(pages).filter(([f, src]) => !s.bytes(f).equals(insertedBefore(src)))
+    .map(([f, src]) => `${f}: input bytes + one robots meta before </head>\n      got  ${s.bytes(f).toString('hex')}\n      want ${insertedBefore(src).toString('hex')}`);
+  assert.deepEqual(wrong, [], wrong.join('\n    '));
   assert.deepEqual([...s.bytes('bom8.html').subarray(0, 3)], [0xef, 0xbb, 0xbf], 'the UTF-8 BOM stays first');
 });
 
