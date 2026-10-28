@@ -181,13 +181,15 @@ export async function bindVanity(env, handle, host, { redirect = true, gen: mean
     method: 'POST', body: JSON.stringify({ handle, gen, host, ticket }),
   });
   if (!pointed.ok) throw new Error(`HostBindings answered ${pointed.status} for ${host}`);
-  const point = await pointed.json();
+  // `owning`: the ticket of the acceptance that owns the host for this handle — this bind's own, or a
+  // newer one of the same handle when this bind was a no-op (r12). It is what /confirm records.
+  const { ticket: owning, ...point } = await pointed.json();
   // 🔴 r9 rule A: the inverse (what canonical /<handle> 301s to) is published only AFTER the host's
   // object accepted, and by the handle's object, which keeps only the newest accepted bind's host. A
   // refused bind (expired, superseded) wrote nothing public, so the previous redirect stands.
   if (point.conflict || !redirect) return { handle, host, gen, ...point };
   const confirmed = await life.fetch('https://card-lifetime/confirm', {
-    method: 'POST', body: JSON.stringify({ handle, host, gen, order, ticket }),
+    method: 'POST', body: JSON.stringify({ handle, host, gen, order, ticket: owning }),
   });
   if (!confirmed.ok) throw new Error(`CardLifetime answered ${confirmed.status} confirming ${host} for ${handle}: the binding stands, its redirect is not published; bind again`);
   const inverse = await confirmed.json();
@@ -265,10 +267,11 @@ async function askLifetime(env, handle, op, body) {
  *                                       refused (`expired`) if the ticket is TICKET_TTL_MS old;
  *                                       refused (`stale_generation`) if (handle, gen) is in `ended`;
  *                                       refused (`superseded`) if ticket < landed (a later-admitted bind
- *                                       already wrote; the same owner again is `accepted`, a no-op);
+ *                                       already wrote; the same owner again is `accepted`, a no-op that
+ *                                       answers ticket = landed, the owner's — r12);
  *                                       otherwise owner = { handle, gen }, landed = ticket, the previous
  *                                       owner joins `losers` — that storage write IS the acceptance —
- *                                       then KV pointer = handle → { accepted, cache?: 'pending' }
+ *                                       then KV pointer = handle → { accepted, ticket, cache?: 'pending' }
  *   POST /end   { handle, gens, host }  every (handle, gen) goes into `ended`; if the owner is one of
  *                                       them, owner = null and KV `vanity:<host>` is deleted
  *   POST /owner { host }                → { handle | null }: for a reader whose KV read missed (hostOwner)
@@ -381,7 +384,10 @@ export class HostBindings {
     const s = await this.load(host);
     if (Date.now() - ticket >= TICKET_TTL_MS) return expired(host);
     if (s.ended[`${handle}:${gen}`] != null) return staleWrite(handle);
-    if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? { accepted: true } : superseded(host);
+    // 🔴 r12: a same-owner no-op answers with the ticket of the acceptance that owns the host NOW, never
+    // its own older one: its /confirm then can neither publish with nor write back a ticket a later
+    // take has already passed (codex r11)
+    if (ticket < s.landed) return s.owner && s.owner.handle === handle && s.owner.gen === gen ? { accepted: true, ticket: s.landed } : superseded(host);
     // 🔴 r10 rule 3: a host bound before generations has a KV pointer and no durable owner. Its first
     // accepted /point adopts that handle as the owner at generation 0, once, so the loser notice below
     // reaches it and its canonical address stops redirecting here. The pointer is the migration's only
@@ -398,7 +404,7 @@ export class HostBindings {
     s.cache = 'pending';
     await this.storage.put('host', s); // THE acceptance: from here the bind stands, whatever KV does next
     await this.flush(s);
-    return { accepted: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
+    return { accepted: true, ticket, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
   /** the legacy pointer's handle as a generation-0 owner, or null (see point) */
   async adoptLegacy(host) {
@@ -431,8 +437,10 @@ export class HostBindings {
  *   POST /register { handle, host, gen } refused (`stale_generation`) unless gen is the current one;
  *                                        otherwise host joins `hosts` → { gen, order: ++seq }
  *   POST /confirm  { handle, host, gen, order, ticket }
- *                                        after HostBindings accepted (r9 rule A): inverse = host unless
- *                                        a newer `order` holds it or `lost[host]` > ticket; then KV
+ *                                        after HostBindings accepted (r9 rule A), with the ticket /point
+ *                                        answered: inverse = host unless `lost[host]` > ticket, or the
+ *                                        inverse names this host with a ticket ≥ this one (r12: it only
+ *                                        goes up), or names another host with a newer `order`; then KV
  *                                        `vanityof:<handle>:<gen>` → { published, cache?: 'pending' }
  *   POST /lost     { handle, host, gen, ticket }
  *                                        HostBindings: the host went to another handle with the taker's
@@ -525,7 +533,8 @@ export class CardLifetime {
   }
   /**
    * 🔴 r9 rule A: a bind the host's object ACCEPTED asks to become the card's one address. Published
-   * only if it is still this lifetime, no bind registered after it was already published (`order`), and
+   * only if it is still this lifetime, no newer acceptance of the same host (`ticket`, r12) or later
+   * registered bind of another host (`order`) was already published, and
    * the host was not taken from this handle after this bind's ticket (`lost`): so a late confirm never
    * clobbers a newer accepted host, and never points the card at a host it no longer has.
    */
@@ -534,8 +543,19 @@ export class CardLifetime {
     if (gen !== s.gen || !s.hosts.includes(host)) return staleWrite(handle);
     await this.adopt(s); // a no-op after /register adopted
     if (s.lost[host] != null && s.lost[host] > ticket) return { published: false, why: `${host} was bound to another card after this bind.` };
-    if (s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
-    s.inverse = { host, order, ticket }; // the acceptance that wrote it: only a later loss clears it (r11)
+    // 🔴 r12: for the host the inverse already names, the inverse's ticket only goes up. Tickets are the
+    // order the host's object and this one share, so an older acceptance never overwrites a newer one,
+    // whatever its registration order (codex r11: a late registration wrote T2 over T4, and the T3 loss
+    // then cleared it). The same ticket is the acceptance already published. Another host's tickets come
+    // from another object's clock, so between hosts the registration order still decides.
+    const same = !!s.inverse && s.inverse.host === host;
+    if (same && (s.inverse.ticket || 0) >= ticket) {
+      return s.inverse.ticket === ticket ? { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) }
+        : { published: false, why: 'A newer bind of this address already set it.' };
+    }
+    if (!same && s.inverse && s.inverse.order > order) return { published: false, why: 'A bind that started later already set this card\'s address.' };
+    // the acceptance that wrote it: only a later loss clears it (r11); its order never goes back either
+    s.inverse = { host, order: same ? Math.max(order, s.inverse.order) : order, ticket };
     s.cache = 'pending';
     await this.storage.put('life', s);
     await this.flush(s);

@@ -1916,3 +1916,118 @@ test('🔴 r11 the loss rule at its boundary: a loss carrying the ticket of the 
     else assert.equal(canon.status, 200, `[+1] a later loss left the inverse: /b → ${canon.headers.get('location')}`);
   }
 });
+
+test('🔴 codex r11 a late same-owner registration never lowers the inverse\'s ticket: the older loss it would expose keeps the newer rebind (4 rows)', async () => {
+  // R/late-register.mjs: b binds OWNER; a second bind of b takes ticket T2 and is held before its
+  // /register; a takes OWNER with T3 while b's /lost answers 503; b binds it back with T4 (published,
+  // 301). The held bind then registers (a NEWER order than T4's), /point accepts it as a same-owner
+  // no-op, and r11's /confirm, which compared only orders, overwrote the inverse's T4 with T2 — so the
+  // retried T3 loss cleared it: /b 301 → 200 while the domain still served b. Rows: generation 0 and a
+  // recreated lifetime, each with the notice failing (the regression) and delivered at once (control).
+  const failures = [];
+  let rows = 0;
+  for (const reborn of [false, true]) for (const fail of [false, true]) {
+    const env = envWith({ a: CARD, b: B_CARD });
+    const where = `[${reborn ? 'reborn' : 'gen0'}${fail ? ', /lost failing' : ', control'}]`;
+    rows++;
+    try {
+      if (reborn) {
+        assert.equal((await call(env, 'DELETE', '/_api/card/b')).status, 200, where);
+        assert.equal((await call(env, 'PUT', '/_api/card/b', { markdown: B_CARD })).status, 200, where);
+      }
+      const lives = env.CARD_LIFETIMES, started = deferred(), release = deferred();
+      let blocked = fail, hold = false, refused = 0;
+      env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+        const op = new URL(url).pathname;
+        if (hold && id.name === 'b' && op === '/register') { hold = false; started.resolve(); await release.promise; }
+        if (blocked && id.name === 'b' && op === '/lost') { refused++; return new Response('unavailable', { status: 503 }); }
+        return lives.get(id).fetch(url, init);
+      } }) };
+      const hostState = () => env.HOST_BINDINGS.storageOf(OWNER)._m.get('host');
+      await bindVanity(env, 'b', OWNER);
+      hold = true;
+      const older = bindVanity(env, 'b', OWNER); // T2, held before its /register
+      await started.promise;
+      const t2 = hostState().seq;
+      await bindVanity(env, 'a', OWNER); // T3
+      const t3 = hostState().landed;
+      const rebound = await bindVanity(env, 'b', OWNER); // T4
+      const t4 = hostState().landed;
+      assert.ok(t2 < t3 && t3 < t4, `${where} CONTROL: tickets T2 < T3 < T4 (${t2}, ${t3}, ${t4})`);
+      assert.equal(rebound.redirect, 'published', `${where}: the rebind was not published`);
+      assert.equal((await page(env, '/b')).status, 301, `${where} CONTROL: /b redirects after the rebind`);
+      release.resolve();
+      assert.equal((await older).accepted, true, `${where} CONTROL: the late bind is a same-owner no-op`);
+      const inverse = lives.storageOf('b')._m.get('life').inverse;
+      // recorded, not thrown, so a red row also shows what the lowered ticket does to /b below
+      if (inverse.ticket !== t4) failures.push(`${where}: the late registration lowered the inverse's ticket ${t4} → ${inverse.ticket}`);
+      assert.equal(refused > 0, fail, `${where} CONTROL: the injected /lost failure took effect`);
+      blocked = false;
+      await env.HOST_BINDINGS.alarm(OWNER);
+      assert.deepEqual(hostState().losers, [], `${where} CONTROL: the retried notices were delivered`);
+      const after = await page(env, '/b');
+      assert.equal(after.status, 301, `${where}: the older loss cleared the newer rebind: /b ${after.status} → ${after.headers.get('location')}`);
+      assert.equal(after.headers.get('location'), `https://${OWNER}/`, where);
+      assert.ok((await (await host(env, OWNER, '/')).text()).includes('Next owner'), `${where} CONTROL: the domain serves b`);
+      // CONTROL: a genuinely later take still clears it
+      await bindVanity(env, 'a', OWNER);
+      assert.equal((await page(env, '/b')).status, 200, `${where} CONTROL: a later take left /b redirecting to a's domain`);
+    } catch (e) { failures.push(e.message); }
+  }
+  assert.deepEqual(failures, []);
+  assert.equal(rows, 4);
+});
+
+test('🔴 r12 a same-owner no-op answers with the ticket that owns the host, never its own: an older bind confirming after a newer one whose confirm never ran writes the newer ticket', async () => {
+  // As codex r11, but T4's /confirm fails (503: its binding stands, its redirect is not published), so
+  // the inverse still holds T1 when the held T2 confirms. Had /point echoed T2, the inverse would be
+  // written with T2 < T3, and the retried T3 loss would clear a redirect to a host b owns.
+  const env = envWith({ a: CARD, b: B_CARD });
+  const lives = env.CARD_LIFETIMES, started = deferred(), release = deferred();
+  let blocked = true, hold = false, failConfirm = false;
+  env.CARD_LIFETIMES = { ...lives, get: (id) => ({ async fetch(url, init) {
+    const op = new URL(url).pathname;
+    if (hold && id.name === 'b' && op === '/register') { hold = false; started.resolve(); await release.promise; }
+    if (blocked && id.name === 'b' && op === '/lost') return new Response('unavailable', { status: 503 });
+    if (failConfirm && id.name === 'b' && op === '/confirm') { failConfirm = false; return new Response('unavailable', { status: 503 }); }
+    return lives.get(id).fetch(url, init);
+  } }) };
+  const hostState = () => env.HOST_BINDINGS.storageOf(OWNER)._m.get('host');
+  await bindVanity(env, 'b', OWNER); // T1
+  hold = true;
+  const older = bindVanity(env, 'b', OWNER); // T2, held before its /register
+  await started.promise;
+  await bindVanity(env, 'a', OWNER); // T3, b's notice failing
+  failConfirm = true;
+  await assert.rejects(bindVanity(env, 'b', OWNER), /confirming/, 'CONTROL: the injected /confirm failure took effect'); // T4
+  const t4 = hostState().landed;
+  assert.equal(hostState().owner.handle, 'b', 'CONTROL: T4 was accepted');
+  release.resolve();
+  const late = await older, failures = [];
+  assert.equal(late.redirect, 'published', 'the late bind of the host b owns was not published');
+  const written = lives.storageOf('b')._m.get('life').inverse.ticket;
+  if (written !== t4) failures.push(`the no-op confirmed with a ticket that does not own the host: ${written}, owner's ${t4}`);
+  blocked = false;
+  await env.HOST_BINDINGS.alarm(OWNER);
+  assert.deepEqual(hostState().losers, [], 'CONTROL: the retried notice was delivered');
+  const after = await page(env, '/b');
+  if (after.status !== 301) failures.push(`the older loss cleared the redirect to a host b owns: /b ${after.status} → ${after.headers.get('location')}`);
+  assert.deepEqual(failures, []);
+});
+
+test('🔴 r12 between two hosts the registration order still decides: a later bind of another host is published even when its ticket ties the first host\'s (two objects, one clock reading)', async () => {
+  // Tickets are max(seq + 1, now) of EACH host's own object, so two hosts bound within one millisecond
+  // can issue the same ticket, and another host's clock can be behind. Ticket order is the inverse's
+  // rule for one host only; with ticket order across hosts, the newer bind below would be refused.
+  const realNow = Date.now, frozen = realNow();
+  Date.now = () => frozen;
+  try {
+    const env = envWith({ b: B_CARD });
+    assert.equal((await bindVanity(env, 'b', 'x.example')).redirect, 'published');
+    const moved = await bindVanity(env, 'b', 'y.example');
+    const tx = env.HOST_BINDINGS.storageOf('x.example')._m.get('host').landed, ty = env.HOST_BINDINGS.storageOf('y.example')._m.get('host').landed;
+    assert.equal(tx, ty, 'CONTROL: the two hosts issued the same ticket');
+    assert.equal(moved.redirect, 'published', 'the later bind of another host was refused on a ticket tie');
+    assert.equal((await page(env, '/b')).headers.get('location'), 'https://y.example/', 'the card kept the older host');
+  } finally { Date.now = realNow; }
+});
