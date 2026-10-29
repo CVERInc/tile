@@ -503,7 +503,8 @@ export class HostBindings {
  *     (rule B: a failed KV put leaves `cache: 'pending'`, retried by the alarm). Pages and get_card read
  *     KV, which converges; the version the fence and base_version compare against is never a KV read;
  *   · 🔴 first contact (migration): a generation this object holds no card for takes it from KV ONCE,
- *     and keeps it. A KV miss is not kept (a create writes the record). After that KV is not consulted;
+ *     and keeps it ADOPTED — unconfirmed — until its alarm settles it (heldCard, settleCard). While
+ *     adopted, every write is refused with a retry. A KV miss is not kept (a create writes the record);
  *   · the lifetime ending (/end) removes the ended generation's card from storage: nothing is kept.
  *   POST /save     { handle, gen, markdown, base?, from, dests, destBase }
  *                                        base given → checked against the card held here (409, nothing
@@ -531,7 +532,9 @@ export class CardLifetime {
       // an asset write is the current lifetime's; the queue's generation is read here, and checked
       // again inside the turn (a delete may end it in between)
       const gen = body.gen != null ? body.gen : (await this.read(body.handle)).gen;
-      return inWriteTurn(this, gen, () => (op === '/save' ? this.saveCard({ ...body, gen }) : this.assetWrite({ ...body, gen })));
+      const fence = op === '/asset' && body.kind === 'fenced' ? { fence: 'if-version' } : {};
+      return inWriteTurn(this, gen, () => (op === '/save' ? this.saveCard({ ...body, gen }) : this.assetWrite({ ...body, gen }))
+        .catch((e) => { if (e instanceof EndedDuringWrite) return { status: 409, body: { ...staleWrite(body.handle), ...fence } }; throw e; }));
     }
     const { handle, host, gen, delivered, order, ticket } = body;
     const hostList = (v) => Array.isArray(v) && v.every((h) => typeof h === 'string' && h);
@@ -556,7 +559,7 @@ export class CardLifetime {
     await inTurn(this, async () => { const s = await this.storage.get('life'); if (s && s.handle) await this.flush(s); return {}; });
     // tile#209 r2: the card's own write-through, in its generation's write queue
     const gen = ((await this.storage.get('life')) || {}).gen || GEN0;
-    await enqueueWrite(this, gen, () => this.flushCard(gen)).catch(() => {});
+    await enqueueWrite(this, gen, async () => { await this.flushCard(gen); await this.settleCard(gen); }).catch(() => {});
   }
   /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings): the WRITE paths' read */
   async load(handle) {
@@ -722,7 +725,7 @@ export class CardLifetime {
 
   // ── the card (tile#209 r2): held here, written here, written through to KV ─────────────────────
 
-  /** how long KV may answer stale, even where it was written: the reconcile window after first contact (r3) */
+  /** how long KV may answer stale, even where it was written: the first-contact window (r3, r4) */
   static KV_WINDOW_MS = 60000;
 
   /** the card of `gen` as this object holds it → { md, version, meta } | null; on first contact, from KV once */
@@ -734,51 +737,73 @@ export class CardLifetime {
       if (parts.some((p) => typeof p !== 'string')) throw new Error(`card:${gen} is missing a chunk`);
       return { md: parts.join(''), version: meta.version, meta };
     }
-    // 🔴 migration: nothing held for this generation yet. KV's body is taken and kept, marked as
-    // ADOPTED (`from: 'kv'`, `adoptedAt`) until the object writes it or reconciles it past KV's window
-    // (heldCard). A KV miss is not kept (it may be a stale negative); a create writes the record itself.
+    // 🔴 migration: nothing held for this generation yet. KV's body is taken and kept ADOPTED
+    // (`from: 'kv'`): unconfirmed until the alarm armed here settles it (settleCard). A KV miss is not
+    // kept (it may be a stale negative); a create writes the record itself.
     const { md } = await liveCard(this.env.CARDS, handle, { gen });
     if (md == null) return null;
+    return this.adoptCard(handle, gen, md, null);
+  }
+  /** keep a KV body as the ADOPTED card of `gen`, and arm the alarm that will try to settle it */
+  async adoptCard(handle, gen, md, prev) {
     const version = await cardVersion(md);
-    const kept = await this.keepCard(handle, gen, md, version, 'written', null, { from: 'kv', adoptedAt: Date.now() });
-    return { md, version, meta: kept, adoptedNow: true };
+    const settleAt = Date.now() + CardLifetime.KV_WINDOW_MS;
+    const kept = await this.keepCard(handle, gen, md, version, 'written', prev, { from: 'kv', settleAt });
+    await this.armAlarm(settleAt);
+    return { md, version, meta: kept };
+  }
+  /** set the object's alarm for `t` unless one is already due sooner (the write-through retry shares it) */
+  async armAlarm(t) {
+    if (!this.storage || typeof this.storage.setAlarm !== 'function') return;
+    const due = typeof this.storage.getAlarm === 'function' ? await this.storage.getAlarm() : null;
+    if (due == null || t < due) await this.storage.setAlarm(t);
   }
   /**
-   * 🔴 r3 (codex r2 P1): the card every WRITE starts from. A card adopted from KV at first contact may
-   * itself be a stale KV answer, so while it is still only adopted (the object has not written it):
-   *   · KV is read again before every write, and a body that differs is adopted in its place — KV's
-   *     caches converge forward, and after rollout nothing but this object writes the key, so a
-   *     different answer is the newer one;
-   *   · inside KV_WINDOW_MS of the adoption the card is `unsettled`: the fenced delete refuses rather
-   *     than delete on the strength of a KV read alone (assetWrite), and the other writes proceed on
-   *     the reconciled card (the residual window, in the lane report);
-   *   · the first write after the window reconciles once more and marks it settled; from then on, and
-   *     from the object's first own write, KV is not consulted.
+   * 🔴 r3/r4 (codex r2, r3): the card every WRITE starts from. A card adopted from KV at first contact
+   * may itself be a stale KV answer — and any write made on it could put stale bytes back over newer
+   * ones (codex r3: a put_asset on a stale adopted card restored an older picture). So while it is
+   * ADOPTED, every write is refused (`unsettled`: the seconds to retry after), uniformly: put_asset,
+   * both deletes, save. Nothing here ends that: only the alarm does (settleCard).
    */
   async heldCard(handle, gen) {
     const cur = await this.cardOf(handle, gen);
     if (!cur || cur.meta.from !== 'kv') return cur;
-    let held = cur;
-    if (!cur.adoptedNow) {
-      const { md } = await liveCard(this.env.CARDS, handle, { gen });
-      if (md != null) {
-        const version = await cardVersion(md);
-        if (version !== cur.version) {
-          held = { md, version, meta: await this.keepCard(handle, gen, md, version, 'written', cur.meta, { from: 'kv', adoptedAt: cur.meta.adoptedAt }) };
-        }
-      }
+    return { ...cur, unsettled: Math.max(1, Math.ceil((cur.meta.settleAt - Date.now()) / 1000)) };
+  }
+  /**
+   * the alarm's half of first contact (r4, codex r3 P2). The card leaves the window only when BOTH
+   *   (a) the alarm has fired at or after `settleAt` — an alarm that fires sooner (the write-through
+   *       retry shares it) re-arms and does nothing else;
+   *   (b) KV, re-read then, answers exactly the held card. A different answer is the newer one (KV's
+   *       caches converge forward, and nothing but this object writes the key now): it is adopted and
+   *       the window starts again. A KV miss keeps the held card and starts the window again.
+   * Not on a write's clock: a forward wall-clock jump can at most bring the alarm early, and (b) must
+   * still hold. The residual: a KV that answers the same stale body for the whole window, twice.
+   */
+  async settleCard(gen) {
+    const meta = await this.storage.get(cardMetaKey(gen));
+    if (!meta || meta.from !== 'kv' || (await this.read(meta.handle)).gen !== gen) return;
+    if (Date.now() < meta.settleAt) { await this.armAlarm(meta.settleAt); return; }
+    const held = await this.cardOf(meta.handle, gen);
+    const { md } = await liveCard(this.env.CARDS, meta.handle, { gen });
+    const version = md == null ? null : await cardVersion(md);
+    if (version === held.version) {
+      await this.storage.put(cardMetaKey(gen), { ...held.meta, from: 'kv-settled' });
+      return;
     }
-    const left = held.meta.adoptedAt + CardLifetime.KV_WINDOW_MS - Date.now();
-    if (left > 0) return { ...held, unsettled: Math.ceil(left / 1000) };
-    const settled = { ...held.meta, from: 'kv-settled' };
-    await this.storage.put(cardMetaKey(gen), settled);
-    return { ...held, meta: settled };
+    if (md == null) {
+      const settleAt = Date.now() + CardLifetime.KV_WINDOW_MS;
+      await this.storage.put(cardMetaKey(gen), { ...held.meta, settleAt });
+      await this.armAlarm(settleAt);
+      return;
+    }
+    await this.adoptCard(meta.handle, gen, md, held.meta);
   }
   /**
    * put a body under a fresh serial, then the record that points at it (the write), then sweep every
-   * card key the record does not name. 🔴 r3: a write that fails partway sweeps its own chunks before
-   * it fails, and the success sweep also takes whatever an earlier crash left (every serial, every
-   * other generation) — no private bytes outlive the card they belonged to.
+   * key of this generation the record does not name. 🔴 r3: a write that fails partway sweeps its own
+   * chunks before it fails, and the success sweep also takes whatever an earlier crash left in this
+   * generation (any serial); ended generations are /end's to sweep (r4: never another generation's).
    */
   async keepCard(handle, gen, md, version, cache, prev, provenance = { from: 'object' }) {
     // A chunk is CARD_CHUNK UTF-16 code units: at most 3 bytes of UTF-8 each, so ≤ 768 KiB a value —
@@ -793,10 +818,18 @@ export class CardLifetime {
       for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(gen, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
       await this.storage.put(cardMetaKey(gen), meta);
     } catch (e) {
-      await this.sweepCards((g, sl) => g === gen && (sl === null || (prev != null && sl === prev.serial))).catch(() => {});
+      // its own generation's chunks only, but the record and the serial it names (r4)
+      await this.sweepCards((g, sl) => g !== gen || sl === null || (prev != null && sl === prev.serial)).catch(() => {});
       throw e;
     }
-    await this.sweepCards((g, sl) => g === gen && (sl === null || sl === serial));
+    // 🔴 r4 (codex r3 P1): a write sweeps ITS OWN generation only, and only once it has checked that
+    // generation is still the current one. Per-generation queues let an ended lifetime's write run
+    // beside the next lifetime's; a sweep from the dead one must never reach the live one's keys.
+    if ((await this.read(handle)).gen !== gen) {
+      await this.sweepCards((g) => g !== gen);
+      throw new EndedDuringWrite();
+    }
+    await this.sweepCards((g, sl) => g !== gen || sl === null || sl === serial);
     return meta;
   }
   /** delete every `card:` key `keep(gen, serial | null for a record)` does not keep — by prefix, so it
@@ -848,6 +881,7 @@ export class CardLifetime {
   async saveCard({ handle, gen, markdown, base, from, dests, destBase, check }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
     const cur = await this.heldCard(handle, gen);
+    if (cur && cur.unsettled) return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was saved') };
     if (base != null && base !== '') {
       const conflict = cur == null
         ? { conflict: true, expected: String(base), current: null, why: 'There is no card at this handle, so the version you read is not of this card.' }
@@ -889,6 +923,8 @@ export class CardLifetime {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: { ...staleWrite(handle), ...fence } };
     const cur = await this.heldCard(handle, gen);
     if (!cur) return { status: 404, body: { error: `No card at "${handle}".`, ...fence } };
+    // 🔴 r4 (codex r3 P1): uniformly, no write on an adopted (unconfirmed) card — see heldCard
+    if (cur.unsettled && kind !== 'put') return { status: 409, body: { ...windowRefusal(cur.unsettled, 'Nothing was deleted'), ...fence } };
     if (kind === 'fenced') {
       const conflict = await checkBaseVersion(ifVersion, cur.md);
       if (conflict) return { status: 409, body: { ...conflict, why: `${conflict.why} Nothing was deleted.`, ...fence } };
@@ -898,6 +934,7 @@ export class CardLifetime {
       // the caller's input, checked after the card as it always was (a missing card is a 404 first)
       if (!b64) return { status: 400, body: { error: 'put_asset needs `base64`.' } };
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
+      if (cur.unsettled) return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was stored') };
       model.assets = { ...model.assets, [id]: { mime, b64 } };
       const md = serializeCard(model);
       const bytes = utf8Bytes(md);
@@ -919,16 +956,6 @@ export class CardLifetime {
       } };
     }
     if (!(id in model.assets)) return { status: 404, body: { error: `No asset "${id}" on "${handle}".`, ...fence } };
-    // 🔴 r3 (codex r2 P1): never a destructive fenced write on the strength of a first-contact KV read
-    // alone. Inside KV's window after adoption the version the caller and this object agree on may
-    // both be the same stale KV answer; nothing is deleted, and the caller is told when to retry. Not
-    // a `conflict` (reef reads that as "the card moved"): an `error` with `retry`.
-    if (kind === 'fenced' && cur.unsettled) {
-      return { status: 409, body: {
-        error: `This card was only just taken over from the store, and its version cannot be confirmed for another ${cur.unsettled} s. Nothing was deleted; try again then.`,
-        retry: true, retry_after_seconds: cur.unsettled, ...fence,
-      } };
-    }
     delete model.assets[id];
     const res = await this.commitCard(handle, gen, serializeCard(model), cur);
     if (res.conflict) return { status: 409, body: { ...res, ...fence } };
@@ -936,6 +963,16 @@ export class CardLifetime {
   }
 }
 
+/** a write whose lifetime ended while it was writing: answered `stale_generation`, nothing of it kept */
+class EndedDuringWrite extends Error {}
+/**
+ * the refusal of a write on a card the object adopted from KV and has not settled (r3/r4). Not a
+ * `conflict` (reef reads that as "the card moved"): an `error` with `retry` and when.
+ */
+const windowRefusal = (seconds, nothing) => ({
+  error: `This card was only just taken over from the store, and its contents cannot be confirmed for another ${seconds} s. ${nothing}; try again then.`,
+  retry: true, retry_after_seconds: seconds,
+});
 const cardMetaKey = (gen) => `card:${gen}`;
 const cardChunkKey = (gen, serial, i) => `card:${gen}:${serial}:${i}`;
 

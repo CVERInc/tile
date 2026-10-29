@@ -113,10 +113,11 @@ const doStorage = () => {
     // r9: the retry an object schedules when a KV write-through fails; `alarm(name)` below fires it
     _alarm: null,
     async setAlarm(t) { this._alarm = t; },
+    async getAlarm() { return this._alarm; },
   };
 };
-const objectNs = (Class) => (env, objectEnv = env) => {
-  const objects = new Map(), inside = new Map(), storages = new Map();
+const objectNs = (Class) => (env, objectEnv = env, { prepare = null } = {}) => {
+  const objects = new Map(), inside = new Map(), storages = new Map(), ready = new Map();
   const storageOf = (name) => { if (!storages.has(name)) storages.set(name, doStorage()); return storages.get(name); };
   return {
     storageOf,
@@ -124,6 +125,8 @@ const objectNs = (Class) => (env, objectEnv = env) => {
     get: ({ name }) => ({
       async fetch(url, init) {
         if (!objects.has(name)) objects.set(name, new Class({ storage: storageOf(name) }, objectEnv));
+        if (prepare && !ready.has(name)) ready.set(name, prepare(objects.get(name), name, objectEnv));
+        if (ready.has(name)) await ready.get(name);
         inside.set(name, (inside.get(name) || 0) + 1);
         try { return await objects.get(name).fetch(new Request(url, init)); } finally { inside.set(name, inside.get(name) - 1); }
       },
@@ -136,10 +139,32 @@ const objectNs = (Class) => (env, objectEnv = env) => {
 const hostBindingsNs = objectNs(HostBindings);
 /** the same, holding the real CardLifetime class: one object per handle (r8) */
 const cardLifetimesNs = objectNs(CardLifetime);
-const envWith = (seed) => {
+/**
+ * 🔴 tile#209 r4: a handle's object adopts a card it has never held from KV and refuses every write
+ * on it until its alarm settles it (first contact). A SEEDED card in these tests stands for a card
+ * the object already holds — the steady state almost every test is about — so by default each object
+ * is prepared with the seeded card as held and settled, through the class's own keepCard (not a copy
+ * of its storage layout). `firstContact: true` leaves the object empty: those tests are about adoption.
+ */
+//
+// It touches neither the object's storage METHODS nor KV's (tests wrap those to hold or count calls):
+// it reads the raw maps, has a scratch CardLifetime write the held card into a scratch storage, and
+// copies those keys in.
+const presettle = async (object, handle, objectEnv) => {
+  const real = object.storage._m, kvMap = objectEnv.CARDS._m;
+  const gen = (real.get('life') || {}).gen || '0';
+  if (real.has(`card:${gen}`)) return;
+  const md = kvMap.get(cardKey(handle, gen)) ?? (gen === '0' ? kvMap.get(handle) : undefined);
+  if (md == null) return;
+  const scratchStore = doStorage();
+  scratchStore._m.set('life', { gen, hosts: [], pending: {} });
+  await new CardLifetime({ storage: scratchStore }, objectEnv).keepCard(handle, gen, md, await cardVersion(md), 'written', null, { from: 'kv-settled' });
+  for (const [k, v] of scratchStore._m) if (k.startsWith('card:')) real.set(k, v);
+};
+const envWith = (seed, { firstContact = false } = {}) => {
   const env = { CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH };
   env.HOST_BINDINGS = hostBindingsNs(env);
-  env.CARD_LIFETIMES = cardLifetimesNs(env);
+  env.CARD_LIFETIMES = cardLifetimesNs(env, env, firstContact ? {} : { prepare: presettle });
   return env;
 };
 /** the body every door serves — NOT a raw `get('<handle>')`: a save writes `card:<handle>:<gen>` (r3),
@@ -177,7 +202,7 @@ test('🔴 FAIL CLOSED: no MCP_TOKEN_HASH configured → every write is refused,
   // (CARD_LIFETIMES is bound, as in every deploy: since tile#209 a card write runs in the handle's
   // object, and an env without it fails closed on its own — that is not what this test asks about.)
   const env = { CARDS: fakeKv({ t: CARD }) };
-  env.CARD_LIFETIMES = cardLifetimesNs(env);
+  env.CARD_LIFETIMES = cardLifetimesNs(env, env, { prepare: presettle });
   const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
   assert.equal(res.status, 503);
   // CONTROL: same env plus the hash, same call → it works. So 503 is about the secret, not the body.
@@ -2787,7 +2812,7 @@ test('🔴 r2 a save under a stale KV read re-attaches the OBJECT\'s assets lane
 });
 
 test('r2 migration: a handle the object has never written takes its card from KV ONCE; after that a KV body is not consulted', async () => {
-  const env = envWith({ t: CARD });
+  const env = firstContactEnv({ t: CARD });
   const life = env.CARD_LIFETIMES.storageOf('t')._m;
   assert.equal([...life.keys()].some((k) => k.startsWith('card:')), false, 'CONTROL: no record before the first write');
   const v = await versionOf(env);
@@ -2801,9 +2826,10 @@ test('r2 migration: a handle the object has never written takes its card from KV
   assert.equal(fb.conflict, undefined, 'the retry was dressed as a version conflict');
   assert.ok(life.has('card:0'), 'the object did not keep the card it adopted');
   assert.equal(life.get('card:0').from, 'kv');
+  // r4: only the alarm settles it — due, and KV re-read equal to the held card
   const later = skewClock(61000);
   let res;
-  try { res = await fencedCall(env, 'unused', v); } finally { later(); } // past the window: settled, deleted
+  try { await env.CARD_LIFETIMES.alarm('t'); res = await fencedCall(env, 'unused', v); } finally { later(); }
   assert.equal(res.status, 200);
   assert.equal(life.get('card:0').from, 'object');
   const after = (await res.json()).version;
@@ -2891,7 +2917,7 @@ const withUnused = (b64) => { const m = parseCard(CARD); m.assets = { ...m.asset
 
 test('🔴 r3 P1 first contact on a STALE KV read: the fenced delete is refused and the replacement survives (reviewer input)', async () => {
   const NEWER = withUnused(AVATAR_NEW);
-  const env = envWith({ [keyT()]: NEWER });          // what KV truly holds
+  const env = firstContactEnv({ [keyT()]: NEWER });  // what KV truly holds
   const restore = lagKv(env, keyT(), CARD);          // what this location still answers
   const vOld = await cardVersion(CARD);
   const res = await fencedCall(env, 'unused', vOld);
@@ -2901,10 +2927,15 @@ test('🔴 r3 P1 first contact on a STALE KV read: the fenced delete is refused 
   assert.equal(res.status, 409, 'a delete passed on the strength of a first-contact KV read alone');
   assert.equal(body.fence, 'if-version');
   assert.equal(body.deleted, undefined);
-  // CONTROL: once KV's window has passed, the object reconciles with KV and the same stale If-Version
-  // is a plain conflict naming the newer card; the current one deletes.
+  // CONTROL: once the object has settled with KV (r4: its alarm, due, finding KV caught up — which
+  // adopts the newer card and restarts the window — and due again, finding KV equal), the same stale
+  // If-Version is a plain conflict naming the newer card; the current one deletes.
   const later = skewClock(61000);
+  const latest = () => {}; let again = latest;
   try {
+    await env.CARD_LIFETIMES.alarm('t');
+    later(); again = skewClock(122000);
+    await env.CARD_LIFETIMES.alarm('t');
     const stale = await fencedCall(env, 'unused', vOld);
     assert.equal(stale.status, 409);
     const sb = await stale.json();
@@ -2912,21 +2943,22 @@ test('🔴 r3 P1 first contact on a STALE KV read: the fenced delete is refused 
     assert.equal(sb.current, await cardVersion(NEWER), 'the object kept the stale first-contact card past the window');
     const ok = await fencedCall(env, 'unused', await cardVersion(NEWER));
     assert.equal(ok.status, 200);
-  } finally { later(); }
+  } finally { later(); again(); }
 });
 
-test('🔴 r3 P1 within the window the object re-reads KV before every write: a newer KV body is adopted before the check', async () => {
+test('🔴 r3 P1 (r4 rule) within the window no write is made on the adopted card, even once this location\'s KV has caught up', async () => {
+  // r3 re-read KV before each write and let non-destructive writes through; r4 (codex r3 P1) refuses
+  // every write until the alarm settles the card, so neither a stale nor a caught-up read decides it.
   const NEWER = withUnused(AVATAR_NEW);
-  const env = envWith({ [keyT()]: NEWER });
+  const env = firstContactEnv({ [keyT()]: NEWER });
   const restore = lagKv(env, keyT(), CARD);
   assert.equal((await fencedCall(env, 'unused', await cardVersion(CARD))).status, 409, 'CONTROL: first contact refused');
   restore(); // this location's KV has caught up, still inside the window
   const stale = await fencedCall(env, 'unused', await cardVersion(CARD));
   assert.equal(stale.status, 409);
-  assert.equal((await stale.json()).current, await cardVersion(NEWER), 'the object did not adopt the newer KV body');
-  // a non-destructive write in the window is made on the reconciled card: the replacement stays
-  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_OLD, mime: 'image/png' })).status, 200);
-  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW, 'the put was made on the stale first-contact card');
+  assert.equal((await stale.json()).retry, true, 'a write inside the window was answered from the adopted card');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_OLD, mime: 'image/png' })).status, 409);
+  assert.equal(env.CARDS._m.get(keyT()), NEWER, 'the replacement was overwritten');
 });
 
 test('🔴 r3 P1 a chunked write that fails leaves no orphan chunks, and /end then leaves no card key at all (reviewer input)', async () => {
@@ -3002,4 +3034,126 @@ test('🔴 r3 P1 put_asset counts bytes: on a card of CJK text under the ceiling
   assert.equal(await versionOf(env), before);
   // CONTROL: a small picture on the same card fits
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/small', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+});
+
+// ── r4 (codex r3): a dead generation's sweep, a uniform first-contact window, the alarm as its clock ──
+
+/** an env whose objects meet the seeded cards for the FIRST time (no held card: they adopt from KV) */
+const firstContactEnv = (seed) => envWith(seed, { firstContact: true });
+
+test('🔴 r4 P1 an old generation\'s write, paused before its sweep across delete + a new save, never deletes the new card (reviewer input)', async () => {
+  const { env } = await fencedFixture();
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  const list = life.list.bind(life);
+  const started = deferred(), release = deferred();
+  let hold = true;
+  life.list = async (o) => { if (hold) { hold = false; started.resolve(); await release.promise; } return list(o); };
+  const old = call(env, 'PUT', '/_api/card/t/asset/late', { base64: AVATAR_OLD, mime: 'image/png' });
+  await Promise.race([started.promise, new Promise((_, no) => setTimeout(() => no(new Error('the old write never reached its sweep')), 2000))]);
+  assert.ok(life._m.has('card:0'), 'CONTROL: the old write stored its record and is paused before its sweep');
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  const saved = await call(env, 'PUT', '/_api/card/t', { markdown: NEXT });
+  assert.equal(saved.status, 200);
+  const G = env.CARDS._m.get(genKey('t'));
+  const nextBody = env.CARDS._m.get(cardKey('t', G));
+  release.resolve();
+  const late = await old;
+  assert.equal(late.status, 409, 'a write from the ended lifetime was acknowledged');
+  assert.ok(life._m.has(`card:${G}`), 'the old write\'s sweep deleted the new generation\'s card');
+  assert.deepEqual([...life._m.keys()].filter((k) => k.startsWith('card:0')), [], 'the dead generation\'s keys stayed');
+  // the held new card is whole: a write made from it keeps the next owner's body
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  assert.ok((await bodyOf(env)).includes('Next owner'));
+  assert.equal(thinCard(await bodyOf(env)), thinCard(nextBody), 'the new card did not survive byte for byte');
+});
+
+test('🔴 r4 P1 inside the first-contact window EVERY write that could overwrite is refused: put_asset, legacy delete, save — and the newer KV bytes survive (reviewer input)', async () => {
+  const NEWER = withUnused(AVATAR_NEW);
+  const env = firstContactEnv({ [keyT()]: NEWER });
+  const restore = lagKv(env, keyT(), withUnused(AVATAR_OLD)); // this location still answers the older card
+  try {
+    const put = await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' });
+    const del = await call(env, 'DELETE', '/_api/card/t/asset/unused');
+    const save = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'edited') });
+    for (const [name, res] of [['put_asset', put], ['delete_asset', del], ['save_card', save]]) {
+      const body = await res.json();
+      assert.equal(res.status, 409, `${name} was acknowledged inside the window: ${JSON.stringify(body)}`);
+      assert.equal(body.retry, true, name);
+      assert.ok(body.retry_after_seconds > 0, name);
+      assert.equal(body.conflict, undefined, name);
+    }
+  } finally { restore(); }
+  assert.equal(env.CARDS._m.get(keyT()), NEWER, 'the newer KV body was overwritten');
+});
+
+test('🔴 r4 P2 a forward clock jump does not end the window: with KV still stale, the old If-Version is refused and NEW survives (reviewer input)', async () => {
+  const NEWER = withUnused(AVATAR_NEW);
+  const env = firstContactEnv({ [keyT()]: NEWER });
+  const restore = lagKv(env, keyT(), CARD);
+  const vOld = await cardVersion(CARD);
+  try {
+    assert.equal((await fencedCall(env, 'unused', vOld)).status, 409, 'CONTROL: refused at first contact');
+    const jump = skewClock(61000);
+    try {
+      const res = await fencedCall(env, 'unused', vOld);
+      const body = await res.json();
+      assert.equal(env.CARDS._m.get(keyT()), NEWER, `the jump let the stale delete through (answered ${res.status} ${JSON.stringify(body)})`);
+      assert.equal(res.status, 409);
+      assert.equal(body.retry, true);
+    } finally { jump(); }
+  } finally { restore(); }
+});
+
+test('🔴 r4 the card leaves the window only when the alarm fires AND KV re-read then equals the held card; a newer KV restarts it', async () => {
+  const NEWER = withUnused(AVATAR_NEW);
+  const env = firstContactEnv({ [keyT()]: NEWER });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  const restore = lagKv(env, keyT(), CARD);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' })).status, 409, 'CONTROL: refused at first contact');
+  assert.ok(life._alarm, 'adoption did not arm the alarm');
+  restore(); // this location catches up with KV
+  const jump = skewClock(61000);
+  try {
+    await env.CARD_LIFETIMES.alarm('t');        // due: KV now differs → the newer body is adopted, window restarts
+    assert.equal(life._m.get('card:0').version, await cardVersion(NEWER), 'the alarm did not adopt the newer KV body');
+    assert.equal(life._m.get('card:0').from, 'kv', 'a changed KV answer settled the card');
+    assert.ok(life._alarm, 'the restarted window has no alarm');
+    assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' })).status, 409, 'a write passed in the restarted window');
+  } finally { jump(); }
+  const later = skewClock(130000);
+  try {
+    await env.CARD_LIFETIMES.alarm('t');        // due again: KV equals the held card → settled
+    assert.equal(life._m.get('card:0').from, 'kv-settled');
+    assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' })).status, 200);
+    assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW, 'the write was made on the stale first-contact card');
+    const stale = await fencedCall(env, 'unused', await cardVersion(CARD));
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).conflict, true);
+  } finally { later(); }
+});
+
+test('r4 an alarm that comes due EARLY (before the window\'s end on its own clock) does not settle the card', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' })).status, 409);
+  await env.CARD_LIFETIMES.alarm('t'); // fired at once (a write-through retry, say): not yet due
+  assert.equal(life._m.get('card:0').from, 'kv');
+  assert.ok(life._alarm, 'the early alarm did not re-arm the window');
+});
+
+test('🔴 r4 P1 a first-contact adoption that lands after the DELETE keeps nothing: the dead generation\'s write answers stale_generation and leaves no key', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  const get = env.CARDS.get.bind(env.CARDS);
+  const started = deferred(), release = deferred();
+  let hold = true;
+  env.CARDS.get = async (k) => { if (hold && k === keyT()) { hold = false; started.resolve(); await release.promise; } return get(k); };
+  const writing = call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' });
+  await Promise.race([started.promise, new Promise((_, no) => setTimeout(() => no(new Error('the write never read KV')), 2000))]);
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200); // the lifetime ends under the adoption
+  release.resolve();
+  const res = await writing;
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).stale_generation, true, 'a write adopted into an ended lifetime was not told so');
+  assert.deepEqual([...life._m.keys()].filter((k) => k.startsWith('card:')), [], 'the deleted card was adopted back into the object');
 });
