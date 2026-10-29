@@ -705,6 +705,7 @@ export class CardLifetime {
     s.legacy = null; // the bare key is generation 0's: DELETE removes it with the legacy keys
     s.dropLegacy = false;
     s.cache = 'written';
+    s.cardless = s.gen; // r5: a generation this object starts has no card it did not write (cardOf)
     await this.storage.put('life', s); // the lifetime ends HERE, before any host is told
     // tile#209 r2/r3: the ended lifetime's card is not kept here either — EVERY card key of every
     // generation but the new one, by prefix: chunks no record names (a write that failed or crashed
@@ -727,28 +728,47 @@ export class CardLifetime {
 
   /** how long KV may answer stale, even where it was written: the first-contact window (r3, r4) */
   static KV_WINDOW_MS = 60000;
+  /**
+   * r5 (codex r4 P2): the delays after a settlement read that failed or found nothing, and so the cap
+   * (its length, about 15 minutes in all). Past the cap an adopted card settles from its last positive
+   * read, and an unknown one keeps refusing at the last delay — each time with a structured log line.
+   */
+  static SETTLE_BACKOFF_MS = [5000, 10000, 20000, 40000, 80000, 160000, 300000, 300000];
 
-  /** the card of `gen` as this object holds it → { md, version, meta } | null; on first contact, from KV once */
+  /**
+   * the card of `gen` as this object holds it:
+   *   { md, version, meta }  held (written here, or adopted from a positive KV read);
+   *   { unknown: true, meta } r5 (codex r4 P1): KV answered a MISS at first contact. A miss is not
+   *                           "no card" — negative answers are cached too — so it is kept as unknown,
+   *                           refused like an adopted card, and settled only by a positive read;
+   *   null                    no card, KNOWN: this generation was started by this object (/end), so
+   *                           no card can be in it that the object did not write.
+   */
   async cardOf(handle, gen) {
     const meta = await this.storage.get(cardMetaKey(gen));
+    if (meta && meta.from === 'unknown') return { unknown: true, meta };
     if (meta) {
       const parts = [];
       for (let i = 0; i < meta.n; i++) parts.push(await this.storage.get(cardChunkKey(gen, meta.serial, i)));
       if (parts.some((p) => typeof p !== 'string')) throw new Error(`card:${gen} is missing a chunk`);
       return { md: parts.join(''), version: meta.version, meta };
     }
-    // 🔴 migration: nothing held for this generation yet. KV's body is taken and kept ADOPTED
-    // (`from: 'kv'`): unconfirmed until the alarm armed here settles it (settleCard). A KV miss is not
-    // kept (it may be a stale negative); a create writes the record itself.
+    // 🔴 migration: nothing held for this generation yet. A positive KV answer is kept ADOPTED
+    // (`from: 'kv'`), unconfirmed until the alarm armed here settles it (settleCard).
+    if ((await this.read(handle)).cardless === gen) return null;
     const { md } = await liveCard(this.env.CARDS, handle, { gen });
-    if (md == null) return null;
-    return this.adoptCard(handle, gen, md, null);
+    if (md != null) return this.adoptCard(handle, gen, md, null);
+    const unknown = { handle, gen, serial: 0, n: 0, version: null, from: 'unknown', settleAt: Date.now() + CardLifetime.KV_WINDOW_MS, attempts: 0 };
+    if ((await this.read(handle)).gen !== gen) throw new EndedDuringWrite();
+    await this.storage.put(cardMetaKey(gen), unknown);
+    await this.armAlarm(unknown.settleAt);
+    return { unknown: true, meta: unknown };
   }
   /** keep a KV body as the ADOPTED card of `gen`, and arm the alarm that will try to settle it */
   async adoptCard(handle, gen, md, prev) {
     const version = await cardVersion(md);
     const settleAt = Date.now() + CardLifetime.KV_WINDOW_MS;
-    const kept = await this.keepCard(handle, gen, md, version, 'written', prev, { from: 'kv', settleAt });
+    const kept = await this.keepCard(handle, gen, md, version, 'written', prev, { from: 'kv', settleAt, attempts: 0 });
     await this.armAlarm(settleAt);
     return { md, version, meta: kept };
   }
@@ -759,45 +779,60 @@ export class CardLifetime {
     if (due == null || t < due) await this.storage.setAlarm(t);
   }
   /**
-   * 🔴 r3/r4 (codex r2, r3): the card every WRITE starts from. A card adopted from KV at first contact
-   * may itself be a stale KV answer — and any write made on it could put stale bytes back over newer
-   * ones (codex r3: a put_asset on a stale adopted card restored an older picture). So while it is
-   * ADOPTED, every write is refused (`unsettled`: the seconds to retry after), uniformly: put_asset,
-   * both deletes, save. Nothing here ends that: only the alarm does (settleCard).
+   * 🔴 r3/r4/r5 (codex r2, r3, r4): the card every WRITE starts from. A card adopted from KV at first
+   * contact may itself be a stale KV answer, and a miss may be a cached negative — any write made on
+   * either could put stale bytes (or an empty assets lane) over newer ones. So while it is ADOPTED or
+   * UNKNOWN, every write is refused (`unsettled`: the seconds to retry after), uniformly: put_asset,
+   * both deletes, save. Nothing here ends that: only the alarm does (settleCard). A write does repair
+   * a missing alarm (r5: one consumed without a replacement must not leave it retrying forever).
    */
   async heldCard(handle, gen) {
     const cur = await this.cardOf(handle, gen);
-    if (!cur || cur.meta.from !== 'kv') return cur;
+    if (!cur || (cur.meta.from !== 'kv' && cur.meta.from !== 'unknown')) return cur;
+    if (typeof this.storage.getAlarm === 'function' && (await this.storage.getAlarm()) == null) {
+      await this.armAlarm(Math.max(cur.meta.settleAt, Date.now() + 1000));
+    }
     return { ...cur, unsettled: Math.max(1, Math.ceil((cur.meta.settleAt - Date.now()) / 1000)) };
   }
   /**
-   * the alarm's half of first contact (r4, codex r3 P2). The card leaves the window only when BOTH
+   * the alarm's half of first contact (r4, codex r3 P2; r5, codex r4). The card leaves the window when
    *   (a) the alarm has fired at or after `settleAt` — an alarm that fires sooner (the write-through
-   *       retry shares it) re-arms and does nothing else;
-   *   (b) KV, re-read then, answers exactly the held card. A different answer is the newer one (KV's
-   *       caches converge forward, and nothing but this object writes the key now): it is adopted and
-   *       the window starts again. A KV miss keeps the held card and starts the window again.
+   *       retry shares it) re-arms and does nothing else; and
+   *   (b) KV, re-read then, answers POSITIVELY: exactly the held card → settled; a different body (or
+   *       any body, for an unknown card) → adopted, and the window starts again.
+   * A read that fails or finds nothing is retried after SETTLE_BACKOFF_MS; past the cap an adopted card
+   * settles from its last positive read (the held one) and an unknown card keeps refusing at the last
+   * delay — each with a structured log line (no alerting exists; the line is what an operator can see).
    * Not on a write's clock: a forward wall-clock jump can at most bring the alarm early, and (b) must
    * still hold. The residual: a KV that answers the same stale body for the whole window, twice.
    */
   async settleCard(gen) {
     const meta = await this.storage.get(cardMetaKey(gen));
-    if (!meta || meta.from !== 'kv' || (await this.read(meta.handle)).gen !== gen) return;
+    if (!meta || (meta.from !== 'kv' && meta.from !== 'unknown') || (await this.read(meta.handle)).gen !== gen) return;
     if (Date.now() < meta.settleAt) { await this.armAlarm(meta.settleAt); return; }
-    const held = await this.cardOf(meta.handle, gen);
-    const { md } = await liveCard(this.env.CARDS, meta.handle, { gen });
-    const version = md == null ? null : await cardVersion(md);
-    if (version === held.version) {
-      await this.storage.put(cardMetaKey(gen), { ...held.meta, from: 'kv-settled' });
+    let md = null, reason = 'miss';
+    try { ({ md } = await liveCard(this.env.CARDS, meta.handle, { gen })); } catch { md = null; reason = 'read_failed'; }
+    if (md != null) {
+      const version = await cardVersion(md);
+      if (meta.from === 'kv' && version === meta.version) {
+        await this.storage.put(cardMetaKey(gen), { ...meta, from: 'kv-settled', attempts: 0 });
+        return;
+      }
+      await this.adoptCard(meta.handle, gen, md, meta);
       return;
     }
-    if (md == null) {
-      const settleAt = Date.now() + CardLifetime.KV_WINDOW_MS;
-      await this.storage.put(cardMetaKey(gen), { ...held.meta, settleAt });
-      await this.armAlarm(settleAt);
+    const backoff = CardLifetime.SETTLE_BACKOFF_MS;
+    const attempts = (meta.attempts || 0) + 1;
+    const line = (event) => console.error(JSON.stringify({ event, handle: meta.handle, gen, attempts, reason, held: meta.from }));
+    if (attempts >= backoff.length && meta.from === 'kv') {
+      await this.storage.put(cardMetaKey(gen), { ...meta, from: 'kv-settled', attempts });
+      line('card_settled_from_last_positive');
       return;
     }
-    await this.adoptCard(meta.handle, gen, md, held.meta);
+    if (attempts >= backoff.length) line('card_settlement_stuck');
+    const settleAt = Date.now() + backoff[Math.min(attempts, backoff.length) - 1];
+    await this.storage.put(cardMetaKey(gen), { ...meta, attempts, settleAt });
+    await this.armAlarm(settleAt);
   }
   /**
    * put a body under a fresh serial, then the record that points at it (the write), then sweep every
@@ -878,9 +913,16 @@ export class CardLifetime {
    * If the card held here is not the one the Worker assembled (`from`), the result's destinations must
    * be the ones Web Risk checked, or the save is refused.
    */
-  async saveCard({ handle, gen, markdown, base, from, dests, destBase, check }) {
+  async saveCard({ handle, gen, markdown, base, from, dests, destBase, check, create }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
-    const cur = await this.heldCard(handle, gen);
+    let cur = await this.heldCard(handle, gen);
+    // r5: `create: true` is the registry's word that this handle has never had a card — the one thing
+    // besides a positive read that lets a write past an UNKNOWN (a miss is not proof). Where a card is
+    // held, it is a conflict, never an overwrite.
+    if (create === true && cur && !cur.unknown) {
+      return { status: 409, body: { conflict: true, expected: null, current: cur.version, why: 'This handle already has a card, so this is not a create. Read it and save with its version.' } };
+    }
+    if (create === true && cur && cur.unknown) cur = null;
     if (cur && cur.unsettled) return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was saved') };
     if (base != null && base !== '') {
       const conflict = cur == null
@@ -923,8 +965,13 @@ export class CardLifetime {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: { ...staleWrite(handle), ...fence } };
     const cur = await this.heldCard(handle, gen);
     if (!cur) return { status: 404, body: { error: `No card at "${handle}".`, ...fence } };
-    // 🔴 r4 (codex r3 P1): uniformly, no write on an adopted (unconfirmed) card — see heldCard
+    // 🔴 r4/r5 (codex r3, r4): uniformly, no write on an adopted or unknown card — see heldCard
     if (cur.unsettled && kind !== 'put') return { status: 409, body: { ...windowRefusal(cur.unsettled, 'Nothing was deleted'), ...fence } };
+    if (cur.unsettled && kind === 'put') {
+      if (!b64) return { status: 400, body: { error: 'put_asset needs `base64`.' } };
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
+      return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was stored') };
+    }
     if (kind === 'fenced') {
       const conflict = await checkBaseVersion(ifVersion, cur.md);
       if (conflict) return { status: 409, body: { ...conflict, why: `${conflict.why} Nothing was deleted.`, ...fence } };
@@ -934,7 +981,6 @@ export class CardLifetime {
       // the caller's input, checked after the card as it always was (a missing card is a 404 first)
       if (!b64) return { status: 400, body: { error: 'put_asset needs `base64`.' } };
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
-      if (cur.unsettled) return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was stored') };
       model.assets = { ...model.assets, [id]: { mime, b64 } };
       const md = serializeCard(model);
       const bytes = utf8Bytes(md);
@@ -1000,7 +1046,7 @@ function cardWriteOk(op, b) {
   const str = (v) => typeof v === 'string' && v.length > 0;
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
   if (op === '/save') {
-    if (!(str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string'))) return false;
+    if (!(str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.create == null || typeof b.create === 'boolean'))) return false;
     if (b.check === true) return true;
     return (b.from === null || str(b.from)) && Array.isArray(b.dests) && b.dests.every((u) => typeof u === 'string') && str(b.destBase);
   }
@@ -1290,7 +1336,9 @@ async function deleteCard(env, handle, meant = null) {
  *   GET    /_api/card/<handle>               get_card      thin markdown + manifest + version
  *   GET    /_api/card/<handle>/full          —             full markdown for the owner
  *   GET    /_api/card/<handle>/lifetime      —             → { handle, gen }: the current generation (reef#2618 r4)
- *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run }
+ *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run, create }
+ *          create: true (tile#209 r5) — the registry's word that the handle has never had a card; the
+ *                  only way past a first-contact KV miss besides the object's alarm finding the card
  *   DELETE /_api/card/<handle>               delete_card   → { handle, deleted } (reef#2618)
  *          If-Generation: <gen> (optional)  412 `stale_generation` unless <gen> is the current one; nothing moves
  *   PUT    /_api/card/<handle>/stop          —             { reason? } → stop serving
@@ -1519,7 +1567,8 @@ export async function handleApi(request, env, url) {
       // point — cannot half-happen. r3 (codex r2 P2): it is checked by the handle's object, against
       // the card IT holds, never against this KV read — which may be stale, and must not veto a
       // current base_version. The same call answers the size (in bytes) and the structural diff.
-      const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, check: true });
+      const create = body.create === true;
+      const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, create, check: true });
       const checked = await pre.json();
       if (pre.status !== 200) return json(checked, pre.status);
 
@@ -1550,7 +1599,7 @@ export async function handleApi(request, env, url) {
       // or one KV has not caught up on — would otherwise be erased by a save that "passed" its lock.
       // `from` and `dests` let it tell whether what it writes is still what Web Risk checked.
       const written = await cardWrite(env, handle, 'save', {
-        gen: live.gen, markdown: body.markdown, base,
+        gen: live.gen, markdown: body.markdown, base, create,
         from: current ? current.version : null, dests, destBase: `${url.origin}/${handle}/`,
       });
       const res = await written.json();

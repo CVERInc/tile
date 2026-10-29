@@ -65,7 +65,7 @@ async function save(md, { env = {}, fetch } = {}) {
   console.warn = (...a) => logs.push(a.join(' '));
   try {
     const url = new URL('https://card.example/_api/card/t');
-    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: md }) });
+    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: md, create: true }) }); // a new handle (tile#209 r5: create is the registry's word)
     const workerEnv = { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...env };
     workerEnv.CARD_LIFETIMES = lifetimes(workerEnv);
     const res = await handleApi(req, workerEnv, url);
@@ -454,7 +454,7 @@ test('r6#1f PUT with dry_run takes the same path', async () => {
   const url = new URL('https://card.example/_api/card/t');
   const realFetch = globalThis.fetch; globalThis.fetch = s.fn;
   try {
-    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true }) });
+    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true, create: true }) });
     // (CARD_LIFETIMES bound: since tile#209 r3 a dry run's lock/size check is the handle's object's)
     const env = { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey };
     env.CARD_LIFETIMES = lifetimes(env);

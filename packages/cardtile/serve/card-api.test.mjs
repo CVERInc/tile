@@ -147,6 +147,7 @@ const cardLifetimesNs = objectNs(CardLifetime);
  * of its storage layout). `firstContact: true` leaves the object empty: those tests are about adoption.
  */
 //
+// An EMPTY seeded handle stands for one the object knows has no card (r5: a KV miss alone is unknown).
 // It touches neither the object's storage METHODS nor KV's (tests wrap those to hold or count calls):
 // it reads the raw maps, has a scratch CardLifetime write the held card into a scratch storage, and
 // copies those keys in.
@@ -155,7 +156,8 @@ const presettle = async (object, handle, objectEnv) => {
   const gen = (real.get('life') || {}).gen || '0';
   if (real.has(`card:${gen}`)) return;
   const md = kvMap.get(cardKey(handle, gen)) ?? (gen === '0' ? kvMap.get(handle) : undefined);
-  if (md == null) return;
+  // r5: an empty handle stands for one the object KNOWS has no card (as a generation it started does)
+  if (md == null) { real.set('life', { ...(real.get('life') || { gen, hosts: [], pending: {} }), cardless: gen }); return; }
   const scratchStore = doStorage();
   scratchStore._m.set('life', { gen, hosts: [], pending: {} });
   await new CardLifetime({ storage: scratchStore }, objectEnv).keepCard(handle, gen, md, await cardVersion(md), 'written', null, { from: 'kv-settled' });
@@ -3156,4 +3158,158 @@ test('🔴 r4 P1 a first-contact adoption that lands after the DELETE keeps noth
   assert.equal(res.status, 409);
   assert.equal((await res.json()).stale_generation, true, 'a write adopted into an ended lifetime was not told so');
   assert.deepEqual([...life._m.keys()].filter((k) => k.startsWith('card:')), [], 'the deleted card was adopted back into the object');
+});
+
+// ── r5 (codex r4): a negative first-contact read is UNKNOWN; settlement retries are bounded and seen ──
+
+/** a card with a referenced `pic` and an unreferenced `unused`, bytes the reviewer used */
+const twoPictures = () => { const m = parseCard(CARD); m.assets = { pic: { mime: 'image/gif', b64: 'TkVX' }, unused: { mime: 'image/gif', b64: 'QUJD' } }; return serializeCard(m); };
+/** an env whose OBJECT's KV view answers `miss(k)` keys with a (cached) miss; the Worker's view is true */
+const envWithObjectView = (seed, miss) => {
+  const env = { CARDS: fakeKv(seed), MCP_TOKEN_HASH: TOKEN_HASH };
+  const view = { ...env.CARDS, get: async (k) => (miss(k) ? null : env.CARDS.get(k)) };
+  const objectEnv = { ...env, CARDS: view };
+  env.HOST_BINDINGS = hostBindingsNs(env);
+  env.CARD_LIFETIMES = cardLifetimesNs(env, objectEnv);
+  return { env, view };
+};
+const logged = async (fn) => {
+  const lines = [], real = console.error;
+  console.error = (...a) => lines.push(a.join(' '));
+  try { await fn(); } finally { console.error = real; }
+  return lines;
+};
+
+test('🔴 r5 P1 a first-contact KV MISS is unknown, not "no card": a save without base_version is refused, and the existing pictures survive (reviewer input)', async () => {
+  const body = twoPictures();
+  let missing = true;
+  const { env } = envWithObjectView({ [keyT()]: body }, (k) => missing && (k === keyT() || k === 't'));
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(body).replace('hello', 'edited') });
+  const answer = await res.json();
+  assert.equal(env.CARDS._m.get(keyT()), body, `the existing card was overwritten (answered ${res.status} ${JSON.stringify(answer)})`);
+  assert.equal(res.status, 409);
+  assert.equal(answer.retry, true);
+  assert.equal(answer.created, undefined);
+  // the asset routes say the same — never a 404 "no card" from a miss
+  const put = await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' });
+  assert.equal(put.status, 409, 'a put_asset on an unknown card answered as if there were none');
+  // CONTROL: once the object's view sees the card and its alarm settles it, the same save carries both pictures
+  missing = false;
+  const t1 = skewClock(61000);
+  try { await env.CARD_LIFETIMES.alarm('t'); } finally { t1(); }      // positive read: adopted, window restarts
+  const t2 = skewClock(122000);
+  try {
+    await env.CARD_LIFETIMES.alarm('t');                                // equal: settled
+    const ok = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(body).replace('hello', 'edited') });
+    const okBody = await ok.json();
+    assert.equal(ok.status, 200, JSON.stringify(okBody));
+    assert.equal(okBody.created, false);
+    assert.equal(okBody.assets_carried, 2);
+  } finally { t2(); }
+});
+
+test('🔴 r5 P1 an explicit create (create: true, the registry\'s word) makes a card on a handle the object has never seen; without it a miss is refused', async () => {
+  const env = firstContactEnv({});
+  const plain = await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD) });
+  assert.equal(plain.status, 409, 'a KV miss was taken as proof that no card exists');
+  assert.equal((await plain.json()).retry, true);
+  const made = await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD), create: true });
+  assert.equal(made.status, 200);
+  assert.equal((await made.json()).created, true);
+});
+
+test('🔴 r5 P1 create: true on a handle that has a card is a conflict, not an overwrite', async () => {
+  const env = envWith({ t: CARD });
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: NEXT, create: true });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.conflict, true);
+  assert.equal(body.current, await cardVersion(CARD));
+  assert.equal(await bodyOf(env), CARD);
+});
+
+test('r5 P1 a generation the object itself started (by a DELETE) knows it has no card: a create there needs no flag', async () => {
+  const env = firstContactEnv({});
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD), create: true })).status, 200);
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  const again = await call(env, 'PUT', '/_api/card/t', { markdown: NEXT });
+  assert.equal(again.status, 200);
+  assert.equal((await again.json()).created, true);
+});
+
+test('🔴 r5 P2 a settlement read that FAILS once re-arms the alarm; the next read settles (reviewer input)', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' })).status, 409, 'CONTROL: first contact');
+  const get = env.CARDS.get.bind(env.CARDS);
+  let fail = true;
+  env.CARDS.get = async (k) => { if (fail && (k === keyT() || k === 't')) { fail = false; throw new Error('kv read failed'); } return get(k); };
+  const t1 = skewClock(61000);
+  try { await env.CARD_LIFETIMES.alarm('t'); } finally { t1(); }
+  assert.ok(life._alarm, 'a failed settlement read left no alarm: every write would retry forever');
+  assert.equal(life._m.get('card:0').from, 'kv');
+  const t2 = skewClock(400000);
+  try { await env.CARD_LIFETIMES.alarm('t'); } finally { t2(); }
+  assert.equal(life._m.get('card:0').from, 'kv-settled', 'the good read after a failed one did not settle');
+});
+
+test('🔴 r5 P2 an adopted card whose alarm is gone gets one back on the next write', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' })).status, 409);
+  life._alarm = null; // consumed without a replacement (a crash, a failed setAlarm)
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' })).status, 409);
+  assert.ok(life._alarm, 'the write did not repair the missing alarm');
+});
+
+test('🔴 r5 P2 after the cap: an adopted card settles from its last positive read, and says so in a structured log line', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' })).status, 409);
+  env.CARDS.get = async () => { throw new Error('kv down'); };
+  const lines = await logged(async () => {
+    for (let i = 1; i <= 40 && life._m.get('card:0').from === 'kv'; i++) {
+      const t = skewClock(i * 3600000);
+      try { await env.CARD_LIFETIMES.alarm('t'); } finally { t(); }
+    }
+  });
+  assert.equal(life._m.get('card:0').from, 'kv-settled', 'the retries never ended');
+  const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  assert.ok(events.some((e) => e.event === 'card_settled_from_last_positive' && e.handle === 't'), `no structured line: ${lines.join(' | ')}`);
+});
+
+test('🔴 r5 P2 after the cap with NO positive read: still refusing, never silently — a structured log line each time, and the alarm stays armed', async () => {
+  const env = firstContactEnv({});
+  const life = env.CARD_LIFETIMES.storageOf('fresh');
+  assert.equal((await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD) })).status, 409);
+  const lines = await logged(async () => {
+    for (let i = 1; i <= 40; i++) {
+      const t = skewClock(i * 3600000);
+      try { await env.CARD_LIFETIMES.alarm('fresh'); } finally { t(); }
+    }
+  });
+  assert.ok(life._alarm, 'the object stopped trying');
+  const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  assert.ok(events.some((e) => e.event === 'card_settlement_stuck' && e.handle === 'fresh'), `no structured line: ${lines.join(' | ')}`);
+  assert.equal((await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD) })).status, 409, 'an unknown card was taken as empty after the cap');
+});
+
+test('🔴 r5 P3 the COMMIT re-checks base_version: a save held at Web Risk after its preflight passed is refused once a put_asset lands, naming the new version', async () => {
+  const env = envWith({ t: CARD });
+  const read = await versionOf(env);
+  const started = deferred(), release = deferred();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { started.resolve(); await release.promise; return new Response('{}', { headers: { 'content-type': 'application/json' } }); };
+  try {
+    const saving = call({ ...env, WEB_RISK_API_KEY: 'fixture-only' }, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'saved over'), base_version: read });
+    await started.promise; // past the preflight, waiting on Web Risk
+    const put = await (await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+    release.resolve();
+    const res = await saving;
+    const body = await res.json();
+    assert.equal(res.status, 409, `the commit wrote over a put that landed after the preflight: ${JSON.stringify(body)}`);
+    assert.equal(body.conflict, true);
+    assert.equal(body.current, put.version);
+    assert.equal((await assetsOf(env)).extra?.b64, AVATAR_NEW);
+  } finally { globalThis.fetch = realFetch; release.resolve(); }
 });
