@@ -314,6 +314,8 @@ export const COPY = {
 		refused: "I don't have a record of that.",
 		toHuman: 'Ask a person instead',
 		toHumanAfterRefusal: 'Send this to a person',
+		kaitoUnavailable: "The AI can't answer right now.",
+		kaitoUnavailableToHuman: "The AI can't answer right now. You can send this to a person.",
 		sentToHuman: "Passed to a person — you'll get a reply here.",
 		name: 'Name (optional)',
 		email: 'Email (optional)',
@@ -353,6 +355,8 @@ export const COPY = {
 		refused: '我沒有這方面的紀錄。',
 		toHuman: '還是想問真人',
 		toHumanAfterRefusal: '幫我轉給真人',
+		kaitoUnavailable: 'AI 現在沒辦法回答。',
+		kaitoUnavailableToHuman: 'AI 現在沒辦法回答，可以轉給真人。',
 		sentToHuman: '已經轉給真人了，回覆會出現在這裡。',
 		name: '姓名（選填）',
 		email: 'Email（選填）',
@@ -392,6 +396,8 @@ export const COPY = {
 		refused: 'そのことについては記録がありません。',
 		toHuman: 'やはり人に聞く',
 		toHumanAfterRefusal: '人に取り次いでもらう',
+		kaitoUnavailable: 'AIは今お答えできません。',
+		kaitoUnavailableToHuman: 'AIは今お答えできません。人に取り次ぐこともできます。',
 		sentToHuman: '担当者に取り次ぎました。返信はここに表示されます。',
 		name: 'お名前（任意）',
 		email: 'メールアドレス（任意）',
@@ -431,6 +437,8 @@ export const COPY = {
 		refused: '我没有这方面的记录。',
 		toHuman: '还是想问真人',
 		toHumanAfterRefusal: '帮我转给真人',
+		kaitoUnavailable: 'AI 现在没办法回答。',
+		kaitoUnavailableToHuman: 'AI 现在没办法回答，可以转给真人。',
 		sentToHuman: '已经转给真人了，回复会出现在这里。',
 		name: '姓名（选填）',
 		email: 'Email（选填）',
@@ -476,6 +484,8 @@ export const COPY = {
 		refused: 'Dazu liegt mir nichts vor.',
 		toHuman: 'Lieber einen Menschen fragen',
 		toHumanAfterRefusal: 'An einen Menschen weitergeben',
+		kaitoUnavailable: 'Die KI kann gerade nicht antworten.',
+		kaitoUnavailableToHuman: 'Die KI kann gerade nicht antworten. Sie können dies an einen Menschen weitergeben.',
 		sentToHuman: 'An einen Menschen weitergegeben — die Antwort erscheint hier.',
 		name: 'Name (optional)',
 		email: 'E-Mail (optional)',
@@ -515,6 +525,8 @@ export const COPY = {
 		refused: 'Je n’ai rien à ce sujet.',
 		toHuman: 'Plutôt demander à une personne',
 		toHumanAfterRefusal: 'Transmettre à une personne',
+		kaitoUnavailable: 'L’IA ne peut pas répondre pour le moment.',
+		kaitoUnavailableToHuman: 'L’IA ne peut pas répondre pour le moment. Vous pouvez transmettre ceci à une personne.',
 		sentToHuman: 'Transmis à une personne — la réponse s’affichera ici.',
 		name: 'Nom (facultatif)',
 		email: 'E-mail (facultatif)',
@@ -554,6 +566,8 @@ export const COPY = {
 		refused: 'No tengo nada registrado sobre eso.',
 		toHuman: 'Mejor preguntar a una persona',
 		toHumanAfterRefusal: 'Enviar esto a una persona',
+		kaitoUnavailable: 'La IA no puede responder en este momento.',
+		kaitoUnavailableToHuman: 'La IA no puede responder en este momento. Puedes enviar esto a una persona.',
 		sentToHuman: 'Enviado a una persona: la respuesta aparecerá aquí.',
 		name: 'Nombre (opcional)',
 		email: 'Correo (opcional)',
@@ -593,6 +607,8 @@ export const COPY = {
 		refused: 'Não tenho registro sobre isso.',
 		toHuman: 'Prefiro perguntar a uma pessoa',
 		toHumanAfterRefusal: 'Enviar para uma pessoa',
+		kaitoUnavailable: 'A IA não pode responder agora.',
+		kaitoUnavailableToHuman: 'A IA não pode responder agora. Você pode enviar isto para uma pessoa.',
 		sentToHuman: 'Enviado para uma pessoa — a resposta vai aparecer aqui.',
 		name: 'Nome (opcional)',
 		email: 'E-mail (opcional)',
@@ -632,6 +648,8 @@ export const COPY = {
 		refused: '그 부분에 대한 기록이 없어요.',
 		toHuman: '사람에게 물어볼래요',
 		toHumanAfterRefusal: '사람에게 전달하기',
+		kaitoUnavailable: '지금은 AI가 답할 수 없어요.',
+		kaitoUnavailableToHuman: '지금은 AI가 답할 수 없어요. 사람에게 전달할 수 있어요.',
 		sentToHuman: '사람에게 전달했어요. 답장은 여기에 표시돼요.',
 		name: '이름 (선택)',
 		email: '이메일 (선택)',
@@ -3179,6 +3197,9 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	} catch {
 		return null;
 	}
+	// A 503 is the engine saying it cannot answer at all — retrying the same question will not
+	// help, so it is told apart from the failures a retry can fix. Everything else stays `null`.
+	if (res.status === 503) return { kind: 'unavailable' };
 	if (!res.ok) return null;
 	let body;
 	try {
@@ -4004,8 +4025,12 @@ export async function mount(el, handoff = null) {
 				// visitor's side the useful fact is identical ("the site does not
 				// answer that; want a person?"), and dressing our plumbing up as
 				// three different experiences would tell them about us instead of
-				// helping them.
-				const said = answer ? answer.text : copy.error;
+				// helping them. The one exception is KAITO answering 503: retrying
+				// cannot help, so it says the AI cannot answer (naming the person door
+				// only when that door is drawn) instead of the send-failure sentence.
+				const said = answer && answer.kind === 'unavailable'
+					? (askOnly ? copy.kaitoUnavailable : copy.kaitoUnavailableToHuman)
+					: answer ? answer.text : copy.error;
 				log.insertAdjacentHTML(
 					'beforeend',
 					`<div class="${PREFIX}-msg ${PREFIX}-msg-owner">${escHtml(said)}</div>` +

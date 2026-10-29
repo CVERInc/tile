@@ -139,6 +139,8 @@ nothing answering at `data-api-base` drew nothing in 0.7.10 (the gate could not 
 go through. Please try again.`) — the gate cannot tell「no backend」from「could not ask this time」.
 If you do not want that, do not set `data-kaito`.
 
+When KAITO itself answers `503` (unavailable) the bubble says so instead of asking for a retry: "The AI can't answer right now." on an ask-only bubble, with "You can send this to a person." added where the person button is drawn (`kaitoUnavailable` / `kaitoUnavailableToHuman`). Any other failure keeps the error line.
+
 ## Searching the site from the bubble (0.7.14, reef#2160)
 
 One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own matching posts
