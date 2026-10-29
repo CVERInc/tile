@@ -703,7 +703,10 @@ export class CardLifetime {
     s.dropLegacy = false;
     s.cache = 'written';
     await this.storage.put('life', s); // the lifetime ends HERE, before any host is told
-    await this.dropCard(ended); // tile#209 r2: the ended lifetime's card is not kept here either
+    // tile#209 r2/r3: the ended lifetime's card is not kept here either — EVERY card key of every
+    // generation but the new one, by prefix: chunks no record names (a write that failed or crashed
+    // between its chunks and its record) are private bytes too
+    await this.sweepCards((g) => g === s.gen);
     return { ended, gen: s.gen, pending: s.pending };
   }
   async settle(handle, delivered) {
@@ -719,6 +722,9 @@ export class CardLifetime {
 
   // ── the card (tile#209 r2): held here, written here, written through to KV ─────────────────────
 
+  /** how long KV may answer stale, even where it was written: the reconcile window after first contact (r3) */
+  static KV_WINDOW_MS = 60000;
+
   /** the card of `gen` as this object holds it → { md, version, meta } | null; on first contact, from KV once */
   async cardOf(handle, gen) {
     const meta = await this.storage.get(cardMetaKey(gen));
@@ -728,33 +734,79 @@ export class CardLifetime {
       if (parts.some((p) => typeof p !== 'string')) throw new Error(`card:${gen} is missing a chunk`);
       return { md: parts.join(''), version: meta.version, meta };
     }
-    // 🔴 migration: nothing held for this generation yet. KV's body is taken ONCE and kept; a KV miss
-    // is not kept (it may be a stale negative), and a create writes the record itself.
+    // 🔴 migration: nothing held for this generation yet. KV's body is taken and kept, marked as
+    // ADOPTED (`from: 'kv'`, `adoptedAt`) until the object writes it or reconciles it past KV's window
+    // (heldCard). A KV miss is not kept (it may be a stale negative); a create writes the record itself.
     const { md } = await liveCard(this.env.CARDS, handle, { gen });
     if (md == null) return null;
     const version = await cardVersion(md);
-    return { md, version, meta: await this.keepCard(handle, gen, md, version, 'written', null) };
+    const kept = await this.keepCard(handle, gen, md, version, 'written', null, { from: 'kv', adoptedAt: Date.now() });
+    return { md, version, meta: kept, adoptedNow: true };
   }
-  /** put a body under a fresh serial, then the record that points at it (the write), then drop the old chunks */
-  async keepCard(handle, gen, md, version, cache, prev) {
+  /**
+   * 🔴 r3 (codex r2 P1): the card every WRITE starts from. A card adopted from KV at first contact may
+   * itself be a stale KV answer, so while it is still only adopted (the object has not written it):
+   *   · KV is read again before every write, and a body that differs is adopted in its place — KV's
+   *     caches converge forward, and after rollout nothing but this object writes the key, so a
+   *     different answer is the newer one;
+   *   · inside KV_WINDOW_MS of the adoption the card is `unsettled`: the fenced delete refuses rather
+   *     than delete on the strength of a KV read alone (assetWrite), and the other writes proceed on
+   *     the reconciled card (the residual window, in the lane report);
+   *   · the first write after the window reconciles once more and marks it settled; from then on, and
+   *     from the object's first own write, KV is not consulted.
+   */
+  async heldCard(handle, gen) {
+    const cur = await this.cardOf(handle, gen);
+    if (!cur || cur.meta.from !== 'kv') return cur;
+    let held = cur;
+    if (!cur.adoptedNow) {
+      const { md } = await liveCard(this.env.CARDS, handle, { gen });
+      if (md != null) {
+        const version = await cardVersion(md);
+        if (version !== cur.version) {
+          held = { md, version, meta: await this.keepCard(handle, gen, md, version, 'written', cur.meta, { from: 'kv', adoptedAt: cur.meta.adoptedAt }) };
+        }
+      }
+    }
+    const left = held.meta.adoptedAt + CardLifetime.KV_WINDOW_MS - Date.now();
+    if (left > 0) return { ...held, unsettled: Math.ceil(left / 1000) };
+    const settled = { ...held.meta, from: 'kv-settled' };
+    await this.storage.put(cardMetaKey(gen), settled);
+    return { ...held, meta: settled };
+  }
+  /**
+   * put a body under a fresh serial, then the record that points at it (the write), then sweep every
+   * card key the record does not name. 🔴 r3: a write that fails partway sweeps its own chunks before
+   * it fails, and the success sweep also takes whatever an earlier crash left (every serial, every
+   * other generation) — no private bytes outlive the card they belonged to.
+   */
+  async keepCard(handle, gen, md, version, cache, prev, provenance = { from: 'object' }) {
     // A chunk is CARD_CHUNK UTF-16 code units: at most 3 bytes of UTF-8 each, so ≤ 768 KiB a value —
     // under the SQLite-backed storage's per-value limit (this class is `new_sqlite_classes`,
-    // wrangler.example.toml) with room to spare — and KV_MAX_BYTES (25 MiB) is exactly 100 chunks.
+    // wrangler.example.toml) with room to spare — and KV_MAX_BYTES (25 MiB) is at most 100 chunks.
     // (A local, not a module constant: the /try/edit bundle carries this module's top-level values.)
     const CARD_CHUNK = 256 * 1024;
     const serial = (prev ? prev.serial : 0) + 1;
     const n = Math.max(1, Math.ceil(md.length / CARD_CHUNK));
-    for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(gen, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
-    const meta = { handle, gen, serial, n, version, cache };
-    await this.storage.put(cardMetaKey(gen), meta);
-    if (prev) for (let i = 0; i < prev.n; i++) await this.storage.delete(cardChunkKey(gen, prev.serial, i));
+    const meta = { handle, gen, serial, n, version, cache, ...provenance };
+    try {
+      for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(gen, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
+      await this.storage.put(cardMetaKey(gen), meta);
+    } catch (e) {
+      await this.sweepCards((g, sl) => g === gen && (sl === null || (prev != null && sl === prev.serial))).catch(() => {});
+      throw e;
+    }
+    await this.sweepCards((g, sl) => g === gen && (sl === null || sl === serial));
     return meta;
   }
-  async dropCard(gen) {
-    const meta = await this.storage.get(cardMetaKey(gen));
-    if (!meta) return;
-    await this.storage.delete(cardMetaKey(gen));
-    for (let i = 0; i < meta.n; i++) await this.storage.delete(cardChunkKey(gen, meta.serial, i));
+  /** delete every `card:` key `keep(gen, serial | null for a record)` does not keep — by prefix, so it
+   *  finds what no record names */
+  async sweepCards(keep) {
+    const listed = await this.storage.list({ prefix: 'card:' });
+    for (const k of listed.keys()) {
+      const [, g, sl] = k.split(':');
+      if (!keep(g, sl === undefined ? null : Number(sl))) await this.storage.delete(k);
+    }
   }
   /** the KV copy of the held card, for the pages; a failure stays `pending` for the alarm */
   async writeThrough(handle, gen, md, meta) {
@@ -777,8 +829,11 @@ export class CardLifetime {
   async commitCard(handle, gen, md, prev) {
     const version = await cardVersion(md);
     if ((await this.read(handle)).gen !== gen) return staleWrite(handle);
+    // 🔴 r3: KV's ceiling is in BYTES; a card it cannot hold is never acknowledged (callers refuse it
+    // first with 413 — this is the last line, so nothing unservable is ever kept here)
+    if (utf8Bytes(md) > KV_MAX_BYTES) throw new Error('commitCard: a card over the KV byte ceiling reached the commit');
     const meta = await this.keepCard(handle, gen, md, version, 'pending', prev && prev.meta);
-    if ((await this.read(handle)).gen !== gen) { await this.dropCard(gen); return staleWrite(handle); }
+    if ((await this.read(handle)).gen !== gen) { await this.sweepCards((g) => g !== gen); return staleWrite(handle); }
     const cache = await this.writeThrough(handle, gen, md, meta);
     if ((await this.read(handle)).gen !== gen) return staleWrite(handle);
     return { version, bytes: md.length, ...(cache === 'pending' ? { cache: 'pending' } : {}) };
@@ -790,9 +845,9 @@ export class CardLifetime {
    * If the card held here is not the one the Worker assembled (`from`), the result's destinations must
    * be the ones Web Risk checked, or the save is refused.
    */
-  async saveCard({ handle, gen, markdown, base, from, dests, destBase }) {
+  async saveCard({ handle, gen, markdown, base, from, dests, destBase, check }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
-    const cur = await this.cardOf(handle, gen);
+    const cur = await this.heldCard(handle, gen);
     if (base != null && base !== '') {
       const conflict = cur == null
         ? { conflict: true, expected: String(base), current: null, why: 'There is no card at this handle, so the version you read is not of this card.' }
@@ -800,9 +855,15 @@ export class CardLifetime {
       if (conflict) return { status: 409, body: conflict };
     }
     const { md, orphans, diff, carried } = assembleSave(markdown, cur && cur.md);
-    if (md.length > KV_MAX_BYTES) {
-      return { status: 413, body: { error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
+    const bytes = utf8Bytes(md);
+    if (bytes > KV_MAX_BYTES) {
+      return { status: 413, body: { error: `That would make the card ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
     }
+    const wouldChange = !cur || md !== cur.md;
+    // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a
+    // dry run gives — is THIS, against the held card, so a current base_version is never vetoed by a
+    // stale KV read. Nothing is written (a first contact may adopt; that is not a change of the card).
+    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange, diff, orphans, carried } };
     if ((cur ? cur.version : null) !== from) {
       const now = cardDestinations(md, { base: destBase });
       if (now.length !== dests.length || now.some((u) => !dests.includes(u))) {
@@ -812,7 +873,7 @@ export class CardLifetime {
     }
     const res = await this.commitCard(handle, gen, md, cur);
     if (res.conflict) return { status: 409, body: res };
-    return { status: 200, body: { ...res, created: !cur, wouldChange: !cur || md !== cur.md, diff, orphans, carried } };
+    return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, carried } };
   }
   /**
    * put_asset, delete_asset and the fenced delete, against the card held here: every check against
@@ -826,7 +887,7 @@ export class CardLifetime {
   async assetWrite({ handle, gen, kind, id, b64, mime, ifVersion }) {
     const fence = kind === 'fenced' ? { fence: 'if-version' } : {};
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: { ...staleWrite(handle), ...fence } };
-    const cur = await this.cardOf(handle, gen);
+    const cur = await this.heldCard(handle, gen);
     if (!cur) return { status: 404, body: { error: `No card at "${handle}".`, ...fence } };
     if (kind === 'fenced') {
       const conflict = await checkBaseVersion(ifVersion, cur.md);
@@ -839,8 +900,9 @@ export class CardLifetime {
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
       model.assets = { ...model.assets, [id]: { mime, b64 } };
       const md = serializeCard(model);
-      if (md.length > KV_MAX_BYTES) {
-        return { status: 413, body: { error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
+      const bytes = utf8Bytes(md);
+      if (bytes > KV_MAX_BYTES) {
+        return { status: 413, body: { error: `That would make the card ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
       }
       const res = await this.commitCard(handle, gen, md, cur);
       if (res.conflict) return { status: 409, body: res };
@@ -857,6 +919,16 @@ export class CardLifetime {
       } };
     }
     if (!(id in model.assets)) return { status: 404, body: { error: `No asset "${id}" on "${handle}".`, ...fence } };
+    // 🔴 r3 (codex r2 P1): never a destructive fenced write on the strength of a first-contact KV read
+    // alone. Inside KV's window after adoption the version the caller and this object agree on may
+    // both be the same stale KV answer; nothing is deleted, and the caller is told when to retry. Not
+    // a `conflict` (reef reads that as "the card moved"): an `error` with `retry`.
+    if (kind === 'fenced' && cur.unsettled) {
+      return { status: 409, body: {
+        error: `This card was only just taken over from the store, and its version cannot be confirmed for another ${cur.unsettled} s. Nothing was deleted; try again then.`,
+        retry: true, retry_after_seconds: cur.unsettled, ...fence,
+      } };
+    }
     delete model.assets[id];
     const res = await this.commitCard(handle, gen, serializeCard(model), cur);
     if (res.conflict) return { status: 409, body: { ...res, ...fence } };
@@ -867,13 +939,33 @@ export class CardLifetime {
 const cardMetaKey = (gen) => `card:${gen}`;
 const cardChunkKey = (gen, serial, i) => `card:${gen}:${serial}:${i}`;
 
+/**
+ * the UTF-8 byte length of a string, without encoding it. 🔴 r3 (codex r2 P1): KV's 25 MiB ceiling is
+ * in bytes, and `md.length` counts UTF-16 code units — a card of CJK text is up to 3× larger than it
+ * looks. A lone surrogate is 3 bytes (TextEncoder writes it as U+FFFD). Exact whenever the string
+ * could exceed the ceiling; below a third of it, where it cannot, the code-unit count stands in.
+ */
+function utf8Bytes(str) {
+  if (str.length * 3 <= KV_MAX_BYTES) return str.length;
+  let n = 0;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+}
+
 /** a well-formed /save or /asset request to CardLifetime (the Worker validated the caller's input) */
 function cardWriteOk(op, b) {
   const str = (v) => typeof v === 'string' && v.length > 0;
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
   if (op === '/save') {
-    return str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.from === null || str(b.from))
-      && Array.isArray(b.dests) && b.dests.every((u) => typeof u === 'string') && str(b.destBase);
+    if (!(str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string'))) return false;
+    if (b.check === true) return true;
+    return (b.from === null || str(b.from)) && Array.isArray(b.dests) && b.dests.every((u) => typeof u === 'string') && str(b.destBase);
   }
   if (!['put', 'delete', 'fenced'].includes(b.kind) || !VALID_ASSET_ID.test(String(b.id))) return false;
   if (b.kind === 'put') return typeof b.b64 === 'string' && str(b.mime);
@@ -1384,25 +1476,21 @@ export async function handleApi(request, env, url) {
       // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard)
       const live = await liveCard(store, handle);
       const current = live.md == null ? null : { md: live.md, version: await cardVersion(live.md) };
+      const base = body.base_version == null ? null : String(body.base_version);
 
-      // 🔴 The lock is checked BEFORE the assembly, so a conflicted save costs nothing and — more to
-      // the point — cannot half-happen.
-      const conflict = current
-        ? await checkBaseVersion(body.base_version, current.md)
-        : (body.base_version
-          ? { conflict: true, expected: String(body.base_version), current: null, why: 'There is no card at this handle, so the version you read is not of this card.' }
-          : null);
-      if (conflict) return json(conflict, 409);
-
-      const { md, orphans, diff, carried } = assembleSave(body.markdown, current && current.md);
-      if (md.length > KV_MAX_BYTES) {
-        return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
-      }
-      const wouldChange = !current || md !== current.md;
+      // 🔴 The lock is checked BEFORE Web Risk, so a conflicted save costs nothing and — more to the
+      // point — cannot half-happen. r3 (codex r2 P2): it is checked by the handle's object, against
+      // the card IT holds, never against this KV read — which may be stale, and must not veto a
+      // current base_version. The same call answers the size (in bytes) and the structural diff.
+      const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, check: true });
+      const checked = await pre.json();
+      if (pre.status !== 200) return json(checked, pre.status);
 
       // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
       // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
       // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
+      // (Assembled on this KV read; the object checks it still links the same way if its card differs.)
+      const { md } = assembleSave(body.markdown, current && current.md);
       const dests = cardDestinations(md, { base: `${url.origin}/${handle}/` });
       const many = tooManyLinks(dests, env);
       if (many) return json(many, 422);
@@ -1411,8 +1499,9 @@ export async function handleApi(request, env, url) {
 
       if (body.dry_run) {
         return json({
-          handle, dry_run: true, valid: true, wouldChange, diff, orphans, assets_carried: carried,
-          message: wouldChange
+          handle, dry_run: true, valid: true, wouldChange: checked.wouldChange, diff: checked.diff, orphans: checked.orphans,
+          assets_carried: checked.carried,
+          message: checked.wouldChange
             ? 'Validates — nothing written (dry_run). Call again without dry_run to save.'
             : 'Validates, but is identical to the current card — a real save would be a no-op.',
         });
@@ -1424,7 +1513,7 @@ export async function handleApi(request, env, url) {
       // or one KV has not caught up on — would otherwise be erased by a save that "passed" its lock.
       // `from` and `dests` let it tell whether what it writes is still what Web Risk checked.
       const written = await cardWrite(env, handle, 'save', {
-        gen: live.gen, markdown: body.markdown, base: body.base_version == null ? null : String(body.base_version),
+        gen: live.gen, markdown: body.markdown, base,
         from: current ? current.version : null, dests, destBase: `${url.origin}/${handle}/`,
       });
       const res = await written.json();

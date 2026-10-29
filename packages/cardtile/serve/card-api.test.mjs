@@ -108,6 +108,8 @@ const doStorage = () => {
     async get(k) { return m.has(k) ? structuredClone(m.get(k)) : undefined; },
     async put(k, v) { m.set(k, structuredClone(v)); },
     async delete(k) { return m.delete(k); },
+    // the storage API's prefix listing: a Map in key order (r3 sweeps card keys by prefix)
+    async list({ prefix = '' } = {}) { return new Map([...m.keys()].filter((k) => k.startsWith(prefix)).sort().map((k) => [k, structuredClone(m.get(k))])); },
     // r9: the retry an object schedules when a KV write-through fails; `alarm(name)` below fires it
     _alarm: null,
     async setAlarm(t) { this._alarm = t; },
@@ -2789,9 +2791,21 @@ test('r2 migration: a handle the object has never written takes its card from KV
   const life = env.CARD_LIFETIMES.storageOf('t')._m;
   assert.equal([...life.keys()].some((k) => k.startsWith('card:')), false, 'CONTROL: no record before the first write');
   const v = await versionOf(env);
-  const res = await fencedCall(env, 'unused', v); // the first write: initialised from KV, at KV's version
+  // r3: the first write adopts KV's card — and a fenced delete inside KV's window after that is refused
+  // (retry), since KV's answer alone is all that vouches for the version
+  const first = await fencedCall(env, 'unused', v);
+  assert.equal(first.status, 409);
+  const fb = await first.json();
+  assert.equal(fb.retry, true);
+  assert.ok(fb.retry_after_seconds > 0 && fb.retry_after_seconds <= 60, `retry_after_seconds ${fb.retry_after_seconds}`);
+  assert.equal(fb.conflict, undefined, 'the retry was dressed as a version conflict');
+  assert.ok(life.has('card:0'), 'the object did not keep the card it adopted');
+  assert.equal(life.get('card:0').from, 'kv');
+  const later = skewClock(61000);
+  let res;
+  try { res = await fencedCall(env, 'unused', v); } finally { later(); } // past the window: settled, deleted
   assert.equal(res.status, 200);
-  assert.ok(life.has('card:0'), 'the object did not keep the card it wrote');
+  assert.equal(life.get('card:0').from, 'object');
   const after = (await res.json()).version;
   // KV is now overwritten behind the object's back with the pre-delete body (a lagging or foreign write)
   env.CARDS._m.set(keyT(), CARD);
@@ -2866,4 +2880,126 @@ test('r2 the object refuses a save whose card is not the one the Worker checked,
   // CONTROL: the same card the Worker checked (`from` = the held version) is written whatever `dests` says
   const same = await save({ from: v, dests: ['https://elsewhere.example/'] });
   assert.equal(same.status, 200);
+});
+
+// ── r3 (codex r2): first contact, crash leftovers, KV's byte ceiling, a preliminary veto ─────────
+
+/** move the object's clock forward by `ms` (Date.now), until the returned restore is called */
+const skewClock = (ms) => { const real = Date.now; Date.now = () => real() + ms; return () => { Date.now = real; }; };
+/** CARD with `unused` replaced — the card KV truly holds after a pre-rollout replacement */
+const withUnused = (b64) => { const m = parseCard(CARD); m.assets = { ...m.assets, unused: { mime: 'image/gif', b64 } }; return serializeCard(m); };
+
+test('🔴 r3 P1 first contact on a STALE KV read: the fenced delete is refused and the replacement survives (reviewer input)', async () => {
+  const NEWER = withUnused(AVATAR_NEW);
+  const env = envWith({ [keyT()]: NEWER });          // what KV truly holds
+  const restore = lagKv(env, keyT(), CARD);          // what this location still answers
+  const vOld = await cardVersion(CARD);
+  const res = await fencedCall(env, 'unused', vOld);
+  const body = await res.json();
+  restore();
+  assert.equal(env.CARDS._m.get(keyT()), NEWER, `the replacement was overwritten (answered ${res.status} ${JSON.stringify(body)})`);
+  assert.equal(res.status, 409, 'a delete passed on the strength of a first-contact KV read alone');
+  assert.equal(body.fence, 'if-version');
+  assert.equal(body.deleted, undefined);
+  // CONTROL: once KV's window has passed, the object reconciles with KV and the same stale If-Version
+  // is a plain conflict naming the newer card; the current one deletes.
+  const later = skewClock(61000);
+  try {
+    const stale = await fencedCall(env, 'unused', vOld);
+    assert.equal(stale.status, 409);
+    const sb = await stale.json();
+    assert.equal(sb.conflict, true);
+    assert.equal(sb.current, await cardVersion(NEWER), 'the object kept the stale first-contact card past the window');
+    const ok = await fencedCall(env, 'unused', await cardVersion(NEWER));
+    assert.equal(ok.status, 200);
+  } finally { later(); }
+});
+
+test('🔴 r3 P1 within the window the object re-reads KV before every write: a newer KV body is adopted before the check', async () => {
+  const NEWER = withUnused(AVATAR_NEW);
+  const env = envWith({ [keyT()]: NEWER });
+  const restore = lagKv(env, keyT(), CARD);
+  assert.equal((await fencedCall(env, 'unused', await cardVersion(CARD))).status, 409, 'CONTROL: first contact refused');
+  restore(); // this location's KV has caught up, still inside the window
+  const stale = await fencedCall(env, 'unused', await cardVersion(CARD));
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).current, await cardVersion(NEWER), 'the object did not adopt the newer KV body');
+  // a non-destructive write in the window is made on the reconciled card: the replacement stays
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_OLD, mime: 'image/png' })).status, 200);
+  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW, 'the put was made on the stale first-contact card');
+});
+
+test('🔴 r3 P1 a chunked write that fails leaves no orphan chunks, and /end then leaves no card key at all (reviewer input)', async () => {
+  const { env } = await fencedFixture();               // held card: migrated (serial 1) then put (serial 2)
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal(life._m.get('card:0').serial, 2, 'CONTROL: the held card is at serial 2');
+  const put = life.put.bind(life);
+  let failed = 0;
+  life.put = async (k, v) => { if (k === 'card:0' && !failed++) throw new Error('record put failed'); return put(k, v); };
+  const big = 'QUJD'.repeat(75 * 1024); // 300 KiB of base64: two new chunks
+  const res = await call(env, 'PUT', '/_api/card/t/asset/big', { base64: big, mime: 'image/png' });
+  life.put = put;
+  assert.equal(failed, 1, 'CONTROL: the record put did fail');
+  assert.equal(res.status, 500);
+  const cardKeys = () => [...life._m.keys()].filter((k) => k.startsWith('card:')).sort();
+  assert.deepEqual(cardKeys().filter((k) => k.startsWith('card:0:3:')), [], 'the failed write left its chunks behind');
+  assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
+  assert.deepEqual(cardKeys(), [], 'card bytes survived the delete');
+});
+
+test('🔴 r3 P1 /end sweeps every generation and serial, including chunks no record names', async () => {
+  const { env } = await fencedFixture();
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  life._m.set('card:0:9:0', 'a chunk a crash left'); // no record names serial 9
+  life._m.set('card:abcdefabcdefabcdefabcdef:1:0', 'a dead generation\'s chunk');
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.deepEqual([...life._m.keys()].filter((k) => k.startsWith('card:')), []);
+});
+
+test('🔴 r3 P1 KV\'s ceiling is in UTF-8 BYTES: a card of 9 Mi `中` (28 MB, 9.4 M code units) is refused 413 and nothing is written (reviewer input)', async () => {
+  const env = envWith({ t: CARD });
+  const before = await versionOf(env);
+  const huge = thinCard(CARD).replace('hello', '中'.repeat(9 * 1024 * 1024));
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: huge });
+  assert.equal(res.status, 413, 'a card KV cannot hold was accepted');
+  assert.equal(await versionOf(env), before);
+  const meta = env.CARD_LIFETIMES.storageOf('t')._m.get('card:0');
+  assert.ok(!meta || meta.version === before, 'the object took a card KV cannot serve');
+});
+
+test('🔴 r3 P1 the object counts bytes too: a save assembled there over the byte ceiling is refused 413', async () => {
+  const env = envWith({ t: CARD });
+  const lives = env.CARD_LIFETIMES;
+  const v = await versionOf(env);
+  const res = await lives.get(lives.idFromName('t')).fetch('https://card-lifetime.example/save', { method: 'POST', body: JSON.stringify({
+    handle: 't', gen: '0', markdown: thinCard(CARD).replace('hello', '中'.repeat(9 * 1024 * 1024)), base: null,
+    from: v, dests: [], destBase: 'https://card.example/t/' }) });
+  assert.equal(res.status, 413);
+});
+
+test('🔴 r3 P2 a CURRENT base_version is not vetoed by the Worker\'s stale KV read: the object decides (200)', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  const restore = lagKv(env, keyT(), before);
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'edited'), base_version: put.version });
+  const body = await res.json();
+  restore();
+  assert.equal(res.status, 200, `a current base_version was refused: ${JSON.stringify(body)}`);
+  assert.equal((await assetsOf(env)).extra?.b64, AVATAR_NEW);
+  // CONTROL: a stale base_version is still refused — by the object, naming the held version
+  const stale = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD), base_version: put.version });
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).current, body.version);
+});
+
+test('🔴 r3 P1 put_asset counts bytes: on a card of CJK text under the ceiling, a picture that crosses it in bytes (not in code units) is refused 413', async () => {
+  const cjk = serializeCard(parseCard(CARD.replace('hello', '中'.repeat(8 * 1024 * 1024)))); // ~24 MiB of UTF-8, 8.4 M code units
+  const env = envWith({ t: cjk });
+  const before = await versionOf(env);
+  const res = await call(env, 'PUT', '/_api/card/t/asset/big', { base64: 'QUJD'.repeat(400 * 1024), mime: 'image/png' }); // +1.6 MB
+  assert.equal(res.status, 413, 'a card KV cannot hold was accepted');
+  assert.equal(await versionOf(env), before);
+  // CONTROL: a small picture on the same card fits
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/small', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
 });

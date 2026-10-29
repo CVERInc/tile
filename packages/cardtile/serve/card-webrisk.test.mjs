@@ -46,7 +46,7 @@ function stubFetch({ listed = {}, status = 200, hang = false } = {}) {
 /** the handle's CardLifetime, where a card write runs since tile#209 (one object per handle, Map storage) */
 const lifetimes = (env) => {
   const objects = new Map();
-  const storage = () => { const m = new Map(); return { async get(k) { return m.get(k); }, async put(k, v) { m.set(k, v); }, async delete(k) { return m.delete(k); } }; };
+  const storage = () => { const m = new Map(); return { async get(k) { return m.get(k); }, async put(k, v) { m.set(k, v); }, async delete(k) { return m.delete(k); }, async list({ prefix = '' } = {}) { return new Map([...m].filter(([k]) => k.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : 1))); } }; };
   return {
     idFromName: (name) => ({ name }),
     get: ({ name }) => ({ fetch(url, init) {
@@ -455,7 +455,10 @@ test('r6#1f PUT with dry_run takes the same path', async () => {
   const realFetch = globalThis.fetch; globalThis.fetch = s.fn;
   try {
     const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true }) });
-    const res = await handleApi(req, { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey }, url);
+    // (CARD_LIFETIMES bound: since tile#209 r3 a dry run's lock/size check is the handle's object's)
+    const env = { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey };
+    env.CARD_LIFETIMES = lifetimes(env);
+    const res = await handleApi(req, env, url);
     assert.equal(res.status, 422);
   } finally { globalThis.fetch = realFetch; }
 });
