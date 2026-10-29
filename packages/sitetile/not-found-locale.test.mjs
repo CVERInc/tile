@@ -461,18 +461,29 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     // it (WHATWG URL), because the question is where a click goes, not what the string looks like.
     const ORIGIN = 'https://example.com';
     const chooserRows = (chooserHtml, search) => {
-      const rows = [...chooserHtml.matchAll(/<a href="([^"]*)" hreflang="[^"]*" data-language-link data-locale="([^"]*)"/g)]
-        .map((m) => ({ built: m[1], href: m[1], locale: m[2] }));
+      // Every row, including one built `hidden` with no href (reef#1910 · 2: a locale whose home the
+      // build did not write). Such a row has `href: null` and `url: null` until the script shows it.
+      // `hidden` is read off the row's <li>, which is what hides it.
+      const rows = [...chooserHtml.matchAll(/<li([^>]*)>\s*<a ([^>]*)>/g)].filter((m) => /\bdata-language-link\b/.test(m[2]))
+        .map(([, li, a]) => {
+          const href = (/(?:^|\s)href="([^"]*)"/.exec(a) || [])[1] ?? null;
+          return { built: href, href, locale: (/data-locale="([^"]*)"/.exec(a) || [])[1], hidden: /(?:^|\s)hidden(?:\s|=|$)/.test(li) && /display:\s*none/.test(li), noHome: /\bdata-no-home\b/.test(a) };
+        });
       assert.ok(rows.length >= 2, 'no chooser rows found — the fixture stopped exercising the chooser');
       const script = [...chooserHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((t) => t.includes('data-language-link'));
       assert.equal(script.length, 1, 'expected exactly one ?return= script on the chooser');
-      const els = rows.map((row) => ({ getAttribute: (k) => (k === 'data-locale' ? row.locale : null), setAttribute: (k, v) => { if (k === 'href') row.href = v; } }));
+      const els = rows.map((row) => ({
+        getAttribute: (k) => (k === 'data-locale' ? row.locale : k === 'data-no-home' ? (row.noHome ? '' : null) : null),
+        setAttribute: (k, v) => { if (k === 'href') row.href = v; },
+        // Shown only once BOTH are gone from the <li>: `hidden` alone loses to the list's display rule.
+        parentNode: { _gone: new Set(), removeAttribute(k) { this._gone.add(k); if (this._gone.has('hidden') && this._gone.has('style')) row.hidden = false; } },
+      }));
       vm.runInNewContext(script[0], {
         URL, URLSearchParams,
         window: { location: { search, href: `${ORIGIN}/language${search}`, origin: ORIGIN } },
         document: { querySelectorAll: () => els, addEventListener: () => {} },
       });
-      return rows.map((row) => ({ ...row, url: new URL(row.href, `${ORIGIN}/language`) }));
+      return rows.map((row) => ({ ...row, url: row.href === null ? null : new URL(row.href, `${ORIGIN}/language`) }));
     };
 
     // ── CVERInc/reef#2112: one 404.html per declared non-default locale ──
@@ -854,6 +865,40 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(htmlLang(home), 'zh-Hant', 'the page still says its own language');
       assert.deepEqual(alternates(home), [
         { tag: 'en', href: 'https://example.com/' }, { tag: 'x-default', href: 'https://example.com/' }]);
+    });
+
+    await test('🔴 rootDisagrees: no chooser row links to a path the build did not write (reef#1910 · 2)', () => {
+      // The Chinese row went to /zh-tw/, which nobody wrote: the Chinese home IS `/`.
+      const { outDir, pages } = site('rootDisagrees');
+      // What a visitor arrives with: nothing, the 404's own return, and an ordinary page's (about
+      // exists in the default edition only, which is what its footer link's `has=` says).
+      for (const chooser of ['language/index.html', 'zh-tw/language/index.html']) {
+        for (const search of ['', '?return=%2F', '?return=%2Fzh-tw%2F', '?return=%2Fabout%2F&has=en-us']) {
+          const rows = chooserRows(pages[chooser], search);
+          const shown = rows.filter((r) => !r.hidden);
+          assert.ok(shown.length >= 1, `${chooser}${search}: no row is shown at all`);
+          for (const r of shown) {
+            assert.ok(r.url && resolves(outDir, r.url.pathname), `${chooser}${search}: the ${r.locale} row goes to ${r.href}, which the build never wrote`);
+          }
+        }
+      }
+      // The row is still on the page, hidden — not dropped: a return path that DOES exist in that
+      // locale may still show it (next test).
+      const zh = chooserRows(pages['language/index.html'], '').find((r) => r.locale === 'zh-tw');
+      assert.ok(zh && zh.hidden && zh.href === null, `the zh-tw row as built: ${JSON.stringify(zh)}`);
+    });
+
+    await test('🔴 noHomeJa: an edition with no home is hidden from the home, and shown for a page that exists in it', () => {
+      // noHomeJa: /ja-jp/about/ exists, /ja-jp/ does not. Arriving from that page, the Japanese row
+      // goes back to it; arriving from the home, it stays hidden.
+      const { outDir, pages } = site('noHomeJa');
+      const from = chooserRows(pages['ja-jp/language/index.html'], '?return=%2Fja-jp%2Fabout%2F&has=ja-jp');
+      const ja = from.find((r) => r.locale === 'ja-jp');
+      assert.equal(ja.hidden, false, 'the ja-jp row stayed hidden for a page that exists in Japanese');
+      assert.equal(ja.href, '/ja-jp/about/');
+      assert.ok(resolves(outDir, ja.href));
+      const home = chooserRows(pages['language/index.html'], '?return=%2F').find((r) => r.locale === 'ja-jp');
+      assert.equal(home.hidden, true, `from the home, the ja-jp row would go to /ja-jp/: ${JSON.stringify(home)}`);
     });
 
     await test('🔴 CONTROL: sites whose home page agrees with `locales` are not warned', () => {
