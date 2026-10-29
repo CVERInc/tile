@@ -139,6 +139,8 @@ nothing answering at `data-api-base` drew nothing in 0.7.10 (the gate could not 
 go through. Please try again.`) — the gate cannot tell「no backend」from「could not ask this time」.
 If you do not want that, do not set `data-kaito`.
 
+When KAITO itself answers `503` (unavailable) the bubble says so instead of asking for a retry: "The AI can't answer right now." on an ask-only bubble, with "You can send this to a person." added where the person button is drawn (`kaitoUnavailable` / `kaitoUnavailableToHuman`). Any other failure keeps the error line.
+
 ## Searching the site from the bubble (0.7.14, reef#2160)
 
 One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own matching posts
@@ -163,7 +165,7 @@ successful send that empties the box takes down whatever an edit made during the
   measured, tniop's 1,410 rows, max 31). Submitting collapses it too.
 - The results are a list with an accent rule, not message bubbles, so an old post is never read as
   the assistant's answer. The privacy sentence (`searchNote`, nine locales) shows once the index is
-  known to have rows:「打字時只在你的瀏覽器裡找，按下『問』才會送出。」
+  known to have rows:「打字時只在你的瀏覽器裡找，按下按鈕才會送出。」
 - 🔴 What the visitor types never leaves the page through this feature and is never recorded —
   ticket item 6 forbids query analytics of any kind. A result link is an ordinary link.
 

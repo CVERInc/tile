@@ -267,12 +267,12 @@ function matchCheckoutResultFallback(request, shops, route) {
 }
 
 const COMPLETE_COPY = {
-	'en-US': { paid: 'Thank you for your order', receipt: 'A receipt was emailed to you.', pending: 'Confirming your payment', pendingBody: 'Payment processing', waiting: "Still confirming — we'll email you the result.", canceled: 'Payment not completed', canceledBody: 'Your cart is unchanged.', refunded: 'This order was refunded', refundedBody: 'The payment for this order has been returned to you.', unknown: "We can't confirm this order here", unknownBody: 'This page appears after you complete a payment. If you paid, sign in to your account or check your confirmation email for the order, or return to the shop.', back: 'Back to the shop', order: 'Order reference', total: 'Total', tax: 'incl. tax' },
-	'ja-JP': { paid: 'ご注文ありがとうございます', receipt: '領収書をメールでお送りしました。', pending: 'お支払いを確認しています', pendingBody: 'お支払いを処理中です', waiting: 'まだ確認中です。結果はメールでお知らせします。', canceled: 'お支払いは完了していません', canceledBody: 'カートの内容はそのままです。', refunded: 'このご注文は返金されました', refundedBody: 'このご注文のお支払いは返金されています。', unknown: 'ご注文を確認できません', unknownBody: 'このページはお支払いの後に表示されます。お支払い済みの場合は、アカウントにログインするか、確認メールでご注文をご確認いただくか、ショップにお戻りください。', back: 'ショップに戻る', order: '注文番号', total: '合計', tax: '税込' },
-	'zh-TW': { paid: '感謝您的訂購', receipt: '收據已寄到您的電子郵件。', pending: '正在確認您的付款', pendingBody: '款項處理中', waiting: '仍在確認中，結果會以 email 通知。', canceled: '付款未完成', canceledBody: '購物車內容仍保留。', refunded: '這筆訂單已退款', refundedBody: '這筆訂單的款項已退還給您。', unknown: '在這裡無法確認這筆訂單', unknownBody: '這一頁會在付款完成後顯示。若您已付款，請登入帳戶或查看確認信來確認訂單，或返回商店。', back: '返回商店', order: '訂單編號', total: '合計', tax: '含稅' },
+	'en-US': { paid: 'Thank you for your order', receipt: 'A receipt was emailed to you.', pending: 'Confirming your payment', pendingBody: 'Payment processing', waiting: 'Still confirming. Check this page again later or look for the order in your account.', canceled: 'Payment not completed', canceledBody: 'Your cart is unchanged.', refunded: 'This order was refunded', refundedBody: 'The payment for this order has been returned to you.', unknown: "We can't confirm this order here", unknownBody: 'This page appears after you complete a payment. If you paid, sign in to your account or check your confirmation email for the order, or return to the shop.', back: 'Back to the shop', order: 'Order reference', total: 'Total', tax: 'incl. tax' },
+	'ja-JP': { paid: 'ご注文ありがとうございます', receipt: '領収書をメールでお送りしました。', pending: 'お支払いを確認しています', pendingBody: 'お支払いを処理中です', waiting: 'まだ確認中です。しばらくしてからこのページを開き直すか、アカウントでご注文をご確認ください。', canceled: 'お支払いは完了していません', canceledBody: 'カートの内容はそのままです。', refunded: 'このご注文は返金されました', refundedBody: 'このご注文のお支払いは返金されています。', unknown: 'ご注文を確認できません', unknownBody: 'このページはお支払いの後に表示されます。お支払い済みの場合は、アカウントにログインするか、確認メールでご注文をご確認いただくか、ショップにお戻りください。', back: 'ショップに戻る', order: '注文番号', total: '合計', tax: '税込' },
+	'zh-TW': { paid: '感謝您的訂購', receipt: '收據已寄到您的電子郵件。', pending: '正在確認您的付款', pendingBody: '款項處理中', waiting: '仍在確認中。請稍後重新開啟這一頁，或到帳戶查看訂單。', canceled: '付款未完成', canceledBody: '購物車內容仍保留。', refunded: '這筆訂單已退款', refundedBody: '這筆訂單的款項已退還給您。', unknown: '在這裡無法確認這筆訂單', unknownBody: '這一頁會在付款完成後顯示。若您已付款，請登入帳戶或查看確認信來確認訂單，或返回商店。', back: '返回商店', order: '訂單編號', total: '合計', tax: '含稅' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): added alongside zh-TW, not derived from it — see
 	// square-shop.js's own zh-CN row for why (wording, not just glyphs, differs).
-	'zh-CN': { paid: '感谢您的订购', receipt: '收据已寄到您的电子邮件。', pending: '正在确认您的付款', pendingBody: '款项处理中', waiting: '仍在确认中，结果会以 email 通知。', canceled: '付款未完成', canceledBody: '购物车内容仍保留。', refunded: '这笔订单已退款', refundedBody: '这笔订单的款项已退还给您。', unknown: '在这里无法确认这笔订单', unknownBody: '这一页会在付款完成后显示。若您已付款，请登录账户或查看确认信来确认订单，或返回商店。', back: '返回商店', order: '订单编号', total: '合计', tax: '含税' }
+	'zh-CN': { paid: '感谢您的订购', receipt: '收据已寄到您的电子邮件。', pending: '正在确认您的付款', pendingBody: '款项处理中', waiting: '仍在确认中。请稍后重新打开这一页，或到账户查看订单。', canceled: '付款未完成', canceledBody: '购物车内容仍保留。', refunded: '这笔订单已退款', refundedBody: '这笔订单的款项已退还给您。', unknown: '在这里无法确认这笔订单', unknownBody: '这一页会在付款完成后显示。若您已付款，请登录账户或查看确认信来确认订单，或返回商店。', back: '返回商店', order: '订单编号', total: '合计', tax: '含税' }
 };
 
 // What the donor shell DECLARES its language to be — the site's own build-owned
@@ -447,8 +447,136 @@ function settleCartAfterOrder(ls, cartKey, soldKey) {
 	if (soldKey) ls.removeItem(soldKey);
 }
 
-function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref) {
-	const data = JSON.stringify({ copy, locale, outcomeUrl, shopPath, storeId, ref: ref || '' }).replace(/</g, '\\u003c');
+// ─── ECPAY ORDER RESULT ───────────────────────────────────────────────────────
+// What the result page adds for an ECPay order. RSP's outcome answer for such an order carries,
+// beside the summary, the buyer's view of its documents — `invoice: {state, invoice_no,
+// allowance_total}` or `receipt: {state, receipt_no}` — and, where RSP sends one, a parcel as
+// `shipment: {state, sub_type, tracking_number}` (the buyer order list's own shape). Nothing else:
+// no address, phone, carrier, tax id or donation code exists in that answer, so none can show.
+//
+// Three views, chosen from facts only:
+//  · just paid — a paid ECPay order whose page was reached from ECPay's return (`merchant_trade_no`
+//    on the URL) or from this tab's own in-page checkout (the sessionStorage note it left);
+//  · cash on delivery placed — RSP's `awaiting_collection` state, or, where RSP still answers
+//    `pending`, the in-page checkout's own note (order id, method, the total it showed);
+//  · by link — a paid ECPay order opened any other way, typically the confirmation email's link.
+// An outcome with none of these facts renders exactly as before.
+
+const ECPAY_RESULT_COPY = {
+	'en-US': { shipArrived: 'At the store', shipPickedUp: 'Picked up', shipDelivered: 'Delivered', shipReturned: 'Returned to the shop', discount: 'Discount', codDue: 'Due on pickup · {total}', paid: 'Payment complete', cod: 'Order placed — pay on pickup', guest: 'Order {ref}', guestNote: 'Viewed from the link in your confirmation email.', fee: 'Shipping', feeVia: 'Shipping · {method}', free: 'Free', codTotal: 'Due on pickup', paidAmount: 'Paid · {total}', invoiceNo: 'E-invoice {no}', invoice: 'E-invoice', receiptNo: 'Receipt {no}', receipt: 'Receipt', issued: 'Issued.', issuing: 'Being issued.', later: 'Issued after payment.', codLater: 'Issued once you pay on pickup.', held: 'Not issued yet; the shop is handling it.', voided: 'Voided.', allowance: '{amount} credited.', shipPreparing: 'Preparing your order', shipAwaiting: 'Waiting to ship', shipBooked: 'Handed to the carrier', shipCancelled: 'Shipment cancelled', shipNote: '{method} · You get an email when it ships.', shipNoteCvs: '{method} · You get an email when it reaches the store.', codNoteCvs: '{method} · Collect and pay at the store before the pickup deadline, or the parcel goes back and the order is cancelled.', codNoteHome: '{method} · Pay when it is delivered.', tracking: 'Tracking number {no}', mailSent: 'A confirmation email is on its way.', guestCardBody: 'Recipient and contact details are only in your confirmation email and your signed-in account.' },
+	'ja-JP': { shipArrived: '店舗に到着', shipPickedUp: '受け取り済み', shipDelivered: '配達済み', shipReturned: 'ショップに返送', discount: '割引', codDue: '受け取り時のお支払い · {total}', paid: 'お支払いが完了しました', cod: 'ご注文を承りました（受け取り時払い）', guest: 'ご注文 {ref}', guestNote: '確認メールのリンクから表示しています。', fee: '送料', feeVia: '送料 · {method}', free: '無料', codTotal: '受け取り時のお支払い', paidAmount: 'お支払い済み · {total}', invoiceNo: '電子発票 {no}', invoice: '電子発票', receiptNo: '領収書 {no}', receipt: '領収書', issued: '発行済みです。', issuing: '発行手続き中です。', later: 'お支払い後に発行されます。', codLater: '受け取り時のお支払い後に発行されます。', held: 'まだ発行されていません。ショップが対応しています。', voided: '取り消されました。', allowance: '{amount} を返金処理しました。', shipPreparing: '出荷準備中', shipAwaiting: '出荷待ち', shipBooked: '配送業者に引き渡し済み', shipCancelled: '配送は取り消されました', shipNote: '{method} · 出荷したらメールでお知らせします。', shipNoteCvs: '{method} · 店舗に届いたらメールでお知らせします。', codNoteCvs: '{method} · 受け取り期限までに店舗でお支払いのうえお受け取りください。期限を過ぎると返送され、ご注文は取り消されます。', codNoteHome: '{method} · 配達時にお支払いください。', tracking: '追跡番号 {no}', mailSent: '確認メールをお送りします。', guestCardBody: '受取人と連絡先は、確認メールとログイン後のアカウントページでのみご確認いただけます。' },
+	'zh-TW': { shipArrived: '已到店', shipPickedUp: '已取貨', shipDelivered: '已送達', shipReturned: '已退回', discount: '折扣', codDue: '取貨時付 · {total}', paid: '付款完成', cod: '訂單成立，取貨時付款', guest: '訂單 {ref}', guestNote: '用確認信裡的連結查看。', fee: '運費', feeVia: '運費 · {method}', free: '免運費', codTotal: '取貨時付', paidAmount: '已付款 · {total}', invoiceNo: '電子發票 {no}', invoice: '電子發票', receiptNo: '收據 {no}', receipt: '收據', issued: '已開立。', issuing: '開立中。', later: '付款後開立。', codLater: '取貨付款後開立。', held: '尚未開立，商店處理中。', voided: '已作廢。', allowance: '已折讓 {amount}。', shipPreparing: '準備出貨', shipAwaiting: '等待出貨', shipBooked: '已交給物流', shipCancelled: '出貨已取消', shipNote: '{method} · 出貨後會寄信通知。', shipNoteCvs: '{method} · 到店後會寄信通知。', codNoteCvs: '{method} · 到店後請在期限內取貨付款，逾期退回、訂單取消。', codNoteHome: '{method} · 送達時付款。', tracking: '物流單號 {no}', mailSent: '確認信會寄到你填的電子郵件。', guestCardBody: '收件人與聯絡資料只在確認信和登入後的帳號頁。' },
+	'zh-CN': { shipArrived: '已到店', shipPickedUp: '已取货', shipDelivered: '已送达', shipReturned: '已退回', discount: '折扣', codDue: '取货时付 · {total}', paid: '付款完成', cod: '订单已提交，取货时付款', guest: '订单 {ref}', guestNote: '通过确认信里的链接查看。', fee: '运费', feeVia: '运费 · {method}', free: '免运费', codTotal: '取货时付', paidAmount: '已付款 · {total}', invoiceNo: '电子发票 {no}', invoice: '电子发票', receiptNo: '收据 {no}', receipt: '收据', issued: '已开具。', issuing: '开具中。', later: '付款后开具。', codLater: '取货付款后开具。', held: '尚未开具，商店处理中。', voided: '已作废。', allowance: '已折让 {amount}。', shipPreparing: '准备发货', shipAwaiting: '等待发货', shipBooked: '已交给物流', shipCancelled: '发货已取消', shipNote: '{method} · 发货后会发邮件通知。', shipNoteCvs: '{method} · 到店后会发邮件通知。', codNoteCvs: '{method} · 到店后请在期限内取货付款，逾期退回、订单取消。', codNoteHome: '{method} · 送达时付款。', tracking: '物流单号 {no}', mailSent: '确认信会发到你填写的电子邮箱。', guestCardBody: '收件人与联系信息只在确认信和登录后的账户页。' }
+};
+
+// The browser half, serialised into the completion script. `B` is this tab's in-page checkout
+// note for the ref (or null); the rest are the completion script's own helpers. Returns true when
+// it rendered, false to leave the outcome to the existing views.
+function ecpayResultView(C, d, B, esc, money, setHeading, root) {
+	const E = C.e;
+	if (!E || !d) return false;
+	const fill = (t, k, v) => String(t).split('{' + k + '}').join(v);
+	const method = (sub) => (C.subtypes && sub && C.subtypes[sub]) || '';
+	const status = (tone, title, note) => '<div class="st-status st-status-' + tone + '"><span class="st-status-ico" aria-hidden="true"></span><div><strong>' + esc(title) + '</strong>' + (note ? '<p class="st-note">' + note + '</p>' : '') + '</div></div>';
+	// A line may name its kind: 'fee' (shipping) and 'discount' lines go to the total block, the rest
+	// are the goods. Lines without a kind are goods, as before.
+	const allLines = Array.isArray(d.lines) ? d.lines.filter((x) => x && typeof x === 'object') : (B && Array.isArray(B.lines) ? B.lines : []);
+	const kindOf = (x) => (x && (x.kind === 'fee' || x.kind === 'discount') ? x.kind : 'item');
+	const lines = (cur) => {
+		const list = allLines.filter((x) => kindOf(x) === 'item');
+		return list.length ? '<ul class="st-list st-lines">' + list.map((x) => '<li><span>' + esc(x.name) + '<span class="st-q">× ' + esc(x.qty) + '</span></span><span>' + esc(money(x.amount_minor, cur)) + '</span></li>').join('') + '</ul>' : '';
+	};
+	const discountRows = (cur) => allLines.filter((x) => kindOf(x) === 'discount').map((x) => '<div><span>' + esc(x.name || E.discount) + '</span><span>−' + esc(money(Math.abs(Number(x.amount_minor) || 0), cur)) + '</span></div>').join('');
+	const feeRow = (cur) => {
+		const fees = allLines.filter((x) => kindOf(x) === 'fee');
+		if (fees.length) {
+			const via = method((d.shipment && d.shipment.sub_type) || (B && B.sub_type));
+			return fees.map((x) => { const f = Number(x.amount_minor) || 0; return '<div><span>' + esc(via ? fill(E.feeVia, 'method', via) : (x.name || E.fee)) + '</span><span>' + esc(f ? money(f, cur) : E.free) + '</span></div>'; }).join('') + discountRows(cur);
+		}
+		if (!B || !Number.isFinite(Number(B.fee_minor))) return discountRows(cur);
+		const via = method(B.sub_type);
+		const f = Number(B.fee_minor);
+		return '<div><span>' + esc(via ? fill(E.feeVia, 'method', via) : E.fee) + '</span><span>' + esc(f ? money(f, cur) : E.free) + '</span></div>' + discountRows(cur);
+	};
+	const order = () => (d.order_ref || (B && B.order_id)) ? '<p>' + esc(C.copy.order) + ' <strong>' + esc(d.order_ref || B.order_id) + '</strong></p>' : '';
+	function documentStatus(cod) {
+		const inv = d.invoice && typeof d.invoice === 'object' ? d.invoice : null;
+		const rec = d.receipt && typeof d.receipt === 'object' ? d.receipt : null;
+		if (inv) {
+			const no = typeof inv.invoice_no === 'string' && inv.invoice_no ? inv.invoice_no : '';
+			const credited = Number(inv.allowance_total) > 0 ? ' ' + esc(fill(E.allowance, 'amount', money(inv.allowance_total, d.currency))) : '';
+			if (inv.state === 'issued') return status('ok', no ? fill(E.invoiceNo, 'no', no) : E.invoice, esc(E.issued) + credited);
+			if (inv.state === 'voided') return status('bad', no ? fill(E.invoiceNo, 'no', no) : E.invoice, esc(E.voided));
+			if (inv.state === 'intended' || inv.state === 'pending') return status('pend', E.invoice, esc(inv.state === 'pending' ? E.issuing : (cod ? E.codLater : E.later)));
+			if (inv.state === 'failed') return status('wait', E.invoice, esc(E.held));
+			return '';
+		}
+		if (rec) {
+			const no = typeof rec.receipt_no === 'string' && rec.receipt_no ? rec.receipt_no : '';
+			if (rec.state === 'issued') return status('ok', no ? fill(E.receiptNo, 'no', no) : E.receipt, esc(E.issued));
+			if (rec.state === 'voided') return status('bad', no ? fill(E.receiptNo, 'no', no) : E.receipt, esc(E.voided));
+			if (rec.state === 'pending') return status('pend', E.receipt, esc(E.issuing));
+			if (rec.state === 'failed') return status('wait', E.receipt, esc(E.held));
+			return '';
+		}
+		if (cod && B && B.invoice) return status('pend', E.invoice, esc(E.codLater));
+		return '';
+	}
+	function shipmentStatus() {
+		const s = d.shipment && typeof d.shipment === 'object' ? d.shipment : null;
+		const sub = (s && s.sub_type) || (B && B.sub_type) || '';
+		const via = method(sub);
+		const cvs = (B && B.logistics_type === 'CVS') || /^(UNIMART|FAMI|HILIFE|OKMART)/.test(sub);
+		const note = via ? esc(fill(cvs ? E.shipNoteCvs : E.shipNote, 'method', via)) : '';
+		if (s) {
+			const track = typeof s.tracking_number === 'string' && s.tracking_number ? esc(fill(E.tracking, 'no', s.tracking_number)) : '';
+			const both = [via ? esc(via) : '', track].filter(Boolean).join(' · ');
+			if (s.state === 'booked') return status('ok', E.shipBooked, both);
+			if (s.state === 'arrived') return status('ok', E.shipArrived, both);
+			if (s.state === 'picked_up') return status('ok', E.shipPickedUp, both);
+			if (s.state === 'delivered') return status('ok', E.shipDelivered, both);
+			if (s.state === 'returned') return status('bad', E.shipReturned, both);
+			if (s.state === 'cancelled') return status('bad', E.shipCancelled, both);
+			return status('wait', E.shipPreparing, note);
+		}
+		return B ? status('wait', E.shipPreparing, note) : '';
+	}
+	const list = (parts) => { const html = parts.filter(Boolean).join(''); return html ? '<div class="st-status-list">' + html + '</div>' : ''; };
+	const back = '<p><a class="st-runtime-action" href="' + esc(C.shopPath) + '">' + esc(C.copy.back) + '</a></p>';
+
+	// Cash on delivery: RSP's own `awaiting_collection` state, or this tab's note on a `pending` one.
+	const codServer = d.state === 'awaiting_collection';
+	if (codServer || (d.state === 'pending' && B && B.cod === true)) {
+		const cur = d.currency || (B && B.currency);
+		const due = Number.isFinite(Number(d.total_minor)) && d.total_minor != null ? d.total_minor : (B ? B.total_minor : 0);
+		const sub = (d.shipment && d.shipment.sub_type) || (B && B.sub_type) || '';
+		const via = method(sub);
+		const home = (B && B.logistics_type === 'HOME') || /^(TCAT|POST)$/.test(sub);
+		const note = via ? esc(fill(home ? E.codNoteHome : E.codNoteCvs, 'method', via)) : '';
+		const parcel = d.shipment && typeof d.shipment === 'object' && d.shipment.state !== 'pending' ? shipmentStatus() : status('wait', E.shipAwaiting, note);
+		if (!B && codServer) {
+			setHeading(fill(E.guest, 'ref', d.order_ref || ''));
+			root.innerHTML = '<p class="st-note">' + esc(E.guestNote) + '</p>' + list([status('wait', fill(E.codDue, 'total', money(due, cur)), ''), documentStatus(true), parcel]) + '<div class="st-cell st-guest-note"><p class="st-note">' + esc(E.guestCardBody) + '</p></div>';
+			return true;
+		}
+		setHeading(E.cod);
+		root.innerHTML = lines(cur) + '<div class="st-sum">' + feeRow(cur) + '<div class="st-sum-tot"><span>' + esc(E.codTotal) + '</span><span>' + esc(money(due, cur)) + '</span></div></div>' + order() + list([parcel, documentStatus(true)]) + '<p class="st-note">' + esc(E.mailSent) + '</p>' + back;
+		return true;
+	}
+	const docs = !!(d.invoice || d.receipt || d.shipment);
+	if (d.state !== 'paid' || !(B || docs)) return false;
+	if (B || C.returned) {
+		setHeading(E.paid);
+		root.innerHTML = lines(d.currency) + '<div class="st-sum">' + feeRow(d.currency) + '<div class="st-sum-tot"><span>' + esc(C.copy.total) + '</span><span>' + esc(money(d.total_minor, d.currency)) + '</span></div></div>' + order() + list([documentStatus(false), shipmentStatus()]) + '<p class="st-note">' + esc(E.mailSent) + '</p>' + back;
+		return true;
+	}
+	setHeading(fill(E.guest, 'ref', d.order_ref || ''));
+	root.innerHTML = '<p class="st-note">' + esc(E.guestNote) + '</p>' + list([status('ok', fill(E.paidAmount, 'total', money(d.total_minor, d.currency)), ''), documentStatus(false), shipmentStatus()]) + '<div class="st-cell st-guest-note"><p class="st-note">' + esc(E.guestCardBody) + '</p></div>';
+	return true;
+}
+
+function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref, ecpay) {
+	const data = JSON.stringify(Object.assign({ copy, locale, outcomeUrl, shopPath, storeId, ref: ref || '' }, ecpay || {})).replace(/</g, '\\u003c');
 	const initial = hasRef ? { heading: copy.pending, body: copy.pendingBody } : { heading: copy.unknown, body: copy.unknownBody };
 	const backLink = hasRef ? '' : `<p><a class="st-runtime-action" href="${shopPath}">${copy.back}</a></p>`;
 	// 🔴 This page's presentation now lives in site.css's `@layer reef.base` ("runtime:
@@ -460,7 +588,7 @@ function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref
 <h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
 </div>
-${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(C.outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}const summary=()=>{const lines=Array.isArray(d.lines)?d.lines:[];return(lines.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
+${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const ecpayResultView=${ecpayResultView.toString()};let B=null;try{const ss=window.sessionStorage;B=ss&&C.ref?JSON.parse(ss.getItem('dc-native-ecpay:'+C.ref)||'null'):null}catch(e){B=null}if(!B||typeof B!=='object'||typeof B.order_id!=='string'||!B.order_id)B=null;const outcomeUrl=B?C.outcomeUrl.replace(/([?&]ref=)[^&]*/,'$1'+encodeURIComponent(B.order_id)):C.outcomeUrl;const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(ecpayResultView(C,d,B,esc,money,setHeading,root)){if(shouldClearCartForOutcome(d.state)){try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}}return}const summary=()=>{const lines=Array.isArray(d.lines)?d.lines.filter(x=>!(x&&(x.kind==='fee'||x.kind==='discount'))):[];return(lines.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
 }
 
 async function renderCompletion(request, env, cfg, shop, checkoutResult) {
@@ -502,13 +630,19 @@ async function renderCompletion(request, env, cfg, shop, checkoutResult) {
 	// Opt in to the extended state set (`refunded`). An RSP that predates it ignores the marker and
 	// answers the legacy set, which this client still renders.
 	outcome.searchParams.set('states', 'extended');
+	// Ask for a native order's discount and delivery fee as `kind` lines on the paid and refunded
+	// answers too (the ECPay views put them in the total block). An RSP that predates it ignores
+	// the parameter; the summary view below leaves `kind` lines out, so it reads as before.
+	outcome.searchParams.set('lines', 'full');
 	let body = stripDonorHead(renderedShell);
 	const initialHeading = hasOutcomeKey ? copy.pending : copy.unknown;
 	body = injectHead(body, `<title>${initialHeading}</title><meta name="robots" content="noindex">`);
 	// 🔴 `ref` and NOT `orderId`: the sold-lines record the coral writes is keyed by the
 	// client_request_ref it minted, so a native-checkout return (which names a PROVIDER order id
 	// instead) finds no record and clears the whole basket, as it always has.
-	body = replaceMain(body, completionBody(copy, locale, outcome.pathname + outcome.search, shellShopPath, cfg.guildId || cfg.siteId || '', hasOutcomeKey, ref));
+	// The ECPay views (ecpayResultView above) read their copy from here and whether ECPay's own
+	// return brought the buyer: its order-result hop adds `merchant_trade_no` to the back URL.
+	body = replaceMain(body, completionBody(copy, locale, outcome.pathname + outcome.search, shellShopPath, cfg.guildId || cfg.siteId || '', hasOutcomeKey, ref, { e: ECPAY_RESULT_COPY[locale], subtypes: NATIVE_ECPAY_SUBTYPES[locale], returned: url.searchParams.has('merchant_trade_no') }));
 	return new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' } });
 }
 
@@ -1192,6 +1326,11 @@ function nativePreviewNotice(copy, preview) {
 	return preview === 'test' ? `<p class="st-runtime-status">${escHtml(copy.previewTest)}</p>` : '';
 }
 
+// The form-post launcher both native checkout scripts share, as source text: the ECPay origin
+// allowlist `T` must be in scope where it is interpolated. Lifted verbatim out of
+// nativeCheckoutScript, so that script's emitted bytes are unchanged.
+const NATIVE_FORM_POST_SOURCE = `function post(fp){const a=fp.action,f=fp.fields;if(typeof a!=='string'||!a||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(a))return false;let u;try{u=new URL(a)}catch(e){return false}if(u.protocol!=='https:'||u.username||u.password||T.indexOf(u.origin)<0)return false;if(!f||typeof f!=='object'||Array.isArray(f))return false;const names=Object.keys(f);if(!names.length||names.length>64)return false;let total=0;for(let i=0;i<names.length;i++){const n=names[i],v=f[n];if(n.length>64||!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(n)||typeof v!=='string'||v.length>8192||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(v))return false;total+=n.length+v.length;if(total>32768)return false}if(!document.createElement)return false;const host=document.body||document.documentElement;if(!host||!host.appendChild)return false;const form=document.createElement('form');const submit=form.submit,add=form.appendChild,drop=form.remove;if(typeof submit!=='function'||typeof add!=='function')return false;for(let i=0;i<names.length;i++){if(names[i] in form||names[i].toLowerCase() in form)return false}form.method='POST';form.action=a;if(form.setAttribute)form.setAttribute('hidden','');for(let i=0;i<names.length;i++){const input=document.createElement('input');input.type='hidden';input.name=names[i];input.value=f[names[i]];add.call(form,input)}host.appendChild(form);let sent=false;try{submit.call(form);sent=true}catch(e){sent=false}finally{if(typeof drop==='function')drop.call(form);else if(host.removeChild)host.removeChild(form)}return sent}`;
+
 // The non-2xx BODY is read BEFORE the failure is classified, because only one exact pair earns
 // the conflict sentence: 409 with {error:"checkout_attempt_conflict"}, the stable code RSP
 // returns when a checkout attempt is already open for this cart. Anything else — a different
@@ -1230,10 +1369,419 @@ function nativeCheckoutScript(copy, preview, rail, choice) {
 	const lock = choice ? "const radios=parent&&parent.querySelectorAll?parent.querySelectorAll('[data-native-rail-choice]'):[];for(let i=0;i<radios.length;i++)radios[i].disabled=true;" : '';
 	const unlockOpen = choice ? '{' : '';
 	const unlockClose = choice ? 'for(let i=0;i<radios.length;i++)radios[i].disabled=false;}' : '';
-	return `<script>(function(){const C=${strings};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}function post(fp){const a=fp.action,f=fp.fields;if(typeof a!=='string'||!a||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(a))return false;let u;try{u=new URL(a)}catch(e){return false}if(u.protocol!=='https:'||u.username||u.password||T.indexOf(u.origin)<0)return false;if(!f||typeof f!=='object'||Array.isArray(f))return false;const names=Object.keys(f);if(!names.length||names.length>64)return false;let total=0;for(let i=0;i<names.length;i++){const n=names[i],v=f[n];if(n.length>64||!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(n)||typeof v!=='string'||v.length>8192||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(v))return false;total+=n.length+v.length;if(total>32768)return false}if(!document.createElement)return false;const host=document.body||document.documentElement;if(!host||!host.appendChild)return false;const form=document.createElement('form');const submit=form.submit,add=form.appendChild,drop=form.remove;if(typeof submit!=='function'||typeof add!=='function')return false;for(let i=0;i<names.length;i++){if(names[i] in form||names[i].toLowerCase() in form)return false}form.method='POST';form.action=a;if(form.setAttribute)form.setAttribute('hidden','');for(let i=0;i<names.length;i++){const input=document.createElement('input');input.type='hidden';input.name=names[i];input.value=f[names[i]];add.call(form,input)}host.appendChild(form);let sent=false;try{submit.call(form);sent=true}catch(e){sent=false}finally{if(typeof drop==='function')drop.call(form);else if(host.removeChild)host.removeChild(form)}return sent}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;${lock}let conflict=false;let currencyRefused=false;let emailCode='';${pv.decl}try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();${bodyBuilder}const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';${pv.detect}throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused${pv.keep})${unlockOpen}button.disabled=false;${unlockClose}if(status){status.textContent=emailMsg?emailMsg:${pv.text}currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>`;
+	return `<script>(function(){const C=${strings};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}${NATIVE_FORM_POST_SOURCE}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;${lock}let conflict=false;let currencyRefused=false;let emailCode='';${pv.decl}try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();${bodyBuilder}const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';${pv.detect}throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused${pv.keep})${unlockOpen}button.disabled=false;${unlockClose}if(status){status.textContent=emailMsg?emailMsg:${pv.text}currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>`;
 }
 
-function nativeProductBody(item, shop, copy, locale, preview) {
+// ─── NATIVE ECPAY CHECKOUT (in-page) ──────────────────────────────────────────
+// A product that ships, priced in TWD, on a Site whose ECPay logistics answer with at least one
+// delivery method gets its checkout expanded IN the page when the buyer presses Buy: delivery
+// method with its fee, the convenience-store map round trip, recipient, invoice choice, payment
+// (cash on delivery where the method allows it) and the total, then RSP's dedicated ECPay door
+// (POST /api/v2/ecpay/checkout). Field names are RSP's own:
+//   GET  /api/v2/ecpay/logistics/delivery-options?site_id=&items_minor=
+//        → {ok, currency, options:[{sub_type, logistics_type, fee_minor, free_threshold_minor, cod_available}]}
+//   POST /api/v2/ecpay/logistics/store-map {site_id, sub_type, client_back_url, device, cash_on_delivery?}
+//        → {ok, form_post}; ECPay's answer returns to client_back_url with `?store_ref=`
+//   POST /api/v2/ecpay/checkout {site_id, items, client_request_ref, client_back_url, logistics,
+//        customer_email, invoice?, payment?} → {order_id, form_post} | {order_id, cash_on_delivery:true}
+//
+// Everything else keeps today's flow byte for byte: any other product renders exactly as before,
+// and a Site whose delivery-options read answers no method hands the very same click to the
+// existing native checkout script (the control is re-marked `data-native-sku` and clicked again).
+//
+// The server mints this door's order id, so the result page cannot be named by it in advance.
+// The script keeps the order id (and, for cash on delivery, the figures it showed) in
+// sessionStorage under the client_request_ref the back URL carries; the completion page reads it
+// back for this tab only. The draft kept across the store-map round trip holds the delivery
+// method, recipient name and phone, email and the invoice CHOICE — never a carrier number,
+// donation code or tax id — stays in this tab's sessionStorage and is removed when the order is sent.
+
+const NATIVE_ECPAY_SUBTYPES = {
+	'en-US': { UNIMART: '7-Eleven pickup', UNIMARTC2C: '7-Eleven pickup', UNIMARTFREEZE: '7-Eleven frozen pickup', FAMI: 'FamilyMart pickup', FAMIC2C: 'FamilyMart pickup', HILIFE: 'Hi-Life pickup', HILIFEC2C: 'Hi-Life pickup', OKMARTC2C: 'OK Mart pickup', TCAT: 'T-Cat home delivery', POST: 'Chunghwa Post home delivery' },
+	'ja-JP': { UNIMART: 'セブン-イレブン受け取り', UNIMARTC2C: 'セブン-イレブン受け取り', UNIMARTFREEZE: 'セブン-イレブン冷凍受け取り', FAMI: 'ファミリーマート受け取り', FAMIC2C: 'ファミリーマート受け取り', HILIFE: 'ハイライフ受け取り', HILIFEC2C: 'ハイライフ受け取り', OKMARTC2C: 'OKマート受け取り', TCAT: 'ヤマト宅配便', POST: '中華郵政宅配' },
+	'zh-TW': { UNIMART: '7-ELEVEN 取貨', UNIMARTC2C: '7-ELEVEN 取貨', UNIMARTFREEZE: '7-ELEVEN 冷凍取貨', FAMI: '全家取貨', FAMIC2C: '全家取貨', HILIFE: '萊爾富取貨', HILIFEC2C: '萊爾富取貨', OKMARTC2C: 'OK 超商取貨', TCAT: '黑貓宅配', POST: '中華郵政宅配' },
+	'zh-CN': { UNIMART: '7-ELEVEN 取货', UNIMARTC2C: '7-ELEVEN 取货', UNIMARTFREEZE: '7-ELEVEN 冷冻取货', FAMI: '全家取货', FAMIC2C: '全家取货', HILIFE: '莱尔富取货', HILIFEC2C: '莱尔富取货', OKMARTC2C: 'OK 超商取货', TCAT: '黑猫宅配', POST: '中华邮政宅配' }
+};
+
+const NATIVE_ECPAY_COPY = {
+	'en-US': { ship: 'Delivery', recipient: 'Recipient', name: 'Name', phone: 'Mobile phone', address: 'Address', postal: 'Postal code (optional)', pay: 'Payment', card: 'Credit card (ECPay)', cod: 'Pay on pickup', codCvs: 'Pay {total} when you collect it at the store.', codHome: 'Pay {total} on delivery.', invoice: 'E-invoice', invEcpay: 'Keep in my ECPay member carrier', invMobile: 'Mobile barcode', invDonate: 'Donate', invTaxId: 'Company tax ID', invCitizen: 'Citizen digital certificate', citizenCode: 'Certificate number', invPaper: 'Paper invoice', invPaperNote: 'Sent with the parcel.', mobileCode: 'Mobile barcode (starts with /, 8 characters)', loveCode: 'Donation code', taxId: 'Tax ID number', company: 'Company name', companyAddress: 'Company address', subtotal: 'Subtotal', fee: 'Shipping', total: 'Total', free: 'Free', threshold: 'Free over {amount}', storePick: 'Choose a store', storePickNote: 'On the ECPay store map', storeChosen: 'Store selected', storeChosenNote: 'Your confirmation email names the store.', storeChange: 'Change store', submitCard: 'Continue to payment', submitCod: 'Place order', noteCard: 'You will pay on the ECPay payment page.', noteCod: 'Nothing is charged now; you pay on pickup.', errName: 'Enter the recipient’s name.', errPhone: 'Enter the recipient’s mobile phone.', errPhoneBad: 'This phone number does not look right.', errStore: 'Choose a store first.', errStoreStale: 'That store selection has expired. Please choose the store again.', errAddress: 'Enter the delivery address.', errPostal: 'This postal code does not look right.', errMobile: 'Enter the mobile barcode (/ followed by 7 characters).', errLove: 'Enter a donation code of 3 to 7 digits.', errLoveUnknown: 'This donation code was not found.', errLoveUnverifiable: 'The donation code cannot be checked right now. Please choose another option.', errTaxId: 'Enter the 8-digit tax ID number.', errCompany: 'Enter the company name.', errCompanyAddress: 'Enter the company address.', errCitizen: 'Enter the certificate number (2 letters followed by 14 digits).', errPaperName: 'Enter the name for the invoice.', errPaperAddress: 'Enter the address for the invoice.', errMethod: 'This delivery method is not available right now. Please choose another.', errCod: 'This order cannot be paid on pickup. Please pay by card.', invNotOffered: 'This shop does not issue e-invoices, so that choice was skipped.', storeMapError: 'The store map could not be opened. Please try again.' },
+	'ja-JP': { ship: '配送方法', recipient: '受取人', name: '氏名', phone: '携帯電話', address: '住所', postal: '郵便番号（任意）', pay: 'お支払い方法', card: 'クレジットカード（ECPay）', cod: '受け取り時払い', codCvs: '店舗での受け取り時に {total} をお支払いください。', codHome: '配達時に {total} をお支払いください。', invoice: '電子発票', invEcpay: 'ECPay 会員キャリアに保存', invMobile: 'モバイルバーコード', invDonate: '寄付', invTaxId: '統一編号（法人）', invCitizen: '自然人証明書', citizenCode: '証明書番号', invPaper: '紙の発票', invPaperNote: '商品に同梱します。', mobileCode: 'モバイルバーコード（/ から始まる 8 文字）', loveCode: '寄付コード', taxId: '統一編号', company: '会社名', companyAddress: '会社住所', subtotal: '小計', fee: '送料', total: '合計', free: '送料無料', threshold: '{amount} 以上で送料無料', storePick: '店舗を選ぶ', storePickNote: 'ECPay の店舗マップで選択', storeChosen: '店舗を選択済み', storeChosenNote: '確認メールに店舗が記載されます。', storeChange: '店舗を変更', submitCard: 'お支払いへ進む', submitCod: '注文を確定する', noteCard: 'ECPay のお支払いページに移動します。', noteCod: '今は請求されません。受け取り時にお支払いください。', errName: '受取人の氏名を入力してください。', errPhone: '受取人の携帯電話を入力してください。', errPhoneBad: '電話番号の形式が正しくありません。', errStore: '先に店舗を選んでください。', errStoreStale: '店舗の選択が無効になりました。もう一度選んでください。', errAddress: '住所を入力してください。', errPostal: '郵便番号の形式が正しくありません。', errMobile: 'モバイルバーコード（/ に続く 7 文字）を入力してください。', errLove: '3〜7 桁の寄付コードを入力してください。', errLoveUnknown: 'この寄付コードは見つかりません。', errLoveUnverifiable: '寄付コードを確認できません。別の方法を選んでください。', errTaxId: '8 桁の統一編号を入力してください。', errCompany: '会社名を入力してください。', errCompanyAddress: '会社住所を入力してください。', errCitizen: '証明書番号（英字 2 文字と数字 14 桁）を入力してください。', errPaperName: '発票の宛名を入力してください。', errPaperAddress: '発票の住所を入力してください。', errMethod: 'この配送方法は現在ご利用いただけません。別の方法を選んでください。', errCod: 'このご注文は受け取り時払いにできません。カードでお支払いください。', invNotOffered: 'このショップは電子発票を発行しないため、この項目は省略しました。', storeMapError: '店舗マップを開けませんでした。もう一度お試しください。' },
+	'zh-TW': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手機', address: '地址', postal: '郵遞區號（選填）', pay: '付款方式', card: '信用卡（綠界）', cod: '取貨付款', codCvs: '到店取貨時付 {total}。', codHome: '送達時付 {total}。', invoice: '電子發票', invEcpay: '存在綠界會員載具', invMobile: '手機條碼', invDonate: '捐贈', invTaxId: '公司統編', invCitizen: '自然人憑證', citizenCode: '憑證號碼', invPaper: '紙本發票', invPaperNote: '隨商品寄出。', mobileCode: '手機條碼（/ 開頭共 8 碼）', loveCode: '捐贈碼', taxId: '統一編號', company: '公司抬頭', companyAddress: '公司地址', subtotal: '小計', fee: '運費', total: '合計', free: '免運費', threshold: '滿 {amount} 免運', storePick: '選門市', storePickNote: '到綠界地圖選', storeChosen: '已選門市', storeChosenNote: '確認信會寫明取貨門市。', storeChange: '換門市', submitCard: '前往付款', submitCod: '送出訂單', noteCard: '會到綠界付款頁。', noteCod: '不會先扣款；取貨時付。', errName: '請輸入收件人姓名。', errPhone: '請輸入收件人手機。', errPhoneBad: '手機號碼格式不對。', errStore: '請先選門市。', errStoreStale: '門市選擇已失效，請重新選門市。', errAddress: '請輸入地址。', errPostal: '郵遞區號格式不對。', errMobile: '請輸入手機條碼（/ 開頭共 8 碼）。', errLove: '請輸入 3 到 7 位數的捐贈碼。', errLoveUnknown: '查無這個捐贈碼。', errLoveUnverifiable: '現在無法確認捐贈碼，請改選其他方式。', errTaxId: '請輸入 8 位數的統一編號。', errCompany: '請輸入公司抬頭。', errCompanyAddress: '請輸入公司地址。', errCitizen: '請輸入憑證號碼（2 個英文字母加 14 位數字）。', errPaperName: '請輸入發票上的姓名。', errPaperAddress: '請輸入發票上的地址。', errMethod: '這個配送方式目前無法使用，請改選其他方式。', errCod: '這筆訂單無法取貨付款，請改用信用卡。', invNotOffered: '這家商店不開立電子發票，已略過這一欄。', storeMapError: '無法開啟門市地圖，請再試一次。' },
+	'zh-CN': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手机', address: '地址', postal: '邮政编码（选填）', pay: '付款方式', card: '信用卡（绿界）', cod: '取货付款', codCvs: '到店取货时付 {total}。', codHome: '送达时付 {total}。', invoice: '电子发票', invEcpay: '存在绿界会员载具', invMobile: '手机条码', invDonate: '捐赠', invTaxId: '公司统编', invCitizen: '自然人凭证', citizenCode: '凭证号码', invPaper: '纸本发票', invPaperNote: '随商品寄出。', mobileCode: '手机条码（/ 开头共 8 码）', loveCode: '捐赠码', taxId: '统一编号', company: '公司抬头', companyAddress: '公司地址', subtotal: '小计', fee: '运费', total: '合计', free: '免运费', threshold: '满 {amount} 免运', storePick: '选门店', storePickNote: '到绿界地图选', storeChosen: '已选门店', storeChosenNote: '确认信会写明取货门店。', storeChange: '换门店', submitCard: '前往付款', submitCod: '提交订单', noteCard: '会跳转到绿界付款页。', noteCod: '不会先扣款；取货时付。', errName: '请输入收件人姓名。', errPhone: '请输入收件人手机。', errPhoneBad: '手机号码格式不对。', errStore: '请先选门店。', errStoreStale: '门店选择已失效，请重新选门店。', errAddress: '请输入地址。', errPostal: '邮政编码格式不对。', errMobile: '请输入手机条码（/ 开头共 8 码）。', errLove: '请输入 3 到 7 位数的捐赠码。', errLoveUnknown: '查无这个捐赠码。', errLoveUnverifiable: '现在无法确认捐赠码，请改选其他方式。', errTaxId: '请输入 8 位数的统一编号。', errCompany: '请输入公司抬头。', errCompanyAddress: '请输入公司地址。', errCitizen: '请输入凭证号码（2 个英文字母加 14 位数字）。', errPaperName: '请输入发票上的姓名。', errPaperAddress: '请输入发票上的地址。', errMethod: '这个配送方式目前无法使用，请改选其他方式。', errCod: '这笔订单无法取货付款，请改用信用卡。', invNotOffered: '这家商店不开具电子发票，已略过这一栏。', storeMapError: '无法打开门店地图，请再试一次。' }
+};
+
+// Which ECPay pages a launched form may go to: the cashier for a payment, the store map for a
+// store choice. Both lists are exact origins, checked by the shared NATIVE_FORM_POST_SOURCE.
+const NATIVE_ECPAY_PAY_ORIGINS = ['https://payment-stage.ecpay.com.tw', 'https://payment.ecpay.com.tw'];
+const NATIVE_ECPAY_MAP_ORIGINS = ['https://logistics-stage.ecpay.com.tw', 'https://logistics.ecpay.com.tw'];
+
+// Only a purchasable, shipping, TWD product is offered the in-page checkout; the delivery-options
+// read decides the rest in the browser.
+function nativeEcpayEligible(item, mapped, refused) {
+	const copy = (item && item.copy) || {};
+	return !!mapped && !refused && !!mapped.available && !!mapped.sku && copy.requires_shipping === true &&
+		String(mapped.currency || '').toUpperCase() === 'TWD' && Number.isSafeInteger(Number(mapped.price_minor)) && Number(mapped.price_minor) > 0;
+}
+
+function nativeEcpayBuyControl(item, copy) {
+	return `<button type="button" class="dc-native-buy" data-native-ecpay-sku="${escHtml(item.sku)}">${escHtml(copy.buy)}</button>`;
+}
+
+// The browser half, serialised with toString() into the page. It may use only its arguments and
+// browser globals: C (the page's data), the two launchers and formatMoney's own source.
+function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
+	const button = document.querySelector('[data-native-ecpay-sku]');
+	const panel = document.querySelector('[data-native-ecpay-checkout]');
+	if (!button || !panel) return;
+	const L = C.labels;
+	const status = button.parentElement && button.parentElement.querySelector('[data-native-status]');
+	const money = (n) => formatMoney({ minor: Number(n) || 0, currency: C.currency, locale: C.locale });
+	const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	const fill = (t, k, v) => String(t).split('{' + k + '}').join(v);
+	const PHONE = /^\+?[0-9][0-9 ()-]{5,19}$/;
+	const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+	const DRAFT = 'dc-native-ecpay-draft:' + C.sku;
+	const KEEP = ['name', 'phone', 'address', 'postal', 'email'];
+	let ss = null;
+	try { ss = window.sessionStorage || null; } catch (e) { ss = null; }
+	const S = { ship: '', storeRef: '', pay: 'card', inv: 'carrier_ecpay', invOff: false, v: {}, err: {}, form: '', notice: '' };
+	let options = null, busy = false, fallen = false, opening = false;
+	const current = () => (options || []).find((o) => o.sub_type === S.ship) || null;
+	const fee = () => { const o = current(); return o ? Number(o.fee_minor) || 0 : 0; };
+	const total = () => C.price + fee();
+	const codAllowed = () => { const o = current(); return !!(o && o.cod_available === true); };
+	const val = (k) => String(S.v[k] == null ? '' : S.v[k]).trim();
+	const uuid = () => (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2));
+	function saveDraft() {
+		if (!ss) return;
+		const v = {};
+		for (const k of KEEP) if (S.v[k]) v[k] = S.v[k];
+		try { ss.setItem(DRAFT, JSON.stringify({ ship: S.ship, pay: S.pay, inv: S.inv, v })); } catch (e) { /* the buyer re-types */ }
+	}
+	function readDraft() {
+		if (!ss) return;
+		let d = null;
+		try { d = JSON.parse(ss.getItem(DRAFT) || 'null'); } catch (e) { d = null; }
+		if (!d || typeof d !== 'object') return;
+		if (typeof d.ship === 'string') S.ship = d.ship;
+		if (d.pay === 'cod' || d.pay === 'card') S.pay = d.pay;
+		if (['carrier_ecpay', 'mobile', 'citizen', 'donate', 'tax_id', 'paper'].indexOf(d.inv) >= 0) S.inv = d.inv;
+		if (d.v && typeof d.v === 'object') for (const k of KEEP) if (typeof d.v[k] === 'string') S.v[k] = d.v[k];
+	}
+	function dropDraft() { if (ss) try { ss.removeItem(DRAFT); } catch (e) { /* nothing kept */ } }
+	function radio(name, value, on, inner) {
+		return '<label class="st-opt' + (on ? ' st-opt-on' : '') + '"><input type="radio" name="dc-ecpay-' + name + '" value="' + esc(value) + '"' + (on ? ' checked' : '') + '>' + inner + '</label>';
+	}
+	function errLine(key) { return S.err[key] ? '<p class="st-err" id="dc-ecpay-' + key + '-err">' + esc(S.err[key]) + '</p>' : ''; }
+	function field(key, label, type, attrs) {
+		const id = 'dc-ecpay-' + key;
+		return '<div class="st-field"><label class="st-field-label" for="' + id + '">' + esc(label) + '</label><input id="' + id + '" type="' + type + '" data-ecpay-field="' + key + '" value="' + esc(S.v[key] || '') + '"' + (attrs || '') + (S.err[key] ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : '') + '>' + errLine(key) + '</div>';
+	}
+	function shipOption(o) {
+		const on = o.sub_type === S.ship;
+		const name = (C.subtypes && C.subtypes[o.sub_type]) || o.sub_type;
+		const f = Number(o.fee_minor) || 0;
+		let inner = '<span class="st-opt-t">' + esc(name) + '</span>';
+		if (o.free_threshold_minor != null) inner += '<span class="st-opt-d">' + esc(fill(L.threshold, 'amount', money(o.free_threshold_minor))) + '</span>';
+		inner += '<span class="st-opt-fee">' + esc(f ? money(f) : L.free) + '</span>';
+		if (on && o.logistics_type === 'CVS') {
+			const chosen = !!S.storeRef;
+			inner += '<div class="st-opt-sub"><div class="st-store"><div><strong>' + esc(chosen ? L.storeChosen : L.storePick) + '</strong><span class="st-note">' + esc(chosen ? L.storeChosenNote : L.storePickNote) + '</span></div><button class="st-runtime-action st-secondary" type="button" data-ecpay-store' + (busy ? ' disabled' : '') + '>' + esc(chosen ? L.storeChange : L.storePick) + '</button></div>' + errLine('store') + '</div>';
+		} else if (on) {
+			inner += '<div class="st-opt-sub">' + field('address', L.address, 'text', ' autocomplete="street-address"') + field('postal', L.postal, 'text', ' autocomplete="postal-code" inputmode="numeric"') + '</div>';
+		}
+		return radio('ship', o.sub_type, on, inner);
+	}
+	function render() {
+		const cod = S.pay === 'cod' && codAllowed();
+		const o = current();
+		let h = '<fieldset class="st-choices"><legend>' + esc(L.ship) + '</legend>' + (options || []).map(shipOption).join('') + errLine('ship') + '</fieldset>';
+		h += '<fieldset class="st-choices"><legend>' + esc(L.recipient) + '</legend>' + field('name', L.name, 'text', ' autocomplete="name"') + field('phone', L.phone, 'tel', ' autocomplete="tel"') + '</fieldset>';
+		if (codAllowed()) {
+			const due = fill(o && o.logistics_type === 'HOME' ? L.codHome : L.codCvs, 'total', money(total()));
+			h += '<fieldset class="st-choices"><legend>' + esc(L.pay) + '</legend>' + radio('pay', 'card', !cod, '<span class="st-opt-t">' + esc(L.card) + '</span>') + radio('pay', 'cod', cod, '<span class="st-opt-t">' + esc(L.cod) + '</span><span class="st-opt-d">' + esc(due) + '</span>') + errLine('pay') + '</fieldset>';
+		}
+		if (!S.invOff) {
+			const sub = (kind) => {
+				if (S.inv !== kind) return '';
+				if (kind === 'mobile') return '<div class="st-opt-sub">' + field('mobile', L.mobileCode, 'text', ' autocapitalize="characters"') + '</div>';
+				if (kind === 'citizen') return '<div class="st-opt-sub">' + field('citizen', L.citizenCode, 'text', ' autocapitalize="characters"') + '</div>';
+				if (kind === 'donate') return '<div class="st-opt-sub">' + field('love', L.loveCode, 'text', ' inputmode="numeric"') + '</div>';
+				if (kind === 'tax_id') return '<div class="st-opt-sub">' + field('taxid', L.taxId, 'text', ' inputmode="numeric"') + field('company', L.company, 'text', ' autocomplete="organization"') + field('companyAddress', L.companyAddress, 'text') + '</div>';
+				if (kind === 'paper') return '<div class="st-opt-sub">' + field('paperName', L.name, 'text', ' autocomplete="name"') + field('paperAddress', L.address, 'text', ' autocomplete="street-address"') + '</div>';
+				return '';
+			};
+			const inv = (kind, label, note) => radio('inv', kind, S.inv === kind, '<span class="st-opt-t">' + esc(label) + '</span>' + (note ? '<span class="st-opt-d">' + esc(note) + '</span>' : '') + sub(kind));
+			// Every standard buyer choice; the paper invoice travels in the parcel, and this checkout only exists for goods that ship.
+			h += '<fieldset class="st-choices"><legend>' + esc(L.invoice) + '</legend>' + inv('carrier_ecpay', L.invEcpay) + inv('mobile', L.invMobile) + inv('citizen', L.invCitizen) + inv('donate', L.invDonate) + inv('tax_id', L.invTaxId) + inv('paper', L.invPaper, L.invPaperNote) + '</fieldset>';
+		}
+		h += field('email', C.emailLabel, 'email', ' autocomplete="email"');
+		if (S.notice) h += '<p class="st-note">' + esc(S.notice) + '</p>';
+		h += '<div class="st-sum">' + (cod ? '' : '<div><span>' + esc(L.subtotal) + '</span><span>' + esc(money(C.price)) + '</span></div><div><span>' + esc(L.fee) + '</span><span>' + esc(money(fee())) + '</span></div>') + '<div class="st-sum-tot"><span>' + esc(L.total) + '</span><span>' + esc(money(total())) + '</span></div></div>';
+		h += '<button class="st-runtime-action st-wide" type="button" data-ecpay-submit' + (busy ? ' disabled aria-busy="true"' : '') + '>' + esc(busy ? C.busy : (cod ? L.submitCod : L.submitCard)) + '</button>';
+		h += '<p class="st-note">' + esc(cod ? L.noteCod : L.noteCard) + '</p>';
+		h += '<p data-ecpay-status role="status" class="st-runtime-status"' + (S.form ? ' data-ejecta-status-tone="error"' : '') + '>' + esc(S.form) + '</p>';
+		panel.innerHTML = h;
+	}
+	function focusFirstError() {
+		const order = ['ship', 'store', 'address', 'postal', 'name', 'phone', 'pay', 'mobile', 'citizen', 'love', 'taxid', 'company', 'companyAddress', 'paperName', 'paperAddress', 'email'];
+		for (const k of order) {
+			if (!S.err[k]) continue;
+			const el = panel.querySelector('[data-ecpay-field="' + k + '"]') || (k === 'store' ? panel.querySelector('[data-ecpay-store]') : null);
+			if (el && el.focus) el.focus();
+			return;
+		}
+	}
+	function validate() {
+		const err = {};
+		const o = current();
+		if (!o) err.ship = L.errMethod;
+		else if (o.logistics_type === 'CVS') { if (!S.storeRef) err.store = L.errStore; }
+		else {
+			if (!val('address')) err.address = L.errAddress;
+			if (val('postal') && !/^[0-9A-Za-z][0-9A-Za-z -]{1,9}$/.test(val('postal'))) err.postal = L.errPostal;
+		}
+		if (!val('name')) err.name = L.errName;
+		if (!val('phone')) err.phone = L.errPhone;
+		else if (!PHONE.test(val('phone'))) err.phone = L.errPhoneBad;
+		if (!S.invOff) {
+			if (S.inv === 'mobile' && !/^\/[0-9A-Z+\-.]{7}$/.test(val('mobile').toUpperCase())) err.mobile = L.errMobile;
+			if (S.inv === 'citizen' && !/^[A-Z]{2}[0-9]{14}$/.test(val('citizen').toUpperCase())) err.citizen = L.errCitizen;
+			if (S.inv === 'donate' && !/^[0-9]{3,7}$/.test(val('love'))) err.love = L.errLove;
+			if (S.inv === 'tax_id') {
+				if (!/^[0-9]{8}$/.test(val('taxid'))) err.taxid = L.errTaxId;
+				if (!val('company')) err.company = L.errCompany;
+				if (!val('companyAddress')) err.companyAddress = L.errCompanyAddress;
+			}
+			if (S.inv === 'paper') {
+				if (!val('paperName') || val('paperName').length > 60) err.paperName = L.errPaperName;
+				if (!val('paperAddress') || val('paperAddress').length > 100) err.paperAddress = L.errPaperAddress;
+			}
+		}
+		if (!val('email')) err.email = C.emailRequired;
+		else if (!EMAIL.test(val('email'))) err.email = C.emailInvalid;
+		return err;
+	}
+	function invoiceBody() {
+		if (S.invOff) return null;
+		const email = val('email');
+		if (S.inv === 'mobile') return { carrier_type: '3', carrier_number: val('mobile').toUpperCase(), email };
+		if (S.inv === 'citizen') return { carrier_type: '2', carrier_number: val('citizen').toUpperCase(), email };
+		if (S.inv === 'donate') return { love_code: val('love'), email };
+		if (S.inv === 'tax_id') return { tax_id: val('taxid'), buyer_name: val('company'), buyer_address: val('companyAddress'), email };
+		if (S.inv === 'paper') return { print: true, buyer_name: val('paperName'), buyer_address: val('paperAddress'), email };
+		return { carrier_type: '1', email };
+	}
+	// One refusal → where it shows. Returns true when the same order should be sent again as is.
+	function refusal(code, r) {
+		const e = r && typeof r.error === 'string' ? r.error : '';
+		const f = r && typeof r.field === 'string' ? r.field : '';
+		const reason = r && typeof r.reason === 'string' ? r.reason : '';
+		const err = {};
+		if ((e === 'invoice_not_offered' || e === 'ecpay invoice not available') && !S.invOff) {
+			S.invOff = true;
+			S.notice = L.invNotOffered;
+			return true;
+		}
+		if (e === 'invoice_love_code_unknown') err.love = L.errLoveUnknown;
+		else if (e === 'invoice_love_code_unverifiable') err.love = L.errLoveUnverifiable;
+		else if (f.indexOf('invoice.') === 0) {
+			const paper = S.inv === 'paper';
+			const k = { carrier_number: S.inv === 'citizen' ? 'citizen' : 'mobile', love_code: 'love', tax_id: 'taxid', buyer_name: paper ? 'paperName' : 'company', buyer_address: paper ? 'paperAddress' : 'companyAddress', email: 'email' }[f.slice(8)];
+			const m = { mobile: L.errMobile, citizen: L.errCitizen, love: L.errLove, taxid: L.errTaxId, company: L.errCompany, companyAddress: L.errCompanyAddress, paperName: L.errPaperName, paperAddress: L.errPaperAddress, email: C.emailInvalid };
+			if (k) err[k] = m[k];
+		} else if (e === 'logistics_invalid') {
+			if (f === 'logistics.store_ref') err.store = reason === 'store_ref_required' ? L.errStore : L.errStoreStale;
+			else if (/^recipient_name/.test(reason)) err.name = L.errName;
+			else if (/^recipient_phone/.test(reason)) err.phone = reason === 'recipient_phone_missing' ? L.errPhone : L.errPhoneBad;
+			else if (/^recipient_address/.test(reason)) err.address = L.errAddress;
+			else if (reason === 'postal_code_malformed') err.postal = L.errPostal;
+			else err.ship = L.errMethod;
+			if (f === 'logistics.store_ref') S.storeRef = '';
+		} else if (e === 'logistics_not_opened') err.ship = L.errMethod;
+		else if (/^cod_/.test(e)) err.pay = L.errCod;
+		else if (e === 'customer_email_required') err.email = C.emailRequired;
+		else if (e === 'customer_email_invalid') err.email = C.emailInvalid;
+		else if (e === 'customer_email_conflict') err.email = C.emailConflict;
+		S.err = err;
+		if (!Object.keys(err).length) {
+			S.form = code === 409 && r && r.code === 'rail_currency_unsupported' ? C.currencyRefused
+				: code === 409 && e === 'preview_checkout_live_mode' && C.refused ? C.refused
+				: code === 409 && e === 'unavailable' ? C.outOfStock
+				: C.error;
+		}
+		return false;
+	}
+	async function submit(again) {
+		if (busy) return;
+		S.err = validate();
+		S.form = '';
+		if (Object.keys(S.err).length) { render(); focusFirstError(); return; }
+		busy = true;
+		render();
+		const o = current();
+		const ref = 'tile-' + uuid();
+		const back = location.origin + C.completePath + '?ref=' + encodeURIComponent(ref);
+		const logistics = { sub_type: o.sub_type, recipient_name: val('name'), recipient_phone: val('phone') };
+		if (o.logistics_type === 'CVS') logistics.store_ref = S.storeRef;
+		else { logistics.address = val('address'); if (val('postal')) logistics.postal_code = val('postal'); }
+		const cod = S.pay === 'cod' && codAllowed();
+		const body = { site_id: C.site, items: [{ sku: C.sku, qty: 1 }], client_request_ref: ref, client_back_url: back, logistics, customer_email: val('email') };
+		const invoice = invoiceBody();
+		if (invoice) body.invoice = invoice;
+		if (cod) body.payment = { method: 'cod' };
+		let res = null, r = null;
+		try {
+			res = await fetch('/api/v2/ecpay/checkout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+			r = await res.json().catch(() => null);
+		} catch (e) { res = null; }
+		busy = false;
+		if (res && res.ok && r && typeof r.order_id === 'string' && r.order_id) {
+			const kept = { order_id: r.order_id, sub_type: o.sub_type, logistics_type: o.logistics_type, fee_minor: fee(), currency: C.currency, invoice: !S.invOff };
+			if (cod && r.cash_on_delivery === true) {
+				Object.assign(kept, { cod: true, total_minor: total(), lines: [{ name: C.name, qty: 1, amount_minor: C.price }] });
+				if (ss) try { ss.setItem('dc-native-ecpay:' + ref, JSON.stringify(kept)); } catch (e) { /* the result page falls back to the server's answer */ }
+				dropDraft();
+				location.assign(back);
+				return;
+			}
+			if (r.form_post) {
+				if (ss) try { ss.setItem('dc-native-ecpay:' + ref, JSON.stringify(kept)); } catch (e) { /* idem */ }
+				dropDraft();
+				if (postPay(r.form_post)) return;
+			}
+			S.form = C.error;
+			render();
+			return;
+		}
+		if (refusal(res ? res.status : 0, r) && !again) { busy = false; return submit(true); }
+		render();
+		focusFirstError();
+	}
+	async function chooseStore() {
+		if (busy) return;
+		const o = current();
+		if (!o) return;
+		saveDraft();
+		busy = true;
+		render();
+		const device = window.matchMedia && window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'pc';
+		const body = { site_id: C.site, sub_type: o.sub_type, client_back_url: location.origin + location.pathname, device };
+		if (S.pay === 'cod' && codAllowed()) body.cash_on_delivery = true;
+		let r = null;
+		try {
+			const res = await fetch('/api/v2/ecpay/logistics/store-map', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+			r = res.ok ? await res.json().catch(() => null) : null;
+		} catch (e) { r = null; }
+		busy = false;
+		if (r && r.form_post && postMap(r.form_post)) return;
+		S.err = { store: L.storeMapError };
+		render();
+	}
+	function fallBack() {
+		fallen = true;
+		button.removeAttribute('data-native-ecpay-sku');
+		button.setAttribute('data-native-sku', C.sku);
+		button.disabled = false;
+		button.removeAttribute('aria-busy');
+		button.textContent = C.buy;
+		button.click();
+	}
+	async function open(fromStoreMap) {
+		if (opening) return;
+		opening = true;
+		if (!fromStoreMap) {
+			button.disabled = true;
+			button.setAttribute('aria-busy', 'true');
+			button.textContent = C.busy;
+		}
+		if (status) { status.textContent = ''; status.removeAttribute('data-ejecta-status-tone'); }
+		let d = null;
+		try {
+			const res = await fetch('/api/v2/ecpay/logistics/delivery-options?site_id=' + encodeURIComponent(C.site) + '&items_minor=' + encodeURIComponent(String(C.price)), { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } });
+			d = res.ok ? await res.json().catch(() => null) : null;
+		} catch (e) { d = null; }
+		opening = false;
+		const list = d && d.ok === true && Array.isArray(d.options) ? d.options.filter((x) => x && typeof x.sub_type === 'string' && (x.logistics_type === 'CVS' || x.logistics_type === 'HOME')) : [];
+		if (!list.length) { if (!fromStoreMap) fallBack(); return; }
+		options = list;
+		if (!current()) { S.ship = list[0].sub_type; S.storeRef = ''; }
+		if (!codAllowed()) S.pay = 'card';
+		button.hidden = true;
+		button.removeAttribute('aria-busy');
+		button.disabled = false;
+		button.textContent = C.buy;
+		const collapse = document.querySelectorAll('[data-native-ecpay-collapse]');
+		for (let i = 0; i < collapse.length; i++) collapse[i].hidden = true;
+		panel.hidden = false;
+		render();
+	}
+	button.addEventListener('click', function () { if (!fallen && !button.disabled) open(false); });
+	panel.addEventListener('input', function (event) {
+		const t = event.target;
+		const k = t && t.getAttribute && t.getAttribute('data-ecpay-field');
+		if (k) S.v[k] = t.value;
+	});
+	panel.addEventListener('change', function (event) {
+		const t = event.target;
+		if (!t || t.type !== 'radio') return;
+		if (t.name === 'dc-ecpay-ship' && t.value !== S.ship) { S.ship = t.value; S.storeRef = ''; if (!codAllowed()) S.pay = 'card'; }
+		else if (t.name === 'dc-ecpay-pay') S.pay = t.value === 'cod' ? 'cod' : 'card';
+		else if (t.name === 'dc-ecpay-inv') S.inv = t.value;
+		else return;
+		S.err = {};
+		S.form = '';
+		render();
+		const again = panel.querySelector('input[name="' + t.name + '"][value="' + t.value + '"]');
+		if (again && again.focus) again.focus();
+	});
+	panel.addEventListener('click', function (event) {
+		const t = event.target && event.target.closest ? event.target : null;
+		if (!t) return;
+		if (t.closest('[data-ecpay-store]')) { event.preventDefault(); chooseStore(); }
+		else if (t.closest('[data-ecpay-submit]')) { event.preventDefault(); submit(false); }
+	});
+	// Back from the store map: ECPay's answer arrived as `?store_ref=`. The draft restores what the
+	// buyer had typed and the store is now part of the order; the query is dropped from the address
+	// bar so a reload or a shared link does not carry it.
+	let returned = '';
+	try { returned = new URL(location.href).searchParams.get('store_ref') || ''; } catch (e) { returned = ''; }
+	if (returned) {
+		readDraft();
+		S.storeRef = returned;
+		try { const u = new URL(location.href); u.searchParams.delete('store_ref'); history.replaceState(history.state, '', u.pathname + u.search + u.hash); } catch (e) { /* the query stays */ }
+		open(true);
+	}
+}
+
+function nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview) {
+	const data = {
+		site: cfg.siteId || '',
+		sku: mapped.sku,
+		name: mapped.name,
+		price: Number(mapped.price_minor),
+		currency: String(mapped.currency).toUpperCase(),
+		locale,
+		completePath: shop.shopPath + '/complete',
+		labels: NATIVE_ECPAY_COPY[locale],
+		subtypes: NATIVE_ECPAY_SUBTYPES[locale],
+		buy: copy.buy,
+		busy: copy.checkoutBusy,
+		error: copy.checkoutError,
+		outOfStock: copy.outOfStock,
+		currencyRefused: copy.currencyRefused,
+		emailLabel: copy.emailLabel,
+		emailRequired: copy.emailRequired,
+		emailInvalid: copy.emailInvalid,
+		emailConflict: copy.emailConflict,
+		refused: preview ? copy.previewLiveRefused : ''
+	};
+	const json = JSON.stringify(data).replace(/</g, '\\u003c');
+	const launcher = (origins) => `(function(){const T=${JSON.stringify(origins)};${NATIVE_FORM_POST_SOURCE}return post})()`;
+	return `<script>(${nativeEcpayCheckoutClient.toString()})(${json},${launcher(NATIVE_ECPAY_PAY_ORIGINS)},${launcher(NATIVE_ECPAY_MAP_ORIGINS)},${completionFormatMoneySource()});</script>`;
+}
+
+function nativeProductBody(item, shop, copy, locale, preview, cfg) {
 	const mapped = nativeCatalogItem(item);
 	// Same wrap as nativeUnavailable() above — nativeUnavailableBody() itself is untouched.
 	if (!mapped) return `<div class="st-runtime">${nativeUnavailableBody(copy)}</div>`;
@@ -1248,6 +1796,13 @@ function nativeProductBody(item, shop, copy, locale, preview) {
 	// `button.parentElement.querySelector('[data-native-status]')` requires — it does not require
 	// that parent to be the `<article>` itself.
 	const refused = nativeItemRefused(mapped, preview);
+	// The in-page ECPay checkout (above) changes this product's markup only: the Buy control's
+	// marker, a collapse marker on the image and description, an empty panel and its script. Every
+	// other product's bytes are exactly the line below the branch. A product that names a payment rail
+	// (`checkout_rail`) or offers a rail choice keeps the rail-aware flow and never takes this branch.
+	if (cfg && cfg.siteId && !mapped.checkoutRail && !mapped.checkoutRails.length && nativeEcpayEligible(item, mapped, refused)) {
+		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview)}`;
+	}
 	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, refused)}${nativeBuyControl(mapped, copy, refused)}${nativeStatusNode(copy, refused)}</div></article>${nativeCheckoutScript(copy, preview, !!mapped.checkoutRail || mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}`;
 }
 
@@ -1292,7 +1847,7 @@ async function renderNativeProduct(request, env, cfg, match, ctx) {
 	// section floor keys off a LEADING `st-` class token this section deliberately keeps clear of.
 	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, `<div class="st-runtime"><section data-storefront-source="native" data-storefront-state="not-found"><h1>${escHtml(copy.notFound)}</h1></section></div>`), 404);
 	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
-	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop, copy, locale, nativePreviewCheckout(projection.body))));
+	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop, copy, locale, nativePreviewCheckout(projection.body), cfg)));
 }
 
 // Resolve the selected provider's catalog list — same same-origin-first,

@@ -1719,6 +1719,98 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 }
 .st-native-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
 
+/* In-page ECPay checkout on a native product (`[data-native-ecpay-checkout]`) and the ECPay order
+   result views. Structure only, from existing tokens: choice rows (`.st-opt`, selected
+   `.st-opt-on`), the store box, labelled fields, the total block and status rows. Every rule is
+   scoped under `.st-runtime` with `:where()` so any theme rule for the same elements wins. */
+.st-runtime :where(.st-native-checkout) { display: grid; gap: 1rem; }
+.st-runtime :where(.st-native-price) { font-size: 1.25rem; font-weight: 700; margin: 0; }
+.st-runtime :where([data-native-ecpay-sku]) { display: block; width: 100%; text-align: center; }
+.st-runtime :where(.st-native-checkout[hidden], [data-native-ecpay-collapse][hidden], [data-native-ecpay-sku][hidden]) { display: none; }
+.st-runtime :where(.st-choices) { border: 0; padding: 0; margin: 0; min-width: 0; }
+.st-runtime :where(.st-choices > legend) { font-weight: 700; padding: 0; margin-bottom: 0.6rem; }
+.st-runtime :where(.st-opt) {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 0.15rem 0.75rem; align-items: start;
+  padding: 0.75rem 0.9rem; margin-bottom: 0.5rem; cursor: pointer;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-bg);
+}
+.st-runtime :where(.st-opt-on) { border-color: var(--gd-text); box-shadow: inset 0 0 0 1px var(--gd-text); }
+.st-runtime :where(.st-opt > input) { grid-row: 1; margin: 0.3rem 0 0; accent-color: var(--gd-text); }
+.st-runtime :where(.st-opt-t) { grid-column: 2; font-weight: 600; }
+.st-runtime :where(.st-opt-d) { grid-column: 2; color: var(--gd-muted); font-size: 0.85rem; }
+.st-runtime :where(.st-opt-fee) { grid-column: 3; grid-row: 1; font-weight: 600; white-space: nowrap; }
+.st-runtime :where(.st-opt-sub) { grid-column: 2 / 4; display: grid; gap: 0.5rem; margin-top: 0.5rem; cursor: auto; }
+.st-runtime :where(.st-store) {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 0.9rem;
+  border: 1px dashed var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-bg);
+}
+.st-runtime :where(.st-store strong) { display: block; }
+.st-runtime :where(.st-field) { display: grid; gap: 0.25rem; margin-bottom: 0.75rem; }
+.st-runtime :where(.st-field-label) { font-size: 0.85rem; font-weight: 600; }
+.st-runtime :where(.st-field > input) {
+  font: inherit; color: var(--gd-text); background: var(--gd-bg); width: 100%; min-height: 2.75rem;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px);
+  padding: .6rem .8rem; box-sizing: border-box;
+}
+.st-runtime :where(.st-field > input):focus-visible { outline: 2px solid var(--gd-accent); outline-offset: 2px; border-color: var(--gd-accent); }
+.st-runtime :where(.st-field > input[aria-invalid="true"]) { border-color: currentColor; }
+.st-runtime :where(.st-err) { font-size: 0.85rem; font-weight: 600; margin: 0.25rem 0 0; }
+.st-runtime :where(.st-err)::before { content: "! "; }
+.st-runtime :where(.st-note) { color: var(--gd-muted); font-size: 0.85rem; margin: 0; }
+.st-runtime :where(.st-sum) { display: grid; gap: 0.25rem; border-top: 2px solid var(--gd-text); padding-top: 0.6rem; margin: 0.5rem 0 0.75rem; }
+.st-runtime :where(.st-sum > div) { display: flex; justify-content: space-between; gap: 0.75rem; }
+.st-runtime :where(.st-sum-tot) { font-weight: 700; font-size: 1.05rem; }
+.st-runtime :where(.st-wide) { width: 100%; align-self: stretch; text-align: center; }
+.st-runtime :where(.st-secondary) { background: var(--gd-bg); color: var(--gd-text); border: 1px solid var(--gd-text); }
+.st-runtime :where(.st-lines) { list-style: none; padding: 0; margin: 0; }
+.st-runtime :where(.st-lines > li) { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.6rem 0; margin: 0; border-top: 1px solid var(--gd-border); }
+.st-runtime :where(.st-lines > li:first-child) { border-top: 0; }
+.st-runtime :where(.st-q) { color: var(--gd-muted); margin-left: 0.4rem; }
+.st-runtime :where(.st-status-list) { display: grid; gap: 0.6rem; margin: 1rem 0; }
+.st-runtime :where(.st-status) {
+  display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.75rem 0.9rem;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-bg);
+}
+.st-runtime :where(.st-status-ico) { width: 1.1rem; height: 1.1rem; border-radius: 50%; flex: none; margin-top: 0.2rem; background: var(--gd-muted); }
+.st-runtime :where(.st-status-ok .st-status-ico) { background: var(--gd-accent); }
+.st-runtime :where(.st-status-bad .st-status-ico) { background: var(--gd-text); }
+.st-runtime :where(.st-status-pend .st-status-ico) { background: transparent; border: 2px solid var(--gd-muted); border-top-color: var(--gd-text); }
+.st-runtime :where(.st-guest-note) { margin-top: 1.25rem; }
+
+/* Account orders drawn one row per order (the account island's orderRow, for a list that carries
+   delivery or document facts): `article[data-ejecta-order]` with a top line (`[data-ejecta-order-top]`:
+   number and date, then the status pill `[data-ejecta-order-status]` toned ok|wait|""), then a
+   label/value list (`dl[data-ejecta-order-facts]`, each `dt[data-ejecta-order-fact]` followed by its
+   `dd`). Each row is its own bordered block, so the orders section drops its frame while it holds
+   them; the one-line text list keeps it. Same `:where()` low specificity as the rules above. */
+:where(.st-account-sections) > [data-ejecta-account-section="orders"]:has(> article[data-ejecta-order]) {
+  display: grid; gap: 0.75rem; padding: 0; border: 0; background: none; white-space: normal;
+}
+:where(.st-account-sections article[data-ejecta-order]) {
+  padding: 1rem 1.15rem; margin: 0;
+  border: 1px solid var(--gd-border); border-radius: var(--gd-radius, 8px); background: var(--gd-surface);
+}
+:where(.st-account-sections [data-ejecta-order-top]) {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem 0.75rem; flex-wrap: wrap;
+}
+:where(.st-account-sections [data-ejecta-order-top] > strong) { font-size: 1rem; }
+:where(.st-account-sections [data-ejecta-order-status]) {
+  display: inline-block; font-size: 0.8rem; font-weight: 700; line-height: 1.4; white-space: nowrap;
+  padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--gd-border); color: var(--gd-text);
+}
+:where(.st-account-sections [data-ejecta-order-status="ok"]) {
+  border-color: transparent; background: color-mix(in oklab, var(--gd-accent) 16%, var(--gd-bg));
+}
+:where(.st-account-sections [data-ejecta-order-status="wait"]) {
+  border-color: transparent; background: color-mix(in oklab, var(--gd-text) 10%, var(--gd-bg));
+}
+:where(.st-account-sections dl[data-ejecta-order-facts]) {
+  display: grid; grid-template-columns: minmax(4.5rem, max-content) 1fr; gap: 0.35rem 1.5rem;
+  margin: 0.75rem 0 0; font-size: 0.9rem;
+}
+:where(.st-account-sections dt[data-ejecta-order-fact]) { color: var(--gd-muted); }
+:where(.st-account-sections [data-ejecta-order-facts] > dd) { margin: 0; overflow-wrap: anywhere; }
+
 /* Result headings (shop complete, checkout/subscribe success): same h2 clamp() the build-time
    section layouts use above, since this file has no general h1 rule to fall back on.
    `#dc-shop-heading` is a pinned id (shop-complete.test.mjs); `[data-ejecta-subscribe-result] h1`

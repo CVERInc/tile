@@ -64,6 +64,11 @@ export const PUBLIC_CATALOG_PATHS = Object.freeze([
 	'/api/v2/shop/catalog/item'
 ]);
 
+// The Site's home page shell, which RSP reads server-side (with cf-worker) for
+// the `<html lang>` its member and order mail use. Exact path, GET only; it is
+// the same public page any visitor gets and goes to the Site Worker, never RSP.
+export const SITE_SHELL_PATH = '/';
+
 // What the capability stub lets a Site Worker read, GET only, exact paths.
 // The catalog paths are deliberately absent: they are rate-limited per visitor, and a
 // server-side hop does not carry the visitor's address, so a Site Worker reads them over its
@@ -140,9 +145,10 @@ export async function handleRequest(request, env, ctx) {
 	const host = normalizeHost(url.hostname);
 
 	// cf-worker marks a request made by a Worker over a public hostname. Only
-	// the public catalog reads may come in that way.
+	// the public catalog reads and the Site shell read may come in that way.
 	if (request.headers.has('cf-worker')) {
-		if (request.method !== 'GET' || !PUBLIC_CATALOG_PATHS.includes(url.pathname)) {
+		if (request.method !== 'GET' ||
+			!(PUBLIC_CATALOG_PATHS.includes(url.pathname) || url.pathname === SITE_SHELL_PATH)) {
 			return json({ error: 'worker_origin_forbidden' }, 403);
 		}
 	}
