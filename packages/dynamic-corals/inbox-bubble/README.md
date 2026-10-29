@@ -163,7 +163,7 @@ successful send that empties the box takes down whatever an edit made during the
   measured, tniop's 1,410 rows, max 31). Submitting collapses it too.
 - The results are a list with an accent rule, not message bubbles, so an old post is never read as
   the assistant's answer. The privacy sentence (`searchNote`, nine locales) shows once the index is
-  known to have rows:「打字時只在你的瀏覽器裡找，按下『問』才會送出。」
+  known to have rows:「打字時只在你的瀏覽器裡找，按下按鈕才會送出。」
 - 🔴 What the visitor types never leaves the page through this feature and is never recorded —
   ticket item 6 forbids query analytics of any kind. A result link is an ordinary link.
 

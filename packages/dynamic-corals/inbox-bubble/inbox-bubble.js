@@ -381,7 +381,7 @@ export const COPY = {
 		backToHuman: '回到真人對話',
 		handoffEnded: '上次的對話已結束',
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
-		searchNote: '打字時只在你的瀏覽器裡找，按下『問』才會送出。',
+		searchNote: '打字時只在你的瀏覽器裡找，按下按鈕才會送出。',
 		askAi: '問 AI',
 		sendOwner: '傳給真人'
 	},
