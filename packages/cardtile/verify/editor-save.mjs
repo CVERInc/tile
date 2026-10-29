@@ -70,7 +70,10 @@ const SEED = [
   '',
 ].join('\n');
 
-await api('PUT', `/_api/card/${SCRATCH}`, { markdown: SEED });
+// create: true on a scratch handle this script owns; a scratch card already there (a 409 conflict) is
+// reseeded through the ordinary save (tile#209 r5/r6)
+const seededNew = await api('PUT', `/_api/card/${SCRATCH}`, { markdown: SEED, create: true });
+if (seededNew.status === 409 && seededNew.json && seededNew.json.conflict) await api('PUT', `/_api/card/${SCRATCH}`, { markdown: SEED });
 await api('PUT', `/_api/card/${SCRATCH}/asset/pic`, { base64: GIF, mime: 'image/gif' });
 const seeded = (await api('GET', `/_api/card/${SCRATCH}`)).json;
 

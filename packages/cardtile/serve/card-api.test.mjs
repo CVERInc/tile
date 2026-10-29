@@ -3313,3 +3313,86 @@ test('🔴 r5 P3 the COMMIT re-checks base_version: a save held at Web Risk afte
     assert.equal((await assetsOf(env)).extra?.b64, AVATAR_NEW);
   } finally { globalThis.fetch = realFetch; release.resolve(); }
 });
+
+// ── r6 (codex r5): create never erases; the publisher can create; the backoff's last delay is waited ──
+import { publishCard } from '../publish.mjs';
+
+/** run the object's alarm AT the time it is scheduled for (a fixed clock), and say when that was */
+const fireAtSchedule = async (env, name) => {
+  const at = env.CARD_LIFETIMES.storageOf(name)._alarm;
+  const real = Date.now;
+  Date.now = () => at;
+  try { await env.CARD_LIFETIMES.alarm(name); } finally { Date.now = real; }
+  return at;
+};
+
+test('🔴 r6 P1 create: true never erases a card the Worker can see, whatever the object\'s view says (reviewer input)', async () => {
+  const body = twoPictures();
+  const { env } = envWithObjectView({ [keyT()]: body }, (k) => k === keyT() || k === 't');
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(body).replace('hello', 'edited'), create: true });
+  const answer = await res.json();
+  assert.equal(env.CARDS._m.get(keyT()), body, `create erased the existing card (answered ${res.status} ${JSON.stringify(answer)})`);
+  assert.equal(res.status, 409);
+  assert.equal(answer.conflict, true);
+  assert.equal(answer.current, await cardVersion(body));
+});
+
+test('🔴 r6 P1 create: true reads KV itself, in its own queue slot: a card that appeared since the object\'s miss is adopted and the create refused', async () => {
+  const base = fakeKv({});
+  const objectEnv = { CARDS: base, MCP_TOKEN_HASH: TOKEN_HASH };
+  const workerView = { ...base, get: async (k) => (k === keyT() || k === 't' ? null : base.get(k)) };
+  const env = { CARDS: workerView, MCP_TOKEN_HASH: TOKEN_HASH, CARD_LIFETIMES: cardLifetimesNs(objectEnv, objectEnv), HOST_BINDINGS: hostBindingsNs(objectEnv) };
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) })).status, 409, 'CONTROL: unknown at first contact');
+  const body = twoPictures();
+  await base.put(keyT(), body); // the card the object's first read missed
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(body).replace('hello', 'edited'), create: true });
+  const answer = await res.json();
+  assert.equal(base._m.get(keyT()), body, `create erased the card its own read could see (answered ${res.status} ${JSON.stringify(answer)})`);
+  assert.equal(res.status, 409);
+  assert.equal(answer.current, await cardVersion(body));
+  assert.equal(env.CARD_LIFETIMES.storageOf('t')._m.get('card:0').from, 'kv', 'the card the create read was not adopted');
+});
+
+test('🔴 r6 P2 the whole-card publisher creates a fresh handle when its caller says it is new (create), pictures and all', async () => {
+  const env = firstContactEnv({});
+  const api = async (method, path, body) => { const r = await call(env, method, path, body); return { status: r.status, json: await r.json() }; };
+  const fat = twoPictures();
+  const res = await publishCard(api, 'fresh', fat.replace('card-page: t', 'card-page: fresh'), { create: true });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.deepEqual(res.json.uploaded.sort(), ['pic', 'unused']);
+  assert.deepEqual(Object.keys(parseCard(await bodyOf(env, 'fresh')).assets).sort(), ['pic', 'unused']);
+  // CONTROL: without the caller's word, a 404 is not taken as proof — nothing is written, and it says so
+  const env2 = firstContactEnv({});
+  const api2 = async (method, path, body) => { const r = await call(env2, method, path, body); return { status: r.status, json: await r.json() }; };
+  const refused = await publishCard(api2, 'fresh', fat);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.retry, true);
+});
+
+test('🔴 r6 P3 an adopted card waits out EVERY backoff delay, the last 300 s included, before it trusts its last positive read (reviewer timing)', async () => {
+  const env = firstContactEnv({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: 'QUJD', mime: 'image/png' })).status, 409);
+  const adoptedAt = life._m.get('card:0').settleAt - CardLifetime.KV_WINDOW_MS;
+  env.CARDS.get = async () => null; // every settlement read misses
+  const at = [];
+  for (let i = 0; i < 20 && life._m.get('card:0').from === 'kv'; i++) at.push(Math.round((await fireAtSchedule(env, 't') - adoptedAt) / 1000));
+  assert.deepEqual(at, [60, 65, 75, 95, 135, 215, 375, 675, 975], 'the alarms did not run at the full schedule');
+  assert.equal(life._m.get('card:0').from, 'kv-settled');
+});
+
+test('🔴 r6 P3 an unknown card logs stuck only after the full schedule, then keeps retrying every 300 s', async () => {
+  const env = firstContactEnv({});
+  const life = env.CARD_LIFETIMES.storageOf('fresh');
+  assert.equal((await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD) })).status, 409);
+  const adoptedAt = life._m.get('card:0').settleAt - CardLifetime.KV_WINDOW_MS;
+  const at = [], stuck = [];
+  const lines = await logged(async () => {
+    for (let i = 0; i < 11; i++) {
+      at.push(Math.round((await fireAtSchedule(env, 'fresh') - adoptedAt) / 1000));
+    }
+  });
+  assert.deepEqual(at, [60, 65, 75, 95, 135, 215, 375, 675, 975, 1275, 1575]);
+  const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e && e.event === 'card_settlement_stuck');
+  assert.deepEqual(events.map((e) => e.attempts), [9, 10, 11], 'stuck was logged before the schedule ran out (or not each time after)');
+});

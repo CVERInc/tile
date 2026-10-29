@@ -730,7 +730,7 @@ export class CardLifetime {
   static KV_WINDOW_MS = 60000;
   /**
    * r5 (codex r4 P2): the delays after a settlement read that failed or found nothing, and so the cap
-   * (its length, about 15 minutes in all). Past the cap an adopted card settles from its last positive
+   * (its length: the read after the last delay is the last chance — 16 min 15 s after adoption). Past the cap an adopted card settles from its last positive
    * read, and an unknown one keeps refusing at the last delay — each time with a structured log line.
    */
   static SETTLE_BACKOFF_MS = [5000, 10000, 20000, 40000, 80000, 160000, 300000, 300000];
@@ -824,12 +824,13 @@ export class CardLifetime {
     const backoff = CardLifetime.SETTLE_BACKOFF_MS;
     const attempts = (meta.attempts || 0) + 1;
     const line = (event) => console.error(JSON.stringify({ event, handle: meta.handle, gen, attempts, reason, held: meta.from }));
-    if (attempts >= backoff.length && meta.from === 'kv') {
+    // r6 (codex r5 P3): the cap is reached only once EVERY delay has been waited, the last one too
+    if (attempts > backoff.length && meta.from === 'kv') {
       await this.storage.put(cardMetaKey(gen), { ...meta, from: 'kv-settled', attempts });
       line('card_settled_from_last_positive');
       return;
     }
-    if (attempts >= backoff.length) line('card_settlement_stuck');
+    if (attempts > backoff.length) line('card_settlement_stuck');
     const settleAt = Date.now() + backoff[Math.min(attempts, backoff.length) - 1];
     await this.storage.put(cardMetaKey(gen), { ...meta, attempts, settleAt });
     await this.armAlarm(settleAt);
@@ -916,13 +917,22 @@ export class CardLifetime {
   async saveCard({ handle, gen, markdown, base, from, dests, destBase, check, create }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
     let cur = await this.heldCard(handle, gen);
-    // r5: `create: true` is the registry's word that this handle has never had a card — the one thing
-    // besides a positive read that lets a write past an UNKNOWN (a miss is not proof). Where a card is
-    // held, it is a conflict, never an overwrite.
-    if (create === true && cur && !cur.unknown) {
-      return { status: 409, body: { conflict: true, expected: null, current: cur.version, why: 'This handle already has a card, so this is not a create. Read it and save with its version.' } };
+    // r5/r6: `create: true` is the caller's word that this handle has never had a card — the one thing
+    // besides a positive read that lets a write past an UNKNOWN (a miss is not proof). 🔴 r6 (codex r5
+    // P1): it can never erase a card. It is refused, as a conflict naming the card, when
+    //   · the object holds one (written here, adopted, or settled);
+    //   · the Worker's own read saw one (`from`) — a positive answer anywhere vetoes a create;
+    //   · this object's OWN KV read, made here in this queue slot, finds one — which is adopted.
+    // Only when all three find nothing is the card written, in this same slot (no write between).
+    if (create === true) {
+      const exists = (current) => ({ status: 409, body: { conflict: true, expected: null, current,
+        why: 'This handle already has a card, so this is not a create. Read it and save with its version.' } });
+      if (cur && !cur.unknown) return exists(cur.version);
+      if (from != null) return exists(from);
+      const { md: seen } = await liveCard(this.env.CARDS, handle, { gen });
+      if (seen != null) return exists((await this.adoptCard(handle, gen, seen, cur ? cur.meta : null)).version);
+      cur = null;
     }
-    if (create === true && cur && cur.unknown) cur = null;
     if (cur && cur.unsettled) return { status: 409, body: windowRefusal(cur.unsettled, 'Nothing was saved') };
     if (base != null && base !== '') {
       const conflict = cur == null
@@ -1047,7 +1057,7 @@ function cardWriteOk(op, b) {
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
   if (op === '/save') {
     if (!(str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.create == null || typeof b.create === 'boolean'))) return false;
-    if (b.check === true) return true;
+    if (b.check === true) return b.from == null || str(b.from);
     return (b.from === null || str(b.from)) && Array.isArray(b.dests) && b.dests.every((u) => typeof u === 'string') && str(b.destBase);
   }
   if (!['put', 'delete', 'fenced'].includes(b.kind) || !VALID_ASSET_ID.test(String(b.id))) return false;
@@ -1568,7 +1578,7 @@ export async function handleApi(request, env, url) {
       // the card IT holds, never against this KV read — which may be stale, and must not veto a
       // current base_version. The same call answers the size (in bytes) and the structural diff.
       const create = body.create === true;
-      const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, create, check: true });
+      const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, create, check: true, from: current ? current.version : null });
       const checked = await pre.json();
       if (pre.status !== 200) return json(checked, pre.status);
 

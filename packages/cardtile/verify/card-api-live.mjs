@@ -156,7 +156,9 @@ console.log(`\n4. LIFECYCLE  (scratch handle "${SCRATCH}" — created, exercised
     '',
   ].join('\n');
 
-  const created = await api('PUT', `/_api/card/${SCRATCH}`, { markdown: seed });
+  // create: true — this script owns its scratch handle (tile#209 r5/r6: a miss alone is not proof; a
+  // card left by an earlier run turns this into a 409 conflict, never an overwrite)
+  const created = await api('PUT', `/_api/card/${SCRATCH}`, { markdown: seed, create: true });
   check(created.status === 200 && created.json.created === true, `created (${created.status})`);
   const v1 = created.json.version;
 

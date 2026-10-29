@@ -14,7 +14,13 @@
 import { parseCard, serializeCard } from './card-core.js';
 
 /**
- * publishCard(api, handle, fatMd, { baseVersion }) → the save response, plus `uploaded`.
+ * publishCard(api, handle, fatMd, { baseVersion, create }) → the save response, plus `uploaded`.
+ *
+ * `create: true` — ONLY from a caller that knows the handle is brand new (it just reserved it in the
+ * registry). It is sent with the seed save, and is what lets a card be made on a handle the Worker's
+ * object has never seen (tile#209 r5/r6: a store miss is not proof that no card exists). It can never
+ * erase one: a card seen anywhere turns the seed into a 409 conflict, returned as is. Without it, a
+ * 404 is not taken as permission — the seed save's own answer (a 409 retry) comes back unchanged.
  *
  * `api(method, path, body)` is the caller's authenticated transport — a tiny seam so this file needs
  * no opinion about where the bearer lives (the editor's is on a loopback server; a script's is in
@@ -28,7 +34,7 @@ import { parseCard, serializeCard } from './card-core.js';
  *   4. save the THIN card, guarded by the version read AFTER those uploads — an upload changes the
  *      card, so the caller's version is stale by construction the moment step 3 does anything.
  */
-export async function publishCard(api, handle, fatMd, { baseVersion } = {}) {
+export async function publishCard(api, handle, fatMd, { baseVersion, create = false } = {}) {
   const model = parseCard(String(fatMd ?? ''));
   const assets = model.assets || {};
 
@@ -54,6 +60,7 @@ export async function publishCard(api, handle, fatMd, { baseVersion } = {}) {
   } else {
     const seed = await api('PUT', `/_api/card/${encodeURIComponent(handle)}`, {
       markdown: serializeCard({ ...model, assets: {} }),
+      ...(create === true ? { create: true } : {}),
     });
     if (seed.status !== 200) return seed;
   }
