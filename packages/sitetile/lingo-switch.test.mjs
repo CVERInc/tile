@@ -431,6 +431,20 @@ test('🔴 rootLangMismatch: names both values and says which one wins; silent w
   assert.equal(rootLangMismatch({ locales: '', rootLang: 'ko' }), null, 'a site that declares nothing');
 });
 
+test('🔴 rootLangMismatch prints the exact line to write, and the file it goes in (reef#1910 · 2)', () => {
+  // "Put the home page's language first" left the owner to work out the spelling and the file.
+  const msg = rootLangMismatch({ locales: 'en-US, zh-TW, ja-JP', rootLang: 'zh-Hant', source: 'content/_site.md' });
+  assert.ok(msg.includes('change the `locales:` line in content/_site.md to: locales: zh-TW, en-US, ja-JP'), msg);
+  // …the other way out, named as concretely: where this page goes and what takes its place.
+  assert.ok(msg.includes('move this page to content/zh-tw/home.md and write an en-US home page at content/home.md'), msg);
+  // A home language that is not declared at all is put first, and nothing else is dropped.
+  assert.ok(rootLangMismatch({ locales: 'en-US, zh-TW', rootLang: 'ko', source: 'content/_site.md' })
+    .includes('to: locales: ko, en-US, zh-TW'));
+  // No file known → the sentence still names the line, without inventing a path.
+  const bare = rootLangMismatch({ locales: 'en-US, zh-TW', rootLang: 'zh-TW' });
+  assert.ok(bare.includes('change the `locales:` line to: locales: zh-TW, en-US'), bare);
+});
+
 test('🔴 SiteLayout: alternates, the chooser link and its prefix all wait for a SECOND locale', () => {
   assert.match(layout, /const multilingual = hasLingo && locales\.length > 1;/);
   assert.match(layout, /const altLocales = !multilingual \? \[\] :/);

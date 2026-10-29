@@ -845,6 +845,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(lines.length, 1, `expected the warning exactly once, got ${lines.length}`);
       assert.ok(lines[0].includes('lang: zh-TW') && lines[0].includes('en-US first'), lines[0]);
       assert.match(lines[0], /en-US wins/);
+      // reef#1910 · 2: the build prints exactly what to change, in which file.
+      assert.ok(lines[0].includes('change the `locales:` line in content/_site.md to: locales: zh-TW, en-US'), lines[0]);
     });
 
     await test('rootDisagrees: nothing else changed — locales[0] still owns `/`', () => {

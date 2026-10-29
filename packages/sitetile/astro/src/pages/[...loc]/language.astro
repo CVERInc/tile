@@ -12,7 +12,7 @@
 //   • the suggestion banner is suppressed here (SiteLayout's localeBanner.excludePath = '/language').
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
-import { toUrlLocale, label, languageCopy, rootLangMismatch } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, label, languageCopy, rootLangMismatch, localesSourceOf } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -29,7 +29,7 @@ export function getStaticPaths() {
   const { rootHome, locales, defaultLocale } = editions;
   // …and when the root home page itself disagrees with that, say so. Here because this runs once
   // per build and already holds the root home; the warning is the build log's, like loadSite's.
-  const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang });
+  const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang, source: localesSourceOf(rootHome) });
   if (mismatch) console.warn(mismatch);
 
   return locales.map((L) => {

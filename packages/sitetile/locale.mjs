@@ -192,15 +192,23 @@ export function defaultLocaleOf(locales, fallback = '') {
  *  🩸 CVERInc/reef#1910. "The first locale lives at `/`" was a rule nothing stated and nothing
  *  checked: `locales: en-US, zh-TW` over a Chinese home page built `<html lang="zh-Hant">` at `/`
  *  with `hreflang="en" href="/"` beside it, and a chooser whose Chinese row went to a `/zh-tw/`
- *  nobody had written. The build was green and silent. */
-export function rootLangMismatch({ locales = [], rootLang = '' } = {}) {
-  const first = parseLocales(locales)[0];
+ *  nobody had written. The build was green and silent.
+ *
+ *  It then said "put the home page's language first in locales" — the owner still had to work out
+ *  the spelling and find the file. It prints the line to write now, in the file `source` names
+ *  (localesSourceOf), and the other way out with its two paths. */
+export function rootLangMismatch({ locales = [], rootLang = '', source = '' } = {}) {
+  const list = parseLocales(locales);
+  const first = list[0];
   const lang = String(rootLang || '').trim();
   if (!first || !lang || sameLocale(first, lang)) return null;
+  const home = localeOf(list, lang);
+  const line = `locales: ${[home, ...list.filter((l) => l !== home)].join(', ')}`;
   return `sitetile: the home page says lang: ${lang}, but locales lists ${first} first — and the `
     + `first locale is the one served at "/". ${first} wins: hreflang, x-default and the language `
-    + `chooser all treat "/" as ${first}, and ${lang} is expected under /${toUrlLocale(localeOf(locales, lang))}/. `
-    + `Put the home page's language first in locales, or move that page under its own locale.`;
+    + `chooser all treat "/" as ${first}, and ${lang} is expected under /${toUrlLocale(home)}/. `
+    + `To make "/" the ${home} home, change the \`locales:\` line${source ? ` in ${source}` : ''} to: ${line}. `
+    + `To keep ${first} at "/", move this page to content/${toUrlLocale(home)}/home.md and write an ${first} home page at content/home.md.`;
 }
 
 /** Is the Lingo install on for this site? — the ONE definition; every gate calls this.
