@@ -169,3 +169,9 @@ test('CONTROL: the scan finds real content, and fires on a fabricated drift', ()
     'the type comparison does not fire on a mismatch',
   );
 });
+
+test('delete_asset declares expected_version beside handle and id (tile#209: the fenced delete reef sends it to)', () => {
+  assert.deepEqual(OPS.delete_asset.params, ['handle', 'id', 'expected_version']);
+  // CONTROL: put_asset did not grow it — only the delete has a fenced route
+  assert.ok(!OPS.put_asset.params.includes('expected_version'));
+});

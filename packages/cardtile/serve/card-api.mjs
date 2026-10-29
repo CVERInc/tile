@@ -301,6 +301,23 @@ function inTurn(object, step) {
   object.tail = turn.catch(() => {}); // a failed write must not wedge the object
   return turn.then((r) => Response.json(r), () => Response.json({ error: 'store_failed' }, { status: 500 }));
 }
+/**
+ * run a card write alone among the card writes of its lifetime (tile#209): `step` answers
+ * `{ status, body }`. One queue per GENERATION the writes were admitted in, apart from `tail`:
+ *   · not `tail`: a card write awaits KV, and a write held there must not hold up the lifetime's own
+ *     requests (DELETE's /end) — the generation stamp (see writeCard) is what keeps a write admitted
+ *     before an end off the next lifetime, as it always was;
+ *   · per generation: writes admitted in different lifetimes write different keys (`card:<h>:<gen>`)
+ *     and cannot overwrite each other, so a dead lifetime's slow write never holds up the next owner's.
+ */
+function inWriteTurn(object, gen, step) {
+  const turn = (object.writes.get(gen) || Promise.resolve()).then(step);
+  const tail = turn.catch(() => {});
+  object.writes.set(gen, tail);
+  tail.then(() => { if (object.writes.get(gen) === tail) object.writes.delete(gen); });
+  return turn.then(({ status, body }) => Response.json(body, { status }),
+    () => Response.json({ error: 'store_failed', why: 'The card store failed during this write. Read the card again before retrying.' }, { status: 500 }));
+}
 /** a failed write-through is retried by the object's alarm (the runtime calls `alarm()`), and sooner by
  *  any request the object gets. A storage without alarms (a test double) relies on the requests alone. */
 async function retryLater(storage) {
@@ -463,14 +480,36 @@ export class HostBindings {
  *                                        → { ended, gen, pending }: every host still owed an end
  *   POST /settle   { handle, delivered: { '<gen>': [host…] } }
  *                                        those leave `pending`; then KV `gen:<handle>` = gen
+ *
+ * 🔴 tile#209 — and it is where the handle's CARD WRITES are serialized. KV has no compare-and-set, so
+ * a read → modify → put from the Worker leaves a window in which another write to the same card lands
+ * and is then overwritten (a same-id put_asset erased by a delete that had checked the old bytes, a
+ * save assembled before a put_asset landed, two put_assets each dropping the other). Every write of a
+ * card body runs its read, its check and its put here, one at a time per handle and lifetime (`writes`,
+ * one queue per generation the Worker admitted the write in, apart from the lifetime's — inWriteTurn):
+ *   POST /save     { handle, gen, md, base? }   base given → checked against the card as it is NOW
+ *                                        (409 conflict, nothing written); then writeCard as before
+ *   POST /asset    { handle, gen, kind: put | delete | fenced, id, b64?, mime?, ifVersion? }
+ *                                        the read, the If-Version check (fenced), the reference check
+ *                                        and the removal or replacement, against one read of the card
+ * These read and write the card's KV keys, which no other path writes (writeCard is the only put of
+ * a body). The lifetime's state is not touched by them and they never read it.
  * An empty object is generation 0: `gen:` keys exist only since this PR, which ships this class, so no
- * handle was ever rotated anywhere else. It never reads KV.
+ * handle was ever rotated anywhere else. Its lifetime state never comes from KV (only the card writes
+ * above read KV, and only the card's own keys).
  */
 export class CardLifetime {
-  constructor(state, env) { this.storage = state && state.storage; this.env = env; this.tail = Promise.resolve(); }
+  constructor(state, env) {
+    this.storage = state && state.storage; this.env = env;
+    this.tail = Promise.resolve(); this.writes = new Map(); // gen → the tail of that lifetime's card writes
+  }
   async fetch(request) {
     const op = new URL(request.url).pathname;
     const body = (await request.json().catch(() => null)) || {};
+    if (op === '/save' || op === '/asset') {
+      if (!cardWriteOk(op, body)) return Response.json({ error: 'bad_request' }, { status: 400 });
+      return inWriteTurn(this, body.gen, () => (op === '/save' ? saveInTurn(this.env.CARDS, body) : assetInTurn(this.env.CARDS, body)));
+    }
     const { handle, host, gen, delivered, order, ticket } = body;
     const hostList = (v) => Array.isArray(v) && v.every((h) => typeof h === 'string' && h);
     const hostGen = typeof host === 'string' && host && typeof gen === 'string' && gen;
@@ -648,6 +687,103 @@ export class CardLifetime {
     await this.env.CARDS.put(genKey(handle), s.gen); // the cache, written from the truth, in this object's turn
     return { gen: s.gen };
   }
+}
+
+/** a well-formed /save or /asset request to CardLifetime (the Worker validated the caller's input) */
+function cardWriteOk(op, b) {
+  const str = (v) => typeof v === 'string' && v.length > 0;
+  if (!VALID_HANDLE.test(String(b.handle)) || !str(b.gen)) return false;
+  if (op === '/save') return str(b.md) && (b.base == null || typeof b.base === 'string');
+  if (!['put', 'delete', 'fenced'].includes(b.kind) || !VALID_ASSET_ID.test(String(b.id))) return false;
+  if (b.kind === 'put') return str(b.b64) && str(b.mime);
+  if (b.kind === 'fenced') return str(b.ifVersion) && b.ifVersion.trim().length > 0;
+  return true;
+}
+
+/**
+ * save_card's write, in the handle's write queue. The Worker checked base_version at admission (so a
+ * conflicted save costs no Web Risk lookup); this checks it again against the card as it is now,
+ * because anything may have written between the two — and nothing can between this check and the put.
+ * The generation is checked first, as writeCard does, so a save from an ended lifetime is still
+ * answered `stale_generation` rather than "no card".
+ */
+async function saveInTurn(store, { handle, gen, md, base }) {
+  if ((await generationOf(store, handle)) !== gen) return { status: 409, body: staleWrite(handle) };
+  if (base != null && base !== '') {
+    const { md: now } = await liveCard(store, handle, { gen });
+    const conflict = now == null
+      ? { conflict: true, expected: String(base), current: null, why: 'There is no card at this handle, so the version you read is not of this card.' }
+      : await checkBaseVersion(base, now);
+    if (conflict) return { status: 409, body: conflict };
+  }
+  const res = await writeCard(store, handle, md, gen);
+  return { status: res.conflict ? 409 : 200, body: res };
+}
+
+/**
+ * put_asset, delete_asset and the fenced delete, in the handle's write queue: one read of the card,
+ * every check against that read, and the put — with no other write of this card between them.
+ *
+ * 🔴 The fenced delete (tile#209, reef#2600 door 3) refuses unless the card is still at `ifVersion`,
+ * the version the caller read. The version covers the asset bytes (it is the full markdown's), so a
+ * same-id replacement after that read moves it. Every answer it gives carries `fence: "if-version"`:
+ * reef reads a 404 without it as "this Worker has no fenced route".
+ */
+async function assetInTurn(store, { handle, gen, kind, id, b64, mime, ifVersion }) {
+  const fence = kind === 'fenced' ? { fence: 'if-version' } : {};
+  // the card of the lifetime the write was admitted in (the Worker's read of gen:, as readCard's was);
+  // writeCard refuses the put if that lifetime has ended since
+  const { md: now } = await liveCard(store, handle, { gen });
+  if (now == null) return { status: 404, body: { error: `No card at "${handle}".`, ...fence } };
+  const current = { md: now, gen };
+  if (kind === 'fenced') {
+    const conflict = await checkBaseVersion(ifVersion, current.md);
+    if (conflict) return { status: 409, body: { ...conflict, why: `${conflict.why} Nothing was deleted.`, ...fence } };
+  }
+  const model = parseCard(current.md);
+  if (kind === 'put') {
+    model.assets = { ...model.assets, [id]: { mime, b64 } };
+    const md = serializeCard(model);
+    if (md.length > KV_MAX_BYTES) {
+      return { status: 413, body: { error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
+    }
+    const res = await writeCard(store, handle, md, current.gen);
+    if (res.conflict) return { status: 409, body: res };
+    return { status: 200, body: { handle, id, bytes: Math.floor(b64.replace(/=+$/, '').length * 3 / 4), version: res.version } };
+  }
+  // 🔴 Refuse while referenced. Deleting an asset a cell still points at does not error anywhere
+  // — `resolveAsset` returns '' for an unresolvable ref, so the picture just silently becomes a
+  // blank box on someone's live page. That is precisely the class of failure whose feedback
+  // arrives too late to connect to the action that caused it.
+  if (referencedAssets(thinCard(current.md)).has(id)) {
+    return { status: 409, body: {
+      error: `"${id}" is still used by this card. Remove the reference first, then delete the asset.`,
+      referenced: true, ...fence,
+    } };
+  }
+  if (!(id in model.assets)) return { status: 404, body: { error: `No asset "${id}" on "${handle}".`, ...fence } };
+  delete model.assets[id];
+  const res = await writeCard(store, handle, serializeCard(model), current.gen);
+  if (res.conflict) return { status: 409, body: { ...res, ...fence } };
+  return { status: 200, body: { handle, id, deleted: true, version: res.version, ...(kind === 'fenced' ? { checked_version: ifVersion } : {}) } };
+}
+
+/**
+ * a card write, sent to the handle's CardLifetime (its write queue) and answered as it answers. No
+ * fallback to writing from here: the queue is what makes the check and the put one step (tile#209).
+ */
+async function cardWrite(env, handle, op, body, extra = {}) {
+  let res;
+  try {
+    res = await lifetimeOf(env, handle).fetch(`https://card-lifetime/${op}`, { method: 'POST', body: JSON.stringify({ handle, ...body }) });
+  } catch (e) {
+    if (e && /is not bound/.test(e.message)) throw e;
+    return json({ error: 'write_failed', why: `"${handle}" was not written: its write queue did not answer. Read the card again before retrying.`, ...extra }, 503);
+  }
+  const answer = await res.json().catch(() => ({ error: 'write_failed', why: 'The write queue answered without a body. Read the card again before retrying.' }));
+  // `extra` (the fenced route's `fence`) marks every refusal, the queue's own included; a success
+  // answers exactly what the queue said
+  return json(res.ok ? answer : { ...answer, ...extra }, res.status);
 }
 
 /** a key, or for generation 0 the legacy key when the new one is absent. */
@@ -941,6 +1077,9 @@ async function deleteCard(env, handle, meant = null) {
  *   DELETE /_api/card/<handle>/stop          —             resume serving
  *   PUT    /_api/card/<handle>/asset/<id>    put_asset     { base64, mime }
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
+ *   DELETE /_api/card/<handle>/asset/<id>/fenced
+ *          If-Version: <version> (required) delete_asset with expected_version (tile#209): 409 unless the
+ *                                           card is still at <version>; every answer carries `fence`
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
  */
@@ -1028,6 +1167,7 @@ export async function handleApi(request, env, url) {
   }
 
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
+  const fenced = /^card\/([^/]+)\/asset\/([^/]+)\/fenced$/.exec(rest);
   const card = /^card\/([^/]+)$/.exec(rest);
   const stop = /^card\/([^/]*)\/stop$/.exec(rest);
   const full = /^card\/([^/]*)\/full$/.exec(rest);
@@ -1081,49 +1221,47 @@ export async function handleApi(request, env, url) {
     return json({ error: `${method} not allowed here.` }, 405);
   }
 
+  // ── the fenced delete_asset (tile#209, reef#2600 door 3) ───────────────────────────────────────
+  //
+  // DELETE with `If-Version: <the version get_card gave>`: removed only if the card is still at that
+  // version, checked and removed in one step of the handle's write queue (assetInTurn). Every answer
+  // carries `fence: "if-version"`, so the caller can tell this route's 404 from "no such route".
+  if (fenced) {
+    const fence = { fence: 'if-version' };
+    let handle, id;
+    try { handle = decodeURIComponent(fenced[1]).toLowerCase(); id = decodeURIComponent(fenced[2]); } catch { handle = ''; id = ''; }
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(fenced[1])}.`, ...fence }, 400);
+    if (!VALID_ASSET_ID.test(id)) return json({ error: `Bad asset id ${JSON.stringify(fenced[2])}.`, ...fence }, 400);
+    if (method !== 'DELETE') return json({ error: `${method} not allowed here; the fenced route only deletes.`, ...fence }, 405);
+    const ifVersion = request.headers.get('if-version');
+    if (ifVersion == null || !ifVersion.trim()) {
+      return json({ error: 'The fenced delete needs an If-Version header: the version get_card returned. Nothing was deleted.', ...fence }, 400);
+    }
+    return cardWrite(env, handle, 'asset', { gen: await generationOf(store, handle), kind: 'fenced', id, ifVersion }, fence);
+  }
+
   // ── put_asset / delete_asset ───────────────────────────────────────────────────────────────────
+  //
+  // The read, the checks and the put run in the handle's write queue (tile#209, see assetInTurn);
+  // only the caller's input is checked here. The answers are what they were.
   if (asset) {
     const handle = decodeURIComponent(asset[1]).toLowerCase();
     const id = decodeURIComponent(asset[2]);
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(asset[1])}.` }, 400);
     if (!VALID_ASSET_ID.test(id)) return json({ error: `Bad asset id ${JSON.stringify(asset[2])}.` }, 400);
-    const current = await readCard(store, handle);
-    if (!current) return json({ error: `No card at "${handle}".` }, 404);
-    const model = parseCard(current.md);
 
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
       const b64 = String(body.base64 || '').replace(/\s+/g, '');
+      // a card first, as before: a missing card is a 404 whatever the body says
+      const current = await readCard(store, handle);
+      if (!current) return json({ error: `No card at "${handle}".` }, 404);
       if (!b64) return json({ error: 'put_asset needs `base64`.' }, 400);
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return json({ error: '`base64` is not base64.' }, 400);
-      model.assets = { ...model.assets, [id]: { mime: String(body.mime || 'image/webp'), b64 } };
-      const md = serializeCard(model);
-      if (md.length > KV_MAX_BYTES) {
-        return json({ error: `That would make the card ${md.length} bytes; the store's ceiling is ${KV_MAX_BYTES}.` }, 413);
-      }
-      const res = await writeCard(store, handle, md, current.gen);
-      if (res.conflict) return json(res, 409);
-      return json({ handle, id, bytes: Math.floor(b64.replace(/=+$/, '').length * 3 / 4), version: res.version });
+      return cardWrite(env, handle, 'asset', { gen: current.gen, kind: 'put', id, b64, mime: String(body.mime || 'image/webp') });
     }
-
-    if (method === 'DELETE') {
-      // 🔴 Refuse while referenced. Deleting an asset a cell still points at does not error anywhere
-      // — `resolveAsset` returns '' for an unresolvable ref, so the picture just silently becomes a
-      // blank box on someone's live page. That is precisely the class of failure whose feedback
-      // arrives too late to connect to the action that caused it.
-      const referenced = referencedAssets(thinCard(current.md));
-      if (referenced.has(id)) {
-        return json({
-          error: `"${id}" is still used by this card. Remove the reference first, then delete the asset.`,
-          referenced: true,
-        }, 409);
-      }
-      if (!(id in model.assets)) return json({ error: `No asset "${id}" on "${handle}".` }, 404);
-      delete model.assets[id];
-      const res = await writeCard(store, handle, serializeCard(model), current.gen);
-      if (res.conflict) return json(res, 409);
-      return json({ handle, id, deleted: true, version: res.version });
-    }
+    if (method === 'DELETE') return cardWrite(env, handle, 'asset', { gen: await generationOf(store, handle), kind: 'delete', id });
+    if (!(await readCard(store, handle))) return json({ error: `No card at "${handle}".` }, 404);
     return json({ error: `${method} not allowed here.` }, 405);
   }
 
@@ -1191,8 +1329,12 @@ export async function handleApi(request, env, url) {
         });
       }
 
-      const res = await writeCard(store, handle, md, live.gen);
-      if (res.conflict) return json(res, 409);
+      // 🔴 tile#209: the write goes through the handle's write queue, which checks base_version AGAIN
+      // against the card as it is then. The check above ran before Web Risk's wait and the assembly;
+      // a put_asset that landed since would otherwise be erased by a save that "passed" its lock.
+      const written = await cardWrite(env, handle, 'save', { gen: live.gen, md, base: body.base_version == null ? null : String(body.base_version) });
+      const res = await written.json();
+      if (written.status !== 200) return json(res, written.status);
       // the handle lives again: a deleted card's tombstone goes the moment a card is back under it
       // (after the write landed, so a failed save never un-says the old delete)
       // A read, not a blind delete: a read is the cheaper KV operation, and almost every create

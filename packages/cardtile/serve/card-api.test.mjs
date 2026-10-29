@@ -171,7 +171,10 @@ test('🔴 the two 401s are indistinguishable — never say WHICH way it failed'
 test('🔴 FAIL CLOSED: no MCP_TOKEN_HASH configured → every write is refused, not waved through', async () => {
   // A forgotten `wrangler secret put` must not look like a working deploy. This is the assertion
   // that makes that true — without it, the absent-secret path is the one nobody ever runs.
+  // (CARD_LIFETIMES is bound, as in every deploy: since tile#209 a card write runs in the handle's
+  // object, and an env without it fails closed on its own — that is not what this test asks about.)
   const env = { CARDS: fakeKv({ t: CARD }) };
+  env.CARD_LIFETIMES = cardLifetimesNs(env);
   const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) });
   assert.equal(res.status, 503);
   // CONTROL: same env plus the hash, same call → it works. So 503 is about the secret, not the body.
@@ -990,13 +993,21 @@ test('🔴 r2#1 a create whose write is held across a second create + delete doe
   const pending = call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'create A') });
   const key = await held.started;
   assert.equal(key, cardKey('t', '0'), 'a create wrote something before its body — it must never write gen:');
-  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
-  assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
-  assert.equal((await page(env, '/t')).status, 410);
+  // 🔴 tile#209: the second create of the same lifetime can no longer land while the first is
+  // mid-put — card writes of one lifetime run one at a time in the handle's object. It waits; the
+  // DELETE (the lifetime's own queue) does not, and ends the lifetime under both of them.
+  let secondAnswered = false;
+  const second = call(env, 'PUT', '/_api/card/t', { markdown: NEXT }).then((r) => { secondAnswered = true; return r; });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(secondAnswered, false, 'a second write of the same card ran while the first was mid-put');
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
   held.release();
   assert.equal((await pending).status, 409);
+  const late = await second;
+  assert.equal(late.status, 409);
+  assert.equal((await late.json()).stale_generation, true, 'the queued create was not told its lifetime ended');
   const res = await page(env, '/t');
-  assert.equal(res.status, 410, 'the held create resurrected the deleted handle');
+  assert.notEqual(res.status, 200, 'a held create resurrected the deleted handle');
   const text = await res.text();
   assert.ok(!text.includes('create A') && !text.includes('Next owner'));
   assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404);
@@ -2471,4 +2482,217 @@ test('🔴 r13 a lifetime stored before highWater existed takes its inverse\'s t
     body: JSON.stringify({ handle: 'b', host: OWNER, gen: r12.gen, order: r12.inverse.order + 5, ticket: tx - 1 }) })).json();
   assert.equal(res.published, false, `an older acceptance overwrote an r12 inverse: ${JSON.stringify(res)}`);
   assert.equal(store.get('life').inverse.ticket, tx, 'the r12 inverse\'s ticket went down');
+});
+
+// ── the fenced asset delete (tile#209, reef#2600 door 3) ─────────────────────────────────────────
+//
+// A console delete of an unused picture names the version the site owner's editor READ. Between that
+// read and the delete, another editor or agent may `put_asset` the same id — put_asset takes
+// caller-chosen ids and replaces one — leaving it still unreferenced. An unfenced delete then removes
+// the NEW bytes and nothing says so. The fenced route refuses when the card moved; and because KV has
+// no compare-and-set, its check and its removal run in the handle's CardLifetime object, in one
+// queue shared by every card write (put_asset, save_card's base_version, both deletes), so no other
+// write can land between the check and the removal.
+//
+// 🔴 Exact answers: reef's hosted delete_asset (reef PR #2683) reads `fence`, `conflict`,
+// `referenced`, `deleted` and `checked_version` by name, and treats a 404/405 WITHOUT `fence` as
+// "this Worker has no fenced route" (a refusal, never a fallback).
+
+const AVATAR_OLD = 'T0xEIGJ5dGVz'; // "OLD bytes"
+const AVATAR_NEW = 'TkVXIGJ5dGVz'; // "NEW bytes"
+/** a card with one referenced picture (`pic`) and one unreferenced (`unused`), as CARD */
+const fencedCall = (env, id, ifVersion, { handle = 't', method = 'DELETE' } = {}) => {
+  const url = new URL(`https://card.example/_api/card/${handle}/asset/${encodeURIComponent(id)}/fenced`);
+  const headers = { authorization: `Bearer ${TOKEN}` };
+  if (ifVersion !== undefined) headers['if-version'] = ifVersion;
+  return handleApi(new Request(url, { method, headers }), env, url);
+};
+const versionOf = async (env, handle = 't') => (await (await call(env, 'GET', `/_api/card/${handle}`)).json()).version;
+const assetsOf = async (env, handle = 't') => parseCard(await bodyOf(env, handle)).assets;
+/** an env whose card `t` has an unreferenced `unused` at OLD bytes, and the version the owner read */
+const fencedFixture = async () => {
+  const env = envWith({ t: CARD });
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_OLD, mime: 'image/png' })).status, 200);
+  return { env, read: await versionOf(env) };
+};
+/** let every queued microtask and the fake objects' awaits run */
+const settle = () => new Promise((r) => setTimeout(r, 20));
+/** a held write that never starts fails the test by name instead of hanging the file (and cancelling every test after it) */
+const started = (held, what) => Promise.race([held.started,
+  new Promise((_, no) => setTimeout(() => no(new Error(`${what} never reached the store`)), 2000))]);
+
+test('🔴 fenced: a same-id put_asset between the read and the delete → 409 conflict, nothing removed, the NEW bytes survive', async () => {
+  const { env, read } = await fencedFixture();
+  // the other editor replaces `unused` after the site owner's read
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  const res = await fencedCall(env, 'unused', read);
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.conflict, true);
+  assert.equal(body.expected, read);
+  assert.equal(body.current, await versionOf(env));
+  assert.equal(body.fence, 'if-version');
+  assert.equal(typeof body.why, 'string');
+  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW, "the other editor's replacement was removed");
+});
+
+test('🔴 fenced: a put_asset IN FLIGHT when the delete arrives — the delete waits for it, then refuses; the NEW bytes survive', async () => {
+  // put_asset is held inside its KV write (after its read, inside the object's write queue). The
+  // fenced delete, sent with the version read before the put, must not read the card until the put
+  // has landed: if it did, its check would pass against the old bytes and its removal would erase
+  // the replacement.
+  const { env, read } = await fencedFixture();
+  const held = holdPut(env, (k) => k === cardKey('t', '0'));
+  const putting = call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' });
+  await started(held, 'the put_asset');
+  let answered = false;
+  const deleting = fencedCall(env, 'unused', read).then((r) => { answered = true; return r; });
+  await settle();
+  assert.equal(answered, false, 'the fenced delete answered while a write to the same card was in flight');
+  held.release();
+  assert.equal((await putting).status, 200);
+  const res = await deleting;
+  assert.equal(res.status, 409, 'the delete checked the version before the in-flight put landed');
+  assert.equal((await res.json()).fence, 'if-version');
+  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW);
+});
+
+test('🔴 fenced: a put_asset arriving while the delete is between its check and its removal waits — and lands after it', async () => {
+  // The other order: the fenced delete has passed its check and is held inside its write. A put of
+  // the same id arriving now must queue behind it, so the replacement is written AFTER the removal
+  // (and survives), never computed from the card the delete is about to replace.
+  const { env, read } = await fencedFixture();
+  const held = holdPut(env, (k) => k === cardKey('t', '0'));
+  const deleting = fencedCall(env, 'unused', read);
+  await started(held, 'the fenced delete');
+  let answered = false;
+  const putting = call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' })
+    .then((r) => { answered = true; return r; });
+  await settle();
+  assert.equal(answered, false, 'put_asset answered while the fenced delete was between its check and its removal');
+  held.release();
+  const del = await deleting;
+  assert.equal(del.status, 200);
+  assert.equal((await putting).status, 200);
+  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW, 'the replacement was lost to the delete');
+});
+
+test('🔴 fenced: an already-stale card (moved before the call, by any write) → 409, nothing removed', async () => {
+  const { env, read } = await fencedFixture();
+  const md = thinCard(await bodyOf(env)).replace('hello', 'edited elsewhere');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: md, base_version: read })).status, 200);
+  const before = await bodyOf(env);
+  const res = await fencedCall(env, 'unused', read);
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['conflict', 'current', 'expected', 'fence', 'why']);
+  assert.equal(await bodyOf(env), before, 'a refused delete wrote');
+});
+
+test('🔴 fenced: If-Version missing or blank → 400 {error, fence}, nothing removed; CONTROL: the same call with it deletes', async () => {
+  const { env, read } = await fencedFixture();
+  for (const missing of [undefined, '', '   ']) {
+    const res = await fencedCall(env, 'unused', missing);
+    assert.equal(res.status, 400, `If-Version ${JSON.stringify(missing)}`);
+    const body = await res.json();
+    assert.equal(body.fence, 'if-version');
+    assert.equal(typeof body.error, 'string');
+    assert.ok('unused' in await assetsOf(env), 'a refused delete removed the asset');
+  }
+  const ok = await fencedCall(env, 'unused', read);
+  assert.equal(ok.status, 200);
+  assert.equal('unused' in await assetsOf(env), false);
+});
+
+test('🔴 fenced: still referenced → 409 {error, referenced, fence}; at the current version, so the reference is what refused it', async () => {
+  const env = envWith({ t: CARD });
+  const res = await fencedCall(env, 'pic', await versionOf(env));
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.referenced, true);
+  assert.equal(body.fence, 'if-version');
+  assert.equal(typeof body.error, 'string');
+  assert.equal(body.conflict, undefined, 'a reference refusal reported as a version conflict');
+  assert.ok('pic' in await assetsOf(env));
+});
+
+test('fenced: no card, no asset → 404 carrying fence (so reef reads it as the Worker\'s answer, not "no such route")', async () => {
+  const env = envWith({ t: CARD });
+  const noCard = await fencedCall(env, 'unused', 'v1:0000000000000000', { handle: 'nobody' });
+  assert.equal(noCard.status, 404);
+  assert.equal((await noCard.json()).fence, 'if-version');
+  const noAsset = await fencedCall(env, 'ghost', await versionOf(env));
+  assert.equal(noAsset.status, 404);
+  const body = await noAsset.json();
+  assert.equal(body.fence, 'if-version');
+  assert.match(body.error, /No asset "ghost"/);
+});
+
+test('fenced: nothing moved → 200 {handle, id, deleted, version, checked_version} — exactly those keys, and version is the card after', async () => {
+  const { env, read } = await fencedFixture();
+  const res = await fencedCall(env, 'unused', read);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['checked_version', 'deleted', 'handle', 'id', 'version']);
+  assert.deepEqual({ handle: body.handle, id: body.id, deleted: body.deleted, checked_version: body.checked_version },
+    { handle: 't', id: 'unused', deleted: true, checked_version: read });
+  assert.equal(body.version, await versionOf(env));
+  assert.notEqual(body.version, read);
+  assert.equal('unused' in await assetsOf(env), false);
+});
+
+test('fenced: only DELETE is a fenced route — PUT there is 405 with fence, and writes nothing', async () => {
+  const { env } = await fencedFixture();
+  const before = await bodyOf(env);
+  const res = await fencedCall(env, 'unused', await versionOf(env), { method: 'PUT' });
+  assert.equal(res.status, 405);
+  assert.equal((await res.json()).fence, 'if-version');
+  assert.equal(await bodyOf(env), before);
+});
+
+test('🔴 CONTROL — the old route is unchanged: no If-Version needed, no fence in its answers, and it still deletes a card that moved', async () => {
+  const { env, read } = await fencedFixture();
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  assert.notEqual(await versionOf(env), read, 'CONTROL: the card moved');
+  const res = await call(env, 'DELETE', '/_api/card/t/asset/unused');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['deleted', 'handle', 'id', 'version']);
+  assert.equal('unused' in await assetsOf(env), false, 'the unfenced delete took the replacement — the race the fence exists for');
+  const ghost = await (await call(env, 'DELETE', '/_api/card/t/asset/ghost')).json();
+  assert.equal(ghost.fence, undefined);
+  const ref = await (await call(env, 'DELETE', '/_api/card/t/asset/pic')).json();
+  assert.deepEqual(Object.keys(ref).sort(), ['error', 'referenced']);
+});
+
+test('🔴 save_card\'s base_version is checked in the same queue: a save read before an in-flight put_asset is refused, and the picture survives', async () => {
+  const env = envWith({ t: CARD });
+  const read = await versionOf(env);
+  const held = holdPut(env, (k) => k === cardKey('t', '0'));
+  const putting = call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' });
+  await started(held, 'the put_asset');
+  // admitted against the card as it was (the Worker's own check passes: the put has not landed)
+  const saving = call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'saved over'), base_version: read });
+  await settle();
+  held.release();
+  assert.equal((await putting).status, 200);
+  const res = await saving;
+  assert.equal(res.status, 409, 'the save wrote a card assembled before the put landed');
+  assert.equal((await res.json()).conflict, true);
+  assert.equal((await assetsOf(env)).extra?.b64, AVATAR_NEW, 'the save erased the picture put while it was in flight');
+});
+
+test('🔴 two concurrent put_assets of different ids both survive (each reads the card the other wrote)', async () => {
+  const env = envWith({ t: CARD });
+  const held = holdPut(env, (k) => k === cardKey('t', '0'));
+  const first = call(env, 'PUT', '/_api/card/t/asset/one', { base64: AVATAR_OLD, mime: 'image/png' });
+  await started(held, 'the first put_asset');
+  const second = call(env, 'PUT', '/_api/card/t/asset/two', { base64: AVATAR_NEW, mime: 'image/png' });
+  await settle();
+  held.release();
+  assert.equal((await first).status, 200);
+  assert.equal((await second).status, 200);
+  const assets = await assetsOf(env);
+  assert.equal(assets.one?.b64, AVATAR_OLD, 'the second put was computed from the card before the first landed');
+  assert.equal(assets.two?.b64, AVATAR_NEW);
 });
