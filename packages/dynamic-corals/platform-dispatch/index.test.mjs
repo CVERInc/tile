@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
 	handleRequest, capabilityFetch, bypassResponse, matchesWorkerFirst,
-	PUBLIC_CATALOG_PATHS, STUB_READ_PATHS
+	PUBLIC_CATALOG_PATHS, STUB_READ_PATHS, SITE_SHELL_PATH
 } from './index.mjs';
 
 const HOST = 'shop.example.com';
@@ -122,6 +122,25 @@ test('cf-worker rule: only GET on public catalog paths pass; everything else 403
 	assert.equal(h.dispatchCalls.length, 0);
 	// Without the header the same paths are not subject to the rule.
 	assert.equal((await handleRequest(req('/api/cart'), h.env, h.ctx)).status, 201);
+});
+
+test('cf-worker rule: GET on the Site shell (/) reaches the Site Worker, so a server-side <html lang> read gets the page', async () => {
+	const h = harness();
+	const w = { 'cf-worker': 'example.com', accept: 'text/html' };
+	assert.equal(SITE_SHELL_PATH, '/');
+	const res = await handleRequest(req('/', { headers: w, redirect: 'manual' }), h.env, h.ctx);
+	assert.equal(res.status, 200);
+	assert.equal(await res.text(), 'site:site-a');
+	assert.equal(h.dispatchCalls.length, 1);
+	assert.equal(h.rspCalls.length, 0);
+	// Only GET on exactly the shell path: other methods and other pages stay 403.
+	for (const [method, p] of [['HEAD', '/'], ['POST', '/'], ['GET', '/index.html'], ['GET', '/account']]) {
+		const denied = await handleRequest(req(p, { method, headers: w }), h.env, h.ctx);
+		assert.equal(denied.status, 403, `${method} ${p}`);
+	}
+	assert.equal(h.dispatchCalls.length, 1);
+	// An unknown host stays 404 with the header too.
+	assert.equal((await handleRequest(req('/', { headers: w }, 'nope.example.com'), h.env, h.ctx)).status, 404);
 });
 
 test('stub is built per request from ctx.exports and passed in props', async () => {
