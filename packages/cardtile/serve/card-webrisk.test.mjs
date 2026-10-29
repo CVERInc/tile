@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { handleApi, _internal } from './card-api.mjs';
+import { handleApi, CardLifetime, _internal } from './card-api.mjs';
 import { checkUrls, ENDPOINT } from './url-risk.mjs';
 
 const TOKEN = 'webrisk-test-bearer';
@@ -43,6 +43,19 @@ function stubFetch({ listed = {}, status = 200, hang = false } = {}) {
   return { fn, queried, urls };
 }
 
+/** the handle's CardLifetime, where a card write runs since tile#209 (one object per handle, Map storage) */
+const lifetimes = (env) => {
+  const objects = new Map();
+  const storage = () => { const m = new Map(); return { async get(k) { return m.get(k); }, async put(k, v) { m.set(k, v); }, async delete(k) { return m.delete(k); }, async list({ prefix = '' } = {}) { return new Map([...m].filter(([k]) => k.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : 1))); } }; };
+  return {
+    idFromName: (name) => ({ name }),
+    get: ({ name }) => ({ fetch(url, init) {
+      if (!objects.has(name)) objects.set(name, new CardLifetime({ storage: storage() }, env));
+      return objects.get(name).fetch(new Request(url, init));
+    } }),
+  };
+};
+
 async function save(md, { env = {}, fetch } = {}) {
   const store = fakeKv();
   const logs = [];
@@ -52,8 +65,10 @@ async function save(md, { env = {}, fetch } = {}) {
   console.warn = (...a) => logs.push(a.join(' '));
   try {
     const url = new URL('https://card.example/_api/card/t');
-    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: md }) });
-    const res = await handleApi(req, { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...env }, url);
+    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: md, create: true }) }); // a new handle (tile#209 r5: create is the registry's word)
+    const workerEnv = { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...env };
+    workerEnv.CARD_LIFETIMES = lifetimes(workerEnv);
+    const res = await handleApi(req, workerEnv, url);
     return { res, body: await res.json(), store, logs };
   } finally { globalThis.fetch = realFetch; console.log = realLog; console.warn = realWarn; }
 }
@@ -439,8 +454,11 @@ test('r6#1f PUT with dry_run takes the same path', async () => {
   const url = new URL('https://card.example/_api/card/t');
   const realFetch = globalThis.fetch; globalThis.fetch = s.fn;
   try {
-    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true }) });
-    const res = await handleApi(req, { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey }, url);
+    const req = new Request(url, { method: 'PUT', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ markdown: feat('href="/attacker"'), dry_run: true, create: true }) });
+    // (CARD_LIFETIMES bound: since tile#209 r3 a dry run's lock/size check is the handle's object's)
+    const env = { CARDS: store, MCP_TOKEN_HASH: TOKEN_HASH, ...withKey };
+    env.CARD_LIFETIMES = lifetimes(env);
+    const res = await handleApi(req, env, url);
     assert.equal(res.status, 422);
   } finally { globalThis.fetch = realFetch; }
 });

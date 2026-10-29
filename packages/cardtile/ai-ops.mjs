@@ -291,7 +291,7 @@ export const OPS = {
     returns: 'structural diff, new version, and ORPHANED assets — reported, never collected',
   },
   put_asset: { seat: SEAT.WRITE, params: ['handle', 'id', 'base64', 'mime'], returns: 'id, bytes' },
-  delete_asset: { seat: SEAT.WRITE, params: ['handle', 'id'], returns: 'refuses while still referenced' },
+  delete_asset: { seat: SEAT.WRITE, params: ['handle', 'id', 'expected_version'], returns: 'refuses while still referenced; with expected_version (tile#209), also if the card moved since that read' },
   preview_card: { seat: SEAT.READ, params: ['handle', 'markdown'], returns: 'a URL. An agent that cannot look at what it did is guessing.' },
 };
 
