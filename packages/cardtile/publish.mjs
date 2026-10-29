@@ -19,7 +19,9 @@ import { parseCard, serializeCard } from './card-core.js';
  * `create: true` — ONLY from a caller that knows the handle is brand new (it just reserved it in the
  * registry). It is sent with the seed save, and is what lets a card be made on a handle the Worker's
  * object has never seen (tile#209 r5/r6: a store miss is not proof that no card exists). It can never
- * erase one: a card seen anywhere turns the seed into a 409 conflict, returned as is. Without it, a
+ * erase one, nor update one: a card the first read finds is refused here (409, the save door's create
+ * conflict) before anything is written, and a card seen anywhere else turns the seed into that same
+ * 409 from the API, returned as is. Without it, a
  * 404 is not taken as permission — the seed save's own answer (a 409 retry) comes back unchanged.
  *
  * `api(method, path, body)` is the caller's authenticated transport — a tiny seam so this file needs
@@ -41,6 +43,19 @@ export async function publishCard(api, handle, fatMd, { baseVersion, create = fa
   const current = await api('GET', `/_api/card/${encodeURIComponent(handle)}`);
   const exists = current.status === 200;
   if (!exists && current.status !== 404) return current;
+
+  // 🔴 r7 (codex r6 P1): a create never becomes an update. A card is there, so this is not a create:
+  // refuse before anything is uploaded or saved, with the conflict the save door gives a create on a
+  // handle that has a card (expected: null, current: its version) — the caller's assertion was wrong.
+  if (exists && create === true) {
+    return {
+      status: 409,
+      json: {
+        conflict: true, expected: null, current: current.json.version,
+        why: 'This handle already has a card, so this is not a create. Read it and save with its version.',
+      },
+    };
+  }
 
   if (exists && baseVersion && current.json.version !== baseVersion) {
     return {

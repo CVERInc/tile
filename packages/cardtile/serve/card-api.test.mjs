@@ -3043,8 +3043,24 @@ test('🔴 r3 P1 put_asset counts bytes: on a card of CJK text under the ceiling
 /** an env whose objects meet the seeded cards for the FIRST time (no held card: they adopt from KV) */
 const firstContactEnv = (seed) => envWith(seed, { firstContact: true });
 
+/** run `fn` with every random byte = `byte`, so a DELETE's new generation is `byte` × 12 in hex (r7) */
+const withRandomBytes = async (byte, fn) => {
+  const real = crypto.getRandomValues;
+  crypto.getRandomValues = (a) => a.fill(byte);
+  try { return await fn(); } finally { crypto.getRandomValues = real; }
+};
+/** the generation a `card:` key belongs to — parsed, never a prefix test ('card:0' prefixes 'card:01…') */
+const genOfKey = (k) => k.split(':')[1];
+
 test('🔴 r4 P1 an old generation\'s write, paused before its sweep across delete + a new save, never deletes the new card (reviewer input)', async () => {
+  // r7 (codex r6 P3): both generations are fixed and neither is 0 — a random new generation that began
+  // with hex 0 used to pass a `startsWith('card:0')` filter and fail this test about 1 run in 16.
+  const OLD = '11'.repeat(12), NEW = 'ab'.repeat(12);
   const { env } = await fencedFixture();
+  await withRandomBytes(0x11, () => call(env, 'DELETE', '/_api/card/t'));
+  assert.equal(env.CARDS._m.get(genKey('t')), OLD, 'CONTROL: the old lifetime is the fixed one');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) })).status, 200);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_OLD, mime: 'image/png' })).status, 200);
   const life = env.CARD_LIFETIMES.storageOf('t');
   const list = life.list.bind(life);
   const started = deferred(), release = deferred();
@@ -3052,17 +3068,20 @@ test('🔴 r4 P1 an old generation\'s write, paused before its sweep across dele
   life.list = async (o) => { if (hold) { hold = false; started.resolve(); await release.promise; } return list(o); };
   const old = call(env, 'PUT', '/_api/card/t/asset/late', { base64: AVATAR_OLD, mime: 'image/png' });
   await Promise.race([started.promise, new Promise((_, no) => setTimeout(() => no(new Error('the old write never reached its sweep')), 2000))]);
-  assert.ok(life._m.has('card:0'), 'CONTROL: the old write stored its record and is paused before its sweep');
-  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.ok(life._m.has(`card:${OLD}`), 'CONTROL: the old write stored its record and is paused before its sweep');
+  assert.equal((await withRandomBytes(0xab, () => call(env, 'DELETE', '/_api/card/t'))).status, 200);
   const saved = await call(env, 'PUT', '/_api/card/t', { markdown: NEXT });
   assert.equal(saved.status, 200);
-  const G = env.CARDS._m.get(genKey('t'));
-  const nextBody = env.CARDS._m.get(cardKey('t', G));
+  assert.equal(env.CARDS._m.get(genKey('t')), NEW, 'CONTROL: the new lifetime is the fixed one');
+  const nextBody = env.CARDS._m.get(cardKey('t', NEW));
+  const keysOf = (g) => [...life._m.keys()].filter((k) => k.startsWith('card:') && genOfKey(k) === g);
+  const newKeys = keysOf(NEW);
+  assert.ok(newKeys.includes(`card:${NEW}`) && newKeys.length >= 2, `CONTROL: the new card is held (${newKeys})`);
   release.resolve();
   const late = await old;
   assert.equal(late.status, 409, 'a write from the ended lifetime was acknowledged');
-  assert.ok(life._m.has(`card:${G}`), 'the old write\'s sweep deleted the new generation\'s card');
-  assert.deepEqual([...life._m.keys()].filter((k) => k.startsWith('card:0')), [], 'the dead generation\'s keys stayed');
+  assert.deepEqual(keysOf(NEW), newKeys, 'the old write\'s sweep touched the new generation\'s keys');
+  assert.deepEqual(keysOf(OLD), [], 'the dead generation\'s keys stayed');
   // the held new card is whole: a write made from it keeps the next owner's body
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/x', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
   assert.ok((await bodyOf(env)).includes('Next owner'));
@@ -3395,4 +3414,41 @@ test('🔴 r6 P3 an unknown card logs stuck only after the full schedule, then k
   assert.deepEqual(at, [60, 65, 75, 95, 135, 215, 375, 675, 975, 1275, 1575]);
   const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e && e.event === 'card_settlement_stuck');
   assert.deepEqual(events.map((e) => e.attempts), [9, 10, 11], 'stuck was logged before the schedule ran out (or not each time after)');
+});
+
+// ── r7 (codex r6): the publisher's create never updates; the preflight's own veto is tested ───────
+
+test('🔴 r7 P1 publishCard with create on a handle that HAS a card is refused — the API\'s own conflict, nothing uploaded, nothing saved (reviewer input)', async () => {
+  const env = envWith({ t: twoPictures() });
+  const api = async (method, path, body) => { const r = await call(env, method, path, body); return { status: r.status, json: await r.json() }; };
+  const before = await bodyOf(env);
+  const incoming = (() => { const m = parseCard(twoPictures().replace('hello', 'NEW OWNER CONTENT')); m.assets.extra = { mime: 'image/png', b64: AVATAR_NEW }; return serializeCard(m); })();
+  const res = await publishCard(api, 't', incoming, { create: true });
+  assert.equal(await bodyOf(env), before, `the publisher updated a card it was told to create (answered ${res.status} ${JSON.stringify(res.json)})`);
+  assert.equal(res.status, 409);
+  // the same answer the API gives a create on this handle
+  const direct = await api('PUT', '/_api/card/t', { markdown: thinCard(incoming), create: true });
+  assert.equal(direct.status, 409, 'CONTROL: the API refuses this create');
+  assert.deepEqual({ conflict: res.json.conflict, expected: res.json.expected, current: res.json.current },
+    { conflict: direct.json.conflict, expected: direct.json.expected, current: direct.json.current });
+  assert.equal(res.json.uploaded, undefined);
+  // CONTROL: the ordinary update (no create) still publishes over it, as it always has
+  assert.equal((await publishCard(api, 't', incoming)).status, 200);
+});
+
+test('🔴 r7 P3 the PREFLIGHT carries the Worker\'s seen version: a create dry run on a card only the Worker can see is refused before Web Risk', async () => {
+  const body = twoPictures();
+  const { env } = envWithObjectView({ [keyT()]: body }, (k) => k === keyT() || k === 't');
+  const queried = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => { queried.push(String(u)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); };
+  try {
+    const res = await call({ ...env, WEB_RISK_API_KEY: 'fixture-only' }, 'PUT', '/_api/card/t',
+      { markdown: thinCard(body).replace('hello', 'edited'), create: true, dry_run: true });
+    const answer = await res.json();
+    assert.equal(res.status, 409, `a create dry run over a card the Worker saw validated: ${JSON.stringify(answer)}`);
+    assert.equal(answer.conflict, true);
+    assert.equal(answer.current, await cardVersion(body));
+    assert.deepEqual(queried, [], 'the refusal came after Web Risk — not from the preflight');
+  } finally { globalThis.fetch = realFetch; }
 });
