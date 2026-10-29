@@ -12,7 +12,7 @@
 //   • the suggestion banner is suppressed here (SiteLayout's localeBanner.excludePath = '/language').
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
-import { toUrlLocale, label, languageCopy, rootLangMismatch } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, label, languageCopy, rootLangMismatch, localesSourceOf } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -26,10 +26,13 @@ export function getStaticPaths() {
   const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   const editions = localeEditions(files);
   if (!editions) return [];
-  const { rootHome, locales, defaultLocale } = editions;
+  const { rootHome, locales, defaultLocale, homesByRel } = editions;
+  // The locales whose home this build writes: the default's is `/`, every other one's is the home
+  // page the content loop routes at `<loc>` (homesByRel holds exactly those).
+  const homed = locales.filter((L) => L === defaultLocale || homesByRel[toUrlLocale(L)]);
   // …and when the root home page itself disagrees with that, say so. Here because this runs once
   // per build and already holds the root home; the warning is the build log's, like loadSite's.
-  const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang });
+  const mismatch = rootLangMismatch({ locales, rootLang: rootHome.lang, source: localesSourceOf(rootHome) });
   if (mismatch) console.warn(mismatch);
 
   return locales.map((L) => {
@@ -37,12 +40,12 @@ export function getStaticPaths() {
     const url = toUrlLocale(L);
     return {
       params: { loc: L === defaultLocale ? undefined : url },
-      props: { pageLocale: L, defaultLocale, locales, meta },
+      props: { pageLocale: L, defaultLocale, locales, homed, meta },
     };
   });
 }
 
-const { pageLocale, defaultLocale, locales, meta } = Astro.props;
+const { pageLocale, defaultLocale, locales, homed, meta } = Astro.props;
 const copy = languageCopy(pageLocale);
 // Resolved to a plain string BEFORE the client <script> template literal below — a prior version
 // called `toUrlLocale(defaultLocale)` inline inside that nested backtick string, which threw
@@ -54,12 +57,19 @@ const defaultUrlLocale = toUrlLocale(defaultLocale);
 // off the return path before re-prefixing per target locale — without this it treated e.g.
 // "/zh-tw/" as the bare path, so English resolved to "/zh-tw/" (you couldn't switch back).
 const urlLocalesJson = JSON.stringify(locales.map((L) => toUrlLocale(L)));
+// 🩸 CVERInc/reef#1910. Every declared locale got a row linking to its home, written or not. A site
+// whose Chinese home sits at `/` under `locales: en-US, zh-TW` had a Chinese row to a `/zh-tw/`
+// nobody wrote, and an edition with pages but no home (content/ja-jp/about.md only) the same. Such
+// a row is built `hidden`, with no href: the script below shows it only when `has=` says the
+// return page exists in that locale, and points it there — never at the missing home.
 const rows = locales.map((L) => {
   const url = toUrlLocale(L);
+  const home = homed.includes(L);
   return {
     url,
     name: label(L),
-    href: L === defaultLocale ? '/' : `/${url}/`,
+    href: home ? (L === defaultLocale ? '/' : `/${url}/`) : undefined,
+    home,
     current: L === pageLocale,
   };
 });
@@ -71,10 +81,12 @@ const rows = locales.map((L) => {
       <p>{copy.prompt}</p>
     </div>
     <ul class="rf-lang-list" aria-label={copy.word}>
+      {/* A row with no home is hidden on its <li> (the row's box) and by an inline style, because
+          the list's own `display: block` on each row — and any theme's display rule — beats `hidden`. */}
       {rows.map((r) => (
-        <li>
+        <li hidden={!r.home} style={r.home ? undefined : 'display:none'}>
           <a href={r.href} hreflang={r.url} data-language-link data-locale={r.url}
-             aria-current={r.current ? 'true' : undefined}>
+             aria-current={r.current ? 'true' : undefined} data-no-home={r.home ? undefined : ''}>
             <span class="rf-lang-name">{r.name}</span>
             <span class="rf-lang-action">
               {r.current ? copy.current : copy.switch}
@@ -96,6 +108,8 @@ const rows = locales.map((L) => {
       deletes; and a locale prefix in front of two slashes, which bare() itself strips. Listing
       spellings is how the first check came to miss three, so same() asks the browser instead: the
       href is resolved and compared with this page's origin before it is written. A refused value
-      leaves the row as built — that locale's home. */}
-  <script is:inline set:html={`(function(){var LOCS=${urlLocalesJson},DEF="${defaultUrlLocale}";function bare(p){for(var i=0;i<LOCS.length;i++){var loc=LOCS[i];if(loc===DEF)continue;if(p==="/"+loc||p==="/"+loc+"/")return"/";if(p.indexOf("/"+loc+"/")===0)return p.slice(("/"+loc).length)}return p}function same(h){try{return new URL(h,window.location.href).origin===window.location.origin}catch(x){return false}}function l(){var n=new URLSearchParams(window.location.search),e=n.get("return");if(!e||e.charAt(0)!=="/"||e.indexOf("//")===0)return;var b=bare(e),r=(n.get("has")||"").split(",").filter(Boolean);document.querySelectorAll("[data-language-link]").forEach(function(s){var t=s.getAttribute("data-locale");if(!t)return;var a=r.length&&r.indexOf(t)<0?"/":b,o=a;t!==DEF&&(o=a==="/"?"/"+t+"/":"/"+t+a);same(o)&&s.setAttribute("href",o)})}l();document.addEventListener("astro:page-load",l)})();`}></script>
+      leaves the row as built — that locale's home.
+      A row built with `data-no-home` (no home of its own, hidden) is shown only for a return path
+      `has=` lists that locale for, and only pointed at that path: otherwise it stays hidden. */}
+  <script is:inline set:html={`(function(){var LOCS=${urlLocalesJson},DEF="${defaultUrlLocale}";function bare(p){for(var i=0;i<LOCS.length;i++){var loc=LOCS[i];if(loc===DEF)continue;if(p==="/"+loc||p==="/"+loc+"/")return"/";if(p.indexOf("/"+loc+"/")===0)return p.slice(("/"+loc).length)}return p}function same(h){try{return new URL(h,window.location.href).origin===window.location.origin}catch(x){return false}}function l(){var n=new URLSearchParams(window.location.search),e=n.get("return");if(!e||e.charAt(0)!=="/"||e.indexOf("//")===0)return;var b=bare(e),r=(n.get("has")||"").split(",").filter(Boolean);document.querySelectorAll("[data-language-link]").forEach(function(s){var t=s.getAttribute("data-locale");if(!t)return;var a=r.length&&r.indexOf(t)<0?"/":b,o=a,h=s.getAttribute("data-no-home")!==null;if(h&&(r.indexOf(t)<0||a==="/"))return;t!==DEF&&(o=a==="/"?"/"+t+"/":"/"+t+a);if(!same(o))return;s.setAttribute("href",o);var li=h&&s.parentNode;li&&(li.removeAttribute("hidden"),li.removeAttribute("style"))})}l();document.addEventListener("astro:page-load",l)})();`}></script>
 </SiteLayout>
