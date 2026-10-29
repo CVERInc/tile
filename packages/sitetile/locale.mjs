@@ -45,12 +45,23 @@ const _canon = (raw) => {
   }
   return _SUBTAG_TO_DATA[parts[0]] || null;
 };
+// Simplified Chinese is its own EDITION (identity zh-CN, attr zh-Hans), not a copy table: a Chinese
+// tag is Simplified when it has no Hant script and has a Hans script or a CN/SG region. Everything
+// else Chinese (zh-TW, zh-Hant*, zh-HK, zh-MO, bare zh) stays zh-TW. _canon is untouched on
+// purpose — uiCopy/dateHeading still key their chrome copy by it, so a Simplified spelling keeps
+// reading the zh-TW row — and _ident is what the identity-bearing helpers below ask instead.
+const SIMPLIFIED = 'zh-CN';
+const _isSimplified = (raw) => {
+  const p = String(raw || '').trim().toLowerCase().split('-');
+  return p[0] === 'zh' && !p.includes('hant') && (p.includes('hans') || p.includes('cn') || p.includes('sg'));
+};
+const _ident = (raw) => (_isSimplified(raw) ? SIMPLIFIED : _canon(raw));
 /** mixed-case data code → lowercase URL form (zh-TW → zh-tw). */
 export function toUrlLocale(locale) { return String(locale).toLowerCase(); }
 /** any locale-ish string → BCP-47 attr tag (zh-TW / zh-tw → zh-Hant); unknown passes through. */
-export function toBcp47(code) { const f = _canon(code); return f ? LINGO_BCP47[f] : String(code); }
+export function toBcp47(code) { const f = _ident(code); return f ? (f === SIMPLIFIED ? 'zh-Hans' : LINGO_BCP47[f]) : String(code); }
 /** human label for the locale picker. */
-export function label(locale) { const f = _canon(locale); return f ? LINGO_LABELS[f] : String(locale); }
+export function label(locale) { const f = _ident(locale); return f ? (f === SIMPLIFIED ? '简体中文' : LINGO_LABELS[f]) : String(locale); }
 
 /** A frontmatter list (`a, b , c`) or an array → trimmed, non-empty entries. */
 const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
@@ -234,7 +245,7 @@ export function lingoEnabled({ packages = [], locales = [] } = {}) {
  *  the two must be spelled identically. `locales: en-US` + `lang: en` (both correct) produced a
  *  chooser at /en-us/language and a footer link to /en/language, both 404. */
 export function sameLocale(a, b) {
-  const ca = _canon(a), cb = _canon(b);
+  const ca = _ident(a), cb = _ident(b);
   if (ca && cb) return ca === cb;
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 }
@@ -258,16 +269,26 @@ export function localeOf(locales, lang) {
 
 /** navigator.language prefixes that map to each locale (for the suggestion banner). */
 const LINGO_PREFIXES = { 'en-US': ['en'], 'ja-JP': ['ja'], 'zh-TW': ['zh'], 'ko-KR': ['ko'] };
-export function prefixes(locale) { const f = _canon(locale); return f ? LINGO_PREFIXES[f] : []; }
+const SIMPLIFIED_PREFIXES = ['zh-cn', 'zh-sg', 'zh-hans'];
+const TRADITIONAL_PREFIXES = ['zh-tw', 'zh-hant', 'zh-hk', 'zh-mo'];
+/** `declared` = the site's locales: with a Simplified edition among them, zh-TW stops claiming bare
+ *  `zh` (a Simplified browser on the Simplified page must not be offered Traditional). */
+export function prefixes(locale, declared = []) {
+  const f = _ident(locale);
+  if (f === SIMPLIFIED) return SIMPLIFIED_PREFIXES;
+  if (f === 'zh-TW' && declared.some(_isSimplified)) return TRADITIONAL_PREFIXES;
+  return f ? LINGO_PREFIXES[f] : [];
+}
 
 /** Per-locale suggestion-banner copy — each option speaks ITS OWN language (Signet pattern). */
 const LINGO_BANNER = {
   'en-US': { prompt: 'Easier to read in English?', continue: 'Okay', dismiss: 'This is fine' },
   'zh-TW': { prompt: '改用台灣華語讀也許更順？', continue: '好啊', dismiss: '先不用沒關係' },
+  [SIMPLIFIED]: { prompt: '改用简体中文阅读也许更顺？', continue: '好啊', dismiss: '先不用没关系' },
   'ja-JP': { prompt: '日本語の方が読みやすいかも？', continue: 'いいね', dismiss: '大丈夫です' },
   'ko-KR': { prompt: '영어 웹사이트가 더 편하신가요?', continue: '네', dismiss: '괜찮습니다' },
 };
-export function bannerCopy(locale) { const f = _canon(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
+export function bannerCopy(locale) { const f = _ident(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
 
 /** The banner's three sentences, overridden per locale from the SITE layer (CVERInc/reef#1888).
  *
@@ -333,7 +354,7 @@ export function bannerOverrides(meta, locales) {
       note('undeclared-locale', key, `\`${key}\` is ignored: "${m[1]}" is not one of this site's locales (${declared.join(', ') || 'none declared'}).`);
       continue;
     }
-    if (!_canon(loc)) {
+    if (!_ident(loc)) {
       note('banner-unsupported-locale', key, `\`${key}\` sets copy for "${loc}", but the banner is only offered to browsers preferring en, ja, zh-TW or ko — visitors preferring ${loc} are never shown it.`);
     }
     const raw = meta[key];
@@ -346,7 +367,7 @@ export function bannerOverrides(meta, locales) {
       const dropped = g.slice(BANNER_MAX_CHARS).join('');
       note('too-long', key, `\`${key}\` is longer than ${BANNER_MAX_CHARS} characters and was cut; dropped: "${[..._graphemes(dropped)].slice(0, 20).join('')}${_graphemes(dropped).length > 20 ? '…' : ''}".`, { dropped });
     }
-    const id = _canon(loc) || loc;
+    const id = _ident(loc) || loc;
     (copy[id] ||= {})[field] = cut;
   }
   return { copy, warnings, findings };
@@ -388,10 +409,10 @@ export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', 
   const options = exists.filter((l) => !sameLocale(l, pageLocale))
     .map((l) => {
       // tile#128 r1: each sentence falls back on its own — override → that locale's default → en.
-      const own = (copy && copy[_canon(l) || l]) || {};
+      const own = (copy && copy[_ident(l) || l]) || {};
       const def = bannerCopy(l); const en = LINGO_BANNER['en-US'];
       const pick = (f) => own[f] || def[f] || en[f];
-      return { id: toUrlLocale(l), match: prefixes(l), prompt: pick('prompt'), continue: pick('continue'), dismiss: pick('dismiss') };
+      return { id: toUrlLocale(l), match: prefixes(l, declared), prompt: pick('prompt'), continue: pick('continue'), dismiss: pick('dismiss') };
     });
   if (!options.length) return null;
   return {
@@ -408,10 +429,11 @@ export function suggestionBanner({ locales = [], lang = '', defaultLocale = '', 
 const LINGO_LANGUAGE = {
   'en-US': { word: 'Language', prompt: 'Pick the language you would like to use on this site.', current: 'Current', switch: 'Switch' },
   'zh-TW': { word: '語言', prompt: '請選擇你想在此網站使用的語言。', current: '目前', switch: '切換' },
+  [SIMPLIFIED]: { word: '语言', prompt: '请选择你想在此网站使用的语言。', current: '当前', switch: '切换' },
   'ja-JP': { word: '言語', prompt: 'このサイトで使う言語を選んでください。', current: '現在', switch: '切り替え' },
   'ko-KR': { word: '언어', prompt: '이 사이트에서 사용하고 싶은 언어를 선택해 주세요.', current: '현재', switch: '변경' },
 };
-export function languageCopy(locale) { const f = _canon(locale); return f ? LINGO_LANGUAGE[f] : LINGO_LANGUAGE['en-US']; }
+export function languageCopy(locale) { const f = _ident(locale); return f ? LINGO_LANGUAGE[f] : LINGO_LANGUAGE['en-US']; }
 
 /** Which locales genuinely have THIS page — the input to hreflang.
  *
