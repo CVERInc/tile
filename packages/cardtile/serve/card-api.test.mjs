@@ -45,7 +45,8 @@ const TOKEN = 'super-secret-bearer';
 let TOKEN_HASH;
 
 /** A Map-backed KV. Says so: it is a stand-in for the shape, and the real store's eventual
- *  consistency is exactly what it CANNOT model — which is why writeCard reads back in production. */
+ *  consistency is exactly what it CANNOT model — which is why the card's truth is the handle's object,
+ *  not KV (tile#209 r2); tests that need a lagging read wrap `get` (lagKv). */
 const fakeKv = (seed = {}) => {
   const m = new Map(Object.entries(seed));
   return {
@@ -1088,7 +1089,10 @@ test("🔴 a save paused at ANY of its gen: reads writes only its admitted gener
       { markdown: thinCard(CARD).replace('hello', 'former words'), base_version: await cardVersion(CARD) })
       .then((r) => { started.resolve(); return r; });
     await started.promise;
-    if (!held) { await pending; assert.ok(n > 3, `the save read gen:t only ${n - 1} times`); break; }
+    // tile#209 r2: the save reads gen:t ONCE now, at admission; every later generation check is the
+    // handle's object's own (commitCard), not a KV read, so there may be nothing after admission to
+    // pause here. The held-put tests above and below hold the window those checks guard.
+    if (!held) { await pending; assert.ok(n - 1 >= 1, `the save never read gen:t at admission (${n - 1} reads)`); break; }
     mine = false;
     await call(env, 'DELETE', '/_api/card/t');
     assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
@@ -2695,4 +2699,171 @@ test('🔴 two concurrent put_assets of different ids both survive (each reads t
   const assets = await assetsOf(env);
   assert.equal(assets.one?.b64, AVATAR_OLD, 'the second put was computed from the card before the first landed');
   assert.equal(assets.two?.b64, AVATAR_NEW);
+});
+
+// ── r2: the fence's truth is the object's own storage, never a KV read (tile#209 r2, codex r1 P1) ──
+//
+// KV is eventually consistent, even at the location that wrote it. Serializing the writes in the
+// object did not make its KV READ current: a stale body passed the If-Version check, and the fence
+// acknowledged deleting the replacement it exists to protect. So the object keeps the card itself
+// (chunked, per generation) and every queued write reads, checks and writes THAT first; KV is written
+// through from it, for the pages. These tests make the KV read lag and nothing else.
+
+/** every read of `key` answers `body` — the object's (and the Worker's) KV view is behind */
+const lagKv = (env, key, body) => {
+  const get = env.CARDS.get.bind(env.CARDS);
+  env.CARDS.get = async (k) => (k === key ? body : get(k));
+  return () => { env.CARDS.get = get; };
+};
+const keyT = () => cardKey('t', '0');
+
+test('🔴 r2 a STALE KV read after a same-id replacement: the fenced delete → 409 naming the current version, and the NEW bytes survive', async () => {
+  const { env, read } = await fencedFixture();
+  const atRead = env.CARDS._m.get(keyT());
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  assert.notEqual(put.version, read, 'CONTROL: the replacement moved the version');
+  const restore = lagKv(env, keyT(), atRead);
+  const res = await fencedCall(env, 'unused', read);
+  const body = await res.json();
+  restore();
+  // the damage first: whatever the answer says, the replacement must still be stored
+  assert.ok(env.CARDS._m.get(keyT()).includes(AVATAR_NEW), `the store lost the replacement (answered ${res.status} ${JSON.stringify(body)})`);
+  assert.equal((await assetsOf(env)).unused?.b64, AVATAR_NEW);
+  assert.equal(res.status, 409, `the fence passed on a stale body: ${JSON.stringify(body)}`);
+  assert.equal(body.conflict, true);
+  assert.equal(body.current, put.version, 'the conflict did not name the version the object holds');
+  assert.equal(body.fence, 'if-version');
+});
+
+test('🔴 r2 CONTROL: fresh KV, If-Version = the current version → 200, removed', async () => {
+  const { env } = await fencedFixture();
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/unused', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  const res = await fencedCall(env, 'unused', put.version);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).checked_version, put.version);
+  assert.equal('unused' in await assetsOf(env), false);
+});
+
+test('🔴 r2 a stale KV read with the CURRENT If-Version: 200, and the removal is made from the object\'s card — a picture KV has not caught up on survives', async () => {
+  const { env } = await fencedFixture();
+  const before = env.CARDS._m.get(keyT());
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  const restore = lagKv(env, keyT(), before); // KV has not seen `extra` yet
+  const res = await fencedCall(env, 'unused', put.version);
+  restore();
+  assert.equal(res.status, 200, 'the fence compared against the stale KV body, not the object');
+  const assets = await assetsOf(env);
+  assert.equal('unused' in assets, false);
+  assert.equal(assets.extra?.b64, AVATAR_NEW, 'the delete was computed from the stale body and erased `extra`');
+});
+
+test('🔴 r2 put_asset under a stale KV read keeps the picture KV has not caught up on', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/one', { base64: AVATAR_OLD, mime: 'image/png' })).status, 200);
+  const restore = lagKv(env, keyT(), before);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/two', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  restore();
+  const assets = await assetsOf(env);
+  assert.equal(assets.one?.b64, AVATAR_OLD, 'the second put was assembled on the stale body');
+  assert.equal(assets.two?.b64, AVATAR_NEW);
+});
+
+test('🔴 r2 a save under a stale KV read re-attaches the OBJECT\'s assets lane — a picture put just before survives', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  const restore = lagKv(env, keyT(), before);
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'edited') });
+  restore();
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.assets_carried, 3, 'the answer counted the stale lane');
+  const md = await bodyOf(env);
+  assert.ok(md.includes('edited'));
+  assert.equal(parseCard(md).assets.extra?.b64, AVATAR_NEW, 'the save re-attached the stale KV lane and erased `extra`');
+});
+
+test('r2 migration: a handle the object has never written takes its card from KV ONCE; after that a KV body is not consulted', async () => {
+  const env = envWith({ t: CARD });
+  const life = env.CARD_LIFETIMES.storageOf('t')._m;
+  assert.equal([...life.keys()].some((k) => k.startsWith('card:')), false, 'CONTROL: no record before the first write');
+  const v = await versionOf(env);
+  const res = await fencedCall(env, 'unused', v); // the first write: initialised from KV, at KV's version
+  assert.equal(res.status, 200);
+  assert.ok(life.has('card:0'), 'the object did not keep the card it wrote');
+  const after = (await res.json()).version;
+  // KV is now overwritten behind the object's back with the pre-delete body (a lagging or foreign write)
+  env.CARDS._m.set(keyT(), CARD);
+  const again = await fencedCall(env, 'unused', v);
+  assert.equal(again.status, 409, 'the fence read KV again instead of the object');
+  assert.equal((await again.json()).current, after);
+});
+
+test('🔴 r2 DELETE of the card leaves no copy of it in the object (nothing is kept)', async () => {
+  const { env } = await fencedFixture();
+  const life = env.CARD_LIFETIMES.storageOf('t')._m;
+  assert.ok([...life.keys()].some((k) => k.startsWith('card:')), 'CONTROL: the object holds the card');
+  assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
+  assert.deepEqual([...life.keys()].filter((k) => k.startsWith('card:')), [], 'the deleted card is still in the object');
+});
+
+test('r2 a card larger than one storage chunk is held in order: a write computed from the held card keeps a multi-chunk picture byte for byte', async () => {
+  const { env } = await fencedFixture();
+  // not uniform: a body joined out of order, or truncated at a chunk edge, must not compare equal
+  let x = 0x9e3779b9;
+  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const big = Array.from({ length: 700 * 1024 }, () => { x = (x * 1103515245 + 12345) >>> 0; return ALPHA[x >>> 26]; }).join('');
+  const before = env.CARDS._m.get(keyT());
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/big', { base64: big, mime: 'image/png' })).json();
+  const meta = env.CARD_LIFETIMES.storageOf('t')._m.get('card:0');
+  assert.ok(meta.n >= 3, `CONTROL: the card spans ${meta.n} chunk(s), not several`);
+  const restore = lagKv(env, keyT(), before); // KV has not seen `big`: only the held card has it
+  const res = await fencedCall(env, 'unused', put.version);
+  restore();
+  assert.equal(res.status, 200);
+  assert.equal((await assetsOf(env)).big?.b64, big, 'the held card did not come back byte for byte');
+});
+
+test('r2 a KV write-through that fails leaves the write done (the object holds it), pending; the alarm writes KV from the held card', async () => {
+  const { env } = await fencedFixture();
+  const put = env.CARDS.put.bind(env.CARDS);
+  let failed = 0;
+  env.CARDS.put = async (k, v, o) => { if (k === keyT() && !failed++) throw new Error('kv unavailable'); return put(k, v, o); };
+  const res = await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' });
+  assert.equal(res.status, 200, 'a write the object holds was reported as failed');
+  const { version } = await res.json();
+  assert.equal(failed, 1, 'CONTROL: the KV put did fail');
+  assert.ok(!env.CARDS._m.get(keyT()).includes(AVATAR_NEW), 'CONTROL: KV does not have it yet');
+  const life = env.CARD_LIFETIMES.storageOf('t');
+  assert.equal(life._m.get('card:0').cache, 'pending');
+  assert.ok(life._alarm, 'no retry was scheduled');
+  // the fence answers from the held card, KV notwithstanding
+  const del = await fencedCall(env, 'unused', version);
+  assert.equal(del.status, 200);
+  const after = (await del.json()).version;
+  // …and once the alarm runs, KV is the held card
+  life._m.get('card:0').cache = 'pending'; // as if the fenced write's own write-through had failed too
+  env.CARDS._m.set(keyT(), 'stale');
+  await env.CARD_LIFETIMES.alarm('t');
+  assert.equal(await cardVersion(env.CARDS._m.get(keyT())), after, 'the alarm did not write the held card through');
+  assert.equal(life._m.get('card:0').cache, 'written');
+});
+
+test('r2 the object refuses a save whose card is not the one the Worker checked, if what it would write links elsewhere than Web Risk saw', async () => {
+  // Today a card's destinations come from its thin part alone, which the object does not change, so
+  // this cannot be reached through the API; it is the guard that keeps Web Risk's answer true if a
+  // renderer ever links from the assets lane. Sent straight to the object, as the Worker would.
+  const env = envWith({ t: CARD });
+  const lives = env.CARD_LIFETIMES;
+  const save = (body) => lives.get(lives.idFromName('t')).fetch('https://card-lifetime.example/save', { method: 'POST',
+    body: JSON.stringify({ handle: 't', gen: '0', markdown: thinCard(CARD), base: null, destBase: 'https://card.example/t/', ...body }) });
+  const v = await versionOf(env);
+  const moved = await save({ from: 'v1:0000000000000000', dests: ['https://elsewhere.example/'] });
+  assert.equal(moved.status, 409);
+  assert.match((await moved.json()).why, /links/);
+  assert.equal(await versionOf(env), v, 'a refused save wrote');
+  // CONTROL: the same card the Worker checked (`from` = the held version) is written whatever `dests` says
+  const same = await save({ from: v, dests: ['https://elsewhere.example/'] });
+  assert.equal(same.status, 200);
 });
