@@ -1343,14 +1343,14 @@ test('stopping a Card blocks every representation on both hosts; resume restores
     assert.notDeepEqual(before[1].body, before[2].body, 'thin and fat fixtures must differ');
     const marker = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
     store.kv.set('stop:t', marker);
+    // tile-lab#51: stopped = exactly what the same address answers when there is no card at all
+    const { t: _body, ...withoutCard } = seed;
     for (const [url, init] of requests) {
-      const res = await worker.fetch(new Request(url, init), env);
+      const res = await responseBytes(await worker.fetch(new Request(url, init), env));
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('cache-control'), 'no-store', url);
-      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
-      const body = await res.text();
-      assert.match(body, /<p>This Card is unavailable\.<\/p>/, url);
-      assert.doesNotMatch(body, /Test Card|A public bio|Review requested|R0lGODlh/, url);
+      assert.doesNotMatch(res.body.toString(), /Test Card|A public bio|Review requested|R0lGODlh|unavailable/i, url);
+      const none = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore(withoutCard) }));
+      assert.deepEqual(res, none, `${url}: a stopped Card answers differently from no card`);
     }
     assert.equal(store.kv.get('stop:t'), marker, 'the Worker changed the serving marker');
     store.kv.delete('stop:t');
@@ -1391,7 +1391,7 @@ test('the card body and stop marker reads start in parallel for pages, markdown 
   }
 });
 
-test('an unknown path under a stopped handle returns Nothing here without any store read', async () => {
+test('an unknown path under a stopped handle returns the no-card page without any store read', async () => {
   const store = recordingStore({ t: SERVING_CARD, 'stop:t': '' }), reads = [];
   const get = store.get;
   store.get = async (k) => { reads.push(k); return get(k); };
@@ -1401,7 +1401,7 @@ test('an unknown path under a stopped handle returns Nothing here without any st
   assert.equal(res.headers.get('cache-control'), 'public, max-age=60');
   assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
   assert.equal(res.headers.get('vary'), 'Accept');
-  assert.match(await res.text(), /<p>Nothing here\.<\/p>/);
+  assert.match(await res.text(), NO_CARD);
 });
 
 test('stop takes precedence over redirects and missing cards, and resume preserves their responses', async () => {
@@ -1423,9 +1423,12 @@ test('stop takes precedence over redirects and missing cards, and resume preserv
     store.kv.set(`stop:${handle}`, '');
     const res = await worker.fetch(new Request(url), env);
     assert.equal(res.status, 404, url);
-    assert.equal(res.headers.get('cache-control'), 'no-store', url);
-    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
-    assert.match(await res.text(), /<p>This Card is unavailable\.<\/p>/, url);
+    // tile-lab#51: no redirect to the card's own domain (it would name the binding), and the one
+    // no-card page or the bare icon 404 — the same a missing card gets, never an "unavailable" one
+    assert.equal(res.headers.get('location'), null, url);
+    const body = await res.text();
+    assert.doesNotMatch(body, /unavailable|Test Card/i, url);
+    if (!url.endsWith('.ico')) assert.match(body, NO_CARD, url);
     store.kv.delete(`stop:${handle}`);
     assert.deepEqual(await responseBytes(await worker.fetch(new Request(url), env)), before, url);
   }
@@ -1714,5 +1717,81 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
     const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...sw };
     const res = await worker.fetch(new Request('https://card.feelreef.com/t'), env);
     assert.equal(await res.text(), today, JSON.stringify(sw));
+  }
+});
+
+// ── tile-lab#51 ②: "no card here" is a Card, and it is ONE page ────────────────────────────────────
+//
+// chodaict 2026-10-30: 「退役（`stop:` 標記）與不存在的公開頁一字不差，退役的人要的是消失」. The
+// comparison is the same handle in two stores — retired, and never there — on every exit a visitor
+// or a crawler can reach, headers included. A retired Card that also has its own domain is in the
+// retired store: the old 301 to that domain would have named the binding.
+const NO_CARD = /<div class="st-card">[\s\S]*<p>There's no card here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
+const STOP = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
+
+test('tile-lab#51 ②: a retired Card and a never-existed handle answer byte for byte the same, on every exit', async () => {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
+    const requests = [...servingRequests(host, 't'), [`https://${host}/t/avatar`, {}], [`https://${host}/t/nothing`, {}],
+      [`https://${host}/T/`, {}], [`https://${host}/t?utm_source=qr`, {}]];
+    for (const [url, init] of requests) {
+      const retired = { PREVIEW: 'false', ...sw, CARDS: recordingStore({ t: SERVING_CARD, 'stop:t': STOP, 'vanityof:t': 'card.example' }) };
+      const never = { PREVIEW: 'false', ...sw, CARDS: recordingStore() };
+      const a = await responseBytes(await worker.fetch(new Request(url, init), retired));
+      const b = await responseBytes(await worker.fetch(new Request(url, init), never));
+      assert.equal(a.status, 404, url);
+      assert.deepEqual(a, b, `${url}: a retired Card is distinguishable from a handle that never existed`);
+      assert.doesNotMatch(a.body.toString(), /unavailable|Test Card|A public bio|Review requested/i, url);
+    }
+  }
+});
+
+// The table the ticket asks for: existing / retired / never-existed / reserved × the button.
+// 🔴 The button column is "no" in every row, and that is a finding, not an omission: whether a name
+// can be registered is RSP's to say (reserved words + the ledger, where a retired name stays its
+// owner's), and RSP's own rule is that nobody keeps a second copy of that list. See notFound.
+test('tile-lab#51 ②: existing / retired / never-existed / reserved — the page each gets, and no button', async () => {
+  const BUTTON = /signup|register|make a card|create a card|\?handle=/i;
+  const rows = [
+    // [row, store, path, status]
+    ['existing', { t: SERVING_CARD }, '/t', 200],
+    ['retired', { t: SERVING_CARD, 'stop:t': STOP }, '/t', 404],
+    ['never-existed', {}, '/t', 404],
+    ['never-existed, grammar-valid and unreserved', {}, '/zlingart', 404],
+    ['reserved (RSP: try)', {}, '/try', 404],
+    ['reserved (RSP: admin)', {}, '/admin', 404],
+  ];
+  const notFoundBodies = new Set();
+  for (const [row, seed, path, status] of rows) {
+    const res = await worker.fetch(new Request(`https://card.feelreef.com${path}`), { PREVIEW: 'false', CARDS: recordingStore(seed) });
+    const body = await res.text();
+    assert.equal(res.status, status, row);
+    assert.doesNotMatch(body, BUTTON, `${row}: a registration button`);
+    if (status === 404) {
+      assert.match(body, NO_CARD, `${row}: not the shaped page`);
+      // (a one-letter handle is in every page; the one-page Set below covers it)
+      if (path.length > 4) assert.ok(!body.includes(path.slice(1)), `${row}: the page echoes the handle`);
+      notFoundBodies.add(body);
+    }
+  }
+  assert.equal(notFoundBodies.size, 1, 'the "no card" rows did not all get the one page');
+});
+
+test('tile-lab#51 ②: every other "no card" door is the same shaped page — no bare HTML left', async () => {
+  const env = { PREVIEW: 'false', CARDS: recordingStore() };
+  for (const url of [
+    'https://saas.feelreef.com/',          // a path-routed host with no root card (was "Pick a card")
+    'https://card.feelreef.com/',          // the root card itself, not yet saved
+    'https://card.feelreef.com/t/nothing', // a sub-path under a handle (was "Nothing here")
+  ]) {
+    const res = await worker.fetch(new Request(url), env);
+    assert.equal(res.status, 404, url);
+    assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8', url);
+    assert.match(await res.text(), NO_CARD, url);
+  }
+  // CONTROL, by design: a creator's own domain keeps the small 404 (reef#1090) — bound or not
+  for (const [url, seed] of [['https://unbound.example/', {}], ['https://card.example/wp-login.php', { t: SERVING_CARD, 'vanity:card.example': 't' }]]) {
+    const res = await worker.fetch(new Request(url), { PREVIEW: 'false', CARDS: recordingStore(seed) });
+    assert.equal(res.status, 404, url);
+    assert.equal(await res.text(), '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', url);
   }
 });

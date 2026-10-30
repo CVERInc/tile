@@ -107,9 +107,9 @@ test('avatar path returns 404 for stopped handles before fetching or reading the
   for (const url of URLS) {
     const res = await get(url, env);
     assert.equal(res.status, 404, url);
-    assert.equal(res.headers.get('cache-control'), 'no-store');
-    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
     assert.notEqual(res.headers.get('content-type'), 'image/png');
+    // tile-lab#51: a stopped handle's avatar answers exactly as an unknown handle's (empty 404)
+    assert.equal((await bytesOf(res)).length, 0, url);
   }
   assert.equal(match.mock.calls.length, 0);
   assert.equal(globalThis.fetch.mock.calls.length, 0);
