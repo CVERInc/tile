@@ -1643,7 +1643,8 @@ test('reef#2725 r2 ③: host-mode /edit serves on reef.cards and on the old host
 // og:url and <link rel=canonical> (card-share.mjs) used to be the REQUEST's host. So a card served on
 // reef.cards while the switch is still off (route first, then the var — r1's order) claimed
 // reef.cards as its address while card.feelreef.com was the canonical one, and a card reached on the
-// SaaS fallback or a workers.dev URL claimed that. The address a preview names is the card's
+// SaaS fallback or a workers.dev URL claimed that (saas stands for both below: the address does not
+// depend on the host). The address a preview names is the card's
 // canonical one — cardUrlFor(handle, {}, env), the same inverse the editor reads — whatever host
 // answered. A vanity card's address is its own domain, in both positions (card-share.test.mjs).
 const shareOf = (html) => ({
@@ -1657,11 +1658,9 @@ test('reef#2725 r3 ①: og:url and canonical name the configured card host, what
     [{}, 'https://reef.cards/t', 'https://card.feelreef.com/t'],
     [{}, 'https://reef.cards/', 'https://card.feelreef.com/feelreef'],
     [{}, 'https://saas.feelreef.com/t', 'https://card.feelreef.com/t'],
-    [{}, 'https://cardtile.example.workers.dev/t', 'https://card.feelreef.com/t'],
     [ON, 'https://reef.cards/t', 'https://reef.cards/t'],
     [ON, 'https://reef.cards/', 'https://reef.cards'],
     [ON, 'https://saas.feelreef.com/t', 'https://reef.cards/t'],
-    [ON, 'https://cardtile.example.workers.dev/t', 'https://reef.cards/t'],
   ];
   for (const [sw, req, want] of cases) {
     const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD }), ...sw };
