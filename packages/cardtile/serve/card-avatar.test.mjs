@@ -108,8 +108,10 @@ test('avatar path returns 404 for stopped handles before fetching or reading the
     const res = await get(url, env);
     assert.equal(res.status, 404, url);
     assert.notEqual(res.headers.get('content-type'), 'image/png');
-    // tile-lab#51: a stopped handle's avatar answers exactly as an unknown handle's (empty 404)
-    assert.equal((await bytesOf(res)).length, 0, url);
+    // A stopped shared-host avatar is empty; an own-domain avatar matches the unbound host.
+    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null } });
+    assert.deepEqual([...res.headers], [...absent.headers], url);
+    assert.deepEqual(await bytesOf(res), await bytesOf(absent), url);
   }
   assert.equal(match.mock.calls.length, 0);
   assert.equal(globalThis.fetch.mock.calls.length, 0);
@@ -119,7 +121,9 @@ test('avatar path returns 404 for unknown handles on canonical and bound vanity 
   for (const url of [...URLS, 'https://card.feelreef.com/missing/avatar']) {
     const res = await get(url, envWith(null));
     assert.equal(res.status, 404, url);
-    assert.equal((await bytesOf(res)).length, 0);
+    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null } });
+    assert.deepEqual([...res.headers], [...absent.headers], url);
+    assert.deepEqual(await bytesOf(res), await bytesOf(absent), url);
   }
   assert.equal(globalThis.fetch.mock.calls.length, 0);
 });
