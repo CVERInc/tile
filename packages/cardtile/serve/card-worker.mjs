@@ -947,6 +947,9 @@ const router = {
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
     const cardMd = stopped != null ? null : liveMd;
+    // An absent card on a creator's host has no public binding, even when a pointer remains.
+    // Use the unbound response, including its robots headers, on every card exit.
+    if (cardMd == null && !routesByPath(host)) return html(SMALL_404, 404, env);
     // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
     // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
     // and the page names nothing from the old card. no-store: the handle is free, and the next

@@ -1321,7 +1321,7 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests('card.example', handle, true), ['https://card.example/nothing', {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), handle === 'missing' ? null : 'noindex, nofollow', url);
+      assert.equal(res.headers.get('x-robots-tag'), url.endsWith('/nothing') && handle === 'missing' ? null : 'noindex, nofollow', url);
     }
   }
 });
@@ -1428,7 +1428,7 @@ test('stop takes precedence over redirects and missing cards, and resume preserv
     assert.equal(res.headers.get('location'), null, url);
     const body = await res.text();
     assert.doesNotMatch(body, /unavailable|Test Card/i, url);
-    if (!url.endsWith('.ico')) assert.match(body, NO_CARD, url);
+    if (!url.endsWith('.ico')) assert.match(body, url.startsWith('https://card.feelreef.com/') ? NO_CARD : /<p>Nothing here\.<\/p>/, url);
     store.kv.delete(`stop:${handle}`);
     assert.deepEqual(await responseBytes(await worker.fetch(new Request(url), env)), before, url);
   }
@@ -1793,5 +1793,19 @@ test('tile-lab#51 ②: every other "no card" door is the same shaped page — no
     const res = await worker.fetch(new Request(url), { PREVIEW: 'false', CARDS: recordingStore(seed) });
     assert.equal(res.status, 404, url);
     assert.equal(await res.text(), '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', url);
+  }
+});
+
+
+test('tile#217 P1: stopped own-domain card exits match an unbound host including headers', async () => {
+  for (const [url, init] of [...servingRequests('card.example', 't', true), ['https://card.example/t', {}]]) {
+    const absent = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore() }));
+    for (const marker of [STOP, '']) {
+      const stopped = await responseBytes(await worker.fetch(new Request(url, init), {
+        PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, 'vanity:card.example': 't', 'stop:t': marker }),
+      }));
+      assert.deepEqual(stopped, absent, `${url}: stopped own-domain response discloses its binding`);
+      assert.equal(stopped.body.length, 79, `${url}: own-domain small-404 size pin`);
+    }
   }
 });
