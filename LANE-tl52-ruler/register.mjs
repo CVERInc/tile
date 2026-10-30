@@ -1,0 +1,3 @@
+// Registers expose-mdblock.mjs as an ESM load hook. Use: node --import ./LANE-tl52-ruler/register.mjs …
+import { register } from 'node:module';
+register('./expose-mdblock.mjs', import.meta.url);
