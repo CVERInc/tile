@@ -18,6 +18,9 @@ const { post, meta, lang, newer, older, keepReadingCards, relatedCards } = Astro
 // (cjk is an alias of cjk-full) falls to fmtDate's own locale default, which is why this page's
 // own `meta.lang` — not the site default — is what gets passed to it below.
 const dateFormat = meta['blog-date-format'];
+// With no blog-date-format the locale default follows the post's resolved language; an explicit
+// format keeps meta.lang (what it was authored against).
+const dateOpts = { lang: dateFormat ? meta.lang : (meta.lang || lang) };
 // blog-post-linebreaks: br → WP-wpautop mode (single newline inside a paragraph → <br>), for
 // WP-sourced recasts whose live keeps manual line breaks. Default (unset) = CommonMark join.
 // dialogue: author-right (#68) → the post's author sits on the right of every dialogue bubble run.
@@ -33,9 +36,11 @@ const html = flowingHtml(post.body, {
 const author = post.author || String(meta['blog-author'] || '').trim();
 const bylineLabel = String(meta['blog-byline-label'] || 'By').trim();
 // post-nav / related labels — overridable so a non-English site localizes them.
-const newerLabel = String(meta['blog-newer-label'] || 'Newer').trim();
-const olderLabel = String(meta['blog-older-label'] || 'Older').trim();
-const keepReadingLabel = String(meta['blog-keep-reading-label'] || 'Keep reading').trim();
+// Defaults come from the post's resolved language (uiCopy); a Site's `blog-*-label` still wins.
+const ui = uiCopy(lang);
+const newerLabel = String(meta['blog-newer-label'] || ui.newer).trim();
+const olderLabel = String(meta['blog-older-label'] || ui.older).trim();
+const keepReadingLabel = String(meta['blog-keep-reading-label'] || ui.keepReading).trim();
 
 // share buttons (`blog-share: email,facebook,twitter`): a share row using standard share URLs for
 // THIS post's canonical URL + title. Absent → no row. Canonical = configured site + this path.
@@ -101,10 +106,10 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
       <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{post.title}</span>
     </nav>
   ) : (
-    <a class="bl-back" href={blogBase(meta)}><Arrow direction="left" size={14} />All posts</a>
+    <a class="bl-back" href={blogBase(meta)}><Arrow direction="left" size={14} />{ui.archive}</a>
   )}
   <header class="bl-post-head">
-    {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat, meta.lang)}</time>}
+    {post.date && <time class="bl-date">{fmtDate(post.date, dateFormat, dateOpts.lang)}</time>}
     <h1>{post.title}</h1>
     {author && <p class="bl-byline">{bylineLabel} {author}</p>}
     {/* The top pair keeps its original plain-link defaults in site.css, where themes can override them. */}
@@ -129,14 +134,14 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
       {newer ? (
         <a class="bl-post-nav-item bl-post-nav-newer" href={postUrl(newer, meta)}>
           <span class="bl-post-nav-label"><Arrow direction="left" size={12} />{newerLabel}</span>
-          {newer.date && <span class="bl-post-nav-date">{fmtDate(newer.date, dateFormat, meta.lang)}</span>}
+          {newer.date && <span class="bl-post-nav-date">{fmtDate(newer.date, dateFormat, dateOpts.lang)}</span>}
           <span class="bl-post-nav-title">{newer.title}</span>
         </a>
       ) : <span />}
       {older && (
         <a class="bl-post-nav-item bl-post-nav-older" href={postUrl(older, meta)}>
           <span class="bl-post-nav-label">{olderLabel}<Arrow direction="right" size={12} /></span>
-          {older.date && <span class="bl-post-nav-date">{fmtDate(older.date, dateFormat, meta.lang)}</span>}
+          {older.date && <span class="bl-post-nav-date">{fmtDate(older.date, dateFormat, dateOpts.lang)}</span>}
           <span class="bl-post-nav-title">{older.title}</span>
         </a>
       )}
@@ -150,7 +155,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
           <li>
               <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
-              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, meta.lang)}</time>}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, dateOpts.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}
             </a>
@@ -167,7 +172,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
           <li>
               <a href={p.href}>
               {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
-              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, meta.lang)}</time>}
+              {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, dateOpts.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}
             </a>

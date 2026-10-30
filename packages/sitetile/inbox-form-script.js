@@ -25,6 +25,8 @@ const INBOX_OUTCOME_HELPERS_SRC = [
   '        function inboxErrorKey(outcome) {',
   "          if (outcome === 'not_claimed') return 'errorNotClaimed';",
   "          if (outcome === 'inbox_storage_full') return 'errorInboxStorageFull';",
+  "          if (outcome === 'too_long') return 'errorTooLong';",
+  "          if (outcome === 'rate_limited') return 'errorRateLimited';",
   "          return 'errorServer';",
   '        }',
   // An older build's payload may lack the reason-specific key; fall back to errorServer rather than show nothing.

@@ -32,14 +32,14 @@ const copy = inboxFormCopy('zh-TW');
 
 test('🔴 reef#2204 mapping: not_claimed → errorNotClaimed; other refusals keep errorServer', () => {
   assert.equal(H.inboxErrorKey('not_claimed'), 'errorNotClaimed');
-  for (const other of ['error', 'too_long', 'rate_limited', 'invalid_body', 'bad_kind', 'site_closed', '', undefined, null]) {
+  for (const other of ['error', 'invalid_body', 'bad_kind', 'site_closed', '', undefined, null]) {
     assert.equal(H.inboxErrorKey(other), 'errorServer', `outcome ${JSON.stringify(other)} should still be the generic retry sentence`);
   }
 });
 
 test('mapping → copy: the sentence shown is the table\'s, and a payload WITHOUT errorNotClaimed (an older build) falls back to errorServer', () => {
   assert.equal(H.inboxErrorCopy(copy, 'not_claimed'), '這個網站目前沒有開放留言。');
-  assert.equal(H.inboxErrorCopy(copy, 'too_long'), copy.errorServer);
+  assert.equal(H.inboxErrorCopy(copy, 'invalid_body'), copy.errorServer);
   assert.equal(H.inboxErrorCopy(null, 'not_claimed'), null, 'no payload → null, so showError keeps the static default');
   const old = { errorServer: copy.errorServer };
   assert.equal(H.inboxErrorCopy(old, 'not_claimed'), copy.errorServer);

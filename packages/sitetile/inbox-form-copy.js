@@ -52,6 +52,10 @@ export const DEFAULT_LANG = 'zh-Hant';
  * `errorInboxStorageFull` (reef#2357): the inbox cannot store new messages. State only,
  * with no retry instruction or promise of when capacity will return.
  *
+ * `errorTooLong` / `errorRateLimited`: the forwarder's `too_long` and `rate_limited` refusals. A retry of
+ * the same text cannot succeed for the first, and neither promises a duration (the limiter has more
+ * than one bucket).
+ *
  * `sentWithEmail` vs `sentWithEmailGeneric`: build time cannot know what a visitor will TYPE, only
  * whether the `{email}` field is guaranteed filled (`required`) — so the server-rendered fallback
  * (what a no-JS visitor sees after the real POST/303 round trip) uses the generic phrasing. The
@@ -79,6 +83,8 @@ const INBOX_FORM_LOCALE = {
     errorServer: '送信できませんでした。もう一度お試しください。',
     errorNotClaimed: 'このサイトは現在メッセージを受け付けていません。',
     errorInboxStorageFull: 'このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。',
+    errorTooLong: 'メッセージが長すぎます。短くしてからもう一度送信してください。',
+    errorRateLimited: '送信が多すぎます。しばらく待ってからもう一度お試しください。',
     sendAnother: 'もう一度送る',
   },
   'zh-tw': {
@@ -93,6 +99,8 @@ const INBOX_FORM_LOCALE = {
     errorServer: '暫時無法送出，請再試一次。',
     errorNotClaimed: '這個網站目前沒有開放留言。',
     errorInboxStorageFull: '這個網站的收件匣已滿，目前無法接收新訊息。',
+    errorTooLong: '訊息太長了，請縮短後再送出。',
+    errorRateLimited: '送出太頻繁了，請稍候再試。',
     sendAnother: '再送一則',
   },
   'zh-cn': {
@@ -107,6 +115,8 @@ const INBOX_FORM_LOCALE = {
     errorServer: '暂时无法发送，请再试一次。',
     errorNotClaimed: '这个网站目前没有开放留言。',
     errorInboxStorageFull: '这个网站的收件箱已满，目前无法接收新消息。',
+    errorTooLong: '消息太长了，请缩短后再发送。',
+    errorRateLimited: '发送太频繁了，请稍后再试。',
     sendAnother: '再发一条',
   },
   ko: {
@@ -121,6 +131,8 @@ const INBOX_FORM_LOCALE = {
     errorServer: '전송하지 못했습니다. 다시 시도해 주세요.',
     errorNotClaimed: '이 사이트는 현재 메시지를 받지 않고 있습니다.',
     errorInboxStorageFull: '이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.',
+    errorTooLong: '메시지가 너무 깁니다. 줄여서 다시 보내 주세요.',
+    errorRateLimited: '너무 자주 보냈습니다. 잠시 후 다시 시도해 주세요.',
     sendAnother: '다시 보내기',
   },
   en: {
@@ -135,6 +147,8 @@ const INBOX_FORM_LOCALE = {
     errorServer: "Couldn't send that — please try again.",
     errorNotClaimed: "This site isn't taking messages right now.",
     errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
+    errorTooLong: 'That message is too long — please shorten it and send again.',
+    errorRateLimited: 'Too many messages were sent just now — please wait a moment and try again.',
     sendAnother: 'Send another',
   },
 };

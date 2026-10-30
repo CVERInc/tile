@@ -2949,6 +2949,8 @@ function renderSection(s, hero, ctx) {
           errorServer: fieldCopy.errorServer,
           errorNotClaimed: fieldCopy.errorNotClaimed, // reef#2204 — see Form.astro's payload
           errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
+          errorTooLong: fieldCopy.errorTooLong,
+          errorRateLimited: fieldCopy.errorRateLimited,
           sentWithEmail: fieldCopy.sentWithEmail,
           sentNoEmail: fieldCopy.sentNoEmail,
           emailField: fields.some(({ f }) => f.kind === 'email') ? 'visitor_email' : null,

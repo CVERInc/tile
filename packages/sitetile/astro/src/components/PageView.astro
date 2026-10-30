@@ -1,5 +1,4 @@
 ---
-import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // Content-page view — one sitetile .md in content/ rendered through SiteLayout.
 // Split out of the old pages/[...slug].astro (the routing/getStaticPaths now lives in
 // pages/[...path].astro, the single root catch-all). The template + frontmatter below are
@@ -7,7 +6,7 @@ import { DEFAULT_LANG } from '../packages/lingo/locale.mjs';
 // point changed (the page's `site` prop now arrives via the catch-all's getStaticPaths).
 import SiteLayout from '../layouts/SiteLayout.astro';
 import Section from './Section.astro';
-import { allPosts, listedPosts } from '../lib/blog.mjs';
+import { allPosts, listedPosts, systemPageLang } from '../lib/blog.mjs';
 import { deriveDescription } from '../../../site-core.js';
 
 // `stamp` (reef#2554, pages/[...path].astro): this page's own noindex: and sitemap listing, for
@@ -19,6 +18,10 @@ const { site, stamp = null } = Astro.props;
 // the RESOLVED `site.meta.title` when the page bares its title — this is what lets a slimmed home
 // (chrome + site-default title in _site) render its <title> instead of an empty one. Existing sites
 // whose pages all carry their own title are unaffected (site.title truthy → used as before).
+// One <html lang> per Site: a page with no lang from page + site config answers like the 404 / blog /
+// system pages (systemPageLang), not a separate literal.
+const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
+const pageLang = site.meta.lang || systemPageLang(site.meta, viewFiles);
 const pageTitle = site.title || site.meta.title || '';
 // `sidebar-archive: true` (+ `packages: blog`) opts a Site page into a year→month archive tree in
 // its sidebar (SiteLayout reads `blogPosts` off this prop) — General for any real site whose
@@ -34,6 +37,6 @@ const headMeta = site.meta.description
   ? site.meta
   : { ...site.meta, description: deriveDescription(site.sections) };
 ---
-<SiteLayout title={pageTitle} lang={site.meta.lang || DEFAULT_LANG} meta={headMeta} blogPosts={blogPosts} stamp={stamp}>
+<SiteLayout title={pageTitle} lang={pageLang} meta={headMeta} blogPosts={blogPosts} stamp={stamp}>
   {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
 </SiteLayout>

@@ -198,6 +198,8 @@ const inboxCopy = isInbox ? {
   // shows this instead of the retry sentence, on both the `?inbox=` reload and the AJAX path.
   errorNotClaimed: fieldCopy.errorNotClaimed,
   errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
+  errorTooLong: fieldCopy.errorTooLong,
+  errorRateLimited: fieldCopy.errorRateLimited,
   // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
   // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
   sentWithEmail: fieldCopy.sentWithEmail,
