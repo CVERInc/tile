@@ -30,6 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro', 'src', 'styles', 'site.css'), 'utf8');
@@ -128,7 +129,7 @@ test('🩸 CONTROL: the sibling that DOES gate on theme is still there, so this 
 // Why nobody caught it by reading: the missing rule is invisible against a block of present ones.
 // The detector was a screenshot, again.
 
-const FAQ_PAGE = readFileSync(join(HERE, 'astro', 'src', 'components', 'sections', 'Faq.astro'), 'utf8');
+const FAQ_PAGE = sectionSource('Faq.astro').all;   // the component and its packages/emit module
 
 test('the faq coral still emits the class this guard is about', () => {
   assert.match(FAQ_PAGE, /class="st-faq"/, 'Faq.astro must still emit .st-faq');

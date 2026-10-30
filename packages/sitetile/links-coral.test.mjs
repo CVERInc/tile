@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { parseSite, serializeSite, renderSiteToHtml, linksParts, KNOWN_TYPES, takeDropWarnings } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

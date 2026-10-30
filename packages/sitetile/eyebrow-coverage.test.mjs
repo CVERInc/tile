@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SECTIONS = join(HERE, 'astro', 'src', 'components', 'sections');
@@ -30,7 +31,7 @@ function test(name, fn) {
 const HEADING = /<(h1|h2|Title)\b|section\.title/;
 const corals = readdirSync(SECTIONS)
   .filter((f) => f.endsWith('.astro') && f !== 'GridCell.astro')
-  .map((f) => ({ file: f, src: readFileSync(join(SECTIONS, f), 'utf8') }));
+  .map((f) => ({ file: f, src: sectionSource(f).all }));   // the component and its packages/emit module
 
 test('every coral that renders a heading reads eyebrow', () => {
   const missing = corals

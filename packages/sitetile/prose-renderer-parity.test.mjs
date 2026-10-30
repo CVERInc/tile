@@ -36,6 +36,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { bodyHtml, parseSite, proseBodyHtml, renderSiteToHtml } from './site-core.js';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
 
