@@ -1607,3 +1607,31 @@ test('reef#2725 r2 ①: cardUrlFor names the configured card host — unset is t
   // a vanity binding still wins in both positions: one domain = one card
   for (const env of [{}, ON]) assert.equal(W.cardUrlFor('maple', { 'maple.example': 'maple' }, env), 'https://maple.example');
 });
+
+// reef#2725 r2 ③ — PIN, not a change: host-mode `/edit` already answers on reef.cards, in both switch
+// positions, with the same page and the same parent pins; and the old host keeps serving it (never
+// 301'd — an iframe that followed a redirect would change origin under the parent's
+// `event.origin` check). So feelreef can move its framing page whenever it likes, before or after
+// the switch, and the old one keeps working until it does. The checklist is in the lane report.
+test('reef#2725 r2 ③: host-mode /edit serves on reef.cards and on the old host, switch on or off, identically', async () => {
+  const host = 'https://feelreef.com';
+  for (const sw of [{}, ON]) {
+    const pages = [];
+    for (const origin of ['https://reef.cards', 'https://card.feelreef.com']) {
+      const { env, touched } = untouchableEnv();
+      const res = await worker.fetch(new Request(`${origin}/edit?host=${encodeURIComponent(host)}&lang=ja`), { ...env, ...sw });
+      assert.equal(res.status, 200, `${origin} ${JSON.stringify(sw)}`);
+      assert.equal(res.headers.get('content-security-policy'), `frame-ancestors ${host}`);
+      assert.equal(res.headers.get('location'), null);
+      const body = await res.text();
+      assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
+      assert.deepEqual(touched, []);
+      pages.push(body);
+    }
+    assert.equal(pages[0], pages[1], 'the page does not depend on which host served it');
+  }
+  // the table it loads is same-origin (`'self'`), so it moves with the page; the parent is named
+  const t = await worker.fetch(new Request('https://reef.cards/try/edit/t/ja/'), { ...untouchableEnv().env, ...ON });
+  assert.equal(t.status, 200);
+  assert.match(t.headers.get('content-security-policy'), /^frame-ancestors 'self' https:\/\/feelreef\.com /);
+});
