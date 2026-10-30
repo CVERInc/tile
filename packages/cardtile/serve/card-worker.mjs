@@ -954,9 +954,10 @@ const router = {
     // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
     // and the page names nothing from the old card. no-store: the handle is free, and the next
     // save must show at once.
-    // (A stopped Card is not asked: the stop wins, and a gone marker from an older lifetime must not
-    // turn it into a 410 that a never-existed handle would never give.)
-    if (cardMd == null && stopped == null && (await store.get(goneKey(resolved.handle))) != null) {
+    // Missing and stopped identities perform the same reads: skipping a key for a stopped card
+    // discloses it through KV latency. The stop still wins over a stale deletion marker.
+    const gone = cardMd == null ? await store.get(goneKey(resolved.handle)) : null;
+    if (cardMd == null && stopped == null && gone != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
         status: 410,
         headers: {
@@ -1021,8 +1022,8 @@ const router = {
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
-    const ownHost = wouldRedirect && stopped == null ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (ownHost && host !== ownHost) {
+    const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
+    if (stopped == null && ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
