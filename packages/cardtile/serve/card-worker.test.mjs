@@ -1839,3 +1839,39 @@ test('tile-lab#51 ②: every other "no card" door is the same shaped page — no
     assert.equal(await res.text(), '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', url);
   }
 });
+
+
+test('tile#217 P1: stopped own-domain card exits match an unbound host including headers', async () => {
+  for (const [url, init] of [...servingRequests('card.example', 't', true), ['https://card.example/t', {}]]) {
+    const absent = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore() }));
+    for (const marker of [STOP, '']) {
+      const stopped = await responseBytes(await worker.fetch(new Request(url, init), {
+        PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, 'vanity:card.example': 't', 'stop:t': marker }),
+      }));
+      assert.deepEqual(stopped, absent, `${url}: stopped own-domain response discloses its binding`);
+      assert.equal(stopped.body.length, 79, `${url}: own-domain small-404 size pin`);
+    }
+  }
+});
+
+test('tile#217 P2: stopped and missing identities perform the same ordered key reads', async () => {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
+    for (const gen of ['0', '7']) {
+      for (const [url, init] of [...servingRequests(host, 't'), [`https://${host}/t/avatar`, {}]]) {
+        const readsFor = async (stopped) => {
+          const seed = { 'gen:t': gen };
+          if (stopped) Object.assign(seed, gen === '0'
+            ? { t: SERVING_CARD, 'stop:t': STOP, 'vanityof:t': 'card.example', 'gone:t': 'old deletion' }
+            : { 'card:t:7': SERVING_CARD, 'stop:t:7': STOP, 'vanityof:t:7': 'card.example', 'gone:t': 'old deletion' });
+          const store = recordingStore(seed), reads = [];
+          const get = store.get;
+          store.get = async (key) => { reads.push(key); return get(key); };
+          const response = await worker.fetch(new Request(url, init), { PREVIEW: 'false', ...sw, CARDS: store });
+          assert.equal(response.status, 404, `${url}: stop must win over stale gone/domain markers`);
+          return reads;
+        };
+        assert.deepEqual(await readsFor(true), await readsFor(false), `${url} gen=${gen}: stopped/missing lookup schedules differ`);
+      }
+    }
+  }
+});

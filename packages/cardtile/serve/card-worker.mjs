@@ -947,12 +947,12 @@ const router = {
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
     const cardMd = stopped != null ? null : liveMd;
-    // A retained binding cannot put our no-card page or card headers on a creator's domain.
-    if (!cardMd && !routesByPath(host)) return html(SMALL_404, 404, env);
-    // 🔴 A DELETED Card (reef#2618, its owner deleted it and the handle is free) is a missing one too —
-    // no 410, no wording, no other headers (tile-lab#51 r2: 停權／刪除／不存在 look the same). Its body
-    // is gone or under an ended generation liveCard never reads, so it simply falls through as missing.
-    // The `gone:` marker deleteCard writes stays in the store (card-api) and is never read here.
+    // An absent card on a creator's host has no public binding, even when a pointer remains.
+    // Use the unbound response, including its robots headers, on every card exit.
+    if (cardMd == null && !routesByPath(host)) return html(SMALL_404, 404, env);
+    // Missing and stopped shared-host identities perform the same ordered reads, including
+    // the legacy deletion marker. Its value never changes the public absence response.
+    if (cardMd == null) await store.get(`gone:${resolved.handle}`);
 
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
     const blank = cardMd != null && isTemplateOnly(cardMd);
@@ -1007,8 +1007,8 @@ const router = {
     const wantFat = want === 'fat';
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
-    const ownHost = wouldRedirect && stopped == null ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (ownHost && host !== ownHost) {
+    const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
+    if (stopped == null && ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
