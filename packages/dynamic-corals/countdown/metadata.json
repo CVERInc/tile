@@ -1,0 +1,71 @@
+{
+  "id": "countdown",
+  "author": "official",
+  "summary": "Counts down to a deadline in the visitor’s browser, as plain digits or split-flap cards, and hides or swaps itself at the deadline.",
+  "embed": "<div data-dynamic-coral=\"countdown\" data-deadline=\"2026-12-01T23:59:59+09:00\" hidden>\n  <span data-part=\"days\" data-flip></span> <span data-part=\"hours\" data-flip></span> <span data-part=\"minutes\" data-flip></span> <span data-part=\"seconds\" data-flip></span>\n</div>\n<script type=\"module\" src=\"https://feelreef.com/corals/countdown/v0/countdown.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the countdown coral.",
+      "values": [
+        "countdown"
+      ]
+    },
+    {
+      "name": "data-deadline",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,3})?)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    {
+      "name": "data-expired",
+      "type": "enum",
+      "required": false,
+      "default": "hide",
+      "description": "What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides).",
+      "values": [
+        "hide",
+        "text"
+      ]
+    },
+    {
+      "name": "data-expired-text",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "Text shown in place of the countdown when data-expired is text."
+    },
+    {
+      "name": "data-part",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h).",
+      "values": [
+        "days",
+        "hours",
+        "minutes",
+        "seconds"
+      ]
+    },
+    {
+      "name": "data-flip",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "On a data-part element: show one split-flap card per digit instead of plain text. data-flip=\"false\" keeps plain text."
+    },
+    {
+      "name": "data-flip-faces",
+      "type": "string",
+      "required": false,
+      "default": "0,1,2,3,4,5,6,7,8,9",
+      "description": "On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; the same ordered list is the drum order a future drum mode would step through."
+    }
+  ]
+}

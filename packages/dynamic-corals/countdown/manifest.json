@@ -1,0 +1,17 @@
+{
+  "name": "countdown",
+  "version": "0.1.0",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/countdown/0.1.0/countdown.js",
+  "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/countdown",
+  "requires": [],
+  "calls": [],
+  "stores": [
+    "none"
+  ],
+  "paid": false,
+  "funding": null,
+  "without": "requires nothing and calls nothing. Without the script the root stays exactly as authored — an author who marked it `hidden` sees nothing, otherwise the host's own markup shows with empty unit elements. A `data-deadline` without an explicit offset is treated the same way: nothing is mounted and nothing is changed.",
+  "capabilities": []
+}
