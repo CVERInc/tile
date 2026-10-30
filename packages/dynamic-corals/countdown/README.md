@@ -29,7 +29,9 @@ No network call, nothing stored.
 
 ## The card — `shared/flip.mjs`
 
-One card is "1 片": two static halves and, during a change, two flaps. The order is the part that is
+One card is "1 片": two static halves and, during a change, two flaps. A card shows ANY text — a
+digit, a letter, one CJK character, or a whole pre-printed word (「各駅停車」→「東京」, as one flap on a
+station board); countdown is just one caller that feeds it digits. The order is the part that is
 easy to get wrong, so it lives here once:
 
 | | during the fold | settled |
@@ -40,11 +42,16 @@ easy to get wrong, so it lives here once:
 | back flap | new, folds up after it | — |
 
 Each half carries a full-height glyph pinned to its own edge, so the seam cuts one glyph in two. A
-change that arrives mid-fold drops the running flaps first. Styling is custom properties only:
+change that arrives mid-fold drops the running flaps first. The card is as wide as its content (as wide
+as BOTH faces while it folds, so a longer old word is not clipped), or `--dc-flip-width` when a board
+wants every flap the same size. A change goes straight to the target face; a drum mode that steps
+through the faces in between would be an option on the same card, not a new card. Styling is custom
+properties only:
 
 | property | default |
 |---|---|
-| `--dc-flip-width` / `--dc-flip-height` | `1.15em` / `1.8em` |
+| `--dc-flip-width` / `--dc-flip-min-width` / `--dc-flip-height` | `auto` (content) / `1.15em` / `1.8em` |
+| `--dc-flip-pad` | `.14em` (each side of the content) |
 | `--dc-flip-bg-top` / `--dc-flip-bg-bottom` | `#333` / `#262626` |
 | `--dc-flip-fg` | `#fff` |
 | `--dc-flip-seam` | `rgba(0,0,0,.5)` |

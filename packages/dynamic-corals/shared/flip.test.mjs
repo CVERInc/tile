@@ -95,3 +95,29 @@ test('the decorative faces are hidden from assistive tech', () => {
   setFlip(cell, '2', env);
   for (const face of cell.children) assert.equal(face.getAttribute('aria-hidden'), 'true');
 });
+
+test('content-agnostic: a whole word is one face, with the same order as a digit', () => {
+  const { env, cell, clock } = setup();
+  const sep = (cell_) => ['.dc-flip-top', '.dc-flip-bottom', '.dc-flip-front', '.dc-flip-back']
+    .map((sel) => { const el = cell_.querySelector(sel); return el ? el.firstChild.textContent : '-'; }).join('|');
+  setFlip(cell, '各駅停車', env);
+  assert.equal(sep(cell), '各駅停車|各駅停車|-|-');
+  setFlip(cell, '東京', env);
+  assert.equal(sep(cell), '東京|各駅停車|各駅停車|東京', 'top new, bottom old, front old, back new');
+  const sizer = () => cell.querySelector('.dc-flip-size').children.map((c) => c.textContent);
+  assert.deepEqual(sizer(), ['各駅停車', '東京'], 'mid-flip the card fits BOTH faces, so the wider old one is not clipped');
+  clock.advance(FLIP_MS);
+  assert.equal(sep(cell), '東京|東京|-|-');
+  assert.deepEqual(sizer(), ['東京'], 'settled: sized by the shown face only');
+  setFlip(cell, 'A', env);
+  assert.equal(cell.querySelector('.dc-flip-top').firstChild.textContent, 'A', 'a letter works the same way');
+});
+
+test('the card width comes from its content or --dc-flip-width, never a fixed one-character box', () => {
+  assert.match(FLIP_CSS, /\.dc-flip\{[^}]*width:var\(--dc-flip-width,auto\)/);
+  assert.doesNotMatch(FLIP_CSS, /\b1ch\b/);
+  assert.match(FLIP_CSS, /\.dc-flip-size\{[^}]*visibility:hidden[^}]*white-space:nowrap/);
+  const { env, cell } = setup();
+  setFlip(cell, '各駅停車', env);
+  assert.equal(cell.querySelector('.dc-flip-size').getAttribute('aria-hidden'), 'true');
+});
