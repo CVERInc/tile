@@ -25,6 +25,7 @@ const PKG = dirname(fileURLToPath(import.meta.url));
 const ALLOW = new Set([
   // ours
   'card.feelreef.com', 'feelreef.com', 'saas.feelreef.com', 'cver.net',
+  'reef.cards',             // the Cards' own domain (reef#2725), named by the Worker's switch
   'staging.feelreef.com',   // an allowed host-mode parent (/edit?host=), named by the contract
   // platforms the renderer knows by name — their marks, their embeds, their oEmbed
   'www.youtube.com', 'youtube.com', 'youtu.be', 'instagram.com', 'www.instagram.com',
