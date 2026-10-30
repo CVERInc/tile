@@ -1460,17 +1460,29 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
   // CONTROL: the old host's bare root is still the directory, not the feelreef card
   assert.equal(resolveHandle('card.feelreef.com', '/'), null);
 
-  // same store, same card, on both hosts in both switch positions; only the address differs
-  for (const sw of [{}, ON]) {
+  // With the switch off, a route placed on the new host must expose no Cards or root assets.
+  for (const off of [{}, { CARD_CANONICAL_HOST: 'evil.example' }]) {
     const store = recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD });
-    const env = { PREVIEW: 'false', CARDS: store, ...sw };
-    for (const host of sw === ON ? ['reef.cards'] : ['reef.cards', 'card.feelreef.com']) {
-      const res = await worker.fetch(new Request(`https://${host}/t`), env);
-      assert.equal(res.status, 200, host);
-      const body = await res.text();
-      assert.match(body, /Test Card/, host);
-      assert.ok(body.includes(`<link rel="canonical" href="https://${host}/t"`), host);
+    const reads = [];
+    const get = store.get;
+    store.get = async (key) => { reads.push(key); return get(key); };
+    const env = { PREVIEW: 'false', CARDS: store, ...off };
+    for (const path of ['/t', '/', '/feelreef', '/favicon.ico', '/apple-touch-icon.png', '/_api/card/t']) {
+      const res = await worker.fetch(new Request(`https://reef.cards${path}`), env);
+      assert.equal(res.status, 404, `switch off: ${path}`);
     }
+    assert.deepEqual(reads, [], 'switch off must not read card data');
+  }
+
+  // With the switch on, the new host serves paths and its root Card.
+  {
+    const store = recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD });
+    const env = { PREVIEW: 'false', CARDS: store, ...ON };
+    const card = await worker.fetch(new Request('https://reef.cards/t'), env);
+    assert.equal(card.status, 200);
+    const body = await card.text();
+    assert.match(body, /Test Card/);
+    assert.ok(body.includes('<link rel="canonical" href="https://reef.cards/t"'));
     const root = await worker.fetch(new Request('https://reef.cards/'), env);
     assert.equal(root.status, 200);
     const rootBody = await root.text();
@@ -1516,6 +1528,7 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   // is not a single handle-shaped segment — the marketing site's own paths are never a Card.
   for (const [url, init] of [
     ['https://card.feelreef.com/_api/card/t', {}],
+    ['https://card.feelreef.com/_api', {}],
     ['https://card.feelreef.com/try/park', { method: 'POST', body: 'x' }],
     ['https://card.feelreef.com/edit?host=https%3A%2F%2Ffeelreef.com', {}],
     ['https://feelreef.com/', {}],
@@ -1524,6 +1537,7 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   ]) {
     const res = await worker.fetch(new Request(url, init), env);
     assert.notEqual(res.status, 301, url);
+    if (url === 'https://card.feelreef.com/_api') assert.equal(res.status, 404, url);
   }
   // switch OFF (unset, or anything that is not exactly reef.cards): the old host serves, as today
   for (const off of [{}, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }, { CARD_CANONICAL_HOST: '' }]) {
@@ -1535,6 +1549,28 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   const sec = await worker.fetch(new Request('https://reef.cards/.well-known/security.txt'), env);
   assert.equal(sec.status, 200);
   assert.match(await sec.text(), /^Canonical: https:\/\/reef\.cards\/\.well-known\/security\.txt$/m);
+});
+
+test('reef#2725: reserved apex paths stay on the site rather than redirect to Cards', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push(request.url);
+    return new Response('site origin', { status: 200 });
+  };
+  try {
+    for (const path of ['/report', '/pricing', '/login', '/edit', '/try']) {
+      for (const variant of [path, `${path}/`, path.toUpperCase()]) {
+        const url = `https://feelreef.com${variant}`;
+        const moved = W.movedTo('feelreef.com', new URL(url), 'GET', ON);
+        assert.equal(moved, null, `reserved apex path ${variant} must stay on the site`);
+        const res = await worker.fetch(new Request(url), ON);
+        assert.equal(res.status, 200, url);
+        assert.equal(await res.text(), 'site origin', url);
+      }
+    }
+    assert.equal(forwarded.length, 15);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => {

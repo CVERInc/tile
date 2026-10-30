@@ -156,8 +156,8 @@ const CANON_HOST = 'card.feelreef.com';
 const FALLBACK_HOST = 'saas.feelreef.com';
 
 // reef#2725 — the Card's own registrable domain. A Card is user content, and a domain of its own
-// keeps its reputation (browsers, search) apart from feelreef.com's. It routes by path like the old
-// host, and its bare root is the platform's own card, the reserved handle ROOT_HANDLE.
+// keeps its reputation (browsers, search) apart from feelreef.com's. With the switch on, it routes
+// by path like the old host, and its bare root is the platform's own card, ROOT_HANDLE.
 export const CARDS_HOST = 'reef.cards';
 export const ROOT_HANDLE = 'feelreef';
 // the apex whose single-segment paths used to name Cards (`feelreef.com/<handle>`)
@@ -175,6 +175,10 @@ const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
 const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
+// These single-segment paths are the site's, even though each matches the Card handle grammar.
+// If the apex route reaches this Worker, send them to the site's origin rather than a Card.
+const APEX_SITE_PATHS = new Set(['report', 'pricing', 'login', 'edit', 'try']);
+const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, '').toLowerCase());
 
 /**
  * movedTo: (host, url, method, env) → the reef.cards URL this request now lives at, or null. Pure.
@@ -190,8 +194,8 @@ export function movedTo(host, url, method, env) {
   if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
   const p = url.pathname;
   if (host === CANON_HOST) {
-    if (p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
-  } else if (host !== APEX_HOST || !APEX_HANDLE_PATH.test(p)) return null;
+    if (p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
+  } else if (host !== APEX_HOST || !APEX_HANDLE_PATH.test(p) || isApexSitePath(p)) return null;
   return `https://${CARDS_HOST}${p}${url.search}`;
 }
 // cacheable at the edge and in the browser; a day, so a correction does not wait a year to arrive
@@ -626,6 +630,9 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const reqHost = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    // A route can be installed before cutover. Until the switch is on, this entire host is dark.
+    if (reqHost === CARDS_HOST && !movedToCardsHost(env)) return NOT_RELAYED();
 
     // 🔴 FIRST, and before any host resolution. The write API is host-agnostic — reef-MCP calls the
     // canonical host, and a vanity domain must never expose it under a creator's own name. Putting
@@ -637,7 +644,8 @@ const router = {
 
     // reef#2725 — after the move, the old Card addresses are redirects and nothing else. Before any
     // store read: a printed QR code hits this forever, and it costs one header lookup. See movedTo.
-    const reqHost = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    if (url.pathname === '/_api') return NOT_RELAYED();
+    if (reqHost === APEX_HOST && isApexSitePath(url.pathname)) return fetch(request);
     const moved = movedTo(reqHost, url, request.method, env);
     if (moved) return new Response(null, { status: 301, headers: { Location: moved, 'Cache-Control': MOVED_CACHE } });
 
