@@ -344,7 +344,9 @@ export function renderCardHTML(cardMd, ctx = {}) {
     // favicon + apple-touch-icon — see card-icon.mjs. Addressed off cardUrl, so none without one.
     iconLinks: iconLinks(model, { cardUrl: ctx.cardUrl || '' }),
     // og:* / twitter:* / description / canonical — see card-share.mjs. Same rule: none without cardUrl.
-    shareTags: shareTags(model, { name, cardUrl: ctx.cardUrl || '' }),
+    // reef#2725 r3 — the address a preview claims is the CANONICAL one (ctx.canonicalUrl, which the
+    // Worker sets from cardUrlFor and the switch), not whichever host answered. Absent = cardUrl.
+    shareTags: shareTags(model, { name, cardUrl: ctx.canonicalUrl || ctx.cardUrl || '' }),
     since: fm('since'),
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
@@ -1020,7 +1022,10 @@ const router = {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, at, blank);
+    // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
+    // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
+    const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos }), 200, env, resolved.handle, at, blank);
   },
 };
 

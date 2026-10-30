@@ -1469,13 +1469,16 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
       assert.equal(res.status, 200, host);
       const body = await res.text();
       assert.match(body, /Test Card/, host);
-      assert.ok(body.includes(`<link rel="canonical" href="https://${host}/t"`), host);
+      // r3: the canonical is the SWITCH's host, not the one that answered (reef#2725 r3 ① below)
+      assert.ok(body.includes(`<link rel="canonical" href="${W.cardOrigin(sw)}/t"`), host);
     }
     const root = await worker.fetch(new Request('https://reef.cards/'), env);
     assert.equal(root.status, 200);
     const rootBody = await root.text();
     assert.match(rootBody, /<title>feelreef/);
-    assert.ok(rootBody.includes('<link rel="canonical" href="https://reef.cards"'), 'the root card names the bare origin');
+    // switch on: the root card names the bare origin; off: its canonical address is still the old host's
+    const rootCanon = sw === ON ? 'https://reef.cards' : 'https://card.feelreef.com/feelreef';
+    assert.ok(rootBody.includes(`<link rel="canonical" href="${rootCanon}"`), 'the root card names its canonical address');
     // the root's icons sit at the origin, where its <link rel=icon> points
     assert.equal((await worker.fetch(new Request('https://reef.cards/favicon.ico'), env)).status, 200);
     // one card, one address: /feelreef on reef.cards is the root under another name
@@ -1634,4 +1637,47 @@ test('reef#2725 r2 ③: host-mode /edit serves on reef.cards and on the old host
   const t = await worker.fetch(new Request('https://reef.cards/try/edit/t/ja/'), { ...untouchableEnv().env, ...ON });
   assert.equal(t.status, 200);
   assert.match(t.headers.get('content-security-policy'), /^frame-ancestors 'self' https:\/\/feelreef\.com /);
+});
+
+// ── reef#2725 r3: what a link preview names follows the switch ──────────────────────────────────
+// og:url and <link rel=canonical> (card-share.mjs) used to be the REQUEST's host. So a card served on
+// reef.cards while the switch is still off (route first, then the var — r1's order) claimed
+// reef.cards as its address while card.feelreef.com was the canonical one, and a card reached on the
+// SaaS fallback or a workers.dev URL claimed that. The address a preview names is the card's
+// canonical one — cardUrlFor(handle, {}, env), the same inverse the editor reads — whatever host
+// answered. A vanity card's address is its own domain, in both positions (card-share.test.mjs).
+const shareOf = (html) => ({
+  canonical: /<link rel="canonical" href="([^"]*)">/.exec(html)?.[1],
+  ogUrl: /<meta property="og:url" content="([^"]*)">/.exec(html)?.[1],
+});
+test('reef#2725 r3 ①: og:url and canonical name the configured card host, whatever host served the page', async () => {
+  const cases = [
+    // [switch, request URL, the address the preview must name]
+    [{}, 'https://card.feelreef.com/t', 'https://card.feelreef.com/t'],
+    [{}, 'https://reef.cards/t', 'https://card.feelreef.com/t'],
+    [{}, 'https://reef.cards/', 'https://card.feelreef.com/feelreef'],
+    [{}, 'https://saas.feelreef.com/t', 'https://card.feelreef.com/t'],
+    [{}, 'https://cardtile.example.workers.dev/t', 'https://card.feelreef.com/t'],
+    [ON, 'https://reef.cards/t', 'https://reef.cards/t'],
+    [ON, 'https://reef.cards/', 'https://reef.cards'],
+    [ON, 'https://saas.feelreef.com/t', 'https://reef.cards/t'],
+    [ON, 'https://cardtile.example.workers.dev/t', 'https://reef.cards/t'],
+  ];
+  for (const [sw, req, want] of cases) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD }), ...sw };
+    const res = await worker.fetch(new Request(req), env);
+    assert.equal(res.status, 200, req);
+    assert.deepEqual(shareOf(await res.text()), { canonical: want, ogUrl: want }, `${req} ${JSON.stringify(sw)}`);
+  }
+});
+
+// PIN: the switch unset (or any value but reef.cards) on the old host is the page today's Worker
+// sent — the same bytes renderCardHTML gives for the request-derived cardUrl it was always handed.
+test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byte for byte', async () => {
+  const today = renderCardHTML(SERVING_CARD, { handle: 't', cardUrl: 'https://card.feelreef.com/t', videos: {} });
+  for (const sw of [{}, { CARD_CANONICAL_HOST: '' }, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'reef.card' }]) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...sw };
+    const res = await worker.fetch(new Request('https://card.feelreef.com/t'), env);
+    assert.equal(await res.text(), today, JSON.stringify(sw));
+  }
 });
