@@ -622,8 +622,10 @@ test('thinCard is idempotent and assetManifest counts decoded bytes', () => {
 // ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────────
 //
 // chodaict's ruling: an owner may delete their Card — nothing kept, the handle free at once. What IS
-// kept is one fact with no content in it: that this handle had a card and when it went, so the
-// public address answers 410 Gone instead of pretending it never existed.
+// kept is one fact with no content in it: that this handle had a card and when it went (`gone:`).
+// The public address does NOT say so: tile-lab#51 r2 (停權／刪除／不存在 look the same) — a deleted
+// Card answers exactly as a handle that never existed, the shaped no-card 404 (card-worker.test.mjs
+// proves the byte identity). The marker stays for the store's own bookkeeping only.
 
 const page = (env, path) => worker.fetch(new Request('https://card.feelreef.com' + path), env);
 const previewIdOf = async (env, handle) => {
@@ -631,9 +633,9 @@ const previewIdOf = async (env, handle) => {
   return /\/_preview\/([0-9a-f]{32})$/.exec(body.url)[1];
 };
 
-test('🔴 delete → 410 → PUT → 200: the handle is released, and the next save brings it back', async () => {
+test('🔴 delete → 404 (as never-existed) → PUT → 200: the handle is released, and the next save brings it back', async () => {
   const env = envWith({ t: CARD });
-  // CONTROL: the card serves before the delete, so the 410 below is about the delete.
+  // CONTROL: the card serves before the delete, so the 404 below is about the delete.
   assert.equal((await page(env, '/t')).status, 200);
 
   const res = await call(env, 'DELETE', '/_api/card/t');
@@ -643,9 +645,9 @@ test('🔴 delete → 410 → PUT → 200: the handle is released, and the next 
 
   for (const path of ['/t', '/t.md', '/t/favicon.ico']) {
     const gone = await page(env, path);
-    assert.equal(gone.status, 410, `${path} after delete`);
+    assert.equal(gone.status, 404, `${path} after delete`);
     const text = await gone.text();
-    assert.ok(!text.includes('Tester') && !text.includes(GIF), `${path}: the 410 leaked the old card`);
+    assert.ok(!text.includes('Tester') && !text.includes(GIF), `${path}: the 404 leaked the old card`);
   }
   assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404, 'the API still sees a card');
 
@@ -731,7 +733,7 @@ test('delete twice: the second answers deleted:false, rewrites no marker, and on
   assert.deepEqual(await again.json(), { handle: 't', deleted: false });
   assert.deepEqual(puts, [genKey('t')], 'the second delete wrote something other than a new generation');
   assert.equal(env.CARDS._m.get(goneKey('t')), first);
-  assert.equal((await page(env, '/t')).status, 410);
+  assert.equal((await page(env, '/t')).status, 404);
 });
 
 test('🔴 If-Generation: a delete checked in an ended lifetime is refused 412 and leaves the next card alone (reef#2618 r4)', async () => {
@@ -848,7 +850,7 @@ test('🔴 r15 /current reads only, and a stale DELETE refuses without reconcili
 
 test('🔴 r16 an If-Generation that is present but not a generation is 400 bad_generation, with every key untouched — only an ABSENT header skips the fence (reef#2618, tile#207 codex r2 #1)', async () => {
   // HEAD passed `meant || null`: an empty value (or whitespace, which Headers trims to empty) became
-  // "no header", /end rotated the current lifetime, and the next owner's card went 410.
+  // "no header", /end rotated the current lifetime, and the next owner's card went missing.
   const env = envWith({ t: CARD });
   for (const bad of ['', '   ', 'abc', '-1', '00', '0123456789ABCDEF01234567', '0123456789abcdef0123456']) {
     const before = everyKey(env);
@@ -895,7 +897,7 @@ test('delete_card uses the bearer guard and refuses bad handles before touching 
   assert.equal((await (await call(env, 'DELETE', '/_api/card/t')).json()).deleted, true);
 });
 
-test('a gone marker WITH a live card body is not 410 — the live card wins', async () => {
+test('a gone marker WITH a live card body is not a 404 — the live card wins', async () => {
   // A body of the CURRENT lifetime (here: one from before generations, generation 0's legacy key) is
   // the card. A save that raced the delete is not this case — it lands on a dead generation's key (below).
   const env = envWith({ t: CARD, [goneKey('t')]: JSON.stringify({ deleted_at: new Date().toISOString() }) });
@@ -949,7 +951,7 @@ test('🔴 an old save held on Web Risk across delete + reuse is refused, and th
       { markdown: thinCard(CARD), base_version: await cardVersion(CARD) });
     await started.promise;
     assert.deepEqual(await (await call(env, 'DELETE', '/_api/card/t')).json(), { handle: 't', deleted: true });
-    assert.equal((await page(env, '/t')).status, 410);
+    assert.equal((await page(env, '/t')).status, 404);
     assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
     const nextBody = await bodyOf(env);
     assert.ok(nextBody.includes('Next owner'));
@@ -990,7 +992,7 @@ const reborn = async (md = thinCard(CARD)) => {
   return env;
 };
 
-test('🔴 a save whose put lands AFTER the delete lands on the dead generation: 410, never the deleted card; the next delete sweeps it', async () => {
+test('🔴 a save whose put lands AFTER the delete lands on the dead generation: 404, never the deleted card; the next delete sweeps it', async () => {
   // The window no check can close: held INSIDE the put, after every check passed.
   const env = envWith({ t: CARD });
   const held = holdPut(env, (k) => k === cardKey('t', '0'));
@@ -1005,7 +1007,7 @@ test('🔴 a save whose put lands AFTER the delete lands on the dead generation:
   assert.ok(env.CARDS._m.get(cardKey('t', '0')).includes('late words'), 'CONTROL: the stale body did land in the store');
   for (const path of ['/t', '/t.md', '/t/favicon.ico']) {
     const res = await page(env, path);
-    assert.equal(res.status, 410, `${path} resurrected the deleted card`);
+    assert.equal(res.status, 404, `${path} resurrected the deleted card`);
     assert.ok(!(await res.text()).includes('late words'));
   }
   assert.equal((await call(env, 'GET', '/_api/card/t')).status, 404);
@@ -1098,7 +1100,7 @@ test('🔴 r2#4 a DELETE whose gen: read is a cached negative still ends the lif
   held.release();
   await pending;
   const res = await page(env, '/t');
-  assert.equal(res.status, 410, 'the save admitted in the deleted lifetime is live after convergence');
+  assert.equal(res.status, 404, 'the save admitted in the deleted lifetime is live after convergence');
   assert.ok(!(await res.text()).includes('late words'));
 });
 
@@ -1173,7 +1175,7 @@ test('🔴 codex r3#1 a DELETE that sees only a legacy body beside a later gener
   held.release();
   assert.equal((await pending).status, 409);
   const res = await page(env, '/t');
-  assert.equal(res.status, 410, 'the save admitted in the ended lifetime is live after convergence');
+  assert.equal(res.status, 404, 'the save admitted in the ended lifetime is live after convergence');
   assert.ok(!(await res.text()).includes('late words'));
 });
 
@@ -1261,10 +1263,10 @@ test("🔴 the renderer reads only the current generation's keys — seeded dire
   assert.equal((await page(env, '/t.md')).status, 404);
   assert.equal((await page(env, `/_preview/${ID}`)).status, 404);
   env.CARDS._m.set(goneKey('t'), JSON.stringify({ deleted_at: new Date().toISOString() }));
-  assert.equal((await page(env, '/t')).status, 410, 'a dead body hid the gone marker');
+  assert.equal((await page(env, '/t')).status, 404, 'the gone marker changed the public answer (tile-lab#51 r2)');
   // a pre-r3 bare body is generation 0's — never read once the handle has been deleted
   env.CARDS._m.set('t', CARD);
-  assert.equal((await page(env, '/t')).status, 410, 'a legacy body was served in a later lifetime');
+  assert.equal((await page(env, '/t')).status, 404, 'a legacy body was served in a later lifetime');
   // CONTROL: the current generation's body and preview serve
   env.CARDS._m.set(cardKey('t', NOW), CARD);
   env.CARDS._meta.set(previewKey(ID), { handle: 't', gen: NOW });
@@ -1721,7 +1723,7 @@ test('🔴 r8 no CardLifetime, no lifetime change: DELETE answers 503 and touche
   // CONTROL: bound again, the same DELETE goes through
   env.CARD_LIFETIMES = lives;
   assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
-  assert.equal((await page(env, '/t')).status, 410);
+  assert.equal((await page(env, '/t')).status, 404);
 });
 
 test("🔴 codex r4#2 a DELETE held before ANY store call after its rotation leaves the next lifetime's binding and preview alone", async () => {

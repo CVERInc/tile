@@ -1728,33 +1728,45 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
 // retired store: the old 301 to that domain would have named the binding.
 const NO_CARD = /<div class="st-card">[\s\S]*<p>There's no card here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
 const STOP = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
+// tile-lab#51 r2: a DELETED Card (reef#2618) as deleteCard leaves the store — the lifetime rotated
+// (`gen:`), a body and a domain binding stranded under the ended generation (a delete that died
+// before its sweep), and the content-free `gone:` marker the registration flow still writes and clears.
+const DEAD_GEN = 'a'.repeat(24), NOW_GEN = 'b'.repeat(24);
+const DELETED = () => ({
+  [`card:t:${DEAD_GEN}`]: SERVING_CARD, [`vanityof:t:${DEAD_GEN}`]: 'card.example', 'gen:t': NOW_GEN,
+  'gone:t': JSON.stringify({ deleted_at: '2026-01-01T00:00:00.000Z' }),
+});
 
-test('tile-lab#51 ②: a retired Card and a never-existed handle answer byte for byte the same, on every exit', async () => {
+test('tile-lab#51 ②: a retired Card, a deleted Card and a never-existed handle answer byte for byte the same, on every exit', async () => {
   for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
     const requests = [...servingRequests(host, 't'), [`https://${host}/t/avatar`, {}], [`https://${host}/t/nothing`, {}],
       [`https://${host}/T/`, {}], [`https://${host}/t?utm_source=qr`, {}]];
     for (const [url, init] of requests) {
       const retired = { PREVIEW: 'false', ...sw, CARDS: recordingStore({ t: SERVING_CARD, 'stop:t': STOP, 'vanityof:t': 'card.example' }) };
+      const deleted = { PREVIEW: 'false', ...sw, CARDS: recordingStore(DELETED()) };
       const never = { PREVIEW: 'false', ...sw, CARDS: recordingStore() };
       const a = await responseBytes(await worker.fetch(new Request(url, init), retired));
+      const d = await responseBytes(await worker.fetch(new Request(url, init), deleted));
       const b = await responseBytes(await worker.fetch(new Request(url, init), never));
-      assert.equal(a.status, 404, url);
+      assert.equal(b.status, 404, url);
       assert.deepEqual(a, b, `${url}: a retired Card is distinguishable from a handle that never existed`);
-      assert.doesNotMatch(a.body.toString(), /unavailable|Test Card|A public bio|Review requested/i, url);
+      assert.deepEqual(d, b, `${url}: a deleted Card is distinguishable from a handle that never existed`);
+      for (const r of [a, d]) assert.doesNotMatch(r.body.toString(), /unavailable|deleted|Gone|Test Card|A public bio|Review requested/i, url);
     }
   }
 });
 
-// The table the ticket asks for: existing / retired / never-existed / reserved × the button.
+// The table the ticket asks for: existing / retired / deleted / never-existed / reserved × the button.
 // 🔴 The button column is "no" in every row, and that is a finding, not an omission: whether a name
 // can be registered is RSP's to say (reserved words + the ledger, where a retired name stays its
 // owner's), and RSP's own rule is that nobody keeps a second copy of that list. See notFound.
-test('tile-lab#51 ②: existing / retired / never-existed / reserved — the page each gets, and no button', async () => {
+test('tile-lab#51 ②: existing / retired / deleted / never-existed / reserved — the page each gets, and no button', async () => {
   const BUTTON = /signup|register|make a card|create a card|\?handle=/i;
   const rows = [
     // [row, store, path, status]
     ['existing', { t: SERVING_CARD }, '/t', 200],
     ['retired', { t: SERVING_CARD, 'stop:t': STOP }, '/t', 404],
+    ['deleted (reef#2618)', DELETED(), '/t', 404],
     ['never-existed', {}, '/t', 404],
     ['never-existed, grammar-valid and unreserved', {}, '/zlingart', 404],
     ['reserved (RSP: try)', {}, '/try', 404],

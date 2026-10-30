@@ -112,7 +112,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -941,29 +941,16 @@ const router = {
     if (!want) return vanityHandle ? html(SMALL_404, 404, env, resolved.handle, at) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
-    // 410/404 below exactly as a missing body does.
+    // no-card 404 exactly as a missing body does.
     const { md: liveMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
     // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
     const cardMd = stopped != null ? null : liveMd;
-    // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
-    // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
-    // and the page names nothing from the old card. no-store: the handle is free, and the next
-    // save must show at once.
-    // (A stopped Card is not asked: the stop wins, and a gone marker from an older lifetime must not
-    // turn it into a 410 that a never-existed handle would never give.)
-    if (cardMd == null && stopped == null && (await store.get(goneKey(resolved.handle))) != null) {
-      return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
-        status: 410,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-Robots-Tag': 'noindex, nofollow',
-          Vary: 'Accept',
-        },
-      });
-    }
+    // 🔴 A DELETED Card (reef#2618, its owner deleted it and the handle is free) is a missing one too —
+    // no 410, no wording, no other headers (tile-lab#51 r2: 停權／刪除／不存在 look the same). Its body
+    // is gone or under an ended generation liveCard never reads, so it simply falls through as missing.
+    // The `gone:` marker deleteCard writes stays in the store (card-api) and is never read here.
 
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
     const blank = cardMd != null && isTemplateOnly(cardMd);

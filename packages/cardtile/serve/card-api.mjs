@@ -41,8 +41,10 @@ export const PREVIEW_TTL = 3600;
 
 /**
  * A deleted card's tombstone (reef#2618). Holds `{ deleted_at }` and nothing else — no content, no
- * account — so the public address can say 410 Gone rather than "never existed". The next save clears
- * it. `:` is not in VALID_HANDLE, so it can never be a handle.
+ * account. The public address never reads it: since tile-lab#51 r2 (停權／刪除／不存在 look the same)
+ * a deleted Card answers exactly as a never-existed handle, the shaped no-card 404 (card-worker
+ * notFound). It stays the store's own record that a lifetime ended here (deleteCard writes it once,
+ * never twice). The next save clears it. `:` is not in VALID_HANDLE, so it can never be a handle.
  */
 export const goneKey = (handle) => `gone:${handle}`;
 
@@ -1243,8 +1245,9 @@ async function readCard(store, handle) {
  *
  * The product owner ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
  * handle is free at once. So this removes the card, its serving stop, every parked preview of it, and
- * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` so the public address answers
- * 410 instead of an ordinary 404. The tombstone does not reserve the handle: the next save clears it.
+ * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` (see goneKey — not served:
+ * the public address answers the ordinary no-card 404, tile-lab#51 r2). The tombstone does not reserve
+ * the handle: the next save clears it.
  *
  * 🔴 The domain binding goes too: its keys are the ended lifetime's (see vanityKey), so the next owner
  * of this handle is neither 301'd to the previous owner's domain nor served on it. Each host the
@@ -1253,10 +1256,9 @@ async function readCard(store, handle) {
  * outside this store; unbinding it stays an operator act.)
  *
  * The marker is written first (r15: first after the lifetime's fence, below, and before `gen:` moves
- * or any body goes): the renderer only reads it when the card body is missing, so it is invisible
- * until the body goes, and a delete that dies halfway leaves a 410, never a resurrected card.
- * Returns whether there was a card to delete; a handle that never had one gets no marker, because a
- * 410 there would claim a card that never was.
+ * or any body goes), and a delete that dies halfway leaves a 404, never a resurrected card.
+ * Returns whether there was a card to delete; a handle that never had one gets no marker, because the
+ * marker would claim a card that never was.
  *
  * 🔴 Then the lifetime ends: a fresh generation in CardLifetime, and then in the `gen:<handle>` cache
  * (see genKey). From that put on, every write admitted before it — a save waiting on Web Risk, a body
@@ -1317,7 +1319,7 @@ async function deleteCard(env, handle, meant = null) {
   const { ended, pending } = ending;
   // The marker is this DELETE's first write (r15: after the fence). It still precedes every key that
   // could make it visible: `gen:` moves at /settle and the body goes after that, so until both the card
-  // still serves from KV, and a delete that dies after here leaves a 410, never a resurrected card.
+  // still serves from KV, and a delete that dies after here leaves a 404, never a resurrected card.
   if (had && !marked) await store.put(goneKey(handle), JSON.stringify({ deleted_at: new Date().toISOString() }));
   const gensOf = new Map();
   for (const [g, hosts] of Object.entries(pending)) for (const h of hosts) gensOf.set(h, [...(gensOf.get(h) || []), g]);
