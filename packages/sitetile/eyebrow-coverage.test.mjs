@@ -46,7 +46,8 @@ test('…and each one actually EMITS it, not just parses it', () => {
   // accepted and dropped. Parsing alone would satisfy the check above.
   const silent = corals
     .filter((c) => /const eyebrow = pm\.eyebrow/.test(c.src))
-    .filter((c) => !/\{eyebrow && </.test(c.src))
+    // `{eyebrow && <p …/>}` in a component; `when(eyebrow, () => '<p …')` in its packages/emit module
+    .filter((c) => !/\{eyebrow && <|when\(eyebrow, \(\) => '</.test(c.src))
     .map((c) => c.file);
   assert.deepEqual(silent, [], `these read eyebrow and never render it:\n${silent.join('\n')}`);
 });
