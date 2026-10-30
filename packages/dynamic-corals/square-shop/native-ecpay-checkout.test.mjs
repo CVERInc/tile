@@ -59,7 +59,7 @@ function ecpayScript(html) {
 
 // A just-enough browser: the panel's innerHTML is the rendered checkout; events are delivered to
 // the listeners the script registered, with targets shaped like the inputs it rendered.
-function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {} } = {}) {
+function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null } = {}) {
   const calls = [];
   const forms = [];
   const store = { ...session };
@@ -69,9 +69,18 @@ function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', s
   const attrs = {};
   const button = Object.assign(listen(), {
     disabled: false, hidden: false, textContent: '立即購買', clicked: 0,
-    parentElement: { querySelector: (sel) => (sel === '[data-native-status]' ? status : null) },
+    parentElement: { querySelector: (sel) => (sel === '[data-native-status]' ? status : sel === '[data-native-rail-choice]:checked' && rail ? { value: rail } : null) },
     getAttribute: (n) => (n in attrs ? attrs[n] : null), setAttribute: (n, v) => { attrs[n] = String(v); }, removeAttribute: (n) => { delete attrs[n]; },
-    click() { this.clicked += 1; },
+    // Like HTMLElement.click(): the control's own listener runs first (a nested click() is a no-op),
+    // then the event bubbles to the document-level native checkout script, recorded as `seen`.
+    click() {
+      if (this.inClick) return;
+      this.inClick = true;
+      this.clicked += 1;
+      if (this.listeners.click) this.listeners.click();
+      this.seen = { sku: attrs['data-native-sku'] || null, ecpay: attrs['data-native-ecpay-sku'] || null };
+      this.inClick = false;
+    },
   });
   attrs['data-native-ecpay-sku'] = 'bowl-sku';
   const panel = Object.assign(listen(), { innerHTML: '', hidden: true, querySelector: () => null });
@@ -413,5 +422,46 @@ test('the new invoice choices follow the shell language', async () => {
     const b = browser(await productHtml(bowl, shell), options([CVS]));
     await b.press();
     for (const w of words) assert.ok(b.panel.innerHTML.includes(w), `${lang}: ${w}`);
+  }
+});
+
+const twoRails = (item = bowl, rails = ['stripe', 'ecpay']) => ({ ...item, commerce: { ...item.commerce, checkout_rails: rails } });
+
+test('a rail choice that includes ECPay keeps the in-page checkout beside the radios', async () => {
+  const html = await productHtml(twoRails());
+  assert.match(html, /<div class="st-native-actions"><fieldset data-native-rails>[\s\S]*value="ecpay" data-native-rail-choice> 綠界<\/label><\/fieldset><button type="button" class="dc-native-buy" data-native-ecpay-sku="bowl-sku">立即購買<\/button>/);
+  assert.match(html, /data-native-ecpay-checkout/);
+  assert.doesNotMatch(html, /data-native-sku=/);
+  assert.ok(ecpayScript(html));
+  assert.ok(html.includes('data-native-rail-choice]:checked'), 'the existing Buy script reads the checked rail');
+});
+
+test('choosing ECPay among the rails opens the in-page checkout, choosing Stripe goes the rail way', async () => {
+  const html = await productHtml(twoRails());
+  const ec = browser(html, options([CVS]), { rail: 'ecpay' });
+  await ec.press();
+  assert.equal(ec.button.clicked, 0);
+  assert.equal(ec.panel.hidden, false);
+  const st = browser(html, options([CVS]), { rail: 'stripe' });
+  await st.press();
+  assert.equal(st.calls.length, 0, 'no delivery-options read for a Stripe press');
+  assert.equal(st.panel.hidden, true);
+  assert.equal(st.button.clicked, 1);
+  assert.deepEqual(st.button.seen, { sku: 'bowl-sku', ecpay: null }, 'the existing script sees its own control for that press');
+  assert.equal(st.button.getAttribute('data-native-ecpay-sku'), 'bowl-sku', 'the control is ours again afterwards');
+  assert.equal(st.button.getAttribute('data-native-sku'), null);
+});
+
+test('a rail choice without ECPay, a single rail, or a non-eligible product keeps the rail-aware flow', async () => {
+  for (const item of [
+    twoRails(bowl, ['stripe', 'square']),
+    { ...bowl, commerce: { ...bowl.commerce, checkout_rail: 'ecpay' } },
+    twoRails({ ...bowl, copy: { ...bowl.copy, requires_shipping: false } }),
+    twoRails({ ...bowl, commerce: { ...bowl.commerce, currency: 'USD' } }),
+  ]) {
+    const html = await productHtml(item);
+    assert.doesNotMatch(html, /data-native-ecpay/);
+    assert.doesNotMatch(html, /nativeEcpayCheckoutClient/);
+    assert.match(html, /class="dc-native-buy" data-native-sku="bowl-sku" data-native-rail="/);
   }
 });

@@ -1716,7 +1716,26 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		panel.hidden = false;
 		render();
 	}
-	button.addEventListener('click', function () { if (!fallen && !button.disabled) open(false); });
+	// Where the Site offers a payment-method choice, only the ECPay choice opens this checkout; any
+	// other rail goes through the existing native checkout for one press and the control stays ours.
+	const otherRail = () => {
+		const holder = button.parentElement;
+		const picked = holder && holder.querySelector ? holder.querySelector('[data-native-rail-choice]:checked') : null;
+		return picked && typeof picked.value === 'string' && picked.value && picked.value !== 'ecpay';
+	};
+	// The replayed click reaches this listener again before it bubbles to the native checkout script.
+	let replaying = false;
+	function viaRail() {
+		replaying = true;
+		button.removeAttribute('data-native-ecpay-sku');
+		button.setAttribute('data-native-sku', C.sku);
+		try { button.click(); } finally {
+			replaying = false;
+			button.removeAttribute('data-native-sku');
+			button.setAttribute('data-native-ecpay-sku', C.sku);
+		}
+	}
+	button.addEventListener('click', function () { if (!replaying && !fallen && !button.disabled) { if (otherRail()) viaRail(); else open(false); } });
 	panel.addEventListener('input', function (event) {
 		const t = event.target;
 		const k = t && t.getAttribute && t.getAttribute('data-ecpay-field');
@@ -1798,10 +1817,11 @@ function nativeProductBody(item, shop, copy, locale, preview, cfg) {
 	const refused = nativeItemRefused(mapped, preview);
 	// The in-page ECPay checkout (above) changes this product's markup only: the Buy control's
 	// marker, a collapse marker on the image and description, an empty panel and its script. Every
-	// other product's bytes are exactly the line below the branch. A product that names a payment rail
-	// (`checkout_rail`) or offers a rail choice keeps the rail-aware flow and never takes this branch.
-	if (cfg && cfg.siteId && !mapped.checkoutRail && !mapped.checkoutRails.length && nativeEcpayEligible(item, mapped, refused)) {
-		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview)}`;
+	// other product's bytes are exactly the line below the branch. A product that names a single payment rail
+	// (`checkout_rail`) keeps the rail-aware flow; one offering a rail choice takes this branch only when
+	// ECPay is among the rails, and then the radios sit beside the control and only the ECPay choice opens it.
+	if (cfg && cfg.siteId && !mapped.checkoutRail && (!mapped.checkoutRails.length || mapped.checkoutRails.includes('ecpay')) && nativeEcpayEligible(item, mapped, refused)) {
+		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, false)}${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview, mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview)}`;
 	}
 	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, refused)}${nativeBuyControl(mapped, copy, refused)}${nativeStatusNode(copy, refused)}</div></article>${nativeCheckoutScript(copy, preview, !!mapped.checkoutRail || mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}`;
 }
