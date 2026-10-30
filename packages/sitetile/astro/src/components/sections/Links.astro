@@ -11,32 +11,14 @@
 // owner wrote this list, so it IS an editorial endorsement — withholding it would defeat the
 // coral. Not `noreferrer`: the recommended site seeing where a visitor came from is the only
 // "reciprocity" this coral has, and it costs no fetch.
-import { parseParams, inlineHtml, bodyHtml, linksParts } from '@sitetile';
+// The markup is packages/emit/links.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
+import { parseParams } from '@sitetile';
+import { emitLinks } from '@emit/links.mjs';
 const { section, hero } = Astro.props;
-const Title = hero ? 'h1' : 'h2';
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every heading-bearing coral
 // has. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
-// Destinations arrive already gated (href is null for a disallowed scheme) and classified, so
-// this component decides nothing the reference renderer does not.
-const lp = linksParts(section.body);
 ---
-<section class="st-links" id={section.id}>
-  {eyebrow && <p class="st-links-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <Title set:html={inlineHtml(section.title)} />}
-  {lp.caption && <Fragment set:html={bodyHtml(lp.caption)} />}
-  {lp.items.length > 0 && (
-    <ul class="st-links-list">
-      {lp.items.map((it) => (
-        <li class="st-link">
-          {it.href
-            ? <a class="st-link-name" href={it.href} target={it.external ? '_blank' : undefined} rel={it.external ? 'noopener' : undefined} set:html={inlineHtml(it.label)} />
-            : <span class="st-link-name" set:html={inlineHtml(it.label)} />}
-          {it.host && <span class="st-link-host">{it.host}</span>}
-          {it.note && <p class="st-link-note" set:html={inlineHtml(it.note)} />}
-        </li>
-      ))}
-    </ul>
-  )}
-</section>
+<Fragment set:html={emitLinks(section, { eyebrow }, { hero })} />

@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro', 'src', 'styles', 'site.css'), 'utf8');
@@ -64,7 +65,7 @@ function sectionClassSets(src) {
 
 const emitted = new Map(); // file -> class-token arrays (one per <section> in that file)
 for (const f of CORAL_FILES) {
-  const src = readFileSync(join(SECTIONS_DIR, f), 'utf8');
+  const src = sectionSource(f).all;   // the component and its packages/emit module
   emitted.set(f, sectionClassSets(src));
 }
 
@@ -193,7 +194,7 @@ test('opting the OUTER hero box out of the floor does not mean the hero is unsty
 // ── tile-lab#11: the three corals with literally zero paint ─────────────────────────────────────
 
 test('the gallery/carousel coral still emits .st-gal-cells / .st-gal-cell / .st-gal-fig', () => {
-  const galSrc = readFileSync(join(SECTIONS_DIR, 'Gallery.astro'), 'utf8');
+  const galSrc = sectionSource('Gallery.astro').all;
   assert.match(galSrc, /class="st-gal-cells"/);
   assert.match(galSrc, /st-gal-cell/);
   assert.match(galSrc, /st-gal-fig/);
@@ -270,7 +271,7 @@ test('unthemed gallery figures retain their 4:3 frame', () => {
 });
 
 test('the tagcloud coral still emits .st-tag-flow / .st-tag', () => {
-  const tcSrc = readFileSync(join(SECTIONS_DIR, 'Tagcloud.astro'), 'utf8');
+  const tcSrc = sectionSource('Tagcloud.astro').all;
   assert.match(tcSrc, /class="st-tag-flow"/);
   assert.match(tcSrc, /class="st-tag"/);
 });

@@ -94,6 +94,7 @@ done
 # Measured 2026-09-07, the first time a listed directory (drawer/) had no tests in it.
 shopt -s nullglob
 SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/pwa/*.test.mjs
+             packages/emit/*.test.mjs
              packages/flowtile/*.test.mjs test/*.test.mjs
              # dynamic-corals arrived 2026-09-07 — the corals, their build and the registry worker.
              # 🔴 One glob per DIRECTORY, which is the same hand-kept list this block complains about

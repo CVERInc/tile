@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { parseSite, serializeSite, renderSiteToHtml, linksParts, KNOWN_TYPES, takeDropWarnings } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -152,15 +153,17 @@ test('degradation contract: rendering never touches the network, so a dead linke
 });
 
 test('Links.astro consumes the same linksParts, and is wired, styled and headed like its siblings', () => {
-  const src = readFileSync(join(SECTIONS, 'Links.astro'), 'utf8');
+  // tile-lab#52: the markup is packages/emit/links.mjs — read the component and its emitter, and
+  // accept each fact in either spelling (Astro's, or the emitter's attr()/site-core import).
+  const src = sectionSource('Links.astro').all;
   const code = src.replace(/^\/\/.*$/gm, '');
-  assert.match(code, /import \{[^}]*\blinksParts\b[^}]*\} from '@sitetile'/);
+  assert.match(code, /import \{[^}]*\blinksParts\b[^}]*\} from '(@sitetile|\.\.\/sitetile\/site-core\.js)'/);
   assert.match(code, /linksParts\(section\.body\)/);
   assert.doesNotMatch(code, /safeHref|https\?:/, 'the component must not re-decide safety/externality — linksParts already did');
-  assert.match(code, /<section class="st-links" id=\{section\.id\}>/);
+  assert.match(code, /<section class="st-links" id=\{section\.id\}>|'<section class="st-links"' \+ attr\('id', section\.id\) \+ '> /);
   assert.match(code, /class="st-links-list"/);
   assert.match(code, /class="st-link-name"/);
-  assert.match(code, /rel=\{it\.external \? 'noopener' : undefined\}/);
+  assert.match(code, /rel=\{it\.external \? 'noopener' : undefined\}|attr\('rel', it\.external \? 'noopener' : undefined\)/);
   assert.doesNotMatch(code, /nofollow|ugc|noreferrer|fetch\(/);
   const sec = readFileSync(join(HERE, 'astro', 'src', 'components', 'Section.astro'), 'utf8');
   assert.match(sec, /links: Links/);
