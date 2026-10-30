@@ -85,7 +85,7 @@ export const CELL_TYPES = {
     hint: 'type.profile.hint',
     body: { label: 'type.profile.body.label', control: CONTROL.AREA, hint: '', rows: 2 },
     params: {
-      avatar: { disposition: DISPOSITION.FORM, label: 'type.profile.avatar.label', control: CONTROL.ASSET, hint: '' },
+      avatar: { disposition: DISPOSITION.FORM, label: 'type.profile.avatar.label', control: CONTROL.ASSET, hint: 'type.profile.avatar.hint' },
       chips: { disposition: DISPOSITION.FORM, label: 'type.profile.chips.label', control: CONTROL.TEXT, hint: 'type.profile.chips.hint' },
     },
     // 🔴 `name` is DERIVED and it is the reason this whole mechanism exists. The name a visitor sees
