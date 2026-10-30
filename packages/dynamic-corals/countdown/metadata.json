@@ -59,6 +59,13 @@
       "required": false,
       "default": false,
       "description": "On a data-part element: show one split-flap card per digit instead of plain text."
+    },
+    {
+      "name": "data-flip-faces",
+      "type": "string",
+      "required": false,
+      "default": "0,1,2,3,4,5,6,7,8,9",
+      "description": "On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; the same ordered list is the drum order a future drum mode would step through."
     }
   ]
 }

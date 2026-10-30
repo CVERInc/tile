@@ -7,6 +7,10 @@
 //
 // `now` is always passed in (ISO or ms) so render + countdown are deterministic + testable; the
 // client script (events.js) refreshes the countdowns live from data-start after hydration.
+//
+// The time-left arithmetic is ../shared/countdown-parts.mjs — the same module the countdown coral
+// uses — so two corals cannot disagree about how many seconds are left.
+import { remainingParts, pad2 } from '../shared/countdown-parts.mjs';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ms = (t) => (typeof t === 'number' ? t : Date.parse(t));
@@ -60,9 +64,8 @@ export function countdownText(ev, now, L = {}, always = false) {
   if (d <= 0) return '';
   const H = 36e5, D = 24 * H, pre = L.inPrefix || 'in ';
   if (d < D) { // within a day → h/m/s, ticking every second; trailing units 2-digit for stable width
-    const h = Math.floor(d / H), m = Math.floor((d % H) / 6e4), s = Math.floor((d % 6e4) / 1e3);
-    const p = (n) => (n < 10 ? '0' + n : '' + n);
-    return pre + (h ? `${h}h ${p(m)}m ${p(s)}s` : m ? `${m}m ${p(s)}s` : `${p(s)}s`);
+    const { hours: h, minutes: m, seconds: s } = remainingParts(start, n);
+    return pre + (h ? `${h}h ${pad2(m)}m ${pad2(s)}s` : m ? `${m}m ${pad2(s)}s` : `${pad2(s)}s`);
   }
   if (d < 7 * D) return pre + `${Math.round(d / D)}d`;
   if (!always) return ''; // >7 days out → the date itself carries it, no countdown

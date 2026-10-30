@@ -42,15 +42,21 @@ easy to get wrong, so it lives here once:
 | back flap | new, folds up after it | — |
 
 Each half carries a full-height glyph pinned to its own edge, so the seam cuts one glyph in two. A
-change that arrives mid-fold drops the running flaps first. The card is as wide as its content (as wide
-as BOTH faces while it folds, so a longer old word is not clipped), or `--dc-flip-width` when a board
-wants every flap the same size. A change goes straight to the target face; a drum mode that steps
-through the faces in between would be an option on the same card, not a new card. Styling is custom
-properties only:
+change that arrives mid-fold drops the running flaps first.
+
+**A flap has one size.** The card never resizes per face: it is as wide as the widest of its
+**faces** — the full set it can show, declared with `data-flip-faces` (comma-separated, in order).
+Every face sits stacked and invisible inside the card, so the browser measures them in the card's own
+font and re-lays them out when a web font arrives or the size changes. Countdown's digit cards use
+`0,1,2,3,4,5,6,7,8,9` unless the element says otherwise, so every digit card is the width of the
+widest digit. Without a declared set a card keeps every face it has shown, so it only grows.
+`--dc-flip-width` overrides both. The same ordered `data-flip-faces` list is the **drum order** a
+future drum mode would step through between two faces; today a change goes straight to the target.
+Styling is custom properties only:
 
 | property | default |
 |---|---|
-| `--dc-flip-width` / `--dc-flip-min-width` / `--dc-flip-height` | `auto` (content) / `1.15em` / `1.8em` |
+| `--dc-flip-width` / `--dc-flip-min-width` / `--dc-flip-height` | `auto` (widest face) / `0` / `1.8em` |
 | `--dc-flip-pad` | `.14em` (each side of the content) |
 | `--dc-flip-bg-top` / `--dc-flip-bg-bottom` | `#333` / `#262626` |
 | `--dc-flip-fg` | `#fff` |
@@ -94,5 +100,6 @@ Author: `official`.
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |
 | `data-part` | enum | yes | — | On a child element: which unit it shows. Two digits minimum; days grow to three when needed. Values: `days`, `hours`, `minutes`, `seconds`. |
 | `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. |
+| `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; the same ordered list is the drum order a future drum mode would step through. |
 
 <!-- coral metadata: end -->

@@ -1,8 +1,15 @@
 // One split-flap card ("1 片") and the order its four faces change in. No time, no data, and no
 // idea what it is showing: a caller hands it any text — a digit, a letter, one CJK character, or a
 // whole pre-printed word like 「各駅停車」 on a station board — and it shows that, flipping when it
-// changes. Text is set with textContent only; the card's width comes from its content (an invisible
-// in-flow copy of the current face) or from --dc-flip-width, never from an assumed one-character box.
+// changes. Text is set with textContent only.
+//
+// A real flap has ONE size: the card never resizes per face. Its width is the widest of its FACES —
+// the full set it can show, declared by the caller (`createFlip(doc, faces)`; a coral exposes it as
+// `data-flip-faces`). Every face sits stacked and invisible in an in-flow sizer, so the browser
+// measures them in the card's own font and CSS and re-lays them out by itself when a web font
+// arrives or the size changes — no measuring code, no observer. Without a declared set the sizer
+// keeps every face the card has shown, so the width only ever grows. `--dc-flip-width` beats both.
+// The same ordered set is what a drum mode would step through (see below).
 //
 // The card is two static halves (the base) and, during a flip, two moving flaps:
 //
@@ -35,15 +42,27 @@ function face(doc, className) {
   return half;
 }
 
-/** A new, empty card. Its state lives on the element, so a card can be re-used across ticks. */
-export function createFlip(doc) {
+/** `data-flip-faces` text → the ordered face list. Comma-separated (as sibling list attributes are),
+ *  trimmed, empties and repeats dropped; null/empty → []. */
+export function parseFaces(text) {
+  if (text == null) return [];
+  return [...new Set(String(text).split(',').map((f) => f.trim()).filter(Boolean))];
+}
+
+/**
+ * A new, empty card. `faces` is every face it can show, in order (optional). Its state lives on the
+ * element, so a card can be re-used across ticks.
+ */
+export function createFlip(doc, faces = []) {
   const cell = doc.createElement('span');
   cell.className = 'dc-flip';
-  // In-flow, invisible: the only thing that gives the card a width, so a word gets a wide card.
+  // In-flow, invisible: the only thing that gives the card a width.
   const size = doc.createElement('span');
   size.className = 'dc-flip-size';
   size.setAttribute('aria-hidden', 'true');
   cell.appendChild(size);
+  cell.__dcFlip = { value: undefined, timer: null, faces: [...faces], fitted: new Set() };
+  for (const f of faces) fit(cell, doc, f);
   cell.appendChild(face(doc, 'dc-flip-half dc-flip-top'));
   cell.appendChild(face(doc, 'dc-flip-half dc-flip-bottom'));
   return cell;
@@ -51,15 +70,15 @@ export function createFlip(doc) {
 
 const glyph = (cell, sel) => cell.querySelector(sel).firstChild;
 
-// The sizer holds one block per face it must fit: both faces while a flip runs (so the old, wider
-// word is not clipped mid-fold), only the shown one once settled.
-function fit(size, doc, faces) {
-  size.textContent = '';
-  for (const text of faces) {
-    const line = doc.createElement('span');
-    line.textContent = text;
-    size.appendChild(line);
-  }
+// Add a face to the sizer once. Lines are never removed, so the card never gets narrower; a face
+// outside the declared set still fits (it grows the card rather than being clipped).
+function fit(cell, doc, text) {
+  const state = cell.__dcFlip;
+  if (state.fitted.has(text)) return;
+  state.fitted.add(text);
+  const line = doc.createElement('span');
+  line.textContent = text;
+  cell.querySelector('.dc-flip-size').appendChild(line);
 }
 
 function clearFlaps(cell, state, env) {
@@ -75,8 +94,7 @@ function clearFlaps(cell, state, env) {
  */
 export function setFlip(cell, next, env) {
   const value = String(next);
-  const state = cell.__dcFlip || (cell.__dcFlip = { value: undefined, timer: null });
-  const size = cell.querySelector('.dc-flip-size');
+  const state = cell.__dcFlip;
   const top = glyph(cell, '.dc-flip-top');
   const bottom = glyph(cell, '.dc-flip-bottom');
   if (state.value === value) return state;
@@ -84,14 +102,13 @@ export function setFlip(cell, next, env) {
   const old = state.value;
   clearFlaps(cell, state, env);
   state.value = value;
+  fit(cell, env.document, value);
   if (old === undefined || env.reduced) {
-    fit(size, env.document, [value]);
     top.textContent = value;
     bottom.textContent = value;
     return state;
   }
 
-  fit(size, env.document, [old, value]);
   top.textContent = value;
   bottom.textContent = old;
   const front = face(env.document, 'dc-flip-flap dc-flip-front');
@@ -105,7 +122,6 @@ export function setFlip(cell, next, env) {
   state.timer = env.setTimeout(() => {
     state.timer = null;
     bottom.textContent = value;
-    fit(size, env.document, [value]);
     clearFlaps(cell, state, env);
   }, FLIP_MS);
   return state;
@@ -113,7 +129,7 @@ export function setFlip(cell, next, env) {
 
 // Neutral by default; every colour and size is a custom property the host sets.
 export const FLIP_CSS = [
-  '.dc-flip{position:relative;display:inline-block;vertical-align:middle;box-sizing:border-box;width:var(--dc-flip-width,auto);min-width:var(--dc-flip-min-width,1.15em);height:var(--dc-flip-height,1.8em);perspective:var(--dc-flip-perspective,4em);border-radius:var(--dc-flip-radius,.14em);overflow:hidden;background:var(--dc-flip-bg-bottom,#262626);color:var(--dc-flip-fg,#fff);font-variant-numeric:tabular-nums}',
+  '.dc-flip{position:relative;display:inline-block;vertical-align:middle;box-sizing:border-box;width:var(--dc-flip-width,auto);min-width:var(--dc-flip-min-width,0);height:var(--dc-flip-height,1.8em);perspective:var(--dc-flip-perspective,4em);border-radius:var(--dc-flip-radius,.14em);overflow:hidden;background:var(--dc-flip-bg-bottom,#262626);color:var(--dc-flip-fg,#fff);font-variant-numeric:tabular-nums}',
   '.dc-flip-size{display:block;visibility:hidden;height:0;overflow:hidden;padding:0 var(--dc-flip-pad,.14em);white-space:nowrap}',
   '.dc-flip-size>span{display:block}',
   '.dc-flip+.dc-flip{margin-left:var(--dc-flip-gap,.08em)}',

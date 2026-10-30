@@ -2,7 +2,7 @@
 //   run: node --test packages/dynamic-corals/shared/flip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFlip, setFlip, FLIP_MS, FLIP_CSS } from './flip.mjs';
+import { createFlip, setFlip, parseFaces, FLIP_MS, FLIP_CSS } from './flip.mjs';
 import { createDocument, createClock } from './fake-dom.mjs';
 
 function setup(reduced = false) {
@@ -104,17 +104,44 @@ test('content-agnostic: a whole word is one face, with the same order as a digit
   assert.equal(sep(cell), '各駅停車|各駅停車|-|-');
   setFlip(cell, '東京', env);
   assert.equal(sep(cell), '東京|各駅停車|各駅停車|東京', 'top new, bottom old, front old, back new');
-  const sizer = () => cell.querySelector('.dc-flip-size').children.map((c) => c.textContent);
-  assert.deepEqual(sizer(), ['各駅停車', '東京'], 'mid-flip the card fits BOTH faces, so the wider old one is not clipped');
   clock.advance(FLIP_MS);
   assert.equal(sep(cell), '東京|東京|-|-');
-  assert.deepEqual(sizer(), ['東京'], 'settled: sized by the shown face only');
   setFlip(cell, 'A', env);
   assert.equal(cell.querySelector('.dc-flip-top').firstChild.textContent, 'A', 'a letter works the same way');
 });
 
+const sizer = (cell) => cell.querySelector('.dc-flip-size').children.map((c) => c.textContent);
+
+test('with a declared face set the sizer holds the whole set from creation and never changes', () => {
+  const doc = createDocument();
+  const clock = createClock(0);
+  const env = { document: doc, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, reduced: false };
+  const set = parseFaces('東京, 各駅停車 ,新大阪,東京,');
+  assert.deepEqual(set, ['東京', '各駅停車', '新大阪'], 'trimmed, empties and repeats dropped, order kept');
+  const cell = createFlip(doc, set);
+  assert.deepEqual(sizer(cell), set, 'width = widest of the set before anything is shown');
+  for (const f of ['東京', '各駅停車', '新大阪', '東京']) { setFlip(cell, f, env); assert.deepEqual(sizer(cell), set, `unchanged showing ${f}`); clock.advance(FLIP_MS); assert.deepEqual(sizer(cell), set); }
+});
+
+test('without a set the card only grows: every face shown stays in the sizer', () => {
+  const { env, cell, clock } = setup();
+  setFlip(cell, '各駅停車', env); clock.advance(FLIP_MS);
+  setFlip(cell, '東京', env); clock.advance(FLIP_MS);
+  assert.deepEqual(sizer(cell), ['各駅停車', '東京'], 'the wider earlier face still sizes the card');
+  setFlip(cell, '各駅停車', env);
+  assert.deepEqual(sizer(cell), ['各駅停車', '東京'], 'a repeat adds nothing');
+});
+
+test('a face outside the declared set still fits (grows rather than clips)', () => {
+  const doc = createDocument();
+  const env = { document: doc, setTimeout: () => 0, clearTimeout() {}, reduced: true };
+  const cell = createFlip(doc, ['0', '1']);
+  setFlip(cell, '回送', env);
+  assert.deepEqual(sizer(cell), ['0', '1', '回送']);
+});
+
 test('the card width comes from its content or --dc-flip-width, never a fixed one-character box', () => {
-  assert.match(FLIP_CSS, /\.dc-flip\{[^}]*width:var\(--dc-flip-width,auto\)/);
+  assert.match(FLIP_CSS, /\.dc-flip\{[^}]*width:var\(--dc-flip-width,auto\);min-width:var\(--dc-flip-min-width,0\)/, 'an explicit width is not overridden by a default min-width');
   assert.doesNotMatch(FLIP_CSS, /\b1ch\b/);
   assert.match(FLIP_CSS, /\.dc-flip-size\{[^}]*visibility:hidden[^}]*white-space:nowrap/);
   const { env, cell } = setup();

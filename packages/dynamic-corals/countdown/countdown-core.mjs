@@ -17,11 +17,13 @@
 // `text` replaces its content with `data-expired-text`. A deadline without an explicit offset is
 // refused (see shared/countdown-parts.mjs) and the root is left exactly as authored.
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { createFlip, setFlip, FLIP_CSS } from '../shared/flip.mjs';
+import { createFlip, setFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
 export const SELECTOR = '[data-dynamic-coral="countdown"]';
 const UNITS = ['days', 'hours', 'minutes', 'seconds'];
+// Every digit card is as wide as the widest digit, so a proportional font cannot make 1 and 8 differ.
+const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const SR_CSS = '.dc-cd-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}';
 
 const styled = new WeakSet();
@@ -52,7 +54,8 @@ function partsOf(root) {
   for (const el of root.querySelectorAll('[data-part]')) {
     const unit = el.getAttribute('data-part');
     if (!UNITS.includes(unit)) continue;
-    parts.push({ el, unit, flip: el.getAttribute('data-flip') !== null, cards: [], sr: null });
+    const faces = parseFaces(el.getAttribute('data-flip-faces'));
+    parts.push({ el, unit, flip: el.getAttribute('data-flip') !== null, faces: faces.length ? faces : DIGITS, cards: [], sr: null });
   }
   return parts;
 }
@@ -68,7 +71,7 @@ function showFlip(part, text, env) {
   part.sr.textContent = text;
   // Cards are matched from the RIGHT: the ones digit is always the same card.
   while (part.cards.length < text.length) {
-    const card = createFlip(env.document);
+    const card = createFlip(env.document, part.faces);
     el.insertBefore(card, part.cards[0] || part.sr);
     part.cards.unshift(card);
   }

@@ -52,16 +52,17 @@ test('same remaining time under TZ=UTC and TZ=Asia/Tokyo', () => {
   assert.deepEqual([utc[1], tokyo[1]], [true, true], 'the zone-dependent spelling is refused in both');
 });
 
-// 🔴 ONE BRAIN. events-core.countdownText splits its final day into h/m/s with the same floors as
-// remainingParts. events does not import this module yet (that changes events.js and is an events
-// release), so until it does, this holds the two to the same answer across the whole final day.
-test('events countdownText agrees with remainingParts on every h/m/s inside the final day', () => {
+// 🔴 ONE BRAIN. events-core.countdownText now takes its final-day h/m/s from remainingParts. This
+// drives events THROUGH that path across the whole final day and checks it against an expectation
+// computed here by plain integer division — not against remainingParts, which would be circular now
+// that events calls it.
+test('events countdownText (via remainingParts) matches an independent h/m/s on every step of the final day', () => {
   const now = Date.parse('2026-10-30T00:00:00Z');
-  const p = (n) => (n < 10 ? '0' + n : '' + n);
+  const two = (n) => String(n).padStart(2, '0');
   for (let left = 1000; left < D; left += 997) {          // a prime step walks every second-of-minute
-    const start = new Date(now + left).toISOString();
-    const r = remainingParts(now + left, now);
-    const expect = 'in ' + (r.hours ? `${r.hours}h ${p(r.minutes)}m ${p(r.seconds)}s` : r.minutes ? `${r.minutes}m ${p(r.seconds)}s` : `${p(r.seconds)}s`);
-    assert.equal(countdownText({ start, end: null }, now), expect, `left=${left}ms`);
+    const secs = Math.trunc(left / 1000);
+    const h = Math.trunc(secs / 3600), m = Math.trunc((secs % 3600) / 60), s = secs % 60;
+    const expect = 'in ' + (h ? `${h}h ${two(m)}m ${two(s)}s` : m ? `${m}m ${two(s)}s` : `${two(s)}s`);
+    assert.equal(countdownText({ start: new Date(now + left).toISOString(), end: null }, now), expect, `left=${left}ms`);
   }
 });

@@ -100,6 +100,7 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # one level up; the orphan guard below is what stops it going stale, and it is the
              # reason a new coral directory fails loudly here instead of never being run.
              packages/dynamic-corals/*.test.mjs
+             packages/dynamic-corals/countdown/*.test.mjs
              packages/dynamic-corals/drawer/*.test.mjs packages/dynamic-corals/events/*.test.mjs
              packages/dynamic-corals/inbox-bubble/*.test.mjs packages/dynamic-corals/qr/*.test.mjs
              packages/dynamic-corals/platform-dispatch/*.test.mjs

@@ -153,3 +153,15 @@ test('mountAll mounts each root once', () => {
   assert.equal(root.getAttribute('data-dynamic-coral-mounted'), '1');
   assert.equal(clock.pending(), 1, 'one interval, not two');
 });
+
+test('digit cards are sized by the whole digit set 0–9 (or data-flip-faces), not the digit shown', () => {
+  const { doc, root, part } = page({ units: ['seconds'] });
+  mountCountdown(root, env(doc, createClock(DL - 10 * 1000)));
+  for (const card of cardsOf(part('seconds'))) {
+    assert.deepEqual(card.querySelector('.dc-flip-size').children.map((c) => c.textContent), ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  }
+  const custom = page({ units: ['seconds'] });
+  custom.part('seconds').setAttribute('data-flip-faces', '０,１,２,３,４,５,６,７,８,９');
+  mountCountdown(custom.root, env(custom.doc, createClock(DL - 10 * 1000)));
+  assert.equal(cardsOf(custom.part('seconds'))[0].querySelector('.dc-flip-size').children[0].textContent, '０');
+});
