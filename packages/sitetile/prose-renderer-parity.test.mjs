@@ -444,11 +444,15 @@ await test('the section\'s own attributes are untouched by the split', () => {
 // 🔴 The shared function is only "shared" while the component calls it. Read the import, not the
 // file: the component's comments name the functions it used to call, and a search for their names
 // in the whole text would be answered by its own explanation.
+// tile-lab#52: the markup moved to packages/emit/prose.mjs, which imports site-core relatively —
+// so the imports read are the component's `@sitetile` one AND its emitter's `../sitetile/site-core.js`
+// one, each expected once.
 await test('Prose.astro splits a body through proseBodyHtml and has no second way to do it', () => {
-  const src = readFileSync(join(HERE, 'astro/src/components/sections/Prose.astro'), 'utf8');
-  const imports = [...src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'@sitetile';?\s*$/gm)];
-  assert.equal(imports.length, 1, `expected one import from @sitetile, found ${imports.length}`);
-  const names = imports[0][1].split(',').map((s) => s.trim()).filter(Boolean);
+  const { astro, emit } = sectionSource('Prose.astro');
+  const fromCore = (src, spec) => [...src.matchAll(new RegExp(`^import\\s*\\{([^}]*)\\}\\s*from\\s*'${spec}';?\\s*$`, 'gm'))];
+  const imports = [...fromCore(astro, '@sitetile'), ...fromCore(emit, '\\.\\./sitetile/site-core\\.js')];
+  assert.equal(imports.length, emit ? 2 : 1, `expected one site-core import per file, found ${imports.length}`);
+  const names = imports.flatMap((m) => m[1].split(',').map((s) => s.trim()).filter(Boolean));
   assert.ok(names.includes('proseBodyHtml'), 'Prose.astro does not import proseBodyHtml');
   for (const own of ['heroParts', 'bodyHtml', 'orderedProseHtml', 'linkButtonsHtml', 'imgTag']) {
     assert.ok(!names.includes(own), `Prose.astro imports ${own} — it is assembling a prose body itself again`);

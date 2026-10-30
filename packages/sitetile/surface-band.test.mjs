@@ -90,7 +90,8 @@ test('🔴 the string renderer emits data-surface on prose, grid and timeline �
 
 test('🔴 the Astro components emit data-surface on the section itself', () => {
   for (const [name, src] of Object.entries(COMPONENTS)) {
-    assert.match(src, /<section class="st-[a-z]+"[^>]*\bdata-surface=\{surface\}/, `${name}.astro lost data-surface on its <section>`);
+    // `data-surface={surface}` in a component; `attr('data-surface', surface)` in its packages/emit module
+    assert.match(src, /<section class="st-[a-z]+"[^>]*(\bdata-surface=\{surface\}|attr\('data-surface', surface\))/, `${name}.astro lost data-surface on its <section>`);
   }
 });
 
