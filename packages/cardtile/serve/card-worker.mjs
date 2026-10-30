@@ -295,11 +295,20 @@ export function cardPath(pathname, handle, isVanity) {
  * on a page no unit test loads. So `vanity` is a PARAMETER now, and the default is none: a browser
  * cannot read the store, and the honest answer for a card nobody has said anything about is the
  * canonical path, never a guess at somebody's domain.
+ *
+ * reef#2725 r2 — `env` is the switch (`{ CARD_CANONICAL_HOST }`), read by the same canonicalHost the
+ * routing reads, so the inverse moves when resolveHandle does: on reef.cards the root card is the
+ * bare origin, as resolveHandle says. No env = today's host. A browser has no Worker env; whoever
+ * serves the editor says which host it is (w/serve.mjs's `/_w/can-save`).
  */
-export const cardUrlFor = (handle, vanity = {}) => {
+export const cardUrlFor = (handle, vanity = {}, env) => {
   const host = Object.keys(vanity).find((h) => vanity[h] === handle);
-  return host ? `https://${host}` : `https://${CANON_HOST}/${handle}`;
+  if (host) return `https://${host}`;
+  const canon = canonicalHost(env);
+  return canon === CARDS_HOST && handle === ROOT_HANDLE ? `https://${CARDS_HOST}` : `https://${canon}/${handle}`;
 };
+/** the configured card host as an origin — where a handle's public exits (`/<h>.md`) are read. */
+export const cardOrigin = (env) => `https://${canonicalHost(env)}`;
 
 // OPTIONAL author fields. `since` = the founding year in the footer's "© 2013–2026" (omit → just
 // the current year); `accent` = one hex that themes the whole card.

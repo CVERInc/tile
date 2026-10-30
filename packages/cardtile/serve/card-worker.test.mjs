@@ -1587,3 +1587,23 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   const killed = await worker.fetch(new Request('https://reef.cards/'), { ...env, CARD_NOINDEX_ALL: '1' });
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
+
+// ── reef#2725 r2: the inverse follows the switch ────────────────────────────────────────────────
+// cardUrlFor is resolveHandle read backwards, and the editor's "is this link the author's own site"
+// rides on it. With the switch on, resolveHandle answers on reef.cards, so its inverse must too —
+// otherwise the editor computes card.feelreef.com/<h> for a card whose address is reef.cards/<h>.
+test('reef#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte', () => {
+  // PIN: no env, an empty env and every value that is not exactly reef.cards = today's string
+  for (const env of [undefined, {}, { CARD_CANONICAL_HOST: '' }, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }]) {
+    assert.equal(W.cardUrlFor('inkbrush', {}, env), 'https://card.feelreef.com/inkbrush', JSON.stringify(env));
+    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com/feelreef', JSON.stringify(env));
+  }
+  assert.equal(W.cardUrlFor('inkbrush'), 'https://card.feelreef.com/inkbrush');
+  // ON: the same URL resolveHandle hands out for that handle on that host — the root card is the bare origin
+  assert.equal(W.cardUrlFor('inkbrush', {}, ON), 'https://reef.cards/inkbrush');
+  assert.equal(W.cardUrlFor('inkbrush', {}, ON), resolveHandle('reef.cards', '/inkbrush').cardUrl);
+  assert.equal(W.cardUrlFor('feelreef', {}, ON), 'https://reef.cards');
+  assert.equal(W.cardUrlFor('feelreef', {}, ON), resolveHandle('reef.cards', '/feelreef').cardUrl);
+  // a vanity binding still wins in both positions: one domain = one card
+  for (const env of [{}, ON]) assert.equal(W.cardUrlFor('maple', { 'maple.example': 'maple' }, env), 'https://maple.example');
+});
