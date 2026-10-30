@@ -1,0 +1,11 @@
+{
+  "name": "@cver/coral-countdown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Countdown — time left until a deadline, as plain digits or split-flap cards. Client (countdown.js) is BUILT from countdown-client.mjs + countdown-core.mjs + shared/countdown-parts.mjs + shared/flip.mjs. Version covers the UNIT: client JS + the data-* attribute API + the dc-flip/dc-cd class names and --dc-flip-* custom properties.",
+  "scripts": {
+    "build": "node ../build.mjs countdown",
+    "test": "node --test countdown-core.test.mjs countdown-manifest.test.mjs ../shared/flip.test.mjs ../shared/countdown-parts.test.mjs"
+  }
+}

@@ -58,6 +58,10 @@ export const INTERNAL = {
     'data-amount': 'Amount on generated sponsor preset buttons.',
   },
   'repo-facts': {},
+  countdown: {
+    'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+  },
 };
 
 // Explicitly account for the names passed through inbox-bubble's computed data-${name} helper.

@@ -28,6 +28,9 @@ export const CORALS = {
   'sponsor': { src: 'sponsor-client.mjs', bundle: true, registry: true },
   // And again: a few lines of mounting over a core that node drives against a real saved page.
   'repo-facts': { src: 'repo-facts-client.mjs', bundle: true, registry: true },
+  // Same split once more: mounting over a core node drives with a fake clock; the countdown math and
+  // the split-flap card are shared modules (../shared/countdown-parts.mjs, ../shared/flip.mjs).
+  'countdown': { src: 'countdown-client.mjs', bundle: true, registry: true },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);
