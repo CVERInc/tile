@@ -938,7 +938,7 @@ const router = {
     const oneCardHost = !!vanityHandle || !!resolved.root;
     const at = { host, vanity: !!vanityHandle };
     const want = cardPath(url.pathname, resolved.handle, oneCardHost);
-    if (!want) return vanityHandle ? html(SMALL_404, 404, env, resolved.handle, at) : notFound(env, resolved.handle, at);
+    if (!want) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -947,6 +947,8 @@ const router = {
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
     const cardMd = stopped != null ? null : liveMd;
+    // A retained binding cannot put our no-card page or card headers on a creator's domain.
+    if (!cardMd && !routesByPath(host)) return html(SMALL_404, 404, env);
     // 🔴 A DELETED Card (reef#2618, its owner deleted it and the handle is free) is a missing one too —
     // no 410, no wording, no other headers (tile-lab#51 r2: 停權／刪除／不存在 look the same). Its body
     // is gone or under an ended generation liveCard never reads, so it simply falls through as missing.
@@ -955,7 +957,7 @@ const router = {
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
     const blank = cardMd != null && isTemplateOnly(cardMd);
 
-    if (want === 'alias' && stopped == null) return Response.redirect(`https://${host}/${url.search}`, 301);
+    if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.

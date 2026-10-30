@@ -1321,7 +1321,7 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests('card.example', handle, true), ['https://card.example/nothing', {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), handle === 'missing' ? null : 'noindex, nofollow', url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
     }
   }
 });
@@ -1428,7 +1428,8 @@ test('stop takes precedence over redirects and missing cards, and resume preserv
     assert.equal(res.headers.get('location'), null, url);
     const body = await res.text();
     assert.doesNotMatch(body, /unavailable|Test Card/i, url);
-    if (!url.endsWith('.ico')) assert.match(body, NO_CARD, url);
+    if (new URL(url).hostname.endsWith('.example')) assert.match(body, /<p>Nothing here\.<\/p>/, url);
+    else if (!url.endsWith('.ico')) assert.match(body, NO_CARD, url);
     store.kv.delete(`stop:${handle}`);
     assert.deepEqual(await responseBytes(await worker.fetch(new Request(url), env)), before, url);
   }
@@ -1752,6 +1753,37 @@ test('tile-lab#51 ②: a retired Card, a deleted Card and a never-existed handle
       assert.deepEqual(a, b, `${url}: a retired Card is distinguishable from a handle that never existed`);
       assert.deepEqual(d, b, `${url}: a deleted Card is distinguishable from a handle that never existed`);
       for (const r of [a, d]) assert.doesNotMatch(r.body.toString(), /unavailable|deleted|Gone|Test Card|A public bio|Review requested/i, url);
+    }
+  }
+});
+
+test('Refs #218: custom-domain absent states share the small 404 on every card exit', async () => {
+  for (const [url, init] of [...servingRequests('card.example', 't', true),
+    ['https://card.example/', {}], ['https://card.example/avatar', {}], ['https://card.example/nothing', {}]]) {
+    const missing = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore() }));
+    assert.equal(missing.status, 404, url);
+    assert.equal(Object.fromEntries(missing.headers)['x-robots-tag'], 'noindex, nofollow', url);
+    for (const seed of [
+      { t: SERVING_CARD, 'stop:t': STOP, 'vanity:card.example': 't', 'vanityof:t': 'card.example' },
+      { ...DELETED(), 'vanity:card.example': 't' },
+      { 'vanity:card.example': 't', 'vanityof:t': 'card.example' },
+    ]) {
+      const absent = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore(seed) }));
+      assert.deepEqual(absent, missing, `${url}: custom-domain absence reveals the binding`);
+    }
+  }
+});
+
+test('Refs #218: both root aliases share the absent-state policy', async () => {
+  for (const host of ['card.feelreef.com', 'reef.cards']) {
+    for (const path of ['/feelreef', '/feelreef/']) {
+      const url = `https://${host}${path}?lang=ja`;
+      const env = { PREVIEW: 'false', ...ON };
+      const missing = await responseBytes(await worker.fetch(new Request(url), { ...env, CARDS: recordingStore() }));
+      for (const seed of [{ feelreef: ROOT_CARD, 'stop:feelreef': STOP }, { 'gone:feelreef': '{}' }]) {
+        const absent = await responseBytes(await worker.fetch(new Request(url), { ...env, CARDS: recordingStore(seed) }));
+        assert.deepEqual(absent, missing, `${url}: root alias reveals absent state`);
+      }
     }
   }
 });
