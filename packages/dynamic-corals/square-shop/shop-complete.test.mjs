@@ -337,9 +337,17 @@ for (const [locale, refunded] of [['en-US', 'This order was refunded'], ['ja-JP'
 test('a legacy-only response (older RSP: refunded reported as paid) still renders paid and clears the cart', async () => {
 	const r = await runCompletion('en-US', OUTCOME_SHAPES.legacyPaid);
 	assert.equal(r.heading, COMPLETE_COPY['en-US'].paid);
-	assert.match(r.body, /A receipt was emailed to you\./);
+	assert.match(r.body, /An order confirmation was emailed to you\./);
 	assert.equal('dc-square-shop-cart:site-key' in r.store, false);
 });
+
+for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
+	test(`paid completion names the order confirmation mail, not a receipt, in ${locale}`, async () => {
+		const r = await runCompletion(locale, OUTCOME_SHAPES.legacyPaid);
+		assert.ok(r.body.includes(COMPLETE_COPY[locale].receipt), r.body);
+		assert.doesNotMatch(r.body, /receipt was emailed|領収書をメール|收據已寄到|收据已寄到/);
+	});
+}
 
 for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
 	test(`unknown does not claim the order is missing and offers safe next steps in ${locale}`, async () => {

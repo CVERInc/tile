@@ -107,7 +107,7 @@ test('an outcome with no ECPay facts keeps the existing paid and pending views',
 	const plain = { state: 'paid', order_ref: 'ord-9', currency: 'TWD', total_minor: 30000, lines: [{ name: 'Tee', qty: 1, amount_minor: 30000 }] };
 	const r = await resultPage('https://site.example/shop/complete?ref=ref-9&merchant_trade_no=T1', plain);
 	assert.equal(r.heading, '感謝您的訂購');
-	assert.ok(r.body.includes('<p>收據已寄到您的電子郵件。</p>'), r.body);
+	assert.ok(r.body.includes('<p>訂單確認信已寄到您的電子郵件。</p>'), r.body);
 	assert.doesNotMatch(r.body, /st-status/);
 	const p = await resultPage('https://site.example/shop/complete?ref=ref-9', { state: 'pending' });
 	assert.equal(p.heading, '正在確認您的付款');
