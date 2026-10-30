@@ -150,7 +150,8 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // domain to the next owner of the handle. Pre-generation bindings are generation 0's.
 const VANITY_KEY = (host) => vanityKey(host); // card-api's, called late: the two modules import each other
 
-// canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
+// canonical multi-tenant host. Its bare root is the platform's own card (ROOT_HANDLE, below) — it
+// was a directory line until tile-lab#51.
 const CANON_HOST = 'card.feelreef.com';
 // the Cloudflare-for-SaaS fallback origin (wrangler.example.toml routes): ours, never a creator's.
 const FALLBACK_HOST = 'saas.feelreef.com';
@@ -221,8 +222,11 @@ export const routesByPath = (host) =>
 // reef#2725: on reef.cards the bare root, `/<ROOT_HANDLE>` and the origin-level icon files are the
 // root card's, which is addressed like a one-card host (cardUrl = the bare origin, `root: true`).
 // An icon path can never be a handle (it has a dot), so nothing a customer could own is taken.
+// tile-lab#51 (chodaict 2026-10-29): the old card host too. A visitor who cuts the handle off a
+// shared link is asking "what is this?", and the Card answers by being one — feelreef's own.
+const hasRootCard = (host) => host === CARDS_HOST || host === CANON_HOST;
 const isRootPath = (host, seg) =>
-  host === CARDS_HOST && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
+  hasRootCard(host) && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
 
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
@@ -297,15 +301,15 @@ export function cardPath(pathname, handle, isVanity) {
  * canonical path, never a guess at somebody's domain.
  *
  * reef#2725 r2 — `env` is the switch (`{ CARD_CANONICAL_HOST }`), read by the same canonicalHost the
- * routing reads, so the inverse moves when resolveHandle does: on reef.cards the root card is the
- * bare origin, as resolveHandle says. No env = today's host. A browser has no Worker env; whoever
+ * routing reads, so the inverse moves when resolveHandle does: the root card is the bare origin of
+ * either host, as resolveHandle says (tile-lab#51). No env = today's host. A browser has no Worker env; whoever
  * serves the editor says which host it is (w/serve.mjs's `/_w/can-save`).
  */
 export const cardUrlFor = (handle, vanity = {}, env) => {
   const host = Object.keys(vanity).find((h) => vanity[h] === handle);
   if (host) return `https://${host}`;
   const canon = canonicalHost(env);
-  return canon === CARDS_HOST && handle === ROOT_HANDLE ? `https://${CARDS_HOST}` : `https://${canon}/${handle}`;
+  return handle === ROOT_HANDLE ? `https://${canon}` : `https://${canon}/${handle}`;
 };
 /** the configured card host as an origin — where a handle's public exits (`/<h>.md`) are read. */
 export const cardOrigin = (env) => `https://${canonicalHost(env)}`;
@@ -448,10 +452,14 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // that domain is the user-content domain and the rule there is: the root card (ROOT_HANDLE) is
 // indexable, every other Card is `noindex`. Before the move reef.cards keeps the old rule, and the
 // old hosts keep it in both positions.
+//
+// tile-lab#51 (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
+// noindex」. The root card is OURS, so the "nobody has vouched for it" reason does not apply to it:
+// indexable on both card hosts in both switch positions. Every customer Card is exactly as before.
 /** robotsTag: ({ env, host, handle, vanity, blank }) → the X-Robots-Tag value, or null. Pure. */
 export function robotsTag({ env, host, handle, vanity = false, blank = false }) {
   if (isPreview(env) || isDemo(handle)) return 'noindex, nofollow';
-  if (!vanity) {
+  if (!vanity && !(handle === ROOT_HANDLE && hasRootCard(host))) {
     if (host !== CARDS_HOST || !movedToCardsHost(env)) return 'noindex, nofollow';
     if (handle !== ROOT_HANDLE) return 'noindex';
   }

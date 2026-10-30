@@ -55,8 +55,12 @@ test('🔴 resolveHandle: a path names a card on our hosts only; a creator domai
   }
 });
 
-test('resolveHandle: bare canonical host (no handle) → null (a directory, not a card)', () => {
-  assert.equal(resolveHandle('card.feelreef.com', '/'), null);
+// tile-lab#51 (chodaict 2026-10-29): the bare old host is feelreef's own card too, not a directory —
+// a visitor who cuts the handle off is asking "what is this?", and a Card answers by being one.
+test('resolveHandle: bare canonical host (no handle) → the root card, at the bare origin', () => {
+  assert.deepEqual(resolveHandle('card.feelreef.com', '/'), { handle: 'feelreef', cardUrl: 'https://card.feelreef.com', root: true });
+  // CONTROL: the other path-routed hosts have no root card
+  for (const host of ['saas.feelreef.com', 'x', 'cardtile-preview.acct.workers.dev']) assert.equal(resolveHandle(host, '/'), null, host);
 });
 
 test('resolveHandle: handle is lowercased; port stripped from host', () => {
@@ -1305,7 +1309,10 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests(host, 'missing'), [`https://${host}/t/nothing`, {}], [`https://${host}/`, {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+      // tile-lab#51: card.feelreef.com's bare root is the root card's (indexable) address, even when
+      // that card is missing; the 404 status already keeps it out of an index
+      const rootOfCardHost = host === 'card.feelreef.com' && url === `https://${host}/`;
+      assert.equal(res.headers.get('x-robots-tag'), rootOfCardHost ? null : 'noindex, nofollow', url);
       assert.equal(res.headers.get('cache-control'), 'public, max-age=60', url);
     }
   }
@@ -1457,8 +1464,10 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
   for (const path of ['/', '', '/feelreef', '/FeelReef/', '/favicon.ico', '/apple-touch-icon.png']) {
     assert.deepEqual(resolveHandle('reef.cards', path), { handle: 'feelreef', cardUrl: 'https://reef.cards', root: true }, path);
   }
-  // CONTROL: the old host's bare root is still the directory, not the feelreef card
-  assert.equal(resolveHandle('card.feelreef.com', '/'), null);
+  // tile-lab#51: the old host's bare root is the feelreef card as well (it used to be the directory)
+  for (const path of ['/', '/feelreef', '/favicon.ico']) {
+    assert.deepEqual(resolveHandle('card.feelreef.com', path), { handle: 'feelreef', cardUrl: 'https://card.feelreef.com', root: true }, path);
+  }
 
   // same store, same card, on both hosts in both switch positions; only the address differs
   for (const sw of [{}, ON]) {
@@ -1476,8 +1485,8 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
     assert.equal(root.status, 200);
     const rootBody = await root.text();
     assert.match(rootBody, /<title>feelreef/);
-    // switch on: the root card names the bare origin; off: its canonical address is still the old host's
-    const rootCanon = sw === ON ? 'https://reef.cards' : 'https://card.feelreef.com/feelreef';
+    // the root card names the switch's host, bare (tile-lab#51: on the old host too, not `/feelreef`)
+    const rootCanon = sw === ON ? 'https://reef.cards' : 'https://card.feelreef.com';
     assert.ok(rootBody.includes(`<link rel="canonical" href="${rootCanon}"`), 'the root card names its canonical address');
     // the root's icons sit at the origin, where its <link rel=icon> points
     assert.equal((await worker.fetch(new Request('https://reef.cards/favicon.ico'), env)).status, 200);
@@ -1548,15 +1557,18 @@ test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => 
     ['reef.cards', 'feelreef', 'on', null],
     ['reef.cards', 't', 'on', 'noindex'],
     ['reef.cards', 'demo-t', 'on', NNF],
-    // before the move, reef.cards is just another of our hosts: today's rule (tile c7aa65e)
-    ['reef.cards', 'feelreef', 'off', NNF],
+    // before the move, reef.cards is just another of our hosts: today's rule (tile c7aa65e) —
+    // except the root card, which tile-lab#51 (chodaict 2026-10-30) opens on BOTH hosts
+    ['reef.cards', 'feelreef', 'off', null],
     ['reef.cards', 't', 'off', NNF],
-    // the old host keeps today's rule in both positions
-    ['card.feelreef.com', 'feelreef', 'off', NNF],
+    // the old host keeps today's rule in both positions, for every customer Card
+    ['card.feelreef.com', 'feelreef', 'off', null],
     ['card.feelreef.com', 't', 'off', NNF],
-    ['card.feelreef.com', 'feelreef', 'on', NNF],
+    ['card.feelreef.com', 'feelreef', 'on', null],
     ['card.feelreef.com', 't', 'on', NNF],
+    // the root card is a Card host's root, and saas.feelreef.com has none
     ['saas.feelreef.com', 'feelreef', 'on', NNF],
+    ['saas.feelreef.com', 'feelreef', 'off', NNF],
   ]) {
     const env = { PREVIEW: 'false', ...(sw === 'on' ? ON : {}) };
     assert.equal(W.robotsTag({ env, host, handle, vanity: false }), want, `${host} ${handle} ${sw}`);
@@ -1591,6 +1603,26 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
 
+// tile-lab#51 ③ (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」.
+// The root response carries no X-Robots-Tag on BOTH hosts; every customer path is unchanged.
+test('tile-lab#51 ③: the root card is indexable on both hosts; customer Cards keep their header', async () => {
+  for (const [sw, host, cust] of [[{}, 'card.feelreef.com', 'noindex, nofollow'], [{}, 'reef.cards', 'noindex, nofollow'], [ON, 'reef.cards', 'noindex']]) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD }), ...sw };
+    const root = await worker.fetch(new Request(`https://${host}/`), env);
+    assert.equal(root.status, 200, `${host} / ${JSON.stringify(sw)}`);
+    assert.match(await root.text(), /<title>feelreef<\/title>|feelreef/, host);
+    assert.equal(root.headers.get('x-robots-tag'), null, `${host} / ${JSON.stringify(sw)}`);
+    const t = await worker.fetch(new Request(`https://${host}/t`), env);
+    assert.equal(t.status, 200);
+    assert.equal(t.headers.get('x-robots-tag'), cust, `${host}/t ${JSON.stringify(sw)}`);
+  }
+  // one card, one address: `/feelreef` on the old host is the root card's alias
+  const env = { PREVIEW: 'false', CARDS: recordingStore({ feelreef: ROOT_CARD }) };
+  const alias = await worker.fetch(new Request('https://card.feelreef.com/feelreef?x=1'), env);
+  assert.equal(alias.status, 301);
+  assert.equal(alias.headers.get('location'), 'https://card.feelreef.com/?x=1');
+});
+
 // ── reef#2725 r2: the inverse follows the switch ────────────────────────────────────────────────
 // cardUrlFor is resolveHandle read backwards, and the editor's "is this link the author's own site"
 // rides on it. With the switch on, resolveHandle answers on reef.cards, so its inverse must too —
@@ -1599,7 +1631,9 @@ test('reef#2725 r2 ①: cardUrlFor names the configured card host — unset is t
   // PIN: no env, an empty env and every value that is not exactly reef.cards = today's string
   for (const env of [undefined, {}, { CARD_CANONICAL_HOST: '' }, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }]) {
     assert.equal(W.cardUrlFor('inkbrush', {}, env), 'https://card.feelreef.com/inkbrush', JSON.stringify(env));
-    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com/feelreef', JSON.stringify(env));
+    // tile-lab#51: the root card lives at the bare origin on the old host too (`/feelreef` 301s there)
+    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com', JSON.stringify(env));
+    assert.equal(W.cardUrlFor('feelreef', {}, env), resolveHandle('card.feelreef.com', '/feelreef').cardUrl);
   }
   assert.equal(W.cardUrlFor('inkbrush'), 'https://card.feelreef.com/inkbrush');
   // ON: the same URL resolveHandle hands out for that handle on that host — the root card is the bare origin
@@ -1656,7 +1690,9 @@ test('reef#2725 r3 ①: og:url and canonical name the configured card host, what
     // [switch, request URL, the address the preview must name]
     [{}, 'https://card.feelreef.com/t', 'https://card.feelreef.com/t'],
     [{}, 'https://reef.cards/t', 'https://card.feelreef.com/t'],
-    [{}, 'https://reef.cards/', 'https://card.feelreef.com/feelreef'],
+    // tile-lab#51: the root card is the bare origin of the old host too
+    [{}, 'https://reef.cards/', 'https://card.feelreef.com'],
+    [{}, 'https://card.feelreef.com/', 'https://card.feelreef.com'],
     [{}, 'https://saas.feelreef.com/t', 'https://card.feelreef.com/t'],
     [ON, 'https://reef.cards/t', 'https://reef.cards/t'],
     [ON, 'https://reef.cards/', 'https://reef.cards'],
