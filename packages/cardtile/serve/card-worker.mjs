@@ -5,6 +5,7 @@
 // card_render.py that bakes one card's HTML per request on Heroku.
 //
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
+//   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
 //

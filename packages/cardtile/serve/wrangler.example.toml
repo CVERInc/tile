@@ -97,10 +97,20 @@ routes = [
   # hostname that has one. A route wins over the origin without touching DNS — so this is reversible
   # by deleting one line, and deleting it puts the 301 back exactly as it was.
   { pattern = "card.feelreef.com/*", zone_name = "feelreef.com" },
+  # reef#2725 — the Cards' own domain, a zone of our own. A Custom Domain refuses a hostname that
+  # already has a CNAME, so check the apex has none first (a plain route over a proxied record is the
+  # fallback, as for card.feelreef.com above). Routing it changes nothing by itself: CARD_CANONICAL_HOST does.
+  # { pattern = "reef.cards", custom_domain = true },
 ]
 
 [env.production.vars]
 PREVIEW = "false"
+# reef#2725 — the switch. Unset (or any value but exactly "reef.cards") = today: card.feelreef.com is
+# canonical, every non-vanity Card is noindex, nofollow. "reef.cards" = the move:
+#   card.feelreef.com/*        → 301 https://reef.cards/<same path + query>  (except /_api, POST, /edit)
+#   feelreef.com/<handle>      → 301 https://reef.cards/<handle>  (only reaches the Worker if routed)
+#   reef.cards/                → the root card (handle `feelreef`), indexable; other Cards there noindex
+# CARD_CANONICAL_HOST = "reef.cards"
 
 [[env.production.kv_namespaces]]
 binding = "CARDS"
