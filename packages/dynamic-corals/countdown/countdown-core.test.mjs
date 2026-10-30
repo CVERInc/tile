@@ -59,7 +59,7 @@ test('ticks every second, and the seconds card flips in the right order', () => 
   const clock = createClock(DL - 10 * 1000);
   mountCountdown(root, env(doc, clock));
   assert.equal(shown(part('seconds')), '10');
-  clock.advance(1000);
+  clock.advance(10);
   const ones = cardsOf(part('seconds'))[1];
   const f = (sel) => { const el = ones.querySelector(sel); return el ? el.firstChild.textContent : '-'; };
   assert.equal(f('.dc-flip-top') + f('.dc-flip-bottom') + f('.dc-flip-front') + f('.dc-flip-back'), '9009');
@@ -88,7 +88,7 @@ test('expiry with data-expired=hide (default): root hidden, timer stopped', () =
   clock.advance(5000);
   assert.equal(root.hidden, true);
   assert.equal(ctl.running, false);
-  assert.equal(clock.pending() <= 2, true, 'only flip settle timers may remain, never the interval');
+  assert.equal(clock.pending() <= 2, true, 'only flip settle timers may remain, never the tick');
   clock.advance(FLIP_MS);
   assert.equal(clock.pending(), 0);
 });
@@ -118,32 +118,13 @@ test('reduced motion: cards change with no flaps and no settle timers', () => {
   const { doc, root, part } = page();
   const clock = createClock(DL - 10 * 1000);
   mountCountdown(root, env(doc, clock, true));
-  clock.advance(1000);
+  clock.advance(10);
   assert.equal(part('seconds').querySelectorAll('.dc-flip-flap').length, 0);
   assert.equal(shown(part('seconds')), '09');
   assert.equal(clock.pending(), 1, 'only the tick interval');
 });
 
-test('styles are injected once per document, only when a part flips', () => {
-  const a = page();
-  const clock = createClock(DL - D);
-  mountCountdown(a.root, env(a.doc, clock));
-  const extra = a.doc.createElement('div');
-  extra.setAttribute('data-deadline', DEADLINE);
-  mountCountdown(extra, env(a.doc, clock));
-  assert.equal(a.doc.head.children.length, 1);
-  assert.equal(a.doc.head.children[0].getAttribute('data-dc'), 'countdown');
-  const b = page({ flip: false });
-  mountCountdown(b.root, env(b.doc, createClock(DL - D)));
-  assert.equal(b.doc.head.children.length, 0);
-});
 
-test('layered sites get the CSS wrapped in @layer reef.corals', () => {
-  const { doc, root } = page();
-  doc.documentElement.setAttribute('data-dynamic-coral-css', 'layered');
-  mountCountdown(root, env(doc, createClock(DL - D)));
-  assert.match(doc.head.children[0].textContent, /^@layer reef\.corals \{\n/);
-});
 
 test('mountAll mounts each root once', () => {
   const { doc, root } = page();
@@ -164,4 +145,100 @@ test('digit cards are sized by the whole digit set 0–9 (or data-flip-faces), n
   custom.part('seconds').setAttribute('data-flip-faces', '０,１,２,３,４,５,６,７,８,９');
   mountCountdown(custom.root, env(custom.doc, createClock(DL - 10 * 1000)));
   assert.equal(cardsOf(custom.part('seconds'))[0].querySelector('.dc-flip-size').children[0].textContent, '０');
+});
+
+test('styles are injected once per document — also when a later root flips and an earlier one did not', () => {
+  const a = page({ flip: false });
+  const clock = createClock(DL - D);
+  mountCountdown(a.root, env(a.doc, clock));
+  assert.equal(a.doc.head.children.length, 1, 'injected even with no flipping part (the [hidden] guard)');
+  const second = a.doc.createElement('div');
+  second.setAttribute('data-deadline', DEADLINE);
+  const p = a.doc.createElement('span');
+  p.setAttribute('data-part', 'seconds');
+  p.setAttribute('data-flip', '');
+  second.appendChild(p);
+  a.doc.body.appendChild(second);
+  mountCountdown(second, env(a.doc, clock));
+  assert.equal(a.doc.head.children.length, 1, 'a second, flipping root on the same document adds no second style');
+  assert.match(a.doc.head.children[0].textContent, /\.dc-flip\{/, 'the one style carries the card CSS too');
+});
+
+test('the [hidden] guard is part of the injected CSS and beats a site display rule', () => {
+  const { doc, root } = page({ flip: false });
+  mountCountdown(root, env(doc, createClock(DL - D)));
+  assert.ok(doc.head.children[0].textContent.startsWith('[data-dynamic-coral="countdown"][hidden]{display:none!important}'));
+});
+
+test('the LARGEST present unit absorbs the units above it (no silently dropped days)', () => {
+  const left = 2 * D + 5 * 36e5 + 12 * 6e4 + 30e3;
+  const hms = page({ flip: false, units: ['hours', 'minutes', 'seconds'] });
+  mountCountdown(hms.root, env(hms.doc, createClock(DL - left)));
+  assert.deepEqual(['hours', 'minutes', 'seconds'].map((u) => hms.part(u).textContent), ['53', '12', '30']);
+  const ms = page({ flip: false, units: ['minutes', 'seconds'] });
+  mountCountdown(ms.root, env(ms.doc, createClock(DL - left)));
+  assert.deepEqual(['minutes', 'seconds'].map((u) => ms.part(u).textContent), ['3192', '30']);
+  const s = page({ units: ['seconds'] });
+  mountCountdown(s.root, env(s.doc, createClock(DL - left)));
+  assert.equal(shown(s.part('seconds')), String(left / 1000), 'flip cards grow to fit too');
+  const all = page({ flip: false });
+  mountCountdown(all.root, env(all.doc, createClock(DL - left)));
+  assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => all.part(u).textContent), ['02', '05', '12', '30'], 'with days present nothing is folded');
+});
+
+test('ticks land on whole-second boundaries of the deadline: every change is exactly one second', () => {
+  const { doc, root, part } = page({ flip: false, units: ['seconds'] });
+  const clock = createClock(DL - 10300);                 // mounted 300 ms into a second (DL - 10000 exactly is covered below)
+  mountCountdown(root, env(doc, clock));
+  let last = part('seconds').textContent, changes = 0;
+  for (let t = 0; t < 8000; t += 10) {
+    clock.advance(10);
+    const now = part('seconds').textContent;
+    if (now === last) continue;
+    changes++;
+    assert.equal(Number(last) - Number(now), 1, `skipped or repeated a second: ${last} → ${now}`);
+    const into = (DL - clock.now()) % 1000;
+    assert.ok(into === 0 || into >= 980, `changed ${1000 - into} ms after the boundary, not on it`);
+    last = now;
+  }
+  assert.equal(changes, 8);
+});
+
+test('the final second reads 00 and the countdown expires AT the deadline, not a second early', () => {
+  const { doc, root, part } = page({ flip: false, units: ['minutes', 'seconds'] });
+  const clock = createClock(DL - 1500);
+  mountCountdown(root, env(doc, clock));
+  assert.equal(part('seconds').textContent, '01');
+  clock.advance(600);                                    // DL - 900
+  assert.equal(part('seconds').textContent, '00');
+  assert.equal(root.hidden, false, '00:00 is on screen during the final second');
+  clock.advance(890);                                    // DL - 10
+  assert.equal(root.hidden, false);
+  clock.advance(20);                                     // DL + 10
+  assert.equal(root.hidden, true);
+});
+
+test('data-flip="false" shows text, not cards', () => {
+  const { doc, root, part } = page({ units: ['seconds'] });
+  part('seconds').setAttribute('data-flip', 'false');
+  mountCountdown(root, env(doc, createClock(DL - 7000)));
+  assert.equal(part('seconds').textContent, '07');
+  assert.equal(cardsOf(part('seconds')).length, 0);
+});
+
+test('data-expired="text" with no data-expired-text hides instead of leaving an empty box', () => {
+  const { doc, root } = page({ expired: 'text' });
+  mountCountdown(root, env(doc, createClock(DL + 1)));
+  assert.equal(root.hidden, true);
+});
+
+test('mounted exactly on a whole second: the next second follows immediately, none is skipped', () => {
+  const { doc, root, part } = page({ flip: false, units: ['seconds'] });
+  const clock = createClock(DL - 10000);
+  mountCountdown(root, env(doc, clock));
+  assert.equal(part('seconds').textContent, '10');
+  clock.advance(10);
+  assert.equal(part('seconds').textContent, '09');
+  clock.advance(995);
+  assert.equal(part('seconds').textContent, '08');
 });

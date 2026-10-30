@@ -6,16 +6,22 @@
 //     <span data-part="days" data-flip></span> d <span data-part="hours" data-flip></span> …
 //   </div>
 //
-// `data-part` is days | hours | minutes | seconds. Without `data-flip` the element's text is the
-// two-digit value; with it, the element holds one split-flap card per digit (shared/flip.mjs) and
+// `data-part` is days | hours | minutes | seconds. The LARGEST unit present takes everything above
+// it too: a root with only hours/minutes/seconds shows 53:12:30 for 2 d 5 h 12 m 30 s, never a
+// silently dropped two days. Without `data-flip` (or with `data-flip="false"`) the element's text is
+// the value, two digits minimum; with it, the element holds one split-flap card per digit (shared/flip.mjs) and
 // gains or drops a card on the left when the digit count changes (99 → 100 days), so the cards that
 // keep their place keep their state. A visually hidden copy of the value stays readable to a screen
 // reader; the cards themselves are aria-hidden.
 //
-// The root is shown after the first tick (an author who adds `hidden` never sees 00 flash). At the
+// The root is shown after the first tick (an author who adds `hidden` never sees 00 flash). The
+// coral's own `[hidden]{display:none!important}` makes that true even when a site rule gives the
+// root a display — the same guard the sibling corals carry. Ticks land on whole-second boundaries of
+// the deadline, so a flip never skips or repeats a second. The final second reads 00:00:00; AT the
 // deadline the timer stops and `data-expired` decides what remains: `hide` (default) hides the root,
-// `text` replaces its content with `data-expired-text`. A deadline without an explicit offset is
-// refused (see shared/countdown-parts.mjs) and the root is left exactly as authored.
+// `text` replaces its content with `data-expired-text` (with no text, it hides instead). A deadline
+// without an explicit offset, or one that does not exist, is refused (see shared/countdown-parts.mjs)
+// and the root is left exactly as authored.
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
 import { createFlip, setFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
@@ -24,7 +30,11 @@ export const SELECTOR = '[data-dynamic-coral="countdown"]';
 const UNITS = ['days', 'hours', 'minutes', 'seconds'];
 // Every digit card is as wide as the widest digit, so a proportional font cannot make 1 and 8 differ.
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const UNIT_SECONDS = { days: 86400, hours: 3600, minutes: 60, seconds: 1 };
 const SR_CSS = '.dc-cd-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}';
+// Wins over a site rule that gives the root a display (and, inside @layer reef.corals on a layered
+// site, still wins: an !important declaration in a layer outranks unlayered ones).
+const HIDDEN_CSS = '[data-dynamic-coral="countdown"][hidden]{display:none!important}';
 
 const styled = new WeakSet();
 function injectStyles(doc) {
@@ -32,7 +42,7 @@ function injectStyles(doc) {
   styled.add(doc);
   const style = doc.createElement('style');
   style.setAttribute('data-dc', 'countdown');
-  style.textContent = withDynamicCoralCssLayer(FLIP_CSS + SR_CSS, doc);
+  style.textContent = withDynamicCoralCssLayer(HIDDEN_CSS + FLIP_CSS + SR_CSS, doc);
   doc.head.appendChild(style);
 }
 
@@ -41,8 +51,6 @@ function globals() {
   return {
     document: typeof document !== 'undefined' ? document : null,
     now: () => Date.now(),
-    setInterval: (fn, ms) => setInterval(fn, ms),
-    clearInterval: (id) => clearInterval(id),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
     reduced: !!(w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -55,7 +63,8 @@ function partsOf(root) {
     const unit = el.getAttribute('data-part');
     if (!UNITS.includes(unit)) continue;
     const faces = parseFaces(el.getAttribute('data-flip-faces'));
-    parts.push({ el, unit, flip: el.getAttribute('data-flip') !== null, faces: faces.length ? faces : DIGITS, cards: [], sr: null });
+    const flip = el.getAttribute('data-flip');
+    parts.push({ el, unit, flip: flip !== null && flip !== 'false', faces: faces.length ? faces : DIGITS, cards: [], sr: null });
   }
   return parts;
 }
@@ -87,19 +96,29 @@ export function mountCountdown(root, deps = {}) {
   const env = { ...globals(), ...deps };
   const deadline = parseDeadline(root.getAttribute('data-deadline'));
   if (Number.isNaN(deadline)) return null;
-  const expiredMode = root.getAttribute('data-expired') === 'text' ? 'text' : 'hide';
+  const expiredText = root.getAttribute('data-expired-text') || '';
+  const expiredMode = root.getAttribute('data-expired') === 'text' && expiredText ? 'text' : 'hide';
   const parts = partsOf(root);
-  if (parts.some((p) => p.flip)) injectStyles(env.document);
+  injectStyles(env.document);
+  // The largest unit present absorbs every unit above it (see the header).
+  const largest = UNITS.find((u) => parts.some((p) => p.unit === u));
 
   let timer = null;
-  const stop = () => { if (timer !== null) env.clearInterval(timer); timer = null; };
+  const stop = () => { if (timer !== null) env.clearTimeout(timer); timer = null; };
+  // The display (whole seconds left, floored) changes the moment the time left drops below the next
+  // whole second — `(deadline - now) % 1000` ms from now, which is 0 when sitting exactly on one. The
+  // next tick goes exactly there, plus a few ms so it lands after the boundary, not before it.
+  const schedule = () => {
+    if (timer !== null) env.clearTimeout(timer);
+    timer = env.setTimeout(tick, ((deadline - env.now()) % 1000) + 5);
+  };
 
   function tick() {
     const left = remainingParts(deadline, env.now());
     if (left.expired) {
       stop();
       if (expiredMode === 'text') {
-        root.textContent = root.getAttribute('data-expired-text') || '';
+        root.textContent = expiredText;
         root.hidden = false;
       } else {
         root.hidden = true;
@@ -107,15 +126,19 @@ export function mountCountdown(root, deps = {}) {
       return left;
     }
     for (const part of parts) {
-      const text = pad2(left[part.unit]);
+      const value = part.unit === largest
+        ? Math.floor(left.total / UNIT_SECONDS[part.unit])
+        : left[part.unit];
+      const text = pad2(value);
       if (part.flip) showFlip(part, text, env);
       else part.el.textContent = text;
     }
     root.hidden = false;
+    schedule();
     return left;
   }
 
-  if (!tick().expired) timer = env.setInterval(tick, 1000);
+  tick();
   return { stop, tick, get running() { return timer !== null; } };
 }
 

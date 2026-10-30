@@ -56,7 +56,7 @@ test('a change mid-flip drops the running flaps and timer, and starts from what 
   clock.advance(100);
   setFlip(cell, '1', env);
   assert.equal(cell.querySelectorAll('.dc-flip-flap').length, 2, 'exactly one pair of flaps, not two');
-  assert.equal(faces(cell), '1221');
+  assert.equal(faces(cell), '1321', 'top new (1), bottom keeps the VISIBLE 3, front folds the visible top 2, back brings 1');
   assert.equal(clock.pending(), 1, 'the first flip\'s settle timer was cleared');
   clock.advance(FLIP_MS);
   assert.equal(faces(cell), '11--');

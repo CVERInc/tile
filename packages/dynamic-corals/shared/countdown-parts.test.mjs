@@ -13,15 +13,16 @@ const D = 864e5, H = 36e5;
 test('parts: days / hours / minutes / seconds, seconds floored', () => {
   const dl = parseDeadline('2026-12-01T23:59:59+09:00');
   const now = dl - (32 * D + 12 * H + 40 * 6e4 + 2 * 1e3 + 600);
-  assert.deepEqual(remainingParts(dl, now), { expired: false, days: 32, hours: 12, minutes: 40, seconds: 2 });
+  assert.deepEqual(remainingParts(dl, now), { expired: false, total: 32 * 86400 + 12 * 3600 + 40 * 60 + 2, days: 32, hours: 12, minutes: 40, seconds: 2 });
 });
 
-test('expiry: from the deadline on, expired and all zero', () => {
+test('expiry is AT the deadline: the final second is 00 and not expired', () => {
   const dl = parseDeadline('2026-12-01T23:59:59Z');
-  assert.equal(remainingParts(dl, dl - 1001).expired, false);
-  assert.deepEqual(remainingParts(dl, dl - 999), { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0 });
+  assert.deepEqual(remainingParts(dl, dl - 1001), { expired: false, total: 1, days: 0, hours: 0, minutes: 0, seconds: 1 });
+  assert.deepEqual(remainingParts(dl, dl - 999), { expired: false, total: 0, days: 0, hours: 0, minutes: 0, seconds: 0 });
+  assert.deepEqual(remainingParts(dl, dl - 1), { expired: false, total: 0, days: 0, hours: 0, minutes: 0, seconds: 0 });
   assert.equal(remainingParts(dl, dl).expired, true);
-  assert.equal(remainingParts(dl, dl + 5000).expired, true);
+  assert.deepEqual(remainingParts(dl, dl + 5000), { expired: true, total: 0, days: 0, hours: 0, minutes: 0, seconds: 0 });
 });
 
 test('pad2 keeps two digits minimum and never truncates (100 days stays 100)', () => {
@@ -40,6 +41,23 @@ test('a deadline without an explicit offset is refused', () => {
   }
 });
 
+test('a date that does not exist is refused, not rolled over', () => {
+  for (const bad of ['2026-02-31T00:00Z', '2026-02-29T00:00Z', '2026-04-31T00:00Z', '2026-13-01T00:00Z', '2026-00-10T00:00Z',
+    '2026-12-01T24:00Z', '2026-12-01T23:60Z', '2026-12-01T23:59:60Z', '2026-12-01T23:59+24:00', '2026-12-01T23:59+09:60', '2026-12-00T00:00Z']) {
+    assert.ok(Number.isNaN(parseDeadline(bad)), bad);
+  }
+  assert.equal(parseDeadline('2028-02-29T00:00Z'), Date.UTC(2028, 1, 29), 'a real leap day is accepted');
+});
+
+test('every accepted deadline is the same instant Date.parse gives for it (no engine leniency involved)', () => {
+  const cases = [];
+  for (const date of ['2026-01-31', '2026-02-28', '2028-02-29', '2026-12-01', '1999-12-31'])
+    for (const time of ['00:00', '23:59', '12:34:56', '07:08:09.5', '07:08:09.123'])
+      for (const zone of ['Z', '+09:00', '-05:30', '+00:00', '+14:00', '-12:00']) cases.push(`${date}T${time}${zone}`);
+  for (const c of cases) assert.equal(parseDeadline(c), Date.parse(c), c);
+  assert.equal(cases.length, 150);
+});
+
 test('same remaining time under TZ=UTC and TZ=Asia/Tokyo', () => {
   const probe = `import { parseDeadline, remainingParts } from ${JSON.stringify(HERE + 'countdown-parts.mjs')};
     const now = Date.parse('2026-10-30T02:19:00Z');
@@ -48,7 +66,7 @@ test('same remaining time under TZ=UTC and TZ=Asia/Tokyo', () => {
   const utc = run('UTC'), tokyo = run('Asia/Tokyo');
   assert.notEqual(utc[2], tokyo[2], 'CONTROL: the two child processes really ran in different zones');
   assert.deepEqual(utc[0], tokyo[0]);
-  assert.deepEqual(utc[0], { expired: false, days: 32, hours: 12, minutes: 40, seconds: 59 });
+  assert.deepEqual(utc[0], { expired: false, total: 32 * 86400 + 12 * 3600 + 40 * 60 + 59, days: 32, hours: 12, minutes: 40, seconds: 59 });
   assert.deepEqual([utc[1], tokyo[1]], [true, true], 'the zone-dependent spelling is refused in both');
 });
 

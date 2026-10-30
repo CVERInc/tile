@@ -21,6 +21,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withDynamicCoralCssLayer, DYNAMIC_CORAL_CSS_ATTR } from './shared/dynamic-coral-css.mjs';
 import { mountSponsor, resetStyleInjectionForTests as resetSponsorStyles } from './sponsor/sponsor-core.mjs';
+import { mountCountdown } from './countdown/countdown-core.mjs';
+import { createDocument } from './shared/fake-dom.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -74,6 +76,31 @@ test('sponsor: injectStyles wraps SPONSOR_CSS only when the doc declares layered
 
   assertLayeringPair(legacy, layered, 'sponsor');
   assert.match(legacy, /\.dc-sponsor\{/, 'sanity: this is really SPONSOR_CSS, not an empty string');
+});
+
+// ── countdown (bundle:true, imports the shared helper; style memo is per document) ─────────────
+
+test('countdown: injected CSS wraps only when the doc declares layered — legacy carries no @layer, layered is legacy wrapped byte-for-byte', () => {
+  const capture = (layered) => {
+    const doc = createDocument();
+    if (layered) doc.documentElement.setAttribute(DYNAMIC_CORAL_CSS_ATTR, 'layered');
+    const root = doc.createElement('div');
+    root.setAttribute('data-deadline', '2099-01-01T00:00:00Z');
+    const part = doc.createElement('span');
+    part.setAttribute('data-part', 'seconds');
+    part.setAttribute('data-flip', '');
+    root.appendChild(part);
+    doc.body.appendChild(root);
+    const ctl = mountCountdown(root, { document: doc, now: () => 0, setTimeout: () => 1, clearTimeout() {}, reduced: true });
+    ctl.stop();
+    assert.equal(doc.head.children.length, 1, 'exactly one style tag');
+    return doc.head.children[0].textContent;
+  };
+  const legacy = capture(false);
+  const layered = capture(true);
+  assertLayeringPair(legacy, layered, 'countdown');
+  assert.match(legacy, /\[data-dynamic-coral="countdown"\]\[hidden\]\{display:none!important\}/, 'sanity: the hidden guard is in it');
+  assert.match(legacy, /\.dc-flip\{/, 'sanity: so is the card CSS');
 });
 
 // ── square-shop and inbox-bubble (bundle:false, hardcode the two literals, self-contained) ─────

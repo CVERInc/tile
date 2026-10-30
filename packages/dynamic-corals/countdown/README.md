@@ -13,16 +13,23 @@ language, layout, the card it sits in — is the host's own markup; the coral on
 <script type="module" src="https://feelreef.com/corals/countdown/v0/countdown.js"></script>
 ```
 
-- `data-deadline` **must name its offset** (`Z` or `±hh:mm`). Without one the same embed would end
-  at a different moment for every visitor's time zone, so it is refused and the root is left as
+- `data-deadline` **must name its offset** (`Z` or `±hh:mm`) and a real date. Without an offset the
+  same embed would end at a different moment for every visitor's time zone; a date that does not
+  exist (`2026-02-31`, `T24:00`) would silently roll over. Both are refused and the root is left as
   authored.
-- Each `data-part` (`days` · `hours` · `minutes` · `seconds`) shows at least two digits; days grow
-  to three when needed. Without `data-flip` the element's text is the number. With it the element
-  holds one split-flap card per digit, a card is added or dropped on the left when the digit count
-  changes, and a visually hidden copy of the value stays readable to a screen reader.
-- The root is shown after the first tick, so a root marked `hidden` never flashes `00`.
-- At the deadline the timer stops: `data-expired="hide"` (default) hides the root;
-  `data-expired="text"` replaces its content with `data-expired-text`.
+- Each `data-part` (`days` · `hours` · `minutes` · `seconds`) shows at least two digits and as many
+  as the value needs. The **largest unit present carries everything above it**: with only
+  hours/minutes/seconds, 2 d 5 h 12 m 30 s reads `53:12:30`, never `05:12:30`. Without `data-flip`
+  (or with `data-flip="false"`) the element's text is the number. With it the element holds one
+  split-flap card per digit, a card is added or dropped on the left when the digit count changes,
+  and a visually hidden copy of the value stays readable to a screen reader.
+- The root is shown after the first tick, so a root marked `hidden` never flashes `00`. The coral
+  injects `[data-dynamic-coral="countdown"][hidden]{display:none!important}`, so a site rule giving
+  the root a display cannot defeat that, or keep a frozen value on screen after the deadline.
+- Ticks land on whole-second boundaries of the deadline, so no second is skipped or shown twice.
+- The final second reads `00:00:00`. At the deadline itself the timer stops: `data-expired="hide"`
+  (default) hides the root; `data-expired="text"` replaces its content with `data-expired-text`
+  (and hides when that text is empty).
 - Reduced motion: cards change without folding.
 
 No network call, nothing stored.
@@ -95,11 +102,11 @@ Author: `official`.
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
 | `data-dynamic-coral` | enum | yes | — | Selects the countdown coral. Values: `countdown`. |
-| `data-deadline` | string | yes | — | ISO date-time WITH an explicit offset (Z or ±hh:mm); without one the root is left as authored. Pattern: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z\|[+-]\d{2}:\d{2})$`. |
-| `data-expired` | enum | no | `hide` | What the root does at the deadline: hide it, or replace its content with data-expired-text. Values: `hide`, `text`. |
+| `data-deadline` | string | yes | — | ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. Pattern: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z\|[+-]\d{2}:\d{2})$`. |
+| `data-expired` | enum | no | `hide` | What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides). Values: `hide`, `text`. |
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |
-| `data-part` | enum | yes | — | On a child element: which unit it shows. Two digits minimum; days grow to three when needed. Values: `days`, `hours`, `minutes`, `seconds`. |
-| `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. |
+| `data-part` | enum | yes | — | On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h). Values: `days`, `hours`, `minutes`, `seconds`. |
+| `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. data-flip="false" keeps plain text. |
 | `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; the same ordered list is the drum order a future drum mode would step through. |
 
 <!-- coral metadata: end -->

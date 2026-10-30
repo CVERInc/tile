@@ -25,8 +25,8 @@
 // glyph pinned to its own edge (top half: top, bottom half: bottom), so the seam cuts one glyph in
 // two; a half-height glyph per half shows the top of the character twice.
 //
-// A change that arrives mid-flip drops the running flaps and starts from what the card is showing
-// now, so flips never stack. Reduced motion (or the first value) sets every face at once.
+// A change that arrives mid-flip drops the running flaps and starts from what each half is showing
+// now (top and bottom separately), so flips never stack and no half changes without a fold. Reduced motion (or the first value) sets every face at once.
 //
 // Today a change goes straight to the target face. A board that steps through every face in between
 // (a drum / sequence mode) is a different caller-supplied OPTION on the same card, not a different
@@ -99,21 +99,26 @@ export function setFlip(cell, next, env) {
   const bottom = glyph(cell, '.dc-flip-bottom');
   if (state.value === value) return state;
 
-  const old = state.value;
+  const first = state.value === undefined;
+  // What is on the card RIGHT NOW, half by half. Mid-flip they differ — the top already shows the
+  // face being flipped to, the bottom still the one before it — and the next flip starts from what
+  // is visible, so neither half jumps without a fold.
+  const shownTop = top.textContent;
+  const shownBottom = bottom.textContent;
   clearFlaps(cell, state, env);
   state.value = value;
   fit(cell, env.document, value);
-  if (old === undefined || env.reduced) {
+  if (first || env.reduced) {
     top.textContent = value;
     bottom.textContent = value;
     return state;
   }
 
   top.textContent = value;
-  bottom.textContent = old;
+  bottom.textContent = shownBottom;
   const front = face(env.document, 'dc-flip-flap dc-flip-front');
   const back = face(env.document, 'dc-flip-flap dc-flip-back');
-  front.firstChild.textContent = old;
+  front.firstChild.textContent = shownTop;
   back.firstChild.textContent = value;
   cell.appendChild(front);
   cell.appendChild(back);

@@ -19,7 +19,7 @@
       "type": "string",
       "required": true,
       "default": null,
-      "description": "ISO date-time WITH an explicit offset (Z or ±hh:mm); without one the root is left as authored.",
+      "description": "ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored.",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,3})?)?(Z|[+-]\\d{2}:\\d{2})$"
     },
     {
@@ -27,7 +27,7 @@
       "type": "enum",
       "required": false,
       "default": "hide",
-      "description": "What the root does at the deadline: hide it, or replace its content with data-expired-text.",
+      "description": "What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides).",
       "values": [
         "hide",
         "text"
@@ -45,7 +45,7 @@
       "type": "enum",
       "required": true,
       "default": null,
-      "description": "On a child element: which unit it shows. Two digits minimum; days grow to three when needed.",
+      "description": "On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h).",
       "values": [
         "days",
         "hours",
@@ -58,7 +58,7 @@
       "type": "boolean",
       "required": false,
       "default": false,
-      "description": "On a data-part element: show one split-flap card per digit instead of plain text."
+      "description": "On a data-part element: show one split-flap card per digit instead of plain text. data-flip=\"false\" keeps plain text."
     },
     {
       "name": "data-flip-faces",
