@@ -61,7 +61,9 @@ export const DEFAULT_LANG = 'zh-Hant';
  * (what a no-JS visitor sees after the real POST/303 round trip) uses the generic phrasing. The
  * AJAX enhancement captures the actual typed address from `FormData` at submit time and has
  * something build time never could, so it fills `sentWithEmail`'s `{email}` placeholder with it —
- * literally what the owner asked for ("確認信已寄到 <email>"). `{email}` is a literal token this
+ * the visitor sees the address their reply goes to.
+ * The sentence is neutral on purpose: the endpoint answers acknowledgement 'stored' only, and the visitor ack
+ * is bounded per address and may be refused, so no sentence here may claim a confirmation mail was sent. `{email}` is a literal token this
  * table defines and Form.astro's inline script substitutes; it is not printf/template-string syntax.
  *
  * `sendAnother` (2026-09-04, a customer's production report): the success card's own escape hatch —
@@ -73,8 +75,8 @@ export const DEFAULT_LANG = 'zh-Hant';
 const INBOX_FORM_LOCALE = {
   ja: {
     fieldRequired: 'この項目は必須です。',
-    sentWithEmail: '確認メールを {email} にお送りしました。返信もご入力のメールアドレスに届きます。',
-    sentWithEmailGeneric: '確認メールをお送りしました。返信もご入力のメールアドレスに届きます。',
+    sentWithEmail: 'メッセージを受け付けました。返信は {email} に届きます。',
+    sentWithEmailGeneric: 'メッセージを受け付けました。返信はご入力のメールアドレスに届きます。',
     sentNoEmail: '返信をご希望の場合はメールアドレスをご記入ください。',
     submitting: '送信中…',
     successHeading: '送信しました',
@@ -89,8 +91,8 @@ const INBOX_FORM_LOCALE = {
   },
   'zh-tw': {
     fieldRequired: '這是必填欄位。',
-    sentWithEmail: '確認信已寄到 {email}。回覆會寄到你剛才填的信箱。',
-    sentWithEmailGeneric: '確認信已寄到你填的信箱。回覆會寄到同一個信箱。',
+    sentWithEmail: '訊息已收到。回覆會寄到 {email}。',
+    sentWithEmailGeneric: '訊息已收到。回覆會寄到你填的信箱。',
     sentNoEmail: '如需回覆，請留下 email。',
     submitting: '送出中…',
     successHeading: '已送出',
@@ -105,8 +107,8 @@ const INBOX_FORM_LOCALE = {
   },
   'zh-cn': {
     fieldRequired: '这是必填字段。',
-    sentWithEmail: '确认信已发送到 {email}。回复会发送到你刚才填写的邮箱。',
-    sentWithEmailGeneric: '确认信已发送到你填写的邮箱。回复会发送到同一个邮箱。',
+    sentWithEmail: '消息已收到。回复会发送到 {email}。',
+    sentWithEmailGeneric: '消息已收到。回复会发送到你填写的邮箱。',
     sentNoEmail: '如需回复，请留下 email。',
     submitting: '发送中…',
     successHeading: '已发送',
@@ -121,8 +123,8 @@ const INBOX_FORM_LOCALE = {
   },
   ko: {
     fieldRequired: '필수 입력 항목입니다.',
-    sentWithEmail: '확인 메일을 {email}(으)로 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
-    sentWithEmailGeneric: '확인 메일을 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
+    sentWithEmail: '메시지를 받았습니다. 답변은 {email}(으)로 전달됩니다.',
+    sentWithEmailGeneric: '메시지를 받았습니다. 답변은 입력하신 메일 주소로 전달됩니다.',
     sentNoEmail: '답변을 받고 싶다면 이메일을 남겨 주세요.',
     submitting: '전송 중…',
     successHeading: '전송 완료',
@@ -137,8 +139,8 @@ const INBOX_FORM_LOCALE = {
   },
   en: {
     fieldRequired: 'This field is required.',
-    sentWithEmail: "We've sent a confirmation to {email}. The reply will go to the address you entered.",
-    sentWithEmailGeneric: "We've sent a confirmation to your email. The reply will go to the address you entered.",
+    sentWithEmail: "Your message was received. The reply will go to {email}.",
+    sentWithEmailGeneric: "Your message was received. The reply will go to the address you entered.",
     sentNoEmail: "Leave an email if you'd like a reply.",
     submitting: 'Sending…',
     successHeading: 'Sent',

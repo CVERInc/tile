@@ -1724,7 +1724,7 @@ const checks = [
   // -- post-submit feedback: submitting / success card / inline retry error (owner ruling, 2026-09-03) --
   // 🩸 2026-09-03: the fixture's inbox form's `{email}` field now defaults `required` (no field
   // says otherwise), which is GUARANTEED filled on any submission the browser lets through — so
-  // the success line's BUILD-TIME default is the "we emailed you a confirmation" variant (the
+  // the success line's BUILD-TIME default is the "message received, reply goes to your address" variant (the
   // generic phrasing, since build time can never know the address one visitor will type — see
   // `sentWithEmailGeneric` in locale.mjs), not the "no email" fallback.
   ['form: success card renders hidden by default — check icon, heading, next-step copy, hidden excerpt, send-another + home links', () => {
@@ -1733,7 +1733,7 @@ const checks = [
     const c = card[1];
     return /<svg class="st-form-success-check"/.test(c)
       && /<p class="st-form-success-heading" role="heading" aria-level="3">Sent<\/p>/.test(c)
-      && /<p class="st-form-success-next" data-inbox-next>We've sent a confirmation to your email\. The reply will go to the address you entered\.<\/p>/.test(c)
+      && /<p class="st-form-success-next" data-inbox-next>Your message was received\. The reply will go to the address you entered\.<\/p>/.test(c)
       && /<p class="st-form-success-excerpt" data-inbox-excerpt hidden><\/p>/.test(c)
       && /<p class="st-form-success-again"><a href="\/forms\/" data-inbox-again>Send another<\/a><\/p>/.test(c)
       && /<p class="st-form-success-back"><a href="\/">Back to homepage<\/a><\/p>/.test(c);

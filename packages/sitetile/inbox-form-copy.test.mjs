@@ -73,28 +73,28 @@ test('sentWithEmailGeneric never leaks the {email} placeholder — it is the bui
 test('success panel describes the reply address without assuming a shop or a role', () => {
   const expected = {
     ja: [
-      '確認メールを {email} にお送りしました。返信もご入力のメールアドレスに届きます。',
-      '確認メールをお送りしました。返信もご入力のメールアドレスに届きます。',
+      'メッセージを受け付けました。返信は {email} に届きます。',
+      'メッセージを受け付けました。返信はご入力のメールアドレスに届きます。',
       '返信をご希望の場合はメールアドレスをご記入ください。',
     ],
     'zh-tw': [
-      '確認信已寄到 {email}。回覆會寄到你剛才填的信箱。',
-      '確認信已寄到你填的信箱。回覆會寄到同一個信箱。',
+      '訊息已收到。回覆會寄到 {email}。',
+      '訊息已收到。回覆會寄到你填的信箱。',
       '如需回覆，請留下 email。',
     ],
     'zh-cn': [
-      '确认信已发送到 {email}。回复会发送到你刚才填写的邮箱。',
-      '确认信已发送到你填写的邮箱。回复会发送到同一个邮箱。',
+      '消息已收到。回复会发送到 {email}。',
+      '消息已收到。回复会发送到你填写的邮箱。',
       '如需回复，请留下 email。',
     ],
     ko: [
-      '확인 메일을 {email}(으)로 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
-      '확인 메일을 보냈습니다. 답변도 입력하신 메일 주소로 전달됩니다.',
+      '메시지를 받았습니다. 답변은 {email}(으)로 전달됩니다.',
+      '메시지를 받았습니다. 답변은 입력하신 메일 주소로 전달됩니다.',
       '답변을 받고 싶다면 이메일을 남겨 주세요.',
     ],
     en: [
-      "We've sent a confirmation to {email}. The reply will go to the address you entered.",
-      "We've sent a confirmation to your email. The reply will go to the address you entered.",
+      "Your message was received. The reply will go to {email}.",
+      "Your message was received. The reply will go to the address you entered.",
       "Leave an email if you'd like a reply.",
     ],
   };
@@ -105,6 +105,16 @@ test('success panel describes the reply address without assuming a shop or a rol
       expected[key],
       `${key} success panel copy`,
     );
+  }
+});
+
+test('sentWithEmail and sentWithEmailGeneric never claim a confirmation mail was sent, in every locale', () => {
+  // A submit whose visitor ack was refused by the per-address ceiling still gets this sentence.
+  const claim = /confirmation|確認信|确认信|確認メール|확인 메일/i;
+  for (const lang of Object.values(LANGS)) {
+    const c = inboxFormCopy(lang);
+    assert.ok(!claim.test(c.sentWithEmail), `${lang} sentWithEmail claims a confirmation mail`);
+    assert.ok(!claim.test(c.sentWithEmailGeneric), `${lang} sentWithEmailGeneric claims a confirmation mail`);
   }
 });
 

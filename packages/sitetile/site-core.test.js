@@ -2546,7 +2546,7 @@ test('#1933 S4b inbox: data-inbox-copy follows the site lang (one assertion per 
   assert.equal(en.submitting, 'Sending…');
   assert.equal(en.emailField, 'visitor_email');
   assert.equal(en.excerptField, 'Message');
-  assert.equal(en.sentWithEmail, "We've sent a confirmation to {email}. The reply will go to the address you entered.");
+  assert.equal(en.sentWithEmail, "Your message was received. The reply will go to {email}.");
 });
 test('#1933 S4b inbox: the copy IS lingo\'s table, and a site with no lang gets Form.astro\'s DEFAULT_LANG copy', () => {
   assert.deepEqual(copyOf(inboxHtml('ja', INBOX_BODY)).errorServer, inboxFormCopy('ja').errorServer);
@@ -2564,7 +2564,7 @@ test('#1933 S4b inbox: data-required-msg on each required control, in the site l
 });
 test('#1933 S4b inbox: success sentence is the generic one when an email is guaranteed, else the no-email one; script text is the shared constant', () => {
   const withEmail = inboxHtml('en', INBOX_BODY);
-  assert.match(withEmail, /data-inbox-next>We've sent a confirmation to your email/);
+  assert.match(withEmail, /data-inbox-next>Your message was received\. The reply will go to the address you entered/);
   const without = inboxHtml('en', '### Message {textarea}');
   assert.match(without, /data-inbox-next>Leave an email if you'd like a reply\./);
   assert.equal(copyOf(without).emailField, null);
