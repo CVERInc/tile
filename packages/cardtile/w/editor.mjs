@@ -12,7 +12,7 @@
 import {
   parseCard, serializeCard, reorder, normalizeCell, setTitle, rasterCopyId,
 } from '../card-core.js';
-import { cardUrlFor, renderCardHTML } from '../serve/card-worker.mjs';
+import { cardOrigin, cardUrlFor, renderCardHTML } from '../serve/card-worker.mjs';
 // 🔴 The forms are BUILT from the shared ai_ops definition, not from a copy of it. fields.mjs was
 // that copy for one day and it was already behind: the renderer honours video.poster, video.title
 // and embed.origin/narrow/bg, and the form had never heard of any of them. One definition, and a
@@ -135,6 +135,10 @@ const S = {
   canSave: false,
   baseVersion: null,
   cardUrl: '',
+  // reef#2725 r2 — which host Cards answer on is the deployment's switch (`CARD_CANONICAL_HOST`),
+  // and a browser has no Worker env: serve.mjs says it in its `/_w/can-save` reply. Nobody said ⇒ {}
+  // ⇒ today's host, which is also what a file-only editor gets.
+  cardEnv: {},
   lane: { kind: 'face', id: '' },   // which lane the palette adds to and drag reorders within
   undo: [],
   dragging: false,
@@ -795,7 +799,7 @@ function deleteCell() {
 function load(md, handle, { cardUrl, vanity } = {}) {
   S.handle = handle || S.handle;
   // Stated > derived > canonical. Whoever opened this editor may know the domain; we do not.
-  S.cardUrl = cardUrl || cardUrlFor(S.handle, vanity || {});
+  S.cardUrl = cardUrl || cardUrlFor(S.handle, vanity || {}, S.cardEnv);
   S.undo = [];
   S.lane = { kind: 'face', id: '' };
   commit(md, { undoable: false });
@@ -818,10 +822,14 @@ function load(md, handle, { cardUrl, vanity } = {}) {
  * route on the feelreef.com zone. So the default origin is the canonical host now, which is also
  * what every non-vanity card's QR encodes. `?from=` still overrides it.
  */
-const CARD_ORIGIN = 'https://card.feelreef.com';
+//
+// reef#2725 r2: and the canonical host is the switch's, not a literal here — `cardOrigin` reads it
+// the way the Worker's routing does. The old host's `.md` 301s to the new one once the switch is on,
+// so a stale default would still load, one hop later; this keeps it zero hops.
+export const cardExitOrigin = (from, env) => (from || cardOrigin(env)).replace(/\/$/, '');
 
 async function loadHandle(handle, from) {
-  const origin = (from || CARD_ORIGIN).replace(/\/$/, '');
+  const origin = cardExitOrigin(from, S.cardEnv);
   let md = null;
   // Prefer the local bridge when this machine can save: it hands back the card AND the `version`
   // that a later save is guarded by. Reading over the public exit and then saving would mean saving
@@ -1170,6 +1178,7 @@ export function boot(opts = {}) {
     // worse than one that was never there — it is a phantom feature with a friendly face.
     fetch('/_w/can-save').then((r) => r.json()).then((j) => {
       S.canSave = !!j.canSave;
+      S.cardEnv = { CARD_CANONICAL_HOST: j.cardHost };
       el('publish').hidden = !S.canSave;
     }).catch(() => { /* not served by serve.mjs — the editor is file-only, which is a valid way to use it */ })
       .finally(() => {
