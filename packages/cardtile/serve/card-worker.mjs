@@ -5,6 +5,7 @@
 // card_render.py that bakes one card's HTML per request on Heroku.
 //
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
+//   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
 //
@@ -154,6 +155,49 @@ const CANON_HOST = 'card.feelreef.com';
 // the Cloudflare-for-SaaS fallback origin (wrangler.example.toml routes): ours, never a creator's.
 const FALLBACK_HOST = 'saas.feelreef.com';
 
+// reef#2725 — the Card's own registrable domain. A Card is user content, and a domain of its own
+// keeps its reputation (browsers, search) apart from feelreef.com's. With the switch on, it routes
+// by path like the old host, and its bare root is the platform's own card, ROOT_HANDLE.
+export const CARDS_HOST = 'reef.cards';
+export const ROOT_HANDLE = 'feelreef';
+// the apex whose single-segment paths used to name Cards (`feelreef.com/<handle>`)
+const APEX_HOST = 'feelreef.com';
+
+/**
+ * The switch: `CARD_CANONICAL_HOST`. Exactly `reef.cards` moves the Cards there — the old addresses
+ * 301 to it and the root card becomes indexable. Unset, or ANY other value, is today's host and
+ * today's behaviour: a typo must never redirect every Card to a host we do not serve.
+ */
+export const canonicalHost = (env) =>
+  String(env?.CARD_CANONICAL_HOST ?? '').trim().toLowerCase() === CARDS_HOST ? CARDS_HOST : CANON_HOST;
+const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
+
+// `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
+// the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
+const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
+// These site endpoints win even if someone creates a Card with the same handle.
+const APEX_SITE_PATHS = new Set(['report', 'pricing', 'login', 'edit', 'try']);
+const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, '').toLowerCase());
+
+/**
+ * movedTo: (host, url, method, env) → the reef.cards URL this request now lives at, or null. Pure.
+ *
+ * Only with the switch on, only GET/HEAD (a 301 turns a POST into a GET), and with the path and
+ * query carried over byte for byte: a printed QR code carries the old URL forever, so the old
+ * address must land on the same card. Two exceptions on the old card host:
+ *   /_api/…  never reaches here (handleApi answers first, on any host)
+ *   /edit    host mode: the feelreef page that frames it pins this origin for postMessage, so it
+ *            moves when that page does, not before
+ */
+export function movedTo(host, url, method, env) {
+  if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
+  const p = url.pathname;
+  if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
+  return `https://${CARDS_HOST}${p}${url.search}`;
+}
+// cacheable at the edge and in the browser; a day, so a correction does not wait a year to arrive
+const MOVED_CACHE = 'public, max-age=86400';
+
 /**
  * resolveHandle: (host, pathname, vanity) → { handle, cardUrl } | null. Pure.
  *
@@ -172,14 +216,21 @@ const FALLBACK_HOST = 'saas.feelreef.com';
  * so `<former-domain>/<handle>` served whoever owned that handle next.
  */
 export const routesByPath = (host) =>
-  !host || host === CANON_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
+  !host || host === CANON_HOST || host === CARDS_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
   || !host.includes('.') || host === '127.0.0.1';
+
+// reef#2725: on reef.cards the bare root, `/<ROOT_HANDLE>` and the origin-level icon files are the
+// root card's, which is addressed like a one-card host (cardUrl = the bare origin, `root: true`).
+// An icon path can never be a handle (it has a dot), so nothing a customer could own is taken.
+const isRootPath = (host, seg) =>
+  host === CARDS_HOST && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
 
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
   const seg = (pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0] || '';
   if (vanity[host]) return { handle: vanity[host], cardUrl: 'https://' + host };            // vanity domain = one card
   if (!routesByPath(host)) return null;                                                       // a creator's domain, unbound → nothing
+  if (isRootPath(host, seg)) return { handle: ROOT_HANDLE, cardUrl: 'https://' + host, root: true };
   if (seg) return { handle: seg.toLowerCase(), cardUrl: 'https://' + (host || CANON_HOST) + '/' + seg.toLowerCase() };
   return null;                                                                                // canonical host, no handle → directory
 }
@@ -381,9 +432,26 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // means, from the code that writes blank cards). Not indexed until its author puts something on it;
 // the moment they do, the next request answers without the header. Judged on CONTENT, never on
 // account age. It only ever ADDS a header: the stricter rule above it is never weakened.
-const ROBOTS_HEADERS = (env, handle, isVanity, blank = false) =>
-  !isVanity || isPreview(env) || isDemo(handle) ? { 'X-Robots-Tag': 'noindex, nofollow' }
-    : blank ? { 'X-Robots-Tag': 'noindex' } : {};
+//
+// reef#2725 — the host. Our own hosts carry Cards nobody has vouched for, so a Card there is
+// `noindex, nofollow` (tile c7aa65e). Once the Cards move to reef.cards (the switch, canonicalHost),
+// that domain is the user-content domain and the rule there is: the root card (ROOT_HANDLE) is
+// indexable, every other Card is `noindex`. Before the move reef.cards keeps the old rule, and the
+// old hosts keep it in both positions.
+/** robotsTag: ({ env, host, handle, vanity, blank }) → the X-Robots-Tag value, or null. Pure. */
+export function robotsTag({ env, host, handle, vanity = false, blank = false }) {
+  if (isPreview(env) || isDemo(handle)) return 'noindex, nofollow';
+  if (!vanity) {
+    if (host !== CARDS_HOST || !movedToCardsHost(env)) return 'noindex, nofollow';
+    if (handle !== ROOT_HANDLE) return 'noindex';
+  }
+  return blank ? 'noindex' : null;
+}
+// `at` = { host, vanity } of the request: where the card is being served, which robotsTag needs
+const ROBOTS_HEADERS = (env, handle, at = {}, blank = false) => {
+  const tag = robotsTag({ env, host: at.host, handle, vanity: !!at.vanity, blank });
+  return tag ? { 'X-Robots-Tag': tag } : {};
+};
 
 // 🔴 `Vary: Accept` on EVERY response the card path can produce, including the HTML one.
 //
@@ -392,17 +460,17 @@ const ROBOTS_HEADERS = (env, handle, isVanity, blank = false) =>
 // for up to a minute, at random. Putting it only on the markdown response is the version that looks
 // right and still breaks — the HTML response is the one that gets cached first, because that is what
 // people request.
-const CARD_HEADERS = (env, handle, isVanity, blank = false) => ({
+const CARD_HEADERS = (env, handle, at, blank = false) => ({
   'Cache-Control': 'public, max-age=60',
   Vary: 'Accept',
   // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
-  ...ROBOTS_HEADERS(env, handle, isVanity, blank),
+  ...ROBOTS_HEADERS(env, handle, at, blank),
 });
 
-const html = (body, status = 200, env = null, handle = '', isVanity = false, blank = false) =>
+const html = (body, status = 200, env = null, handle = '', at = {}, blank = false) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, isVanity, blank) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, at, blank) },
   });
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
@@ -417,7 +485,7 @@ const html = (body, status = 200, env = null, handle = '', isVanity = false, bla
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle, isVanity, blank }) =>
+const markdown = (body, { env, originalLength, alternate, handle, at, blank }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -425,7 +493,7 @@ const markdown = (body, { env, originalLength, alternate, handle, isVanity, blan
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
-      ...CARD_HEADERS(env, handle, isVanity, blank),
+      ...CARD_HEADERS(env, handle, at, blank),
     },
   });
 
@@ -559,6 +627,9 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const reqHost = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    // A route can be installed before cutover. Until the switch is on, this entire host is dark.
+    if (reqHost === CARDS_HOST && !movedToCardsHost(env)) return NOT_RELAYED();
 
     // 🔴 FIRST, and before any host resolution. The write API is host-agnostic — reef-MCP calls the
     // canonical host, and a vanity domain must never expose it under a creator's own name. Putting
@@ -568,12 +639,33 @@ const router = {
     const api = await handleApi(request, env, url);
     if (api) return api;
 
+    // reef#2725 — the old Card host redirects before any store read. Apex paths need a Card lookup
+    // before redirecting, since the site's route table can grow without a cardtile change.
+    if (movedToCardsHost(env)) {
+      // Only a live, handle-shaped Card address leaves the apex. Every other apex request belongs
+      // to the site, whose routes can grow independently of this package.
+      if (reqHost === APEX_HOST) {
+        if (APEX_HANDLE_PATH.test(url.pathname) && !isApexSitePath(url.pathname) &&
+            (request.method === 'GET' || request.method === 'HEAD') && env?.CARDS) {
+          const handle = url.pathname.replace(/^\/|\/$/g, '').toLowerCase();
+          const { md } = await liveCard(env.CARDS, handle);
+          if (md != null) return new Response(null, { status: 301, headers: {
+            Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
+          } });
+        }
+        return fetch(request);
+      }
+    }
+    const moved = movedTo(reqHost, url, request.method, env);
+    if (moved) return new Response(null, { status: 301, headers: { Location: moved, 'Cache-Control': MOVED_CACHE } });
+
     // reef#2044 ③ — security.txt, on the canonical host only. A constant: no store read, no handle.
     // `.well-known` can never be a handle (the grammar starts a handle with a letter or digit), so
     // without this it fell through to handle routing and 404'd. See SECURITY_TXT for what it says.
-    if (url.pathname === SECURITY_TXT_PATH
-      && (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '') === CANON_HOST) {
-      return new Response(request.method === 'HEAD' ? null : SECURITY_TXT, {
+    // reef#2725: "the canonical host" is the switch's, and so is the file's own Canonical line.
+    if (url.pathname === SECURITY_TXT_PATH && reqHost === canonicalHost(env)) {
+      const txt = SECURITY_TXT.replace(`https://${CANON_HOST}${SECURITY_TXT_PATH}`, `https://${reqHost}${SECURITY_TXT_PATH}`);
+      return new Response(request.method === 'HEAD' ? null : txt, {
         headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
       });
     }
@@ -797,7 +889,7 @@ const router = {
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
     // next owner's card. The generation read here is the one the card is read under.
-    let pointer = host && host !== CANON_HOST ? await store.get(VANITY_KEY(host)) : null;
+    let pointer = host && host !== CANON_HOST && host !== CARDS_HOST ? await store.get(VANITY_KEY(host)) : null;
     // 🔴 r9: `vanity:<host>` is HostBindings' write-through cache, so a MISS on a creator's domain may be
     // a put that failed after the bind was accepted: ask the host's object, once (card-api hostOwner)
     if (pointer == null && host && !routesByPath(host)) pointer = await hostOwner(env, host);
@@ -814,8 +906,11 @@ const router = {
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
-    const want = cardPath(url.pathname, resolved.handle, !!vanityHandle);
-    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, !!vanityHandle);
+    // the root card on reef.cards is addressed like a one-card host (resolveHandle `root`)
+    const oneCardHost = !!vanityHandle || !!resolved.root;
+    const at = { host, vanity: !!vanityHandle };
+    const want = cardPath(url.pathname, resolved.handle, oneCardHost);
+    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // 410/404 below exactly as a missing body does.
@@ -867,14 +962,14 @@ const router = {
           });
       // Apply host-specific robots rules after a relay cache hit as well as a fresh response.
       const headers = new Headers(image.headers);
-      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank))) headers.set(key, value);
+      for (const [key, value] of Object.entries(ROBOTS_HEADERS(env, resolved.handle, at, blank))) headers.set(key, value);
       return new Response(image.body, { status: image.status, headers });
     }
 
     // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
     // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
     if (want === 'ico' || want === 'svg' || want === 'apple') {
-      if (!cardMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle) } });
+      if (!cardMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, at) } });
       const file = await iconFile(want, parseCard(cardMd),
         { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
       return new Response(file.body, {
@@ -885,7 +980,7 @@ const router = {
           'Cache-Control': 'public, max-age=3600',
           // the avatar's type comes from the card's own `mime=`; never let a client second-guess it
           'X-Content-Type-Options': 'nosniff',
-          ...ROBOTS_HEADERS(env, resolved.handle, !!vanityHandle, blank),
+          ...ROBOTS_HEADERS(env, resolved.handle, at, blank),
         },
       });
     }
@@ -905,12 +1000,14 @@ const router = {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
-    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env, resolved.handle, !!vanityHandle);
+    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env, resolved.handle, at);
 
     // the download link, in the form this host actually uses
-    const fatUrl = vanityHandle ? `https://${host}/index.md` : `${resolved.cardUrl}.md`;
+    // (the root card keeps the canonical form: `/index.md` on reef.cards would name the handle `index`)
+    const fatUrl = vanityHandle ? `https://${host}/index.md`
+      : resolved.root ? `https://${host}/${ROOT_HANDLE}.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, isVanity: !!vanityHandle, blank });
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, at, blank });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -918,7 +1015,7 @@ const router = {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, isVanity: !!vanityHandle, blank });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, at, blank });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -932,7 +1029,7 @@ const router = {
     // card must not go down because a video platform did.
     const videos = await resolveChannels(cardMd, ytFetch);
 
-    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, !!vanityHandle, blank);
+    return html(renderCardHTML(cardMd, { ...resolved, videos }), 200, env, resolved.handle, at, blank);
   },
 };
 
