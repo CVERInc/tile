@@ -1,0 +1,20 @@
+{
+  "id": "grid-masonry",
+  "author": "official",
+  "summary": "Packs a grid's cards into column boxes by DOM-order parity at the theme's breakpoints.",
+  "embed": "<div class=\"st-cells\" data-dynamic-coral=\"grid-masonry\"><div class=\"st-cell\">One</div><div class=\"st-cell\">Two</div><div class=\"st-cell\">Three</div></div>\n<script src=\"grid-masonry.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the grid-masonry coral; on the cards' container.",
+      "values": [
+        "grid-masonry"
+      ]
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output, not a standalone copy-paste embed. The renderer emits the mount point and the section's markup; sitetile's section component imports the client source and Astro bundles it into the page, and a Worker host serves the built artifact itself. The breakpoints in the client must match the theme's `.st-cells[data-pack=\"masonry\"]` CSS, which the renderer's `data-pack` attribute selects."
+}

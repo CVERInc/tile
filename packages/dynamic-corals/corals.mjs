@@ -7,7 +7,7 @@
 // Local-only (not a registry participant): build.mjs still produces its generated local artifact
 // (<coral>/<coral>.js), but requires no manifest and never touches the registry — qr and drawer
 // are served through Cardtile's own embed step (see packages/cardtile/serve/gen-assets.mjs), not
-// through a registry channel.
+// through a registry channel; the sitetile section corals are bundled into the page by Astro.
 //
 // Plain data, no side effects, and no import beyond what the data needs — this has to stay
 // importable on a bare checkout with no node_modules anywhere. build.mjs itself is NOT importable
@@ -31,6 +31,11 @@ export const CORALS = {
   // Same split once more: mounting over a core node drives with a fake clock; the countdown math and
   // the split-flap card are shared modules (../shared/countdown-parts.mjs, ../shared/flip.mjs).
   'countdown': { src: 'countdown-client.mjs', bundle: true, registry: true },
+  // sitetile section behaviour (tile-lab#52 phase 2): what used to be a section component's hoisted
+  // <script>. Local-only like qr/drawer — sitetile's component imports the client source and Astro
+  // bundles it into the page; the built <coral>.js is for a host that serves corals itself.
+  'grid-masonry': { src: 'grid-masonry-client.mjs', bundle: true, registry: false },
+  'grid-filter': { src: 'grid-filter-client.mjs', bundle: true, registry: false },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);

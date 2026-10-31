@@ -11,3 +11,5 @@ export { emitLinks } from './links.mjs';
 export { emitTimeline } from './timeline.mjs';
 export { emitGallery } from './gallery.mjs';
 export { emitPeople } from './people.mjs';
+export { signetArrow } from './arrow.mjs';
+export { emitGrid, gridCell, gridFacets } from './grid.mjs';

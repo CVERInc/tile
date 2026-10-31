@@ -1,7 +1,14 @@
-// grid-filter.js — client-side facet filter for a `%% grid … filter=<label> %%` section.
+// grid-filter — the grid-filter dynamic coral, CLIENT source (built into grid-filter.js by
+// dynamic-corals/build.mjs; sitetile's Grid.astro imports this file and Astro bundles it).
+//
+// Client-side facet filter for a `%% grid … filter=<label> %%` section.
 // Progressive enhancement: the server renders every card + a filter bar; this script makes the
 // bar's pills toggle card visibility by `data-cat` (the card's badge). No JS → all cards show.
 // Scoped per-section so multiple filtered grids on one page don't cross-talk. Zero deps.
+//
+// Mount: the bar itself, `data-dynamic-coral="grid-filter"` (packages/emit/grid.mjs writes it).
+// Was packages/sitetile/astro/src/components/sections/grid-filter.js until tile-lab#52 phase 2,
+// which moved it here unchanged except for that selector (it used to find `.st-grid-filter`).
 function wire(bar) {
   const section = bar.closest('.st-grid');
   if (!section) return;
@@ -23,4 +30,4 @@ function wire(bar) {
     });
   });
 }
-document.querySelectorAll('.st-grid-filter').forEach(wire);
+document.querySelectorAll('[data-dynamic-coral="grid-filter"]').forEach(wire);
