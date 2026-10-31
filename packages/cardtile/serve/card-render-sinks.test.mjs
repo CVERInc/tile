@@ -36,7 +36,9 @@ const CONSTRUCT = new RegExp([
 ].join('|'), 'gi');
 const IMAGE_SET = /image-set\(/i;
 // what the `${…}` content must start with: the registry (optionally HTML-escaped on the way out) or a validated CSS value
-const GUARDED = /^(?:esc\(\s*)?(?:attrUrl|cssAttrUrl)\(|^esc\(\s*(?:cssColor|cssPos)\(/;
+// 🔴 tile-lab#52 phase 3: a cell's markup is written by a shared emitter (packages/emit), which receives this
+// renderer's registry as `ctx.url` / `ctx.cssUrl` (card-render's `dialect`, pinned below to esc(attrUrl) / esc(cssAttrUrl)).
+const GUARDED = /^(?:esc\(\s*)?(?:attrUrl|cssAttrUrl)\(|^esc\(\s*(?:cssColor|cssPos)\(|^ctx\.(?:url|cssUrl)\(/;
 
 // Output constructs that are NOT author-selected fetches: [construct text up to its closing `}`, how many times, why].
 // "Construct + value", never a whole line; the COUNT makes a second identical construct a new, unlisted sink.
@@ -105,9 +107,41 @@ export function unguardedSinks(src) {
   return out;
 }
 
-const SRC = readFileSync(new URL('../card-render.mjs', import.meta.url), 'utf8');
+const RENDER_SRC = readFileSync(new URL('../card-render.mjs', import.meta.url), 'utf8');
 
-test('sinks: every URL-bearing construct in card-render.mjs is guarded or listed as fixed', () => {
+// 🔴 tile-lab#52 phase 3: the cells' markup moved into packages/emit — card-render calls the shared emitters with its
+// own dialect — and the URL sinks moved with it. A scan of card-render.mjs alone would go quiet exactly as the sinks
+// left it, so the scan reads every packages/emit module card-render imports, and the emit modules THOSE import, found
+// from the import lines: an emitter is scanned the day it is imported, not the day somebody remembers to list it.
+export function emitSources() {
+  const seen = new Map();
+  const queue = [[new URL('../card-render.mjs', import.meta.url), RENDER_SRC]];
+  while (queue.length) {
+    const [base, src] = queue.shift();
+    for (const m of stripComments(src).matchAll(/^import\s[^;]*?from\s+'(\.{1,2}\/[^']+\.mjs)'/gm)) {
+      const u = new URL(m[1], base);
+      if (!/\/packages\/emit\/[^/]+\.mjs$/.test(u.pathname) || seen.has(u.href)) continue;
+      const text = readFileSync(u, 'utf8');
+      seen.set(u.href, text);
+      queue.push([u, text]);
+    }
+  }
+  return seen;
+}
+const EMIT = emitSources();
+const SRC = [RENDER_SRC, ...EMIT.values()].join('\n');
+
+test('sinks: the emit modules card-render imports are in the scan, and the registry it hands them is the registry', () => {
+  const names = [...EMIT.keys()].map((h) => h.split('/').pop()).sort();
+  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
+  // the two names a Card branch may write a URL through are exactly the guarded calls, made in ONE place
+  const body = stripComments(RENDER_SRC);
+  assert.match(body, /\burl: \(raw\) => esc\(attrUrl\(ctx, raw\)\),/);
+  assert.match(body, /\bcssUrl: \(raw\) => esc\(cssAttrUrl\(ctx, raw\)\),/);
+  assert.equal((body.match(/\burl: \(raw\) =>/g) || []).length, 1);
+});
+
+test('sinks: every URL-bearing construct in card-render.mjs (and the emitters it renders cells with) is guarded or listed as fixed', () => {
   assert.deepEqual(unguardedSinks(SRC), []);
 });
 

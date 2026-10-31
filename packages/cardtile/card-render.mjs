@@ -26,6 +26,7 @@ import { escHtml } from '../cssmd/cssmd.js';
 // `params.cell` (the bento layout attributes) and this renderer's own dialect — see `dialect` below.
 import { emitProse } from '../emit/prose.mjs';
 import { gridCell } from '../emit/grid.mjs';
+import { emitSocial } from '../emit/social.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -654,7 +655,7 @@ function renderCell(cell, place, ctx) {
       const bare = (h) => String(h || '').replace(/^www\./, '');
       const selfHost = bare(hostOf(ctx.cardUrl || ''));
       const isSelf = (u) => selfHost && !u.startsWith('mailto:') && bare(hostOf(u)) === selfHost;
-      const marks = items.map((x) => {
+      const buttons = items.map((x) => {
         const { label, url } = x;
         const over = overrideMark(x, hasIcon(ctx));
         // 🔴 the author's explicit override wins over EVERY default, the envelope and the house
@@ -668,9 +669,10 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(attrUrl(ctx, url))}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
-      }).join('');
-      return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
+        // the href is registered where it is written — packages/emit/social.mjs, through dialect().url
+        return { href: url, label, icon: icon + bare, rel: url.startsWith('mailto:') ? null : relFor(url, ctx) };
+      });
+      return emitSocial({}, { cell: { attrs: size }, buttons }, dialect(ctx));
     }
     default:
       return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b, ctx)}</div>`;
