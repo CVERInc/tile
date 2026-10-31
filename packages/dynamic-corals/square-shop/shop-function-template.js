@@ -1383,7 +1383,7 @@ function nativeCheckoutScript(copy, preview, rail, choice) {
 //   POST /api/v2/ecpay/logistics/store-map {site_id, sub_type, client_back_url, device, cash_on_delivery?}
 //        → {ok, form_post}; ECPay's answer returns to client_back_url with `?store_ref=`
 //   POST /api/v2/ecpay/checkout {site_id, items, client_request_ref, client_back_url, logistics,
-//        customer_email, invoice?, payment?} → {order_id, form_post} | {order_id, cash_on_delivery:true}
+//        customer_email, invoice?, payment?, lang?} → {order_id, form_post} | {order_id, cash_on_delivery:true}
 //
 // Everything else keeps today's flow byte for byte: any other product renders exactly as before,
 // and a Site whose delivery-options read answers no method hands the very same click to the
@@ -1630,6 +1630,10 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		const invoice = invoiceBody();
 		if (invoice) body.invoice = invoice;
 		if (cod) body.payment = { method: 'cod' };
+		// The page's declared language, as the cart checkout sends it, so the order (and the mail RSP
+		// writes later) carries the language the buyer bought in. Absent when the page declares none.
+		const lang = (document.documentElement && document.documentElement.lang || '').trim();
+		if (lang) body.lang = lang;
 		let res = null, r = null;
 		try {
 			res = await fetch('/api/v2/ecpay/checkout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

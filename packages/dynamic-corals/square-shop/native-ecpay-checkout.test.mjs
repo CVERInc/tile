@@ -59,7 +59,7 @@ function ecpayScript(html) {
 
 // A just-enough browser: the panel's innerHTML is the rendered checkout; events are delivered to
 // the listeners the script registered, with targets shaped like the inputs it rendered.
-function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null } = {}) {
+function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null, docLang = null } = {}) {
   const calls = [];
   const forms = [];
   const store = { ...session };
@@ -98,6 +98,7 @@ function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', s
       return form;
     },
   };
+  if (docLang !== null) document.documentElement = { lang: docLang };
   const window = { sessionStorage, matchMedia: () => ({ matches: true }), crypto: { randomUUID: () => '0f0e0d0c-0b0a-4908-8706-050403020100' } };
   const fetch = async (u, init = {}) => {
     const body = init.body ? JSON.parse(init.body) : null;
@@ -247,6 +248,21 @@ async function readyForSubmit(respond, list = [CVS]) {
 const deliveryThen = (list, after) => async (u, body, n) => (u.startsWith('/api/v2/ecpay/logistics/delivery-options')
   ? { status: 200, body: { ok: true, currency: 'TWD', options: list } }
   : after(u, body, n));
+
+test('the dedicated ECPay checkout carries the page\'s declared language, as the cart checkout does', async () => {
+  const html = await productHtml(bowl);
+  const cashier = { action: 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { MerchantTradeNo: 'T1', CheckMacValue: 'X' } };
+  const draft = { 'dc-native-ecpay-draft:bowl-sku': JSON.stringify({ ship: CVS.sub_type, pay: 'card', inv: 'carrier_ecpay', v: { name: 'Lin', phone: '0912345678', email: 'buyer@example.com' } }) };
+  const respond = deliveryThen([CVS], () => ({ status: 200, body: { order_id: 'order-1', form_post: cashier } }));
+  for (const [docLang, expected] of [[' zh-Hant ', 'zh-Hant'], ['', undefined]]) {
+    const b = browser(html, respond, { href: 'https://site.example/shop/tea-bowl?store_ref=store-1', session: { ...draft }, docLang });
+    await b.settle(); await b.settle();
+    await b.submit();
+    const sent = b.calls.find((c) => c.url === '/api/v2/ecpay/checkout');
+    assert.equal(sent.body.lang, expected, `page lang ${JSON.stringify(docLang)}`);
+    assert.equal('lang' in sent.body, expected !== undefined);
+  }
+});
 
 test('a card order sends the dedicated ECPay checkout with RSP\'s field names and launches the cashier', async () => {
   const cashier = { action: 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { MerchantTradeNo: 'T1', CheckMacValue: 'X' } };
