@@ -10,6 +10,14 @@
 //   text    : body = markdown
 // A block heading is a LANE (`## English`), not a cell — see card-core's parseCard.
 // packGrid gives each cell its w×h → data-span="{w}x{h}". 防醜 (no overlap) is card-core's.
+//
+// 🔴 A cell's MARKUP is not written here (tile-lab#52 phase 3). Each cell is a shared section emitter
+// (packages/emit) called with `params.cell` and this renderer's dialect (`dialect` below: mdInline /
+// mdBlock, esc, the destination registry): text → emitProse, link / feature → gridCell, social →
+// emitSocial, profile → emitHero, video → emitEmbed, embed → emitCarousel. What stays here is what only
+// a Card has: reading the params (`p.<name>` in renderCell — ai-ops.test.mjs scans it), assets, marks
+// and favicons, the drawer anchors, the bento pack (renderGrid), drawers, the page shell (frontmatter,
+// accent scale, footer) and the byte budget.
 import { packGrid } from './card-core.js';
 import { resolveBackdropDim, themeCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
@@ -30,6 +38,7 @@ import { emitSocial } from '../emit/social.mjs';
 import { emitHero } from '../emit/hero.mjs';
 import { emitEmbed } from '../emit/embed.mjs';
 import { emitCarousel } from '../emit/carousel.mjs';
+import { cellFrame } from '../emit/cell.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -621,7 +630,8 @@ function renderCell(cell, place, ctx) {
       return emitSocial({}, { cell: { attrs: size }, buttons }, dialect(ctx));
     }
     default:
-      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b, ctx)}</div>`;
+      // a type this renderer does not know: its body as inline text, in the bare cell frame
+      return cellFrame({ attrs: size }, '', esc(cell.type), mdInline(b, ctx));
   }
 }
 
