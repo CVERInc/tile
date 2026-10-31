@@ -1,0 +1,27 @@
+{
+  "id": "carousel",
+  "author": "official",
+  "summary": "Wires a carousel's prev/next buttons, overflow state and visible-cards height.",
+  "embed": "<section class=\"st-carousel\" data-dynamic-coral=\"carousel\"><div class=\"st-car-viewport\"><button class=\"st-car-nav st-car-prev\" type=\"button\" aria-label=\"Previous\">‹</button><div class=\"st-car-track\" data-start=\"0\"><div class=\"st-car-cell\">One</div><div class=\"st-car-cell\">Two</div></div><button class=\"st-car-nav st-car-next\" type=\"button\" aria-label=\"Next\">›</button></div></section>\n<script src=\"carousel.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the carousel coral; on the carousel section.",
+      "values": [
+        "carousel"
+      ]
+    },
+    {
+      "name": "data-start",
+      "type": "number",
+      "required": false,
+      "default": 0,
+      "description": "On .st-car-track: the 0-based card the track first rests on."
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output, not a standalone copy-paste embed. The renderer emits the mount point and the section's markup; sitetile's section component imports the client source and Astro bundles it into the page, and a Worker host serves the built artifact itself."
+}

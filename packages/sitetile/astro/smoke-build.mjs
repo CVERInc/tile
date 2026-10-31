@@ -163,6 +163,7 @@ const occ = (s) => occIn(html, s);
 // ---- the accounted client-JS set (signature → the doctrine that earned it) ----
 // header-overlay  13896b8: transparent header solidifies past the hero; self-gates (no hero → no-op)
 // parallax        697abd1: layered hero damped parallax; opt-in marker, respects reduced-motion
+//                 (tile-lab#52: now the hero-parallax dynamic coral, same code, mount selector)
 // pv-gate/resume  1f53aff: preview content-notice gate + resume link (reader is a product feature)
 // reader chunk    1f53aff: pagetile Kindle-grade reader (paged/scroll/spread/scrubber)
 // ha-toggle       header-actions / nav-mobile a11y polish: Escape-to-close + Enter/Space on the
@@ -175,7 +176,9 @@ const ALLOWED_INLINE = [
   // reef#1921: the inline loader, which names the coral's URL and imports it only where it draws.
   ['site inbox bubble loader', '/corals/inbox-bubble/v0/inbox-bubble.js'],
   ['header-overlay', 'rf-header--overlay'],
-  ['parallax', 'st-hero-layered[data-parallax]'],
+  // tile-lab#52: the hero-parallax dynamic coral's client, which Hero.astro bundles into the page;
+  // its root selector is the mount the emitter writes.
+  ['parallax', 'data-dynamic-coral="hero-parallax"'],
   ['pv-gate', 'pv-notice-ok'],
   ['ha-toggle (nav hamburger / drawer a11y)', 'data-ha-toggle'],
   // 🩸 Both Lingo scripts below had NEVER been through this audit. No fixture set `packages:`, so
@@ -209,7 +212,9 @@ const ALLOWED_INLINE = [
   ['header-actions preload-flash guard (double-rAF rf-preload removal, gated on any toggle header-action)', 'rf-preload'],
   // carousel scroll-snap wiring (round 4's scheme-check.md is the first fixture to use the
   // `carousel` coral at all — round 2 already named it as untested). Self-gates per instance
-  // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page.
+  // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page. tile-lab#52: the
+  // carousel dynamic coral's client, which Carousel.astro bundles into the page (same code; it now
+  // finds the `data-dynamic-coral="carousel"` mount the emitter writes on each section).
   ['carousel prev/next + overflow wiring (per-instance self-gating, zero-op with no .st-carousel)', 'carInit'],
   // YouTube line click-to-play (tile#148, youtube-line-script.js): progressive over a real link —
   // JS-off, the poster IS `<a href="…youtube…">`, so the video still opens; the script only swaps

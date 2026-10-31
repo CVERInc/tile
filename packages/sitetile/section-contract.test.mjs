@@ -147,6 +147,13 @@ const CASES = [
   { title: 'FAQ eyebrow', marker: '%% sitetile: faq eyebrow="Help" %%', body: 'Lead.\n\n### Why?\nBecause.' },
   { title: 'Timeline eyebrow', marker: '%% sitetile: timeline eyebrow="Since 2011" %%', body: '### 2011\nStart.' },
   { title: 'Gallery eyebrow', marker: '%% sitetile: gallery eyebrow="See all" %%', body: '### One\n![One](/img/1.png)' },
+  // tile-lab#52 phase 2: carousel had no case at all. A plain one (linked / badged / labelled /
+  // bare cells, a gated destination), and one with every optional head part and the blog-full cell.
+  { title: 'Carousel', marker: '%% sitetile: carousel cols=3 %%',
+    body: 'Intro.\n\n### One →/one [New]\n![One](/img/1.png)\nCaption one.\n\n### Two "Go"\n![Two](/img/2.png)\n\n### Three →https://example.com/3\nNo image.\n\n### Bad →javascript:alert(1)\n![Bad](/img/bad.png)' },
+  { title: 'Carousel eyebrow', marker: '%% sitetile: carousel eyebrow="Cast" more="All=/all" start=1 card=blog-full %%',
+    body: '### Post →/p "Read"\n![P](/img/p.png)\nExcerpt.' },
+  { title: '', label: 'Carousel bare', marker: '%% sitetile: carousel %%', body: '### Only\n![O](/img/o.png)' },
 ];
 
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
@@ -168,7 +175,8 @@ const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
   const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery',
-    'embed', 'embed', 'people', 'people', 'social', 'social', 'tagcloud', 'links', 'links', 'faq', 'timeline', 'gallery'];
+    'embed', 'embed', 'people', 'people', 'social', 'social', 'tagcloud', 'links', 'links', 'faq', 'timeline', 'gallery',
+    'carousel', 'carousel', 'carousel'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });

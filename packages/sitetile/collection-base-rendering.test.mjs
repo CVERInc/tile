@@ -5,11 +5,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { parseSite } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro/src/styles/site.css'), 'utf8');
-const COMPONENT = readFileSync(join(HERE, 'astro/src/components/sections/Collection.astro'), 'utf8');
+// The component and the packages/emit module it renders through (tile-lab#52) — see section-source.mjs.
+const COMPONENT = sectionSource('Collection.astro').all;
 const FIXTURE = readFileSync(join(HERE, 'astro/content/markers.md'), 'utf8');
 const CUSTOM_THEME = readFileSync(join(HERE, 'examples/lilac/theme.css'), 'utf8');
 const LAYOUT = readFileSync(join(HERE, 'astro/src/layouts/SiteLayout.astro'), 'utf8');

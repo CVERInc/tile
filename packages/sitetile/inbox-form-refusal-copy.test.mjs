@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { inboxFormCopy } from './inbox-form-copy.js';
 import { inboxOutcomeHelpers } from './inbox-form-script.js';
 
@@ -49,9 +50,9 @@ test('copy resolves per outcome; an older payload without the keys falls back to
   assert.equal(h.inboxErrorCopy(old, 'rate_limited'), 'retry');
   assert.equal(h.inboxErrorCopy(null, 'too_long'), null);
 });
-test('both copy payloads (Form.astro, site-core.js) pass the two keys', () => {
-  for (const f of ['astro/src/components/sections/Form.astro', 'site-core.js']) {
-    const s = readFileSync(join(HERE, f), 'utf8');
+test('both copy payloads (Form.astro + its emitter, site-core.js) pass the two keys', () => {
+  // tile-lab#52: Form.astro's payload is built in packages/emit/form.mjs — read both (section-source.mjs).
+  for (const [f, s] of [['Form.astro', sectionSource('Form.astro').all], ['site-core.js', readFileSync(join(HERE, 'site-core.js'), 'utf8')]]) {
     assert.match(s, /errorTooLong: fieldCopy\.errorTooLong/, f);
     assert.match(s, /errorRateLimited: fieldCopy\.errorRateLimited/, f);
   }
