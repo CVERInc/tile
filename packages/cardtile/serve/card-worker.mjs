@@ -176,6 +176,8 @@ const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
 const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
+// Error class names safe to log verbatim. Anything else is reported as 'unknown' (tile#220 review).
+const LOGGED_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'AbortError', 'TimeoutError']);
 // These site endpoints win even if someone creates a Card with the same handle.
 const APEX_SITE_PATHS = new Set(['report', 'pricing', 'login', 'edit', 'try']);
 const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, '').toLowerCase());
@@ -702,10 +704,11 @@ const router = {
           try { ({ md } = await liveCard(env.CARDS, handle)); }
           catch (err) {
             // tile#219 follow-up: the forward hides the failure from the visitor, so leave one line
-            // for the operator. Same JSON-event shape as card-api's settlement lines; host and op
-            // only, never the handle's contents or a binding name.
+            // for the operator. Same JSON-event shape as card-api's settlement lines. No error text:
+            // the store's message names the key it failed on (the handle) and may carry anything
+            // else, and `name` is settable text too — so only an allowlisted class name is logged.
             console.warn(JSON.stringify({ event: 'apex_card_lookup_failed', host: reqHost, op: 'liveCard',
-              error: err?.name || 'Error', message: String(err?.message ?? err).slice(0, 200) }));
+              error: LOGGED_ERROR_NAMES.has(err?.name) ? err.name : 'unknown' }));
             return fetch(request);
           }
           if (md != null) return new Response(null, { status: 301, headers: {

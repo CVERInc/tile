@@ -1660,15 +1660,30 @@ test('tile#219: an apex store failure leaves exactly one warn line; a working st
     assert.deepEqual(warned, [], 'a working store must not warn');
 
     // Failure: the request is still forwarded, and the operator gets one structured line.
-    const store = recordingStore({ 'card:t:0': SERVING_CARD });
-    store.get = async () => { throw new TypeError('KV unavailable'); };
-    const res = await worker.fetch(new Request('https://feelreef.com/t'), { ...ON, CARDS: store });
+    // The store's error names the key it failed on (so the handle) and, here, a credential:
+    // neither may reach the log. Only an allowlisted classification of the error does.
+    const store = recordingStore({ 'card:privatehandle:0': SERVING_CARD });
+    store.get = async (key) => { throw new TypeError(`KV unavailable for ${key}; token=supersecret`); };
+    const res = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
     assert.equal(res.status, 200, 'the failure still reaches the site origin');
     assert.equal(warned.length, 1, 'exactly one line per failed lookup');
     assert.equal(warned[0].length, 1, 'one JSON string argument');
+    const line = warned[0][0];
+    assert.ok(!line.includes('privatehandle'), `the handle must not be logged: ${line}`);
+    assert.ok(!line.includes('token='), `error text must not be logged: ${line}`);
+    assert.ok(!line.includes('supersecret'), `error text must not be logged: ${line}`);
+    assert.deepEqual(JSON.parse(line), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'TypeError',
+    });
+
+    // A name outside the allowlist is error text too (a custom class, or a store that sets
+    // `name` from its input): it is classified, never echoed.
+    warned.length = 0;
+    store.get = async () => { const e = new Error('x'); e.name = 'privatehandle token=supersecret'; throw e; };
+    await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(warned.length, 1);
     assert.deepEqual(JSON.parse(warned[0][0]), {
-      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard',
-      error: 'TypeError', message: 'KV unavailable',
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'unknown',
     });
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });
