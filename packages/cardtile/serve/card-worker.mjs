@@ -707,8 +707,15 @@ const router = {
             // for the operator. Same JSON-event shape as card-api's settlement lines. No error text:
             // the store's message names the key it failed on (the handle) and may carry anything
             // else, and `name` is settable text too — so only an allowlisted class name is logged.
-            console.warn(JSON.stringify({ event: 'apex_card_lookup_failed', host: reqHost, op: 'liveCard',
-              error: LOGGED_ERROR_NAMES.has(err?.name) ? err.name : 'unknown' }));
+            // A thrown value can be anything: `name` is read exactly once (a getter may answer
+            // differently twice, or throw), and nothing here may stand between the visitor and
+            // the site, so the whole line is best-effort.
+            try {
+              let name;
+              try { name = err?.name; } catch { name = undefined; }
+              const error = typeof name === 'string' && LOGGED_ERROR_NAMES.has(name) ? name : 'unknown';
+              console.warn(JSON.stringify({ event: 'apex_card_lookup_failed', host: reqHost, op: 'liveCard', error }));
+            } catch { /* logging is optional; the fallthrough is not */ }
             return fetch(request);
           }
           if (md != null) return new Response(null, { status: 301, headers: {

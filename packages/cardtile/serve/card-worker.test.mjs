@@ -1685,6 +1685,38 @@ test('tile#219: an apex store failure leaves exactly one warn line; a working st
     assert.deepEqual(JSON.parse(warned[0][0]), {
       event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'unknown',
     });
+
+    // A thrown value whose `name` answers differently on each read: the allowlist check and the
+    // logged value must be the same single read, so the second answer never reaches the log.
+    warned.length = 0;
+    store.get = async () => {
+      let reads = 0;
+      throw { get name() { reads += 1; return reads === 1 ? 'TypeError' : 'privatehandle token=supersecret'; } };
+    };
+    const twoFaced = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(twoFaced.status, 200, 'a two-faced name still reaches the site origin');
+    assert.equal(warned.length, 1);
+    assert.ok(!warned[0][0].includes('privatehandle') && !warned[0][0].includes('token='),
+      `the second read of name must not be logged: ${warned[0][0]}`);
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'TypeError',
+    });
+
+    // A thrown value whose `name` getter throws: classifying it must not cost the visitor the site.
+    warned.length = 0;
+    store.get = async () => { throw { get name() { throw new Error('privatehandle token=supersecret'); } }; };
+    const hostile = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(hostile.status, 200, 'a throwing name getter still reaches the site origin');
+    assert.equal(await hostile.text(), 'site origin');
+    assert.equal(warned.length, 1);
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'unknown',
+    });
+
+    // Logging itself failing (a console that throws) is no reason to drop the visitor either.
+    console.warn = () => { throw new Error('console unavailable'); };
+    const noConsole = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(noConsole.status, 200, 'a throwing console still reaches the site origin');
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });
 
