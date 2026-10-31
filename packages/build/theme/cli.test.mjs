@@ -450,3 +450,25 @@ test('🔴 colours follow CSS Color 4 per form: legacy comma hsl needs %, legacy
     assert.equal(run(t, `---\nname: s\ngd-bg: ${v}\n---\n`).status, 0, v);
   }
 });
+
+// ── round 14: a deadline is a real calendar moment; `none` in the modern colour syntax ─────────
+
+test('🔴 an impossible calendar date is a drop (Date.parse would roll it forward silently)', (t) => {
+  for (const until of ['2026-02-30T23:59:00Z', '2026-04-31T23:59:00+08:00', '2026-02-29T00:00:00Z', '2026-13-01T00:00:00Z',
+    '2026-12-01T24:00:00Z', '2026-12-01T23:60:00Z', '2026-12-01T23:59:60+08:00']) {
+    const r = assertRefusedNaming(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`, [`announce-until: ${JSON.stringify(until)} dropped`]);
+    assert.match(r.stderr, /not a real date|calendar/, r.stderr);
+  }
+  for (const until of ['2028-02-29T00:00:00Z', '2026-04-30T23:59:00+08:00', '2026-12-31T23:59:59-11:00', '2026-01-01T00:00:00+14:00']) {
+    assert.equal(run(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`).status, 0, until);
+  }
+});
+
+test('🔴 `none` is a colour component in the modern space syntax only', (t) => {
+  for (const v of ['rgb(none 0 0)', 'rgb(1 2 3 / none)', 'hsl(none 20% 30%)', 'hsl(10 none none / none)', 'rgb(none none none)']) {
+    assert.equal(run(t, `---\nname: s\ngd-bg: ${v}\n---\n`).status, 0, v);
+  }
+  for (const v of ['rgb(none, 0, 0)', 'hsl(none, 20%, 30%)', 'rgba(1, 2, 3, none)', 'rgb(nonee 0 0)']) {
+    assertRefusedNaming(t, `---\nname: s\ngd-bg: ${v}\n---\n`, [`gd-bg: ${JSON.stringify(v)} dropped`]);
+  }
+});

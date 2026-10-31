@@ -160,18 +160,35 @@ if (off !== 'true') {
   for (const k of ['announce-href', 'announce-until']) {
     if (set(k) && !seen.has(k) && siteMeta[k] !== String(meta[k]).trim()) drop(k, 'an announcement link or deadline with no `announce:` text shows nothing');
   }
-  // …and once they do reach it, the renderer still has to accept them. A deadline it cannot read
-  // hides the whole announcement (announceModel: "a deadline we cannot read is not no deadline");
-  // asked with a clock at the start of time, so only unreadability — never lateness — says none.
-  if (siteMeta['announce-until'] && announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
-    drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
-  }
-  // …and a deadline it CAN read must still name its zone. The renderer hands the string to
-  // Date.parse and defines no zone of its own, so `2026-12-01T23:59:00` ends at 23:59 wherever the
-  // build happens to run (eight hours late for an owner at +08:00 on a UTC host), and a bare date is
-  // read as UTC midnight. Only an explicit `Z` or `±hh:mm` means the same moment everywhere.
-  else if (siteMeta['announce-until'] && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(siteMeta['announce-until'])) {
-    drop('announce-until', 'no time-zone offset — the build host\'s zone would decide when it ends; add the offset, e.g. 2026-12-01T23:59:00+08:00 (or Z for UTC)');
+  // …and once they do reach it, the renderer still has to accept them, at the moment the author
+  // meant. Three ways a deadline goes wrong, checked in this order:
+  //   • no explicit offset: the renderer hands it to Date.parse and defines no zone, so
+  //     `2026-12-01T23:59:00` ends at 23:59 wherever the build runs, and a bare date is UTC midnight;
+  //   • an impossible calendar date: Date.parse ROLLS `2026-02-30` forward to March 2nd, silently —
+  //     so the written fields must round-trip, in the written offset, to the parsed instant;
+  //   • unreadable altogether: announceModel shows no announcement at all (asked with a clock at the
+  //     start of time, so only unreadability — never lateness — says none).
+  const until = siteMeta['announce-until'];
+  if (until) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|([+-])(\d{2}):(\d{2}))$/i.exec(until);
+    if (!m) {
+      if (announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+        drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
+      } else {
+        drop('announce-until', 'no time-zone offset — the build host\'s zone would decide when it ends; add the offset, e.g. 2026-12-01T23:59:00+08:00 (or Z for UTC)');
+      }
+    } else {
+      const [, y, mo, d, h, mi, sec = '00', z, sign, oh, om] = m;
+      const offsetMin = z.toUpperCase() === 'Z' ? 0 : (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om));
+      const ms = Date.parse(until);
+      const at = new Date(ms + offsetMin * 60000);   // the instant, read back on the author's own clock
+      const same = Number.isFinite(ms) && at.getUTCFullYear() === Number(y) && at.getUTCMonth() + 1 === Number(mo)
+        && at.getUTCDate() === Number(d) && at.getUTCHours() === Number(h) && at.getUTCMinutes() === Number(mi)
+        && at.getUTCSeconds() === Number(sec);
+      if (!same || announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+        drop('announce-until', `not a real date and time — ${y}-${mo}-${d} ${h}:${mi}:${sec} does not exist on the calendar (a parser would quietly roll it to another moment)`);
+      }
+    }
   }
   if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
 }

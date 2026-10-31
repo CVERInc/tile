@@ -30,10 +30,13 @@ const ALPHA = `(?:${NUM}|${PCT})`;
 //   legacy comma form — rgb(): all three numbers OR all three percentages (no mixing);
 //                       hsl(): hue, then saturation and lightness as PERCENTAGES; alpha is
 //                       number or percentage
-//   modern space form — each component number or percentage; optional `/ alpha`
+//   modern space form — each component number, percentage or `none`; optional `/ alpha` (also `none`)
 const N_OR_P = `(?:${NUM}|${PCT})`;
+// `none` (a missing component) exists only in the modern space syntax, for every component and alpha
+const NONE = 'none';
+const M = (x) => `(?:${x}|${NONE})`;
 const legacy = (names, a, b, c) => `^(?:${names})\\(\\s*${a}\\s*,\\s*${b}\\s*,\\s*${c}(?:\\s*,\\s*${ALPHA})?\\s*\\)$`;
-const modern = (names, a, b, c) => `^(?:${names})\\(\\s*${a}\\s+${b}\\s+${c}(?:\\s*\\/\\s*${ALPHA})?\\s*\\)$`;
+const modern = (names, a, b, c) => `^(?:${names})\\(\\s*${M(a)}\\s+${M(b)}\\s+${M(c)}(?:\\s*\\/\\s*${M(ALPHA)})?\\s*\\)$`;
 const COLOUR_FNS = [
   legacy('rgba?', NUM, NUM, NUM), legacy('rgba?', PCT, PCT, PCT), modern('rgba?', N_OR_P, N_OR_P, N_OR_P),
   legacy('hsla?', ANGLE, PCT, PCT), modern('hsla?', ANGLE, N_OR_P, N_OR_P),
