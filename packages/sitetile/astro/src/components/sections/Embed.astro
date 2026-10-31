@@ -3,8 +3,10 @@
 // seam. Per the marker-growth policy, a recurring shape should graduate to a real marker instead.
 // Modifier: `%% sitetile: embed wide %%` → `.is-wide` (full-bleed marketing band); default hugs the
 // theme content width (site.css .st-embed → --gd-max) so an embedded coral reads as page content.
+// The markup is packages/emit/embed.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
 import { parseParams } from '@sitetile';
+import { emitEmbed } from '@emit/embed.mjs';
 const { section } = Astro.props;
-const cls = 'st-embed' + (parseParams(section.params).wide ? ' is-wide' : '');
 ---
-<section class={cls} id={section.id} set:html={section.body || ''} />
+<Fragment set:html={emitEmbed(section, { wide: parseParams(section.params).wide })} />

@@ -4,10 +4,11 @@
 // Layout: each entry is a two-column row (year gutter | prose) — the THEME decides
 // the grid/gutter treatment. Block carries structure (year + prose); theme carries the look.
 // First consumer: a company-history timeline. Mirrors the reference renderer in site-core.js.
-import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+// The markup is packages/emit/timeline.mjs (tile-lab#52); this component reads the params and
+// hands their values over.
+import { parseParams } from '@sitetile';
+import { emitTimeline } from '@emit/timeline.mjs';
 const { section, hero } = Astro.props;
-const Title = hero && section.title ? 'h1' : 'h2';   // first section → page <h1>
-const entries = section.entries || [];
 // `style=zigzag` (opt-in) alternates each entry left/right of a center dot-spine — mirrors
 // site-core.js's renderSection for editor-preview parity. Default (absent) unchanged.
 const pm = parseParams(section.params);
@@ -24,20 +25,4 @@ const zigzag = pm.style === 'zigzag';
 // adjacent grid inside one continuous off-white belt (mixfairy steps under the features belt).
 const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
 ---
-<section class="st-timeline" id={section.id} data-style={zigzag ? 'zigzag' : undefined} data-surface={surface}>
-  {eyebrow && <p class="st-timeline-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <Title set:html={inlineHtml(section.title)} />}
-  {section.body && <Fragment set:html={bodyHtml(section.body)} />}
-  <div class="st-tl-rows">
-    {entries.map((e, i) => (
-      <div class="st-tl-row" data-side={zigzag ? (i % 2 === 0 ? 'left' : 'right') : undefined}>
-        {zigzag && <span class="st-tl-dot" aria-hidden="true" />}
-        <p class="st-tl-year" set:html={inlineHtml(e.year)} />
-        <div class="st-tl-body">
-          {e.title && <h3 set:html={inlineHtml(e.title)} />}
-          <Fragment set:html={bodyHtml(e.body)} />
-        </div>
-      </div>
-    ))}
-  </div>
-</section>
+<Fragment set:html={emitTimeline(section, { eyebrow, zigzag, surface }, { hero })} />

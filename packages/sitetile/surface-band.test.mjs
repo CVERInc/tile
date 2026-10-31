@@ -14,12 +14,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { parseSite, renderSiteToHtml } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro/src/styles/site.css'), 'utf8');
 const COMPONENTS = Object.fromEntries(['Prose', 'Grid', 'Timeline'].map((n) =>
-  [n, readFileSync(join(HERE, `astro/src/components/sections/${n}.astro`), 'utf8')]));
+  [n, sectionSource(`${n}.astro`).all]));   // the component and its packages/emit module
 
 /** Leaf rules as `{ selector, css, context }`, comments stripped, `context` = enclosing preludes
  *  outermost first. Same walker as collection-band.test.mjs (see its 🩸 on why a flat regex is not
@@ -89,7 +90,8 @@ test('🔴 the string renderer emits data-surface on prose, grid and timeline �
 
 test('🔴 the Astro components emit data-surface on the section itself', () => {
   for (const [name, src] of Object.entries(COMPONENTS)) {
-    assert.match(src, /<section class="st-[a-z]+"[^>]*\bdata-surface=\{surface\}/, `${name}.astro lost data-surface on its <section>`);
+    // `data-surface={surface}` in a component; `attr('data-surface', surface)` in its packages/emit module
+    assert.match(src, /<section class="st-[a-z]+"[^>]*(\bdata-surface=\{surface\}|attr\('data-surface', surface\))/, `${name}.astro lost data-surface on its <section>`);
   }
 });
 
