@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-hero-parallax",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A sitetile layered hero's `parallax` as a dynamic coral: damped pointer and scroll drift per layer, front layers moving more. A no-op under reduced motion. Version covers the UNIT: the client JS + the data-* contract.",
+  "scripts": {
+    "build": "node ../build.mjs hero-parallax"
+  }
+}

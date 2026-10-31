@@ -12,11 +12,13 @@
 // zero-JS, GAIDO-editable (fields live in the Markdown). A near-universal contact widget no other
 // coral expresses — grown when a real /contact page hit the wall (recast doctrine: hit a wall,
 // grow a GENERAL coral).
-import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath, INBOX_FORM_SCRIPT } from '@sitetile';
+// The markup is packages/emit/form.mjs (tile-lab#52); this component reads the params, resolves
+// what only a build knows (its own path, the locale home, the thanks manifest) and hands it over.
+import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath } from '@sitetile';
+import { emitForm } from '@emit/form.mjs';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
 import { recordThanks } from '../../../noindex-pass.mjs';
 const { section, index = 0, hero, lang, meta } = Astro.props;
-const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every other
 // heading-bearing coral now has. 🩸 Three had it and six did not, with nothing in the
@@ -24,13 +26,6 @@ const pm = parseParams(section.params);
 // did nothing. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const submit = pm.submit || 'Send';
-const fields = section.fields || [];
-const idOf = (i) => `st-form-${index}-f${i + 1}`;
-// JSON outcome → fragment IDs (without #), echoed by the forwarder on refusal.
-const returnFragments = {
-  inbox_storage_full: `inbox-storage-full-${index}`,
-  not_claimed: `inbox-not-claimed-${index}`,
-};
 
 // ── 🩸 `inbox=` IS BACK, 2026-09-03 — the same-origin route it needed exists now ──
 //
@@ -108,18 +103,8 @@ const thanksPath = safeInternalPath(pm.thanks);
 // emitted file, then removes the mark. Not recorded outside a build: no attribute at all.
 const thanksMark = isInbox && thanksPath ? recordThanks(thanksPath) : undefined;
 
-// The forwarder's reserved field names — an owner field must never land on the wire
-// under one of these, or it would be read as routing data instead of message content.
-// Checked case-insensitively (the forwarder's own keys are all lowercase) so a field
-// authored as "Kind" or "Text" cannot collide either. The visible label is untouched;
-// only the wire `name=` gets `field_` prefixed.
-const RESERVED_INBOX_NAMES = new Set(['kind', 'id', 'text', 'conversation_id', 'page_url', 'return_to', 'return_fragment', 'thanks_to', '_hp', 'visitor_email', 'email_field']);
-const inboxNameFor = (label, kind) => {
-  if (kind === 'email') return 'visitor_email';
-  const s = String(label);
-  return RESERVED_INBOX_NAMES.has(s.toLowerCase()) ? `field_${s}` : s;
-};
-const nameFor = (f) => (isInbox ? inboxNameFor(f.label, f.kind) : f.label);
+// The forwarder's reserved field names (an owner field never lands on the wire under one) and
+// the `field_` prefix that avoids them live with the field markup, in emitForm.
 // `return_to` — locale-aware because Astro.url.pathname IS the built path, which
 // already carries the locale segment for every non-default-locale page (the router
 // bakes it in via toUrlLocale; see lib routing). Read once, per page render.
@@ -137,193 +122,14 @@ const homeHref = isInbox ? localeHomePath({
   contentRels: contentRelsOf(import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true })),
 }) : '/';
 
-// 🔴 A form with nowhere to send is not a form with a working button. Before
-// this, an unwired coral rendered a live submit that posted to the page's own
-// URL — which on a static host is a 405 the visitor cannot see: they type, they
-// press, the words vanish, and nothing says so. The header above already claimed
-// "never claims a backend it lacks"; a pressable button was claiming one.
-// round 4: gated on `formAction`, not the raw `action` — a hostile action must disable the
-// button, not merely swap what it posts to (formAction already degrades to undefined for both
-// "no action=" and "unsafe action=", so this line does not need to know which).
-const wired = Boolean(formAction);
-
-// ── required fields (2026-09-03, cold-read findings #9/#10) ────────────────────────────────────
-// Before this, EVERY field rendered `required=false` — blank was indistinguishable from filled,
-// so a form with nothing in it "sent successfully" with no field flagged and the owner received an
-// empty message. `f.required` (site-core.js's new brace grammar) wins whenever an author states
-// one, either way; unstated, `action=inbox` defaults ONLY its message textarea and email field —
-// the two the forwarder actually needs to do anything with the submission — everything else
-// (a plain `{tel}`, a name field, a non-inbox form entirely) stays exactly as permissive as before.
-function isRequired(f) {
-  if (typeof f.required === 'boolean') return f.required;
-  return isInbox && (f.kind === 'textarea' || f.kind === 'email');
-}
-// Locale copy for the marker's error text + the two "what happens next" success variants below.
-// Its OWN small table (see locale.mjs) — not `uiCopy`'s four Lingo site locales — because it
-// distinguishes Simplified from Traditional, which `uiCopy` does not.
-const fieldCopy = inboxFormCopy(lang || DEFAULT_LANG);
-const renderFields = fields.map((f, i) => ({ ...f, id: idOf(i), name: nameFor(f), required: isRequired(f) }));
-// 🔴 Knowable at BUILD time, not by echoing what the visitor typed back through the redirect: an
-// email field that is REQUIRED is, by construction, filled on every submission the browser lets
-// through at all (that's what `required` means) — so which success sentence applies is a fact
-// about this form's own configuration, not about one particular visitor's request. An email field
-// that is present but explicitly opted OUT of the default (`required: false`) may or may not have
-// been filled, so it gets the same safe fallback as having no email field at all.
-const emailGuaranteed = isInbox && renderFields.some((f) => f.kind === 'email' && f.required);
-const inboxSentText = emailGuaranteed ? fieldCopy.sentWithEmailGeneric : fieldCopy.sentNoEmail;
-
-// ── post-submit feedback: submitting / success card / inline retry error ───────────────────────
-// (owner ruling, 2026-09-03: a same-size paragraph under a form that STAYS is too weak a signal —
-// measured as visitors resubmitting because nothing told them it had already worked). The
-// STATIC markup includes hidden reason paragraphs inside noscript. A native POST
-// returns with this form's reason fragment; :target reveals that paragraph without JS. The
-// `is:inline` script below is a progressive AJAX enhancement over the exact same `formAction` —
-// same contract, same `/__reef/inbox` forwarder, same `?inbox=<outcome>` vocabulary — that avoids
-// the reload entirely so it can show a "submitting…" state, keep the visitor's typed values on
-// failure, and (JS-only, since only the browser ever holds it) fill the real email address into
-// the success sentence and quote back what they wrote. No fetch to feelreef.com, no new endpoint —
-// see the file-header note above `RESERVED_INBOX_NAMES` for why that road stays closed.
+// 🔴 A form with nowhere to send is not a form with a working button: emitForm renders the submit
+// DISABLED unless `formAction` is set (round 4: gated on `formAction`, not the raw `action` — a
+// hostile action disables the button, it does not merely swap what it posts to).
 //
-// `emailField`/`excerptField` are the WIRE names (post-`nameFor` — `visitor_email`, or an
-// author's own field label) so the client script can `FormData.get()` them without re-deriving
-// the reserved-name/collision rules that already ran at build time.
-const emailFieldName = renderFields.some((f) => f.kind === 'email') ? 'visitor_email' : null;
-const excerptField = renderFields.find((f) => f.kind === 'textarea');
-const inboxCopy = isInbox ? {
-  submitting: fieldCopy.submitting,
-  successHeading: fieldCopy.successHeading,
-  errorNetwork: fieldCopy.errorNetwork,
-  errorServer: fieldCopy.errorServer,
-  // reef#2204: the forwarder's `not_claimed` outcome (owner never claimed Inbox) — the script
-  // shows this instead of the retry sentence, on both the `?inbox=` reload and the AJAX path.
-  errorNotClaimed: fieldCopy.errorNotClaimed,
-  errorInboxStorageFull: fieldCopy.errorInboxStorageFull,
-  errorTooLong: fieldCopy.errorTooLong,
-  errorRateLimited: fieldCopy.errorRateLimited,
-  // Templates the script fills in with what only the browser ever holds — see locale.mjs's note
-  // on `sentWithEmail` vs `sentWithEmailGeneric` (the latter is what inboxSentText above uses).
-  sentWithEmail: fieldCopy.sentWithEmail,
-  sentNoEmail: fieldCopy.sentNoEmail,
-  emailField: emailFieldName,
-  excerptField: excerptField ? excerptField.name : null,
-  // `thanks=`: the script needs to know ONLY whether a successful submit is
-  // headed to a different, owner-edited page rather than this one — the forwarder computes and
-  // re-validates the actual destination itself (see the file-header note), so the script is never
-  // handed the path, only the fact that navigating there, not showing the built-in card in place,
-  // is the right move once the fetch resolves.
-  // `undefined`, not `false`, when absent: JSON.stringify drops an undefined property
-  // entirely, so an ordinary action=inbox form with no `thanks=` emits this payload
-  // BYTE-IDENTICAL to before `thanks=` existed — the key appears at all only for a form
-  // that opts in.
-  redirectsToThanks: thanksPath ? true : undefined,
-} : null;
+// Required fields, the success sentence and the `data-inbox-copy` payload the script reads are
+// worked out in emitForm from the fields and this locale's copy below (2026-09-03 cold-read
+// findings #9/#10; owner ruling on the success card).
+const fieldCopy = inboxFormCopy(lang || DEFAULT_LANG);
+
 ---
-<section class="st-form-section" id={section.id} data-inbox-copy={inboxCopy ? JSON.stringify(inboxCopy) : undefined}>
-  <div class="st-form-head">
-    {eyebrow && <p class="st-form-eyebrow" set:html={inlineHtml(eyebrow)} />}
-    {section.title && <Title set:html={inlineHtml(section.title)} />}
-    {section.body && <Fragment set:html={bodyHtml(section.body)} />}
-  </div>
-  {isInbox && (
-    // The success CARD — replaces the whole form on submit (hidden, not removed: focus lands here
-    // and screen-reader users still have the form's own DOM to tab back into if they want it).
-    // `role="status"` + `tabindex="-1"` so the script can move focus AND have it announced without
-    // adding this element to the normal tab order the rest of the time.
-    <div class="st-form-success" data-inbox-success role="status" tabindex="-1" hidden>
-      <svg class="st-form-success-check" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true" focusable="false">
-        <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"></circle>
-        <path d="M14 25l7 7 14-15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-      </svg>
-      <p class="st-form-success-heading" role="heading" aria-level="3">{fieldCopy.successHeading}</p>
-      {/* Server-rendered default (a no-JS visitor, after the real POST → 303 → reload, sees exactly
-          this): the safe generic sentence, since build time cannot know a per-submission email
-          address. The script overwrites this text on a JS-handled submit — see below. */}
-      <p class="st-form-success-next" data-inbox-next set:html={inlineHtml(inboxSentText)} />
-      {/* Only ever filled in by the script (a no-JS submit has no typed values left to quote back
-          after the redirect round trip) — stays hidden until it has something to show. */}
-      <p class="st-form-success-excerpt" data-inbox-excerpt hidden></p>
-      {/* 🔑 bug #2 (2026-09-04): without this the card had no way back — reload, the back
-          button, or sharing the URL all kept showing this same card forever, and the JS
-          path left it up with nothing to press. A plain `<a>` to the form's own CLEAN path
-          (`returnTo` — `Astro.url.pathname`, already query-free) works with zero JS: it
-          navigates, the reload lands with no `?inbox=`, and the form is there again. The
-          script below intercepts the same click to reset and re-show the form in place
-          instead of navigating — see the `data-inbox-again` handler. */}
-      <p class="st-form-success-again"><a href={returnTo} data-inbox-again>{fieldCopy.sendAnother}</a></p>
-      <p class="st-form-success-back"><a href={homeHref}>{fieldCopy.backHome}</a></p>
-    </div>
-  )}
-  <form class="st-form" action={formAction} method={method} data-sitetile-thanks={thanksMark}>
-    {/* `thanks_to` (frontmatter's own note on `thanksPath`, above) rides alongside `return_to`
-        inside this SAME conditional, never a second one of its own, so a plain `action=inbox`
-        form with no `thanks=` posts only the return path and its reason fragments. */
-    isInbox && (thanksPath
-      ? <Fragment><input type="hidden" name="return_to" value={returnTo} /><input type="hidden" name="thanks_to" value={thanksPath} /></Fragment>
-      : <input type="hidden" name="return_to" value={returnTo} />
-    )}
-    {isInbox && <input type="hidden" name="return_fragment" value={JSON.stringify(returnFragments)} />}
-    {isInbox && (
-      // Honeypot: a real visitor never sees or tabs to this, so it stays empty; a
-      // bot's autofill routine — which reads the DOM, not computed CSS — still finds
-      // and fills it. Off-screen + zero-size, deliberately NOT `display:none`.
-      <input type="text" name="_hp" autocomplete="off" tabindex="-1" aria-hidden="true"
-        style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;" />
-    )}
-    {renderFields.map((f) => (
-      <div class="st-form-field">
-        {/* Byte-identical to before for every field that stays optional (the common case, and
-            every field on every pre-existing site) — the required marker's wrapper renders ONLY
-            for a field that IS required, so nothing else moves. */}
-        {f.required ? (
-          <label class="st-form-label" for={f.id}>
-            <span set:html={inlineHtml(f.label)} /><span class="st-form-required-mark" aria-hidden="true"> *</span>
-          </label>
-        ) : (
-          <label class="st-form-label" for={f.id} set:html={inlineHtml(f.label)} />
-        )}
-        {f.kind === 'textarea' ? (
-          <textarea class="st-form-input st-form-textarea" id={f.id} name={f.name} rows="5"
-            required={f.required || undefined} aria-required={f.required || undefined}
-            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined}></textarea>
-        ) : f.kind === 'select' ? (
-          <select class="st-form-input st-form-select" id={f.id} name={f.name}
-            required={f.required || undefined} aria-required={f.required || undefined}
-            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined}>
-            <option value="" disabled selected>—</option>
-            {(f.options || []).map((o) => <option value={o}>{o}</option>)}
-          </select>
-        ) : (
-          <input class="st-form-input" id={f.id} name={f.name}
-            type={f.kind === 'email' ? 'email' : f.kind === 'tel' ? 'tel' : 'text'}
-            required={f.required || undefined} aria-required={f.required || undefined}
-            data-required-msg={f.required ? fieldCopy.fieldRequired : undefined} />
-        )}
-      </div>
-    ))}
-    {isInbox && (
-      // Inline, ABOVE the button (owner ruling): failure keeps the form and every value the
-      // visitor already typed — nothing here is inside a `hidden` ancestor that would also hide
-      // the fields — and the button re-enables so "再試一次" is just pressing it again, not
-      // re-typing anything. Static default is the generic server-refusal sentence; the script
-      // swaps in the network-vs-server distinction it alone can tell apart. The native
-      // redirect fragment reveals a prebuilt reason with CSS when JavaScript is disabled.
-      <Fragment>
-        <p class="st-form-error" data-inbox-error hidden set:html={inlineHtml(fieldCopy.errorServer)} />
-        <noscript>
-          <p class="st-form-error" id={returnFragments.inbox_storage_full} hidden set:html={inlineHtml(fieldCopy.errorInboxStorageFull)} />
-          <p class="st-form-error" id={returnFragments.not_claimed} hidden set:html={inlineHtml(fieldCopy.errorNotClaimed)} />
-        </noscript>
-      </Fragment>
-    )}
-    <button class="st-form-submit" type="submit" disabled={!wired}>{submit}</button>
-  </form>
-  {isInbox && (
-    // Client-only status line: the build is static, so the coral cannot read `?inbox=` at build
-    // time, capture what a visitor typed, or know whether a fetch it makes will succeed — only
-    // the visitor's own browser can. Kept tiny and inline (no import, no event handler
-    // attributes) like ArchiveView's tag-filter script, so it stays CSP-clean under a default
-    // script-src, and it is a PROGRESSIVE ENHANCEMENT over the static markup above, never a
-    // replacement for it — every branch below degrades to something that already worked.
-    <script is:inline set:html={INBOX_FORM_SCRIPT}></script>
-  )}
-</section>
+<Fragment set:html={emitForm(section, { eyebrow, submit, isInbox, formAction, method, thanksPath, thanksMark, returnTo, homeHref, copy: fieldCopy }, { hero, index, inline: inlineHtml, block: bodyHtml })} />

@@ -1,5 +1,8 @@
 ---
-import { parseParams, inlineHtml, bodyHtml, ctaHtml, heroParts, linkButtonsHtml, safeSrc, cssUrlString } from '@sitetile';
+// The markup is packages/emit/hero.mjs (tile-lab#52); this component reads the params and hands
+// their values over, with sitetile's own markdown renderers.
+import { parseParams, inlineHtml, bodyHtml, safeSrc } from '@sitetile';
+import { emitHero } from '@emit/hero.mjs';
 const { section } = Astro.props;
 const pm = parseParams(section.params);
 // round 4: `bg=` is an author-controlled background-image destination reaching a live CSS
@@ -15,7 +18,7 @@ const pm = parseParams(section.params);
 // HTML entities in the attribute value before the CSS parser ever sees it, so the quotes/escapes
 // built here survive to the CSS parser intact.
 const bgOk = pm.bg ? safeSrc(pm.bg) : null;
-const style = bgOk ? `background-image:url("${cssUrlString(bgOk)}")` : undefined;
+// (emitHero turns bgOk into the quoted `style` with cssUrlString.)
 const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image variant (round avatar vs uncropped logo)
 // `layout` (e.g. split) = OPT-IN columned hero (eyebrow + lead + button row + side art). Absent →
 // the legacy hero (h1 + body + single `cta=`), kept byte-identical so an existing logo hero is untouched.
@@ -35,7 +38,6 @@ const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label 
 // treatment (theme sets colour/size). Each row repeats its word enough to loop seamlessly.
 const marqueeRaw = pm.marquee ? (typeof pm.marquee === 'object' ? pm.marquee.label : pm.marquee) : null;
 const marqueeWords = marqueeRaw ? String(marqueeRaw).split('|').map((w) => w.trim()).filter(Boolean) : [];
-const hp = layout ? heroParts(section.body) : null;
 // `enter` (bare flag) — OPT-IN entrance treatment: renders the `bg=` image as a separate
 // absolutely-positioned layer the theme can scale/fade on load (a ken-burns settle), and marks
 // the section `data-enter` so the theme can stagger the heading/lead/CTA in. General; absent →
@@ -51,114 +53,12 @@ const layerList = layersRaw ? String(layersRaw).split('|').map((s) => s.trim()).
 const parallax = pm.parallax != null;
 const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
 // round 3 (Astro consumers, R2-P3-5): `logo=`/`layers=` params and `heroParts`' extracted image
-// are all author-controlled `src` destinations that reach a live `<img>` with no gate of their
-// own in this file (imgTag, which every OTHER caller of these values goes through, is never
-// called here) — site-core.js's own `imgTag` gates every image src on `isSafeImageSrc`; `safeSrc`
-// shares that ONE policy here. `null` degrades to no image, same shape the falsy check already had.
+// are all author-controlled `src` destinations that reach a live `<img>` — site-core.js's own
+// `imgTag` gates every image src on `isSafeImageSrc`; `safeSrc` shares that ONE policy (here for
+// `logo=`, in emitHero for each layer and each extracted image). `null` degrades to no image.
 const logo = logoRaw ? safeSrc(logoRaw) : null;
 const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
 ---
-{layerList.length ? (
-  <section class="st-hero st-full-bleed st-hero-layered" id={section.id} data-media={media} data-parallax={parallax ? '' : undefined} data-logo-pos={logoPos} data-enter={enter ? '' : undefined}>
-    <div class="st-hero-stage" aria-hidden="true">
-      {layerList.map((src, i) => {
-        // round 4 (R3-P3-2): hoisted to a const — was two calls per layer.
-        const srcOk = safeSrc(src);
-        return srcOk && (
-          <img class="st-hero-layer" src={srcOk} alt="" data-depth={i} loading="eager" decoding="async" />
-        );
-      })}
-    </div>
-    <div class="st-hero-text st-hero-overlay">
-      {eyebrow && <p class="st-hero-eyebrow" set:html={inlineHtml(eyebrow)} />}
-      {logo
-        ? <h1 class="st-hero-logo"><img src={logo} alt={section.title} loading="eager" decoding="async" /></h1>
-        : <h1 set:html={inlineHtml(section.title)} />}
-      <Fragment set:html={bodyHtml(section.body)} />
-      <Fragment set:html={ctaHtml(pm.cta, 'st-hero-cta')} />
-    </div>
-  </section>
-) : layout ? (
-  <section class="st-hero st-full-bleed" id={section.id} data-media={media} data-layout={layout} style={style}>
-    {marqueeWords.length > 0 && (
-      <div class="st-hero-marquee" aria-hidden="true">
-        {marqueeWords.map((w, i) => (
-          <div class="st-hero-marquee-row" data-dir={i % 2 ? 'rev' : 'fwd'}>
-            <div class="st-hero-marquee-track">
-              {Array.from({ length: 12 }).map(() => <span>{w}</span>)}
-            </div>
-          </div>
-        ))}
-      </div>
-    )}
-    <div class={layout === 'bubble' ? 'st-hero-bubble' : 'st-hero-text'}>
-      {eyebrow && <p class="st-hero-eyebrow" set:html={inlineHtml(eyebrow)} />}
-      {logo
-        ? <h1 class="st-hero-logo"><img src={logo} alt={section.title} loading="eager" decoding="async" /></h1>
-        : <h1 set:html={inlineHtml(section.title)} />}
-      <Fragment set:html={bodyHtml(hp.text)} />
-      <Fragment set:html={hp.buttons.length ? linkButtonsHtml(hp.buttons, 'st-hero') : ctaHtml(pm.cta, 'st-hero-cta')} />
-    </div>
-    {hp.images.length > 0 && (
-      <div class="st-hero-art" data-imgs={hp.images.length > 1 ? String(hp.images.length) : undefined}>
-        {hp.images.map((im) => {
-          // round 4 (R3-P3-2): hoisted to a const — was two calls per image.
-          const srcOk = safeSrc(im.src);
-          return srcOk && (
-            <img class="st-img" src={srcOk} alt={im.alt} loading="eager" decoding="async" />
-          );
-        })}
-      </div>
-    )}
-  </section>
-) : (
-  <section class="st-hero st-full-bleed" id={section.id} data-media={media} data-enter={enter ? '' : undefined} style={style}>
-    {enter && bgOk && <div class="st-hero-bg" aria-hidden="true" style={`background-image:url("${cssUrlString(bgOk)}")`} />}
-    <h1 set:html={inlineHtml(section.title)} />
-    <Fragment set:html={bodyHtml(section.body)} />
-    <Fragment set:html={ctaHtml(pm.cta, 'st-hero-cta')} />
-  </section>
-)}
+<Fragment set:html={emitHero(section, { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta: pm.cta, bgOk }, { inline: inlineHtml, block: bodyHtml })} />
 
-<script>
-  // REEF hero parallax — subtle multi-layer depth on pointer-move + scroll. Opt-in via
-  // [data-parallax]; no-op otherwise and under reduced-motion. Back layers drift less than front.
-  // Motion is DAMPED (each frame eases current → target) so pointer-leave glides back to centre
-  // instead of snapping — no flicker when the cursor exits the art.
-  const heroes = Array.from(document.querySelectorAll('.st-hero-layered[data-parallax]'));
-  if (heroes.length && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    for (const hero of heroes) {
-      const layers = Array.from(hero.querySelectorAll('.st-hero-layer'));
-      const maxDepth = Math.max(1, layers.length - 1);
-      let tmx = 0, tmy = 0, tsy = 0;   // targets (pointer x/y, scroll)
-      let mx = 0, my = 0, sy = 0;      // eased current
-      let running = false;
-      const render = () => {
-        mx += (tmx - mx) * 0.09; my += (tmy - my) * 0.09; sy += (tsy - sy) * 0.14;
-        for (const el of layers) {
-          const d = (Number(el.dataset.depth) || 0) / maxDepth;   // 0 back → 1 front
-          const tx = mx * (9 + d * 30);
-          const ty = my * (9 + d * 30) + sy * (22 + d * 54);       // pointer + scroll drift
-          el.style.transform = `translate3d(${tx.toFixed(2)}px, ${ty.toFixed(2)}px, 0) scale(1.06)`;
-        }
-        if (Math.abs(tmx - mx) > 1e-3 || Math.abs(tmy - my) > 1e-3 || Math.abs(tsy - sy) > 1e-3) {
-          requestAnimationFrame(render);
-        } else { running = false; }
-      };
-      const kick = () => { if (!running) { running = true; requestAnimationFrame(render); } };
-      hero.addEventListener('pointermove', (e) => {
-        const r = hero.getBoundingClientRect();
-        tmx = ((e.clientX - r.left) / (r.width || 1) - 0.5) * 2;
-        tmy = ((e.clientY - r.top) / (r.height || 1) - 0.5) * 2;
-        kick();
-      });
-      hero.addEventListener('pointerleave', () => { tmx = 0; tmy = 0; kick(); });   // glide home
-      window.addEventListener('scroll', () => {
-        const r = hero.getBoundingClientRect();
-        tsy = Math.max(-1, Math.min(1, -r.top / (r.height || 1)));
-        kick();
-      }, { passive: true });
-      render();
-    }
-  }
-</script>
+<script>import '../../../../../dynamic-corals/hero-parallax/hero-parallax-client.mjs';</script>

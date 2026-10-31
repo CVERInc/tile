@@ -18,11 +18,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 import { parseSite, renderSiteToHtml } from './site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, 'astro/src/styles/site.css'), 'utf8');
-const COMPONENT = readFileSync(join(HERE, 'astro/src/components/sections/Collection.astro'), 'utf8');
+// The component and the packages/emit module it renders through (tile-lab#52) — see section-source.mjs.
+const COMPONENT = sectionSource('Collection.astro').all;
 
 /** Strip comments, then walk the source by brace depth. Every LEAF block (one with no block inside
  *  it) comes back as `{ selector, css, context }`, where `context` is the list of enclosing
