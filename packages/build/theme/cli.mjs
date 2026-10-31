@@ -146,16 +146,24 @@ if (off !== 'true') {
 // to the HTML page itself, which no compiler can rule out without knowing every page. So this is an
 // ALLOWLIST, applied to the exact string safeHref returns — the href the renderer will emit:
 //   (a) an absolute http:// or https:// URL with a host and a path beyond `/`, or a query;
-//   (b) a root-relative path: one leading `/`, longer than `/`, no `#`, not a bare `/?…`.
+//   (b) a root-relative path that, RESOLVED as a browser would, stays on the site's own host,
+//       has a pathname longer than `/` and no `#`.
 // Everything else is a drop. Narrow on purpose: a webfont stylesheet is one of these in practice.
 function stylesheetHrefOk(emitted) {
   if (typeof emitted !== 'string' || !emitted) return false;
+  // 🩸 Judge the URL a browser RESOLVES, never the spelling: a regex on the string let `/fonts/..`
+  // (the site root), `/%2e%2e/` and `/\cdn.example/a.css` (a browser reads `\` as `/`, so that
+  // is another host) through. Both forms are resolved with WHATWG URL, which is what a browser runs.
+  let u;
   if (/^https?:\/\//i.test(emitted)) {
-    let u;
     try { u = new URL(emitted); } catch { return false; }
-    return !!u.hostname && (u.pathname.length > 1 || u.search.length > 1);
+    return /^https?:$/.test(u.protocol) && !!u.hostname && (u.pathname.length > 1 || u.search.length > 1);
   }
-  return /^\/[^/?#][^#]*$/.test(emitted);
+  if (emitted.startsWith('/')) {
+    try { u = new URL(emitted, 'https://site.invalid/some/page'); } catch { return false; }
+    return u.protocol === 'https:' && u.host === 'site.invalid' && u.pathname.length > 1 && !u.hash;
+  }
+  return false;
 }
 if (siteMeta.fonts && !stylesheetHrefOk(safeHref(siteMeta.fonts))) {
   drop('fonts', 'a stylesheet <link> cannot load this — use an absolute https:// stylesheet URL (with a path or query), or a /root/path longer than /');

@@ -91,8 +91,10 @@ that is not a plain filename (`../oops`) is always refused: the build finds the 
 `fonts:` goes into a `<link rel="stylesheet">` on every page, so it is an **allowlist**, checked
 against the exact href the renderer will emit (after its `safeHref`, which decodes entities): an
 absolute `https://` or `http://` URL with a host and a path or query
-(`https://fonts.googleapis.com/css2?family=Fraunces`), or a root path longer than `/` with no `#`
-(`/fonts/site.css`). Anything else — `mailto:`, a `#fragment`, `.`, `/`, `./?v=2`, a relative or
+(`https://fonts.googleapis.com/css2?family=Fraunces`), or a root path that — resolved the way a
+browser resolves it — stays on the site's own host with a path beyond `/` and no `#`
+(`/fonts/site.css`). Anything else — `mailto:`, a `#fragment`, `.`, `/`, `./?v=2`, `/fonts/..`,
+`/%2e%2e/`, `/\cdn.example/…` (a browser reads `\` as `/`: another host), a relative or
 protocol-relative path — is reported as dropped. Most of those would load the HTML page itself.
 
 **What the source may say.** Every legal key is in `theme/theme-schema.js`: `TOKENS` (the `--gd-*`

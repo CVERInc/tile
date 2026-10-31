@@ -324,3 +324,21 @@ test('🔴 with --allow-dropped, a dropped value is NOT printed among the _site.
   assert.match(r.stdout, /^theme: s$/m);
   assert.match(r.stdout, /^announce: Hi$/m, 'what was not dropped is still printed');
 });
+
+// ── round 7: a root path is judged by where a browser RESOLVES it, not by how it is spelled ─────
+
+test('🔴 fonts: a root path that resolves to the site root or to another host is a drop', (t) => {
+  const refused = ['/fonts/..', '/\\cdn.example/a.css', '/./', '/%2e%2e/', '/fonts/%2E%2E/', '/\\\\cdn.example/a.css',
+    '/\\/cdn.example/a.css', '/fonts\\..\\', '/.', '/fonts/../?v=2'];
+  for (const v of refused) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 2, `${JSON.stringify(v)} → exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /fonts: .* dropped/, v);
+    assert.equal(existsSync(r.out), false, v);
+  }
+  // control: root paths that resolve to a real path on the same host still pass
+  for (const v of ['/fonts/a.css', '/fonts/../css/a.css', '/fonts.css?v=2', '/a\\b.css']) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 0, `${JSON.stringify(v)}: ${r.stderr}`);
+  }
+});
