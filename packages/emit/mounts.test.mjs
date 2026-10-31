@@ -96,6 +96,25 @@ test('CONTROL: the mount check sees a mount on the wrong element', () => {
   assert.notDeepEqual(mountsIn(moved, 'grid-masonry'), [CASES[0].where]);
 });
 
+// 🩸 The filter's pills come from EVERY cell's badge (gridFacets), but until 2026-10-31 only an
+// image card carried `data-cat` — on a plain-card grid every pill matched nothing and hid the whole
+// section. Every cell shape here: bare <div>, whole-cell link, link with a CTA (badge in the foot),
+// overlay (badge is the secondary action), image card linked and not.
+test('grid-filter: every pill names a category some cell carries — in every cell shape', () => {
+  const shapes = sectionOf('grid', ['### Div [Plain]\nx', '### Link →/a [Linked]\nx', '### Foot →/b "Read" [Footed]\nx',
+    '### Over →/c [Docs →/docs]\nx', '### None\nx'].join('\n\n'));
+  const images = sectionOf('grid', '### Img [Pic]\n![a](/a.png)\n\n### ImgLink →/d [Linked pic]\n![b](/b.png)');
+  for (const [name, sec, imageCards] of [['plain cards', shapes, false], ['image cards', images, true]]) {
+    const html = emitGrid(sec, gridParams({ filterLabel: 'All', imageCards }), ctx);
+    const bar = html.slice(html.indexOf('<div class="st-grid-filter"'), html.indexOf('<div class="st-cells"'));
+    const pills = [...bar.matchAll(/data-cat="([^"]+)"/g)].map((m) => m[1]);
+    const cellCats = [...html.matchAll(/<(?:div|a) class="st-cell(?: [^"]*)?"([^>]*)>/g)].map((m) => (/\bdata-cat="([^"]*)"/.exec(m[1]) || [])[1]);
+    assert.ok(pills.length >= 2, `${name}: the fixture has facets (${pills})`);
+    for (const p of pills) assert.ok(cellCats.includes(p), `${name}: pill "${p}" matches no cell (cells carry ${JSON.stringify(cellCats)})`);
+    assert.equal(cellCats.filter((c) => c !== undefined).length, pills.length, `${name}: one category per badged cell, none on the unbadged`);
+  }
+});
+
 test('no emitter writes a <script> — except the inbox form, by name', () => {
   for (const c of CASES) assert.ok(!/<script\b/i.test(c.on()), `${c.coral}: emitter output has a <script>`);
   assert.ok(!/<script\b/i.test(emitCollection(sectionOf('collection', '### G\n#### I\nx'), { eyebrow: null, link: null, ui: { updated: (x) => x, gh: 'gh', learn: 'l' } }, ctx)));

@@ -7,6 +7,11 @@ the theme's breakpoints, re-running on resize and `astro:page-load`. It measures
 correct the moment the DOM exists. Below the first breakpoint, and without JS, the cards stay one
 flat sequence. See the header of `grid-masonry-client.mjs` for why parity, not height.
 
+Only VISIBLE cards are bucketed: a card a `filter=` pill hid (`grid-filter`, which sets `hidden`)
+stays in the container after the columns, and `i` counts the visible cards. The layout re-runs
+when `grid-filter` sends `dc-grid-filter-change` to the container, so a filtered set fills the
+columns from the top.
+
 Local-only (no registry channel): sitetile's `Grid.astro` imports the client source and Astro
 bundles it into the page; `grid-masonry.js` is the built artifact for a host that serves corals itself.
 
