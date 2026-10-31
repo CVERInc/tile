@@ -140,18 +140,27 @@ if (off !== 'true') {
   }
   if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
 }
-// `fonts:` is not a navigation link: SiteLayout puts it in <link rel="stylesheet" href>. So it must
-// pass the renderer's safeHref (or it is not emitted at all) AND be something a stylesheet link can
-// fetch — it has to resolve to an http(s) URL that is not the page itself. safeHref alone lets
-// `mailto:`, `tel:` and `#fragment` through, which are fine destinations for a click and load no CSS.
-if (siteMeta.fonts) {
-  const v = siteMeta.fonts;
-  let fetchable = false;
-  if (safeHref(v) && !/^[#?]/.test(v)) {
-    try { fetchable = ['http:', 'https:'].includes(new URL(v, 'https://site.invalid/page/').protocol); } catch {}
+// `fonts:` is not a navigation link: SiteLayout puts `safeHref(fonts)` in <link rel="stylesheet" href>.
+// 🩸 Two rounds of "what can a stylesheet link load" each left a hole: safeHref DECODES entities
+// (`&#109;ailto:` is `mailto:` by the time it is emitted), and `.`, `./`, `/`, `./?v=2` all resolve
+// to the HTML page itself, which no compiler can rule out without knowing every page. So this is an
+// ALLOWLIST, applied to the exact string safeHref returns — the href the renderer will emit:
+//   (a) an absolute http:// or https:// URL with a host and a path beyond `/`, or a query;
+//   (b) a root-relative path: one leading `/`, longer than `/`, no `#`, not a bare `/?…`.
+// Everything else is a drop. Narrow on purpose: a webfont stylesheet is one of these in practice.
+function stylesheetHrefOk(emitted) {
+  if (typeof emitted !== 'string' || !emitted) return false;
+  if (/^https?:\/\//i.test(emitted)) {
+    let u;
+    try { u = new URL(emitted); } catch { return false; }
+    return !!u.hostname && (u.pathname.length > 1 || u.search.length > 1);
   }
-  if (!fetchable) drop('fonts', 'a stylesheet <link> cannot load this — use an https:// (or http://, //host/, /path, relative) stylesheet URL');
+  return /^\/[^/?#][^#]*$/.test(emitted);
 }
+if (siteMeta.fonts && !stylesheetHrefOk(safeHref(siteMeta.fonts))) {
+  drop('fonts', 'a stylesheet <link> cannot load this — use an absolute https:// stylesheet URL (with a path or query), or a /root/path longer than /');
+}
+
 // type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
 // the compiler what it WOULD derive with the hand-set steps taken away, so a ratio that derives
 // nothing is caught even when gd-h1/h2/h3 are all set by hand and hide it.
@@ -181,5 +190,7 @@ writeFileSync(out, css);
 
 // Every key the theme OWNS, in a fixed order. A key the theme does not set is not printed — and if
 // your _site.md still carries it from an earlier theme, delete it there: the theme is its source.
-for (const k of THEME_SITE_KEYS) if (siteMeta[k] != null) console.log(`${k}: ${siteMeta[k]}`);
+// A value reported as dropped is not advertised here either, even under --allow-dropped: pasting
+// these lines must give the site exactly what the compile kept.
+for (const k of THEME_SITE_KEYS) if (siteMeta[k] != null && !seen.has(k)) console.log(`${k}: ${siteMeta[k]}`);
 console.error(`✓ wrote ${out} — the keys above belong in _site.md (theme-owned: ${THEME_SITE_KEYS.join(', ')})`);

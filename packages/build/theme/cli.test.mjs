@@ -281,12 +281,46 @@ test('🔴 a fonts: value no stylesheet link can load is a drop, even when it is
   for (const v of ['mailto:owner@example.org', '#fonts', '?v=2', 'tel:123', 'ftp://cdn.example/a.css']) {
     assertRefusedNaming(t, `---\nname: s\nfonts: ${v}\n---\n`, [`fonts: ${JSON.stringify(v)} dropped`]);
   }
-  // control: every form a stylesheet <link> resolves to an http(s) fetch
-  for (const v of ['https://fonts.example/a.css', 'http://fonts.example/a.css', '//cdn.example/a.css', '/fonts/a.css', 'fonts/a.css', './a.css', '../a.css']) {
+  // control: the forms the allowlist accepts (round 6 narrowed it — see the test below)
+  for (const v of ['https://fonts.example/a.css', 'http://fonts.example/a.css', '/fonts/a.css']) {
     const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
     assert.equal(r.status, 0, `${v}: ${r.stderr}`);
     assert.match(r.stdout, new RegExp(`^fonts: ${v.replace(/[.?*+^$()[\]{}|\\/]/g, '\\$&')}$`, 'm'));
   }
   // announce-href keeps the renderer's navigation rule: a mail link is a fine announcement link
   assert.equal(run(t, '---\nname: s\nannounce: Write to us\nannounce-href: mailto:owner@example.org\n---\n').status, 0);
+});
+
+// ── round 6: `fonts:` is an ALLOWLIST, judged on the exact href the renderer will emit ───────────
+
+test('🔴 fonts: only an absolute http(s) URL with a host and a path or query, or a root path longer than `/`', (t) => {
+  const refused = [
+    // entity-encoded: safeHref decodes them, and the decoded href is what lands in <link>
+    '&#109;ailto:owner@example.org', '&#116;el:123', '&#35;fonts',
+    // same-page: they resolve to the HTML page itself
+    '.', './', '/', './#fonts', './?v=2', '/?v=2', '/#fonts', '/fonts.css#x',
+    // outside the allowlist on purpose: no host, or relative to a page the compiler cannot know
+    'https://fonts.example', 'https://fonts.example/', '//cdn.example/a.css', 'fonts/a.css', '../a.css',
+  ];
+  for (const v of refused) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 2, `${JSON.stringify(v)} → exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /fonts: .* dropped/, v);
+    assert.equal(existsSync(r.out), false, v);
+  }
+  for (const v of ['https://fonts.example/a.css', 'https://fonts.example/?family=Fraunces', 'http://fonts.example/css2?family=A',
+    'https://fonts.googleapis.com/css2?family=Fraunces&display=swap', '/fonts/a.css', '/fonts.css?v=2', '&#47;fonts/a.css']) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 0, `${JSON.stringify(v)}: ${r.stderr}`);
+  }
+});
+
+test('🔴 with --allow-dropped, a dropped value is NOT printed among the _site.md keys', (t) => {
+  const r = run(t, '---\nname: s\nfonts: mailto:owner@example.org\nannounce: Hi\nannounce-until: tomorrowish\n---\n', 'theme.css', ['--allow-dropped']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /fonts: "mailto:owner@example\.org" dropped/);
+  assert.doesNotMatch(r.stdout, /^fonts:/m, 'the dropped font must not be advertised for _site.md');
+  assert.doesNotMatch(r.stdout, /^announce-until:/m, 'nor the unreadable deadline');
+  assert.match(r.stdout, /^theme: s$/m);
+  assert.match(r.stdout, /^announce: Hi$/m, 'what was not dropped is still printed');
 });
