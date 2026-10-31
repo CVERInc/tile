@@ -175,3 +175,20 @@ test('delete_asset declares expected_version beside handle and id (tile#209: the
   // CONTROL: put_asset did not grow it — only the delete has a fenced route
   assert.ok(!OPS.put_asset.params.includes('expected_version'));
 });
+
+// tile-lab#51 (chodaict 2026-10-29) — the profile cell is for a company too. A company's own agent
+// read 「photo, name, one line」, concluded the cell was for a person and built its card without one:
+// no logo, and no QR (the QR is mounted on the profile's avatar). That was the agent reading us right.
+// These are the exact words reef-mcp's describe_card_grammar resolves (src/card-grammar.js:
+// `say(def.hint)` → purpose, `say(param.label)` / `say(param.hint)`, over cellStrings('en')).
+test('describe_card_grammar profile: a face OR a logo, and the QR lives here', async () => {
+  const { cellStrings, text } = await import('./w/cell-i18n.mjs');
+  const say = (k) => text(cellStrings('en'), k);
+  const p = CELL_TYPES.profile;
+  assert.equal(say(p.hint), 'The top of the card: a face or a logo, the name, one line. The QR code lives here too.');
+  assert.equal(say(p.params.avatar.label), 'Photo or logo');
+  assert.equal(say(p.params.avatar.hint), "A person's photo, or a brand mark on a plain background.");
+  // the person example stays; a brand-flavoured one sits beside it
+  assert.match(say(p.params.chips.hint), /"Illustrator, remote"/);
+  assert.match(say(p.params.chips.hint), /"Live2D, Tokyo"/);
+});

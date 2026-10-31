@@ -55,8 +55,12 @@ test('🔴 resolveHandle: a path names a card on our hosts only; a creator domai
   }
 });
 
-test('resolveHandle: bare canonical host (no handle) → null (a directory, not a card)', () => {
-  assert.equal(resolveHandle('card.feelreef.com', '/'), null);
+// tile-lab#51 (chodaict 2026-10-29): the bare old host is feelreef's own card too, not a directory —
+// a visitor who cuts the handle off is asking "what is this?", and a Card answers by being one.
+test('resolveHandle: bare canonical host (no handle) → the root card, at the bare origin', () => {
+  assert.deepEqual(resolveHandle('card.feelreef.com', '/'), { handle: 'feelreef', cardUrl: 'https://card.feelreef.com', root: true });
+  // CONTROL: the other path-routed hosts have no root card
+  for (const host of ['saas.feelreef.com', 'x', 'cardtile-preview.acct.workers.dev']) assert.equal(resolveHandle(host, '/'), null, host);
 });
 
 test('resolveHandle: handle is lowercased; port stripped from host', () => {
@@ -1305,7 +1309,10 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests(host, 'missing'), [`https://${host}/t/nothing`, {}], [`https://${host}/`, {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+      // tile-lab#51: card.feelreef.com's bare root is the root card's (indexable) address, even when
+      // that card is missing; the 404 status already keeps it out of an index
+      const rootOfCardHost = host === 'card.feelreef.com' && url === `https://${host}/`;
+      assert.equal(res.headers.get('x-robots-tag'), rootOfCardHost ? null : 'noindex, nofollow', url);
       assert.equal(res.headers.get('cache-control'), 'public, max-age=60', url);
     }
   }
@@ -1314,7 +1321,7 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests('card.example', handle, true), ['https://card.example/nothing', {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), handle === 'missing' ? null : 'noindex, nofollow', url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
     }
   }
 });
@@ -1336,14 +1343,14 @@ test('stopping a Card blocks every representation on both hosts; resume restores
     assert.notDeepEqual(before[1].body, before[2].body, 'thin and fat fixtures must differ');
     const marker = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
     store.kv.set('stop:t', marker);
+    // tile-lab#51: stopped = exactly what the same address answers when there is no card at all
+    const { t: _body, ...withoutCard } = seed;
     for (const [url, init] of requests) {
-      const res = await worker.fetch(new Request(url, init), env);
+      const res = await responseBytes(await worker.fetch(new Request(url, init), env));
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('cache-control'), 'no-store', url);
-      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
-      const body = await res.text();
-      assert.match(body, /<p>This Card is unavailable\.<\/p>/, url);
-      assert.doesNotMatch(body, /Test Card|A public bio|Review requested|R0lGODlh/, url);
+      assert.doesNotMatch(res.body.toString(), /Test Card|A public bio|Review requested|R0lGODlh|unavailable/i, url);
+      const none = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore(withoutCard) }));
+      assert.deepEqual(res, none, `${url}: a stopped Card answers differently from no card`);
     }
     assert.equal(store.kv.get('stop:t'), marker, 'the Worker changed the serving marker');
     store.kv.delete('stop:t');
@@ -1384,7 +1391,7 @@ test('the card body and stop marker reads start in parallel for pages, markdown 
   }
 });
 
-test('an unknown path under a stopped handle returns Nothing here without any store read', async () => {
+test('an unknown path under a stopped handle returns the no-card page without any store read', async () => {
   const store = recordingStore({ t: SERVING_CARD, 'stop:t': '' }), reads = [];
   const get = store.get;
   store.get = async (k) => { reads.push(k); return get(k); };
@@ -1394,7 +1401,7 @@ test('an unknown path under a stopped handle returns Nothing here without any st
   assert.equal(res.headers.get('cache-control'), 'public, max-age=60');
   assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
   assert.equal(res.headers.get('vary'), 'Accept');
-  assert.match(await res.text(), /<p>Nothing here\.<\/p>/);
+  assert.match(await res.text(), NO_CARD);
 });
 
 test('stop takes precedence over redirects and missing cards, and resume preserves their responses', async () => {
@@ -1416,9 +1423,12 @@ test('stop takes precedence over redirects and missing cards, and resume preserv
     store.kv.set(`stop:${handle}`, '');
     const res = await worker.fetch(new Request(url), env);
     assert.equal(res.status, 404, url);
-    assert.equal(res.headers.get('cache-control'), 'no-store', url);
-    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
-    assert.match(await res.text(), /<p>This Card is unavailable\.<\/p>/, url);
+    // tile-lab#51: no redirect to the card's own domain (it would name the binding), and the one
+    // no-card page or the bare icon 404 — the same a missing card gets, never an "unavailable" one
+    assert.equal(res.headers.get('location'), null, url);
+    const body = await res.text();
+    assert.doesNotMatch(body, /unavailable|Test Card/i, url);
+    if (!url.endsWith('.ico')) assert.match(body, url.startsWith('https://card.feelreef.com/') ? NO_CARD : /<p>Nothing here\.<\/p>/, url);
     store.kv.delete(`stop:${handle}`);
     assert.deepEqual(await responseBytes(await worker.fetch(new Request(url), env)), before, url);
   }
@@ -1457,8 +1467,10 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
   for (const path of ['/', '', '/feelreef', '/FeelReef/', '/favicon.ico', '/apple-touch-icon.png']) {
     assert.deepEqual(resolveHandle('reef.cards', path), { handle: 'feelreef', cardUrl: 'https://reef.cards', root: true }, path);
   }
-  // CONTROL: the old host's bare root is still the directory, not the feelreef card
-  assert.equal(resolveHandle('card.feelreef.com', '/'), null);
+  // tile-lab#51: the old host's bare root is the feelreef card as well (it used to be the directory)
+  for (const path of ['/', '/feelreef', '/favicon.ico']) {
+    assert.deepEqual(resolveHandle('card.feelreef.com', path), { handle: 'feelreef', cardUrl: 'https://card.feelreef.com', root: true }, path);
+  }
 
   // With the switch off, a route placed on the new host must expose no Cards or root assets.
   for (const off of [{}, { CARD_CANONICAL_HOST: 'evil.example' }]) {
@@ -1663,15 +1675,17 @@ test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => 
     ['reef.cards', 'feelreef', 'on', null],
     ['reef.cards', 't', 'on', 'noindex'],
     ['reef.cards', 'demo-t', 'on', NNF],
-    // before the move, reef.cards is just another of our hosts: today's rule (tile c7aa65e)
-    ['reef.cards', 'feelreef', 'off', NNF],
+    // The pure predicate still describes the root, though the switch gates off-host requests first.
+    ['reef.cards', 'feelreef', 'off', null],
     ['reef.cards', 't', 'off', NNF],
-    // the old host keeps today's rule in both positions
-    ['card.feelreef.com', 'feelreef', 'off', NNF],
+    // the old host keeps today's rule in both positions, for every customer Card
+    ['card.feelreef.com', 'feelreef', 'off', null],
     ['card.feelreef.com', 't', 'off', NNF],
-    ['card.feelreef.com', 'feelreef', 'on', NNF],
+    ['card.feelreef.com', 'feelreef', 'on', null],
     ['card.feelreef.com', 't', 'on', NNF],
+    // the root card is a Card host's root, and saas.feelreef.com has none
     ['saas.feelreef.com', 'feelreef', 'on', NNF],
+    ['saas.feelreef.com', 'feelreef', 'off', NNF],
   ]) {
     const env = { PREVIEW: 'false', ...(sw === 'on' ? ON : {}) };
     assert.equal(W.robotsTag({ env, host, handle, vanity: false }), want, `${host} ${handle} ${sw}`);
@@ -1706,6 +1720,26 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
 
+// tile-lab#51 ③ (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」.
+// The root response carries no X-Robots-Tag on BOTH hosts; every customer path is unchanged.
+test('tile-lab#51 ③: the root card is indexable on active hosts; customer Cards keep their header', async () => {
+  for (const [sw, host, cust] of [[{}, 'card.feelreef.com', 'noindex, nofollow'], [ON, 'reef.cards', 'noindex']]) {
+    const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD }), ...sw };
+    const root = await worker.fetch(new Request(`https://${host}/`), env);
+    assert.equal(root.status, 200, `${host} / ${JSON.stringify(sw)}`);
+    assert.match(await root.text(), /<title>feelreef<\/title>|feelreef/, host);
+    assert.equal(root.headers.get('x-robots-tag'), null, `${host} / ${JSON.stringify(sw)}`);
+    const t = await worker.fetch(new Request(`https://${host}/t`), env);
+    assert.equal(t.status, 200);
+    assert.equal(t.headers.get('x-robots-tag'), cust, `${host}/t ${JSON.stringify(sw)}`);
+  }
+  // one card, one address: `/feelreef` on the old host is the root card's alias
+  const env = { PREVIEW: 'false', CARDS: recordingStore({ feelreef: ROOT_CARD }) };
+  const alias = await worker.fetch(new Request('https://card.feelreef.com/feelreef?x=1'), env);
+  assert.equal(alias.status, 301);
+  assert.equal(alias.headers.get('location'), 'https://card.feelreef.com/?x=1');
+});
+
 // ── reef#2725 r2: the inverse follows the switch ────────────────────────────────────────────────
 // cardUrlFor is resolveHandle read backwards, and the editor's "is this link the author's own site"
 // rides on it. With the switch on, resolveHandle answers on reef.cards, so its inverse must too —
@@ -1714,7 +1748,9 @@ test('reef#2725 r2 ①: cardUrlFor names the configured card host — unset is t
   // PIN: no env, an empty env and every value that is not exactly reef.cards = today's string
   for (const env of [undefined, {}, { CARD_CANONICAL_HOST: '' }, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }]) {
     assert.equal(W.cardUrlFor('inkbrush', {}, env), 'https://card.feelreef.com/inkbrush', JSON.stringify(env));
-    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com/feelreef', JSON.stringify(env));
+    // tile-lab#51: the root card lives at the bare origin on the old host too (`/feelreef` 301s there)
+    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com', JSON.stringify(env));
+    assert.equal(W.cardUrlFor('feelreef', {}, env), resolveHandle('card.feelreef.com', '/feelreef').cardUrl);
   }
   assert.equal(W.cardUrlFor('inkbrush'), 'https://card.feelreef.com/inkbrush');
   // ON: the same URL resolveHandle hands out for that handle on that host — the root card is the bare origin
@@ -1773,6 +1809,8 @@ test('reef#2725 r3 ①: og:url and canonical name the configured card host, what
   const cases = [
     // [switch, request URL, the address the preview must name]
     [{}, 'https://card.feelreef.com/t', 'https://card.feelreef.com/t'],
+    // tile-lab#51: the root card is the bare origin of the old host too
+    [{}, 'https://card.feelreef.com/', 'https://card.feelreef.com'],
     [{}, 'https://saas.feelreef.com/t', 'https://card.feelreef.com/t'],
     [ON, 'https://reef.cards/t', 'https://reef.cards/t'],
     [ON, 'https://reef.cards/', 'https://reef.cards'],
@@ -1794,5 +1832,119 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
     const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...sw };
     const res = await worker.fetch(new Request('https://card.feelreef.com/t'), env);
     assert.equal(await res.text(), today, JSON.stringify(sw));
+  }
+});
+
+// ── tile-lab#51 ②: "no card here" is a Card, and it is ONE page ────────────────────────────────────
+//
+// chodaict 2026-10-30: 「退役（`stop:` 標記）與不存在的公開頁一字不差，退役的人要的是消失」. The
+// comparison is the same handle in two stores — retired, and never there — on every exit a visitor
+// or a crawler can reach, headers included. A retired Card that also has its own domain is in the
+// retired store: the old 301 to that domain would have named the binding.
+const NO_CARD = /<div class="st-card">[\s\S]*<p>There's no card here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
+const STOP = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
+
+test('tile-lab#51 ②: a retired Card and a never-existed handle answer byte for byte the same, on every exit', async () => {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
+    const requests = [...servingRequests(host, 't'), [`https://${host}/t/avatar`, {}], [`https://${host}/t/nothing`, {}],
+      [`https://${host}/T/`, {}], [`https://${host}/t?utm_source=qr`, {}]];
+    for (const [url, init] of requests) {
+      const retired = { PREVIEW: 'false', ...sw, CARDS: recordingStore({ t: SERVING_CARD, 'stop:t': STOP, 'vanityof:t': 'card.example' }) };
+      const never = { PREVIEW: 'false', ...sw, CARDS: recordingStore() };
+      const a = await responseBytes(await worker.fetch(new Request(url, init), retired));
+      const b = await responseBytes(await worker.fetch(new Request(url, init), never));
+      assert.equal(a.status, 404, url);
+      assert.deepEqual(a, b, `${url}: a retired Card is distinguishable from a handle that never existed`);
+      assert.doesNotMatch(a.body.toString(), /unavailable|Test Card|A public bio|Review requested/i, url);
+    }
+  }
+});
+
+// The table the ticket asks for: existing / retired / never-existed / reserved × the button.
+// 🔴 The button column is "no" in every row, and that is a finding, not an omission: whether a name
+// can be registered is RSP's to say (reserved words + the ledger, where a retired name stays its
+// owner's), and RSP's own rule is that nobody keeps a second copy of that list. See notFound.
+test('tile-lab#51 ②: existing / retired / never-existed / reserved — the page each gets, and no button', async () => {
+  const BUTTON = /signup|register|make a card|create a card|\?handle=/i;
+  const rows = [
+    // [row, store, path, status]
+    ['existing', { t: SERVING_CARD }, '/t', 200],
+    ['retired', { t: SERVING_CARD, 'stop:t': STOP }, '/t', 404],
+    ['never-existed', {}, '/t', 404],
+    ['never-existed, grammar-valid and unreserved', {}, '/zlingart', 404],
+    ['reserved (RSP: try)', {}, '/try', 404],
+    ['reserved (RSP: admin)', {}, '/admin', 404],
+  ];
+  const notFoundBodies = new Set();
+  for (const [row, seed, path, status] of rows) {
+    const res = await worker.fetch(new Request(`https://card.feelreef.com${path}`), { PREVIEW: 'false', CARDS: recordingStore(seed) });
+    const body = await res.text();
+    assert.equal(res.status, status, row);
+    assert.doesNotMatch(body, BUTTON, `${row}: a registration button`);
+    if (status === 404) {
+      assert.match(body, NO_CARD, `${row}: not the shaped page`);
+      // (a one-letter handle is in every page; the one-page Set below covers it)
+      if (path.length > 4) assert.ok(!body.includes(path.slice(1)), `${row}: the page echoes the handle`);
+      notFoundBodies.add(body);
+    }
+  }
+  assert.equal(notFoundBodies.size, 1, 'the "no card" rows did not all get the one page');
+});
+
+test('tile-lab#51 ②: every other "no card" door is the same shaped page — no bare HTML left', async () => {
+  const env = { PREVIEW: 'false', CARDS: recordingStore() };
+  for (const url of [
+    'https://saas.feelreef.com/',          // a path-routed host with no root card (was "Pick a card")
+    'https://card.feelreef.com/',          // the root card itself, not yet saved
+    'https://card.feelreef.com/t/nothing', // a sub-path under a handle (was "Nothing here")
+  ]) {
+    const res = await worker.fetch(new Request(url), env);
+    assert.equal(res.status, 404, url);
+    assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8', url);
+    assert.match(await res.text(), NO_CARD, url);
+  }
+  // CONTROL, by design: a creator's own domain keeps the small 404 (reef#1090) — bound or not
+  for (const [url, seed] of [['https://unbound.example/', {}], ['https://card.example/wp-login.php', { t: SERVING_CARD, 'vanity:card.example': 't' }]]) {
+    const res = await worker.fetch(new Request(url), { PREVIEW: 'false', CARDS: recordingStore(seed) });
+    assert.equal(res.status, 404, url);
+    assert.equal(await res.text(), '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', url);
+  }
+});
+
+
+test('tile#217 P1: stopped own-domain card exits match an unbound host including headers', async () => {
+  for (const [url, init] of [...servingRequests('card.example', 't', true), ['https://card.example/t', {}],
+    ...['/t/nothing', '/wp-login.php', '/robots.txt'].flatMap((path) =>
+      [{}, { method: 'HEAD' }, { headers: { accept: 'text/markdown' } }].map((init) => [`https://card.example${path}`, init]))]) {
+    const absent = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore() }));
+    for (const marker of [STOP, '']) {
+      const stopped = await responseBytes(await worker.fetch(new Request(url, init), {
+        PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, 'vanity:card.example': 't', 'stop:t': marker }),
+      }));
+      assert.deepEqual(stopped, absent, `${url}: stopped own-domain response discloses its binding`);
+      assert.equal(stopped.body.length, 79, `${url}: own-domain small-404 size pin`);
+    }
+  }
+});
+
+test('tile#217 P2: stopped and missing identities perform the same ordered key reads', async () => {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
+    for (const gen of ['0', '7']) {
+      for (const [url, init] of [...servingRequests(host, 't'), [`https://${host}/t/avatar`, {}]]) {
+        const readsFor = async (stopped) => {
+          const seed = { 'gen:t': gen };
+          if (stopped) Object.assign(seed, gen === '0'
+            ? { t: SERVING_CARD, 'stop:t': STOP, 'vanityof:t': 'card.example', 'gone:t': 'old deletion' }
+            : { 'card:t:7': SERVING_CARD, 'stop:t:7': STOP, 'vanityof:t:7': 'card.example', 'gone:t': 'old deletion' });
+          const store = recordingStore(seed), reads = [];
+          const get = store.get;
+          store.get = async (key) => { reads.push(key); return get(key); };
+          const response = await worker.fetch(new Request(url, init), { PREVIEW: 'false', ...sw, CARDS: store });
+          assert.equal(response.status, 404, `${url}: stop must win over stale gone/domain markers`);
+          return reads;
+        };
+        assert.deepEqual(await readsFor(true), await readsFor(false), `${url} gen=${gen}: stopped/missing lookup schedules differ`);
+      }
+    }
   }
 });

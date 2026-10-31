@@ -150,7 +150,8 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // domain to the next owner of the handle. Pre-generation bindings are generation 0's.
 const VANITY_KEY = (host) => vanityKey(host); // card-api's, called late: the two modules import each other
 
-// canonical multi-tenant host — a bare visit here (no handle) is a directory, not a card.
+// canonical multi-tenant host. Its bare root is the platform's own card (ROOT_HANDLE, below) — it
+// was a directory line until tile-lab#51.
 const CANON_HOST = 'card.feelreef.com';
 // the Cloudflare-for-SaaS fallback origin (wrangler.example.toml routes): ours, never a creator's.
 const FALLBACK_HOST = 'saas.feelreef.com';
@@ -222,8 +223,11 @@ export const routesByPath = (host) =>
 // reef#2725: on reef.cards the bare root, `/<ROOT_HANDLE>` and the origin-level icon files are the
 // root card's, which is addressed like a one-card host (cardUrl = the bare origin, `root: true`).
 // An icon path can never be a handle (it has a dot), so nothing a customer could own is taken.
+// tile-lab#51 (chodaict 2026-10-29): the old card host too. A visitor who cuts the handle off a
+// shared link is asking "what is this?", and the Card answers by being one — feelreef's own.
+const hasRootCard = (host) => host === CARDS_HOST || host === CANON_HOST;
 const isRootPath = (host, seg) =>
-  host === CARDS_HOST && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
+  hasRootCard(host) && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
 
 export function resolveHandle(host, pathname, vanity = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
@@ -298,15 +302,15 @@ export function cardPath(pathname, handle, isVanity) {
  * canonical path, never a guess at somebody's domain.
  *
  * reef#2725 r2 — `env` is the switch (`{ CARD_CANONICAL_HOST }`), read by the same canonicalHost the
- * routing reads, so the inverse moves when resolveHandle does: on reef.cards the root card is the
- * bare origin, as resolveHandle says. No env = today's host. A browser has no Worker env; whoever
+ * routing reads, so the inverse moves when resolveHandle does: the root card is the bare origin of
+ * either host, as resolveHandle says (tile-lab#51). No env = today's host. A browser has no Worker env; whoever
  * serves the editor says which host it is (w/serve.mjs's `/_w/can-save`).
  */
 export const cardUrlFor = (handle, vanity = {}, env) => {
   const host = Object.keys(vanity).find((h) => vanity[h] === handle);
   if (host) return `https://${host}`;
   const canon = canonicalHost(env);
-  return canon === CARDS_HOST && handle === ROOT_HANDLE ? `https://${CARDS_HOST}` : `https://${canon}/${handle}`;
+  return handle === ROOT_HANDLE ? `https://${canon}` : `https://${canon}/${handle}`;
 };
 /** the configured card host as an origin — where a handle's public exits (`/<h>.md`) are read. */
 export const cardOrigin = (env) => `https://${canonicalHost(env)}`;
@@ -449,10 +453,14 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // that domain is the user-content domain and the rule there is: the root card (ROOT_HANDLE) is
 // indexable, every other Card is `noindex`. Before the move reef.cards keeps the old rule, and the
 // old hosts keep it in both positions.
+//
+// tile-lab#51 (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
+// noindex」. The root card is OURS, so the "nobody has vouched for it" reason does not apply to it:
+// indexable on both card hosts in both switch positions. Every customer Card is exactly as before.
 /** robotsTag: ({ env, host, handle, vanity, blank }) → the X-Robots-Tag value, or null. Pure. */
 export function robotsTag({ env, host, handle, vanity = false, blank = false }) {
   if (isPreview(env) || isDemo(handle)) return 'noindex, nofollow';
-  if (!vanity) {
+  if (!vanity && !(handle === ROOT_HANDLE && hasRootCard(host))) {
     if (host !== CARDS_HOST || !movedToCardsHost(env)) return 'noindex, nofollow';
     if (handle !== ROOT_HANDLE) return 'noindex';
   }
@@ -483,6 +491,36 @@ const html = (body, status = 200, env = null, handle = '', at = {}, blank = fals
     status,
     headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, at, blank) },
   });
+
+// ── "no card here" (tile-lab#51) ─────────────────────────────────────────────────────────────────
+//
+// 🩸 It was `<p>No card for “zlingart”.</p>`, `<p>Nothing here.</p>`, `<p>Pick a card: …</p>` and, for
+// a stopped card, `<p>This Card is unavailable.</p>` — bare HTML on the two doors a stranger most
+// often walks through (a mistyped share link; a cut-off one). So it is a Card now, drawn by the same
+// renderer and CSS as every Card, from a constant: no handle, nothing the request said, in it.
+//
+// 🔴 ONE PAGE FOR EVERY "NO CARD" (chodaict 2026-10-30): a stopped (retired) Card and a handle that
+// never existed answer byte for byte the same, headers included — 「退役的人要的是消失，不留
+// unavailable 墓碑」. Two wordings would let anyone probe who was taken down. That is why the page
+// echoes nothing: if it named the handle, "identical" would hold only per handle.
+//
+// 🔴 NO 「make a card with this name」 BUTTON, on purpose and for now. The ruling allows it only where
+// the name can really be registered, and this Worker cannot know that: the reserved words and the
+// ledger (a retired name stays its owner's) live in RSP (`shared/reserved-slugs.ts`,
+// `platform-registry-cards.ts`), whose own rule is that nobody keeps a second copy of the list.
+// A button decided from half the facts would invite people to names that then refuse them.
+const NOT_FOUND_CARD = [
+  '---', 'title: feelreef', 'generator: off', '---', '', '## grid', '',
+  "- [ ] %% card: text %% There's no card here.",
+  '- [ ] %% card: link w=6 %% [feelreef](https://feelreef.com/)',
+  '',
+].join('\n');
+// 🔴 …except on a creator's OWN domain, where an unknown path (`/wp-login.php`, `/robots.txt`) stays
+// the small 404 it was (card-icon.test.mjs catch-all, reef#1090): bots probe those all day, and a
+// feelreef page is not ours to put on somebody's domain. It names nothing, so it leaks nothing.
+const SMALL_404 = '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>';
+const notFound = (env, handle = '', at = {}) =>
+  html(renderCardHTML(NOT_FOUND_CARD, { handle: '', cardUrl: '' }), 404, env, handle, at);
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
 //
@@ -531,7 +569,7 @@ const wantsMarkdown = (request) => /(^|,)\s*text\/markdown\b/.test(request.heade
 // the CARDS store for this route, on purpose: RSP reserves the handle `try` (a real card can never
 // register it), and this Worker's own store is a separate, unrelated namespace where the string
 // "try" has never been and must never be a key. Anyone visiting bare `card.feelreef.com/try` (no
-// `/edit`) gets the ordinary "No card for try" 404 every other never-registered handle gets.
+// `/edit`) gets the same no-card 404 every other never-registered handle gets (notFound).
 const SANDBOX_PATH = '/try/edit';
 // `/try/edit2` is the RETIRED path this used to be staged under while `/try/edit` still served the
 // old editor. It is kept as a 301 (not removed outright) so nothing that already linked to it
@@ -908,12 +946,9 @@ const router = {
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
-    if (!resolved) {
-      // the directory hint only where a path can name a card; an unbound creator's domain names nothing
-      return routesByPath(host)
-        ? html('<!doctype html><meta charset=utf-8><title>feelreef Cards</title><p>Pick a card: /&lt;handle&gt;</p>', 404, env)
-        : html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env);
-    }
+    // a host of ours with no root card and no handle in the path: the no-card page. An unbound
+    // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
+    if (!resolved) return routesByPath(host) ? notFound(env) : html(SMALL_404, 404, env);
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
@@ -921,27 +956,26 @@ const router = {
     const oneCardHost = !!vanityHandle || !!resolved.root;
     const at = { host, vanity: !!vanityHandle };
     const want = cardPath(url.pathname, resolved.handle, oneCardHost);
-    if (!want) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>', 404, env, resolved.handle, at);
+    if (!want) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // 410/404 below exactly as a missing body does.
-    const { md: cardMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
-    if (stopped != null) {
-      return new Response('<!doctype html><meta charset=utf-8><title>Unavailable</title><p>This Card is unavailable.</p>', {
-        status: 404,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-Robots-Tag': 'noindex, nofollow',
-          Vary: 'Accept',
-        },
-      });
-    }
+    const { md: liveMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
+    // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
+    // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
+    // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
+    const cardMd = stopped != null ? null : liveMd;
+    // An absent card on a creator's host has no public binding, even when a pointer remains.
+    // Use the unbound response, including its robots headers, on every card exit.
+    if (cardMd == null && !routesByPath(host)) return html(SMALL_404, 404, env);
     // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
     // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
     // and the page names nothing from the old card. no-store: the handle is free, and the next
     // save must show at once.
-    if (cardMd == null && (await store.get(goneKey(resolved.handle))) != null) {
+    // Missing and stopped identities perform the same reads: skipping a key for a stopped card
+    // discloses it through KV latency. The stop still wins over a stale deletion marker.
+    const gone = cardMd == null ? await store.get(goneKey(resolved.handle)) : null;
+    if (cardMd == null && stopped == null && gone != null) {
       return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
         status: 410,
         headers: {
@@ -956,7 +990,7 @@ const router = {
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
     const blank = cardMd != null && isTemplateOnly(cardMd);
 
-    if (want === 'alias') return Response.redirect(`https://${host}/${url.search}`, 301);
+    if (want === 'alias' && stopped == null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
@@ -1007,11 +1041,11 @@ const router = {
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
     const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (ownHost && host !== ownHost) {
+    if (stopped == null && ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
-    if (!cardMd) return html('<!doctype html><meta charset=utf-8><title>Not found</title><p>No card for “' + resolved.handle + '”.</p>', 404, env, resolved.handle, at);
+    if (!cardMd) return notFound(env, resolved.handle, at);
 
     // the download link, in the form this host actually uses
     // (the root card keeps the canonical form: `/index.md` on reef.cards would name the handle `index`)
