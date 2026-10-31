@@ -128,6 +128,25 @@ const CASES = [
   { title: 'Timeline', marker: '%% sitetile: timeline %%', body: '### 2020\nStart.\n\n### 2021\nGrowth.' },
   { title: 'CTA', marker: '%% sitetile: cta %%', body: 'Come along.\n\n[Join](/join)' },
   { title: 'Gallery', marker: '%% sitetile: gallery %%', body: '![One](/img/1.png)\n\n![Two](/img/2.png)' },
+  // tile-lab#52 phase 1: the five of the nine emitter sections this list had no case for. Each has a
+  // case that exercises its optional parts (eyebrow, caption, a gated destination) beside a bare one.
+  { title: 'Embed', marker: '%% sitetile: embed %%', body: '<div class="custom"><p>Raw <b>html</b>.</p></div>' },
+  { title: 'Embed wide', marker: '%% sitetile: embed wide %%', body: '<iframe src="https://example.com/e" title="e"></iframe>' },
+  { title: 'People flat', marker: '%% sitetile: people cols=3 eyebrow="Team" %%',
+    body: 'The team.\n\n### Ada →https://example.com/ada [Founder · CTO]\n![Ada](/img/ada.png)\nWrote the first program.\nlinks: Site=https://ada.example, Blog=/blog, Bad=javascript:void(0)\ntone: dark\n\n### Grace →/grace\nNo portrait.\n\n### Hostile →javascript:alert(1)\nPlain name.' },
+  { title: 'People grouped', marker: '%% sitetile: people shape=logo %%',
+    body: '### Partners\nPartner lead.\n\n#### Acme →https://acme.example\n![Acme](/img/acme.png)\nA company.\n\n#### Beta\nBeta body.\n\n### Friends\n#### Gamma [Role]\nGamma body.' },
+  { title: 'Social', marker: '%% sitetile: social eyebrow="Follow" %%',
+    body: 'Find us here.\n\n[Patreon](https://patreon.com/x) · [GitHub](https://github.com/x) · [Mail](mailto:a@example.com) · [Bad](javascript:void(0))' },
+  { title: 'Social bare', marker: '%% sitetile: social %%', body: '[Only](/only)' },
+  { title: 'Tagcloud', marker: '%% sitetile: tagcloud eyebrow="Topics" %%', body: '- [comic576](/tag/comic)\n- [art12](/tag/art)\n- [bad](javascript:void(0))' },
+  { title: 'Links', marker: '%% sitetile: links eyebrow="Read" %%',
+    body: 'Sites we like.\n\n- [Example](https://www.example.com/a) — the best one\n- [Internal](/internal) : an internal page\n- [Bad](javascript:alert(1))\n- [Mail](mailto:me@example.com)' },
+  { title: 'Links bare', marker: '%% sitetile: links %%', body: '- [Only](https://example.org/)' },
+  // …and `eyebrow=` on the three nine-emitter sections whose cases above never set one.
+  { title: 'FAQ eyebrow', marker: '%% sitetile: faq eyebrow="Help" %%', body: 'Lead.\n\n### Why?\nBecause.' },
+  { title: 'Timeline eyebrow', marker: '%% sitetile: timeline eyebrow="Since 2011" %%', body: '### 2011\nStart.' },
+  { title: 'Gallery eyebrow', marker: '%% sitetile: gallery eyebrow="See all" %%', body: '### One\n![One](/img/1.png)' },
 ];
 
 // Known gaps, by name. Each must be real (the sections tagged with it differ) or the test fails.
@@ -148,7 +167,8 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery'];
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery',
+    'embed', 'embed', 'people', 'people', 'social', 'social', 'tagcloud', 'links', 'links', 'faq', 'timeline', 'gallery'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
   for (const c of CASES) assert.ok(stringById.get(idOf(nameOf(c))), `string render has no section for ${nameOf(c)}`);
 });

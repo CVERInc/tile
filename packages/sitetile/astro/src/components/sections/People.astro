@@ -7,73 +7,17 @@
 // the group wrapper; a grouped roster renders a labelled block per group. Theme paints
 // `.st-people` / `.st-person` / `.st-person-role`; site.css carries the structural defaults so a
 // roster is legible on a site that has never been themed.
-import { parseParams, inlineHtml, bodyHtml, firstImage, imgTag, slugify, safeHref } from '@sitetile';
+// The markup is packages/emit/people.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
+import { parseParams } from '@sitetile';
+import { emitPeople } from '@emit/people.mjs';
 const { section, hero } = Astro.props;
 // The page's FIRST section carries its primary heading as <h1> — the same seam Prose/Faq/
 // Timeline already honour. A roster that opened a page rendered <h2> and the page had NO h1:
 // bad for the document outline, and the theme's title band attaches to h1, so those pages
-// silently lost their band too.
-const Title = hero && section.title ? 'h1' : 'h2';
+// silently lost their band too. (emitPeople picks the tag from `hero`.)
 const pm = parseParams(section.params);
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const shape = pm.shape === 'logo' ? 'logo' : 'avatar';
-const groups = section.groups || [];
-const flat = groups.length === 1 && !groups[0].title;
-const gid = (t) => 'people-' + slugify(t, 'g');
-const roles = (b) => String(b || '').split('·').map((x) => x.trim()).filter(Boolean);
-const ext = (h) => /^https?:\/\//.test(h);
 ---
-<section class="st-people" id={section.id} data-cols={pm.cols || ''} data-shape={shape}>
-  {eyebrow && <p class="st-people-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <Title set:html={inlineHtml(section.title)} />}
-  {section.body && <Fragment set:html={bodyHtml(section.body)} />}
-  {groups.map((g) => {
-    const cells = (
-      <div class="st-people-cells">
-        {(g.people || []).map((p) => {
-          const fi = firstImage(p.body);
-          // round 4 (R3-P3-2): hoisted to a const — was three calls per person for the same
-          // destination, each a separate drop-warning queue entry.
-          const pHrefOk = safeHref(p.href);
-          return (
-            <div class="st-person" data-tone={p.tone || undefined}>
-              {fi.img && <Fragment set:html={`<figure class="st-person-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>`} />}
-              <h3 class="st-person-name">
-                {/* round 3 (Astro consumers, R2-P3-5): `p.href` is author Markdown, gated by
-                    site-core.js's own `people` case via `isSafeHref`; `safeHref` shares that ONE
-                    policy here — a `javascript:`/`data:` name link degrades to plain text. */}
-                {pHrefOk
-                  ? <a href={pHrefOk} target={ext(pHrefOk) ? '_blank' : undefined} rel={ext(pHrefOk) ? 'noopener' : undefined} set:html={inlineHtml(p.title)} />
-                  : <Fragment set:html={inlineHtml(p.title)} />}
-              </h3>
-              {p.badge && (
-                <span class="st-person-roles">
-                  {roles(p.badge).map((x) => <span class="st-person-role">{x}</span>)}
-                </span>
-              )}
-              <div class="st-person-body" set:html={bodyHtml(fi.rest)} />
-              {p.links && p.links.length > 0 && (
-                <div class="st-person-links">
-                  {p.links.map((l) => {
-                    // round 4 (R3-P3-2): hoisted to a const — was three calls per link.
-                    const lHrefOk = safeHref(l.href);
-                    return lHrefOk
-                      ? <a class="st-person-link" href={lHrefOk} target={ext(lHrefOk) ? '_blank' : undefined} rel={ext(lHrefOk) ? 'noopener' : undefined}>{l.label}</a>
-                      : <span class="st-person-link">{l.label}</span>;
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-    return flat ? cells : (
-      <div class="st-people-group">
-        <p class="st-people-group-head" id={gid(g.title)} set:html={inlineHtml(g.title)} />
-        {g.lead && <Fragment set:html={bodyHtml(g.lead)} />}
-        {cells}
-      </div>
-    );
-  })}
-</section>
+<Fragment set:html={emitPeople(section, { eyebrow, cols: pm.cols, shape }, { hero })} />
