@@ -10,9 +10,9 @@
 //      readable, greppable text in this repo. That is enough for this kind: confirming "this repo
 //      refuses X" tells nobody anything X's owner has not already published.
 //
-//   2. THE PRIVATE LIST (the other public identity, customer handles used as examples). NEVER hashed
+//   2. THE PRIVATE LIST (names kept off this repo entirely, e.g. customer handles used as examples). NEVER hashed
 //      into this repo: those names are guessable, so a hash would be a confirmation oracle — hash a
-//      suspected name, find it in the file, and the link the list exists to protect is made. This tier
+//      suspected name, find it in the file, and what the list keeps private is confirmed. This tier
 //      reads the SAME private list the push-time content-guard reads, from outside the repo:
 //        $CVER_FORBIDDEN_TERMS  →  `git config cver.forbiddenTerms`  →  ~/.config/git/forbidden-terms
 //      One extended-regex per line, `#` comments. With no list on the machine this tier says so out
@@ -89,7 +89,7 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
   const notes = [];
   if (!privateList) {
     if (required) notes.push({ fatal: true, text: 'the private term list is REQUIRED here (CVER_FORBIDDEN_TERMS_REQUIRED=1) and none was found' });
-    else notes.push({ fatal: false, text: 'private term list not on this machine — tier 2 (the other identity, customer handles) NOT checked' });
+    else notes.push({ fatal: false, text: 'private term list not on this machine — tier 2 (the private list) NOT checked' });
   }
   const seen = new Map(); // token → handle # or 0
   const handleOf = (tok) => {
