@@ -50,7 +50,7 @@ export const FIXED = [
   ['href="https://feelreef.com/signup${ref}', 1, 'fixed host, handle-derived query only'],
   ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
-  ['src="${esc(src)}', 3, 'IMG_ICON (author image registered at its call site) and the slider / bubbles frames (`imgs` came through attrUrl at its definition, asserted below)'],
+  ['src="${esc(src)}', 1, 'IMG_ICON (author image registered at its call site)'],
   ['data-url="${e(qrUrl)}', 1, "the QR code encodes the card's own address (emit/hero.mjs heroCell, the QR mount)"],
   ['background-image:url("${cssUrlString(bgOk)}', 1, "emit/hero.mjs's SITE hero (no Card cell writes it): bgOk is gated by safeSrc and quoted by cssUrlString"],
   ['href="#${id}', 1, 'in-page drawer anchor'],
@@ -134,7 +134,7 @@ const SRC = [RENDER_SRC, ...EMIT.values()].join('\n');
 
 test('sinks: the emit modules card-render imports are in the scan, and the registry it hands them is the registry', () => {
   const names = [...EMIT.keys()].map((h) => h.split('/').pop()).sort();
-  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs', 'embed.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
+  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs', 'embed.mjs', 'carousel.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
   // the two names a Card branch may write a URL through are exactly the guarded calls, made in ONE place
   const body = stripComments(RENDER_SRC);
   assert.match(body, /\burl: \(raw\) => esc\(attrUrl\(ctx, raw\)\),/);
@@ -153,11 +153,13 @@ test('sinks: the scan has something to scan, and every FIXED entry still exists 
   for (const [text, n] of FIXED) assert.equal(all.filter((c) => !c.guarded && c.text === text).length, n, `FIXED entry out of step with the renderer: ${text}`);
 });
 
-test('sinks: the two indirect cases are guarded where the value is made', () => {
+test('sinks: the indirect case is guarded where the value is made', () => {
   const body = stripComments(SRC).split('\n');
-  const defs = body.filter((l) => /const imgs = /.test(l));
-  assert.equal(defs.length, 2, 'slider and bubbles each define imgs');
-  for (const l of defs) assert.match(l, /attrUrl\(ctx,/, l);
+  // tile-lab#52 phase 3: the slider / bubbles images used to be registered where `imgs` was defined and escaped where
+  // written; they are written by emit/carousel.mjs through ctx.url now, so no frame may write a bare `src` any more.
+  const frames = body.filter((l) => /<figure[^`]*<img src="\$\{/.test(l));
+  assert.equal(frames.length, 2, 'slider and bubbles each write their frames');
+  for (const l of frames) assert.match(l, /<img src="\$\{ctx\.url\(src\)\}"/, l);
   const calls = body.filter((l) => /BACKDROP_CSS\(/.test(l) && !/const BACKDROP_CSS/.test(l));
   assert.equal(calls.length, 1);
   assert.match(calls[0], /BACKDROP_CSS\(cssAttrUrl\(ctx,/);

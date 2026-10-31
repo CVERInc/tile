@@ -77,3 +77,4 @@ are still read by the host — `p.<name>` stays in card-render's `switch (cell.t
 | `feature` | `gridCell` (`imageCards` shape) |
 | `profile` | `emitHero` (the QR mount `cp-icon` / `data-dynamic-coral="qr"` byte-identical) |
 | `video` | `emitEmbed` (click-to-load: poster + play, no iframe) |
+| `embed kind=slider` / `kind=bubbles` | `emitCarousel` (with their per-cell `<style>`) |

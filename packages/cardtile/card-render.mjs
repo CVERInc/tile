@@ -29,6 +29,7 @@ import { gridCell } from '../emit/grid.mjs';
 import { emitSocial } from '../emit/social.mjs';
 import { emitHero } from '../emit/hero.mjs';
 import { emitEmbed } from '../emit/embed.mjs';
+import { emitCarousel } from '../emit/carousel.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -342,8 +343,9 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 // re-implemented. The first pass here re-wrote it as an opacity crossfade with scale(.98) and
 // silently destroyed the whole point: the ancestor pops each bubble OUT OF THE CHARACTER'S MOUTH
 // via `transform-origin:53% 76%` + `scale(0.001)→scale(1)`. Same failure mode the QR coral exists
-// to prevent (Python→Svelte→here, re-cut each hop). The keyframes/origin/scale below are the
-// ancestor's, parameterised only for N images and an author-set origin.
+// to prevent (Python→Svelte→here, re-cut each hop). The keyframes/origin/scale (now in
+// packages/emit/carousel.mjs, tile-lab#52) are the ancestor's, parameterised only for N images and
+// an author-set origin.
 //   origin=  the bubble's tail anchor, % of the frame (default 53% 76% = the ancestor's)
 //   narrow=  the same anchor for narrow screens (the ancestor retargets to 53% 33%)
 //
@@ -365,80 +367,29 @@ function renderEmbed(p, body, size, ctx = {}) {
   // character's mouth. chodaict, 2026-07-30: 「你用到〔那張卡〕的版本了,它只需要很常見的 slide,
   // 附上左右按鈕即可」.
   //
-  // The pop animation below is preserved verbatim under its own name; that one stored card is
-  // migrated to `kind=bubbles` so nothing about it changes.
+  // The pop animation is preserved verbatim under its own name; that one stored card is migrated
+  // to `kind=bubbles` so nothing about it changes. Both carousels' markup (and their per-cell
+  // <style>) is packages/emit/carousel.mjs's `carouselCell` (tile-lab#52).
+  if (p.kind !== 'slider' && p.kind !== 'bubbles') {
+    // 🔴 There is no generic embed. It had zero uses and spliced its body into the page UNESCAPED —
+    // on a renderer whose input can arrive from parsing a third party's page. A hatch nobody climbed
+    // through, opening onto a drop. `kind=slider` is the only embed, and it builds its own markup.
+    return '';
+  }
+  const images = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+  const cell = { attrs: size };
   if (p.kind === 'slider') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
-    // 🔴 CSS scroll-snap + anchor links. No JS: the prev/next are <a href="#…"> into the track, so
-    // they work on the first paint, survive a dead script, and the browser's own swipe/keyboard/
-    // scrollbar all come free. `scroll-behavior:smooth` is what makes an anchor jump read as a slide.
-    const uid = 'sl' + Math.abs([...String(p.images || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(36);
-    const n = imgs.length;
-    const slides = imgs.map((src, i) => {
-      const prev = `#${uid}-${(i - 1 + n) % n}`;
-      const next = `#${uid}-${(i + 1) % n}`;
-      return `<figure id="${uid}-${i}"><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-        + `<a class="st-slide-nav st-slide-prev" href="${prev}" aria-label="${esc(label(ctx, 'prev'))}">‹</a>`
-        + `<a class="st-slide-nav st-slide-next" href="${next}" aria-label="${esc(label(ctx, 'next'))}">›</a></figure>`;
-    }).join('');
-    const dots = imgs.map((_, i) => `<a class="st-slide-dot" href="#${uid}-${i}" aria-label="${esc(label(ctx, 'slide', i + 1))}"></a>`).join('');
-    const css = [
-      // 🔴 NO fixed aspect. chodaict read Incrediville's live page as `6x6(slide*5)` AND
-      // `3x6(slide*4)` — the same widget, two different heights, because the PICTURES differ. Pinning
-      // 2/1 here would be 「width decides shape」 all over again, four hours after I removed exactly
-      // that rule from features. The first slide's natural height sets the track; the rest are
-      // covered into it, so a set of squares is square and a set of banners is a banner.
-      `.st-slider{position:relative;width:100%;overflow:hidden;border-radius:inherit}`,
-      `.st-slider-track{display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none}`,
-      `.st-slider-track::-webkit-scrollbar{display:none}`,
-      `.st-slider figure{position:relative;flex:0 0 100%;margin:0;scroll-snap-align:center}`,
-      `.st-slider figure:first-child img{height:auto}`,
-      `.st-slider figure img{width:100%;height:100%;object-fit:cover;display:block}`,
-      `.st-slide-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;text-decoration:none;color:#fff;background:rgba(0,0,0,.42);backdrop-filter:blur(2px);opacity:.85;transition:opacity .2s,background .2s}`,
-      `.st-slide-nav:hover{opacity:1;background:rgba(0,0,0,.6)}`,
-      `.st-slide-prev{left:10px}.st-slide-next{right:10px}`,
-      `.st-slider-dots{position:absolute;left:0;right:0;bottom:9px;display:flex;gap:6px;justify-content:center}`,
-      `.st-slide-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.55);box-shadow:0 0 0 1px rgba(0,0,0,.18)}`,
-      // one image needs no controls, and controls on a single slide read as broken
-      n < 2 ? `.st-slide-nav,.st-slider-dots{display:none}` : '',
-    ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="embed"><style>${css}</style>`
-      + `<div class="st-slider"><div class="st-slider-track">${slides}</div>`
-      + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div></div>';
+    const labels = { prev: label(ctx, 'prev'), next: label(ctx, 'next'), slide: (n) => label(ctx, 'slide', n) };
+    return emitCarousel({}, { cell, kind: 'slider', images, seed: p.images, labels }, dialect(ctx));
   }
-  if (p.kind === 'bubbles') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
-    const n = imgs.length;
-    const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
-    const cycle = n * hold;
-    const origin = cssPos(p.origin, '53% 76%');
+  return emitCarousel({}, {
+    cell, kind: 'bubbles', images,
+    origin: cssPos(p.origin, '53% 76%'),
     // #1929: `narrow=` (the name) beats the legacy `origin-narrow=` by NAME, not by order on the line — deliberate.
-    const originNarrow = cssPos(p.narrow || p['origin-narrow'], '53% 33%');
-    // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
-    // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
-    const slot = 100 / n;
-    const inAt = 3;
-    const outAt = (slot - 3).toFixed(1);
-    const figures = imgs.map((src) => `<figure><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>`).join('');
-    const bgStyle = p.bg ? ` style="background-image:url('${esc(cssAttrUrl(ctx, resolveAsset(p.bg, ctx)))}')"` : '';
-    const css = [
-      `.st-carousel{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background-size:contain;background-position:center;background-repeat:no-repeat}`,
-      `.st-carousel figure{position:absolute;inset:0;margin:0;padding:0;display:flex;align-items:center;justify-content:center;opacity:0;transform-origin:${origin};animation:st-carousel-slide ${cycle}s infinite;animation-fill-mode:both}`,
-      `.st-carousel figure img{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0}`,
-      imgs.map((_, i) => `.st-carousel figure:nth-child(${i + 1}){animation-delay:${i * hold}s}`).join(''),
-      // 🔴 verbatim: scale(0.001) → scale(1) about the tail origin = "pops out of the mouth"
-      `@keyframes st-carousel-slide{0%,${slot.toFixed(1)}%,100%{opacity:0;transform:scale(0.001)}${inAt}%,${outAt}%{opacity:1;transform:scale(1)}}`,
-      `@media screen and (max-width:888px){.st-carousel figure{transform-origin:${originNarrow}}}`,
-      `@media(prefers-reduced-motion:reduce){.st-carousel figure{animation:none}.st-carousel figure:nth-child(1){opacity:1;transform:scale(1)}}`,
-    ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="embed"><style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div></div>`;
-  }
-  // 🔴 There is no generic embed. It had zero uses and spliced its body into the page UNESCAPED —
-  // on a renderer whose input can arrive from parsing a third party's page. A hatch nobody climbed
-  // through, opening onto a drop. `kind=slider` is the only embed, and it builds its own markup.
-  return '';
+    originNarrow: cssPos(p.narrow || p['origin-narrow'], '53% 33%'),
+    // `bg=` present but unresolvable still writes its (empty) url(), as it always did
+    bg: p.bg ? resolveAsset(p.bg, ctx) : null,
+  }, dialect(ctx));
 }
 
 // How a cell's target becomes anchor attributes. A `#id` target opens a DRAWER (an overlay on this
