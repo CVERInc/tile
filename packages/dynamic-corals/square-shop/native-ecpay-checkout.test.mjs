@@ -465,3 +465,33 @@ test('a rail choice without ECPay, a single rail, or a non-eligible product keep
     assert.match(html, /class="dc-native-buy" data-native-sku="bowl-sku" data-native-rail="/);
   }
 });
+
+// A Site that holds both the B2C and the C2C logistics contract is offered both sub-types of a
+// carrier; the buyer reads one name for each, so the panel shows one row per choice.
+const FAMI_B2C = { sub_type: 'FAMI', logistics_type: 'CVS', fee_minor: 6000, free_threshold_minor: 100000, cod_available: true };
+const FAMI_C2C = { ...FAMI_B2C, sub_type: 'FAMIC2C' };
+const UNI_B2C = { sub_type: 'UNIMART', logistics_type: 'CVS', fee_minor: 6000, free_threshold_minor: 100000, cod_available: true };
+const UNI_C2C = { ...UNI_B2C, sub_type: 'UNIMARTC2C' };
+const radiosOf = (h) => [...h.matchAll(/<input type="radio" name="dc-ecpay-ship" value="([A-Z0-9]+)"/g)].map((m) => m[1]);
+
+test('B2C and C2C sub-types that read and cost the same are one delivery row', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, UNI_B2C, FAMI_C2C, UNI_C2C, HOME]));
+  await b.press();
+  assert.deepEqual(radiosOf(b.panel.innerHTML), ['FAMI', 'UNIMART', 'TCAT']);
+  assert.equal((b.panel.innerHTML.match(/全家取貨/g) || []).length, 1);
+  assert.equal((b.panel.innerHTML.match(/7-ELEVEN 取貨/g) || []).length, 1);
+});
+
+test('the surviving row still reaches a valid sub-type: the store map and the order use it', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, FAMI_C2C]));
+  await b.press();
+  await b.pickStore();
+  assert.equal(b.calls[1].url, '/api/v2/ecpay/logistics/store-map');
+  assert.equal(b.calls[1].body.sub_type, 'FAMI');
+});
+
+test('same-name rows that differ in fee stay separate choices', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, { ...FAMI_C2C, fee_minor: 9000 }]));
+  await b.press();
+  assert.deepEqual(radiosOf(b.panel.innerHTML), ['FAMI', 'FAMIC2C']);
+});

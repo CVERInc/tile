@@ -1704,8 +1704,13 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		opening = false;
 		const list = d && d.ok === true && Array.isArray(d.options) ? d.options.filter((x) => x && typeof x.sub_type === 'string' && (x.logistics_type === 'CVS' || x.logistics_type === 'HOME')) : [];
 		if (!list.length) { if (!fromStoreMap) fallBack(); return; }
-		options = list;
-		if (!current()) { S.ship = list[0].sub_type; S.storeRef = ''; }
+		// B2C and C2C sub-types of one carrier share a buyer-visible name; rows that read the same and cost the same are one choice.
+		const seen = {};
+		options = list.filter((x) => {
+			const k = [(C.subtypes && C.subtypes[x.sub_type]) || x.sub_type, x.logistics_type, Number(x.fee_minor) || 0, x.free_threshold_minor == null ? '' : x.free_threshold_minor, x.cod_available === true].join('|');
+			return seen[k] ? false : (seen[k] = true);
+		});
+		if (!current()) { S.ship = options[0].sub_type; S.storeRef = ''; }
 		if (!codAllowed()) S.pay = 'card';
 		button.hidden = true;
 		button.removeAttribute('aria-busy');
