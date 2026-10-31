@@ -282,7 +282,7 @@ test('🔴 a fonts: value no stylesheet link can load is a drop, even when it is
     assertRefusedNaming(t, `---\nname: s\nfonts: ${v}\n---\n`, [`fonts: ${JSON.stringify(v)} dropped`]);
   }
   // control: the forms the allowlist accepts (round 6 narrowed it — see the test below)
-  for (const v of ['https://fonts.example/a.css', 'http://fonts.example/a.css', '/fonts/a.css']) {
+  for (const v of ['https://fonts.example/a.css', '/fonts/a.css']) {
     const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
     assert.equal(r.status, 0, `${v}: ${r.stderr}`);
     assert.match(r.stdout, new RegExp(`^fonts: ${v.replace(/[.?*+^$()[\]{}|\\/]/g, '\\$&')}$`, 'm'));
@@ -308,7 +308,7 @@ test('🔴 fonts: only an absolute http(s) URL with a host and a path or query, 
     assert.match(r.stderr, /fonts: .* dropped/, v);
     assert.equal(existsSync(r.out), false, v);
   }
-  for (const v of ['https://fonts.example/a.css', 'https://fonts.example/?family=Fraunces', 'http://fonts.example/css2?family=A',
+  for (const v of ['https://fonts.example/a.css', 'https://fonts.example/css2?family=A',
     'https://fonts.googleapis.com/css2?family=Fraunces&display=swap', '/fonts/a.css', '/fonts.css?v=2', '&#47;fonts/a.css']) {
     const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
     assert.equal(r.status, 0, `${JSON.stringify(v)}: ${r.stderr}`);
@@ -340,5 +340,24 @@ test('🔴 fonts: a root path that resolves to the site root or to another host 
   for (const v of ['/fonts/a.css', '/fonts/../css/a.css', '/fonts.css?v=2', '/a\\b.css']) {
     const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
     assert.equal(r.status, 0, `${JSON.stringify(v)}: ${r.stderr}`);
+  }
+});
+
+// ── round 8 (final shape): https only, and a query never stands in for a path ────────────────────
+
+test('🔴 fonts: http: is a drop (an https page blocks it as mixed content), and the resolved path must be longer than `/`', (t) => {
+  const refused = [
+    'https://cdn.example/?family=A', 'https://cdn.example/%2e%2e/?family=A', 'https://cdn.example/./?family=A',
+    'http://fonts.example/a.css', 'http://fonts.example/css2?family=A', 'HTTP://fonts.example/a.css',
+    'https://fonts.example/a.css#x',
+  ];
+  for (const v of refused) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 2, `${JSON.stringify(v)} → exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /fonts: .* dropped/, v);
+    assert.equal(existsSync(r.out), false, v);
+  }
+  for (const v of ['https://fonts.googleapis.com/css2?family=Fraunces&display=swap', 'HTTPS://fonts.example/a.css', 'https://cdn.example/x/../a.css']) {
+    assert.equal(run(t, `---\nname: s\nfonts: ${v}\n---\n`).status, 0, v);
   }
 });

@@ -90,10 +90,11 @@ that is not a plain filename (`../oops`) is always refused: the build finds the 
 
 `fonts:` goes into a `<link rel="stylesheet">` on every page, so it is an **allowlist**, checked
 against the exact href the renderer will emit (after its `safeHref`, which decodes entities): an
-absolute `https://` or `http://` URL with a host and a path or query
-(`https://fonts.googleapis.com/css2?family=Fraunces`), or a root path that — resolved the way a
-browser resolves it — stays on the site's own host with a path beyond `/` and no `#`
-(`/fonts/site.css`). Anything else — `mailto:`, a `#fragment`, `.`, `/`, `./?v=2`, `/fonts/..`,
+absolute `https://` URL with a host (`https://fonts.googleapis.com/css2?family=Fraunces`), or a
+root path that stays on the site's own host (`/fonts/site.css`). Both are judged the way a browser
+resolves them: the resulting path must be longer than `/` — a query never stands in for a path —
+and carry no `#`. `http://` is dropped too: an https page blocks it as mixed content. Anything
+else — `mailto:`, a `#fragment`, `.`, `/`, `./?v=2`, `https://cdn.example/?family=A`, `/fonts/..`,
 `/%2e%2e/`, `/\cdn.example/…` (a browser reads `\` as `/`: another host), a relative or
 protocol-relative path — is reported as dropped. Most of those would load the HTML page itself.
 

@@ -31,7 +31,7 @@ export function describeTheme() {
     tokens,
     meta: {
       name: 'the theme id (required): letters, digits, dot, dash or underscore, at most 64. Also the name the build stages theme.css under.',
-      fonts: 'optional https:// webfont stylesheet URL, emitted as <link> (never @import)',
+      fonts: 'optional webfont stylesheet, emitted as <link> (never @import): an https:// URL with a path, or a /root/path on the site itself',
       announce: 'optional site-wide announcement text, shown as a thin band at the top of every page',
       'announce-href': 'optional link for the announcement: a /path or an https:// address',
       'announce-until': 'optional end date and time WITH an offset (2026-12-01T23:59:00+08:00): the band becomes a corner card with a countdown, and a build after that moment shows nothing',

@@ -145,7 +145,8 @@ if (off !== 'true') {
 // (`&#109;ailto:` is `mailto:` by the time it is emitted), and `.`, `./`, `/`, `./?v=2` all resolve
 // to the HTML page itself, which no compiler can rule out without knowing every page. So this is an
 // ALLOWLIST, applied to the exact string safeHref returns — the href the renderer will emit:
-//   (a) an absolute http:// or https:// URL with a host and a path beyond `/`, or a query;
+//   (a) an absolute https:// URL (http:// is mixed content on an https page) with a host, a
+//       resolved pathname longer than `/` (a query never substitutes for a path) and no `#`;
 //   (b) a root-relative path that, RESOLVED as a browser would, stays on the site's own host,
 //       has a pathname longer than `/` and no `#`.
 // Everything else is a drop. Narrow on purpose: a webfont stylesheet is one of these in practice.
@@ -155,9 +156,12 @@ function stylesheetHrefOk(emitted) {
   // (the site root), `/%2e%2e/` and `/\cdn.example/a.css` (a browser reads `\` as `/`, so that
   // is another host) through. Both forms are resolved with WHATWG URL, which is what a browser runs.
   let u;
-  if (/^https?:\/\//i.test(emitted)) {
+  // https only: an https page blocks an http:// stylesheet as mixed content, so it would never load.
+  // And a query never stands in for a path — `https://cdn.example/?family=A` (or `/%2e%2e/?…`) is the
+  // host's root document, whatever it answers.
+  if (/^https:\/\//i.test(emitted)) {
     try { u = new URL(emitted); } catch { return false; }
-    return /^https?:$/.test(u.protocol) && !!u.hostname && (u.pathname.length > 1 || u.search.length > 1);
+    return u.protocol === 'https:' && !!u.hostname && u.pathname.length > 1 && !u.hash;
   }
   if (emitted.startsWith('/')) {
     try { u = new URL(emitted, 'https://site.invalid/some/page'); } catch { return false; }
@@ -166,7 +170,7 @@ function stylesheetHrefOk(emitted) {
   return false;
 }
 if (siteMeta.fonts && !stylesheetHrefOk(safeHref(siteMeta.fonts))) {
-  drop('fonts', 'a stylesheet <link> cannot load this — use an absolute https:// stylesheet URL (with a path or query), or a /root/path longer than /');
+  drop('fonts', 'a stylesheet <link> cannot load this — use an absolute https:// stylesheet URL with a path (http:// is blocked on an https page), or a /root/path');
 }
 
 // type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
