@@ -46,8 +46,17 @@ const md = ['---', 'title: Probe', 'accent: "#ff6b4a"', 'theme: light', '---', '
   '- [ ] %% card: embed w=6 kind=slider images="https://i.example/1.png,https://i.example/2.png" %%',
   ''].join('\n');
 
+// r4: the square embed and the cells packed after it — the review's shape (an embed, a tile beside
+// it, a tile under it) at w=3 and w=6. The links are written the way a link cell reads them (the body
+// `[text](url)`); a `url=` param is not one, and such a cell renders nothing — measuring nothing.
+const NEIGHBOURS = {
+  'grid-w3': ['- [ ] %% card: embed w=3 %% <b>embed</b>', '- [ ] %% card: link w=3 %% [Right](https://example.com)', '- [ ] %% card: link w=3 %% [Under](https://example.com)'],
+  'grid-w6': ['- [ ] %% card: embed w=6 %% <b>embed</b>', '- [ ] %% card: link w=3 %% [Next](https://example.com)', '- [ ] %% card: link w=3 %% [Next2](https://example.com)'],
+};
+const cards = { probe: md };
+for (const [k, lines] of Object.entries(NEIGHBOURS)) cards[k] = ['---', 'title: Grid', '---', '', '## grid', '', ...lines, ''].join('\n');
 // the store shape every harness here uses: the card under its bare (legacy) key, nothing else
-const env = { CARDS: { get: async (k) => (k === 'probe' ? md : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
+const env = { CARDS: { get: async (k) => cards[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://localhost' + req.url, { headers: req.headers }), env);
   res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -100,6 +109,39 @@ try {
   check(boxes.length === 2 && boxes.every((x) => x.w > 50 && Math.abs(x.w - x.h) < 1.5 && Math.abs(x.fw - x.w) < 1.5 && Math.abs(x.fh - x.h) < 1.5), 'each embed fills a square cell of its own width');
   check(boxes.length === 2 && boxes[0].w > boxes[1].w * 1.8, 'w=6 is about twice w=3');
   check(await pg.evaluate(() => document.querySelectorAll('[data-coral-type="slides"] .st-slider figure').length) === 2, 'the old `embed kind=slider` still renders its two-slide carousel');
+
+  // r4: nothing packed after a square embed overlaps it. The bento pack (card-core packGrid) gives every
+  // cell ONE row and the CSS rows are content-sized (`grid-auto-rows:minmax(var(--cp-unit),auto)`), so the
+  // square's own height is what its row becomes — measured, at a phone width and a desktop one.
+  const overlaps = async (page) => page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.st-cells > *')];
+    const out = [];
+    cells.forEach((c, i) => {
+      const f = c.querySelector('.st-embed-html iframe') || (c.matches('.st-embed-html') && c.querySelector('iframe'));
+      if (!f) return;
+      const e = f.getBoundingClientRect();
+      for (const n of cells.slice(i + 1)) {
+        const r = n.getBoundingClientRect();
+        const sharesColumns = r.left < e.right - 1 && r.right > e.left + 1;
+        if (sharesColumns && r.top < e.bottom - 0.5) out.push(`${n.textContent.trim() || n.getAttribute('data-coral-type')} top ${r.top.toFixed(1)} < iframe bottom ${e.bottom.toFixed(1)}`);
+      }
+    });
+    return { cells: cells.length, out };
+  });
+  for (const k of Object.keys(NEIGHBOURS)) for (const width of [390, 900]) {
+    const g = await b.newPage({ viewport: { width, height: 1400 } });
+    await g.goto(`${base}/${k}`, { waitUntil: 'load' });
+    const { cells, out } = await overlaps(g);
+    check(cells === 3 && out.length === 0, `${k} @${width}px: the cells after the square embed start below the iframe's bottom (${cells} cells${out.length ? '; ' + out.join('; ') : ''})`);
+    if (k === 'grid-w3' && width === 390) {
+      // 🔴 CONTROL: pin the rows to one unit — the layout the review reasoned about — and the same
+      // measure must report the overlap, or it cannot see the thing it guards
+      await g.addStyleTag({ content: 'html body .st-card .st-cells{grid-auto-rows:var(--cp-unit)!important}' });
+      const pinned = await overlaps(g);
+      check(pinned.out.length > 0, `CONTROL: with rows pinned to one unit the measure DOES report the overlap (${pinned.out.join('; ') || 'nothing'})`);
+    }
+    await g.close();
+  }
 
   // 🔴 CONTROL: allow-same-origin is the token we leave out. Add it, and the same probe must read.
   const ctl = await b.newPage();

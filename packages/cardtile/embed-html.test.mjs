@@ -328,6 +328,28 @@ test('🔴 the iframe cannot reach the card\'s storage: opaque origin, no naviga
   assert.equal(edit.replace(/ data-cell="\d+"/g, '').replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''), html.replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''));
 });
 
+// r4: a square embed and the cells packed after it. Every cell is ONE row in the bento pack (`h` is
+// retired — no cell declares rows), and the rows are content-sized, so the square's height becomes its
+// row's and nothing after it can overlap. These pin the two facts that guarantee it; the overlap
+// itself is measured in a real browser by verify/embed-sandbox.mjs (with a pinned-row control).
+for (const w of [3, 6]) {
+  test(`a w=${w} square embed declares one row like every cell, in content-sized rows`, () => {
+    const md = card(`- [ ] %% card: embed w=${w} %% <b>embed</b>`, '- [ ] %% card: link w=3 %% [Right](https://example.com)', '- [ ] %% card: link w=3 %% [Under](https://example.com)');
+    const html = render(md);
+    const [cell] = cellsOf(html, 'embed');
+    assert.match(cell, new RegExp(`^<div class="st-cell st-embed st-embed-html" data-span="${w}x1" data-w="${w}" data-coral-type="embed">`));
+    // the rows grow to their tallest cell — a fixed track here is exactly the layout that WOULD overlap
+    assert.match(html, /\.st-card \.st-cells\{[^}]*grid-auto-rows:minmax\(var\(--cp-unit\),auto\)!important/);
+    assert.match(html, /\.st-card \.st-cell\{grid-row:auto;align-self:start/);
+    // and the embed takes its height from its own width, never from a row count or a fixed length
+    const css = /<style>([^<]*)<\/style><iframe/.exec(cell)[1];
+    assert.match(css, /\.st-card \.st-embed-html\{position:relative;aspect-ratio:1;min-height:0\}/);
+    assert.doesNotMatch(css, /grid-row|(?<![-\w])(?:min-)?height:\d+(?:\.\d+)?(?:px|r?em|[sld]?vh)/, 'the embed cell sets its own row span or a fixed height');
+    // CONTROL: the same check does fire on a fixed height
+    assert.match('.x{height:120px}', /grid-row|(?<![-\w])(?:min-)?height:\d+(?:\.\d+)?(?:px|r?em|[sld]?vh)/);
+  });
+}
+
 test('an empty embed renders nothing on a live card', () => {
   const html = render(card('- [ ] %% card: embed w=6 %%'));
   assert.equal(cellsOf(html, 'embed').length, 0);
