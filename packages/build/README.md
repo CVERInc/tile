@@ -76,11 +76,18 @@ sets — `_theme.md` is their source). The compiler does not edit `_site.md` for
 and the rest of it is not the compiler's business. Then run the second line. Change `_theme.md`,
 run both again.
 
+**Exit 0 means the theme you wrote is the theme you got.** If any value would be left out — an
+unknown key (`gd-bgg`), a treatment value that is not on its list (`card: glassy`), a non-hex
+surface, an unsafe token value, a `type-scale` that derives nothing — the first line names each one
+(`✗ card: "glassy" dropped — not one of surface, flat, glass, elevated`), writes nothing, and exits 2.
+Fix them, or add `--allow-dropped` to compile without them; the list is printed either way. A name
+that is not a plain filename (`../oops`) is always refused: the build finds the stylesheet by it.
+
 **What the source may say.** Every legal key is in `theme/theme-schema.js`: `TOKENS` (the `--gd-*`
 custom properties `packages/sitetile/astro/src/styles/site.css` defines or reads; a test holds the
 two to zero drift in both directions), `TREATMENTS` (the layout switches and their allowed values),
-and `META_KEYS`. `describeThemeGrammar()` returns the same vocabulary as data, with a one-line
-purpose for each key. A few rules that matter in practice:
+and `META_KEYS`. `describeTheme()` returns the same vocabulary as data, with a one-line purpose
+for each key and how to compile it. A few rules that matter in practice:
 
 - Only the keys you set are emitted. Everything else stays at the renderer's default, so a theme
   that sets three colours changes three colours.
@@ -92,12 +99,15 @@ purpose for each key. A few rules that matter in practice:
   Hex only; a gradient or an image is custom CSS on `[data-surface="<name>"]`.
 - Values are interpolated into a live stylesheet and into `_site.md`, so a value that could break
   out of either (a line break, `; { } < > @ \ /* */ url()` in a token, a name that is not a plain
-  filename) is **dropped and reported**, never written. The custom CSS block is the deliberate
+  filename) is **never written** — the CLI refuses it as above. The custom CSS block is the deliberate
   exception: it is appended verbatim, with only `</style` removed.
 
-The same functions are importable — `compileTheme(meta, customCss)` returns `{ name, css, siteMeta
-}`, and `parseThemeDoc` / `residueOf` read a `_theme.md` — for an editor that writes themes rather
-than a person who types them.
+The same functions are importable from `@tile/build/theme` (`theme/index.js`, the one public
+entrypoint) — `compileTheme(meta, customCss)` returns `{ name, css, siteMeta }`, `parseThemeDoc` /
+`residueOf` read a `_theme.md`, and `structuralIssues` / `sanitizeThemeMeta` say what would be
+ignored or dropped — for an editor that writes themes rather than a person who types them. The
+library itself does not refuse: an editor that has already told its author what it dropped wants
+a compile, so refusing is the CLI's job.
 
 ## The API
 

@@ -78,11 +78,11 @@ test('refuses by name, writing nothing: no frontmatter, no name, no file', (t) =
   }
 });
 
-test('an unknown key and an unsafe value are reported, and compiled around rather than refused', (t) => {
-  const r = run(t, '---\nname: x\ngd-bg: #fff\ngd-bogus: 1\ngd-text: red} body{display:none\n---\n');
+test('with --allow-dropped, an unknown key and an unsafe value are reported and compiled around', (t) => {
+  const r = run(t, '---\nname: x\ngd-bg: #fff\ngd-bogus: 1\ngd-text: red} body{display:none\n---\n', 'theme.css', ['--allow-dropped']);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /gd-bogus — unknown theme key/);
-  assert.match(r.stderr, /gd-text dropped \(unsafe\)/);
+  assert.match(r.stderr, /gd-bogus: "1" dropped — not a key this vocabulary has/);
+  assert.match(r.stderr, /gd-text: "red\} body\{display:none" dropped — unsafe: /);
   const css = readFileSync(r.out, 'utf8');
   assert.doesNotMatch(css, /display:\s*none|gd-bogus/);
   assert.match(css, /--gd-bg: #fff;/);
@@ -114,10 +114,68 @@ test('the README\'s worked example compiles, and prints exactly the keys the REA
   assert.match(readFileSync(r.out, 'utf8'), /letter-spacing: -0\.02em/, 'its custom CSS block reached theme.css');
 });
 
-test('the package exports resolve to these very modules', async () => {
-  const viaName = await import('@tile/build/theme/theme-compile.js');
+test('the package\'s one theme entrypoint resolves to these very modules, and is the PUBLIC face', async () => {
+  const pub = await import('@tile/build/theme');
   const viaPath = await import('./theme-compile.js');
-  assert.equal(viaName.compileTheme, viaPath.compileTheme);
-  const schema = await import('@tile/build/theme/theme-schema.js');
-  assert.equal(schema.parseThemeDoc, parseThemeDoc);
+  assert.equal(pub.compileTheme, viaPath.compileTheme);
+  assert.equal(pub.parseThemeDoc, parseThemeDoc);
+  assert.equal(typeof pub.describeTheme, 'function');
+  assert.equal('describeThemeGrammar' in pub, false, 'the hosted editor\'s description is not the public entrypoint');
+  // the module files themselves are not exported by path any more
+  await assert.rejects(() => import('@tile/build/theme/theme-schema.js'), /ERR_PACKAGE_PATH_NOT_EXPORTED|not exported/);
+});
+
+// ── round 2: a successful exit must mean the theme you wrote is the theme you got ────────────────
+
+test('🔴 a name the compiler would drop is refused before anything is written', (t) => {
+  for (const name of ['../oops', 'a b', 'x*/y', 'n'.repeat(65)]) {
+    const r = run(t, `---\nname: ${name}\ngd-bg: #fff\n---\n`);
+    assert.equal(r.status, 2, `name ${JSON.stringify(name)} → exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /name/);
+    assert.equal(r.stdout, '', 'no _site.md keys printed for a refused theme');
+    assert.equal(existsSync(r.out), false, 'and no theme.css');
+  }
+});
+
+test('🔴 every value the compiler would drop is named — key, value, reason — and refused unless --allow-dropped', (t) => {
+  const doc = [
+    '---', 'name: sample', 'gd-bg: #fff',
+    'card: glassy',                    // not a listed treatment value
+    'surface-sand: rgb(banana)',       // surfaces are hex only
+    'gd-text: red} body{display:none', // structurally unsafe
+    'gd-band: #f3e9dc',                // per-surface, not site-wide
+    'gd-bgg: #000',                    // a typo: no such key
+    'type-scale: 9',                   // out of range: derives nothing
+    'gd-font-size: 18px',
+    '---', '',
+  ].join('\n');
+  const r = run(t, doc);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(existsSync(r.out), false, 'refused: nothing written');
+  assert.equal(r.stdout, '');
+  for (const [key, value] of [['card', 'glassy'], ['surface-sand', 'rgb(banana)'], ['gd-text', 'red} body{display:none'],
+    ['gd-band', '#f3e9dc'], ['gd-bgg', '#000'], ['type-scale', '9']]) {
+    const line = r.stderr.split('\n').find((l) => l.includes(`${key}: ${JSON.stringify(value)}`));
+    assert.ok(line, `no dropped line names ${key}: ${JSON.stringify(value)}\n${r.stderr}`);
+    assert.match(line, /dropped/);
+    assert.match(line, / — \S/, `the line for ${key} gives no reason: ${line}`);
+  }
+  assert.match(r.stderr.split('\n').find((l) => l.startsWith('✗ card:')) ?? '', /solid|surface, flat, glass, elevated/);
+  assert.match(r.stderr, /--allow-dropped/, 'the refusal names the way through');
+
+  // the same document, explicitly accepted: written, reported, exit 0
+  const ok = run(t, doc, 'theme.css', ['--allow-dropped']);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.ok(existsSync(ok.out));
+  assert.match(ok.stderr, /card: "glassy"/);
+  const css = readFileSync(ok.out, 'utf8');
+  assert.match(css, /--gd-bg: #fff;/);
+  assert.doesNotMatch(css, /banana|display:\s*none|glassy|--gd-band: #f3e9dc/);
+  assert.equal(ok.stdout.trim(), 'theme: sample', 'the dropped card value is not stamped');
+});
+
+test('a clean theme reports no drops; a default treatment value is not a drop', (t) => {
+  const r = run(t, '---\nname: sample\ngd-bg: #fff\ncard: surface\nbutton: pill\nsurface-sand: #efe6d8\ngd-font-size: 18px\ntype-scale: 1.25\n---\n');
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /dropped|⚠|✗/);
 });

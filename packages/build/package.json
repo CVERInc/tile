@@ -17,8 +17,7 @@
     ".": "./index.mjs",
     "./mkpages.mjs": "./mkpages.mjs",
     "./stage.mjs": "./stage.mjs",
-    "./theme/theme-compile.js": "./theme/theme-compile.js",
-    "./theme/theme-schema.js": "./theme/theme-schema.js"
+    "./theme": "./theme/index.js"
   },
   "bin": {
     "tile-build": "./cli.mjs",
