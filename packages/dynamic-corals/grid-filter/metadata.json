@@ -1,0 +1,27 @@
+{
+  "id": "grid-filter",
+  "author": "official",
+  "summary": "Makes a grid's facet pills show only the cards in the chosen facet.",
+  "embed": "<section class=\"st-grid\"><div class=\"st-grid-filter\" data-dynamic-coral=\"grid-filter\" role=\"group\" aria-label=\"All\"><button type=\"button\" class=\"st-filter-pill is-active\" data-cat=\"\" aria-pressed=\"true\">All</button><button type=\"button\" class=\"st-filter-pill\" data-cat=\"Brand\" aria-pressed=\"false\">Brand</button></div><div class=\"st-cells\"><div class=\"st-cell\" data-cat=\"Brand\">One</div></div></section>\n<script src=\"grid-filter.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the grid-filter coral; on the filter bar inside a .st-grid.",
+      "values": [
+        "grid-filter"
+      ]
+    },
+    {
+      "name": "data-cat",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "On each pill and card: its facet. A pill with an empty value shows every card."
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output, not a standalone copy-paste embed. The renderer emits the mount point and the section's markup; sitetile's section component imports the client source and Astro bundles it into the page, and a Worker host serves the built artifact itself."
+}

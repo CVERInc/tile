@@ -26,6 +26,7 @@ import {
 } from './colour.mjs';
 import { renderPage } from './card-render.mjs';
 import { parseCard } from './card-core.js';
+import { CSS as CARD_CSS } from './serve/card-assets.mjs';
 
 let passed = 0;
 const test = (name, fn) => {
@@ -325,9 +326,12 @@ test('nothing that floats or sits on artwork is left wearing a ground-derived co
   assert.ok(html.includes('.st-grid-label{font-weight:700') && /st-grid-label\{[^}]*--cp-accent-bright/.test(html),
     'the lane label must use --cp-accent-bright');
   assert.ok(!/st-grid-label\{[^}]*color:var\(--cp-accent,/.test(html), 'and not the raw accent');
-  // card.css carries `.st-footer a{color:var(--cp-accent)!important}` — it has to be beaten
-  assert.ok(html.includes('.st-footer a{color:var(--cp-accent-bright,#0a8c8e)!important}'),
-    'the footer link needs the !important back, because the rule it corrects has one');
+  // 🩸 This asserted the footer link's !important accent override was present. tile-lab#55 補 5
+  // reversed the design, not the measurement: footer links are not painted at all — they take the
+  // footer's own (ground-derived, measured) ink, and only :hover is the accent. So the claim is now
+  // that NO layer paints them, which is what made the old override necessary in the first place.
+  assert.ok(!/\.st-footer a\{[^}]*color:[^}]*!important/.test(html + CARD_CSS),
+    'nothing paints the footer links with an !important colour — they inherit the footer\'s ink');
   // text on a picture is not themed: it gets a scrim and fixed light ink
   // 🩸 This used to assert `.st-gal-body{background:linear-gradient(` — the ELEMENT, by source
   // string. The intent (text on a picture must have a dark backing, whatever the photo is) is right;

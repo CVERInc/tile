@@ -178,6 +178,8 @@ const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
 const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
+// Error class names safe to log verbatim. Anything else is reported as 'unknown' (tile#220 review).
+const LOGGED_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'AbortError', 'TimeoutError']);
 // These site endpoints win even if someone creates a Card with the same handle.
 const APEX_SITE_PATHS = new Set(['report', 'pricing', 'login', 'edit', 'try']);
 const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, '').toLowerCase());
@@ -728,7 +730,22 @@ const router = {
           // The apex belongs to the site when the optional Card lookup is unavailable.
           let md;
           try { ({ md } = await liveCard(env.CARDS, handle)); }
-          catch { return fetch(request); }
+          catch (err) {
+            // tile#219 follow-up: the forward hides the failure from the visitor, so leave one line
+            // for the operator. Same JSON-event shape as card-api's settlement lines. No error text:
+            // the store's message names the key it failed on (the handle) and may carry anything
+            // else, and `name` is settable text too — so only an allowlisted class name is logged.
+            // A thrown value can be anything: `name` is read exactly once (a getter may answer
+            // differently twice, or throw), and nothing here may stand between the visitor and
+            // the site, so the whole line is best-effort.
+            try {
+              let name;
+              try { name = err?.name; } catch { name = undefined; }
+              const error = typeof name === 'string' && LOGGED_ERROR_NAMES.has(name) ? name : 'unknown';
+              console.warn(JSON.stringify({ event: 'apex_card_lookup_failed', host: reqHost, op: 'liveCard', error }));
+            } catch { /* logging is optional; the fallthrough is not */ }
+            return fetch(request);
+          }
           if (md != null) return new Response(null, { status: 301, headers: {
             Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
           } });

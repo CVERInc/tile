@@ -214,6 +214,42 @@ if ((block.match(/#b890e8/g) || []).length !== 6) throw new Error('a non-assignm
 block = block.split(K_HEX).join("cl.style.background='var(--cp-accent)'");
 if (block.includes('b890e8')) throw new Error("the lifted card's accent survived");
 
+// 9. the HOLDER follows the avatar instead of freezing the size it saw at mount.
+//
+//    The coral wraps the avatar in `#qr-holder` and wrote that box's size INLINE, from
+//    `icon.offsetWidth/offsetHeight` at the moment it mounted. The avatar's size is not a constant
+//    (23.6cqw with a 56px floor, a 600px breakpoint, and the Deck shows it at 140px), so the box
+//    went stale the moment anything changed it after mount. Found on chodaict's iPhone
+//    (tile-lab#55 補 4): the holder stayed 81px around a 140px avatar, the picture overflowed it to
+//    the right, and the avatar sat 30px off centre — on desktop too, where nobody had noticed.
+//
+//    🔴 The box is now shrink-to-fit (an inline-block with no width/height is exactly the avatar's
+//    box), so there is no number to go stale. The inline size existed for one real reason, and it
+//    is kept: while the QR is open the avatar flies OUT of the holder, and an empty shrink-to-fit
+//    box collapses — the hero would jump under the overlay and the avatar fly back to where it no
+//    longer belongs. So the size is pinned for exactly the flight (from the holder's own box, the
+//    instant before the avatar leaves) and released the moment the avatar is back.
+//
+//    Geometry only, like 6 and 7: not one character of the 表演 changes.
+{
+  const K_HOLDER = "holder.style.cssText='display:inline-block;width:'+icon.offsetWidth+'px;height:'+icon.offsetHeight+'px;position:relative';";
+  const nh = block.split(K_HOLDER).length - 1;
+  if (nh !== 1) throw new Error(`holder sizing anchor: expected exactly one, found ${nh}`);
+  block = block.replace(K_HOLDER, "holder.style.cssText='display:inline-block;position:relative';");
+
+  const K_FLY = "var grp=document.createElement('div');grp.id='qr-group';";
+  const nf = block.split(K_FLY).length - 1;
+  if (nf !== 1) throw new Error(`flight anchor: expected exactly one, found ${nf}`);
+  block = block.replace(K_FLY, "_origHolder.style.width=_origHolder.offsetWidth+'px';_origHolder.style.height=_origHolder.offsetHeight+'px';" + K_FLY);
+
+  const K_BACK = "_origHolder.appendChild(icon);_origHolder.appendChild(wrap);";
+  const nb = block.split(K_BACK).length - 1;
+  if (nb !== 1) throw new Error(`return anchor: expected exactly one, found ${nb}`);
+  block = block.replace(K_BACK, K_BACK + "_origHolder.style.width='';_origHolder.style.height='';");
+
+  if (/icon\.offset(Width|Height)\+'px/.test(block)) throw new Error('a mount-time holder size survived');
+}
+
 const out = `// REEF with Card — QR dynamic coral, CLIENT (built by build.mjs into qr.js; do not edit qr.js).
 //
 // 🔴 The avatar-morph QR popup is chodaict's 心血 — it was born in Python, carried to Svelte, and

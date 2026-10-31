@@ -2762,17 +2762,23 @@ function renderSection(s, hero, ctx) {
     case 'carousel': {
       // Single-row sibling of gallery: same image-first cards, but laid in a horizontal scroll
       // track with prev/next arrows (slidesToShow via `cols=`). For casts/archives too long for a
-      // static grid. The JS runtime (carousel.js) wires the arrows; CSS-only it degrades to a
-      // scrollable track. Theme paints `.st-carousel` / `.st-car-track` / `.st-car-cell`.
+      // static grid. The JS runtime (the carousel dynamic coral) wires the arrows; CSS-only it degrades
+      // to a scrollable track. Theme paints `.st-carousel` / `.st-car-track` / `.st-car-cell`.
+      // `card=blog-full` — the opt-in full-post cell (mirrors Carousel.astro): an extra class and an
+      // empty byline slot under the title. 🩸 tile-lab#52: the built page had both and this branch
+      // neither, found when section-contract.test.mjs gained its first carousel cases.
+      const blogFull = pm.card === 'blog-full';
       const cells = (s.cells || []).map((c) => {
         const fi = firstImage(c.body);
         const fig = fi.img ? '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>' : '';
         const badge = c.badge ? '<span class="st-cell-badge" data-badge="' + escAttr(c.badge.toLowerCase()) + '">' + inlineHtml(c.badge) + '</span>' : '';
         const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + inlineHtml(c.cta) + '</span></span>' : '';
-        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + bodyHtml(fi.rest, c.href && isSafeHref(c.href) ? IN_LINK : undefined) + cta;
+        const inner = fig + '<h3>' + inlineHtml(c.title) + '</h3>' + (blogFull ? '<div class="st-car-byline" aria-hidden="true"></div>' : '')
+          + bodyHtml(fi.rest, c.href && isSafeHref(c.href) ? IN_LINK : undefined) + cta;
+        const cellCls = 'st-car-cell st-gal-cell' + (blogFull ? ' st-car-cell-blogfull' : '');
         return (c.href && isSafeHref(c.href))
-          ? '<a class="st-car-cell st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
-          : '<div class="st-car-cell st-gal-cell">' + badge + inner + '</div>';
+          ? '<a class="' + cellCls + ' st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
+          : '<div class="' + cellCls + '">' + badge + inner + '</div>';
       }).join('');
       // `more="LABEL=/href"` — optional "view all" link top-right of the heading row (mirrors Carousel.astro).
       const moreRaw = pm.more ? (typeof pm.more === 'object' ? pm.more.label : pm.more) : null;
@@ -2780,8 +2786,8 @@ function renderSection(s, hero, ctx) {
         ? { label: String(moreRaw).split('=')[0].trim(), href: String(moreRaw).split('=').slice(1).join('=').trim() }
         : null;
       const moreOk = more && isSafeHref(more.href);
-      const head = (s.title || more)
-        ? '<div class="st-car-head">' + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
+      const head = (s.title || more || pm.eyebrow)
+        ? '<div class="st-car-head">' + eyebrowP('carousel') + (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') +
           (moreOk ? '<a class="st-car-more" href="' + escHrefAttr(more.href) + '">' + inlineHtml(more.label) + '</a>'
             : more ? '<span class="st-car-more">' + inlineHtml(more.label) + '</span>' : '') + '</div>'
         : '';
