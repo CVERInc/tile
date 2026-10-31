@@ -22,6 +22,9 @@ import { linkOf, hostLabel, hostOf, iconDomains, socialLineOf, overrideMark, def
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
 import { DRAWER_CSS } from '../dynamic-corals/drawer/drawer-style.mjs';
 import { escHtml } from '../cssmd/cssmd.js';
+// The cells' markup is the shared section emitters' (tile-lab#52 phase 3): each is called with
+// `params.cell` (the bento layout attributes) and this renderer's own dialect — see `dialect` below.
+import { emitProse } from '../emit/prose.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -449,6 +452,17 @@ function anchorFor(url, ctx) {
   return `href="${esc(attrUrl(ctx, url))}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
 
+// The Card's dialect for the shared emitters (packages/emit/cell.mjs): the emitters share the
+// MARKUP; markdown, escaping and the destination registry stay this renderer's own (tile-lab#52
+// ruling 2026-10-31), so a Card's bytes are what they were before the markup moved.
+const dialect = (ctx) => ({
+  inline: (s) => mdInline(s, ctx),
+  block: (s) => mdBlock(s, ctx),
+  esc,
+  url: (raw) => esc(attrUrl(ctx, raw)),
+  cssUrl: (raw) => esc(cssAttrUrl(ctx, raw)),
+});
+
 function renderCell(cell, place, ctx) {
   const p = cell.params || {};
   // `data-span` stays: card.css uses it for CONTENT decisions (a 2×2 tile hides its sub-label), and
@@ -579,7 +593,7 @@ function renderCell(cell, place, ctx) {
     case 'embed':
       return renderEmbed(p, b, size, ctx);
     case 'text':
-      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b, ctx)}</div>`;
+      return emitProse({ body: b }, { cell: { attrs: size } }, dialect(ctx));
     case 'video': {
       // Click-to-load YouTube. The platforms we take refugees from drop a live iframe on page load,
       // which means YouTube is watching every visitor before anyone presses play, and the player's
