@@ -111,7 +111,7 @@ const thanksMark = isInbox && thanksPath ? recordThanks(thanksPath) : undefined;
 const returnTo = Astro.url.pathname;
 // "Back to homepage" on the success card — the home of the locale `returnTo` sits under, from the
 // same built path and through the same function the header logo uses (lingo/locale.mjs →
-// localeHomePath). 🩸 CVERInc/reef#1891: it was a literal `/`, one line below a link that carried
+// localeHomePath). 🩸 reef#1891: it was a literal `/`, one line below a link that carried
 // the locale, so a zh-TW visitor was handed back to the English home. MEASURED against the content
 // files: a locale with a contact page and no home content file yet keeps `/` rather than a prefix
 // whose home was never written (content file present = counted, as hreflang counts it).

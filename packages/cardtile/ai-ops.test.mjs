@@ -176,7 +176,7 @@ test('delete_asset declares expected_version beside handle and id (tile#209: the
   assert.ok(!OPS.put_asset.params.includes('expected_version'));
 });
 
-// tile-lab#51 (chodaict 2026-10-29) — the profile cell is for a company too. A company's own agent
+// tile-lab#51 (product owner 2026-10-29) — the profile cell is for a company too. A company's own agent
 // read 「photo, name, one line」, concluded the cell was for a person and built its card without one:
 // no logo, and no QR (the QR is mounted on the profile's avatar). That was the agent reading us right.
 // These are the exact words reef-mcp's describe_card_grammar resolves (src/card-grammar.js:

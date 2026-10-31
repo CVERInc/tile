@@ -41,7 +41,7 @@
 import { escHtml, markCode, markEmphasis, markEscapes } from '../cssmd/cssmd.js';
 import { highlightCode, knowsLanguage } from '../cssmd/highlight.js';
 // The `action=inbox` form's runtime copy and script: the SAME module and the SAME text Form.astro
-// reads (CVERInc/reef#1933 S4b), never a second copy of the strings.
+// reads (reef#1933 S4b), never a second copy of the strings.
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { localeHomePath } from './locale.mjs';
 import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
@@ -1650,10 +1650,10 @@ function renderList(items) {
 // ── dialogue ────────────────────────────────────────────────────────────────────────────────
 // A blockquote whose FIRST line is nothing but a bold name is a spoken turn, not a quotation:
 //
-//     > **CHOD**
+//     > **CLEO**
 //     > Everyone who types already knows an aligned keyboard is hard to type on.
 //
-// An optional `· suffix` after the name carries a date (`> **GOGO** · 2026-04-10`).
+// An optional `· suffix` after the name carries a date (`> **GWEN** · 2026-04-10`).
 //
 // Why a markdown convention and not a coral: posts (`ir/posts/*.md`) are plain markdown — the
 // `%% sitetile: %%` grammar is for page bodies only — so a coral could not reach the one place
@@ -2562,7 +2562,7 @@ function orderedProseHtml(body) {
 // renderSection's prose branch below call this and nothing else, so the two cannot disagree about
 // where an image lands.
 //
-// Everything stays where the author wrote it (CVERInc/reef#1933 S6). It is `bodyHtml`, paragraph by
+// Everything stays where the author wrote it (reef#1933 S6). It is `bodyHtml`, paragraph by
 // paragraph: a paragraph that is ONLY images is bodyHtml's own `figure.st-figure` (several images in
 // one paragraph = one figure holding them all), and a paragraph that is ONLY links is a
 // `.st-prose-btns` row drawn at that position (a lone `[Back to X](…)` is a `.st-prose-plain` link).
@@ -2571,7 +2571,7 @@ function orderedProseHtml(body) {
 // 🩸 tile#120 made the two renderers agree by lifting every images-only paragraph into one trailing
 // `.st-prose-imgs` group and every links-only paragraph into one row before it — the `heroParts`
 // split, which cuts the raw body on blank lines. Two things were wrong with that: the author's
-// order was thrown away (chodaict's ruling on #1933: images stay where they are written), and a
+// order was thrown away (product owner's ruling on #1933: images stay where they are written), and a
 // blank-line split does not know a code fence — a `[A](/a)` line inside a fenced block became a
 // button and an `![x](…)` line inside it left the code for the image group. The paragraphs here are
 // the ones bodyHtml finds after it has taken fences, lists, quotes and tables whole.

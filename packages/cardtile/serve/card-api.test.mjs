@@ -621,7 +621,7 @@ test('thinCard is idempotent and assetManifest counts decoded bytes', () => {
 
 // ── delete_card (reef#2618) ──────────────────────────────────────────────────────────────────────
 //
-// chodaict's ruling: an owner may delete their Card — nothing kept, the handle free at once. What IS
+// the product owner's ruling: an owner may delete their Card — nothing kept, the handle free at once. What IS
 // kept is one fact with no content in it: that this handle had a card and when it went (`gone:`).
 // The public address does NOT say so: tile-lab#51 r2 (停權／刪除／不存在 look the same) — a deleted
 // Card answers exactly as a handle that never existed, the shaped no-card 404 (card-worker.test.mjs

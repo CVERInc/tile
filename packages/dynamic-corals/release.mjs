@@ -11,7 +11,7 @@
 //
 // `gen-assets` reads the BUILT bundle. I edited the source, skipped `npm run build`, and rebuilt the
 // assets from a stale artifact — three times. The version number changed every time, so every check
-// I ran said the deploy had landed. chodaict tested on real phones three times and told me it still
+// I ran said the deploy had landed. The product owner tested on real phones three times and told me it still
 // did not work, three times.
 //
 // 🔴 It was already written down — 「改 coral＝發佈(bump→build→頻道→deploy)非 cp」 — in a memory

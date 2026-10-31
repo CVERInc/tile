@@ -16,7 +16,7 @@ const ordered = pm.ordered != null;
 // renders as real CTA buttons, mirroring Hero's identical `linksOnly`/`linkButtonsHtml` seam —
 // found on a real /about page, where the closing links are bordered pill buttons, not inline
 // text joined by "·". Reuses the exact same parser so both seams stay in lockstep.
-// Every paragraph stays where it is written (CVERInc/reef#1933 S6): a links-only one is a button
+// Every paragraph stays where it is written (reef#1933 S6): a links-only one is a button
 // row in place, an images-only one a `figure.st-figure` in place. The body's markup lives in
 // `proseBodyHtml`, which the string renderer's prose branch calls too — written out here instead,
 // the two renderers gave one body two different structures.

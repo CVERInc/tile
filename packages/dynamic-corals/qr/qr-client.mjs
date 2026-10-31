@@ -1,6 +1,6 @@
 // REEF with Card — QR dynamic coral, CLIENT (built by build.mjs into qr.js; do not edit qr.js).
 //
-// 🔴 The avatar-morph QR popup is chodaict's 心血 — it was born in Python, carried to Svelte, and
+// 🔴 The avatar-morph QR popup is the product owner's 心血 — it was born in Python, carried to Svelte, and
 // was about to be re-hand-carried into cardtile (每搬一次就可能壞). Making it a coral gives it ONE
 // home: the popup 表演 below is lifted VERBATIM from the live qr-anim.js; the only edits are (a) the
 // _qrMatrix is now COMPUTED (qr-core, so any URL works) instead of a server-baked literal, (b) the
@@ -29,7 +29,7 @@ import { qrMatrix } from './qr-core.mjs';
 
     // the matrix — COMPUTED, not shipped (this is the re-break fix)
     //
-    // EC level H (30%) — M(15%) → Q(25%) → H, each step taken because real phones still failed. Measured 2026-07-30 after chodaict reported a real-device
+    // EC level H (30%) — M(15%) → Q(25%) → H, each step taken because real phones still failed. Measured 2026-07-30 after the product owner reported a real-device
     // failure: some weaker phones could not scan DURING the animations. A signal from actual
     // hardware beats the arithmetic that said 0.07 was enough.
     //

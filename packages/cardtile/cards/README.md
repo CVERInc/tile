@@ -39,7 +39,7 @@ Verified against the live deployment on 2026-08-12: 401 / 401 / 404, refusals by
 
 🔴 **The three real cards left this directory on 2026-08-12.** They are in `../../../lab/`.
 
-chodaict's ruling, and it is the right shape: *if a Card owner could make this themselves without
+the product owner's ruling, and it is the right shape: *if a Card owner could make this themselves without
 us, we do not need to keep it — and if we do keep it, it goes in our own workspace, not interwoven
 with the product.* Those three exist because REEF with Card's first customers were ones we built
 for BY HAND and then gave away. The free product is heading somewhere anyone makes their own. So

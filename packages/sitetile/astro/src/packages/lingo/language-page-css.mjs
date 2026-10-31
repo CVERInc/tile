@@ -2,7 +2,7 @@
 //
 // language-page.css lifts the BOX of the chooser's parts into `reef.responsive`, the layer after the
 // site's theme, so a site-wide rule (`main * { max-width }`) cannot crush a page its owner was not
-// looking at (CVERInc/reef#1887). A cascade layer cannot tell that rule from the opposite case: an
+// looking at (reef#1887). A cascade layer cannot tell that rule from the opposite case: an
 // owner who restyled the chooser ON PURPOSE. Measured on a real theme, `.rf-lang-list { display:
 // grid; grid-template-columns: repeat(3, …) }` came out as one stacked flex column.
 //

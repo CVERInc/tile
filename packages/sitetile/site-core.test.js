@@ -533,11 +533,11 @@ test('round-trip: 3-deep block-scalar nav is idempotent (serialize emits `key: |
 const dlg = (body) => renderSiteToHtml(parseSite('---\nsitetile-page: t\n---\n\n## R\n%% sitetile: prose %%\n' + body));
 
 test('dialogue: a bold-name-only quote line becomes a turn', () => {
-  const html = dlg('> **CHOD**\n> Aligned keyboards are hard to type on.');
+  const html = dlg('> **CLEO**\n> Aligned keyboards are hard to type on.');
   assert.ok(html.includes('<div class="st-dialogue">'), 'wraps in st-dialogue');
   assert.ok(html.includes('data-side="left"'), 'first speaker sits left');
   assert.ok(html.includes('<div class="st-turn-who" aria-hidden="true">C</div>'), 'initial stands in for an avatar');
-  assert.ok(html.includes('>CHOD</p>') || /st-turn-name">CHOD/.test(html), 'name is in text, not only in the initial');
+  assert.ok(html.includes('>CLEO</p>') || /st-turn-name">CLEO/.test(html), 'name is in text, not only in the initial');
   assert.ok(html.includes('Aligned keyboards are hard to type on.'), 'speech survives');
   assert.ok(!html.includes('st-quote'), 'a turn is not also a quotation');
 });
@@ -555,28 +555,28 @@ test('dialogue: bold text with anything else on the line is NOT a turn', () => {
 });
 
 test('dialogue: a bold name with nothing under it is NOT a turn', () => {
-  const html = dlg('> **CHOD**');
+  const html = dlg('> **CLEO**');
   assert.ok(html.includes('<blockquote class="st-quote">'), 'a name alone is a quotation, not speech');
   assert.ok(!html.includes('st-dialogue'), 'not a dialogue');
 });
 
 test('dialogue: second speaker sits on the other side, and a run groups into one block', () => {
-  const html = dlg('> **CHOD**\n> Really? Esc in the bottom-left corner?\n\n> **KITT**\n> No. I moved it back.');
+  const html = dlg('> **CLEO**\n> Really? Esc in the bottom-left corner?\n\n> **KIRA**\n> No. I moved it back.');
   assert.equal((html.match(/st-dialogue/g) || []).length, 1, 'one group, not two');
   assert.equal((html.match(/data-side="left"/g) || []).length, 1, 'first speaker left');
   assert.equal((html.match(/data-side="right"/g) || []).length, 1, 'second speaker right');
 });
 
 test('dialogue: the same speaker twice drops the repeated label', () => {
-  const html = dlg('> **KITT**\n> First.\n\n> **KITT**\n> Still me.');
+  const html = dlg('> **KIRA**\n> First.\n\n> **KIRA**\n> Still me.');
   assert.equal((html.match(/data-cont="1"/g) || []).length, 1, 'only the second turn is a continuation');
   assert.equal((html.match(/data-side="right"/g) || []).length, 0, 'one voice never crosses to the right');
 });
 
 test('dialogue: `· suffix` after the name carries a date', () => {
-  const html = dlg('> **GOGO** · 2026-04-10\n> Day one.');
+  const html = dlg('> **GWEN** · 2026-04-10\n> Day one.');
   assert.ok(html.includes('<span class="st-turn-meta">2026-04-10</span>'), 'suffix becomes meta');
-  assert.ok(/st-turn-name">GOGO</.test(html), 'name is not swallowed by the suffix');
+  assert.ok(/st-turn-name">GWEN</.test(html), 'name is not swallowed by the suffix');
 });
 
 test('dialogue: two adjacent ordinary quotes still render as two blockquotes', () => {
@@ -586,7 +586,7 @@ test('dialogue: two adjacent ordinary quotes still render as two blockquotes', (
 });
 
 test('dialogue: a turn and a quotation in the same run keep their own shapes and order', () => {
-  const html = dlg('> **KITT**\n> Mine.\n\n> Not mine — someone else wrote this.');
+  const html = dlg('> **KIRA**\n> Mine.\n\n> Not mine — someone else wrote this.');
   assert.ok(html.indexOf('st-dialogue') < html.indexOf('st-quote'), 'the turn comes first, the quote after');
   assert.ok(html.includes('st-dialogue') && html.includes('st-quote'), 'both shapes present');
 });
@@ -625,7 +625,7 @@ test('dialogue: a run where a bold-headed block is NOT a turn is a Q&A list — 
   assert.equal((iv.match(/<blockquote class="st-quote">/g) || []).length, 2);
   // …while a turn beside an ORDINARY quotation (no bold head) is still allowed to mix — that shape
   // is a person speaking and then somebody else's words being quoted, not a repeated item.
-  const mixed = dlg('> **KITT**\n> Mine.\n\n> Not mine — someone else wrote this.');
+  const mixed = dlg('> **KIRA**\n> Mine.\n\n> Not mine — someone else wrote this.');
   assert.ok(mixed.includes('st-dialogue') && mixed.includes('st-quote'), 'turn + plain quote keeps mixing');
 });
 
@@ -677,25 +677,25 @@ test('dialogue: a ・ or • bulleted nav block under a bold line is not a turn 
     assert.ok(!html.includes('st-dialogue'), what + ' is not a dialogue');
   }
   // …but the marker still has to lead the line: `*emphasis*` opens speech, not a list.
-  const emph = dlg('> **CHOD**\n> *sighs* I do not know what to tell you.');
+  const emph = dlg('> **CLEO**\n> *sighs* I do not know what to tell you.');
   assert.ok(emph.includes('<div class="st-dialogue">'), 'italics at the start are still speech');
 });
 
 test('dialogue: speech that merely OPENS with a number is still speech, not a list', () => {
   // A `1.` / `1)` marker alone cannot tell a numbered list from a sentence that starts with a
   // number, so it only makes a list with corroboration: a link, or a second item under it.
-  const year = dlg('> **CHOD**\n> 2026. That was the year we finally shipped it.');
+  const year = dlg('> **CLEO**\n> 2026. That was the year we finally shipped it.');
   assert.ok(year.includes('<div class="st-dialogue">'), 'a year + period opens prose, not a list');
   assert.ok(!year.includes('st-quote'), 'not demoted to a plain quotation');
 
-  const paren = dlg('> **CHOD**\n> 1) it was late, and 2) nobody was looking.');
+  const paren = dlg('> **CLEO**\n> 1) it was late, and 2) nobody was looking.');
   assert.ok(paren.includes('<div class="st-dialogue">'), 'an inline enumeration is still one sentence');
 
-  const link = dlg('> **CHOD**\n> 1. [Part 1](/a)');
+  const link = dlg('> **CLEO**\n> 1. [Part 1](/a)');
   assert.ok(link.includes('<blockquote class="st-quote">'), 'a numbered LINK is an item, not speech');
   assert.ok(!link.includes('st-dialogue'), 'not a dialogue');
 
-  const two = dlg('> **CHOD**\n> 1. first thing\n> 2. second thing');
+  const two = dlg('> **CLEO**\n> 1. first thing\n> 2. second thing');
   assert.ok(two.includes('<blockquote class="st-quote">'), 'a second item corroborates the first');
   assert.ok(!two.includes('st-dialogue'), 'not a dialogue');
 });

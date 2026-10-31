@@ -1,5 +1,5 @@
 // A prose paragraph of several images is ONE figure, and the base style does not turn it into a row
-// of round avatars — CVERInc/reef#1933 (S6).
+// of round avatars — reef#1933 (S6).
 //   run: node packages/sitetile/prose-multi-image-figure-1933.test.mjs
 //
 // site.css had `.st-figure:has(> .st-img ~ .st-img)` → 3.5rem circles. It was written for the hero

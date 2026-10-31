@@ -902,7 +902,7 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route, ctx) {
 // can't confirm this subscription here" for; handing it back to the generic forward
 // would show the legacy whole-page fallback under a path this worker owns.
 //
-// CVERInc/reef#1910: the locale the buyer came from rides on the path. The caller
+// reef#1910: the locale the buyer came from rides on the path. The caller
 // contract is that whatever emits the result URL puts the shop's locale prefix
 // in front of the contract path — /zh-tw/subscribe/success for the zh-tw shop —
 // exactly the shape /zh-tw/shop/complete already has (matchShopComplete). The

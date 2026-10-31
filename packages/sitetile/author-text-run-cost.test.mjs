@@ -91,7 +91,7 @@ function refParseParams(raw) {
   }
   return map;
 }
-// The same function with ONE thing changed: what a NAME is. Since CVERInc/reef#1915 a name may carry
+// The same function with ONE thing changed: what a NAME is. Since reef#1915 a name may carry
 // hyphens after its first word character (`logo-pos=top` is the key `logo-pos`; it used to be read
 // from its last hyphen on, as `pos`). Written the way the replaced code was written — a pattern
 // per question, re-read from every start — and NOT the way site-core.js reads it, so the two are

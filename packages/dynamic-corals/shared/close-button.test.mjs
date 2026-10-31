@@ -1,7 +1,7 @@
 // The shared close button must stay identical to the QR popup's, which is the original.
 //
 // This is the only kind of copy that is allowed here: the QR client is generated verbatim from
-// chodaict's qr-anim.js and must not be edited to import anything, so the sharing runs the other
+// the product owner's qr-anim.js and must not be edited to import anything, so the sharing runs the other
 // way — the module mirrors the original and this test is what stops the mirror drifting. If the
 // popup's button is ever restyled, this fails and the module follows, instead of the family
 // quietly ending up with a seventh close button.

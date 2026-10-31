@@ -1,5 +1,5 @@
 // `prose` — the default section: heading + markdown body. The body's markup is `proseBodyHtml`,
-// which the reference renderer's prose branch calls too (CVERInc/reef#1933 S6: every paragraph stays
+// which the reference renderer's prose branch calls too (reef#1933 S6: every paragraph stays
 // where it is written — a links-only one is a button row in place, an images-only one a figure).
 import { inlineHtml, proseBodyHtml } from '../sitetile/site-core.js';
 import { attr, when } from './html.mjs';

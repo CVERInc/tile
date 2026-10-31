@@ -95,7 +95,7 @@ function carouselCell(params, ctx) {
     }).join('');
     const dots = imgs.map((_, i) => `<a class="st-slide-dot" href="#${uid}-${i}" aria-label="${e(labels.slide(i + 1))}"></a>`).join('');
     const css = [
-      // 🔴 NO fixed aspect. chodaict read Incrediville's live page as `6x6(slide*5)` AND
+      // 🔴 NO fixed aspect. The product owner read Incrediville's live page as `6x6(slide*5)` AND
       // `3x6(slide*4)` — the same widget, two different heights, because the PICTURES differ. Pinning
       // 2/1 here would be 「width decides shape」 all over again, four hours after I removed exactly
       // that rule from features. The first slide's natural height sets the track; the rest are

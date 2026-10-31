@@ -129,7 +129,7 @@ const HP_STYLE = 'position:absolute;left:-9999px;width:1px;height:1px;overflow:h
 
 // ── in-site search (reef#2160) ───────────────────────────────────────────────
 // The bubble filters the site's own /search-index.json in the visitor's browser as they type
-// (chodaict 2026-10-18: one input; typing floats matching articles, Enter is always「ask」). The
+// (product owner 2026-10-18: one input; typing floats matching articles, Enter is always「ask」). The
 // index is named by the host's `data-search-index` attribute (the sitetile layout sets it only on a
 // blog site with bubble search on), fetched ONCE per mount and only on the FIRST OPEN — never at
 // page load — and an index that is `[]` or unreachable draws today's bubble, byte for byte.
@@ -1137,7 +1137,7 @@ export function aiSessionPayload(kind, id, state) {
  * Hand one payload to the network in a way that survives the page going away.
  *
  * 🔴 `sendBeacon` FIRST, and with the JSON **string**, not a `Blob`. Measured on Safari 26
- * (CVERInc/reef#466, 2026-09-07): a `Blob` typed `application/json` makes this a CORS request
+ * (reef#466, 2026-09-07): a `Blob` typed `application/json` makes this a CORS request
  * that needs a preflight, and what was observed is the OUTCOME — the beacon reports `true` and
  * nothing reaches the server. Whether WebKit skips the preflight for a beacon or starts one that
  * loses to the document's unload is not something that measurement can tell apart, and it does
@@ -2349,7 +2349,7 @@ export async function askInboxClaim(apiBase, kind, id, signal) {
 // settings row whose absence makes a message come back `not_claimed`, for every kind this coral
 // mounts, so the bubble and the send cannot disagree about which tenants have an Inbox.
 //
-// 🩸 THE GATE DECIDES WHICH BUBBLE, NOT ONLY WHETHER (0.7.11, CVERInc/reef#1866). As first written
+// 🩸 THE GATE DECIDES WHICH BUBBLE, NOT ONLY WHETHER (0.7.11, reef#1866). As first written
 // it returned on every no — and `data-kaito="1"` on a tenant without an Inbox is not a broken
 // install, it is the state owner ruling 54 describes by name: the ask-the-site half, bought on its
 // own. That half needs nobody to receive anything, so the gate was hiding a working product behind
@@ -2467,7 +2467,7 @@ async function awaitInboxClaim(apiBase, kind, id, cancelled, settleOnUnknown = f
 /** Mounts still waiting on their claim answer → the function that tells them to stop. */
 const gating = new WeakMap();
 
-// ── the site layout's loader hands over what it already learned (0.7.12, CVERInc/reef#1921) ─────
+// ── the site layout's loader hands over what it already learned (0.7.12, reef#1921) ─────
 //
 // sitetile no longer puts this file in a <script src> on every page: an inline loader asks the
 // mount's claim question first and imports this coral only where it will draw. Two things that
@@ -2722,13 +2722,13 @@ function escHtml(s) {
 /**
  * The closed bubble's glyph.
  *
- * A ROUNDED bubble, chosen by chodaict over the squared one: 「上面的比較好，
+ * A ROUNDED bubble, chosen by the product owner over the squared one: 「上面的比較好，
  * 圓圓的親切」. Support widgets are the friendliest thing on a page or they are
  * the most annoying, and the corner radius is most of that.
  *
  * 🔴 GEOMETRICALLY centred, not eyeballed. Centring the SVG BOX is not enough — a
  * glyph drawn off-centre inside a centred box still sits off-centre, which is
- * what the first attempt did (chodaict: 「注意按鈕內的位置」). The test measures
+ * what the first attempt did (product owner: 「注意按鈕內的位置」). The test measures
  * the path's real `getBBox()` in a chromium and fails if its centre drifts off
  * (12, 12), so redrawing this without balancing it is a red test, not a shrug.
  *
@@ -3462,7 +3462,7 @@ export async function mount(el, handoff = null) {
 	/**
 	 * Typing filters; Enter and the button stay what they were (`bindCompose`). The list collapses
 	 * on a newline or past SEARCH_QUERY_MAX characters — that is a message being written — and on
-	 * submit. No results draws nothing: no「not found」line (chodaict 2026-10-18). `label` is the
+	 * submit. No results draws nothing: no「not found」line (product owner 2026-10-18). `label` is the
 	 * button's idle wording (`idleLabel` below), set once the index turns search on.
 	 *
 	 * 🩸 A SUBMIT STAYS SUBMITTED (codex r1 on tile#180). The index can arrive after the visitor

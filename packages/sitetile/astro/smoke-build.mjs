@@ -1163,7 +1163,7 @@ const checks = [
   ['🔴 icons: every icon <link> on every owner-favicon build names a file that build ships', () =>
     [[ODIST, ownerHome], [HPDIST, handPlacedHome], [MFDIST, malformedHome]].every(([d, h]) =>
       [...h.matchAll(/<link rel="(?:icon|apple-touch-icon)"[^>]*\bhref="([^"]+)"/g)].every(([, href]) => existsSync(join(d, href.slice(1)))))],
-  // -- CVERInc/reef#596: every *.svg the site serves is an attachment --
+  // -- reef#596: every *.svg the site serves is an attachment --
   ['🔴 _headers: a site with no _headers of its own gets dist/_headers carrying exactly the platform /*.svg attachment rule', () =>
     primaryHeaders === PLATFORM_RULE && svgRuleCount(primaryHeaders) === 1],
   ['🔴 _headers: the build\'s own /favicon.svg is one of the files that rule covers (it exists at the root)', () =>
@@ -1386,7 +1386,7 @@ const checks = [
       && a.current === 'en-us' && a.options.map((o) => o.id).join() === 'zh-tw'
       && b.current === 'zh-tw' && b.options.map((o) => o.id).join() === 'en-us';
   }],
-  // 🔴 CVERInc/reef#1910 item 5 made the decision this check used to forbid: a blog route's own
+  // 🔴 reef#1910 item 5 made the decision this check used to forbid: a blog route's own
   // measurement (bannerLocales) is also its hreflang set, and the footer link's `?has=` follows it.
   // This post exists in both languages, so BOTH editions are named (and x-default), each pointing at
   // a page this build wrote. The banner and the footer link are asserted PRESENT first, so the
@@ -1457,7 +1457,7 @@ const checks = [
   ['banner: 404 and /preview/ exist once per site, not once per language — no banner', () =>
     bannerConfig(readFileSync(join(DIST, '404.html'), 'utf8')) === null
     && bannerConfig(readFileSync(join(DIST, 'preview/index.html'), 'utf8')) === null],
-  // -- CVERInc/reef#2112: one 404.html per declared NON-default locale, as a FILE at <loc>/404.html
+  // -- reef#2112: one 404.html per declared NON-default locale, as a FILE at <loc>/404.html
   // (Cloudflare Pages reads the nearest 404.html up the tree; Astro only writes the ROOT one bare,
   // so astro.config.mjs's locale404Pages() renames <loc>/404/index.html). The root 404 is tile#135's
   // and stays the site's default language.
@@ -1550,7 +1550,7 @@ const checks = [
   ['markers: both cells carry the chevron', () => (markers.match(/<span class="st-cell-cta/g) || []).length === 2],
   ['markers: grouped collection renders through the shared cell system', () =>
     /<section class="st-collection st-full-bleed"[^>]*>[\s\S]*?class="st-collection-pills"[\s\S]*?class="st-cell st-item"/.test(markers)],
-  // CVERInc/reef#1869: the belt is a band. The section opts out of the generic floor (once per
+  // reef#1869: the belt is a band. The section opts out of the generic floor (once per
   // collection — markers.md has one), and the built stylesheet carries the un-gated inner floor that
   // keeps the head/belt content inset in its place.
   ['markers: collection section opts out of the section floor, exactly once', () =>
@@ -1619,10 +1619,10 @@ const checks = [
     /<pre class="st-code"><code>[^<]*<\/code>/.test(blocks)],
   // -- byline: post `author` → post head + feed. The UNSIGNED fixture is the half that matters:
   //    a site that never named an author must emit no byline and no dc:creator, not empty ones. --
-  ['byline: a signed post carries By <author> in its head', () => signedPost.includes('<p class="bl-byline">By KITT</p>')],
+  ['byline: a signed post carries By <author> in its head', () => signedPost.includes('<p class="bl-byline">By KIRA</p>')],
   ['byline: an unsigned post has no byline element at all', () => !unsignedPost.includes('bl-byline')],
   ['feed: dc:creator carries the byline (not RSS <author>, which is specified as an email)', () =>
-    rss.includes('xmlns:dc="http://purl.org/dc/elements/1.1/"') && rss.includes('<dc:creator>KITT</dc:creator>')],
+    rss.includes('xmlns:dc="http://purl.org/dc/elements/1.1/"') && rss.includes('<dc:creator>KIRA</dc:creator>')],
   ['feed: the unsigned post contributes no dc:creator', () =>
     (rss.match(/<dc:creator>/g) || []).length === 1 && !rss.includes('<author>')],
   // -- tile#177: the channel <image> names a PNG this build REALLY wrote. The unit test proves the
@@ -1995,7 +1995,7 @@ const checks = [
   // that decision being revisited on purpose.
   ['form-thanks (zh-tw): return_to carries the locale segment this route was built at', () =>
     /<input type="hidden" name="return_to" value="\/zh-tw\/form-thanks\/">/.test(formThanksZh)],
-  // 🩸 CVERInc/reef#1891: the card's "back to homepage" was a literal `/` on every locale — one
+  // 🩸 reef#1891: the card's "back to homepage" was a literal `/` on every locale — one
   // line below a "send another" link that already carried the locale. Counted, not merely found:
   // a second card pointing somewhere else would be the one a visitor clicks.
   ['form-thanks (zh-tw): the success card\'s home link is this locale\'s home, which this build wrote', () => {

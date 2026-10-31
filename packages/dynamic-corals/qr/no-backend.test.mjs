@@ -63,7 +63,7 @@ test('CONTROL: the tenant-colour gate fires on the legacy source', () => {
     'the legacy source already assigns the token seven times — the count above separates nothing');
 });
 
-// The cut was surgical: everything chodaict tuned is still in the bundle. Named individually so a
+// The cut was surgical: everything the product owner tuned is still in the bundle. Named individually so a
 // failure says WHICH part of the 表演 went missing rather than "the file got smaller".
 test('the 表演 survived intact — 11 modes, morph, and the focus trap', () => {
   for (const mode of ['_modeA', '_modeB', '_modeC', '_modeD', '_modeE', '_modeF', '_modeG', '_modeH', '_modeI', '_modeJ', '_modeK']) {

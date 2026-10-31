@@ -1,6 +1,6 @@
 // Every overlay on a Card closes the same way.
 //
-// chodaict: 「modal目前關閉看起來還是不同?我覺得該全部放左上角,行為就是跟qr一樣關閉可關、modal外也可關」
+// The product owner: 「modal目前關閉看起來還是不同?我覺得該全部放左上角,行為就是跟qr一樣關閉可關、modal外也可關」
 //
 // There are two overlays — the QR popup and the drawer — and they had learned different manners. The
 // QR pinned its ✕ top-LEFT over a full-screen morph; the drawer floated its own top-RIGHT inside the

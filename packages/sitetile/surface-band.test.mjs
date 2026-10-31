@@ -3,7 +3,7 @@
 //   run: node packages/sitetile/surface-band.test.mjs   (wired into scripts/test.sh via the glob)
 //   the browser half: real-render/surface-band.smoke.mjs (PLAYWRIGHT set)
 //
-// 🩸 CVERInc/reef#1869, part 2 (ruled 2026-10-20). prose / grid / timeline emit `data-surface` for
+// 🩸 reef#1869, part 2 (ruled 2026-10-20). prose / grid / timeline emit `data-surface` for
 // the theme to paint, and base caged the section twice: `.st-prose, .st-grid, .st-cta, .st-people`
 // at (0,1,0) (plus `.st-grid { max-width: 80rem }`), and the `:where()` floor. A painted surface was
 // a box in the middle of the page. The band is paint only: a `border-image` outset in the colour

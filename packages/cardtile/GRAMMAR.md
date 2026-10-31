@@ -69,6 +69,6 @@ English; the editor's labels and hints use the existing nine-language flow in
 `w/cell-i18n.mjs`. The one-link-per-social-line explanation is already present
 in all nine languages. No editor strings or golden rows change here.
 
-These rules follow [reef#2026](https://github.com/CVERInc/reef/issues/2026) and
-[reef#2015](https://github.com/CVERInc/reef/issues/2015), implemented by
+These rules follow reef#2026 and
+reef#2015, implemented by
 [tile#125](https://github.com/CVERInc/tile/pull/125).

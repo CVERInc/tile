@@ -1,4 +1,4 @@
-// Read a live page and print its layout the way chodaict reads it off the screen:
+// Read a live page and print its layout the way the product owner reads it off the screen:
 //
 //   高x寬 in six-column units, with (slide*N) when a block is a carousel.
 //

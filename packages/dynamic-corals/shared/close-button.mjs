@@ -1,12 +1,12 @@
 // The overlay close button — ONE identity, shared as SOURCE between corals.
 //
 // The family had six of these: cp-feed-reader-close, reef-drawer-close, reef-toast-close,
-// cp-icon-btn, my cp-drawer-close, and the one in the QR popup. The QR one is chodaict's and it is
+// cp-icon-btn, my cp-drawer-close, and the one in the QR popup. The QR one is the product owner's and it is
 // the best of them — a 44px circle (the touch-target floor, not a coincidence), an accent ring, a
 // blurred ground so it reads over artwork, and a focus ring that is visible rather than polite.
 // So it is the origin here, copied verbatim from what qr-client.mjs emits.
 //
-// 🔴 The QR client is NOT changed to import this. It is generated verbatim from chodaict's
+// 🔴 The QR client is NOT changed to import this. It is generated verbatim from the product owner's
 // qr-anim.js, and the standing rule is that nothing in that 表演 moves. Instead this module
 // mirrors it and close-button.test.mjs asserts the two are byte-identical, so the copy cannot
 // drift while the original stays untouched. Sharing source, not stylesheets, is also what lets a

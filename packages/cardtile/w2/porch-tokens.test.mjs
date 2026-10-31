@@ -13,12 +13,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const CSS = fs.readFileSync(join(DIR, 'porch-tokens.css'), 'utf8');
-const REEF_APP_CSS = '/Users/chodaict/Developer/reef/apps/feelreef/src/app.css';
+const REEF_APP_CSS = join(process.env.DEV_ROOT || join(homedir(), 'Developer'), 'reef/apps/feelreef/src/app.css');
 
 /** `--name: value;` pairs from every `:root {…}` (and Tailwind `@theme {…}`) block, comments stripped. FIRST declaration wins,
  *  so a later override (reef's prefers-contrast block, say) never masks the base value. */

@@ -2,7 +2,7 @@
 // on every built page — and a site without it gains nothing at all.
 //   run: node packages/sitetile/site-embed.test.mjs   (globbed into scripts/test.sh)
 //
-// CVERInc/reef#2302 (owner ruling 2026-10-21): third-party scripts (GA, a pixel, a chat button) get
+// reef#2302 (owner ruling 2026-10-21): third-party scripts (GA, a pixel, a chat button) get
 // ONE raw slot and no named integrations. The slot is the per-page `embed` coral's escape hatch one
 // level up, so this file asserts exactly what that promise is, on what a real build WROTE:
 //   1. every page carries the raw string, byte for byte, immediately before </body>;

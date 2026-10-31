@@ -32,7 +32,7 @@ const test = (name, fn) => {
 };
 
 const ITEMS = [
-  { title: 'Second', url: 'https://x.test/devlog/b', description: 'b', date: '2026-07-14', author: 'GOGO' },
+  { title: 'Second', url: 'https://x.test/devlog/b', description: 'b', date: '2026-07-14', author: 'GWEN' },
   { title: 'First', url: 'https://x.test/devlog/a', description: 'a', date: '2026-03-25', author: '' },
 ];
 
@@ -173,10 +173,10 @@ test('🔴 a post is an article, in both channels at once', () => {
 test('JSON-LD says what is true and omits the rest', () => {
   const g = pageGraph({
     kind: 'article', url: 'https://x.test/devlog/a', siteName: 'ATLAS.DEV', siteUrl: 'https://x.test/',
-    title: 'A', description: 'd', datePublished: '2026-03-25', author: 'GOGO', inLanguage: 'en',
+    title: 'A', description: 'd', datePublished: '2026-03-25', author: 'GWEN', inLanguage: 'en',
   });
   assert.equal(g['@type'], 'BlogPosting');
-  assert.equal(g.author.name, 'GOGO');
+  assert.equal(g.author.name, 'GWEN');
   assert.equal(g.datePublished, '2026-03-25');
   assert.ok(!('dateModified' in g), 'this platform does not track one, so it may not claim one');
   assert.ok(!('image' in g), 'no image passed → no key, not an empty string');

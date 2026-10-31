@@ -41,10 +41,10 @@ const x = 1;
 ```
 
 ## A quoted name with speech under it
-> **KITT**
+> **KIRA**
 > A blockquote whose first line is nothing but a bold name is a spoken turn.
 
-> **CHOD**
+> **CLEO**
 > An ordinary quotation, above, must keep rendering as a quotation.
 
 > Like this one, which opens with no name and stays a quote.

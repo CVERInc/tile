@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { reefComponentsLayer } from './reef-components-layer.mjs';
 // The build owns dist/_headers: the site's own rules first, then `/*.svg` as an attachment.
 import { svgAttachmentHeaders } from './svg-attachment-headers.mjs';
-// One 404.html per declared locale (CVERInc/reef#2112): `<loc>/404/index.html` → `<loc>/404.html`,
+// One 404.html per declared locale (reef#2112): `<loc>/404/index.html` → `<loc>/404.html`,
 // because Cloudflare Pages reads a locale's 404 only at that path and Astro only writes the ROOT
 // 404 as a bare file. Here, not in packages/build: production runs a plain `npx astro build`.
 import { locale404Pages } from './locale-404.mjs';

@@ -48,11 +48,11 @@ const BASE = arg('--base', 'https://card.feelreef.com');
 const WRITE = process.argv.includes('--write');
 // 🔴 A handle nobody's card could be. The write half creates and then deletes this row; pointing it
 // at a real handle is how a verification script becomes an outage.
-const SCRATCH = arg('--scratch', 'kitt-probe');
+const SCRATCH = arg('--scratch', 'probe-scratch');
 // 🔴 A handle nobody's card could be, that does NOT exist. The door checks below need a valid
 // token to be distinguishable from an invalid one, and 404-vs-401 is that signal — requireAuth
 // runs BEFORE the handle is resolved, so a good token on a missing row answers 404. No row needed.
-const NOBODY = arg('--nobody', 'kitt-probe-absent');
+const NOBODY = arg('--nobody', 'probe-scratch-absent');
 // Opt-in ONLY. Passing --card aims the read half at a real creator's card, including two
 // authenticated dry-run PUTs. That used to be the DEFAULT, pointed at a customer.
 const LIVE_CARD = arg('--card', null);

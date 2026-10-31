@@ -2,7 +2,7 @@
 // by the coral that asks for it.
 //   run: node packages/sitetile/param-names.test.mjs   (wired into scripts/test.sh via the glob)
 //
-// 🩸 CVERInc/reef#1915. parseParams read a name as `\w+`, and a hyphen is not a word character, so
+// 🩸 reef#1915. parseParams read a name as `\w+`, and a hyphen is not a word character, so
 // a hyphenated name was read from its last hyphen on:
 //
 //     parseParams('logo-pos=top')      → { pos: 'top' }

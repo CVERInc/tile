@@ -12,7 +12,7 @@
 // 🔴 WHAT DOES NOT MOVE, and why:
 //
 // 1. `cp-icon`, `cp-midwater` and the `--cp-*` custom properties are the QR coral's MOUNT CONTRACT.
-//    That coral is lifted verbatim from chodaict's qr-anim.js and does `querySelector('.cp-icon')`
+//    That coral is lifted verbatim from the product owner's qr-anim.js and does `querySelector('.cp-icon')`
 //    and `var(--cp-accent)` in code nothing is allowed to edit. Renaming them would mean editing the
 //    表演, which is the one thing ruled out. They are the coral's API, documented in qr/GEN.md, and
 //    an API is allowed to have its own name.

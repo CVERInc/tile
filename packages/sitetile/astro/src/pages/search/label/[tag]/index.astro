@@ -59,7 +59,7 @@ const sysFiles = import.meta.glob('../../../../../content/*.md', { query: '?raw'
 const { posts, meta, tag } = Astro.props;
 // 🔗 The tag chips on the cards were <span>s while the SAME tag in the sidebar cloud was a link —
 // one destination, two affordances, and the chip was the one readers actually reach for
-// (chodaict: 「貼文tag點了沒有反應」). They're anchors now, to whichever archive really exists.
+// (product owner: 「貼文tag點了沒有反應」). They're anchors now, to whichever archive really exists.
 const catSet = routedCategories(posts, meta);
 // Sidebar chrome copy — resolved once, from the locale table. These were the FOURTH and
 // FIFTH inline copies of the same Chinese literals; a structural test found them after two

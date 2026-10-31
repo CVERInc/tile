@@ -1,4 +1,4 @@
-// Platform buttons follow the SITE's button radius — CVERInc/reef#1888 (B).
+// Platform buttons follow the SITE's button radius — reef#1888 (B).
 //   run: node packages/sitetile/button-radius-1888.test.mjs
 //
 // 🩸 2026-10-14, measured in a browser on two live sites: a site whose buttons are 6px got 9999px
