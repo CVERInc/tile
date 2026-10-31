@@ -134,7 +134,7 @@ const SRC = [RENDER_SRC, ...EMIT.values()].join('\n');
 
 test('sinks: the emit modules card-render imports are in the scan, and the registry it hands them is the registry', () => {
   const names = [...EMIT.keys()].map((h) => h.split('/').pop()).sort();
-  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
+  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs', 'embed.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
   // the two names a Card branch may write a URL through are exactly the guarded calls, made in ONE place
   const body = stripComments(RENDER_SRC);
   assert.match(body, /\burl: \(raw\) => esc\(attrUrl\(ctx, raw\)\),/);
