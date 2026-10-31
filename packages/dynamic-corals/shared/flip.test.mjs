@@ -2,7 +2,7 @@
 //   run: node --test packages/dynamic-corals/shared/flip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFlip, setFlip, parseFaces, FLIP_MS, FLIP_CSS } from './flip.mjs';
+import { createFlip, setFlip, parseFaces, FLIP_MS, DRUM_STEP_MS, FLIP_CSS } from './flip.mjs';
 import { createDocument, createClock } from './fake-dom.mjs';
 
 function setup(reduced = false) {
@@ -147,4 +147,119 @@ test('the card width comes from its content or --dc-flip-width, never a fixed on
   const { env, cell } = setup();
   setFlip(cell, '各駅停車', env);
   assert.equal(cell.querySelector('.dc-flip-size').getAttribute('aria-hidden'), 'true');
+});
+
+// ── drum mode ───────────────────────────────────────────────────────────────────────────────────
+const DRUM = ['A', 'B', 'C', 'D', 'E'];
+function drumSetup(reduced = false, drum = DRUM, faces = []) {
+  const doc = createDocument();
+  const clock = createClock(0);
+  const env = { document: doc, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, reduced };
+  const cell = createFlip(doc, faces, { drum });
+  doc.body.appendChild(cell);
+  return { doc, clock, env, cell };
+}
+/** Every fold the card makes until it is at rest: [shown-before, shown-after] per fold, and the faces
+ *  sampled mid-fold. Advances the clock 1 ms at a time, so a fold that is skipped cannot hide. */
+function runDrum(cell, clock, maxMs = 5000) {
+  const folds = [];
+  let last = null;
+  for (let t = 0; t <= maxMs; t++) {
+    const on = cell.classList.contains('dc-flip-on');
+    if (on) {
+      const f = faces(cell);
+      if (f !== last) folds.push(f);
+      last = f;
+    } else last = null;
+    if (!on && clock.pending() === 0) break;
+    clock.advance(1);
+  }
+  return folds;
+}
+const adjacent = (drum, a, b) => drum[(drum.indexOf(a) + 1) % drum.length] === b;
+
+test('drum: A→D folds through B and C, one ordinary fold per step, each between ADJACENT faces', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'D', env);
+  const folds = runDrum(cell, clock);
+  // Each fold sampled mid-way reads top=new, bottom=old, front=old, back=new (the same order as a plain flip).
+  assert.deepEqual(folds, ['BAAB', 'CBBC', 'DCCD']);
+  for (const f of folds) assert.ok(adjacent(DRUM, f[1], f[0]), `${f[1]}→${f[0]} is one step on the drum`);
+  assert.equal(faces(cell), 'DD--');
+  assert.equal(clock.pending(), 0);
+});
+
+test('drum: it only turns forward — going "back" one face is a full turn round the drum', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'C', env);
+  setFlip(cell, 'B', env);
+  const folds = runDrum(cell, clock);
+  assert.deepEqual(folds.map((f) => f[1] + f[0]), ['CD', 'DE', 'EA', 'AB']);
+});
+
+test('drum: a new target mid-run carries on FORWARD from the face showing, never jumps back or stacks', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'E', env);            // A→B→C→D→E planned
+  clock.advance(DRUM_STEP_MS + 10);   // B is up, folding to C
+  setFlip(cell, 'B', env);            // now stop at B: forward from C is D, E, A, B
+  assert.equal(cell.querySelectorAll('.dc-flip-flap').length, 2, 'the running fold was not doubled');
+  assert.ok(clock.pending() <= 1, 'no second timer');
+  const folds = runDrum(cell, clock);
+  assert.deepEqual(folds.map((f) => f[1] + f[0]), ['BC', 'CD', 'DE', 'EA', 'AB']);
+  assert.equal(faces(cell), 'BB--');
+});
+
+test('drum: many retargets leave at most one timer and one pair of flaps at any moment', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  for (let i = 0; i < 200; i++) {
+    setFlip(cell, DRUM[(i * 3) % DRUM.length], env);
+    assert.ok(clock.pending() <= 1, `timers after retarget ${i}`);
+    assert.ok(cell.querySelectorAll('.dc-flip-flap').length <= 2);
+    clock.advance(37);
+  }
+  runDrum(cell, clock);
+  assert.equal(clock.pending(), 0);
+  assert.equal(cell.querySelectorAll('.dc-flip-flap').length, 0);
+});
+
+test('drum + reduced motion: straight to the target, no flaps, no timers', () => {
+  const { env, cell, clock } = drumSetup(true);
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'D', env);
+  assert.equal(faces(cell), 'DD--');
+  assert.equal(clock.pending(), 0);
+});
+
+test('drum: a face that is not on the drum goes straight there in ONE plain fold', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, '回送', env);
+  assert.equal(clock.pending(), 1);
+  clock.advance(FLIP_MS);
+  assert.equal(cell.querySelector('.dc-flip-top').firstChild.textContent, '回送');
+  assert.equal(clock.pending(), 0, 'no further steps');
+});
+
+test('drum: the width set holds the drum faces from creation and does not change while turning', () => {
+  const { env, cell, clock } = drumSetup(false, ['5', '4', '3', '2', '1', '0'], ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  const before = sizer(cell);
+  assert.deepEqual(before, ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'], 'the wider set sizes a 6-face drum');
+  setFlip(cell, '0', env);
+  setFlip(cell, '5', env);
+  for (let t = 0; t < 5 * DRUM_STEP_MS; t += 7) { assert.deepEqual(sizer(cell), before); clock.advance(7); }
+});
+
+test('drum: one step is shorter than a plain flip, and covers both of its folds', () => {
+  assert.ok(DRUM_STEP_MS < FLIP_MS);
+  const m = /\.dc-flip-drum\.dc-flip-on \.dc-flip-front\{animation-duration:\.(\d+)s\}\.dc-flip-drum\.dc-flip-on \.dc-flip-back\{animation-duration:\.(\d+)s;animation-delay:\.(\d+)s\}/.exec(FLIP_CSS);
+  assert.ok(m, 'drum fold timings are declared');
+  const end = Math.max(Number('0.' + m[1]), Number('0.' + m[2]) + Number('0.' + m[3]));
+  assert.ok(DRUM_STEP_MS >= end * 1000, `step ${DRUM_STEP_MS}ms must not cut the ${end * 1000}ms folds short`);
+  const { cell } = drumSetup();
+  assert.ok(cell.classList.contains('dc-flip-drum'));
+  const plain = createFlip(createDocument());
+  assert.equal(plain.classList.contains('dc-flip-drum'), false, 'without a drum it is a plain card');
 });

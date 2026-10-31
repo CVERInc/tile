@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mountCountdown, mountAll } from './countdown-core.mjs';
-import { FLIP_MS } from '../shared/flip.mjs';
+import { FLIP_MS, DRUM_STEP_MS } from '../shared/flip.mjs';
 import { createDocument, createClock } from '../shared/fake-dom.mjs';
 
 const DEADLINE = '2026-12-01T23:59:59+09:00';
@@ -241,4 +241,73 @@ test('mounted exactly on a whole second: the next second follows immediately, no
   assert.equal(part('seconds').textContent, '09');
   clock.advance(995);
   assert.equal(part('seconds').textContent, '08');
+});
+
+// ── data-flip-mode="drum": every place is a 0–9 wheel turning DOWN ───────────────────────────────
+function drumPage(units) {
+  const p = page({ units });
+  for (const u of units) p.part(u).setAttribute('data-flip-mode', 'drum');
+  return p;
+}
+/** Advance through one tick and the drum run after it, 1 ms at a time; count the faces each card
+ *  passes through (every new value = one step), card by card, left to right. */
+function stepsThroughNextSecond(el, clock) {
+  const cards = cardsOf(el);
+  const seen = cards.map((c) => [c.__dcFlip.value]);
+  for (let t = 0; t < 1000 + 10 * DRUM_STEP_MS; t++) {
+    clock.advance(1);
+    cards.forEach((c, i) => { const v = c.__dcFlip.value; if (seen[i][seen[i].length - 1] !== v) seen[i].push(v); });
+    if (t > 1000 && cards.every((c) => !c.classList.contains('dc-flip-on'))) break;
+  }
+  return seen.map((s) => s.join(''));
+}
+
+test('drum: at the minute the seconds tens wheel runs 0→9→8→7→6→5 (5 steps), the ones 0→9 (1 step)', () => {
+  const { doc, root, part } = drumPage(['minutes', 'seconds']);
+  const clock = createClock(DL - 60 * 1000 - 500);   // shows 01:00, next tick 00:59
+  mountCountdown(root, env(doc, clock));
+  assert.equal(shown(part('seconds')), '00');
+  const [tens, ones] = stepsThroughNextSecond(part('seconds'), clock);
+  assert.equal(tens, '098765', 'every digit between, in wheel order');
+  assert.equal(ones, '09', 'one step');
+  assert.equal(shown(part('seconds')), '59');
+  assert.equal(shown(part('minutes')), '00');
+});
+
+test('drum: an ordinary second is exactly one step on the ones wheel and none on the tens', () => {
+  const { doc, root, part } = drumPage(['minutes', 'seconds']);
+  const clock = createClock(DL - 47 * 1000 - 500);  // shows 00:47
+  mountCountdown(root, env(doc, clock));
+  const [tens, ones] = stepsThroughNextSecond(part('seconds'), clock);
+  assert.equal(tens, '4');
+  assert.equal(ones, '76');
+});
+
+test('drum: at the day the hours run 00→23 — tens 0→9…2 (8 steps), ones 0→9…3 (7 steps)', () => {
+  const { doc, root, part } = drumPage(['days', 'hours', 'minutes', 'seconds']);
+  const clock = createClock(DL - D - 500);   // shows 01 00 00 00
+  mountCountdown(root, env(doc, clock));
+  assert.equal(shown(part('hours')), '00');
+  const [tens, ones] = stepsThroughNextSecond(part('hours'), clock);
+  assert.equal(tens, '098765432');
+  assert.equal(ones, '09876543');
+  assert.equal(shown(part('hours')), '23');
+});
+
+test('drum + reduced motion: digits change at once, no running wheels', () => {
+  const { doc, root, part } = drumPage(['minutes', 'seconds']);
+  const clock = createClock(DL - 60 * 1000 - 500);
+  mountCountdown(root, env(doc, clock, true));
+  clock.advance(510);
+  assert.equal(shown(part('seconds')), '59');
+  assert.equal(part('seconds').querySelectorAll('.dc-flip-flap').length, 0);
+});
+
+test('without data-flip-mode the cards still go straight to the next digit (default unchanged)', () => {
+  const { doc, root, part } = page({ units: ['minutes', 'seconds'] });
+  const clock = createClock(DL - 60 * 1000 - 500);
+  mountCountdown(root, env(doc, clock));
+  const [tens] = stepsThroughNextSecond(part('seconds'), clock);
+  assert.equal(tens, '05');
+  assert.equal(cardsOf(part('seconds'))[0].classList.contains('dc-flip-drum'), false);
 });
