@@ -37,7 +37,7 @@
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
 // A second copy of "which values are legal" here would be a second thing to keep in step.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
 import {
   parseThemeDoc, residueOf, structuralIssues, sanitizeThemeMeta, unsafeReason,
@@ -77,20 +77,27 @@ const doc = parseThemeDoc(md);
 const issues = structuralIssues(doc && doc.meta);
 const show = (v) => JSON.stringify(truncateCssText(String(v)));
 
-// A missing frontmatter or name is a refusal: the build stages theme.css under the theme's NAME,
-// so a nameless theme compiles to a file nothing will ever look up. A name the compiler would DROP
-// (`../oops`, a space, `*/`) is the same refusal — it ends as `theme: ` with nothing after it.
-const fatal = issues.filter((i) => i.key === '(doc)' || i.key === 'name');
-if (!fatal.length) {
-  const why = unsafeReason('name', doc.meta.name);
-  if (why) fatal.push({ key: 'name', problem: `${show(String(doc.meta.name).trim())} ${why}` });
-}
-if (fatal.length) {
-  for (const i of fatal) console.error(`✗ ${src}: ${i.key} — ${i.problem}`);
+// No frontmatter at all is the one refusal that cannot wait: there is nothing else to check.
+if (!doc) {
+  for (const i of issues) console.error(`✗ ${src}: ${i.key} — ${i.problem}`);
   process.exit(2);
+}
+// A missing or unusable name is a refusal too — the build stages theme.css under the theme's NAME,
+// so a nameless theme compiles to a file nothing will ever look up, and a name the compiler would
+// DROP (`../oops`, a space, `*/`) ends as `theme: ` with nothing after it. But it is COLLECTED, not
+// returned early: a refused run lists every problem, so the author fixes the source in one pass.
+const nameProblems = issues.filter((i) => i.key === 'name').map((i) => i.problem);
+if (!nameProblems.length) {
+  const why = unsafeReason('name', doc.meta.name);
+  if (why) nameProblems.push(`${show(String(doc.meta.name).trim())} ${why}`);
 }
 
 const { css, siteMeta } = compileTheme(doc.meta, residueOf(doc.body));
+// 🩸 "Did this key reach theme.css" is asked of the sheet compiled WITHOUT the author's custom CSS
+// block: that block is appended verbatim, so a comment in it spelling `[data-surface="sand"] {
+// --gd-band: banana; }` made a dropped surface look emitted. Author text can never stand in for an
+// emitted rule when it is not in the text being searched.
+const emitted = compileTheme(doc.meta, '').css;
 const meta = doc.meta;
 const set = (k) => meta[k] != null && String(meta[k]).trim() !== '';
 
@@ -122,7 +129,8 @@ const dupes = [...firstLines].filter(([, at]) => at.length > 1);
 // Each drop keeps the FULL key, for the lookup; it is cut only when printed.
 const dropped = [];   // { key, value, reason }
 const seen = new Set();
-const drop = (key, reason) => { if (!seen.has(key)) { seen.add(key); dropped.push({ key, value: meta[key], reason }); } };
+// `name` is reported once, above, as a name problem — not again as a drop
+const drop = (key, reason) => { if (key !== 'name' && !seen.has(key)) { seen.add(key); dropped.push({ key, value: meta[key], reason }); } };
 for (const k of Object.keys(meta)) {
   if (!THEME_KEYS.has(k) && !DARK_KEYS.has(k) && !surfaceOf(k)) drop(k, 'not a key this vocabulary has (a typo?) — see TOKENS, TREATMENTS and META_KEYS in theme-schema.js');
 }
@@ -135,13 +143,13 @@ for (const k of Object.keys(meta)) {
   const stem = stems.has(k) ? k : darkStemOf(k);
   const surface = surfaceOf(k);
   const treatment = TREATMENTS.find((t) => t.key === k);
-  if (stem && !css.includes(`--${stem}: ${v};`)) drop(k, 'not written to theme.css');
+  if (stem && !emitted.includes(`--${stem}: ${v};`)) drop(k, 'not written to theme.css');
   // the one VALUE check on tokens: the schema types each token (`category`), and a colour token
   // that holds no colour leaves the property it feeds unusable (`background: var(--gd-bg)`).
   else if (stem && TOKENS.find((t) => t.stem === stem).category === 'color' && !isCssColour(v)) {
     drop(k, 'not a CSS colour — use hex (#rrggbb), rgb()/hsl() with numbers, a colour name, transparent, currentColor or var(--…)');
   }
-  else if (surface && !css.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
+  else if (surface && !emitted.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
   else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
 }
 // The announcement's link and deadline reach _site.md only beside its text (announce-off hides
@@ -207,6 +215,7 @@ if (set('type-scale') && !seen.has('type-scale')) {
 }
 
 const mark = '✗';
+for (const p of nameProblems) console.error(`${mark} ${src}: name — ${p}`);
 for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
 for (const [key, at] of dupes) {
   const last = at[at.length - 1];
@@ -214,13 +223,24 @@ for (const [key, at] of dupes) {
   console.error(`${mark} ${truncateCssText(key)}: written ${at.length} times (${at.map((a) => `line ${a.line}`).join(', ')}) — only the last, ${show(last.value)}, is used; ${lost} dropped`);
 }
 for (const d of dropped) console.error(`${mark} ${truncateCssText(d.key)}: ${show(d.value)} dropped — ${d.reason}`);
-const problems = unread.length + dupes.length + dropped.length;
+const problems = nameProblems.length + unread.length + dupes.length + dropped.length;
 if (problems) {
   console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them and run it again.`);
   process.exit(2);
 }
 
-writeFileSync(out, css);
+// Written beside its destination under a temporary name, then renamed into place: a write that
+// fails (a missing directory, no permission, a full disk) is a refusal like any other — exit 2, the
+// path named, no stack trace, and no half-written theme.css left where the build would find it.
+const tmp = `${out}.${process.pid}.tmp`;
+try {
+  writeFileSync(tmp, css);
+  renameSync(tmp, out);
+} catch (e) {
+  try { rmSync(tmp, { force: true }); } catch {}
+  console.error(`✗ cannot write ${out}: ${e.code ?? e.message} — nothing was written.`);
+  process.exit(2);
+}
 
 // Every key the theme OWNS, in a fixed order. A key the theme does not set is not printed — and if
 // your _site.md still carries it from an earlier theme, delete it there: the theme is its source.

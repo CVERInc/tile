@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -395,4 +395,36 @@ test('🔴 there is no override: --allow-dropped is an unknown option, refused, 
     assert.equal(existsSync(r.out), false, 'nothing written');
     assert.equal(r.stdout, '');
   }
+});
+
+// ── round 12: author text never stands in for an emitted rule; one run lists everything ─────────
+
+test('🔴 a comment in the custom CSS that spells the dropped rule does not make the drop pass', (t) => {
+  const doc = '---\nname: s\nsurface-sand: banana\n---\n\n```css\n/* [data-surface="sand"] { --gd-band: banana; } */\n```\n';
+  assertRefusedNaming(t, doc, ['surface-sand: "banana" dropped']);
+  // and the same for a token: custom CSS that writes the very declaration does not count as the token arriving
+  assertRefusedNaming(t, '---\nname: s\ngd-bg: #zzzzzz\n---\n\n```css\nhtml:root { --gd-bg: #zzzzzz; }\n```\n', ['gd-bg: "#zzzzzz" dropped']);
+});
+
+test('🔴 a missing or unusable name is listed WITH every other problem, in one run', (t) => {
+  for (const [nameLine, nameNeedle] of [['', 'name'], ['name: ../oops\n', '"../oops"']]) {
+    const r = assertRefusedNaming(t, `---\n${nameLine}gd-bgg: #fff\ncard: glassy\n---\n`,
+      [nameNeedle, 'gd-bgg: "#fff" dropped', 'card: "glassy" dropped']);
+    assert.match(r.stderr, /3 problem\(s\) above/, r.stderr);
+  }
+});
+
+test('🔴 an output that cannot be written is a refusal (exit 2, path named), not a crash, and leaves nothing behind', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tile-theme-out-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, '_theme.md');
+  writeFileSync(src, '---\nname: s\ngd-bg: #fff\n---\n');
+  const out = path.join(dir, 'no-such-dir', 'theme.css');
+  const r = spawnSync(process.execPath, [CLI, src, out], { encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(out), `the refusal names the path:\n${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /\n\s+at /, 'no stack trace');
+  assert.doesNotMatch(r.stderr, /✓/, 'no success line');
+  assert.equal(r.stdout, '', 'no _site.md keys printed for a theme that was not written');
+  assert.deepEqual(readdirSync(dir).sort(), ['_theme.md'], 'nothing partial left behind');
 });
