@@ -89,7 +89,8 @@ surface, an unsafe or empty value, an `announce-href`/`announce-until` with no `
 `announce-off` that is neither `true` nor `false`, a `type-scale` that derives nothing, or a value
 the renderer itself would not use (a deadline it cannot read, which hides the whole announcement,
 or one without an explicit `Z`/`±hh:mm` offset, whose end the build host's zone would decide, or
-one that is not a real calendar moment such as `2026-02-30T23:59:00Z`, which a parser rolls forward;
+one that is not a real calendar moment such as `2026-02-30T23:59:00Z`, which a parser rolls forward,
+or finer than a millisecond (more than 3 fractional-second digits);
 an announcement link it refuses — judged by the renderer's own `announceModel` and `safeHref`,
 imported, not copied), or a `fonts:` value outside its allowlist — the first line names each one
 (`✗ card: "glassy" dropped — not one of surface, flat, glass, elevated`), writes nothing, and exits 2.

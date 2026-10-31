@@ -472,3 +472,15 @@ test('🔴 `none` is a colour component in the modern space syntax only', (t) =>
     assertRefusedNaming(t, `---\nname: s\ngd-bg: ${v}\n---\n`, [`gd-bg: ${JSON.stringify(v)} dropped`]);
   }
 });
+
+// ── round 15: at most millisecond precision on a deadline ─────────────────────────────────────────
+
+test('🔴 announce-until with more than 3 fractional-second digits is a drop (finer than a parser keeps)', (t) => {
+  for (const until of ['2026-12-01T23:59:00.1234Z', '2026-12-01T23:59:00.0001Z', '2026-12-01T23:59:59.9999Z']) {
+    const r = assertRefusedNaming(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`, [`announce-until: ${JSON.stringify(until)} dropped`]);
+    assert.match(r.stderr, /at most 3/, r.stderr);
+  }
+  for (const until of ['2026-12-01T23:59:00.123Z', '2026-12-01T23:59:00.5Z']) {
+    assert.equal(run(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`).status, 0, until);
+  }
+});

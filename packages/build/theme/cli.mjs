@@ -170,7 +170,7 @@ if (off !== 'true') {
   //     start of time, so only unreadability — never lateness — says none).
   const until = siteMeta['announce-until'];
   if (until) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|([+-])(\d{2}):(\d{2}))$/i.exec(until);
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):(\d{2}))$/i.exec(until);
     if (!m) {
       if (announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
         drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
@@ -178,14 +178,18 @@ if (off !== 'true') {
         drop('announce-until', 'no time-zone offset — the build host\'s zone would decide when it ends; add the offset, e.g. 2026-12-01T23:59:00+08:00 (or Z for UTC)');
       }
     } else {
-      const [, y, mo, d, h, mi, sec = '00', z, sign, oh, om] = m;
+      const [, y, mo, d, h, mi, sec = '00', frac = '', z, sign, oh, om] = m;
       const offsetMin = z.toUpperCase() === 'Z' ? 0 : (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om));
       const ms = Date.parse(until);
       const at = new Date(ms + offsetMin * 60000);   // the instant, read back on the author's own clock
       const same = Number.isFinite(ms) && at.getUTCFullYear() === Number(y) && at.getUTCMonth() + 1 === Number(mo)
         && at.getUTCDate() === Number(d) && at.getUTCHours() === Number(h) && at.getUTCMinutes() === Number(mi)
         && at.getUTCSeconds() === Number(sec);
-      if (!same || announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+      // Date.parse keeps milliseconds; a fourth digit is silently rounded or cut, so the moment
+      // written is not the moment kept.
+      if (frac.length > 3) {
+        drop('announce-until', `.${frac} is finer than a millisecond — use at most 3 fractional-second digits (e.g. ${y}-${mo}-${d}T${h}:${mi}:${sec}.${frac.slice(0, 3)}${z})`);
+      } else if (!same || announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
         drop('announce-until', `not a real date and time — ${y}-${mo}-${d} ${h}:${mi}:${sec} does not exist on the calendar (a parser would quietly roll it to another moment)`);
       }
     }
