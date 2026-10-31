@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-carousel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A sitetile carousel's prev/next, overflow state and adaptive height as a dynamic coral. Without JS the track still scrolls natively. Version covers the UNIT: the client JS + the data-* contract.",
+  "scripts": {
+    "build": "node ../build.mjs carousel"
+  }
+}

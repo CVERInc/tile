@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { parseSite, inlineHtml, bodyHtml, gridCellBodyHtml } from '../sitetile/site-core.js';
 import { emitGrid } from './grid.mjs';
 import { emitHero } from './hero.mjs';
+import { emitCarousel } from './carousel.mjs';
 import { emitCollection } from './collection.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,7 @@ const gridParams = (o) => ({ eyebrow: null, cols: '', imageCards: false, more: n
 const grid = sectionOf('grid', '### A [Brand]\nx\n\n### B [Other]\ny');
 const heroParams = (o) => ({ media: 'avatar', layout: null, eyebrow: null, marqueeWords: [], enter: false, layerList: [], parallax: false, logo: null, logoPos: 'bottom', cta: undefined, bgOk: null, ...o });
 const hero = sectionOf('hero', 'Body.');
+const car = sectionOf('carousel', '### One\n![a](/a.png)');
 
 const CASES = [
   {
@@ -62,6 +64,12 @@ const CASES = [
     on: () => emitHero(hero, heroParams({ layerList: ['/b.png', '/f.png'], parallax: true }), ctx),
     off: () => emitHero(hero, heroParams({ layerList: ['/b.png', '/f.png'] }), ctx),   // layered, no parallax
     where: { tag: 'section', cls: 'st-hero st-full-bleed st-hero-layered' },
+  },
+  {
+    coral: 'carousel', component: 'Carousel.astro', oldSelector: "'.st-carousel'",
+    on: () => emitCarousel(car, { eyebrow: null, cols: '', more: null, start: '', isBlogFull: false, cells: car.cells }, ctx),
+    off: null,   // every carousel is a mount
+    where: { tag: 'section', cls: 'st-carousel' },
   },
 ];
 

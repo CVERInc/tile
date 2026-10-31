@@ -212,7 +212,9 @@ const ALLOWED_INLINE = [
   ['header-actions preload-flash guard (double-rAF rf-preload removal, gated on any toggle header-action)', 'rf-preload'],
   // carousel scroll-snap wiring (round 4's scheme-check.md is the first fixture to use the
   // `carousel` coral at all — round 2 already named it as untested). Self-gates per instance
-  // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page.
+  // (`dataset.carInit`) and no-ops with zero `.st-carousel` sections on the page. tile-lab#52: the
+  // carousel dynamic coral's client, which Carousel.astro bundles into the page (same code; it now
+  // finds the `data-dynamic-coral="carousel"` mount the emitter writes on each section).
   ['carousel prev/next + overflow wiring (per-instance self-gating, zero-op with no .st-carousel)', 'carInit'],
   // YouTube line click-to-play (tile#148, youtube-line-script.js): progressive over a real link —
   // JS-off, the poster IS `<a href="…youtube…">`, so the video still opens; the script only swaps
