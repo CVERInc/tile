@@ -1,6 +1,6 @@
 // reef#2725 — `embed` means "paste HTML" now, and the carousel that borrowed the name is `slides`.
 //
-// What this file pins, in the order the spec says it (reef#2725 「embed 正式版規格」, chodaict 10-31):
+// What this file pins, in the order the spec says it (reef#2725 「embed 正式版規格」, 2026-10-31):
 //   1. the BACKWARD MAPPING. An existing card that wrote `embed kind=…` keeps rendering the carousel it
 //      always rendered, with no change to its file — the parser reads it as `slides`, and writes it
 //      back with the word it was written with.
@@ -14,7 +14,9 @@
 //   5. the BUDGET. An embed whose HTML would blow the card's byte ceiling is refused, by name.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCard, serializeCard, CARD_MAX_BYTES, embedsOverCeiling } from './card-core.js';
+import { readFileSync } from 'node:fs';
+import { parseCard, serializeCard, normalizeCell, removeToken, CARD_MAX_BYTES, embedsOverCeiling } from './card-core.js';
+import { LEGACY_EMBED_LINES, legacyCard, gridOf } from './cards/embed-legacy-lines.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
 import { CELL_TYPES, PALETTE, BLANKS } from './ai-ops.mjs';
 
@@ -147,18 +149,76 @@ test('`embed` without `kind` is HTML; `slides` is the carousel by its own name',
   assert.deepEqual(m.cells.map((c) => c.type), ['embed', 'slides']);
 });
 
-test('an old `embed kind=slider|bubbles` renders exactly what the same cell renders as `slides`', () => {
-  for (const params of [
-    'w=6 kind=slider images="https://i.example/1.png,https://i.example/2.png,https://i.example/3.png"',
-    'w=6 kind=slider images="https://i.example/1.png"',
-    'bleed kind=bubbles images="https://i.example/1.png,https://i.example/2.png" origin="10% 20%" narrow="30% 40%" bg=https://i.example/bg.png',
-    'kind=bubbles images=https://i.example/1.png origin-narrow="1% 2%"',
-  ]) {
-    const old = render(card(`- [ ] %% card: embed ${params} %%`));
-    const now = render(card(`- [ ] %% card: slides ${params} %%`));
-    assert.equal(old, now, `embed ${params} renders differently from slides ${params}`);
-    assert.equal(cellsOf(old, 'slides').length, 1, `embed ${params} rendered no carousel at all`);
-    assert.doesNotMatch(old, /<iframe/, 'a carousel became an iframe');
+// 🔴 THE EXPECTATION COMES FROM BEFORE THE CHANGE. A first version of this test rendered `embed …` and
+// `slides …` with the SAME (new) renderer and compared them — two renders of HEAD agree whatever HEAD
+// does, and it let `kind=""` (blank before) start drawing a carousel through the new default.
+// cards/embed-legacy.golden.json is the pre-rename renderer's output, frozen with its ref.
+const GOLDEN = JSON.parse(readFileSync(new URL('./cards/embed-legacy.golden.json', import.meta.url), 'utf8'));
+
+test('🔴 every legacy `embed` line renders what the PRE-RENAME renderer drew (the frozen golden)', () => {
+  assert.ok(!/^0+$/.test(GOLDEN.ref) && GOLDEN.ref.length === 40, 'the golden names no source ref');
+  assert.deepEqual(Object.keys(GOLDEN.grids), LEGACY_EMBED_LINES, 'the golden and the line list disagree — regenerate the golden from the pre-rename ref');
+  for (const line of LEGACY_EMBED_LINES) {
+    const now = gridOf(render(legacyCard(line)));
+    // the ONE intended difference: the carousel cell now says what it is (nothing reads the attribute)
+    const then = GOLDEN.grids[line].replace(/data-coral-type="embed"/g, 'data-coral-type="slides"');
+    assert.equal(now, then, `changed since tile@${GOLDEN.ref.slice(0, 7)}: ${line}`);
+    assert.doesNotMatch(now, /<iframe/, `a legacy line became an iframe: ${line}`);
+  }
+  // CONTROL: the golden is not all-empty, and not all-carousel — both sides of the boundary are in it
+  const drawn = Object.values(GOLDEN.grids).filter((g) => /<figure/.test(g)).length;
+  assert.ok(drawn >= 4 && drawn < LEGACY_EMBED_LINES.length, `${drawn} of ${LEGACY_EMBED_LINES.length} golden grids draw a carousel`);
+});
+
+test('the same params under the new name draw the same carousel (the default only fills an ABSENT kind)', () => {
+  for (const params of ['w=6 kind=slider images="https://i.example/1.png,https://i.example/2.png"', 'kind=bubbles images=https://i.example/1.png']) {
+    assert.equal(gridOf(render(card(`- [ ] %% card: embed ${params} %%`))), gridOf(render(card(`- [ ] %% card: slides ${params} %%`))));
+  }
+  // a NEW slides cell with no kind is a slider…
+  assert.match(render(card('- [ ] %% card: slides images=https://i.example/1.png %%')), /st-slider/);
+  // …but an explicitly empty one is not filled in, under either name
+  assert.doesNotMatch(render(card('- [ ] %% card: slides kind="" images=https://i.example/1.png %%')), /<figure/);
+});
+
+test('🔴 the boundary is a `kind=` ASSIGNMENT token, read the way parseParams reads names', () => {
+  const typeOf = (params, body = '') => parseCard(card(`- [ ] %% card: embed ${params} %%${body ? ' ' + body : ''}`)).cells[0].type;
+  // legacy: any assignment of kind, with or without a value — these drew nothing before, and must not
+  // start running their bodies as HTML now
+  assert.equal(typeOf('kind= images="https://example.com/a.png"', '<b>legacy body</b>'), 'slides');
+  assert.equal(typeOf('kind="" images="https://example.com/a.png"'), 'slides');
+  assert.equal(typeOf('kind =slider images=x'), 'slides');
+  assert.equal(typeOf('-kind=slider images=x'), 'slides', 'parseParams reads `-kind=` as kind, so this was a carousel');
+  // HTML: no assignment of the NAME kind — a bare flag, a longer name, or `kind=` inside a quoted value
+  assert.equal(typeOf('kind', '<b>x</b>'), 'embed', 'a bare `kind` flag is not a `kind=` token');
+  assert.equal(typeOf('w=6 akind=x', '<b>x</b>'), 'embed');
+  assert.equal(typeOf('w=6 foo-kind=x', '<b>x</b>'), 'embed', 'parseParams reads `foo-kind` as ONE name');
+  assert.equal(typeOf('w=6 note="keep kind=slider"', '<b>x</b>'), 'embed', 'a `kind=` inside quotes is the note\'s text');
+});
+
+test('🔴 writing back: the old word is kept exactly while the line still parses as slides, by the same reading', () => {
+  // byte-identical round trips for every legacy shape, including the ones a substring test gets wrong
+  for (const line of [...LEGACY_EMBED_LINES, '%% card: embed -kind=slider images="https://example.com/a.png" %%']) {
+    const md = legacyCard(line);
+    assert.equal(serializeCard(parseCard(md)), md, `round trip changed: ${line}`);
+  }
+  // the edit path: remove the REAL kind; a `kind=` left inside a quoted note must not keep the old word
+  const md = legacyCard('%% card: embed kind=slider images="https://example.com/a.png" note="keep kind=slider" %%');
+  const cell = parseCard(md).cells[0];
+  assert.equal(cell.type, 'slides');
+  const edited = normalizeCell({ ...cell, rawParams: removeToken(cell.rawParams, 'kind') });
+  assert.doesNotMatch(edited.rawParams, /^kind=|\skind=slider images/, 'removeToken did not remove the real kind — the fixture measures nothing');
+  assert.equal(edited.type, 'slides', 'the slideshow became an HTML embed (and disappeared) once its kind was removed');
+  assert.match(serializeCard({ ...parseCard(md), cells: [edited] }), /%% card: slides /);
+  // and the writer agrees with the parser on every input: a legacy slides cell edited to carry each of
+  // these param strings is written so that it reads back as slides — never as HTML — and keeps the old
+  // word exactly when the parser would have read that word as slides
+  const base = parseCard(card('- [ ] %% card: embed kind=slider %%'));
+  for (const params of ['kind=slider', 'kind=', 'kind=""', 'kind =x', '-kind=x', 'kind', 'akind=x', 'foo-kind=x', 'note="kind=x"', 'note="a" kind=x', 'x.kind=y', 'w=6']) {
+    const out = serializeCard({ ...base, cells: [{ ...base.cells[0], rawParams: params }] });
+    const back = parseCard(out).cells[0];
+    assert.equal(back.type, 'slides', `a slideshow edited to \`${params}\` came back as ${back.type}`);
+    const parserSaysSlides = parseCard(card(`- [ ] %% card: embed ${params} %%`)).cells[0].type === 'slides';
+    assert.equal(/%% card: embed /.test(out), parserSaysSlides, `\`${params}\`: the writer and the parser disagree about the old word`);
   }
 });
 

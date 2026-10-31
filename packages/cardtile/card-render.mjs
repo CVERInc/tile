@@ -331,8 +331,9 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 
 // `slides` — the image carousel. Until reef#2725 (2026-10-31) this was `embed`, a generic word it
 // had borrowed; an old `embed kind=…` line is read as `slides` by the parser (card-core.js,
-// `legacySlides`) and lands here unchanged. `kind` defaults to `slider` for a cell written under the
-// new name — an old one always says which (that is how the parser knew it was a carousel).
+// `legacySlides`) and lands here unchanged. `kind` defaults to `slider` only when it is ABSENT and
+// the cell was written under the new name. An old line is drawn exactly as before: its `kind=""` or
+// valueless `kind=` drew nothing then, and a default must not start publishing what it held.
 //
 // 🔴 kind=slider carries a SPEECH-BUBBLE ROTATION 表演 — and表演 is lifted VERBATIM, never
 // re-implemented. The first pass here re-wrote it as an opacity crossfade with scale(.98) and
@@ -351,8 +352,8 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 // said `origin-narrow=` worked — through the truncation. Names are read whole now, so that spelling
 // is read by its own name below, and the cards that carry it keep the anchor they were given.
 //   bg=      static backdrop the bubbles rotate over (the characters the tails point at)
-function renderSlides(p, size, ctx = {}) {
-  const kind = p.kind == null || p.kind === '' ? 'slider' : p.kind;
+function renderSlides(p, size, ctx = {}, legacy = false) {
+  const kind = p.kind === undefined && !legacy ? 'slider' : p.kind;
   // 🔴 `slider` is the COMMON one — a horizontal carousel you swipe, with prev/next. `bubbles` is
   // the speech-bubble pop, which is what `slider` used to mean for everybody.
   //
@@ -437,7 +438,7 @@ function renderSlides(p, size, ctx = {}) {
   return '';
 }
 
-// `embed` — the author's own HTML, scripts included (reef#2725, chodaict 2026-10-31).
+// `embed` — the author's own HTML, scripts included (reef#2725, 2026-10-31).
 //
 // 🔴 WHY AN IFRAME, AND WHY ONLY THIS ONE TOKEN. Every Card lives on ONE origin (card.feelreef.com,
 // then reef.cards). A script of A's spliced into A's page runs as that origin — so when B, signed in,
@@ -628,7 +629,7 @@ function renderCell(cell, place, ctx) {
       return `<div class="st-cell st-cell-tile" ${size} data-coral-type="linktile"><a class="st-cell-link" ${a}><div class="st-cell-head">${icon}${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText)}</div>${sub}</div></a></div>`;
     }
     case 'slides':
-      return renderSlides(p, size, ctx);
+      return renderSlides(p, size, ctx, cell.spelled === 'embed');
     case 'embed':
       // the HTML is the cell's body as written — not `b`, which is trimmed for prose
       return renderEmbedHtml(cell.body, size, ctx);

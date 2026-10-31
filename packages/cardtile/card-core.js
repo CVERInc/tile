@@ -64,7 +64,7 @@ const clampSpan = (v, max) => {
   return Math.min(max, Math.max(1, Math.floor(n)));
 };
 
-// 🔴 THE OLD NAME OF THE CAROUSEL (reef#2725, chodaict 2026-10-31). `embed` was a fossil: an image
+// 🔴 THE OLD NAME OF THE CAROUSEL (reef#2725, 2026-10-31). `embed` was a fossil: an image
 // carousel built for one card borrowed the family's generic word, and Site's `embed` meant "paste
 // HTML" the whole time. `embed` means that now, and the carousel is `slides`.
 //
@@ -73,12 +73,23 @@ const clampSpan = (v, max) => {
 // only for `kind=slider` / `kind=bubbles` and returned '' for every embed without a `kind=` (the
 // "generic embed" was removed for splicing its body unescaped). So
 //   · `embed` WITH a `kind=` token  → the carousel, read as `slides` — exactly the cells that ever
-//     drew a carousel, plus `kind=<anything else>`, which drew nothing then and draws nothing now;
+//     drew a carousel, plus `kind=<anything else>` / `kind=""` / a valueless `kind=`, which drew
+//     nothing then and draw nothing now (the renderer gives a legacy cell no default kind);
 //   · `embed` WITHOUT one           → HTML. Every such cell rendered NOTHING before, so no carousel
 //     anybody has ever seen can change by this.
 // Read once, here, so every reader of the model — renderer, both editors, the board, an agent —
 // sees `slides` and none of them has to know the old spelling exists.
-const legacySlides = (word, params) => word === 'embed' && Object.prototype.hasOwnProperty.call(params, 'kind');
+//
+// 🔴 "A `kind=` token" is an ASSIGNMENT of the NAME `kind`, read the way parseParams reads names, and
+// not "the params object has a kind" — parseParams DROPS a valueless `kind=` (so a blank legacy cell
+// would have become HTML and run its old body) and KEEPS a bare `kind` flag (which is not a `kind=`).
+// So, on the param string with quoted values blanked out (a `note="keep kind=slider"` is the note's
+// text): `kind` must be a WHOLE name — parseParams scans `\w[\w-]*`, so `foo-kind` is one name and
+// `-kind` is the name `kind` — followed by `=` (a space before it allowed, as parseParams' own
+// key test allows). cellToRaw below repeats this exact test inline; embed-html.test.mjs checks they agree.
+const KIND_ASSIGNMENT = /(?:^|[^\w-])-*kind\s*=/;
+const unquoted = (raw) => String(raw || '').replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
+const legacySlides = (word, rawParams) => word === 'embed' && KIND_ASSIGNMENT.test(unquoted(rawParams));
 
 // one tugtile card's text → a typed cell. No marker = a plain text widget (whole text is the body).
 function extractCell(text) {
@@ -91,7 +102,7 @@ function extractCell(text) {
   const body = (m[2] + (m[3] ? '\n' + m[3] : '')).replace(/\s+$/, '');
   const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, '') };
   // `spelled` remembers the word on disk, so writing the cell back does not rewrite the file
-  if (legacySlides(word, params)) return { ...cell, type: 'slides', spelled: word };
+  if (legacySlides(word, rawParams)) return { ...cell, type: 'slides', spelled: word };
   return cell;
 }
 
@@ -101,10 +112,12 @@ function extractCell(text) {
 // 🔴 SELF-CONTAINED, deliberately — reef-mcp cuts this function out of this file verbatim
 // (apps/reef-mcp/scripts/card-syntax.mjs) into a module with no imports, so it may not call a helper.
 // A `slides` cell read from an old `embed kind=…` line is written back as `embed` — but only while it
-// still carries `kind=`, the token that makes it read as `slides` again. Without it the old word
-// would come back as HTML, so the cell is written by its real name instead.
+// still carries a `kind=` token, by EXACTLY the test extractCell uses (KIND_ASSIGNMENT on the param
+// string with quoted values blanked; repeated here because this function may not call out). Without
+// one the old word would come back as HTML, so the cell is written by its real name instead.
 function cellToRaw(cell) {
-  const word = cell.type === 'slides' && cell.spelled === 'embed' && /(^|\s)kind=/.test(cell.rawParams || '') ? 'embed' : cell.type;
+  const kindToken = /(?:^|[^\w-])-*kind\s*=/.test(String(cell.rawParams || '').replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length)));
+  const word = cell.type === 'slides' && cell.spelled === 'embed' && kindToken ? 'embed' : cell.type;
   const marker = '%% card: ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
   const body = cell.body || '';
   if (!body) return '- [ ] ' + marker;
