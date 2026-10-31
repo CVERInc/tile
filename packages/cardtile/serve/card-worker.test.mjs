@@ -1646,6 +1646,33 @@ test('tile#214: apex lookup errors fall through to the site origin', async () =>
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('tile#219: an apex store failure leaves exactly one warn line; a working store leaves none', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warned = [];
+  globalThis.fetch = async () => new Response('site origin');
+  console.warn = (...args) => { warned.push(args); };
+  try {
+    // Success: a live Card redirects and a missing one reaches the site — neither is a failure.
+    const ok = { ...ON, CARDS: recordingStore({ 'card:t:0': SERVING_CARD }) };
+    assert.equal((await worker.fetch(new Request('https://feelreef.com/t'), ok)).status, 301);
+    assert.equal((await worker.fetch(new Request('https://feelreef.com/nobody'), ok)).status, 200);
+    assert.deepEqual(warned, [], 'a working store must not warn');
+
+    // Failure: the request is still forwarded, and the operator gets one structured line.
+    const store = recordingStore({ 'card:t:0': SERVING_CARD });
+    store.get = async () => { throw new TypeError('KV unavailable'); };
+    const res = await worker.fetch(new Request('https://feelreef.com/t'), { ...ON, CARDS: store });
+    assert.equal(res.status, 200, 'the failure still reaches the site origin');
+    assert.equal(warned.length, 1, 'exactly one line per failed lookup');
+    assert.equal(warned[0].length, 1, 'one JSON string argument');
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard',
+      error: 'TypeError', message: 'KV unavailable',
+    });
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
 test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach origin', async () => {
   const originalFetch = globalThis.fetch;
   const forwarded = [];

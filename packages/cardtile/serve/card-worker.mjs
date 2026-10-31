@@ -700,7 +700,14 @@ const router = {
           // The apex belongs to the site when the optional Card lookup is unavailable.
           let md;
           try { ({ md } = await liveCard(env.CARDS, handle)); }
-          catch { return fetch(request); }
+          catch (err) {
+            // tile#219 follow-up: the forward hides the failure from the visitor, so leave one line
+            // for the operator. Same JSON-event shape as card-api's settlement lines; host and op
+            // only, never the handle's contents or a binding name.
+            console.warn(JSON.stringify({ event: 'apex_card_lookup_failed', host: reqHost, op: 'liveCard',
+              error: err?.name || 'Error', message: String(err?.message ?? err).slice(0, 200) }));
+            return fetch(request);
+          }
           if (md != null) return new Response(null, { status: 301, headers: {
             Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
           } });
