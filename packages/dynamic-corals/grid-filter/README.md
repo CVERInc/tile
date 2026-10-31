@@ -6,6 +6,11 @@ the mount point on the bar; this coral makes a pill show only the cards whose `d
 (the first, empty-valued pill shows all). Scoped to the bar's own `.st-grid`, so two filtered grids
 on one page do not cross-talk. Without JS every card shows.
 
+With `pack=masonry` the two corals compose: this one decides which cards are visible, then sends
+`dc-grid-filter-change` to the section's `.st-cells`, and `grid-masonry` re-lays out only the
+visible cards. Cards are found wherever masonry has moved them (inside its column wrappers), not
+only as direct children of `.st-cells`.
+
 Local-only (no registry channel): sitetile's `Grid.astro` imports the client source and Astro
 bundles it into the page; `grid-filter.js` is the built artifact for a host that serves corals itself.
 

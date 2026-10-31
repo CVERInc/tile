@@ -9,10 +9,21 @@
 // Mount: the bar itself, `data-dynamic-coral="grid-filter"` (packages/emit/grid.mjs writes it).
 // Was packages/sitetile/astro/src/components/sections/grid-filter.js until tile-lab#52 phase 2,
 // which moved it here unchanged except for that selector (it used to find `.st-grid-filter`).
+//
+// Composes with `pack=masonry` (the grid-masonry coral): THIS decides which cells are visible,
+// masonry lays out the visible ones. After every pill press the section's `.st-cells` receives a
+// `dc-grid-filter-change` event, which masonry answers by re-bucketing the cells still shown —
+// so a filtered result fills the columns from the top instead of keeping the holes where the
+// hidden cards were. Without masonry the event has no listener and changes nothing.
+// 🩸 Until 2026-10-31 the cells were found as `.st-cells > …` — direct children only. At ≥992 px
+// masonry has already moved them into column wrappers when this runs (Astro bundles it first), so
+// that found NO cells and every pill did nothing. Cells are found wherever they sit now, once, at
+// wire time: masonry moves elements, it never replaces them, so the list stays the live cells.
 function wire(bar) {
   const section = bar.closest('.st-grid');
   if (!section) return;
-  const cells = Array.from(section.querySelectorAll('.st-cells > [data-cat], .st-cells > .st-cell'));
+  const container = section.querySelector('.st-cells');
+  const cells = Array.from(section.querySelectorAll('.st-cells .st-cell'));
   const pills = Array.from(bar.querySelectorAll('.st-filter-pill'));
   bar.addEventListener('click', (e) => {
     const pill = e.target.closest('.st-filter-pill');
@@ -28,6 +39,7 @@ function wire(bar) {
       c.hidden = !show;                    // [hidden] — semantic, survives CSS reset
       c.style.display = show ? '' : 'none';
     });
+    if (container) container.dispatchEvent(new CustomEvent('dc-grid-filter-change', { detail: { cat } }));
   });
 }
 document.querySelectorAll('[data-dynamic-coral="grid-filter"]').forEach(wire);

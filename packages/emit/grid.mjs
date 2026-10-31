@@ -81,6 +81,10 @@ export function gridCell(c, imageCards, ctx) {
   // `[Label →href]` badge = a SECONDARY card link; it can't nest inside the whole-cell <a>, so
   // such a cell uses the OVERLAY pattern (absolute full-cell <a> + the action stacked above it).
   const hasAction = !!(hrefOk && badgeHrefOk);
+  // The cell's facet for `filter=` — on EVERY shape, because gridFacets makes a pill of every
+  // cell's badge, whatever shape the cell renders in. 🩸 Until 2026-10-31 only image cards wrote
+  // it: on a plain-card grid each pill matched no cell, so the first click hid the whole section.
+  const cat = attr('data-cat', c.badge || undefined);
   const badgeSpan = () => '<span class="st-cell-badge"' + attr('data-badge', String(c.badge).toLowerCase()) + '>' + inline(c.badge) + '</span>';
   const glyph = () => (c.icon
     ? '<span class="st-cell-icon" aria-hidden="true">' + lucideSvg(c.icon) + '</span>'
@@ -92,11 +96,11 @@ export function gridCell(c, imageCards, ctx) {
       + when(fi.img, () => '<figure class="st-gal-fig">' + imgTag(fi.img.alt, fi.img.src) + '</figure>') + ' '
       + when(badge, badgeSpan) + ' ' + h3() + ' ' + cellBlock(fi.rest, cellOpts);
     return hrefOk
-      ? '<a class="st-cell st-gal-cell st-cell-link group"' + attr('href', hrefOk) + tgt(hrefOk) + attr('data-cat', c.badge || undefined) + inner + ' </a>'
-      : '<div class="st-cell st-gal-cell"' + attr('data-cat', c.badge || undefined) + inner + ' </div>';
+      ? '<a class="st-cell st-gal-cell st-cell-link group"' + attr('href', hrefOk) + tgt(hrefOk) + cat + inner + ' </a>'
+      : '<div class="st-cell st-gal-cell"' + cat + inner + ' </div>';
   }
   if (hasAction) {
-    return '<div class="st-cell st-cell-link st-cell-overlaid group"> '
+    return '<div class="st-cell st-cell-link st-cell-overlaid group"' + cat + '> '
       + '<a class="st-cell-overlay"' + attr('href', hrefOk) + tgt(hrefOk) + attr('aria-label', c.title) + '></a> '
       + glyph() + ' ' + h3() + ' ' + cellBlock(c.body, cellOpts) + ' '
       + '<div class="st-cell-foot"> <a class="st-cell-action"' + attr('href', badgeHrefOk) + tgt(badgeHrefOk) + '> '
@@ -111,8 +115,8 @@ export function gridCell(c, imageCards, ctx) {
       : (c.badge || c.emoji || c.icon) ? '' : '<span class="st-cell-cta" aria-hidden="true">' + signetArrow('right', 18) + '</span>';
   const inner = '> ' + (footTag ? '' : when(badge, badgeSpan)) + ' ' + glyph() + ' ' + h3() + ' ' + cellBlock(c.body, cellOpts) + ' ' + tail;
   return hrefOk
-    ? '<a class="st-cell st-cell-link group"' + attr('href', hrefOk) + tgt(hrefOk) + inner + ' </a>'
-    : '<div class="st-cell"' + inner + ' </div>';
+    ? '<a class="st-cell st-cell-link group"' + attr('href', hrefOk) + tgt(hrefOk) + cat + inner + ' </a>'
+    : '<div class="st-cell"' + cat + inner + ' </div>';
 }
 
 /**

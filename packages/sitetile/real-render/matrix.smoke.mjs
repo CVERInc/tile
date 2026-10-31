@@ -34,7 +34,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { ARMS, THEME_TOKENS, THEME_SELECTOR_OVERRIDES, HEADING_OVERRIDE, prepareEngine, buildSites, siteLang, themeCss,
+import { ARMS, THEME_TOKENS, THEME_SELECTOR_OVERRIDES, HEADING_OVERRIDE, prepareEngine, buildSites, expectedLang, themeCss,
   armTheme, armCoralCss, isDeclared, legacyTwin, knownArm } from './lib/sites.mjs';
 import { STATES, emitWorker, composeStates, islandFixture } from './lib/states.mjs';
 import { startServer, CORAL_ARTIFACT_PATH } from './lib/server.mjs';
@@ -161,7 +161,7 @@ try {
             facts.cascade = await page.evaluate(cascadeControls, spec);
             if (theme === 'custom') facts.themeOverrides = await page.evaluate(themeOverrideControls, { spec, overrides: THEME_SELECTOR_OVERRIDES });
             facts.consoleErrors = consoleErrors;
-            const v = verdicts({ spec: st, theme, declared, vp, facts, expectedLang: siteLang(arm), themeTokens: THEME_TOKENS[theme], headingOverride: theme === 'custom' ? HEADING_OVERRIDE : null });
+            const v = verdicts({ spec: st, theme, declared, vp, facts, expectedLang: expectedLang(arm, st), themeTokens: THEME_TOKENS[theme], headingOverride: theme === 'custom' ? HEADING_OVERRIDE : null });
             Object.assign(record, v);
             factsByArm[arm][vp][st.id] = facts;
             const factsDir = path.join(OUT, 'facts', arm, vp); mkdirSync(factsDir, { recursive: true });

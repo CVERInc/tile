@@ -1,6 +1,6 @@
 {
   "name": "@cver/coral-grid-masonry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "A sitetile grid's `pack=masonry` layout as a dynamic coral: cards are bucketed into `cols` column boxes by DOM-order parity at the theme's breakpoints. No measurement, no image wait. Version covers the UNIT: the client JS + the data-* contract.",
