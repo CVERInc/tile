@@ -17,17 +17,18 @@
 // `name: ../oops` all exited 0 with a success line, while the card look, the band and the theme's
 // NAME (the one thing the build looks the stylesheet up by) silently went missing. A person at a
 // terminal has no editor between them and that silence, so here every drop is named — key, value,
-// reason — and refused unless they say `--allow-dropped`.
+// reason — and refused unless they say `--allow-dropped`. That includes what the forgiving parser
+// never hands over: a line it cannot read, and the earlier value of a key written twice.
 //
 // 🔴 The drops are found by reading the OUTPUT, not by restating the compiler's rules: a key the
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
 // A second copy of "which values are legal" here would be a second thing to keep in step.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { compileTheme, THEME_SITE_KEYS } from './theme-compile.js';
+import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
 import {
   parseThemeDoc, residueOf, structuralIssues, sanitizeThemeMeta, unsafeReason,
-  TOKENS, TREATMENTS, TYPE_SCALE_RANGE, SURFACE_HEX_REASON, surfaceOf, darkStemOf,
+  TOKENS, TREATMENTS, TYPE_SCALE_RANGE, SURFACE_HEX_REASON, THEME_KEYS, DARK_KEYS, surfaceOf, darkStemOf,
 } from './theme-schema.js';
 import { truncateCssText } from './css-text.js';
 
@@ -73,11 +74,35 @@ const { css, siteMeta } = compileTheme(doc.meta, residueOf(doc.body));
 const meta = doc.meta;
 const set = (k) => meta[k] != null && String(meta[k]).trim() !== '';
 
+// ── what the parser never handed over ──────────────────────────────────────────────────────────
+// 🩸 parseThemeDoc is forgiving by design (an editor wrote the file; a stray line should not break a
+// live site), so a line with no colon is SKIPPED and a key written twice keeps its LAST value — both
+// in silence. That is the library's right; it is not this command's. So the CLI reads the same
+// frontmatter block itself, line by line, and names what the parser would not use. The block is
+// found with the parser's own shape (`---` … `---` at the top), so the two read the same lines.
+const unread = [];   // { line, text, reason }
+const fm = /^---\r?\n([\s\S]*?)\r?\n---\s*/.exec(md);
+const firstLines = new Map();   // key → [{ line, value }]
+fm[1].split(/\r?\n/).forEach((text, i) => {
+  const line = i + 2;   // line 1 is the opening ---
+  if (!text.trim() || /^\s*#/.test(text)) return;
+  const at = text.indexOf(':');
+  if (at < 0) { unread.push({ line, text, reason: 'no `key: value` colon — the parser skips this line' }); return; }
+  const key = text.slice(0, at).trim();
+  if (!key) { unread.push({ line, text, reason: 'nothing before the colon — there is no key to set' }); return; }
+  if (!firstLines.has(key)) firstLines.set(key, []);
+  firstLines.get(key).push({ line, value: text.slice(at + 1).trim() });
+});
+const dupes = [...firstLines].filter(([, at]) => at.length > 1);
+
 // ── what was asked for and did not arrive ──────────────────────────────────────────────────────
+// Each drop keeps the FULL key, for the lookup; it is cut only when printed.
 const dropped = [];   // { key, value, reason }
 const seen = new Set();
 const drop = (key, reason) => { if (!seen.has(key)) { seen.add(key); dropped.push({ key, value: meta[key], reason }); } };
-for (const i of issues) if (/^unknown theme key/.test(i.problem)) drop(i.key, 'not a key this vocabulary has (a typo?) — see TOKENS, TREATMENTS and META_KEYS in theme-schema.js');
+for (const k of Object.keys(meta)) {
+  if (!THEME_KEYS.has(k) && !DARK_KEYS.has(k) && !surfaceOf(k)) drop(k, 'not a key this vocabulary has (a typo?) — see TOKENS, TREATMENTS and META_KEYS in theme-schema.js');
+}
 for (const d of sanitizeThemeMeta(meta).dropped) drop(d.key, `${d.kind}: ${d.problem}`);
 const stems = new Set(TOKENS.map((t) => t.stem));
 for (const k of Object.keys(meta)) {
@@ -90,18 +115,34 @@ for (const k of Object.keys(meta)) {
   else if (surface && !css.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
   else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
 }
-// type-scale is not emitted itself; it is visible only through the heading steps it derives.
+// The announcement's link and deadline reach _site.md only beside its text (announce-off hides
+// all three on purpose, which is a choice and not a drop).
+if (String(meta['announce-off'] ?? '').trim() !== 'true') {
+  for (const k of ['announce-href', 'announce-until']) {
+    if (set(k) && !seen.has(k) && siteMeta[k] !== String(meta[k]).trim()) drop(k, 'an announcement link or deadline with no `announce:` text shows nothing');
+  }
+}
+// type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
+// the compiler what it WOULD derive with the hand-set steps taken away, so a ratio that derives
+// nothing is caught even when gd-h1/h2/h3 are all set by hand and hide it.
 if (set('type-scale') && !seen.has('type-scale')) {
-  const derived = ['gd-h3', 'gd-h2', 'gd-h1'].some((h) => !set(h) && css.includes(`--${h}: `));
-  const wouldShow = ['gd-h3', 'gd-h2', 'gd-h1'].some((h) => !set(h));
-  if (wouldShow && !derived) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
+  const probe = { ...sanitizeThemeMeta(meta).meta };
+  for (const h of ['gd-h1', 'gd-h2', 'gd-h3']) delete probe[h];
+  if (!/--gd-h3: /.test(compileThemeCss(probe))) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
 }
 
 for (const i of issues) if (!/^unknown theme key/.test(i.problem)) console.error(`⚠ ${src}: ${i.key} — ${i.problem}`);
 const mark = allowDropped ? '⚠' : '✗';
-for (const d of dropped) console.error(`${mark} ${d.key}: ${show(d.value)} dropped — ${d.reason}`);
-if (dropped.length && !allowDropped) {
-  console.error(`✗ ${src}: ${dropped.length} value(s) above would be dropped, so nothing was written. Fix them, or pass --allow-dropped to compile without them.`);
+for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
+for (const [key, at] of dupes) {
+  const last = at[at.length - 1];
+  const lost = at.slice(0, -1).map((a) => `${show(a.value)} (line ${a.line})`).join(', ');
+  console.error(`${mark} ${truncateCssText(key)}: written ${at.length} times (${at.map((a) => `line ${a.line}`).join(', ')}) — only the last, ${show(last.value)}, is used; ${lost} dropped`);
+}
+for (const d of dropped) console.error(`${mark} ${truncateCssText(d.key)}: ${show(d.value)} dropped — ${d.reason}`);
+const problems = unread.length + dupes.length + dropped.length;
+if (problems && !allowDropped) {
+  console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them, or pass --allow-dropped to compile without them.`);
   process.exit(2);
 }
 

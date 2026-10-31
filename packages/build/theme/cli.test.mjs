@@ -179,3 +179,61 @@ test('a clean theme reports no drops; a default treatment value is not a drop', 
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /dropped|⚠|✗/);
 });
+
+// ── round 3: what the forgiving parser skips or overwrites is a drop too ─────────────────────────
+
+/** Refused (exit 2, nothing written, nothing printed), and stderr names every `needles` line. */
+function assertRefusedNaming(t, doc, needles) {
+  const r = run(t, doc);
+  assert.equal(r.status, 2, `exit ${r.status}\n${r.stderr}`);
+  assert.equal(existsSync(r.out), false, 'refused: no theme.css');
+  assert.equal(r.stdout, '');
+  for (const n of needles) assert.ok(r.stderr.includes(n), `stderr does not name ${JSON.stringify(n)}:\n${r.stderr}`);
+  const ok = run(t, doc, 'theme.css', ['--allow-dropped']);
+  assert.equal(ok.status, 0, `--allow-dropped must compile anyway:\n${ok.stderr}`);
+  for (const n of needles) assert.ok(ok.stderr.includes(n), `--allow-dropped still lists ${JSON.stringify(n)}`);
+  return r;
+}
+
+test('🔴 a frontmatter line the parser cannot read is named by line number and refused', (t) => {
+  const r = assertRefusedNaming(t, '---\nname: sample\ngd-bg #fff\n---\n', ['line 3', '"gd-bg #fff"']);
+  assert.match(r.stderr, /line 3: "gd-bg #fff" — /);
+});
+
+test('🔴 a key written twice is named with both lines and refused (the parser keeps the last)', (t) => {
+  const r = assertRefusedNaming(t, '---\nname: sample\ngd-bg: #000\ngd-bg: #fff\n---\n', ['gd-bg', 'line 3', 'line 4', '"#000"']);
+  assert.match(r.stderr, /gd-bg/);
+});
+
+test('🔴 an announcement link or deadline with no announcement text is a drop', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\nannounce-href: /sale\nannounce-until: 2026-12-01T23:59:00+08:00\n---\n',
+    ['announce-href: "/sale" dropped', 'announce-until: "2026-12-01T23:59:00+08:00" dropped']);
+});
+
+test('🔴 an unusable type-scale is a drop even when every heading step is set by hand', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\ngd-font-size: 18px\ngd-h1: 30px\ngd-h2: 24px\ngd-h3: 20px\ntype-scale: 9\n---\n',
+    ['type-scale: "9" dropped']);
+  // control: a USABLE ratio with every step overridden is the author's choice, not a drop
+  const r = run(t, '---\nname: sample\ngd-font-size: 18px\ngd-h1: 30px\ngd-h2: 24px\ngd-h3: 20px\ntype-scale: 1.25\n---\n');
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('🔴 a long unknown key is reported with its REAL value (looked up by the full key, cut only for display)', (t) => {
+  const key = 'x'.repeat(201);
+  const r = run(t, `---\nname: sample\n${key}: 42\n---\n`);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /x{200}…: "42" dropped/);
+  assert.doesNotMatch(r.stderr, /undefined/);
+});
+
+test('an announcement that IS shown is not a drop; neither is announce-off hiding it', (t) => {
+  for (const doc of ['---\nname: s\nannounce: Hi\nannounce-href: /sale\n---\n', '---\nname: s\nannounce: Hi\nannounce-href: /x\nannounce-off: true\n---\n']) {
+    const r = run(t, doc);
+    assert.equal(r.status, 0, `${doc}\n${r.stderr}`);
+  }
+});
+
+test('comments and blank lines in the frontmatter are not "unreadable"', (t) => {
+  const r = run(t, '---\n# a comment\nname: s\n\n   \ngd-bg: #fff\n---\n');
+  assert.equal(r.status, 0, r.stderr);
+});
