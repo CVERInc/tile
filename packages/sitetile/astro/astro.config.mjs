@@ -36,6 +36,9 @@ export default defineConfig({
         // three icon routes AND by SiteLayout's <head>, so the files and the links that name them
         // cannot disagree. Same out-of-dir alias pattern as @sitetile / @pwa.
         '@icons': fileURLToPath(new URL('../icon-core.mjs', import.meta.url)),
+        // The shared section emitter (tile-lab#52) — pure `(section, params, ctx) → HTML`, which
+        // the section components call through set:html. Same out-of-dir alias pattern.
+        '@emit': fileURLToPath(new URL('../../emit', import.meta.url)),
       },
     },
   },

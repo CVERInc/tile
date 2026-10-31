@@ -5,9 +5,11 @@
 // reference renderer's `case 'social'` (site-core.js) so the editor preview matches the build.
 // IR: `## Title` + `%% sitetile: social %%` + caption prose + a links-only paragraph
 // (`[Patreon](url) · [Instagram](url) · [X](url)`); the button row renders after the caption.
-import { parseParams, inlineHtml, bodyHtml, socialParts, linkButtonsHtml } from '@sitetile';
+// The markup is packages/emit/social.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
+import { parseParams } from '@sitetile';
+import { emitSocial } from '@emit/social.mjs';
 const { section, hero } = Astro.props;
-const Title = hero ? 'h1' : 'h2';
 // 🔴 The result was discarded here — the call was kept only to VALIDATE the params.
 // It has a reader now, so it is bound.
 const pm = parseParams(section.params);
@@ -16,11 +18,5 @@ const pm = parseParams(section.params);
 // grammar explaining the split; authors reasonably used it everywhere and it silently
 // did nothing. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
-const sp = socialParts(section.body);
 ---
-<section class="st-social" id={section.id}>
-  {eyebrow && <p class="st-social-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <Title set:html={inlineHtml(section.title)} />}
-  {sp.caption && <Fragment set:html={bodyHtml(sp.caption)} />}
-  <Fragment set:html={linkButtonsHtml(sp.links, 'st-social')} />
-</section>
+<Fragment set:html={emitSocial(section, { eyebrow }, { hero })} />

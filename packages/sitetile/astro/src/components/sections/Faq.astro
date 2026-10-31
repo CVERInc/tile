@@ -6,9 +6,11 @@
 // matching a SiteOrigin `.mp-accordion` default state); absent → collapsed. An answer body may
 // lead with a `###### <bold summary>` (h6), the exact shape live FAQs use for the one-line answer.
 // The THEME paints the disclosure chrome. Mirrors the reference renderer in site-core.js.
-import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
+// The markup is packages/emit/faq.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
+import { parseParams } from '@sitetile';
+import { emitFaq } from '@emit/faq.mjs';
 const { section, hero } = Astro.props;
-const Title = hero && section.title ? 'h1' : 'h2';   // first section on the page → its title is the <h1>
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
 // already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
@@ -17,20 +19,5 @@ const pm = parseParams(section.params);
 // eyebrow sits above — the inconsistency was arbitrary. Absent → no DOM change.
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 const openAll = pm.open != null;
-const faqs = section.faqs || [];
 ---
-<section class="st-faq" id={section.id}>
-  <div class="st-faq-head">
-    {eyebrow && <p class="st-faq-eyebrow" set:html={inlineHtml(eyebrow)} />}
-    {section.title && <Title set:html={inlineHtml(section.title)} />}
-    {section.body && <Fragment set:html={bodyHtml(section.body)} />}
-  </div>
-  <div class="st-faq-list">
-    {faqs.map((e) => (
-      <details class="st-faq-item" open={openAll}>
-        <summary class="st-faq-q" set:html={inlineHtml(e.q)} />
-        <div class="st-faq-a" set:html={bodyHtml(e.body)} />
-      </details>
-    ))}
-  </div>
-</section>
+<Fragment set:html={emitFaq(section, { eyebrow, open: openAll }, { hero })} />

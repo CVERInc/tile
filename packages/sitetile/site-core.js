@@ -2590,6 +2590,13 @@ function renderSection(s, hero, ctx) {
   // embed hard-code <h2> there, so they do here.
   const H = hero && s.title ? 'h1' : 'h2';
   const pm = parseParams(s.params);
+  // `eyebrow="…"` → the small label every heading-bearing component writes as its section's first
+  // `<p class="st-<coral>-eyebrow">` (faq: first in .st-faq-head). 🩸 tile-lab#52: seven of the
+  // components had it and their branches here did not, so an editor preview dropped a label the
+  // built page showed — found when section-contract.test.mjs gained cases that set one.
+  const eyebrowP = (coral) => pm.eyebrow
+    ? '<p class="st-' + coral + '-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>'
+    : '';
   const type = KNOWN_TYPES.indexOf(s.type) >= 0 ? s.type : 'prose';
   switch (type) {
     case 'hero': {
@@ -2748,7 +2755,7 @@ function renderSection(s, hero, ctx) {
           ? '<a class="st-gal-cell st-cell-link group" href="' + escHrefAttr(c.href) + '">' + badge + inner + '</a>'
           : '<div class="st-gal-cell">' + badge + inner + '</div>';
       }).join('');
-      return '<section class="st-gallery" data-cols="' + escAttr(pm.cols || '') + '">' +
+      return '<section class="st-gallery" data-cols="' + escAttr(pm.cols || '') + '">' + eyebrowP('gallery') +
         (s.title ? '<h2>' + inlineHtml(s.title) + '</h2>' : '') + bodyHtml(s.body) +
         '<div class="st-gal-cells">' + cells + '</div></section>';
     }
@@ -2842,7 +2849,7 @@ function renderSection(s, hero, ctx) {
         : gs.map((g) => '<div class="st-people-group">' +
             '<p class="st-people-group-head" id="' + gid(g.title) + '">' + inlineHtml(g.title) + '</p>' +
             bodyHtml(g.lead) + '<div class="st-people-cells">' + cellsOf(g) + '</div></div>').join('');
-      return '<section class="st-people" data-cols="' + escAttr(pm.cols || '') + '" data-shape="' + shape + '">' +
+      return '<section class="st-people" data-cols="' + escAttr(pm.cols || '') + '" data-shape="' + shape + '">' + eyebrowP('people') +
         (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + inner + '</section>';
     }
     case 'collection': {
@@ -2997,7 +3004,7 @@ function renderSection(s, hero, ctx) {
         '<summary class="st-faq-q">' + inlineHtml(e.q) + '</summary>' +
         '<div class="st-faq-a">' + bodyHtml(e.body) + '</div></details>').join('');
       return '<section class="st-faq">' +
-        '<div class="st-faq-head">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' +
+        '<div class="st-faq-head">' + eyebrowP('faq') + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + bodyHtml(s.body) + '</div>' +
         '<div class="st-faq-list">' + items + '</div></section>';
     }
     case 'timeline': {
@@ -3012,7 +3019,7 @@ function renderSection(s, hero, ctx) {
         '<p class="st-tl-year">' + inlineHtml(e.year) + '</p>' +
         '<div class="st-tl-body">' + (e.title ? '<h3>' + inlineHtml(e.title) + '</h3>' : '') + bodyHtml(e.body) + '</div></div>').join('');
       const tlSurface = pm.surface ? ' data-surface="' + escAttr(typeof pm.surface === 'object' ? pm.surface.label : pm.surface) + '"' : '';
-      return '<section class="st-timeline"' + (zigzag ? ' data-style="zigzag"' : '') + tlSurface + '>' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
+      return '<section class="st-timeline"' + (zigzag ? ' data-style="zigzag"' : '') + tlSurface + '>' + eyebrowP('timeline') + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         bodyHtml(s.body) + '<div class="st-tl-rows">' + rows + '</div></section>';
     }
     case 'social': {
@@ -3020,7 +3027,7 @@ function renderSection(s, hero, ctx) {
       // (first = primary filled, rest = outline). Buttons render AFTER the caption. General — any
       // creator/landing follow band. Mirrors Social.astro for editor-preview parity.
       const sp = socialParts(s.body);
-      return '<section class="st-social">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
+      return '<section class="st-social">' + eyebrowP('social') + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         (sp.caption ? bodyHtml(sp.caption) : '') + linkButtonsHtml(sp.links, 'st-social') + '</section>';
     }
     case 'tagcloud': {
@@ -3033,7 +3040,7 @@ function renderSection(s, hero, ctx) {
       const tags = links.map((l) => isSafeHref(l.href)
         ? '<a class="st-tag" href="' + escHrefAttr(l.href) + '">' + inlineHtml(l.label) + '</a>'
         : '<span class="st-tag">' + inlineHtml(l.label) + '</span>').join('');
-      return '<section class="st-tagcloud">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
+      return '<section class="st-tagcloud">' + eyebrowP('tagcloud') + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         '<div class="st-tag-flow">' + tags + '</div></section>';
     }
     case 'links': {
@@ -3049,7 +3056,7 @@ function renderSection(s, hero, ctx) {
           : '<span class="st-link-name">' + inlineHtml(it.label) + '</span>') +
         (it.host ? '<span class="st-link-host">' + escHtml(it.host) + '</span>' : '') +
         (it.note ? '<p class="st-link-note">' + inlineHtml(it.note) + '</p>' : '') + '</li>').join('');
-      return '<section class="st-links">' + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
+      return '<section class="st-links">' + eyebrowP('links') + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') +
         (lp.caption ? bodyHtml(lp.caption) : '') + (cards ? '<ul class="st-links-list">' + cards + '</ul>' : '') + '</section>';
     }
     default: { // prose — omit the heading when headingless; `align=left` opts out of centering.
