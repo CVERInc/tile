@@ -1,6 +1,6 @@
 // cardtile-w's sandbox — the ONE door out, into the real thing.
 //
-// Ported from feelreef's `apps/feelreef/src/lib/card/tryToReal.ts` (chodaict, 2026-08-27), which
+// Ported from feelreef's `apps/feelreef/src/lib/card/tryToReal.ts` (the owner, 2026-08-27), which
 // used to compute this for the retired `feelreef.com/card/try` route. That route died with the rest
 // of the legacy Python surfaces (commit 3fcfb09ff, 2026-08-28) — but the CONTRACT it wrote down did
 // not stop being true: `/dashboard/cards`'s own input still carries

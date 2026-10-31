@@ -1493,13 +1493,13 @@ function mountEditor(contentEl, opts, host) {
     // ---- Selection menu (touch only) ----------------------------------------------------------------
     // The toolbar is always visible but knows nothing about your selection; the table menu knows exactly what
     // you touched but exists for one construct. Nothing answered "I have selected some text, now what?" —
-    // chodaict's observation. This does, and it can say things a toolbar cannot: wrapState lets an item read
+    // the owner's observation. This does, and it can say things a toolbar cannot: wrapState lets an item read
     // 取消粗體 rather than 粗體, and the list items read the caret line's marker the same way.
     //
     // 🩸 The FIRST version of this triggered on 'contextmenu' after a selection existed — the same event the
     // table menu uses, which works fine there. It does not work here: on iOS, long-pressing text you have
     // ALREADY selected is a gesture WebKit reserves for its own native callout (Copy / Look Up / …), and it
-    // does not dispatch 'contextmenu' for it. chodaict felt the haptic (the native selection UI recognising
+    // does not dispatch 'contextmenu' for it. the owner felt the haptic (the native selection UI recognising
     // the gesture) and got no menu — the event this code was listening for never fired. Verified against a
     // real phone, not inferred from a changelog.
     //
