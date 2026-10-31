@@ -31,10 +31,15 @@
  * plain variable used as `i % cols` — nothing below is hardcoded to a 2-column split, so any
  * breakpoint's column count gets the same parity treatment.
  *
- * Import once anywhere in your app:
- *   import '@sitetile/components/sections/grid-masonry.js';
- * Auto-wires every `.st-cells[data-pack="masonry"]` on load, resize (debounced), and Astro view
+ * The grid-masonry dynamic coral, CLIENT source (built into grid-masonry.js by
+ * dynamic-corals/build.mjs; sitetile's Grid.astro imports this file and Astro bundles it).
+ * Auto-wires every mount — `data-dynamic-coral="grid-masonry"`, which packages/emit/grid.mjs writes
+ * on a `pack=masonry` grid's `.st-cells` — on load, resize (debounced), and Astro view
  * transitions (`astro:page-load`). SSR-safe: a no-op when there's no `document`.
+ *
+ * Was packages/sitetile/astro/src/components/sections/grid-masonry.js until tile-lab#52 phase 2,
+ * which moved it here unchanged except for that selector (it used to find
+ * `.st-cells[data-pack="masonry"]`).
  */
 
 function columnsFor(width) {
@@ -108,7 +113,7 @@ function wire(container) {
 
 export function init() {
   if (typeof document === 'undefined') return;
-  document.querySelectorAll('.st-cells[data-pack="masonry"]').forEach(wire);
+  document.querySelectorAll('[data-dynamic-coral="grid-masonry"]').forEach(wire);
 }
 
 if (typeof document !== 'undefined') {

@@ -62,6 +62,12 @@ export const INTERNAL = {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
     'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
   },
+  'grid-masonry': {},
+  'grid-filter': {},
+  'hero-parallax': {},
+  carousel: {
+    'data-car-init': 'Runtime mount guard written by the coral.',
+  },
 };
 
 // Explicitly account for the names passed through inbox-bubble's computed data-${name} helper.

@@ -18,7 +18,8 @@ const attr = (tag, n) => (new RegExp(`\\b${n}="([^"]*)"`).exec(tag) || [])[1];
 const outbound = (html) => anchors(html).filter((a) => /^https?:/i.test(attr(a, 'href') || ''));
 const isUgc = (a) => /\bugc\b/.test(attr(a, 'rel') || '') && /\bnofollow\b/.test(attr(a, 'rel') || '');
 // the platform's own "Powered by" credit is ours, not user content
-const userLinks = (html) => outbound(html).filter((a) => !/st-footer-credit/.test(a));
+// (identified by its destination: the `st-footer-credit` class it used to carry is gone, tile-lab#55)
+const userLinks = (html) => outbound(html).filter((a) => !/feelreef\.com\/signup/.test(attr(a, 'href') || ''));
 
 const CARD = [
   '---', 'card-page: maple', 'title: Maple', '---', '', '## grid', '',

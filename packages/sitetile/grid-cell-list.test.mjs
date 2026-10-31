@@ -71,15 +71,22 @@ test('other grid bodies retain the block parser output', () => {
 });
 
 test('Astro routes every cell body through the shared grid renderer', () => {
-  const source = readFileSync(new URL('./astro/src/components/sections/GridCell.astro', import.meta.url), 'utf8')
-    .replace(/\/\/[^\n]*/g, '');
+  // tile-lab#52 phase 2: the cell markup is packages/emit/grid.mjs (was GridCell.astro). Grid.astro
+  // hands sitetile's gridCellBodyHtml in as `ctx.cellBlock`; the emitter calls nothing else for a
+  // cell body.
+  const strip = (s) => s.replace(/\/\/[^\n]*/g, '');
+  const astro = strip(readFileSync(new URL('./astro/src/components/sections/Grid.astro', import.meta.url), 'utf8'));
+  const emit = strip(readFileSync(new URL('../emit/grid.mjs', import.meta.url), 'utf8'));
   assert.deepEqual({
-    imported: /import \{[^}]*\bgridCellBodyHtml\b[^}]*\} from '@sitetile'/.test(source),
-    calls: [...source.matchAll(/<Fragment set:html=\{([^}]+)\} \/>/g)].map((m) => m[1]),
+    imported: /import \{[^}]*\bgridCellBodyHtml\b[^}]*\} from '@sitetile'/.test(astro),
+    injected: /\bcellBlock: gridCellBodyHtml\b/.test(astro),
+    resolved: /const cellBlock = ctx\.cellBlock \|\| ctx\.block;/.test(emit),
+    calls: [...emit.matchAll(/\bcellBlock\(([^)]*)\)/g)].map((m) => m[1]),
   }, {
     imported: true,
+    injected: true,
+    resolved: true,
     // `cellOpts` = { inLink: true } on a linked cell (tile#150 L1: no YouTube player inside its <a>)
-    calls: ['gridCellBodyHtml(fi.rest, cellOpts)', 'gridCellBodyHtml(fi.rest, cellOpts)',
-      'gridCellBodyHtml(c.body, cellOpts)', 'gridCellBodyHtml(c.body, cellOpts)', 'gridCellBodyHtml(c.body, cellOpts)'],
+    calls: ['fi.rest, cellOpts', 'c.body, cellOpts', 'c.body, cellOpts'],
   });
 });
