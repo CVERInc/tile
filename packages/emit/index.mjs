@@ -13,3 +13,4 @@ export { emitGallery } from './gallery.mjs';
 export { emitPeople } from './people.mjs';
 export { signetArrow } from './arrow.mjs';
 export { emitGrid, gridCell, gridFacets } from './grid.mjs';
+export { emitCollection } from './collection.mjs';

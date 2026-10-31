@@ -277,7 +277,7 @@ test('the tagcloud coral still emits .st-tag-flow / .st-tag', () => {
 });
 
 test('the collection coral still emits .st-collection-pills / .st-collection-pill', () => {
-  const colSrc = readFileSync(join(SECTIONS_DIR, 'Collection.astro'), 'utf8');
+  const colSrc = sectionSource('Collection.astro').all;   // the component and its packages/emit module
   assert.match(colSrc, /class="st-collection-pills"/);
   assert.match(colSrc, /class="st-collection-pill/);
 });
