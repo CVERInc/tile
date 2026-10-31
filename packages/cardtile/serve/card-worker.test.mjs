@@ -1537,8 +1537,18 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   ]) {
     const res = await worker.fetch(new Request(url, init), env);
     assert.notEqual(res.status, 301, url);
-    if (url === 'https://card.feelreef.com/_api') assert.equal(res.status, 404, url);
+    if (url === 'https://card.feelreef.com/_api') {
+      assert.equal(res.status, 404, url);
+      assert.match(await res.text(), /<!doctype html>/, 'bare /_api keeps its HTML 404');
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+      assert.equal(res.headers.get('vary'), 'Accept');
+    }
   }
+  const newHostApi = await worker.fetch(new Request('https://reef.cards/_api'), env);
+  assert.equal(newHostApi.status, 404);
+  assert.match(await newHostApi.text(), /<!doctype html>/, 'bare /_api on reef.cards keeps its HTML 404');
+  assert.equal(newHostApi.headers.get('x-robots-tag'), 'noindex');
+  assert.equal(newHostApi.headers.get('vary'), 'Accept');
   // switch OFF (unset, or anything that is not exactly reef.cards): the old host serves, as today
   for (const off of [{}, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }, { CARD_CANONICAL_HOST: '' }]) {
     const e = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...off };
@@ -1598,6 +1608,29 @@ test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach o
     assert.deepEqual(forwarded, ['/signup', '/dashboard', '/card', '/absent', '/retired'].map((p) => `https://feelreef.com${p}`));
     assert.ok(reads.includes('gen:t') && reads.includes('card:t:0'), 'redirect checks the current Card body');
     assert.equal(reads.filter((key) => key === 'gen:t').length, 1, 'one generation read per candidate');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('reef#2725 r4: every other apex path reaches the site origin on GET and HEAD', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push([request.method, request.url]);
+    return new Response(request.method === 'HEAD' ? null : 'site origin', { status: 200 });
+  };
+  try {
+    const env = { CARDS: recordingStore({ 'card:t:0': SERVING_CARD }), ...ON };
+    const paths = ['/', '/dashboard/sites', '/report.html', '/t.md', '/.well-known/security.txt', '/absent'];
+    for (const method of ['GET', 'HEAD']) {
+      for (const path of paths) {
+        const url = `https://feelreef.com${path}`;
+        const res = await worker.fetch(new Request(url, { method }), env);
+        assert.equal(res.status, 200, `${method} ${path} must reach site origin`);
+        if (method === 'GET') assert.equal(await res.text(), 'site origin', path);
+      }
+    }
+    assert.deepEqual(forwarded, ['GET', 'HEAD'].flatMap((method) =>
+      paths.map((path) => [method, `https://feelreef.com${path}`])));
   } finally { globalThis.fetch = originalFetch; }
 });
 

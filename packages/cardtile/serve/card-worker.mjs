@@ -642,12 +642,12 @@ const router = {
     // reef#2725 — the old Card host redirects before any store read. Apex paths need a Card lookup
     // before redirecting, since the site's route table can grow without a cardtile change.
     if (movedToCardsHost(env)) {
-      if (url.pathname === '/_api') return NOT_RELAYED();
-      // An apex segment belongs to the site unless the current Card body exists. The site adds
-      // routes independently of this package, so a static route list cannot decide redirects.
-      if (reqHost === APEX_HOST && APEX_HANDLE_PATH.test(url.pathname)) {
-        const handle = url.pathname.replace(/^\/|\/$/g, '').toLowerCase();
-        if (!isApexSitePath(url.pathname) && (request.method === 'GET' || request.method === 'HEAD') && env?.CARDS) {
+      // Only a live, handle-shaped Card address leaves the apex. Every other apex request belongs
+      // to the site, whose routes can grow independently of this package.
+      if (reqHost === APEX_HOST) {
+        if (APEX_HANDLE_PATH.test(url.pathname) && !isApexSitePath(url.pathname) &&
+            (request.method === 'GET' || request.method === 'HEAD') && env?.CARDS) {
+          const handle = url.pathname.replace(/^\/|\/$/g, '').toLowerCase();
           const { md } = await liveCard(env.CARDS, handle);
           if (md != null) return new Response(null, { status: 301, headers: {
             Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
