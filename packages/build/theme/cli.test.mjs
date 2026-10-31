@@ -125,7 +125,7 @@ test('the package\'s one theme entrypoint resolves to these very modules, and is
   await assert.rejects(() => import('@tile/build/theme/theme-schema.js'), /ERR_PACKAGE_PATH_NOT_EXPORTED|not exported/);
 });
 
-// ── round 2: a successful exit must mean the theme you wrote is the theme you got ────────────────
+// ── round 2: a successful exit must not hide a key that went nowhere ────────────────
 
 test('🔴 a name the compiler would drop is refused before anything is written', (t) => {
   for (const name of ['../oops', 'a b', 'x*/y', 'n'.repeat(65)]) {
@@ -368,5 +368,33 @@ test('🔴 fonts: an EMPTY trailing `#` is still a fragment (URL.hash reads it a
     assert.equal(r.status, 2, `${JSON.stringify(v)} → exit ${r.status}\n${r.stderr}`);
     assert.match(r.stderr, /fonts: .* dropped/, v);
     assert.equal(existsSync(r.out), false, v);
+  }
+});
+
+// ── round 10: colour tokens must hold a CSS colour (the one value check besides the URL rules) ───
+
+test('🔴 a colour token whose value is not a CSS colour is a drop — light and @dark alike', (t) => {
+  for (const [k, v] of [['gd-bg', '#zzzzzz'], ['gd-text', '#12345'], ['gd-accent', 'rgb(banana)'], ['gd-border', 'reddish'],
+    ['gd-bg@dark', 'hsl(blue)'], ['gd-muted', 'rgb(1, 2)'], ['gd-surface', 'var(nope)'], ['gd-head', '12px']]) {
+    const r = run(t, `---\nname: s\n${k}: ${v}\n---\n`);
+    assert.equal(r.status, 2, `${k}: ${v} → exit ${r.status}\n${r.stderr}`);
+    assert.ok(r.stderr.includes(`${k}: ${JSON.stringify(v)} dropped`), `${k}: ${v}\n${r.stderr}`);
+    assert.equal(existsSync(r.out), false);
+  }
+  // control: every form the parser accepts, and a non-colour token is NOT colour-checked
+  for (const [k, v] of [['gd-bg', '#fff'], ['gd-bg', '#ffff'], ['gd-bg', '#F3E9DC'], ['gd-bg', '#f3e9dc80'], ['gd-bg', 'rgb(1, 2, 3)'],
+    ['gd-bg', 'rgba(1,2,3,.5)'], ['gd-bg', 'rgb(1 2 3 / 50%)'], ['gd-bg', 'hsl(10 20% 30%)'], ['gd-bg', 'hsla(10, 20%, 30%, 0.4)'],
+    ['gd-bg', 'RebeccaPurple'], ['gd-bg', 'transparent'], ['gd-bg', 'currentColor'], ['gd-btn-fill', 'var(--gd-accent)'],
+    ['gd-bg', 'var(--brand, #fff)'], ['gd-bg@dark', '#120d1c'], ['gd-radius', 'whatever-length']]) {
+    const r = run(t, `---\nname: s\n${k}: ${v}\n---\n`);
+    assert.equal(r.status, 0, `${k}: ${v}\n${r.stderr}`);
+  }
+});
+
+test('the README and --help state the narrowed contract the CLI actually keeps', () => {
+  const usage = spawnSync(process.execPath, [CLI], { encoding: 'utf8' }).stderr;
+  for (const text of [README, usage]) {
+    assert.match(text, /NOT validated as CSS/);
+    assert.match(text, /colour tokens/);
   }
 });

@@ -76,7 +76,12 @@ sets — `_theme.md` is their source). The compiler does not edit `_site.md` for
 and the rest of it is not the compiler's business. Then run the second line. Change `_theme.md`,
 run both again.
 
-**Exit 0 means the theme you wrote is the theme you got.** If anything would be left out — a
+**What exit 0 means — exactly this, and no more:** every key you wrote reached `theme.css` or the
+printed `_site.md` keys. Values are passed through and are **NOT validated as CSS**, except
+colour tokens (each token the schema types as a colour must be hex, `rgb()`/`hsl()` with numbers, a
+CSS colour name, `transparent`, `currentColor` or `var(--…)`) and the `fonts:` / announcement rules
+below. A length like `gd-radius: banana` compiles; the browser will ignore it. If anything would
+be left out — a
 frontmatter line with no `key: value` colon, a key written twice (only the last counts), an
 unknown key (`gd-bgg`), a treatment value that is not on its list (`card: glassy`), a non-hex
 surface, an unsafe or empty value, an `announce-href`/`announce-until` with no `announce:` text, an

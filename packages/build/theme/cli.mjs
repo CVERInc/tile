@@ -11,7 +11,14 @@
 // they can be pasted (or piped) into the site's own `_site.md`. Nothing here edits `_site.md` for
 // you: it is the site's file, and what else is in it is not this compiler's business.
 //
-// 🩸 EXIT 0 MEANS "THE THEME YOU WROTE IS THE THEME YOU GOT". The library is forgiving on purpose —
+// 🔴 THE CONTRACT, exactly as narrow as what is checked: exit 0 means every key you wrote reached
+// theme.css or the printed _site.md keys. Values are passed through and are NOT validated as CSS,
+// except colour tokens (a small strict colour parser, css-colour.js) and the URL / announcement
+// rules below. An earlier wording ("the theme you wrote is the theme you got") promised more than
+// any finite list of checks can keep — every review round found one more value it did not judge —
+// so the promise now says what it covers and nothing else.
+//
+// 🩸 WHY THERE IS A CONTRACT AT ALL. The library is forgiving on purpose —
 // an editor that already told its author what it dropped wants a compile, not a refusal — and the
 // first version of this CLI inherited that: `card: glassy`, `surface-sand: rgb(banana)` and even
 // `name: ../oops` all exited 0 with a success line, while the card look, the band and the theme's
@@ -31,6 +38,7 @@ import {
   TOKENS, TREATMENTS, TYPE_SCALE_RANGE, SURFACE_HEX_REASON, THEME_KEYS, DARK_KEYS, surfaceOf, darkStemOf,
 } from './theme-schema.js';
 import { truncateCssText } from './css-text.js';
+import { isCssColour } from './css-colour.js';
 // The RENDERER's own judges, imported rather than restated: whether it will link a URL, and whether
 // it can read an announcement deadline. A copy here would be a second rule that drifts from the one
 // that actually decides what a visitor sees.
@@ -45,8 +53,11 @@ const USAGE = `usage: node packages/build/theme/cli.mjs <_theme.md> [theme.css] 
 
   --allow-dropped   compile even when some values would be dropped (each is still listed)
 
-exit: 0 compiled · 2 refused, nothing written (no frontmatter, an unusable name, or a dropped
-      value without --allow-dropped — the message says which)
+exit: 0 compiled — every key you wrote reached theme.css or the printed _site.md keys. Values are
+      passed through and are NOT validated as CSS, except colour tokens and the fonts: /
+      announce rules.
+      2 refused, nothing written (no frontmatter, an unusable name, or a dropped value without
+      --allow-dropped — the message says which)
 `;
 
 const args = process.argv.slice(2);
@@ -121,6 +132,11 @@ for (const k of Object.keys(meta)) {
   const surface = surfaceOf(k);
   const treatment = TREATMENTS.find((t) => t.key === k);
   if (stem && !css.includes(`--${stem}: ${v};`)) drop(k, 'not written to theme.css');
+  // the one VALUE check on tokens: the schema types each token (`category`), and a colour token
+  // that holds no colour leaves the property it feeds unusable (`background: var(--gd-bg)`).
+  else if (stem && TOKENS.find((t) => t.stem === stem).category === 'color' && !isCssColour(v)) {
+    drop(k, 'not a CSS colour — use hex (#rrggbb), rgb()/hsl() with numbers, a colour name, transparent, currentColor or var(--…)');
+  }
   else if (surface && !css.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
   else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
 }
