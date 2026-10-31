@@ -110,6 +110,26 @@ const SITE = {
 
 export const siteIdFor = (arm) => `site-${arm}`;
 export const siteLang = (arm) => SITE[arm].lang;
+/**
+ * The `<html lang>` a state's page must declare on this arm's site.
+ *
+ * Normally the site's own (`siteLang`). A state whose path names a locale (`copyLocale`, e.g.
+ * `/zh-tw/shop/complete` → 'zh-TW') renders its copy in THAT locale whatever the site's language,
+ * and the document must say so: the completion page re-declares the donor shell in the rendered
+ * locale (square-shop 0e68a34, "the document's lang always describes the copy") — unless the
+ * shell's own declaration already maps to it, which keeps the site's spelling (zh-Hant stays
+ * zh-Hant on a zh-TW page). `coralLocale` is exactly that mapping: the copy-table locale the
+ * site's declared language names.
+ *
+ * 🩸 Until 2026-10-31 the matrix expected `siteLang` for every state. That was written when the
+ * completion page still kept the donor's `lang`, so on the en-US arms it was asserting
+ * `<html lang="en-US">` around 感謝您的訂購 — the mislabel 0e68a34 fixed — and has been red
+ * (6 of 210) on the plain/tokens/tokens-layered arms ever since.
+ */
+export function expectedLang(arm, state) {
+  const s = SITE[arm];
+  return state && state.copyLocale && state.copyLocale !== s.coralLocale ? state.copyLocale : s.lang;
+}
 /** Which theme treatment this arm wears: 'plain' | 'tokens' | 'custom'. */
 export const armTheme = (arm) => SITE[arm].theme;
 /** The arm's declaration: '' for a legacy (undeclared) site, 'layered' for a declaring one. */

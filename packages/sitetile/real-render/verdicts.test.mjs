@@ -14,7 +14,9 @@
 // on an undeclared site, this goes red, and it is supposed to.
 import assert from 'node:assert/strict';
 import { verdicts, flattenFacts, modeDelta, modeDeltaVerdict, rgbOf } from './lib/probe.mjs';
-import { HEADING_OVERRIDE, THEME_TOKENS } from './lib/sites.mjs';
+import { HEADING_OVERRIDE, THEME_TOKENS, ARMS, siteLang, expectedLang } from './lib/sites.mjs';
+import { STATES } from './lib/states.mjs';
+import { matchShopComplete, renderCompletion } from '../../dynamic-corals/square-shop/shop-function-template.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -207,5 +209,41 @@ test('the no-regression arm: a theme with no selector overrides must move NOTHIN
   assert.equal(v.result, 'FAIL');
   assert.equal(modeDeltaVerdict({ coral: true, overrides: false, deltas: [] }).result, 'PASS');
 });
+
+// ── the language each state's page must declare ──────────────────────────────────────────────
+// 🩸 The matrix expected the SITE's language on every state until 2026-10-31, and the one state
+// whose path names a locale (/zh-tw/shop/complete) went red on the three en-US arms the day the
+// completion page started declaring the language of its copy (square-shop 0e68a34). The page was
+// right; the expectation was a sync claim nothing checked. So the expectation is now checked
+// against the Worker's own completion renderer, with each arm's real declared language on the
+// donor shell, in the ordinary suite — the next change to either side shows up here, not only in
+// the browser matrix nobody runs by default.
+const asyncTests = [];
+const atest = (name, fn) => asyncTests.push([name, fn]);
+const htmlLangOf = (html) => (html.match(/<html\b[^>]*\blang="([^"]*)"/i) || [])[1];
+for (const st of STATES.filter((x) => x.family === 'shop completion')) {
+  for (const arm of ARMS) {
+    atest(`${st.id} on ${arm}: the matrix expects the <html lang> the Worker's completion page declares`, async () => {
+      const u = new URL(st.path, 'https://shop.example.test');
+      const shell = `<!doctype html><html lang="${siteLang(arm)}"><head><title>Shop</title></head><body><header>N</header><main>G</main><footer>F</footer></body></html>`;
+      const env = { ASSETS: { fetch: async (r) => (new URL(r.url).pathname === '/shop/' ? new Response(shell) : new Response('nf', { status: 404 })) } };
+      const shop = matchShopComplete(u.pathname, [{ shopPath: '/shop', source: 'native' }]);
+      assert.ok(shop, `${st.path} matches a completion route`);
+      const html = await (await renderCompletion(new Request(u.href), env, { siteId: 'site-key' }, shop)).text();
+      assert.equal(expectedLang(arm, st), htmlLangOf(html));
+    });
+  }
+}
+atest('CONTROL: the locale-path state really does expect something other than the site language on an en-US arm', async () => {
+  const st = STATES.find((x) => x.id === 'shop-complete-locale-paid');
+  assert.equal(siteLang('plain'), 'en-US');
+  assert.equal(expectedLang('plain', st), 'zh-TW');
+  assert.equal(expectedLang('custom', st), 'zh-Hant', 'a shell already declaring the same language keeps its spelling');
+  assert.equal(expectedLang('plain', STATES.find((x) => x.id === 'shop-complete-paid')), 'en-US');
+});
+for (const [name, fn] of asyncTests) {
+  try { await fn(); passed++; console.log('  ✓ ' + name); }
+  catch (e) { console.error('  ✗ ' + name + '\n    ' + (e && e.message ? e.message : e)); process.exitCode = 1; }
+}
 
 console.log(`\nreal-render verdicts: ${passed} passed`);
