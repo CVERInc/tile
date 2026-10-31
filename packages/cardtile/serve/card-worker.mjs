@@ -697,7 +697,10 @@ const router = {
         if (APEX_HANDLE_PATH.test(url.pathname) && !isApexSitePath(url.pathname) &&
             (request.method === 'GET' || request.method === 'HEAD') && env?.CARDS) {
           const handle = url.pathname.replace(/^\/|\/$/g, '').toLowerCase();
-          const { md } = await liveCard(env.CARDS, handle);
+          // The apex belongs to the site when the optional Card lookup is unavailable.
+          let md;
+          try { ({ md } = await liveCard(env.CARDS, handle)); }
+          catch { return fetch(request); }
           if (md != null) return new Response(null, { status: 301, headers: {
             Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
           } });

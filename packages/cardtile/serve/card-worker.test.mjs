@@ -1618,6 +1618,34 @@ test('tile#214: a live reserved Card stays on the apex site', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('tile#214: apex lookup errors fall through to the site origin', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push(request);
+    return new Response(request.method === 'HEAD' ? null : 'site origin');
+  };
+  try {
+    for (const failingKey of ['gen:t', 'card:t:0']) {
+      for (const method of ['GET', 'HEAD']) {
+        const store = recordingStore({ 'card:t:0': SERVING_CARD });
+        const get = store.get;
+        store.get = async (key) => {
+          if (key === failingKey) throw new Error(`KV unavailable: ${key}`);
+          return get(key);
+        };
+        const request = new Request('https://feelreef.com/t?from=qr', { method });
+        const res = await worker.fetch(request, { ...ON, CARDS: store });
+        assert.equal(res.status, 200, `${method} ${failingKey} failure must reach site origin`);
+        assert.equal(res.headers.get('location'), null);
+        assert.equal(await res.text(), method === 'HEAD' ? '' : 'site origin');
+        assert.equal(forwarded.at(-1), request, 'forward the original request');
+      }
+    }
+    assert.equal(forwarded.length, 4);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach origin', async () => {
   const originalFetch = globalThis.fetch;
   const forwarded = [];
