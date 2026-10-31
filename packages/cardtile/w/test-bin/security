@@ -1,0 +1,3 @@
+#!/bin/sh
+# Test-only Keychain stand-in: credential discovery always fails.
+exit 1

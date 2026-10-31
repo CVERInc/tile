@@ -32,7 +32,7 @@ const MIME = {
 // retired `/try/edit2` path answers here too (as the same 301 the edge gives), for the same reason.
 // Without this line the only way to look at the sandbox is to deploy it, which is the shape of
 // every bug that gets found by a customer.
-const worker = (await import('../serve/card-worker.mjs')).default;
+const { default: worker, canonicalHost, cardOrigin } = await import('../serve/card-worker.mjs');
 const EDGE = /^\/(_coral|_icon|_yt|try)\//;
 
 // 🔴 …and the card exits themselves (`/<handle>.md`, and Accept: text/markdown), backed by the repo
@@ -69,7 +69,13 @@ const isCardPath = (p) => {
 //
 // 🔴 It is also why the assembly happens here rather than in the page. Deciding which images are new
 // needs the parser, and the parser is already imported at the top of this file for the fixtures.
-const CARD_API = process.env.CARD_API_BASE || 'https://card.feelreef.com';
+//
+// reef#2725 r2 — the card host is the deployment's switch, CARD_CANONICAL_HOST, read by the Worker's
+// own canonicalHost (exactly `reef.cards`, or today's host). `CARD_API_BASE` still overrides the API
+// alone. The editor is told the host over `/_w/can-save`. (The edge preview below needs nothing:
+// the Worker reads the request's own Host header, so there a card's URL is `127.0.0.1`'s, as before.)
+export const cardHosts = (env) => ({ cardHost: canonicalHost(env), api: env.CARD_API_BASE || cardOrigin(env) });
+const { cardHost: CARD_HOST, api: CARD_API } = cardHosts(process.env);
 
 let cachedToken;
 function cardToken() {
@@ -159,7 +165,7 @@ async function bridge(req, res, path) {
 
   // Can this machine save at all? The editor asks BEFORE showing a save button, because a button
   // that appears and then fails is worse than one that explains why it is not there.
-  if (path === '/_w/can-save') return send(200, { canSave: !!cardToken(), api: CARD_API }), true;
+  if (path === '/_w/can-save') return send(200, { canSave: !!cardToken(), api: CARD_API, cardHost: CARD_HOST }), true;
 
   if (!cardToken()) return send(503, { error: '這台機器沒有 cardtile-mcp-token,存不到線上。' }), true;
 

@@ -1702,3 +1702,56 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   const killed = await worker.fetch(new Request('https://reef.cards/'), { ...env, CARD_NOINDEX_ALL: '1' });
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
+
+// ── reef#2725 r2: the inverse follows the switch ────────────────────────────────────────────────
+// cardUrlFor is resolveHandle read backwards, and the editor's "is this link the author's own site"
+// rides on it. With the switch on, resolveHandle answers on reef.cards, so its inverse must too —
+// otherwise the editor computes card.feelreef.com/<h> for a card whose address is reef.cards/<h>.
+test('reef#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte', () => {
+  // PIN: no env, an empty env and every value that is not exactly reef.cards = today's string
+  for (const env of [undefined, {}, { CARD_CANONICAL_HOST: '' }, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }]) {
+    assert.equal(W.cardUrlFor('inkbrush', {}, env), 'https://card.feelreef.com/inkbrush', JSON.stringify(env));
+    assert.equal(W.cardUrlFor('feelreef', {}, env), 'https://card.feelreef.com/feelreef', JSON.stringify(env));
+  }
+  assert.equal(W.cardUrlFor('inkbrush'), 'https://card.feelreef.com/inkbrush');
+  // ON: the same URL resolveHandle hands out for that handle on that host — the root card is the bare origin
+  assert.equal(W.cardUrlFor('inkbrush', {}, ON), 'https://reef.cards/inkbrush');
+  assert.equal(W.cardUrlFor('inkbrush', {}, ON), resolveHandle('reef.cards', '/inkbrush').cardUrl);
+  assert.equal(W.cardUrlFor('feelreef', {}, ON), 'https://reef.cards');
+  assert.equal(W.cardUrlFor('feelreef', {}, ON), resolveHandle('reef.cards', '/feelreef').cardUrl);
+  // a vanity binding still wins in both positions: one domain = one card
+  for (const env of [{}, ON]) assert.equal(W.cardUrlFor('maple', { 'maple.example': 'maple' }, env), 'https://maple.example');
+});
+
+// reef#2725 r2 ③ — host-mode `/edit` answers on reef.cards after the switch, with the same page
+// and parent pins; before the switch main's host gate keeps reef.cards dark. The old host keeps serving it (never
+// 301'd — an iframe that followed a redirect would change origin under the parent's
+// `event.origin` check). So feelreef can move its framing page whenever it likes, before or after
+// the switch, and the old one keeps working until it does. The checklist is in the lane report.
+test('reef#2725 r2 ③: host-mode /edit serves on the old host in both positions and reef.cards after cutover', async () => {
+  const host = 'https://feelreef.com';
+  let oldHostPage;
+  for (const sw of [{}, ON]) {
+    for (const origin of ['https://reef.cards', 'https://card.feelreef.com']) {
+      const { env, touched } = untouchableEnv();
+      const res = await worker.fetch(new Request(`${origin}/edit?host=${encodeURIComponent(host)}&lang=ja`), { ...env, ...sw });
+      if (origin === 'https://reef.cards' && !sw.CARD_CANONICAL_HOST) {
+        assert.equal(res.status, 404, 'reef.cards stays dark until cutover');
+        assert.deepEqual(touched, []);
+        continue;
+      }
+      assert.equal(res.status, 200, `${origin} ${JSON.stringify(sw)}`);
+      assert.equal(res.headers.get('content-security-policy'), `frame-ancestors ${host}`);
+      assert.equal(res.headers.get('location'), null);
+      const body = await res.text();
+      assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
+      assert.deepEqual(touched, []);
+      if (origin === 'https://card.feelreef.com') oldHostPage ??= body;
+      assert.equal(body, oldHostPage, 'the page does not depend on host or switch position');
+    }
+  }
+  // the table it loads is same-origin (`'self'`), so it moves with the page; the parent is named
+  const t = await worker.fetch(new Request('https://reef.cards/try/edit/t/ja/'), { ...untouchableEnv().env, ...ON });
+  assert.equal(t.status, 200);
+  assert.match(t.headers.get('content-security-policy'), /^frame-ancestors 'self' https:\/\/feelreef\.com /);
+});
