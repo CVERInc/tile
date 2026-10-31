@@ -94,25 +94,6 @@ function grepLineSet(src, lines) {
   if (r.status !== 0) throw new Error('forbidden-terms: grep failed on the private list');
   return new Set(r.stdout.split('\n').filter(Boolean).map((l) => Number(l.slice(0, l.indexOf(':'))) - 1));
 }
-/** { rel → Set(1-based line) } for every text file matching the ERE `src` — answered by grep. */
-function grepFiles(root, src, rels) {
-  const out = new Map();
-  for (let i = 0; i < rels.length; i += 200) {
-    const r = grep(['-a', '-n', '-i', '-E', '-H', '-Z', '-e', src, '--', ...rels.slice(i, i + 200)], { cwd: root });
-    if (r.status === 1) continue;
-    if (r.status !== 0) throw new Error('forbidden-terms: grep failed on the private list');
-    for (const rec of r.stdout.split('\n')) {
-      const z = rec.indexOf('\0');
-      if (z < 0) continue;
-      const rel = rec.slice(0, z);
-      const line = Number(rec.slice(z + 1, rec.indexOf(':', z + 1)));
-      if (!out.has(rel)) out.set(rel, new Set());
-      out.get(rel).add(line);
-    }
-  }
-  return out;
-}
-
 function trackedFiles(root) {
   const out = execFileSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return out.split('\0').filter(Boolean);
@@ -153,7 +134,13 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
     for (const i of grepLineSet(src, files.map((f) => f.replace(/\n/g, ' ')))) { found.push({ i, line: 0, what: `private list entry #${n}` }); unsafePath.add(i); }
   }
   // ── contents (text files) ──
-  const text = [];
+  // Tier 2's content goes to grep as ONE stream on stdin, and hits come back as `N:` stream line
+  // numbers mapped back here. 🩸 review round 2 of #230: asking grep for file names made the output
+  // format the protocol — `-Z` is GNU's NUL separator but Apple's "decompress" (its NUL flag is
+  // `--null`), so on macOS every record lost its separator and tier 2 found nothing; and a tracked
+  // file named `-` was read as standard input. `-n` on stdin means the same thing to both greps.
+  const streamLines = [];
+  const streamAt = []; // stream line → [file index, 1-based line]
   files.forEach((rel, i) => {
     let buf;
     try {
@@ -161,10 +148,10 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
       buf = fs.readFileSync(path.join(root, rel));
     } catch { return; } // deleted in the work tree
     if (buf.subarray(0, 8192).includes(0)) return; // binary
-    text.push(rel);
     const lines = buf.toString('utf8').split('\n');
     for (let l = 0; l < lines.length; l++) {
       const line = lines[l];
+      if (privateList && !(l === lines.length - 1 && line === '')) { streamLines.push(line); streamAt.push([i, l + 1]); }
       for (const tok of line.match(/[A-Za-z0-9]+/g) || []) {
         const k = handleOf(tok);
         if (k) found.push({ i, line: l + 1, what: `person handle #${k}` });
@@ -172,10 +159,9 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
       if (PRIVATE_REPO_LINK.test(line)) found.push({ i, line: l + 1, what: REPO_LINK_MSG });
     }
   });
-  if (privateList && text.length) {
-    const index = new Map(files.map((f, i) => [f, i]));
+  if (privateList && streamLines.length) {
     for (const { n, src } of privateList) {
-      for (const [rel, lines] of grepFiles(root, src, text)) for (const line of lines) found.push({ i: index.get(rel), line, what: `private list entry #${n}` });
+      for (const k of grepLineSet(src, streamLines)) { const [i, line] = streamAt[k]; found.push({ i, line, what: `private list entry #${n}` }); }
     }
   }
   // 🩸 review of #230: a hit used to be reported as `<path>: …`, and when the PATH was the hit the

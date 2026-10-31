@@ -191,3 +191,46 @@ test('P3: an existing but EMPTY private list counts as missing — fatal when re
   assert.ok(scan({ root, hashesFile: hashes, required: true }).notes.some((n) => n.fatal), 'an empty required list passed');
   assert.ok(scan({ root, hashesFile: hashes, required: false }).notes.some((n) => !n.fatal && /NOT checked/.test(n.text)));
 });
+
+// ── review round 2 of #230: portable grep protocol ───────────────────────────────────────────────
+// GNU grep's `-Z` is "NUL after the file name"; Apple's grep spells that `--null` and reads `-Z` as
+// "decompress". A gate that parses file-name output works on one and silently finds nothing on the
+// other. This shim gives the gate Apple's meaning of those two flags (and runs the real grep for
+// everything else), so the GNU machine running this suite also answers for macOS.
+function appleGrepShim() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forbidden-applegrep-'));
+  made.push(dir);
+  const real = execFileSync('bash', ['-c', 'type -P grep'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(dir, 'grep'), `#!/usr/bin/env bash
+# Apple text_cmds grep: -Z = decompress (no output change for plain text), --null = NUL after file name.
+args=()
+for a in "$@"; do
+  case "$a" in
+    -Z) ;;
+    --null) args+=(-Z) ;;
+    -*Z*) [[ "$a" == --* ]] && args+=("$a") || args+=("\${a//Z/}") ;;
+    *) args+=("$a") ;;
+  esac
+done
+exec ${JSON.stringify(real)} "\${args[@]}"
+`, { mode: 0o755 });
+  return dir;
+}
+
+for (const flavour of ['gnu', 'apple']) {
+  test(`P2 portability (${flavour} grep): a private-list hit in file CONTENT is found`, () => {
+    const { hashes, priv } = lists();
+    const root = repo({ ...filler(), 'a.md': `x\n${PLANTED_PRIVATE}\n` });
+    const PATH = flavour === 'apple' ? `${appleGrepShim()}:${process.env.PATH}` : process.env.PATH;
+    const res = cli(root, hashes, { CVER_FORBIDDEN_TERMS: priv, PATH });
+    assert.equal(res.status, 1, res.stdout + res.stderr);
+    assert.match(res.stderr, /a\.md:2: private list entry #1/);
+  });
+}
+
+test('P3: a tracked file literally named "-" is scanned, not read as standard input', () => {
+  const { hashes, priv } = lists();
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  const r = scan({ root: repo({ '-': `clean\n${PLANTED_PRIVATE}\n`, 'b.md': 'clean\n' }), hashesFile: hashes });
+  assert.deepEqual(r.hits, ['-:2: private list entry #1']);
+});
