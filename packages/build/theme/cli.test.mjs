@@ -274,3 +274,19 @@ test('🔴 a fonts URL or announcement link the renderer rejects is a drop (it w
   // control: what the renderer accepts
   assert.equal(run(t, '---\nname: sample\nfonts: https://fonts.example/a.css\nannounce: Hi\nannounce-href: /sale\n---\n').status, 0);
 });
+
+// ── round 5: `fonts:` lands in <link rel="stylesheet" href>, so it must be something that can load CSS ──
+
+test('🔴 a fonts: value no stylesheet link can load is a drop, even when it is a safe NAVIGATION link', (t) => {
+  for (const v of ['mailto:owner@example.org', '#fonts', '?v=2', 'tel:123', 'ftp://cdn.example/a.css']) {
+    assertRefusedNaming(t, `---\nname: s\nfonts: ${v}\n---\n`, [`fonts: ${JSON.stringify(v)} dropped`]);
+  }
+  // control: every form a stylesheet <link> resolves to an http(s) fetch
+  for (const v of ['https://fonts.example/a.css', 'http://fonts.example/a.css', '//cdn.example/a.css', '/fonts/a.css', 'fonts/a.css', './a.css', '../a.css']) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 0, `${v}: ${r.stderr}`);
+    assert.match(r.stdout, new RegExp(`^fonts: ${v.replace(/[.?*+^$()[\]{}|\\/]/g, '\\$&')}$`, 'm'));
+  }
+  // announce-href keeps the renderer's navigation rule: a mail link is a fine announcement link
+  assert.equal(run(t, '---\nname: s\nannounce: Write to us\nannounce-href: mailto:owner@example.org\n---\n').status, 0);
+});

@@ -140,7 +140,18 @@ if (off !== 'true') {
   }
   if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
 }
-if (siteMeta.fonts && !safeHref(siteMeta.fonts)) drop('fonts', 'the renderer refuses this URL, so the stylesheet is never linked — use an https:// stylesheet address');
+// `fonts:` is not a navigation link: SiteLayout puts it in <link rel="stylesheet" href>. So it must
+// pass the renderer's safeHref (or it is not emitted at all) AND be something a stylesheet link can
+// fetch — it has to resolve to an http(s) URL that is not the page itself. safeHref alone lets
+// `mailto:`, `tel:` and `#fragment` through, which are fine destinations for a click and load no CSS.
+if (siteMeta.fonts) {
+  const v = siteMeta.fonts;
+  let fetchable = false;
+  if (safeHref(v) && !/^[#?]/.test(v)) {
+    try { fetchable = ['http:', 'https:'].includes(new URL(v, 'https://site.invalid/page/').protocol); } catch {}
+  }
+  if (!fetchable) drop('fonts', 'a stylesheet <link> cannot load this — use an https:// (or http://, //host/, /path, relative) stylesheet URL');
+}
 // type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
 // the compiler what it WOULD derive with the hand-set steps taken away, so a ratio that derives
 // nothing is caught even when gd-h1/h2/h3 are all set by hand and hide it.

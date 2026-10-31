@@ -82,8 +82,9 @@ unknown key (`gd-bgg`), a treatment value that is not on its list (`card: glassy
 surface, an unsafe or empty value, an `announce-href`/`announce-until` with no `announce:` text, an
 `announce-off` that is neither `true` nor `false`, a `type-scale` that derives nothing, or a value
 the renderer itself would not use (a deadline it cannot read, which hides the whole announcement;
-a `fonts:` URL or announcement link it refuses — judged by the renderer's own `announceModel` and
-`safeHref`, imported, not copied) — the first line names each one
+an announcement link it refuses; a `fonts:` value a stylesheet `<link>` cannot load, such as
+`mailto:` or `#fragment` — judged by the renderer's own `announceModel` and `safeHref`, imported,
+not copied) — the first line names each one
 (`✗ card: "glassy" dropped — not one of surface, flat, glass, elevated`), writes nothing, and exits 2.
 Fix them, or add `--allow-dropped` to compile without them; the list is printed either way. A name
 that is not a plain filename (`../oops`) is always refused: the build finds the stylesheet by it.
