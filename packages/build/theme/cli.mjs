@@ -152,6 +152,8 @@ if (off !== 'true') {
 // Everything else is a drop. Narrow on purpose: a webfont stylesheet is one of these in practice.
 function stylesheetHrefOk(emitted) {
   if (typeof emitted !== 'string' || !emitted) return false;
+  // `#` anywhere is a fragment, an EMPTY one included: URL.hash reads `…a.css#` as '' (its href keeps the `#`).
+  if (emitted.includes('#')) return false;
   // 🩸 Judge the URL a browser RESOLVES, never the spelling: a regex on the string let `/fonts/..`
   // (the site root), `/%2e%2e/` and `/\cdn.example/a.css` (a browser reads `\` as `/`, so that
   // is another host) through. Both forms are resolved with WHATWG URL, which is what a browser runs.
@@ -161,11 +163,11 @@ function stylesheetHrefOk(emitted) {
   // host's root document, whatever it answers.
   if (/^https:\/\//i.test(emitted)) {
     try { u = new URL(emitted); } catch { return false; }
-    return u.protocol === 'https:' && !!u.hostname && u.pathname.length > 1 && !u.hash;
+    return u.protocol === 'https:' && !!u.hostname && u.pathname.length > 1 && !u.href.includes('#');
   }
   if (emitted.startsWith('/')) {
     try { u = new URL(emitted, 'https://site.invalid/some/page'); } catch { return false; }
-    return u.protocol === 'https:' && u.host === 'site.invalid' && u.pathname.length > 1 && !u.hash;
+    return u.protocol === 'https:' && u.host === 'site.invalid' && u.pathname.length > 1 && !u.href.includes('#');
   }
   return false;
 }

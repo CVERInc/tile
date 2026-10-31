@@ -293,7 +293,7 @@ test('🔴 a fonts: value no stylesheet link can load is a drop, even when it is
 
 // ── round 6: `fonts:` is an ALLOWLIST, judged on the exact href the renderer will emit ───────────
 
-test('🔴 fonts: only an absolute http(s) URL with a host and a path or query, or a root path longer than `/`', (t) => {
+test('🔴 fonts: only an absolute https URL or a root path, each resolving to a path longer than `/` with no `#`', (t) => {
   const refused = [
     // entity-encoded: safeHref decodes them, and the decoded href is what lands in <link>
     '&#109;ailto:owner@example.org', '&#116;el:123', '&#35;fonts',
@@ -359,5 +359,14 @@ test('🔴 fonts: http: is a drop (an https page blocks it as mixed content), an
   }
   for (const v of ['https://fonts.googleapis.com/css2?family=Fraunces&display=swap', 'HTTPS://fonts.example/a.css', 'https://cdn.example/x/../a.css']) {
     assert.equal(run(t, `---\nname: s\nfonts: ${v}\n---\n`).status, 0, v);
+  }
+});
+
+test('🔴 fonts: an EMPTY trailing `#` is still a fragment (URL.hash reads it as "")', (t) => {
+  for (const v of ['https://fonts.example/a.css#', '/fonts/a.css#']) {
+    const r = run(t, `---\nname: s\nfonts: ${v}\n---\n`);
+    assert.equal(r.status, 2, `${JSON.stringify(v)} → exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /fonts: .* dropped/, v);
+    assert.equal(existsSync(r.out), false, v);
   }
 });
