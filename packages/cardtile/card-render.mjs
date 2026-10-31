@@ -511,8 +511,7 @@ function renderCell(cell, place, ctx) {
       const hasHref = !!String(p.href == null ? '' : p.href).trim();
       const fa = hasHref ? anchorFor(p.href, ctx) : '';
       if (hasHref && !fa) return '';                 // a drawer target inside a drawer — refused, as before
-      const linkOpen = hasHref ? `<a class="st-gal-link" ${fa}>` : '<div class="st-gal-link">';
-      const linkClose = hasHref ? '</a>' : '</div>';
+      const cell = { attrs: size };
       // 🔴 An empty `img=` is not "a small picture", it is NO picture — and `<img src="">` is the
       // same current-document trap as the href above, drawn as a broken-image glyph on a stranger's
       // first card. Live: nothing. Editing: a tappable outline that says what is missing.
@@ -522,7 +521,7 @@ function renderCell(cell, place, ctx) {
         // 🔴 SAME GEOMETRY AS A FILLED LABELLED PICTURE: `.st-gal-link` → picture slot → label. The slot
         // is an empty `<span class="st-gal-img">` (an `<img>` with no src is the current-document
         // trap above), so the words sit under the frame the picture will fill, not floating in the cell.
-        return `<div class="st-cell st-gal-cell st-gal-cell-bare st-gal-labelled st-cell-unset" ${size} data-coral-type="feature"><div class="st-gal-link"><span class="st-gal-img" aria-hidden="true"></span><span class="st-gal-label">${esc(label(ctx, 'imgUnset'))}</span></div></div>`;
+        return gridCell({ cell, unset: true, label: label(ctx, 'imgUnset') }, true, dialect(ctx));
       }
       // 🔴 An image tile with nothing to say stays an IMAGE. The scrim + eyebrow + title + CTA arrow
       // are chrome for a tile that carries copy — painted over a creator's artwork they darken the
@@ -547,9 +546,7 @@ function renderCell(cell, place, ctx) {
         // text, including the one written specifically to prove the switch was off.
         const on = String(p.label == null ? '' : p.label).trim().toLowerCase();
         const labelled = !!p.alt && on !== '' && on !== 'off' && on !== 'false' && on !== 'no';
-        const cls = 'st-cell st-gal-cell st-gal-cell-bare' + (labelled ? ' st-gal-labelled' : '');
-        const capt = labelled ? `<span class="st-gal-label">${esc(p.alt)}</span>` : '';
-        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
+        return gridCell({ cell, anchor: fa, img: featureImg, alt: p.alt, labelled }, true, dialect(ctx));
       }
       // 🩸 A FEATURE WITH COPY BUT NO PICTURE. Everything below — the scrim, the near-white eyebrow,
       // the white title, their shadows — is chrome designed to sit ON artwork. With no `img=`, the
@@ -560,16 +557,12 @@ function renderCell(cell, place, ctx) {
       // So the picture-ness becomes a class instead of an assumption. No img ⇒ no <img>, no scrim,
       // and `st-gal-cell-flat`, which the stylesheet themes against the ground like any other text.
       // (Not `st-gal-cell-bare` — that one already means "picture only, no copy", the opposite case.)
-      const hasImg = !!featureImg;
-      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
-        // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
-        // every feature title — the arrow had been the span's only content, and the container
-        // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
-        // inside and the box it lived in is still styled, still painted, still meaningless.
-        const arrow = arrowOf(ctx, 15, 'st-gal-arrow', '');
-        if (!p.cta && !arrow) return '';
-        return `<span class="st-gal-cta">${esc(p.cta)}${arrow}</span>`;
-      })()}</div>${linkClose}</div>`;
+      // The markup for all three shapes is packages/emit/grid.mjs's `cardCell` (tile-lab#52).
+      // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
+      // every feature title — the arrow had been the span's only content, and the container
+      // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
+      // inside and the box it lived in is still styled, still painted, still meaningless.
+      return gridCell({ cell, anchor: fa, img: featureImg, eyebrow: b, title: p.title, cta: p.cta, arrow: arrowOf(ctx, 15, 'st-gal-arrow', '') }, true, dialect(ctx));
     }
     case 'link': {
       const { label: linkText, url } = linkOf(b);

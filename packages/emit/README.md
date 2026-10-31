@@ -74,3 +74,4 @@ are still read by the host — `p.<name>` stays in card-render's `switch (cell.t
 | `text` | `emitProse` |
 | `link` | `gridCell` (link shape) |
 | `social` | `emitSocial` |
+| `feature` | `gridCell` (`imageCards` shape) |

@@ -62,8 +62,9 @@ export function gridFacets(section, filterLabel) {
 }
 
 /** One grid card (was GridCell.astro). Exported for a host that lays cells out itself.
- *  `c.cell` → a Card cell (cell.mjs) in GridCell's link shape (`imageCards` false: the Card's `link`
- *  tile) — the Card's own spelling of the same `st-cell` / `st-cell-link` card, see cardCell below. */
+ *  `c.cell` → a Card cell (cell.mjs) in one of GridCell's two shapes: `imageCards` (the Card's
+ *  `feature`: st-gal-*) or the link card (the Card's `link` tile: st-cell-link) — the Card's own
+ *  spelling of the same cards, see cardCell below. */
 export function gridCell(c, imageCards, ctx) {
   if (c.cell) return cardCell(c, imageCards, ctx);
   const inline = ctx.inline;
@@ -119,14 +120,39 @@ export function gridCell(c, imageCards, ctx) {
  * (card-render.mjs reads the params, resolves assets and builds the anchor through its destination
  * registry); this writes the markup, escaping with the Card's `ctx.esc`.
  *
- * link (`imageCards` false) — a row/tile that leaves the card:
- *   `anchor`  the `<a>`'s attributes, ready-made (href/target/rel, or a drawer's `#id` trio); absent
- *             with `unset` → an inert `<div>` (the editor's outline for a link with no address yet)
- *   `icon`    the mark's markup ('' for none) · `arrow` the signet arrow's markup ('' when off)
- *   `title` · `sub` (omitted when empty)
+ * Both shapes: `anchor` is the `<a>`'s attributes, ready-made (href/target/rel, or a drawer's `#id`
+ * trio); absent → an inert `<div>` in the same place. `arrow` is the signet arrow's markup ('' when
+ * the card has arrows off). `unset` → the editor's outline for a tile not filled in yet.
+ *
+ * feature (`imageCards`) — a picture tile, three shapes:
+ *   unset                         the outline: an empty picture slot and `label` under it
+ *   no `eyebrow`/`title`/`cta`    the picture alone (`img`, `alt`); `labelled` → `alt` shown under it
+ *   otherwise                     picture + scrim (or `st-gal-cell-flat` with no `img`) + the copy
+ * link — a row/tile that leaves the card: `icon` (the mark's markup, '' for none), `title`, `sub`
+ *   (omitted when empty).
  */
 function cardCell(c, imageCards, ctx) {
   const e = ctx.esc;
+  if (imageCards) {
+    const cls = 'st-gal-cell';
+    if (c.unset) {
+      return cellFrame(c.cell, `${cls} st-gal-cell-bare st-gal-labelled st-cell-unset`, 'feature',
+        `<div class="st-gal-link"><span class="st-gal-img" aria-hidden="true"></span><span class="st-gal-label">${e(c.label)}</span></div>`);
+    }
+    const open = c.anchor ? `<a class="st-gal-link" ${c.anchor}>` : '<div class="st-gal-link">';
+    const close = c.anchor ? '</a>' : '</div>';
+    if (!c.title && !c.cta && !c.eyebrow) {
+      return cellFrame(c.cell, `${cls} st-gal-cell-bare${c.labelled ? ' st-gal-labelled' : ''}`, 'feature',
+        `${open}<img class="st-gal-img" src="${ctx.url(c.img)}" alt="${e(c.alt || '')}" loading="lazy" referrerpolicy="no-referrer">`
+        + `${c.labelled ? `<span class="st-gal-label">${e(c.alt)}</span>` : ''}${close}`);
+    }
+    return cellFrame(c.cell, cls + (c.img ? '' : ' st-gal-cell-flat'), 'feature',
+      `${open}${c.img ? `<img class="st-gal-img" src="${ctx.url(c.img)}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}`
+      + `<div class="st-gal-body">${c.eyebrow ? `<span class="st-gal-eyebrow">${e(c.eyebrow)}</span>` : ''}`
+      + `${c.title ? `<span class="st-gal-title">${e(c.title)}</span>` : ''}`
+      // no text and no arrow ⇒ no pill (an empty capsule under the title otherwise)
+      + `${!c.cta && !c.arrow ? '' : `<span class="st-gal-cta">${e(c.cta)}${c.arrow}</span>`}</div>${close}`);
+  }
   const tag = c.anchor ? 'a' : 'div';
   return cellFrame(c.cell, 'st-cell-tile' + (c.unset ? ' st-cell-unset' : ''), 'linktile',
     `<${tag} class="st-cell-link"${c.anchor ? ' ' + c.anchor : ''}><div class="st-cell-head">${c.icon || ''}${c.arrow}</div>`
