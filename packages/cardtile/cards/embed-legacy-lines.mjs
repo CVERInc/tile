@@ -17,6 +17,8 @@ export const LEGACY_EMBED_LINES = [
   '%% card: embed kind =slider images="https://example.com/a.png" %% <b>legacy body</b>',
   '%% card: embed kind=video channel=UCabc w=6 %% Latest',
   '%% card: embed kind=slider %%',
+  // r3: a stray quote inside an unquoted value; parseParams still reads the kind after it
+  '%% card: embed note=a" kind=slider images=https://example.com/a.png x="b" %% <b>Hello</b>',
 ];
 
 export const legacyCard = (line) => ['---', 'title: T', '---', '', '## grid', '', `- [ ] ${line}`, ''].join('\n');

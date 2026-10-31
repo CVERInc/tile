@@ -15,7 +15,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseCard, serializeCard, normalizeCell, removeToken, CARD_MAX_BYTES, embedsOverCeiling } from './card-core.js';
+import { parseCard, serializeCard, normalizeCell, removeToken, cellToRaw, kindAssigned, CARD_MAX_BYTES, embedsOverCeiling } from './card-core.js';
+import { parseParams } from '../sitetile/site-core.js';
 import { LEGACY_EMBED_LINES, legacyCard, gridOf } from './cards/embed-legacy-lines.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
 import { CELL_TYPES, PALETTE, BLANKS } from './ai-ops.mjs';
@@ -193,6 +194,56 @@ test('🔴 the boundary is a `kind=` ASSIGNMENT token, read the way parseParams 
   assert.equal(typeOf('w=6 akind=x', '<b>x</b>'), 'embed');
   assert.equal(typeOf('w=6 foo-kind=x', '<b>x</b>'), 'embed', 'parseParams reads `foo-kind` as ONE name');
   assert.equal(typeOf('w=6 note="keep kind=slider"', '<b>x</b>'), 'embed', 'a `kind=` inside quotes is the note\'s text');
+});
+
+// 🔴 r3: the boundary is decided on the PARSER'S OWN TOKEN STREAM. r2 searched the raw string with
+// quoted values blanked — a different stream from parseParams' — and both ways it can differ are real:
+// a `kind=` INSIDE an unquoted value (a URL's query) is not an assignment, and a `"` inside an unquoted
+// value must not blank out the real assignment after it.
+const BOUNDARY = [
+  // [params, kind assigned?] — the review's two inputs first
+  ['note=https://example.com/?kind=slider', false],
+  ['note=a" kind=slider images=https://example.com/a.png x="b"', true],
+  ['kind=slider', true], ['kind=', true], ['kind=""', true], ['kind =x', true], ['-kind=x', true],
+  ['kind', false], ['akind=x', false], ['foo-kind=x', false], ['note="kind=x"', false], ['note="a" kind=x', true],
+  ['x.kind=y', true], ['w=6', false], ['a ="x kind=y"', true], ['note=x?kind=', false], ['note="unterminated kind=x', true],
+];
+
+test('🔴 r3 the review\'s inputs: a `kind=` inside a URL value is HTML; a real one after a stray quote is the carousel', () => {
+  const html = render(card('- [ ] %% card: embed note=https://example.com/?kind=slider %% <b>Hello</b>'));
+  const [cell] = cellsOf(html, 'embed');
+  assert.ok(cell, 'the embed whose only `kind=` is inside a URL rendered no HTML cell');
+  assert.deepEqual(problems(cell, '<b>Hello</b>'), []);
+  const md = card('- [ ] %% card: embed note=a" kind=slider images=https://example.com/a.png x="b" %% <b>Hello</b>');
+  assert.equal(parseCard(md).cells[0].type, 'slides');
+  const out = render(md);
+  assert.doesNotMatch(out, /<iframe/, 'a carousel the old renderer drew became an iframe publishing its body');
+  assert.match(out, /<figure[^>]*><img src="https:\/\/example\.com\/a\.png"/);
+});
+
+test('🔴 r3 `kindAssigned` agrees with parseParams: every kind the old renderer could read is an assignment', () => {
+  for (const [raw, want] of BOUNDARY) {
+    assert.equal(kindAssigned(raw), want, `kindAssigned(${JSON.stringify(raw)})`);
+    const p = parseParams(raw);
+    // the direction that protects published cards: a kind VALUE parseParams reads ⇒ legacy
+    if (typeof p.kind === 'string') assert.ok(kindAssigned(raw), `parseParams reads kind=${JSON.stringify(p.kind)} from ${JSON.stringify(raw)}, kindAssigned does not`);
+    // and a bare flag is never an assignment
+    if (p.kind === true) assert.ok(!kindAssigned(raw), `${JSON.stringify(raw)}: a bare kind flag counted as an assignment`);
+  }
+});
+
+test('🔴 r3 the writer\'s inline copy decides exactly as the parser does, on every boundary input', () => {
+  for (const [raw] of BOUNDARY) {
+    const written = cellToRaw({ type: 'slides', spelled: 'embed', rawParams: raw, body: '' });
+    assert.equal(/%% card: embed /.test(written), kindAssigned(raw), `${JSON.stringify(raw)}: cellToRaw and kindAssigned disagree`);
+  }
+});
+
+test('the inline copy in cellToRaw is the same code as kindAssigned, line for line', () => {
+  const src = readFileSync(new URL('./card-core.js', import.meta.url), 'utf8');
+  const copies = [...src.matchAll(/^([ \t]*)function kindAssigned\(raw\) \{\n([\s\S]*?)^\1\}$/gm)].map((m) => m[2].split('\n').map((l) => l.trim()).join('\n'));
+  assert.equal(copies.length, 2, `found ${copies.length} copies of kindAssigned, expected the function and cellToRaw's copy`);
+  assert.equal(copies[1], copies[0], 'cellToRaw\'s copy of kindAssigned has drifted from the one extractCell uses');
 });
 
 test('🔴 writing back: the old word is kept exactly while the line still parses as slides, by the same reading', () => {

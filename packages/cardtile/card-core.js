@@ -80,16 +80,29 @@ const clampSpan = (v, max) => {
 // Read once, here, so every reader of the model — renderer, both editors, the board, an agent —
 // sees `slides` and none of them has to know the old spelling exists.
 //
-// 🔴 "A `kind=` token" is an ASSIGNMENT of the NAME `kind`, read the way parseParams reads names, and
-// not "the params object has a kind" — parseParams DROPS a valueless `kind=` (so a blank legacy cell
+// 🔴 "A `kind=` token" is an ASSIGNMENT of the NAME `kind`, found on parseParams' OWN token stream.
+// Not "the params object has a kind": parseParams DROPS a valueless `kind=` (so a blank legacy cell
 // would have become HTML and run its old body) and KEEPS a bare `kind` flag (which is not a `kind=`).
-// So, on the param string with quoted values blanked out (a `note="keep kind=slider"` is the note's
-// text): `kind` must be a WHOLE name — parseParams scans `\w[\w-]*`, so `foo-kind` is one name and
-// `-kind` is the name `kind` — followed by `=` (a space before it allowed, as parseParams' own
-// key test allows). cellToRaw below repeats this exact test inline; embed-html.test.mjs checks they agree.
-const KIND_ASSIGNMENT = /(?:^|[^\w-])-*kind\s*=/;
-const unquoted = (raw) => String(raw || '').replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length));
-const legacySlides = (word, rawParams) => word === 'embed' && KIND_ASSIGNMENT.test(unquoted(rawParams));
+// And not a search of the raw string either — r2 did that, with quoted values blanked, and it is a
+// different stream: it found `kind=` inside a URL's query (`note=https://x/?kind=slider`, one value
+// to parseParams) and blanked away a real `kind=` after a stray quote (`note=a" kind=slider`).
+//
+// So this walks the param string with parseParams' own name/value regex (sitetile/site-core.js),
+// widened only to also CONSUME a `=` that has no value after it — which leaves the token stream
+// exactly as parseParams scans it — and every value is consumed whole, so nothing inside a value is
+// ever read as a name. `kind` counts when it is followed by `=`, or by spaces and then `=` (`kind =x`:
+// parseParams' own key test allows the space; such a cell drew nothing before and draws nothing now).
+//
+// cellToRaw below carries a VERBATIM copy (it is cut out of this file into an import-free module);
+// embed-html.test.mjs checks the copy, this function and parseParams agree.
+function kindAssigned(raw) {
+  const s = String(raw || '');
+  const re = /\b(\w[\w-]*)(?:(=)("[^"]*"(?:→\S+)?|\S+)?)?/g;
+  let m;
+  while ((m = re.exec(s))) if (m[1] === 'kind' && (m[2] || /^\s*=/.test(s.slice(re.lastIndex)))) return true;
+  return false;
+}
+const legacySlides = (word, rawParams) => word === 'embed' && kindAssigned(rawParams);
 
 // one tugtile card's text → a typed cell. No marker = a plain text widget (whole text is the body).
 function extractCell(text) {
@@ -112,12 +125,18 @@ function extractCell(text) {
 // 🔴 SELF-CONTAINED, deliberately — reef-mcp cuts this function out of this file verbatim
 // (apps/reef-mcp/scripts/card-syntax.mjs) into a module with no imports, so it may not call a helper.
 // A `slides` cell read from an old `embed kind=…` line is written back as `embed` — but only while it
-// still carries a `kind=` token, by EXACTLY the test extractCell uses (KIND_ASSIGNMENT on the param
-// string with quoted values blanked; repeated here because this function may not call out). Without
-// one the old word would come back as HTML, so the cell is written by its real name instead.
+// still carries a `kind=` token, by EXACTLY the test extractCell uses — `kindAssigned`, copied in
+// verbatim because this function may not call out. Without one the old word would come back as
+// HTML, so the cell is written by its real name instead.
 function cellToRaw(cell) {
-  const kindToken = /(?:^|[^\w-])-*kind\s*=/.test(String(cell.rawParams || '').replace(/"[^"]*"(?:→\S+)?/g, (q) => ' '.repeat(q.length)));
-  const word = cell.type === 'slides' && cell.spelled === 'embed' && kindToken ? 'embed' : cell.type;
+  function kindAssigned(raw) {
+    const s = String(raw || '');
+    const re = /\b(\w[\w-]*)(?:(=)("[^"]*"(?:→\S+)?|\S+)?)?/g;
+    let m;
+    while ((m = re.exec(s))) if (m[1] === 'kind' && (m[2] || /^\s*=/.test(s.slice(re.lastIndex)))) return true;
+    return false;
+  }
+  const word = cell.type === 'slides' && cell.spelled === 'embed' && kindAssigned(cell.rawParams) ? 'embed' : cell.type;
   const marker = '%% card: ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
   const body = cell.body || '';
   if (!body) return '- [ ] ' + marker;
@@ -442,7 +461,7 @@ function embedsOverCeiling(model, cardBytes, max = CARD_MAX_BYTES) {
 }
 
 export { parseCard, serializeCard, packGrid, reorder, setSpan, extractCell, cellToRaw, clampSpan };
-export { CARD_MAX_BYTES, utf8Length, embedsOverCeiling };
+export { CARD_MAX_BYTES, utf8Length, embedsOverCeiling, kindAssigned };
 // the param primitives, exported for cardtile-w. 🔴 The editor must not carry its own copy of this
 // grammar — two implementations of "what a param looks like" is how a form starts writing tokens the
 // parser reads differently, on somebody's only copy of their file.
