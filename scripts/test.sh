@@ -118,6 +118,10 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # test needs packages/sitetile/astro/node_modules and names itself SKIPPED without
              # them, exactly like the astro smoke further down.
              packages/build/*.test.mjs
+             # the theme compiler (`ir/_theme.md` → theme.css + the _site.md keys it owns) arrived
+             # 2026-10-31 under packages/build/theme/. Pure: it reads the renderer's own site.css and
+             # SiteLayout.astro by path for its zero-drift checks, and needs no node_modules.
+             packages/build/theme/*.test.mjs
              # real-render arrived with the per-site dynamic-coral CSS declaration. The matrix
              # itself needs a browser and is listed in MATRIX_GLOBS below; what is covered HERE is
              # its pure half — the mode-aware expectations, driven with synthetic facts, so the

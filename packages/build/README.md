@@ -24,6 +24,81 @@ without it, rather than quietly producing a site wearing only the baseline skin.
 declares none. Add `--assets ./assets` for the site's own media; `node engine/packages/build/cli.mjs`
 with no arguments prints the rest.
 
+## Compile a theme
+
+A site's look is a structured document, `ir/_theme.md`: tokens (colours, type, shape), a handful
+of layout switches, and an optional block of custom CSS for whatever the vocabulary cannot say. The
+build does not read it. It reads two things the **compiler** makes from it:
+
+- `theme.css`, which you pass to the build as `--theme`;
+- a few keys in `_site.md` (`theme:`, `fonts:`, `announce:`, the layout switches), which the
+  renderer reads as config, not as CSS. `theme:` is also the name the build stages the stylesheet
+  under, so without it your `theme.css` is never looked up.
+
+Write the source:
+
+````md
+---
+name: harbour
+gd-bg: #fbf8f3
+gd-text: #2b2320
+gd-accent: #b4532a
+gd-font-size: 18px
+type-scale: 1.25
+button: pill
+surface-sand: #efe6d8
+fonts: https://fonts.example/harbour.css
+---
+
+```css
+.st-hero h1 { letter-spacing: -0.02em; }
+```
+````
+
+Compile it, then build with the result:
+
+```
+node engine/packages/build/theme/cli.mjs ./ir/_theme.md ./theme.css
+node engine/packages/build/cli.mjs ./ir ./dist --theme ./theme.css --site-url https://your-domain.example
+```
+
+The first line writes `theme.css` and prints the `_site.md` keys this theme owns, one `key: value`
+per line:
+
+```
+theme: harbour
+fonts: https://fonts.example/harbour.css
+button: pill
+```
+
+Put those in `ir/_site.md` (replace any earlier values; delete a theme-owned key the theme no longer
+sets — `_theme.md` is their source). The compiler does not edit `_site.md` for you: it is your file
+and the rest of it is not the compiler's business. Then run the second line. Change `_theme.md`,
+run both again.
+
+**What the source may say.** Every legal key is in `theme/theme-schema.js`: `TOKENS` (the `--gd-*`
+custom properties `packages/sitetile/astro/src/styles/site.css` defines or reads; a test holds the
+two to zero drift in both directions), `TREATMENTS` (the layout switches and their allowed values),
+and `META_KEYS`. `describeThemeGrammar()` returns the same vocabulary as data, with a one-line
+purpose for each key. A few rules that matter in practice:
+
+- Only the keys you set are emitted. Everything else stays at the renderer's default, so a theme
+  that sets three colours changes three colours.
+- Any token can carry a dark-scheme value: `gd-bg@dark: #16130f` beside `gd-bg: #fbf8f3`. It is
+  used when the site sets `color-scheme: toggle` in `_site.md` and the visitor picks dark.
+- `type-scale` with `gd-font-size` derives the three heading sizes (h3 = size × r, h2 = size × r²,
+  h1 = size × r³). Set `gd-h1`/`gd-h2`/`gd-h3` only to override one step.
+- `surface-<name>: #rrggbb` paints every section marked `surface=<name>` as a full-width band.
+  Hex only; a gradient or an image is custom CSS on `[data-surface="<name>"]`.
+- Values are interpolated into a live stylesheet and into `_site.md`, so a value that could break
+  out of either (a line break, `; { } < > @ \ /* */ url()` in a token, a name that is not a plain
+  filename) is **dropped and reported**, never written. The custom CSS block is the deliberate
+  exception: it is appended verbatim, with only `</style` removed.
+
+The same functions are importable — `compileTheme(meta, customCss)` returns `{ name, css, siteMeta
+}`, and `parseThemeDoc` / `residueOf` read a `_theme.md` — for an editor that writes themes rather
+than a person who types them.
+
 ## The API
 
 ```js
@@ -100,12 +175,11 @@ the point: something outside this repo reads it.
 | `_query-redirects.md` | — | the site's query-string 301 table, compiled into its `_worker.js` by the emitter (`packages/sitetile/query-redirects.mjs`). Not a page |
 | `_site.md` | `_site` | not a route — the renderer reads it as config |
 
-The stylesheet you pass as `--theme` is `theme.css`, and it is **compiled by the platform and
-travels with the export**, next to `ir/`. Nothing in this repo compiles it: `_theme.md` is the
-source the compiler reads, and it is exported alongside the result and kept here for the day that
-compiler is public. Until then, hand the build the `theme.css` you were given — the site you rebuild
-looks like your site because that file came with it, not because anything here recreated it.
-(`packages/build/fixtures/theme.css` is a hand-written stand-in so this repo's own tests have one.)
+The stylesheet you pass as `--theme` is `theme.css`. An export carries one, compiled, next to
+`ir/` — and since the compiler lives here too (`theme/`, see [Compile a theme](#compile-a-theme)),
+you can also change `_theme.md` and compile your own. `_theme.md` is the source; `theme.css` is the
+artifact the build stages. (`packages/build/fixtures/theme.css` is a hand-written stand-in so this
+repo's own tests have one.)
 
 A locale home COLLAPSES: `zh-tw/home.md` becomes the page path `zh-tw`, so the Chinese homepage is
 `/zh-tw/` and not `/zh-tw/home/`. Preserving the nested name instead is a real, measured defect —
