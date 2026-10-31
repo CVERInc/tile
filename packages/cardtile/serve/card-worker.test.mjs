@@ -1599,6 +1599,25 @@ test('reef#2725: reserved apex paths stay on the site rather than redirect to Ca
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('tile#214: a live reserved Card stays on the apex site', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push(request.url);
+    return new Response('site origin');
+  };
+  try {
+    const env = { ...ON, CARDS: recordingStore({ 'card:report:0': SERVING_CARD, 'card:t:0': SERVING_CARD }) };
+    const site = await worker.fetch(new Request('https://feelreef.com/report'), env);
+    assert.equal(site.status, 200, 'live reserved report must reach site origin');
+    assert.equal(await site.text(), 'site origin');
+    const card = await worker.fetch(new Request('https://feelreef.com/t'), env);
+    assert.equal(card.status, 301, 'non-reserved live Card still redirects');
+    assert.equal(card.headers.get('location'), 'https://reef.cards/t');
+    assert.deepEqual(forwarded, ['https://feelreef.com/report']);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach origin', async () => {
   const originalFetch = globalThis.fetch;
   const forwarded = [];
