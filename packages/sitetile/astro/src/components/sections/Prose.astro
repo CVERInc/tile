@@ -1,8 +1,9 @@
 ---
-import { parseParams, inlineHtml, proseBodyHtml } from '@sitetile';
+// The markup is packages/emit/prose.mjs (tile-lab#52); this component reads the params and hands
+// their values over.
+import { parseParams } from '@sitetile';
+import { emitProse } from '@emit/prose.mjs';
 const { section, hero } = Astro.props;
-// first section on the page → its title is the page's primary heading → <h1> (one per page)
-const Title = hero && section.title ? 'h1' : 'h2';
 const pm = parseParams(section.params);
 // `align=left` opts a prose section out of the default centered lead-band styling
 // (content-heavy pages like /about, /oss, legal read left-aligned).
@@ -28,8 +29,4 @@ const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label 
 // Card-family primitive, not a mixfairy-only hack. Absent → no DOM change (byte-identical elsewhere).
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 ---
-<section class="st-prose" id={section.id} data-align={align} data-ordered={ordered ? '' : undefined} data-surface={surface}>
-  {eyebrow && <p class="st-prose-eyebrow" set:html={inlineHtml(eyebrow)} />}
-  {section.title && <Title set:html={inlineHtml(section.title)} />}
-  <Fragment set:html={proseBodyHtml(section.body, ordered)} />
-</section>
+<Fragment set:html={emitProse(section, { eyebrow, align, ordered, surface }, { hero })} />

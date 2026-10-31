@@ -30,8 +30,10 @@ test('reef#2725 r2 ②: serve.mjs derives its API base and card host from the sw
 });
 
 // The wiring, end to end: a real serve.mjs process with the switch in its environment. The
-// environment is built from scratch, not inherited, so the shell that runs the test cannot flip it.
+// child can still use serve.mjs's Keychain fallback, so give it a PATH containing only a failing
+// security stand-in. This also keeps a saved developer token from changing the probe's answer.
 const SERVE = fileURLToPath(new URL('./serve.mjs', import.meta.url));
+const NO_KEYCHAIN = fileURLToPath(new URL('./test-bin/', import.meta.url));
 const PROBE = `
 const { createServer } = await import(${JSON.stringify(SERVE)});
 const srv = createServer().listen(0, '127.0.0.1', async () => {
@@ -42,7 +44,7 @@ const srv = createServer().listen(0, '127.0.0.1', async () => {
 });`;
 const probe = (extra) => new Promise((resolve, reject) => {
   execFile(process.execPath, ['--input-type=module', '-e', PROBE],
-    { env: { PATH: process.env.PATH, HOME: process.env.HOME, CARD_API_TOKEN: '', ...extra }, timeout: 30000 },
+    { env: { PATH: NO_KEYCHAIN, HOME: NO_KEYCHAIN, CARD_API_TOKEN: '', ...extra }, timeout: 30000 },
     (err, stdout, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve(JSON.parse(stdout.trim().split('\n').pop()))));
 });
 
