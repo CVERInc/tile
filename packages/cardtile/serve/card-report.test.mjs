@@ -282,3 +282,27 @@ test('reef#2758: the words exist in all nine console locales, and the page speak
   // CONTROL: nothing asked for → English
   assert.match(await (await worker.fetch(new Request('https://reef.cards/report'), envOn())).text(), /<html lang="en-US">/);
 });
+
+// codex review P3 on tile#222: an explicit English choice must survive the submit. `?lang=en-US` with a
+// Japanese browser, then submit what was shown — the error, the forwarded locale and the receipt stay English.
+test('reef#2758: an explicit ?lang=en-US survives the submit over a Japanese Accept-Language', async () => {
+  const JA = { 'accept-language': 'ja-JP' };
+  const shown = await (await worker.fetch(new Request('https://reef.cards/report?lang=en-US', { headers: JA }), envOn())).text();
+  assert.match(shown, /<html lang="en-US">/);
+  // what the browser submits is exactly the form's own fields — read the hidden lang back off the page
+  const lang = /<input type="hidden" name="lang" value="([^"]*)">/.exec(shown)?.[1];
+  assert.equal(lang, 'en-US', 'the English page carries no lang field, so the submit falls back to Accept-Language');
+  // a validation error
+  const err = await (await worker.fetch(post({ card: '', reason: 'other', lang }, JA), envOn())).text();
+  assert.match(err, /<html lang="en-US">/);
+  assert.match(err, /Paste the card&#39;s address\./);
+  // a valid submission: the forwarded locale and the receipt
+  await withFetch(ok, async (calls) => {
+    const res = await worker.fetch(post({ card: 'https://reef.cards/t', reason: 'other', lang }, JA), envOn());
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/report?sent=1&lang=en-US');
+    assert.equal(calls[0].init.headers['accept-language'], 'en-US');
+    const done = await (await worker.fetch(new Request(`https://reef.cards${res.headers.get('location')}`, { headers: JA }), envOn())).text();
+    assert.match(done, /Thanks — we&#39;ve received your report\./);
+  });
+});

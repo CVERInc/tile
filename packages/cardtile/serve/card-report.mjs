@@ -368,7 +368,9 @@ export function reportPageHtml(localeKey, { card = '', reason = '', email = '', 
   const key = REPORT_WORDS[localeKey] ? localeKey : 'en';
   const w = REPORT_WORDS[key];
   const lang = SANDBOX_LOCALES[key]?.lang || 'en-US';
-  const langField = key === 'en' ? '' : `<input type="hidden" name="lang" value="${esc(lang)}">`;
+  // Always, English included: the form action has no query, so this field is the only way the language
+  // shown here reaches the POST (codex review P3 on tile#222 — `?lang=en-US` under a Japanese browser).
+  const langField = `<input type="hidden" name="lang" value="${esc(lang)}">`;
   const refusal = refused
     ? `<p class="err" role="alert" data-reason="${esc(refused)}">${esc(w[REFUSAL_WORD[refused] || 'unavailable'])}</p>`
     : '';
@@ -528,7 +530,8 @@ export async function handleReport(request, env, { handleOf = async () => null }
   const email = readEmail(typed.email);
   if (email.refused) return refuse(email.refused, email.refused === 'email_too_long' ? 413 : 400);
 
-  const sentTo = `${REPORT_PATH}?sent=1${form.get('lang') ? `&lang=${encodeURIComponent(SANDBOX_LOCALES[locale]?.lang || 'en-US')}` : ''}`;
+  // the receipt speaks the language the report was written in, whatever the browser would pick
+  const sentTo = `${REPORT_PATH}?sent=1&lang=${encodeURIComponent(SANDBOX_LOCALES[locale]?.lang || 'en-US')}`;
   const sent = () => new Response(null, { status: 303, headers: { Location: sentTo, 'Cache-Control': 'no-store' } });
 
   // Honeypot: a filled hidden field is a bot. It is told exactly what a person is told, and nothing is sent.
