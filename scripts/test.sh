@@ -133,7 +133,10 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
 SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # tile#19: the inbox honeypot measured in a real layout, on legacy and layered hosts.
              # It takes the same `<base URL of its directory>` argument as the two above.
-             packages/dynamic-corals/inbox-bubble/*.smoke.mjs)
+             packages/dynamic-corals/inbox-bubble/*.smoke.mjs
+             # grid `filter=` over plain cards, with and without `pack=masonry`, at 390 and 1440 px:
+             # the emitter's markup driven by the built grid-filter and grid-masonry corals.
+             packages/dynamic-corals/grid-filter/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
 # static python3 server the block further down starts. The real-render matrix takes no base URL —

@@ -63,6 +63,15 @@ function layout(container) {
   const cols = columnsFor(window.innerWidth);
   const colGap = 62;
 
+  // Only the cells a `filter=` pill (the grid-filter coral) left visible are bucketed. The hidden
+  // ones stay in the container, after the columns, so the filter can show them again and the next
+  // run (a pill press, a resize) re-buckets from the same stable list.
+  // 🩸 Until 2026-10-31 every cell was bucketed, shown or not, so a filtered grid kept each
+  // visible card in the column its UNFILTERED index chose: three matches at indices 0, 3 and 6
+  // stacked in column 1 of 3 with the other two columns empty.
+  const shown = cells.filter((cell) => !cell.hidden);
+  const hidden = cells.filter((cell) => cell.hidden);
+
   if (cols === 1) {
     // single column at narrow widths — plain flow, no wrapper divs, no inline layout styles.
     for (const cell of cells) cell.style.width = '';
@@ -85,7 +94,7 @@ function layout(container) {
     wrap.style.width = colWidth + 'px';
     return wrap;
   });
-  cells.forEach((cell, i) => {
+  shown.forEach((cell, i) => {
     cell.style.width = colWidth + 'px';
     wraps[i % cols].appendChild(cell);
   });
@@ -93,7 +102,7 @@ function layout(container) {
   container.style.flexDirection = 'row';
   container.style.alignItems = 'flex-start';   // columns end at different heights — don't stretch them to match
   container.style.gap = colGap + 'px';
-  container.replaceChildren(...wraps);
+  container.replaceChildren(...wraps, ...hidden);
 }
 
 function wire(container) {
@@ -104,6 +113,8 @@ function wire(container) {
   // No image-load wait needed anymore — index-parity placement doesn't measure anything, so it's
   // correct the instant the DOM exists (also removes the old FOUC while waiting for images).
   run();
+  // The grid-filter coral changed which cells are shown: lay out the new visible set.
+  container.addEventListener('dc-grid-filter-change', run);
   let t;
   window.addEventListener('resize', () => {
     clearTimeout(t);

@@ -54,7 +54,7 @@ const packMasonry = pm.pack === 'masonry' || (pm.pack && typeof pm.pack === 'obj
 const surface = pm.surface ? (typeof pm.surface === 'object' ? pm.surface.label : pm.surface) : undefined;
 // `filter=<all-label>` — OPT-IN client-side facet filter over the cards' badges. The first pill
 // (labelled with the param value, e.g. "品牌") resets to ALL; one pill per DISTINCT cell badge
-// toggles to just that facet (image cards carry data-cat — packages/emit/grid.mjs; the pills are wired by the grid-filter dynamic coral). Zero-JS-degradation: without JS
+// toggles to just that facet (every card carries data-cat — packages/emit/grid.mjs; the pills are wired by the grid-filter dynamic coral, which composes with pack=masonry). Zero-JS-degradation: without JS
 // every card shows (the filter bar is progressive enhancement). General — any badged card grid
 // (a 90-product catalogue filtered by two facets is its first consumer).
 const filterLabel = pm.filter ? (typeof pm.filter === 'object' ? pm.filter.label : String(pm.filter)) : null;

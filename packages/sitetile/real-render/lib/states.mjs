@@ -237,7 +237,10 @@ export const STATES = [
     root: '#dc-shop-outcome', heading: '#dc-shop-heading', client: { wait: 'outcome' } },
   { id: 'shop-complete-paid', family: 'shop completion', path: '/shop/complete?ref=paid',
     root: '#dc-shop-outcome', heading: '#dc-shop-heading', client: { wait: 'paid' } },
-  { id: 'shop-complete-locale-paid', family: 'shop completion', path: '/zh-tw/shop/complete?ref=paid',
+  // `copyLocale`: the path's locale decides the copy (and so <html lang>) on every arm — see
+  // expectedLang in sites.mjs. None of the arms builds a /zh-tw/shop page; this is the fallback
+  // to the root shop shell.
+  { id: 'shop-complete-locale-paid', family: 'shop completion', path: '/zh-tw/shop/complete?ref=paid', copyLocale: 'zh-TW',
     root: '#dc-shop-outcome', heading: '#dc-shop-heading', client: { wait: 'paid' } },
   { id: 'shop-complete-canceled', family: 'shop completion', path: '/shop/complete?ref=canceled',
     root: '#dc-shop-outcome', heading: '#dc-shop-heading', actions: [A('#dc-shop-outcome a', 'link')], client: { wait: 'back' }, extra: true },
