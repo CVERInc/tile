@@ -5,8 +5,6 @@ import { inlineHtml, bodyHtml, socialParts, linkButtonsHtml } from '../sitetile/
 import { attr, when } from './html.mjs';
 import { cellFrame } from './cell.mjs';
 
-const ROOT = 'st-social';
-
 /**
  * @param {{ eyebrow?: unknown, cell?: { attrs: string },
  *           buttons?: Array<{ href: string, label: string, icon: string, rel: string | null }> }} params
@@ -18,13 +16,13 @@ const ROOT = 'st-social';
 export function emitSocial(section, params, ctx) {
   if (params.cell) {
     const e = ctx.esc;
-    return cellFrame(params.cell, ROOT, 'social', params.buttons.map((b) => `<a class="${ROOT}-btn" href="${ctx.url(b.href)}"`
+    return cellFrame(params.cell, 'st-social', 'social', params.buttons.map((b) => `<a class="st-social-btn" href="${ctx.url(b.href)}"`
       + `${b.rel ? ` target="_blank" rel="${b.rel}"` : ''} aria-label="${e(b.label)}" title="${e(b.label)}">${b.icon}</a>`).join(''));
   }
   const Title = ctx.hero ? 'h1' : 'h2';
   const { eyebrow } = params;
   const sp = socialParts(section.body);
-  return '<section class="' + ROOT + '"' + attr('id', section.id) + '> '
+  return '<section class="st-social"' + attr('id', section.id) + '> '
     + when(eyebrow, () => '<p class="st-social-eyebrow">' + inlineHtml(eyebrow) + '</p>') + ' '
     + when(section.title, () => '<' + Title + '>' + inlineHtml(section.title) + '</' + Title + '>') + ' '
     + when(sp.caption, () => bodyHtml(sp.caption)) + ' '
