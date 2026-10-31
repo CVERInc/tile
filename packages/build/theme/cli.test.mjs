@@ -547,3 +547,62 @@ test('🔴 a file, symlink or hard link already sitting at the old predictable t
     else assert.equal(left.filter((f) => !/\.\d+\.tmp$/.test(f)).length, 0, `${mode}: stray files ${left}`);
   }
 });
+
+// ── round 18: every byte reaches the temp file, or nothing reaches theme.css ────────────────────
+
+/** Run the CLI in a child whose fs.writeSync (for file fds) is replaced by `impl` — the reviewer's probe. */
+function runWithWrite(t, impl) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tile-theme-short-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, '_theme.md');
+  writeFileSync(src, '---\nname: s\ngd-bg: #fff\n---\n');
+  const out = path.join(dir, 'theme.css');
+  const harness = path.join(dir, 'harness.mjs');
+  writeFileSync(harness, `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const realWrite = fs.writeSync;
+    let calls = 0;
+    const impl = ${impl};
+    fs.writeSync = (fd, data, ...args) => fd <= 2 ? realWrite(fd, data, ...args) : impl(realWrite, fd, data, args, calls++);
+    syncBuiltinESMExports();
+    process.argv = [process.execPath, ${JSON.stringify(CLI)}, ${JSON.stringify(src)}, ${JSON.stringify(out)}];
+    await import(${JSON.stringify(pathToFileURL(CLI).href)});
+  `);
+  const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+  const left = readdirSync(dir).filter((f) => !['_theme.md', 'harness.mjs', 'theme.css'].includes(f));
+  return { ...r, out, left, expected: compileTheme({ name: 's', 'gd-bg': '#fff' }, '').css };
+}
+// a write that honours (buffer, offset, length, position) and writes at most `max` bytes of it
+const PARTIAL = (max) => `(real, fd, data, args) => {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+  const off = typeof args[0] === 'number' ? args[0] : 0;
+  const len = typeof args[1] === 'number' ? args[1] : buf.length - off;
+  return real(fd, buf, off, Math.min(len, ${max}), args[2]);
+}`;
+
+test('🔴 a short write — once, or every time — is continued until every byte is written', (t) => {
+  for (const [label, impl] of [
+    ['short once', `(real, fd, data, args, n) => n === 0 ? (${PARTIAL(8)})(real, fd, data, args) : real(fd, data, ...args)`],
+    ['short every time (1 byte per call)', PARTIAL(1)],
+  ]) {
+    const r = runWithWrite(t, impl);
+    assert.equal(r.status, 0, `${label}\n${r.stderr}`);
+    assert.equal(readFileSync(r.out, 'utf8'), r.expected, `${label}: theme.css is not the whole sheet`);
+    assert.deepEqual(r.left, [], `${label}: stray ${r.left}`);
+  }
+});
+
+test('🔴 a write that makes no progress, or lies about its count, is a refusal: nothing renamed into place', (t) => {
+  for (const [label, impl] of [
+    ['no progress', '() => 0'],
+    ['claims all, writes 8', `(real, fd, data, args) => { const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data)); real(fd, buf, 0, 8); return typeof args[1] === 'number' ? args[1] : buf.length; }`],
+  ]) {
+    const r = runWithWrite(t, impl);
+    assert.equal(r.status, 2, `${label}: exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /cannot write/, label);
+    assert.equal(existsSync(r.out), false, `${label}: a truncated theme.css was put in place`);
+    assert.deepEqual(r.left, [], `${label}: the temp file was left behind: ${r.left}`);
+    assert.equal(r.stdout, '', label);
+  }
+});

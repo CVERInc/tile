@@ -37,7 +37,7 @@
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
 // A second copy of "which values are legal" here would be a second thing to keep in step.
 
-import { readFileSync, renameSync, realpathSync, statSync, openSync, writeSync, closeSync, unlinkSync } from 'node:fs';
+import { readFileSync, renameSync, realpathSync, statSync, openSync, writeSync, fsyncSync, closeSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
@@ -296,7 +296,20 @@ try {
     try { fd = openSync(candidate, 'wx', 0o644); tmp = candidate; }
     catch (e) { if (e.code !== 'EEXIST' || tries >= 16) throw e; }
   }
-  try { writeSync(fd, css); } finally { closeSync(fd); }
+  // 🩸 writeSync may write FEWER bytes than asked (a permitted result, e.g. under storage pressure)
+  // and says so only in its return value; ignoring it renamed an 8-byte theme.css into place with
+  // exit 0. So: loop until every byte is written, fsync, close — then check the file's size on disk
+  // before the rename. No progress, or a size that disagrees, is a refusal.
+  const bytes = Buffer.from(css, 'utf8');
+  try {
+    for (let at = 0; at < bytes.length;) {
+      const n = writeSync(fd, bytes, at, bytes.length - at, at);
+      if (!(n > 0)) throw Object.assign(new Error('the write made no progress'), { code: 'ESHORTWRITE' });
+      at += n;
+    }
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  if (statSync(tmp).size !== bytes.length) throw Object.assign(new Error('the written file is not the whole sheet'), { code: 'ESHORTWRITE' });
   if (isSameFile(src, out)) throw Object.assign(new Error('the destination became the source'), { code: 'ESAMEFILE' });
   renameSync(tmp, out);
   tmp = null;
