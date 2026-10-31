@@ -45,7 +45,7 @@ ok('REGISTRY_CORALS names exactly the six corals that publish through the regist
   JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['countdown', 'events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']),
   REGISTRY_CORALS.join(', '));
 ok('LOCAL_ONLY_CORALS names exactly the non-registry corals: Cardtile-served qr/drawer and the sitetile section corals',
-  JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['drawer', 'grid-filter', 'grid-masonry', 'qr']),
+  JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['drawer', 'grid-filter', 'grid-masonry', 'hero-parallax', 'qr']),
   LOCAL_ONLY_CORALS.join(', '));
 for (const [name, cfg] of Object.entries(CORALS)) {
   const inRegistry = REGISTRY_CORALS.includes(name);

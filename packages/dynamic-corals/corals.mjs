@@ -36,6 +36,7 @@ export const CORALS = {
   // bundles it into the page; the built <coral>.js is for a host that serves corals itself.
   'grid-masonry': { src: 'grid-masonry-client.mjs', bundle: true, registry: false },
   'grid-filter': { src: 'grid-filter-client.mjs', bundle: true, registry: false },
+  'hero-parallax': { src: 'hero-parallax-client.mjs', bundle: true, registry: false },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);

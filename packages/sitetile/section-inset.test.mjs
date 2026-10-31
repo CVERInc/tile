@@ -172,7 +172,7 @@ test('the 404 page section (`st-section st-notfound`) is also reached — two cl
 // ── hero: the one deliberate full-bleed opt-out ──────────────────────────────────────────────────
 
 test('🔴 every hero variant opts out via .st-full-bleed — the outer box stays edge-to-edge on purpose', () => {
-  const heroSrc = readFileSync(join(SECTIONS_DIR, 'Hero.astro'), 'utf8');
+  const heroSrc = sectionSource('Hero.astro').all;   // the component and its packages/emit module
   const sets = sectionClassSets(heroSrc);
   assert.ok(sets.length >= 3, `expected 3 hero <section> variants, found ${sets.length}`);
   for (const s of sets) {

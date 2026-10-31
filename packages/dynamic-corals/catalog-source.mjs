@@ -64,6 +64,7 @@ export const INTERNAL = {
   },
   'grid-masonry': {},
   'grid-filter': {},
+  'hero-parallax': {},
 };
 
 // Explicitly account for the names passed through inbox-bubble's computed data-${name} helper.

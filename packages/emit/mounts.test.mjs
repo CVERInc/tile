@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSite, inlineHtml, bodyHtml, gridCellBodyHtml } from '../sitetile/site-core.js';
 import { emitGrid } from './grid.mjs';
+import { emitHero } from './hero.mjs';
+import { emitCollection } from './collection.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CORALS = join(HERE, '..', 'dynamic-corals');
@@ -39,6 +41,8 @@ const mountsIn = (html, name) => [...html.matchAll(/<([a-z]+)\b([^>]*)>/g)]
 
 const gridParams = (o) => ({ eyebrow: null, cols: '', imageCards: false, more: null, packMasonry: false, surface: undefined, filterLabel: null, ...o });
 const grid = sectionOf('grid', '### A [Brand]\nx\n\n### B [Other]\ny');
+const heroParams = (o) => ({ media: 'avatar', layout: null, eyebrow: null, marqueeWords: [], enter: false, layerList: [], parallax: false, logo: null, logoPos: 'bottom', cta: undefined, bgOk: null, ...o });
+const hero = sectionOf('hero', 'Body.');
 
 const CASES = [
   {
@@ -52,6 +56,12 @@ const CASES = [
     on: () => emitGrid(grid, gridParams({ filterLabel: 'All' }), ctx),
     off: () => emitGrid(sectionOf('grid', '### No badge\nx'), gridParams({ filterLabel: 'All' }), ctx),   // no facet → no bar
     where: { tag: 'div', cls: 'st-grid-filter' },
+  },
+  {
+    coral: 'hero-parallax', component: 'Hero.astro', oldSelector: '.st-hero-layered[data-parallax]',
+    on: () => emitHero(hero, heroParams({ layerList: ['/b.png', '/f.png'], parallax: true }), ctx),
+    off: () => emitHero(hero, heroParams({ layerList: ['/b.png', '/f.png'] }), ctx),   // layered, no parallax
+    where: { tag: 'section', cls: 'st-hero st-full-bleed st-hero-layered' },
   },
 ];
 
@@ -79,6 +89,7 @@ test('CONTROL: the mount check sees a mount on the wrong element', () => {
 
 test('no emitter writes a <script>', () => {
   for (const c of CASES) assert.ok(!/<script\b/i.test(c.on()), `${c.coral}: emitter output has a <script>`);
+  assert.ok(!/<script\b/i.test(emitCollection(sectionOf('collection', '### G\n#### I\nx'), { eyebrow: null, link: null, ui: { updated: (x) => x, gh: 'gh', learn: 'l' } }, ctx)));
 });
 
 console.log(`  ${passed} passed`);
