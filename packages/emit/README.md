@@ -14,11 +14,26 @@ call the same function, so a section's markup exists once.
   contract `packages/sitetile/coral-params.test.mjs` guards: reef-mcp derives "which params each
   coral reads" by scanning the `.astro` files for `pm.<name>`, so a read moved in here would make
   that table call a live param inert.
-- **`ctx`** — render context: `{ hero }` (this is the page's first section → its title is `<h1>`).
+- **`ctx`** — render context: `{ hero }` (this is the page's first section → its title is `<h1>`),
+  plus, from phase 2 on, the caller's markdown renderers (below) and whatever a section needs that
+  only a host knows (Form's `index`).
 
-Markdown inside a section goes through sitetile's own `inlineHtml` / `bodyHtml` / `proseBodyHtml`,
-exactly as the components called them. Which markdown dialect a shared emitter should speak is
-tile-lab#52's question ②, not settled here.
+**Markdown is injected, markup is shared** (tile-lab#52 engineering ruling, 2026-10-31). A phase-2
+emitter never imports a markdown renderer: it calls `ctx.inline(md)` and `ctx.block(md, opts)`, and
+Grid also `ctx.cellBlock(md, opts)` (falls back to `ctx.block`). sitetile passes its own
+`inlineHtml` / `bodyHtml` / `gridCellBodyHtml`; a Card host passes `card-render.mjs`'s `mdInline` /
+`mdBlock`. Each side keeps its own live output, so "golden diff zero" holds on both, and whether
+the two dialects should become one (question ②) stays a separate decision. The phase-1 nine still
+import sitetile's renderers directly; moving them onto `ctx` is mechanical and changes no bytes.
+
+**Behaviour is a dynamic coral, not a script.** A section that needs client JS (grid `pack=masonry`
+and `filter=`, hero `parallax`, the carousel) gets it from `packages/dynamic-corals/<name>/`; the
+emitter writes only the coral's mount point, `data-dynamic-coral="<name>"`, and the host loads the
+coral (sitetile: the component's `<script>import …-client.mjs</script>`, which Astro bundles into the
+page; a Worker: the built `<name>.js`). `mounts.test.mjs` pins each mount, its client's selector and
+the component's import. The one exception is Form's inbox script: site-core's `INBOX_FORM_SCRIPT`,
+already a single shared string, which finds its form through `document.currentScript` and so is
+emitted inside the section, as before.
 
 ## Byte-identical to the template it replaced
 
@@ -30,5 +45,10 @@ text, the same single spaces `compressHTML` left between nodes, and the four pri
 ## Sections
 
 Phase 1 (no Astro-specific features): `embed`, `social`, `tagcloud`, `prose`, `faq`, `links`,
-`timeline`, `gallery`, `people`. Carousel, Collection, Form, Grid/GridCell and Hero still render
-in Astro.
+`timeline`, `gallery`, `people`.
+
+Phase 2: `grid` (with its cell, formerly `GridCell.astro`), `collection`, `hero`, `carousel`,
+`form`. `arrow.mjs` is the string form of `@cvernet/signet/Arrow.astro`, byte-for-byte; the page
+still imports `@cvernet/signet/arrow.css` for its hover morph. Form's build-time inputs (its own
+path, the locale home, the `thanks=` manifest id) arrive as params from the component, which is
+where `Astro.url`, `import.meta.glob` and `recordThanks()` stay.

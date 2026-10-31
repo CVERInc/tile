@@ -21,6 +21,7 @@ import { emitGrid } from './grid.mjs';
 import { emitHero } from './hero.mjs';
 import { emitCarousel } from './carousel.mjs';
 import { emitCollection } from './collection.mjs';
+import { emitForm } from './form.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CORALS = join(HERE, '..', 'dynamic-corals');
@@ -95,9 +96,16 @@ test('CONTROL: the mount check sees a mount on the wrong element', () => {
   assert.notDeepEqual(mountsIn(moved, 'grid-masonry'), [CASES[0].where]);
 });
 
-test('no emitter writes a <script>', () => {
+test('no emitter writes a <script> — except the inbox form, by name', () => {
   for (const c of CASES) assert.ok(!/<script\b/i.test(c.on()), `${c.coral}: emitter output has a <script>`);
   assert.ok(!/<script\b/i.test(emitCollection(sectionOf('collection', '### G\n#### I\nx'), { eyebrow: null, link: null, ui: { updated: (x) => x, gh: 'gh', learn: 'l' } }, ctx)));
+  const form = (isInbox) => emitForm(sectionOf('form', '### Email {email}\n### Message {textarea}'), {
+    eyebrow: null, submit: 'Send', isInbox, formAction: isInbox ? '/__reef/inbox' : undefined, method: 'post', thanksPath: null,
+    thanksMark: undefined, returnTo: '/contact/', homeHref: '/', copy: new Proxy({}, { get: (_, k) => String(k) }),
+  }, ctx);
+  assert.ok(!/<script\b/i.test(form(false)), 'a plain form has no script');
+  assert.equal((form(true).match(/<script\b/g) || []).length, 1, 'an inbox form carries exactly its one inline script');
+  assert.ok(form(true).endsWith('</script> </section>'), 'and it sits inside the section it drives');
 });
 
 console.log(`  ${passed} passed`);
