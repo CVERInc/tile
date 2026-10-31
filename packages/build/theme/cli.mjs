@@ -37,7 +37,8 @@
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
 // A second copy of "which values are legal" here would be a second thing to keep in step.
 
-import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, realpathSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
 import {
   parseThemeDoc, residueOf, structuralIssues, sanitizeThemeMeta, unsafeReason,
@@ -72,6 +73,24 @@ if (!src || rest.length) { console.error(USAGE); process.exit(2); }
 
 let md;
 try { md = readFileSync(src, 'utf8'); } catch (e) { console.error(`✗ cannot read ${src}: ${e.code ?? e.message}`); process.exit(2); }
+
+// 🩸 `cli.mjs ./ir/_theme.md ./ir/_theme.md` overwrote the source with CSS. The destination may be
+// the source under another spelling (`./`, an absolute path), through a symlink, or as a hard link,
+// so compare the resolved path (the destination's real parent + its basename — it may not exist
+// yet) AND, when it exists, the device + inode, which a symlink and a hard link both share.
+function isSameFile(a, b) {
+  try {
+    const ra = realpathSync(a);
+    const rb = path.join(realpathSync(path.dirname(path.resolve(b))), path.basename(b));
+    if (ra === rb) return true;
+  } catch {}
+  try {
+    const sa = statSync(a), sb = statSync(b);
+    if (sa.dev === sb.dev && sa.ino === sb.ino) return true;
+  } catch {}
+  return false;
+}
+const outProblems = isSameFile(src, out) ? [`${out} is the same file as the source ${src} — writing it would overwrite your theme with CSS; name a different output, e.g. theme.css`] : [];
 
 const doc = parseThemeDoc(md);
 const issues = structuralIssues(doc && doc.meta);
@@ -243,6 +262,7 @@ if (set('type-scale') && !seen.has('type-scale')) {
 }
 
 const mark = '✗';
+for (const p of outProblems) console.error(`${mark} ${p}`);
 for (const p of nameProblems) console.error(`${mark} ${src}: name — ${p}`);
 for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
 for (const [key, at] of dupes) {
@@ -251,7 +271,7 @@ for (const [key, at] of dupes) {
   console.error(`${mark} ${truncateCssText(key)}: written ${at.length} times (${at.map((a) => `line ${a.line}`).join(', ')}) — only the last, ${show(last.value)}, is used; ${lost} dropped`);
 }
 for (const d of dropped) console.error(`${mark} ${truncateCssText(d.key)}: ${show(d.value)} dropped — ${d.reason}`);
-const problems = nameProblems.length + unread.length + dupes.length + dropped.length;
+const problems = outProblems.length + nameProblems.length + unread.length + dupes.length + dropped.length;
 if (problems) {
   console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them and run it again.`);
   process.exit(2);

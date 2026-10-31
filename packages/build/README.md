@@ -97,7 +97,8 @@ imported, not copied), or a `fonts:` value outside its allowlist — the first l
 Every problem is listed in one run. **There are exactly two outcomes and no override:** everything
 you wrote is usable (exit 0, `theme.css` written, keys printed), or the theme is refused (exit 2,
 nothing written, nothing printed) — fix the source and run it again. A name that is not a plain
-filename (`../oops`) is refused the same way: the build finds the stylesheet by it. (The library
+filename (`../oops`) is refused the same way: the build finds the stylesheet by it. So is an output
+that is the source file itself — the same path, a symlink or a hard link to it. (The library
 functions stay forgiving for a program that calls them; the refusing is the CLI's.)
 
 `fonts:` goes into a `<link rel="stylesheet">` on every page, so it is an **allowlist**, checked

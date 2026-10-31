@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync, symlinkSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -483,4 +483,28 @@ test('🔴 announce-until with more than 3 fractional-second digits is a drop (f
   for (const until of ['2026-12-01T23:59:00.123Z', '2026-12-01T23:59:00.5Z']) {
     assert.equal(run(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`).status, 0, until);
   }
+});
+
+// ── round 16: the output can never be the source ───────────────────────────────────────────────
+
+test('🔴 a destination that is the source file — by path, by ./, by symlink or by hard link — is refused, the source untouched', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tile-theme-self-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, '_theme.md');
+  const body = '---\nname: s\ngd-bg: #fff\n---\n';
+  writeFileSync(src, body);
+  symlinkSync(src, path.join(dir, 'link.css'));
+  linkSync(src, path.join(dir, 'hard.css'));
+  for (const [srcArg, outArg] of [[src, src], ['./_theme.md', '_theme.md'], ['_theme.md', 'link.css'], ['_theme.md', 'hard.css'],
+    [path.join(dir, 'link.css'), src]]) {
+    const r = spawnSync(process.execPath, [CLI, srcArg, outArg], { encoding: 'utf8', cwd: dir });
+    assert.equal(r.status, 2, `${srcArg} → ${outArg}: exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /same file/, r.stderr);
+    assert.equal(r.stdout, '');
+    assert.equal(readFileSync(src, 'utf8'), body, `${srcArg} → ${outArg} overwrote the source`);
+  }
+  // control: a different file in the same directory is written
+  const ok = spawnSync(process.execPath, [CLI, '_theme.md', 'theme.css'], { encoding: 'utf8', cwd: dir });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(readFileSync(src, 'utf8'), body);
 });
