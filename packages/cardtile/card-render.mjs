@@ -25,6 +25,7 @@ import { escHtml } from '../cssmd/cssmd.js';
 // The cells' markup is the shared section emitters' (tile-lab#52 phase 3): each is called with
 // `params.cell` (the bento layout attributes) and this renderer's own dialect — see `dialect` below.
 import { emitProse } from '../emit/prose.mjs';
+import { gridCell } from '../emit/grid.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -580,15 +581,15 @@ function renderCell(cell, place, ctx) {
         // 🔴 SAME GEOMETRY AS THE FILLED TILE (ruler: tile-geometry.test.mjs). This used to be a bare
         // `.st-cell-body` straight inside the cell — no `.st-cell-link`, no `.st-cell-head` — so the
         // empty link sat rounded with its title at the top while the filled one next to it sat square
-        // with its title at the bottom. Same skeleton now, with the `<a>` swapped for an inert `<div>`
-        // (nothing to navigate to) and the icon omitted (there is no address to derive one from).
-        return `<div class="st-cell st-cell-tile st-cell-unset" ${size} data-coral-type="linktile"><div class="st-cell-link"><div class="st-cell-head">${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText || unset)}</div><div class="st-cell-sub">${esc(unset)}</div></div></div></div>`;
+        // with its title at the bottom. Same skeleton now (packages/emit/grid.mjs), with the `<a>`
+        // swapped for an inert `<div>` (nothing to navigate to) and the icon omitted (there is no
+        // address to derive one from).
+        return gridCell({ cell: { attrs: size }, unset: true, arrow: arrowOf(ctx, 17), title: linkText || unset, sub: unset }, false, dialect(ctx));
       }
       const a = anchorFor(url, ctx);
       if (!a) return '';
       const icon = linkIcon(p, url, ctx);
-      const sub = p.sub ? `<div class="st-cell-sub">${esc(p.sub)}</div>` : '';
-      return `<div class="st-cell st-cell-tile" ${size} data-coral-type="linktile"><a class="st-cell-link" ${a}><div class="st-cell-head">${icon}${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText)}</div>${sub}</div></a></div>`;
+      return gridCell({ cell: { attrs: size }, anchor: a, icon, arrow: arrowOf(ctx, 17), title: linkText, sub: p.sub }, false, dialect(ctx));
     }
     case 'embed':
       return renderEmbed(p, b, size, ctx);

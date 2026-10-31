@@ -15,6 +15,7 @@ import { firstImage, imgTag, safeHref } from '../sitetile/site-core.js';
 import { lucideSvg } from '../sitetile/astro/src/lib/lucide.mjs';
 import { attr, text, when } from './html.mjs';
 import { signetArrow } from './arrow.mjs';
+import { cellFrame } from './cell.mjs';
 
 const isExternal = (h) => /^https?:\/\//.test(h || '');
 // external cell links open in a new tab (rel=noopener), mirroring every other button surface
@@ -60,8 +61,11 @@ export function gridFacets(section, filterLabel) {
   return filterLabel ? [...new Set((section.cells || []).map((c) => c.badge).filter(Boolean))] : [];
 }
 
-/** One grid card (was GridCell.astro). Exported for a host that lays cells out itself. */
+/** One grid card (was GridCell.astro). Exported for a host that lays cells out itself.
+ *  `c.cell` → a Card cell (cell.mjs) in GridCell's link shape (`imageCards` false: the Card's `link`
+ *  tile) — the Card's own spelling of the same `st-cell` / `st-cell-link` card, see cardCell below. */
 export function gridCell(c, imageCards, ctx) {
+  if (c.cell) return cardCell(c, imageCards, ctx);
   const inline = ctx.inline;
   const cellBlock = ctx.cellBlock || ctx.block;
   const fi = imageCards ? firstImage(c.body) : null;
@@ -108,4 +112,23 @@ export function gridCell(c, imageCards, ctx) {
   return hrefOk
     ? '<a class="st-cell st-cell-link group"' + attr('href', hrefOk) + tgt(hrefOk) + inner + ' </a>'
     : '<div class="st-cell"' + inner + ' </div>';
+}
+
+/**
+ * A Card cell in GridCell's shapes (tile-lab#52 phase 3). Values arrive resolved by the Card host
+ * (card-render.mjs reads the params, resolves assets and builds the anchor through its destination
+ * registry); this writes the markup, escaping with the Card's `ctx.esc`.
+ *
+ * link (`imageCards` false) — a row/tile that leaves the card:
+ *   `anchor`  the `<a>`'s attributes, ready-made (href/target/rel, or a drawer's `#id` trio); absent
+ *             with `unset` → an inert `<div>` (the editor's outline for a link with no address yet)
+ *   `icon`    the mark's markup ('' for none) · `arrow` the signet arrow's markup ('' when off)
+ *   `title` · `sub` (omitted when empty)
+ */
+function cardCell(c, imageCards, ctx) {
+  const e = ctx.esc;
+  const tag = c.anchor ? 'a' : 'div';
+  return cellFrame(c.cell, 'st-cell-tile' + (c.unset ? ' st-cell-unset' : ''), 'linktile',
+    `<${tag} class="st-cell-link"${c.anchor ? ' ' + c.anchor : ''}><div class="st-cell-head">${c.icon || ''}${c.arrow}</div>`
+    + `<div class="st-cell-body"><div class="st-cell-title">${e(c.title)}</div>${c.sub ? `<div class="st-cell-sub">${e(c.sub)}</div>` : ''}</div></${tag}>`);
 }
