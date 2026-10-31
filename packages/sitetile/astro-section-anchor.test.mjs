@@ -22,9 +22,10 @@
 // as "the citation is a bit vague", not as a defect. Nothing else goes red.
 
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIR = join(HERE, 'astro/src/components/sections');
@@ -58,9 +59,12 @@ const files = readdirSync(DIR)
 assert.ok(files.length >= 14, `expected the full component set, found ${files.length}`);
 
 let total = 0;
+// tile-lab#52: a component whose markup moved to packages/emit writes its <section> there, as
+// `'<section …' + attr('id', section.id) + '>'` — the same anchor in the emitter's own syntax.
+const ANCHORED = /\sid=\{section\.id\}|attr\('id', section\.id\)/;
 for (const f of files) {
-	const src = readFileSync(join(DIR, f), 'utf8');
-	const tags = sectionTags(src);
+	const { astro: src, emit } = sectionSource(f);
+	const tags = [...sectionTags(src), ...sectionTags(emit)];
 	assert.ok(tags.length >= 1, `${f}: renders no <section> — is it still a section component?`);
 
 	// It must be able to SEE the id before it can stamp it.
@@ -69,7 +73,7 @@ for (const f of files) {
 	for (const tag of tags) {
 		assert.match(
 			tag,
-			/\sid=\{section\.id\}/,
+			ANCHORED,
 			`${f}: a <section> ships without an anchor —\n    ${tag.slice(0, 110)}`
 		);
 	}
@@ -86,8 +90,18 @@ ok(`${total} section tags across ${files.length} components`);
 	const doctored = `---\nconst { section } = Astro.props;\n---\n<section class="st-fake">x</section>`;
 	const tags = sectionTags(doctored);
 	assert.equal(tags.length, 1);
-	assert.ok(!/\sid=\{section\.id\}/.test(tags[0]), 'the control tag should NOT be anchored');
+	assert.ok(!ANCHORED.test(tags[0]), 'the control tag should NOT be anchored');
 	ok('control — an unstamped component is detected, not skipped');
+}
+
+{
+	// The same control for an emitter: an id written onto some OTHER element does not anchor the section.
+	const doctored = "return '<section class=\"st-fake\">' + '<p' + attr('id', section.id) + '>x</p></section>';";
+	const tags = sectionTags(doctored);
+	assert.equal(tags.length, 1);
+	assert.ok(!ANCHORED.test(tags[0]), 'the emitter control tag should NOT be anchored');
+	assert.ok(ANCHORED.test(sectionTags("'<section class=\"st-x\"' + attr('id', section.id) + '>'")[0]), 'an anchored emitter tag must pass');
+	ok('control — an emitter section without its id is detected, and one with it passes');
 }
 
 {

@@ -71,6 +71,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sectionSource } from './section-source.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const siteCss = readFileSync(join(HERE, 'astro/src/styles/site.css'), 'utf8');
@@ -245,7 +246,7 @@ test('🔴 CSS a component IMPORTS is layered too, not just what SiteLayout inli
 test('control: an embed coral\'s <style> is still unlayered — the escape hatch survives', () => {
   // Everything above narrows what a theme may accidentally beat. If it also closed the deliberate
   // override, the doctrine would have quietly changed from "born-valid is a suggestion" to "a cage".
-  const embed = readFileSync(join(HERE, 'astro/src/components/sections/Embed.astro'), 'utf8');
+  const embed = sectionSource('Embed.astro').all;   // the component and its packages/emit module
   assert.ok(!/@layer/.test(embed), 'embed <style> must stay unlayered so it outranks every layer');
 });
 
