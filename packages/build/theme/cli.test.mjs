@@ -4,10 +4,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync, symlinkSync, linkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync, symlinkSync, linkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileTheme, THEME_SITE_KEYS } from './theme-compile.js';
 import { parseThemeDoc, residueOf } from './theme-schema.js';
 
@@ -507,4 +507,43 @@ test('🔴 a destination that is the source file — by path, by ./, by symlink 
   const ok = spawnSync(process.execPath, [CLI, '_theme.md', 'theme.css'], { encoding: 'utf8', cwd: dir });
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(readFileSync(src, 'utf8'), body);
+});
+
+// ── round 17: the temporary file is created exclusively, never through a path that already exists ─
+
+test('🔴 a file, symlink or hard link already sitting at the old predictable temp name is never written through', (t) => {
+  // The CLI is imported IN a child process whose pid is known, so the old `${out}.${pid}.tmp` name
+  // can be planted before it runs — exactly the reviewer's probe.
+  const original = '---\nname: s\ngd-bg: #fff\n---\n';
+  for (const mode of ['same-name', 'symlink', 'hardlink']) {
+    const dir = mkdtempSync(path.join(tmpdir(), `tile-theme-tmp-${mode}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const harness = path.join(dir, 'harness.mjs');
+    writeFileSync(harness, `
+      import { writeFileSync, symlinkSync, linkSync } from 'node:fs';
+      import path from 'node:path';
+      const dir = ${JSON.stringify(dir)};
+      const out = path.join(dir, 'theme.css');
+      const tmp = \`\${out}.\${process.pid}.tmp\`;
+      const src = ${JSON.stringify(mode)} === 'same-name' ? tmp : path.join(dir, '_theme.md');
+      writeFileSync(src, ${JSON.stringify(original)});
+      if (${JSON.stringify(mode)} === 'symlink') symlinkSync(src, tmp);
+      if (${JSON.stringify(mode)} === 'hardlink') linkSync(src, tmp);
+      writeFileSync(path.join(dir, 'src-path.txt'), src);
+      process.argv = [process.execPath, ${JSON.stringify(CLI)}, src, out];
+      await import(${JSON.stringify(pathToFileURL(CLI).href)});
+    `);
+    const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+    const src = readFileSync(path.join(dir, 'src-path.txt'), 'utf8');
+    assert.ok(existsSync(src), `${mode}: the source was removed\n${r.stderr}`);
+    assert.equal(readFileSync(src, 'utf8'), original, `${mode}: the source was overwritten\n${r.stderr}`);
+    if (r.status === 0) {
+      assert.match(readFileSync(path.join(dir, 'theme.css'), 'utf8'), /^\/\* Compiled from ir\/_theme\.md/, mode);
+      assert.equal(lstatSync(path.join(dir, 'theme.css')).isSymbolicLink(), false, `${mode}: output must be a plain file`);
+    }
+    // nothing of ours left behind: only what the probe planted, the harness, and theme.css
+    const left = readdirSync(dir).filter((f) => !['harness.mjs', 'src-path.txt', 'theme.css', '_theme.md', path.basename(src)].includes(f));
+    if (mode === 'same-name') assert.deepEqual(left, [], `${mode}: stray files ${left}`);
+    else assert.equal(left.filter((f) => !/\.\d+\.tmp$/.test(f)).length, 0, `${mode}: stray files ${left}`);
+  }
 });

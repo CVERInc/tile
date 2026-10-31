@@ -37,7 +37,8 @@
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
 // A second copy of "which values are legal" here would be a second thing to keep in step.
 
-import { readFileSync, writeFileSync, renameSync, rmSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, renameSync, realpathSync, statSync, openSync, writeSync, closeSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
 import {
@@ -280,12 +281,27 @@ if (problems) {
 // Written beside its destination under a temporary name, then renamed into place: a write that
 // fails (a missing directory, no permission, a full disk) is a refusal like any other — exit 2, the
 // path named, no stack trace, and no half-written theme.css left where the build would find it.
-const tmp = `${out}.${process.pid}.tmp`;
+// 🩸 The temporary name used to be `${out}.${pid}.tmp`, opened with a plain write: predictable, and
+// FOLLOWED if something already sat there — a source named that way was renamed away, and a symlink
+// or hard link planted at that name had the source behind it overwritten with CSS. Now the name is
+// random and the file is created EXCLUSIVELY (`wx`: fails if anything — a file, a symlink, a hard
+// link — already has that name, and never follows one), retried on a collision; on any failure only
+// a file this run created is removed. The same-file check runs again right before the rename.
+let tmp = null;
 try {
-  writeFileSync(tmp, css);
+  const dir = path.dirname(path.resolve(out));
+  let fd;
+  for (let tries = 0; fd === undefined; tries++) {
+    const candidate = path.join(dir, `.${path.basename(out)}.${randomBytes(8).toString('hex')}.tmp`);
+    try { fd = openSync(candidate, 'wx', 0o644); tmp = candidate; }
+    catch (e) { if (e.code !== 'EEXIST' || tries >= 16) throw e; }
+  }
+  try { writeSync(fd, css); } finally { closeSync(fd); }
+  if (isSameFile(src, out)) throw Object.assign(new Error('the destination became the source'), { code: 'ESAMEFILE' });
   renameSync(tmp, out);
+  tmp = null;
 } catch (e) {
-  try { rmSync(tmp, { force: true }); } catch {}
+  if (tmp) { try { unlinkSync(tmp); } catch {} }
   console.error(`✗ cannot write ${out}: ${e.code ?? e.message} — nothing was written.`);
   process.exit(2);
 }
