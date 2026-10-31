@@ -57,8 +57,18 @@ Every face sits stacked and invisible inside the card, so the browser measures t
 font and re-lays them out when a web font arrives or the size changes. Countdown's digit cards use
 `0,1,2,3,4,5,6,7,8,9` unless the element says otherwise, so every digit card is the width of the
 widest digit. Without a declared set a card keeps every face it has shown, so it only grows.
-`--dc-flip-width` overrides both. The same ordered `data-flip-faces` list is the **drum order** a
-future drum mode would step through between two faces; today a change goes straight to the target.
+`--dc-flip-width` overrides both.
+
+**Drum mode** — `data-flip-mode="drum"` on a `data-part` element. Each card becomes a counter wheel
+that only turns forward: a change folds through every face after the one showing, in wheel order and
+wrapping round, one short fold per step (`DRUM_STEP_MS`, 140 ms; the four-face order is the same as
+above). A countdown's wheel is 0–9 turning DOWN (9, 8, … 0, 9 …), on every place, as on a mechanical
+counter: an ordinary second is one step, and a place that wraps runs through every digit in between —
+the tens of the seconds go 0→9→8→7→6→5 at the minute (5 steps), the hours 00→23 at the day (8 and 7).
+Cards that have farther to go stop later, so a row finishes raggedly: that 「嘩啦啦」 is the wheel, not an
+added stagger. A new value while the wheel is turning is only a new place to stop — it carries on
+forward, never back, and never runs twice. `data-flip-faces`, when given, is the wheel in the order
+written. A face not on the wheel, the first value, and reduced motion all go straight to the target.
 Styling is custom properties only:
 
 | property | default |
@@ -107,6 +117,7 @@ Author: `official`.
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |
 | `data-part` | enum | yes | — | On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h). Values: `days`, `hours`, `minutes`, `seconds`. |
 | `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. data-flip="false" keeps plain text. |
-| `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; the same ordered list is the drum order a future drum mode would step through. |
+| `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; with data-flip-mode="drum" the same list, in the order written, is the wheel the cards turn through. |
+| `data-flip-mode` | enum | no | — | On a data-flip element: drum makes each card a counter wheel that only turns forward (9, 8, … 0 by default), folding through every digit in between — the tens of the seconds go 0→9→8→7→6→5 at the minute. Unset keeps the straight-to-target flip. Reduced motion always goes straight. Values: `drum`. |
 
 <!-- coral metadata: end -->

@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-grid-filter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A sitetile grid's `filter=` facet bar as a dynamic coral: its pills toggle the section's cards by `data-cat`. Without JS every card shows. Version covers the UNIT: the client JS + the data-* contract.",
+  "scripts": {
+    "build": "node ../build.mjs grid-filter"
+  }
+}

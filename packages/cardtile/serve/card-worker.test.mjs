@@ -1646,6 +1646,80 @@ test('tile#214: apex lookup errors fall through to the site origin', async () =>
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('tile#219: an apex store failure leaves exactly one warn line; a working store leaves none', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warned = [];
+  globalThis.fetch = async () => new Response('site origin');
+  console.warn = (...args) => { warned.push(args); };
+  try {
+    // Success: a live Card redirects and a missing one reaches the site — neither is a failure.
+    const ok = { ...ON, CARDS: recordingStore({ 'card:t:0': SERVING_CARD }) };
+    assert.equal((await worker.fetch(new Request('https://feelreef.com/t'), ok)).status, 301);
+    assert.equal((await worker.fetch(new Request('https://feelreef.com/nobody'), ok)).status, 200);
+    assert.deepEqual(warned, [], 'a working store must not warn');
+
+    // Failure: the request is still forwarded, and the operator gets one structured line.
+    // The store's error names the key it failed on (so the handle) and, here, a credential:
+    // neither may reach the log. Only an allowlisted classification of the error does.
+    const store = recordingStore({ 'card:privatehandle:0': SERVING_CARD });
+    store.get = async (key) => { throw new TypeError(`KV unavailable for ${key}; token=supersecret`); };
+    const res = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(res.status, 200, 'the failure still reaches the site origin');
+    assert.equal(warned.length, 1, 'exactly one line per failed lookup');
+    assert.equal(warned[0].length, 1, 'one JSON string argument');
+    const line = warned[0][0];
+    assert.ok(!line.includes('privatehandle'), `the handle must not be logged: ${line}`);
+    assert.ok(!line.includes('token='), `error text must not be logged: ${line}`);
+    assert.ok(!line.includes('supersecret'), `error text must not be logged: ${line}`);
+    assert.deepEqual(JSON.parse(line), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'TypeError',
+    });
+
+    // A name outside the allowlist is error text too (a custom class, or a store that sets
+    // `name` from its input): it is classified, never echoed.
+    warned.length = 0;
+    store.get = async () => { const e = new Error('x'); e.name = 'privatehandle token=supersecret'; throw e; };
+    await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(warned.length, 1);
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'unknown',
+    });
+
+    // A thrown value whose `name` answers differently on each read: the allowlist check and the
+    // logged value must be the same single read, so the second answer never reaches the log.
+    warned.length = 0;
+    store.get = async () => {
+      let reads = 0;
+      throw { get name() { reads += 1; return reads === 1 ? 'TypeError' : 'privatehandle token=supersecret'; } };
+    };
+    const twoFaced = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(twoFaced.status, 200, 'a two-faced name still reaches the site origin');
+    assert.equal(warned.length, 1);
+    assert.ok(!warned[0][0].includes('privatehandle') && !warned[0][0].includes('token='),
+      `the second read of name must not be logged: ${warned[0][0]}`);
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'TypeError',
+    });
+
+    // A thrown value whose `name` getter throws: classifying it must not cost the visitor the site.
+    warned.length = 0;
+    store.get = async () => { throw { get name() { throw new Error('privatehandle token=supersecret'); } }; };
+    const hostile = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(hostile.status, 200, 'a throwing name getter still reaches the site origin');
+    assert.equal(await hostile.text(), 'site origin');
+    assert.equal(warned.length, 1);
+    assert.deepEqual(JSON.parse(warned[0][0]), {
+      event: 'apex_card_lookup_failed', host: 'feelreef.com', op: 'liveCard', error: 'unknown',
+    });
+
+    // Logging itself failing (a console that throws) is no reason to drop the visitor either.
+    console.warn = () => { throw new Error('console unavailable'); };
+    const noConsole = await worker.fetch(new Request('https://feelreef.com/privatehandle'), { ...ON, CARDS: store });
+    assert.equal(noConsole.status, 200, 'a throwing console still reaches the site origin');
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
 test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach origin', async () => {
   const originalFetch = globalThis.fetch;
   const forwarded = [];

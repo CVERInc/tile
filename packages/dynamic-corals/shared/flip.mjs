@@ -28,11 +28,19 @@
 // A change that arrives mid-flip drops the running flaps and starts from what each half is showing
 // now (top and bottom separately), so flips never stack and no half changes without a fold. Reduced motion (or the first value) sets every face at once.
 //
-// Today a change goes straight to the target face. A board that steps through every face in between
-// (a drum / sequence mode) is a different caller-supplied OPTION on the same card, not a different
-// card: `setFlip(cell, next, env)` keeps `env` open for it, and nothing here is named after "jump".
+// By default a change goes straight to the target face. DRUM mode (`createFlip(doc, faces, { drum })`)
+// is the station board: the card's faces are printed on a drum that only turns FORWARD, so going
+// from A to B folds through every face after A, in drum order and wrapping round, until B is up.
+// One ordinary fold per step — the same four-face order as above, just shorter (DRUM_STEP_MS). The
+// distance between two faces is the number of folds, so a row of cards started together stops one
+// by one: that ragged 「嘩啦啦」 finish is the physics, not an added stagger. A new target that arrives
+// while the drum is turning is just a new place to stop: the running fold finishes and the drum keeps
+// going forward from the face now showing — it never jumps back and never stacks a second run. A
+// face that is not on the drum (or the first value, or reduced motion) goes straight there. The drum
+// order may differ from the width set: a countdown's tens card turns 5…0 but is as wide as 0–9.
 
 export const FLIP_MS = 460;   // both folds (2 × .22s in FLIP_CSS) plus a frame of slack
+export const DRUM_STEP_MS = 140;   // one drum step: both folds (2 × .06s, .dc-flip-drum in FLIP_CSS) plus slack
 
 function face(doc, className) {
   const half = doc.createElement('span');
@@ -53,16 +61,18 @@ export function parseFaces(text) {
  * A new, empty card. `faces` is every face it can show, in order (optional). Its state lives on the
  * element, so a card can be re-used across ticks.
  */
-export function createFlip(doc, faces = []) {
+export function createFlip(doc, faces = [], { drum = null } = {}) {
   const cell = doc.createElement('span');
-  cell.className = 'dc-flip';
+  cell.className = drum && drum.length > 1 ? 'dc-flip dc-flip-drum' : 'dc-flip';
   // In-flow, invisible: the only thing that gives the card a width.
   const size = doc.createElement('span');
   size.className = 'dc-flip-size';
   size.setAttribute('aria-hidden', 'true');
   cell.appendChild(size);
-  cell.__dcFlip = { value: undefined, timer: null, faces: [...faces], fitted: new Set() };
+  cell.__dcFlip = { value: undefined, timer: null, faces: [...faces], fitted: new Set(),
+    drum: drum && drum.length > 1 ? [...drum] : null, target: undefined, turning: false };
   for (const f of faces) fit(cell, doc, f);
+  if (cell.__dcFlip.drum) for (const f of cell.__dcFlip.drum) fit(cell, doc, f);
   cell.appendChild(face(doc, 'dc-flip-half dc-flip-top'));
   cell.appendChild(face(doc, 'dc-flip-half dc-flip-bottom'));
   return cell;
@@ -84,6 +94,7 @@ function fit(cell, doc, text) {
 function clearFlaps(cell, state, env) {
   if (state.timer) env.clearTimeout(state.timer);
   state.timer = null;
+  state.turning = false;
   cell.classList.remove('dc-flip-on');
   for (const flap of cell.querySelectorAll('.dc-flip-flap')) flap.remove();
 }
@@ -95,10 +106,42 @@ function clearFlaps(cell, state, env) {
 export function setFlip(cell, next, env) {
   const value = String(next);
   const state = cell.__dcFlip;
+  const { drum } = state;
+  if (drum && state.turning) {
+    // The drum is already turning: the new target is just where it stops. If it is on the drum the
+    // running fold finishes and the drum carries on forward; if not, fall through and go straight.
+    if (drum.includes(value)) { state.target = value; return state; }
+  } else if (state.value === value) {
+    return state;
+  }
+  const from = state.value;
+  if (drum && from !== undefined && !env.reduced && drum.includes(from) && drum.includes(value)) {
+    state.target = value;
+    turn(cell, state, env);
+    return state;
+  }
+  state.target = value;
+  fold(cell, state, env, value, FLIP_MS, null);
+  return state;
+}
+
+// One drum step: fold to the face after the one showing, then — if that is not the target yet —
+// the next one. `state.value` is always the face fully up (or being folded to), so a retarget
+// mid-run carries on from there.
+function turn(cell, state, env) {
+  const { drum } = state;
+  const at = drum.indexOf(state.value);
+  const step = drum[(at + 1) % drum.length];
+  fold(cell, state, env, step, DRUM_STEP_MS, () => {
+    if (state.value !== state.target && drum.includes(state.target)) turn(cell, state, env);
+  });
+  state.turning = true;
+}
+
+// The fold itself: the four-face order in the header. `after` runs once it has settled.
+function fold(cell, state, env, value, ms, after) {
   const top = glyph(cell, '.dc-flip-top');
   const bottom = glyph(cell, '.dc-flip-bottom');
-  if (state.value === value) return state;
-
   const first = state.value === undefined;
   // What is on the card RIGHT NOW, half by half. Mid-flip they differ — the top already shows the
   // face being flipped to, the bottom still the one before it — and the next flip starts from what
@@ -111,7 +154,7 @@ export function setFlip(cell, next, env) {
   if (first || env.reduced) {
     top.textContent = value;
     bottom.textContent = value;
-    return state;
+    return;
   }
 
   top.textContent = value;
@@ -128,8 +171,8 @@ export function setFlip(cell, next, env) {
     state.timer = null;
     bottom.textContent = value;
     clearFlaps(cell, state, env);
-  }, FLIP_MS);
-  return state;
+    if (after) after();
+  }, ms);
 }
 
 // Neutral by default; every colour and size is a custom property the host sets.
@@ -150,6 +193,8 @@ export const FLIP_CSS = [
   '.dc-flip-back{transform-origin:top;transform:rotateX(90deg)}',
   '.dc-flip-on .dc-flip-front{animation:dc-flip-down .22s ease-in forwards}',
   '.dc-flip-on .dc-flip-back{animation:dc-flip-up .22s .22s ease-out forwards}',
+  '.dc-flip-drum.dc-flip-on .dc-flip-front{animation-duration:.06s}',
+  '.dc-flip-drum.dc-flip-on .dc-flip-back{animation-duration:.06s;animation-delay:.06s}',
   '@keyframes dc-flip-down{to{transform:rotateX(-90deg);filter:brightness(.7)}}',
   '@keyframes dc-flip-up{to{transform:rotateX(0deg)}}',
   '@media (prefers-reduced-motion:reduce){.dc-flip-flap{animation:none!important}}',

@@ -1,0 +1,27 @@
+{
+  "id": "hero-parallax",
+  "author": "official",
+  "summary": "Drifts a layered hero's images on pointer and scroll, front layers more; off under reduced motion.",
+  "embed": "<section class=\"st-hero st-hero-layered\" data-dynamic-coral=\"hero-parallax\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"back.webp\" alt=\"\" data-depth=\"0\"><img class=\"st-hero-layer\" src=\"front.webp\" alt=\"\" data-depth=\"1\"></div></section>\n<script src=\"hero-parallax.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the hero-parallax coral; on the layered hero section.",
+      "values": [
+        "hero-parallax"
+      ]
+    },
+    {
+      "name": "data-depth",
+      "type": "number",
+      "required": false,
+      "default": 0,
+      "description": "On each .st-hero-layer: its back-to-front index. Front layers drift more."
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output, not a standalone copy-paste embed. The renderer emits the mount point and the section's markup; sitetile's section component imports the client source and Astro bundles it into the page, and a Worker host serves the built artifact itself."
+}

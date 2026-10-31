@@ -10,6 +10,14 @@
 //   text    : body = markdown
 // A block heading is a LANE (`## English`), not a cell — see card-core's parseCard.
 // packGrid gives each cell its w×h → data-span="{w}x{h}". 防醜 (no overlap) is card-core's.
+//
+// 🔴 A cell's MARKUP is not written here (tile-lab#52 phase 3). Each cell is a shared section emitter
+// (packages/emit) called with `params.cell` and this renderer's dialect (`dialect` below: mdInline /
+// mdBlock, esc, the destination registry): text → emitProse, link / feature → gridCell, social →
+// emitSocial, profile → emitHero, video and embed → emitEmbed, slides → emitCarousel. What stays here is what only
+// a Card has: reading the params (`p.<name>` in renderCell — ai-ops.test.mjs scans it), assets, marks
+// and favicons, the drawer anchors, the bento pack (renderGrid), drawers, the page shell (frontmatter,
+// accent scale, footer) and the byte budget.
 import { packGrid, CARD_MAX_BYTES, utf8Length } from './card-core.js';
 import { resolveBackdropDim, themeCss, themeRootCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
@@ -22,6 +30,15 @@ import { linkOf, hostLabel, hostOf, iconDomains, socialLineOf, overrideMark, def
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
 import { DRAWER_CSS } from '../dynamic-corals/drawer/drawer-style.mjs';
 import { escHtml } from '../cssmd/cssmd.js';
+// The cells' markup is the shared section emitters' (tile-lab#52 phase 3): each is called with
+// `params.cell` (the bento layout attributes) and this renderer's own dialect — see `dialect` below.
+import { emitProse } from '../emit/prose.mjs';
+import { gridCell } from '../emit/grid.mjs';
+import { emitSocial } from '../emit/social.mjs';
+import { emitHero } from '../emit/hero.mjs';
+import { emitEmbed } from '../emit/embed.mjs';
+import { emitCarousel } from '../emit/carousel.mjs';
+import { cellFrame } from '../emit/cell.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -339,8 +356,9 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 // re-implemented. The first pass here re-wrote it as an opacity crossfade with scale(.98) and
 // silently destroyed the whole point: the ancestor pops each bubble OUT OF THE CHARACTER'S MOUTH
 // via `transform-origin:53% 76%` + `scale(0.001)→scale(1)`. Same failure mode the QR coral exists
-// to prevent (Python→Svelte→here, re-cut each hop). The keyframes/origin/scale below are the
-// ancestor's, parameterised only for N images and an author-set origin.
+// to prevent (Python→Svelte→here, re-cut each hop). The keyframes/origin/scale (now in
+// packages/emit/carousel.mjs, tile-lab#52) are the ancestor's, parameterised only for N images and
+// an author-set origin.
 //   origin=  the bubble's tail anchor, % of the frame (default 53% 76% = the ancestor's)
 //   narrow=  the same anchor for narrow screens (the ancestor retargets to 53% 33%)
 //
@@ -363,79 +381,28 @@ function renderSlides(p, size, ctx = {}, legacy = false) {
   // character's mouth. chodaict, 2026-07-30: 「你用到〔那張卡〕的版本了,它只需要很常見的 slide,
   // 附上左右按鈕即可」.
   //
-  // The pop animation below is preserved verbatim under its own name; that one stored card is
-  // migrated to `kind=bubbles` so nothing about it changes.
+  // The pop animation is preserved verbatim under its own name; that one stored card is migrated
+  // to `kind=bubbles` so nothing about it changes. Both carousels' markup (and their per-cell
+  // <style>) is packages/emit/carousel.mjs's `carouselCell` (tile-lab#52).
+  if (kind !== 'slider' && kind !== 'bubbles') {
+    // 🔴 Any other `kind` draws nothing — as it always did. The generic embed that once lived here
+    // spliced its body into the page UNESCAPED; HTML is `embed` now, and it goes in a sandbox (below).
+    return '';
+  }
+  const images = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+  const cell = { attrs: size };
   if (kind === 'slider') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="slides"></div>`;
-    // 🔴 CSS scroll-snap + anchor links. No JS: the prev/next are <a href="#…"> into the track, so
-    // they work on the first paint, survive a dead script, and the browser's own swipe/keyboard/
-    // scrollbar all come free. `scroll-behavior:smooth` is what makes an anchor jump read as a slide.
-    const uid = 'sl' + Math.abs([...String(p.images || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(36);
-    const n = imgs.length;
-    const slides = imgs.map((src, i) => {
-      const prev = `#${uid}-${(i - 1 + n) % n}`;
-      const next = `#${uid}-${(i + 1) % n}`;
-      return `<figure id="${uid}-${i}"><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-        + `<a class="st-slide-nav st-slide-prev" href="${prev}" aria-label="${esc(label(ctx, 'prev'))}">‹</a>`
-        + `<a class="st-slide-nav st-slide-next" href="${next}" aria-label="${esc(label(ctx, 'next'))}">›</a></figure>`;
-    }).join('');
-    const dots = imgs.map((_, i) => `<a class="st-slide-dot" href="#${uid}-${i}" aria-label="${esc(label(ctx, 'slide', i + 1))}"></a>`).join('');
-    const css = [
-      // 🔴 NO fixed aspect. chodaict read Incrediville's live page as `6x6(slide*5)` AND
-      // `3x6(slide*4)` — the same widget, two different heights, because the PICTURES differ. Pinning
-      // 2/1 here would be 「width decides shape」 all over again, four hours after I removed exactly
-      // that rule from features. The first slide's natural height sets the track; the rest are
-      // covered into it, so a set of squares is square and a set of banners is a banner.
-      `.st-slider{position:relative;width:100%;overflow:hidden;border-radius:inherit}`,
-      `.st-slider-track{display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none}`,
-      `.st-slider-track::-webkit-scrollbar{display:none}`,
-      `.st-slider figure{position:relative;flex:0 0 100%;margin:0;scroll-snap-align:center}`,
-      `.st-slider figure:first-child img{height:auto}`,
-      `.st-slider figure img{width:100%;height:100%;object-fit:cover;display:block}`,
-      `.st-slide-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;text-decoration:none;color:#fff;background:rgba(0,0,0,.42);backdrop-filter:blur(2px);opacity:.85;transition:opacity .2s,background .2s}`,
-      `.st-slide-nav:hover{opacity:1;background:rgba(0,0,0,.6)}`,
-      `.st-slide-prev{left:10px}.st-slide-next{right:10px}`,
-      `.st-slider-dots{position:absolute;left:0;right:0;bottom:9px;display:flex;gap:6px;justify-content:center}`,
-      `.st-slide-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.55);box-shadow:0 0 0 1px rgba(0,0,0,.18)}`,
-      // one image needs no controls, and controls on a single slide read as broken
-      n < 2 ? `.st-slide-nav,.st-slider-dots{display:none}` : '',
-    ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="slides"><style>${css}</style>`
-      + `<div class="st-slider"><div class="st-slider-track">${slides}</div>`
-      + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div></div>';
+    const labels = { prev: label(ctx, 'prev'), next: label(ctx, 'next'), slide: (n) => label(ctx, 'slide', n) };
+    return emitCarousel({}, { cell, kind: 'slider', images, seed: p.images, labels }, dialect(ctx));
   }
-  if (kind === 'bubbles') {
-    const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="slides"></div>`;
-    const n = imgs.length;
-    const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
-    const cycle = n * hold;
-    const origin = cssPos(p.origin, '53% 76%');
+  return emitCarousel({}, {
+    cell, kind: 'bubbles', images,
+    origin: cssPos(p.origin, '53% 76%'),
     // #1929: `narrow=` (the name) beats the legacy `origin-narrow=` by NAME, not by order on the line — deliberate.
-    const originNarrow = cssPos(p.narrow || p['origin-narrow'], '53% 33%');
-    // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
-    // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
-    const slot = 100 / n;
-    const inAt = 3;
-    const outAt = (slot - 3).toFixed(1);
-    const figures = imgs.map((src) => `<figure><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>`).join('');
-    const bgStyle = p.bg ? ` style="background-image:url('${esc(cssAttrUrl(ctx, resolveAsset(p.bg, ctx)))}')"` : '';
-    const css = [
-      `.st-carousel{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background-size:contain;background-position:center;background-repeat:no-repeat}`,
-      `.st-carousel figure{position:absolute;inset:0;margin:0;padding:0;display:flex;align-items:center;justify-content:center;opacity:0;transform-origin:${origin};animation:st-carousel-slide ${cycle}s infinite;animation-fill-mode:both}`,
-      `.st-carousel figure img{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0}`,
-      imgs.map((_, i) => `.st-carousel figure:nth-child(${i + 1}){animation-delay:${i * hold}s}`).join(''),
-      // 🔴 verbatim: scale(0.001) → scale(1) about the tail origin = "pops out of the mouth"
-      `@keyframes st-carousel-slide{0%,${slot.toFixed(1)}%,100%{opacity:0;transform:scale(0.001)}${inAt}%,${outAt}%{opacity:1;transform:scale(1)}}`,
-      `@media screen and (max-width:888px){.st-carousel figure{transform-origin:${originNarrow}}}`,
-      `@media(prefers-reduced-motion:reduce){.st-carousel figure{animation:none}.st-carousel figure:nth-child(1){opacity:1;transform:scale(1)}}`,
-    ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="slides"><style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div></div>`;
-  }
-  // 🔴 Any other `kind` draws nothing — as it always did. The generic embed that once lived here
-  // spliced its body into the page UNESCAPED; HTML is `embed` now, and it goes in a sandbox (below).
-  return '';
+    originNarrow: cssPos(p.narrow || p['origin-narrow'], '53% 33%'),
+    // `bg=` present but unresolvable still writes its (empty) url(), as it always did
+    bg: p.bg ? resolveAsset(p.bg, ctx) : null,
+  }, dialect(ctx));
 }
 
 // `embed` — the author's own HTML, scripts included (reef#2725, 2026-10-31).
@@ -456,20 +423,17 @@ function renderSlides(p, size, ctx = {}, legacy = false) {
 // then `"`, and `<` `>` as well so a raw `</iframe>` never appears in our markup at all. Its own
 // function, not `esc`: `esc` is defined for text and attributes in general, and this is the one
 // value whose escaping is a security property — it should not change because `esc` did.
+// (The escape, the sandbox and the cell's box live in packages/emit/embed.mjs, the Card branch of
+// emitEmbed — beside the Site's `embed`, the same coral. This renderer builds the DOCUMENT: the
+// card's theme and the author's HTML, after the byte budget.)
 //
 // Size: the cell's own box, a square of its width (`w=6` is the card's width; there is no `h` any
 // more, and nothing in the frame can tell us its height — we do not open a channel to ask). Theme:
 // the card's `--cp-*` in the document's `:root`, so `var(--cp-ink)` inside means what it means on the
 // card.
-const srcdocAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // the accent family the page's #cp-accent block declares, for the same accent (card.css's defaults
 // when the card names none) — the tokens below are color-mix()es of `--cp-accent`, so it must be here
 const embedAccentCss = (a) => `--cp-accent:${a};--cp-accent-bg:color-mix(in srgb,${a} 12%,transparent);--cp-accent-border:color-mix(in srgb,${a} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${a} 35%,transparent)`;
-const EMBED_CELL_CSS = '.st-card .st-embed-html{position:relative;aspect-ratio:1;min-height:0}'
-  + '.st-embed-html iframe{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:transparent}'
-  // the editor's index attribute is only ever on a cell the EDITOR rendered: there a click selects
-  // the tile, so the frame must not swallow it. Same bytes on the live card, where it matches nothing.
-  + '.st-embed-html[data-cell] iframe{pointer-events:none}';
 function renderEmbedHtml(body, size, ctx = {}) {
   const html = String(body || '');
   if (!html.trim()) return '';
@@ -482,8 +446,8 @@ function renderEmbedHtml(body, size, ctx = {}) {
   const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
   const theme = `:root{${embedAccentCss(accentC || DEFAULT_ACCENT)}}${themeRootCss(mode, accentC)}body{margin:0;color:var(--cp-ink)}`;
   const doc = `<!doctype html><meta charset="utf-8"><style id="cp-theme">${theme}</style>${html}`;
-  return `<div class="st-cell st-embed st-embed-html" ${size} data-coral-type="embed"><style>${EMBED_CELL_CSS}</style>`
-    + `<iframe sandbox="allow-scripts" srcdoc="${srcdocAttr(doc)}" title="${esc(label(ctx, 'embed'))}" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
+  // the frame — the sandbox, the srcdoc escape, the square box — is the shared emitter's Card branch
+  return emitEmbed({}, { cell: { attrs: size }, srcdoc: doc, title: label(ctx, 'embed') }, dialect(ctx));
 }
 
 // How a cell's target becomes anchor attributes. A `#id` target opens a DRAWER (an overlay on this
@@ -500,6 +464,17 @@ function anchorFor(url, ctx) {
   }
   return `href="${esc(attrUrl(ctx, url))}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
+
+// The Card's dialect for the shared emitters (packages/emit/cell.mjs): the emitters share the
+// MARKUP; markdown, escaping and the destination registry stay this renderer's own (tile-lab#52
+// ruling 2026-10-31), so a Card's bytes are what they were before the markup moved.
+const dialect = (ctx) => ({
+  inline: (s) => mdInline(s, ctx),
+  block: (s) => mdBlock(s, ctx),
+  esc,
+  url: (raw) => esc(attrUrl(ctx, raw)),
+  cssUrl: (raw) => esc(cssAttrUrl(ctx, raw)),
+});
 
 function renderCell(cell, place, ctx) {
   const p = cell.params || {};
@@ -521,7 +496,7 @@ function renderCell(cell, place, ctx) {
   const b = (cell.body || '').trim();
   switch (cell.type) {
     case 'profile': {
-      const chips = (p.chips ? String(p.chips).split(/\s*,\s*/) : []).map((c) => `<span class="st-chip">${esc(c)}</span>`).join('');
+      const chips = p.chips ? String(p.chips).split(/\s*,\s*/) : [];
       // 🔴 May be ''. A profile with no `avatar=` used to still emit <img class="cp-icon" src="">,
       // and an empty src is not "no image" — per HTML it resolves to the CURRENT DOCUMENT URL, so
       // the browser fetches the whole page as an image and fails. It also carried role="button"
@@ -534,8 +509,9 @@ function renderCell(cell, place, ctx) {
       const avatar = resolveAsset(p.avatar, ctx);
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
+      // The mount's markup is packages/emit/hero.mjs's `heroCell`, byte-identical (tile-lab#52).
       const qrUrl = ctx.cardUrl || '';
-      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(attrUrl(ctx, avatar))}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
+      return emitHero({ body: b }, { cell: { attrs: size }, name: ctx.name, avatar, qrUrl, qrLabel: label(ctx, 'qr'), chips }, dialect(ctx));
     }
     case 'feature': {
       // 🩸 A PICTURE DOES NOT HAVE TO GO ANYWHERE. `anchorFor(p.href)` was called unconditionally,
@@ -547,8 +523,7 @@ function renderCell(cell, place, ctx) {
       const hasHref = !!String(p.href == null ? '' : p.href).trim();
       const fa = hasHref ? anchorFor(p.href, ctx) : '';
       if (hasHref && !fa) return '';                 // a drawer target inside a drawer — refused, as before
-      const linkOpen = hasHref ? `<a class="st-gal-link" ${fa}>` : '<div class="st-gal-link">';
-      const linkClose = hasHref ? '</a>' : '</div>';
+      const cell = { attrs: size };
       // 🔴 An empty `img=` is not "a small picture", it is NO picture — and `<img src="">` is the
       // same current-document trap as the href above, drawn as a broken-image glyph on a stranger's
       // first card. Live: nothing. Editing: a tappable outline that says what is missing.
@@ -558,7 +533,7 @@ function renderCell(cell, place, ctx) {
         // 🔴 SAME GEOMETRY AS A FILLED LABELLED PICTURE: `.st-gal-link` → picture slot → label. The slot
         // is an empty `<span class="st-gal-img">` (an `<img>` with no src is the current-document
         // trap above), so the words sit under the frame the picture will fill, not floating in the cell.
-        return `<div class="st-cell st-gal-cell st-gal-cell-bare st-gal-labelled st-cell-unset" ${size} data-coral-type="feature"><div class="st-gal-link"><span class="st-gal-img" aria-hidden="true"></span><span class="st-gal-label">${esc(label(ctx, 'imgUnset'))}</span></div></div>`;
+        return gridCell({ cell, unset: true, label: label(ctx, 'imgUnset') }, true, dialect(ctx));
       }
       // 🔴 An image tile with nothing to say stays an IMAGE. The scrim + eyebrow + title + CTA arrow
       // are chrome for a tile that carries copy — painted over a creator's artwork they darken the
@@ -583,9 +558,7 @@ function renderCell(cell, place, ctx) {
         // text, including the one written specifically to prove the switch was off.
         const on = String(p.label == null ? '' : p.label).trim().toLowerCase();
         const labelled = !!p.alt && on !== '' && on !== 'off' && on !== 'false' && on !== 'no';
-        const cls = 'st-cell st-gal-cell st-gal-cell-bare' + (labelled ? ' st-gal-labelled' : '');
-        const capt = labelled ? `<span class="st-gal-label">${esc(p.alt)}</span>` : '';
-        return `<div class="${cls}" ${size} data-coral-type="feature">${linkOpen}<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="${esc(p.alt || '')}" loading="lazy" referrerpolicy="no-referrer">${capt}${linkClose}</div>`;
+        return gridCell({ cell, anchor: fa, img: featureImg, alt: p.alt, labelled }, true, dialect(ctx));
       }
       // 🩸 A FEATURE WITH COPY BUT NO PICTURE. Everything below — the scrim, the near-white eyebrow,
       // the white title, their shadows — is chrome designed to sit ON artwork. With no `img=`, the
@@ -596,16 +569,12 @@ function renderCell(cell, place, ctx) {
       // So the picture-ness becomes a class instead of an assumption. No img ⇒ no <img>, no scrim,
       // and `st-gal-cell-flat`, which the stylesheet themes against the ground like any other text.
       // (Not `st-gal-cell-bare` — that one already means "picture only, no copy", the opposite case.)
-      const hasImg = !!featureImg;
-      return `<div class="st-cell st-gal-cell${hasImg ? '' : ' st-gal-cell-flat'}" ${size} data-coral-type="feature">${linkOpen}${hasImg ? `<img class="st-gal-img" src="${esc(attrUrl(ctx, featureImg))}" alt="" loading="lazy"><div class="st-gal-scrim"></div>` : ''}<div class="st-gal-body">${b ? `<span class="st-gal-eyebrow">${esc(b)}</span>` : ''}${p.title ? `<span class="st-gal-title">${esc(p.title)}</span>` : ''}${(() => {
-        // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
-        // every feature title — the arrow had been the span's only content, and the container
-        // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
-        // inside and the box it lived in is still styled, still painted, still meaningless.
-        const arrow = arrowOf(ctx, 15, 'st-gal-arrow', '');
-        if (!p.cta && !arrow) return '';
-        return `<span class="st-gal-cta">${esc(p.cta)}${arrow}</span>`;
-      })()}</div>${linkClose}</div>`;
+      // The markup for all three shapes is packages/emit/grid.mjs's `cardCell` (tile-lab#52).
+      // 🔴 No text and no arrow ⇒ NO PILL. Turning arrows off left an empty grey capsule under
+      // every feature title — the arrow had been the span's only content, and the container
+      // outlived it. Exactly the hollow-social-circle shape from earlier today: remove the thing
+      // inside and the box it lived in is still styled, still painted, still meaningless.
+      return gridCell({ cell, anchor: fa, img: featureImg, eyebrow: b, title: p.title, cta: p.cta, arrow: arrowOf(ctx, 15, 'st-gal-arrow', '') }, true, dialect(ctx));
     }
     case 'link': {
       const { label: linkText, url } = linkOf(b);
@@ -618,15 +587,15 @@ function renderCell(cell, place, ctx) {
         // 🔴 SAME GEOMETRY AS THE FILLED TILE (ruler: tile-geometry.test.mjs). This used to be a bare
         // `.st-cell-body` straight inside the cell — no `.st-cell-link`, no `.st-cell-head` — so the
         // empty link sat rounded with its title at the top while the filled one next to it sat square
-        // with its title at the bottom. Same skeleton now, with the `<a>` swapped for an inert `<div>`
-        // (nothing to navigate to) and the icon omitted (there is no address to derive one from).
-        return `<div class="st-cell st-cell-tile st-cell-unset" ${size} data-coral-type="linktile"><div class="st-cell-link"><div class="st-cell-head">${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText || unset)}</div><div class="st-cell-sub">${esc(unset)}</div></div></div></div>`;
+        // with its title at the bottom. Same skeleton now (packages/emit/grid.mjs), with the `<a>`
+        // swapped for an inert `<div>` (nothing to navigate to) and the icon omitted (there is no
+        // address to derive one from).
+        return gridCell({ cell: { attrs: size }, unset: true, arrow: arrowOf(ctx, 17), title: linkText || unset, sub: unset }, false, dialect(ctx));
       }
       const a = anchorFor(url, ctx);
       if (!a) return '';
       const icon = linkIcon(p, url, ctx);
-      const sub = p.sub ? `<div class="st-cell-sub">${esc(p.sub)}</div>` : '';
-      return `<div class="st-cell st-cell-tile" ${size} data-coral-type="linktile"><a class="st-cell-link" ${a}><div class="st-cell-head">${icon}${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText)}</div>${sub}</div></a></div>`;
+      return gridCell({ cell: { attrs: size }, anchor: a, icon, arrow: arrowOf(ctx, 17), title: linkText, sub: p.sub }, false, dialect(ctx));
     }
     case 'slides':
       return renderSlides(p, size, ctx, cell.spelled === 'embed');
@@ -634,7 +603,7 @@ function renderCell(cell, place, ctx) {
       // the HTML is the cell's body as written — not `b`, which is trimmed for prose
       return renderEmbedHtml(cell.body, size, ctx);
     case 'text':
-      return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b, ctx)}</div>`;
+      return emitProse({ body: b }, { cell: { attrs: size } }, dialect(ctx));
     case 'video': {
       // Click-to-load YouTube. The platforms we take refugees from drop a live iframe on page load,
       // which means YouTube is watching every visitor before anyone presses play, and the player's
@@ -666,10 +635,9 @@ function renderCell(cell, place, ctx) {
       // exists to prevent, reintroduced through an <img>. The Worker proxies it (see /_yt/ there).
       const poster = p.poster || (vid ? posterPath(vid) : '');
       const label = b || p.title || (hit && hit.title) || 'YouTube';
-      const attrs = vid ? `data-yt="${esc(vid)}"`
-        : chanIsId ? `data-yt-channel="${esc(chanId)}"`
-        : `data-yt-handle="${esc(chan)}"`;
-      return `<div class="st-cell st-embed-video" ${size} data-coral-type="video"><button type="button" class="st-embed-video-btn${poster ? '' : ' st-embed-video-noposter'}" ${attrs} aria-label="${esc(label)}">${poster ? `<img class="st-embed-video-poster" src="${esc(attrUrl(ctx, poster))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span class="st-embed-video-play" aria-hidden="true"><svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7a8.6 8.6 0 0 0-6-6C55.3 0 34 0 34 0S12.7 0 7.5 1.6a8.6 8.6 0 0 0-6 6.1A90 90 0 0 0 0 24a90 90 0 0 0 1.5 16.3 8.6 8.6 0 0 0 6 6C12.7 48 34 48 34 48s21.3 0 26.5-1.6a8.6 8.6 0 0 0 6-6.1A90 90 0 0 0 68 24a90 90 0 0 0-1.5-16.3z" fill="#f00"/><path d="M27 34l18-10-18-10z" fill="#fff"/></svg></span>${label ? `<span class="st-embed-video-label">${esc(label)}</span>` : ''}</button></div>`;
+      const source = vid ? ['data-yt', vid] : chanIsId ? ['data-yt-channel', chanId] : ['data-yt-handle', chan];
+      // the poster + play button markup is packages/emit/embed.mjs's Card branch (tile-lab#52)
+      return emitEmbed({}, { cell: { attrs: size }, video: { source, poster, label } }, dialect(ctx));
     }
     case 'social': {
       // The compact icon row every link-in-bio has: 40px marks, no labels, sitting with the profile
@@ -694,7 +662,7 @@ function renderCell(cell, place, ctx) {
       const bare = (h) => String(h || '').replace(/^www\./, '');
       const selfHost = bare(hostOf(ctx.cardUrl || ''));
       const isSelf = (u) => selfHost && !u.startsWith('mailto:') && bare(hostOf(u)) === selfHost;
-      const marks = items.map((x) => {
+      const buttons = items.map((x) => {
         const { label, url } = x;
         const over = overrideMark(x, hasIcon(ctx));
         // 🔴 the author's explicit override wins over EVERY default, the envelope and the house
@@ -708,12 +676,14 @@ function renderCell(cell, place, ctx) {
         // the drawn glyph rides along ONLY when the icon is a fetched favicon — our own SVGs (mail,
         // the self-site house, a drawn brand) cannot fail, so giving them a fallback would be dead markup.
         const bare = /^<img/.test(icon) ? SOCIAL_FALLBACK : '';
-        return `<a class="st-social-btn" href="${esc(attrUrl(ctx, url))}"${url.startsWith('mailto:') ? '' : ` target="_blank" rel="${relFor(url, ctx)}"`} aria-label="${esc(label)}" title="${esc(label)}">${icon}${bare}</a>`;
-      }).join('');
-      return `<div class="st-cell st-social" ${size} data-coral-type="social">${marks}</div>`;
+        // the href is registered where it is written — packages/emit/social.mjs, through dialect().url
+        return { href: url, label, icon: icon + bare, rel: url.startsWith('mailto:') ? null : relFor(url, ctx) };
+      });
+      return emitSocial({}, { cell: { attrs: size }, buttons }, dialect(ctx));
     }
     default:
-      return `<div class="st-cell" ${size} data-coral-type="${esc(cell.type)}">${mdInline(b, ctx)}</div>`;
+      // a type this renderer does not know: its body as inline text, in the bare cell frame
+      return cellFrame({ attrs: size }, '', esc(cell.type), mdInline(b, ctx));
   }
 }
 
@@ -834,10 +804,13 @@ const NATIVE_CSS = [
   // label sat on the picture. Not a regression — a thing the previous measure structurally could
   // not see, because it sampled the background with the text lifted off.
   `.st-embed-video-label{background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.82) 55%,rgba(0,0,0,.6) 85%,rgba(0,0,0,.35));text-shadow:0 0 4px rgba(0,0,0,.95),0 1px 6px rgba(0,0,0,.9),0 0 14px rgba(0,0,0,.8)}`,
-  // card.css carries `.st-footer a{color:var(--cp-accent)!important}` — the raw brand colour, which
-  // measured 2.17:1 on a light ground. Same specificity, later in the document, and the !important
-  // has to come along because the rule being corrected has one.
-  `.st-footer a{color:var(--cp-accent-bright,#0a8c8e)!important}`,
+  // 🩸 A footer-link colour override lived here: `.st-footer a{color:var(--cp-accent-bright)!important}`,
+  // correcting card.css's `.st-footer a{color:var(--cp-accent)!important}` (2.17:1 on a light ground),
+  // with BACKDROP_CSS stacking a third !important on top and the accent block a credit class. Three
+  // layers to paint a link that should not be painted at all (tile-lab#55 補 5: footer links take
+  // the footer's own colour and weight, no underline, accent on hover). The fix is at the source —
+  // card.css's carrier rule says `color:inherit;font-weight:inherit` and its `:hover` the accent —
+  // and the layers that fought over the colour are gone rather than outvoted by a fourth.
   // a bare image tile: the artwork IS the tile. No scrim, no CTA, no card chrome behind it.
   // 🔴 `.st-card .st-cell.st-gal-cell-bare`, not `.st-gal-cell-bare`. card.css declares
   // `.st-card .st-cell{border:1px solid var(--cp-line)}` at (0,2,0) and this was written at (0,1,0),
@@ -1149,7 +1122,9 @@ const NATIVE_CSS = [
   `.st-embed-video iframe{width:100%;height:100%;border:0;display:block}`,
   // social mark row
   `.st-social{display:flex;flex-wrap:wrap;gap:var(--s-2,.5rem);align-items:center;justify-content:center;background:none;border:none;box-shadow:none;padding:0;min-height:0}`,
-  `.st-social-btn{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--cp-accent-border,rgba(10,140,142,.28));background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 8%,transparent);color:var(--cp-accent,#0a8c8e);transition:background .2s,transform .2s}`,
+  // `text-decoration:none`: the button is an <a>, and with no declaration of its own the UA's link
+  // underline leaked under any bare-text fallback glyph (tile-lab#55 補 3).
+  `.st-social-btn{text-decoration:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--cp-accent-border,rgba(10,140,142,.28));background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 8%,transparent);color:var(--cp-accent,#0a8c8e);transition:background .2s,transform .2s}`,
   `.st-social-btn:hover{background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 20%,transparent);transform:translateY(-2px)}`,
   `.st-social-btn .st-cell-icon-img{width:20px;height:20px;background:none}`,
   // a DRAWN brand mark (ICONS) carries no width/height of its own — unsized, an inline svg lays out
@@ -1251,7 +1226,7 @@ const FLOATING_INK = [
   // backdrop the footer is on artwork, and it measured 2.86 there against a 4.5 floor. Same mistake
   // the tagline had with `--cp-muted`: a colour derived for one surface, used on another.
   `.st-footer,.st-footer>div{color:var(--cp-ink)!important;${HALO}}`,
-  `.st-footer a{color:var(--cp-accent-bright)!important;${HALO}}`,
+  // no `.st-footer a` line: the links inherit both the ink and the halo from the footer above
 ].join('');
 
 // 🔴 The header joins the floating-text set (2026-07-29), and it had to. Once the frame table was
@@ -1275,7 +1250,14 @@ const FLOATING_INK = [
 // darker than a mid-lightness colour, so NO scrim opacity below 100 makes them safe. Giving them a
 // local shadow is what iOS does for home-screen labels under an arbitrary wallpaper, and it leaves
 // the global scrim answering only for body ink.
-const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
+//
+// 🔴 `.st-backdrop` is sized to the LARGE viewport, not `inset:0` (tile-lab#55 補 4, found on an
+// iPhone). On iOS the toolbars collapse while you scroll, the visual viewport's height changes, and a
+// fixed `inset:0` box follows it — so `background-size:cover` re-fits the artwork on every change and
+// the backdrop visibly jumps (spread mode too, so it is the renderer's, not the Deck's). `100lvh` is
+// the height with the toolbars retracted: the box never resizes, the crop never changes, and with
+// the toolbars out the bottom simply sits behind them. `100vh` first for engines without `lvh`.
+const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0 0 auto;height:100vh;height:100lvh;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
 html{scrollbar-gutter:auto}
 .st-wrap,.st-footer{position:relative;z-index:1}
 .st-backdrop::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}%,transparent),color-mix(in srgb,var(--cp-ground,#0a1628) ${Math.min(96, dim + 18)}%,transparent))}
@@ -1479,12 +1461,12 @@ export function renderPage(model, ctx = {}) {
   const owner = `<span>${esc(ctx.name)} &copy; ${since}${year}</span>`;
   const ref = ctx.handle ? `?ref=${encodeURIComponent(ctx.handle)}` : '';
   const powered = ctx.poweredBy
-    ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}" class="st-footer-credit">feelreef</a>`
+    ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}">feelreef</a>`
     : '';
   const footer = `<footer class="st-footer"><div>${owner}${powered}</div></footer>`;
   // accent: ONE author-set hex derives the whole --cp-accent-* family (the same 12/25/35/72% ramp
   // the Python renderer derives per guild), so a card is themed by a single frontmatter field.
-  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
+  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}</style>` : '';
   // 🔴 The theme block comes LAST in the head, and that placement is the whole mechanism: card.css
   // declares the --cp-* ramp in :root, so an override at equal specificity has to arrive later to
   // win. It also has to sit after the accent block, which still carries --cp-accent itself.
