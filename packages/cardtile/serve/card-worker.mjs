@@ -7,6 +7,7 @@
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
 //   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
+//   reef.cards/report            → the report door, reef.cards only (reef#2758, card-report.mjs)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
 //
 // The render path (resolveHandle → renderCardHTML) is pure and node-testable; the fetch handler is
@@ -117,6 +118,7 @@ import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FIL
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
 import { validHostOrigin } from '../w2/host-bridge.mjs';
+import { handleReport, REPORT_PATH } from './card-report.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -675,6 +677,32 @@ window.__CARDTILE_W2_OPTS__ = ${opts};
 </body></html>`;
 }
 
+/**
+ * reportedHandle: (a Card address, env) → the handle it names, or null. For the report's inbox line
+ * (reef#2758: 「自動附 handle」), worked out here and never taken from the form.
+ *
+ *   reef.cards/<h>, card.feelreef.com/<h>   by path, exactly as resolveHandle routes them (bare = root)
+ *   feelreef.com/<h>                        the old apex address, when it is handle-shaped and not a site page
+ *   anything else                           a Card on its own domain: its live binding, read the way the
+ *                                           router reads it (a binding from an ended lifetime is none)
+ *
+ * Best effort: an unknown address still files the report, with the handle left for a person to find.
+ */
+async function reportedHandle(u, env) {
+  const host = u.hostname.toLowerCase();
+  if (host === APEX_HOST) {
+    return APEX_HANDLE_PATH.test(u.pathname) && !isApexSitePath(u.pathname)
+      ? u.pathname.replace(/^\/|\/$/g, '').toLowerCase() : null;
+  }
+  if (host === CARDS_HOST || host === CANON_HOST) return resolveHandle(host, u.pathname)?.handle ?? null;
+  const store = env && env.CARDS;
+  if (!store) return null;
+  const pointer = await store.get(VANITY_KEY(host));
+  if (pointer == null) return null;
+  const gen = await generationOf(store, pointer);
+  return (await isBound(store, pointer, gen, host)) ? pointer : null;
+}
+
 const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -727,6 +755,13 @@ const router = {
     }
     const moved = movedTo(reqHost, url, request.method, env);
     if (moved) return new Response(null, { status: 301, headers: { Location: moved, 'Cache-Control': MOVED_CACHE } });
+
+    // reef#2758 — the report door, on reef.cards only (and only with the switch on: the host is dark
+    // otherwise, above). On the old card host `/report` 301s here like every other path (GET), and a
+    // POST there falls through to handle routing — `report` is a reserved handle, so it is no card.
+    if (reqHost === CARDS_HOST && (url.pathname === REPORT_PATH || url.pathname === `${REPORT_PATH}/`)) {
+      return handleReport(request, env, { handleOf: (u) => reportedHandle(u, env) });
+    }
 
     // reef#2044 ③ — security.txt, on the canonical host only. A constant: no store read, no handle.
     // `.well-known` can never be a handle (the grammar starts a handle with a letter or digit), so
