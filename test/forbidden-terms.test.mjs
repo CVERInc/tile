@@ -109,3 +109,85 @@ test('the committed hash list is well-formed and non-empty', () => {
   const r = scan({ root: repo({ 'a.md': 'clean\n' }) });
   assert.ok(r.hashes >= 3, 'the real handle list is suspiciously short');
 });
+
+// ── review of #230 ───────────────────────────────────────────────────────────────────────────────
+
+const cli = (root, hashes, env) => spawnSync(process.execPath, [GATE, '--root', root, '--hashes', hashes], { encoding: 'utf8', env: { ...process.env, ...env } });
+
+test('P2: a forbidden term in a FILE NAME is never printed — the path is withheld, every tier, content hits too', () => {
+  const { hashes, priv } = lists();
+  const repoLinkDir = ['CVERInc', 'reef'].join('/');
+  const root = repo({
+    ...filler(),
+    [`docs/${PLANTED_PRIVATE}.md`]: `clean\nby ${PLANTED_HANDLE}\n`,
+    [`notes/${PLANTED_HANDLE}-log.md`]: 'clean\n',
+    [`${repoLinkDir}/notes.md`]: 'clean\n',
+  });
+  const res = cli(root, hashes, { CVER_FORBIDDEN_TERMS: priv });
+  const out = res.stdout + res.stderr;
+  assert.equal(res.status, 1, out);
+  for (const secret of [PLANTED_PRIVATE, PLANTED_HANDLE, repoLinkDir]) assert.ok(!out.includes(secret), `the refusal printed ${secret}`);
+  assert.match(out, /path withheld/);
+  assert.match(out, /\(in the path\) private list entry #1/);
+  assert.match(out, /\(in the path\) person handle #2/);
+  assert.match(out, /\(in the path\) link to a private repo/);
+  assert.match(out, /: person handle #2$/m, 'the content hit inside the withheld file is still reported');
+});
+
+test('P3: the private-repo pattern applies to paths, with clean controls', () => {
+  const { hashes, priv } = lists();
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  const r = scan({ root: repo({ [`${['CVERInc', 'reef'].join('/')}/notes.md`]: 'clean\n', 'reef/notes.md': 'clean\n', 'docs/reef-notes.md': 'clean\n' }), hashesFile: hashes });
+  assert.equal(r.hits.length, 1, r.hits.join('\n'));
+  assert.match(r.hits[0], /\(in the path\) link to a private repo/);
+});
+
+// The push-time content guard reads the same list as ONE extended regex: comments stripped, entries
+// joined with `|`, `grep -niE`. That pipeline, run here verbatim, is the oracle.
+function contentGuardOracle(listFile, line) {
+  const pat = execFileSync('bash', ['-c', `grep -vE '^\\s*(#|$)' "$1" | paste -sd'|' -`, '_', listFile], { encoding: 'utf8' }).trim();
+  return spawnSync('grep', ['-niE', pat], { input: `+${line}\n` }).status === 0;
+}
+
+test('P2: the private list keeps grep -E semantics — POSIX classes agree with the push guard on every sample', () => {
+  const { hashes } = lists();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forbidden-ere-'));
+  made.push(dir);
+  const priv = path.join(dir, 'private');
+  fs.writeFileSync(priv, `# synthetic, ERE with POSIX classes\n(^|[^[:alnum:]_])${PLANTED_PRIVATE}([^[:alnum:]_]|$)\n[[:digit:]]{3}-zzsynthcode\n`);
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  const samples = [
+    `example: ${PLANTED_PRIVATE}.`, `${PLANTED_PRIVATE.toUpperCase()}`, `x${PLANTED_PRIVATE}`, `${PLANTED_PRIVATE}_y`,
+    'ref 123-zzsynthcode', 'ref 12-zzsynthcode', 'ref abc-zzsynthcode', 'nothing here',
+  ];
+  let agreedRed = 0;
+  for (const s of samples) {
+    const expected = contentGuardOracle(priv, s);
+    const got = scan({ root: repo({ 'a.md': `${s}\n` }), hashesFile: hashes }).hits.length > 0;
+    assert.equal(got, expected, `gate and content guard disagree on ${JSON.stringify(s)}: gate ${got}, guard ${expected}`);
+    if (expected) agreedRed++;
+  }
+  assert.ok(agreedRed >= 3 && agreedRed < samples.length, 'the oracle samples must include both hits and misses');
+});
+
+test('P2: a private entry grep -E cannot compile is refused, not skipped', () => {
+  const { hashes } = lists();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forbidden-bad-'));
+  made.push(dir);
+  const priv = path.join(dir, 'private');
+  fs.writeFileSync(priv, 'ok-term\n[[:nosuchclass:]]x\n');
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  assert.throws(() => scan({ root: repo({ 'a.md': 'clean\n' }), hashesFile: hashes }), /private list entry #2/);
+});
+
+test('P3: an existing but EMPTY private list counts as missing — fatal when required', () => {
+  const { hashes } = lists();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forbidden-empty-'));
+  made.push(dir);
+  const priv = path.join(dir, 'private');
+  fs.writeFileSync(priv, '# comments only\n\n');
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  const root = repo({ 'a.md': 'clean\n' });
+  assert.ok(scan({ root, hashesFile: hashes, required: true }).notes.some((n) => n.fatal), 'an empty required list passed');
+  assert.ok(scan({ root, hashesFile: hashes, required: false }).notes.some((n) => !n.fatal && /NOT checked/.test(n.text)));
+});
