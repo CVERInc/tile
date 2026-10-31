@@ -31,6 +31,11 @@ import {
   TOKENS, TREATMENTS, TYPE_SCALE_RANGE, SURFACE_HEX_REASON, THEME_KEYS, DARK_KEYS, surfaceOf, darkStemOf,
 } from './theme-schema.js';
 import { truncateCssText } from './css-text.js';
+// The RENDERER's own judges, imported rather than restated: whether it will link a URL, and whether
+// it can read an announcement deadline. A copy here would be a second rule that drifts from the one
+// that actually decides what a visitor sees.
+import { safeHref } from '../../sitetile/site-core.js';
+import { announceModel } from '../../sitetile/astro/src/lib/announce.mjs';
 
 const USAGE = `usage: node packages/build/theme/cli.mjs <_theme.md> [theme.css] [--allow-dropped]
 
@@ -90,6 +95,9 @@ fm[1].split(/\r?\n/).forEach((text, i) => {
   if (at < 0) { unread.push({ line, text, reason: 'no `key: value` colon — the parser skips this line' }); return; }
   const key = text.slice(0, at).trim();
   if (!key) { unread.push({ line, text, reason: 'nothing before the colon — there is no key to set' }); return; }
+  // a well-formed line whose key the parser did not keep (`__proto__:` goes to the object's
+  // prototype, not into it) is as lost as a line with no colon
+  if (!Object.prototype.hasOwnProperty.call(meta, key)) { unread.push({ line, text, reason: 'the parser does not keep this key — it never reaches the compiler' }); return; }
   if (!firstLines.has(key)) firstLines.set(key, []);
   firstLines.get(key).push({ line, value: text.slice(at + 1).trim() });
 });
@@ -104,6 +112,7 @@ for (const k of Object.keys(meta)) {
   if (!THEME_KEYS.has(k) && !DARK_KEYS.has(k) && !surfaceOf(k)) drop(k, 'not a key this vocabulary has (a typo?) — see TOKENS, TREATMENTS and META_KEYS in theme-schema.js');
 }
 for (const d of sanitizeThemeMeta(meta).dropped) drop(d.key, `${d.kind}: ${d.problem}`);
+for (const k of Object.keys(meta)) if (k !== 'name' && !set(k)) drop(k, 'empty value — nothing to set');
 const stems = new Set(TOKENS.map((t) => t.stem));
 for (const k of Object.keys(meta)) {
   if (seen.has(k) || !set(k)) continue;
@@ -116,22 +125,33 @@ for (const k of Object.keys(meta)) {
   else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
 }
 // The announcement's link and deadline reach _site.md only beside its text (announce-off hides
-// all three on purpose, which is a choice and not a drop).
-if (String(meta['announce-off'] ?? '').trim() !== 'true') {
+// all three on purpose, which is a choice and not a drop). Only the exact word `true` hides it.
+const off = String(meta['announce-off'] ?? '').trim();
+if (set('announce-off') && !seen.has('announce-off') && off !== 'true' && off !== 'false') drop('announce-off', 'only `true` hides the announcement (and `false` shows it) — this value does neither');
+if (off !== 'true') {
   for (const k of ['announce-href', 'announce-until']) {
     if (set(k) && !seen.has(k) && siteMeta[k] !== String(meta[k]).trim()) drop(k, 'an announcement link or deadline with no `announce:` text shows nothing');
   }
+  // …and once they do reach it, the renderer still has to accept them. A deadline it cannot read
+  // hides the whole announcement (announceModel: "a deadline we cannot read is not no deadline");
+  // asked with a clock at the start of time, so only unreadability — never lateness — says none.
+  if (siteMeta['announce-until'] && announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+    drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
+  }
+  if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
 }
+if (siteMeta.fonts && !safeHref(siteMeta.fonts)) drop('fonts', 'the renderer refuses this URL, so the stylesheet is never linked — use an https:// stylesheet address');
 // type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
 // the compiler what it WOULD derive with the hand-set steps taken away, so a ratio that derives
 // nothing is caught even when gd-h1/h2/h3 are all set by hand and hide it.
 if (set('type-scale') && !seen.has('type-scale')) {
   const probe = { ...sanitizeThemeMeta(meta).meta };
   for (const h of ['gd-h1', 'gd-h2', 'gd-h3']) delete probe[h];
-  if (!/--gd-h3: /.test(compileThemeCss(probe))) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
+  // only the LIGHT root block: a `gd-h3@dark` override lands in the dark block and is not derived
+  const light = /^html:root \{\n([\s\S]*?)^\}/m.exec(compileThemeCss(probe))?.[1] ?? '';
+  if (!/--gd-h3: /.test(light)) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
 }
 
-for (const i of issues) if (!/^unknown theme key/.test(i.problem)) console.error(`⚠ ${src}: ${i.key} — ${i.problem}`);
 const mark = allowDropped ? '⚠' : '✗';
 for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
 for (const [key, at] of dupes) {

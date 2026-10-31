@@ -237,3 +237,40 @@ test('comments and blank lines in the frontmatter are not "unreadable"', (t) => 
   const r = run(t, '---\n# a comment\nname: s\n\n   \ngd-bg: #fff\n---\n');
   assert.equal(r.status, 0, r.stderr);
 });
+
+// ── round 4: a value the RENDERER would not use is a drop, judged by the renderer's own code ─────
+
+test('🔴 an unusable type-scale is a drop even when a DARK heading token exists (only derived light steps count)', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\ngd-font-size: 18px\ngd-h3@dark: 24px\ntype-scale: 9\n---\n', ['type-scale: "9" dropped']);
+  // control: a usable ratio beside a dark heading override is fine
+  assert.equal(run(t, '---\nname: sample\ngd-font-size: 18px\ngd-h3@dark: 24px\ntype-scale: 1.25\n---\n').status, 0);
+});
+
+test('🔴 an announcement deadline the renderer cannot read is a drop (the renderer would show nothing)', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\nannounce: Sale now\nannounce-until: tomorrowish\n---\n', ['announce-until: "tomorrowish" dropped']);
+  // control: a readable deadline with an offset — past or future — is the owner's choice
+  for (const until of ['2026-12-01T23:59:00+08:00', '2001-01-01T00:00:00Z']) {
+    const r = run(t, `---\nname: sample\nannounce: Sale now\nannounce-until: ${until}\n---\n`);
+    assert.equal(r.status, 0, `${until}: ${r.stderr}`);
+  }
+});
+
+test('🔴 an announce-off value other than true/false is a drop (only `true` hides it)', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\nannounce: Sale now\nannounce-off: yes\n---\n', ['announce-off: "yes" dropped']);
+  for (const v of ['true', 'false']) assert.equal(run(t, `---\nname: sample\nannounce: Sale now\nannounce-off: ${v}\n---\n`).status, 0, v);
+});
+
+test('🔴 an empty value is a drop, not a warning beside a success', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\ngd-bg:\n---\n', ['gd-bg: "" dropped']);
+});
+
+test('🔴 a source line the parser silently loses (`__proto__:`) is a drop', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\n__proto__: typo\n---\n', ['line 3', '"__proto__: typo"']);
+});
+
+test('🔴 a fonts URL or announcement link the renderer rejects is a drop (it would never load / link)', (t) => {
+  assertRefusedNaming(t, '---\nname: sample\nfonts: javascript:alert(1)\n---\n', ['fonts: "javascript:alert(1)" dropped']);
+  assertRefusedNaming(t, '---\nname: sample\nannounce: Hi\nannounce-href: javascript:alert(1)\n---\n', ['announce-href: "javascript:alert(1)" dropped']);
+  // control: what the renderer accepts
+  assert.equal(run(t, '---\nname: sample\nfonts: https://fonts.example/a.css\nannounce: Hi\nannounce-href: /sale\n---\n').status, 0);
+});
