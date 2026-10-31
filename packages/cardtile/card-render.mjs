@@ -752,10 +752,13 @@ const NATIVE_CSS = [
   // label sat on the picture. Not a regression — a thing the previous measure structurally could
   // not see, because it sampled the background with the text lifted off.
   `.st-embed-video-label{background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.82) 55%,rgba(0,0,0,.6) 85%,rgba(0,0,0,.35));text-shadow:0 0 4px rgba(0,0,0,.95),0 1px 6px rgba(0,0,0,.9),0 0 14px rgba(0,0,0,.8)}`,
-  // card.css carries `.st-footer a{color:var(--cp-accent)!important}` — the raw brand colour, which
-  // measured 2.17:1 on a light ground. Same specificity, later in the document, and the !important
-  // has to come along because the rule being corrected has one.
-  `.st-footer a{color:var(--cp-accent-bright,#0a8c8e)!important}`,
+  // 🩸 A footer-link colour override lived here: `.st-footer a{color:var(--cp-accent-bright)!important}`,
+  // correcting card.css's `.st-footer a{color:var(--cp-accent)!important}` (2.17:1 on a light ground),
+  // with BACKDROP_CSS stacking a third !important on top and the accent block a credit class. Three
+  // layers to paint a link that should not be painted at all (tile-lab#55 補 5: footer links take
+  // the footer's own colour and weight, no underline, accent on hover). The fix is at the source —
+  // card.css's carrier rule says `color:inherit;font-weight:inherit` and its `:hover` the accent —
+  // and the layers that fought over the colour are gone rather than outvoted by a fourth.
   // a bare image tile: the artwork IS the tile. No scrim, no CTA, no card chrome behind it.
   // 🔴 `.st-card .st-cell.st-gal-cell-bare`, not `.st-gal-cell-bare`. card.css declares
   // `.st-card .st-cell{border:1px solid var(--cp-line)}` at (0,2,0) and this was written at (0,1,0),
@@ -1067,7 +1070,9 @@ const NATIVE_CSS = [
   `.st-embed-video iframe{width:100%;height:100%;border:0;display:block}`,
   // social mark row
   `.st-social{display:flex;flex-wrap:wrap;gap:var(--s-2,.5rem);align-items:center;justify-content:center;background:none;border:none;box-shadow:none;padding:0;min-height:0}`,
-  `.st-social-btn{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--cp-accent-border,rgba(10,140,142,.28));background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 8%,transparent);color:var(--cp-accent,#0a8c8e);transition:background .2s,transform .2s}`,
+  // `text-decoration:none`: the button is an <a>, and with no declaration of its own the UA's link
+  // underline leaked under any bare-text fallback glyph (tile-lab#55 補 3).
+  `.st-social-btn{text-decoration:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--cp-accent-border,rgba(10,140,142,.28));background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 8%,transparent);color:var(--cp-accent,#0a8c8e);transition:background .2s,transform .2s}`,
   `.st-social-btn:hover{background:color-mix(in srgb,var(--cp-accent,#0a8c8e) 20%,transparent);transform:translateY(-2px)}`,
   `.st-social-btn .st-cell-icon-img{width:20px;height:20px;background:none}`,
   // a DRAWN brand mark (ICONS) carries no width/height of its own — unsized, an inline svg lays out
@@ -1169,7 +1174,7 @@ const FLOATING_INK = [
   // backdrop the footer is on artwork, and it measured 2.86 there against a 4.5 floor. Same mistake
   // the tagline had with `--cp-muted`: a colour derived for one surface, used on another.
   `.st-footer,.st-footer>div{color:var(--cp-ink)!important;${HALO}}`,
-  `.st-footer a{color:var(--cp-accent-bright)!important;${HALO}}`,
+  // no `.st-footer a` line: the links inherit both the ink and the halo from the footer above
 ].join('');
 
 // 🔴 The header joins the floating-text set (2026-07-29), and it had to. Once the frame table was
@@ -1193,7 +1198,14 @@ const FLOATING_INK = [
 // darker than a mid-lightness colour, so NO scrim opacity below 100 makes them safe. Giving them a
 // local shadow is what iOS does for home-screen labels under an arbitrary wallpaper, and it leaves
 // the global scrim answering only for body ink.
-const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
+//
+// 🔴 `.st-backdrop` is sized to the LARGE viewport, not `inset:0` (tile-lab#55 補 4, found on an
+// iPhone). On iOS the toolbars collapse while you scroll, the visual viewport's height changes, and a
+// fixed `inset:0` box follows it — so `background-size:cover` re-fits the artwork on every change and
+// the backdrop visibly jumps (spread mode too, so it is the renderer's, not the Deck's). `100lvh` is
+// the height with the toolbars retracted: the box never resizes, the crop never changes, and with
+// the toolbars out the bottom simply sits behind them. `100vh` first for engines without `lvh`.
+const BACKDROP_CSS = (img, dim) => `.st-backdrop{position:fixed;inset:0 0 auto;height:100vh;height:100lvh;z-index:0;background-image:url("${img}");background-size:cover;background-position:center;background-attachment:fixed}
 html{scrollbar-gutter:auto}
 .st-wrap,.st-footer{position:relative;z-index:1}
 .st-backdrop::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}%,transparent),color-mix(in srgb,var(--cp-ground,#0a1628) ${Math.min(96, dim + 18)}%,transparent))}
@@ -1397,12 +1409,12 @@ export function renderPage(model, ctx = {}) {
   const owner = `<span>${esc(ctx.name)} &copy; ${since}${year}</span>`;
   const ref = ctx.handle ? `?ref=${encodeURIComponent(ctx.handle)}` : '';
   const powered = ctx.poweredBy
-    ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}" class="st-footer-credit">feelreef</a>`
+    ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}">feelreef</a>`
     : '';
   const footer = `<footer class="st-footer"><div>${owner}${powered}</div></footer>`;
   // accent: ONE author-set hex derives the whole --cp-accent-* family (the same 12/25/35/72% ramp
   // the Python renderer derives per guild), so a card is themed by a single frontmatter field.
-  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>` : `<style>.st-footer-credit{color:var(--cp-accent-bright,#0a8c8e);text-decoration:none;font-weight:600}</style>`;
+  const accent = accentC ? `<style id="cp-accent">:root{--cp-accent:${esc(accentC)};--cp-accent-bg:color-mix(in srgb,${esc(accentC)} 12%,transparent);--cp-accent-border:color-mix(in srgb,${esc(accentC)} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${esc(accentC)} 35%,transparent);--cp-accent-bright:color-mix(in srgb,${esc(accentC)} 72%,#fff)}</style>` : '';
   // 🔴 The theme block comes LAST in the head, and that placement is the whole mechanism: card.css
   // declares the --cp-* ramp in :root, so an override at equal specificity has to arrive later to
   // win. It also has to sit after the accent block, which still carries --cp-accent itself.
