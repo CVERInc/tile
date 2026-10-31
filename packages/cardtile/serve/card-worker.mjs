@@ -112,7 +112,7 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, goneKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
 import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
 import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
@@ -959,7 +959,7 @@ const router = {
     if (!want) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
-    // 410/404 below exactly as a missing body does.
+    // no-card 404 exactly as a missing body does.
     const { md: liveMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
     // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
@@ -968,29 +968,14 @@ const router = {
     // An absent card on a creator's host has no public binding, even when a pointer remains.
     // Use the unbound response, including its robots headers, on every card exit.
     if (cardMd == null && !routesByPath(host)) return html(SMALL_404, 404, env);
-    // reef#2618 — its owner deleted it. 410, not 404: the address did have a card, and saying so
-    // lets search engines drop it. Read only when the body is missing, so a live card pays nothing;
-    // and the page names nothing from the old card. no-store: the handle is free, and the next
-    // save must show at once.
-    // Missing and stopped identities perform the same reads: skipping a key for a stopped card
-    // discloses it through KV latency. The stop still wins over a stale deletion marker.
-    const gone = cardMd == null ? await store.get(goneKey(resolved.handle)) : null;
-    if (cardMd == null && stopped == null && gone != null) {
-      return new Response('<!doctype html><meta charset=utf-8><title>Gone</title><p>This Card has been deleted.</p>', {
-        status: 410,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-Robots-Tag': 'noindex, nofollow',
-          Vary: 'Accept',
-        },
-      });
-    }
+    // Missing and stopped shared-host identities perform the same ordered reads, including
+    // the legacy deletion marker. Its value never changes the public absence response.
+    if (cardMd == null) await store.get(`gone:${resolved.handle}`);
 
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
     const blank = cardMd != null && isTemplateOnly(cardMd);
 
-    if (want === 'alias' && stopped == null) return Response.redirect(`https://${host}/${url.search}`, 301);
+    if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
@@ -1041,7 +1026,7 @@ const router = {
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
     const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (stopped == null && ownHost && host !== ownHost) {
+    if (cardMd != null && ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
