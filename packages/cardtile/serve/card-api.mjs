@@ -578,6 +578,10 @@ export class CardLifetime {
     const s = (await this.storage.get('life')) || { gen: GEN0, hosts: [], pending: {} };
     s.handle = handle;
     s.seq = s.seq || 0;
+    // reef#2725: which lifetime of the handle this is, counting from the first this object saw (0). It
+    // rises at every /end, so a commit's (lifetime, serial) orders it after every commit of an ended
+    // lifetime — the generation id itself is random and orders nothing.
+    s.lifetime = s.lifetime || 0;
     s.inverse = s.inverse || null;
     s.lost = s.lost || {};
     s.highWater = s.highWater || {};
@@ -699,6 +703,7 @@ export class CardLifetime {
     await this.flush(s);
     if (s.hosts.length) s.pending[ended] = [...new Set([...(s.pending[ended] || []), ...s.hosts])];
     s.gen = newGen();
+    s.lifetime += 1;
     s.hosts = [];
     // the ended lifetime's inverse key is on `pending` (it needs a registered host), so DELETE removes it
     s.inverse = null;
@@ -906,8 +911,12 @@ export class CardLifetime {
     const meta = await this.keepCard(handle, gen, md, version, 'pending', prev && prev.meta);
     if ((await this.read(handle)).gen !== gen) { await this.sweepCards((g) => g !== gen); return staleWrite(handle); }
     const cache = await this.writeThrough(handle, gen, md, meta);
-    if ((await this.read(handle)).gen !== gen) return staleWrite(handle);
-    return { version, bytes: md.length, ...(cache === 'pending' ? { cache: 'pending' } : {}) };
+    const life = await this.read(handle);
+    if (life.gen !== gen) return staleWrite(handle);
+    // reef#2725 — the commit this write was, in this object's own order: `serial` rises on every write
+    // of the generation (keepCard, in the generation's write queue) and `lifetime` at every /end. The
+    // version is a hash of the bytes and repeats when a card is reverted; this does not.
+    return { version, bytes: md.length, commit: { gen, lifetime: life.lifetime, serial: meta.serial }, ...(cache === 'pending' ? { cache: 'pending' } : {}) };
   }
   /**
    * save_card's write. base_version is checked against the card held here (the Worker's check at
@@ -1349,6 +1358,8 @@ async function deleteCard(env, handle, meant = null) {
  *   GET    /_api/card/<handle>/full          —             full markdown for the owner
  *   GET    /_api/card/<handle>/lifetime      —             → { handle, gen }: the current generation (reef#2618 r4)
  *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run, create }
+ *          answers { handle, version, commit: { gen, lifetime, serial }, bytes, … } — `commit` orders
+ *                  saves by (lifetime, serial); `version` is a content hash and repeats on a revert
  *          create: true (tile#209 r5) — the registry's word that the handle has never had a card; the
  *                  only way past a first-contact KV miss besides the object's alarm finding the card
  *   DELETE /_api/card/<handle>               delete_card   → { handle, deleted } (reef#2618)
@@ -1624,6 +1635,10 @@ export async function handleApi(request, env, url) {
       return json({
         handle,
         version: res.version,
+        // reef#2725 — which commit this save was: `{ gen, lifetime, serial }`, ordered by (lifetime,
+        // serial) for the handle. A consumer that must not let an older save's derived copy (the
+        // reef.cards /draw snapshot) replace a newer one compares this, never the version.
+        ...(res.commit ? { commit: res.commit } : {}),
         bytes: res.bytes,
         created: res.created,
         wouldChange: res.wouldChange,
