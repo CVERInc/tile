@@ -64,21 +64,48 @@ const clampSpan = (v, max) => {
   return Math.min(max, Math.max(1, Math.floor(n)));
 };
 
+// 🔴 THE OLD NAME OF THE CAROUSEL (reef#2725, chodaict 2026-10-31). `embed` was a fossil: an image
+// carousel built for one card borrowed the family's generic word, and Site's `embed` meant "paste
+// HTML" the whole time. `embed` means that now, and the carousel is `slides`.
+//
+// Every card already written keeps rendering what it rendered, with no change to its file, and the
+// mapping is decided by the cell's SHAPE, not by a list of cards: the old renderer drew something
+// only for `kind=slider` / `kind=bubbles` and returned '' for every embed without a `kind=` (the
+// "generic embed" was removed for splicing its body unescaped). So
+//   · `embed` WITH a `kind=` token  → the carousel, read as `slides` — exactly the cells that ever
+//     drew a carousel, plus `kind=<anything else>`, which drew nothing then and draws nothing now;
+//   · `embed` WITHOUT one           → HTML. Every such cell rendered NOTHING before, so no carousel
+//     anybody has ever seen can change by this.
+// Read once, here, so every reader of the model — renderer, both editors, the board, an agent —
+// sees `slides` and none of them has to know the old spelling exists.
+const legacySlides = (word, params) => word === 'embed' && Object.prototype.hasOwnProperty.call(params, 'kind');
+
 // one tugtile card's text → a typed cell. No marker = a plain text widget (whole text is the body).
 function extractCell(text) {
   const m = RE_CARD_MARKER.exec(text || '');
   if (!m) return { type: 'text', params: {}, rawParams: '', body: (text || '').trim() };
   const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[1].trim());
-  const type = sp ? sp[1] : 'text';
+  const word = sp ? sp[1] : 'text';
   const rawParams = sp ? sp[2].trim() : '';
+  const params = parseParams(rawParams);
   const body = (m[2] + (m[3] ? '\n' + m[3] : '')).replace(/\s+$/, '');
-  return { type, params: parseParams(rawParams), rawParams, body: body.replace(/^\n+/, '') };
+  const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, '') };
+  // `spelled` remembers the word on disk, so writing the cell back does not rewrite the file
+  if (legacySlides(word, params)) return { ...cell, type: 'slides', spelled: word };
+  return cell;
 }
 
 // a typed cell → one tugtile `- [ ] …` card block. Short single-line body stays inline after the
 // marker; multi-line body (prose / fenced JSON) goes on tab-indented续行 (the indentation rule above).
+//
+// 🔴 SELF-CONTAINED, deliberately — reef-mcp cuts this function out of this file verbatim
+// (apps/reef-mcp/scripts/card-syntax.mjs) into a module with no imports, so it may not call a helper.
+// A `slides` cell read from an old `embed kind=…` line is written back as `embed` — but only while it
+// still carries `kind=`, the token that makes it read as `slides` again. Without it the old word
+// would come back as HTML, so the cell is written by its real name instead.
 function cellToRaw(cell) {
-  const marker = '%% card: ' + cell.type + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
+  const word = cell.type === 'slides' && cell.spelled === 'embed' && /(^|\s)kind=/.test(cell.rawParams || '') ? 'embed' : cell.type;
+  const marker = '%% card: ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
   const body = cell.body || '';
   if (!body) return '- [ ] ' + marker;
   if (!body.includes('\n')) return '- [ ] ' + marker + ' ' + body;
@@ -356,7 +383,53 @@ function reorder(model, from, to) {
   return { ...model, cells };
 }
 
+/**
+ * A card's byte ceiling: the one HARD limit there is — a KV value is 25 MiB (serve/card-api.mjs stores
+ * the card as one, and refuses a save over it). Not a number picked for embeds: assets/embed.mjs tells
+ * how a made-up budget refused a real creator twice, and this is the line it settled on.
+ */
+const CARD_MAX_BYTES = 25 * 1024 * 1024;
+
+/** UTF-8 length — what the ceiling is measured in (a `中` is 3 bytes and 1 code unit) */
+const utf8Length = (s) => {
+  let n = 0;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+};
+
+/**
+ * embedsOverCeiling(model, cardBytes, max) → one sentence per `embed` cell that puts the card over its
+ * ceiling, naming the cell; [] when the card fits, or when it does not and no embed is why.
+ *
+ * "Why" is measured, not guessed: an embed is named when its HTML alone is over the ceiling, or when
+ * the card WITHOUT it would fit. A card that is over because of its pictures does not get told its
+ * three-line embed is the problem.
+ */
+function embedsOverCeiling(model, cardBytes, max = CARD_MAX_BYTES) {
+  if (cardBytes <= max) return [];
+  const out = [];
+  const lanes = [['', model.cells || []], ...(model.drawers || []).map((d) => [`drawer "${d.id}" `, d.cells || []])];
+  for (const [where, cells] of lanes) {
+    cells.forEach((c, i) => {
+      if (c.type !== 'embed') return;
+      const b = utf8Length(c.body);
+      if (b > max || cardBytes - b <= max) {
+        out.push(`The embed at ${where}#${i + 1} is ${b} bytes of HTML — ${b > max ? 'more than the card\'s whole ceiling of ' + max + ' bytes on its own' : 'without it the card would fit under its ceiling of ' + max + ' bytes'}.`);
+      }
+    });
+  }
+  return out;
+}
+
 export { parseCard, serializeCard, packGrid, reorder, setSpan, extractCell, cellToRaw, clampSpan };
+export { CARD_MAX_BYTES, utf8Length, embedsOverCeiling };
 // the param primitives, exported for cardtile-w. 🔴 The editor must not carry its own copy of this
 // grammar — two implementations of "what a param looks like" is how a form starts writing tokens the
 // parser reads differently, on somebody's only copy of their file.

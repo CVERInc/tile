@@ -413,12 +413,46 @@ export const CELL_STRINGS_BY_KEY = {
     pt: 'Um por linha: o nome e depois o endereço. Se um ícone sair errado, acrescente icon=<nome> ou iconhost=<domínio> depois do endereço. Escreva um espaço dentro do endereço como %20. Dois links na mesma linha mostram só o primeiro.',
   },
 
-  // ── the slideshow tile ─────────────────────────────────────────────────────────────────────────
+  // ── the embed tile: the author's own HTML (reef#2725) ───────────────────────────────────────────
+  // 🔴 The ban list (w2/banned-words.mjs) forbids iframe / sandbox / srcdoc on screen, so the walled
+  // box is said in plain words. "HTML" is the name of what they paste, like "Markdown" names the file.
   'type.embed.title': {
+    zh: '嵌入', ja: '埋め込み', en: 'Embed', ko: '임베드', 'zh-Hans': '嵌入',
+    de: 'Einbetten', fr: 'Intégration', es: 'Insertar', pt: 'Incorporar',
+  },
+  'type.embed.hint': {
+    zh: '貼上一段 HTML，程式碼也行。它在自己的隔間裡執行，碰不到卡片其他地方。',
+    ja: 'HTML を貼り付けます。スクリプトも動きます。専用の区画で動き、カードのほかの部分には触れられません。',
+    en: 'Paste a piece of HTML, scripts included. It runs in a walled-off box of its own and cannot touch the rest of the card.',
+    ko: 'HTML을 붙여 넣어요. 스크립트도 돼요. 따로 떨어진 칸에서 실행되어 카드의 다른 곳에는 닿지 못해요.',
+    'zh-Hans': '粘贴一段 HTML，代码也行。它在自己的隔间里运行，碰不到卡片其他地方。',
+    de: 'Ein Stück HTML einfügen, Skripte inklusive. Es läuft in einem eigenen, abgeschotteten Kasten und erreicht den Rest der Karte nicht.',
+    fr: 'Collez un morceau de HTML, scripts compris. Il s’exécute dans une boîte fermée à part et ne peut pas toucher au reste de la carte.',
+    es: 'Pega un fragmento de HTML, con scripts incluidos. Se ejecuta en una caja cerrada propia y no puede tocar el resto de la tarjeta.',
+    pt: 'Cole um trecho de HTML, scripts incluídos. Ele roda numa caixa fechada própria e não alcança o resto do cartão.',
+  },
+  'type.embed.body.label': {
+    zh: 'HTML', ja: 'HTML', en: 'HTML', ko: 'HTML', 'zh-Hans': 'HTML',
+    de: 'HTML', fr: 'HTML', es: 'HTML', pt: 'HTML',
+  },
+  'type.embed.body.hint': {
+    zh: '它填滿這一格，寬多少就高多少，不會跟著內容長高。想用卡片的顏色，寫 var(--cp-ink)、var(--cp-accent) 這類變數。',
+    ja: 'このマスいっぱいに広がり、高さは幅と同じで、中身に合わせて伸びません。カードの色は var(--cp-ink)、var(--cp-accent) などの変数で使えます。',
+    en: 'It fills this tile, as tall as it is wide, and does not grow to fit. For the card\'s colours, use var(--cp-ink), var(--cp-accent) and the like.',
+    ko: '이 칸을 가득 채우고, 높이는 너비와 같으며 내용에 맞춰 늘어나지 않아요. 카드 색은 var(--cp-ink), var(--cp-accent) 같은 변수로 써요.',
+    'zh-Hans': '它填满这一格，宽多少就高多少，不会跟着内容长高。想用卡片的颜色，写 var(--cp-ink)、var(--cp-accent) 这类变量。',
+    de: 'Es füllt diese Kachel, so hoch wie breit, und wächst nicht mit dem Inhalt. Für die Farben der Karte var(--cp-ink), var(--cp-accent) und Ähnliches verwenden.',
+    fr: 'Il remplit cette tuile, aussi haut que large, sans s’agrandir selon le contenu. Pour les couleurs de la carte, utilisez var(--cp-ink), var(--cp-accent) et consorts.',
+    es: 'Llena este bloque, tan alto como ancho, y no crece con el contenido. Para los colores de la tarjeta, usa var(--cp-ink), var(--cp-accent) y similares.',
+    pt: 'Preenche este bloco, tão alto quanto largo, e não cresce com o conteúdo. Para as cores do cartão, use var(--cp-ink), var(--cp-accent) e afins.',
+  },
+
+  // ── the slideshow tile ─────────────────────────────────────────────────────────────────────────
+  'type.slides.title': {
     zh: '輪播', ja: 'スライド', en: 'Slideshow', ko: '슬라이드', 'zh-Hans': '轮播',
     de: 'Diaschau', fr: 'Diaporama', es: 'Pase de imágenes', pt: 'Apresentação de imagens',
   },
-  'type.embed.hint': {
+  'type.slides.hint': {
     zh: '好幾張圖片輪流顯示。', ja: '複数の画像を順に表示します。',
     en: 'Several pictures, one after another.',
     ko: '여러 장의 사진을 차례로 보여 줘요.', 'zh-Hans': '好几张图片轮流显示。',
@@ -427,11 +461,11 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Varias imágenes, una tras otra.',
     pt: 'Várias imagens, uma após a outra.',
   },
-  'type.embed.kind.label': {
+  'type.slides.kind.label': {
     zh: '樣式', ja: '形式', en: 'Style', ko: '형식', 'zh-Hans': '样式',
     de: 'Art', fr: 'Style', es: 'Estilo', pt: 'Estilo',
   },
-  'type.embed.kind.hint': {
+  'type.slides.kind.hint': {
     zh: '「slider」左右滑動，「bubbles」泡泡彈出。',
     ja: '「slider」は横にスライド、「bubbles」はふわっと切り替え。',
     en: '"slider" slides sideways; "bubbles" pops in and out.',
@@ -442,11 +476,11 @@ export const CELL_STRINGS_BY_KEY = {
     es: '«slider» se desliza de lado, «bubbles» aparece y desaparece.',
     pt: '“slider” desliza para o lado, “bubbles” aparece e desaparece.',
   },
-  'type.embed.images.label': {
+  'type.slides.images.label': {
     zh: '圖片', ja: '画像', en: 'Pictures', ko: '사진', 'zh-Hans': '图片',
     de: 'Bilder', fr: 'Images', es: 'Imágenes', pt: 'Imagens',
   },
-  'type.embed.images.hint': {
+  'type.slides.images.hint': {
     zh: '用逗號分開每一張。', ja: 'カンマで区切ります。', en: 'Separate each one with a comma.',
     ko: '쉼표로 구분해 주세요.', 'zh-Hans': '用逗号分开每一张。',
     de: 'Mit Kommas trennen.', fr: 'Séparez chacune par une virgule.',
@@ -491,11 +525,11 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Se ignora cuando el campo del título del vídeo está lleno. El formulario usa ese campo; este queda para tarjetas existentes.',
     pt: 'É ignorado quando o campo do título do vídeo está preenchido. O formulário usa esse campo; este fica para cartões existentes.',
   },
-  'type.embed.origin.label': {
+  'type.slides.origin.label': {
     zh: '焦點', ja: '注目位置', en: 'Focal point', ko: '초점', 'zh-Hans': '焦点',
     de: 'Bildmittelpunkt', fr: 'Point focal', es: 'Punto focal', pt: 'Ponto focal',
   },
-  'type.embed.origin.hint': {
+  'type.slides.origin.hint': {
     zh: '圖片哪個位置保持在畫面裡，預設 53% 76%。',
     ja: '画像のどこを画面に残すか。初期値は 53% 76%。',
     en: 'Which part of the picture stays in view. Default 53% 76%.',
@@ -506,13 +540,13 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Qué parte de la imagen queda a la vista. Por defecto 53% 76%.',
     pt: 'Que parte da imagem fica à vista. Padrão 53% 76%.',
   },
-  'type.embed.narrow.label': {
+  'type.slides.narrow.label': {
     zh: '窄螢幕焦點', ja: '狭い画面での注目位置', en: 'Focal point on narrow screens',
     ko: '좁은 화면의 초점', 'zh-Hans': '窄屏焦点', de: 'Bildmittelpunkt auf schmalen Bildschirmen',
     fr: 'Point focal sur écran étroit', es: 'Punto focal en pantallas estrechas',
     pt: 'Ponto focal em telas estreitas',
   },
-  'type.embed.narrow.hint': {
+  'type.slides.narrow.hint': {
     zh: '同上，給手機這類窄螢幕用，預設 53% 33%。',
     ja: '同じく、スマートフォンなど狭い画面用。初期値は 53% 33%。',
     en: 'The same, for narrow screens such as phones. Default 53% 33%.',
@@ -523,11 +557,11 @@ export const CELL_STRINGS_BY_KEY = {
     es: 'Lo mismo, para pantallas estrechas como los móviles. Por defecto 53% 33%.',
     pt: 'O mesmo, para telas estreitas como celulares. Padrão 53% 33%.',
   },
-  'type.embed.bg.label': {
+  'type.slides.bg.label': {
     zh: '背景圖', ja: '背景画像', en: 'Background picture', ko: '배경 사진', 'zh-Hans': '背景图',
     de: 'Hintergrundbild', fr: 'Image de fond', es: 'Imagen de fondo', pt: 'Imagem de fundo',
   },
-  'type.embed.bg.hint': {
+  'type.slides.bg.hint': {
     zh: '墊在輪播底下的圖。', ja: 'スライドの下に敷く画像。',
     en: 'A picture laid underneath the slideshow.',
     ko: '슬라이드 아래에 까는 사진.', 'zh-Hans': '垫在轮播底下的图。',

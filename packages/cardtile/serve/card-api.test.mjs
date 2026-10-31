@@ -3454,3 +3454,24 @@ test('🔴 r7 P3 the PREFLIGHT carries the Worker\'s seen version: a create dry 
     assert.deepEqual(queried, [], 'the refusal came after Web Risk — not from the preflight');
   } finally { globalThis.fetch = realFetch; }
 });
+
+// reef#2725 — an `embed` is the author's own HTML, and it counts against the card's byte ceiling like
+// everything else in the file. When its HTML is why a save is over, the refusal says WHICH embed:
+// "the card is too big" alone sends the author to look at their pictures.
+test('🔴 reef#2725 a save whose embed blows the byte ceiling is refused 413, naming that embed', async () => {
+  const env = envWith({ t: CARD });
+  const before = await versionOf(env);
+  const html = '<p>' + 'x'.repeat(26 * 1024 * 1024) + '</p>';
+  const md = thinCard(CARD).replace(/\n*$/, '\n') + `- [ ] %% card: embed w=6 %% ${html}\n`;
+  assert.ok(parseCard(md).cells.some((c) => c.type === 'embed'), 'the fixture did not add an embed cell — this measures nothing');
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: md });
+  assert.equal(res.status, 413);
+  const { error } = await res.json();
+  assert.match(error, /The embed at #\d+ is \d+ bytes of HTML/, `the refusal does not name the embed: ${error}`);
+  assert.equal(await versionOf(env), before, 'something was written');
+  // CONTROL: over the ceiling for a reason that is NOT the embed, the embed is not blamed
+  const other = thinCard(CARD).replace('hello', '中'.repeat(9 * 1024 * 1024)).replace(/\n*$/, '\n') + '- [ ] %% card: embed w=6 %% <p>x</p>\n';
+  const res2 = await call(env, 'PUT', '/_api/card/t', { markdown: other });
+  assert.equal(res2.status, 413);
+  assert.doesNotMatch((await res2.json()).error, /embed/);
+});

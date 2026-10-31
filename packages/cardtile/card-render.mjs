@@ -10,8 +10,8 @@
 //   text    : body = markdown
 // A block heading is a LANE (`## English`), not a cell — see card-core's parseCard.
 // packGrid gives each cell its w×h → data-span="{w}x{h}". 防醜 (no overlap) is card-core's.
-import { packGrid } from './card-core.js';
-import { resolveBackdropDim, themeCss, DEFAULT_ACCENT } from './colour.mjs';
+import { packGrid, CARD_MAX_BYTES, utf8Length } from './card-core.js';
+import { resolveBackdropDim, themeCss, themeRootCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
@@ -184,10 +184,10 @@ const mdInline = (s, ctx) => esc(s)
 // a live card renders nothing at all in that case — which is why they live here, in this file's own
 // four-language table, rather than growing the rendered-card vocabulary.
 const LABELS = {
-  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture' },
-  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片' },
-  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加' },
-  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가' },
+  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture', embed: 'Embedded content' },
+  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片', embed: '嵌入的內容' },
+  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加', embed: '埋め込みコンテンツ' },
+  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가', embed: '삽입된 콘텐츠' },
 };
 
 /**
@@ -329,7 +329,10 @@ function linkIcon(p, url, ctx) {
 const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arrows === 'on' ? (ctx.arrow || '') : '')
   .replace(/__SIZE__/g, String(px)).replace('__CLASS__', cls).replace('__DIR__', dir ? ' signet-arrow' + dir : '');
 
-// The embed escape hatch: a self-contained block that isn't a native widget.
+// `slides` — the image carousel. Until reef#2725 (2026-10-31) this was `embed`, a generic word it
+// had borrowed; an old `embed kind=…` line is read as `slides` by the parser (card-core.js,
+// `legacySlides`) and lands here unchanged. `kind` defaults to `slider` for a cell written under the
+// new name — an old one always says which (that is how the parser knew it was a carousel).
 //
 // 🔴 kind=slider carries a SPEECH-BUBBLE ROTATION 表演 — and表演 is lifted VERBATIM, never
 // re-implemented. The first pass here re-wrote it as an opacity crossfade with scale(.98) and
@@ -348,7 +351,8 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 // said `origin-narrow=` worked — through the truncation. Names are read whole now, so that spelling
 // is read by its own name below, and the cards that carry it keep the anchor they were given.
 //   bg=      static backdrop the bubbles rotate over (the characters the tails point at)
-function renderEmbed(p, body, size, ctx = {}) {
+function renderSlides(p, size, ctx = {}) {
+  const kind = p.kind == null || p.kind === '' ? 'slider' : p.kind;
   // 🔴 `slider` is the COMMON one — a horizontal carousel you swipe, with prev/next. `bubbles` is
   // the speech-bubble pop, which is what `slider` used to mean for everybody.
   //
@@ -360,9 +364,9 @@ function renderEmbed(p, body, size, ctx = {}) {
   //
   // The pop animation below is preserved verbatim under its own name; that one stored card is
   // migrated to `kind=bubbles` so nothing about it changes.
-  if (p.kind === 'slider') {
+  if (kind === 'slider') {
     const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
+    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="slides"></div>`;
     // 🔴 CSS scroll-snap + anchor links. No JS: the prev/next are <a href="#…"> into the track, so
     // they work on the first paint, survive a dead script, and the browser's own swipe/keyboard/
     // scrollbar all come free. `scroll-behavior:smooth` is what makes an anchor jump read as a slide.
@@ -396,13 +400,13 @@ function renderEmbed(p, body, size, ctx = {}) {
       // one image needs no controls, and controls on a single slide read as broken
       n < 2 ? `.st-slide-nav,.st-slider-dots{display:none}` : '',
     ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="embed"><style>${css}</style>`
+    return `<div class="st-cell st-embed" ${size} data-coral-type="slides"><style>${css}</style>`
       + `<div class="st-slider"><div class="st-slider-track">${slides}</div>`
       + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div></div>';
   }
-  if (p.kind === 'bubbles') {
+  if (kind === 'bubbles') {
     const imgs = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => attrUrl(ctx, resolveAsset(u, ctx)));
-    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="embed"></div>`;
+    if (!imgs.length) return `<div class="st-cell st-embed" ${size} data-coral-type="slides"></div>`;
     const n = imgs.length;
     const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
     const cycle = n * hold;
@@ -426,12 +430,59 @@ function renderEmbed(p, body, size, ctx = {}) {
       `@media screen and (max-width:888px){.st-carousel figure{transform-origin:${originNarrow}}}`,
       `@media(prefers-reduced-motion:reduce){.st-carousel figure{animation:none}.st-carousel figure:nth-child(1){opacity:1;transform:scale(1)}}`,
     ].join('');
-    return `<div class="st-cell st-embed" ${size} data-coral-type="embed"><style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div></div>`;
+    return `<div class="st-cell st-embed" ${size} data-coral-type="slides"><style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div></div>`;
   }
-  // 🔴 There is no generic embed. It had zero uses and spliced its body into the page UNESCAPED —
-  // on a renderer whose input can arrive from parsing a third party's page. A hatch nobody climbed
-  // through, opening onto a drop. `kind=slider` is the only embed, and it builds its own markup.
+  // 🔴 Any other `kind` draws nothing — as it always did. The generic embed that once lived here
+  // spliced its body into the page UNESCAPED; HTML is `embed` now, and it goes in a sandbox (below).
   return '';
+}
+
+// `embed` — the author's own HTML, scripts included (reef#2725, chodaict 2026-10-31).
+//
+// 🔴 WHY AN IFRAME, AND WHY ONLY THIS ONE TOKEN. Every Card lives on ONE origin (card.feelreef.com,
+// then reef.cards). A script of A's spliced into A's page runs as that origin — so when B, signed in,
+// opens A's card, A's script reads B's storage and cookies: cross-tenant XSS, structural, and no
+// AUP or report button stops it (the victim is the READER). `sandbox="allow-scripts"` without
+// `allow-same-origin` gives the document an OPAQUE origin: its scripts run, and they can reach no
+// storage, no cookie and no DOM of the card. Without `allow-top-navigation` it cannot take the reader
+// away; without `allow-popups`/`allow-forms`/`allow-modals` it cannot open windows, post forms or
+// raise dialogs over the card. One token, and every one left out is a defence — embed-html.test.mjs
+// names each.
+//
+// 🔴 THE ESCAPE IS THE WHOLE BOUNDARY. The document rides in `srcdoc="…"`; one `"` that is not
+// escaped ends the attribute, and everything after it is markup in OUR page — the attack, with the
+// sandbox politely standing next to it. `&` first (so an author's literal `&quot;` stays literal),
+// then `"`, and `<` `>` as well so a raw `</iframe>` never appears in our markup at all. Its own
+// function, not `esc`: `esc` is defined for text and attributes in general, and this is the one
+// value whose escaping is a security property — it should not change because `esc` did.
+//
+// Size: the cell's own box, a square of its width (`w=6` is the card's width; there is no `h` any
+// more, and nothing in the frame can tell us its height — we do not open a channel to ask). Theme:
+// the card's `--cp-*` in the document's `:root`, so `var(--cp-ink)` inside means what it means on the
+// card.
+const srcdocAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// the accent family the page's #cp-accent block declares, for the same accent (card.css's defaults
+// when the card names none) — the tokens below are color-mix()es of `--cp-accent`, so it must be here
+const embedAccentCss = (a) => `--cp-accent:${a};--cp-accent-bg:color-mix(in srgb,${a} 12%,transparent);--cp-accent-border:color-mix(in srgb,${a} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${a} 35%,transparent)`;
+const EMBED_CELL_CSS = '.st-card .st-embed-html{position:relative;aspect-ratio:1;min-height:0}'
+  + '.st-embed-html iframe{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:transparent}'
+  // the editor's index attribute is only ever on a cell the EDITOR rendered: there a click selects
+  // the tile, so the frame must not swallow it. Same bytes on the live card, where it matches nothing.
+  + '.st-embed-html[data-cell] iframe{pointer-events:none}';
+function renderEmbedHtml(body, size, ctx = {}) {
+  const html = String(body || '');
+  if (!html.trim()) return '';
+  // 🔴 refused by name: an embed whose HTML alone is over the card's ceiling never reaches the page.
+  // A save refuses it first (card-api, `embedsOverCeiling`); this is the floor for anything rendered
+  // without being saved — a preview, a file opened locally.
+  const bytes = utf8Length(html);
+  if (bytes > CARD_MAX_BYTES) return `<!-- embed refused: ${bytes} bytes of HTML, over the card's ${CARD_MAX_BYTES}-byte ceiling -->`;
+  const accentC = ctx.accent ? cssColor(ctx.accent) : '';
+  const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
+  const theme = `:root{${embedAccentCss(accentC || DEFAULT_ACCENT)}}${themeRootCss(mode, accentC)}body{margin:0;color:var(--cp-ink)}`;
+  const doc = `<!doctype html><meta charset="utf-8"><style id="cp-theme">${theme}</style>${html}`;
+  return `<div class="st-cell st-embed st-embed-html" ${size} data-coral-type="embed"><style>${EMBED_CELL_CSS}</style>`
+    + `<iframe sandbox="allow-scripts" srcdoc="${srcdocAttr(doc)}" title="${esc(label(ctx, 'embed'))}" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
 }
 
 // How a cell's target becomes anchor attributes. A `#id` target opens a DRAWER (an overlay on this
@@ -576,8 +627,11 @@ function renderCell(cell, place, ctx) {
       const sub = p.sub ? `<div class="st-cell-sub">${esc(p.sub)}</div>` : '';
       return `<div class="st-cell st-cell-tile" ${size} data-coral-type="linktile"><a class="st-cell-link" ${a}><div class="st-cell-head">${icon}${arrowOf(ctx, 17)}</div><div class="st-cell-body"><div class="st-cell-title">${esc(linkText)}</div>${sub}</div></a></div>`;
     }
+    case 'slides':
+      return renderSlides(p, size, ctx);
     case 'embed':
-      return renderEmbed(p, b, size, ctx);
+      // the HTML is the cell's body as written — not `b`, which is trimmed for prose
+      return renderEmbedHtml(cell.body, size, ctx);
     case 'text':
       return `<div class="st-cell st-prose" ${size} data-coral-type="text">${mdBlock(b, ctx)}</div>`;
     case 'video': {

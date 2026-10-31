@@ -156,6 +156,15 @@ export function identityOrder(model, ctx = {}) {
 const firstLine = (s) => String(s || '').split('\n').find((l) => l.trim() !== '') || '';
 const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
 
+/**
+ * An embed's grey line: how much HTML it holds, in lines — `12 × </>` — never the HTML itself, which
+ * on a tile face would be markup somebody has to read past (and a `#` in it would become a tag).
+ */
+const embedSize = (body) => {
+  const n = String(body || '').split('\n').filter((l) => l.trim()).length;
+  return n ? `${n} × </>` : '';
+};
+
 /** strip the markdown a summary line must not carry INTO a heading (a nested `#` would be a tag) */
 const flat = (s) => String(s || '').replace(/[#\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -212,10 +221,13 @@ export function tileText(cell, ctx = {}) {
       return [head(name('social')),
         String(cell.body || '').split('\n').map((l) => linkOf(l).label || '').filter(Boolean).join(' · ')]
         .filter(Boolean).join('\n');
-    case 'embed':
-      return [head(name('embed')),
+    case 'slides':
+      return [head(name('slides')),
         String(p.images || '').split(',').filter(Boolean).length ? `${String(p.images || '').split(',').filter(Boolean).length}` : '']
         .filter(Boolean).join('\n');
+    case 'embed':
+      // HTML has no words of its own worth a heading — the kind is the title, the size the sub
+      return [head(name('embed')), embedSize(cell.body)].filter(Boolean).join('\n');
     default:
       return head(flat(firstLine(cell.body)) || cell.type);
   }
@@ -302,9 +314,13 @@ export function tileFace(cell, ctx = {}) {
       face.icons = items.flatMap((x) => marks(x.url, x)).slice(0, 6);
       return face;
     }
-    case 'embed': {
-      const imgs = String(p.images || '').split(',').map((s) => s.trim()).filter(Boolean);
+    case 'embed':
       face.title = name('embed');
+      face.sub = embedSize(cell.body);
+      return face;
+    case 'slides': {
+      const imgs = String(p.images || '').split(',').map((s) => s.trim()).filter(Boolean);
+      face.title = name('slides');
       face.sub = imgs.length ? String(imgs.length) : '';
       face.img = imgs[0] || '';
       return face;
