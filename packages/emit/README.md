@@ -75,3 +75,4 @@ are still read by the host — `p.<name>` stays in card-render's `switch (cell.t
 | `link` | `gridCell` (link shape) |
 | `social` | `emitSocial` |
 | `feature` | `gridCell` (`imageCards` shape) |
+| `profile` | `emitHero` (the QR mount `cp-icon` / `data-dynamic-coral="qr"` byte-identical) |

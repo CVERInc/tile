@@ -51,7 +51,8 @@ export const FIXED = [
   ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(src)}', 3, 'IMG_ICON (author image registered at its call site) and the slider / bubbles frames (`imgs` came through attrUrl at its definition, asserted below)'],
-  ['data-url="${esc(qrUrl)}', 1, "the QR code encodes the card's own address"],
+  ['data-url="${e(qrUrl)}', 1, "the QR code encodes the card's own address (emit/hero.mjs heroCell, the QR mount)"],
+  ['background-image:url("${cssUrlString(bgOk)}', 1, "emit/hero.mjs's SITE hero (no Card cell writes it): bgOk is gated by safeSrc and quoted by cssUrlString"],
   ['href="#${id}', 1, 'in-page drawer anchor'],
   ['background-image:url("${img}', 1, 'the same BACKDROP_CSS url(), seen once more as a background declaration'],
   ['background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}', 1, 'BACKDROP_CSS: `dim` is a clamped number (colour.mjs), no URL in this declaration'],
@@ -133,7 +134,7 @@ const SRC = [RENDER_SRC, ...EMIT.values()].join('\n');
 
 test('sinks: the emit modules card-render imports are in the scan, and the registry it hands them is the registry', () => {
   const names = [...EMIT.keys()].map((h) => h.split('/').pop()).sort();
-  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
+  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
   // the two names a Card branch may write a URL through are exactly the guarded calls, made in ONE place
   const body = stripComments(RENDER_SRC);
   assert.match(body, /\burl: \(raw\) => esc\(attrUrl\(ctx, raw\)\),/);

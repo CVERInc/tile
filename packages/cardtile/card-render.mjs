@@ -27,6 +27,7 @@ import { escHtml } from '../cssmd/cssmd.js';
 import { emitProse } from '../emit/prose.mjs';
 import { gridCell } from '../emit/grid.mjs';
 import { emitSocial } from '../emit/social.mjs';
+import { emitHero } from '../emit/hero.mjs';
 
 // Escaping is the family's — `escHtml` from tile's cssmd, vendored here — plus `"`. The extra quote
 // is not a dialect difference: cssmd escapes text CONTENT, while this renderer also splices values
@@ -485,7 +486,7 @@ function renderCell(cell, place, ctx) {
   const b = (cell.body || '').trim();
   switch (cell.type) {
     case 'profile': {
-      const chips = (p.chips ? String(p.chips).split(/\s*,\s*/) : []).map((c) => `<span class="st-chip">${esc(c)}</span>`).join('');
+      const chips = p.chips ? String(p.chips).split(/\s*,\s*/) : [];
       // 🔴 May be ''. A profile with no `avatar=` used to still emit <img class="cp-icon" src="">,
       // and an empty src is not "no image" — per HTML it resolves to the CURRENT DOCUMENT URL, so
       // the browser fetches the whole page as an image and fails. It also carried role="button"
@@ -498,8 +499,9 @@ function renderCell(cell, place, ctx) {
       const avatar = resolveAsset(p.avatar, ctx);
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
+      // The mount's markup is packages/emit/hero.mjs's `heroCell`, byte-identical (tile-lab#52).
       const qrUrl = ctx.cardUrl || '';
-      return `<div class="st-cell st-hero" ${size} data-coral-type="profile"><div class="st-figure" data-dynamic-coral="qr" data-url="${esc(qrUrl)}" data-name="${esc(ctx.name)}" data-version="4">${avatar ? `<img class="cp-icon" src="${esc(attrUrl(ctx, avatar))}" alt="${esc(ctx.name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${esc(label(ctx, 'qr'))}">` : ''}</div><div class="st-hero-text"><h1 class="st-hero-name">${esc(ctx.name)}</h1><p class="st-hero-tagline">${mdInline(b, ctx)}</p><div class="st-hero-meta">${chips}</div></div></div>`;
+      return emitHero({ body: b }, { cell: { attrs: size }, name: ctx.name, avatar, qrUrl, qrLabel: label(ctx, 'qr'), chips }, dialect(ctx));
     }
     case 'feature': {
       // 🩸 A PICTURE DOES NOT HAVE TO GO ANYWHERE. `anchorFor(p.href)` was called unconditionally,
