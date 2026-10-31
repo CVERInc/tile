@@ -428,3 +428,25 @@ test('🔴 an output that cannot be written is a refusal (exit 2, path named), n
   assert.equal(r.stdout, '', 'no _site.md keys printed for a theme that was not written');
   assert.deepEqual(readdirSync(dir).sort(), ['_theme.md'], 'nothing partial left behind');
 });
+
+// ── round 13: a deadline names its zone; colours follow the CSS Color 4 grammar per form ─────────
+
+test('🔴 announce-until without an explicit offset is a drop that says to add one (the build host would pick the zone)', (t) => {
+  for (const until of ['2026-12-01T23:59:00', '2026-12-01T23:59', '2026-12-01', '2026-12-01T23:59:00+0800']) {
+    const r = assertRefusedNaming(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`, [`announce-until: ${JSON.stringify(until)} dropped`]);
+    assert.match(r.stderr, /offset/, r.stderr);
+  }
+  for (const until of ['2026-12-01T23:59:00+08:00', '2026-12-01T15:59:00Z', '2026-12-01T23:59:00.5-03:30', '2026-12-01T15:59Z']) {
+    assert.equal(run(t, `---\nname: s\nannounce: Sale\nannounce-until: ${until}\n---\n`).status, 0, until);
+  }
+});
+
+test('🔴 colours follow CSS Color 4 per form: legacy comma hsl needs %, legacy comma rgb may not mix % and numbers', (t) => {
+  for (const v of ['hsl(10,20,30)', 'hsla(10, 20, 30, .5)', 'hsl(10, 20%, 30)', 'rgb(10%, 20, 30)', 'rgba(1, 2, 3%, .5)']) {
+    assertRefusedNaming(t, `---\nname: s\ngd-bg: ${v}\n---\n`, [`gd-bg: ${JSON.stringify(v)} dropped`]);
+  }
+  for (const v of ['hsl(10, 20%, 30%)', 'hsla(10deg, 20%, 30%, 50%)', 'hsl(10 20 30)', 'hsl(10 20% 30 / .5)',
+    'rgb(10%, 20%, 30%)', 'rgb(1, 2, 3)', 'rgba(1, 2, 3, 50%)', 'rgb(10% 20 30)', 'rgb(1 2 3 / .5)']) {
+    assert.equal(run(t, `---\nname: s\ngd-bg: ${v}\n---\n`).status, 0, v);
+  }
+});

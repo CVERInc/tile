@@ -147,7 +147,7 @@ for (const k of Object.keys(meta)) {
   // the one VALUE check on tokens: the schema types each token (`category`), and a colour token
   // that holds no colour leaves the property it feeds unusable (`background: var(--gd-bg)`).
   else if (stem && TOKENS.find((t) => t.stem === stem).category === 'color' && !isCssColour(v)) {
-    drop(k, 'not a CSS colour — use hex (#rrggbb), rgb()/hsl() with numbers, a colour name, transparent, currentColor or var(--…)');
+    drop(k, 'not a CSS colour — use hex (#rrggbb), rgb()/hsl() (comma form: hsl needs % for saturation and lightness; rgb all numbers or all %), a colour name, transparent, currentColor or var(--…)');
   }
   else if (surface && !emitted.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
   else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
@@ -165,6 +165,13 @@ if (off !== 'true') {
   // asked with a clock at the start of time, so only unreadability — never lateness — says none.
   if (siteMeta['announce-until'] && announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
     drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
+  }
+  // …and a deadline it CAN read must still name its zone. The renderer hands the string to
+  // Date.parse and defines no zone of its own, so `2026-12-01T23:59:00` ends at 23:59 wherever the
+  // build happens to run (eight hours late for an owner at +08:00 on a UTC host), and a bare date is
+  // read as UTC midnight. Only an explicit `Z` or `±hh:mm` means the same moment everywhere.
+  else if (siteMeta['announce-until'] && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(siteMeta['announce-until'])) {
+    drop('announce-until', 'no time-zone offset — the build host\'s zone would decide when it ends; add the offset, e.g. 2026-12-01T23:59:00+08:00 (or Z for UTC)');
   }
   if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
 }
