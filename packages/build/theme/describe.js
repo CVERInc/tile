@@ -19,7 +19,7 @@ export function describeTheme() {
     file: 'ir/_theme.md',
     purpose: 'A site\'s look as a structured document: tokens, a few layout switches, and optional custom CSS. It compiles to the site\'s own theme.css plus a few _site.md keys, both of which travel with the site.',
     compile: {
-      cli: 'node packages/build/theme/cli.mjs ir/_theme.md theme.css — writes theme.css and prints the _site.md keys the theme owns. Refuses (exit 2, writes nothing) when the theme has no usable name or when a value would be dropped; --allow-dropped compiles anyway and still lists every drop.',
+      cli: 'node packages/build/theme/cli.mjs ir/_theme.md theme.css — writes theme.css and prints the _site.md keys the theme owns. Refuses (exit 2, writes nothing) when the theme has no usable name or when a value would be dropped, listing every problem; there is no override. Values are not validated as CSS, except colour tokens and the fonts:/announce rules.',
       library: 'compileTheme(meta, customCss) → { name, css, siteMeta }; parseThemeDoc(md) → { meta, body }; residueOf(body) → the custom CSS; structuralIssues(meta) and sanitizeThemeMeta(meta) say what would be ignored or dropped.',
       build: 'Pass theme.css to packages/build/cli.mjs as --theme; put the printed keys in ir/_site.md (theme: is the name the build stages the stylesheet under).',
     },

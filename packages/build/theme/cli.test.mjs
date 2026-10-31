@@ -78,14 +78,13 @@ test('refuses by name, writing nothing: no frontmatter, no name, no file', (t) =
   }
 });
 
-test('with --allow-dropped, an unknown key and an unsafe value are reported and compiled around', (t) => {
-  const r = run(t, '---\nname: x\ngd-bg: #fff\ngd-bogus: 1\ngd-text: red} body{display:none\n---\n', 'theme.css', ['--allow-dropped']);
-  assert.equal(r.status, 0, r.stderr);
+test('an unknown key and an unsafe value are both reported, and the theme is refused', (t) => {
+  const r = run(t, '---\nname: x\ngd-bg: #fff\ngd-bogus: 1\ngd-text: red} body{display:none\n---\n');
+  assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /gd-bogus: "1" dropped — not a key this vocabulary has/);
   assert.match(r.stderr, /gd-text: "red\} body\{display:none" dropped — unsafe: /);
-  const css = readFileSync(r.out, 'utf8');
-  assert.doesNotMatch(css, /display:\s*none|gd-bogus/);
-  assert.match(css, /--gd-bg: #fff;/);
+  assert.match(r.stderr, /2 problem\(s\) above — nothing was written/, 'every problem is listed in one run');
+  assert.equal(existsSync(r.out), false);
 });
 
 test('no arguments, or one too many, prints the usage and exits 2', () => {
@@ -137,7 +136,7 @@ test('🔴 a name the compiler would drop is refused before anything is written'
   }
 });
 
-test('🔴 every value the compiler would drop is named — key, value, reason — and refused unless --allow-dropped', (t) => {
+test('🔴 every value the compiler would drop is named — key, value, reason — and the theme is refused', (t) => {
   const doc = [
     '---', 'name: sample', 'gd-bg: #fff',
     'card: glassy',                    // not a listed treatment value
@@ -161,17 +160,8 @@ test('🔴 every value the compiler would drop is named — key, value, reason �
     assert.match(line, / — \S/, `the line for ${key} gives no reason: ${line}`);
   }
   assert.match(r.stderr.split('\n').find((l) => l.startsWith('✗ card:')) ?? '', /solid|surface, flat, glass, elevated/);
-  assert.match(r.stderr, /--allow-dropped/, 'the refusal names the way through');
-
-  // the same document, explicitly accepted: written, reported, exit 0
-  const ok = run(t, doc, 'theme.css', ['--allow-dropped']);
-  assert.equal(ok.status, 0, ok.stderr);
-  assert.ok(existsSync(ok.out));
-  assert.match(ok.stderr, /card: "glassy"/);
-  const css = readFileSync(ok.out, 'utf8');
-  assert.match(css, /--gd-bg: #fff;/);
-  assert.doesNotMatch(css, /banana|display:\s*none|glassy|--gd-band: #f3e9dc/);
-  assert.equal(ok.stdout.trim(), 'theme: sample', 'the dropped card value is not stamped');
+  assert.match(r.stderr, /6 problem\(s\) above — nothing was written\. Fix them and run it again\./);
+  assert.doesNotMatch(r.stderr, /allow-dropped|override/, 'there is no way through but fixing the source');
 });
 
 test('a clean theme reports no drops; a default treatment value is not a drop', (t) => {
@@ -189,9 +179,6 @@ function assertRefusedNaming(t, doc, needles) {
   assert.equal(existsSync(r.out), false, 'refused: no theme.css');
   assert.equal(r.stdout, '');
   for (const n of needles) assert.ok(r.stderr.includes(n), `stderr does not name ${JSON.stringify(n)}:\n${r.stderr}`);
-  const ok = run(t, doc, 'theme.css', ['--allow-dropped']);
-  assert.equal(ok.status, 0, `--allow-dropped must compile anyway:\n${ok.stderr}`);
-  for (const n of needles) assert.ok(ok.stderr.includes(n), `--allow-dropped still lists ${JSON.stringify(n)}`);
   return r;
 }
 
@@ -315,14 +302,13 @@ test('🔴 fonts: only an absolute https URL or a root path, each resolving to a
   }
 });
 
-test('🔴 with --allow-dropped, a dropped value is NOT printed among the _site.md keys', (t) => {
-  const r = run(t, '---\nname: s\nfonts: mailto:owner@example.org\nannounce: Hi\nannounce-until: tomorrowish\n---\n', 'theme.css', ['--allow-dropped']);
-  assert.equal(r.status, 0, r.stderr);
+test('🔴 a refused theme advertises no _site.md keys at all — nothing to paste, nothing half-applied', (t) => {
+  const r = run(t, '---\nname: s\nfonts: mailto:owner@example.org\nannounce: Hi\nannounce-until: tomorrowish\n---\n');
+  assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /fonts: "mailto:owner@example\.org" dropped/);
-  assert.doesNotMatch(r.stdout, /^fonts:/m, 'the dropped font must not be advertised for _site.md');
-  assert.doesNotMatch(r.stdout, /^announce-until:/m, 'nor the unreadable deadline');
-  assert.match(r.stdout, /^theme: s$/m);
-  assert.match(r.stdout, /^announce: Hi$/m, 'what was not dropped is still printed');
+  assert.match(r.stderr, /announce-until: "tomorrowish" dropped/);
+  assert.equal(r.stdout, '');
+  assert.equal(existsSync(r.out), false);
 });
 
 // ── round 7: a root path is judged by where a browser RESOLVES it, not by how it is spelled ─────
@@ -396,5 +382,17 @@ test('the README and --help state the narrowed contract the CLI actually keeps',
   for (const text of [README, usage]) {
     assert.match(text, /NOT validated as CSS/);
     assert.match(text, /colour tokens/);
+  }
+});
+
+// ── round 11: two outcomes only — usable (exit 0, written) or refused (exit 2, nothing written) ─
+
+test('🔴 there is no override: --allow-dropped is an unknown option, refused, nothing written', (t) => {
+  for (const doc of ['---\nname: s\ngd-bg: #zzzzzz\n---\n', '---\nname: s\nannounce: Sale\nannounce-until: tomorrowish\n---\n']) {
+    const r = run(t, doc, 'theme.css', ['--allow-dropped']);
+    assert.equal(r.status, 2, `${doc}\n${r.stderr}`);
+    assert.match(r.stderr, /unknown option --allow-dropped/);
+    assert.equal(existsSync(r.out), false, 'nothing written');
+    assert.equal(r.stdout, '');
   }
 });

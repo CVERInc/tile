@@ -90,8 +90,11 @@ the renderer itself would not use (a deadline it cannot read, which hides the wh
 an announcement link it refuses — judged by the renderer's own `announceModel` and `safeHref`,
 imported, not copied), or a `fonts:` value outside its allowlist — the first line names each one
 (`✗ card: "glassy" dropped — not one of surface, flat, glass, elevated`), writes nothing, and exits 2.
-Fix them, or add `--allow-dropped` to compile without them; the list is printed either way. A name
-that is not a plain filename (`../oops`) is always refused: the build finds the stylesheet by it.
+Every problem is listed in one run. **There are exactly two outcomes and no override:** everything
+you wrote is usable (exit 0, `theme.css` written, keys printed), or the theme is refused (exit 2,
+nothing written, nothing printed) — fix the source and run it again. A name that is not a plain
+filename (`../oops`) is refused the same way: the build finds the stylesheet by it. (The library
+functions stay forgiving for a program that calls them; the refusing is the CLI's.)
 
 `fonts:` goes into a `<link rel="stylesheet">` on every page, so it is an **allowlist**, checked
 against the exact href the renderer will emit (after its `safeHref`, which decodes entities): an

@@ -24,8 +24,14 @@
 // `name: ../oops` all exited 0 with a success line, while the card look, the band and the theme's
 // NAME (the one thing the build looks the stylesheet up by) silently went missing. A person at a
 // terminal has no editor between them and that silence, so here every drop is named — key, value,
-// reason — and refused unless they say `--allow-dropped`. That includes what the forgiving parser
-// never hands over: a line it cannot read, and the earlier value of a key written twice.
+// reason — and refused. That includes what the forgiving parser never hands over: a line it cannot
+// read, and the earlier value of a key written twice.
+//
+// 🔴 TWO OUTCOMES, NO OVERRIDE. There used to be an `--allow-dropped` that compiled anyway, and every
+// review of it found the same shape: a value REPORTED as dropped still shaped the result (a refused
+// colour still landed in theme.css; dropping an unreadable deadline turned a card that takes itself
+// down into a band that never does). "Compile without it" is a second compiler, and the library
+// is already the forgiving one for programmatic callers. Here it is usable, or it is refused.
 //
 // 🔴 The drops are found by reading the OUTPUT, not by restating the compiler's rules: a key the
 // author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
@@ -45,26 +51,24 @@ import { isCssColour } from './css-colour.js';
 import { safeHref } from '../../sitetile/site-core.js';
 import { announceModel } from '../../sitetile/astro/src/lib/announce.mjs';
 
-const USAGE = `usage: node packages/build/theme/cli.mjs <_theme.md> [theme.css] [--allow-dropped]
+const USAGE = `usage: node packages/build/theme/cli.mjs <_theme.md> [theme.css]
 
   Writes the compiled stylesheet to [theme.css] (default: ./theme.css) and prints the _site.md
   keys this theme owns on stdout. Put them in your _site.md: the build looks the stylesheet up
   by the theme: name, and reads fonts / announce / the treatment switches from there.
 
-  --allow-dropped   compile even when some values would be dropped (each is still listed)
-
 exit: 0 compiled — every key you wrote reached theme.css or the printed _site.md keys. Values are
       passed through and are NOT validated as CSS, except colour tokens and the fonts: /
       announce rules.
-      2 refused, nothing written (no frontmatter, an unusable name, or a dropped value without
-      --allow-dropped — the message says which)
+      2 refused, nothing written: every problem is listed (no frontmatter, an unusable name, a
+      value that would be dropped). There is no override — fix the source and run it again.
 `;
 
 const args = process.argv.slice(2);
-const allowDropped = args.includes('--allow-dropped');
-const positional = args.filter((a) => a !== '--allow-dropped');
-const [src, out = 'theme.css', ...rest] = positional;
-if (!src || rest.length || positional.some((a) => a.startsWith('-'))) { console.error(USAGE); process.exit(2); }
+const flag = args.find((a) => a.startsWith('-'));
+if (flag) { console.error(`✗ unknown option ${flag} — this command takes no options\n\n${USAGE}`); process.exit(2); }
+const [src, out = 'theme.css', ...rest] = args;
+if (!src || rest.length) { console.error(USAGE); process.exit(2); }
 
 let md;
 try { md = readFileSync(src, 'utf8'); } catch (e) { console.error(`✗ cannot read ${src}: ${e.code ?? e.message}`); process.exit(2); }
@@ -202,7 +206,7 @@ if (set('type-scale') && !seen.has('type-scale')) {
   if (!/--gd-h3: /.test(light)) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
 }
 
-const mark = allowDropped ? '⚠' : '✗';
+const mark = '✗';
 for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
 for (const [key, at] of dupes) {
   const last = at[at.length - 1];
@@ -211,8 +215,8 @@ for (const [key, at] of dupes) {
 }
 for (const d of dropped) console.error(`${mark} ${truncateCssText(d.key)}: ${show(d.value)} dropped — ${d.reason}`);
 const problems = unread.length + dupes.length + dropped.length;
-if (problems && !allowDropped) {
-  console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them, or pass --allow-dropped to compile without them.`);
+if (problems) {
+  console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them and run it again.`);
   process.exit(2);
 }
 
@@ -220,7 +224,5 @@ writeFileSync(out, css);
 
 // Every key the theme OWNS, in a fixed order. A key the theme does not set is not printed — and if
 // your _site.md still carries it from an earlier theme, delete it there: the theme is its source.
-// A value reported as dropped is not advertised here either, even under --allow-dropped: pasting
-// these lines must give the site exactly what the compile kept.
-for (const k of THEME_SITE_KEYS) if (siteMeta[k] != null && !seen.has(k)) console.log(`${k}: ${siteMeta[k]}`);
+for (const k of THEME_SITE_KEYS) if (siteMeta[k] != null) console.log(`${k}: ${siteMeta[k]}`);
 console.error(`✓ wrote ${out} — the keys above belong in _site.md (theme-owned: ${THEME_SITE_KEYS.join(', ')})`);

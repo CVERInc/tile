@@ -4,7 +4,7 @@
 // and hsl()/hsla() with numeric arguments (comma or space syntax, optional `/ alpha`), the CSS named
 // colours, `transparent`, `currentColor`, and `var(--name)` with an optional fallback that is itself
 // a colour. Anything else is "not a colour" even if some browser would accept it (lab(), color-mix(),
-// …) — a refusal the author can override with --allow-dropped beats a silent wrong background.
+// …) — a refusal the author can act on beats a silent wrong background.
 //
 // Not imported by the compiler: what reef (or anyone) vendors from theme-compile.js does not change.
 
