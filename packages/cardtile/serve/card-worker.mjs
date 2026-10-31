@@ -175,8 +175,7 @@ const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
 const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
-// These single-segment paths are the site's, even though each matches the Card handle grammar.
-// If the apex route reaches this Worker, send them to the site's origin rather than a Card.
+// These site endpoints win even if someone creates a Card with the same handle.
 const APEX_SITE_PATHS = new Set(['report', 'pricing', 'login', 'edit', 'try']);
 const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, '').toLowerCase());
 
@@ -193,9 +192,7 @@ const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, ''
 export function movedTo(host, url, method, env) {
   if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
   const p = url.pathname;
-  if (host === CANON_HOST) {
-    if (p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
-  } else if (host !== APEX_HOST || !APEX_HANDLE_PATH.test(p) || isApexSitePath(p)) return null;
+  if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
   return `https://${CARDS_HOST}${p}${url.search}`;
 }
 // cacheable at the edge and in the browser; a day, so a correction does not wait a year to arrive
@@ -642,10 +639,23 @@ const router = {
     const api = await handleApi(request, env, url);
     if (api) return api;
 
-    // reef#2725 — after the move, the old Card addresses are redirects and nothing else. Before any
-    // store read: a printed QR code hits this forever, and it costs one header lookup. See movedTo.
-    if (url.pathname === '/_api') return NOT_RELAYED();
-    if (reqHost === APEX_HOST && isApexSitePath(url.pathname)) return fetch(request);
+    // reef#2725 — the old Card host redirects before any store read. Apex paths need a Card lookup
+    // before redirecting, since the site's route table can grow without a cardtile change.
+    if (movedToCardsHost(env)) {
+      if (url.pathname === '/_api') return NOT_RELAYED();
+      // An apex segment belongs to the site unless the current Card body exists. The site adds
+      // routes independently of this package, so a static route list cannot decide redirects.
+      if (reqHost === APEX_HOST && APEX_HANDLE_PATH.test(url.pathname)) {
+        const handle = url.pathname.replace(/^\/|\/$/g, '').toLowerCase();
+        if (!isApexSitePath(url.pathname) && (request.method === 'GET' || request.method === 'HEAD') && env?.CARDS) {
+          const { md } = await liveCard(env.CARDS, handle);
+          if (md != null) return new Response(null, { status: 301, headers: {
+            Location: `https://${CARDS_HOST}${url.pathname}${url.search}`, 'Cache-Control': MOVED_CACHE,
+          } });
+        }
+        return fetch(request);
+      }
+    }
     const moved = movedTo(reqHost, url, request.method, env);
     if (moved) return new Response(null, { status: 301, headers: { Location: moved, 'Cache-Control': MOVED_CACHE } });
 

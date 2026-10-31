@@ -1504,7 +1504,7 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
 });
 
 test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.cards, path and query intact, cacheable', async () => {
-  const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...ON };
+  const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, 'some-handle': SERVING_CARD }), ...ON };
   for (const [from, to] of [
     ['https://card.feelreef.com/t', 'https://reef.cards/t'],
     ['https://card.feelreef.com/T?utm_source=qr', 'https://reef.cards/T?utm_source=qr'],
@@ -1571,6 +1571,52 @@ test('reef#2725: reserved apex paths stay on the site rather than redirect to Ca
     }
     assert.equal(forwarded.length, 15);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('reef#2725 r3: apex redirects only a live Card; unknown site routes reach origin', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push(request.url);
+    return new Response('site origin', { status: 200 });
+  };
+  try {
+    const store = recordingStore({ 'card:t:0': SERVING_CARD,
+      'gen:retired': 'aaaaaaaaaaaaaaaaaaaaaaaa', 'card:retired:0': SERVING_CARD });
+    const reads = [];
+    const get = store.get;
+    store.get = async (key) => { reads.push(key); return get(key); };
+    const env = { CARDS: store, ...ON };
+    for (const path of ['/signup', '/dashboard', '/card', '/absent', '/retired']) {
+      const res = await worker.fetch(new Request(`https://feelreef.com${path}`), env);
+      assert.equal(res.status, 200, `${path} must reach site origin when no Card exists`);
+      assert.equal(await res.text(), 'site origin');
+    }
+    const card = await worker.fetch(new Request('https://feelreef.com/t?from=qr'), env);
+    assert.equal(card.status, 301);
+    assert.equal(card.headers.get('location'), 'https://reef.cards/t?from=qr');
+    assert.deepEqual(forwarded, ['/signup', '/dashboard', '/card', '/absent', '/retired'].map((p) => `https://feelreef.com${p}`));
+    assert.ok(reads.includes('gen:t') && reads.includes('card:t:0'), 'redirect checks the current Card body');
+    assert.equal(reads.filter((key) => key === 'gen:t').length, 1, 'one generation read per candidate');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('reef#2725 r3: switch off keeps apex routing', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('switch-off request unexpectedly forwarded to origin'); };
+  try {
+    const store = recordingStore({ report: SERVING_CARD });
+    const apex = await worker.fetch(new Request('https://feelreef.com/report'), { CARDS: store });
+    assert.equal(apex.status, 404, 'switch off retains the old apex route result');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('reef#2725 r3: switch off keeps the old bare /_api response', async () => {
+  const api = await worker.fetch(new Request('https://card.feelreef.com/_api'), { CARDS: recordingStore() });
+  assert.equal(api.status, 404);
+  assert.match(await api.text(), /<!doctype html>/, 'bare /_api keeps its HTML 404');
+  assert.equal(api.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.equal(api.headers.get('vary'), 'Accept');
 });
 
 test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => {
