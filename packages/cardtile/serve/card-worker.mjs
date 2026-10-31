@@ -938,7 +938,7 @@ const router = {
     const oneCardHost = !!vanityHandle || !!resolved.root;
     const at = { host, vanity: !!vanityHandle };
     const want = cardPath(url.pathname, resolved.handle, oneCardHost);
-    if (!want) return vanityHandle ? html(SMALL_404, 404, env, resolved.handle, at) : notFound(env, resolved.handle, at);
+    if (!want) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // 410/404 below exactly as a missing body does.

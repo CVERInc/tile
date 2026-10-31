@@ -1321,7 +1321,7 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
     for (const [url, init] of [...servingRequests('card.example', handle, true), ['https://card.example/nothing', {}]]) {
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
-      assert.equal(res.headers.get('x-robots-tag'), url.endsWith('/nothing') && handle === 'missing' ? null : 'noindex, nofollow', url);
+      assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
     }
   }
 });
@@ -1798,7 +1798,9 @@ test('tile-lab#51 ②: every other "no card" door is the same shaped page — no
 
 
 test('tile#217 P1: stopped own-domain card exits match an unbound host including headers', async () => {
-  for (const [url, init] of [...servingRequests('card.example', 't', true), ['https://card.example/t', {}]]) {
+  for (const [url, init] of [...servingRequests('card.example', 't', true), ['https://card.example/t', {}],
+    ...['/t/nothing', '/wp-login.php', '/robots.txt'].flatMap((path) =>
+      [{}, { method: 'HEAD' }, { headers: { accept: 'text/markdown' } }].map((init) => [`https://card.example${path}`, init]))]) {
     const absent = await responseBytes(await worker.fetch(new Request(url, init), { PREVIEW: 'false', CARDS: recordingStore() }));
     for (const marker of [STOP, '']) {
       const stopped = await responseBytes(await worker.fetch(new Request(url, init), {
