@@ -1774,12 +1774,24 @@ test('Refs #218: custom-domain absent states share the small 404 on every card e
   }
 });
 
+test('Refs #218: an inverse binding without a card body cannot redirect an absent handle', async () => {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [{}, 'saas.feelreef.com'], [ON, 'reef.cards']]) {
+    for (const [url, init] of servingRequests(host, 't')) {
+      const env = { PREVIEW: 'false', ...sw };
+      const missing = await responseBytes(await worker.fetch(new Request(url, init), { ...env, CARDS: recordingStore() }));
+      const orphan = await responseBytes(await worker.fetch(new Request(url, init), { ...env, CARDS: recordingStore({ 'vanityof:t': 'card.example' }) }));
+      assert.deepEqual(orphan, missing, `${url}: inverse binding without a body redirects an absent handle`);
+    }
+  }
+});
+
 test('Refs #218: both root aliases share the absent-state policy', async () => {
-  for (const host of ['card.feelreef.com', 'reef.cards']) {
+  for (const [sw, host] of [[{}, 'card.feelreef.com'], [ON, 'card.feelreef.com'], [{}, 'reef.cards'], [ON, 'reef.cards']]) {
     for (const path of ['/feelreef', '/feelreef/']) {
       const url = `https://${host}${path}?lang=ja`;
-      const env = { PREVIEW: 'false', ...ON };
+      const env = { PREVIEW: 'false', ...sw };
       const missing = await responseBytes(await worker.fetch(new Request(url), { ...env, CARDS: recordingStore() }));
+      assert.equal(missing.status, host === 'card.feelreef.com' && sw === ON ? 301 : 404, `${url}: root alias route with switch ${sw === ON ? 'on' : 'off'}`);
       for (const seed of [{ feelreef: ROOT_CARD, 'stop:feelreef': STOP }, { 'gone:feelreef': '{}' }]) {
         const absent = await responseBytes(await worker.fetch(new Request(url), { ...env, CARDS: recordingStore(seed) }));
         assert.deepEqual(absent, missing, `${url}: root alias reveals absent state`);

@@ -1008,7 +1008,7 @@ const router = {
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
     const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (stopped == null && ownHost && host !== ownHost) {
+    if (cardMd != null && ownHost && host !== ownHost) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
