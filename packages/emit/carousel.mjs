@@ -10,6 +10,7 @@
 // Markdown is the CALLER's dialect (tile-lab#52 ruling 2026-10-31): `ctx.inline` / `ctx.block`.
 import { firstImage, imgTag, safeHref } from '../sitetile/site-core.js';
 import { attr, text, when } from './html.mjs';
+import { cellFrame } from './cell.mjs';
 
 // The nav glyph: a signet arrow at 18px, written inline (not signetArrow — this is the spelling the
 // carousel has always shipped, without the component's inter-node spaces).
@@ -26,6 +27,7 @@ function navArrow(left) {
  * @param {{ inline: (md: string) => string, block: (md: string, opts?: object) => string }} ctx
  */
 export function emitCarousel(section, params, ctx) {
+  if (params.cell) return carouselCell(params, ctx);
   const { eyebrow, cols, more, start, isBlogFull, cells } = params;
   // `more.href` / `c.href` are author-set; site-core.js's own `carousel` case gates both on
   // `isSafeHref`, and `safeHref` shares that ONE policy. The "view all" link is read first.
@@ -59,4 +61,82 @@ export function emitCarousel(section, params, ctx) {
         : '<div' + attr('class', cellClass) + '>' + inner + '</div>';
     }).join('')
     + ' </div> <button class="st-car-nav st-car-next" type="button" aria-label="Next"><span class="st-sr-only">Next</span>' + navArrow(false) + '</button> </div> </section>';
+}
+
+/**
+ * A Card `embed kind=slider|bubbles` cell (cell.mjs) — the Card's two carousels, in its own spelling.
+ * Values arrive resolved by the Card host (card-render reads the params, resolves `asset:` images,
+ * validates the two transform origins); each image is written through the Card's registry
+ * (`ctx.url` / `ctx.cssUrl`), in the order the slides are written.
+ *
+ *   `kind`     'slider' — a horizontal carousel you swipe, prev/next + dots, CSS scroll-snap and
+ *              anchor links (no JS); 'bubbles' — the speech-bubble pop, each image scaling out of a
+ *              tail origin over a static backdrop, auto-cycling, no controls
+ *   `images`   resolved image URLs (none → an empty frame) · `seed` the authored list as written: the
+ *              slide ids derive from it, so a card's anchors are stable across renders
+ *   `labels`   { prev, next, slide(n) } in the card's language
+ *   `origin` / `originNarrow`  bubbles only: validated `transform-origin` values · `bg` bubbles only:
+ *              the backdrop URL, or null for none
+ */
+function carouselCell(params, ctx) {
+  const { kind, images: imgs } = params;
+  if (!imgs.length) return cellFrame(params.cell, 'st-embed', 'embed', '');
+  const n = imgs.length;
+  if (kind === 'slider') {
+    const e = ctx.esc;
+    const { labels } = params;
+    const uid = 'sl' + Math.abs([...String(params.seed || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)).toString(36);
+    const slides = imgs.map((src, i) => {
+      const prev = `#${uid}-${(i - 1 + n) % n}`;
+      const next = `#${uid}-${(i + 1) % n}`;
+      return `<figure id="${uid}-${i}"><img src="${ctx.url(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+        + `<a class="st-slide-nav st-slide-prev" href="${prev}" aria-label="${e(labels.prev)}">‹</a>`
+        + `<a class="st-slide-nav st-slide-next" href="${next}" aria-label="${e(labels.next)}">›</a></figure>`;
+    }).join('');
+    const dots = imgs.map((_, i) => `<a class="st-slide-dot" href="#${uid}-${i}" aria-label="${e(labels.slide(i + 1))}"></a>`).join('');
+    const css = [
+      // 🔴 NO fixed aspect. chodaict read Incrediville's live page as `6x6(slide*5)` AND
+      // `3x6(slide*4)` — the same widget, two different heights, because the PICTURES differ. Pinning
+      // 2/1 here would be 「width decides shape」 all over again, four hours after I removed exactly
+      // that rule from features. The first slide's natural height sets the track; the rest are
+      // covered into it, so a set of squares is square and a set of banners is a banner.
+      `.st-slider{position:relative;width:100%;overflow:hidden;border-radius:inherit}`,
+      `.st-slider-track{display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none}`,
+      `.st-slider-track::-webkit-scrollbar{display:none}`,
+      `.st-slider figure{position:relative;flex:0 0 100%;margin:0;scroll-snap-align:center}`,
+      `.st-slider figure:first-child img{height:auto}`,
+      `.st-slider figure img{width:100%;height:100%;object-fit:cover;display:block}`,
+      `.st-slide-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;text-decoration:none;color:#fff;background:rgba(0,0,0,.42);backdrop-filter:blur(2px);opacity:.85;transition:opacity .2s,background .2s}`,
+      `.st-slide-nav:hover{opacity:1;background:rgba(0,0,0,.6)}`,
+      `.st-slide-prev{left:10px}.st-slide-next{right:10px}`,
+      `.st-slider-dots{position:absolute;left:0;right:0;bottom:9px;display:flex;gap:6px;justify-content:center}`,
+      `.st-slide-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.55);box-shadow:0 0 0 1px rgba(0,0,0,.18)}`,
+      // one image needs no controls, and controls on a single slide read as broken
+      n < 2 ? `.st-slide-nav,.st-slider-dots{display:none}` : '',
+    ].join('');
+    return cellFrame(params.cell, 'st-embed', 'embed', `<style>${css}</style>`
+      + `<div class="st-slider"><div class="st-slider-track">${slides}</div>`
+      + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div>');
+  }
+  const hold = 5;                                   // seconds each bubble is on screen (ancestor's)
+  const cycle = n * hold;
+  const { origin, originNarrow, bg } = params;
+  // the ancestor's stops for n=3 were 0%,33.3%,100% hidden / 3%,30% visible — i.e. hidden outside
+  // this figure's slot, popped in 3% after the slot opens until 3% before it closes.
+  const slot = 100 / n;
+  const inAt = 3;
+  const outAt = (slot - 3).toFixed(1);
+  const figures = imgs.map((src) => `<figure><img src="${ctx.url(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>`).join('');
+  const bgStyle = bg != null ? ` style="background-image:url('${ctx.cssUrl(bg)}')"` : '';
+  const css = [
+    `.st-carousel{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background-size:contain;background-position:center;background-repeat:no-repeat}`,
+    `.st-carousel figure{position:absolute;inset:0;margin:0;padding:0;display:flex;align-items:center;justify-content:center;opacity:0;transform-origin:${origin};animation:st-carousel-slide ${cycle}s infinite;animation-fill-mode:both}`,
+    `.st-carousel figure img{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0}`,
+    imgs.map((_, i) => `.st-carousel figure:nth-child(${i + 1}){animation-delay:${i * hold}s}`).join(''),
+    // 🔴 verbatim: scale(0.001) → scale(1) about the tail origin = "pops out of the mouth"
+    `@keyframes st-carousel-slide{0%,${slot.toFixed(1)}%,100%{opacity:0;transform:scale(0.001)}${inAt}%,${outAt}%{opacity:1;transform:scale(1)}}`,
+    `@media screen and (max-width:888px){.st-carousel figure{transform-origin:${originNarrow}}}`,
+    `@media(prefers-reduced-motion:reduce){.st-carousel figure{animation:none}.st-carousel figure:nth-child(1){opacity:1;transform:scale(1)}}`,
+  ].join('');
+  return cellFrame(params.cell, 'st-embed', 'embed', `<style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div>`);
 }

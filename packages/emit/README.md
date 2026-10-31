@@ -52,3 +52,29 @@ Phase 2: `grid` (with its cell, formerly `GridCell.astro`), `collection`, `hero`
 still imports `@cvernet/signet/arrow.css` for its hover morph. Form's build-time inputs (its own
 path, the locale home, the `thanks=` manifest id) arrive as params from the component, which is
 where `Astro.url`, `import.meta.glob` and `recordThanks()` stay.
+
+## The Card host (phase 3)
+
+`packages/cardtile/card-render.mjs` renders its cells through these same emitters. A Card cell is
+the section's markup in a Card frame (`cell.mjs`): the emitter is called with `params.cell`
+(`{ attrs }` — the bento pack's `data-span` / `data-w` / `data-cell`, Card-only) and writes
+`<div class="st-cell <root class>" … data-coral-type="<type>">` instead of its `<section>`, in the
+Card's compact spelling. Where a Card cell's markup differs from the Site section's, the difference
+is a parameter of the emitter; neither side's output changed (tile-lab#52 phase 3: every live Card
+fixture, `/try` example and lab card renders byte-identical, destination registry included).
+
+The Card injects its whole dialect through `ctx`, not only markdown: `ctx.inline` / `ctx.block`
+(`mdInline` / `mdBlock`), `ctx.esc` (cssmd `escHtml` + `"`) and `ctx.url` / `ctx.cssUrl` (an author
+URL, registered with the Card's destination registry where it is written, then escaped). Params
+are still read by the host — `p.<name>` stays in card-render's `switch (cell.type)`, which is what
+`ai-ops.test.mjs` scans, the same contract as the `.astro` wrappers' `pm.<name>`.
+
+| Card cell | emitter |
+|---|---|
+| `text` | `emitProse` |
+| `link` | `gridCell` (link shape) |
+| `social` | `emitSocial` |
+| `feature` | `gridCell` (`imageCards` shape) |
+| `profile` | `emitHero` (the QR mount `cp-icon` / `data-dynamic-coral="qr"` byte-identical) |
+| `video` | `emitEmbed` (click-to-load: poster + play, no iframe) |
+| `embed kind=slider` / `kind=bubbles` | `emitCarousel` (with their per-cell `<style>`) |

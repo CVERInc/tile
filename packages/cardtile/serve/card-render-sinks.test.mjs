@@ -36,7 +36,9 @@ const CONSTRUCT = new RegExp([
 ].join('|'), 'gi');
 const IMAGE_SET = /image-set\(/i;
 // what the `${…}` content must start with: the registry (optionally HTML-escaped on the way out) or a validated CSS value
-const GUARDED = /^(?:esc\(\s*)?(?:attrUrl|cssAttrUrl)\(|^esc\(\s*(?:cssColor|cssPos)\(/;
+// 🔴 tile-lab#52 phase 3: a cell's markup is written by a shared emitter (packages/emit), which receives this
+// renderer's registry as `ctx.url` / `ctx.cssUrl` (card-render's `dialect`, pinned below to esc(attrUrl) / esc(cssAttrUrl)).
+const GUARDED = /^(?:esc\(\s*)?(?:attrUrl|cssAttrUrl)\(|^esc\(\s*(?:cssColor|cssPos)\(|^ctx\.(?:url|cssUrl)\(/;
 
 // Output constructs that are NOT author-selected fetches: [construct text up to its closing `}`, how many times, why].
 // "Construct + value", never a whole line; the COUNT makes a second identical construct a new, unlisted sink.
@@ -48,8 +50,9 @@ export const FIXED = [
   ['href="https://feelreef.com/signup${ref}', 1, 'fixed host, handle-derived query only'],
   ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
-  ['src="${esc(src)}', 3, 'IMG_ICON (author image registered at its call site) and the slider / bubbles frames (`imgs` came through attrUrl at its definition, asserted below)'],
-  ['data-url="${esc(qrUrl)}', 1, "the QR code encodes the card's own address"],
+  ['src="${esc(src)}', 1, 'IMG_ICON (author image registered at its call site)'],
+  ['data-url="${e(qrUrl)}', 1, "the QR code encodes the card's own address (emit/hero.mjs heroCell, the QR mount)"],
+  ['background-image:url("${cssUrlString(bgOk)}', 1, "emit/hero.mjs's SITE hero (no Card cell writes it): bgOk is gated by safeSrc and quoted by cssUrlString"],
   ['href="#${id}', 1, 'in-page drawer anchor'],
   ['background-image:url("${img}', 1, 'the same BACKDROP_CSS url(), seen once more as a background declaration'],
   ['background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}', 1, 'BACKDROP_CSS: `dim` is a clamped number (colour.mjs), no URL in this declaration'],
@@ -105,9 +108,41 @@ export function unguardedSinks(src) {
   return out;
 }
 
-const SRC = readFileSync(new URL('../card-render.mjs', import.meta.url), 'utf8');
+const RENDER_SRC = readFileSync(new URL('../card-render.mjs', import.meta.url), 'utf8');
 
-test('sinks: every URL-bearing construct in card-render.mjs is guarded or listed as fixed', () => {
+// 🔴 tile-lab#52 phase 3: the cells' markup moved into packages/emit — card-render calls the shared emitters with its
+// own dialect — and the URL sinks moved with it. A scan of card-render.mjs alone would go quiet exactly as the sinks
+// left it, so the scan reads every packages/emit module card-render imports, and the emit modules THOSE import, found
+// from the import lines: an emitter is scanned the day it is imported, not the day somebody remembers to list it.
+export function emitSources() {
+  const seen = new Map();
+  const queue = [[new URL('../card-render.mjs', import.meta.url), RENDER_SRC]];
+  while (queue.length) {
+    const [base, src] = queue.shift();
+    for (const m of stripComments(src).matchAll(/^import\s[^;]*?from\s+'(\.{1,2}\/[^']+\.mjs)'/gm)) {
+      const u = new URL(m[1], base);
+      if (!/\/packages\/emit\/[^/]+\.mjs$/.test(u.pathname) || seen.has(u.href)) continue;
+      const text = readFileSync(u, 'utf8');
+      seen.set(u.href, text);
+      queue.push([u, text]);
+    }
+  }
+  return seen;
+}
+const EMIT = emitSources();
+const SRC = [RENDER_SRC, ...EMIT.values()].join('\n');
+
+test('sinks: the emit modules card-render imports are in the scan, and the registry it hands them is the registry', () => {
+  const names = [...EMIT.keys()].map((h) => h.split('/').pop()).sort();
+  for (const f of ['cell.mjs', 'prose.mjs', 'grid.mjs', 'social.mjs', 'hero.mjs', 'embed.mjs', 'carousel.mjs']) assert.ok(names.includes(f), `${f} is not scanned: ${names}`);
+  // the two names a Card branch may write a URL through are exactly the guarded calls, made in ONE place
+  const body = stripComments(RENDER_SRC);
+  assert.match(body, /\burl: \(raw\) => esc\(attrUrl\(ctx, raw\)\),/);
+  assert.match(body, /\bcssUrl: \(raw\) => esc\(cssAttrUrl\(ctx, raw\)\),/);
+  assert.equal((body.match(/\burl: \(raw\) =>/g) || []).length, 1);
+});
+
+test('sinks: every URL-bearing construct in card-render.mjs (and the emitters it renders cells with) is guarded or listed as fixed', () => {
   assert.deepEqual(unguardedSinks(SRC), []);
 });
 
@@ -118,11 +153,13 @@ test('sinks: the scan has something to scan, and every FIXED entry still exists 
   for (const [text, n] of FIXED) assert.equal(all.filter((c) => !c.guarded && c.text === text).length, n, `FIXED entry out of step with the renderer: ${text}`);
 });
 
-test('sinks: the two indirect cases are guarded where the value is made', () => {
+test('sinks: the indirect case is guarded where the value is made', () => {
   const body = stripComments(SRC).split('\n');
-  const defs = body.filter((l) => /const imgs = /.test(l));
-  assert.equal(defs.length, 2, 'slider and bubbles each define imgs');
-  for (const l of defs) assert.match(l, /attrUrl\(ctx,/, l);
+  // tile-lab#52 phase 3: the slider / bubbles images used to be registered where `imgs` was defined and escaped where
+  // written; they are written by emit/carousel.mjs through ctx.url now, so no frame may write a bare `src` any more.
+  const frames = body.filter((l) => /<figure[^`]*<img src="\$\{/.test(l));
+  assert.equal(frames.length, 2, 'slider and bubbles each write their frames');
+  for (const l of frames) assert.match(l, /<img src="\$\{ctx\.url\(src\)\}"/, l);
   const calls = body.filter((l) => /BACKDROP_CSS\(/.test(l) && !/const BACKDROP_CSS/.test(l));
   assert.equal(calls.length, 1);
   assert.match(calls[0], /BACKDROP_CSS\(cssAttrUrl\(ctx,/);

@@ -10,6 +10,7 @@
 // Markdown is the CALLER's dialect (tile-lab#52 ruling 2026-10-31): `ctx.inline` / `ctx.block`.
 import { ctaHtml, heroParts, linkButtonsHtml, safeSrc, cssUrlString } from '../sitetile/site-core.js';
 import { attr, text, when } from './html.mjs';
+import { cellFrame } from './cell.mjs';
 
 /**
  * @param {{ media: 'logo' | 'avatar', layout: string | null, eyebrow?: unknown, marqueeWords: string[],
@@ -19,6 +20,7 @@ import { attr, text, when } from './html.mjs';
  * @param {{ inline: (md: string) => string, block: (md: string) => string }} ctx
  */
 export function emitHero(section, params, ctx) {
+  if (params.cell) return heroCell(section, params, ctx);
   const { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta, bgOk } = params;
   // A SAFE destination still isn't a SAFE `url()` token: `cssUrlString` quotes it and CSS-escapes
   // the two characters a quoted CSS string treats specially (round 5, R4-P3-6).
@@ -63,4 +65,28 @@ export function emitHero(section, params, ctx) {
     + when(enter && bgOk, () => '<div class="st-hero-bg" aria-hidden="true"' + attr('style', style) + '></div>') + ' '
     + '<h1>' + ctx.inline(section.title) + '</h1> ' + ctx.block(section.body) + ' ' + ctaHtml(cta, 'st-hero-cta')
     + ' </section>';
+}
+
+/**
+ * A Card `profile` cell (cell.mjs) — the hero's `media=avatar` band in the Card's spelling: the
+ * avatar figure, then `.st-hero-text` with the name as the card's <h1>, the tagline (`section.body`,
+ * the Card's inline markdown) and the chips. Values arrive resolved by the Card host.
+ *
+ * 🔴 The figure is the QR dynamic coral's MOUNT CONTRACT and stays byte-identical
+ * (card-coral-profile-salvage): `data-dynamic-coral="qr"` with `data-url` (the card's own address —
+ * what the code encodes), `data-name`, `data-version="4"` (the live 33×33 density), and the avatar
+ * as `img.cp-icon` — the coral's installer is `querySelector('.cp-icon')`, and it themes off
+ * `--cp-*`. With no `avatar` the figure stays (the coral's anchor) and the <img> is omitted: an
+ * empty src would fetch the page itself as an image.
+ *
+ * @param {{ cell: { attrs: string }, name?: string, avatar?: string, qrUrl: string, qrLabel: string, chips: string[] }} params
+ */
+function heroCell(section, params, ctx) {
+  const e = ctx.esc;
+  const { name, avatar, qrUrl, qrLabel, chips } = params;
+  return cellFrame(params.cell, 'st-hero', 'profile',
+    `<div class="st-figure" data-dynamic-coral="qr" data-url="${e(qrUrl)}" data-name="${e(name)}" data-version="4">`
+    + `${avatar ? `<img class="cp-icon" src="${ctx.url(avatar)}" alt="${e(name)}" width="80" height="80" fetchpriority="high" role="button" tabindex="0" aria-label="${e(qrLabel)}">` : ''}</div>`
+    + `<div class="st-hero-text"><h1 class="st-hero-name">${e(name)}</h1><p class="st-hero-tagline">${ctx.inline(section.body)}</p>`
+    + `<div class="st-hero-meta">${chips.map((c) => `<span class="st-chip">${e(c)}</span>`).join('')}</div></div>`);
 }
