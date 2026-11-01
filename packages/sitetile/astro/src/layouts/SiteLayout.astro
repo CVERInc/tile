@@ -28,6 +28,7 @@ import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn, bubbleSearchOn } from '../lib/inbox-bubble.mjs';
 import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
+import { APPBAR_CSS, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel } from '../lib/appbar.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
@@ -389,6 +390,15 @@ const multilingual = hasLingo && locales.length > 1;
 // opaque icon set (gen-icons.sh output, which lands in public/ and therefore wins the icon paths
 // over the generated badge). Off → the ordinary icon set below, which every site now gets.
 const hasPwa = packages.includes('pwa');
+// reef#2790 — the installed-app bottom bar (lib/appbar.mjs): only a site that can BE installed
+// (`packages: pwa`) and has a nav to move. Every other site renders exactly as before.
+// The bar is written (hidden) right after the footer, BEFORE the inbox mount, so the dock's
+// document-order rule puts the nav first and the tools after it. 🔴 Its three conditionals in the
+// template below are glued to their neighbours on one line on purpose: a conditional on a line of its
+// own leaves a whitespace node in every page, including the pages it renders nothing on — measured,
+// it was the only byte a non-pwa site's pages differed by.
+const appbar = hasPwa && navMenu.length > 0;
+const appbarPath = Astro.url?.pathname || '/';
 // current page's locale → its URL path + BCP-47 attr (only when lingo is on).
 // Lingo's "main language at root" rule: the root locale (the page's own `lang`)
 // lives at `/`, every OTHER locale at `/<lower-full-code>/`.
@@ -997,7 +1007,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         enough: while these sheets were still unlayered, they outranked the theme regardless of
         order or specificity once the theme itself moved into a layer. The intent was always this;
         the mechanism now matches it. */}
-    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}
+    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}{appbar && <style is:inline set:html={APPBAR_CSS}></style>}
     {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
@@ -1437,7 +1447,27 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         {footerLinks.length === 0 && !copyright && <p>{title}</p>}
       </slot>
     </footer>
-    {bubbleOn && (
+    {appbar && (
+      <dc-dock name="bar" data-st-appbar="" data-more-label={appbarMoreLabel(lang)} hidden="">
+        {navMenu.map((it) => {
+          const hrefOk = safeHref(it.href);
+          const kids = appbarFlatten(it);
+          if (!kids.length) {
+            return hrefOk
+              ? <a class="rf-tab" href={hrefOk} aria-current={appbarCurrent(hrefOk, appbarPath) ? 'page' : undefined} {...ext(hrefOk)}>{it.label}</a>
+              : <span class="rf-tab">{it.label}</span>;
+          }
+          const links = [...(hrefOk ? [{ label: it.label, href: hrefOk }] : []), ...kids.map((k) => ({ label: k.label, href: safeHref(k.href) })).filter((k) => k.href)];
+          return (
+            <div class="rf-tab rf-tab-group" data-current={links.some((l) => appbarCurrent(l.href, appbarPath)) ? '' : undefined}>
+              <details><summary>{it.label}</summary><div class="rf-tab-list">
+                {links.map((l) => <a href={l.href} aria-current={appbarCurrent(l.href, appbarPath) ? 'page' : undefined} {...ext(l.href)}>{l.label}</a>)}
+              </div></details>
+            </div>
+          );
+        })}
+      </dc-dock>
+    )}{bubbleOn && (
       <>
         <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined} data-search-index={bubbleSearch ? '/search-index.json' : undefined}></div>
         {/* reef#1921: a loader in place of `<script src>` — it fetches the 159 KB coral (same URL,
@@ -1510,6 +1540,6 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         })();
       </script>
     )}
-    <script>import '../packages/header-overlay/header-overlay.js';</script>
+    {appbar && <script>import '../packages/appbar/appbar.js';</script>}<script>import '../packages/header-overlay/header-overlay.js';</script>
     <Fragment set:html={siteEmbed} /></body>
 </html>
