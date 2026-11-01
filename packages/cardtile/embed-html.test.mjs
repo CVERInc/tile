@@ -19,7 +19,7 @@ import { parseCard, serializeCard, normalizeCell, removeToken, cellToRaw, kindAs
 import { parseParams } from '../sitetile/site-core.js';
 import { LEGACY_EMBED_LINES, legacyCard, gridOf } from './cards/embed-legacy-lines.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
-import { CELL_TYPES, PALETTE, BLANKS } from './ai-ops.mjs';
+import { CELL_TYPES, PALETTE, BLANKS, UNIVERSAL, DISPOSITION } from './ai-ops.mjs';
 
 const card = (...lines) => ['---', 'title: T', '---', '', '## grid', '', ...lines, ''].join('\n');
 const render = (md, ctx = {}) => renderCardHTML(md, { handle: 't', cardUrl: 'https://t.example/', ...ctx });
@@ -434,4 +434,35 @@ test('the shared definition: `embed` is a body of HTML, `slides` carries the car
   // a new embed is visibly something, and a new slideshow is not mistaken for HTML
   assert.ok(BLANKS.embed.body && /</.test(BLANKS.embed.body));
   assert.equal(parseCard(card(`- [ ] %% card: slides ${BLANKS.slides.rawParams} %%`)).cells[0].type, 'slides');
+});
+
+test('🔴 the grammar says an `embed` line with `kind=` is a slideshow — from both entries, and truthfully', () => {
+  const said = { embed: CELL_TYPES.embed.spelling, slides: CELL_TYPES.slides.spelling };
+  // An agent reads the STORED word. Told only that `embed` is pasted HTML, it rewrites
+  // `embed kind=slider images=…` with embed's fields and the slideshow is gone.
+  for (const [type, s] of Object.entries(said)) {
+    assert.equal(typeof s, 'string', `${type}: the grammar entry says nothing about the legacy spelling`);
+    assert.match(s, /`embed`/, `${type}: does not name the stored word`);
+    assert.match(s, /`kind=`/, `${type}: does not name the token that decides it`);
+    assert.match(s, /legacy spelling/, `${type}: does not say the spelling is the old one`);
+    assert.match(s, /saving it keeps the word `embed`/, `${type}: does not say the spelling survives a save`);
+    assert.match(s, /while `kind=` stays on the line/, `${type}: does not say how to edit it safely`);
+    assert.match(s, /under the word `slides`/, `${type}: does not offer the rewrite as slides`);
+  }
+  assert.match(said.embed, /legacy spelling of `slides`/);
+  // what such a line carries = every param `slides` honours, universal ones included, no more
+  const carried = /\(([^)]*)\)/.exec(said.embed)[1].split(/,\s*/).sort();
+  const slidesParams = Object.keys({ ...UNIVERSAL, ...CELL_TYPES.slides.params })
+    .filter((n) => ({ ...UNIVERSAL, ...CELL_TYPES.slides.params })[n].disposition !== DISPOSITION.RETIRED).sort();
+  assert.deepEqual(carried, slidesParams);
+
+  // ...and every claim is what the parser does
+  const old = '- [ ] %% card: embed kind=slider images=a.png w=6 %%';
+  const read = parseCard(card(old));
+  assert.equal(read.cells[0].type, 'slides', 'renders as a slideshow');
+  assert.ok(serializeCard(read).includes(old), 'saving keeps the word `embed`');
+  const asSlides = parseCard(card('- [ ] %% card: slides kind=slider images=a.png w=6 %%')).cells[0];
+  assert.deepEqual({ type: asSlides.type, params: asSlides.params }, { type: read.cells[0].type, params: read.cells[0].params },
+    'the same params under `slides` are the same cell');
+  assert.equal(parseCard(card('- [ ] %% card: embed images=a.png w=6 %%')).cells[0].type, 'embed', 'without `kind=` it is HTML');
 });
