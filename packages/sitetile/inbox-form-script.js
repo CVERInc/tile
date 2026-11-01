@@ -6,7 +6,7 @@
 // string side could not import. The text below is that literal verbatim (leading indent included),
 // only with `\`, backtick and `${` escaped for a template string.
 //
-// CVERInc/reef#1933 (S4b).
+// reef#1933 (S4b).
 //
 // reef#2204 — the outcome → sentence mapping and the "which shape did the forwarder answer in"
 // reader are ONE source text, embedded verbatim in the browser script below AND evaluated by

@@ -428,7 +428,7 @@ test('matchSubscribeResult answers null for an absent route and honours the decl
 	assert.equal(claimed.matchSubscribeResult(get(PAGE + '?' + PARAM + '=x'), route), route);
 });
 
-// ── 5b. the locale the buyer came from (CVERInc/reef#1910, last item) ────────
+// ── 5b. the locale the buyer came from (reef#1910, last item) ────────
 // The URL that sends a buyer here carries the shop's locale prefix — the caller
 // contract — so /zh-tw/<path> is the zh-tw shop's result page. Its shell is that
 // locale's home, its copy is that locale, and its way back is THAT home, the same

@@ -1,7 +1,7 @@
 // Generate qr-client.mjs by lifting the QR 表演 VERBATIM out of the live qr-anim.js and applying
 // ONLY surgical, auditable transforms (config injection + 2 fish guards + cutting the dead owner
 // edit-mode picker, which was the coral's last call back into the Heroku Python app). This keeps
-// chodaict's labour-of-love animation byte-for-byte; the diff is exactly the coupling removal.
+// the product owner's labour-of-love animation byte-for-byte; the diff is exactly the coupling removal.
 import fs from 'node:fs';
 
 const SRC = new URL('./qr-anim.legacy.js', import.meta.url).pathname;
@@ -54,7 +54,7 @@ block = block.replace(g2, 'if(!mw)return;' + g2);
 //    "can the old backend be switched off for this capability?" — with the picker in, the answer is no).
 //
 //    🔴 Nothing else goes. The 表演 — 11 modes, the morph, backCircle, overlay, focus trap — is
-//    chodaict's and stays byte-for-byte. The boundary is MEASURED by brace-matching, never eyeballed
+//    the product owner's and stays byte-for-byte. The boundary is MEASURED by brace-matching, never eyeballed
 //    (a hand-guessed "the previous closing brace" has eaten the function above it before).
 const editStart = block.indexOf(EDIT_MARK);
 if (editStart < 0) throw new Error('edit-mode branch not found');
@@ -79,7 +79,7 @@ for (const decl of ["var _qrSetting='G';", 'var _qrLabelOff="\\u95dc\\u9589";', 
 
 // 6. the OPENING KEYFRAME reads the avatar instead of a baked-in 80px.
 //
-//    chodaict: 「qr動畫因為大頭貼換大顆了,所以qr動畫的起始關鍵影格的大頭貼尺寸也應該跟大頭貼一樣?」
+//    The product owner: 「qr動畫因為大頭貼換大顆了,所以qr動畫的起始關鍵影格的大頭貼尺寸也應該跟大頭貼一樣?」
 //    Yes. The animation grows OUT of the avatar, so its first frame encodes the avatar's size — and
 //    that size was written when the avatar was a hard-coded 78px. It is `23.6cqw` now (7865fd9): still
 //    78px on a phone, 152px on a desktop card. So on anything wider than a phone the avatar visibly
@@ -105,7 +105,7 @@ if (/icon\.style\.width='80px'/.test(block)) throw new Error('a baked 80px avata
 
 // 7. the DAMAGE RATIO over the QR is locked, because a QR code is not a picture.
 //
-//    chodaict: 「大頭貼飛出來遮住QR的『比例』必須鎖定,外面大沒關係,飛出來後要不是讓QR更大
+//    The product owner: 「大頭貼飛出來遮住QR的『比例』必須鎖定,外面大沒關係,飛出來後要不是讓QR更大
 //    (桌機/平板還有空間),不然就是在手機上要讓大頭貼變小以符合破壞比例」.
 //
 //    A QR's error correction recovers a bounded fraction of its codewords — L 7%, M 15%, Q 25%,
@@ -123,14 +123,14 @@ if (/icon\.style\.width='80px'/.test(block)) throw new Error('a baked 80px avata
 //    avatar. Capping the avatar and leaving the disc alone would have measured "fixed" while the
 //    real occluder stayed oversized.
 //
-//    Both of chodaict's branches, in his order: grow the QR where there is room (desktop and tablet
+//    Both of the product owner's branches, in his order: grow the QR where there is room (desktop and tablet
 //    have it), and only shrink the avatar when there is not (a phone).
 const K_RECT = "var iconRect=icon.getBoundingClientRect();";
 if ((block.match(/var iconRect=icon\.getBoundingClientRect\(\);/g) || []).length !== 1) {
   throw new Error('iconRect anchor: expected exactly one');
 }
 // 🔴 THE MODE THAT OPENS MUST SCAN. Was 'G' (matrix rain) — every visitor got it on the first
-// open, and chodaict measured real phones failing on it. The eleven modes are NOT equal:
+// open, and the product owner measured real phones failing on it. The eleven modes are NOT equal:
 //
 //   I, K  `_hideAll()` then reveal — most of the cycle is not a QR at all
 //   A, J  dim EVERY (or every other) cell to 20% opacity — a contrast collapse, worst for a weak lens
@@ -139,7 +139,7 @@ if ((block.match(/var iconRect=icon\.getBoundingClientRect\(\);/g) || []).length
 //   B,C,H one row / ring / column, restored in ~100ms
 //   D     one cell plus its neighbours, restored in ~2s
 //
-// 🔴 C — SONAR. chodaict's own original default, and he said why: 「它最搭彈跳出來的動畫」. The card
+// 🔴 C — SONAR. The product owner's own original default, and he said why: 「它最搭彈跳出來的動畫」. The card
 // pops open from the avatar's centre and the sonar ring expands from the same point, so the QR
 // finishes the gesture the overlay started. I had picked D on damage alone and would have thrown
 // that away; C is in the same light band (one ring, 0.85 mask, restored in 80ms) — so his design
@@ -162,7 +162,7 @@ block = block.replace(K_RECT, K_RECT
   // ELEVEN animations that also remove cells, from the same budget. The constant was computed as if
   // the occluder were the only damage, and the animations spend from the same pool.
   //
-  // Measured by chodaict on the live card 2026-07-30: the 190px disc fails to scan under some of the
+  // Measured by the product owner on the live card 2026-07-30: the 190px disc fails to scan under some of the
   // modes; 160px reads. Area scales with d², so 0.10 × (160/190)² = 0.0709 — and 0.07 leaves the
   // animations 8 points of headroom instead of 5, a 60% larger margin for the thing that was
   // actually breaking it.
@@ -190,7 +190,7 @@ if (block.includes('var sz=312')) throw new Error('the fixed 312 survived');
 
 // 8. the ACCENT is the host card's, never the one it was lifted from.
 //
-//    chodaict, looking at another creator's card: 「qr 裡沒有完全照 accent 顏色,其中幾個混到紫色(顯然是
+//    The product owner, looking at another creator's card: 「qr 裡沒有完全照 accent 顏色,其中幾個混到紫色(顯然是
 //    〔那張卡〕的殘留)」. Correct. `#b890e8` is that card's accent, and in the source it WAS the
 //    right answer — the file only ever ran on one card. Transforms 1–2 parameterised the matrix and
 //    the URL and left the colour behind, so every card's QR painted some cells in another tenant's
@@ -206,7 +206,7 @@ if (block.includes('var sz=312')) throw new Error('the fixed 312 survived');
 //    uses two lines away — so this makes the two paths agree rather than inventing a mechanism.
 //
 //    🔴 Colour only. The 11 modes, the morph and every timing are untouched — same category as the
-//    geometry in 6 and 7, both of which chodaict also asked for by name.
+//    geometry in 6 and 7, both of which the product owner also asked for by name.
 const K_HEX = "cl.style.background='#b890e8'";
 const hexUses = (block.match(/cl\.style\.background='#b890e8'/g) || []).length;
 if (hexUses !== 6) throw new Error('accent literal: expected 6 assignments, found ' + hexUses);
@@ -219,7 +219,7 @@ if (block.includes('b890e8')) throw new Error("the lifted card's accent survived
 //    The coral wraps the avatar in `#qr-holder` and wrote that box's size INLINE, from
 //    `icon.offsetWidth/offsetHeight` at the moment it mounted. The avatar's size is not a constant
 //    (23.6cqw with a 56px floor, a 600px breakpoint, and the Deck shows it at 140px), so the box
-//    went stale the moment anything changed it after mount. Found on chodaict's iPhone
+//    went stale the moment anything changed it after mount. Found on the product owner's iPhone
 //    (tile-lab#55 補 4): the holder stayed 81px around a 140px avatar, the picture overflowed it to
 //    the right, and the avatar sat 30px off centre — on desktop too, where nobody had noticed.
 //
@@ -252,7 +252,7 @@ if (block.includes('b890e8')) throw new Error("the lifted card's accent survived
 
 const out = `// REEF with Card — QR dynamic coral, CLIENT (built by build.mjs into qr.js; do not edit qr.js).
 //
-// 🔴 The avatar-morph QR popup is chodaict's 心血 — it was born in Python, carried to Svelte, and
+// 🔴 The avatar-morph QR popup is the product owner's 心血 — it was born in Python, carried to Svelte, and
 // was about to be re-hand-carried into cardtile (每搬一次就可能壞). Making it a coral gives it ONE
 // home: the popup 表演 below is lifted VERBATIM from the live qr-anim.js; the only edits are (a) the
 // _qrMatrix is now COMPUTED (qr-core, so any URL works) instead of a server-baked literal, (b) the
@@ -281,7 +281,7 @@ import { qrMatrix } from './qr-core.mjs';
 
     // the matrix — COMPUTED, not shipped (this is the re-break fix)
     //
-    // EC level H (30%) — M(15%) → Q(25%) → H, each step taken because real phones still failed. Measured 2026-07-30 after chodaict reported a real-device
+    // EC level H (30%) — M(15%) → Q(25%) → H, each step taken because real phones still failed. Measured 2026-07-30 after the product owner reported a real-device
     // failure: some weaker phones could not scan DURING the animations. A signal from actual
     // hardware beats the arithmetic that said 0.07 was enough.
     //

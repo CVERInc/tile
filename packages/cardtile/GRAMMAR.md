@@ -64,7 +64,7 @@ over its mark; these thumbnails also retain their colours in mono mode.
 
 ## Embed and slides
 
-`embed` is pasted HTML, scripts included ([reef#2725](https://github.com/CVERInc/reef/issues/2725)):
+`embed` is pasted HTML, scripts included (reef#2725):
 
 ```markdown
 - [ ] %% card: embed w=3 %% <div id="t"></div><script>t.textContent = new Date().toLocaleTimeString()</script>
@@ -91,6 +91,6 @@ English; the editor's labels and hints use the existing nine-language flow in
 `w/cell-i18n.mjs`. The one-link-per-social-line explanation is already present
 in all nine languages. No editor strings or golden rows change here.
 
-These rules follow [reef#2026](https://github.com/CVERInc/reef/issues/2026) and
-[reef#2015](https://github.com/CVERInc/reef/issues/2015), implemented by
+These rules follow reef#2026 and
+reef#2015, implemented by
 [tile#125](https://github.com/CVERInc/tile/pull/125).

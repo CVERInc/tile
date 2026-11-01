@@ -45,7 +45,7 @@ export const iconOnerror = (last) => 'var f=(this.dataset.iconfallback||"").spli
     : 'else{this.onerror=null;this.style.display="none"}');
 
 /**
- * Upstream, two stages (CVERInc/reef#2026): DuckDuckGo first, Google when DuckDuckGo has nothing,
+ * Upstream, two stages (reef#2026): DuckDuckGo first, Google when DuckDuckGo has nothing,
  * then the card's own fallback. 🔴 Both are FIXED addresses with a validated domain (ICON_DOMAIN_RE)
  * in the path/query — the server never connects to an address a creator wrote. Neither endpoint is
  * documented, which is why there are two: each is the other's backup. Google answers an honest 404

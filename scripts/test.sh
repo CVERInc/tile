@@ -15,6 +15,12 @@ for f in i18n/*.json; do
   node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$f" || { echo "BAD JSON: $f"; exit 1; }
 done
 
+# Person handles, links to private repos, and (where this machine has it) the private term list —
+# over every tracked file, not only the lines a push adds. The lists and why each lives where it does
+# are in the script's header; the matched text is never printed, because CI logs here are public.
+echo "→ forbidden terms"
+node scripts/forbidden-terms.mjs
+
 echo "→ build (inlines core + i18n; needs python3 + bash)"
 bash hosts/obsidian/tugtile/build.sh >/dev/null
 bash hosts/obsidian/marktile/build-marktile.sh >/dev/null

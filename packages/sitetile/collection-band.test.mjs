@@ -2,7 +2,7 @@
 // an inner box — and a collection on a theme that says nothing about it keeps the page inset.
 //   run: node packages/sitetile/collection-band.test.mjs   (wired into scripts/test.sh via the glob)
 //
-// 🩸 CVERInc/reef#1869. The generic section floor (section-inset.test.mjs) caged the whole
+// 🩸 reef#1869. The generic section floor (section-inset.test.mjs) caged the whole
 // `<section class="st-collection">` at --gd-maxw. The coral's own markup had always been two
 // outer/inner pairs (`-head`/`-head-inner`, `-belt`/`-belt-inner`) — built so the belt could
 // span the viewport — so a theme that painted `.st-collection-belt` drew a box in the middle of

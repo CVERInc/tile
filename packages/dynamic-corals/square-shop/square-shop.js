@@ -216,7 +216,7 @@ function cartStorageEntries(cart) {
 // `apps/mixfairy/services/payments/byo/square_catalog.py#fetch_catalog_items` calls Square's
 // `search-catalog-items` ONCE and discards the cursor (there is no `cursor` anywhere in that
 // file), so a catalog longer than one page arrives HTTP 200, non-empty and SHORT. That backend
-// defect is tracked as CVERInc/reef#593 — it is the only place it can be repaired; nothing here
+// defect is tracked as reef#593 — it is the only place it can be repaired; nothing here
 // can fetch back the half of a catalog that was never sent. Reconciling
 // against that and writing the result back is not a stale-row cleanup; it is deleting, from the
 // shopper's own machine, irreversibly, rows the seller still sells. Measured as review round 2's
@@ -264,7 +264,7 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		// square-shop.js` in the private `reef` repo is a vendored copy of this file at 0.11.5,
 		// pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`,
 		// and it still holds this same line against a per-item index — so feelreef's own SPA cart
-		// loses the shopper's sibling variants exactly as this one did. Tracked as CVERInc/reef#592
+		// loses the shopper's sibling variants exactly as this one did. Tracked as reef#592
 		// and in ./PROVENANCE.md § "Still open". The repair there is a RE-VENDOR of this file plus a
 		// new sha, never a hand-patch of this one line: hand-patching makes the pin guard a file no
 		// build can reproduce. ./cart-variant-collapse.test.mjs is the basket that decides it either

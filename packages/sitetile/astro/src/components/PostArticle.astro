@@ -94,7 +94,7 @@ const commentsLabel = String(meta['blog-comments-label'] || 'Comments').trim();
 // "Home"), middle = the blog's own `blog-title`, leaf = this post's title. Absent → back-link as before.
 const showBreadcrumb = String(meta['blog-breadcrumb'] || '').trim() === 'true';
 const crumbHome = String(meta['breadcrumb-home'] || 'Home').trim();
-// CVERInc/reef#1910: the home of the locale this post's URL sits under (one definition, lingo/locale.mjs).
+// reef#1910: the home of the locale this post's URL sits under (one definition, lingo/locale.mjs).
 const crumbHomeHref = localeHomePath({ locales: meta.locales, pathname: Astro.url?.pathname });
 const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
 ---

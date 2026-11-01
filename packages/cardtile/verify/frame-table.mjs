@@ -211,7 +211,7 @@ for (const scheme of ['dark', 'light']) {
   if (edge) { console.log('     🔴 the header grew an edge on a backdrop card'); bad++; }
   // 🔴 REVERSED 2026-07-30. This used to REQUIRE a veil — a `--cp-ground` plate under the header on
   // any backdrop card — because stripping the frame had put a tagline on bare artwork at
-  // 1.89:1. chodaict: 「st-cell st-hero 目前疊超多層顏色,有沒有可能弄出『沒有背景色也好看的版本』?」
+  // 1.89:1. The product owner: 「st-cell st-hero 目前疊超多層顏色,有沒有可能弄出『沒有背景色也好看的版本』?」
   //
   // He was right, and the 1.89 was never the artwork's fault: the tagline was wearing `--cp-muted`,
   // a colour derived for a surface it was not on, and my "fix" then forced #fff, which is worse

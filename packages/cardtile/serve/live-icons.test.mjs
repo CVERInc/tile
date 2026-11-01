@@ -1,4 +1,4 @@
-// Link marks are fetched live, in colour — never an automatic built-in brand SVG (CVERInc/reef#2026).
+// Link marks are fetched live, in colour — never an automatic built-in brand SVG (reef#2026).
 //
 //   node --test packages/cardtile/serve/live-icons.test.mjs
 //

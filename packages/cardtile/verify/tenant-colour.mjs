@@ -1,6 +1,6 @@
 // No card wears another creator's brand colour.
 //
-// chodaict, looking at a creator's live card: 「qr 裡沒有完全照 accent 顏色,其中幾個混到紫色(顯然是
+// The product owner, looking at a creator's live card: 「qr 裡沒有完全照 accent 顏色,其中幾個混到紫色(顯然是
 // 另一位創作者的殘留)」. He was right, and it was bigger than the QR. `#b890e8` is ANOTHER creator's
 // accent — the card it was tuned on — and it was
 // baked as a bare literal into two places that run on EVERY card:

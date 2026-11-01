@@ -277,7 +277,7 @@ export function blankCell(type, strings = {}) {
  * The OPERATIONS a door offers on a Card. Shaped after reef-MCP's `get_page` / `save_page` on
  * purpose — a second grammar for the same job is drift.
  *
- * `seat` uses COAM's vocabulary WITH its prefix (`reef/docs/SPEC-coam.md` §2, the owner 2026-07-30):
+ * `seat` uses COAM's vocabulary WITH its prefix (`reef/docs/SPEC-coam.md` §2, the product owner 2026-07-30):
  * CO / CA / CM are the CUSTOMER's Owner / Admin / Manager. fO — feelreef's own Owner — is NOT on
  * this list and that is deliberate: 「fO 不是客戶站的隱形超級帳號」.
  */
@@ -320,7 +320,7 @@ export const OPS = {
  *
  * NB the canon's "Card" is the block-JSON one (`catalog.snapshot.json`: sizes 1x1…3x3, types
  * alliance / announcements / button / cover / divider). cardtile is a different artifact, and its
- * Heroku predecessor is a strangler target rather than a core to reuse — ruled by the owner
+ * Heroku predecessor is a strangler target rather than a core to reuse — ruled by the product owner
  * 2026-07-30: 「MixFairy 是 Bot」.
  */
 export const DEBT = {

@@ -235,7 +235,7 @@ test('🔴 SiteLayout derives the page\'s URL prefix from localeOf, not the raw 
   assert.doesNotMatch(layout, /lingo\.toUrlLocale\(lang\) !== defaultUrlLocale/, 'the old raw comparison is gone');
 });
 
-// ── CVERInc/reef#1910: one parser for `locales`, one definition of the default ──────────────
+// ── reef#1910: one parser for `locales`, one definition of the default ──────────────
 // 🩸 Eleven places split `locales` on commas themselves and nine took the first entry (or, in one
 // of them, the site config's `lang:` BEFORE it). The frontmatter reader is not YAML and hands the
 // value over verbatim, so each copy turned `[zh-TW, en-US]` into a directory called `en-us]`.
@@ -454,7 +454,7 @@ test('🔴 SiteLayout: alternates, the chooser link and its prefix all wait for 
 });
 
 
-// ── CVERInc/reef#1888: the banner's three sentences can be overridden per locale ──────────────
+// ── reef#1888: the banner's three sentences can be overridden per locale ──────────────
 // A site wanted a formal register and had no setting for it. The override opens TEXT ONLY, in the
 // site layer, as flat keys in the `locales` family (the site layer has no nested blocks):
 //   locales-banner-<url-locale>-prompt | -continue | -dismiss

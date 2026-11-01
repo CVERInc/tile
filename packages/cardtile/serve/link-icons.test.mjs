@@ -1,4 +1,4 @@
-// A link's brand mark, and the chain it falls back through (CVERInc/reef#2011).
+// A link's brand mark, and the chain it falls back through (reef#2011).
 //
 //   node --test packages/cardtile/serve/link-icons.test.mjs
 //

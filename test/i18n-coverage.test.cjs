@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Every key the code asks for exists in every locale.
  *
- * 🩸 WHY. On 2026-08-13 chodaict spotted `aria-label="顯示 QR code"` in the source and asked whether
+ * 🩸 WHY. On 2026-08-13 the product owner spotted `aria-label="顯示 QR code"` in the source and asked whether
  * CI should enforce "outward-facing code and comments must be all English". The obvious gate — grep
  * the public repo for CJK — was measured and rejected: 93.1% of the CJK occurrences in this tree are
  * CORRECT (locale data, CJK test fixtures for a CJK-first editor, regex character classes). A gate

@@ -2,7 +2,7 @@
 //
 // ── Why the write lives HERE and not in reef ─────────────────────────────────────────────────────
 //
-// chodaict ruled 乙案 on 2026-07-30: reef-MCP calls this Worker rather than vendoring cardtile. The
+// The product owner ruled 乙案 on 2026-07-30: reef-MCP calls this Worker rather than vendoring cardtile. The
 // reason is the assembly, not the storage — a save arrives as a THIN card and the stored assets have
 // to be put back around it, and only card-core knows where that lane begins. Vendoring the parser
 // into reef would mean two copies of the format, and the format is the product.

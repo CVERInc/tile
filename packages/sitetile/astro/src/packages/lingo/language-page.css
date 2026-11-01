@@ -1,7 +1,7 @@
 /* REEF with Lingo — the `/language` chooser page (the PRIMARY locale switcher).
  *
  * This is a page the PLATFORM draws: no content file stands behind it, so a site owner is not
- * looking at it while they write their theme (CVERInc/reef#1887). Three decisions follow from that.
+ * looking at it while they write their theme (reef#1887). Three decisions follow from that.
  *
  * 1. THE COLUMN IS PADDING, NOT A WIDTH. The page used to be a 32rem-wide box. A site-wide gutter
  *    such as `html .rf-main > * { padding-inline: max(1.5rem, calc(50vw - 30rem)) }` is a good rule

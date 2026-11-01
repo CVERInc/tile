@@ -1,7 +1,7 @@
 // The 404 page speaks the SITE's language, and its Language link lands on a page that exists.
 //   run: node packages/sitetile/not-found-locale.test.mjs   (globbed into scripts/test.sh)
 //
-// 🩸 CVERInc/reef#1886, CVERInc/reef#1868. Measured on a two-locale site whose default is English:
+// 🩸 reef#1886, reef#1868. Measured on a two-locale site whose default is English:
 // the 404 page was `<html lang="zh-Hant">` and read 找不到頁面 — the engine default, not the site's —
 // and its footer Language link was built for that wrong language instead of opening the site's
 // default-locale chooser. Every ordinary page on the same site was correct.
@@ -17,7 +17,7 @@
 // page uses). It tests the answer: real IR in, real HTML out, and the href resolved against the
 // files the build actually wrote.
 //
-// 🩸 CVERInc/reef#1910 is held here too, because its edges are read off the same kind of build: one
+// 🩸 reef#1910 is held here too, because its edges are read off the same kind of build: one
 // declared locale, a root page that disagrees with `locales`, list spellings the frontmatter reader
 // hands over verbatim, the way back from the 404's chooser, and the one definition of "the site's
 // default language". Each has a fixture below and is asserted on what the build WROTE.
@@ -67,7 +67,7 @@ const sdl = (meta, files = {}) => {
 };
 
 await test('🔴 the first declared locale outranks the site config\'s own `lang`', () => {
-  // 🩸 CVERInc/reef#1910. This said the opposite — "the site config's own `lang` wins over
+  // 🩸 reef#1910. This said the opposite — "the site config's own `lang` wins over
   // everything else" — and was the one reader of the site's default that did not put `locales`
   // first. Every URL on the site already obeyed `locales`; only the 404's language did not.
   assert.equal(sdl({ lang: 'ko-KR', locales: 'zh-TW, en' }, { 'home.md': 'sitetile-page: home\nlang: ja' }), 'zh-TW');
@@ -148,7 +148,7 @@ await test('🔴 #1868 systemPageLang: config `lang` kept; locales site unchange
   assert.equal(typeof blog.systemPageLang, 'function', 'lib/blog.mjs does not export systemPageLang');
   const files = glob({ '_site.md': 'brand: x', 'a.md': 'sitetile-page: a\nlang: en', 'b.md': 'sitetile-page: b\nlang: en' });
   assert.equal(blog.systemPageLang({ lang: 'ja' }, files), 'ja');
-  // 🩸 CVERInc/reef#2066: this said DEFAULT_LANG ("a locales site must keep its old answer") — the one
+  // 🩸 reef#2066: this said DEFAULT_LANG ("a locales site must keep its old answer") — the one
   // intentional inconsistency tile#135 left. A site that declares `locales` and says no `lang` speaks locales[0].
   assert.equal(blog.systemPageLang({ locales: 'en, zh-TW' }, files), 'en', 'a locales site speaks its first locale, like its 404');
   assert.equal(blog.systemPageLang({ locales: 'zh-TW, en' }, files), 'zh-TW');
@@ -166,7 +166,7 @@ const SITES = {
     'home.md': page('sitetile-page: home\ntitle: Tsuru Paper\nlang: en', 'Paper cranes'),
     'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW', '紙鶴'),
   },
-  // ── CVERInc/reef#2112: three locales, so the per-locale 404 is checked on a locale that is neither
+  // ── reef#2112: three locales, so the per-locale 404 is checked on a locale that is neither
   // the default nor the one every other fixture uses. `ja-JP` is declared second, `zh-TW` third.
   triEnJaZh: {
     '_site.md': '---\nbrand: Tsuru Paper\nlocales: en-US, ja-JP, zh-TW\n---\n',
@@ -186,7 +186,7 @@ const SITES = {
     'about.md': page('sitetile-page: about\ntitle: About\nlang: en', 'About'),
     'home.md': page('sitetile-page: home\ntitle: 折り鶴\nlang: ja', '折り鶴'),
   },
-  // ── CVERInc/reef#1910 ──
+  // ── reef#1910 ──
   // ONE declared locale and nothing else. `legal/terms` is nested on purpose: the dead hreflang was
   // built from the page's own path.
   oneLocale: {
@@ -257,7 +257,7 @@ const SITES = {
     'zh-tw/home.md': page('sitetile-page: home\ntitle: 紙鶴工坊\nlang: zh-TW\nlocales: zh-TW, ../kiln', '紙鶴'),
     'zh-tw/about.md': page('sitetile-page: about\ntitle: 關於\nlang: zh-TW', '關於'),
   },
-  // ── CVERInc/reef#1868: one language, no `locales`, nothing in `_site.md` ──
+  // ── reef#1868: one language, no `locales`, nothing in `_site.md` ──
   // English throughout.
   monoEn: {
     '_site.md': '---\nbrand: Tsuru Paper\n---\n',
@@ -285,7 +285,7 @@ const SITES = {
     'a.md': page('sitetile-page: a\ntitle: A\nlang: en', 'A'),
     'b.md': page('sitetile-page: b\ntitle: B\nlang: en', 'B'),
   },
-  // ── CVERInc/reef#2066: declared locales + a blog. The root pages are English, `locales` says
+  // ── reef#2066: declared locales + a blog. The root pages are English, `locales` says
   // English first, `_site.md` has no `lang`. A translated post sits under posts/zh-tw/.
   multiEnBlog: {
     '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nblog-search: true\nblog-label-routes: true\nblog-tag-routes: true\nblog-date-routes: true\n---\n',
@@ -298,7 +298,7 @@ const SITES = {
     // No `lang:` of its own: the /zh-tw/ directory is what says which language it is.
     'posts/zh-tw/p2.md': '---\ntitle: 紙鶴二\ndate: 2026-01-03\ntags: [crane]\n---\n內文。\n',
   },
-  // ── CVERInc/reef#2066, tile#136 review: the site config's `lang` DISAGREES with locales[0], and a
+  // ── reef#2066, tile#136 review: the site config's `lang` DISAGREES with locales[0], and a
   // blog is on. The base views' meta.lang is then ja-JP (from `_site.md`) although the site's default
   // is en-US; a view must not take that for "this is a translated view".
   configDisagreesBlog: {
@@ -308,7 +308,7 @@ const SITES = {
     'posts/p1.md': '---\ntitle: P1\ndate: 2026-01-02\ntags: [crane]\n---\nBody text.\n',
     'posts/ja-jp/p1.md': '---\ntitle: 折り鶴一\ndate: 2026-01-02\ntags: [crane]\n---\n本文。\n',
   },
-  // ── CVERInc/reef#1910 items 5 and 7: the engine's "home" links and the blog's hreflang. English
+  // ── reef#1910 items 5 and 7: the engine's "home" links and the blog's hreflang. English
   // default, zh-TW second; a post in both languages (p1) and one in English only (p2).
   homeLinks: {
     '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nbreadcrumb-label: Paper\nfooter-brand: Tsuru Paper\nfooter-cols: Shop: Cranes=/cranes\nblog-breadcrumb: true\n---\n',
@@ -320,7 +320,7 @@ const SITES = {
     'posts/p2.md': '---\ntitle: P2\ndate: 2026-01-03\n---\nBody text.\n',
     'posts/zh-tw/p1.md': '---\ntitle: 紙鶴一\ndate: 2026-01-02\nlang: zh-TW\n---\n內文。\n',
   },
-  // CVERInc/reef#1910 item 5, the pager: page size 1, two English posts (two pages), one translated
+  // reef#1910 item 5, the pager: page size 1, two English posts (two pages), one translated
   // (one page). Page 1 exists in both languages; English page 2 exists in one.
   homeLinksPager: {
     '_site.md': '---\nbrand: Tsuru Paper\nlocales: en, zh-TW\npackages: lingo, blog\nblog-page-size: 1\n---\n',
@@ -341,7 +341,7 @@ const SITES = {
     '_site.md': '---\nbrand: Nobody\n---\n',
     'home.md': page('sitetile-page: home\ntitle: Nobody', 'Nothing declared'),
   },
-  // ── CVERInc/reef#2112 r2 (tile#157 review): pages of the owner's own whose URL is `<seg>/404/`.
+  // ── reef#2112 r2 (tile#157 review): pages of the owner's own whose URL is `<seg>/404/`.
   // 🩸 The first rename moved ANY two-segment `…/404/` route, so this one-language site lost the
   // directory index of a page it wrote. `manual` is not a locale; nothing here declares one.
   monoManual404: {
@@ -486,7 +486,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       return rows.map((row) => ({ ...row, url: row.href === null ? null : new URL(row.href, `${ORIGIN}/language`) }));
     };
 
-    // ── CVERInc/reef#2112: one 404.html per declared non-default locale ──
+    // ── reef#2112: one 404.html per declared non-default locale ──
     // Every `404.html` a build wrote and every `404/` directory it left, relative to the output.
     const notFoundFiles = (b) => Object.keys(b.pages).filter((rel) => /(^|\/)404\.html$/.test(rel)).sort();
     const notFoundDirs = (b) => Object.keys(b.pages).filter((rel) => /(^|\/)404\/index\.html$/.test(rel)).sort();
@@ -686,7 +686,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.deepEqual([...new Set(inLanguage(notFound))], ['ja']);
     });
 
-    // ── CVERInc/reef#1868: a one-language site that is not zh-Hant ───────────────────────────
+    // ── reef#1868: a one-language site that is not zh-Hant ───────────────────────────
     for (const name of ['monoEn', 'monoEnSilentHome', 'noSiteFile']) {
       await test(`🔴 #1868 ${name}: the 404 and /preview/ speak English, and the JSON-LD says so`, () => {
         const { pages } = site(name);
@@ -708,7 +708,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
-    // ── CVERInc/reef#2066: a site that declares `locales` — every system page and blog view ───────
+    // ── reef#2066: a site that declares `locales` — every system page and blog view ───────
     await test('🔴 #2066 multiEnBlog: /preview, /search, tag, /devlog, post and archive are all `en`, like the 404', () => {
       const { pages } = site('multiEnBlog');
       const rels = ['404.html', 'preview/index.html', 'search/index.html', 'search/label/crane/index.html', 'tag/crane/index.html',
@@ -761,7 +761,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
-    // ── CVERInc/reef#2066, the last item: "`/zh-tw/search/` renders `<html lang="en">`" ─────────
+    // ── reef#2066, the last item: "`/zh-tw/search/` renders `<html lang="en">`" ─────────
     // 🩸 Measured on production (wtg, 2026-10-17): /search/, /zh-tw/search/, /zh-tw/preview/ and two
     // made-up paths all answered 404 with the SAME bytes (one md5) — the root 404.html, which speaks
     // the site's default language by the rule at the top of this file. The build writes no
@@ -798,7 +798,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
       assert.equal(existsSync(join(outDir, 'zh-tw', 'search')), false);
       assert.equal(existsSync(join(outDir, 'zh-tw', 'preview')), false);
-      // The ROOT 404 speaks the site's default, by the rule this whole file holds. 🩸 CVERInc/reef#2112:
+      // The ROOT 404 speaks the site's default, by the rule this whole file holds. 🩸 reef#2112:
       // this list used to hold `zh-tw/404.html` too, with "a per-locale 404 is a hosting question" — it
       // was, and the answer is one 404.html per declared locale, which Pages serves as the nearest one
       // up the tree. So a missing /zh-tw/… path is now answered by `zh-tw/404.html`, in Chinese.
@@ -824,7 +824,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.deepEqual(langLinks(notFound), [], 'a site with no locales grew a Language link');
     });
 
-    // ── CVERInc/reef#1910 · 1: one declared locale is not an install ──────────────────────────
+    // ── reef#1910 · 1: one declared locale is not an install ──────────────────────────
     for (const [name, lang] of [['oneLocale', 'zh-TW'], ['oneLocaleLingo', 'ko']]) {
       await test(`🔴 ${name}: no alternates, no x-default, no Language link, no chooser, no banner`, () => {
         const { outDir, pages } = site(name);
@@ -1027,7 +1027,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     await test('🔴 `return=` never takes a chooser row off this site', () => {
-      // 🩸 CVERInc/reef#1910. The script checked "starts with one slash". A browser reads `/\` as
+      // 🩸 reef#1910. The script checked "starts with one slash". A browser reads `/\` as
       // `//`, deletes a tab or newline between two slashes, and bare() itself removed a locale
       // prefix standing in front of two — each put another origin on the default locale's row.
       const hostile = ['/\\evil.example', '/\\/evil.example', '/\t/evil.example', '/\n/evil.example', '/zh-tw//evil.example',
@@ -1056,7 +1056,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(htmlLang(site('configDisagrees').pages['index.html']), 'en');
     });
 
-    // ── CVERInc/reef#1910 item 7: the engine's four "home" links follow the page's locale ─────────
+    // ── reef#1910 item 7: the engine's four "home" links follow the page's locale ─────────
     const homeHrefs = (html) => ({
       crumb: [...html.matchAll(/<nav class="[^"]*\brf-breadcrumb\b[^"]*"[^>]*>\s*<a href="([^"]*)"/g)].map((m) => m[1]),
       wordmark: [...html.matchAll(/<a class="rf-foot-wordmark" href="([^"]*)"/g)].map((m) => m[1]),
@@ -1079,7 +1079,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       }
     });
 
-    // ── CVERInc/reef#1910 item 5: the blog routes carry hreflang, measured by the route ───────────
+    // ── reef#1910 item 5: the blog routes carry hreflang, measured by the route ───────────
     await test('🔴 #1910 homeLinks: a post that exists in both languages names both, reciprocally, plus x-default', () => {
       const { pages } = site('homeLinks');
       const want = [{ tag: 'en', href: 'https://example.com/devlog/p1/' }, { tag: 'zh-Hant', href: 'https://example.com/zh-tw/devlog/p1/' },

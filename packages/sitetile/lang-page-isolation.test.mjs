@@ -3,7 +3,7 @@
 //        PLAYWRIGHT=/path/to/node_modules/playwright/index.js node …   (adds the measured half;
 //        index.mjs works too)
 //
-// 🩸 CVERInc/reef#1887. A two-language site wrote a site-wide side gutter in its theme. It was a
+// 🩸 reef#1887. A two-language site wrote a site-wide side gutter in its theme. It was a
 // sound rule for that site's full-width sections. The chooser at /language is a page the platform
 // draws, with a 32rem column, and the same padding took the whole column: the heading was left
 // with a few pixels and wrapped one character per line. The band behind the rows was a dark teal

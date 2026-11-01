@@ -520,7 +520,7 @@ body.is-phone .tugtile--prompting .tugtile__ctlbar { display: none; }
 }
 /* .tugtile-ed-tool, .tugtile-ed-find-b, .tugtile-prompt-x/ok all inherit everything from .tugtile-iconbtn above */
 /* …except size, for the TOOLBAR tools only. .tugtile-iconbtn is 40px around a 20px icon — half of it is empty,
-   which reads as "the buttons are too big" (it is the owner's word for it) and, on desktop, is what decides
+   which reads as "the buttons are too big" (it is the product owner's word for it) and, on desktop, is what decides
    whether sixteen tools need one row of chrome or three. The header ✕/✓ and the find bar keep 40: they are
    lone targets with room around them, not a dense row. Phone keeps a bigger target — a thumb is not a cursor,
    and the phone row scrolls sideways anyway, so shrinking there buys nothing worth the miss-taps. */

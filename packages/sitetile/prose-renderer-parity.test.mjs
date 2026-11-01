@@ -13,7 +13,7 @@
 //
 // CVERInc/tile#120 made them agree by moving every standalone image to one trailing
 // `.st-prose-imgs` and every links-only paragraph to one row before it — in both renderers.
-// CVERInc/reef#1933 (S6, chodaict's ruling) puts them back where the author wrote them: an
+// reef#1933 (S6, the product owner's ruling) puts them back where the author wrote them: an
 // images-only paragraph is a `figure.st-figure` in place (several images in one paragraph = one
 // figure holding them all), a links-only paragraph is a `.st-prose-btns` row in place, and there
 // is no `.st-prose-imgs` at all. The paragraphs are the ones `bodyHtml` already finds, so a fenced

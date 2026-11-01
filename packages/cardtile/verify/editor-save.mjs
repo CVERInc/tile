@@ -32,7 +32,7 @@ if (!_cfg.ok) { console.log(_cfg.why); process.exit(0); }
 const WRANGLER_CFG = _cfg.path;
 
 const KEEP = process.argv.includes('--keep');
-const SCRATCH = 'kitt-probe';
+const SCRATCH = 'probe-scratch';
 const GIF = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const API = 'https://card.feelreef.com';
 

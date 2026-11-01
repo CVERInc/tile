@@ -55,7 +55,7 @@ test('🔴 resolveHandle: a path names a card on our hosts only; a creator domai
   }
 });
 
-// tile-lab#51 (chodaict 2026-10-29): the bare old host is feelreef's own card too, not a directory —
+// tile-lab#51 (product owner 2026-10-29): the bare old host is feelreef's own card too, not a directory —
 // a visitor who cuts the handle off is asking "what is this?", and a Card answers by being one.
 test('resolveHandle: bare canonical host (no handle) → the root card, at the bare origin', () => {
   assert.deepEqual(resolveHandle('card.feelreef.com', '/'), { handle: 'feelreef', cardUrl: 'https://card.feelreef.com', root: true });
@@ -198,7 +198,7 @@ test('bubbles: the ancestor 表演 is carried verbatim — pops from the tail or
 });
 
 test('bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as', () => {
-  // 🩸 CVERInc/reef#1915. parseParams read a hyphenated name from its last hyphen on, so
+  // 🩸 reef#1915. parseParams read a hyphenated name from its last hyphen on, so
   // `origin-narrow=` set `narrow` and a card carrying the older spelling got its anchor through the
   // truncation. Names are read whole now; this holds that card where it was.
   const card = (params) => ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
@@ -228,7 +228,7 @@ test('🔴 slider is the COMMON carousel — swipeable, with prev/next, and no J
   assert.equal((html.match(/<figure id=/g) || []).length, 3);
   assert.match(html, /scroll-snap-type:x mandatory/, 'the browser does the swiping');
   assert.equal((html.match(/st-slide-nav/g) || []).length > 0, true, 'prev/next missing');
-  // 🔴 NO fixed aspect: chodaict read Incrediville as 6x6(slide*5) AND 3x6(slide*4) — same widget,
+  // 🔴 NO fixed aspect: The product owner read Incrediville as 6x6(slide*5) AND 3x6(slide*4) — same widget,
   // two heights, because the pictures differ. A pinned ratio here is 「width decides shape」 again.
   assert.ok(!/\.st-slider\{[^}]*aspect-ratio/.test(html), 'the slider pinned an aspect ratio');
   // 🔴 the controls are ANCHORS, so they work before any script and survive a dead one
@@ -285,7 +285,7 @@ test('🔴 a hyphenated param name is its own name — `yt-channel=` is not `cha
   // 🩸 This test used to lock the opposite: parseParams read `a-b=x` as the key `b`, so a
   // hyphenated param resolved to undefined, the code fell back to its default, and nothing ever
   // looked broken — "keep names hyphen-free" was the rule, and `yt-channel=` reaching `channel`
-  // through the truncation was the warning. Names are read whole now (CVERInc/reef#1915), so the
+  // through the truncation was the warning. Names are read whole now (reef#1915), so the
   // trap is gone and so is the accident: a name means what it says.
   const md = ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
     '- [ ] %% card: video w=6 h=4 channel="UCabcdefghijklmnopqrstuv" %% Latest',
@@ -1842,7 +1842,7 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
 
-// tile-lab#51 ③ (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」.
+// tile-lab#51 ③ (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」.
 // The root response carries no X-Robots-Tag on BOTH hosts; every customer path is unchanged.
 test('tile-lab#51 ③: the root card is indexable on active hosts; customer Cards keep their header', async () => {
   for (const [sw, host, cust] of [[{}, 'card.feelreef.com', 'noindex, nofollow'], [ON, 'reef.cards', 'noindex']]) {
@@ -1959,7 +1959,7 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
 
 // ── tile-lab#51 ②: "no card here" is a Card, and it is ONE page ────────────────────────────────────
 //
-// chodaict 2026-10-30: 「退役（`stop:` 標記）與不存在的公開頁一字不差，退役的人要的是消失」. The
+// The product owner 2026-10-30: 「退役（`stop:` 標記）與不存在的公開頁一字不差，退役的人要的是消失」. The
 // comparison is the same handle in two stores — retired, and never there — on every exit a visitor
 // or a crawler can reach, headers included. A retired Card that also has its own domain is in the
 // retired store: the old 301 to that domain would have named the binding.

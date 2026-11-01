@@ -1,6 +1,6 @@
 // The QR grows OUT of the avatar, so its first frame must BE the avatar.
 //
-// chodaict: 「qr動畫因為大頭貼換大顆了,所以qr動畫的起始關鍵影格的大頭貼尺寸也應該跟大頭貼一樣?」
+// The product owner: 「qr動畫因為大頭貼換大顆了,所以qr動畫的起始關鍵影格的大頭貼尺寸也應該跟大頭貼一樣?」
 //
 // The opening frame used to set `icon.style.width='80px'`, written when the avatar was a hard-coded
 // 78px. The avatar is `23.6cqw` now — still 78px on a phone, 152px on a desktop card — so anything
@@ -14,7 +14,7 @@
 // 390. That is the shape of the actual bug — invisible on a phone, wrong everywhere else — and a
 // harness that cannot reproduce it is not testing anything.
 //
-// 🔴 This measures GEOMETRY only. The 11 modes, the morph, the timings are chodaict's and are not
+// 🔴 This measures GEOMETRY only. The 11 modes, the morph, the timings are the product owner's and are not
 // touched, here or in the coral.
 //
 //   node packages/cardtile/verify/qr-open.mjs

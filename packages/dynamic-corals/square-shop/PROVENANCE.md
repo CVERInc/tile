@@ -178,7 +178,7 @@ lands in the same place for the same reason.
 - `connected: false` falls back to `renderBrowseOnly` when the edge has already SSR'd a grid into
   this root, like every other unreadable answer (round 3, P3-1). The arm was already safe — no
   till, storage untouched; it was not honest to the seller.
-- The backend truncation account now names `CVERInc/reef#593` (round 3, P3-3), which is the only
+- The backend truncation account now names `reef#593` (round 3, P3-3), which is the only
   place that defect can actually be repaired.
 - The repo-root guard reads `.json`/`.ts` as well as the `.js` family and counts files rather than
   directory entries (round 3, P3-2). Not a client change — no bearing on this version number.
@@ -228,7 +228,7 @@ occur anywhere in that file — while RSP's own `fetchSquareCatalogItems`
 200, non-empty and **short**, with no error anywhere. Every row off that page then looked exactly
 like a product the seller had deleted.
 
-🔴 **That backend defect has a ticket of its own: `CVERInc/reef#593`, OPEN.** It is the only place
+🔴 **That backend defect has a ticket of its own: `reef#593`, OPEN.** It is the only place
 it can actually be repaired — everything in this file is a client defending itself, and no client
 can fetch back the half of a catalog it was never sent. Whoever reads this section next should
 land there rather than concluding the premise is simply false and unowned. (#593's own text names
@@ -334,7 +334,7 @@ no version links the two. The cart-mode fall-through above is what makes a coral
 the worker is rebuilt, every shopper on `/shop` pays for a round trip the SSR was there to save.
 
 The fork in `reef` is still 0.11.5 and still loses this basket — see § "Still open" 1 and
-`CVERInc/reef#592`.
+`reef#592`.
 
 (The per-version log below skips 0.11.7–0.11.13, which were published without entries. This one is
 written because the version is about money that was actually lost.)
@@ -558,7 +558,7 @@ reaches the button (driven, mid-flight).
 0.11.2 closed the gap between the SSR card and the hydrated card and left one surface open, which
 it recorded below as a deliberate omission: the cart panel. A JPY shopper therefore read `¥1,400税込`
 on the card and, one click later, a bare `¥2,800` for two of them in the basket beside it — two
-different claims about the same money on the same screen. chodaict's tax decision (2026-08-28) is
+different claims about the same money on the same screen. The product owner's tax decision (2026-08-28) is
 one tax-inclusive price shown **everywhere** for JPY, so the omission is now closed rather than
 flagged.
 
@@ -859,7 +859,7 @@ version number in this registry means the client contract moved.
 ### Still open
 
 1. **Re-vendor this file into the feelreef fork** (and re-pin its sha256 in
-   `vendor-pristine.test.ts`) — `CVERInc/reef#592`, OPEN.
+   `vendor-pristine.test.ts`) — `reef#592`, OPEN.
 
    `apps/feelreef/src/lib/dynamic-corals/square-shop/square-shop.js` in `reef` is this file at
    **0.11.5**, pinned by sha256 in `apps/feelreef/src/lib/corals/square_shop/vendor-pristine.test.ts`.

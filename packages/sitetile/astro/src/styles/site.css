@@ -357,7 +357,7 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
    split — `-head`/`-head-inner`, `-belt`/`-belt-inner` — since it was written). The floor above
    caged the whole section at --gd-maxw, so a theme that painted `.st-collection-belt` got a box
    in the middle of the page instead of a band, and the born belt's own inner width could never be
-   reached (CVERInc/reef#1869).
+   reached (reef#1869).
 
    The section now opts out, and the floor moves one level IN, onto the boxes that were built to
    carry it. Same numbers, so a theme that says nothing about a collection keeps the geometry it
@@ -802,7 +802,7 @@ a.st-cell-link .st-cell-cta-labeled { display: inline-flex; align-items: center;
 p .st-img { display: inline; vertical-align: middle; }
 /* a HERO figure holding 2+ images (e.g. `![](a.jpg)![](b.jpg)…`) is an avatar cluster row —
    auto-detected from existing multi-image syntax, no new markdown needed.
-   🩸 CVERInc/reef#1933 S6: this selected EVERY multi-image figure on the page, while what it draws
+   🩸 reef#1933 S6: this selected EVERY multi-image figure on the page, while what it draws
    (3.5rem circles, next to the `.st-hero[data-media="avatar"]` portrait above) is the hero's avatar
    cluster. Outside the hero it already reached cta / social / grid / people / faq / timeline
    bodies, where an image-only paragraph has always been a figure — a pair of store badges or a
@@ -1436,7 +1436,7 @@ body:has(#st-ha-cart:checked) .rf-ha-overlay[data-ha-overlay="cart"] { display: 
 [id^="inbox-not-claimed"]:target { display: block; }
 
 
-/* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (CVERInc/reef#47) ──────────
+/* ── runtime-composed presentation: NEVER gated on [data-theme-custom] (reef#47) ──────────
    Every rule in this block styles DOM a native storefront / /membership / /account / result page
    composes at request time (server or client-island), inside a generated site's normal shell —
    reusing existing `--gd-*` tokens/`st-*` primitives, so a theme overrides it the ordinary way, by

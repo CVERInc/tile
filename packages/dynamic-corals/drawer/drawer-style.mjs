@@ -37,7 +37,7 @@ export const DRAWER_CSS = [
     // the close control — the QR popup's identity, this host's placement. It is a LINK, because
     // what it does is navigate back out of the fragment, and a link does that without script.
     //
-    // 🔴 TOP-LEFT, matching the QR popup. the owner: 「我覺得該全部放左上角,行為就是跟qr一樣關閉可關、
+    // 🔴 TOP-LEFT, matching the QR popup. The product owner: 「我覺得該全部放左上角,行為就是跟qr一樣關閉可關、
     // modal外也可關」. It used to float RIGHT, so a reader who learned where ✕ lives from one overlay
     // had to hunt for it in the other — and every overlay on a Card is the same promise, so it should
     // be the same gesture. The dismiss half already matched: the scrim is a clickable link, and the

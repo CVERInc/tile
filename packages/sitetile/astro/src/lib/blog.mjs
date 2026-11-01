@@ -480,7 +480,7 @@ export function siteMeta(contentGlob) {
 // The language of the SITE — for a route with no page behind it (the 404), which therefore has no
 // page `lang` to read.
 //
-// 🩸 CVERInc/reef#1886, #1868. siteMeta() used to answer this by accident: with no `_site.md` it
+// 🩸 reef#1886, #1868. siteMeta() used to answer this by accident: with no `_site.md` it
 // returns the HOME page's frontmatter, `lang` included. Once a site has a `_site.md` it returns
 // that instead, and `_site.md` carries `locales:` but usually no `lang:` — `lang` lives on each
 // page, because it is that page's <html lang>. So the 404 got no answer and took DEFAULT_LANG: on
@@ -501,7 +501,7 @@ export function siteMeta(contentGlob) {
 // Returns '' when none of them says anything, so the caller still takes the one shared
 // DEFAULT_LANG rather than this function becoming a tenth place a default lives.
 //
-// 🩸 CVERInc/reef#1910. 1 and 2 were the other way round — the only reader of "the site's default"
+// 🩸 reef#1910. 1 and 2 were the other way round — the only reader of "the site's default"
 // that did not put `locales[0]` first. A config with `lang: ja-JP` over `locales: en-US, ja-JP`
 // got a Japanese 404 whose Language link was the /ja-jp/ chooser, on a site whose `/` is English.
 // When the config's `lang` names the SAME locale as `locales[0]` (`zh-Hant` over `zh-TW`) it is
@@ -522,7 +522,7 @@ function siteLayerLang(meta, contentGlob) {
 }
 
 // The language most of the site's root pages declare — the third answer to "what language is this
-// site", for a site with no `locales:` and no `lang:` in its site config. 🩸 CVERInc/reef#1868.
+// site", for a site with no `locales:` and no `lang:` in its site config. 🩸 reef#1868.
 // This used to read the root home page ONLY, so a site whose home wrote no `lang` (or wrote a
 // different one from the rest) took the engine default on every route without a page behind it.
 // Counted over `content/*.md` (no sub-directories: a locale directory is another language by
@@ -554,7 +554,7 @@ function pagesLangMajority(contentGlob) {
 }
 
 // The language of a SYSTEM page's own chrome (/preview, /search, /search/label/…) — routes with no
-// page behind them. 🩸 CVERInc/reef#1868, #2066. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
+// page behind them. 🩸 reef#1868, #2066. They took `meta.lang || DEFAULT_LANG`, and `lang` is a
 // per-page key, so an English single-language site's preview said zh-Hant. siteDefaultLang, then the
 // one shared default. A site that declares `locales` used to be exempt (tile#135 kept its zh-Hant so
 // its artifacts stayed bit-identical) and its 404 disagreed with its /preview and /search; #2066
@@ -568,7 +568,7 @@ export function systemPageLang(meta, contentGlob) {
 export const LOCALE_VIEW = Symbol.for('sitetile.localeView');
 
 // The language of a BLOG view's <html lang> (/devlog index, a post, a tag/category/author/date
-// archive). 🩸 CVERInc/reef#2066. These took `meta.lang || DEFAULT_LANG`: on a site that declares
+// archive). 🩸 reef#2066. These took `meta.lang || DEFAULT_LANG`: on a site that declares
 // `locales` and writes no site-level `lang`, `meta.lang` is empty, so every one of them said zh-Hant
 // while the site's pages said `locales[0]`. The site's own language is siteDefaultLang's question,
 // answered once for the 404, the system pages and these.
@@ -1416,7 +1416,7 @@ export function blogSwitchLocales(meta, basePosts, corpora) {
 // blogAlternates: the hreflang set of a blog index / pager / post — the route's own measurement
 // (blogSwitchLocales' answer, handed down as `bannerLocales`), or '' for "advertise nothing" so the
 // layout falls to its content-file measurement, which finds none for a generated route.
-// CVERInc/reef#1910 item 5. A url that exists in ONE language has no alternate to name, so fewer
+// reef#1910 item 5. A url that exists in ONE language has no alternate to name, so fewer
 // than two is nothing — the same bar the language banner uses to draw at all.
 export function blogAlternates(bannerLocales) {
   return Array.isArray(bannerLocales) && bannerLocales.length >= 2 ? bannerLocales : '';

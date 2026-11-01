@@ -2,7 +2,7 @@
 //
 // Lives at the top level of packages/sitetile so site-core.js can import it from its own directory
 // (the reef vendor closure copies site-core's siblings); astro/src/packages/lingo/locale.mjs
-// re-exports from here, so Form.astro and every existing importer keep their path. CVERInc/reef#1933.
+// re-exports from here, so Form.astro and every existing importer keep their path. reef#1933.
 
 /**
  * The language a page declares when its site does not say.

@@ -26,6 +26,18 @@ jobs:
       # skips scrolled past inside a long green. Measured 2026-09-07 on a clean clone.
       - name: Install the renderer's dependencies
         run: npm ci --prefix packages/sitetile/astro
+      # scripts/forbidden-terms.mjs tier 2: the private term list never lives in this repo. If the
+      # repo secret CVER_FORBIDDEN_TERMS holds it, CI checks it too; without the secret that tier
+      # says it was skipped (the push-time content-guard still covers it on our machines).
+      - name: Arm the private term list (if the secret is set)
+        env:
+          TERMS: ${{ secrets.CVER_FORBIDDEN_TERMS }}
+        run: |
+          if [ -n "$TERMS" ]; then
+            printf '%s\n' "$TERMS" > "$RUNNER_TEMP/forbidden-terms"
+            echo "CVER_FORBIDDEN_TERMS=$RUNNER_TEMP/forbidden-terms" >> "$GITHUB_ENV"
+            echo "CVER_FORBIDDEN_TERMS_REQUIRED=1" >> "$GITHUB_ENV"
+          fi
       # build.sh inlines SortableJS + i18n via python3 (preinstalled on ubuntu-latest)
       - name: Build + test
         run: bash scripts/test.sh

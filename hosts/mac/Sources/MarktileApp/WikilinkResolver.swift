@@ -17,11 +17,11 @@ import Foundation
 // Why `.several` is a list of names and not a search: a full-text search answers "where does this
 // word appear", which is a different question from "which file is called this". Measured on the
 // first build: ⌘-click on [[dup]] beside two dup.md files gave 12 hits across 3,095 files — none
-// of them either dup.md. chodaict saw it (「裡面都會搜很多檔」); KITT proposed the chooser,
+// of them either dup.md. The product owner saw it (「裡面都會搜很多檔」); the agent proposed the chooser,
 // he answered 「好啊，感謝你這麼為我著想！」 (2026-10-14).
 //
 // A link to a note that does not exist does NOT create one, which is what Obsidian does. Ruled
-// 2026-10-14: KITT proposed it, chodaict answered 「同意，多謝！」. The reason is the same as the
+// 2026-10-14: The agent proposed it, the product owner answered 「同意，多謝！」. The reason is the same as the
 // app's whole scope — it opens one document and is not a vault's caretaker, so a ⌘-click that quietly
 // wrote an empty file into whatever folder the document sits in would litter places nobody chose.
 enum WikilinkResolver {
