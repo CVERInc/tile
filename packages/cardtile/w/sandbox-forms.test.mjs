@@ -312,8 +312,9 @@ test('every type in the palette adds a tile that serialises as THAT type', () =>
     assert.match(md, new RegExp(`%% card: ${type}\\b`), `${type}: the marker does not name the type`);
     assert.ok(!/^- \[ \]/.test(back[0].body), `${type}: the tugtile line prefix leaked into the body`);
   }
-  // CONTROL: the loop must have walked the whole palette, and the palette must be the seven types
-  assert.equal(PALETTE.length, 7, 'the palette is no longer seven types — this test was written for seven');
+  // CONTROL: the loop must have walked the whole palette, and the palette must be the eight types
+  // (reef#2725 split the old `embed` into `slides`, the carousel, and `embed`, pasted HTML)
+  assert.equal(PALETTE.length, 8, 'the palette is no longer eight types — this test was written for eight');
   assert.deepEqual([...PALETTE].sort(), Object.keys(CELL_TYPES).sort(),
     'the picker and the definition disagree about which types exist');
 });

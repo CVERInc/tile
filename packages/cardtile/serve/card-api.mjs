@@ -21,7 +21,7 @@
 // The consequence is stated plainly rather than left implicit: ANYONE holding this token can write
 // ANY card. It is an infrastructure credential, not a user credential, and it is scoped by being
 // held only by the hosted Worker.
-import { parseCard, serializeCard } from '../card-core.js';
+import { parseCard, serializeCard, CARD_MAX_BYTES, embedsOverCeiling } from '../card-core.js';
 import { cardDestinations } from './card-destinations.mjs';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
@@ -34,7 +34,8 @@ const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const VALID_ASSET_ID = /^[A-Za-z0-9_.\-]{1,128}$/;
 
 /** KV's per-value ceiling. Hitting it should read as a sentence, not as a store exception. */
-const KV_MAX_BYTES = 25 * 1024 * 1024;
+// the card's byte ceiling, declared where the renderer can read it too (an embed is refused against it)
+const KV_MAX_BYTES = CARD_MAX_BYTES;
 
 /** A preview is a look at an unsaved draft, not a publication. One hour is longer than any edit. */
 export const PREVIEW_TTL = 3600;
@@ -954,7 +955,10 @@ export class CardLifetime {
     const { md, orphans, diff, carried } = assembleSave(markdown, cur && cur.md);
     const bytes = utf8Bytes(md);
     if (bytes > KV_MAX_BYTES) {
-      return { status: 413, body: { error: `That would make the card ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
+      // reef#2725: when an embed's HTML is why, say which one — "the card is too big" sends the author
+      // looking at their pictures
+      const named = embedsOverCeiling(parseCard(md), bytes, KV_MAX_BYTES);
+      return { status: 413, body: { error: [`That would make the card ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.`, ...named].join(' ') } };
     }
     const wouldChange = !cur || md !== cur.md;
     // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a

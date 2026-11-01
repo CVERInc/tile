@@ -14,12 +14,12 @@
 // 🔴 A cell's MARKUP is not written here (tile-lab#52 phase 3). Each cell is a shared section emitter
 // (packages/emit) called with `params.cell` and this renderer's dialect (`dialect` below: mdInline /
 // mdBlock, esc, the destination registry): text → emitProse, link / feature → gridCell, social →
-// emitSocial, profile → emitHero, video → emitEmbed, embed → emitCarousel. What stays here is what only
+// emitSocial, profile → emitHero, video and embed → emitEmbed, slides → emitCarousel. What stays here is what only
 // a Card has: reading the params (`p.<name>` in renderCell — ai-ops.test.mjs scans it), assets, marks
 // and favicons, the drawer anchors, the bento pack (renderGrid), drawers, the page shell (frontmatter,
 // accent scale, footer) and the byte budget.
-import { packGrid } from './card-core.js';
-import { resolveBackdropDim, themeCss, DEFAULT_ACCENT } from './colour.mjs';
+import { packGrid, CARD_MAX_BYTES, utf8Length } from './card-core.js';
+import { resolveBackdropDim, themeCss, themeRootCss, DEFAULT_ACCENT } from './colour.mjs';
 // posterPath only — the renderer emits the path, the Worker serves it, and one definition keeps them
 // from drifting apart into a 404 nobody notices until a poster silently stops appearing.
 import { posterPath } from './yt.mjs';
@@ -201,10 +201,10 @@ const mdInline = (s, ctx) => esc(s)
 // a live card renders nothing at all in that case — which is why they live here, in this file's own
 // four-language table, rather than growing the rendered-card vocabulary.
 const LABELS = {
-  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture' },
-  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片' },
-  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加' },
-  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가' },
+  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture', embed: 'Embedded content' },
+  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片', embed: '嵌入的內容' },
+  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加', embed: '埋め込みコンテンツ' },
+  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가', embed: '삽입된 콘텐츠' },
 };
 
 /**
@@ -346,7 +346,11 @@ function linkIcon(p, url, ctx) {
 const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arrows === 'on' ? (ctx.arrow || '') : '')
   .replace(/__SIZE__/g, String(px)).replace('__CLASS__', cls).replace('__DIR__', dir ? ' signet-arrow' + dir : '');
 
-// The embed escape hatch: a self-contained block that isn't a native widget.
+// `slides` — the image carousel. Until reef#2725 (2026-10-31) this was `embed`, a generic word it
+// had borrowed; an old `embed kind=…` line is read as `slides` by the parser (card-core.js,
+// `legacySlides`) and lands here unchanged. `kind` defaults to `slider` only when it is ABSENT and
+// the cell was written under the new name. An old line is drawn exactly as before: its `kind=""` or
+// valueless `kind=` drew nothing then, and a default must not start publishing what it held.
 //
 // 🔴 kind=slider carries a SPEECH-BUBBLE ROTATION 表演 — and表演 is lifted VERBATIM, never
 // re-implemented. The first pass here re-wrote it as an opacity crossfade with scale(.98) and
@@ -366,7 +370,8 @@ const arrowOf = (ctx, px, cls = 'st-cell-arrow', dir = '--up-right') => (ctx.arr
 // said `origin-narrow=` worked — through the truncation. Names are read whole now, so that spelling
 // is read by its own name below, and the cards that carry it keep the anchor they were given.
 //   bg=      static backdrop the bubbles rotate over (the characters the tails point at)
-function renderEmbed(p, body, size, ctx = {}) {
+function renderSlides(p, size, ctx = {}, legacy = false) {
+  const kind = p.kind === undefined && !legacy ? 'slider' : p.kind;
   // 🔴 `slider` is the COMMON one — a horizontal carousel you swipe, with prev/next. `bubbles` is
   // the speech-bubble pop, which is what `slider` used to mean for everybody.
   //
@@ -379,15 +384,14 @@ function renderEmbed(p, body, size, ctx = {}) {
   // The pop animation is preserved verbatim under its own name; that one stored card is migrated
   // to `kind=bubbles` so nothing about it changes. Both carousels' markup (and their per-cell
   // <style>) is packages/emit/carousel.mjs's `carouselCell` (tile-lab#52).
-  if (p.kind !== 'slider' && p.kind !== 'bubbles') {
-    // 🔴 There is no generic embed. It had zero uses and spliced its body into the page UNESCAPED —
-    // on a renderer whose input can arrive from parsing a third party's page. A hatch nobody climbed
-    // through, opening onto a drop. `kind=slider` is the only embed, and it builds its own markup.
+  if (kind !== 'slider' && kind !== 'bubbles') {
+    // 🔴 Any other `kind` draws nothing — as it always did. The generic embed that once lived here
+    // spliced its body into the page UNESCAPED; HTML is `embed` now, and it goes in a sandbox (below).
     return '';
   }
   const images = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
   const cell = { attrs: size };
-  if (p.kind === 'slider') {
+  if (kind === 'slider') {
     const labels = { prev: label(ctx, 'prev'), next: label(ctx, 'next'), slide: (n) => label(ctx, 'slide', n) };
     return emitCarousel({}, { cell, kind: 'slider', images, seed: p.images, labels }, dialect(ctx));
   }
@@ -399,6 +403,51 @@ function renderEmbed(p, body, size, ctx = {}) {
     // `bg=` present but unresolvable still writes its (empty) url(), as it always did
     bg: p.bg ? resolveAsset(p.bg, ctx) : null,
   }, dialect(ctx));
+}
+
+// `embed` — the author's own HTML, scripts included (reef#2725, 2026-10-31).
+//
+// 🔴 WHY AN IFRAME, AND WHY ONLY THIS ONE TOKEN. Every Card lives on ONE origin (card.feelreef.com,
+// then reef.cards). A script of A's spliced into A's page runs as that origin — so when B, signed in,
+// opens A's card, A's script reads B's storage and cookies: cross-tenant XSS, structural, and no
+// AUP or report button stops it (the victim is the READER). `sandbox="allow-scripts"` without
+// `allow-same-origin` gives the document an OPAQUE origin: its scripts run, and they can reach no
+// storage, no cookie and no DOM of the card. Without `allow-top-navigation` it cannot take the reader
+// away; without `allow-popups`/`allow-forms`/`allow-modals` it cannot open windows, post forms or
+// raise dialogs over the card. One token, and every one left out is a defence — embed-html.test.mjs
+// names each.
+//
+// 🔴 THE ESCAPE IS THE WHOLE BOUNDARY. The document rides in `srcdoc="…"`; one `"` that is not
+// escaped ends the attribute, and everything after it is markup in OUR page — the attack, with the
+// sandbox politely standing next to it. `&` first (so an author's literal `&quot;` stays literal),
+// then `"`, and `<` `>` as well so a raw `</iframe>` never appears in our markup at all. Its own
+// function, not `esc`: `esc` is defined for text and attributes in general, and this is the one
+// value whose escaping is a security property — it should not change because `esc` did.
+// (The escape, the sandbox and the cell's box live in packages/emit/embed.mjs, the Card branch of
+// emitEmbed — beside the Site's `embed`, the same coral. This renderer builds the DOCUMENT: the
+// card's theme and the author's HTML, after the byte budget.)
+//
+// Size: the cell's own box, a square of its width (`w=6` is the card's width; there is no `h` any
+// more, and nothing in the frame can tell us its height — we do not open a channel to ask). Theme:
+// the card's `--cp-*` in the document's `:root`, so `var(--cp-ink)` inside means what it means on the
+// card.
+// the accent family the page's #cp-accent block declares, for the same accent (card.css's defaults
+// when the card names none) — the tokens below are color-mix()es of `--cp-accent`, so it must be here
+const embedAccentCss = (a) => `--cp-accent:${a};--cp-accent-bg:color-mix(in srgb,${a} 12%,transparent);--cp-accent-border:color-mix(in srgb,${a} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${a} 35%,transparent)`;
+function renderEmbedHtml(body, size, ctx = {}) {
+  const html = String(body || '');
+  if (!html.trim()) return '';
+  // 🔴 refused by name: an embed whose HTML alone is over the card's ceiling never reaches the page.
+  // A save refuses it first (card-api, `embedsOverCeiling`); this is the floor for anything rendered
+  // without being saved — a preview, a file opened locally.
+  const bytes = utf8Length(html);
+  if (bytes > CARD_MAX_BYTES) return `<!-- embed refused: ${bytes} bytes of HTML, over the card's ${CARD_MAX_BYTES}-byte ceiling -->`;
+  const accentC = ctx.accent ? cssColor(ctx.accent) : '';
+  const mode = ctx.theme === 'light' || ctx.theme === 'dark' ? ctx.theme : null;
+  const theme = `:root{${embedAccentCss(accentC || DEFAULT_ACCENT)}}${themeRootCss(mode, accentC)}body{margin:0;color:var(--cp-ink)}`;
+  const doc = `<!doctype html><meta charset="utf-8"><style id="cp-theme">${theme}</style>${html}`;
+  // the frame — the sandbox, the srcdoc escape, the square box — is the shared emitter's Card branch
+  return emitEmbed({}, { cell: { attrs: size }, srcdoc: doc, title: label(ctx, 'embed') }, dialect(ctx));
 }
 
 // How a cell's target becomes anchor attributes. A `#id` target opens a DRAWER (an overlay on this
@@ -548,8 +597,11 @@ function renderCell(cell, place, ctx) {
       const icon = linkIcon(p, url, ctx);
       return gridCell({ cell: { attrs: size }, anchor: a, icon, arrow: arrowOf(ctx, 17), title: linkText, sub: p.sub }, false, dialect(ctx));
     }
+    case 'slides':
+      return renderSlides(p, size, ctx, cell.spelled === 'embed');
     case 'embed':
-      return renderEmbed(p, b, size, ctx);
+      // the HTML is the cell's body as written — not `b`, which is trimmed for prose
+      return renderEmbedHtml(cell.body, size, ctx);
     case 'text':
       return emitProse({ body: b }, { cell: { attrs: size } }, dialect(ctx));
     case 'video': {
