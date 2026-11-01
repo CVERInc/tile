@@ -311,3 +311,159 @@ test('without data-flip-mode the cards still go straight to the next digit (defa
   assert.equal(tens, '05');
   assert.equal(cardsOf(part('seconds'))[0].classList.contains('dc-flip-drum'), false);
 });
+
+// ── post-review fixes: faces vs wheel, teardown, live reduced motion ───────────────────────────
+/** The whole subtree, classes and text, as one string — two roots that look the same serialize the same. */
+const snap = (el) => (el.children.length ? `<${el.className}>${el.children.map(snap).join('')}</>` : el.textContent);
+
+test('drum: writing the documented default data-flip-faces="0,…,9" behaves exactly like leaving it out', () => {
+  const runs = ['0,1,2,3,4,5,6,7,8,9', null].map((faces) => {
+    const { doc, root, part } = drumPage(['minutes', 'seconds']);
+    if (faces) for (const u of ['minutes', 'seconds']) part(u).setAttribute('data-flip-faces', faces);
+    const clock = createClock(DL - 61 * 1000 - 500);   // 01:01, across the minute, three seconds
+    mountCountdown(root, env(doc, clock));
+    const frames = [];
+    for (let t = 0; t < 3000; t++) { frames.push(snap(root) + '|' + clock.pending()); clock.advance(1); }
+    return { frames, seconds: shown(part('seconds')) };
+  });
+  assert.equal(runs[0].frames.length, runs[1].frames.length);
+  runs[0].frames.forEach((f, i) => assert.equal(f, runs[1].frames[i], `frame ${i} ms`));
+  assert.equal(runs[0].seconds, '58', 'and it counts down');
+});
+
+test('teardown: stop() mid-run cancels every card timer and shows the current value at once', () => {
+  const { doc, root, part } = drumPage(['days', 'hours', 'minutes', 'seconds']);
+  const clock = createClock(DL - D - 500);   // 01 00 00 00
+  const cd = mountCountdown(root, env(doc, clock));
+  clock.advance(510);                        // 00 23 59 59: wheels turning on every place
+  assert.ok(clock.pending() > 1, 'runs in flight');
+  cd.stop();
+  assert.equal(clock.pending(), 0, 'no tick, no card timer');
+  assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '59']);
+  assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0);
+});
+
+test('teardown: expiry mid-run (a late tick after sleep) leaves no card stepping off-DOM', () => {
+  const { doc, root } = drumPage(['minutes', 'seconds']);
+  root.setAttribute('data-expired', 'text');
+  root.setAttribute('data-expired-text', 'done');
+  const clock = createClock(DL - 60 * 1000 - 500);   // 01:00
+  let skew = 0;
+  const cd = mountCountdown(root, { ...env(doc, clock), now: () => clock.now() + skew });
+  clock.advance(510 + 70);                           // 00:59, the seconds tens running 0→9…5
+  assert.ok(clock.pending() > 1, 'run in flight');
+  skew = 60 * 1000;                                  // the wall clock jumps past the deadline
+  cd.tick();
+  assert.equal(root.textContent, 'done');
+  assert.equal(clock.pending(), 0);
+});
+
+test('teardown: a card dropped mid-run is settled before removal (no stepping on a detached node)', () => {
+  const { doc, root, part } = drumPage(['seconds']);   // seconds alone carry the whole count
+  const clock = createClock(DL - 200 * 1000 - 500);    // 200
+  let skew = 0;
+  const cd = mountCountdown(root, { ...env(doc, clock), now: () => clock.now() + skew });
+  clock.advance(510 + 70);                             // 199: every card mid-step
+  const [dropped] = cardsOf(part('seconds'));
+  assert.ok(dropped.__dcFlip.timer !== null, 'the hundreds card is mid-step');
+  skew = 100 * 1000;                                   // a late tick: 99, three cards → two
+  cd.tick();
+  assert.equal(dropped.parentNode, null, 'dropped');
+  assert.equal(dropped.__dcFlip.timer, null, 'its timer was cancelled');
+  const live = cardsOf(part('seconds')).filter((c) => c.__dcFlip.timer !== null).length;
+  assert.equal(clock.pending(), 1 + live, 'the tick and the live cards only');
+  assert.equal(shown(part('seconds')).length, 2);
+});
+
+test('reduced motion is read live: switching it on mid-run stops the wheel; stop() unsubscribes', () => {
+  const { doc, root, part } = drumPage(['days', 'hours', 'minutes', 'seconds']);
+  const clock = createClock(DL - D - 500);
+  const motion = { matches: false, fn: null,
+    addEventListener(type, fn) { if (type === 'change') this.fn = fn; },
+    removeEventListener(type, fn) { if (this.fn === fn) this.fn = null; } };
+  const e = { ...env(doc, clock), motion };
+  delete e.reduced;                                    // as in the browser: from the media query
+  const cd = mountCountdown(root, e);
+  clock.advance(510 + 70);                             // hours 00→23 under way (8 and 7 steps)
+  assert.ok(root.querySelectorAll('.dc-flip-flap').length > 0, 'turning');
+  motion.matches = true;
+  motion.fn({ matches: true });
+  clock.advance(DRUM_STEP_MS);                         // the running folds settle, then straight there
+  assert.equal(shown(part('hours')), '23');
+  assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0);
+  assert.equal(clock.pending(), 1, 'only the tick');
+  cd.stop();
+  assert.equal(motion.fn, null);
+});
+
+// ── follow-up review: initial matchMedia read, resume after stop(), settle on switch-on ─────────
+/** A MediaQueryList stand-in that keeps every `change` listener, so tests can count and fire them. */
+function fakeMotion(matches) {
+  return { matches, fns: [],
+    addEventListener(type, fn) { if (type === 'change' && !this.fns.includes(fn)) this.fns.push(fn); },
+    removeEventListener(type, fn) { this.fns = this.fns.filter((f) => f !== fn); },
+    fire(matches) { this.matches = matches; for (const fn of [...this.fns]) fn({ matches }); } };
+}
+
+test('reduced motion already on at load (reduced not passed): read from matchMedia, cards never fold', () => {
+  for (const drum of [false, true]) {
+    const { doc, root, part } = drum ? drumPage(['days', 'hours', 'minutes', 'seconds']) : page();
+    const clock = createClock(DL - D - 500);           // 01 00 00 00: every place changes at the next tick
+    const motion = fakeMotion(true);
+    const e = { ...env(doc, clock), motion };
+    delete e.reduced;                                  // as in the browser: from the media query only
+    mountCountdown(root, e);
+    for (let t = 0; t < 1000; t++) {
+      clock.advance(1);
+      assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, `${drum ? 'drum' : 'plain'}: no flaps at ${t} ms`);
+      assert.equal(clock.pending(), 1, `${drum ? 'drum' : 'plain'}: only the tick at ${t} ms`);
+    }
+    assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '59']);
+  }
+});
+
+test('tick() after stop() resumes with the reduced-motion listener back (pause/resume is safe)', () => {
+  const { doc, root, part } = drumPage(['days', 'hours', 'minutes', 'seconds']);
+  const clock = createClock(DL - D - 500);
+  const motion = fakeMotion(false);
+  const e = { ...env(doc, clock), motion };
+  delete e.reduced;
+  const cd = mountCountdown(root, e);
+  assert.equal(motion.fns.length, 1);
+  cd.stop();
+  assert.equal(motion.fns.length, 0, 'stop() unsubscribes');
+  cd.tick();
+  assert.equal(cd.running, true);
+  assert.equal(motion.fns.length, 1, 'resuming subscribes again');
+  cd.tick();
+  assert.equal(motion.fns.length, 1, 'once, not once per tick');
+  clock.advance(510 + 70);                             // 00 23 59 59: wheels turning
+  assert.ok(root.querySelectorAll('.dc-flip-flap').length > 0, 'turning');
+  motion.fire(true);
+  clock.advance(1000);
+  assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, 'the drum follows reduced motion again');
+  assert.equal(clock.pending(), 1, 'only the tick');
+  assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '58']);
+  cd.stop();
+  assert.equal(motion.fns.length, 0);
+});
+
+test('switching reduced motion on settles every fold in flight at once (drum and plain)', () => {
+  for (const drum of [false, true]) {
+    const { doc, root, part } = drum ? drumPage(['days', 'hours', 'minutes', 'seconds']) : page();
+    const clock = createClock(DL - D - 500);
+    const motion = fakeMotion(false);
+    const e = { ...env(doc, clock), motion };
+    delete e.reduced;
+    mountCountdown(root, e);
+    clock.advance(510 + 70);
+    assert.ok(root.querySelectorAll('.dc-flip-flap').length > 0, `${drum ? 'drum' : 'plain'}: folding`);
+    motion.fire(true);                                 // no clock advance: settled by the switch itself
+    assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, `${drum ? 'drum' : 'plain'}: no flaps left`);
+    assert.equal(clock.pending(), 1, `${drum ? 'drum' : 'plain'}: only the tick`);
+    assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '59']);
+    motion.fire(false);                                // and off again: the next second folds as before
+    clock.advance(1000);
+    assert.ok(part('seconds').querySelectorAll('.dc-flip-flap').length > 0, `${drum ? 'drum' : 'plain'}: folds again once it is off`);
+  }
+});
