@@ -8,7 +8,20 @@
 //
 // `data-part` is days | hours | minutes | seconds. The LARGEST unit present takes everything above
 // it too: a root with only hours/minutes/seconds shows 53:12:30 for 2 d 5 h 12 m 30 s, never a
-// silently dropped two days.
+// silently dropped two days. Without `data-flip` (or with `data-flip="false"`) the element's text is
+// the value, two digits minimum; with it, the element holds one split-flap card per digit (shared/flip.mjs) and
+// gains or drops a card on the left when the digit count changes (99 → 100 days), so the cards that
+// keep their place keep their state. A visually hidden copy of the value stays readable to a screen
+// reader; the cards themselves are aria-hidden.
+//
+// The root is shown after the first tick (an author who adds `hidden` never sees 00 flash). The
+// coral's own `[hidden]{display:none!important}` makes that true even when a site rule gives the
+// root a display — the same guard the sibling corals carry. Ticks land on whole-second boundaries of
+// the deadline, so a flip never skips or repeats a second. The final second reads 00:00:00; AT the
+// deadline the timer stops and `data-expired` decides what remains: `hide` (default) hides the root,
+// `text` replaces its content with `data-expired-text` (with no text, it hides instead). A deadline
+// without an explicit offset, or one that does not exist, is refused (see shared/countdown-parts.mjs)
+// and the root is left exactly as authored.
 //
 // `data-flip-mode="drum"` turns each card into a mechanical counter wheel (shared/flip.mjs): every
 // place carries the same 0–9 wheel, turning DOWNWARD (9, 8, … 0, then 9 again), because a countdown
@@ -16,11 +29,17 @@
 // through every digit in between: the tens of the seconds going 0→5 at the minute is five steps
 // (9, 8, 7, 6, 5), the hours going 00→23 at the day is 8 and 7. That run at each boundary — and the
 // cards stopping one by one — is the wheel, not an animation choice. (A 6-face 5…0 tens wheel would
-// make 0→5 a single step: no less true, but it is a different machine and loses the run.) An
-// explicit `data-flip-faces` is used as the wheel, in the order written.
+// make 0→5 a single step: no less true, but it is a different machine and loses the run.) The wheel
+// is ALWAYS 9…0: `data-flip-faces` only sizes the cards, in drum mode as without it, so writing the
+// documented default `0,…,9` is the same as leaving it out (an ascending wheel would turn every
+// one-second decrement into a nine-step run longer than the tick).
+//
+// Reduced motion is read live (a `change` listener on the media query), so switching it on stops a
+// wheel that is already turning. `stop()` — and expiry, which calls it — settles every card at once
+// and a dropped card is settled before it is removed, so no card keeps stepping behind the timer.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { createFlip, setFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
+import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
 export const SELECTOR = '[data-dynamic-coral="countdown"]';
@@ -51,7 +70,7 @@ function globals() {
     now: () => Date.now(),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
-    reduced: !!(w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    motion: w.matchMedia ? w.matchMedia('(prefers-reduced-motion: reduce)') : null,
   };
 }
 
@@ -63,7 +82,7 @@ function partsOf(root) {
     const faces = parseFaces(el.getAttribute('data-flip-faces'));
     const flip = el.getAttribute('data-flip');
     parts.push({ el, unit, flip: flip !== null && flip !== 'false', faces: faces.length ? faces : DIGITS,
-      declared: faces.length > 0, drum: el.getAttribute('data-flip-mode') === 'drum', cards: [], sr: null });
+      drum: el.getAttribute('data-flip-mode') === 'drum', cards: [], sr: null });
   }
   return parts;
 }
@@ -79,18 +98,16 @@ function showFlip(part, text, env) {
   part.sr.textContent = text;
   // Cards are matched from the RIGHT: the ones digit is always the same card.
   while (part.cards.length < text.length) {
-    const card = createFlip(env.document, part.faces, { drum: drumFor(part) });
+    const card = createFlip(env.document, part.faces, { drum: part.drum ? WHEEL_DOWN : null });
     el.insertBefore(card, part.cards[0] || part.sr);
     part.cards.unshift(card);
   }
-  while (part.cards.length > text.length) part.cards.shift().remove();
+  while (part.cards.length > text.length) {
+    const card = part.cards.shift();
+    settleFlip(card, env);
+    card.remove();
+  }
   part.cards.forEach((card, i) => setFlip(card, text[i], env));
-}
-
-// The wheel for a card, or null when the part is not in drum mode.
-function drumFor(part) {
-  if (!part.drum) return null;
-  return part.declared ? part.faces : WHEEL_DOWN;
 }
 
 /**
@@ -108,8 +125,18 @@ export function mountCountdown(root, deps = {}) {
   // The largest unit present absorbs every unit above it (see the header).
   const largest = UNITS.find((u) => parts.some((p) => p.unit === u));
 
+  // Reduced motion, live: `env.reduced` is what every card reads, at every change and every drum step.
+  if (env.reduced === undefined) env.reduced = !!(env.motion && env.motion.matches);
+  const onMotion = (e) => { env.reduced = !!e.matches; };
+  if (env.motion && env.motion.addEventListener) env.motion.addEventListener('change', onMotion);
+
   let timer = null;
-  const stop = () => { if (timer !== null) env.clearTimeout(timer); timer = null; };
+  const stop = () => {
+    if (timer !== null) env.clearTimeout(timer);
+    timer = null;
+    if (env.motion && env.motion.removeEventListener) env.motion.removeEventListener('change', onMotion);
+    for (const part of parts) for (const card of part.cards) settleFlip(card, env);
+  };
   // The display (whole seconds left, floored) changes the moment the time left drops below the next
   // whole second — `(deadline - now) % 1000` ms from now, which is 0 when sitting exactly on one. The
   // next tick goes exactly there, plus a few ms so it lands after the boundary, not before it.
