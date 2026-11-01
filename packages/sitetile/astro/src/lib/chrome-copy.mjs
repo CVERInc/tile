@@ -15,6 +15,14 @@ export function dateBadgeParts(s, lang) {
   return { month: lingoUiCopy(lang || NEUTRAL_UI_LANG).monthShort(d.getMonth() + 1), day: String(d.getDate()), year: String(d.getFullYear()) };
 }
 
+// indexDateLang: the language a listing card's date is written in. Same rule as PostArticle: with no
+// `blog-date-format` the date follows the view's resolved language (viewLang), so a Site whose default
+// language is set by `locales` (no meta.lang) still reads 2026年10月26日; an explicit format keeps
+// meta.lang, which it was authored against.
+export function indexDateLang(dateFormat, meta, viewLang) {
+  return dateFormat ? meta.lang : (meta.lang || viewLang);
+}
+
 /** Sidebar/archive chrome copy for a site: the locale defaults, with the site's own overrides on
  *  top. ONE resolver, because the same widget markup is duplicated in BlogIndexView, PostView,
  *  ArchiveView and two label routes — five copies could let a fix land in one and look done.

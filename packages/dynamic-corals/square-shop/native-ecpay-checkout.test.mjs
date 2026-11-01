@@ -59,7 +59,7 @@ function ecpayScript(html) {
 
 // A just-enough browser: the panel's innerHTML is the rendered checkout; events are delivered to
 // the listeners the script registered, with targets shaped like the inputs it rendered.
-function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null } = {}) {
+function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null, docLang = null } = {}) {
   const calls = [];
   const forms = [];
   const store = { ...session };
@@ -98,6 +98,7 @@ function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', s
       return form;
     },
   };
+  if (docLang !== null) document.documentElement = { lang: docLang };
   const window = { sessionStorage, matchMedia: () => ({ matches: true }), crypto: { randomUUID: () => '0f0e0d0c-0b0a-4908-8706-050403020100' } };
   const fetch = async (u, init = {}) => {
     const body = init.body ? JSON.parse(init.body) : null;
@@ -247,6 +248,21 @@ async function readyForSubmit(respond, list = [CVS]) {
 const deliveryThen = (list, after) => async (u, body, n) => (u.startsWith('/api/v2/ecpay/logistics/delivery-options')
   ? { status: 200, body: { ok: true, currency: 'TWD', options: list } }
   : after(u, body, n));
+
+test('the dedicated ECPay checkout carries the page\'s declared language, as the cart checkout does', async () => {
+  const html = await productHtml(bowl);
+  const cashier = { action: 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { MerchantTradeNo: 'T1', CheckMacValue: 'X' } };
+  const draft = { 'dc-native-ecpay-draft:bowl-sku': JSON.stringify({ ship: CVS.sub_type, pay: 'card', inv: 'carrier_ecpay', v: { name: 'Lin', phone: '0912345678', email: 'buyer@example.com' } }) };
+  const respond = deliveryThen([CVS], () => ({ status: 200, body: { order_id: 'order-1', form_post: cashier } }));
+  for (const [docLang, expected] of [[' zh-Hant ', 'zh-Hant'], ['', undefined]]) {
+    const b = browser(html, respond, { href: 'https://site.example/shop/tea-bowl?store_ref=store-1', session: { ...draft }, docLang });
+    await b.settle(); await b.settle();
+    await b.submit();
+    const sent = b.calls.find((c) => c.url === '/api/v2/ecpay/checkout');
+    assert.equal(sent.body.lang, expected, `page lang ${JSON.stringify(docLang)}`);
+    assert.equal('lang' in sent.body, expected !== undefined);
+  }
+});
 
 test('a card order sends the dedicated ECPay checkout with RSP\'s field names and launches the cashier', async () => {
   const cashier = { action: 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { MerchantTradeNo: 'T1', CheckMacValue: 'X' } };
@@ -464,4 +480,34 @@ test('a rail choice without ECPay, a single rail, or a non-eligible product keep
     assert.doesNotMatch(html, /nativeEcpayCheckoutClient/);
     assert.match(html, /class="dc-native-buy" data-native-sku="bowl-sku" data-native-rail="/);
   }
+});
+
+// A Site that holds both the B2C and the C2C logistics contract is offered both sub-types of a
+// carrier; the buyer reads one name for each, so the panel shows one row per choice.
+const FAMI_B2C = { sub_type: 'FAMI', logistics_type: 'CVS', fee_minor: 6000, free_threshold_minor: 100000, cod_available: true };
+const FAMI_C2C = { ...FAMI_B2C, sub_type: 'FAMIC2C' };
+const UNI_B2C = { sub_type: 'UNIMART', logistics_type: 'CVS', fee_minor: 6000, free_threshold_minor: 100000, cod_available: true };
+const UNI_C2C = { ...UNI_B2C, sub_type: 'UNIMARTC2C' };
+const radiosOf = (h) => [...h.matchAll(/<input type="radio" name="dc-ecpay-ship" value="([A-Z0-9]+)"/g)].map((m) => m[1]);
+
+test('B2C and C2C sub-types that read and cost the same are one delivery row', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, UNI_B2C, FAMI_C2C, UNI_C2C, HOME]));
+  await b.press();
+  assert.deepEqual(radiosOf(b.panel.innerHTML), ['FAMI', 'UNIMART', 'TCAT']);
+  assert.equal((b.panel.innerHTML.match(/全家取貨/g) || []).length, 1);
+  assert.equal((b.panel.innerHTML.match(/7-ELEVEN 取貨/g) || []).length, 1);
+});
+
+test('the surviving row still reaches a valid sub-type: the store map and the order use it', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, FAMI_C2C]));
+  await b.press();
+  await b.pickStore();
+  assert.equal(b.calls[1].url, '/api/v2/ecpay/logistics/store-map');
+  assert.equal(b.calls[1].body.sub_type, 'FAMI');
+});
+
+test('same-name rows that differ in fee stay separate choices', async () => {
+  const b = browser(await productHtml(bowl), options([FAMI_B2C, { ...FAMI_C2C, fee_minor: 9000 }]));
+  await b.press();
+  assert.deepEqual(radiosOf(b.panel.innerHTML), ['FAMI', 'FAMIC2C']);
 });
