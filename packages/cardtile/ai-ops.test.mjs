@@ -51,7 +51,7 @@ function casesOf(body) {
 
 // Some types read their params inside a helper instead of inline. The mapping is DECLARED here, so a
 // new helper that nobody registers shows up as a param this file cannot find rather than as silence.
-const DELEGATES = { link: ['linkIcon'], embed: ['renderEmbed'] };
+const DELEGATES = { link: ['linkIcon'], slides: ['renderSlides'], embed: ['renderEmbedHtml'] };
 /**
  * 🩸 WAS `RENDER.slice(k, k + 2000)` — a fixed byte window, which is a ruler that SHRINKS as the code
  * grows. On 2026-07-30 `renderEmbed` gained a second slider kind (~2,500 chars) and the bubbles

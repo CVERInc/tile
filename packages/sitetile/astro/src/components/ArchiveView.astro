@@ -21,7 +21,7 @@
 //                array bypasses the (here, always-empty) content-glob measurement. Omitted (the
 //                default) on /author /YYYY /YYYY-MM, which stay exactly as they always rendered.
 import SiteLayout from '../layouts/SiteLayout.astro';
-import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, listedPosts, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy, blogViewLang } from '../lib/blog.mjs';
+import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, listedPosts, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy, blogViewLang, indexDateLang } from '../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';
 
@@ -45,6 +45,7 @@ const sideCopy = sidebarCopy(meta);
 const {
   pagePosts, tags: pillTags, totalPages, currentPage, pager, showSidebar, dateFormat, readMore,
 } = buildIndexView(posts, meta, pageNum, corpus);
+const lang = indexDateLang(dateFormat, meta, blogViewLang(meta, viewFiles));
 const recentPosts = corpus.slice(0, 5);
 const archive = showSidebar ? groupByArchive(corpus) : [];
 ---
@@ -76,7 +77,7 @@ const archive = showSidebar ? groupByArchive(corpus) : [];
                 <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
               </time>
             ) : (
-              <time class="bl-date">{fmtDate(p.date, dateFormat, meta.lang)}</time>
+              <time class="bl-date">{fmtDate(p.date, dateFormat, lang)}</time>
             ))}
             <h2 class="bl-title">{p.title}</h2>
             {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}

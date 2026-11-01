@@ -18,7 +18,7 @@ test('the nine here are the sandbox’s nine', () => {
 });
 
 test('every kind in the picker has a title AND a one-line description in all nine', () => {
-  assert.equal(PALETTE.length, 7);
+  assert.equal(PALETTE.length, 8);   // reef#2725: `slides` (the carousel's own name) joined `embed` (HTML)
   const gaps = [];
   for (const t of PALETTE) {
     const def = CELL_TYPES[t];

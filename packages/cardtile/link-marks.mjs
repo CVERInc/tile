@@ -88,7 +88,7 @@ function iconDomains(host) {
   return [...new Set([ICON_ALIAS[bare] ? base : host, site, `www.${site}`])];
 }
 
-// 🔴 NO automatic built-in brand mark (CVERInc/reef#2026, chodaict's ruling). tile#123 drew Instagram
+// 🔴 NO automatic built-in brand mark (CVERInc/reef#2026, the owner's ruling). tile#123 drew Instagram
 // and Threads by host because the favicon service had nothing for them; that is gone. Design
 // principle: an external site's mark is NOT stored on our side, it is fetched LIVE every time (via
 // /_icon, which asks DuckDuckGo, then Google — see marks.mjs), so a rebrand follows by itself. Marks

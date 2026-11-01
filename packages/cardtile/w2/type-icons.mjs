@@ -2,8 +2,8 @@
 //
 // 🔴 NEW, because the engine has none of these. `hosts/web/tugtile/icons.js` carries the authentic
 // Lucide bodies the plugin's own `setIcon` draws — undo, fold, search, the lane menu — and every
-// one of them is about a BOARD. A Card's seven kinds (a profile, a link, a picture, prose, a video,
-// a social row, a slideshow) are this product's vocabulary and the engine has never heard of them.
+// one of them is about a BOARD. A Card's eight kinds (a profile, a link, a picture, prose, a video,
+// a social row, a slideshow, pasted HTML) are this product's vocabulary and the engine has never heard of them.
 // Reusing an icon set is not the same as reusing an icon that does not exist.
 //
 // Same drawing contract as the engine's: 24×24 viewBox, `fill=none`, `stroke=currentColor`,
@@ -23,7 +23,9 @@ export const TYPE_ICONS = {
   // a row of dots joined — the social row
   social: '<circle cx="5" cy="12" r="2.5"/><circle cx="12" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/>',
   // stacked frames — the slideshow
-  embed: '<rect x="7" y="3" width="14" height="14" rx="2"/><path d="M3 7v12a2 2 0 0 0 2 2h12"/>',
+  slides: '<rect x="7" y="3" width="14" height="14" rx="2"/><path d="M3 7v12a2 2 0 0 0 2 2h12"/>',
+  // angle brackets — pasted HTML (Lucide `code`)
+  embed: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
 };
 
 /** the icon body for a type, or a neutral square for one this table has not met */

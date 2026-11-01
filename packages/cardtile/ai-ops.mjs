@@ -188,28 +188,39 @@ export const CELL_TYPES = {
     params: {},
   },
 
-  embed: {
-    title: 'type.embed.title',
-    hint: 'type.embed.hint',
+  slides: {
+    title: 'type.slides.title',
+    hint: 'type.slides.hint',
     body: null,
     params: {
       // 🔴 `slider` is the COMMON one and holds the common name. `bubbles` was what `slider` used to
       // mean for everybody — a bespoke pop built for one card (scale(0.001)→scale(1) about a tail
       // origin, 1:1, no controls), so every imported carousel inherited a character's mouth.
       kind: {
-        disposition: DISPOSITION.FORM, label: 'type.embed.kind.label', control: CONTROL.SELECT,
+        disposition: DISPOSITION.FORM, label: 'type.slides.kind.label', control: CONTROL.SELECT,
         options: ['slider', 'bubbles'],
-        hint: 'type.embed.kind.hint',
+        hint: 'type.slides.kind.hint',
       },
-      images: { disposition: DISPOSITION.FORM, label: 'type.embed.images.label', control: CONTROL.TEXT, hint: 'type.embed.images.hint' },
+      images: { disposition: DISPOSITION.FORM, label: 'type.slides.images.label', control: CONTROL.TEXT, hint: 'type.slides.images.hint' },
       // Positioning knobs for the slider's focal point. Real, honoured, and the kind of thing an
       // author sets once with a picture in front of them — a form field for a CSS `object-position`
       // pair would be a worse UI than the string itself.
-      origin: { disposition: DISPOSITION.RAW, label: 'type.embed.origin.label', hint: 'type.embed.origin.hint' },
-      narrow: { disposition: DISPOSITION.RAW, label: 'type.embed.narrow.label', hint: 'type.embed.narrow.hint' },
-      bg: { disposition: DISPOSITION.RAW, label: 'type.embed.bg.label', hint: 'type.embed.bg.hint' },
+      origin: { disposition: DISPOSITION.RAW, label: 'type.slides.origin.label', hint: 'type.slides.origin.hint' },
+      narrow: { disposition: DISPOSITION.RAW, label: 'type.slides.narrow.label', hint: 'type.slides.narrow.hint' },
+      bg: { disposition: DISPOSITION.RAW, label: 'type.slides.bg.label', hint: 'type.slides.bg.hint' },
       w: WIDTH,
     },
+  },
+
+  // 🔴 HTML, scripts included (reef#2725). Rendered in `<iframe sandbox="allow-scripts" srcdoc>` —
+  // an opaque origin that cannot reach the card's storage or navigate the page (card-render.mjs,
+  // renderEmbedHtml). No params of its own: it is as wide as `w` and as tall as it is wide.
+  embed: {
+    title: 'type.embed.title',
+    hint: 'type.embed.hint',
+    body: { label: 'type.embed.body.label', control: CONTROL.AREA, hint: 'type.embed.body.hint', rows: 10 },
+    params: { w: WIDTH },
+    form: [{ source: SOURCE.BODY }, { source: SOURCE.PARAM, name: 'w' }],
   },
 };
 
@@ -221,7 +232,7 @@ export const CELL_TYPES = {
  * and that meant scrolling past five things they do not recognise to reach the one they came for.
  * `profile` leads now — and it only became worth reaching once its name field existed at all.
  */
-export const PALETTE = ['profile', 'link', 'feature', 'text', 'video', 'social', 'embed'];
+export const PALETTE = ['profile', 'link', 'feature', 'text', 'video', 'social', 'slides', 'embed'];
 
 /**
  * What a new cell starts as. Deliberately NOT empty: an empty cell renders to nothing (a link with
@@ -241,7 +252,10 @@ export const BLANKS = {
   // 🔴 NOT a key, and deliberately not translated: this one is a brand name, identical in all nine,
   // and it has to stay a whole `[name](url)` line because that is the grammar a social row reads.
   social: { type: 'social', rawParams: 'w=6', body: '[Instagram](https://instagram.com/)' },
-  embed: { type: 'embed', rawParams: 'kind=slider w=6', body: '' },
+  slides: { type: 'slides', rawParams: 'kind=slider w=6', body: '' },
+  // 🔴 NOT a key, and not translated — like `social`'s, it is code, and identical in all nine. It
+  // shows the one thing worth knowing on first sight: the card's own colours reach inside.
+  embed: { type: 'embed', rawParams: 'w=3', body: '<div style="display:grid;place-items:center;height:100vh;font:600 2rem system-ui;color:var(--cp-accent-bright)">&lt;/&gt;</div>' },
 };
 
 /**
@@ -263,7 +277,7 @@ export function blankCell(type, strings = {}) {
  * The OPERATIONS a door offers on a Card. Shaped after reef-MCP's `get_page` / `save_page` on
  * purpose — a second grammar for the same job is drift.
  *
- * `seat` uses COAM's vocabulary WITH its prefix (`reef/docs/SPEC-coam.md` §2, chodaict 2026-07-30):
+ * `seat` uses COAM's vocabulary WITH its prefix (`reef/docs/SPEC-coam.md` §2, the owner 2026-07-30):
  * CO / CA / CM are the CUSTOMER's Owner / Admin / Manager. fO — feelreef's own Owner — is NOT on
  * this list and that is deliberate: 「fO 不是客戶站的隱形超級帳號」.
  */
@@ -306,7 +320,7 @@ export const OPS = {
  *
  * NB the canon's "Card" is the block-JSON one (`catalog.snapshot.json`: sizes 1x1…3x3, types
  * alliance / announcements / button / cover / divider). cardtile is a different artifact, and its
- * Heroku predecessor is a strangler target rather than a core to reuse — ruled by chodaict
+ * Heroku predecessor is a strangler target rather than a core to reuse — ruled by the owner
  * 2026-07-30: 「MixFairy 是 Bot」.
  */
 export const DEBT = {
