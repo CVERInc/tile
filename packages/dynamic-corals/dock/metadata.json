@@ -1,7 +1,7 @@
 {
   "id": "dock",
   "author": "official",
-  "summary": "A corner bubble the owner writes in plain markup — one that opens a panel of the owner's own content, or one that is a link — placed in the shared corner dock beside the inbox bubble; in an installed app the corners become one bottom bar.",
+  "summary": "A corner bubble the owner writes in plain markup — one that opens a panel of the owner's own content, or one that is a link — placed in the shared corner dock beside the inbox bubble; in an installed app whose page carries a site renderer's bottom bar, the item joins that bar.",
   "embed": "<div data-dynamic-coral=\"dock\" data-dock=\"left\" data-label=\"Cohort 6 closes soon\" data-color=\"#ff5d61\" data-open-on-hash=\"cohort6\" hidden>\n  <svg slot=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.4l3.6 2.1-1 1.7L11 13V7z\"/></svg>\n  <div>Your panel: any markup, styled by the site's own CSS.</div>\n</div>\n<script type=\"module\" src=\"https://feelreef.com/corals/dock/v0/dock.js\"></script>",
   "attributes": [
     {
@@ -19,7 +19,7 @@
       "type": "string",
       "required": false,
       "default": "right",
-      "description": "Which corner: right or left (a lowercase name; unknown names sit where right does). Items in one corner stack in document order, the earliest nearest the corner. Ignored in an installed app, where every item joins the bottom bar."
+      "description": "Which corner: right or left (a lowercase name; unknown names sit where right does). Items in one corner stack in document order, the earliest nearest the corner. Ignored where the page's renderer has switched its installed-app bottom bar on (sitetile: an installed app on a narrow screen): there every item joins that bar."
     },
     {
       "name": "data-href",
@@ -54,7 +54,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "A name (letters, digits, _ or -): #name in the URL opens this panel, at load and on a later hashchange. Also the key that remembers a visitor's collapse.",
+      "description": "A name (letters, digits, _ or -): #name in the URL opens this panel, at load and on a later hashchange. Also the key that remembers this item's once-per-visit auto-open.",
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     {
@@ -62,7 +62,7 @@
       "type": "boolean",
       "required": false,
       "default": false,
-      "description": "Set to 1 to open the panel once per visit, phones included, until the visitor collapses it (remembered for the tab when the item has data-open-on-hash or an id). When two items ask, the first in the document opens."
+      "description": "Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens."
     }
   ]
 }

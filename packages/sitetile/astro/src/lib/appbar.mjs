@@ -6,9 +6,17 @@
 // also where the corner corals (inbox and the site's own dock items) go. The header keeps the logo
 // and its action buttons (cart, search, theme, the CTA); the hamburger goes.
 //
-// 🔴 A NORMAL BROWSER SEES NOTHING NEW. The bar is written `hidden` and stays hidden unless the
-// appbar script (packages/appbar/appbar.js) finds the page running standalone; every rule below is
-// keyed on `html[data-st-appbar]`, which only that script sets, or on the hidden bar itself. And a
+// 🔴 ONLY AN INSTALLED APP ON A NARROW SCREEN (owner ruling 2026-11-01). The switch is ONE decision,
+// made before first paint by the inline <head> snippet below (APPBAR_HEAD_SCRIPT): running as an
+// installed app (display-mode: standalone, or iOS's navigator.standalone) AND inside sitetile's
+// mobile breakpoint (APPBAR_MEDIA, the same 48rem as site.css's `mobile` rules) ⇒
+// `html[data-dc-dock-bar]`. Every rule below keys on that attribute, appbar.js reads it, and the
+// corals' shared dock base reads it (contract ①: a coral joins the bar only when the page has one AND
+// it is switched on). A wide installed window keeps the normal header and the corner docks. Decided
+// once per page view: a rotation does not move the nav back and forth under the visitor's thumb.
+//
+// 🔴 A NORMAL BROWSER SEES NOTHING NEW. The bar is written `hidden` and stays hidden unless the switch
+// is on; every rule below is keyed on `html[data-dc-dock-bar]` or on the hidden bar itself. And a
 // site without `packages: pwa` (it cannot be installed) or without a `nav:` gets none of this: not
 // the element, not the style, not the script — its pages are byte-identical to before.
 //
@@ -18,7 +26,31 @@
 // tools (inbox …) follow. The dock owns the tab shape and the "More" rule — over five visible tabs,
 // the first four stay and the rest go to a More sheet — so first-level nav takes at most four tabs
 // whenever there is anything after it. A nav item with children opens a list. The current page's
-// tab carries aria-current="page" (a group: data-current, when one of its links is the page).
+// tab carries aria-current="page" (a group: data-current, when one of its links is the page). A nav
+// item whose destination is not a safe link is left out of the bar (a tab that goes nowhere is noise).
+//
+// The inbox joins the bar late — after its network gate — so the renderer, which knows at build time
+// that the site has one, writes `data-reserve="1"` on the bar: the dock counts it from the first paint
+// and a fifth nav tab is in More from the start, instead of jumping there when the inbox arrives.
+
+/**
+ * sitetile's mobile breakpoint, reused (site.css: `@media (max-width: 48rem)`, the `mobile` header
+ * actions and the folded sidebar). appbar.test.mjs fails if site.css stops carrying it.
+ */
+export const APPBAR_MEDIA = '(max-width: 48rem)';
+
+/**
+ * The switch, inline in <head> so it runs before the first paint (no header flash): an installed app
+ * at the mobile breakpoint ⇒ `<html data-dc-dock-bar>`. Only on pages that carry the bar.
+ */
+export const APPBAR_HEAD_SCRIPT = `(function(){try{var m=window.matchMedia,s=(m&&m('(display-mode: standalone)').matches)||navigator.standalone===true;if(s&&m&&m(${JSON.stringify(APPBAR_MEDIA)}).matches)document.documentElement.setAttribute('data-dc-dock-bar','')}catch(e){}})();`;
+
+/**
+ * The oldest inbox-bubble an appbar page may be served (the first that joins the bar). Written as the
+ * loader's rollback marker on those pages — `/*inbox-bubble>=0.8.0*\/` — so a search before rolling the
+ * coral's `v0` back below it finds them (review of tile#233, finding 6).
+ */
+export const APPBAR_CORAL_FLOOR = '0.8.0';
 
 /**
  * The "More" tab's name, in the page's language: its own complete table over the four languages
@@ -50,11 +82,11 @@ export function flatten(item) {
 }
 
 export const APPBAR_CSS = `
-html[data-st-appbar] .rf-nav > :is(.rf-nav-link,.rf-nav-group),
-html[data-st-appbar] .rf-nav-hamburger,
-html[data-st-appbar] .rf-nav-check,
-html[data-st-appbar] .rf-ha-overlay[data-ha-overlay="nav"]{display:none!important}
-html[data-st-appbar] body{padding-bottom:calc(3.5rem + env(safe-area-inset-bottom,0px))}
+html[data-dc-dock-bar] .rf-nav > :is(.rf-nav-link,.rf-nav-group),
+html[data-dc-dock-bar] .rf-nav-hamburger,
+html[data-dc-dock-bar] .rf-nav-check,
+html[data-dc-dock-bar] .rf-ha-overlay[data-ha-overlay="nav"]{display:none!important}
+html[data-dc-dock-bar] body{padding-bottom:calc(3.5rem + env(safe-area-inset-bottom,0px))}
 dc-dock[name="bar"]{--dc-dock-bar-bg:var(--gd-nav-panel,var(--gd-head,var(--gd-bg,#fff)));--dc-dock-bar-fg:var(--gd-text,#111)}
 dc-dock[name="bar"] .rf-tab{color:inherit;text-decoration:none}
 dc-dock[name="bar"] .rf-tab:focus-visible,dc-dock[name="bar"] .rf-tab summary:focus-visible{outline:2px solid currentColor;outline-offset:-4px}

@@ -9,6 +9,10 @@
 //   3. The same site WITHOUT `packages: pwa` (it cannot be installed) gains nothing: no bar, no
 //      style, no switch. (That such a site's pages are byte-identical to the engine before this
 //      change is measured by building the same fixtures with both engines — see the PR.)
+//   4. With the inbox on, the bar reserves its entry (`data-reserve="1"`, no tab jump when it
+//      arrives) and the loader names the coral the bar needs (`/*inbox-bubble>=0.8.0*/`, the
+//      rollback marker); the switch is an inline <head> snippet (no header flash) keyed on sitetile's
+//      existing mobile breakpoint; a nav item without a safe destination gets no tab.
 //
 // It needs the renderer's dependencies and SAYS SO when they are absent — same shape as
 // site-embed.test.mjs.
@@ -20,7 +24,8 @@ import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { RENDERER_SUBPATH } from '../build/index.mjs';
-import { isCurrent, flatten, moreLabel } from './astro/src/lib/appbar.mjs';
+import { isCurrent, flatten, moreLabel, APPBAR_MEDIA, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR } from './astro/src/lib/appbar.mjs';
+import { CORAL_FLOOR } from './astro/src/lib/inbox-bubble-loader.mjs';
 
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
 const ASTRO = join(ENGINE, RENDERER_SUBPATH);
@@ -42,7 +47,26 @@ await test('the current-page rule: same-site paths, trailing slash and query ign
   assert.deepEqual(flatten({ children: [{ label: 'a', children: [{ label: 'b' }] }, { label: 'c' }] }).map((n) => n.label), ['a', 'b', 'c']);
 });
 
-const NAV = 'nav: |\n  - Home /\n  - Comics /comics\n    - Latest /comics/latest\n    - Archive /comics/archive\n  - Shop /shop\n  - About /about\n  - Language /language\n  - Contact /contact';
+await test('the switch reuses sitetile\'s mobile breakpoint (site.css), and is on only in an installed app inside it', () => {
+  const css = readFileSync(new URL('./astro/src/styles/site.css', import.meta.url), 'utf8');
+  const m = /^\(max-width: ([\d.]+rem)\)$/.exec(APPBAR_MEDIA);
+  assert.ok(m, APPBAR_MEDIA);
+  assert.match(css, new RegExp(`@media \\(max-width: ${m[1].replace('.', '\\.')}\\) \\{\\s*/\\* header-actions: reveal mobile-only buttons \\*/\\s*\\.rf-ha-btn--mobile`),
+    'site.css no longer carries the mobile breakpoint the appbar switch reuses');
+  const run = ({ standalone = false, iosStandalone = false, narrow = false }) => {
+    const attrs = new Set();
+    const window = { matchMedia: (q) => ({ matches: q === '(display-mode: standalone)' ? standalone : q === APPBAR_MEDIA ? narrow : false }) };
+    new Function('window', 'navigator', 'document', APPBAR_HEAD_SCRIPT)(window, { standalone: iosStandalone }, { documentElement: { setAttribute: (k) => attrs.add(k) } });
+    return attrs.has('data-dc-dock-bar');
+  };
+  assert.equal(run({ standalone: true, narrow: true }), true);
+  assert.equal(run({ iosStandalone: true, narrow: true }), true);
+  assert.equal(run({ standalone: true, narrow: false }), false, 'a wide installed window got the bar');
+  assert.equal(run({ standalone: false, narrow: true }), false, 'a phone browser got the bar');
+  assert.equal(APPBAR_CORAL_FLOOR, '0.8.0');
+});
+
+const NAV = 'nav: |\n  - Home /\n  - Comics /comics\n    - Latest /comics/latest\n    - Archive /comics/archive\n  - Shop /shop\n  - About /about\n  - Language /language\n  - Contact /contact\n  - Nowhere javascript:alert(1)';
 const page = (fm, heading) => `---\n${fm}\n---\n\n## ${heading}\n%% sitetile: hero %%\n\nA fixture page.\n`;
 const pages = {
   'home.md': page('sitetile-page: home\ntitle: Paper Comics\nlang: en', 'Comics'),
@@ -61,20 +85,21 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     const p = join(d, n);
     return statSync(p).isDirectory() ? walk(p) : [p];
   });
-  const buildOne = (name, files) => {
+  const buildOne = (name, files, extra = []) => {
     const irDir = join(work, name, 'ir');
     for (const [rel, body] of Object.entries(files)) {
       mkdirSync(dirname(join(irDir, rel)), { recursive: true });
       writeFileSync(join(irDir, rel), body);
     }
     const outDir = join(work, name, 'out');
-    const r = spawnSync(process.execPath, [join(ENGINE, 'packages/build/cli.mjs'), irDir, outDir, '--site-url', 'https://example.com', '--engine', ENGINE], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [join(ENGINE, 'packages/build/cli.mjs'), irDir, outDir, '--site-url', 'https://example.com', '--engine', ENGINE, ...extra], { encoding: 'utf8' });
     const log = `${r.stdout || ''}\n${r.stderr || ''}`;
     const html = Object.fromEntries(walk(outDir).filter((p) => p.endsWith('.html')).map((p) => [relative(outDir, p), readFileSync(p, 'utf8')]));
     return { code: r.status, log, html };
   };
   try {
-    const built = { pwa: buildOne('pwa', SITES.pwa), plain: buildOne('plain', SITES.plain) };
+    // `pwa` without a site id (no inbox); `inbox` the same site with one; `plain` without pwa, with one.
+    const built = { pwa: buildOne('pwa', SITES.pwa), inbox: buildOne('inbox', SITES.pwa, ['--site-id', 'appbar-test']), plain: buildOne('plain', SITES.plain, ['--site-id', 'appbar-test']) };
     for (const [name, b] of Object.entries(built)) assert.equal(b.code, 0, `astro build failed for ${name}:\n${b.log.slice(-1200)}`);
     const shop = built.pwa.html['shop/index.html'];
     const bar = (h) => (/<dc-dock name="bar"[^>]*>[\s\S]*?<\/dc-dock>/.exec(h) || [''])[0];
@@ -85,7 +110,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.ok(b, 'no dc-dock[name="bar"] on a pwa page with a nav');
       assert.match(b, /^<dc-dock name="bar" data-st-appbar(?:="")? data-more-label="More" hidden(?:="")?>/);
       const tabs = [...b.matchAll(/<(?:a|span|div) class="rf-tab(?: rf-tab-group)?"/g)];
-      assert.equal(tabs.length, 6, 'one tab per first-level nav item');
+      assert.equal(tabs.length, 6, 'one tab per first-level nav item with a safe destination');
+      assert.equal(/<span class="rf-tab"|Nowhere/.test(b), false, 'a nav item without a safe destination became a dead tab');
       assert.match(b, /<div class="rf-tab rf-tab-group">\s*<details><summary>Comics<\/summary><div class="rf-tab-list">\s*<a href="\/comics">Comics<\/a><a href="\/comics\/latest">Latest<\/a><a href="\/comics\/archive">Archive<\/a>\s*<\/div><\/details>\s*<\/div>/,
         'a nav item with children is a list (its own link first, then every child)');
       assert.match(b, /<a class="rf-tab" href="\/language">Language<\/a>/, 'the language switch moves with the nav');
@@ -101,7 +127,9 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       const at = shop.indexOf('<dc-dock name="bar"');
       const inbox = shop.indexOf('data-dynamic-coral="inbox-bubble"');
       if (inbox >= 0) assert.ok(at < inbox, 'the bar is written after the inbox mount — the nav would follow the tools');
-      assert.match(shop, /html\[data-st-appbar\] \.rf-nav > :is\(\.rf-nav-link,\.rf-nav-group\)/);
+      assert.match(shop, /html\[data-dc-dock-bar\] \.rf-nav > :is\(\.rf-nav-link,\.rf-nav-group\)/);
+      const head = shop.slice(0, shop.indexOf('</head>'));
+      assert.ok(head.includes(`<script>${APPBAR_HEAD_SCRIPT}</script>`), 'the switch is not an inline <head> snippet (the header would flash)');
       const scripts = [...shop.matchAll(/<script\b[^>]*src="([^"]+)"[^>]*>|<script\b[^>]*>([\s\S]*?)<\/script>/g)];
       const outDir = join(work, 'pwa', 'out');
       assert.ok(scripts.some(([, src, body]) => (src ? readFileSync(join(outDir, src.replace(/^\//, '')), 'utf8') : body || '').includes('data-st-appbar')),
@@ -114,11 +142,23 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.match(header, /rf-nav-hamburger/);
     });
 
+    await test('🔴 with the inbox on: the bar reserves its entry, and the loader names the coral the bar needs', () => {
+      const page = built.inbox.html['shop/index.html'];
+      assert.ok(page && page.includes('data-dynamic-coral="inbox-bubble"'), 'the inbox fixture has no inbox mount');
+      assert.match(bar(page), /^<dc-dock name="bar" data-st-appbar(?:="")? data-more-label="More" data-reserve="1" hidden(?:="")?>/);
+      assert.equal(bar(shop).includes('data-reserve'), false, 'a site without the inbox reserved an entry for it');
+      assert.ok(page.indexOf('<dc-dock name="bar"') < page.indexOf('data-dynamic-coral="inbox-bubble"'));
+      assert.ok(page.includes(`/*inbox-bubble>=${APPBAR_CORAL_FLOOR}*/(function bubbleLoader(`), 'an appbar page does not carry the >=0.8.0 rollback marker');
+      assert.equal(page.includes(`/*inbox-bubble>=${CORAL_FLOOR}*/`), false);
+      const plain = built.plain.html['shop/index.html'];
+      assert.ok(plain.includes(`/*inbox-bubble>=${CORAL_FLOOR}*/(function bubbleLoader(`), 'a page without the bar lost its own floor');
+    });
+
     await test('🔴 a site that cannot be installed gains nothing: no bar, no style, no switch', () => {
       assert.deepEqual(Object.keys(built.plain.html).sort(), Object.keys(built.pwa.html).sort());
       for (const [rel, h] of Object.entries(built.plain.html)) {
         assert.equal(h.includes('dc-dock'), false, `${rel}: a non-pwa page carries the bar`);
-        assert.equal(h.includes('data-st-appbar'), false, `${rel}: a non-pwa page carries the appbar style or switch`);
+        assert.equal(h.includes('data-st-appbar') || h.includes('data-dc-dock-bar'), false, `${rel}: a non-pwa page carries the appbar style or switch`);
       }
     });
   } finally {

@@ -18,11 +18,15 @@
 // both directions; Enter (sends) and Shift+Enter (a newline) in the box, and the conversation drawn
 // after a send; `#inbox` with data-open-on-hash="1" (opens, focuses the box) and without it (does
 // not); and the phone keyboard — a 390×664 viewport shrunk to 390×364 with the panel open, where the
-// panel, the box and Send must stay fully on screen.
+// panel, the box and Send must stay fully on screen. And the knobs set on a WRAPPER around the container
+// rather than on :root (`--reef-inbox-accent`, `--reef-inbox-offset-y`): the bubble's colour and its
+// distance from the bottom must be what the old coral, which lived inside the container, drew.
 //
 // THE DIFFERENCES THE DOCK MADE ON PURPOSE are removed by name before comparing, each one asserted
 // to be present in the new coral (so a removal that silently stopped matching would be red):
 //   · the bubble's aria-expanded/aria-controls and the panel's id;
+//   · open, the bubble is the panel's close control: × in place of the glyph, named「Close」(owner
+//     ruling 2026-11-01; the panel keeps its own × too);
 //   · the bubble stays under the open panel (the panel sits directly above its own item) — one more
 //     Tab stop after Send, and one more node in the open markup;
 //   · Esc closes the panel and returns focus to the bubble (the old coral had no Esc), and × returns
@@ -58,10 +62,10 @@ const legacy = (html) => html
   .replace(' id="dc-inbox-panel"', '')
   .replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>');
 
-const page = (attrs, origin) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+const page = (attrs, origin, wrap = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0;font:16px Georgia,serif}</style></head>
 <body><a id="before" href="#x">before</a>
-<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="equiv" data-api-base="${origin}" data-site-name="Equiv Shop" ${attrs}></div>
+${wrap ? `<div style="${wrap}">` : ''}<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="equiv" data-api-base="${origin}" data-site-name="Equiv Shop" ${attrs}></div>${wrap ? '</div>' : ''}
 <a id="after" href="#y">after</a>
 <script type="module" src="${coralUrl('X')}"></script></body></html>`;
 
@@ -71,6 +75,9 @@ const SCENARIOS = {
   askOnly: { attrs: 'data-kaito="1"', claimed: false },
   hash: { attrs: 'data-open-on-hash="1"', claimed: true, hash: '#inbox' },
   hashOff: { attrs: '', claimed: true, hash: '#inbox' },
+  // Review of tile#233, finding 3: the knobs on a wrapper (and inline on the container), not on :root.
+  wrapped: { attrs: '', claimed: true, wrap: '--reef-inbox-accent:rgb(200,0,0);--reef-inbox-offset-y:80px' },
+  inline: { attrs: 'style="--reef-inbox-accent:rgb(0,120,0);--reef-inbox-offset-x:24px;--reef-inbox-on-accent:rgb(255,255,0)"', claimed: true },
 };
 
 async function measure(browser, src, name) {
@@ -80,7 +87,7 @@ async function measure(browser, src, name) {
   const errs = [];
   p.on('pageerror', (e) => errs.push(String(e)));
   const origin = new URL(fixtureUrl).origin;
-  await p.route(fixtureUrl, (r) => r.fulfill({ contentType: 'text/html', body: page(sc.attrs, origin) }));
+  await p.route(fixtureUrl, (r) => r.fulfill({ contentType: 'text/html', body: page(sc.attrs, origin, sc.wrap) }));
   await p.route(coralUrl('X'), (r) => r.fulfill({ contentType: 'text/javascript', body: src }));
   await p.route('**/api/**', (r) => {
     const u = r.request().url();
@@ -102,6 +109,21 @@ async function measure(browser, src, name) {
     return a ? `${inside ? 'in:' : ''}${a.tagName.toLowerCase()}${a.id ? '#' + a.id : ''}${a.className && typeof a.className === 'string' ? '.' + a.className.split(' ')[0] : ''}${a.name ? '[' + a.name + ']' : ''}` : 'none';
   });
   const out = { scenario: name };
+  if (name === 'wrapped' || name === 'inline') {
+    const look = () => p.evaluate(() => {
+      const b = document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open');
+      const cs = getComputedStyle(b);
+      const r = b.getBoundingClientRect();
+      return { background: cs.backgroundColor, ink: cs.color, fromBottom: Math.round(document.documentElement.clientHeight - r.bottom), fromRight: Math.round(document.documentElement.clientWidth - r.right) };
+    });
+    out.closedLook = await look();
+    await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').click());
+    await p.waitForTimeout(300);
+    out.openPanelBg = await p.evaluate(() => getComputedStyle(document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-form button[type="submit"]')).backgroundColor);
+    await ctx.close();
+    out.errs = errs;
+    return out;
+  }
   if (name === 'hash' || name === 'hashOff') {
     out.openAtLoad = await p.evaluate(() => !!document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'));
     out.focusAtLoad = await focus();
@@ -166,6 +188,7 @@ function normalise(r, isNew, problems, label, buttonsTab = true) {
   for (const k of ['closed', 'open', 'afterClose', 'afterSend']) if (typeof n[k] === 'string') n[k] = legacy(n[k]);
   if (isNew && n.open !== undefined) {
     if (!/aria-expanded="true" aria-controls="dc-inbox-panel"/.test(r.open)) problems.push(`${label}: expected the open bubble's aria-expanded/controls`);
+    if (!/<button type="button" class="dc-inbox-open" aria-label="Close" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path [^>]*d="M6 6l12 12M18 6 6 18"/.test(r.open)) problems.push(`${label}: expected the open bubble to be the close control (× and Close)`);
     // WebKit (as Safari by default) does not Tab to buttons at all — not to Send, not to the bubble.
     if (buttonsTab && r.tabForward[1] !== 'in:button.dc-inbox-open') problems.push(`${label}: expected the bubble as the Tab stop after Send, got ${r.tabForward[1]}`);
     n.tabForward = r.tabForward.filter((f) => f !== 'in:button.dc-inbox-open');

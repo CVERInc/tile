@@ -2308,3 +2308,99 @@ test('tile#193: data-ai-log="0" installs no pageshow listener', async () => {
 	assert.equal((windowListeners.get('pageshow') ?? []).length, before);
 	coral.unmount(el);
 });
+
+// ── reef#2790: the DOCKED path, in node (review of tile#233, finding 9) ────────────────────────────
+// Every test above runs the fallback: this file's `document` has no `body`, so `dockJoin` returns null
+// and the host goes into the container as before. This one gives the document a body for one mount,
+// so the path every real page takes — the host in `dc-dock[name="right"]`, `data-docked`, the open
+// announce and the close on another item's announce, `--_dc-below`, the bubble as the close control,
+// and retiring when the container has left the document — is pinned without a browser too.
+test('reef#2790 docked: the host joins the right dock, keeps the digests, and the bubble closes what it opened', async () => {
+	class DEl extends El {
+		constructor(attrs) {
+			super(attrs);
+			this.style = { props: {}, setProperty(k, v) { this.props[k] = String(v); }, removeProperty(k) { delete this.props[k]; } };
+			this.connected = undefined;
+		}
+		get ownerDocument() { return document; }
+		get isConnected() { return this.connected; }
+		attachShadow(init) {
+			if (this.shadowRoot) throw new Error('NotSupportedError: shadow root already attached');
+			this.shadowRoot = new DEl();
+			this.shadowRoot.mode = init.mode;
+			return this.shadowRoot;
+		}
+		append(...kids) { for (const k of kids) this.appendChild(k); }
+		insertBefore(child, ref) {
+			const at = ref ? this.children.indexOf(ref) : -1;
+			if (at < 0) this.children.push(child); else this.children.splice(at, 0, child);
+			child.parentNode = this;
+			return child;
+		}
+	}
+	const events = new EventTarget();
+	const body = new DEl();
+	const saved = { ...document };
+	Object.assign(document, {
+		body,
+		createElement: () => new DEl(),
+		querySelector: (sel) => {
+			const m = /^dc-dock\[name="([^"]+)"\]$/.exec(sel);
+			return m ? body.children.find((c) => c.getAttribute('name') === m[1]) || null : null;
+		},
+		addEventListener: (t, f) => events.addEventListener(t, f),
+		removeEventListener: (t, f) => events.removeEventListener(t, f),
+		dispatchEvent: (e) => events.dispatchEvent(e)
+	});
+	const announced = [];
+	const record = (e) => announced.push(e.detail);
+	events.addEventListener('dc-dock:open', record);
+	try {
+		const el = new DEl({ 'data-kind': 'site', 'data-id': 'docked-1', 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+		const before = listenerCount();
+		await mount(el);
+		await settle();
+		const dock = body.children.find((c) => c.getAttribute('name') === 'right');
+		assert.ok(dock, 'no dc-dock[name="right"] in <body>');
+		assert.equal(el.children.length, 0, 'the host went into the container, not the dock');
+		assert.equal(dock.children.length, 1);
+		const host = dock.children[0];
+		assert.equal(host.getAttribute('data-docked'), 'right');
+		assert.equal(host.dockAnchor, el, 'the container is not the host\'s place in the order (contract ①)');
+		assert.ok(dock.shadowRoot, 'the dock was not given its look');
+		const root = panelIn(host);
+		assert.equal(digest(legacy(root.innerHTML)), BEFORE.closed, 'the docked closed bubble differs from the old one');
+		await openBubble(root);
+		await settle();
+		assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the docked open panel differs from the old one');
+		assert.equal(host.style.props['--_dc-below'], '0', 'the room for the items below was not set on open');
+		assert.deepEqual(announced, [host], 'opening did not announce itself on document (contract ②)');
+		// Open, the bubble is the panel's close control: × and「Close」, the same word as the panel's ×.
+		assert.match(root.innerHTML, /<button type="button" class="dc-inbox-open" aria-label="Close" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path[^>]* d="M6 6l12 12M18 6 6 18"\/><\/svg><\/button>$/);
+		assert.match(root.innerHTML, /class="dc-inbox-close" aria-label="Close">×<\/button>/, 'the panel\'s own × went away');
+		// Another item opening closes this panel.
+		document.dispatchEvent(new CustomEvent('dc-dock:open', { detail: new DEl() }));
+		assert.ok(isClosedBubble(root) && !isOpen(root), 'another item\'s announce left the panel open');
+		assert.match(root.innerHTML, /aria-label="Message us" aria-expanded="false"/);
+		// The container leaves the document; the dock's watcher takes the host out (contract ③ — a
+		// browser's job, done by hand here); the next way in finds it and undoes the mount.
+		el.connected = false;
+		host.connected = false;
+		host.remove();
+		dispatch('reef-inbox:open');
+		await settle();
+		assert.ok(!isOpen(root), 'a retired bubble opened a panel nobody can see');
+		// Every listener the mount added is gone; what stays is the dock's own `resize` (its reserve), which
+		// belongs to the dock and outlives any one item in it.
+		assert.equal(listenerCount(), before + 1, 'a retired mount kept its window listeners');
+		assert.equal((windowListeners.get('resize') ?? []).length >= 1, true);
+		assert.equal(coral.unmount(el), false, 'the retired mount was not undone');
+	} finally {
+		events.removeEventListener('dc-dock:open', record);
+		for (const k of Object.keys(document)) if (!(k in saved)) delete document[k];
+		Object.assign(document, saved);
+	}
+	// And the fallback is back for whatever runs next: a mount without a body goes into its container.
+	const { el } = await mountFresh();
+	assert.equal(el.children.length, 1);
+});

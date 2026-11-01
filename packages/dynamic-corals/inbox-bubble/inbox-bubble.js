@@ -291,7 +291,7 @@ function withDynamicCoralCssLayer(css) {
 // 🔴 VERBATIM COPY of ../shared/dock.mjs's DOCK-BASE block — the corner dock every corner coral joins
 // (reef#2790): where the bubble sits, how it stacks with the site's own corner items, the shape and
 // the shadow budget. A coral has no imports, so it is pasted, not imported; dock-sync.test.mjs fails
-// the moment the two blocks differ. Edit the module, then paste it here. The two-sentence contract
+// the moment the two blocks differ. Edit the module, then paste it here. The three-sentence contract
 // that lets this copy and an older or newer one on the same page cooperate is in that module's header.
 // ── DOCK-BASE-BEGIN (verbatim in inbox-bubble.js) ──
 const DOCK_TAG = 'dc-dock';
@@ -342,15 +342,17 @@ const DOCK_CSS = `
 `;
 const DOCK_MORE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
 
-/** Is this page an installed app? Decided once per call, from the media query (and iOS's flag). */
-function dockStandalone() {
-  try {
-    if (typeof window === 'undefined') return false;
-    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
-    return !!(window.navigator && window.navigator.standalone === true);
-  } catch {
-    return false;
-  }
+/** The × an open item's bubble shows in place of its icon: the bubble is the panel's close control. */
+const DOCK_CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>';
+
+/**
+ * The renderer's bar, when this page view uses it (contract ①): written by the page and switched on
+ * by `<html data-dc-dock-bar>`. Otherwise null — and then every item stays in the corners.
+ */
+function dockBarOn(doc) {
+  if (!doc.documentElement || typeof doc.documentElement.hasAttribute !== 'function') return null;
+  if (!doc.documentElement.hasAttribute('data-dc-dock-bar')) return null;
+  return doc.querySelector(`${DOCK_TAG}[name="bar"]`);
 }
 
 /**
@@ -393,11 +395,22 @@ function dockBar(dock, shadow) {
   more.addEventListener('click', () => show(more.getAttribute('aria-expanded') !== 'true'));
   // Any other open closes the sheet — an item opened FROM the sheet included: its panel takes the
   // screen, and stays visible because an item's panel sets `visibility:visible` over the sheet's.
-  doc.addEventListener(DOCK_OPEN, (e) => { if (e.detail !== dock) show(false); });
+  // Not an opener INSIDE a More entry (a nav group's list): what it opens is part of the sheet, and
+  // closing the sheet would hide it again (review of tile#233, finding 4).
+  doc.addEventListener(DOCK_OPEN, (e) => {
+    const d = e.detail;
+    if (d === dock) return;
+    const entry = d && typeof d.closest === 'function' ? d.closest('[slot="more"]') : null;
+    if (entry && entry !== d && entry.parentNode === dock) return;
+    show(false);
+  });
   shadow.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet.hasAttribute('data-open')) show(false, true); });
   const sync = () => {
     const kids = [...dock.children].filter((k) => !k.hidden);
-    const over = kids.length > DOCK_BAR_MAX;
+    // Entries the renderer said will join later (`data-reserve`) count from the start, until they do.
+    const reserve = Math.min(Math.max(parseInt(dock.getAttribute('data-reserve') || '0', 10) || 0, 0), DOCK_BAR_MAX);
+    const own = kids.filter((k) => !k.dockAnchor).length;
+    const over = Math.max(kids.length, own + reserve) > DOCK_BAR_MAX;
     kids.forEach((k, i) => {
       const want = over && i >= DOCK_BAR_MAX - 1 ? 'more' : null;
       if (k.getAttribute('slot') !== want) { if (want) k.setAttribute('slot', want); else k.removeAttribute('slot'); }
@@ -405,7 +418,10 @@ function dockBar(dock, shadow) {
     more.hidden = !over;
     if (!over && sheet.hasAttribute('data-open')) show(false);
     // An empty bar is no bar: a strip along the bottom with nothing in it is a broken page.
-    dock.hidden = kids.length === 0;
+    // 🩸 ONLY WHEN IT CHANGES. Setting `hidden` to the value it already has still queues an attribute
+    // record, the observer below watches exactly that attribute, and an empty bar re-ran this forever:
+    // the page froze (review of tile#233, finding 1).
+    if (dock.hidden !== (kids.length === 0)) dock.hidden = kids.length === 0;
   };
   if (typeof MutationObserver === 'function') {
     new MutationObserver(sync).observe(dock, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
@@ -413,10 +429,28 @@ function dockBar(dock, shadow) {
   sync();
 }
 
+/**
+ * Contract ③: one observer per page, set up by the first copy to claim a dock. When nodes leave the
+ * document it retires every docked item whose anchor went with them — the inbox whose container a
+ * route change replaced, a dock item whose section was torn down — as removing the container did
+ * when the item still lived inside it. Removals only, and only the docks' own children are looked at.
+ */
+function dockWatch(doc) {
+  if (doc.dcDockWatch || typeof MutationObserver !== 'function') return;
+  doc.dcDockWatch = true;
+  new MutationObserver((records) => {
+    if (!records.some((r) => r.removedNodes.length)) return;
+    for (const dock of doc.querySelectorAll(DOCK_TAG)) {
+      for (const item of [...dock.children]) if (item.dockAnchor && !item.dockAnchor.isConnected) item.remove();
+    }
+  }).observe(doc, { childList: true, subtree: true });
+}
+
 /** Gives a dock its look, once: the first copy to arrive attaches the shadow root, later ones see it. */
 function dockClaim(dock) {
   if (dock.shadowRoot) return;
   const doc = dock.ownerDocument;
+  dockWatch(doc);
   const shadow = dock.attachShadow({ mode: 'open' });
   const style = doc.createElement('style');
   style.textContent = DOCK_CSS;
@@ -431,8 +465,10 @@ function dockClaim(dock) {
 function dockJoin(item, anchor, name) {
   const doc = item.ownerDocument;
   if (!doc || !doc.body || typeof doc.querySelector !== 'function') return null;
-  const want = dockStandalone() ? 'bar' : (/^[a-z][a-z0-9-]*$/.test(name || '') ? name : 'right');
-  let dock = doc.querySelector(`${DOCK_TAG}[name="${want}"]`);
+  const bar = dockBarOn(doc);
+  // `bar` is the renderer's to write: a coral asking for it by name gets a corner like any other name.
+  const want = /^[a-z][a-z0-9-]*$/.test(name || '') && name !== 'bar' ? name : 'right';
+  let dock = bar || doc.querySelector(`${DOCK_TAG}[name="${want}"]`);
   if (!dock) {
     dock = doc.createElement(DOCK_TAG);
     dock.setAttribute('name', want);
@@ -467,6 +503,36 @@ function dockListen(item, close) {
   const on = (e) => { if (e.detail !== item) close(); };
   doc.addEventListener(DOCK_OPEN, on);
   return () => doc.removeEventListener(DOCK_OPEN, on);
+}
+
+/**
+ * Is any corner item open right now, whoever drew it? Read from what every item already shows: a
+ * control with `aria-expanded="true"` in its open shadow root (or the bar's own More), or an open
+ * `<details>` among a renderer's own entries. An auto-open asks this first, so it never closes what a
+ * visitor, a `#name` or a `reef-inbox:open` opened.
+ */
+function dockAnyOpen(doc) {
+  const open = (root) => !!(root && root.querySelector('[aria-expanded="true"]'));
+  for (const dock of doc.querySelectorAll(DOCK_TAG)) {
+    if (open(dock.shadowRoot)) return true;
+    for (const item of dock.children) {
+      if (item.shadowRoot ? open(item.shadowRoot) : !!item.querySelector('details[open]')) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Where the focus goes when an item's panel closes from the keyboard: its bubble — or, for an item
+ * that sits in the bar's More sheet (closed by the time its panel was open), the More button, the
+ * nearest control still on screen.
+ */
+function dockFocusBack(item, bubble) {
+  const dock = item.parentNode;
+  const more = item.getAttribute && item.getAttribute('slot') === 'more' && dock && dock.shadowRoot
+    ? dock.shadowRoot.querySelector('.more') : null;
+  const to = more && !more.hidden ? more : bubble;
+  if (to && typeof to.focus === 'function') to.focus();
 }
 
 /** `#rgb`, `#rrggbb`, `rgb()`/`rgba()` → [r, g, b] (0–255), or null. */
@@ -2952,6 +3018,8 @@ const OFFSET_KNOBS = [
 	{ axis: 'x', knob: '--reef-inbox-offset-x', own: '--_reef-inbox-ox' },
 	{ axis: 'y', knob: '--reef-inbox-offset-y', own: '--_reef-inbox-oy' }
 ];
+/** Every public knob a page may set for the bubble — what crosses into the shadow root by inheritance. */
+const KNOBS = ['--reef-inbox-accent', '--reef-inbox-on-accent', '--reef-inbox-bg', '--reef-inbox-fg', '--reef-inbox-offset-x', '--reef-inbox-offset-y'];
 /** The conversation keeps at least this much height before the open panel is moved down to make room. */
 const MIN_LOG_REM = 5;
 
@@ -2995,7 +3063,7 @@ const MIN_LOG_REM = 5;
  * changes the knobs at runtime without any of those is picked up on the next open or close; there is
  * no cheap way to be told a custom property changed, and polling for it would cost every page.
  */
-function createPlacement(host, shadow, root) {
+function createPlacement(host, shadow, root, el = host) {
 	const live =
 		typeof getComputedStyle === 'function' &&
 		!!host.style &&
@@ -3030,8 +3098,26 @@ function createPlacement(host, shadow, root) {
 		return Number.isFinite(out) ? out : null;
 	}
 
+	/**
+	 * 🔴 THE KNOBS ARE READ FROM THE CONTAINER, and carried to the host (review of tile#233, finding 3).
+	 * Custom properties inherit along the DOM, and since 0.8.0 the host lives in the dock at the end of
+	 * <body>, not inside `el`: a page that set `--reef-inbox-accent` or `--reef-inbox-offset-y` on a
+	 * wrapper around the container (or inline on it) — not on `:root` — lost them. So the six knobs are
+	 * read where the page wrote them, `el`, and each one that has a value there is set on the host,
+	 * whose shadow stylesheet reads them as before; one without a value leaves the host to inherit.
+	 */
+	function carry(cs) {
+		if (el === host) return;
+		for (const knob of KNOBS) {
+			const v = String(cs.getPropertyValue(knob) || '').trim();
+			if (v) host.style.setProperty(knob, v);
+			else host.style.removeProperty(knob);
+		}
+	}
+
 	function want() {
-		const cs = getComputedStyle(host);
+		const cs = getComputedStyle(el);
+		carry(cs);
 		const out = {};
 		for (const { axis, knob } of OFFSET_KNOBS) out[axis] = px(cs.getPropertyValue(knob)) ?? 0;
 		return out;
@@ -3995,10 +4081,23 @@ export async function mount(el, handoff = null) {
 		});
 	}
 	// Where it sits: the owner's offset, read and validated, and room for the composer (see the function).
-	const placement = createPlacement(host, shadow, root);
+	const placement = createPlacement(host, shadow, root, el);
 
 	/** See `pollGeneration` — what makes `stopPolling()` reach the requests already in the air. */
 	const generation = pollGeneration();
+
+	/**
+	 * 🔴 THE CONTAINER'S LIFETIME IS THE BUBBLE'S AGAIN (review of tile#233, finding 5). The host lives
+	 * in the dock, not in `el`, so removing `el` no longer takes the bubble with it by itself: the dock's
+	 * page watcher (contract ③) takes the host out of the dock when `el` leaves the document — a route
+	 * change replacing the container, a checkout step removing it — and the next thing this mount is
+	 * asked to do finds that out here and undoes the rest (listeners, poller), as `unmount(el)` does.
+	 */
+	function retired() {
+		if (!dock || host.isConnected !== false || el.isConnected !== false) return false;
+		unmount(el);
+		return true;
+	}
 
 	function stopPolling() {
 		// 🔴 UNCONDITIONAL, and before the `poller` check: there can be a `refresh()` in flight with
@@ -4014,7 +4113,7 @@ export async function mount(el, handoff = null) {
 	let pollFailures = 0;
 
 	async function refresh() {
-		if (!conv) return;
+		if (!conv || retired()) return;
 		const at = conv;
 		await generation.run(
 			() => fetchTranscript(apiBase, kind, id, conv),
@@ -4088,10 +4187,13 @@ export async function mount(el, handoff = null) {
 	/**
 	 * The bubble. Closed it is the whole root; open it stays BELOW the panel (reef#2790: the panel sits
 	 * directly above its own item), says so with `aria-expanded`, names the panel with
-	 * `aria-controls`, and a press on it closes the panel again.
+	 * `aria-controls`, and is the panel's close control: × in place of the glyph, named「Close」(the
+	 * same word as the panel's own ×, which stays for compatibility), and a press closes the panel.
 	 */
 	function bubbleHtml(expanded) {
-		return `<button type="button" class="${PREFIX}-open" aria-label="${escHtml(openLabel)}" aria-expanded="${expanded}" aria-controls="${PREFIX}-panel">${OPEN_ICON}</button>`;
+		const label = expanded ? copy.closed : openLabel;
+		const icon = expanded ? DOCK_CLOSE_ICON.replace('<svg ', `<svg class="${PREFIX}-icon" `) : OPEN_ICON;
+		return `<button type="button" class="${PREFIX}-open" aria-label="${escHtml(label)}" aria-expanded="${expanded}" aria-controls="${PREFIX}-panel">${icon}</button>`;
 	}
 	function wireBubble() {
 		root.querySelector(`.${PREFIX}-open`).addEventListener('click', () => (open ? hide(true) : show()));
@@ -4102,13 +4204,17 @@ export async function mount(el, handoff = null) {
 		renderOpen();
 		if (dock) dockAnnounce(host);
 	}
-	/** Closes it; `focus` returns the focus to the bubble (Esc, ×, the bubble) — never when another item took over. */
+	/**
+	 * Closes it; `focus` returns the focus to the bubble (Esc, ×, the bubble) — or, from the bar's More
+	 * sheet, to the More button, the bubble being in the closed sheet — never when another item took over.
+	 */
 	function hide(focus) {
 		open = false;
 		renderClosed();
 		if (focus) {
 			const bubble = root.querySelector(`.${PREFIX}-open`);
-			if (bubble && bubble.focus) bubble.focus();
+			if (dock) dockFocusBack(host, bubble);
+			else if (bubble && bubble.focus) bubble.focus();
 		}
 	}
 
@@ -4424,6 +4530,9 @@ export async function mount(el, handoff = null) {
 	 * the cursor where the visitor was going anyway, without touching what they have typed.
 	 */
 	function openPanel() {
+		// Retired by the dock (contract ③: the container left the document): finish the job, as
+		// `unmount(el)` would, instead of opening a panel nobody can see.
+		if (retired()) return;
 		if (open) {
 			const textarea = root.querySelector('textarea');
 			if (textarea && textarea.focus) textarea.focus();

@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { safeItemHref, itemName } from './dock-core.mjs';
+import { safeItemHref, itemName, autoKey, closeLabel } from './dock-core.mjs';
 
 test('a link item goes to http(s), mailto, tel, a fragment or a same-site path — nothing else', () => {
   for (const ok of ['https://line.me/R/ti/p/@x', 'http://a.test/', 'mailto:a@b.test', 'tel:+81312345678', '#top', '/contact', './a', '../b']) {
@@ -28,4 +28,21 @@ test('the built bundle carries the shared base, one copy, bundled in', () => {
   assert.match(bundle, /dc-dock:open/);
   assert.match(bundle, /function dockJoin\(/);
   assert.equal((bundle.match(/function dockJoin\(/g) || []).length, 1);
+});
+
+test('once per visit: the key is the item\'s name, else its corner and its label — never empty', () => {
+  const el = (attrs) => ({ getAttribute: (n) => (n in attrs ? attrs[n] : null), querySelector: () => null });
+  assert.equal(autoKey(el({ 'data-open-on-hash': 'cohort6', 'data-label': 'X' })), 'dc-dock:cohort6');
+  assert.equal(autoKey(el({ 'data-label': 'Sale ends soon' })), 'dc-dock:right:Sale ends soon');
+  assert.equal(autoKey(el({ 'data-label': 'Sale ends soon', 'data-dock': 'left' })), 'dc-dock:left:Sale ends soon');
+  // Two unnamed items in different corners, or with different labels, are remembered apart.
+  assert.notEqual(autoKey(el({ 'data-label': 'A' })), autoKey(el({ 'data-label': 'B' })));
+});
+
+test('the open bubble is called「Close」in the page\'s language (the inbox\'s nine)', () => {
+  for (const [lang, word] of [['en', 'Close'], ['en-US', 'Close'], ['zh-TW', '關閉'], ['zh-Hant-HK', '關閉'], ['zh', '關閉'],
+    ['zh-CN', '关闭'], ['zh-Hans', '关闭'], ['ja', '閉じる'], ['ko-KR', '닫기'], ['de', 'Schließen'], ['fr-CA', 'Fermer'],
+    ['es', 'Cerrar'], ['pt-BR', 'Fechar'], ['nl', 'Close'], [null, 'Close']]) {
+    assert.equal(closeLabel(lang), word, String(lang));
+  }
 });

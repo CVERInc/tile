@@ -11,18 +11,23 @@ next taking its place are ordinary layout. The base lives in `../shared/dock.mjs
 carries a verbatim copy of it (`../inbox-bubble/dock-sync.test.mjs` holds the two equal). This
 coral is the owner-written item.
 
-## The contract — two sentences
+## The contract — three sentences
 
 Every coral bundle carries its own copy of the base, so two copies of different ages can meet on
 one page. They only have to agree on this:
 
-1. **To join position P**, take `document.querySelector('dc-dock[name="P"]')` — `name="bar"` when
-   the page runs as an installed app (`display-mode: standalone`) — creating it at the end of
-   `<body>` if it is missing; set `item.dockAnchor` to a node left where the item stood, and insert
-   the item before the first child whose `dockAnchor` (or, lacking one, the child itself) follows
-   that anchor in document order.
+1. **To join position P**, take `document.querySelector('dc-dock[name="P"]')` — creating it at the
+   end of `<body>` if it is missing — or, when the page's renderer has written a
+   `dc-dock[name="bar"]` and switched it on (`<html data-dc-dock-bar>`), that bar, which no coral
+   ever creates; set `item.dockAnchor` to a node left where the item stood, and insert the item
+   before the first child whose `dockAnchor` (or, lacking one, the child itself) follows that anchor
+   in document order.
 2. **When an item opens**, it dispatches `dc-dock:open` on `document` with `detail` = the item;
    every other open item that hears it closes.
+3. **An item whose `dockAnchor` has left the document leaves its dock**: the first copy to claim a
+   dock on a page sets `document.dcDockWatch` and watches the page (removals only) for every item of
+   every dock, whoever drew it. Removing the place an item was written — a section, an SPA route —
+   removes the item, as it did when items lived where they were written.
 
 Everything else — the dock's look, its custom properties, the bar's "More" — belongs to whichever
 copy created the dock (the first `attachShadow` wins; a later copy sees `shadowRoot` and leaves the
@@ -102,19 +107,39 @@ A shadow may not reach further than the edge margin, or the screen edge cuts it.
 iPhone 14 (390×664 visible): the inbox panel's former `0 12px 40px` was cut by 18 / 24 / 36 px. The
 budget is `0 1px 3px` + `0 4px 12px` — 16px down, 12px sideways, inside the `max(1rem, 16px)` margin.
 
-## In an installed app
+## The bubble, open
 
-With `display-mode: standalone` (decided once, in script) both corners become **one bar along the
-bottom edge**, and every item in it is a square tab — the dock's shape, the items unchanged. A
-site renderer may write its own nav links into `dc-dock[name="bar"]` first (sitetile does, on a
-site with `packages: pwa`); they keep their place before every coral item. With more than five
-visible tabs the first four stay and the rest move into a **More** sheet (`data-more-label` on the
-bar names it). A panel opens as a sheet above the bar. The bar clears only the home-indicator inset.
+While its panel is open, an item's bubble shows **×** in place of its icon, is named「Close」in the
+page's language, says `aria-expanded="true"`, and closes the panel when pressed. The panel has no ×
+of its own. Esc closes it too and returns the focus to the bubble.
+
+**Auto-open** (`data-auto-open="1"`) opens a panel once per visit — this tab, across pages
+(sessionStorage, keyed by the item's `data-open-on-hash` name, or else by its corner and label) —
+and never over something already open: a panel the visitor opened, one a `#name` opened, the inbox
+opened by `reef-inbox:open`, whichever bundle drew it (read from the `aria-expanded="true"` every
+open item shows).
+
+## In an installed app — only on the renderer's bar
+
+A coral never creates the bar and never decides "installed app" by itself: an installed PWA without
+a renderer's bar keeps its corners, exactly like a browser (a bar made up by a coral covered the
+page's footer and its own bottom bar, with nothing reserving room for it). A site renderer that
+wants a bar writes one `dc-dock[name="bar"]`, hidden, with its own nav links, and switches it on
+before first paint with `<html data-dc-dock-bar>` — sitetile does on a `packages: pwa` site with a
+`nav:`, in an installed app at its mobile breakpoint; a wide installed window keeps the corners.
+Then every item joins **one bar along the bottom edge** as a square tab — the dock's shape, the
+items unchanged — after the renderer's links. With more than five visible entries the first four
+stay and the rest move into a **More** sheet (`data-more-label` on the bar names it); entries the
+renderer knows will join later count from the first paint (`data-reserve="<n>"`, sitetile's inbox),
+so nothing jumps into More when they arrive. A list that opens inside a More entry (a nav group)
+keeps the sheet open; an item's own panel opens as a sheet above the bar and closes More, and Esc
+then returns the focus to the More button. An empty bar is hidden. The bar clears only the
+home-indicator inset.
 
 <!-- coral metadata: start (generated by catalog-readme.mjs) -->
 ## dock metadata
 
-A corner bubble the owner writes in plain markup — one that opens a panel of the owner's own content, or one that is a link — placed in the shared corner dock beside the inbox bubble; in an installed app the corners become one bottom bar.
+A corner bubble the owner writes in plain markup — one that opens a panel of the owner's own content, or one that is a link — placed in the shared corner dock beside the inbox bubble; in an installed app whose page carries a site renderer's bottom bar, the item joins that bar.
 
 Author: `official`.
 
@@ -133,12 +158,12 @@ Author: `official`.
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
 | `data-dynamic-coral` | enum | yes | — | Selects the dock coral. The element itself becomes the item and moves into the corner dock; a comment marks where it was written. Values: `dock`. |
-| `data-dock` | string | no | `right` | Which corner: right or left (a lowercase name; unknown names sit where right does). Items in one corner stack in document order, the earliest nearest the corner. Ignored in an installed app, where every item joins the bottom bar. |
+| `data-dock` | string | no | `right` | Which corner: right or left (a lowercase name; unknown names sit where right does). Items in one corner stack in document order, the earliest nearest the corner. Ignored where the page's renderer has switched its installed-app bottom bar on (sitetile: an installed app on a narrow screen): there every item joins that bar. |
 | `data-href` | url | no | — | Makes the item a link instead of a panel: http(s), mailto, tel, a #fragment or a same-site path. Any other scheme leaves the bubble without a destination. |
 | `data-label` | string | no | — | The bubble's and the panel's accessible name. Without it, the text of the panel's first heading. |
 | `data-color` | string | no | `#111` | The bubble's colour, any CSS colour. |
 | `data-icon-color` | string | no | — | The icon's colour. Without it, black or white, whichever the bubble colour's luminance calls for. |
-| `data-open-on-hash` | string | no | — | A name (letters, digits, _ or -): #name in the URL opens this panel, at load and on a later hashchange. Also the key that remembers a visitor's collapse. Pattern: `^[A-Za-z0-9_-]{1,64}$`. |
-| `data-auto-open` | boolean | no | `false` | Set to 1 to open the panel once per visit, phones included, until the visitor collapses it (remembered for the tab when the item has data-open-on-hash or an id). When two items ask, the first in the document opens. |
+| `data-open-on-hash` | string | no | — | A name (letters, digits, _ or -): #name in the URL opens this panel, at load and on a later hashchange. Also the key that remembers this item's once-per-visit auto-open. Pattern: `^[A-Za-z0-9_-]{1,64}$`. |
+| `data-auto-open` | boolean | no | `false` | Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens. |
 
 <!-- coral metadata: end -->

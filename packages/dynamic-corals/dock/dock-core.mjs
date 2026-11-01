@@ -24,15 +24,16 @@
 // visit (`data-auto-open="1"`). What the owner cannot set: size, distance from the edge, shadow —
 // stacking, symmetry and the phone's room are all built on every item being the same size.
 //
-// Behaviour: collapsed by default; a visitor's collapse is remembered for this tab
-// (sessionStorage) and an auto-open item stays collapsed after it; nothing ever moves on its own
+// Behaviour: collapsed by default; an auto-open item opens once per visit (this tab, across pages:
+// sessionStorage), never over something already open; while open, the bubble shows × and is the
+// panel's close control (the panel has no × of its own); nothing ever moves on its own
 // (no badge, no pulse); when every element of the panel's content hides itself (countdown at its
 // deadline sets `hidden`), the whole item retires, and comes back if one shows again; Esc closes
 // and returns focus to the bubble; one panel open at a time across every dock item on the page
 // (contract ②); hidden in print; and the owner's `hidden` stays until this script has mounted the
 // item, so a page whose script failed shows nothing.
 import {
-  dockJoin, dockBelow, dockAnnounce, dockListen, dockInk, dockRgb, DOCK_SHADOW,
+  dockJoin, dockBelow, dockAnnounce, dockListen, dockAnyOpen, dockFocusBack, dockInk, dockRgb, DOCK_SHADOW, DOCK_CLOSE_ICON,
 } from '../shared/dock.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
@@ -40,6 +41,14 @@ export const SELECTOR = '[data-dynamic-coral="dock"]';
 const DEFAULT_BG = '#111';
 const STORE_PREFIX = 'dc-dock:';
 const HASH_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** What an open item's bubble is called — it closes the panel — in the page's language (the inbox's nine). */
+const CLOSE = { en: 'Close', 'zh-tw': '關閉', 'zh-cn': '关闭', ja: '閉じる', ko: '닫기', de: 'Schließen', fr: 'Fermer', es: 'Cerrar', pt: 'Fechar' };
+export function closeLabel(lang) {
+  const parts = String(lang || 'en').toLowerCase().split('-').filter(Boolean);
+  if (parts[0] === 'zh') return CLOSE[parts.includes('hans') || ((parts.includes('cn') || parts.includes('sg')) && !parts.includes('hant')) ? 'zh-cn' : 'zh-tw'];
+  return CLOSE[parts[0]] || CLOSE.en;
+}
 
 const PANEL_ICON = '<svg class="d" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.2 3.6c-.5.4-1.3.1-1.3-.6V16A2.5 2.5 0 0 1 4 13.5z"/></svg>';
 const LINK_ICON = '<svg class="d" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 17 17 7M9 7h8v8"/></svg>';
@@ -53,6 +62,10 @@ const ITEM_CSS = `
   box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW});font:inherit;line-height:0;text-decoration:none}
 .b:focus-visible{outline:2px solid var(--_bg,${DEFAULT_BG});outline-offset:2px}
 .d,::slotted(svg){width:1.6rem!important;height:1.6rem!important;display:block!important;flex:none!important}
+.x{display:none;width:1.6rem;height:1.6rem;flex:none}
+.x svg{display:block;width:100%;height:100%}
+.b[aria-expanded="true"] slot[name="icon"]{display:none}
+.b[aria-expanded="true"] .x{display:block}
 :host([slot="more"]) .b{justify-content:flex-start;height:3rem;font-size:1rem;line-height:1.2}
 :host([slot="more"]) .b::after{content:attr(aria-label)}
 .p{box-sizing:border-box;width:var(--dc-dock-panel-w,min(22rem,calc(100vw - 2rem)));
@@ -78,7 +91,7 @@ export function safeItemHref(raw) {
   }
 }
 
-/** The item's name for `#name` and for remembering a collapse — or '' when it has none. */
+/** The item's name for `#name` and for remembering its once-per-visit auto-open — or '' when it has none. */
 export function itemName(el) {
   const raw = String(el.getAttribute('data-open-on-hash') || '').trim();
   return HASH_NAME.test(raw) ? raw : '';
@@ -101,7 +114,18 @@ function session() {
   try { return typeof sessionStorage !== 'undefined' ? sessionStorage : null; } catch { return null; }
 }
 
-/** First in document wins: once an item of this bundle has auto-opened, no later one does. */
+/**
+ * The once-per-visit key: the item's name, else its corner and its label (an item without either is
+ * still remembered — review of tile#233, finding 8).
+ */
+export function autoKey(el, label = itemLabel(el)) {
+  const name = itemName(el);
+  if (name) return STORE_PREFIX + name;
+  const pos = String(el.getAttribute('data-dock') || '').trim() || 'right';
+  return `${STORE_PREFIX}${pos}:${label}`;
+}
+
+/** First in document wins: once an item of this bundle has asked to auto-open, no later one does. */
 let autoTaken = false;
 
 /**
@@ -117,7 +141,7 @@ export function mountItem(el) {
   const isLink = el.hasAttribute('data-href');
   const name = itemName(el);
   const label = itemLabel(el);
-  const key = name || el.id ? STORE_PREFIX + (name || el.id) : '';
+  const close = closeLabel(doc.documentElement && doc.documentElement.getAttribute('lang'));
 
   const style = doc.createElement('style');
   style.textContent = withDynamicCoralCssLayer(ITEM_CSS, doc);
@@ -148,6 +172,13 @@ export function mountItem(el) {
   iconSlot.name = 'icon';
   iconSlot.innerHTML = isLink ? LINK_ICON : PANEL_ICON;
   b.appendChild(iconSlot);
+  if (!isLink) {
+    // Open, the bubble is the close control: × in place of the icon (CSS, keyed on aria-expanded).
+    const x = doc.createElement('span');
+    x.className = 'x';
+    x.innerHTML = DOCK_CLOSE_ICON;
+    b.appendChild(x);
+  }
   shadow.appendChild(b);
 
   // Colour and its ink. A colour this file can parse is read directly; anything else (a name, a
@@ -174,10 +205,6 @@ export function mountItem(el) {
   let open = false;
   let slotted = false;
   const store = session();
-  const remember = (state) => {
-    if (!key || !store) return;
-    try { if (state) store.setItem(key, state); else store.removeItem(key); } catch { /* full or blocked */ }
-  };
 
   function setOpen(next, { user = false, focus = false } = {}) {
     if (!panel || next === open || (next && el.hidden)) return;
@@ -189,13 +216,24 @@ export function mountItem(el) {
     if (next) panel.style.setProperty('--_dc-below', String(dockBelow(el)));
     panel.hidden = !next;
     b.setAttribute('aria-expanded', String(next));
-    if (user) remember(next ? '' : 'closed');
+    if (next) b.setAttribute('aria-label', close);
+    else if (label) b.setAttribute('aria-label', label);
+    else b.removeAttribute('aria-label');
     if (next) {
       dockAnnounce(el);
       if (user) panel.focus();
     } else if (focus) {
-      b.focus();
+      dockFocusBack(el, b);
     }
+  }
+
+  // Once per visit, and never over something already open (a visitor's panel, a `#name`, the inbox
+  // opened by `reef-inbox:open`) — whichever bundle drew it.
+  const autoAt = autoKey(el, label);
+  function autoOpen() {
+    if (dockAnyOpen(doc)) return;
+    setOpen(true);
+    try { if (store) store.setItem(autoAt, 'opened'); } catch { /* full or blocked */ }
   }
 
   if (panel) {
@@ -220,7 +258,7 @@ export function mountItem(el) {
     if (retire && open) setOpen(false);
     if (!retire && pendingAuto) {
       pendingAuto = false;
-      setOpen(true);
+      autoOpen();
     }
   };
   if (typeof MutationObserver === 'function') {
@@ -234,10 +272,10 @@ export function mountItem(el) {
       autoTaken = true;
       setOpen(true);
     } else if (el.getAttribute('data-auto-open') === '1' && !autoTaken) {
-      let collapsed = false;
-      try { collapsed = !!(key && store && store.getItem(key) === 'closed'); } catch { /* blocked */ }
+      let done = false;
+      try { done = !!(store && store.getItem(autoAt)); } catch { /* blocked */ }
       autoTaken = true;
-      if (!collapsed) { pendingAuto = true; sync(); }
+      if (!done) { pendingAuto = true; sync(); }
     }
     if (name && win) win.addEventListener('hashchange', () => { if (hashOpens()) setOpen(true); });
   }

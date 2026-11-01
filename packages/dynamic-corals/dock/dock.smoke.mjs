@@ -10,11 +10,15 @@
 // to narrow). The safe-area arm needs Chromium's `Emulation.setSafeAreaInsetsOverride` and throws
 // rather than measure a zero inset and call it green.
 //
-// THE INSTALLED APP. `display-mode: standalone` is decided once, in script (shared/dock.mjs
-// `dockStandalone`), and nothing reads the media query in CSS — so the bar arm forces that one
-// decision with an init script that answers `matchMedia('(display-mode: standalone)')` true, in
-// every engine. Where Chromium can also emulate the media feature itself it is asked first and the
-// result is printed, so a run says which of the two it exercised.
+// THE INSTALLED APP. Whether a page view uses the renderer's bar is decided once, before first paint,
+// by sitetile's inline <head> snippet (lib/appbar.mjs APPBAR_HEAD_SCRIPT: an installed app at the
+// mobile breakpoint ⇒ `html[data-dc-dock-bar]`), and the dock, appbar.js and the CSS all read that one
+// attribute. The bar arms put the REAL snippet in the page's <head> and force its standalone half with
+// an init script that answers `matchMedia('(display-mode: standalone)')` true, in every engine (the
+// width half is the real viewport). Where Chromium can also emulate the media feature itself it is
+// asked first and the result is printed, so a run says which of the two it exercised.
+//
+// DOCK_SMOKE_ARMS=<comma list of arm numbers> runs only those arms (for the mutation runs).
 //
 // THE SECOND BUNDLE. inbox-bubble.js carries its own pasted copy of the base and dock.js its bundled
 // one: two copies already. The skew arm adds a third, `__dock-skew.js` — dock.js with its base's gap
@@ -32,6 +36,13 @@ const inboxUrl = new URL('../inbox-bubble/inbox-bubble.js', base).href;
 const appbarUrl = new URL('../../sitetile/astro/src/packages/appbar/appbar.js', base).href;
 const appbarCssUrl = new URL('../../sitetile/astro/src/lib/appbar.mjs', base).href;
 const DOCK_SRC = readFileSync(new URL('./dock.js', import.meta.url), 'utf8');
+const { APPBAR_HEAD_SCRIPT } = await import(new URL('../../sitetile/astro/src/lib/appbar.mjs', import.meta.url).href);
+const APPBAR_HEAD = `<script>${APPBAR_HEAD_SCRIPT}</script>`;
+const ARMS = process.env.DOCK_SMOKE_ARMS ? process.env.DOCK_SMOKE_ARMS.split(',').map(Number) : null;
+const arm = (n) => !ARMS || ARMS.includes(n);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** A promise, or 'TIMEOUT' after `ms` — a frozen page never answers, and must not freeze the smoke too. */
+const within = (promise, ms) => Promise.race([promise, sleep(ms).then(() => 'TIMEOUT')]);
 // Its own selector, so it mounts only the item written for it and dock.js mounts the rest.
 const SKEW_SRC = DOCK_SRC.replaceAll('--dc-dock-gap:.5rem', '--dc-dock-gap:.75rem')
   .replaceAll('[data-dynamic-coral="dock"]', '[data-dynamic-coral="dock-skew"]')
@@ -66,7 +77,7 @@ for (const engine of engines) {
     console.log(`  · ${engine} not launchable here (${String(e.message).split('\n')[0]}) — SKIPPED`);
     continue;
   }
-  async function open(html, { viewport = { width: 390, height: 664 }, standalone = false, init = null, hash = '' } = {}) {
+  async function open(html, { viewport = { width: 390, height: 664 }, standalone = false, init = null, hash = '', claimDelay = 0, pages = {}, loadTimeout = 30000 } = {}) {
     const ctx = await browser.newContext({ viewport, hasTouch: false });
     const p = await ctx.newPage();
     const errs = [];
@@ -81,15 +92,16 @@ for (const engine of engines) {
     }
     if (init) await p.addInitScript(init);
     await p.route(fixtureUrl, (r) => r.fulfill({ contentType: 'text/html', body: html }));
+    for (const [name, body] of Object.entries(pages)) await p.route(new URL(name, base).href, (r) => r.fulfill({ contentType: 'text/html', body }));
     await p.route(skewUrl, (r) => r.fulfill({ contentType: 'text/javascript', body: SKEW_SRC }));
     await p.route('**/api/**', (r) => {
       const u = r.request().url();
-      if (u.includes('/api/inbox/session')) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, claimed: true }) });
+      if (u.includes('/api/inbox/session')) return sleep(claimDelay).then(() => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, claimed: true }) }));
       return r.fulfill({ contentType: 'application/json', body: '{}' });
     });
-    await p.goto(fixtureUrl + hash);
-    await p.waitForTimeout(400);
-    return { ctx, p, errs };
+    const loaded = await p.goto(fixtureUrl + hash, { timeout: loadTimeout }).then(() => true, () => false);
+    if (loaded) await p.waitForTimeout(400);
+    return { ctx, p, errs, loaded };
   }
   const origin = new URL(fixtureUrl).origin;
   // Every dock and its items, as boxes, in dock order.
@@ -104,7 +116,7 @@ for (const engine of engines) {
   const bubbleOf = (sel) => `(() => { const h = document.querySelector(${JSON.stringify(sel)}); const sr = h.shadowRoot; return sr.querySelector('.b, .dc-inbox-open'); })()`;
 
   // ── 1. document order, across bundles, and an async mount ───────────────────────────────────
-  {
+  if (arm(1)) {
     // The inbox is written FIRST but mounts LAST (it asks the network first); the skewed copy loads
     // first and creates the dock; dock.js's items mount in between.
     const html = page({
@@ -156,6 +168,19 @@ ${item('id="b" data-label="B"', '<div id="b-content"><h2>B</h2></div>')}
     });
     check(engine, 'the panel opens directly above its own bubble', pr.panelBottom <= pr.bubbleTop && pr.bubbleTop - pr.panelBottom <= 12, JSON.stringify(pr));
     check(engine, 'aria-expanded follows', pr.expanded === 'true', pr.expanded);
+    // Owner ruling 2026-11-01: open, the bubble is the close control — × in place of the icon, named「Close」.
+    const x = await p.evaluate(() => {
+      const sr = document.getElementById('a').shadowRoot;
+      const b = sr.querySelector('.b');
+      return { label: b.getAttribute('aria-label'), x: getComputedStyle(sr.querySelector('.x')).display, icon: getComputedStyle(sr.querySelector('slot[name="icon"]')).display, panelButtons: sr.querySelector('.p').querySelectorAll('button').length };
+    });
+    check(engine, 'open: the bubble shows × instead of its icon and is named Close; the panel has no × of its own', x.label === 'Close' && x.x === 'block' && x.icon === 'none' && x.panelButtons === 0, JSON.stringify(x));
+    await p.evaluate(`${bubbleOf('#a')}.click()`);
+    await p.waitForTimeout(50);
+    const x2 = await p.evaluate(() => { const sr = document.getElementById('a').shadowRoot; return { hidden: sr.querySelector('.p').hidden, label: sr.querySelector('.b').getAttribute('aria-label'), x: getComputedStyle(sr.querySelector('.x')).display }; });
+    check(engine, 'pressing the × bubble closes the panel; the icon and the name come back', x2.hidden && x2.label === 'A' && x2.x === 'none', JSON.stringify(x2));
+    await p.evaluate(`${bubbleOf('#a')}.click()`);
+    await p.waitForTimeout(50);
     const itemB = (s) => s.find((d) => d.name === 'right').items.find((i) => i.id === 'b');
     check(engine, 'the item above is pushed up by the panel', itemB(during).bottom < itemB(before).bottom - 50, `${itemB(before).bottom} → ${itemB(during).bottom}`);
     check(engine, 'the panel stays inside the visible viewport', pr.panelTop >= 0, JSON.stringify(pr));
@@ -210,8 +235,8 @@ ${item('id="b" data-label="B"', '<div id="b-content"><h2>B</h2></div>')}
     await ctx.close();
   }
 
-  // ── 6. lazy content, auto-open (first wins), remembered collapse, #name, ink ──
-  {
+  // ── 6. lazy content, auto-open (first wins, once per visit), #name, ink ──
+  if (arm(6)) {
     const html = page({
       body: `${item('id="first" data-label="First" data-open-on-hash="first" data-auto-open="1" data-color="#ffd400"', '<div id="lazy"><img id="img" loading="lazy" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="10" height="10"><h2>First</h2></div>')}
 ${item('id="second" data-label="Second" data-auto-open="1" data-dock="left"')}
@@ -229,12 +254,11 @@ ${item('id="link" data-label="Top" data-href="#top"', '')}`,
     check(engine, 'the default dark bubble gets white ink', ink2 === 'rgb(255, 255, 255)', ink2);
     const link = await p.evaluate(() => { const a = document.getElementById('link').shadowRoot.querySelector('a.b'); return a && a.getAttribute('href'); });
     check(engine, 'a link item is a link, with no panel', link === '#top', String(link));
-    // Collapse it, reload: stays collapsed for this tab.
-    await p.evaluate(`${bubbleOf('#first')}.click()`);
+    // Once per visit: reload (the visitor never collapsed it) — it stays shut for this tab.
     await p.reload();
     await p.waitForTimeout(300);
     st = await state();
-    check(engine, 'a visitor\'s collapse is remembered for the tab (sessionStorage)', !st.first, JSON.stringify(st));
+    check(engine, 'auto-open happens once per visit: after a reload it stays shut (sessionStorage)', !st.first, JSON.stringify(st));
     const lazy = await p.evaluate(() => ({ slot: !!document.getElementById('first').shadowRoot.querySelector('.p slot'), rects: document.getElementById('lazy').getClientRects().length }));
     check(engine, 'panel content is not laid out before the first open', !lazy.slot && lazy.rects === 0, JSON.stringify(lazy));
     await p.evaluate(`${bubbleOf('#first')}.click()`);
@@ -254,7 +278,7 @@ ${item('id="link" data-label="Top" data-href="#top"', '')}`,
   }
 
   // ── 7. no script ⇒ no item ──
-  {
+  if (arm(7)) {
     // On a page whose CSS leaves `hidden` alone (a site rule like `div{display:block}` outranks the
     // browser's own [hidden] rule, and without the script there is no coral CSS to restore it).
     const { ctx, p } = await open(page({ body: item('id="x" data-label="X"') }).replace(/<style>body[^<]*<\/style>/, ''));
@@ -264,7 +288,7 @@ ${item('id="link" data-label="Top" data-href="#top"', '')}`,
   }
 
   // ── 8. safe areas (Chromium) ──
-  if (engine === 'chromium') {
+  if (engine === 'chromium' && arm(8)) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 664 } });
     const p = await ctx.newPage();
     const cdp = await ctx.newCDPSession(p);
@@ -293,13 +317,13 @@ ${item('id="link" data-label="Top" data-href="#top"', '')}`,
   }
 
   // ── 9. the installed-app bar, with sitetile's own markup, stylesheet and switch ──
-  {
+  if (arm(9)) {
     const navTabs = ['Home /', 'Comics /comics', 'Shop /shop', 'About /about'].map((s) => {
       const [label, href] = s.split(' ');
       return `<a class="rf-tab" href="${href}"${href === '/shop' ? ' aria-current="page"' : ''}>${label}</a>`;
     }).join('') + '<div class="rf-tab rf-tab-group"><details><summary>More links</summary><div class="rf-tab-list"><a href="/a">A</a><a href="/b">B</a></div></details></div>';
     const html = (withBar) => page({
-      head: `<script type="module">import { APPBAR_CSS } from ${JSON.stringify(appbarCssUrl)}; const s = document.createElement('style'); s.textContent = APPBAR_CSS; document.head.append(s);</script>`,
+      head: `${APPBAR_HEAD}<script type="module">import { APPBAR_CSS } from ${JSON.stringify(appbarCssUrl)}; const s = document.createElement('style'); s.textContent = APPBAR_CSS; document.head.append(s);</script>`,
       body: `<header class="rf-header"><a class="rf-logo" href="/">Logo</a><nav class="rf-nav" id="rf-nav"><a class="rf-nav-link" href="/">Home</a><a class="rf-nav-link" href="/shop">Shop</a><button class="rf-search-toggle">S</button></nav><label class="rf-nav-hamburger" for="rf-nav-toggle">≡</label><div class="rf-header-actions"><a class="rf-ha-btn" href="/cart">Cart</a></div></header>
 ${withBar ? `<dc-dock name="bar" data-st-appbar="" data-more-label="More" hidden="">${navTabs}</dc-dock>` : ''}
 ${inbox(origin)}
@@ -314,7 +338,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
         barHidden: document.querySelector('dc-dock[name="bar"]').hidden,
         barShown: document.querySelector('dc-dock[name="bar"]').getClientRects().length,
         nav: getComputedStyle(document.querySelector('.rf-nav-link')).display,
-        flag: document.documentElement.hasAttribute('data-st-appbar'),
+        flag: document.documentElement.hasAttribute('data-dc-dock-bar'),
         corners: [...document.querySelectorAll('dc-dock')].map((d) => d.getAttribute('name')).sort(),
       }));
       check(engine, 'browser mode: the bar stays hidden, the header keeps its nav, items go to the corners',
@@ -345,7 +369,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       const vr = (el) => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; };
       return {
         docks: [...document.querySelectorAll('dc-dock')].map((d) => d.getAttribute('name')),
-        flag: document.documentElement.hasAttribute('data-st-appbar'),
+        flag: document.documentElement.hasAttribute('data-dc-dock-bar'),
         navLinkDisplay: getComputedStyle(document.querySelector('.rf-nav-link')).display,
         hamburger: getComputedStyle(document.querySelector('.rf-nav-hamburger')).display,
         logo: getComputedStyle(document.querySelector('.rf-logo')).display,
@@ -395,6 +419,38 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       return { sheetOpen: sh.hasAttribute('data-open'), panelShown: !panel.hidden && r.height > 0 && getComputedStyle(panel).visibility === 'visible', panelBottom: Math.round(r.bottom), barTop: Math.round(document.querySelector('dc-dock[name="bar"]').getBoundingClientRect().top) };
     });
     check(engine, 'a tool opened from More shows its panel as a sheet above the bar, and More closes', !after.sheetOpen && after.panelShown && Math.abs(after.panelBottom - after.barTop) <= 1, JSON.stringify(after));
+    // Esc from a panel opened in More: the bubble is in the closed sheet, so the focus goes to More.
+    await p.evaluate(() => document.getElementById('t2').shadowRoot.querySelector('.p').focus());
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(80);
+    const escMore = await p.evaluate(() => {
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      const a = bar.shadowRoot.activeElement;
+      return { closed: document.getElementById('t2').shadowRoot.querySelector('.p').hidden, active: document.activeElement === bar && a ? a.className : (document.activeElement && document.activeElement.tagName) };
+    });
+    check(engine, 'Esc from a dock panel opened in More returns the focus to the More button, not <body>', escMore.closed && escMore.active === 'more', JSON.stringify(escMore));
+    // The same for the inbox, which sits in More here too.
+    await p.evaluate(() => document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.more').click());
+    await p.waitForTimeout(80);
+    await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').click());
+    await p.waitForTimeout(250);
+    const inboxOpenInBar = await p.evaluate(() => {
+      const b = document.querySelector('.dc-inbox-host').shadowRoot.querySelectorAll('.dc-inbox-open');
+      const open = b[b.length - 1];
+      return { panel: !!document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'), label: open && open.getAttribute('aria-label'), x: !!(open && open.querySelector('path[d="M6 6l12 12M18 6 6 18"]')) };
+    });
+    check(engine, 'the inbox opened from More: its bubble is the close control (× and Close)', inboxOpenInBar.panel && inboxOpenInBar.label === 'Close' && inboxOpenInBar.x, JSON.stringify(inboxOpenInBar));
+    await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('textarea').focus());
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(80);
+    const escInbox = await p.evaluate(() => {
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      const a = bar.shadowRoot.activeElement;
+      return { closed: !document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'), active: document.activeElement === bar && a ? a.className : (document.activeElement && document.activeElement.tagName) };
+    });
+    check(engine, 'Esc from the inbox opened in More returns the focus to the More button, not <body>', escInbox.closed && escInbox.active === 'more', JSON.stringify(escInbox));
+    await p.evaluate(() => document.getElementById('t2').shadowRoot.querySelector('.b').click());
+    await p.waitForTimeout(80);
     // A nav group is a list, and joins one-open-at-a-time.
     await p.evaluate(() => document.querySelector('.rf-tab-group summary').click());
     await p.waitForTimeout(100);
@@ -402,12 +458,217 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
     check(engine, 'a nav item with children opens a list and closes the open panel', grp.open && !grp.t2, JSON.stringify(grp));
     check(engine, 'no page errors (standalone bar page)', errs.length === 0, errs.join(' | '));
     await ctx.close();
+    // A nav group that landed in More, opened the way a visitor does it — tap More, tap the group — and
+    // one of its links is on screen and is what a tap there hits (review of tile#233, finding 4).
+    {
+      const g = await open(html(true), { standalone: true });
+      const tap = async (fn) => { const r = await g.p.evaluate(fn); await g.p.mouse.click(r.x, r.y); await g.p.waitForTimeout(120); };
+      await tap(() => { const r = document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await tap(() => { const r = document.querySelector('.rf-tab-group summary').getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2 }; });
+      const hit = await g.p.evaluate(() => {
+        const group = document.querySelector('.rf-tab-group');
+        const link = group.querySelector('.rf-tab-list a');
+        const r = link.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2);
+        return { inMore: group.getAttribute('slot') === 'more', open: group.querySelector('details').open, sheetOpen: document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.sheet').hasAttribute('data-open'),
+          visibility: getComputedStyle(link).visibility, height: Math.round(r.height), inView: r.top >= 0 && r.bottom <= innerHeight, hits: at === link || link.contains(at) };
+      });
+      check(engine, 'tap More, tap a group in it: the group opens inside the sheet, and its link is visible and hittable',
+        hit.inMore && hit.open && hit.sheetOpen && hit.visibility === 'visible' && hit.height > 0 && hit.inView && hit.hits, JSON.stringify(hit));
+      await g.ctx.close();
+    }
     // Five or fewer: no More.
-    const few = await open(page({ body: `<dc-dock name="bar" data-st-appbar="" hidden=""><a class="rf-tab" href="/">Home</a><a class="rf-tab" href="/x">X</a></dc-dock>${inbox(origin)}${item('id="f1" data-label="F1"')}`, scripts: [appbarUrl, dockUrl, inboxUrl] }), { standalone: true });
+    const few = await open(page({ head: APPBAR_HEAD, body: `<dc-dock name="bar" data-st-appbar="" hidden=""><a class="rf-tab" href="/">Home</a><a class="rf-tab" href="/x">X</a></dc-dock>${inbox(origin)}${item('id="f1" data-label="F1"')}`, scripts: [appbarUrl, dockUrl, inboxUrl] }), { standalone: true });
     await few.p.waitForTimeout(300);
     const f = await few.p.evaluate(() => { const bar = document.querySelector('dc-dock[name="bar"]'); return { n: [...bar.children].filter((k) => !k.hidden && !k.getAttribute('slot')).length, more: bar.shadowRoot.querySelector('.more').hidden }; });
     check(engine, 'standalone: four entries ⇒ four tabs, no More', f.n === 4 && f.more === true, JSON.stringify(f));
     await few.ctx.close();
+  }
+
+  // ── 10. 🔴 an empty bar does not freeze the page (review of tile#233, finding 1) ──
+  // `hidden` set to the value it already had queued a record for the bar's own observer, forever. Each
+  // case gets a browser of its own: a frozen page must not take the rest of the run with it.
+  if (arm(10)) {
+    const emptyBar = '<dc-dock name="bar" data-st-appbar="" data-more-label="More" hidden=""></dc-dock>';
+    const cases = [
+      ['zero visible items at load (empty bar, appbar switch)', page({ head: APPBAR_HEAD, body: emptyBar, scripts: [appbarUrl] }), null],
+      ['zero visible items at load (the only item already retired)', page({ head: APPBAR_HEAD, body: `${emptyBar}${item('id="z" data-label="Z"', '<div hidden><h2>over</h2></div>')}`, scripts: [dockUrl] }), null],
+      ['the last item retires at runtime', page({ head: APPBAR_HEAD, body: `${emptyBar}${item('id="z" data-label="Z"', '<div id="zc"><h2>soon</h2></div>')}`, scripts: [dockUrl] }),
+        () => { document.getElementById('zc').hidden = true; }],
+      ['the inbox, alone in the bar, is unmounted', page({ head: APPBAR_HEAD, body: `${emptyBar}${inbox(origin)}`, scripts: [inboxUrl] }),
+        `import(${JSON.stringify(inboxUrl)}).then((m) => m.unmount(document.querySelector('[data-dynamic-coral="inbox-bubble"]')))`],
+    ];
+    for (const [name, html, act] of cases) {
+      const b = await lib[engine].launch();
+      const saved = browser;
+      browser = b;
+      try {
+        const { p, loaded } = await open(html, { standalone: true, loadTimeout: 8000 });
+        let alive = loaded ? await within(p.evaluate(() => 'alive'), 4000) : 'LOAD-TIMEOUT';
+        let state = null;
+        if (alive === 'alive') {
+          const inBar = await within(p.evaluate(() => [...document.querySelector('dc-dock[name="bar"]').children].length), 4000);
+          if (act) { await within(typeof act === 'string' ? p.evaluate(act) : p.evaluate(act), 4000); await sleep(500); }
+          alive = await within(p.evaluate(() => 'alive'), 4000);
+          if (alive === 'alive') state = await p.evaluate(() => { const bar = document.querySelector('dc-dock[name="bar"]'); return { hidden: bar.hidden, shown: bar.getClientRects().length, kids: [...bar.children].filter((k) => !k.hidden).length }; });
+          if (act && state) state.before = inBar;
+        }
+        check(engine, `standalone, ${name}: the page stays responsive and the empty bar stays hidden`,
+          alive === 'alive' && state && state.hidden && state.shown === 0 && state.kids === 0 && (!act || state.before >= 1), `${alive} ${JSON.stringify(state)}`);
+      } finally {
+        browser = saved;
+        await within(b.close(), 5000);
+      }
+    }
+  }
+
+  // ── 11. a coral never makes up a bar; the bar is for narrow installed windows only ──
+  if (arm(11)) {
+    // Review of tile#233, finding 2: an installed PWA that is NOT a sitetile appbar page — a stale
+    // build, a site without nav, a third-party embed — with a footer and a fixed bottom bar of its own.
+    const tall = '<main style="height:1400px">content</main>';
+    const footer = '<footer id="foot" style="height:120px;background:#eee">footer<br>last line</footer>';
+    const ownBar = '<nav id="own" style="position:fixed;left:0;right:0;bottom:0;height:56px;background:#0a0;margin:0">own bar</nav>';
+    for (const [name, body] of [['footer only', `${tall}${footer}`], ['a fixed bottom bar of its own', `${tall}${footer}${ownBar}`]]) {
+      const { ctx, p, errs } = await open(page({ body: `${body}${inbox(origin)}${item('id="w" data-label="W" data-dock="left"')}`, scripts: [dockUrl, inboxUrl] }), { standalone: true });
+      await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await p.waitForTimeout(150);
+      const r = await p.evaluate(() => {
+        const vh = document.documentElement.clientHeight;
+        const own = document.getElementById('own');
+        const foot = document.getElementById('foot').getBoundingClientRect();
+        // The middle of the bottom edge, between the two corners: what a full-width strip would cover.
+        const at = document.elementFromPoint(innerWidth / 2, vh - 20);
+        return { docks: [...document.querySelectorAll('dc-dock')].map((d) => d.getAttribute('name')).sort(), hit: at && (at.id || at.tagName), ownTop: own ? Math.round(own.getBoundingClientRect().top) : null,
+          footVisibleBottom: Math.round(foot.bottom), inboxDocked: document.querySelector('.dc-inbox-host').getAttribute('data-docked') };
+      });
+      const expectHit = name === 'footer only' ? 'foot' : 'own';
+      check(engine, `installed PWA without the renderer's bar (${name}): corals stay in the corners, no bar is made, nothing along the bottom is covered`,
+        JSON.stringify(r.docks) === '["left","right"]' && r.hit === expectHit && r.inboxDocked === 'right', JSON.stringify(r));
+      check(engine, `no page errors (no-bar PWA, ${name})`, errs.length === 0, errs.join(' | '));
+      await ctx.close();
+    }
+    // Owner ruling 2026-11-01: a WIDE installed window keeps the normal layout and the corner docks.
+    const navTabs = '<a class="rf-tab" href="/">Home</a><a class="rf-tab" href="/shop">Shop</a>';
+    const sitePage = page({
+      head: `${APPBAR_HEAD}<script type="module">import { APPBAR_CSS } from ${JSON.stringify(appbarCssUrl)}; const s = document.createElement('style'); s.textContent = APPBAR_CSS; document.head.append(s);</script>`,
+      body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">Home</a></nav></header><dc-dock name="bar" data-st-appbar="" hidden="">${navTabs}</dc-dock>${inbox(origin)}${item('id="t1" data-label="T1"')}`,
+      scripts: [appbarUrl, dockUrl, inboxUrl],
+    });
+    for (const [label, viewport, wantBar] of [['narrow (390px)', { width: 390, height: 664 }, true], ['at the breakpoint (768px)', { width: 768, height: 1024 }, true], ['wide (1280px)', { width: 1280, height: 800 }, false]]) {
+      const { ctx, p } = await open(sitePage, { standalone: true, viewport });
+      await p.waitForTimeout(200);
+      const r = await p.evaluate(() => ({
+        flag: document.documentElement.hasAttribute('data-dc-dock-bar'),
+        barShown: document.querySelector('dc-dock[name="bar"]').getClientRects().length > 0,
+        nav: getComputedStyle(document.querySelector('.rf-nav-link')).display,
+        docks: [...document.querySelectorAll('dc-dock')].filter((d) => d.getClientRects().length).map((d) => d.getAttribute('name')).sort(),
+      }));
+      const ok = wantBar
+        ? r.flag && r.barShown && r.nav === 'none' && JSON.stringify(r.docks) === '["bar"]'
+        : !r.flag && !r.barShown && r.nav !== 'none' && JSON.stringify(r.docks) === '["right"]';
+      check(engine, `installed app, ${label}: ${wantBar ? 'the bottom bar and the slim header' : 'the normal header and the corner docks'}`, ok, JSON.stringify(r));
+      await ctx.close();
+    }
+  }
+
+  // ── 12. the container's lifetime is the bubble's (review of tile#233, finding 5) ──
+  if (arm(12)) {
+    const { ctx, p, errs } = await open(page({ body: `<main id="route">${inbox(origin)}<section id="sec">${item('id="s1" data-label="S1"')}</section></main>`, scripts: [dockUrl, inboxUrl] }));
+    await p.waitForFunction(() => document.querySelector('.dc-inbox-host'), null, { timeout: 8000 }).catch(() => {});
+    const live = () => p.evaluate(() => [...document.querySelectorAll('.dc-inbox-host')].filter((h) => h.isConnected).length);
+    const n0 = await live();
+    // An SPA route change: the container is replaced (no unmount) and the page mounts again.
+    await p.evaluate(async (src) => {
+      const old = document.querySelector('[data-dynamic-coral="inbox-bubble"]');
+      const fresh = old.cloneNode(false);
+      fresh.removeAttribute('data-dynamic-coral-mounted');
+      old.replaceWith(fresh);
+      (await import(src)).mountAll();
+    }, inboxUrl);
+    await p.waitForTimeout(800);
+    const n1 = await live();
+    const anchored = await p.evaluate(() => { const h = document.querySelector('.dc-inbox-host'); return !!h && h.dockAnchor === document.querySelector('[data-dynamic-coral="inbox-bubble"]'); });
+    check(engine, 'replace the container and mountAll(): exactly one live bubble, the new container\'s', n0 === 1 && n1 === 1 && anchored, JSON.stringify({ n0, n1, anchored }));
+    await p.evaluate(() => document.querySelector('[data-dynamic-coral="inbox-bubble"]').remove());
+    await p.waitForTimeout(150);
+    const n2 = await live();
+    // A later open request reaches no ghost (and, through it, closes nothing else).
+    await p.evaluate(() => { document.getElementById('s1').shadowRoot.querySelector('.b').click(); });
+    await p.waitForTimeout(80);
+    await p.evaluate(() => dispatchEvent(new CustomEvent('reef-inbox:open')));
+    await p.waitForTimeout(150);
+    const s1Open = await p.evaluate(() => !document.getElementById('s1').shadowRoot.querySelector('.p').hidden);
+    check(engine, 'removing the container removes its bubble, and a later reef-inbox:open closes nothing through a ghost', n2 === 0 && s1Open, JSON.stringify({ n2, s1Open }));
+    await p.evaluate(() => document.getElementById('sec').remove());
+    await p.waitForTimeout(150);
+    const items = await p.evaluate(() => [...document.querySelectorAll('dc-dock')].flatMap((d) => [...d.children].map((c) => c.id || c.className)));
+    check(engine, 'removing the section a dock item was written in removes the item from the dock', items.length === 0, JSON.stringify(items));
+    check(engine, 'no page errors (retire page)', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
+
+  // ── 13. first paint is final: the reserved inbox entry, and the switch before the header paints ──
+  if (arm(13)) {
+    const five = ['N1 /', 'N2 /2', 'N3 /3', 'N4 /4', 'N5 /5'].map((t) => { const [l, h] = t.split(' '); return `<a class="rf-tab" href="${h}">${l}</a>`; }).join('');
+    const html = page({
+      head: APPBAR_HEAD,
+      body: `<script>window.__flagAtBody = document.documentElement.hasAttribute('data-dc-dock-bar');</script><header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">N1</a></nav></header>
+<dc-dock name="bar" data-st-appbar="" data-more-label="More" data-reserve="1" hidden="">${five}</dc-dock>${inbox(origin)}`,
+      scripts: [appbarUrl, inboxUrl],
+    });
+    const { ctx, p, errs } = await open(html, { standalone: true, claimDelay: 1500 });
+    const tabs = () => p.evaluate(() => {
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      const kids = [...bar.children].filter((k) => !k.hidden);
+      const name = (k) => k.className === 'dc-inbox-host' ? 'inbox' : k.textContent.trim();
+      return { claimed: !!bar.shadowRoot, tabs: kids.filter((k) => !k.getAttribute('slot')).map(name), more: kids.filter((k) => k.getAttribute('slot') === 'more').map(name), moreShown: !!bar.shadowRoot && !bar.shadowRoot.querySelector('.more').hidden };
+    });
+    const first = await tabs();
+    await p.waitForFunction(() => document.querySelector('.dc-inbox-host'), null, { timeout: 8000 }).catch(() => {});
+    await p.waitForTimeout(200);
+    const later = await tabs();
+    check(engine, 'five nav tabs + the inbox (reserved): four tabs and More from the first paint, and nothing moves when the inbox arrives',
+      JSON.stringify(first.tabs) === '["N1","N2","N3","N4"]' && JSON.stringify(first.more) === '["N5"]' && first.moreShown
+      && JSON.stringify(later.tabs) === JSON.stringify(first.tabs) && JSON.stringify(later.more) === '["N5","inbox"]', JSON.stringify({ first, later }));
+    const flagAtBody = await p.evaluate(() => window.__flagAtBody);
+    check(engine, 'the installed-app switch is on before the first element of <body> is parsed (no header flash)', flagAtBody === true, String(flagAtBody));
+    check(engine, 'no page errors (reserve page)', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
+
+  // ── 14. auto-open: once per visit, across pages, never over something already open ──
+  if (arm(14)) {
+    // An item with neither a name nor an id (review of tile#233, finding 8: it reopened on every page).
+    const body = item('data-label="Unnamed" data-auto-open="1"');
+    const html = page({ body, scripts: [dockUrl] });
+    const { ctx, p } = await open(html, { pages: { '__dock-page2.html': html } });
+    const isOpen = () => p.evaluate(() => !document.querySelector('dc-dock [data-dynamic-coral="dock"]').shadowRoot.querySelector('.p').hidden);
+    const a = await isOpen();
+    await p.reload();
+    await p.waitForTimeout(300);
+    const b = await isOpen();
+    await p.goto(new URL('__dock-page2.html', base).href);
+    await p.waitForTimeout(300);
+    const c = await isOpen();
+    check(engine, 'an unnamed auto-open item opens once per visit: not again after a reload, nor on the next page', a && !b && !c, JSON.stringify({ first: a, reload: b, nextPage: c }));
+    await ctx.close();
+    // The inbox opened by reef-inbox:open; a dock item set to auto-open becomes visible later.
+    const late = await open(page({ body: `${inbox(origin)}${item('id="late" data-label="Late" data-auto-open="1"', '<div id="late-c" hidden><h2>Late</h2></div>')}`, scripts: [dockUrl, inboxUrl] }));
+    await late.p.waitForFunction(() => document.querySelector('.dc-inbox-host'), null, { timeout: 8000 }).catch(() => {});
+    await late.p.evaluate(() => dispatchEvent(new CustomEvent('reef-inbox:open')));
+    await late.p.waitForTimeout(250);
+    await late.p.evaluate(() => { document.getElementById('late-c').hidden = false; });
+    await late.p.waitForTimeout(200);
+    const st = await late.p.evaluate(() => ({ inbox: !!document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'), late: !document.getElementById('late').shadowRoot.querySelector('.p').hidden }));
+    check(engine, 'a late auto-open does not close the inbox that reef-inbox:open opened', st.inbox && !st.late, JSON.stringify(st));
+    await late.ctx.close();
+    // #name opened by ANOTHER copy (the skewed one, loaded first); this copy's auto-open item comes after.
+    const skewItem = item('id="h" data-label="H" data-open-on-hash="h"').replace('data-dynamic-coral="dock"', 'data-dynamic-coral="dock-skew"');
+    const hp = await open(page({ body: `${skewItem}${item('id="auto" data-label="Auto" data-auto-open="1"')}`, scripts: [skewUrl, dockUrl] }), { hash: '#h' });
+    const hs = await hp.p.evaluate(() => ({ h: !document.getElementById('h').shadowRoot.querySelector('.p').hidden, auto: !document.getElementById('auto').shadowRoot.querySelector('.p').hidden }));
+    check(engine, '#name opened by another copy is not undone by this copy\'s auto-open', hs.h && !hs.auto, JSON.stringify(hs));
+    await hp.ctx.close();
   }
   await browser.close();
 }

@@ -212,7 +212,9 @@ export const CORAL_FLOOR = '0.7.12';
 // Leading indentation is dropped (no string literal in the body spans a line, so that is all it
 // touches); the tests run this exact string, not only the function. The leading comment names the
 // coral floor on every built page — what to search a site's HTML for before rolling the coral back.
-export function bubbleLoaderScript(src) {
+// A page that needs a newer coral than the loader does names that one instead (`floor`: the
+// installed-app bar's pages need the inbox that joins it, lib/appbar.mjs APPBAR_CORAL_FLOOR).
+export function bubbleLoaderScript(src, floor = CORAL_FLOOR) {
 	const body = bubbleLoader.toString().replace(/\n\t+/g, '\n');
-	return `/*inbox-bubble>=${CORAL_FLOOR}*/(${body})(${JSON.stringify(String(src)).replace(/</g, '\\u003c')},window);`;
+	return `/*inbox-bubble>=${floor}*/(${body})(${JSON.stringify(String(src)).replace(/</g, '\\u003c')},window);`;
 }

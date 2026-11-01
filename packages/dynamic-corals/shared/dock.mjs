@@ -3,15 +3,19 @@
 // them, one disappearing, and the next one taking its place are ordinary layout, not coordinates
 // copied from somebody else's source.
 //
-// ── The contract (two sentences; version-stable on purpose) ──────────────────────────────────────
+// ── The contract (three sentences; version-stable on purpose) ────────────────────────────────────
 //
-//   ① To join position P, take `document.querySelector('dc-dock[name="P"]')` — `name="bar"` when
-//     the page runs as an installed app (display-mode: standalone) — creating it at the end of
-//     <body> if it is missing; set `item.dockAnchor` to a node left where the item stood, and
-//     insert the item before the first child whose `dockAnchor` (or, lacking one, the child
-//     itself) follows that anchor in document order.
+//   ① To join position P, take `document.querySelector('dc-dock[name="P"]')` — creating it at the
+//     end of <body> if it is missing — or, when the page's renderer has written a
+//     `dc-dock[name="bar"]` and switched it on (`<html data-dc-dock-bar>`), that bar, which no coral
+//     ever creates; set `item.dockAnchor` to a node left where the item stood, and insert the item
+//     before the first child whose `dockAnchor` (or, lacking one, the child itself) follows that
+//     anchor in document order.
 //   ② When an item opens, it dispatches `dc-dock:open` on `document` with `detail` = the item;
 //     every other open item that hears it closes.
+//   ③ An item whose `dockAnchor` has left the document leaves its dock: the first copy to claim a
+//     dock on a page sets `document.dcDockWatch` and watches the page for it, for every item of
+//     every dock, whoever drew it.
 //
 // That is ALL two bundles have to agree on. Each coral carries its own copy of this file (a
 // dynamic coral ships as one file; inbox-bubble pastes the block below verbatim and
@@ -45,19 +49,25 @@
 // the outer layer reaches 4 + 12 = 16px down and 12px sideways, inside the 16px margin
 // (`max(1rem, 16px)`, so a small root font cannot shrink the margin under the shadow's reach).
 //
-// ── Installed app (display-mode: standalone) ─────────────────────────────────────────────────────
+// ── Installed app: the bar ───────────────────────────────────────────────────────────────────────
 //
 // An installed app has no address bar and no back button, so the page has to bring its own
-// navigation. There, every item joins ONE dock, `bar`: a row along the bottom edge in which every
-// child is a square tab (the dock's shape, not the item's). A site renderer may put its own nav
-// links into the same `dc-dock[name="bar"]` before any coral runs; they are children without a
-// `dockAnchor` and therefore stand where they are written. More than five visible children: the
-// first four stay tabs and the rest move into a "More" sheet — by `slot`, not by moving nodes, so
-// document order and the contract above are untouched.
+// navigation. A site renderer that wants that writes ONE `dc-dock[name="bar"]` (hidden) holding its
+// own nav links, and decides — before first paint, once — whether this page view uses it, by setting
+// `data-dc-dock-bar` on <html> (sitetile: an installed app at its mobile breakpoint; a wide installed
+// window keeps the corners). Only then does every coral item join the bar instead of a corner: a row
+// along the bottom edge in which every child is a square tab (the dock's shape, not the item's). The
+// renderer's links are children without a `dockAnchor` and therefore stand where they are written.
+// More than five visible entries: the first four stay tabs and the rest move into a "More" sheet — by
+// `slot`, not by moving nodes, so document order and the contract above are untouched. A renderer
+// that knows an item will join later (the inbox, behind its network gate) says so with
+// `data-reserve="<n>"` on the bar, and the More split counts those entries from the first paint, so
+// nothing moves into More when they arrive.
 //
-// The installed-app decision is made ONCE, in JS (`dockStandalone`), and nothing here reads the
-// media query in CSS: one switch, so a test can force it, and a page without JS is simply a page
-// with no dock at all.
+// 🔴 A CORAL NEVER CREATES THE BAR, and never decides "installed app" itself. A bar a coral made up on
+// a page that had none covered the page's own footer and its own fixed bottom bar, with nothing
+// reserving room for it (review of tile#233, finding 2). Without the renderer's bar and switch, an
+// installed app gets the corners, exactly like a browser.
 
 // ── DOCK-BASE-BEGIN (verbatim in inbox-bubble.js) ──
 const DOCK_TAG = 'dc-dock';
@@ -108,15 +118,17 @@ const DOCK_CSS = `
 `;
 const DOCK_MORE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
 
-/** Is this page an installed app? Decided once per call, from the media query (and iOS's flag). */
-function dockStandalone() {
-  try {
-    if (typeof window === 'undefined') return false;
-    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
-    return !!(window.navigator && window.navigator.standalone === true);
-  } catch {
-    return false;
-  }
+/** The × an open item's bubble shows in place of its icon: the bubble is the panel's close control. */
+const DOCK_CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>';
+
+/**
+ * The renderer's bar, when this page view uses it (contract ①): written by the page and switched on
+ * by `<html data-dc-dock-bar>`. Otherwise null — and then every item stays in the corners.
+ */
+function dockBarOn(doc) {
+  if (!doc.documentElement || typeof doc.documentElement.hasAttribute !== 'function') return null;
+  if (!doc.documentElement.hasAttribute('data-dc-dock-bar')) return null;
+  return doc.querySelector(`${DOCK_TAG}[name="bar"]`);
 }
 
 /**
@@ -159,11 +171,22 @@ function dockBar(dock, shadow) {
   more.addEventListener('click', () => show(more.getAttribute('aria-expanded') !== 'true'));
   // Any other open closes the sheet — an item opened FROM the sheet included: its panel takes the
   // screen, and stays visible because an item's panel sets `visibility:visible` over the sheet's.
-  doc.addEventListener(DOCK_OPEN, (e) => { if (e.detail !== dock) show(false); });
+  // Not an opener INSIDE a More entry (a nav group's list): what it opens is part of the sheet, and
+  // closing the sheet would hide it again (review of tile#233, finding 4).
+  doc.addEventListener(DOCK_OPEN, (e) => {
+    const d = e.detail;
+    if (d === dock) return;
+    const entry = d && typeof d.closest === 'function' ? d.closest('[slot="more"]') : null;
+    if (entry && entry !== d && entry.parentNode === dock) return;
+    show(false);
+  });
   shadow.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet.hasAttribute('data-open')) show(false, true); });
   const sync = () => {
     const kids = [...dock.children].filter((k) => !k.hidden);
-    const over = kids.length > DOCK_BAR_MAX;
+    // Entries the renderer said will join later (`data-reserve`) count from the start, until they do.
+    const reserve = Math.min(Math.max(parseInt(dock.getAttribute('data-reserve') || '0', 10) || 0, 0), DOCK_BAR_MAX);
+    const own = kids.filter((k) => !k.dockAnchor).length;
+    const over = Math.max(kids.length, own + reserve) > DOCK_BAR_MAX;
     kids.forEach((k, i) => {
       const want = over && i >= DOCK_BAR_MAX - 1 ? 'more' : null;
       if (k.getAttribute('slot') !== want) { if (want) k.setAttribute('slot', want); else k.removeAttribute('slot'); }
@@ -171,7 +194,10 @@ function dockBar(dock, shadow) {
     more.hidden = !over;
     if (!over && sheet.hasAttribute('data-open')) show(false);
     // An empty bar is no bar: a strip along the bottom with nothing in it is a broken page.
-    dock.hidden = kids.length === 0;
+    // 🩸 ONLY WHEN IT CHANGES. Setting `hidden` to the value it already has still queues an attribute
+    // record, the observer below watches exactly that attribute, and an empty bar re-ran this forever:
+    // the page froze (review of tile#233, finding 1).
+    if (dock.hidden !== (kids.length === 0)) dock.hidden = kids.length === 0;
   };
   if (typeof MutationObserver === 'function') {
     new MutationObserver(sync).observe(dock, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
@@ -179,10 +205,28 @@ function dockBar(dock, shadow) {
   sync();
 }
 
+/**
+ * Contract ③: one observer per page, set up by the first copy to claim a dock. When nodes leave the
+ * document it retires every docked item whose anchor went with them — the inbox whose container a
+ * route change replaced, a dock item whose section was torn down — as removing the container did
+ * when the item still lived inside it. Removals only, and only the docks' own children are looked at.
+ */
+function dockWatch(doc) {
+  if (doc.dcDockWatch || typeof MutationObserver !== 'function') return;
+  doc.dcDockWatch = true;
+  new MutationObserver((records) => {
+    if (!records.some((r) => r.removedNodes.length)) return;
+    for (const dock of doc.querySelectorAll(DOCK_TAG)) {
+      for (const item of [...dock.children]) if (item.dockAnchor && !item.dockAnchor.isConnected) item.remove();
+    }
+  }).observe(doc, { childList: true, subtree: true });
+}
+
 /** Gives a dock its look, once: the first copy to arrive attaches the shadow root, later ones see it. */
 function dockClaim(dock) {
   if (dock.shadowRoot) return;
   const doc = dock.ownerDocument;
+  dockWatch(doc);
   const shadow = dock.attachShadow({ mode: 'open' });
   const style = doc.createElement('style');
   style.textContent = DOCK_CSS;
@@ -197,8 +241,10 @@ function dockClaim(dock) {
 function dockJoin(item, anchor, name) {
   const doc = item.ownerDocument;
   if (!doc || !doc.body || typeof doc.querySelector !== 'function') return null;
-  const want = dockStandalone() ? 'bar' : (/^[a-z][a-z0-9-]*$/.test(name || '') ? name : 'right');
-  let dock = doc.querySelector(`${DOCK_TAG}[name="${want}"]`);
+  const bar = dockBarOn(doc);
+  // `bar` is the renderer's to write: a coral asking for it by name gets a corner like any other name.
+  const want = /^[a-z][a-z0-9-]*$/.test(name || '') && name !== 'bar' ? name : 'right';
+  let dock = bar || doc.querySelector(`${DOCK_TAG}[name="${want}"]`);
   if (!dock) {
     dock = doc.createElement(DOCK_TAG);
     dock.setAttribute('name', want);
@@ -235,6 +281,36 @@ function dockListen(item, close) {
   return () => doc.removeEventListener(DOCK_OPEN, on);
 }
 
+/**
+ * Is any corner item open right now, whoever drew it? Read from what every item already shows: a
+ * control with `aria-expanded="true"` in its open shadow root (or the bar's own More), or an open
+ * `<details>` among a renderer's own entries. An auto-open asks this first, so it never closes what a
+ * visitor, a `#name` or a `reef-inbox:open` opened.
+ */
+function dockAnyOpen(doc) {
+  const open = (root) => !!(root && root.querySelector('[aria-expanded="true"]'));
+  for (const dock of doc.querySelectorAll(DOCK_TAG)) {
+    if (open(dock.shadowRoot)) return true;
+    for (const item of dock.children) {
+      if (item.shadowRoot ? open(item.shadowRoot) : !!item.querySelector('details[open]')) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Where the focus goes when an item's panel closes from the keyboard: its bubble — or, for an item
+ * that sits in the bar's More sheet (closed by the time its panel was open), the More button, the
+ * nearest control still on screen.
+ */
+function dockFocusBack(item, bubble) {
+  const dock = item.parentNode;
+  const more = item.getAttribute && item.getAttribute('slot') === 'more' && dock && dock.shadowRoot
+    ? dock.shadowRoot.querySelector('.more') : null;
+  const to = more && !more.hidden ? more : bubble;
+  if (to && typeof to.focus === 'function') to.focus();
+}
+
 /** `#rgb`, `#rrggbb`, `rgb()`/`rgba()` → [r, g, b] (0–255), or null. */
 function dockRgb(text) {
   const s = String(text || '').trim();
@@ -263,6 +339,6 @@ function dockInk(bg) {
 // ── DOCK-BASE-END ──
 
 export {
-  DOCK_TAG, DOCK_OPEN, DOCK_SHADOW, DOCK_BAR_MAX, DOCK_CSS,
-  dockStandalone, dockClaim, dockJoin, dockBelow, dockAnnounce, dockListen, dockRgb, dockInk,
+  DOCK_TAG, DOCK_OPEN, DOCK_SHADOW, DOCK_BAR_MAX, DOCK_CSS, DOCK_CLOSE_ICON,
+  dockBarOn, dockClaim, dockJoin, dockBelow, dockAnnounce, dockListen, dockAnyOpen, dockFocusBack, dockRgb, dockInk,
 };

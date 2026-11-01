@@ -104,6 +104,7 @@ README drift. The rest of each README remains hand-written context.
   own on failure: the page is left exactly as it was built. See its README.
 - `dock/` — the corners, shared: one dock per corner (`../shared/dock.mjs`) that inbox-bubble and
   owner-written panel/link items stack into in document order, with one size, one edge distance and
-  one shadow budget; in an installed app the corners become one bottom bar. Its README carries the
-  two-sentence contract that lets bundles of different ages share a page, and the rule it is built
+  one shadow budget; in an installed app whose page carries a renderer's bar (sitetile, on narrow
+  screens) the corners join that bottom bar. Its README carries the
+  three-sentence contract that lets bundles of different ages share a page, and the rule it is built
   on: prevent ugliness within reason; beyond that, do not clean up after the owner.

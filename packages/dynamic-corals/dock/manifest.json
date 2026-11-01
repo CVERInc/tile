@@ -8,7 +8,7 @@
   "requires": [],
   "calls": [],
   "stores": [
-    "browser sessionStorage — only for an item with data-open-on-hash or an id, and only once a visitor collapses its panel: the key dc-dock:<name> holding \"closed\", so an item set to open once per visit stays collapsed for the rest of that tab's visit. Removed when the visitor opens it again. Nothing about the visitor, nothing sent anywhere"
+    "browser sessionStorage — only for an item set to open once per visit (data-auto-open), and only once it has opened: the key dc-dock:<name> (or dc-dock:<corner>:<label> for an item without data-open-on-hash) holding \"opened\", so it does not open again for the rest of that tab's visit. Nothing about the visitor, nothing sent anywhere"
   ],
   "paid": false,
   "funding": null,

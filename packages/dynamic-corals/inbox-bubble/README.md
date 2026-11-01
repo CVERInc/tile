@@ -387,26 +387,40 @@ bubble this product exists not to be.
 
 The bubble no longer positions itself. It joins the page's corner dock — `dc-dock[name="right"]`,
 shared with the site's own corner items (the `dock` coral; see `../dock/README.md` for the dock
-and its two-sentence contract) — through a verbatim copy of `../shared/dock.mjs`
+and its three-sentence contract) — through a verbatim copy of `../shared/dock.mjs`
 (`dock-sync.test.mjs` holds the two equal). Every `data-*` attribute below keeps its meaning; the
 dock only adds:
 
 - **Stacking in document order.** The host (`div.dc-inbox-host`) moves into the dock at the end of
   `<body>`; the container you wrote stays where it is and is the bubble's place in the order. A
   site layout that writes the container before its embed slot gets the inbox nearest the corner.
-  Removing the container no longer removes the bubble with it — call `unmount(el)`, as before.
+  Removing the container still removes the bubble: the dock watches the page and takes out any item
+  whose container has left the document, and the mount then undoes itself as `unmount(el)` does (a
+  route change that replaces the container and mounts again shows one bubble, not two).
 - **The panel sits directly above the bubble**, which stays where it is, says `aria-expanded`, names
-  the panel with `aria-controls`, and closes it when pressed. The items above it are pushed up.
-- **Esc closes the panel** and returns the focus to the bubble; so does ×.
+  the panel with `aria-controls`, and is the panel's close control: while the panel is open it
+  shows × instead of its glyph and is named「Close」(the same word as the panel's own ×, which
+  stays). The items above it are pushed up.
+- **Esc closes the panel** and returns the focus to the bubble; so does ×. (Opened from an
+  installed app's More sheet, the focus goes to the More button: the bubble is in the closed sheet.)
 - **One panel open at a time** with every other corner item on the page (`dc-dock:open`).
 - **The dock's shape and shadow**: same 56px circle 16px from the corner, with the shadow budget
   `0 1px 3px` + `0 4px 12px` (the old `0 6px 24px` / `0 12px 40px` were cut by a phone's edge).
-- **Hidden in print.** **In an installed app** (display-mode: standalone) the bubble is a square
-  tab in the bottom bar and the panel a sheet above it.
+- **Hidden in print.** **In an installed app whose page carries the renderer's bar and switched it
+  on** (sitetile: `packages: pwa` with a `nav:`, at its mobile breakpoint) the bubble is a square tab
+  in the bottom bar and the panel a sheet above it. Anywhere else — a browser, a wide installed
+  window, an installed PWA without that bar — it stays in the corner: the coral never makes a bar.
 - `--reef-inbox-offset-x/-y` still raise / move in the bubble by the same validated amount: they
   are now margins on the bubble inside the dock, so whatever is stacked above it moves with it. For
   a cookie bar or another vendor's widget, prefer the dock's `--dc-dock-reserve`, which lifts both
   corners together.
+- **The `--reef-inbox-*` knobs are read from the container.** The host no longer sits inside it, so
+  a knob set on a wrapper around the container, or inline on it, would no longer inherit; the coral
+  reads all six from the container on every render and resize and carries each one that has a value
+  over to the host. A knob on `:root` works as it always did.
+- **The corner margin is `max(1rem, 16px)`** (the dock's), not `1rem`. On a site whose root font
+  is 62.5% (`1rem` = 10px) the bubble sits 16px from the corner instead of 10px, so it moves 6px in:
+  the margin may not shrink below the shadow's 16px reach.
 
 ## Taking it off the page (0.7.9)
 
@@ -424,11 +438,12 @@ site's theme wins without this file knowing anything about it. Dark mode follows
 `prefers-color-scheme`; the entrance animation respects reduced motion.
 
 **Since 0.7.13 the panel lives in a shadow root** (`mode:'open'`, on a `div.dc-inbox-host`
-the coral appends to the container), with its stylesheet inside it — nothing goes into
+— since 0.8.0 in the corner dock at the end of `<body>`, before that inside the container —
+with its stylesheet inside it), and nothing goes into
 `document.head`. A page's selectors, and a browser extension's cosmetic CSS, no longer reach
 the bubble: reef#2139 measured one `button{min-width:88px}` turning it into an 88×56 capsule.
 What crosses the boundary is what inherits, on purpose: the `--reef-inbox-*` custom properties
-and the site's `font`. So the colour knobs above, and the two position knobs below, are the
+(read from the container and carried to the host, see "In the corner dock") and the site's `font`. So the colour knobs above, and the two position knobs below, are the
 whole styling surface — a site rule aimed at `.dc-inbox-*` no longer applies. A script that
 needs a node reaches it deliberately through `host.shadowRoot`; `shape.smoke.mjs` measures the
 shape, the colours and the font in chromium.
@@ -514,7 +529,25 @@ new version before publishing.
 **0.8.0 is the corner dock** (reef#2790; see "In the corner dock" above) on top of 0.7.17 and the two
 fixes that landed after 0.7.17 without a bump (the KAITO-unavailable sentence and the zh-TW search
 note). A minor version: every attribute keeps its meaning and the dock only adds. Behind the loader
-it is above the 0.7.12 floor, so nothing about the rollout order below changes.
+it is above the 0.7.12 floor.
+
+### 🔴 Rolling out 0.8.0 and the installed-app bar — coral first, in this order
+
+The coral alone is safe on every page: it never creates a bar, so an installed PWA without
+sitetile's bar keeps its bubble in the corner, as with 0.7.x. The sitetile engine that writes the bar
+needs the coral that joins it (an older bubble sits fixed over the bar's right-hand tab). Each step
+gates the next:
+
+- [ ] **Publish `inbox-bubble@0.8.0`** (and `dock@0.1.0`) as immutable versions.
+- [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, ×/Esc/focus,
+      a wrapper-themed bubble) against `v0`.
+- [ ] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
+      propagation), and verify `X-Coral-Resolved: 0.8.0` and the body's `['inbox-bubble']='0.8.0'`.
+- [ ] **Only then release the sitetile engine** that writes the bar, and rebuild sites.
+
+**Rollback rule: never serve a coral below 0.8.0 while appbar pages exist.** Their loader opens with
+`/*inbox-bubble>=0.8.0*/` instead of the loader's own floor, so a search of the built HTML finds them;
+roll the engine back and rebuild those sites first, as for 0.7.12 below.
 
 **0.7.17 is 0.7.16 plus tile#202's copy** (reef#2418). After 0.7.16 was merged (tile#199),
 tile#202 made the visitor copy site-neutral in all nine locales, matching the site form's

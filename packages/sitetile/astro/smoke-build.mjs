@@ -233,6 +233,9 @@ const ALLOWED_INLINE = [
   // in a browser the bar it would switch on is server-rendered `hidden` and stays so, and the header
   // keeps its nav. JS-off in an app: the bar stays hidden and the header nav stays, so nothing is lost.
   ['installed-app bottom bar (standalone only; pwa + nav sites only)', 'data-st-appbar'],
+  // Its switch, inline in <head> so the header never flashes (lib/appbar.mjs APPBAR_HEAD_SCRIPT): an
+  // installed app at the mobile breakpoint sets html[data-dc-dock-bar], and nothing else. Same sites only.
+  ['installed-app bottom bar switch (<head>, before first paint; pwa + nav sites only)', 'data-dc-dock-bar'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
