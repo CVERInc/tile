@@ -467,6 +467,18 @@ async function twoTenants(served, answers) {
 	return { outcome, imports, claimRequests: claimRequests(), drawn: [a.children.length > 0, b.children.length > 0] };
 }
 
+test('an installed-app bar page names the coral it needs: /*inbox-bubble>=0.8.0*/, and this coral meets it (tile#233 review, finding 6)', async () => {
+	const { APPBAR_CORAL_FLOOR } = await import('./astro/src/lib/appbar.mjs');
+	const s = bubbleLoaderScript(SRC, APPBAR_CORAL_FLOOR);
+	assert.ok(s.startsWith(`/*inbox-bubble>=${APPBAR_CORAL_FLOOR}*/(function bubbleLoader(`), 'an appbar page does not name its floor');
+	assert.equal(s.slice(s.indexOf('*/')), bubbleLoaderScript(SRC).slice(bubbleLoaderScript(SRC).indexOf('*/')), 'the loader itself differs, not only its marker');
+	assert.ok(atLeast(APPBAR_CORAL_FLOOR, CORAL_FLOOR), 'the appbar floor is below the loader\'s own');
+	const pkg = JSON.parse(readFileSync(new URL('../dynamic-corals/inbox-bubble/package.json', import.meta.url), 'utf8'));
+	assert.ok(atLeast(pkg.version, APPBAR_CORAL_FLOOR), `inbox-bubble ${pkg.version} is below the appbar floor ${APPBAR_CORAL_FLOOR}`);
+	const readme = readFileSync(new URL('../dynamic-corals/inbox-bubble/README.md', import.meta.url), 'utf8');
+	assert.ok(readme.includes(`/*inbox-bubble>=${APPBAR_CORAL_FLOOR}*/`), 'the coral README\'s rollout checklist does not name the appbar marker');
+});
+
 test('the floor: the emitted loader and the coral\'s handoff contract name the same minimum version, and this coral meets it', async () => {
 	assert.match(CORAL_FLOOR, /^\d+\.\d+\.\d+$/);
 	assert.equal(coral.LOADER_HANDOFF_SINCE, CORAL_FLOOR, 'the coral\'s handoff contract and the loader disagree about the floor');

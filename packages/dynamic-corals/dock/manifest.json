@@ -1,0 +1,17 @@
+{
+  "name": "dock",
+  "version": "0.1.0",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/dock/0.1.0/dock.js",
+  "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/dock",
+  "requires": [],
+  "calls": [],
+  "stores": [
+    "browser sessionStorage — only for an item set to open once per visit (data-auto-open), and only once it has opened: the key dc-dock:<name> (or dc-dock:<corner>:<label> for an item without data-open-on-hash) holding \"opened\", so it does not open again for the rest of that tab's visit. Nothing about the visitor, nothing sent anywhere"
+  ],
+  "paid": false,
+  "funding": null,
+  "without": "requires nothing and calls nothing. Without the script the element stays exactly as authored — the documented embed carries `hidden`, so nothing shows; without `hidden` the owner's own markup shows in place, unstyled by this coral.",
+  "capabilities": []
+}

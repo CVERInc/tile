@@ -107,7 +107,7 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # one level up; the orphan guard below is what stops it going stale, and it is the
              # reason a new coral directory fails loudly here instead of never being run.
              packages/dynamic-corals/*.test.mjs
-             packages/dynamic-corals/countdown/*.test.mjs
+             packages/dynamic-corals/countdown/*.test.mjs packages/dynamic-corals/dock/*.test.mjs
              packages/dynamic-corals/drawer/*.test.mjs packages/dynamic-corals/events/*.test.mjs
              packages/dynamic-corals/inbox-bubble/*.test.mjs packages/dynamic-corals/qr/*.test.mjs
              packages/dynamic-corals/platform-dispatch/*.test.mjs
@@ -144,6 +144,8 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # tile#19: the inbox honeypot measured in a real layout, on legacy and layered hosts.
              # It takes the same `<base URL of its directory>` argument as the two above.
              packages/dynamic-corals/inbox-bubble/*.smoke.mjs
+             # reef#2790: the corner dock — order, version skew, shadow reach, safe areas, the bar.
+             packages/dynamic-corals/dock/*.smoke.mjs
              # grid `filter=` over plain cards, with and without `pack=masonry`, at 390 and 1440 px:
              # the emitter's markup driven by the built grid-filter and grid-masonry corals.
              packages/dynamic-corals/grid-filter/*.smoke.mjs)

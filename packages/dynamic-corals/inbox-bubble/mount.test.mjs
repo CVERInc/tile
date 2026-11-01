@@ -445,8 +445,9 @@ test('tile #14: a de-DE page with a German title and placeholder gets German chr
 		const html = root.innerHTML;
 		assert.match(html, /aria-label="Schreiben Sie uns"/);
 		assert.match(html, />Senden</, 'the Send button is not German');
-		assert.match(html, /aria-label="Schließen"/, 'the close button is not named in German');
-		assert.doesNotMatch(html, />Send<|aria-label="Close"/, 'English chrome beside a German title');
+		// The panel's own × is named like the bubble (one close rule, round 5): "<closed name> schließen".
+		assert.match(html, /class="dc-inbox-close" aria-label="Nachricht senden schließen"/, 'the close button is not named in German');
+		assert.doesNotMatch(html, />Send<|aria-label="Close/, 'English chrome beside a German title');
 	} finally {
 		document.documentElement.setAttribute('lang', 'en');
 	}
@@ -856,6 +857,25 @@ const BEFORE = {
 		ext_plain: 'efd03fa789db6e44'
 	}
 };
+/**
+ * 🔴 THE RULER STAYS THE OLD CORAL, AND THE DIFFERENCE IS NAMED (reef#2790). The dock changed exactly
+ * three things in this markup, all asked for: the bubble says whether the panel is open and which
+ * panel it controls (`aria-expanded`, `aria-controls`), the panel carries the `id` that names it, and
+ * the bubble STAYS under the open panel (the panel sits directly above its own item; a press on the
+ * bubble closes it). `legacy()` takes exactly those three away and nothing else, so every digest below
+ * is still measured against the coral as it was — any other change is still red.
+ *
+ * A fourth, from the one close rule (owner ruling 2026-11-01, round 5): the panel's own × is named
+ * like the bubble and carries the dock's × icon (it shows only when the inbox is opened from More —
+ * CSS, which this harness does not run). `legacy()` writes the old × back in its place, for the English
+ * name only, so a digest of any other markup or language is still red.
+ */
+const PANEL_X_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>';
+const legacy = (html) => html
+	.replace(/ aria-expanded="(?:true|false)" aria-controls="dc-inbox-panel"/g, '')
+	.replace(' id="dc-inbox-panel"', '')
+	.replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>')
+	.replace(new RegExp(`<button type="button" class="dc-inbox-close" aria-label="Close [^"]+">${PANEL_X_ICON.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</button>`), '<button type="button" class="dc-inbox-close" aria-label="Close">×</button>');
 const { createHash } = await import('node:crypto');
 const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
@@ -886,7 +906,7 @@ test('gate: two tenants on one page, one with an Inbox and one without — only 
 	const off = new El({ 'data-kind': 'site', 'data-id': 'off-mixed' });
 	await Promise.all([mount(on), mount(off)]);
 	await drain();
-	assert.equal(digest(panelOf(on).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(on).innerHTML)), BEFORE.closed);
 	assert.ok(nothingRendered(off));
 });
 
@@ -903,7 +923,7 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await mount(el);
 		await settle();
 		assert.equal(el.children.length, 1, name);
-		assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
+		assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed, `${name}: closed bubble changed`);
 		// The two a mount had, plus the funnel's `pageshow` (0.7.15) — a listener, not markup or a request.
 		assert.equal(listenerCount(), before + 3, `${name}: not the three window listeners a mount has`);
 		// Apart from the probe, the same requests as before — except the assistant-name read, which
@@ -913,7 +933,7 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await panelOf(el).querySelector('.dc-inbox-open').emit('click');
 		await settle();
 		assert.equal(assistantReads(from).length, 1, `${name}: opening did not read the name once`);
-		assert.equal(digest(panelOf(el).innerHTML), BEFORE.open[name], `${name}: open panel changed`);
+		assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open[name], `${name}: open panel changed`);
 	}
 });
 
@@ -972,7 +992,7 @@ test('gate: cannot ask ⇒ nothing, retried at 2 s, 8 s and 30 s, and drawn when
 	await drain();
 	assert.equal(probes(from).length, 4);
 	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed);
 });
 
 test('gate: never answers ⇒ stops after four requests and draws nothing', async () => {
@@ -1046,7 +1066,7 @@ test('gate: a reef-inbox:open sent while the probe is still out is held, and ope
 	await done;
 	await drain();
 	assert.equal(el.children.length, 1);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito,
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_kaito,
 		'the open asked for before the answer was dropped (panel still closed)');
 	assert.equal(listenerCount(), before + 3, 'the holding listener outlived the answer');
 
@@ -1110,7 +1130,7 @@ test('gate: nobody could say, but this browser once heard yes (within 30 days) �
 	await drain();
 	assert.equal(probes(from).length, 1);
 	assert.equal(a.children.length, 1, 'a throttled ask took the bubble off a site that has an Inbox');
-	assert.equal(digest(panelOf(a).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(a).innerHTML)), BEFORE.closed);
 	assert.equal(storage.get(claimKey('site', 'stale-1')), kept, 'a non-answer re-dated the yes');
 
 	// a timeout (could not ask) + a yes from 29 days ago ⇒ drawn at the first non-answer, no retry wait.
@@ -1286,8 +1306,8 @@ function assertAskOnly(v, why) {
 
 test('#1866 row 1 — KAITO + an Inbox: the full bubble, unchanged, and the questions DO leave (the control)', async () => {
 	const v = await visit({ 'data-id': 'r1-on', 'data-kaito': '1' });
-	assert.equal(digest(v.closed), BEFORE.closed, 'closed bubble changed');
-	assert.equal(digest(v.panel), BEFORE.open.site_kaito, 'open panel changed');
+	assert.equal(digest(legacy(v.closed)), BEFORE.closed, 'closed bubble changed');
+	assert.equal(digest(legacy(v.panel)), BEFORE.open.site_kaito, 'open panel changed');
 	assert.ok(v.panel.includes(`KAITO${CHIP}${HAS_INBOX_LINE}`), 'not the has-an-Inbox status line');
 	assert.equal(v.panel.includes(ASK_ONLY_LINE), false, 'a site with an Inbox got the KAITO-only line');
 	assert.match(v.exchange, /dc-inbox-tohuman/, 'the answer lost its way to a person');
@@ -1366,9 +1386,9 @@ test('#1866 row 2 — a stored handle is not adopted, an open asked for early is
 	await mount(second);
 	await drain();
 	assert.equal(probes(f).length, 1, 'the next page did not ask again');
-	assert.equal(digest(panelOf(second).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(second).innerHTML)), BEFORE.closed);
 	await openBubble(panelOf(second));
-	assert.equal(digest(panelOf(second).innerHTML), BEFORE.open.site_kaito, 'the next page is not the full bubble');
+	assert.equal(digest(legacy(panelOf(second).innerHTML)), BEFORE.open.site_kaito, 'the next page is not the full bubble');
 });
 
 test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, and nothing leaves even if the site does have an Inbox', async () => {
@@ -1401,7 +1421,7 @@ test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, an
 	await mount(el);
 	await drain();
 	await openBubble(panelOf(el));
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_kaito);
 });
 
 test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async () => {
@@ -1410,13 +1430,13 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	const before = listenerCount();
 	await mount(el);
 	await drain();
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed);
 	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 	assert.equal(listenerCount(), before + 3);
 	await openBubble(panelOf(el));
 	await drain();
 	assert.equal(assistantReads(from).length, 1);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_status);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_status);
 	assert.match(panelOf(el).innerHTML, /name="text"/);
 	assert.equal(panelOf(el).innerHTML.includes(ASK_ONLY_LINE), false);
 });
@@ -1931,7 +1951,7 @@ for (const [name, route] of [
 			await openBubble(root);
 			await drain();
 			assert.equal(indexRequests(from).length, 1, 'control: the index was not read');
-			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel is not the no-attribute panel');
+			assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the opened panel is not the no-attribute panel');
 			assert.equal(removed.length - removedBefore, 1, 'the search block was not removed exactly once');
 			const textarea = composeBox(root);
 			textarea.value = 'caf';
@@ -1943,7 +1963,7 @@ for (const [name, route] of [
 			await openBubble(root);
 			await drain();
 			assert.ok(isOpen(root));
-			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the reopened panel is not the no-attribute panel');
+			assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the reopened panel is not the no-attribute panel');
 			assert.equal(indexRequests(from).length, 1, 'a reopen read the index again');
 		} finally {
 			respond = null;
@@ -1956,7 +1976,7 @@ test('2160 negative control: without data-search-index the panel is byte-identic
 	const { root } = await mountFresh({ 'data-kaito': '1', 'data-site-name': 'Example Shop' });
 	await openBubble(root);
 	await drain();
-	assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
+	assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
 	assert.doesNotMatch(root.innerHTML, /dc-inbox-search|dc-inbox-results|Typing only searches/);
 	const textarea = composeBox(root);
 	textarea.value = 'caf';
@@ -2295,4 +2315,102 @@ test('tile#193: data-ai-log="0" installs no pageshow listener', async () => {
 	const { el } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
 	assert.equal((windowListeners.get('pageshow') ?? []).length, before);
 	coral.unmount(el);
+});
+
+// ── reef#2790: the DOCKED path, in node (review of tile#233, finding 9) ────────────────────────────
+// Every test above runs the fallback: this file's `document` has no `body`, so `dockJoin` returns null
+// and the host goes into the container as before. This one gives the document a body for one mount,
+// so the path every real page takes — the host in `dc-dock[name="right"]`, `data-docked`, the open
+// announce and the close on another item's announce, `--_dc-below`, the bubble as the close control,
+// and retiring when the container has left the document — is pinned without a browser too.
+test('reef#2790 docked: the host joins the right dock, keeps the digests, and the bubble closes what it opened', async () => {
+	class DEl extends El {
+		constructor(attrs) {
+			super(attrs);
+			this.style = { props: {}, setProperty(k, v) { this.props[k] = String(v); }, removeProperty(k) { delete this.props[k]; } };
+			this.connected = undefined;
+		}
+		get ownerDocument() { return document; }
+		get isConnected() { return this.connected; }
+		attachShadow(init) {
+			if (this.shadowRoot) throw new Error('NotSupportedError: shadow root already attached');
+			this.shadowRoot = new DEl();
+			this.shadowRoot.mode = init.mode;
+			return this.shadowRoot;
+		}
+		append(...kids) { for (const k of kids) this.appendChild(k); }
+		insertBefore(child, ref) {
+			const at = ref ? this.children.indexOf(ref) : -1;
+			if (at < 0) this.children.push(child); else this.children.splice(at, 0, child);
+			child.parentNode = this;
+			return child;
+		}
+	}
+	const events = new EventTarget();
+	const body = new DEl();
+	const saved = { ...document };
+	Object.assign(document, {
+		body,
+		createElement: () => new DEl(),
+		querySelector: (sel) => {
+			const m = /^dc-dock\[name="([^"]+)"\]$/.exec(sel);
+			return m ? body.children.find((c) => c.getAttribute('name') === m[1]) || null : null;
+		},
+		addEventListener: (t, f) => events.addEventListener(t, f),
+		removeEventListener: (t, f) => events.removeEventListener(t, f),
+		dispatchEvent: (e) => events.dispatchEvent(e)
+	});
+	const announced = [];
+	const record = (e) => announced.push(e.detail);
+	events.addEventListener('dc-dock:open', record);
+	try {
+		const el = new DEl({ 'data-kind': 'site', 'data-id': 'docked-1', 'data-kaito': '1', 'data-site-name': 'Example Shop' });
+		const before = listenerCount();
+		await mount(el);
+		await settle();
+		const dock = body.children.find((c) => c.getAttribute('name') === 'right');
+		assert.ok(dock, 'no dc-dock[name="right"] in <body>');
+		assert.equal(el.children.length, 0, 'the host went into the container, not the dock');
+		assert.equal(dock.children.length, 1);
+		const host = dock.children[0];
+		assert.equal(host.getAttribute('data-docked'), 'right');
+		assert.equal(host.dockAnchor, el, 'the container is not the host\'s place in the order (contract ①)');
+		assert.ok(dock.shadowRoot, 'the dock was not given its look');
+		const root = panelIn(host);
+		assert.equal(digest(legacy(root.innerHTML)), BEFORE.closed, 'the docked closed bubble differs from the old one');
+		await openBubble(root);
+		await settle();
+		assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the docked open panel differs from the old one');
+		assert.equal(host.style.props['--_dc-below'], '0', 'the room for the items below was not set on open');
+		assert.deepEqual(announced, [host], 'opening did not announce itself on document (contract ②)');
+		// Open, the bubble is the panel's close control: × and "Close <what it closes>" (cold review N2).
+		// The panel's own × is named the same, with the same icon — one close rule (round 5); it shows only
+		// from More, which is CSS (dock.smoke.mjs arm 18 measures it in a browser).
+		assert.match(root.innerHTML, /<button type="button" class="dc-inbox-open" aria-label="Close Message us" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path[^>]* d="M6 6l12 12M18 6 6 18"\/><\/svg><\/button>$/);
+		assert.ok(root.innerHTML.includes(`<button type="button" class="dc-inbox-close" aria-label="Close Message us">${PANEL_X_ICON}</button>`), 'the panel\'s own × is not named like the bubble');
+		// Another item opening closes this panel.
+		document.dispatchEvent(new CustomEvent('dc-dock:open', { detail: new DEl() }));
+		assert.ok(isClosedBubble(root) && !isOpen(root), 'another item\'s announce left the panel open');
+		assert.match(root.innerHTML, /aria-label="Message us" aria-expanded="false"/);
+		// The container leaves the document; the dock's watcher takes the host out (contract ③ — a
+		// browser's job, done by hand here); the next way in finds it and undoes the mount.
+		el.connected = false;
+		host.connected = false;
+		host.remove();
+		dispatch('reef-inbox:open');
+		await settle();
+		assert.ok(!isOpen(root), 'a retired bubble opened a panel nobody can see');
+		// Every listener the mount added is gone; what stays is the dock's own `resize` (its reserve), which
+		// belongs to the dock and outlives any one item in it.
+		assert.equal(listenerCount(), before + 1, 'a retired mount kept its window listeners');
+		assert.equal((windowListeners.get('resize') ?? []).length >= 1, true);
+		assert.equal(coral.unmount(el), false, 'the retired mount was not undone');
+	} finally {
+		events.removeEventListener('dc-dock:open', record);
+		for (const k of Object.keys(document)) if (!(k in saved)) delete document[k];
+		Object.assign(document, saved);
+	}
+	// And the fallback is back for whatever runs next: a mount without a body goes into its container.
+	const { el } = await mountFresh();
+	assert.equal(el.children.length, 1);
 });

@@ -228,10 +228,20 @@ const ALLOWED_INLINE = [
   // page outlives its deadline); the module ticks the countdown, removes the card at the deadline,
   // and unhides/wires the ×. Both carry the dismiss-key literal, so one signature admits both.
   ['announce card (deadline guard + countdown/× module, only on a page with a future announce-until)', 'rf-announce-x:'],
+  // reef#2790 installed-app bottom bar (packages/appbar/appbar.js): only on a `packages: pwa` site
+  // with a `nav:`, and a no-op unless the page runs as an installed app (display-mode: standalone) —
+  // in a browser the bar it would switch on is server-rendered `hidden` and stays so, and the header
+  // keeps its nav. JS-off in an app: the bar stays hidden and the header nav stays, so nothing is lost.
+  ['installed-app bottom bar (standalone only; pwa + nav sites only)', 'data-st-appbar'],
+  // Its switch, inline in <head> so the header never flashes (lib/appbar.mjs APPBAR_HEAD_SCRIPT): an
+  // installed app at the mobile breakpoint sets html[data-dc-dock-bar], and nothing else. Same sites only.
+  ['installed-app bottom bar switch (<head>, before first paint; pwa + nav sites only)', 'data-dc-dock-bar'],
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
   ['pkg-runtimes (bleedblend canvas)', 'willReadFrequently'],
+  // reef#2790: the appbar switch with the corner dock base it imports (see ALLOWED_INLINE above).
+  ['installed-app bottom bar (standalone only; pwa + nav sites only)', 'data-st-appbar'],
 ];
 
 // 🩸 2026-08-08. This audit counted <script> TAGS, and a <script type="application/ld+json"> is

@@ -259,7 +259,8 @@ test('🔴 the whole renderer carries no other CJK UI literal', () => {
   // all four locales, so its Korean string is Korean on purpose. The allowlist is explicit rather
   // than a pattern match, so adding to it is a decision somebody makes on the record — and each
   // entry must still PROVE it maps every locale, or it is just a hardcode with a friend.
-  const OWNS_A_TABLE = ['components/sections/Collection.astro'];
+  // lib/appbar.mjs (reef#2790) owns the installed-app bar's one word,「More」, in the same four.
+  const OWNS_A_TABLE = ['components/sections/Collection.astro', 'lib/appbar.mjs'];
   // fmtDate's `cjk-full` / `cjk-md` branches ARE Chinese, and that is the feature: they are named
   // date formats a site opts into with `blog-date-format`. What would make them a defect is being
   // reachable without asking — so rather than exempt the file, prove the shape: every CJK format
