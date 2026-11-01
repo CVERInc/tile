@@ -12,7 +12,8 @@
 //                    Worker's missing-binding 503 for every request.
 //
 // Mapping entry (value stored under the lowercase hostname):
-//   { worker: string, generation: number|string, runWorkerFirst?: string[] }
+//   { worker: string, generation: number|string, runWorkerFirst?: string[], boundDomain?: string }
+// `boundDomain` passes through lookup untouched and changes no serving behavior.
 //
 // This module never sets X-Forwarded-Host and never rewrites a forwarded request.
 
@@ -118,7 +119,7 @@ export function matchesWorkerFirst(patterns, pathname) {
 	return included;
 }
 
-async function lookup(env, host) {
+export async function lookup(env, host) {
 	const kv = env[HOST_ROUTES_BINDING];
 	if (!kv) return { error: json({ error: 'host_routes_binding_missing' }, 503) };
 	let entry;
@@ -138,25 +139,19 @@ function buildStub(ctx, host, entry) {
 	catch (e) { return null; }
 }
 
-export async function handleRequest(request, env, ctx) {
-	if (isOn(env[BYPASS_VAR])) return bypassResponse();
-
-	const url = new URL(request.url);
-	const host = normalizeHost(url.hostname);
-
-	// cf-worker marks a request made by a Worker over a public hostname. Only
-	// the public catalog reads and the Site shell read may come in that way.
-	if (request.headers.has('cf-worker')) {
-		if (request.method !== 'GET' ||
-			!(PUBLIC_CATALOG_PATHS.includes(url.pathname) || url.pathname === SITE_SHELL_PATH)) {
-			return json({ error: 'worker_origin_forbidden' }, 403);
-		}
+// Host-level guard shared by both entry paths. cf-worker marks a request made by a Worker over
+// a public hostname. Only the public catalog reads and the Site shell read may come in that way.
+function workerOriginGuard(request, url) {
+	if (!request.headers.has('cf-worker')) return null;
+	if (request.method !== 'GET' ||
+		!(PUBLIC_CATALOG_PATHS.includes(url.pathname) || url.pathname === SITE_SHELL_PATH)) {
+		return json({ error: 'worker_origin_forbidden' }, 403);
 	}
+	return null;
+}
 
-	const found = await lookup(env, host);
-	if (found.error) return found.error;
-	const entry = found.entry;
-
+// Serving after a successful lookup; `host` is what the capability stub is pinned to.
+async function serve(request, env, ctx, url, host, entry) {
 	if (url.pathname.startsWith(API_PREFIX) || isDirectForward(request.method, url.pathname)) {
 		const rsp = env[RSP_BINDING];
 		if (!rsp) return bypassResponse();
@@ -185,6 +180,41 @@ export async function handleRequest(request, env, ctx) {
 		if (/not found/i.test(msg)) return json({ error: 'site_worker_not_found' }, 502);
 		return json({ error: 'site_worker_error' }, 502);
 	}
+}
+
+export async function handleRequest(request, env, ctx) {
+	if (isOn(env[BYPASS_VAR])) return bypassResponse();
+
+	const url = new URL(request.url);
+	const host = normalizeHost(url.hostname);
+
+	const forbidden = workerOriginGuard(request, url);
+	if (forbidden) return forbidden;
+
+	const found = await lookup(env, host);
+	if (found.error) return found.error;
+	return serve(request, env, ctx, url, host, found.entry);
+}
+
+// Route-key entry (called over RPC by ./entry.mjs RouteDispatch): the mapping is looked up under
+// `routeKey` (must start with "preview:") instead of the request hostname, and the capability
+// stub is pinned to the passed `host`. A real hostname can never carry ':' so the Host path in
+// handleRequest cannot reach a route key. The bypass var and the cf-worker guard apply here too:
+// both are host-level protections of the same Worker.
+export const ROUTE_KEY_PREFIX = 'preview:';
+
+export async function fetchRoute(request, env, ctx, { routeKey, host } = {}) {
+	if (isOn(env[BYPASS_VAR])) return bypassResponse();
+	if (typeof routeKey !== 'string' || !routeKey.startsWith(ROUTE_KEY_PREFIX)) {
+		return json({ error: 'route_key_invalid' }, 400);
+	}
+	const url = new URL(request.url);
+	const forbidden = workerOriginGuard(request, url);
+	if (forbidden) return forbidden;
+
+	const found = await lookup(env, routeKey);
+	if (found.error) return found.error;
+	return serve(request, env, ctx, url, normalizeHost(host), found.entry);
 }
 
 // Logic of the capability stub (the WorkerEntrypoint in ./entry.mjs calls this).

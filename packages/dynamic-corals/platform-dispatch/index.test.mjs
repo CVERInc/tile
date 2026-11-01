@@ -286,3 +286,88 @@ test('capability stub: GET allowlist only, host fixed by props, headers carried'
 	assert.equal(h.rspCalls.length, before);
 	assert.equal((await capabilityFetch(ok, h.env, undefined)).status, 403);
 });
+
+// ---- route-key entry (fetchRoute) and exported lookup ----
+import { fetchRoute, lookup } from './index.mjs';
+
+const KEY = 'preview:site1';
+const PHOST = 'site1-preview.example.com';
+const rmap = (extra = {}) => ({ [KEY]: { worker: 'site1-p1', generation: 3, ...extra }, [HOST]: { worker: 'site-a', generation: 7 } });
+
+test('fetchRoute serves a route key through the dispatcher with the stub pinned to the passed host', async () => {
+	const h = harness({ mapping: rmap() });
+	const res = await fetchRoute(req('/page', {}, PHOST), h.env, h.ctx, { routeKey: KEY, host: 'Site1-Preview.Example.com.' });
+	assert.equal(await res.text(), 'site:site1-p1');
+	assert.deepEqual(h.kvCalls, [[KEY, 'json']]);
+	assert.equal(h.stubs.length, 1);
+	assert.equal(h.stubs[0].props.host, PHOST);
+	assert.equal(h.stubs[0].props.worker, 'site1-p1');
+	assert.equal(h.dispatchCalls[0].opts.props.generation, 3);
+	assert.equal(h.rspCalls.length, 0);
+});
+
+test('fetchRoute sends /api/* and direct-forward paths to RSP verbatim', async () => {
+	const h = harness({ mapping: rmap() });
+	const r = req('/api/x', { method: 'POST', body: 'b' }, PHOST);
+	const res = await fetchRoute(r, h.env, h.ctx, { routeKey: KEY, host: PHOST });
+	assert.equal(res.status, 201);
+	assert.equal(h.rspCalls[0], r);
+	await fetchRoute(req('/seam/island.js', {}, PHOST), h.env, h.ctx, { routeKey: KEY, host: PHOST });
+	assert.equal(h.rspCalls.length, 2);
+	assert.equal(h.dispatchCalls.length, 0);
+});
+
+test('fetchRoute: unknown key is 404 with no RSP call', async () => {
+	const h = harness({ mapping: rmap() });
+	const res = await fetchRoute(req('/api/x', {}, PHOST), h.env, h.ctx, { routeKey: 'preview:nope', host: PHOST });
+	assert.equal(res.status, 404);
+	assert.equal(h.rspCalls.length, 0);
+	assert.equal(h.dispatchCalls.length, 0);
+});
+
+test('fetchRoute refuses keys without the preview: prefix before any lookup', async () => {
+	const h = harness({ mapping: rmap() });
+	for (const routeKey of [HOST, 'site1', 'Preview:site1', undefined, null, 5]) {
+		const res = await fetchRoute(req('/', {}, PHOST), h.env, h.ctx, { routeKey, host: PHOST });
+		assert.equal(res.status, 400);
+		assert.deepEqual(await res.json(), { error: 'route_key_invalid' });
+	}
+	assert.equal(h.kvCalls.length, 0);
+	assert.equal(h.rspCalls.length, 0);
+});
+
+test('an entry with boundDomain serves exactly like one without', async () => {
+	const plain = harness({ mapping: rmap() });
+	const bound = harness({ mapping: rmap({ boundDomain: 'shop.example.org' }) });
+	for (const h of [plain, bound]) {
+		await fetchRoute(req('/page', {}, PHOST), h.env, h.ctx, { routeKey: KEY, host: PHOST });
+		await fetchRoute(req('/api/y', {}, PHOST), h.env, h.ctx, { routeKey: KEY, host: PHOST });
+		await handleRequest(req('/page', {}, HOST), h.env, h.ctx);
+	}
+	assert.deepEqual(bound.dispatchCalls.map((c) => [c.name, Object.keys(c.opts.props).sort(), c.opts.props.generation]),
+		plain.dispatchCalls.map((c) => [c.name, Object.keys(c.opts.props).sort(), c.opts.props.generation]));
+	assert.equal(bound.rspCalls.length, plain.rspCalls.length);
+	assert.deepEqual(bound.stubs.map((s) => s.props), plain.stubs.map((s) => s.props));
+});
+
+test('lookup is exported and returns the documented shape', async () => {
+	const h = harness({ mapping: rmap({ runWorkerFirst: ['/a/*'], boundDomain: 'shop.example.org' }) });
+	const ok = await lookup(h.env, KEY);
+	assert.deepEqual(ok, { entry: { worker: 'site1-p1', generation: 3, runWorkerFirst: ['/a/*'], boundDomain: 'shop.example.org' } });
+	const miss = await lookup(h.env, 'preview:nope');
+	assert.equal(miss.error.status, 404);
+	assert.equal('entry' in miss, false);
+	const bad = await lookup({ HOST_ROUTES: { async get() { return { worker: 5 }; } } }, KEY);
+	assert.equal(bad.error.status, 502);
+});
+
+test('the Host path can never reach a preview: key (a hostname has no colon)', async () => {
+	const h = harness({ mapping: rmap() });
+	// A URL cannot carry ':' in its hostname (it parses as a port or fails), so lookup keys
+	// derived from the Host never contain it and never equal a route key.
+	assert.throws(() => new Request('https://preview:site1/page'));
+	const res = await handleRequest(new Request('https://preview:443/page'), h.env, h.ctx);
+	assert.equal(res.status, 404);
+	assert.deepEqual(h.kvCalls, [['preview', 'json']]);
+	assert.equal(h.dispatchCalls.length, 0);
+});

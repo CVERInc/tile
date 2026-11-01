@@ -4,7 +4,7 @@ Dispatch Worker for Workers for Platforms Sites. **Inert by construction:** no
 package imports it, no build includes it, and `wrangler.example.jsonc` names no
 real zone or account. It changes nothing until someone deploys it.
 
-Entry: `entry.mjs` (`default.fetch`, `Connector` WorkerEntrypoint). Testable core: `index.mjs`.
+Entry: `entry.mjs` (`default.fetch`, `Connector` and `RouteDispatch` WorkerEntrypoints). Testable core: `index.mjs`.
 
 ## Bindings
 | Name | Kind | Use |
@@ -23,5 +23,10 @@ Entry: `entry.mjs` (`default.fetch`, `Connector` WorkerEntrypoint). Testable cor
 - Capability stub: `ctx.exports.Connector({props:{host,worker,generation}})`, built per request and passed as `props.CONNECTOR`; absent when `ctx.exports` is unavailable (token tier). It allows GET on `STUB_READ_PATHS` only (the catalog paths are not among them: they are rate-limited per visitor and reach RSP over the own host via the `cf-worker` rule) and always targets the mapped host.
 - `runWorkerFirst` (data from the mapping; wrangler glob and `!` semantics): paths outside it are static assets and get no stub. No list means every path gets one.
 - `DISPATCHER.get` or the fetch failing with "not found": 502 `site_worker_not_found`; any other failure: 502 `site_worker_error`.
+
+## Exports and route-key entry
+- `lookup(env, key)` -> `{ entry: { worker, generation, runWorkerFirst?, boundDomain? } }` or `{ error: Response }` (503 binding/KV failure, 404 `unknown_host`, 502 `host_mapping_invalid`). `boundDomain` is passed through and changes no serving behavior.
+- `fetchRoute(request, env, ctx, { routeKey, host })`: `routeKey` must start with `preview:` (else 400 `route_key_invalid`); the mapping is read from `HOST_ROUTES[routeKey]` and served exactly like a Host lookup (`/api/` and direct forward to `RSP` verbatim, else the Site Worker with the capability stub pinned to `host`). Unknown key: 404, RSP never called. `DISPATCH_BYPASS` and the `cf-worker` rule apply as for hosts. A hostname never contains `:`, so the Host path cannot reach a `preview:` key.
+- `RouteDispatch` (`entry.mjs`): `fetchRoute(request, { routeKey, host })` over a service binding with `entrypoint: "RouteDispatch"`.
 
 Run the tests with node's test runner (`index.test.mjs`, `direct-forward.test.mjs`). `entry.mjs` needs workerd and is exercised by the local harness.
