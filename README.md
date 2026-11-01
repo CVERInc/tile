@@ -60,6 +60,9 @@ per host.
 - **`packages/sitetile`** — the site renderer: an Astro build that turns a directory of Markdown
   into a published multilingual site, plus the page/theme model (`site-core.js`) it round-trips.
   **`packages/pagetile`** is the long-form reader core and **`packages/pwa`** the installable shell.
+  **`packages/build`** turns a site's IR into static HTML with that renderer, and its `theme/`
+  compiles the site's structured theme (`ir/_theme.md`) into the `theme.css` the build stages — see
+  [Compile a theme](packages/build/README.md#compile-a-theme).
 - **`packages/cardtile`** — REEF with Card: a one-page Card as Markdown, its multi-tenant edge
   worker, and two sandbox editors (`w/` a modal, `w2/` the tugtile board as an editing desktop).
   It imports `packages/tugtile`, `packages/sitetile` and `packages/cssmd` directly — the Card model
