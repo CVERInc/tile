@@ -192,3 +192,37 @@ test('describe_card_grammar profile: a face OR a logo, and the QR lives here', a
   assert.match(say(p.params.chips.hint), /"Illustrator, remote"/);
   assert.match(say(p.params.chips.hint), /"Live2D, Tokyo"/);
 });
+
+// 🩸 The legacy-spelling text lists what an old `embed kind=…` line carries, as an exhaustive list an
+// agent rebuilds the line from. Checked against `slides.params` it missed `origin-narrow`: the
+// renderer reads that one by BRACKET (`p['origin-narrow']`), which `paramsIn` above never matched,
+// so the schema never declared it either. This test scans both spellings of a read.
+const readsIn = (src) => new Set([
+  ...paramsIn(src),
+  ...[...src.matchAll(/\bp\[\s*(['"])([\w-]+)\1\s*\]/g)].map((m) => m[2]),
+]);
+const namedIn = (text) => new Set(/carries the (?:slides|same) params: ([^(]*)\(/.exec(text)?.[1].split(/,\s*/).map((s) => s.trim()).filter(Boolean) || []);
+
+const slidesReads = () => {
+  const read = new Set([...readsIn(CASES.slides), ...readsIn(fnBody('renderSlides'))]);
+  for (const [n, p] of Object.entries(UNIVERSAL)) if (p.disposition !== DISPOSITION.RETIRED) read.add(n);
+  return read;
+};
+
+test('🔴 the legacy-spelling text names every param the renderer reads for a slideshow — bracket reads included', () => {
+  const read = slidesReads();
+  assert.ok(read.has('origin-narrow'), 'the scan does not see bracket reads — it would miss `origin-narrow` again');
+  for (const type of ['embed', 'slides']) {
+    const named = namedIn(CELL_TYPES[type].spelling);
+    assert.ok(named.size >= 5, `${type}: found only ${named.size} params in its spelling text — nothing is being compared`);
+    assert.deepEqual([...read].filter((n) => !named.has(n)).sort(), [], `${type}: the renderer reads params its spelling text leaves out`);
+    assert.deepEqual([...named].filter((n) => !read.has(n)).sort(), [], `${type}: its spelling text names params the renderer never reads`);
+  }
+});
+
+test('CONTROL: the legacy-spelling scan fires on a list with a param missing', () => {
+  const text = CELL_TYPES.embed.spelling.replace('narrow, origin-narrow, ', 'narrow, ');
+  assert.notEqual(text, CELL_TYPES.embed.spelling, 'the control did not change the text');
+  const named = namedIn(text);
+  assert.deepEqual([...slidesReads()].filter((n) => !named.has(n)), ['origin-narrow']);
+});

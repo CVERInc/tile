@@ -436,7 +436,7 @@ test('the shared definition: `embed` is a body of HTML, `slides` carries the car
   assert.equal(parseCard(card(`- [ ] %% card: slides ${BLANKS.slides.rawParams} %%`)).cells[0].type, 'slides');
 });
 
-test('🔴 the grammar says an `embed` line with `kind=` is a slideshow — from both entries, and truthfully', () => {
+test('🔴 the grammar says an `embed` line with `kind=` is a legacy `slides` — from both entries, and truthfully', async () => {
   const said = { embed: CELL_TYPES.embed.spelling, slides: CELL_TYPES.slides.spelling };
   // An agent reads the STORED word. Told only that `embed` is pasted HTML, it rewrites
   // `embed kind=slider images=…` with embed's fields and the slideshow is gone.
@@ -446,23 +446,43 @@ test('🔴 the grammar says an `embed` line with `kind=` is a slideshow — from
     assert.match(s, /`kind=`/, `${type}: does not name the token that decides it`);
     assert.match(s, /legacy spelling/, `${type}: does not say the spelling is the old one`);
     assert.match(s, /saving it keeps the word `embed`/, `${type}: does not say the spelling survives a save`);
-    assert.match(s, /while `kind=` stays on the line/, `${type}: does not say how to edit it safely`);
-    assert.match(s, /under the word `slides`/, `${type}: does not offer the rewrite as slides`);
+    // classification is not visibility: only two kinds draw anything
+    assert.match(s, /draws a slideshow only when `kind` is `slider` or `bubbles`/, `${type}: claims every legacy line is visible`);
+    assert.match(s, /\(`kind=""`\), no value \(`kind=`\) or any other value it draws nothing/, `${type}: does not say which legacy lines draw nothing`);
+    // the rewrite is NOT equivalent for a kind with no value: `slides` defaults it, the legacy word does not
+    assert.match(s, /draws a slider when `kind` has no value/, `${type}: does not say \`slides\` defaults an absent kind`);
+    assert.match(s, /makes its images visible/, `${type}: does not say what that rewrite does`);
+    assert.match(s, /`origin-narrow` is the older name of `narrow`/, `${type}: does not name the narrow alias`);
+    assert.match(s, /when both are present, `narrow` wins/, `${type}: does not say which spelling wins`);
   }
   assert.match(said.embed, /legacy spelling of `slides`/);
-  // what such a line carries = every param `slides` honours, universal ones included, no more
-  const carried = /\(([^)]*)\)/.exec(said.embed)[1].split(/,\s*/).sort();
-  const slidesParams = Object.keys({ ...UNIVERSAL, ...CELL_TYPES.slides.params })
-    .filter((n) => ({ ...UNIVERSAL, ...CELL_TYPES.slides.params })[n].disposition !== DISPOSITION.RETIRED).sort();
-  assert.deepEqual(carried, slidesParams);
 
-  // ...and every claim is what the parser does
-  const old = '- [ ] %% card: embed kind=slider images=a.png w=6 %%';
+  // ...and every claim is what the parser and the renderer do
+  const drawn = async (line) => gridOf(await renderCardHTML(legacyCard(line), { handle: 't', cardUrl: 'https://t.example/' }));
+  const visible = async (line) => /<img /.test(await drawn(line));
+  const IMG = 'images=https://example.test/a.png';
+
+  const old = `- [ ] %% card: embed kind=slider ${IMG} w=6 %%`;
   const read = parseCard(card(old));
-  assert.equal(read.cells[0].type, 'slides', 'renders as a slideshow');
+  assert.equal(read.cells[0].type, 'slides', 'a legacy line reads as slides');
   assert.ok(serializeCard(read).includes(old), 'saving keeps the word `embed`');
-  const asSlides = parseCard(card('- [ ] %% card: slides kind=slider images=a.png w=6 %%')).cells[0];
-  assert.deepEqual({ type: asSlides.type, params: asSlides.params }, { type: read.cells[0].type, params: read.cells[0].params },
-    'the same params under `slides` are the same cell');
-  assert.equal(parseCard(card('- [ ] %% card: embed images=a.png w=6 %%')).cells[0].type, 'embed', 'without `kind=` it is HTML');
+  for (const kind of ['slider', 'bubbles']) {
+    assert.ok(await visible(`%% card: embed kind=${kind} ${IMG} %%`), `legacy kind=${kind} draws a slideshow`);
+    assert.ok(await visible(`%% card: slides kind=${kind} ${IMG} %%`), `slides kind=${kind} draws the same`);
+  }
+  for (const kind of ['kind=', 'kind=""', 'kind=unknown']) {
+    const line = `%% card: embed ${IMG} ${kind} %%`;
+    assert.equal(parseCard(legacyCard(line)).cells[0].type, 'slides', `${kind}: still classified as legacy slides`);
+    assert.equal(await visible(line), false, `legacy ${kind} draws nothing`);
+  }
+  // the one place the rewrite differs: no value under `slides` is a slider
+  assert.equal(await visible(`%% card: slides ${IMG} kind= %%`), true, '`slides kind=` draws a slider');
+  assert.equal(await visible(`%% card: slides ${IMG} %%`), true, '`slides` with no kind draws a slider');
+  assert.equal(await visible(`%% card: slides ${IMG} kind="" %%`), false, '`slides kind=""` draws nothing, like the legacy line');
+  assert.equal(await visible(`%% card: slides ${IMG} kind=unknown %%`), false, '`slides kind=unknown` draws nothing, like the legacy line');
+  // `origin-narrow` is read, and `narrow` wins by name
+  assert.match(await drawn(`%% card: embed kind=bubbles ${IMG} origin-narrow="1% 2%" %%`), /max-width:888px\)\{\.st-carousel figure\{transform-origin:1% 2%\}/);
+  assert.match(await drawn(`%% card: embed kind=bubbles ${IMG} origin-narrow="1% 2%" narrow="3% 4%" %%`), /max-width:888px\)\{\.st-carousel figure\{transform-origin:3% 4%\}/);
+  // and without `kind=` the word means HTML
+  assert.equal(parseCard(card(`- [ ] %% card: embed ${IMG} w=6 %%`)).cells[0].type, 'embed', 'without `kind=` it is HTML');
 });
