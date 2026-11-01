@@ -11,8 +11,9 @@
 //      change is measured by building the same fixtures with both engines — see the PR.)
 //   4. With the inbox on, the bar reserves its entry (`data-reserve="1"`, no tab jump when it
 //      arrives) and the loader names the coral the bar needs (`/*inbox-bubble>=0.8.0*/`, the
-//      rollback marker); the switch is an inline <head> snippet (no header flash) keyed on sitetile's
-//      existing mobile breakpoint; a nav item without a safe destination gets no tab.
+//      rollback marker); the switch is an inline <head> snippet (no header flash) keyed on site.css's
+//      hamburger breakpoint (the test reads site.css, so the two cannot drift); a nav item without a
+//      safe destination gets no tab.
 //   5. The bar is a navigation landmark with a name in the page's language, and the header gives up
 //      its nav only while the bar is SHOWN (`:has(dc-dock[name="bar"]:not([hidden]))`), never on the
 //      switch alone — so a page whose appbar.js never runs keeps its header nav (cold review S3, N1).
@@ -62,22 +63,56 @@ await test('🔴 the header gives up its nav only while the bar is shown — nev
   }
 });
 
-await test('the switch reuses sitetile\'s mobile breakpoint (site.css), and is on only in an installed app inside it', () => {
+/**
+ * Every `@media` block of site.css that carries the hamburger's rules (any rule keyed on
+ * `body[data-nav-mobile]` or naming `.rf-nav-hamburger`), as its query text. Comments are
+ * stripped first: site.css's prose quotes `@media (max-width: 64rem)` too, and a comment must neither
+ * satisfy nor break this check.
+ */
+const hamburgerQueries = (css) => {
+  const src = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out = [];
+  for (let i = src.indexOf('@media'); i !== -1; i = src.indexOf('@media', i + 1)) {
+    const open = src.indexOf('{', i);
+    let depth = 1, j = open + 1;
+    for (; depth && j < src.length; j++) depth += src[j] === '{' ? 1 : src[j] === '}' ? -1 : 0;
+    const body = src.slice(open + 1, j - 1);
+    if (/body\[data-nav-mobile|\.rf-nav-hamburger/.test(body)) {
+      out.push(src.slice(i + '@media'.length, open).trim().replace(/\s+/g, ' '));
+    }
+  }
+  return out;
+};
+
+await test('🔴 the switch\'s query IS site.css\'s hamburger query — the two cannot drift (owner ruling: where the hamburger would appear, the bar)', () => {
   const css = readFileSync(new URL('./astro/src/styles/site.css', import.meta.url), 'utf8');
-  const m = /^\(max-width: ([\d.]+rem)\)$/.exec(APPBAR_MEDIA);
-  assert.ok(m, APPBAR_MEDIA);
-  assert.match(css, new RegExp(`@media \\(max-width: ${m[1].replace('.', '\\.')}\\) \\{\\s*/\\* header-actions: reveal mobile-only buttons \\*/\\s*\\.rf-ha-btn--mobile`),
-    'site.css no longer carries the mobile breakpoint the appbar switch reuses');
-  const run = ({ standalone = false, iosStandalone = false, narrow = false }) => {
+  const queries = hamburgerQueries(css);
+  // Two blocks today: reef.base (the header's styling) and reef.responsive (the open/closed display).
+  assert.ok(queries.length >= 2, `site.css: found ${queries.length} @media block(s) with hamburger rules — the parser no longer sees them`);
+  for (const q of queries) assert.equal(q, APPBAR_MEDIA, 'site.css folds the header into the hamburger at a different query than the appbar switch');
+});
+
+await test('the switch, by viewport width: on only in an installed app at or under the hamburger breakpoint (1024px in, 1032px out)', () => {
+  // matchMedia for `(max-width: <n>rem)` the way a browser answers it: rem in a media query is the
+  // initial 16px, whatever the page's own root font size; the bound is inclusive.
+  const m = /^\(max-width: ([\d.]+)rem\)$/.exec(APPBAR_MEDIA);
+  assert.ok(m, `APPBAR_MEDIA is not a max-width rem query: ${APPBAR_MEDIA}`);
+  const run = ({ width, standalone = false, iosStandalone = false }) => {
     const attrs = new Set();
-    const window = { matchMedia: (q) => ({ matches: q === '(display-mode: standalone)' ? standalone : q === APPBAR_MEDIA ? narrow : false }) };
+    const window = { matchMedia: (q) => ({ matches: q === '(display-mode: standalone)' ? standalone : q === APPBAR_MEDIA ? width <= Number(m[1]) * 16 : false }) };
     new Function('window', 'navigator', 'document', APPBAR_HEAD_SCRIPT)(window, { standalone: iosStandalone }, { documentElement: { setAttribute: (k) => attrs.add(k) } });
     return attrs.has('data-dc-dock-bar');
   };
-  assert.equal(run({ standalone: true, narrow: true }), true);
-  assert.equal(run({ iosStandalone: true, narrow: true }), true);
-  assert.equal(run({ standalone: true, narrow: false }), false, 'a wide installed window got the bar');
-  assert.equal(run({ standalone: false, narrow: true }), false, 'a phone browser got the bar');
+  const table = [
+    [{ width: 390, standalone: true }, true],
+    [{ width: 1024, standalone: true }, true],
+    [{ width: 1024, iosStandalone: true }, true],
+    [{ width: 1032, standalone: true }, false],
+    [{ width: 1280, standalone: true }, false],
+    [{ width: 390 }, false],
+    [{ width: 1024 }, false],
+  ];
+  for (const [input, want] of table) assert.equal(run(input), want, JSON.stringify(input));
   assert.equal(APPBAR_CORAL_FLOOR, '0.8.0');
 });
 

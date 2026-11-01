@@ -12,7 +12,7 @@
 //
 // THE INSTALLED APP. Whether a page view uses the renderer's bar is decided once, before first paint,
 // by sitetile's inline <head> snippet (lib/appbar.mjs APPBAR_HEAD_SCRIPT: an installed app at the
-// mobile breakpoint ⇒ `html[data-dc-dock-bar]`), and the dock, appbar.js and the CSS all read that one
+// hamburger breakpoint ⇒ `html[data-dc-dock-bar]`), and the dock, appbar.js and the CSS all read that one
 // attribute. The bar arms put the REAL snippet in the page's <head> and force its standalone half with
 // an init script that answers `matchMedia('(display-mode: standalone)')` true, in every engine (the
 // width half is the real viewport). Where Chromium can also emulate the media feature itself it is
@@ -556,7 +556,10 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">Home</a></nav></header><dc-dock name="bar" data-st-appbar="" hidden="">${navTabs}</dc-dock>${inbox(origin)}${item('id="t1" data-label="T1"')}`,
       scripts: [appbarUrl, dockUrl, inboxUrl],
     });
-    for (const [label, viewport, wantBar] of [['narrow (390px)', { width: 390, height: 664 }, true], ['at the breakpoint (768px)', { width: 768, height: 1024 }, true], ['wide (1280px)', { width: 1280, height: 800 }, false]]) {
+    // The width half is site.css's hamburger breakpoint (max-width: 64rem, inclusive): an old 12.9"
+    // tablet in portrait (1024px) is inside it and gets the bar; a new 13" one (1032px) is not.
+    for (const [label, viewport, wantBar] of [['narrow (390px)', { width: 390, height: 664 }, true], ['at the hamburger breakpoint (1024px)', { width: 1024, height: 1366 }, true],
+      ['just past it (1032px)', { width: 1032, height: 1376 }, false], ['wide (1280px)', { width: 1280, height: 800 }, false]]) {
       const { ctx, p } = await open(sitePage, { standalone: true, viewport });
       await p.waitForTimeout(200);
       const r = await p.evaluate(() => ({

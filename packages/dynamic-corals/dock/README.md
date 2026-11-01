@@ -127,7 +127,8 @@ a renderer's bar keeps its corners, exactly like a browser (a bar made up by a c
 page's footer and its own bottom bar, with nothing reserving room for it). A site renderer that
 wants a bar writes one `dc-dock[name="bar"]`, hidden, with its own nav links, and switches it on
 before first paint with `<html data-dc-dock-bar>` — sitetile does on a `packages: pwa` site with a
-`nav:`, in an installed app at its mobile breakpoint; a wide installed window keeps the corners.
+`nav:`, in an installed app wherever its header would fold into the hamburger (`max-width: 64rem`,
+1024px included); a wider installed window keeps the corners.
 Then every item joins **one bar along the bottom edge** as a square tab — the dock's shape, the
 items unchanged — after the renderer's links, wherever on the page the item was written: the nav
 leads, the tools follow. With more than five visible entries the first four

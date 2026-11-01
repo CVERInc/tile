@@ -1,7 +1,7 @@
 // reef#2790 — the installed-app bottom bar's switch (see ../../lib/appbar.mjs for the whole story).
 // Runs only on a page that carries the bar (a `packages: pwa` site with a `nav:`). The DECISION is
 // not made here: the inline <head> snippet (APPBAR_HEAD_SCRIPT) made it before first paint —
-// an installed app at the mobile breakpoint ⇒ `html[data-dc-dock-bar]` — and this module only acts
+// an installed app at the hamburger breakpoint ⇒ `html[data-dc-dock-bar]` — and this module only acts
 // on it, as the corals' dock base does. Without the attribute (a browser, a wide installed window)
 // it does nothing: the hidden bar stays hidden and the header keeps its nav. With it: the corner
 // dock gives the bar its look (the same base the corals carry; the first copy to arrive does it), and

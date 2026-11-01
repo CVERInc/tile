@@ -408,7 +408,7 @@ dock only adds:
 - **The dock's shape and shadow**: same 56px circle 16px from the corner, with the shadow budget
   `0 1px 3px` + `0 4px 12px` (the old `0 6px 24px` / `0 12px 40px` were cut by a phone's edge).
 - **Hidden in print.** **In an installed app whose page carries the renderer's bar and switched it
-  on** (sitetile: `packages: pwa` with a `nav:`, at its mobile breakpoint) the bubble is a square tab
+  on** (sitetile: `packages: pwa` with a `nav:`, at its hamburger breakpoint, `max-width: 64rem`) the bubble is a square tab
   in the bottom bar and the panel a sheet above it. Anywhere else — a browser, a wide installed
   window, an installed PWA without that bar — it stays in the corner: the coral never makes a bar.
 - `--reef-inbox-offset-x/-y` still raise / move in the bubble by the same validated amount: they

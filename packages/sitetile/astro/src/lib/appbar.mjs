@@ -6,11 +6,12 @@
 // also where the corner corals (inbox and the site's own dock items) go. The header keeps the logo
 // and its action buttons (cart, search, theme, the CTA); the hamburger goes.
 //
-// 🔴 ONLY AN INSTALLED APP ON A NARROW SCREEN (owner ruling 2026-11-01). The switch is ONE decision,
-// made before first paint by the inline <head> snippet below (APPBAR_HEAD_SCRIPT): running as an
-// installed app (display-mode: standalone, or iOS's navigator.standalone) AND inside sitetile's
-// mobile breakpoint (APPBAR_MEDIA, the same 48rem as site.css's `mobile` rules) ⇒
-// `html[data-dc-dock-bar]`. Every rule below keys on that attribute, appbar.js reads it, and the
+// 🔴 ONLY AN INSTALLED APP WHERE THE HEADER WOULD FOLD INTO THE HAMBURGER (owner rulings 2026-11-01:
+// "where the hamburger would appear, the installed app gets the bar instead"). The switch is ONE
+// decision, made before first paint by the inline <head> snippet below (APPBAR_HEAD_SCRIPT): running
+// as an installed app (display-mode: standalone, or iOS's navigator.standalone) AND inside site.css's
+// hamburger breakpoint (APPBAR_MEDIA = `max-width: 64rem`, inclusive: a 1024px-wide portrait tablet
+// gets the bar, a 1032px one keeps the header) ⇒ `html[data-dc-dock-bar]`. Every rule below keys on that attribute, appbar.js reads it, and the
 // corals' shared dock base reads it (contract ①: a coral joins the bar only when the page has one AND
 // it is switched on). A wide installed window keeps the normal header and the corner docks. Decided
 // once per page view: a rotation does not move the nav back and forth under the visitor's thumb.
@@ -42,14 +43,16 @@
 // and a fifth nav tab is in More from the start, instead of jumping there when the inbox arrives.
 
 /**
- * sitetile's mobile breakpoint, reused (site.css: `@media (max-width: 48rem)`, the `mobile` header
- * actions and the folded sidebar). appbar.test.mjs fails if site.css stops carrying it.
+ * site.css's hamburger breakpoint, reused: the query of the two `@media` blocks that fold the header
+ * nav into the hamburger (reef.base and reef.responsive). site.css is plain CSS shipped as written,
+ * so this cannot import it; appbar.test.mjs instead reads site.css and fails unless every `@media`
+ * block carrying hamburger rules has exactly this query. Change both together, never one.
  */
-export const APPBAR_MEDIA = '(max-width: 48rem)';
+export const APPBAR_MEDIA = '(max-width: 64rem)';
 
 /**
  * The switch, inline in <head> so it runs before the first paint (no header flash): an installed app
- * at the mobile breakpoint ⇒ `<html data-dc-dock-bar>`. Only on pages that carry the bar.
+ * at the hamburger breakpoint ⇒ `<html data-dc-dock-bar>`. Only on pages that carry the bar.
  */
 export const APPBAR_HEAD_SCRIPT = `(function(){try{var m=window.matchMedia,s=(m&&m('(display-mode: standalone)').matches)||navigator.standalone===true;if(s&&m&&m(${JSON.stringify(APPBAR_MEDIA)}).matches)document.documentElement.setAttribute('data-dc-dock-bar','')}catch(e){}})();`;
 
