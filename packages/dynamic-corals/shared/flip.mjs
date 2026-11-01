@@ -9,7 +9,7 @@
 // measures them in the card's own font and CSS and re-lays them out by itself when a web font
 // arrives or the size changes — no measuring code, no observer. Without a declared set the sizer
 // keeps every face the card has shown, so the width only ever grows. `--dc-flip-width` beats both.
-// The same ordered set is what a drum mode would step through (see below).
+// A drum's wheel (see below) is passed on its own; its faces are fitted into the sizer at creation too.
 //
 // The card is two static halves (the base) and, during a flip, two moving flaps:
 //
@@ -36,8 +36,14 @@
 // by one: that ragged 「嘩啦啦」 finish is the physics, not an added stagger. A new target that arrives
 // while the drum is turning is just a new place to stop: the running fold finishes and the drum keeps
 // going forward from the face now showing — it never jumps back and never stacks a second run. A
-// face that is not on the drum (or the first value, or reduced motion) goes straight there. The drum
-// order may differ from the width set: a countdown's tens card turns 5…0 but is as wide as 0–9.
+// face that is not on the drum (or the first value, or reduced motion) goes straight there. Reduced
+// motion is checked at every step, so a caller that keeps `env.reduced` live stops a run that is
+// already turning: the running fold finishes and the card goes straight to the target. The drum
+// order and the width set are independent: a countdown's cards all turn 9…0, while `faces` (0–9, or
+// whatever the author declares) only sizes them — the card is as wide as the widest of both.
+//
+// `settleFlip` is the teardown: it cancels the card's timer, drops its flaps and shows the last value
+// asked for at once, so a caller that stops, or removes a card, leaves nothing stepping behind it.
 
 export const FLIP_MS = 460;   // both folds (2 × .22s in FLIP_CSS) plus a frame of slack
 export const DRUM_STEP_MS = 140;   // one drum step: both folds (2 × .06s, .dc-flip-drum in FLIP_CSS) plus slack
@@ -133,9 +139,24 @@ function turn(cell, state, env) {
   const at = drum.indexOf(state.value);
   const step = drum[(at + 1) % drum.length];
   fold(cell, state, env, step, DRUM_STEP_MS, () => {
-    if (state.value !== state.target && drum.includes(state.target)) turn(cell, state, env);
+    if (state.value === state.target || !drum.includes(state.target)) return;
+    // Reduced motion switched on mid-run: no more steps, straight to the target.
+    if (env.reduced) fold(cell, state, env, state.target, 0, null);
+    else turn(cell, state, env);
   });
   state.turning = true;
+}
+
+/** Stop `cell` where it is meant to be: no timer, no flaps, both halves showing the last value asked
+ *  for (a drum mid-run jumps to its target). A card that has shown nothing yet is left alone. */
+export function settleFlip(cell, env) {
+  const state = cell.__dcFlip;
+  clearFlaps(cell, state, env);
+  if (state.target === undefined) return state;
+  state.value = state.target;
+  glyph(cell, '.dc-flip-top').textContent = state.target;
+  glyph(cell, '.dc-flip-bottom').textContent = state.target;
+  return state;
 }
 
 // The fold itself: the four-face order in the header. `after` runs once it has settled.
