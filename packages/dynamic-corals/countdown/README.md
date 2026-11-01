@@ -30,7 +30,11 @@ language, layout, the card it sits in — is the host's own markup; the coral on
 - The final second reads `00:00:00`. At the deadline itself the timer stops: `data-expired="hide"`
   (default) hides the root; `data-expired="text"` replaces its content with `data-expired-text`
   (and hides when that text is empty).
-- Reduced motion: cards change without folding.
+- Reduced motion: cards change without folding. It is read live, so switching it on settles every
+  card that is folding (a turning drum jumps to its target) at once.
+- `stop()` and expiry settle every card at once, and a card dropped on a digit-count change is
+  settled before it is removed: nothing keeps folding after the countdown has stopped. Calling
+  `tick()` after `stop()` resumes it, reduced motion still read live.
 
 No network call, nothing stored.
 
@@ -67,8 +71,9 @@ counter: an ordinary second is one step, and a place that wraps runs through eve
 the tens of the seconds go 0→9→8→7→6→5 at the minute (5 steps), the hours 00→23 at the day (8 and 7).
 Cards that have farther to go stop later, so a row finishes raggedly: that 「嘩啦啦」 is the wheel, not an
 added stagger. A new value while the wheel is turning is only a new place to stop — it carries on
-forward, never back, and never runs twice. `data-flip-faces`, when given, is the wheel in the order
-written. A face not on the wheel, the first value, and reduced motion all go straight to the target.
+forward, never back, and never runs twice. The wheel is always 9…0: `data-flip-faces` only sizes the
+cards, in drum mode as without it, so writing the default `0,1,2,3,4,5,6,7,8,9` is the same as leaving
+it out. A face not on the wheel, the first value, and reduced motion all go straight to the target.
 Styling is custom properties only:
 
 | property | default |
@@ -117,7 +122,7 @@ Author: `official`.
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |
 | `data-part` | enum | yes | — | On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h). Values: `days`, `hours`, `minutes`, `seconds`. |
 | `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. data-flip="false" keeps plain text. |
-| `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; with data-flip-mode="drum" the same list, in the order written, is the wheel the cards turn through. |
-| `data-flip-mode` | enum | no | — | On a data-flip element: drum makes each card a counter wheel that only turns forward (9, 8, … 0 by default), folding through every digit in between — the tens of the seconds go 0→9→8→7→6→5 at the minute. Unset keeps the straight-to-target flip. Reduced motion always goes straight. Values: `drum`. |
+| `data-flip-faces` | string | no | `0,1,2,3,4,5,6,7,8,9` | On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them. It only sizes the cards: with data-flip-mode="drum" the wheel is still 9, 8, … 0, so the default written out behaves exactly like leaving it out. |
+| `data-flip-mode` | enum | no | — | On a data-flip element: drum makes each card a counter wheel that only turns forward (always 9, 8, … 0), folding through every digit in between — the tens of the seconds go 0→9→8→7→6→5 at the minute. Unset keeps the straight-to-target flip. Reduced motion always goes straight. Values: `drum`. |
 
 <!-- coral metadata: end -->
