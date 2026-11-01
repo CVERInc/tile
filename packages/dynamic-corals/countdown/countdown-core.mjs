@@ -34,9 +34,11 @@
 // documented default `0,…,9` is the same as leaving it out (an ascending wheel would turn every
 // one-second decrement into a nine-step run longer than the tick).
 //
-// Reduced motion is read live (a `change` listener on the media query), so switching it on stops a
-// wheel that is already turning. `stop()` — and expiry, which calls it — settles every card at once
-// and a dropped card is settled before it is removed, so no card keeps stepping behind the timer.
+// Reduced motion is read live (a `change` listener on the media query), so switching it on settles
+// every card mid-fold at once (a turning wheel jumps to its target). `stop()` — and expiry, which
+// calls it — settles every card at once and unsubscribes; a dropped card is settled before it is
+// removed, so no card keeps stepping behind the timer. `tick()` after `stop()` resumes and
+// subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
@@ -126,22 +128,34 @@ export function mountCountdown(root, deps = {}) {
   const largest = UNITS.find((u) => parts.some((p) => p.unit === u));
 
   // Reduced motion, live: `env.reduced` is what every card reads, at every change and every drum step.
+  // Subscribed while the countdown runs: from mount (or a tick() after stop()) until stop(). Switching
+  // it on also settles any fold in flight, so no card sits half-turned under the reduce-motion CSS.
   if (env.reduced === undefined) env.reduced = !!(env.motion && env.motion.matches);
-  const onMotion = (e) => { env.reduced = !!e.matches; };
-  if (env.motion && env.motion.addEventListener) env.motion.addEventListener('change', onMotion);
+  const settleAll = () => { for (const part of parts) for (const card of part.cards) settleFlip(card, env); };
+  const onMotion = (e) => { env.reduced = !!e.matches; if (env.reduced) settleAll(); };
+  let listening = false;
+  const listen = (on) => {
+    if (on === listening || !env.motion) return;
+    const method = on ? 'addEventListener' : 'removeEventListener';
+    if (!env.motion[method]) return;
+    env.motion[method]('change', onMotion);
+    listening = on;
+  };
+  listen(true);
 
   let timer = null;
   const stop = () => {
     if (timer !== null) env.clearTimeout(timer);
     timer = null;
-    if (env.motion && env.motion.removeEventListener) env.motion.removeEventListener('change', onMotion);
-    for (const part of parts) for (const card of part.cards) settleFlip(card, env);
+    listen(false);
+    settleAll();
   };
   // The display (whole seconds left, floored) changes the moment the time left drops below the next
   // whole second — `(deadline - now) % 1000` ms from now, which is 0 when sitting exactly on one. The
   // next tick goes exactly there, plus a few ms so it lands after the boundary, not before it.
   const schedule = () => {
     if (timer !== null) env.clearTimeout(timer);
+    listen(true);   // a tick() after stop() resumes, and must follow reduced motion again
     timer = env.setTimeout(tick, ((deadline - env.now()) % 1000) + 5);
   };
 

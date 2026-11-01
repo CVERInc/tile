@@ -30,10 +30,11 @@ language, layout, the card it sits in — is the host's own markup; the coral on
 - The final second reads `00:00:00`. At the deadline itself the timer stops: `data-expired="hide"`
   (default) hides the root; `data-expired="text"` replaces its content with `data-expired-text`
   (and hides when that text is empty).
-- Reduced motion: cards change without folding. It is read live, so switching it on stops a drum
-  that is already turning.
+- Reduced motion: cards change without folding. It is read live, so switching it on settles every
+  card that is folding (a turning drum jumps to its target) at once.
 - `stop()` and expiry settle every card at once, and a card dropped on a digit-count change is
-  settled before it is removed: nothing keeps folding after the countdown has stopped.
+  settled before it is removed: nothing keeps folding after the countdown has stopped. Calling
+  `tick()` after `stop()` resumes it, reduced motion still read live.
 
 No network call, nothing stored.
 

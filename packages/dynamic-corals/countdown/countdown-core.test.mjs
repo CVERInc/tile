@@ -395,3 +395,75 @@ test('reduced motion is read live: switching it on mid-run stops the wheel; stop
   cd.stop();
   assert.equal(motion.fn, null);
 });
+
+// ── follow-up review: initial matchMedia read, resume after stop(), settle on switch-on ─────────
+/** A MediaQueryList stand-in that keeps every `change` listener, so tests can count and fire them. */
+function fakeMotion(matches) {
+  return { matches, fns: [],
+    addEventListener(type, fn) { if (type === 'change' && !this.fns.includes(fn)) this.fns.push(fn); },
+    removeEventListener(type, fn) { this.fns = this.fns.filter((f) => f !== fn); },
+    fire(matches) { this.matches = matches; for (const fn of [...this.fns]) fn({ matches }); } };
+}
+
+test('reduced motion already on at load (reduced not passed): read from matchMedia, cards never fold', () => {
+  for (const drum of [false, true]) {
+    const { doc, root, part } = drum ? drumPage(['days', 'hours', 'minutes', 'seconds']) : page();
+    const clock = createClock(DL - D - 500);           // 01 00 00 00: every place changes at the next tick
+    const motion = fakeMotion(true);
+    const e = { ...env(doc, clock), motion };
+    delete e.reduced;                                  // as in the browser: from the media query only
+    mountCountdown(root, e);
+    for (let t = 0; t < 1000; t++) {
+      clock.advance(1);
+      assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, `${drum ? 'drum' : 'plain'}: no flaps at ${t} ms`);
+      assert.equal(clock.pending(), 1, `${drum ? 'drum' : 'plain'}: only the tick at ${t} ms`);
+    }
+    assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '59']);
+  }
+});
+
+test('tick() after stop() resumes with the reduced-motion listener back (pause/resume is safe)', () => {
+  const { doc, root, part } = drumPage(['days', 'hours', 'minutes', 'seconds']);
+  const clock = createClock(DL - D - 500);
+  const motion = fakeMotion(false);
+  const e = { ...env(doc, clock), motion };
+  delete e.reduced;
+  const cd = mountCountdown(root, e);
+  assert.equal(motion.fns.length, 1);
+  cd.stop();
+  assert.equal(motion.fns.length, 0, 'stop() unsubscribes');
+  cd.tick();
+  assert.equal(cd.running, true);
+  assert.equal(motion.fns.length, 1, 'resuming subscribes again');
+  cd.tick();
+  assert.equal(motion.fns.length, 1, 'once, not once per tick');
+  clock.advance(510 + 70);                             // 00 23 59 59: wheels turning
+  assert.ok(root.querySelectorAll('.dc-flip-flap').length > 0, 'turning');
+  motion.fire(true);
+  clock.advance(1000);
+  assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, 'the drum follows reduced motion again');
+  assert.equal(clock.pending(), 1, 'only the tick');
+  assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '58']);
+  cd.stop();
+  assert.equal(motion.fns.length, 0);
+});
+
+test('switching reduced motion on settles every fold in flight at once (drum and plain)', () => {
+  for (const drum of [false, true]) {
+    const { doc, root, part } = drum ? drumPage(['days', 'hours', 'minutes', 'seconds']) : page();
+    const clock = createClock(DL - D - 500);
+    const motion = fakeMotion(false);
+    const e = { ...env(doc, clock), motion };
+    delete e.reduced;
+    mountCountdown(root, e);
+    clock.advance(510 + 70);
+    assert.ok(root.querySelectorAll('.dc-flip-flap').length > 0, `${drum ? 'drum' : 'plain'}: folding`);
+    motion.fire(true);                                 // no clock advance: settled by the switch itself
+    assert.equal(root.querySelectorAll('.dc-flip-flap').length, 0, `${drum ? 'drum' : 'plain'}: no flaps left`);
+    assert.equal(clock.pending(), 1, `${drum ? 'drum' : 'plain'}: only the tick`);
+    assert.deepEqual(['days', 'hours', 'minutes', 'seconds'].map((u) => shown(part(u))), ['00', '23', '59', '59']);
+    motion.fire(false);                                // and off again: the next second folds as before
+    clock.advance(1000);
+    assert.ok(part('seconds').querySelectorAll('.dc-flip-flap').length > 0, `${drum ? 'drum' : 'plain'}: folds again once it is off`);
+  }
+});
