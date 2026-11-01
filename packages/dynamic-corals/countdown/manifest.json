@@ -1,9 +1,9 @@
 {
   "name": "countdown",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/countdown/0.2.0/countdown.js",
+  "source": "https://feelreef.com/corals/countdown/0.2.1/countdown.js",
   "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/countdown",
   "requires": [],
   "calls": [],

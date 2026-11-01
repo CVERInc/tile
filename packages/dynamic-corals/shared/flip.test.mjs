@@ -2,7 +2,7 @@
 //   run: node --test packages/dynamic-corals/shared/flip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFlip, setFlip, parseFaces, FLIP_MS, DRUM_STEP_MS, FLIP_CSS } from './flip.mjs';
+import { createFlip, setFlip, settleFlip, parseFaces, FLIP_MS, DRUM_STEP_MS, FLIP_CSS } from './flip.mjs';
 import { createDocument, createClock } from './fake-dom.mjs';
 
 function setup(reduced = false) {
@@ -243,13 +243,58 @@ test('drum: a face that is not on the drum goes straight there in ONE plain fold
   assert.equal(clock.pending(), 0, 'no further steps');
 });
 
-test('drum: the width set holds the drum faces from creation and does not change while turning', () => {
-  const { env, cell, clock } = drumSetup(false, ['5', '4', '3', '2', '1', '0'], ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+test('drum: the wheel faces are in the sizer from creation, with no declared set, and it does not change while turning', () => {
+  // No `faces`: the only thing that can put the wheel into the sizer before a value is shown is the
+  // pre-fit in createFlip. Without it the sizer starts empty and grows face by face while turning.
+  const { env, cell, clock } = drumSetup(false, ['5', '4', '3', '2', '1', '0'], []);
   const before = sizer(cell);
-  assert.deepEqual(before, ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'], 'the wider set sizes a 6-face drum');
-  setFlip(cell, '0', env);
-  setFlip(cell, '5', env);
+  assert.deepEqual(before, ['5', '4', '3', '2', '1', '0'], 'the whole wheel sizes the card before the first value');
+  setFlip(cell, '4', env);
+  setFlip(cell, '0', env);   // 4→3→2→1→0: four steps
   for (let t = 0; t < 5 * DRUM_STEP_MS; t += 7) { assert.deepEqual(sizer(cell), before); clock.advance(7); }
+  assert.equal(faces(cell), '00--');
+});
+
+test('drum: a declared width set wider than the wheel sizes it too', () => {
+  const { cell } = drumSetup(false, ['5', '4', '3', '2', '1', '0'], ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  assert.deepEqual(sizer(cell), ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+});
+
+test('drum: an off-wheel face arriving MID-RUN still goes straight there (the run does not stop half-way)', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'D', env);            // A→B→C→D planned
+  clock.advance(70);                  // folding A→B
+  setFlip(cell, '回送', env);
+  assert.equal(cell.querySelectorAll('.dc-flip-flap').length, 2, 'one pair of flaps');
+  assert.equal(clock.pending(), 1, 'one timer');
+  runDrum(cell, clock);
+  assert.equal(cell.querySelector('.dc-flip-top').firstChild.textContent, '回送');
+  assert.equal(cell.querySelector('.dc-flip-bottom').firstChild.textContent, '回送');
+  assert.equal(clock.pending(), 0);
+});
+
+test('drum: reduced motion switched on MID-RUN stops the stepping — the running fold ends, then straight to the target', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'E', env);            // A→B→C→D→E planned
+  clock.advance(70);                  // folding A→B
+  env.reduced = true;                 // the caller keeps env.reduced live (countdown: a media-query listener)
+  clock.advance(DRUM_STEP_MS - 70);   // the A→B fold settles
+  assert.equal(faces(cell), 'EE--', 'straight to E, no C/D steps');
+  assert.equal(clock.pending(), 0);
+});
+
+test('settleFlip: cancels the timer, drops the flaps and shows the target at once (a drum mid-run included)', () => {
+  const { env, cell, clock } = drumSetup();
+  setFlip(cell, 'A', env);
+  setFlip(cell, 'D', env);
+  clock.advance(70);
+  settleFlip(cell, env);
+  assert.equal(faces(cell), 'DD--');
+  assert.equal(clock.pending(), 0);
+  assert.equal(cell.classList.contains('dc-flip-on'), false);
+  settleFlip(createFlip(createDocument()), env);   // a card that has shown nothing: no throw, nothing set
 });
 
 test('drum: one step is shorter than a plain flip, and covers both of its folds', () => {
