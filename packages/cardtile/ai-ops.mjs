@@ -73,6 +73,36 @@ export const UNIVERSAL = {
 };
 
 /**
+ * 🔴 ONE STORED WORD, TWO CELLS. Before `slides` had a name, the carousel was spelled `embed`, and
+ * cards saved then still say `- [ ] %% card: embed kind=slider images=… %%`. card-core.js reads such
+ * a line as `slides` (`legacySlides`: the word `embed` plus a `kind=` token) and writes it back as
+ * `embed` for as long as the `kind=` token is there. The editor opens it as a slideshow, so no person
+ * needs telling; an agent reads the stored markdown, sees `embed`, and — told only that `embed` is
+ * pasted HTML — rewrites the line with embed's fields and the slideshow is gone.
+ *
+ * `spelling` is that rule in words, for the agent door (reef-mcp's describe_card_grammar). It is
+ * English and deliberately not a key in w/cell-i18n.mjs: no form shows it, like OPS's contract text.
+ * ai-ops.test.mjs checks the params it names against what the renderer reads (`origin-narrow` is read
+ * by bracket and is not in `slides.params`); embed-html.test.mjs checks its claims against the
+ * parser and the renderer.
+ */
+const LEGACY_SLIDES = {
+  fromEmbed:
+    'A line spelled `embed` that carries a `kind=` token is not an HTML embed: it is the legacy spelling of `slides`, and saving it keeps the word `embed`. ' +
+    'It draws a slideshow only when `kind` is `slider` or `bubbles`; with an empty value (`kind=""`), no value (`kind=`) or any other value it draws nothing. ' +
+    'Instead of an HTML body it carries the slides params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`; when both are present, a nonempty `narrow` wins, and an empty `narrow=""` falls back to `origin-narrow`). ' +
+    'The same params under the word `slides` draw the same thing, except that `slides` draws a slider when `kind` has no value (`kind=` or no `kind` at all), so rewriting a legacy line whose `kind=` has no value as `slides` makes its images visible. ' +
+    'Removing `kind=` from a line spelled `embed` makes it an HTML embed, and the slideshow is gone.',
+  fromSlides:
+    'Cards saved before this cell had its own name use a legacy spelling for it: `embed` with a `kind=` token, e.g. `- [ ] %% card: embed kind=slider images=… %%`. ' +
+    'That line is this cell, not an HTML embed, and saving it keeps the word `embed`. ' +
+    'It carries the same params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`, read under either spelling; when both are present, a nonempty `narrow` wins, and an empty `narrow=""` falls back to `origin-narrow`). ' +
+    'A legacy line draws a slideshow only when `kind` is `slider` or `bubbles`; with an empty value (`kind=""`), no value (`kind=`) or any other value it draws nothing. ' +
+    'This cell draws a slider when `kind` has no value (`kind=` or no `kind` at all), so rewriting a legacy line whose `kind=` has no value as `slides` makes its images visible; otherwise the same params under either word draw the same thing. ' +
+    'Removing `kind=` from a line spelled `embed` makes it an HTML embed, and the slideshow is gone.',
+};
+
+/**
  * type → what it is, what its body means, and every param it honours.
  *
  * `body` is the one field that is not a param, and what it MEANS differs per type — a tagline, an
@@ -210,6 +240,7 @@ export const CELL_TYPES = {
       bg: { disposition: DISPOSITION.RAW, label: 'type.slides.bg.label', hint: 'type.slides.bg.hint' },
       w: WIDTH,
     },
+    spelling: LEGACY_SLIDES.fromSlides,
   },
 
   // 🔴 HTML, scripts included (reef#2725). Rendered in `<iframe sandbox="allow-scripts" srcdoc>` —
@@ -221,6 +252,7 @@ export const CELL_TYPES = {
     body: { label: 'type.embed.body.label', control: CONTROL.AREA, hint: 'type.embed.body.hint', rows: 10 },
     params: { w: WIDTH },
     form: [{ source: SOURCE.BODY }, { source: SOURCE.PARAM, name: 'w' }],
+    spelling: LEGACY_SLIDES.fromEmbed,
   },
 };
 
