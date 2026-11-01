@@ -1,7 +1,7 @@
 ---
 // The 404 page of each NON-DEFAULT locale, wearing that locale's chrome and speaking its language.
 //
-// 🩸 CVERInc/reef#2112. A site with `locales: en-US, zh-TW` served ONE 404 — the root one, in the
+// 🩸 reef#2112. A site with `locales: en-US, zh-TW` served ONE 404 — the root one, in the
 // site's default language (tile#135's ruling, kept: pages/404.astro is untouched) — so a visitor who
 // mistyped a /zh-tw/… address was told "Page not found" in English on a Chinese edition. Cloudflare
 // Pages serves the NEAREST `404.html` up the directory tree, so `dist/zh-tw/404.html` catches every
@@ -18,7 +18,7 @@
 // One-language sites, and `packages: lingo` over one locale, build nothing here: their dist is
 // byte-identical to before.
 //
-// The Language link behaves like the root 404's (#114 / CVERInc/reef#1910): `languageReturn` is this
+// The Language link behaves like the root 404's (#114 / reef#1910): `languageReturn` is this
 // locale's home, so the chooser (which the layout prefixes for this locale) offers every row at its
 // own home — the missing address has no page to come back to. `notFoundHome` goes to THIS locale's
 // home, not `/`: a Chinese visitor who came in through /zh-tw/ stays in Chinese.

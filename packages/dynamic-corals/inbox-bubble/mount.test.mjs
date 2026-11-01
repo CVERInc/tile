@@ -1178,7 +1178,7 @@ test('gate: nobody could say, but this browser once heard yes (within 30 days) �
 	assert.ok(nothingRendered(g));
 });
 
-// ── KAITO without an Inbox: the ask-only bubble (CVERInc/reef#1866, owner ruling 54) ────────────
+// ── KAITO without an Inbox: the ask-only bubble (reef#1866, owner ruling 54) ────────────
 //
 // 🩸 THE FAILURE THIS EXISTS FOR. The claim gate returned on every no, and a tenant that has the
 // ask-the-site half and no Inbox — the state ruling 54 names and gives its own status line — got an

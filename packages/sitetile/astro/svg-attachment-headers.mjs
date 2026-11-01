@@ -4,7 +4,7 @@
 // pasted URL) it runs as a page on the site's own origin — scripts and all. An uploaded vector file
 // is an image, not a page, so the site says so: `Content-Disposition: attachment`. `<img src>` and
 // CSS `url()` ignore that header and keep working; embedding an SVG with `<object>`/`<iframe>` stops
-// rendering it, and that loss is accepted (CVERInc/reef#596).
+// rendering it, and that loss is accepted (reef#596).
 //
 // WHERE THE MERGE LIVES, and why here: a site's own assets are copied OVER the renderer's `public/`
 // before `astro build` runs, as a file-level REPLACE. So an owner's `_headers` does not add to one we

@@ -71,7 +71,7 @@ const _list = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
  *  `locales` (layout, chooser route, blog, sitemap, verdict, inbox bubble) calls this, because each
  *  entry becomes a URL path segment (`/<lowercased>/`) and a directory in the build.
  *
- *  🩸 CVERInc/reef#1910. There were eleven copies of `split(',').map(trim).filter(Boolean)`, and the
+ *  🩸 reef#1910. There were eleven copies of `split(',').map(trim).filter(Boolean)`, and the
  *  frontmatter reader is deliberately not YAML — it hands the value over verbatim. So
  *  `locales: [zh-TW, en-US]` built a directory named `en-us]`, `"zh-TW, en-US"` one named `en-us"`,
  *  and `ko/kr` a nested `ko/kr/language/`; `../kiln` failed the build on a routing error that never
@@ -140,7 +140,7 @@ export function parseLocales(v, source = '') {
  *  anything parses it the object is `{ ...siteConfig, ...pageFrontmatter }` and the value alone no
  *  longer says whose it is.
  *
- *  🩸 CVERInc/reef#1910. A page may write its own `locales:`, and it reaches the same parser. The
+ *  🩸 reef#1910. A page may write its own `locales:`, and it reaches the same parser. The
  *  error said "fix the site config" for a line that was in `content/about.md`.
  *
  *  A symbol key, so it is no frontmatter key (nothing lists, renders or serialises it) and an
@@ -187,7 +187,7 @@ export function pageLocalesOrWarn(meta, file, site = null) {
 /** The site's DEFAULT locale — the one that lives at `/`. THE one definition:
  *  the first entry of `locales`, else `fallback` (the language of a site that declares none).
  *
- *  🩸 CVERInc/reef#1910. Nine places derived this inline and they did not all agree on the first
+ *  🩸 reef#1910. Nine places derived this inline and they did not all agree on the first
  *  preference: the layout, the chooser, the blog link helpers and the verdict took `locales[0]`;
  *  the 404's language took the site config's own `lang:` first. On a site where the two differ the
  *  404 was rendered as a non-default-locale page of a site whose every other route said otherwise.
@@ -200,7 +200,7 @@ export function defaultLocaleOf(locales, fallback = '') {
 /** The sentence for a site whose ROOT home page says one language while `locales` puts another
  *  first — or null when they agree (or either is silent). `locales[0]` wins; this only says so.
  *
- *  🩸 CVERInc/reef#1910. "The first locale lives at `/`" was a rule nothing stated and nothing
+ *  🩸 reef#1910. "The first locale lives at `/`" was a rule nothing stated and nothing
  *  checked: `locales: en-US, zh-TW` over a Chinese home page built `<html lang="zh-Hant">` at `/`
  *  with `hreflang="en" href="/"` beside it, and a chooser whose Chinese row went to a `/zh-tw/`
  *  nobody had written. The build was green and silent.
@@ -290,7 +290,7 @@ const LINGO_BANNER = {
 };
 export function bannerCopy(locale) { const f = _ident(locale); return f ? LINGO_BANNER[f] : { prompt: '', continue: '', dismiss: '' }; }
 
-/** The banner's three sentences, overridden per locale from the SITE layer (CVERInc/reef#1888).
+/** The banner's three sentences, overridden per locale from the SITE layer (reef#1888).
  *
  *  A site wanted a more formal register than the defaults and had no setting for it — the only
  *  way was per-page JS, which is the kind of patch that breaks on the next release. The override
@@ -486,7 +486,7 @@ export function alternateLocales({ locales = [], defaultLocale = '', subPath = '
  *  no `sitetile-page:`) still counts, exactly as it does for hreflang. Leave `contentRels` out and
  *  the prefix alone decides.
  *
- *  🩸 CVERInc/reef#1891. The success card's "Back to homepage" was a literal `/` one line below a
+ *  🩸 reef#1891. The success card's "Back to homepage" was a literal `/` one line below a
  *  "Send another" link that carried the locale, so a visitor who had just written in one language
  *  was sent to the other one's home. The logo already had the right answer, inline in the layout
  *  where the card could not reach it — the fix is that there is one of it now, not a second. */

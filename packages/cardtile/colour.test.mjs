@@ -300,7 +300,7 @@ test('floating text over a photograph carries its own shadow', () => {
   assert.equal(scrimFloor(g, P('#5a9aaa')), 90, 'the footer teal needs 90 — proof the global scrim cannot carry it');
   const withBackdrop = renderWith(70);
   assert.ok(/\.st-grid-label\{text-shadow:/.test(withBackdrop), 'a lane label gets a local shadow');
-  // 🔴 REVERSED 2026-07-30. This required the footer to get a ground-coloured PLATE. chodaict asked
+  // 🔴 REVERSED 2026-07-30. This required the footer to get a ground-coloured PLATE. The product owner asked
   // for the backgrounds to go — 「st-footer 也是,不要背景色」— and the plate's job is now done without
   // one: THEMED ink (`--cp-ink`, not the page-mist `--cp-page-ink` that measured 2.86:1 on her
   // artwork) plus a `--cp-ground` halo carried by the glyphs themselves. 6.39 dark / 12.96 light.
@@ -336,7 +336,7 @@ test('nothing that floats or sits on artwork is left wearing a ground-derived co
   // 🩸 This used to assert `.st-gal-body{background:linear-gradient(` — the ELEMENT, by source
   // string. The intent (text on a picture must have a dark backing, whatever the photo is) is right;
   // the assertion had picked one of the two elements that were both painting one, and stacking them
-  // took the bottom of every tile to ~0.99 opaque. chodaict: 「漸層下手太重,我看到你疊了好幾層」.
+  // took the bottom of every tile to ~0.99 opaque. The product owner: 「漸層下手太重,我看到你疊了好幾層」.
   //
   // Now it asserts the INTENT: a scrim exists, it is bottom-heavy where the caption sits, and the
   // caption is NOT painting a second one on top of it.

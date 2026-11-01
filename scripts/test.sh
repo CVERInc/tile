@@ -15,6 +15,12 @@ for f in i18n/*.json; do
   node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$f" || { echo "BAD JSON: $f"; exit 1; }
 done
 
+# Person handles, links to private repos, and (where this machine has it) the private term list —
+# over every tracked file, not only the lines a push adds. The lists and why each lives where it does
+# are in the script's header; the matched text is never printed, because CI logs here are public.
+echo "→ forbidden terms"
+node scripts/forbidden-terms.mjs
+
 echo "→ build (inlines core + i18n; needs python3 + bash)"
 bash hosts/obsidian/tugtile/build.sh >/dev/null
 bash hosts/obsidian/marktile/build-marktile.sh >/dev/null
@@ -118,6 +124,10 @@ SUITE_GLOBS=(packages/sitetile/*.test.mjs packages/sitetile/*.test.js packages/p
              # test needs packages/sitetile/astro/node_modules and names itself SKIPPED without
              # them, exactly like the astro smoke further down.
              packages/build/*.test.mjs
+             # the theme compiler (`ir/_theme.md` → theme.css + the _site.md keys it owns) arrived
+             # 2026-10-31 under packages/build/theme/. Pure: it reads the renderer's own site.css and
+             # SiteLayout.astro by path for its zero-drift checks, and needs no node_modules.
+             packages/build/theme/*.test.mjs
              # real-render arrived with the per-site dynamic-coral CSS declaration. The matrix
              # itself needs a browser and is listed in MATRIX_GLOBS below; what is covered HERE is
              # its pure half — the mode-aware expectations, driven with synthetic facts, so the

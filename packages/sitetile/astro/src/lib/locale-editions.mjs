@@ -1,7 +1,7 @@
 // The site's locale EDITIONS, read off the home pages authored in content/ — the one discovery the
 // engine's per-locale system pages share (the /language chooser, the per-locale 404).
 //
-// Lifted verbatim out of pages/[...loc]/language.astro's getStaticPaths (CVERInc/reef#2112) so the
+// Lifted verbatim out of pages/[...loc]/language.astro's getStaticPaths (reef#2112) so the
 // 404 route does not grow a second copy of the same loop that could answer "which locales does this
 // site have" differently from the chooser. The rule to keep: a locale gets its own 404 exactly when
 // the chooser offers it a row — a visitor who mistypes /ja-jp/… is told so in Japanese iff there is

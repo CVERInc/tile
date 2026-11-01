@@ -1,7 +1,7 @@
 // An inbox form's success card sends the visitor back to the home of the language they are reading.
 //   run: node packages/sitetile/form-home-locale.test.mjs   (globbed into scripts/test.sh)
 //
-// 🩸 CVERInc/reef#1891. Measured on a two-locale site whose default is English: after a successful
+// 🩸 reef#1891. Measured on a two-locale site whose default is English: after a successful
 // submit on the zh-TW contact page, the card's two links were
 //     <a href="/zh-tw/contact/" data-inbox-again>   ← in the visitor's language
 //     <a href="/">                                  ← the ENGLISH home

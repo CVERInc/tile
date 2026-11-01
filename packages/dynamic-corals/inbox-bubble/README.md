@@ -88,7 +88,7 @@ browser on a site with one — up to four per mount only while the endpoint cann
 The ask-the-site half can be had on its own, and it needs no Inbox: the question goes to
 `/api/kaito` and the answer comes back from the site's own published content. From 0.7.10's
 gate until 0.7.11 such a mount drew **nothing** — the gate returned on every no, so a tenant with KAITO
-and no Inbox got an empty container and no error (CVERInc/reef#1866). The gate now decides
+and no Inbox got an empty container and no error (reef#1866). The gate now decides
 **which** bubble to draw, not only whether:
 
 | `data-kaito` | the answer | the bubble | a way to a person | the question log | status line |
@@ -143,7 +143,7 @@ When KAITO itself answers `503` (unavailable) the bubble says so instead of aski
 
 ## Searching the site from the bubble (0.7.14, reef#2160)
 
-One input, three rungs (chodaict 2026-10-18): **typing** floats the site's own matching posts
+One input, three rungs (product owner 2026-10-18): **typing** floats the site's own matching posts
 (title + date, as links) above the composer, filtered inside the visitor's browser; **Enter** is
 always「ask」— the button says「問 AI」/ Ask AI on the ask view and「傳給真人」/ Send to a person
 on the compose view, so the input says what Enter does (an explicit `data-send-label` still
@@ -202,7 +202,7 @@ such a page it moves focus one round trip later than the page load.
 
 ## Behind the site layout's loader (0.7.12)
 
-sitetile does not put this file in a `<script src>` on every page any more (CVERInc/reef#1921): an
+sitetile does not put this file in a `<script src>` on every page any more (reef#1921): an
 inline loader asks the mount's Inbox question first and imports this coral only where it will draw.
 What the loader learned before this file was on the page reaches it **in memory**, on
 `window.__reefInboxLoader = { v: 1, claims: { '<kind>:<id>': true | false | null }, open, taken }`,

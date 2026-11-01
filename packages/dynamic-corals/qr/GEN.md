@@ -2,7 +2,7 @@
 
 `qr-client.mjs` is **not hand-written**. Its QR popup (the avatar-morph 表演 with 11 mask modes,
 backCircle, blur overlay, focus trap) is lifted **verbatim** from a live card
-`qr-anim.js` — chodaict's labour of love, born in Python, carried to Svelte, and made portable
+`qr-anim.js` — the product owner's labour of love, born in Python, carried to Svelte, and made portable
 here so it never gets re-hand-carried (and re-broken) again.
 
 ## The exact transform (the whole diff)
@@ -33,7 +33,7 @@ and carries a control that fires on the legacy source.
 
 Everything else — the 11 modes (Breath/Sonar/Ripple/Glow/Tide/Serpent/Abyss/Wave/Pulse/Grid/
 Nautilus), the morph choreography, the accessibility (role=dialog, Esc, Tab trap, focus return) —
-is byte-for-byte chodaict's.
+is byte-for-byte the product owner's.
 
 ## Regenerate
 

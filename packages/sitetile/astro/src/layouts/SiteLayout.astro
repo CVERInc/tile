@@ -48,7 +48,7 @@ const themes = import.meta.glob('../themes/*.css', { query: '?raw', import: 'def
 // `bannerLocales: [...]` — for a generated BLOG route (index, pager, post): the locales whose build
 // emits this same url, measured by the route (lib/blog.mjs → blogSwitchLocales). It feeds the
 // language banner ONLY. A blog view that also wants hreflang says so itself, through `alternates`
-// (CVERInc/reef#1910 item 5: BlogIndexView and PostView hand the same measured list there).
+// (reef#1910 item 5: BlogIndexView and PostView hand the same measured list there).
 // `routeCss: '<css>'` — the stylesheet of a page the PLATFORM draws (pages/[...loc]/language.astro),
 // handed over as text so the layout can place it BEFORE the site's theme. Imported the ordinary way
 // it arrives through Astro's own <style>, which lands after the theme: same layer, later in the
@@ -324,7 +324,7 @@ const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-h
 // round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
 // verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
 // every other emitter uses, falling back to the safe default rather than going live unfiltered.
-// 🩸 CVERInc/reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
+// 🩸 reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
 // key having a value: a refused value fell back to `/language`, and on a one-locale site (which
 // builds no chooser) that put a dead link on every page while reading as the owner's own.
 const ownLanguageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '') : '';
@@ -382,7 +382,7 @@ const PKG_REGISTRY = {
 const hasLingo = lingo.lingoEnabled({ packages, locales });
 // Lingo with something to switch BETWEEN. hasLingo alone still decides the attribute form of the
 // document's `lang`; everything that links one edition to another reads this.
-// 🩸 CVERInc/reef#1910. One declared locale is not an install: `locales: zh-TW` put
+// 🩸 reef#1910. One declared locale is not an install: `locales: zh-TW` put
 // `hreflang → /zh-TW/` and a footer link to `/language` on every page, and neither was ever built
 // (10 dead links on a 6-page site). With `packages: lingo` it built a chooser with one row on it.
 const multilingual = hasLingo && locales.length > 1;
@@ -504,7 +504,7 @@ const localeBannerCss = multilingual ? stripCssComments(signetLocaleBannerCss) +
 // A blog route brings a second measurement (`bannerLocales`). Both go in and suggestionBanner()
 // takes their union — choosing between them HERE is what once took the banner off the home page
 // of a root-mounted blog. Every other page passes null and gets altLocales as before.
-// CVERInc/reef#1888: the three sentences can be overridden per locale in _site.md
+// reef#1888: the three sentences can be overridden per locale in _site.md
 // (`locales-banner-<locale>-prompt|continue|dismiss`) — text only; a bad key is warned, never fatal.
 const { copy: bannerCopyOverrides, warnings: bannerCopyWarnings } = hasLingo ? lingo.bannerOverrides(meta, locales) : { copy: null, warnings: [] };
 for (const w of bannerCopyWarnings) lingo.warnOnce(`sitetile: ${w}`);
@@ -833,7 +833,7 @@ const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
 // means no route can get this wrong, including one written after this comment.
 const dynamicCoralCss = dynamicCoralCssMode(
   (loadSite(contentGlob) || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
-// CVERInc/reef#2302 — the SITE-WIDE embed slot: the `embed:` key of content/_site.md, emitted
+// reef#2302 — the SITE-WIDE embed slot: the `embed:` key of content/_site.md, emitted
 // VERBATIM as the last thing before </body> on every page this layout renders. It is the per-page
 // `embed` coral's escape hatch one level up (sections/Embed.astro: `set:html` of the owner's raw
 // string) and deliberately nothing more: no validation, no rewriting, no wrapper element, no named

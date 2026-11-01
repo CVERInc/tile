@@ -55,8 +55,8 @@ test('the recipe and the copy of it at the top of cli.mjs have not drifted apart
 });
 
 // 🔴 The export's shape, asserted where somebody reading the recipe would look for it: the compiled
-// theme.css sits BESIDE ir/, because the platform compiles it and ships it with the export. Nothing
-// in this repo compiles `_theme.md`; fixtures/theme.css is a hand-written stand-in for the one a
+// theme.css sits BESIDE ir/, because that is where an export ships it (and where `theme/cli.mjs`
+// is told to write it in the README). fixtures/theme.css is a hand-written stand-in for the one a
 // real export carries, and its position on disk is the part that has to be true.
 test('the fixture is laid out like an export: theme.css beside ir/', () => {
   assert.equal(flag('theme'), './theme.css', 'the recipe no longer passes the exported stylesheet');

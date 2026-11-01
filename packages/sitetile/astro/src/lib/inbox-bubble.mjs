@@ -17,7 +17,7 @@ export function pathMatches(pattern, pathname) {
 }
 
 // bubbleSearchOn: may the inbox bubble search this site's posts from inside the visitor's browser?
-// reef#2160 (chodaict 2026-10-18: default on, live sites too, OTA). Site-level, not per page — it
+// reef#2160 (product owner 2026-10-18: default on, live sites too, OTA). Site-level, not per page — it
 // decides whether /search-index.json carries rows, and that file is one per site. Off by either
 // switch: the bubble itself (`inbox-bubble: off`) or the one-line owner opt-out
 // (`inbox-bubble-search: off`). The page exclusion list is a per-page matter and is not read here.

@@ -1,4 +1,4 @@
-// The editing table draws the SAME mark the published card does (CVERInc/reef#2015).
+// The editing table draws the SAME mark the published card does (reef#2015).
 //
 //   node --test packages/cardtile/w2/board-marks.test.mjs
 //

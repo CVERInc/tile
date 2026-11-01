@@ -18,7 +18,29 @@ const PLAY = '<svg viewBox="0 0 68 48" width="54" height="38"><path d="M66.5 7.7
  *   the Card's registry (`ctx.url`).
  * @param {{ esc?: (v: unknown) => string, url?: (raw: string) => string }} [ctx]
  */
+// ── the Card's `embed`: the author's HTML in a sandboxed srcdoc frame (reef#2725) ─────────────────
+// The reasons are written at card-render's renderEmbedHtml, which builds the document; this writes the
+// frame. 🔴 `sandbox="allow-scripts"` and nothing else (an opaque origin: no storage, cookies or DOM of
+// the card, no top navigation, no popups/forms/modals). 🔴 The srcdoc escape is its own function, `&`
+// first so an author's literal `&quot;` stays literal, then `"` `<` `>` — the one value whose escaping
+// is a security property, so it does not borrow `ctx.esc`. embed-html.test.mjs and
+// verify/embed-sandbox.mjs hold both.
+const srcdocAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// the cell is a square of its own width (no `h`, and no channel from the frame to measure it); the
+// `[data-cell]` rule matches only a cell the EDITOR rendered, where a click must select the tile
+const SRCDOC_CELL_CSS = '.st-card .st-embed-html{position:relative;aspect-ratio:1;min-height:0}'
+  + '.st-embed-html iframe{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:transparent}'
+  + '.st-embed-html[data-cell] iframe{pointer-events:none}';
+
+/**
+ * …and `cell` + `srcdoc` → a Card `embed` cell: `srcdoc` is the whole document the Card built (its
+ * theme, then the author's HTML), `title` the frame's accessible name.
+ */
 export function emitEmbed(section, params, ctx) {
+  if (params.cell && params.srcdoc != null) {
+    return cellFrame(params.cell, 'st-embed st-embed-html', 'embed', `<style>${SRCDOC_CELL_CSS}</style>`
+      + `<iframe sandbox="allow-scripts" srcdoc="${srcdocAttr(params.srcdoc)}" title="${ctx.esc(params.title)}" loading="lazy" referrerpolicy="no-referrer"></iframe>`);
+  }
   if (params.cell) {
     const e = ctx.esc;
     const { source: [name, value], poster, label } = params.video;

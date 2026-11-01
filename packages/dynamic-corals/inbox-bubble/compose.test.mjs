@@ -208,7 +208,7 @@ test('every COPY table carries every string English carries, as the same kind of
 		// the sentence instead of where its translator put it. Placement is the table's job.
 		assert.equal(table.statusDefault('小美').split(AI_CHIP_TOKEN).length, 2,
 			`${locale}.statusDefault places the AI chip token ${table.statusDefault('小美').split(AI_CHIP_TOKEN).length - 1} times, not once`);
-		// The KAITO-only line (CVERInc/reef#1866) is held to the same placement rule, and may not
+		// The KAITO-only line (reef#1866) is held to the same placement rule, and may not
 		// promise a reader: it is shown exactly where there is no Inbox for anyone to read in.
 		assert.equal(table.statusAiOnly('小美').split(AI_CHIP_TOKEN).length, 2,
 			`${locale}.statusAiOnly places the AI chip token ${table.statusAiOnly('小美').split(AI_CHIP_TOKEN).length - 1} times, not once`);
@@ -2755,7 +2755,7 @@ test('tile#19: the hand-off honeypot hides itself inline, where a layered host c
 	assert.match(input, /autocomplete="off"/);
 });
 
-// ── CVERInc/reef#1866: the status line of KAITO without an Inbox ─────────────────────────────
+// ── reef#1866: the status line of KAITO without an Inbox ─────────────────────────────
 
 test('#1866: statusFor picks the KAITO-only line only for askOnly, and never loses the chip or the escaping', () => {
 	const chip = '<span class="dc-inbox-ai-chip" aria-label="AI">AI</span>';

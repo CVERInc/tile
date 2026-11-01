@@ -58,7 +58,7 @@ packages/sitetile/astro/.tile-build-stash-*
 # one time it does it must not be committed into the repo as a permanent "someone is building".
 packages/sitetile/astro/.tile-build-lock
 # 🔴 THE WALL. `lab/` is the incubator's never-graduates folder — creators' cards, our deployment
-# config, the forbidden-terms list. It lives in CVERInc/tile-lab, which has this repo as a
+# config, the forbidden-terms list. It lives in tile-lab, which has this repo as a
 # submodule at engine/. Ignoring it here means a careless copy in the wrong direction cannot commit
 # somebody's card into the public repo. Naming alone was a habit; this is a wall. (2026-08-13)
 lab/

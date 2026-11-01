@@ -22,7 +22,7 @@ import { chooserCss } from '../../packages/lingo/language-page-css.mjs';
 export function getStaticPaths() {
   // Discover the site's locale set + per-locale chrome from the HOME pages authored in content/.
   // The loop itself lives in lib/locale-editions.mjs, shared with the per-locale 404 route
-  // (CVERInc/reef#2112) so the two can never disagree about which editions this site has.
+  // (reef#2112) so the two can never disagree about which editions this site has.
   const files = import.meta.glob('../../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   const editions = localeEditions(files);
   if (!editions) return [];
@@ -57,7 +57,7 @@ const defaultUrlLocale = toUrlLocale(defaultLocale);
 // off the return path before re-prefixing per target locale — without this it treated e.g.
 // "/zh-tw/" as the bare path, so English resolved to "/zh-tw/" (you couldn't switch back).
 const urlLocalesJson = JSON.stringify(locales.map((L) => toUrlLocale(L)));
-// 🩸 CVERInc/reef#1910. Every declared locale got a row linking to its home, written or not. A site
+// 🩸 reef#1910. Every declared locale got a row linking to its home, written or not. A site
 // whose Chinese home sits at `/` under `locales: en-US, zh-TW` had a Chinese row to a `/zh-tw/`
 // nobody wrote, and an edition with pages but no home (content/ja-jp/about.md only) the same. Such
 // a row is built `hidden`, with no href: the script below shows it only when `has=` says the
@@ -101,7 +101,7 @@ const rows = locales.map((L) => {
   </section>
   {/* ?return=<path> (+ optional ?has=<locales with that path>) → rewrite each row to that page,
       per-locale-prefixed. Same contract as a live /language page. is:inline so it ships verbatim.
-      🩸 CVERInc/reef#1910. `return` is a value anyone can put in a link, and the only check was
+      🩸 reef#1910. `return` is a value anyone can put in a link, and the only check was
       "starts with one slash, not two". Three ways through that to another origin, each on the
       DEFAULT locale's row (the one row that gets no locale prefix): a backslash after the slash,
       which a browser reads as a second slash; a tab or newline between two slashes, which a browser

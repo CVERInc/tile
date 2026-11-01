@@ -1,0 +1,9 @@
+# Person handles this public repo must not carry, as salted hashes (see scripts/forbidden-terms.mjs).
+# One per line: handleHash(token) = sha256(SALT + lowercase token), first 24 hex chars.
+# Add one with:  node -e "import('./scripts/forbidden-terms.mjs').then(m=>console.log(m.handleHash(process.argv[1])))" <token>
+5b0aef55bce0a2e22f6da02a
+bb6fb0e98e0451be22b08680
+71cc6b5f95ca742a2849f62e
+3e18056d18a62787a54a6abe
+70119089f1a0ed725bb638de
+6bc1b87a05da3cc4c89b105d

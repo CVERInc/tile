@@ -227,7 +227,7 @@ export const routesByPath = (host) =>
 // reef#2725: on reef.cards the bare root, `/<ROOT_HANDLE>` and the origin-level icon files are the
 // root card's, which is addressed like a one-card host (cardUrl = the bare origin, `root: true`).
 // An icon path can never be a handle (it has a dot), so nothing a customer could own is taken.
-// tile-lab#51 (chodaict 2026-10-29): the old card host too. A visitor who cuts the handle off a
+// tile-lab#51 (product owner 2026-10-29): the old card host too. A visitor who cuts the handle off a
 // shared link is asking "what is this?", and the Card answers by being one — feelreef's own.
 const hasRootCard = (host) => host === CARDS_HOST || host === CANON_HOST;
 const isRootPath = (host, seg) =>
@@ -458,7 +458,7 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // indexable, every other Card is `noindex`. Before the move reef.cards keeps the old rule, and the
 // old hosts keep it in both positions.
 //
-// tile-lab#51 (chodaict 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
+// tile-lab#51 (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
 // noindex」. The root card is OURS, so the "nobody has vouched for it" reason does not apply to it:
 // indexable on both card hosts in both switch positions. Every customer Card is exactly as before.
 /** robotsTag: ({ env, host, handle, vanity, blank }) → the X-Robots-Tag value, or null. Pure. */
@@ -503,7 +503,7 @@ const html = (body, status = 200, env = null, handle = '', at = {}, blank = fals
 // often walks through (a mistyped share link; a cut-off one). So it is a Card now, drawn by the same
 // renderer and CSS as every Card, from a constant: no handle, nothing the request said, in it.
 //
-// 🔴 ONE PAGE FOR EVERY "NO CARD" (chodaict 2026-10-30): a stopped (retired) Card and a handle that
+// 🔴 ONE PAGE FOR EVERY "NO CARD" (product owner 2026-10-30): a stopped (retired) Card and a handle that
 // never existed answer byte for byte the same, headers included — 「退役的人要的是消失，不留
 // unavailable 墓碑」. Two wordings would let anyone probe who was taken down. That is why the page
 // echoes nothing: if it named the handle, "identical" would hold only per handle.
@@ -555,7 +555,7 @@ const wantsMarkdown = (request) => /(^|,)\s*text\/markdown\b/.test(request.heade
 
 // ── the public sandbox: card.feelreef.com/try/edit ─────────────────────────────────────────────
 //
-// Originally rebuilt here (chodaict, 2026-09) after the legacy `feelreef.com/card/try` route, then
+// Originally rebuilt here (product owner, 2026-09) after the legacy `feelreef.com/card/try` route, then
 // REPLACED at this same path by owner ruling: the review of the tugtile-table rebuild staged beside
 // it as `/try/edit2` (REVIEW-card-edit2-rereview-2026-09-06.md) came back "四條 P1 全部在線上修好…
 // 判定：換上正式路徑" — put the rebuild on the official path. `/try/edit` now serves that experience;

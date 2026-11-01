@@ -134,7 +134,7 @@ console.log(`   floats text on the scrim: ${html.includes('class="st-grid-label"
 if (!dim || Number(dim[1]) !== WANT_DIM) { console.log(`   🔴 the author's ${WANT_DIM} did NOT survive into the scrim`); bad++; }
 const box = await footerBox(html);
 console.log(`   footer floats on the artwork:  ${box ? `yes, at y=${Math.round(box.y)}  plate: ${box.plate !== 'none'}` : 'no footer'}`);
-// 🔴 REVERSED 2026-07-30 — this required a PLATE, and chodaict asked for the backgrounds to go
+// 🔴 REVERSED 2026-07-30 — this required a PLATE, and the product owner asked for the backgrounds to go
 // (「st-footer 也是,不要背景色」). The plate's purpose was to keep the footer's ink standing on the
 // ground it was derived against. The same end is now reached without a background: the footer uses
 // `--cp-ink` (not `--cp-page-ink`, which is derived for the page mist and measured 2.86:1 on her

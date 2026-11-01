@@ -20,8 +20,8 @@ test('the manifest declares no `main` — it would make `node --test packages/bu
     + 'whole suite and passes without reading any test in this package. Use `exports` instead.');
 });
 
-test('the manifest still resolves the package and its two named entrypoints', () => {
-  assert.deepEqual(Object.keys(manifest.exports), ['.', './mkpages.mjs', './stage.mjs']);
+test('the manifest still resolves the package and its named entrypoints', () => {
+  assert.deepEqual(Object.keys(manifest.exports), ['.', './mkpages.mjs', './stage.mjs', './theme']);
   assert.equal(manifest.exports['.'], './index.mjs');
   assert.equal(manifest.type, 'module');
   assert.equal(manifest.license, 'MIT');

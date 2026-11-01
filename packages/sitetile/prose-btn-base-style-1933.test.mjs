@@ -1,4 +1,4 @@
-// Prose link-button rows get the same base paint as hero buttons — CVERInc/reef#1933 (S5).
+// Prose link-button rows get the same base paint as hero buttons — reef#1933 (S5).
 //   run: node packages/sitetile/prose-btn-base-style-1933.test.mjs
 //
 // `linkButtonsHtml(buttons, 'st-prose')` emits `.st-prose-btns` / `.st-prose-btn(-primary|-secondary)` /

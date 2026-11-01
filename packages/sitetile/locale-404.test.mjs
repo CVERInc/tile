@@ -1,7 +1,7 @@
 // One `404.html` per declared locale: the rename `<loc>/404/index.html` → `<loc>/404.html` at build:done.
 //   run: node packages/sitetile/locale-404.test.mjs   (globbed into scripts/test.sh)
 //
-// 🩸 CVERInc/reef#2112. Cloudflare Pages serves the nearest `404.html` up the tree; Astro writes only
+// 🩸 reef#2112. Cloudflare Pages serves the nearest `404.html` up the tree; Astro writes only
 // the ROOT 404 as a bare file, so a per-locale 404 route lands at `zh-tw/404/index.html` — a page
 // to Pages, not a 404. The hook in astro/locale-404.mjs moves it. This file is the pure half: the
 // route-list reading, the rename on a scratch directory, and the wiring in astro.config.mjs. The

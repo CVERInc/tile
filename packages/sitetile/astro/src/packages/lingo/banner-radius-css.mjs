@@ -1,4 +1,4 @@
-// The language banner's two buttons follow the site's button radius — CVERInc/reef#1888.
+// The language banner's two buttons follow the site's button radius — reef#1888.
 // Signet ships `.locale-banner__continue { border-radius: var(--gd-pill, 9999px) }` and a
 // hard-coded 9999px on `.locale-banner__decline`; neither reads the theme. Appended after Signet's
 // CSS inside the same `@layer reef.theme` (same specificity, later wins — the LINGO_BAR_POSITION

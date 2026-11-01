@@ -1,6 +1,6 @@
 // One `404.html` per declared locale: `dist/<url-locale>/404/index.html` → `dist/<url-locale>/404.html`.
 //
-// 🩸 CVERInc/reef#2112. Cloudflare Pages serves the NEAREST `404.html` up the directory tree, so a
+// 🩸 reef#2112. Cloudflare Pages serves the NEAREST `404.html` up the directory tree, so a
 // Chinese edition's missing pages are caught by `dist/zh-tw/404.html` — a FILE at that path. Astro writes
 // only the root `/404` (and `/500`) as a bare `.html` (its STATUS_CODE_PAGES); every other route, the
 // per-locale 404 in pages/[...loc]/404.astro included, is a directory index, and `zh-tw/404/index.html`

@@ -16,10 +16,12 @@
   "exports": {
     ".": "./index.mjs",
     "./mkpages.mjs": "./mkpages.mjs",
-    "./stage.mjs": "./stage.mjs"
+    "./stage.mjs": "./stage.mjs",
+    "./theme": "./theme/index.js"
   },
   "bin": {
-    "tile-build": "./cli.mjs"
+    "tile-build": "./cli.mjs",
+    "tile-theme": "./theme/cli.mjs"
   },
   "scripts": {
     "test": "node --test"
