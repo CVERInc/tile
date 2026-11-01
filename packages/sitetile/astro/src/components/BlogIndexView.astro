@@ -7,7 +7,7 @@
 // old index.astro so output stays byte-for-byte identical.
 import SiteLayout from '../layouts/SiteLayout.astro';
 import Section from './Section.astro';
-import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates } from '../lib/blog.mjs';
+import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
@@ -33,6 +33,7 @@ const sideCopy = sidebarCopy(meta);
 const {
   pagePosts, tags, tagCounts, totalPages, currentPage, pager, showSidebar, archiveSidebar, categories, recentPosts, archive, dateFormat, readMore,
 } = buildIndexView(posts, meta, pageNum);
+const lang = indexDateLang(dateFormat, meta, blogViewLang(meta, viewFiles));
 const pageHref = (n) => indexUrl(meta, n);
 // Root-mounted blog index (blog-path:"") page 1 IS the site home. A live root-mount home
 // (a root-mounted blog) shows the post grid with NO archive heading and the site's own
@@ -91,7 +92,7 @@ const title = isHome
                 <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
               </time>
             ) : (
-              <time class="bl-date">{fmtDate(p.date, dateFormat, meta.lang)}</time>
+              <time class="bl-date">{fmtDate(p.date, dateFormat, lang)}</time>
             ))}
             <h2 class="bl-title">{p.title}</h2>
             {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}

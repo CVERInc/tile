@@ -62,6 +62,28 @@ follow the theme colour, and are left alone by mono mode.
 `iconimg=` supplies an artwork thumbnail for a link cell and takes precedence
 over its mark; these thumbnails also retain their colours in mono mode.
 
+## Embed and slides
+
+`embed` is pasted HTML, scripts included ([reef#2725](https://github.com/CVERInc/reef/issues/2725)):
+
+```markdown
+- [ ] %% card: embed w=3 %% <div id="t"></div><script>t.textContent = new Date().toLocaleTimeString()</script>
+```
+
+The body becomes the `srcdoc` of an `<iframe sandbox="allow-scripts">` and nothing
+else: the document has an opaque origin, so it cannot read the card's storage or
+cookies, touch the card's DOM, navigate the page, open popups or submit forms. The
+iframe fills a square cell of its own width and does not grow to fit its content.
+The card's `--cp-*` colour variables are declared on the document's `:root`, and
+its background is transparent over the tile. An embed whose HTML is over the
+card's byte ceiling (25 MiB) is refused by name on save and never rendered.
+
+The image carousel that used the name `embed` is now `slides` (`kind=slider` or
+`kind=bubbles`, same params). An existing `embed` line **with** a `kind=` token is
+read as `slides` and written back unchanged, so old cards render exactly as before
+without editing their files. An `embed` line without `kind=` rendered nothing
+before, and is HTML now.
+
 ## Language note
 
 This repository has no localized Markdown grammar documents. This note is in

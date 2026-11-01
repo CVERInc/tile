@@ -274,6 +274,18 @@ export function tokens(mode, accent) {
  * web's own answer and the reason the light ramp had to exist at all rather than stay a TODO.
  * A `mode` → that one, pinned: an author who states a ground has stated it.
  */
+/**
+ * The theme's VARIABLES and nothing else — `themeCss` minus the rule that paints the page's ground.
+ * What an embed's own document gets (reef#2725: 「把 `--cp-*` 注進 srcdoc 的 `:root`」): the same
+ * tokens, selected the same way, but its `html` stays transparent so the tile it sits in shows through.
+ * Same two branches as themeCss below, and embed-html.test.mjs compares the two on a rendered page.
+ */
+export function themeRootCss(mode, accent) {
+  if (mode) return `:root{color-scheme:${mode};${tokens(mode, accent)}}`;
+  return `:root{color-scheme:light dark;${tokens('dark', accent)}}`
+    + `@media(prefers-color-scheme:light){:root{${tokens('light', accent)}}}`;
+}
+
 export function themeCss(mode, accent) {
   // 🔴 card.css hard-codes `html{background-color:#0a1628}` — the Python era's deep blue. The body's
   // own gradient covers it everywhere the body reaches, so it was invisible and stayed. It is not:

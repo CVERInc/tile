@@ -26,7 +26,7 @@
 // (`/search/label/活動`) alike; both decode to the same dir, and trailingSlash:'ignore'
 // + build.format:'directory' serve them with or without the trailing slash.
 import SiteLayout from '../../../../layouts/SiteLayout.astro';
-import { allPosts, listedPosts, siteMeta, systemPageLang, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy} from '../../../../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, systemPageLang, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy, indexDateLang } from '../../../../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
@@ -72,6 +72,7 @@ const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const {
   pagePosts, tags: pillTags, totalPages, currentPage, pager, showSidebar, dateFormat, readMore,
 } = buildIndexView(labelPosts, meta, 1);
+const lang = indexDateLang(dateFormat, meta, systemPageLang(meta, sysFiles));
 // Sidebar widgets are site-wide (recent + archive over the WHOLE corpus, like live),
 // not scoped to this label.
 const recentPosts = posts.slice(0, 5);
@@ -109,7 +110,7 @@ const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag
                 <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
               </time>
             ) : (
-              <time class="bl-date">{fmtDate(p.date, dateFormat, meta.lang)}</time>
+              <time class="bl-date">{fmtDate(p.date, dateFormat, lang)}</time>
             ))}
             <h2 class="bl-title">{p.title}</h2>
             {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}

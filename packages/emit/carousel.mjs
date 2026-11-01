@@ -64,7 +64,9 @@ export function emitCarousel(section, params, ctx) {
 }
 
 /**
- * A Card `embed kind=slider|bubbles` cell (cell.mjs) — the Card's two carousels, in its own spelling.
+ * A Card `slides` cell (cell.mjs) — the Card's two carousels, in its own spelling. Until reef#2725 the
+ * Card called this cell `embed kind=slider|bubbles`; card-core still reads that old line as `slides`,
+ * and `embed` is now pasted HTML (embed.mjs). The class stays `st-embed`: card.css styles it.
  * Values arrive resolved by the Card host (card-render reads the params, resolves `asset:` images,
  * validates the two transform origins); each image is written through the Card's registry
  * (`ctx.url` / `ctx.cssUrl`), in the order the slides are written.
@@ -80,7 +82,7 @@ export function emitCarousel(section, params, ctx) {
  */
 function carouselCell(params, ctx) {
   const { kind, images: imgs } = params;
-  if (!imgs.length) return cellFrame(params.cell, 'st-embed', 'embed', '');
+  if (!imgs.length) return cellFrame(params.cell, 'st-embed', 'slides', '');
   const n = imgs.length;
   if (kind === 'slider') {
     const e = ctx.esc;
@@ -114,7 +116,7 @@ function carouselCell(params, ctx) {
       // one image needs no controls, and controls on a single slide read as broken
       n < 2 ? `.st-slide-nav,.st-slider-dots{display:none}` : '',
     ].join('');
-    return cellFrame(params.cell, 'st-embed', 'embed', `<style>${css}</style>`
+    return cellFrame(params.cell, 'st-embed', 'slides', `<style>${css}</style>`
       + `<div class="st-slider"><div class="st-slider-track">${slides}</div>`
       + (n > 1 ? `<div class="st-slider-dots">${dots}</div>` : '') + '</div>');
   }
@@ -138,5 +140,5 @@ function carouselCell(params, ctx) {
     `@media screen and (max-width:888px){.st-carousel figure{transform-origin:${originNarrow}}}`,
     `@media(prefers-reduced-motion:reduce){.st-carousel figure{animation:none}.st-carousel figure:nth-child(1){opacity:1;transform:scale(1)}}`,
   ].join('');
-  return cellFrame(params.cell, 'st-embed', 'embed', `<style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div>`);
+  return cellFrame(params.cell, 'st-embed', 'slides', `<style>${css}</style><div class="st-carousel"${bgStyle}>${figures}</div>`);
 }

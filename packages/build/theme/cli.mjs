@@ -1,0 +1,325 @@
+#!/usr/bin/env node
+// Compile a site's structured theme, `ir/_theme.md`, into the two things the renderer reads:
+//
+//   1. theme.css — the file you hand the build as `--theme`
+//   2. a few `_site.md` keys (theme:, fonts:, announce…, the treatment switches) — the renderer
+//      reads those from the site's config, not from the stylesheet
+//
+//     node engine/packages/build/theme/cli.mjs ./ir/_theme.md ./theme.css
+//
+// theme.css is written; the `_site.md` keys are printed on stdout, one `key: value` per line, so
+// they can be pasted (or piped) into the site's own `_site.md`. Nothing here edits `_site.md` for
+// you: it is the site's file, and what else is in it is not this compiler's business.
+//
+// 🔴 THE CONTRACT, exactly as narrow as what is checked: exit 0 means every key you wrote reached
+// theme.css or the printed _site.md keys. Values are passed through and are NOT validated as CSS,
+// except colour tokens (a small strict colour parser, css-colour.js) and the URL / announcement
+// rules below. An earlier wording ("the theme you wrote is the theme you got") promised more than
+// any finite list of checks can keep — every review round found one more value it did not judge —
+// so the promise now says what it covers and nothing else.
+//
+// 🩸 WHY THERE IS A CONTRACT AT ALL. The library is forgiving on purpose —
+// an editor that already told its author what it dropped wants a compile, not a refusal — and the
+// first version of this CLI inherited that: `card: glassy`, `surface-sand: rgb(banana)` and even
+// `name: ../oops` all exited 0 with a success line, while the card look, the band and the theme's
+// NAME (the one thing the build looks the stylesheet up by) silently went missing. A person at a
+// terminal has no editor between them and that silence, so here every drop is named — key, value,
+// reason — and refused. That includes what the forgiving parser never hands over: a line it cannot
+// read, and the earlier value of a key written twice.
+//
+// 🔴 TWO OUTCOMES, NO OVERRIDE. There used to be an `--allow-dropped` that compiled anyway, and every
+// review of it found the same shape: a value REPORTED as dropped still shaped the result (a refused
+// colour still landed in theme.css; dropping an unreadable deadline turned a card that takes itself
+// down into a band that never does). "Compile without it" is a second compiler, and the library
+// is already the forgiving one for programmatic callers. Here it is usable, or it is refused.
+//
+// 🔴 The drops are found by reading the OUTPUT, not by restating the compiler's rules: a key the
+// author set that did not arrive in theme.css or the printed keys was dropped, whatever the reason.
+// A second copy of "which values are legal" here would be a second thing to keep in step.
+
+import { readFileSync, renameSync, realpathSync, statSync, openSync, writeSync, fsyncSync, closeSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
+import { compileTheme, compileThemeCss, THEME_SITE_KEYS } from './theme-compile.js';
+import {
+  parseThemeDoc, residueOf, structuralIssues, sanitizeThemeMeta, unsafeReason,
+  TOKENS, TREATMENTS, TYPE_SCALE_RANGE, SURFACE_HEX_REASON, THEME_KEYS, DARK_KEYS, surfaceOf, darkStemOf,
+} from './theme-schema.js';
+import { truncateCssText } from './css-text.js';
+import { isCssColour } from './css-colour.js';
+// The RENDERER's own judges, imported rather than restated: whether it will link a URL, and whether
+// it can read an announcement deadline. A copy here would be a second rule that drifts from the one
+// that actually decides what a visitor sees.
+import { safeHref } from '../../sitetile/site-core.js';
+import { announceModel } from '../../sitetile/astro/src/lib/announce.mjs';
+
+const USAGE = `usage: node packages/build/theme/cli.mjs <_theme.md> [theme.css]
+
+  Writes the compiled stylesheet to [theme.css] (default: ./theme.css) and prints the _site.md
+  keys this theme owns on stdout. Put them in your _site.md: the build looks the stylesheet up
+  by the theme: name, and reads fonts / announce / the treatment switches from there.
+
+exit: 0 compiled — every key you wrote reached theme.css or the printed _site.md keys. Values are
+      passed through and are NOT validated as CSS, except colour tokens and the fonts: /
+      announce rules.
+      2 refused, nothing written: every problem is listed (no frontmatter, an unusable name, a
+      value that would be dropped). There is no override — fix the source and run it again.
+`;
+
+const args = process.argv.slice(2);
+const flag = args.find((a) => a.startsWith('-'));
+if (flag) { console.error(`✗ unknown option ${flag} — this command takes no options\n\n${USAGE}`); process.exit(2); }
+const [src, out = 'theme.css', ...rest] = args;
+if (!src || rest.length) { console.error(USAGE); process.exit(2); }
+
+let md;
+try { md = readFileSync(src, 'utf8'); } catch (e) { console.error(`✗ cannot read ${src}: ${e.code ?? e.message}`); process.exit(2); }
+
+// 🩸 `cli.mjs ./ir/_theme.md ./ir/_theme.md` overwrote the source with CSS. The destination may be
+// the source under another spelling (`./`, an absolute path), through a symlink, or as a hard link,
+// so compare the resolved path (the destination's real parent + its basename — it may not exist
+// yet) AND, when it exists, the device + inode, which a symlink and a hard link both share.
+function isSameFile(a, b) {
+  try {
+    const ra = realpathSync(a);
+    const rb = path.join(realpathSync(path.dirname(path.resolve(b))), path.basename(b));
+    if (ra === rb) return true;
+  } catch {}
+  try {
+    const sa = statSync(a), sb = statSync(b);
+    if (sa.dev === sb.dev && sa.ino === sb.ino) return true;
+  } catch {}
+  return false;
+}
+const outProblems = isSameFile(src, out) ? [`${out} is the same file as the source ${src} — writing it would overwrite your theme with CSS; name a different output, e.g. theme.css`] : [];
+
+const doc = parseThemeDoc(md);
+const issues = structuralIssues(doc && doc.meta);
+const show = (v) => JSON.stringify(truncateCssText(String(v)));
+
+// No frontmatter at all is the one refusal that cannot wait: there is nothing else to check.
+if (!doc) {
+  for (const i of issues) console.error(`✗ ${src}: ${i.key} — ${i.problem}`);
+  process.exit(2);
+}
+// A missing or unusable name is a refusal too — the build stages theme.css under the theme's NAME,
+// so a nameless theme compiles to a file nothing will ever look up, and a name the compiler would
+// DROP (`../oops`, a space, `*/`) ends as `theme: ` with nothing after it. But it is COLLECTED, not
+// returned early: a refused run lists every problem, so the author fixes the source in one pass.
+const nameProblems = issues.filter((i) => i.key === 'name').map((i) => i.problem);
+if (!nameProblems.length) {
+  const why = unsafeReason('name', doc.meta.name);
+  if (why) nameProblems.push(`${show(String(doc.meta.name).trim())} ${why}`);
+}
+
+const { css, siteMeta } = compileTheme(doc.meta, residueOf(doc.body));
+// 🩸 "Did this key reach theme.css" is asked of the sheet compiled WITHOUT the author's custom CSS
+// block: that block is appended verbatim, so a comment in it spelling `[data-surface="sand"] {
+// --gd-band: banana; }` made a dropped surface look emitted. Author text can never stand in for an
+// emitted rule when it is not in the text being searched.
+const emitted = compileTheme(doc.meta, '').css;
+const meta = doc.meta;
+const set = (k) => meta[k] != null && String(meta[k]).trim() !== '';
+
+// ── what the parser never handed over ──────────────────────────────────────────────────────────
+// 🩸 parseThemeDoc is forgiving by design (an editor wrote the file; a stray line should not break a
+// live site), so a line with no colon is SKIPPED and a key written twice keeps its LAST value — both
+// in silence. That is the library's right; it is not this command's. So the CLI reads the same
+// frontmatter block itself, line by line, and names what the parser would not use. The block is
+// found with the parser's own shape (`---` … `---` at the top), so the two read the same lines.
+const unread = [];   // { line, text, reason }
+const fm = /^---\r?\n([\s\S]*?)\r?\n---\s*/.exec(md);
+const firstLines = new Map();   // key → [{ line, value }]
+fm[1].split(/\r?\n/).forEach((text, i) => {
+  const line = i + 2;   // line 1 is the opening ---
+  if (!text.trim() || /^\s*#/.test(text)) return;
+  const at = text.indexOf(':');
+  if (at < 0) { unread.push({ line, text, reason: 'no `key: value` colon — the parser skips this line' }); return; }
+  const key = text.slice(0, at).trim();
+  if (!key) { unread.push({ line, text, reason: 'nothing before the colon — there is no key to set' }); return; }
+  // a well-formed line whose key the parser did not keep (`__proto__:` goes to the object's
+  // prototype, not into it) is as lost as a line with no colon
+  if (!Object.prototype.hasOwnProperty.call(meta, key)) { unread.push({ line, text, reason: 'the parser does not keep this key — it never reaches the compiler' }); return; }
+  if (!firstLines.has(key)) firstLines.set(key, []);
+  firstLines.get(key).push({ line, value: text.slice(at + 1).trim() });
+});
+const dupes = [...firstLines].filter(([, at]) => at.length > 1);
+
+// ── what was asked for and did not arrive ──────────────────────────────────────────────────────
+// Each drop keeps the FULL key, for the lookup; it is cut only when printed.
+const dropped = [];   // { key, value, reason }
+const seen = new Set();
+// `name` is reported once, above, as a name problem — not again as a drop
+const drop = (key, reason) => { if (key !== 'name' && !seen.has(key)) { seen.add(key); dropped.push({ key, value: meta[key], reason }); } };
+for (const k of Object.keys(meta)) {
+  if (!THEME_KEYS.has(k) && !DARK_KEYS.has(k) && !surfaceOf(k)) drop(k, 'not a key this vocabulary has (a typo?) — see TOKENS, TREATMENTS and META_KEYS in theme-schema.js');
+}
+for (const d of sanitizeThemeMeta(meta).dropped) drop(d.key, `${d.kind}: ${d.problem}`);
+for (const k of Object.keys(meta)) if (k !== 'name' && !set(k)) drop(k, 'empty value — nothing to set');
+const stems = new Set(TOKENS.map((t) => t.stem));
+for (const k of Object.keys(meta)) {
+  if (seen.has(k) || !set(k)) continue;
+  const v = String(meta[k]).trim();
+  const stem = stems.has(k) ? k : darkStemOf(k);
+  const surface = surfaceOf(k);
+  const treatment = TREATMENTS.find((t) => t.key === k);
+  if (stem && !emitted.includes(`--${stem}: ${v};`)) drop(k, 'not written to theme.css');
+  // the one VALUE check on tokens: the schema types each token (`category`), and a colour token
+  // that holds no colour leaves the property it feeds unusable (`background: var(--gd-bg)`).
+  else if (stem && TOKENS.find((t) => t.stem === stem).category === 'color' && !isCssColour(v)) {
+    drop(k, 'not a CSS colour — use hex (#rrggbb), rgb()/hsl() (comma form: hsl needs % for saturation and lightness; rgb all numbers or all %), a colour name, transparent, currentColor or var(--…)');
+  }
+  else if (surface && !emitted.includes(`[data-surface="${surface.name}"] { --gd-band: ${v}; }`)) drop(k, SURFACE_HEX_REASON);
+  else if (treatment && v !== treatment.default && siteMeta[k] !== v) drop(k, `not one of ${treatment.values.join(', ')}`);
+}
+// The announcement's link and deadline reach _site.md only beside its text (announce-off hides
+// all three on purpose, which is a choice and not a drop). Only the exact word `true` hides it.
+const off = String(meta['announce-off'] ?? '').trim();
+if (set('announce-off') && !seen.has('announce-off') && off !== 'true' && off !== 'false') drop('announce-off', 'only `true` hides the announcement (and `false` shows it) — this value does neither');
+if (off !== 'true') {
+  for (const k of ['announce-href', 'announce-until']) {
+    if (set(k) && !seen.has(k) && siteMeta[k] !== String(meta[k]).trim()) drop(k, 'an announcement link or deadline with no `announce:` text shows nothing');
+  }
+  // …and once they do reach it, the renderer still has to accept them, at the moment the author
+  // meant. Three ways a deadline goes wrong, checked in this order:
+  //   • no explicit offset: the renderer hands it to Date.parse and defines no zone, so
+  //     `2026-12-01T23:59:00` ends at 23:59 wherever the build runs, and a bare date is UTC midnight;
+  //   • an impossible calendar date: Date.parse ROLLS `2026-02-30` forward to March 2nd, silently —
+  //     so the written fields must round-trip, in the written offset, to the parsed instant;
+  //   • unreadable altogether: announceModel shows no announcement at all (asked with a clock at the
+  //     start of time, so only unreadability — never lateness — says none).
+  const until = siteMeta['announce-until'];
+  if (until) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):(\d{2}))$/i.exec(until);
+    if (!m) {
+      if (announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+        drop('announce-until', 'the renderer cannot read this deadline, so it shows no announcement at all — write ISO 8601 with an offset, e.g. 2026-12-01T23:59:00+08:00');
+      } else {
+        drop('announce-until', 'no time-zone offset — the build host\'s zone would decide when it ends; add the offset, e.g. 2026-12-01T23:59:00+08:00 (or Z for UTC)');
+      }
+    } else {
+      const [, y, mo, d, h, mi, sec = '00', frac = '', z, sign, oh, om] = m;
+      const offsetMin = z.toUpperCase() === 'Z' ? 0 : (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om));
+      const ms = Date.parse(until);
+      const at = new Date(ms + offsetMin * 60000);   // the instant, read back on the author's own clock
+      const same = Number.isFinite(ms) && at.getUTCFullYear() === Number(y) && at.getUTCMonth() + 1 === Number(mo)
+        && at.getUTCDate() === Number(d) && at.getUTCHours() === Number(h) && at.getUTCMinutes() === Number(mi)
+        && at.getUTCSeconds() === Number(sec);
+      // Date.parse keeps milliseconds; a fourth digit is silently rounded or cut, so the moment
+      // written is not the moment kept.
+      if (frac.length > 3) {
+        drop('announce-until', `.${frac} is finer than a millisecond — use at most 3 fractional-second digits (e.g. ${y}-${mo}-${d}T${h}:${mi}:${sec}.${frac.slice(0, 3)}${z})`);
+      } else if (!same || announceModel(siteMeta, { now: -8.64e15 }).mode === '') {
+        drop('announce-until', `not a real date and time — ${y}-${mo}-${d} ${h}:${mi}:${sec} does not exist on the calendar (a parser would quietly roll it to another moment)`);
+      }
+    }
+  }
+  if (siteMeta['announce-href'] && !safeHref(siteMeta['announce-href'])) drop('announce-href', 'the renderer refuses this link (a /path or an https:// address), so the announcement is not linked');
+}
+// `fonts:` is not a navigation link: SiteLayout puts `safeHref(fonts)` in <link rel="stylesheet" href>.
+// 🩸 Two rounds of "what can a stylesheet link load" each left a hole: safeHref DECODES entities
+// (`&#109;ailto:` is `mailto:` by the time it is emitted), and `.`, `./`, `/`, `./?v=2` all resolve
+// to the HTML page itself, which no compiler can rule out without knowing every page. So this is an
+// ALLOWLIST, applied to the exact string safeHref returns — the href the renderer will emit:
+//   (a) an absolute https:// URL (http:// is mixed content on an https page) with a host, a
+//       resolved pathname longer than `/` (a query never substitutes for a path) and no `#`;
+//   (b) a root-relative path that, RESOLVED as a browser would, stays on the site's own host,
+//       has a pathname longer than `/` and no `#`.
+// Everything else is a drop. Narrow on purpose: a webfont stylesheet is one of these in practice.
+function stylesheetHrefOk(emitted) {
+  if (typeof emitted !== 'string' || !emitted) return false;
+  // `#` anywhere is a fragment, an EMPTY one included: URL.hash reads `…a.css#` as '' (its href keeps the `#`).
+  if (emitted.includes('#')) return false;
+  // 🩸 Judge the URL a browser RESOLVES, never the spelling: a regex on the string let `/fonts/..`
+  // (the site root), `/%2e%2e/` and `/\cdn.example/a.css` (a browser reads `\` as `/`, so that
+  // is another host) through. Both forms are resolved with WHATWG URL, which is what a browser runs.
+  let u;
+  // https only: an https page blocks an http:// stylesheet as mixed content, so it would never load.
+  // And a query never stands in for a path — `https://cdn.example/?family=A` (or `/%2e%2e/?…`) is the
+  // host's root document, whatever it answers.
+  if (/^https:\/\//i.test(emitted)) {
+    try { u = new URL(emitted); } catch { return false; }
+    return u.protocol === 'https:' && !!u.hostname && u.pathname.length > 1 && !u.href.includes('#');
+  }
+  if (emitted.startsWith('/')) {
+    try { u = new URL(emitted, 'https://site.invalid/some/page'); } catch { return false; }
+    return u.protocol === 'https:' && u.host === 'site.invalid' && u.pathname.length > 1 && !u.href.includes('#');
+  }
+  return false;
+}
+if (siteMeta.fonts && !stylesheetHrefOk(safeHref(siteMeta.fonts))) {
+  drop('fonts', 'a stylesheet <link> cannot load this — use an absolute https:// stylesheet URL with a path (http:// is blocked on an https page), or a /root/path');
+}
+
+// type-scale is not emitted itself; it is visible only through the heading steps it derives. Ask
+// the compiler what it WOULD derive with the hand-set steps taken away, so a ratio that derives
+// nothing is caught even when gd-h1/h2/h3 are all set by hand and hide it.
+if (set('type-scale') && !seen.has('type-scale')) {
+  const probe = { ...sanitizeThemeMeta(meta).meta };
+  for (const h of ['gd-h1', 'gd-h2', 'gd-h3']) delete probe[h];
+  // only the LIGHT root block: a `gd-h3@dark` override lands in the dark block and is not derived
+  const light = /^html:root \{\n([\s\S]*?)^\}/m.exec(compileThemeCss(probe))?.[1] ?? '';
+  if (!/--gd-h3: /.test(light)) drop('type-scale', `derives nothing: needs a ratio between ${TYPE_SCALE_RANGE[0]} and ${TYPE_SCALE_RANGE[1]} and gd-font-size as a plain length (px, rem, em, pt)`);
+}
+
+const mark = '✗';
+for (const p of outProblems) console.error(`${mark} ${p}`);
+for (const p of nameProblems) console.error(`${mark} ${src}: name — ${p}`);
+for (const u of unread) console.error(`${mark} line ${u.line}: ${show(u.text)} — ${u.reason}`);
+for (const [key, at] of dupes) {
+  const last = at[at.length - 1];
+  const lost = at.slice(0, -1).map((a) => `${show(a.value)} (line ${a.line})`).join(', ');
+  console.error(`${mark} ${truncateCssText(key)}: written ${at.length} times (${at.map((a) => `line ${a.line}`).join(', ')}) — only the last, ${show(last.value)}, is used; ${lost} dropped`);
+}
+for (const d of dropped) console.error(`${mark} ${truncateCssText(d.key)}: ${show(d.value)} dropped — ${d.reason}`);
+const problems = outProblems.length + nameProblems.length + unread.length + dupes.length + dropped.length;
+if (problems) {
+  console.error(`✗ ${src}: ${problems} problem(s) above — nothing was written. Fix them and run it again.`);
+  process.exit(2);
+}
+
+// Written beside its destination under a temporary name, then renamed into place: a write that
+// fails (a missing directory, no permission, a full disk) is a refusal like any other — exit 2, the
+// path named, no stack trace, and no half-written theme.css left where the build would find it.
+// 🩸 The temporary name used to be `${out}.${pid}.tmp`, opened with a plain write: predictable, and
+// FOLLOWED if something already sat there — a source named that way was renamed away, and a symlink
+// or hard link planted at that name had the source behind it overwritten with CSS. Now the name is
+// random and the file is created EXCLUSIVELY (`wx`: fails if anything — a file, a symlink, a hard
+// link — already has that name, and never follows one), retried on a collision; on any failure only
+// a file this run created is removed. The same-file check runs again right before the rename.
+let tmp = null;
+try {
+  const dir = path.dirname(path.resolve(out));
+  let fd;
+  for (let tries = 0; fd === undefined; tries++) {
+    const candidate = path.join(dir, `.${path.basename(out)}.${randomBytes(8).toString('hex')}.tmp`);
+    try { fd = openSync(candidate, 'wx', 0o644); tmp = candidate; }
+    catch (e) { if (e.code !== 'EEXIST' || tries >= 16) throw e; }
+  }
+  // 🩸 writeSync may write FEWER bytes than asked (a permitted result, e.g. under storage pressure)
+  // and says so only in its return value; ignoring it renamed an 8-byte theme.css into place with
+  // exit 0. So: loop until every byte is written, fsync, close — then check the file's size on disk
+  // before the rename. No progress, or a size that disagrees, is a refusal.
+  const bytes = Buffer.from(css, 'utf8');
+  try {
+    for (let at = 0; at < bytes.length;) {
+      const n = writeSync(fd, bytes, at, bytes.length - at, at);
+      if (!(n > 0)) throw Object.assign(new Error('the write made no progress'), { code: 'ESHORTWRITE' });
+      at += n;
+    }
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  if (statSync(tmp).size !== bytes.length) throw Object.assign(new Error('the written file is not the whole sheet'), { code: 'ESHORTWRITE' });
+  if (isSameFile(src, out)) throw Object.assign(new Error('the destination became the source'), { code: 'ESAMEFILE' });
+  renameSync(tmp, out);
+  tmp = null;
+} catch (e) {
+  if (tmp) { try { unlinkSync(tmp); } catch {} }
+  console.error(`✗ cannot write ${out}: ${e.code ?? e.message} — nothing was written.`);
+  process.exit(2);
+}
+
+// Every key the theme OWNS, in a fixed order. A key the theme does not set is not printed — and if
+// your _site.md still carries it from an earlier theme, delete it there: the theme is its source.
+for (const k of THEME_SITE_KEYS) if (siteMeta[k] != null) console.log(`${k}: ${siteMeta[k]}`);
+console.error(`✓ wrote ${out} — the keys above belong in _site.md (theme-owned: ${THEME_SITE_KEYS.join(', ')})`);

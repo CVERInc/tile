@@ -7,7 +7,7 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, d
 // Chrome copy lives in a module that imports NO build alias, so a plain `node` test can reach
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
-export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts } from './chrome-copy.mjs';
+export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } from './chrome-copy.mjs';
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.

@@ -422,6 +422,46 @@ test('🔴 a save sent WITHOUT assets keeps the pictures — this is the whole t
   assert.ok(stored.includes('hello there'), 'the edit did not land');
 });
 
+// reef#2725 — a save answers WHICH commit it was, not only what the card now says. `version` is a hash
+// of the bytes, so a revert (A → B → A) answers the same version twice and a consumer cannot tell the
+// third save from the first. `commit` is the handle's object's own order: `serial` rises on every
+// write of a generation (keepCard), `lifetime` rises every time a lifetime ends (/end), `gen` names it.
+// Additive: every field a save answered before is still there.
+test('🔴 a save answers its commit: serial rises on every write, even when a revert repeats the version', async () => {
+  const env = envWith({ t: CARD });
+  const saves = [];
+  for (const word of ['A', 'B', 'A']) {
+    const res = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', `hello ${word}`) });
+    assert.equal(res.status, 200);
+    saves.push(await res.json());
+  }
+  assert.equal(saves[0].version, saves[2].version, 'control: the revert repeats the version — a hash cannot order these');
+  for (const s of saves) {
+    assert.deepEqual(Object.keys(s.commit).sort(), ['gen', 'lifetime', 'serial']);
+    assert.ok(Number.isSafeInteger(s.commit.serial) && Number.isSafeInteger(s.commit.lifetime));
+    assert.equal(typeof s.version, 'string', 'the existing fields are kept');
+    assert.equal(typeof s.bytes, 'number');
+  }
+  assert.deepEqual(new Set(saves.map((s) => `${s.commit.gen}/${s.commit.lifetime}`)).size, 1, 'one lifetime');
+  assert.ok(saves[0].commit.serial < saves[1].commit.serial && saves[1].commit.serial < saves[2].commit.serial,
+    `serials ${saves.map((s) => s.commit.serial)}`);
+  // A dry run commits nothing and so answers no commit.
+  const dry = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD), dry_run: true });
+  assert.equal('commit' in (await dry.json()), false);
+});
+
+test('🔴 a save in the next lifetime answers a higher lifetime, so its commit orders after every commit of the last', async () => {
+  const env = envWith({ t: CARD });
+  const before = await (await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'hello old') })).json();
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  const created = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('Tester', 'Next'), create: true });
+  assert.equal(created.status, 200);
+  const after = await created.json();
+  assert.notEqual(after.commit.gen, before.commit.gen, 'control: the delete started another generation');
+  assert.equal(after.commit.lifetime, before.commit.lifetime + 1);
+  assert.ok(after.commit.serial <= before.commit.serial, 'control: serial alone would order the new card BEFORE the old one');
+});
+
 test('CONTROL: the same round trip with NO edit is byte-identical to what was stored', async () => {
   // If this drifts, every "the edit landed" assertion above is measuring serialization noise.
   const env = envWith({ t: CARD });
@@ -3453,4 +3493,25 @@ test('🔴 r7 P3 the PREFLIGHT carries the Worker\'s seen version: a create dry 
     assert.equal(answer.current, await cardVersion(body));
     assert.deepEqual(queried, [], 'the refusal came after Web Risk — not from the preflight');
   } finally { globalThis.fetch = realFetch; }
+});
+
+// reef#2725 — an `embed` is the author's own HTML, and it counts against the card's byte ceiling like
+// everything else in the file. When its HTML is why a save is over, the refusal says WHICH embed:
+// "the card is too big" alone sends the author to look at their pictures.
+test('🔴 reef#2725 a save whose embed blows the byte ceiling is refused 413, naming that embed', async () => {
+  const env = envWith({ t: CARD });
+  const before = await versionOf(env);
+  const html = '<p>' + 'x'.repeat(26 * 1024 * 1024) + '</p>';
+  const md = thinCard(CARD).replace(/\n*$/, '\n') + `- [ ] %% card: embed w=6 %% ${html}\n`;
+  assert.ok(parseCard(md).cells.some((c) => c.type === 'embed'), 'the fixture did not add an embed cell — this measures nothing');
+  const res = await call(env, 'PUT', '/_api/card/t', { markdown: md });
+  assert.equal(res.status, 413);
+  const { error } = await res.json();
+  assert.match(error, /The embed at #\d+ is \d+ bytes of HTML/, `the refusal does not name the embed: ${error}`);
+  assert.equal(await versionOf(env), before, 'something was written');
+  // CONTROL: over the ceiling for a reason that is NOT the embed, the embed is not blamed
+  const other = thinCard(CARD).replace('hello', '中'.repeat(9 * 1024 * 1024)).replace(/\n*$/, '\n') + '- [ ] %% card: embed w=6 %% <p>x</p>\n';
+  const res2 = await call(env, 'PUT', '/_api/card/t', { markdown: other });
+  assert.equal(res2.status, 413);
+  assert.doesNotMatch((await res2.json()).error, /embed/);
 });
