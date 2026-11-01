@@ -5,6 +5,7 @@ import test from 'node:test';
 import worker, { resolveHandle, renderCardHTML } from './card-worker.mjs';
 // reef#2725's tests reach new exports through the namespace, so each goes red on its own assertion
 import * as W from './card-worker.mjs';
+import { BLANKS } from '../ai-ops.mjs';
 import { QR_VERSION, QR_JS, DRAWER_VERSION, DRAWER_JS, CSS } from './card-assets.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -1247,6 +1248,16 @@ const SERVING_CARD = [
   '',
 ].join('\n');
 
+// the same handle, still only create_card's starter (reef create-card.js starterCardMarkdown, mirrored
+// line for line in card-blank-noindex.test.mjs): nothing on it was written by its author
+const BLANK_CARD = [
+  '---', 'card-page: t', 'title: Test Card', 'theme: light', 'cols: 6', '---', '', '## grid', '',
+  `- [ ] %% card: ${BLANKS.profile.type} ${BLANKS.profile.rawParams} %% ${BLANKS.profile.body}`,
+  `- [ ] %% card: ${BLANKS.social.type} ${BLANKS.social.rawParams} %%`,
+  ...BLANKS.social.body.split('\n').map((l) => `\t${l.trim()}`),
+  '',
+].join('\n');
+
 function servingRequests(host, handle = 't', vanity = false) {
   const origin = `https://${host}`, base = vanity ? '' : `/${handle}`;
   const page = origin + (base || '/');
@@ -1563,7 +1574,7 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   const newHostApi = await worker.fetch(new Request('https://reef.cards/_api'), env);
   assert.equal(newHostApi.status, 404);
   assert.match(await newHostApi.text(), /<!doctype html>/, 'bare /_api on reef.cards keeps its HTML 404');
-  assert.equal(newHostApi.headers.get('x-robots-tag'), 'noindex');
+  assert.equal(newHostApi.headers.get('x-robots-tag'), null, 'reef.cards is indexable; a 404 needs no header');
   assert.equal(newHostApi.headers.get('vary'), 'Accept');
   // switch OFF (unset, or anything that is not exactly reef.cards): the old host serves, as today
   for (const off of [{}, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }, { CARD_CANONICAL_HOST: '' }]) {
@@ -1793,9 +1804,10 @@ test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => 
   assert.equal(typeof W.robotsTag, 'function', 'card-worker.mjs exports no robotsTag predicate');
   const NNF = 'noindex, nofollow';
   for (const [host, handle, sw, want] of [
-    // the move: customer Cards noindex, the root Card indexable
+    // the move: reef.cards is the user-content domain — a customer Card is indexable there like the root
+    // (reef#2044: Cards stay searchable; only a blank-template Card is noindex, see below)
     ['reef.cards', 'feelreef', 'on', null],
-    ['reef.cards', 't', 'on', 'noindex'],
+    ['reef.cards', 't', 'on', null],
     ['reef.cards', 'demo-t', 'on', NNF],
     // The pure predicate still describes the root, though the switch gates off-host requests first.
     ['reef.cards', 'feelreef', 'off', null],
@@ -1819,8 +1831,9 @@ test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => 
     assert.equal(W.robotsTag({ env: { PREVIEW: 'false', ...sw }, host: 'card.example', handle: 't', vanity: true }), null);
     assert.equal(W.robotsTag({ env: { PREVIEW: 'false', ...sw }, host: 'card.example', handle: 't', vanity: true, blank: true }), 'noindex');
   }
-  // the root card still waits for content like any other
+  // the root card still waits for content like any other — and so does a customer Card on reef.cards
   assert.equal(W.robotsTag({ env: { PREVIEW: 'false', ...ON }, host: 'reef.cards', handle: 'feelreef', vanity: false, blank: true }), 'noindex');
+  assert.equal(W.robotsTag({ env: { PREVIEW: 'false', ...ON }, host: 'reef.cards', handle: 't', vanity: false, blank: true }), 'noindex');
 });
 
 test('reef#2725 ③: the predicate is what the Worker sends, on every representation', async () => {
@@ -1828,8 +1841,19 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   for (const [url, init] of servingRequests('reef.cards', 't')) {
     const res = await worker.fetch(new Request(url, init), env);
     assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('x-robots-tag'), null, url);
+  }
+  // a Card nobody has written on yet is the one exception (reef#2044 ④)
+  const blankEnv = { PREVIEW: 'false', CARDS: recordingStore({ t: BLANK_CARD, feelreef: ROOT_CARD }), ...ON };
+  for (const [url, init] of servingRequests('reef.cards', 't')) {
+    const res = await worker.fetch(new Request(url, init), blankEnv);
+    assert.equal(res.status, 200, url);
     assert.equal(res.headers.get('x-robots-tag'), 'noindex', url);
   }
+  // a page with no Card on it: the 404 status alone keeps it out of an index, no header
+  const missing = await worker.fetch(new Request('https://reef.cards/nobody'), env);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get('x-robots-tag'), null);
   // the root, as a one-card host: page, thin markdown, its icons, and its download
   for (const url of ['https://reef.cards/', 'https://reef.cards/feelreef.md', 'https://reef.cards/favicon.ico',
     'https://reef.cards/favicon.svg', 'https://reef.cards/apple-touch-icon.png']) {
@@ -1842,10 +1866,12 @@ test('reef#2725 ③: the predicate is what the Worker sends, on every representa
   assert.equal(killed.headers.get('x-robots-tag'), 'noindex');
 });
 
-// tile-lab#51 ③ (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」.
-// The root response carries no X-Robots-Tag on BOTH hosts; every customer path is unchanged.
-test('tile-lab#51 ③: the root card is indexable on active hosts; customer Cards keep their header', async () => {
-  for (const [sw, host, cust] of [[{}, 'card.feelreef.com', 'noindex, nofollow'], [ON, 'reef.cards', 'noindex']]) {
+// tile-lab#51 ③ (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機 noindex」—
+// the host-wide noindex was 「直到…搬去獨立 usercontent 網域那天」, and reef.cards is that domain (reef#2725,
+// 2026-10-31: 「reef.cards 上的免費 Card 預設可索引」). The root response carries no X-Robots-Tag on BOTH
+// hosts; a customer Card keeps its header on the old host and loses it on reef.cards.
+test('tile-lab#51 ③: the root card is indexable on active hosts; customer Cards keep the old host\'s header', async () => {
+  for (const [sw, host, cust] of [[{}, 'card.feelreef.com', 'noindex, nofollow'], [ON, 'reef.cards', null]]) {
     const env = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD, feelreef: ROOT_CARD }), ...sw };
     const root = await worker.fetch(new Request(`https://${host}/`), env);
     assert.equal(root.status, 200, `${host} / ${JSON.stringify(sw)}`);

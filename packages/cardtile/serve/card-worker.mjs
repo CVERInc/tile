@@ -452,21 +452,25 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // the moment they do, the next request answers without the header. Judged on CONTENT, never on
 // account age. It only ever ADDS a header: the stricter rule above it is never weakened.
 //
-// reef#2725 — the host. Our own hosts carry Cards nobody has vouched for, so a Card there is
-// `noindex, nofollow` (tile c7aa65e). Once the Cards move to reef.cards (the switch, canonicalHost),
-// that domain is the user-content domain and the rule there is: the root card (ROOT_HANDLE) is
-// indexable, every other Card is `noindex`. Before the move reef.cards keeps the old rule, and the
-// old hosts keep it in both positions.
+// reef#2725 — the host. The OLD shared host (card.feelreef.com) carries Cards nobody has vouched for
+// on the product's own domain, so a Card there is `noindex, nofollow` (tile c7aa65e) in both switch
+// positions — after the move it only 301s anyway. reef.cards (the switch, canonicalHost) is the
+// user-content domain with its own reputation, and there the project's ruling on Cards applies as
+// written: a Card is searchable (2026-10-13 「Card 維持可以被搜尋到」); the ONLY content-based
+// exception is the blank template (2026-10-14 gatekeeper list: 「空白樣板卡 noindex」). Before the
+// move reef.cards keeps the old rule.
 //
 // tile-lab#51 (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
-// noindex」. The root card is OURS, so the "nobody has vouched for it" reason does not apply to it:
-// indexable on both card hosts in both switch positions. Every customer Card is exactly as before.
+// noindex」— the host-wide noindex was explicitly 「直到…搬去獨立 usercontent 網域那天」, and
+// reef.cards is that domain (reef#2725, 2026-10-31: 「reef.cards 上的免費 Card 預設可索引」). The
+// root card is OURS: indexable on both card hosts in both switch positions.
+// A no-card 404 on reef.cards carries no header: the 404 status already keeps it out of an index
+// (the same reasoning the old host's missing root card already follows).
 /** robotsTag: ({ env, host, handle, vanity, blank }) → the X-Robots-Tag value, or null. Pure. */
 export function robotsTag({ env, host, handle, vanity = false, blank = false }) {
   if (isPreview(env) || isDemo(handle)) return 'noindex, nofollow';
   if (!vanity && !(handle === ROOT_HANDLE && hasRootCard(host))) {
     if (host !== CARDS_HOST || !movedToCardsHost(env)) return 'noindex, nofollow';
-    if (handle !== ROOT_HANDLE) return 'noindex';
   }
   return blank ? 'noindex' : null;
 }

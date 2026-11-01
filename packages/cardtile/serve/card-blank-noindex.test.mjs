@@ -102,8 +102,21 @@ test('control: a card with author content on its vanity host carries no X-Robots
   }
 });
 
-test('the canonical host keeps its stricter rule for a blank card (never weakened to plain noindex)', async () => {
+test('the old canonical host keeps its stricter rule for a blank card (never weakened to plain noindex)', async () => {
   assert.equal(await robots(starter(), { url: 'https://card.feelreef.com/maple' }), 'noindex, nofollow');
+});
+
+// reef#2044 on reef.cards (the user-content domain, reef#2725): a Card is indexable; only the blank
+// template is not — the same rule as a creator's own domain.
+test('on reef.cards (switch on) a filled card carries no header and a template-only card answers noindex', async () => {
+  const ON = { CARD_CANONICAL_HOST: 'reef.cards' };
+  const url = 'https://reef.cards/maple';
+  assert.equal(await robots(REAL['create_card with a tagline'], { url, extra: ON }), null, 'filled');
+  assert.equal(await robots(starter(), { url, extra: ON }), 'noindex', 'blank');
+  // control: in the same switch position the old shared host no longer serves a Card at all — it 301s
+  const old = await worker.fetch(new Request('https://card.feelreef.com/maple', { redirect: 'manual' }), envFor(starter(), ON));
+  assert.equal(old.status, 301, 'old host');
+  assert.equal(old.headers.get('location'), 'https://reef.cards/maple');
 });
 
 test('the kill switch and the blank rule agree: switch on → noindex on a real card as before', async () => {
