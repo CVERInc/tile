@@ -1,6 +1,6 @@
 // reef#2044 ④ — is this card still only the blank template? Pure; the Worker asks it per request.
 //
-// chodaict 2026-10-13: 「只有範本內容的空白卡先不收錄，內容填好就收錄」 — judged on CONTENT, never on
+// the owner 2026-10-13: 「只有範本內容的空白卡先不收錄，內容填好就收錄」 — judged on CONTENT, never on
 // account age, and (2026-10-14 ruling) only by means that are automatic and do not misjudge.
 //
 // 🔴 "TEMPLATE" IS DEFINED BY THE CODE THAT WRITES BLANK CARDS, not by a guess at what thin looks like.
