@@ -607,7 +607,6 @@ export const COPY = {
 		error: "That didn't go through. Please try again.",
 		errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
 		rate: "That's a lot of messages — please try again in a minute.",
-		closed: 'Close',
 		closeNamed: (l) => `Close ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
 		statusNoAi: 'A person reads what you send',
@@ -649,7 +648,6 @@ export const COPY = {
 		error: '沒有送出去，請再試一次。',
 		errorInboxStorageFull: "這個網站的收件匣已滿，目前無法接收新訊息。",
 		rate: '訊息有點多，請稍等一分鐘再試。',
-		closed: '關閉',
 		closeNamed: (l) => `關閉「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusNoAi: '真人會看',
@@ -691,7 +689,6 @@ export const COPY = {
 		error: '送信できませんでした。もう一度お試しください。',
 		errorInboxStorageFull: "このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。",
 		rate: '送信が多すぎます。1分ほどお待ちください。',
-		closed: '閉じる',
 		closeNamed: (l) => `「${l}」を閉じる`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
@@ -733,7 +730,6 @@ export const COPY = {
 		error: '没有发送出去，请再试一次。',
 		errorInboxStorageFull: "这个网站的收件箱已满，目前无法接收新消息。",
 		rate: '消息有点多，请稍等一分钟再试。',
-		closed: '关闭',
 		closeNamed: (l) => `关闭「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusNoAi: '真人会看',
@@ -781,7 +777,6 @@ export const COPY = {
 		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
 		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
-		closed: 'Schließen',
 		closeNamed: (l) => `${l} schließen`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
 		statusNoAi: 'Was Sie senden, liest ein Mensch',
@@ -823,7 +818,6 @@ export const COPY = {
 		error: 'L’envoi a échoué. Veuillez réessayer.',
 		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
-		closed: 'Fermer',
 		closeNamed: (l) => `Fermer ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
 		statusNoAi: 'Une personne lit ce que vous envoyez',
@@ -865,7 +859,6 @@ export const COPY = {
 		error: 'No se ha podido enviar. Inténtalo de nuevo.',
 		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
-		closed: 'Cerrar',
 		closeNamed: (l) => `Cerrar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
 		statusNoAi: 'Lo que envíes lo lee una persona',
@@ -907,7 +900,6 @@ export const COPY = {
 		error: 'Não foi possível enviar. Tente de novo.',
 		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
-		closed: 'Fechar',
 		closeNamed: (l) => `Fechar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
 		statusNoAi: 'Uma pessoa lê o que você envia',
@@ -949,7 +941,6 @@ export const COPY = {
 		error: '보내지 못했어요. 다시 시도해 주세요.',
 		errorInboxStorageFull: "이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.",
 		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
-		closed: '닫기',
 		closeNamed: (l) => `${l} 닫기`,
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
 		// name is owner-chosen at runtime. A label-style sentence without it reads naturally.
@@ -3348,8 +3339,15 @@ function styleElement() {
 .${PREFIX}-second{display:block;margin:.35rem 0 0;border:1px solid currentColor;border-radius:.45rem;
   padding:.2rem .5rem;cursor:pointer;background:transparent;color:inherit;font:inherit;font-size:.72rem}
 .${PREFIX}-ended{margin:.3rem 0 0;text-align:left}
-.${PREFIX}-close{border:0;background:none;cursor:pointer;font-size:1.1rem;line-height:1;
-  padding:.25rem;color:inherit;opacity:.6}
+/* 🔴 ONE CLOSE RULE FOR EVERY DOCK ITEM (owner ruling 2026-11-01): the close control is always
+   visible. Where the bubble can be seen it IS the bubble (× and "Close <name>"); only opened from the
+   bar's More sheet, the bubble being in the closed sheet, does the panel show its own × — 48px, at the
+   end of the head, named like the bubble. Same rule, same switch as a dock item's .px. */
+.${PREFIX}-close{display:none}
+:host([slot="more"]) .${PREFIX}-close{all:unset;box-sizing:border-box;flex:none;display:flex;align-items:center;
+  justify-content:center;width:3rem;height:3rem;margin:-.5rem -.6rem -.5rem 0;border-radius:50%;cursor:pointer;color:inherit}
+:host([slot="more"]) .${PREFIX}-close:focus-visible{outline:2px solid currentColor;outline-offset:-4px}
+.${PREFIX}-close svg{display:block;width:1.5rem;height:1.5rem}
 /* 🩸 WHEN THE PANEL IS SHORT, ONLY THE LOG GIVES (tile#199 review P2-1). Every other part (header,
    hint, search, error, composer) keeps its content height: a flex item does not shrink below it. The
    log takes what is left and scrolls (min-height:0 is a scroll container's automatic minimum anyway;
@@ -3984,7 +3982,7 @@ export async function mount(el, handoff = null) {
 		return `<div class="${PREFIX}-head-text"><h2>${escHtml(site)}</h2>` +
 			(status ? `<p class="${PREFIX}-status">${status}</p>` : '') +
 			secondBtn + note +
-			`</div><button type="button" class="${PREFIX}-close" aria-label="${escHtml(copy.closed)}">×</button>`;
+			`</div><button type="button" class="${PREFIX}-close" aria-label="${escHtml(copy.closeNamed(openLabel))}">${DOCK_CLOSE_ICON}</button>`;
 	}
 
 	/** Wires the close button and, when `headHtml()` rendered one, the second action. */
@@ -4198,8 +4196,8 @@ export async function mount(el, handoff = null) {
 	 * directly above its own item), says so with `aria-expanded`, names the panel with
 	 * `aria-controls`, and is the panel's close control: × in place of the glyph, named "Close <its
 	 * closed name>" (`copy.closeNamed`, so the name still says what it controls — cold review of
-	 * tile#233, N2; the panel's own ×, kept for compatibility, stays plain「Close」), and a press closes
-	 * the panel.
+	 * tile#233, N2), and a press closes the panel. The panel's own × (same name) shows only when the
+	 * bubble cannot be seen: opened from the bar's More sheet (CSS, `:host([slot="more"])`).
 	 */
 	function bubbleHtml(expanded) {
 		const label = expanded ? copy.closeNamed(openLabel) : openLabel;

@@ -445,8 +445,9 @@ test('tile #14: a de-DE page with a German title and placeholder gets German chr
 		const html = root.innerHTML;
 		assert.match(html, /aria-label="Schreiben Sie uns"/);
 		assert.match(html, />Senden</, 'the Send button is not German');
-		assert.match(html, /aria-label="Schließen"/, 'the close button is not named in German');
-		assert.doesNotMatch(html, />Send<|aria-label="Close"/, 'English chrome beside a German title');
+		// The panel's own × is named like the bubble (one close rule, round 5): "<closed name> schließen".
+		assert.match(html, /class="dc-inbox-close" aria-label="Nachricht senden schließen"/, 'the close button is not named in German');
+		assert.doesNotMatch(html, />Send<|aria-label="Close/, 'English chrome beside a German title');
 	} finally {
 		document.documentElement.setAttribute('lang', 'en');
 	}
@@ -863,11 +864,18 @@ const BEFORE = {
  * the bubble STAYS under the open panel (the panel sits directly above its own item; a press on the
  * bubble closes it). `legacy()` takes exactly those three away and nothing else, so every digest below
  * is still measured against the coral as it was — any other change is still red.
+ *
+ * A fourth, from the one close rule (owner ruling 2026-11-01, round 5): the panel's own × is named
+ * like the bubble and carries the dock's × icon (it shows only when the inbox is opened from More —
+ * CSS, which this harness does not run). `legacy()` writes the old × back in its place, for the English
+ * name only, so a digest of any other markup or language is still red.
  */
+const PANEL_X_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>';
 const legacy = (html) => html
 	.replace(/ aria-expanded="(?:true|false)" aria-controls="dc-inbox-panel"/g, '')
 	.replace(' id="dc-inbox-panel"', '')
-	.replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>');
+	.replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>')
+	.replace(new RegExp(`<button type="button" class="dc-inbox-close" aria-label="Close [^"]+">${PANEL_X_ICON.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</button>`), '<button type="button" class="dc-inbox-close" aria-label="Close">×</button>');
 const { createHash } = await import('node:crypto');
 const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
@@ -2375,10 +2383,11 @@ test('reef#2790 docked: the host joins the right dock, keeps the digests, and th
 		assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the docked open panel differs from the old one');
 		assert.equal(host.style.props['--_dc-below'], '0', 'the room for the items below was not set on open');
 		assert.deepEqual(announced, [host], 'opening did not announce itself on document (contract ②)');
-		// Open, the bubble is the panel's close control: × and "Close <what it closes>" (cold review N2);
-		// the panel's own × stays plain「Close」.
+		// Open, the bubble is the panel's close control: × and "Close <what it closes>" (cold review N2).
+		// The panel's own × is named the same, with the same icon — one close rule (round 5); it shows only
+		// from More, which is CSS (dock.smoke.mjs arm 18 measures it in a browser).
 		assert.match(root.innerHTML, /<button type="button" class="dc-inbox-open" aria-label="Close Message us" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path[^>]* d="M6 6l12 12M18 6 6 18"\/><\/svg><\/button>$/);
-		assert.match(root.innerHTML, /class="dc-inbox-close" aria-label="Close">×<\/button>/, 'the panel\'s own × went away');
+		assert.ok(root.innerHTML.includes(`<button type="button" class="dc-inbox-close" aria-label="Close Message us">${PANEL_X_ICON}</button>`), 'the panel\'s own × is not named like the bubble');
 		// Another item opening closes this panel.
 		document.dispatchEvent(new CustomEvent('dc-dock:open', { detail: new DEl() }));
 		assert.ok(isClosedBubble(root) && !isOpen(root), 'another item\'s announce left the panel open');

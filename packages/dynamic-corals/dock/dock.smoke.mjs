@@ -790,6 +790,86 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       await ctx.close();
     }
   }
+
+  // ── 18. one close rule for every item, the inbox included (owner ruling 2026-11-01, round 5) ──
+  // Where the bubble can be seen it is the close control and the panel shows no × of its own; only
+  // opened from More (the bubble in the closed sheet) does the inbox's panel show its ×.
+  if (arm(18)) {
+    const inboxX = () => {
+      const sr = document.querySelector('.dc-inbox-host').shadowRoot;
+      const x = sr.querySelector('.dc-inbox-panel .dc-inbox-close');
+      const b = sr.querySelector('.dc-inbox-open');
+      const r = x ? x.getBoundingClientRect() : null;
+      const at = r && r.width ? sr.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+      return { open: !!sr.querySelector('.dc-inbox-panel'), slot: document.querySelector('.dc-inbox-host').getAttribute('slot'),
+        x: x && { display: getComputedStyle(x).display, w: Math.round(r.width), h: Math.round(r.height), hits: !!at && (at === x || x.contains(at)) },
+        bubble: { visibility: getComputedStyle(b).visibility, label: b.getAttribute('aria-label'), x: !!b.querySelector('path[d="M6 6l12 12M18 6 6 18"]') } };
+    };
+    const focusName = () => {
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      const host = document.querySelector('.dc-inbox-host');
+      if (bar && document.activeElement === bar && bar.shadowRoot.activeElement) return 'bar:' + bar.shadowRoot.activeElement.className;
+      if (document.activeElement === host && host.shadowRoot.activeElement) return 'inbox:' + host.shadowRoot.activeElement.className;
+      return document.activeElement ? document.activeElement.tagName : 'none';
+    };
+    // (a) a corner inbox, and (b) the inbox as a bar tab: the bubble is seen ⇒ no panel ×.
+    for (const [where, html, opts] of [
+      ['a corner', page({ body: inbox(origin), scripts: [inboxUrl] }), {}],
+      ['a bar tab', page({ head: `${APPBAR_HEAD}${APPBAR_STYLE}`, body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">N1</a></nav></header>
+<dc-dock name="bar" data-st-appbar="" data-more-label="More" data-reserve="1" hidden="">${navTabs(2)}</dc-dock>${inbox(origin)}`, scripts: [appbarUrl, dockUrl, inboxUrl] }), { standalone: true }],
+    ]) {
+      const { ctx, p, errs } = await open(html, opts);
+      await p.waitForFunction(() => document.querySelector('.dc-inbox-host')?.shadowRoot?.querySelector('.dc-inbox-open'), null, { timeout: 8000 }).catch(() => {});
+      await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').click());
+      await p.waitForTimeout(250);
+      const st = await p.evaluate(inboxX);
+      check(engine, `the inbox in ${where}, open: its panel shows no × of its own (display:none, not hit); the bubble, seen, is the close control ("Close Message us")`,
+        st.open && st.slot !== 'more' && st.x && st.x.display === 'none' && !st.x.hits && st.bubble.visibility === 'visible' && st.bubble.label === 'Close Message us' && st.bubble.x, JSON.stringify(st));
+      await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').click());
+      await p.waitForTimeout(150);
+      const closed = await p.evaluate(() => !document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'));
+      const f = await p.evaluate(focusName);
+      check(engine, `the inbox in ${where}: pressing the bubble closes the panel, the focus stays on the bubble`, closed && f === 'inbox:dc-inbox-open', JSON.stringify({ closed, f }));
+      check(engine, `no page errors (inbox in ${where})`, errs.length === 0, errs.join(' | '));
+      await ctx.close();
+    }
+    // (c) the inbox in More, on a touch screen: the bubble hides with the sheet ⇒ the panel's × shows.
+    {
+      const html = page({
+        head: `${APPBAR_HEAD}${APPBAR_STYLE}`,
+        body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">N1</a></nav></header>
+<dc-dock name="bar" data-st-appbar="" data-more-label="More" data-reserve="1" hidden="">${navTabs(5)}</dc-dock>${inbox(origin)}`,
+        scripts: [appbarUrl, dockUrl, inboxUrl],
+      });
+      const { ctx, p, errs } = await open(html, { standalone: true, touch: true });
+      await p.waitForFunction(() => document.querySelector('.dc-inbox-host')?.getAttribute('slot') === 'more', null, { timeout: 8000 }).catch(() => {});
+      const tap = async (fn) => { const r = await p.evaluate(fn); await p.touchscreen.tap(r.x, r.y); await p.waitForTimeout(250); };
+      await tap(() => { const r = document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await tap(() => { const r = document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2 }; });
+      const st = await p.evaluate(() => {
+        const host = document.querySelector('.dc-inbox-host');
+        const sr = host.shadowRoot;
+        const x = sr.querySelector('.dc-inbox-panel .dc-inbox-close');
+        const r = x ? x.getBoundingClientRect() : { width: 0, height: 0, top: -1, bottom: -1, left: -1, right: -1 };
+        const at = x && r.width ? sr.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+        if (x) x.focus();
+        return { inMore: host.getAttribute('slot') === 'more', open: !!sr.querySelector('.dc-inbox-panel'),
+          sheetOpen: document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.sheet').hasAttribute('data-open'),
+          x: x && { display: getComputedStyle(x).display, visibility: getComputedStyle(x).visibility, w: Math.round(r.width), h: Math.round(r.height),
+            inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, hits: !!at && (at === x || x.contains(at)),
+            focused: sr.activeElement === x, label: x.getAttribute('aria-label'), icon: !!x.querySelector('path[d="M6 6l12 12M18 6 6 18"]') },
+          bubbleVisibility: getComputedStyle(sr.querySelector('.dc-inbox-open')).visibility };
+      });
+      check(engine, 'tap More, tap the inbox in it: its panel opens (the sheet closes, hiding the bubble), and the panel shows a × that is visible, 48px, hittable, focusable and named like the bubble ("Close Message us")',
+        st.inMore && st.open && !st.sheetOpen && st.bubbleVisibility === 'hidden' && st.x && st.x.display !== 'none' && st.x.visibility === 'visible' && st.x.w === 48 && st.x.h === 48 && st.x.inView && st.x.hits && st.x.focused && st.x.label === 'Close Message us' && st.x.icon, JSON.stringify(st));
+      await tap(() => { const x = document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel .dc-inbox-close'); const r = x ? x.getBoundingClientRect() : { left: 1, top: 1, width: 0, height: 0 }; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      const closed = await p.evaluate(() => !document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'));
+      const f = await p.evaluate(focusName);
+      check(engine, 'tapping the inbox panel\'s × closes it and puts the focus on More', closed && f === 'bar:more', JSON.stringify({ closed, f }));
+      check(engine, 'no page errors (inbox in More)', errs.length === 0, errs.join(' | '));
+      await ctx.close();
+    }
+  }
   await browser.close();
 }
 

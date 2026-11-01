@@ -400,10 +400,18 @@ dock only adds:
 - **The panel sits directly above the bubble**, which stays where it is, says `aria-expanded`, names
   the panel with `aria-controls`, and is the panel's close control: while the panel is open it
   shows × instead of its glyph and is named "Close <its closed name>" in the page's language
-  ("Close Message us"), so the name still says what it controls; the panel's own ×, which stays, is
-  named「Close」. The items above it are pushed up.
-- **Esc closes the panel** and returns the focus to the bubble; so does ×. (Opened from an
-  installed app's More sheet, the focus goes to the More button: the bubble is in the closed sheet.)
+  ("Close Message us"), so the name still says what it controls. The items above it are pushed up.
+- **One close rule, the same as every dock item's: the close control is always visible.** Where the
+  bubble can be seen (a corner, a bar tab) it is the close control, and the panel shows **no × of
+  its own** — 0.7 drew a small × in the panel's header; 0.8 does not. Only when the bubble cannot be
+  seen — the inbox opened from an installed app's More sheet, the bubble being in the closed sheet
+  (`slot="more"`) — does the panel show its own ×: 48px, at the end of its header, named like the
+  bubble ("Close Message us"), with the same × icon. It is CSS on `:host([slot="more"])`, so it
+  follows the inbox into and out of More. (The × lives in the shadow root with no `::part`; nothing
+  outside could style or reach it.)
+- **Esc closes the panel** and returns the focus to the bubble; so does the bubble. (Opened from an
+  installed app's More sheet, Esc and the panel's × put the focus on the More button: the bubble is
+  in the closed sheet.)
 - **One panel open at a time** with every other corner item on the page (`dc-dock:open`).
 - **The dock's shape and shadow**: same 56px circle 16px from the corner, with the shadow budget
   `0 1px 3px` + `0 4px 12px` (the old `0 6px 24px` / `0 12px 40px` were cut by a phone's edge).
@@ -544,8 +552,8 @@ the next:
 
 - [ ] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions. Point no `dock`
       channel at 0.1.0 yet.
-- [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, ×/Esc/focus,
-      a wrapper-themed bubble) against `v0`.
+- [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, the bubble as ×
+      with no panel × in the corner, Esc/focus, a wrapper-themed bubble) against `v0`.
 - [ ] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
       propagation), and verify `X-Coral-Resolved: 0.8.0` and the body's `['inbox-bubble']='0.8.0'`.
 - [ ] **Only then repoint `dock`'s `latest` and `v0` → 0.1.0** (the documented embed is

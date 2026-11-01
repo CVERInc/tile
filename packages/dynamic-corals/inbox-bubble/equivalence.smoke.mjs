@@ -26,8 +26,12 @@
 // to be present in the new coral (so a removal that silently stopped matching would be red):
 //   · the bubble's aria-expanded/aria-controls and the panel's id;
 //   · open, the bubble is the panel's close control: × in place of the glyph, named "Close <its
-//     closed name>" (owner ruling 2026-11-01; the name since cold review N2; the panel keeps its own
-//     ×, still plain「Close」);
+//     closed name>" (owner ruling 2026-11-01; the name since cold review N2);
+//   · one close rule for every dock item (owner ruling 2026-11-01, round 5): where the bubble can be
+//     seen it is the only close control, so in a corner the panel's own × is not shown — display:none,
+//     not hit, no Tab stop — and is named like the bubble with the dock's × icon (it shows only when
+//     the inbox is opened from the bar's More sheet; dock.smoke.mjs arm 18). "Close" presses whichever
+//     control is visible: the old coral's panel ×, the new coral's bubble;
 //   · the bubble stays under the open panel (the panel sits directly above its own item) — one more
 //     Tab stop after Send, and one more node in the open markup;
 //   · Esc closes the panel and returns focus to the bubble (the old coral had no Esc), and × returns
@@ -61,7 +65,9 @@ const coralUrl = (arm) => new URL(`__equiv-${arm}.js`, base).href;
 const legacy = (html) => html
   .replace(/ aria-expanded="(?:true|false)" aria-controls="dc-inbox-panel"/g, '')
   .replace(' id="dc-inbox-panel"', '')
-  .replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>');
+  .replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>')
+  .replace(/<button type="button" class="dc-inbox-close" aria-label="[^"]*">[\s\S]*?<\/button>/, '');
+const PANEL_X = 'in:button.dc-inbox-close';
 
 const page = (attrs, origin, wrap = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0;font:16px Georgia,serif}</style></head>
@@ -136,6 +142,16 @@ async function measure(browser, src, name) {
   await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-open').click());
   await p.waitForTimeout(300);
   out.open = await markup();
+  // The panel's own ×: is it there for a visitor (shown, and the point under its middle is it)?
+  const panelX = () => p.evaluate(() => {
+    const sr = document.querySelector('.dc-inbox-host').shadowRoot;
+    const x = sr.querySelector('.dc-inbox-close');
+    if (!x) return { present: false };
+    const r = x.getBoundingClientRect();
+    const hit = r.width > 0 && x.contains(sr.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+    return { present: true, display: getComputedStyle(x).display, hit };
+  });
+  out.panelX = await panelX();
   out.focusOnOpen = await focus();
   const tabs = async (key, n) => { const seq = []; for (let i = 0; i < n; i++) { await p.keyboard.press(key); seq.push(await focus()); } return seq; };
   out.tabForward = await tabs('Tab', 4);
@@ -166,8 +182,15 @@ async function measure(browser, src, name) {
   await p.keyboard.press('Enter');
   await p.waitForTimeout(600);
   out.afterSend = (await markup()).replace(/<textarea[^>]*>[^<]*<\/textarea>/, '<textarea/>');
-  // Close with ×: the closed markup again, and where the focus went.
-  await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-close').click());
+  // Close with the VISIBLE close control (the panel's × if it is shown, else the bubble): the closed
+  // markup again, and where the focus went.
+  out.closedWith = await p.evaluate(() => {
+    const sr = document.querySelector('.dc-inbox-host').shadowRoot;
+    const x = sr.querySelector('.dc-inbox-close');
+    const shown = x && getComputedStyle(x).display !== 'none';
+    (shown ? x : sr.querySelector('.dc-inbox-open')).click();
+    return shown ? 'panel ×' : 'bubble';
+  });
   await p.waitForTimeout(100);
   out.afterClose = await markup();
   out.focusAfterClose = await focus();
@@ -194,6 +217,13 @@ function normalise(r, isNew, problems, label, buttonsTab = true) {
     const closedName = (/class="dc-inbox-open" aria-label="([^"]*)"/.exec(r.closed) || [])[1];
     const openRe = new RegExp(`<button type="button" class="dc-inbox-open" aria-label="Close ${(closedName || '\u0000').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path [^>]*d="M6 6l12 12M18 6 6 18"`);
     if (!closedName || !openRe.test(r.open)) problems.push(`${label}: expected the open bubble to be the close control (× and "Close ${closedName}")`);
+    // One close rule (round 5): the panel's own × is there, named like the bubble, with the dock's ×
+    // icon — and in a corner not shown, not hit, never a Tab stop; "Close" therefore pressed the bubble.
+    const xRe = new RegExp(`<button type="button" class="dc-inbox-close" aria-label="Close ${(closedName || '\u0000').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"><svg [^>]*><path [^>]*d="M6 6l12 12M18 6 6 18"`);
+    if (!xRe.test(r.open)) problems.push(`${label}: expected the panel's own × named "Close ${closedName}" with the dock's × icon`);
+    if (!(r.panelX.present && r.panelX.display === 'none' && !r.panelX.hit)) problems.push(`${label}: expected the panel's own × hidden in a corner, got ${JSON.stringify(r.panelX)}`);
+    if (r.closedWith !== 'bubble') problems.push(`${label}: expected the bubble to be the visible close control, got ${r.closedWith}`);
+    if ([...r.tabForward, ...r.tabBack].includes(PANEL_X)) problems.push(`${label}: the hidden panel × is a Tab stop`);
     // WebKit (as Safari by default) does not Tab to buttons at all — not to Send, not to the bubble.
     if (buttonsTab && r.tabForward[1] !== 'in:button.dc-inbox-open') problems.push(`${label}: expected the bubble as the Tab stop after Send, got ${r.tabForward[1]}`);
     n.tabForward = r.tabForward.filter((f) => f !== 'in:button.dc-inbox-open');
@@ -201,14 +231,18 @@ function normalise(r, isNew, problems, label, buttonsTab = true) {
     if (r.focusAfterClose !== 'in:button.dc-inbox-open') problems.push(`${label}: expected × to return focus to the bubble`);
     delete n.escCloses; delete n.focusAfterEsc; delete n.focusAfterClose;
   } else if (n.open !== undefined) {
+    // The old coral's panel × was shown and hit — so the difference above names something real.
+    if (!(r.panelX.present && r.panelX.display !== 'none' && r.panelX.hit && r.closedWith === 'panel ×')) problems.push(`${label}: expected the old coral's panel × shown, hit and pressed, got ${JSON.stringify(r.panelX)} / ${r.closedWith}`);
     n.tabForward = n.tabForward.filter((f) => f !== 'in:button.dc-inbox-open');
     delete n.escCloses; delete n.focusAfterEsc; delete n.focusAfterClose;
   }
   // Where the panel sits in the PAGE's tab order is a named difference too: the host lives in the
   // dock at the end of <body> now, not inside its container, so the page's own links before and after
   // the container are reached in a different order. Inside the panel the order is compared exactly.
-  if (n.tabForward) n.tabForward = n.tabForward.filter((f) => f.startsWith('in:'));
-  if (n.tabBack) n.tabBack = n.tabBack.filter((f) => f.startsWith('in:'));
+  // The panel × (shown in the old coral, not in a corner now) is taken out of both orders by name.
+  if (n.tabForward) n.tabForward = n.tabForward.filter((f) => f.startsWith('in:') && f !== PANEL_X);
+  if (n.tabBack) n.tabBack = n.tabBack.filter((f) => f.startsWith('in:') && f !== PANEL_X);
+  delete n.panelX; delete n.closedWith;
   return n;
 }
 

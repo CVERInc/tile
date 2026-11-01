@@ -137,7 +137,7 @@ renderer knows will join later count from the first paint (`data-reserve="<n>"`,
 so nothing jumps into More when they arrive. A list that opens inside a More entry (a nav group)
 keeps the sheet open; an item's own panel opens as a sheet above the bar and closes More. Its bubble
 is in the closed sheet then, so there — and only there — the panel shows its own ×, first in it
-and named like the bubble; that × or Esc closes the panel and returns the focus to the More button. An empty bar is hidden. The bar clears only the
+and named like the bubble; that × or Esc closes the panel and returns the focus to the More button. The inbox follows the same rule: its panel shows no × of its own unless it was opened from More. An empty bar is hidden. The bar clears only the
 home-indicator inset.
 
 ## Known limits
