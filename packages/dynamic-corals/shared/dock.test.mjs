@@ -134,20 +134,52 @@ test('① a dock another copy already claimed is joined, never re-styled (versio
   assert.deepEqual(labels(dock), ['x']);
 });
 
-test('① children without a dockAnchor (a renderer\'s own nav tabs) keep their written place', () => {
+test('① children without a dockAnchor (a renderer\'s own nav tabs) come first, wherever an item was written (cold review S1)', () => {
   const doc = makeDoc();
+  doc.documentElement.setAttribute('data-dc-dock-bar', '');
+  const main = doc.body.appendChild(new N(doc, 'main'));
   const bar = doc.body.appendChild(doc.createElement('dc-dock'));
-  bar.setAttribute('name', 'right');
+  bar.setAttribute('name', 'bar');
   for (const t of ['nav1', 'nav2']) bar.appendChild(Object.assign(doc.createElement('a'), { label: t }));
-  // An item written BEFORE the dock goes before the tabs; one written after goes after them.
-  const early = new N(doc, 'div');
-  doc.body.insertBefore(early, bar);
+  // An item written BEFORE the bar (in <main>) and one written after it: both follow the tabs, in
+  // document order among themselves.
   const later = doc.body.appendChild(new N(doc, 'div'));
   const h1 = doc.createElement('div'); h1.label = 'after';
-  dockJoin(h1, later, 'right');
+  dockJoin(h1, later, 'left');
+  const early = main.appendChild(new N(doc, 'section'));
   const h0 = doc.createElement('div'); h0.label = 'before';
   dockJoin(h0, early, 'right');
-  assert.deepEqual(labels(bar), ['before', 'nav1', 'nav2', 'after']);
+  assert.deepEqual(labels(bar), ['nav1', 'nav2', 'before', 'after']);
+});
+
+test('bar: four nav tabs, an owner\'s dock item in <main> and the inbox ⇒ [nav1..nav4, More], both tools in More (cold review S1)', () => {
+  withObserver((observers) => {
+    const doc = makeDoc();
+    doc.documentElement.setAttribute('data-dc-dock-bar', '');
+    const main = doc.body.appendChild(new N(doc, 'main'));
+    const section = main.appendChild(new N(doc, 'section'));
+    doc.body.appendChild(new N(doc, 'footer'));
+    const bar = rendererBar(doc, ['nav1', 'nav2', 'nav3', 'nav4'], { 'data-reserve': '1' });
+    dockClaim(bar);
+    const inboxAt = doc.body.appendChild(new N(doc, 'div'));
+    const promo = doc.createElement('div'); promo.label = 'promo';
+    dockJoin(promo, section, 'left');
+    const inbox = doc.createElement('div'); inbox.label = 'inbox';
+    dockJoin(inbox, inboxAt, 'right');
+    observers.find((o) => o.target === bar).cb([]);
+    const tabs = bar.kids.filter((k) => !k.getAttribute('slot')).map((k) => k.label);
+    const more = bar.kids.filter((k) => k.getAttribute('slot') === 'more').map((k) => k.label);
+    assert.deepEqual(tabs, ['nav1', 'nav2', 'nav3', 'nav4'], 'a tool took a nav tab\'s place');
+    assert.deepEqual(more, ['promo', 'inbox']);
+    // Three nav entries and the item written in <main>: the item still follows the nav.
+    const d2 = makeDoc();
+    d2.documentElement.setAttribute('data-dc-dock-bar', '');
+    const s2 = d2.body.appendChild(new N(d2, 'main')).appendChild(new N(d2, 'section'));
+    const b2 = rendererBar(d2, ['nav1', 'nav2', 'nav3']);
+    const p2 = d2.createElement('div'); p2.label = 'promo';
+    dockJoin(p2, s2, 'left');
+    assert.deepEqual(labels(b2), ['nav1', 'nav2', 'nav3', 'promo']);
+  });
 });
 
 test('① an unknown or unsafe position name falls back to right rather than into a selector', () => {

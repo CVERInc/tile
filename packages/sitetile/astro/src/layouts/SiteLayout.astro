@@ -28,7 +28,7 @@ import { FEED_PATH } from '../lib/feed.mjs';
 import { pageGraph, jsonLdScript } from '../lib/structured-data.mjs';
 import { inboxBubbleOn, bubbleSearchOn } from '../lib/inbox-bubble.mjs';
 import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
-import { APPBAR_CSS, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel } from '../lib/appbar.mjs';
+import { APPBAR_CSS, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel, navLabel as appbarNavLabel } from '../lib/appbar.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
@@ -392,8 +392,9 @@ const multilingual = hasLingo && locales.length > 1;
 const hasPwa = packages.includes('pwa');
 // reef#2790 — the installed-app bottom bar (lib/appbar.mjs): only a site that can BE installed
 // (`packages: pwa`) and has a nav to move. Every other site renders exactly as before.
-// The bar is written (hidden) right after the footer, BEFORE the inbox mount, so the dock's
-// document-order rule puts the nav first and the tools after it. 🔴 Its three conditionals in the
+// The bar is written (hidden) right after the footer, holding the nav tabs; the dock's contract ①
+// puts a renderer's own entries first, so the tools — the inbox, an owner's dock item written
+// anywhere in the page — follow the nav. 🔴 Its three conditionals in the
 // template below are glued to their neighbours on one line on purpose: a conditional on a line of its
 // own leaves a whitespace node in every page, including the pages it renders nothing on — measured,
 // it was the only byte a non-pwa site's pages differed by.
@@ -1448,7 +1449,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       </slot>
     </footer>
     {appbar && (
-      <dc-dock name="bar" data-st-appbar="" data-more-label={appbarMoreLabel(lang)} data-reserve={bubbleOn ? '1' : undefined} hidden="">
+      <dc-dock name="bar" role="navigation" aria-label={appbarNavLabel(lang)} data-st-appbar="" data-more-label={appbarMoreLabel(lang)} data-reserve={bubbleOn ? '1' : undefined} hidden="">
         {navMenu.map((it) => {
           const hrefOk = safeHref(it.href);
           const kids = appbarFlatten(it);

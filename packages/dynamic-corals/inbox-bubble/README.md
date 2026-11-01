@@ -399,8 +399,9 @@ dock only adds:
   route change that replaces the container and mounts again shows one bubble, not two).
 - **The panel sits directly above the bubble**, which stays where it is, says `aria-expanded`, names
   the panel with `aria-controls`, and is the panel's close control: while the panel is open it
-  shows × instead of its glyph and is named「Close」(the same word as the panel's own ×, which
-  stays). The items above it are pushed up.
+  shows × instead of its glyph and is named "Close <its closed name>" in the page's language
+  ("Close Message us"), so the name still says what it controls; the panel's own ×, which stays, is
+  named「Close」. The items above it are pushed up.
 - **Esc closes the panel** and returns the focus to the bubble; so does ×. (Opened from an
   installed app's More sheet, the focus goes to the More button: the bubble is in the closed sheet.)
 - **One panel open at a time** with every other corner item on the page (`dc-dock:open`).
@@ -535,14 +536,21 @@ it is above the 0.7.12 floor.
 
 The coral alone is safe on every page: it never creates a bar, so an installed PWA without
 sitetile's bar keeps its bubble in the corner, as with 0.7.x. The sitetile engine that writes the bar
-needs the coral that joins it (an older bubble sits fixed over the bar's right-hand tab). Each step
-gates the next:
+needs the coral that joins it (an older bubble sits fixed over the bar's right-hand tab). And the
+`dock` coral needs it too: a 0.7.x bubble places itself in the right corner instead of joining the
+dock, so a page with both would show the two bubbles on top of each other, and the dock could not
+see a 0.7.x panel that is open. So no channel serves `dock` until `v0` serves 0.8.0. Each step gates
+the next:
 
-- [ ] **Publish `inbox-bubble@0.8.0`** (and `dock@0.1.0`) as immutable versions.
+- [ ] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions. Point no `dock`
+      channel at 0.1.0 yet.
 - [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, ×/Esc/focus,
       a wrapper-themed bubble) against `v0`.
 - [ ] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
       propagation), and verify `X-Coral-Resolved: 0.8.0` and the body's `['inbox-bubble']='0.8.0'`.
+- [ ] **Only then repoint `dock`'s `latest` and `v0` → 0.1.0** (the documented embed is
+      `/corals/dock/v0/dock.js`), and verify the same way. From here a page that loads the dock
+      through a channel gets an inbox that joins it.
 - [ ] **Only then release the sitetile engine** that writes the bar, and rebuild sites.
 
 **Rollback rule: never serve a coral below 0.8.0 while appbar pages exist.** Their loader opens with

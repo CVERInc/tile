@@ -13,6 +13,9 @@
 //      arrives) and the loader names the coral the bar needs (`/*inbox-bubble>=0.8.0*/`, the
 //      rollback marker); the switch is an inline <head> snippet (no header flash) keyed on sitetile's
 //      existing mobile breakpoint; a nav item without a safe destination gets no tab.
+//   5. The bar is a navigation landmark with a name in the page's language, and the header gives up
+//      its nav only while the bar is SHOWN (`:has(dc-dock[name="bar"]:not([hidden]))`), never on the
+//      switch alone — so a page whose appbar.js never runs keeps its header nav (cold review S3, N1).
 //
 // It needs the renderer's dependencies and SAYS SO when they are absent — same shape as
 // site-embed.test.mjs.
@@ -24,7 +27,7 @@ import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { RENDERER_SUBPATH } from '../build/index.mjs';
-import { isCurrent, flatten, moreLabel, APPBAR_MEDIA, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR } from './astro/src/lib/appbar.mjs';
+import { isCurrent, flatten, moreLabel, navLabel, APPBAR_CSS, APPBAR_MEDIA, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR } from './astro/src/lib/appbar.mjs';
 import { CORAL_FLOOR } from './astro/src/lib/inbox-bubble-loader.mjs';
 
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
@@ -45,6 +48,18 @@ await test('the current-page rule: same-site paths, trailing slash and query ign
   assert.equal(isCurrent('//example.com/shop', '/shop'), false);
   assert.deepEqual(['en-US', 'zh-TW', 'zh-Hant', 'ja-JP', 'ko', 'de-DE', ''].map(moreLabel), ['More', '更多', '更多', 'その他', '더보기', 'More', 'More']);
   assert.deepEqual(flatten({ children: [{ label: 'a', children: [{ label: 'b' }] }, { label: 'c' }] }).map((n) => n.label), ['a', 'b', 'c']);
+  assert.deepEqual(['en-US', 'zh-TW', 'ja-JP', 'ko-KR', 'de'].map(navLabel), ['Main', '主要', 'メイン', '주요', 'Main']);
+});
+
+await test('🔴 the header gives up its nav only while the bar is shown — never on the switch alone (cold review S3)', () => {
+  // Every rule that reaches outside the bar itself (the header, <body>) must wait for the bar to show.
+  const selectors = APPBAR_CSS.split('}').map((r) => r.trim()).filter(Boolean)
+    .flatMap((r) => r.slice(0, r.indexOf('{')).split(/,(?![^(]*\))/).map((x) => x.trim()))
+    .filter((sel) => !sel.startsWith('dc-dock[name="bar"]'));
+  assert.ok(selectors.length >= 5, APPBAR_CSS);
+  for (const sel of selectors) {
+    assert.ok(sel.startsWith('html[data-dc-dock-bar]:has(dc-dock[name="bar"]:not([hidden])) '), `keyed on the switch alone: ${sel}`);
+  }
 });
 
 await test('the switch reuses sitetile\'s mobile breakpoint (site.css), and is on only in an installed app inside it', () => {
@@ -108,7 +123,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.ok(shop, `no shop page: ${Object.keys(built.pwa.html).join(', ')}`);
       const b = bar(shop);
       assert.ok(b, 'no dc-dock[name="bar"] on a pwa page with a nav');
-      assert.match(b, /^<dc-dock name="bar" data-st-appbar(?:="")? data-more-label="More" hidden(?:="")?>/);
+      assert.match(b, /^<dc-dock name="bar" role="navigation" aria-label="Main" data-st-appbar(?:="")? data-more-label="More" hidden(?:="")?>/);
       const tabs = [...b.matchAll(/<(?:a|span|div) class="rf-tab(?: rf-tab-group)?"/g)];
       assert.equal(tabs.length, 6, 'one tab per first-level nav item with a safe destination');
       assert.equal(/<span class="rf-tab"|Nowhere/.test(b), false, 'a nav item without a safe destination became a dead tab');
@@ -127,7 +142,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       const at = shop.indexOf('<dc-dock name="bar"');
       const inbox = shop.indexOf('data-dynamic-coral="inbox-bubble"');
       if (inbox >= 0) assert.ok(at < inbox, 'the bar is written after the inbox mount — the nav would follow the tools');
-      assert.match(shop, /html\[data-dc-dock-bar\] \.rf-nav > :is\(\.rf-nav-link,\.rf-nav-group\)/);
+      assert.match(shop, /html\[data-dc-dock-bar\]:has\(dc-dock\[name="bar"\]:not\(\[hidden\]\)\) \.rf-nav > :is\(\.rf-nav-link,\.rf-nav-group\)/);
       const head = shop.slice(0, shop.indexOf('</head>'));
       assert.ok(head.includes(`<script>${APPBAR_HEAD_SCRIPT}</script>`), 'the switch is not an inline <head> snippet (the header would flash)');
       const scripts = [...shop.matchAll(/<script\b[^>]*src="([^"]+)"[^>]*>|<script\b[^>]*>([\s\S]*?)<\/script>/g)];
@@ -145,7 +160,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     await test('🔴 with the inbox on: the bar reserves its entry, and the loader names the coral the bar needs', () => {
       const page = built.inbox.html['shop/index.html'];
       assert.ok(page && page.includes('data-dynamic-coral="inbox-bubble"'), 'the inbox fixture has no inbox mount');
-      assert.match(bar(page), /^<dc-dock name="bar" data-st-appbar(?:="")? data-more-label="More" data-reserve="1" hidden(?:="")?>/);
+      assert.match(bar(page), /^<dc-dock name="bar" role="navigation" aria-label="Main" data-st-appbar(?:="")? data-more-label="More" data-reserve="1" hidden(?:="")?>/);
       assert.equal(bar(shop).includes('data-reserve'), false, 'a site without the inbox reserved an entry for it');
       assert.ok(page.indexOf('<dc-dock name="bar"') < page.indexOf('data-dynamic-coral="inbox-bubble"'));
       assert.ok(page.includes(`/*inbox-bubble>=${APPBAR_CORAL_FLOOR}*/(function bubbleLoader(`), 'an appbar page does not carry the >=0.8.0 rollback marker');

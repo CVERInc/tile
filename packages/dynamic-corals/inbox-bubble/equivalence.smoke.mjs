@@ -25,8 +25,9 @@
 // THE DIFFERENCES THE DOCK MADE ON PURPOSE are removed by name before comparing, each one asserted
 // to be present in the new coral (so a removal that silently stopped matching would be red):
 //   · the bubble's aria-expanded/aria-controls and the panel's id;
-//   · open, the bubble is the panel's close control: × in place of the glyph, named「Close」(owner
-//     ruling 2026-11-01; the panel keeps its own × too);
+//   · open, the bubble is the panel's close control: × in place of the glyph, named "Close <its
+//     closed name>" (owner ruling 2026-11-01; the name since cold review N2; the panel keeps its own
+//     ×, still plain「Close」);
 //   · the bubble stays under the open panel (the panel sits directly above its own item) — one more
 //     Tab stop after Send, and one more node in the open markup;
 //   · Esc closes the panel and returns focus to the bubble (the old coral had no Esc), and × returns
@@ -188,7 +189,11 @@ function normalise(r, isNew, problems, label, buttonsTab = true) {
   for (const k of ['closed', 'open', 'afterClose', 'afterSend']) if (typeof n[k] === 'string') n[k] = legacy(n[k]);
   if (isNew && n.open !== undefined) {
     if (!/aria-expanded="true" aria-controls="dc-inbox-panel"/.test(r.open)) problems.push(`${label}: expected the open bubble's aria-expanded/controls`);
-    if (!/<button type="button" class="dc-inbox-open" aria-label="Close" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path [^>]*d="M6 6l12 12M18 6 6 18"/.test(r.open)) problems.push(`${label}: expected the open bubble to be the close control (× and Close)`);
+    // Named "Close <its closed name>" (cold review of tile#233, N2): the closed bubble's own name, read
+    // from the closed markup, so each scenario (Message us / the ask-only name) checks its own.
+    const closedName = (/class="dc-inbox-open" aria-label="([^"]*)"/.exec(r.closed) || [])[1];
+    const openRe = new RegExp(`<button type="button" class="dc-inbox-open" aria-label="Close ${(closedName || '\u0000').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path [^>]*d="M6 6l12 12M18 6 6 18"`);
+    if (!closedName || !openRe.test(r.open)) problems.push(`${label}: expected the open bubble to be the close control (× and "Close ${closedName}")`);
     // WebKit (as Safari by default) does not Tab to buttons at all — not to Send, not to the bubble.
     if (buttonsTab && r.tabForward[1] !== 'in:button.dc-inbox-open') problems.push(`${label}: expected the bubble as the Tab stop after Send, got ${r.tabForward[1]}`);
     n.tabForward = r.tabForward.filter((f) => f !== 'in:button.dc-inbox-open');

@@ -36,7 +36,7 @@ const inboxUrl = new URL('../inbox-bubble/inbox-bubble.js', base).href;
 const appbarUrl = new URL('../../sitetile/astro/src/packages/appbar/appbar.js', base).href;
 const appbarCssUrl = new URL('../../sitetile/astro/src/lib/appbar.mjs', base).href;
 const DOCK_SRC = readFileSync(new URL('./dock.js', import.meta.url), 'utf8');
-const { APPBAR_HEAD_SCRIPT } = await import(new URL('../../sitetile/astro/src/lib/appbar.mjs', import.meta.url).href);
+const { APPBAR_HEAD_SCRIPT, APPBAR_CSS } = await import(new URL('../../sitetile/astro/src/lib/appbar.mjs', import.meta.url).href);
 const APPBAR_HEAD = `<script>${APPBAR_HEAD_SCRIPT}</script>`;
 const ARMS = process.env.DOCK_SMOKE_ARMS ? process.env.DOCK_SMOKE_ARMS.split(',').map(Number) : null;
 const arm = (n) => !ARMS || ARMS.includes(n);
@@ -77,8 +77,8 @@ for (const engine of engines) {
     console.log(`  · ${engine} not launchable here (${String(e.message).split('\n')[0]}) — SKIPPED`);
     continue;
   }
-  async function open(html, { viewport = { width: 390, height: 664 }, standalone = false, init = null, hash = '', claimDelay = 0, pages = {}, loadTimeout = 30000 } = {}) {
-    const ctx = await browser.newContext({ viewport, hasTouch: false });
+  async function open(html, { viewport = { width: 390, height: 664 }, standalone = false, init = null, hash = '', claimDelay = 0, pages = {}, loadTimeout = 30000, touch = false, routes = null, waitUntil = 'load' } = {}) {
+    const ctx = await browser.newContext({ viewport, hasTouch: touch });
     const p = await ctx.newPage();
     const errs = [];
     p.on('pageerror', (e) => errs.push(String(e)));
@@ -99,7 +99,8 @@ for (const engine of engines) {
       if (u.includes('/api/inbox/session')) return sleep(claimDelay).then(() => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, claimed: true }) }));
       return r.fulfill({ contentType: 'application/json', body: '{}' });
     });
-    const loaded = await p.goto(fixtureUrl + hash, { timeout: loadTimeout }).then(() => true, () => false);
+    if (routes) await routes(p);
+    const loaded = await p.goto(fixtureUrl + hash, { timeout: loadTimeout, waitUntil }).then(() => true, () => false);
     if (loaded) await p.waitForTimeout(400);
     return { ctx, p, errs, loaded };
   }
@@ -172,9 +173,9 @@ ${item('id="b" data-label="B"', '<div id="b-content"><h2>B</h2></div>')}
     const x = await p.evaluate(() => {
       const sr = document.getElementById('a').shadowRoot;
       const b = sr.querySelector('.b');
-      return { label: b.getAttribute('aria-label'), x: getComputedStyle(sr.querySelector('.x')).display, icon: getComputedStyle(sr.querySelector('slot[name="icon"]')).display, panelButtons: sr.querySelector('.p').querySelectorAll('button').length };
+      return { label: b.getAttribute('aria-label'), x: getComputedStyle(sr.querySelector('.x')).display, icon: getComputedStyle(sr.querySelector('slot[name="icon"]')).display, panelButtons: [...sr.querySelector('.p').querySelectorAll('button')].filter((e) => getComputedStyle(e).display !== 'none').length };
     });
-    check(engine, 'open: the bubble shows × instead of its icon and is named Close; the panel has no × of its own', x.label === 'Close' && x.x === 'block' && x.icon === 'none' && x.panelButtons === 0, JSON.stringify(x));
+    check(engine, 'open: the bubble shows × instead of its icon and is named "Close A"; the panel shows no × of its own', x.label === 'Close A' && x.x === 'block' && x.icon === 'none' && x.panelButtons === 0, JSON.stringify(x));
     await p.evaluate(`${bubbleOf('#a')}.click()`);
     await p.waitForTimeout(50);
     const x2 = await p.evaluate(() => { const sr = document.getElementById('a').shadowRoot; return { hidden: sr.querySelector('.p').hidden, label: sr.querySelector('.b').getAttribute('aria-label'), x: getComputedStyle(sr.querySelector('.x')).display }; });
@@ -439,7 +440,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       const open = b[b.length - 1];
       return { panel: !!document.querySelector('.dc-inbox-host').shadowRoot.querySelector('.dc-inbox-panel'), label: open && open.getAttribute('aria-label'), x: !!(open && open.querySelector('path[d="M6 6l12 12M18 6 6 18"]')) };
     });
-    check(engine, 'the inbox opened from More: its bubble is the close control (× and Close)', inboxOpenInBar.panel && inboxOpenInBar.label === 'Close' && inboxOpenInBar.x, JSON.stringify(inboxOpenInBar));
+    check(engine, 'the inbox opened from More: its bubble is the close control (× and "Close Message us")', inboxOpenInBar.panel && inboxOpenInBar.label === 'Close Message us' && inboxOpenInBar.x, JSON.stringify(inboxOpenInBar));
     await p.evaluate(() => document.querySelector('.dc-inbox-host').shadowRoot.querySelector('textarea').focus());
     await p.keyboard.press('Escape');
     await p.waitForTimeout(80);
@@ -574,7 +575,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
 
   // ── 12. the container's lifetime is the bubble's (review of tile#233, finding 5) ──
   if (arm(12)) {
-    const { ctx, p, errs } = await open(page({ body: `<main id="route">${inbox(origin)}<section id="sec">${item('id="s1" data-label="S1"')}</section></main>`, scripts: [dockUrl, inboxUrl] }));
+    const { ctx, p, errs } = await open(page({ body: `<main id="route">${inbox(origin)}<section id="sec">${item('id="s1" data-label="S1"')}</section><section id="sec2">${item('id="s2" data-label="S2" data-open-on-hash="s2"')}</section></main>`, scripts: [dockUrl, inboxUrl] }));
     await p.waitForFunction(() => document.querySelector('.dc-inbox-host'), null, { timeout: 8000 }).catch(() => {});
     const live = () => p.evaluate(() => [...document.querySelectorAll('.dc-inbox-host')].filter((h) => h.isConnected).length);
     const n0 = await live();
@@ -600,6 +601,14 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
     await p.waitForTimeout(150);
     const s1Open = await p.evaluate(() => !document.getElementById('s1').shadowRoot.querySelector('.p').hidden);
     check(engine, 'removing the container removes its bubble, and a later reef-inbox:open closes nothing through a ghost', n2 === 0 && s1Open, JSON.stringify({ n2, s1Open }));
+    // A retired dock item hears its #name no more: nothing opens, and what is open stays open (cold review N3).
+    await p.evaluate(() => { window.__s2 = document.getElementById('s2'); document.getElementById('sec2').remove(); });
+    await p.waitForTimeout(150);
+    await p.evaluate(() => { location.hash = '#s2'; });
+    await p.waitForTimeout(150);
+    const n3 = await p.evaluate(() => ({ s1: !document.getElementById('s1').shadowRoot.querySelector('.p').hidden, s2InDock: !!document.querySelector('dc-dock #s2'),
+      s2Open: !window.__s2.shadowRoot.querySelector('.p').hidden, s2Expanded: window.__s2.shadowRoot.querySelector('.b').getAttribute('aria-expanded') }));
+    check(engine, 'navigating to a retired item\'s #name closes nothing on screen and opens nothing', n3.s1 === true && !n3.s2InDock && n3.s2Open === false && n3.s2Expanded === 'false', JSON.stringify(n3));
     await p.evaluate(() => document.getElementById('sec').remove());
     await p.waitForTimeout(150);
     const items = await p.evaluate(() => [...document.querySelectorAll('dc-dock')].flatMap((d) => [...d.children].map((c) => c.id || c.className)));
@@ -669,6 +678,114 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
     const hs = await hp.p.evaluate(() => ({ h: !document.getElementById('h').shadowRoot.querySelector('.p').hidden, auto: !document.getElementById('auto').shadowRoot.querySelector('.p').hidden }));
     check(engine, '#name opened by another copy is not undone by this copy\'s auto-open', hs.h && !hs.auto, JSON.stringify(hs));
     await hp.ctx.close();
+  }
+
+  // The bar arms below put sitetile's real stylesheet INLINE in <head>, where the build writes it, so
+  // what is painted before any script runs is what a visitor gets.
+  const APPBAR_STYLE = `<style>${APPBAR_CSS}</style>`;
+  const navTabs = (n) => Array.from({ length: n }, (_, i) => `<a class="rf-tab" href="/${i + 1}">N${i + 1}</a>`).join('');
+  const barState = (p) => p.evaluate(() => {
+    const bar = document.querySelector('dc-dock[name="bar"]');
+    const kids = [...bar.children].filter((k) => !k.hidden);
+    const name = (k) => k.id || (k.className === 'dc-inbox-host' ? 'inbox' : k.textContent.trim());
+    return { tabs: kids.filter((k) => !k.getAttribute('slot')).map(name), more: kids.filter((k) => k.getAttribute('slot') === 'more').map(name), moreShown: !!bar.shadowRoot && !bar.shadowRoot.querySelector('.more').hidden };
+  });
+
+  // ── 15. nav first: an owner's dock item written in <main> follows every nav tab (cold review S1) ──
+  if (arm(15)) {
+    const html = page({
+      head: `${APPBAR_HEAD}${APPBAR_STYLE}`,
+      body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">N1</a></nav></header>
+<main><section>${item('id="promo" data-label="Promo" data-dock="left"')}</section></main><footer>footer</footer>
+<dc-dock name="bar" data-st-appbar="" data-more-label="More" data-reserve="1" hidden="">${navTabs(4)}</dc-dock>${inbox(origin)}`,
+      scripts: [appbarUrl, dockUrl, inboxUrl],
+    });
+    const { ctx, p, errs } = await open(html, { standalone: true });
+    await p.waitForFunction(() => document.querySelector('.dc-inbox-host'), null, { timeout: 8000 }).catch(() => {});
+    await p.waitForTimeout(200);
+    const r = await barState(p);
+    check(engine, 'four nav tabs, an owner\'s dock item written in <main>, and the inbox: [N1..N4, More], the item and the inbox in More',
+      JSON.stringify(r.tabs) === '["N1","N2","N3","N4"]' && JSON.stringify(r.more) === '["promo","inbox"]' && r.moreShown, JSON.stringify(r));
+    check(engine, 'no page errors (nav-first page)', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
+
+  // ── 16. a panel opened from More can be closed — on a touch screen (cold review S2) ──
+  if (arm(16)) {
+    const html = page({
+      head: `${APPBAR_HEAD}${APPBAR_STYLE}`,
+      body: `<header class="rf-header"><nav class="rf-nav"><a class="rf-nav-link" href="/">N1</a></nav></header>
+<dc-dock name="bar" data-st-appbar="" data-more-label="More" hidden="">${navTabs(5)}</dc-dock>${item('id="promo" data-label="Promo"', '<div><h2>Promo</h2><p>Body</p></div>')}`,
+      scripts: [appbarUrl, dockUrl],
+    });
+    const { ctx, p, errs } = await open(html, { standalone: true, touch: true });
+    const tap = async (fn) => { const r = await p.evaluate(fn); await p.touchscreen.tap(r.x, r.y); await p.waitForTimeout(150); };
+    await tap(() => { const r = document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await tap(() => { const r = document.getElementById('promo').shadowRoot.querySelector('.b').getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2 }; });
+    const st = await p.evaluate(() => {
+      const sr = document.getElementById('promo').shadowRoot;
+      const panel = sr.querySelector('.p');
+      const x = sr.querySelector('.p .px');
+      const r = x.getBoundingClientRect();
+      const at = sr.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      x.focus();
+      return { inMore: document.getElementById('promo').getAttribute('slot') === 'more', open: !panel.hidden, sheetOpen: document.querySelector('dc-dock[name="bar"]').shadowRoot.querySelector('.sheet').hasAttribute('data-open'),
+        x: { display: getComputedStyle(x).display, visibility: getComputedStyle(x).visibility, w: Math.round(r.width), h: Math.round(r.height), inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+          hits: at === x || x.contains(at), focused: sr.activeElement === x, label: x.getAttribute('aria-label') },
+        bubbleVisibility: getComputedStyle(sr.querySelector('.b')).visibility };
+    });
+    check(engine, 'tap More, tap a dock item in it: its panel opens (the sheet closes, hiding the bubble), and the panel shows a × that is visible, hittable, focusable and named "Close Promo"',
+      st.inMore && st.open && !st.sheetOpen && st.bubbleVisibility === 'hidden' && st.x.display !== 'none' && st.x.visibility === 'visible' && st.x.w >= 44 && st.x.h >= 44 && st.x.inView && st.x.hits && st.x.focused && st.x.label === 'Close Promo', JSON.stringify(st));
+    await tap(() => { const r = document.getElementById('promo').shadowRoot.querySelector('.p .px').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const after = await p.evaluate(() => {
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      return { closed: document.getElementById('promo').shadowRoot.querySelector('.p').hidden, active: document.activeElement === bar && bar.shadowRoot.activeElement ? bar.shadowRoot.activeElement.className : (document.activeElement && document.activeElement.tagName) };
+    });
+    check(engine, 'tapping that × closes the panel and puts the focus on More', after.closed && after.active === 'more', JSON.stringify(after));
+    check(engine, 'no page errors (More panel page)', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
+
+  // ── 17. never a page without navigation: the header keeps its nav until the bar is shown (cold review S3) ──
+  if (arm(17)) {
+    // What the first rendered frame shows, recorded by the page itself (rAF runs before that paint).
+    const firstFrame = `<script>requestAnimationFrame(() => { const n = document.querySelector('.rf-nav-link'); const bar = document.querySelector('dc-dock[name="bar"]'); window.__firstFrame = { nav: getComputedStyle(n).display, bar: bar.getClientRects().length > 0 }; });</script>`;
+    const html = page({
+      head: `${APPBAR_HEAD}${APPBAR_STYLE}`,
+      body: `<header class="rf-header"><a class="rf-logo" href="/">Logo</a><nav class="rf-nav"><a class="rf-nav-link" href="/">Home</a> <a class="rf-nav-link" id="shop" href="/shop-s3">Shop</a></nav></header>
+<main>content</main><dc-dock name="bar" data-st-appbar="" data-more-label="More" hidden="">${navTabs(2)}</dc-dock>${firstFrame}`,
+      scripts: [appbarUrl],
+    });
+    const state = (p) => p.evaluate(() => {
+      const a = document.getElementById('shop');
+      const r = a.getBoundingClientRect();
+      const at = r.width ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+      const bar = document.querySelector('dc-dock[name="bar"]');
+      return { flag: document.documentElement.hasAttribute('data-dc-dock-bar'), nav: getComputedStyle(a).display, hit: at === a, barShown: bar.getClientRects().length > 0, firstFrame: window.__firstFrame };
+    });
+    // (a) appbar.js never runs (a chunk that 404s after a deploy, a CSP block): aborted.
+    {
+      const { ctx, p } = await open(html, { standalone: true, routes: (pg) => pg.route(appbarUrl, (r) => r.abort()) });
+      const r = await state(p);
+      let went = null;
+      if (r.hit) {
+        const box = await p.evaluate(() => { const b = document.getElementById('shop').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+        await p.mouse.click(box.x, box.y);
+        await p.waitForTimeout(400);
+        went = new URL(p.url()).pathname;
+      }
+      check(engine, 'appbar.js blocked: switch on, bar never shown — the header keeps its nav, on screen and working (a tap navigates)',
+        r.flag && !r.barShown && r.nav !== 'none' && r.hit && r.firstFrame && r.firstFrame.nav !== 'none' && went === '/shop-s3', JSON.stringify({ ...r, went }));
+      await ctx.close();
+    }
+    // (b) appbar.js late (a slow network): the first frame has the header nav; once it runs, the nav is in the bar.
+    {
+      const { ctx, p } = await open(html, { standalone: true, routes: (pg) => pg.route(appbarUrl, async (r) => { await sleep(1500); await r.continue(); }) });
+      const r = await state(p);
+      check(engine, 'appbar.js late: the first frame shows the header nav (no frame without navigation); after it runs, the bar is shown and the header nav is gone',
+        r.firstFrame && r.firstFrame.nav !== 'none' && r.firstFrame.bar === false && r.flag && r.barShown && r.nav === 'none', JSON.stringify(r));
+      await ctx.close();
+    }
   }
   await browser.close();
 }

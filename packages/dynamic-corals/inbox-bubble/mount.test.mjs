@@ -2375,8 +2375,9 @@ test('reef#2790 docked: the host joins the right dock, keeps the digests, and th
 		assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the docked open panel differs from the old one');
 		assert.equal(host.style.props['--_dc-below'], '0', 'the room for the items below was not set on open');
 		assert.deepEqual(announced, [host], 'opening did not announce itself on document (contract ②)');
-		// Open, the bubble is the panel's close control: × and「Close」, the same word as the panel's ×.
-		assert.match(root.innerHTML, /<button type="button" class="dc-inbox-open" aria-label="Close" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path[^>]* d="M6 6l12 12M18 6 6 18"\/><\/svg><\/button>$/);
+		// Open, the bubble is the panel's close control: × and "Close <what it closes>" (cold review N2);
+		// the panel's own × stays plain「Close」.
+		assert.match(root.innerHTML, /<button type="button" class="dc-inbox-open" aria-label="Close Message us" aria-expanded="true" aria-controls="dc-inbox-panel"><svg class="dc-inbox-icon" [^>]*><path[^>]* d="M6 6l12 12M18 6 6 18"\/><\/svg><\/button>$/);
 		assert.match(root.innerHTML, /class="dc-inbox-close" aria-label="Close">×<\/button>/, 'the panel\'s own × went away');
 		// Another item opening closes this panel.
 		document.dispatchEvent(new CustomEvent('dc-dock:open', { detail: new DEl() }));

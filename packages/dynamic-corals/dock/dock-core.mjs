@@ -26,7 +26,9 @@
 //
 // Behaviour: collapsed by default; an auto-open item opens once per visit (this tab, across pages:
 // sessionStorage), never over something already open; while open, the bubble shows × and is the
-// panel's close control (the panel has no × of its own); nothing ever moves on its own
+// panel's close control, named "Close <label>" (the panel has no × of its own — except in the
+// installed-app bar's More sheet, which hides with the bubble in it once the panel opens); nothing
+// ever moves on its own
 // (no badge, no pulse); when every element of the panel's content hides itself (countdown at its
 // deadline sets `hidden`), the whole item retires, and comes back if one shows again; Esc closes
 // and returns focus to the bubble; one panel open at a time across every dock item on the page
@@ -42,12 +44,23 @@ const DEFAULT_BG = '#111';
 const STORE_PREFIX = 'dc-dock:';
 const HASH_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** What an open item's bubble is called — it closes the panel — in the page's language (the inbox's nine). */
-const CLOSE = { en: 'Close', 'zh-tw': '關閉', 'zh-cn': '关闭', ja: '閉じる', ko: '닫기', de: 'Schließen', fr: 'Fermer', es: 'Cerrar', pt: 'Fechar' };
-export function closeLabel(lang) {
+/**
+ * What an open item's bubble is called — it closes the panel — in the page's language (the inbox's
+ * nine): "Close <label>", so the name still says what it controls (cold review of tile#233, N2); the
+ * bare word when the item has no label.
+ */
+const CLOSE = {
+  en: ['Close', (l) => `Close ${l}`], 'zh-tw': ['關閉', (l) => `關閉「${l}」`], 'zh-cn': ['关闭', (l) => `关闭「${l}」`],
+  ja: ['閉じる', (l) => `「${l}」を閉じる`], ko: ['닫기', (l) => `${l} 닫기`], de: ['Schließen', (l) => `${l} schließen`],
+  fr: ['Fermer', (l) => `Fermer ${l}`], es: ['Cerrar', (l) => `Cerrar ${l}`], pt: ['Fechar', (l) => `Fechar ${l}`],
+};
+export function closeLabel(lang, label = '') {
   const parts = String(lang || 'en').toLowerCase().split('-').filter(Boolean);
-  if (parts[0] === 'zh') return CLOSE[parts.includes('hans') || ((parts.includes('cn') || parts.includes('sg')) && !parts.includes('hant')) ? 'zh-cn' : 'zh-tw'];
-  return CLOSE[parts[0]] || CLOSE.en;
+  const key = parts[0] === 'zh'
+    ? (parts.includes('hans') || ((parts.includes('cn') || parts.includes('sg')) && !parts.includes('hant')) ? 'zh-cn' : 'zh-tw')
+    : CLOSE[parts[0]] ? parts[0] : 'en';
+  const [word, named] = CLOSE[key];
+  return label ? named(label) : word;
 }
 
 const PANEL_ICON = '<svg class="d" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.2 3.6c-.5.4-1.3.1-1.3-.6V16A2.5 2.5 0 0 1 4 13.5z"/></svg>';
@@ -76,6 +89,11 @@ const ITEM_CSS = `
 .p.bar{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,3.5rem) + env(safe-area-inset-bottom,0px));width:auto;
   max-height:var(--dc-dock-room,calc(100vh - 4.5rem));border-radius:.9rem .9rem 0 0;
   box-shadow:0 -1px 3px rgba(0,0,0,.12),0 -4px 12px rgba(0,0,0,.14)}
+.px{display:none}
+:host([slot="more"]) .px{all:unset;box-sizing:border-box;position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:center;
+  width:3rem;height:3rem;margin:0 0 0 auto;border-radius:50%;cursor:pointer;color:inherit;background:inherit}
+:host([slot="more"]) .px:focus-visible{outline:2px solid currentColor;outline-offset:-4px}
+.px svg{display:block;width:1.5rem;height:1.5rem}
 `;
 
 /** Only what a link may safely be: http(s), mailto, tel, a fragment, or a same-site path. */
@@ -125,7 +143,7 @@ export function autoKey(el, label = itemLabel(el)) {
   return `${STORE_PREFIX}${pos}:${label}`;
 }
 
-/** First in document wins: once an item of this bundle has asked to auto-open, no later one does. */
+/** First in document wins: once an item of this bundle is going to auto-open this visit, no later one does. */
 let autoTaken = false;
 
 /**
@@ -141,13 +159,14 @@ export function mountItem(el) {
   const isLink = el.hasAttribute('data-href');
   const name = itemName(el);
   const label = itemLabel(el);
-  const close = closeLabel(doc.documentElement && doc.documentElement.getAttribute('lang'));
+  const close = closeLabel(doc.documentElement && doc.documentElement.getAttribute('lang'), label);
 
   const style = doc.createElement('style');
   style.textContent = withDynamicCoralCssLayer(ITEM_CSS, doc);
   shadow.appendChild(style);
 
   let panel = null;
+  let panelX = null;
   if (!isLink) {
     panel = doc.createElement('div');
     panel.className = 'p';
@@ -156,6 +175,16 @@ export function mountItem(el) {
     panel.tabIndex = -1;
     panel.setAttribute('role', 'dialog');
     if (label) panel.setAttribute('aria-label', label);
+    // 🔴 THE ONE × A PANEL CARRIES (cold review of tile#233, S2). Opened from the bar's More sheet, the
+    // panel closes the sheet — and the bubble, which is the close control everywhere else, is in that
+    // sheet and hides with it. There, and only there (CSS: `:host([slot="more"])`), the panel shows
+    // its own ×, first in it, so a touch or a Tab reaches it. Everywhere else it is display:none.
+    panelX = doc.createElement('button');
+    panelX.className = 'px';
+    panelX.setAttribute('type', 'button');
+    panelX.setAttribute('aria-label', close);
+    panelX.innerHTML = DOCK_CLOSE_ICON;
+    panel.appendChild(panelX);
     shadow.appendChild(panel);
   }
   const b = doc.createElement(isLink ? 'a' : 'button');
@@ -206,8 +235,19 @@ export function mountItem(el) {
   let slotted = false;
   const store = session();
 
+  // Retired by the page watcher (contract ③: its anchor left the document), the item is gone for good
+  // — the client mounts once. What it still hears (`hashchange`, another item's announce) it then
+  // ignores and stops listening to, so a `#name` cannot open a detached panel and, through its
+  // announce, close what IS on screen (cold review of tile#233, N3; inbox-bubble's `retired()`).
+  const offs = [];
+  function retired() {
+    if (el.isConnected !== false) return false;
+    while (offs.length) offs.pop()();
+    return true;
+  }
+
   function setOpen(next, { user = false, focus = false } = {}) {
-    if (!panel || next === open || (next && el.hidden)) return;
+    if (!panel || next === open || (next && (el.hidden || retired()))) return;
     open = next;
     if (next && !slotted) {
       panel.appendChild(doc.createElement('slot'));
@@ -238,13 +278,14 @@ export function mountItem(el) {
 
   if (panel) {
     b.addEventListener('click', () => setOpen(!open, { user: true }));
+    panelX.addEventListener('click', () => setOpen(false, { user: true, focus: true }));
     // On the host, so a key pressed inside the owner's own panel content (light DOM) is heard too.
     el.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !open) return;
       e.stopPropagation();
       setOpen(false, { user: true, focus: true });
     });
-    dockListen(el, () => setOpen(false));
+    offs.push(dockListen(el, () => { if (!retired()) setOpen(false); }));
   }
 
   // Opening once per visit waits for the item to be visible: a countdown inside it may mount after
@@ -274,10 +315,15 @@ export function mountItem(el) {
     } else if (el.getAttribute('data-auto-open') === '1' && !autoTaken) {
       let done = false;
       try { done = !!(store && store.getItem(autoAt)); } catch { /* blocked */ }
-      autoTaken = true;
-      if (!done) { pendingAuto = true; sync(); }
+      // Only an item that will open this visit takes the turn: one already shown leaves it to the next
+      // (cold review of tile#233, N7 — otherwise a later item was starved on every page).
+      if (!done) { autoTaken = true; pendingAuto = true; sync(); }
     }
-    if (name && win) win.addEventListener('hashchange', () => { if (hashOpens()) setOpen(true); });
+    if (name && win) {
+      const onHash = () => { if (!retired() && hashOpens()) setOpen(true); };
+      win.addEventListener('hashchange', onHash);
+      offs.push(() => win.removeEventListener('hashchange', onHash));
+    }
   }
 
   return { el, open: () => setOpen(true, { user: true }), close: () => setOpen(false, { user: true }), isOpen: () => open };

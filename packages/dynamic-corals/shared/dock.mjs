@@ -9,8 +9,8 @@
 //     end of <body> if it is missing — or, when the page's renderer has written a
 //     `dc-dock[name="bar"]` and switched it on (`<html data-dc-dock-bar>`), that bar, which no coral
 //     ever creates; set `item.dockAnchor` to a node left where the item stood, and insert the item
-//     before the first child whose `dockAnchor` (or, lacking one, the child itself) follows that
-//     anchor in document order.
+//     before the first child whose `dockAnchor` follows that anchor in document order. A child
+//     without a `dockAnchor` (a renderer's own entry) is never passed: those come first.
 //   ② When an item opens, it dispatches `dc-dock:open` on `document` with `detail` = the item;
 //     every other open item that hears it closes.
 //   ③ An item whose `dockAnchor` has left the document leaves its dock: the first copy to claim a
@@ -57,7 +57,9 @@
 // `data-dc-dock-bar` on <html> (sitetile: an installed app at its mobile breakpoint; a wide installed
 // window keeps the corners). Only then does every coral item join the bar instead of a corner: a row
 // along the bottom edge in which every child is a square tab (the dock's shape, not the item's). The
-// renderer's links are children without a `dockAnchor` and therefore stand where they are written.
+// renderer's links are children without a `dockAnchor`, and those come first (contract ①): the nav
+// leads and every item follows it, wherever on the page the item was written — an owner's dock item
+// in <main> included (cold review of tile#233, S1).
 // More than five visible entries: the first four stay tabs and the rest move into a "More" sheet — by
 // `slot`, not by moving nodes, so document order and the contract above are untouched. A renderer
 // that knows an item will join later (the inbox, behind its network gate) says so with
@@ -252,12 +254,12 @@ function dockJoin(item, anchor, name) {
   }
   dockClaim(dock);
   item.dockAnchor = anchor;
-  const at = (n) => n.dockAnchor || n;
   let before = null;
   for (const child of dock.children) {
-    if (child === item) continue;
+    // A renderer's own entry (no anchor) is never passed: the renderer's entries lead.
+    if (child === item || !child.dockAnchor) continue;
     // DOCUMENT_POSITION_FOLLOWING: the child's place comes after this item's.
-    if (anchor.compareDocumentPosition(at(child)) & 4) { before = child; break; }
+    if (anchor.compareDocumentPosition(child.dockAnchor) & 4) { before = child; break; }
   }
   if (item.parentNode !== dock || item.nextElementSibling !== before) dock.insertBefore(item, before);
   return dock;

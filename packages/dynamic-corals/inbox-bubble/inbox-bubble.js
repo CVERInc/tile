@@ -476,12 +476,12 @@ function dockJoin(item, anchor, name) {
   }
   dockClaim(dock);
   item.dockAnchor = anchor;
-  const at = (n) => n.dockAnchor || n;
   let before = null;
   for (const child of dock.children) {
-    if (child === item) continue;
+    // A renderer's own entry (no anchor) is never passed: the renderer's entries lead.
+    if (child === item || !child.dockAnchor) continue;
     // DOCUMENT_POSITION_FOLLOWING: the child's place comes after this item's.
-    if (anchor.compareDocumentPosition(at(child)) & 4) { before = child; break; }
+    if (anchor.compareDocumentPosition(child.dockAnchor) & 4) { before = child; break; }
   }
   if (item.parentNode !== dock || item.nextElementSibling !== before) dock.insertBefore(item, before);
   return dock;
@@ -608,6 +608,7 @@ export const COPY = {
 		errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
 		rate: "That's a lot of messages — please try again in a minute.",
 		closed: 'Close',
+		closeNamed: (l) => `Close ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
 		statusNoAi: 'A person reads what you send',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}answers from this site's content`,
@@ -649,6 +650,7 @@ export const COPY = {
 		errorInboxStorageFull: "這個網站的收件匣已滿，目前無法接收新訊息。",
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closed: '關閉',
+		closeNamed: (l) => `關閉「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
 		statusNoAi: '真人會看',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用這個站的內容回答`,
@@ -690,6 +692,7 @@ export const COPY = {
 		errorInboxStorageFull: "このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。",
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closed: '閉じる',
+		closeNamed: (l) => `「${l}」を閉じる`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
@@ -731,6 +734,7 @@ export const COPY = {
 		errorInboxStorageFull: "这个网站的收件箱已满，目前无法接收新消息。",
 		rate: '消息有点多，请稍等一分钟再试。',
 		closed: '关闭',
+		closeNamed: (l) => `关闭「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
 		statusNoAi: '真人会看',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}用这个网站的内容回答`,
@@ -778,6 +782,7 @@ export const COPY = {
 		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closed: 'Schließen',
+		closeNamed: (l) => `${l} schließen`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
 		statusNoAi: 'Was Sie senden, liest ein Mensch',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}antwortet mit den Inhalten dieser Website`,
@@ -819,6 +824,7 @@ export const COPY = {
 		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closed: 'Fermer',
+		closeNamed: (l) => `Fermer ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
 		statusNoAi: 'Une personne lit ce que vous envoyez',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}répond à partir du contenu de ce site`,
@@ -860,6 +866,7 @@ export const COPY = {
 		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closed: 'Cerrar',
+		closeNamed: (l) => `Cerrar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
 		statusNoAi: 'Lo que envíes lo lee una persona',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde con el contenido de este sitio`,
@@ -901,6 +908,7 @@ export const COPY = {
 		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closed: 'Fechar',
+		closeNamed: (l) => `Fechar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
 		statusNoAi: 'Uma pessoa lê o que você envia',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}responde com o conteúdo deste site`,
@@ -942,6 +950,7 @@ export const COPY = {
 		errorInboxStorageFull: "이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.",
 		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
 		closed: '닫기',
+		closeNamed: (l) => `${l} 닫기`,
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
 		// name is owner-chosen at runtime. A label-style sentence without it reads naturally.
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}먼저 답하고, 보내면 사람이 읽어요`,
@@ -4187,11 +4196,13 @@ export async function mount(el, handoff = null) {
 	/**
 	 * The bubble. Closed it is the whole root; open it stays BELOW the panel (reef#2790: the panel sits
 	 * directly above its own item), says so with `aria-expanded`, names the panel with
-	 * `aria-controls`, and is the panel's close control: × in place of the glyph, named「Close」(the
-	 * same word as the panel's own ×, which stays for compatibility), and a press closes the panel.
+	 * `aria-controls`, and is the panel's close control: × in place of the glyph, named "Close <its
+	 * closed name>" (`copy.closeNamed`, so the name still says what it controls — cold review of
+	 * tile#233, N2; the panel's own ×, kept for compatibility, stays plain「Close」), and a press closes
+	 * the panel.
 	 */
 	function bubbleHtml(expanded) {
-		const label = expanded ? copy.closed : openLabel;
+		const label = expanded ? copy.closeNamed(openLabel) : openLabel;
 		const icon = expanded ? DOCK_CLOSE_ICON.replace('<svg ', `<svg class="${PREFIX}-icon" `) : OPEN_ICON;
 		return `<button type="button" class="${PREFIX}-open" aria-label="${escHtml(label)}" aria-expanded="${expanded}" aria-controls="${PREFIX}-panel">${icon}</button>`;
 	}

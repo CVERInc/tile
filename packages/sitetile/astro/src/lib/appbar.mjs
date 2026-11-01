@@ -15,15 +15,23 @@
 // it is switched on). A wide installed window keeps the normal header and the corner docks. Decided
 // once per page view: a rotation does not move the nav back and forth under the visitor's thumb.
 //
+// 🔴 NEVER A PAGE WITHOUT NAVIGATION (cold review of tile#233, S3). The switch says the bar WILL be
+// used; the header's nav leaves only while the bar is actually SHOWN —
+// `html[data-dc-dock-bar]:has(dc-dock[name="bar"]:not([hidden]))` — and the bar is un-hidden only by
+// the dock base claiming it (appbar.js, or a coral joining it). If that script never runs (a chunk
+// that 404s after a deploy, a CSP block, an error), the header keeps its nav for the whole page view.
+// The price: until the deferred appbar.js has run, the header's nav links are painted, and then move
+// into the bar. A browser without `:has()` drops the rule and shows both (never neither).
+//
 // 🔴 A NORMAL BROWSER SEES NOTHING NEW. The bar is written `hidden` and stays hidden unless the switch
 // is on; every rule below is keyed on `html[data-dc-dock-bar]` or on the hidden bar itself. And a
 // site without `packages: pwa` (it cannot be installed) or without a `nav:` gets none of this: not
 // the element, not the style, not the script — its pages are byte-identical to before.
 //
 // The bar is the corner dock's own element (`dc-dock[name="bar"]`, packages/dynamic-corals/shared/
-// dock.mjs): the nav tabs are written into it here, before any coral runs, so by the dock's
-// contract (children without a `dockAnchor` keep their written place) they come first and the
-// tools (inbox …) follow. The dock owns the tab shape and the "More" rule — over five visible tabs,
+// dock.mjs): the nav tabs are written into it here, before any coral runs, and by the dock's
+// contract ① children without a `dockAnchor` (a renderer's own entries) come first: the nav leads
+// and every tool (the inbox, an owner's dock item written anywhere in the page) follows it. The dock owns the tab shape and the "More" rule — over five visible tabs,
 // the first four stay and the rest go to a More sheet — so first-level nav takes at most four tabs
 // whenever there is anything after it. A nav item with children opens a list. The current page's
 // tab carries aria-current="page" (a group: data-current, when one of its links is the page). A nav
@@ -59,11 +67,17 @@ export const APPBAR_CORAL_FLOOR = '0.8.0';
  * package's generated bundle, which this change has no business regenerating.
  */
 const MORE = { 'en-us': 'More', 'zh-tw': '更多', 'ja-jp': 'その他', 'ko-kr': '더보기' };
-export function moreLabel(lang) {
+const key = (lang) => {
   const l = String(lang || '').toLowerCase();
-  const key = l.startsWith('zh') ? 'zh-tw' : l.startsWith('ja') ? 'ja-jp' : l.startsWith('ko') ? 'ko-kr' : 'en-us';
-  return MORE[key];
-}
+  return l.startsWith('zh') ? 'zh-tw' : l.startsWith('ja') ? 'ja-jp' : l.startsWith('ko') ? 'ko-kr' : 'en-us';
+};
+export function moreLabel(lang) { return MORE[key(lang)]; }
+/**
+ * The bar's landmark name (it is the page's navigation while the header's is hidden — cold review of
+ * tile#233, N1). A screen reader says "navigation" itself, so the name is only which one.
+ */
+const NAV = { 'en-us': 'Main', 'zh-tw': '主要', 'ja-jp': 'メイン', 'ko-kr': '주요' };
+export function navLabel(lang) { return NAV[key(lang)]; }
 
 /** `/a/b/` → `/a/b`, `/` → `/`; the query and fragment never count. */
 const norm = (p) => (String(p).replace(/[?#].*$/, '').replace(/\/+$/, '') || '/');
@@ -81,12 +95,14 @@ export function flatten(item) {
   return out;
 }
 
+/** The header gives up its nav only while the bar is SHOWN (see 🔴 NEVER A PAGE WITHOUT NAVIGATION). */
+const BAR_SHOWN = 'html[data-dc-dock-bar]:has(dc-dock[name="bar"]:not([hidden]))';
 export const APPBAR_CSS = `
-html[data-dc-dock-bar] .rf-nav > :is(.rf-nav-link,.rf-nav-group),
-html[data-dc-dock-bar] .rf-nav-hamburger,
-html[data-dc-dock-bar] .rf-nav-check,
-html[data-dc-dock-bar] .rf-ha-overlay[data-ha-overlay="nav"]{display:none!important}
-html[data-dc-dock-bar] body{padding-bottom:calc(3.5rem + env(safe-area-inset-bottom,0px))}
+${BAR_SHOWN} .rf-nav > :is(.rf-nav-link,.rf-nav-group),
+${BAR_SHOWN} .rf-nav-hamburger,
+${BAR_SHOWN} .rf-nav-check,
+${BAR_SHOWN} .rf-ha-overlay[data-ha-overlay="nav"]{display:none!important}
+${BAR_SHOWN} body{padding-bottom:calc(3.5rem + env(safe-area-inset-bottom,0px))}
 dc-dock[name="bar"]{--dc-dock-bar-bg:var(--gd-nav-panel,var(--gd-head,var(--gd-bg,#fff)));--dc-dock-bar-fg:var(--gd-text,#111)}
 dc-dock[name="bar"] .rf-tab{color:inherit;text-decoration:none}
 dc-dock[name="bar"] .rf-tab:focus-visible,dc-dock[name="bar"] .rf-tab summary:focus-visible{outline:2px solid currentColor;outline-offset:-4px}
