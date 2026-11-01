@@ -185,7 +185,7 @@ const mdInline = (s, ctx) => esc(s)
 //
 // 🩸 These five were hardcoded in Chinese and shipped to every card in every language. A creator
 // writing an English card had a screen reader announce 「顯示 QR code」 to their readers; found on a
-// live customer's page on 2026-08-13 by chodaict reading the source. Everything else on a card is
+// live customer's page on 2026-08-13 by the owner reading the source. Everything else on a card is
 // the author's own words — these are the only strings we put in their mouth, which is exactly why
 // they must follow the card rather than the person who wrote the renderer.
 //
@@ -337,7 +337,7 @@ function linkIcon(p, url, ctx) {
 // A seal with two impressions is not a seal, and the second impression is where behaviour goes to
 // die. Fallback is empty rather than a local copy: no arrow beats a divergent arrow.
 // dir: '' = right (onward, a CTA) · '--up-right' = outbound (a link that leaves the card).
-// 🔴 OFF BY DEFAULT since 2026-07-30 (chodaict). Every Portaly page we imported has NO arrow on its
+// 🔴 OFF BY DEFAULT since 2026-07-30 (the owner). Every Portaly page we imported has NO arrow on its
 // rows or its CTAs, and ours had one on both — a mark of ours, added to somebody else's page as if
 // it were theirs. A card that opts in writes `arrows: on` in its frontmatter.
 //
@@ -373,7 +373,7 @@ function renderEmbed(p, body, size, ctx = {}) {
   // 🩸 That was the bug, and it is a naming bug rather than a rendering one: a bespoke effect built
   // for ONE card (scale(0.001)→scale(1) about a tail origin, 1:1, `contain` over a background image,
   // auto-cycling, no controls) held the generic name, so every imported carousel inherited a
-  // character's mouth. chodaict, 2026-07-30: 「你用到〔那張卡〕的版本了,它只需要很常見的 slide,
+  // character's mouth. the owner, 2026-07-30: 「你用到〔那張卡〕的版本了,它只需要很常見的 slide,
   // 附上左右按鈕即可」.
   //
   // The pop animation is preserved verbatim under its own name; that one stored card is migrated
@@ -681,7 +681,7 @@ const NATIVE_CSS = [
   // NATIVE_CSS is printed in the body.
   // 🔴 ONE gradient, not two. `.st-gal-scrim` already paints one over the whole tile; this element
   // painted a SECOND on top of it, so every title sat under two stacked scrims and the picture went
-  // muddy. chodaict: 「漸層下手太重,我看到你疊了好幾層漸層」. The scrim owns the darkening; the body
+  // muddy. the owner: 「漸層下手太重,我看到你疊了好幾層漸層」. The scrim owns the darkening; the body
   // owns the text.
   // 🔴 THE SCRIM LIVES HERE, not only in card.css. Removing the caption's own gradient exposed that
   // the only bottom-heavy scrim was in the committed stylesheet — so a render without it (the colour
@@ -708,7 +708,7 @@ const NATIVE_CSS = [
   //
   // `--cp-ground` is `color-mix(accent 6%, #f2f2f2)` — a lavender off-white carrying 6% of the
   // creator's colour. On Incrediville that computes to srgb(0.936 0.916 0.937), which is what
-  // chodaict was looking at when he asked for 「純白」. The token stays as it is (the page backdrop
+  // the owner was looking at when he asked for 「純白」. The token stays as it is (the page backdrop
   // and the QR overlay both want the tint); only the CARD goes white.
   //
   // 🔴 Scoped to light. `data-theme="dark"` and a reader-preferred dark card must NOT turn white, so
@@ -812,7 +812,7 @@ const NATIVE_CSS = [
   // it made WIDTH decide SHAPE, so every full-width picture became a banner whether or not it was
   // one, and `object-fit:cover` then threw away the other half.
   //
-  // Measured 2026-07-30 on HTL. chodaict read his own live page off the screen as 方(6x6)、方(6x6)、
+  // Measured 2026-07-30 on HTL. the owner read his own live page off the screen as 方(6x6)、方(6x6)、
   // 細(1x6)、長方(3x6)、長方(3x6)、細(1x6) and said we had it wrong. The source images say the same
   // thing: 1200×1200, 1280×1280, then 562×281 and 1000×500. Two of his pictures are SQUARE and were
   // being cropped in half; the two that looked right were 2:1 already — correct by coincidence.
@@ -911,7 +911,7 @@ const NATIVE_CSS = [
   // divider read as DOUBLED from the third row on while the first two looked perfect, which is a very
   // good disguise for "this mechanism does not actually work".
   //
-  // 「除非必要不然 CSS 別寫負數」 — chodaict, and the bug is the argument. A negative offset that has
+  // 「除非必要不然 CSS 別寫負數」 — the owner, and the bug is the argument. A negative offset that has
   // to equal another value is a constraint the layout is not expressing.
   `.st-card .st-run{grid-column:1 / -1;display:flex;flex-direction:column;background:var(--cp-surface);border:1px solid var(--cp-line);border-radius:18px;overflow:hidden}`,
   // 🔴 `align-self:stretch` undoes `.st-card .st-cell{align-self:start}`, which is right for a GRID
@@ -1116,7 +1116,7 @@ const NATIVE_CSS = [
 // So the reserved strip itself has to go, and only on cards that have a backdrop — non-backdrop
 // cards keep `stable` and do not move by a pixel. See verify/backdrop-gutter.mjs.
 //
-// 🔴 THE VEIL IS GONE (2026-07-30). chodaict, on a card with a backdrop: 「st-cell st-hero 目前疊超多
+// 🔴 THE VEIL IS GONE (2026-07-30). the owner, on a card with a backdrop: 「st-cell st-hero 目前疊超多
 // 層顏色,有沒有可能弄出『沒有背景色也好看的版本』?」and the same for the footer. He is right, and the
 // veil was mine: a slab of `--cp-ground` laid over her artwork so the ink underneath had something
 // tame to sit on. It read as exactly what it was — a rectangle of interface colour on a painting.
@@ -1433,7 +1433,7 @@ export function renderPage(model, ctx = {}) {
   // the visible `Powered by feelreef` footer. That one is an ad slot on someone else's page and is
   // correctly opt-in; this one says what rendered the document, the same field WordPress, Hugo and
   // Astro all emit. Without it a card is identifiable only by UNDECLARED traces — `st-` prefixes,
-  // /_coral/, /_yt/, /_icon/ — which is not more private, only less honest. And chodaict's reason,
+  // /_coral/, /_yt/, /_icon/ — which is not more private, only less honest. And the owner's reason,
   // which outranks both: without it we cannot get cold traffic at all.
   //
   // 🔴 Semantics copied EXACTLY from sitetile's SiteLayout, which shipped this first (I designed a

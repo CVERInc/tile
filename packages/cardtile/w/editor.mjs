@@ -29,7 +29,7 @@ import { whatIsWrong } from './md-guard.mjs';
 // SHARED definition (MCP and GAIDO read it too) and must not import an editor surface, so the
 // resolution happens on THIS side — see cell-i18n.mjs's header for why it is keyed key-first.
 import { CELL_STRINGS_ZH, cellStrings, text as tx } from './cell-i18n.mjs';
-// The `card.feelreef.com/try/edit` sandbox (chodaict, rebuilt 2026-09 after the legacy
+// The `card.feelreef.com/try/edit` sandbox (the owner, rebuilt 2026-09 after the legacy
 // `feelreef.com/card/try` route — same product, new substrate — was retired 2026-08-28 by
 // 3fcfb09ff). Both modules are pure; sandbox mode is this file deciding NOT to touch `/_w/*`.
 import { sandboxDoorHref, parkSandboxCard } from './sandbox-door.mjs';
@@ -869,7 +869,7 @@ function download() {
 //
 // 🔴 THE BACKUP IS OFFERED AT THE DANGEROUS MOMENT, AND NOWHERE ELSE.
 //
-// chodaict's shape (2026-07-30, the Blogger-era 下載範本): no surprise download when you open a card
+// the owner's shape (2026-07-30, the Blogger-era 下載範本): no surprise download when you open a card
 // — a download you did not ask for is one you learn to dismiss, and a dismissed backup is not a
 // backup. The tick lives in the SAVE confirmation, pre-ticked, because that is the moment something
 // can be lost. And it downloads the FAT card: the pictures are 99.7% of one real card's file and the part

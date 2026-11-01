@@ -51,7 +51,7 @@ const dry = args.includes('--dry');
 //
 // The budget's job is not "be small in the abstract" — it is "be one document that beats what the
 // creator already has". Against 16MB and 133 requests, a 2.6MB single file is six times lighter,
-// so refusing it at 1500 was measuring against the wrong thing. chodaict, 2026-07-30: 「不管怎麼樣
+// so refusing it at 1500 was measuring against the wrong thing. the owner, 2026-07-30: 「不管怎麼樣
 // 來我們家都會變快」 — which turned out to be true by a wide margin, and is now evidence.
 //
 // 🔴 The line itself does NOT move: a Card is one file, so it has a size, and something is still
@@ -59,7 +59,7 @@ const dry = args.includes('--dry');
 // 🩸 THE BUDGET WAS A NUMBER I MADE UP, TWICE.
 //
 // 1500 was a feeling. When it refused a real creator's card I raised it to 3000 — also a feeling —
-// and then declared that creator 「a Site customer」 on top of it. chodaict, 2026-07-30: 「我單純覺得
+// and then declared that creator 「a Site customer」 on top of it. the owner, 2026-07-30: 「我單純覺得
 // 限制得太著急」. He is right, and the shape is the one this codebase keeps catching: a premise that
 // arrives exactly where it makes the argument work.
 //
@@ -164,7 +164,7 @@ function sniff(buf) {
  * simply does not hold. Quality is the only knob that moves the right way; width stays native.
  *
  * The cost is real and is stated rather than hidden: an animated avatar is ~119KB more than a frozen
- * one. That is the creator's identity — chodaict spotted the frozen frame within seconds of looking
+ * one. That is the creator's identity — the owner spotted the frozen frame within seconds of looking
  * at the card — so it is worth the bytes, and when it is NOT affordable the caller is told, never
  * silently handed a still.
  */
