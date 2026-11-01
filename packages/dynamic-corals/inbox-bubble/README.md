@@ -547,18 +547,20 @@ sitetile's bar keeps its bubble in the corner, as with 0.7.x. The sitetile engin
 needs the coral that joins it (an older bubble sits fixed over the bar's right-hand tab). And the
 `dock` coral needs it too: a 0.7.x bubble places itself in the right corner instead of joining the
 dock, so a page with both would show the two bubbles on top of each other, and the dock could not
-see a 0.7.x panel that is open. So no channel serves `dock` until `v0` serves 0.8.0. Each step gates
-the next:
+see a 0.7.x panel that is open. That needs a page that loads `dock` through a channel while `v0` still
+serves 0.7.x. The registry contract requires both channels for every registry coral, so `dock`'s
+channels point at 0.1.0 from its first publish; when they did, no page loaded `dock` (sitetile's bar
+and inbox 0.8.0 carry the dock base inside their own bundles). Keep that window short: don't document
+or suggest the `dock` embed to sites until `v0` serves 0.8.0. Each step gates the next:
 
-- [ ] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions. Point no `dock`
-      channel at 0.1.0 yet.
+- [ ] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions, with `dock`'s
+      `latest` and `v0` → 0.1.0 (required by the registry contract; see above).
 - [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, the bubble as ×
       with no panel × in the corner, Esc/focus, a wrapper-themed bubble) against `v0`.
 - [ ] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
       propagation), and verify `X-Coral-Resolved: 0.8.0` and the body's `['inbox-bubble']='0.8.0'`.
-- [ ] **Only then repoint `dock`'s `latest` and `v0` → 0.1.0** (the documented embed is
-      `/corals/dock/v0/dock.js`), and verify the same way. From here a page that loads the dock
-      through a channel gets an inbox that joins it.
+- [ ] **Only then document the `dock` embed** (`/corals/dock/v0/dock.js`) to sites. From here a page
+      that loads the dock through a channel gets an inbox that joins it.
 - [ ] **Only then release the sitetile engine** that writes the bar, and rebuild sites.
 
 **Rollback rule: never serve a coral below 0.8.0 while appbar pages exist.** Their loader opens with
