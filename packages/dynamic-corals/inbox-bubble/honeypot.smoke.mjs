@@ -95,6 +95,9 @@ async function arm({ label, layered, hostCss }) {
 	const host = await measure('#host-label');
 	// The compose form's honeypot lives in the human-thread panel; the hand-off's Send takes the
 	// visitor there only after a successful POST, so it is measured on a second, KAITO-less mount.
+	// reef#2790: the bubble lives in the corner dock, not inside its container, so replacing the
+	// container no longer takes the old bubble with it — `unmount(el)` does, as it always has.
+	await p.evaluate((u) => import(u).then((m) => m.unmount(document.querySelector('[data-dynamic-coral="inbox-bubble"]'))), coralUrl);
 	await p.evaluate(() => {
 		const el = document.querySelector('[data-dynamic-coral="inbox-bubble"]');
 		const fresh = el.cloneNode(false);

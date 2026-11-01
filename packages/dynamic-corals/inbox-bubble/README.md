@@ -383,6 +383,31 @@ visitor's own question travels when they press the button — and the press is t
 point: a refusal is common, and turning every one into an interruption is the
 bubble this product exists not to be.
 
+## In the corner dock (0.8.0, reef#2790)
+
+The bubble no longer positions itself. It joins the page's corner dock — `dc-dock[name="right"]`,
+shared with the site's own corner items (the `dock` coral; see `../dock/README.md` for the dock
+and its two-sentence contract) — through a verbatim copy of `../shared/dock.mjs`
+(`dock-sync.test.mjs` holds the two equal). Every `data-*` attribute below keeps its meaning; the
+dock only adds:
+
+- **Stacking in document order.** The host (`div.dc-inbox-host`) moves into the dock at the end of
+  `<body>`; the container you wrote stays where it is and is the bubble's place in the order. A
+  site layout that writes the container before its embed slot gets the inbox nearest the corner.
+  Removing the container no longer removes the bubble with it — call `unmount(el)`, as before.
+- **The panel sits directly above the bubble**, which stays where it is, says `aria-expanded`, names
+  the panel with `aria-controls`, and closes it when pressed. The items above it are pushed up.
+- **Esc closes the panel** and returns the focus to the bubble; so does ×.
+- **One panel open at a time** with every other corner item on the page (`dc-dock:open`).
+- **The dock's shape and shadow**: same 56px circle 16px from the corner, with the shadow budget
+  `0 1px 3px` + `0 4px 12px` (the old `0 6px 24px` / `0 12px 40px` were cut by a phone's edge).
+- **Hidden in print.** **In an installed app** (display-mode: standalone) the bubble is a square
+  tab in the bottom bar and the panel a sheet above it.
+- `--reef-inbox-offset-x/-y` still raise / move in the bubble by the same validated amount: they
+  are now margins on the bubble inside the dock, so whatever is stacked above it moves with it. For
+  a cookie bar or another vendor's widget, prefer the dock's `--dc-dock-reserve`, which lifts both
+  corners together.
+
 ## Taking it off the page (0.7.9)
 
 A plain page never needs this. A host that removes the container itself — an SPA changing route —
@@ -477,14 +502,19 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.7.17/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.8.0/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.7.17, stop and choose a
+is immutable: if that deployment already has different bytes at 0.8.0, stop and choose a
 new version before publishing.
+
+**0.8.0 is the corner dock** (reef#2790; see "In the corner dock" above) on top of 0.7.17 and the two
+fixes that landed after 0.7.17 without a bump (the KAITO-unavailable sentence and the zh-TW search
+note). A minor version: every attribute keeps its meaning and the dock only adds. Behind the loader
+it is above the 0.7.12 floor, so nothing about the rollout order below changes.
 
 **0.7.17 is 0.7.16 plus tile#202's copy** (reef#2418). After 0.7.16 was merged (tile#199),
 tile#202 made the visitor copy site-neutral in all nine locales, matching the site form's

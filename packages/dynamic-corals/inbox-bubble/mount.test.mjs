@@ -856,6 +856,18 @@ const BEFORE = {
 		ext_plain: 'efd03fa789db6e44'
 	}
 };
+/**
+ * 🔴 THE RULER STAYS THE OLD CORAL, AND THE DIFFERENCE IS NAMED (reef#2790). The dock changed exactly
+ * three things in this markup, all asked for: the bubble says whether the panel is open and which
+ * panel it controls (`aria-expanded`, `aria-controls`), the panel carries the `id` that names it, and
+ * the bubble STAYS under the open panel (the panel sits directly above its own item; a press on the
+ * bubble closes it). `legacy()` takes exactly those three away and nothing else, so every digest below
+ * is still measured against the coral as it was — any other change is still red.
+ */
+const legacy = (html) => html
+	.replace(/ aria-expanded="(?:true|false)" aria-controls="dc-inbox-panel"/g, '')
+	.replace(' id="dc-inbox-panel"', '')
+	.replace(/<\/div><button type="button" class="dc-inbox-open" aria-label="[^"]*">[\s\S]*?<\/button>$/, '</div>');
 const { createHash } = await import('node:crypto');
 const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
@@ -886,7 +898,7 @@ test('gate: two tenants on one page, one with an Inbox and one without — only 
 	const off = new El({ 'data-kind': 'site', 'data-id': 'off-mixed' });
 	await Promise.all([mount(on), mount(off)]);
 	await drain();
-	assert.equal(digest(panelOf(on).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(on).innerHTML)), BEFORE.closed);
 	assert.ok(nothingRendered(off));
 });
 
@@ -903,7 +915,7 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await mount(el);
 		await settle();
 		assert.equal(el.children.length, 1, name);
-		assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed, `${name}: closed bubble changed`);
+		assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed, `${name}: closed bubble changed`);
 		// The two a mount had, plus the funnel's `pageshow` (0.7.15) — a listener, not markup or a request.
 		assert.equal(listenerCount(), before + 3, `${name}: not the three window listeners a mount has`);
 		// Apart from the probe, the same requests as before — except the assistant-name read, which
@@ -913,7 +925,7 @@ test('gate: a tenant with an Inbox gets the bubble the coral rendered before the
 		await panelOf(el).querySelector('.dc-inbox-open').emit('click');
 		await settle();
 		assert.equal(assistantReads(from).length, 1, `${name}: opening did not read the name once`);
-		assert.equal(digest(panelOf(el).innerHTML), BEFORE.open[name], `${name}: open panel changed`);
+		assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open[name], `${name}: open panel changed`);
 	}
 });
 
@@ -972,7 +984,7 @@ test('gate: cannot ask ⇒ nothing, retried at 2 s, 8 s and 30 s, and drawn when
 	await drain();
 	assert.equal(probes(from).length, 4);
 	assert.deepEqual(gaps(d), [2000, 8000, 30000]);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed);
 });
 
 test('gate: never answers ⇒ stops after four requests and draws nothing', async () => {
@@ -1046,7 +1058,7 @@ test('gate: a reef-inbox:open sent while the probe is still out is held, and ope
 	await done;
 	await drain();
 	assert.equal(el.children.length, 1);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito,
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_kaito,
 		'the open asked for before the answer was dropped (panel still closed)');
 	assert.equal(listenerCount(), before + 3, 'the holding listener outlived the answer');
 
@@ -1110,7 +1122,7 @@ test('gate: nobody could say, but this browser once heard yes (within 30 days) �
 	await drain();
 	assert.equal(probes(from).length, 1);
 	assert.equal(a.children.length, 1, 'a throttled ask took the bubble off a site that has an Inbox');
-	assert.equal(digest(panelOf(a).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(a).innerHTML)), BEFORE.closed);
 	assert.equal(storage.get(claimKey('site', 'stale-1')), kept, 'a non-answer re-dated the yes');
 
 	// a timeout (could not ask) + a yes from 29 days ago ⇒ drawn at the first non-answer, no retry wait.
@@ -1286,8 +1298,8 @@ function assertAskOnly(v, why) {
 
 test('#1866 row 1 — KAITO + an Inbox: the full bubble, unchanged, and the questions DO leave (the control)', async () => {
 	const v = await visit({ 'data-id': 'r1-on', 'data-kaito': '1' });
-	assert.equal(digest(v.closed), BEFORE.closed, 'closed bubble changed');
-	assert.equal(digest(v.panel), BEFORE.open.site_kaito, 'open panel changed');
+	assert.equal(digest(legacy(v.closed)), BEFORE.closed, 'closed bubble changed');
+	assert.equal(digest(legacy(v.panel)), BEFORE.open.site_kaito, 'open panel changed');
 	assert.ok(v.panel.includes(`KAITO${CHIP}${HAS_INBOX_LINE}`), 'not the has-an-Inbox status line');
 	assert.equal(v.panel.includes(ASK_ONLY_LINE), false, 'a site with an Inbox got the KAITO-only line');
 	assert.match(v.exchange, /dc-inbox-tohuman/, 'the answer lost its way to a person');
@@ -1366,9 +1378,9 @@ test('#1866 row 2 — a stored handle is not adopted, an open asked for early is
 	await mount(second);
 	await drain();
 	assert.equal(probes(f).length, 1, 'the next page did not ask again');
-	assert.equal(digest(panelOf(second).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(second).innerHTML)), BEFORE.closed);
 	await openBubble(panelOf(second));
-	assert.equal(digest(panelOf(second).innerHTML), BEFORE.open.site_kaito, 'the next page is not the full bubble');
+	assert.equal(digest(legacy(panelOf(second).innerHTML)), BEFORE.open.site_kaito, 'the next page is not the full bubble');
 });
 
 test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, and nothing leaves even if the site does have an Inbox', async () => {
@@ -1401,7 +1413,7 @@ test('#1866 row 3 — KAITO, could not ask: ask-only at the first non-answer, an
 	await mount(el);
 	await drain();
 	await openBubble(panelOf(el));
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_kaito);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_kaito);
 });
 
 test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async () => {
@@ -1410,13 +1422,13 @@ test('#1866 row 4 — no KAITO + an Inbox: the compose bubble, unchanged', async
 	const before = listenerCount();
 	await mount(el);
 	await drain();
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.closed);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.closed);
 	assert.deepEqual(requests.slice(from).map((r) => new URL(r.url).pathname), ['/api/inbox/session']);
 	assert.equal(listenerCount(), before + 3);
 	await openBubble(panelOf(el));
 	await drain();
 	assert.equal(assistantReads(from).length, 1);
-	assert.equal(digest(panelOf(el).innerHTML), BEFORE.open.site_status);
+	assert.equal(digest(legacy(panelOf(el).innerHTML)), BEFORE.open.site_status);
 	assert.match(panelOf(el).innerHTML, /name="text"/);
 	assert.equal(panelOf(el).innerHTML.includes(ASK_ONLY_LINE), false);
 });
@@ -1931,7 +1943,7 @@ for (const [name, route] of [
 			await openBubble(root);
 			await drain();
 			assert.equal(indexRequests(from).length, 1, 'control: the index was not read');
-			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel is not the no-attribute panel');
+			assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the opened panel is not the no-attribute panel');
 			assert.equal(removed.length - removedBefore, 1, 'the search block was not removed exactly once');
 			const textarea = composeBox(root);
 			textarea.value = 'caf';
@@ -1943,7 +1955,7 @@ for (const [name, route] of [
 			await openBubble(root);
 			await drain();
 			assert.ok(isOpen(root));
-			assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the reopened panel is not the no-attribute panel');
+			assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the reopened panel is not the no-attribute panel');
 			assert.equal(indexRequests(from).length, 1, 'a reopen read the index again');
 		} finally {
 			respond = null;
@@ -1956,7 +1968,7 @@ test('2160 negative control: without data-search-index the panel is byte-identic
 	const { root } = await mountFresh({ 'data-kaito': '1', 'data-site-name': 'Example Shop' });
 	await openBubble(root);
 	await drain();
-	assert.equal(digest(root.innerHTML), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
+	assert.equal(digest(legacy(root.innerHTML)), BEFORE.open.site_kaito, 'the opened panel changed for a mount that has no index');
 	assert.doesNotMatch(root.innerHTML, /dc-inbox-search|dc-inbox-results|Typing only searches/);
 	const textarea = composeBox(root);
 	textarea.value = 'caf';

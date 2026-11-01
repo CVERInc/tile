@@ -42,7 +42,7 @@ const strippedEnv = (extra = {}) => {
 // than a second hand-kept list, so the per-coral loop below is what actually proves they cannot
 // silently diverge from the table an added coral would be entered into.
 ok('REGISTRY_CORALS names exactly the six corals that publish through the registry',
-  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['countdown', 'events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']),
+  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['countdown', 'dock', 'events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']),
   REGISTRY_CORALS.join(', '));
 ok('LOCAL_ONLY_CORALS names exactly the non-registry corals: Cardtile-served qr/drawer and the sitetile section corals',
   JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['carousel', 'drawer', 'grid-filter', 'grid-masonry', 'hero-parallax', 'qr']),

@@ -31,6 +31,9 @@ export const CORALS = {
   // Same split once more: mounting over a core node drives with a fake clock; the countdown math and
   // the split-flap card are shared modules (../shared/countdown-parts.mjs, ../shared/flip.mjs).
   'countdown': { src: 'countdown-client.mjs', bundle: true, registry: true },
+  // And once more: mounting over an item core, which imports the shared corner dock
+  // (../shared/dock.mjs) — the same base inbox-bubble carries a verbatim copy of.
+  'dock': { src: 'dock-client.mjs', bundle: true, registry: true },
   // sitetile section behaviour (tile-lab#52 phase 2): what used to be a section component's hoisted
   // <script>. Local-only like qr/drawer — sitetile's component imports the client source and Astro
   // bundles it into the page; the built <coral>.js is for a host that serves corals itself.

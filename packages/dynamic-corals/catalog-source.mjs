@@ -50,6 +50,7 @@ export const INTERNAL = {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
     'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
     'data-cancel': 'Cancel control inside the generated inbox dialog.',
+    'data-more-label': 'Read by the pasted corner-dock base from the installed-app bar dock (written by a site renderer), not a mount option.',
   },
   qr: {},
   drawer: {},
@@ -61,6 +62,11 @@ export const INTERNAL = {
   countdown: {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
     'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+  },
+  dock: {
+    'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+    'data-more-label': 'Read from the installed-app bar dock (written by a site renderer), not a mount option.',
   },
   'grid-masonry': {},
   'grid-filter': {},

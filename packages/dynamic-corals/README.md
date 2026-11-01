@@ -102,3 +102,8 @@ README drift. The rest of each README remains hand-written context.
 - `repo-facts/` — fills the repository cards a page already has with the latest
   release, its date and an archived badge. The one coral that renders nothing of its
   own on failure: the page is left exactly as it was built. See its README.
+- `dock/` — the corners, shared: one dock per corner (`../shared/dock.mjs`) that inbox-bubble and
+  owner-written panel/link items stack into in document order, with one size, one edge distance and
+  one shadow budget; in an installed app the corners become one bottom bar. Its README carries the
+  two-sentence contract that lets bundles of different ages share a page, and the rule it is built
+  on: prevent ugliness within reason; beyond that, do not clean up after the owner.

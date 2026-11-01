@@ -273,7 +273,9 @@ const inside = (r, vp) => r.left >= 0 && r.top >= 0 && r.right <= vp.width && r.
 	if (bb.width !== 56 || bb.height !== 56) problems.push(`bubble is ${bb.width}×${bb.height}, not 56×56`);
 	if (bb.right !== DESKTOP.width - 16 || bb.bottom !== DESKTOP.height - 16) problems.push(`bubble is not 16px from the corner: right ${bb.right}, bottom ${bb.bottom}`);
 	if (m.panel.width !== 352) problems.push(`panel width ${m.panel.width}, not 22rem (352px)`);
-	if (m.panel.right !== DESKTOP.width - 16 || m.panel.bottom !== DESKTOP.height - 16) problems.push(`panel is not 16px from the corner: right ${m.panel.right}, bottom ${m.panel.bottom}`);
+	// reef#2790: the open panel sits directly above its own bubble (the dock's gap, 8px), the bubble
+	// staying where it is — it used to take the bubble's place in the corner.
+	if (m.panel.right !== DESKTOP.width - 16 || m.panel.bottom !== DESKTOP.height - 16 - 56 - 8) problems.push(`panel is not directly above the bubble in the corner: right ${m.panel.right}, bottom ${m.panel.bottom}`);
 	// The composer probe's own control: on the roomy default panel it must pass.
 	problems.push(...composerProblems(m.controls));
 	check('desktop, defaults', problems, m);

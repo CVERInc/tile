@@ -1,0 +1,11 @@
+{
+  "name": "@cver/coral-dock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "REEF with Dock — corner items (a bubble that opens a panel, or a bubble that is a link) in the shared corner dock. Client (dock.js) is BUILT from dock-client.mjs + dock-core.mjs + shared/dock.mjs + shared/dynamic-coral-css.mjs. Version covers the UNIT: client JS + the data-* attribute API + the dc-dock element/contract and the --dc-dock-* custom properties.",
+  "scripts": {
+    "build": "node ../build.mjs dock",
+    "test": "node --test dock-core.test.mjs dock-manifest.test.mjs ../shared/dock.test.mjs"
+  }
+}

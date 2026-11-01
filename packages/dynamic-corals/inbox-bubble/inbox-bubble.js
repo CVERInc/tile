@@ -288,6 +288,214 @@ function withDynamicCoralCssLayer(css) {
 	return layered ? `@layer reef.corals {\n${css}\n}` : css;
 }
 
+// 🔴 VERBATIM COPY of ../shared/dock.mjs's DOCK-BASE block — the corner dock every corner coral joins
+// (reef#2790): where the bubble sits, how it stacks with the site's own corner items, the shape and
+// the shadow budget. A coral has no imports, so it is pasted, not imported; dock-sync.test.mjs fails
+// the moment the two blocks differ. Edit the module, then paste it here. The two-sentence contract
+// that lets this copy and an older or newer one on the same page cooperate is in that module's header.
+// ── DOCK-BASE-BEGIN (verbatim in inbox-bubble.js) ──
+const DOCK_TAG = 'dc-dock';
+const DOCK_OPEN = 'dc-dock:open';
+/** The budget (see the header): the outer layer's reach, 4 + 12 = 16px, is the edge margin. */
+const DOCK_SHADOW = '0 1px 3px rgba(0,0,0,.12),0 4px 12px rgba(0,0,0,.14)';
+/** Tabs in the installed-app bar before the last one becomes "More". */
+const DOCK_BAR_MAX = 5;
+const DOCK_CSS = `
+:host{position:fixed!important;z-index:2147483000;display:flex!important;flex-direction:column-reverse;
+  box-sizing:border-box;margin:0!important;border:0!important;width:auto;height:auto;
+  padding:0 0 var(--_dc-reserve,0px)!important;pointer-events:none;
+  gap:var(--dc-dock-gap);bottom:calc(var(--dc-dock-margin) + env(safe-area-inset-bottom,0px));
+  --dc-dock-margin:max(1rem,16px);--dc-dock-size:3.5rem;--dc-dock-w:var(--dc-dock-size);--dc-dock-gap:.5rem;
+  --dc-dock-radius:50%;--dc-dock-shadow:${DOCK_SHADOW};--dc-dock-vh:100vh;
+  --dc-dock-room:calc(var(--dc-dock-vh) - 2 * var(--dc-dock-margin) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - var(--_dc-reserve,0px));
+  --dc-dock-panel-w:min(22rem,calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
+@supports (height:100dvh){:host{--dc-dock-vh:100dvh}}
+:host([hidden]){display:none!important}
+:host(:not([name="left"])){right:calc(var(--dc-dock-margin) + env(safe-area-inset-right,0px));align-items:flex-end}
+:host([name="left"]){left:calc(var(--dc-dock-margin) + env(safe-area-inset-left,0px));align-items:flex-start}
+::slotted(*){display:flex!important;flex-direction:column!important;align-items:inherit!important;gap:var(--dc-dock-gap)!important;
+  flex:none!important;position:static!important;margin:0!important;padding:0!important;pointer-events:auto}
+::slotted([hidden]){display:none!important}
+:host([name="bar"]){left:0;right:0;bottom:0;flex-direction:row;align-items:stretch;gap:0;
+  padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)!important;
+  background:var(--dc-dock-bar-bg,#fff);color:var(--dc-dock-bar-fg,#111);box-shadow:0 -1px 0 rgba(0,0,0,.12);
+  --dc-dock-w:100%;--dc-dock-radius:0;--dc-dock-shadow:none;--dc-dock-item-bg:transparent;--dc-dock-item-ink:currentColor;
+  --dc-dock-room:calc(var(--dc-dock-vh) - var(--dc-dock-size) - var(--dc-dock-margin) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+  --dc-dock-panel-w:auto}
+:host([name="bar"]) ::slotted(*){flex:1 1 0!important;min-width:0!important;min-height:var(--dc-dock-size)!important;
+  align-items:center!important;justify-content:center!important;gap:0!important;box-sizing:border-box!important;
+  color:inherit;text-align:center;text-decoration:none;font-size:.75rem;line-height:1.2;overflow-wrap:anywhere}
+:host([name="bar"]) ::slotted([aria-current="page"]),:host([name="bar"]) ::slotted([data-current]){font-weight:700;box-shadow:inset 0 3px 0 currentColor}
+:host([name="bar"]) ::slotted([slot="more"]){flex:none!important;min-height:3rem!important;align-items:stretch!important;justify-content:center!important;padding:0 1rem!important;text-align:start;font-size:1rem}
+.more{all:unset;box-sizing:border-box;flex:1 1 0;min-width:0;min-height:var(--dc-dock-size);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;cursor:pointer;color:inherit;font:inherit;font-size:.75rem;line-height:1.2;pointer-events:auto}
+.more[hidden]{display:none}
+.more:focus-visible{outline:2px solid currentColor;outline-offset:-4px}
+.more svg{width:1.5rem;height:1.5rem}
+.sheet{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size) + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;
+  max-height:var(--dc-dock-room);overflow:auto;padding:0 env(safe-area-inset-right,0px) 0 env(safe-area-inset-left,0px);
+  background:inherit;color:inherit;box-shadow:0 -1px 3px rgba(0,0,0,.12),0 -4px 12px rgba(0,0,0,.14);border-radius:.9rem .9rem 0 0;
+  visibility:hidden;pointer-events:none}
+.sheet[data-open]{visibility:visible;pointer-events:auto}
+@media (prefers-color-scheme:dark){:host([name="bar"]){background:var(--dc-dock-bar-bg,#1c1c1e);color:var(--dc-dock-bar-fg,#f2f2f7)}}
+@media print{:host{display:none!important}}
+`;
+const DOCK_MORE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
+
+/** Is this page an installed app? Decided once per call, from the media query (and iOS's flag). */
+function dockStandalone() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    return !!(window.navigator && window.navigator.standalone === true);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The owner's bottom reserve, validated: a length (not a percentage) or 0px. A typo in a site's
+ * theme must not invalidate the dock's own geometry, so the public token is read and only a value
+ * the browser accepts as a length reaches the private one the stylesheet uses.
+ */
+function dockReserve(dock) {
+  let v = '';
+  try { v = String(getComputedStyle(dock).getPropertyValue('--dc-dock-reserve') || '').trim(); } catch { /* no CSSOM */ }
+  const ok = v && !/%/.test(v) && typeof CSS !== 'undefined' && CSS.supports && CSS.supports('padding-bottom', v);
+  dock.style.setProperty('--_dc-reserve', ok ? `clamp(0px,${v},50vh)` : '0px');
+}
+
+/** The bar's "More": children past the fourth go to `slot="more"` once there are more than five. */
+function dockBar(dock, shadow) {
+  const doc = dock.ownerDocument;
+  const more = doc.createElement('button');
+  more.type = 'button';
+  more.className = 'more';
+  more.hidden = true;
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-controls', 'dc-dock-sheet');
+  const label = dock.getAttribute('data-more-label') || 'More';
+  more.innerHTML = DOCK_MORE_ICON;
+  more.appendChild(doc.createElement('span')).textContent = label;
+  const sheet = doc.createElement('div');
+  sheet.className = 'sheet';
+  sheet.id = 'dc-dock-sheet';
+  sheet.setAttribute('role', 'group');
+  sheet.setAttribute('aria-label', label);
+  sheet.appendChild(doc.createElement('slot')).name = 'more';
+  shadow.append(more, sheet);
+  const show = (open, focus) => {
+    sheet.toggleAttribute('data-open', open);
+    more.setAttribute('aria-expanded', String(open));
+    if (open) doc.dispatchEvent(new CustomEvent(DOCK_OPEN, { detail: dock }));
+    else if (focus) more.focus();
+  };
+  more.addEventListener('click', () => show(more.getAttribute('aria-expanded') !== 'true'));
+  // Any other open closes the sheet — an item opened FROM the sheet included: its panel takes the
+  // screen, and stays visible because an item's panel sets `visibility:visible` over the sheet's.
+  doc.addEventListener(DOCK_OPEN, (e) => { if (e.detail !== dock) show(false); });
+  shadow.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet.hasAttribute('data-open')) show(false, true); });
+  const sync = () => {
+    const kids = [...dock.children].filter((k) => !k.hidden);
+    const over = kids.length > DOCK_BAR_MAX;
+    kids.forEach((k, i) => {
+      const want = over && i >= DOCK_BAR_MAX - 1 ? 'more' : null;
+      if (k.getAttribute('slot') !== want) { if (want) k.setAttribute('slot', want); else k.removeAttribute('slot'); }
+    });
+    more.hidden = !over;
+    if (!over && sheet.hasAttribute('data-open')) show(false);
+    // An empty bar is no bar: a strip along the bottom with nothing in it is a broken page.
+    dock.hidden = kids.length === 0;
+  };
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(sync).observe(dock, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+  }
+  sync();
+}
+
+/** Gives a dock its look, once: the first copy to arrive attaches the shadow root, later ones see it. */
+function dockClaim(dock) {
+  if (dock.shadowRoot) return;
+  const doc = dock.ownerDocument;
+  const shadow = dock.attachShadow({ mode: 'open' });
+  const style = doc.createElement('style');
+  style.textContent = DOCK_CSS;
+  shadow.append(style, doc.createElement('slot'));
+  dockReserve(dock);
+  if (typeof window !== 'undefined') window.addEventListener('resize', () => dockReserve(dock));
+  if (dock.getAttribute('name') === 'bar') dockBar(dock, shadow);
+  else dock.hidden = false;
+}
+
+/** Contract ①. Returns the dock the item is now in, or null where there is no document to join. */
+function dockJoin(item, anchor, name) {
+  const doc = item.ownerDocument;
+  if (!doc || !doc.body || typeof doc.querySelector !== 'function') return null;
+  const want = dockStandalone() ? 'bar' : (/^[a-z][a-z0-9-]*$/.test(name || '') ? name : 'right');
+  let dock = doc.querySelector(`${DOCK_TAG}[name="${want}"]`);
+  if (!dock) {
+    dock = doc.createElement(DOCK_TAG);
+    dock.setAttribute('name', want);
+    doc.body.appendChild(dock);
+  }
+  dockClaim(dock);
+  item.dockAnchor = anchor;
+  const at = (n) => n.dockAnchor || n;
+  let before = null;
+  for (const child of dock.children) {
+    if (child === item) continue;
+    // DOCUMENT_POSITION_FOLLOWING: the child's place comes after this item's.
+    if (anchor.compareDocumentPosition(at(child)) & 4) { before = child; break; }
+  }
+  if (item.parentNode !== dock || item.nextElementSibling !== before) dock.insertBefore(item, before);
+  return dock;
+}
+
+/** How many visible items sit between this one and the corner — what an open panel must leave room for. */
+function dockBelow(item) {
+  let n = 0;
+  for (let s = item.previousElementSibling; s; s = s.previousElementSibling) if (!s.hidden) n++;
+  return n;
+}
+
+/** Contract ②, both halves: announce an open; close when another item announces one. */
+function dockAnnounce(item) {
+  item.ownerDocument.dispatchEvent(new CustomEvent(DOCK_OPEN, { detail: item }));
+}
+function dockListen(item, close) {
+  const doc = item.ownerDocument;
+  const on = (e) => { if (e.detail !== item) close(); };
+  doc.addEventListener(DOCK_OPEN, on);
+  return () => doc.removeEventListener(DOCK_OPEN, on);
+}
+
+/** `#rgb`, `#rrggbb`, `rgb()`/`rgba()` → [r, g, b] (0–255), or null. */
+function dockRgb(text) {
+  const s = String(text || '').trim();
+  let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s);
+  if (m) {
+    const h = m[1].length === 3 ? m[1].replace(/./g, (c) => c + c) : m[1];
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  }
+  m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(s);
+  return m ? [m[1], m[2], m[3]].map(Number) : null;
+}
+
+/**
+ * Black or white ink for a background, by relative luminance (WCAG 2): white below 0.179, where the
+ * two contrast ratios cross. A colour that cannot be read is treated as dark — the default bubble is.
+ */
+function dockInk(bg) {
+  const rgb = dockRgb(bg);
+  if (!rgb) return '#fff';
+  const [r, g, b] = rgb.map((c) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? '#000' : '#fff';
+}
+// ── DOCK-BASE-END ──
+
 // ── copy ────────────────────────────────────────────────────────────────────
 // Defaults come from the PAGE's declared language (`<html lang>`), which is the
 // site's own statement about who it is for — not from a guess, and not from the
@@ -2969,7 +3177,16 @@ function styleElement() {
 .${PREFIX}-root{position:fixed;z-index:2147483000;font:inherit;
   --${PREFIX}-right:calc(1rem + clamp(0px,var(--_reef-inbox-ox,0px),50vw) + env(safe-area-inset-right,0px));
   --${PREFIX}-bottom:calc(1rem + clamp(0px,var(--_reef-inbox-oy,0px),50vh) + env(safe-area-inset-bottom,0px));
-  right:var(--${PREFIX}-right);bottom:var(--${PREFIX}-bottom)}
+  right:var(--${PREFIX}-right);bottom:var(--${PREFIX}-bottom);
+  display:flex;flex-direction:column;align-items:flex-end;gap:var(--dc-dock-gap,.5rem)}
+/* IN THE DOCK (reef#2790). The corner is the dock's: its margin, the safe areas, the site-wide bottom
+   reserve and the stacking with the site's own corner items. The root is then an ordinary box inside
+   the host the dock lays out; the owner's offset knobs (still read and validated by
+   createPlacement()) become margins on it, so a raised inbox lifts itself and whatever is stacked
+   above it, exactly as far as before. The fixed rule above is for a host that could not join a dock. */
+:host([data-docked]) .${PREFIX}-root{position:relative;right:auto;bottom:auto;z-index:auto;
+  margin:0 clamp(0px,var(--_reef-inbox-ox,0px),50vw) clamp(0px,var(--_reef-inbox-oy,0px),50vh) 0}
+:host([data-docked="bar"]) .${PREFIX}-root{margin:0;align-items:stretch;align-self:stretch}
 /* 🔴 EVERY SHAPE PROPERTY IS SET, not only the four that draw it (reef#2139). The shadow root keeps
    the page's selectors out; the one stylesheet that still reaches this button is the browser's
    own, and its button defaults are exactly these properties, differently per engine. So the shape
@@ -2982,17 +3199,40 @@ function styleElement() {
   aspect-ratio:1;flex:none;border-radius:50%;-webkit-appearance:none;appearance:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
-  box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
-.${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
+  box-shadow:${DOCK_SHADOW};line-height:0}
+/* The SHAPE is the dock's (reef#2790): size, radius and shadow arrive as --dc-dock-* from the dock this
+   bubble sits in — a round 3.5rem bubble in a corner, a square tab in an installed app's bar. The
+   fallbacks are the same round bubble, for a host outside any dock. The shadow is the dock's budget
+   (0 1px 3px + 0 4px 12px: 16px of reach, inside the 16px margin); 0 6px 24px was cut by the screen edge. */
+:host([data-docked]) .${PREFIX}-open{width:var(--dc-dock-w,3.5rem);height:var(--dc-dock-size,3.5rem);
+  border-radius:var(--dc-dock-radius,50%);box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW});
+  background:var(--dc-dock-item-bg,var(--reef-inbox-accent,#111));color:var(--dc-dock-item-ink,var(--reef-inbox-on-accent,#fff))}
+:host([slot="more"]) .${PREFIX}-open{justify-content:flex-start;gap:.75rem;height:3rem;font-size:1rem;line-height:1.2}
+:host([slot="more"]) .${PREFIX}-open::after{content:attr(aria-label)}
+.${PREFIX}-open:focus-visible{outline:2px solid var(--reef-inbox-accent,#111);outline-offset:2px}
+.${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block;flex:none}
 /* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
    room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
    both reduce to the old calc(100vw - 2rem) and min(30rem,70vh). dvh after vh: a phone's toolbar. */
 .${PREFIX}-panel{width:min(22rem,calc(100vw - var(--${PREFIX}-right) - 1rem - env(safe-area-inset-left,0px)));
-  max-height:min(30rem,70vh,calc(100vh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
-  max-height:min(30rem,70dvh,calc(100dvh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px)));
+  max-height:min(30rem,70vh,calc(100vh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px) - 4rem));
+  max-height:min(30rem,70dvh,calc(100dvh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px) - 4rem));
   display:flex;flex-direction:column;border-radius:.9rem;overflow-x:hidden;overflow-y:auto;
   background:var(--reef-inbox-bg,#fff);color:var(--reef-inbox-fg,#111);
-  box-shadow:0 12px 40px rgba(0,0,0,.22)}
+  box-shadow:${DOCK_SHADOW};visibility:visible}
+/* In the dock the panel sits directly above its own bubble (reef#2790), so the room it may take is the
+   dock's visible height less the bubble and every item below it (--_dc-below, counted on open: every
+   item is the same size, so counting is exact — no measuring). The 30rem / 70vh caps are unchanged. */
+:host([data-docked]) .${PREFIX}-panel{
+  width:min(22rem,calc(var(--dc-dock-panel-w,100vw) - clamp(0px,var(--_reef-inbox-ox,0px),50vw)));
+  max-height:min(30rem,70vh,calc(var(--dc-dock-room,100vh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,3.5rem) + var(--dc-dock-gap,.5rem))));
+  max-height:min(30rem,70dvh,calc(var(--dc-dock-room,100dvh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,3.5rem) + var(--dc-dock-gap,.5rem))));
+  box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW})}
+/* In an installed app's bar the panel is a sheet above the bar, as wide as the screen. */
+:host([data-docked="bar"]) .${PREFIX}-panel{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,3.5rem) + env(safe-area-inset-bottom,0px));
+  width:auto;max-height:var(--dc-dock-room,calc(100vh - 4.5rem));border-radius:.9rem .9rem 0 0;
+  box-shadow:0 -1px 3px rgba(0,0,0,.12),0 -4px 12px rgba(0,0,0,.14)}
+@media print{.${PREFIX}-root{display:none}}
 .${PREFIX}-head{display:flex;align-items:flex-start;justify-content:space-between;
   gap:.5rem;padding:.75rem .9rem;border-bottom:1px solid rgba(0,0,0,.08)}
 .${PREFIX}-head-text{min-width:0}
@@ -3654,10 +3894,7 @@ export async function mount(el, handoff = null) {
 
 	/** Wires the close button and, when `headHtml()` rendered one, the second action. */
 	function wireHead() {
-		root.querySelector(`.${PREFIX}-close`).addEventListener('click', () => {
-			open = false;
-			renderClosed();
-		});
+		root.querySelector(`.${PREFIX}-close`).addEventListener('click', () => hide(true));
 		const second = root.querySelector(`.${PREFIX}-second`);
 		if (second) second.addEventListener('click', () => (conv ? goAsk() : goHuman()));
 	}
@@ -3740,7 +3977,23 @@ export async function mount(el, handoff = null) {
 	const root = document.createElement('div');
 	root.className = `${PREFIX}-root`;
 	shadow.appendChild(root);
-	el.appendChild(host);
+	// 🔴 INTO THE CORNER DOCK (reef#2790), not into `el`. The dock is where the corner's items stack in
+	// document order, and `el` — which stays where the page wrote it — is this item's place in that
+	// order (contract ①: the anchor). Where there is no document to join (a test double, a host
+	// without `body`), the host goes into `el` as it did before, and the fixed rules position it.
+	const dock = typeof dockJoin === 'function' && host.ownerDocument ? dockJoin(host, el, 'right') : null;
+	if (dock) host.setAttribute('data-docked', dock.getAttribute('name') || 'right');
+	else el.appendChild(host);
+	// Contract ②: another corner item opening closes this panel — without taking the focus anywhere.
+	const stopListening = dock ? dockListen(host, () => { if (open) hide(false); }) : () => {};
+	// Esc closes the panel and gives the focus back to the bubble. On the root, which every render keeps.
+	if (typeof root.addEventListener === 'function') {
+		root.addEventListener('keydown', (event) => {
+			if (event.key !== 'Escape' || !open) return;
+			event.stopPropagation();
+			hide(true);
+		});
+	}
 	// Where it sits: the owner's offset, read and validated, and room for the composer (see the function).
 	const placement = createPlacement(host, shadow, root);
 
@@ -3799,6 +4052,10 @@ export async function mount(el, handoff = null) {
 	 */
 	function renderOpen() {
 	readName();
+		// How many corner items sit below this one: the room the panel leaves for them (see the CSS).
+		if (dock && host.style && typeof host.style.setProperty === 'function') {
+			host.style.setProperty('--_dc-below', String(dockBelow(host)));
+		}
 		const concluded = handoffConcluded(messages, conversationStatus);
 		const mode = resolveViewMode({ hasHandoffConv: !!handoffConv, storedMode, concluded, kaitoOn });
 		if (mode === 'ask') {
@@ -3823,13 +4080,36 @@ export async function mount(el, handoff = null) {
 		// The words are not deleted, they MOVE: `copy.open` is now the button's
 		// accessible name, so a screen reader says exactly what it said before
 		// while the corner shows a glyph.
-		root.innerHTML =
-			`<button type="button" class="${PREFIX}-open" aria-label="${escHtml(openLabel)}">${OPEN_ICON}</button>`;
+		root.innerHTML = bubbleHtml(false);
 		placement.update();
-		root.querySelector(`.${PREFIX}-open`).addEventListener('click', () => {
-			open = true;
-			renderOpen();
-		});
+		wireBubble();
+	}
+
+	/**
+	 * The bubble. Closed it is the whole root; open it stays BELOW the panel (reef#2790: the panel sits
+	 * directly above its own item), says so with `aria-expanded`, names the panel with
+	 * `aria-controls`, and a press on it closes the panel again.
+	 */
+	function bubbleHtml(expanded) {
+		return `<button type="button" class="${PREFIX}-open" aria-label="${escHtml(openLabel)}" aria-expanded="${expanded}" aria-controls="${PREFIX}-panel">${OPEN_ICON}</button>`;
+	}
+	function wireBubble() {
+		root.querySelector(`.${PREFIX}-open`).addEventListener('click', () => (open ? hide(true) : show()));
+	}
+	/** Opens the panel — every way in (a click, `reef-inbox:open`, `#inbox`) comes through here. */
+	function show() {
+		open = true;
+		renderOpen();
+		if (dock) dockAnnounce(host);
+	}
+	/** Closes it; `focus` returns the focus to the bubble (Esc, ×, the bubble) — never when another item took over. */
+	function hide(focus) {
+		open = false;
+		renderClosed();
+		if (focus) {
+			const bubble = root.querySelector(`.${PREFIX}-open`);
+			if (bubble && bubble.focus) bubble.focus();
+		}
 	}
 
 	/**
@@ -3956,16 +4236,17 @@ export async function mount(el, handoff = null) {
 	 */
 	function renderAsk() {
 		root.innerHTML = `
-<div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(panelLabel)}">
+<div class="${PREFIX}-panel" id="${PREFIX}-panel" role="dialog" aria-label="${escHtml(panelLabel)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
   ${searchBlockHtml()}<form class="${PREFIX}-form">
     <textarea name="q" rows="1" placeholder="${escHtml(copy.ask)}"></textarea>
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
-</div>`;
+</div>${bubbleHtml(true)}`;
 		placement.update();
 		wireHead();
+		wireBubble();
 
 		const form = root.querySelector(`.${PREFIX}-form`);
 		const textarea = form.querySelector('textarea');
@@ -4051,7 +4332,7 @@ export async function mount(el, handoff = null) {
 
 	function renderMessages() {
 		root.innerHTML = `
-<div class="${PREFIX}-panel" role="dialog" aria-label="${escHtml(copy.title)}">
+<div class="${PREFIX}-panel" id="${PREFIX}-panel" role="dialog" aria-label="${escHtml(copy.title)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
   <div class="${PREFIX}-log"></div>
   ${replyWithinHours ? `<p class="${PREFIX}-hint">${escHtml(copy.within(replyWithinHours))}</p>` : ''}
@@ -4062,13 +4343,14 @@ export async function mount(el, handoff = null) {
     <textarea name="text" rows="1" placeholder="${escHtml(copy.placeholder)}"></textarea>
     <button type="submit">${escHtml(copy.send)}</button>
   </form>
-</div>`;
+</div>${bubbleHtml(true)}`;
 
 		const log = root.querySelector(`.${PREFIX}-log`);
 		renderLog(log, messages);
 		placement.update();
 
 		wireHead();
+		wireBubble();
 
 		const form = root.querySelector(`.${PREFIX}-form`);
 		const textarea = form.querySelector('textarea');
@@ -4147,8 +4429,7 @@ export async function mount(el, handoff = null) {
 			if (textarea && textarea.focus) textarea.focus();
 			return;
 		}
-		open = true;
-		renderOpen();
+		show();
 	}
 
 	// #13: a programmatic way in. A site's own "report a problem" footer link can open this panel
@@ -4219,6 +4500,7 @@ export async function mount(el, handoff = null) {
 		window.removeEventListener('reef-inbox:open', openPanel);
 		window.removeEventListener('pagehide', onPagehide);
 		window.removeEventListener('pageshow', onPageshow);
+		stopListening();
 		stopPolling();
 		placement.dispose();
 		host.remove();

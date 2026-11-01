@@ -735,8 +735,11 @@ test('B3: nothing is left of the hand-off event — no listener, no export, no R
 	// that an open was asked for (`openRequested = true`), naming nothing. The fourth (0.7.15,
 	// tile#193) is the funnel's `pageshow` — the browser's own event, read for `persisted` only.
 	// The fifth (0.7.16, tile#199) is `createPlacement`'s `resize`: the browser's own event, which
-	// re-reads the owner's offset knobs and takes no argument.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 5);
+	// re-reads the owner's offset knobs and takes no argument. The sixth (reef#2790) is the corner
+	// dock's own `resize`, installed once per DOCK (not per mount) by the pasted dock base when it
+	// creates one: the browser's event again, re-reading the site's bottom reserve, naming nothing.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 6);
+	assert.match(CORAL_CODE, /window\.addEventListener\('resize', \(\) => dockReserve\(dock\)\);/);
 	assert.match(CORAL_CODE, /const onResize = \(\) => update\(\);\s*window\.addEventListener\('resize', onResize\);/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', openPanel\);/);
 	assert.match(CORAL_CODE, /window\.addEventListener\('reef-inbox:open', heldOpen\);/);
@@ -777,8 +780,13 @@ test('B3: the header bounds its own claim to what this file controls', () => {
 test('B9: every window listener mount() adds has a removal beside it', () => {
 	// Five registrations, six removals: the claim gate's stand-in is removed on two paths — when
 	// the answer arrives and on an `unmount` before it does (mount.test.mjs measures both). The
-	// placement's `resize` (0.7.16) is removed by its `dispose()`, which the unmount calls.
-	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 5);
+	// placement's `resize` (0.7.16) is removed by its `dispose()`, which the unmount calls. The sixth
+	// registration (reef#2790) is the corner DOCK's `resize`, not this mount's: the dock outlives any one
+	// item in it (another coral's items share it), so it has no removal, and an unmount leaves it be.
+	// What mount() itself adds for the dock — its `dc-dock:open` listener on `document` — is removed
+	// by `stopListening()` in the same teardown.
+	assert.equal((CORAL_CODE.match(/window\.addEventListener\(/g) || []).length, 6);
+	assert.match(CORAL_CODE, /stopListening\(\);\s*stopPolling\(\);/);
 	assert.equal((CORAL_CODE.match(/window\.removeEventListener\(/g) || []).length, 6);
 	assert.match(CORAL_CODE, /window\.removeEventListener\('resize', onResize\);/);
 	assert.match(CORAL_CODE, /stopPolling\(\);\s*placement\.dispose\(\);\s*host\.remove\(\);/);
