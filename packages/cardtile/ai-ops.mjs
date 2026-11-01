@@ -90,13 +90,13 @@ const LEGACY_SLIDES = {
   fromEmbed:
     'A line spelled `embed` that carries a `kind=` token is not an HTML embed: it is the legacy spelling of `slides`, and saving it keeps the word `embed`. ' +
     'It draws a slideshow only when `kind` is `slider` or `bubbles`; with an empty value (`kind=""`), no value (`kind=`) or any other value it draws nothing. ' +
-    'Instead of an HTML body it carries the slides params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`; when both are present, `narrow` wins). ' +
+    'Instead of an HTML body it carries the slides params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`; when both are present, a nonempty `narrow` wins, and an empty `narrow=""` falls back to `origin-narrow`). ' +
     'The same params under the word `slides` draw the same thing, except that `slides` draws a slider when `kind` has no value (`kind=` or no `kind` at all), so rewriting a legacy line whose `kind=` has no value as `slides` makes its images visible. ' +
     'Removing `kind=` from a line spelled `embed` makes it an HTML embed, and the slideshow is gone.',
   fromSlides:
     'Cards saved before this cell had its own name use a legacy spelling for it: `embed` with a `kind=` token, e.g. `- [ ] %% card: embed kind=slider images=… %%`. ' +
     'That line is this cell, not an HTML embed, and saving it keeps the word `embed`. ' +
-    'It carries the same params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`, read under either spelling; when both are present, `narrow` wins). ' +
+    'It carries the same params: kind, images, origin, narrow, origin-narrow, bg, w, bleed (`origin-narrow` is the older name of `narrow`, read under either spelling; when both are present, a nonempty `narrow` wins, and an empty `narrow=""` falls back to `origin-narrow`). ' +
     'A legacy line draws a slideshow only when `kind` is `slider` or `bubbles`; with an empty value (`kind=""`), no value (`kind=`) or any other value it draws nothing. ' +
     'This cell draws a slider when `kind` has no value (`kind=` or no `kind` at all), so rewriting a legacy line whose `kind=` has no value as `slides` makes its images visible; otherwise the same params under either word draw the same thing. ' +
     'Removing `kind=` from a line spelled `embed` makes it an HTML embed, and the slideshow is gone.',

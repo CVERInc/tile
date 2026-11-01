@@ -453,7 +453,7 @@ test('ðŸ”´ the grammar says an `embed` line with `kind=` is a legacy `slides` â€
     assert.match(s, /draws a slider when `kind` has no value/, `${type}: does not say \`slides\` defaults an absent kind`);
     assert.match(s, /makes its images visible/, `${type}: does not say what that rewrite does`);
     assert.match(s, /`origin-narrow` is the older name of `narrow`/, `${type}: does not name the narrow alias`);
-    assert.match(s, /when both are present, `narrow` wins/, `${type}: does not say which spelling wins`);
+    assert.match(s, /when both are present, a nonempty `narrow` wins, and an empty `narrow=""` falls back to `origin-narrow`/, `${type}: does not say which spelling wins, empty narrow included`);
   }
   assert.match(said.embed, /legacy spelling of `slides`/);
 
@@ -483,6 +483,8 @@ test('ðŸ”´ the grammar says an `embed` line with `kind=` is a legacy `slides` â€
   // `origin-narrow` is read, and `narrow` wins by name
   assert.match(await drawn(`%% card: embed kind=bubbles ${IMG} origin-narrow="1% 2%" %%`), /max-width:888px\)\{\.st-carousel figure\{transform-origin:1% 2%\}/);
   assert.match(await drawn(`%% card: embed kind=bubbles ${IMG} origin-narrow="1% 2%" narrow="3% 4%" %%`), /max-width:888px\)\{\.st-carousel figure\{transform-origin:3% 4%\}/);
+  // ...but only a NONEMPTY `narrow`: the renderer reads `p.narrow || p['origin-narrow']`, so `narrow=""` falls back to the alias
+  assert.match(await drawn(`%% card: embed kind=bubbles ${IMG} origin-narrow="1% 2%" narrow="" %%`), /max-width:888px\)\{\.st-carousel figure\{transform-origin:1% 2%\}/);
   // and without `kind=` the word means HTML
   assert.equal(parseCard(card(`- [ ] %% card: embed ${IMG} w=6 %%`)).cells[0].type, 'embed', 'without `kind=` it is HTML');
 });
