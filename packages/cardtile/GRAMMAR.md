@@ -64,7 +64,7 @@ over its mark; these thumbnails also retain their colours in mono mode.
 
 ## Embed and slides
 
-`embed` is pasted HTML, scripts included ([reef#2725](https://github.com/CVERInc/reef/issues/2725)):
+`embed` is pasted HTML, scripts included (reef#2725):
 
 ```markdown
 - [ ] %% card: embed w=3 %% <div id="t"></div><script>t.textContent = new Date().toLocaleTimeString()</script>
