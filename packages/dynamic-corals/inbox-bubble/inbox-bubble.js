@@ -2982,7 +2982,7 @@ function styleElement() {
   aspect-ratio:1;flex:none;border-radius:50%;-webkit-appearance:none;appearance:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
-  box-shadow:0 6px 24px rgba(0,0,0,.18);line-height:0}
+  box-shadow:0 3px 12px rgba(0,0,0,.2);line-height:0}
 .${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block}
 /* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
    room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
