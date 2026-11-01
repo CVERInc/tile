@@ -65,14 +65,14 @@
       "type": "string",
       "required": false,
       "default": "0,1,2,3,4,5,6,7,8,9",
-      "description": "On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them; with data-flip-mode=\"drum\" the same list, in the order written, is the wheel the cards turn through."
+      "description": "On a data-flip element: comma-separated faces its cards can show. Every card is locked to the widest of them. It only sizes the cards: with data-flip-mode=\"drum\" the wheel is still 9, 8, … 0, so the default written out behaves exactly like leaving it out."
     },
     {
       "name": "data-flip-mode",
       "type": "enum",
       "required": false,
       "default": null,
-      "description": "On a data-flip element: drum makes each card a counter wheel that only turns forward (9, 8, … 0 by default), folding through every digit in between — the tens of the seconds go 0→9→8→7→6→5 at the minute. Unset keeps the straight-to-target flip. Reduced motion always goes straight.",
+      "description": "On a data-flip element: drum makes each card a counter wheel that only turns forward (always 9, 8, … 0), folding through every digit in between — the tens of the seconds go 0→9→8→7→6→5 at the minute. Unset keeps the straight-to-target flip. Reduced motion always goes straight.",
       "values": [
         "drum"
       ]
