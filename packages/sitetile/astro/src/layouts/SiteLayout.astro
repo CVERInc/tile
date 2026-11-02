@@ -164,10 +164,12 @@ const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(
 // footer below is untouched (an existing footer stays as-is).
 const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
 // Columns keep .rf-foot-col and add --<1-based position> plus --<ASCII heading slug>.
-// Empty slugs and later occurrences of the same slug have only the positional modifier.
-const footerColSlugs = new Set();
-const footerCols = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean).map((col, index) => {
-  const ci = col.indexOf(':');
+// Empty, positional, and repeated slugs have only the positional modifier.
+const footerColParts = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean);
+const footerColSlugs = new Set(footerColParts.map((_, index) => String(index + 1)));
+const footerCols = footerColParts.map((col, index) => {
+  const firstColon = col.indexOf(':');
+  const ci = firstColon >= 0 && !col.slice(0, firstColon).includes('=') ? firstColon : -1;
   const head = ci >= 0 ? col.slice(0, ci).trim() : '';
   const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
   const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
