@@ -163,14 +163,22 @@ const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(
 // e.g. "coming soon" labels). General (any site's columned footer); absent → the simple centered
 // footer below is untouched (an existing footer stays as-is).
 const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
-const footerCols = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean).map((col) => {
-  const ci = col.indexOf(':');
+// Columns keep .rf-foot-col and add --<1-based position> plus --<ASCII heading slug>.
+// Empty, positional, and repeated slugs have only the positional modifier.
+const footerColParts = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean);
+const footerColSlugs = new Set(footerColParts.map((_, index) => String(index + 1)));
+const footerCols = footerColParts.map((col, index) => {
+  const firstColon = col.indexOf(':');
+  const ci = firstColon >= 0 && !col.slice(0, firstColon).includes('=') ? firstColon : -1;
   const head = ci >= 0 ? col.slice(0, ci).trim() : '';
   const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
   const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
     const m = it.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
   });
-  return { head, items };
+  const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const nameClass = slug && !footerColSlugs.has(slug) ? ` rf-foot-col--${slug}` : '';
+  if (slug) footerColSlugs.add(slug);
+  return { head, items, className: `rf-foot-col rf-foot-col--${index + 1}${nameClass}` };
 });
 // round 3 (Astro consumers, R2-P3-5): `footer-logo`/`site-logo` are raw frontmatter image
 // destinations reaching a live `<img src>` in three places below with no gate of their own;
@@ -1388,7 +1396,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
             </div>
             <div class="rf-foot-cols">
               {footerCols.map((col) => (
-                <div class="rf-foot-col">
+                <div class={col.className}>
                   {col.head && <h4>{col.head}</h4>}
                   {col.items.map((it) => {
                     // round 4 (R3-P3-2): hoisted to a const — was three calls per item.
