@@ -212,3 +212,25 @@ that constant is enabled, an omitted option permits per-page degradation: failur
 are grouped by reason with a page count and up to five page paths, generated image
 metadata is removed (Open Graph, Twitter and JSON-LD), and the build continues. Explicit
 `true` remains strict regardless of the default.
+
+## Footer columns
+
+In `_site.md`, `footer-cols:` puts columns in the footer:
+
+```yaml
+footer-cols: Company: About=/about ;; Help: FAQ=/faq
+```
+
+`;;` separates columns; `;` separates items within a column. A column starts with
+`Heading:`. Items use `Label=href`; omit `=href` for plain text.
+
+Each column keeps `rf-foot-col` and adds `rf-foot-col--<n>` (1-based position)
+and `rf-foot-col--<slug>` (the heading in lowercase ASCII, with runs of
+non-alphanumeric characters replaced by `-` and leading/trailing `-` removed).
+For example, the first column above has
+`rf-foot-col rf-foot-col--1 rf-foot-col--company`. Use the name class to style a
+column across position changes, or the positional class to style a given slot.
+An empty slug (such as a CJK-only heading) adds only the positional class.
+When headings produce the same slug, only the first gets the name class;
+later columns get only their positional class. Sites without `footer-cols`
+keep their existing footer HTML.
