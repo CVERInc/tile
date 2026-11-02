@@ -54,6 +54,7 @@ export const FIXED = [
   ['data-url="${e(qrUrl)}', 1, "the QR code encodes the card's own address (emit/hero.mjs heroCell, the QR mount)"],
   ['background-image:url("${cssUrlString(bgOk)}', 1, "emit/hero.mjs's SITE hero (no Card cell writes it): bgOk is gated by safeSrc and quoted by cssUrlString"],
   ['href="#${id}', 1, 'in-page drawer anchor'],
+  ['href="#${esc(id)}', 1, 'in-page back anchor: a lane id that backTarget() checked against the card\'s own back lanes'],
   ['background-image:url("${img}', 1, 'the same BACKDROP_CSS url(), seen once more as a background declaration'],
   ['background:linear-gradient(180deg,color-mix(in srgb,var(--cp-ground,#0a1628) ${dim}', 1, 'BACKDROP_CSS: `dim` is a clamped number (colour.mjs), no URL in this declaration'],
   ['href="${esc(l.href)}', 1, 'icon <link>s: local icon routes, or the avatar already registered as the profile image'],
