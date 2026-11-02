@@ -114,7 +114,7 @@ inbox-bubble-color: accent
 | `accent` (trimmed, any case) | `style="--reef-inbox-accent:var(--gd-accent);--reef-inbox-on-accent:var(--gd-accent-ink,#fff)"`: the bubble takes the theme's accent, and its icon takes the theme's text-on-accent colour |
 | no line, `default`, empty, anything else | no `style` attribute at all. The markup is byte-identical to a build from before the key existed |
 
-Nothing changes inside the coral. It already reads those two knobs from its container through an open shadow root, so the custom properties inherit (see `packages/dynamic-corals/inbox-bubble/README.md`). Without the line, a theme or custom CSS that sets `--reef-inbox-accent` on `:root` or on a wrapper still works exactly as before. With the line, the inline style on the mount is closer to the bubble than either of those, so the theme accent wins.
+Nothing changes inside the coral. It already reads those two knobs from its container through an open shadow root, so the custom properties inherit (see `packages/dynamic-corals/inbox-bubble/README.md`). Without the line, a theme or custom CSS that sets `--reef-inbox-accent` on `:root` or on a wrapper still works exactly as before. With the line, the inline style on the mount is closer to the bubble than either of those, so the theme accent wins. The key colours the corner bubble only: in the installed-app bottom bar the dock's own item colours apply, as they do for every accent source. If a custom theme drops `--gd-accent` entirely, the variable is invalid, the bubble falls back to its default black, and nothing breaks.
 
 ### `_headers` — the build owns it
 
