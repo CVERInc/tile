@@ -53,6 +53,11 @@ const WIDTH = {
   optionLabels: { 6: 'width.6', 3: 'width.3' },
 };
 
+// `back=#id` opens one of the card's `## back:` lanes as this tile's other side (reef#2725). RAW: the
+// editor sets it by picking a back, not by typing an id, and that picker is a separate change.
+// Honoured by the four types card-render gives a door or a back anchor (DOOR_TYPES + link/feature).
+const BACK = { disposition: DISPOSITION.RAW, label: 'back.label', hint: 'back.hint' };
+
 /**
  * Params every cell has, whatever its type. Read by `packGrid` (w) and `renderGrid` (bleed) rather
  * than by any one `case`, which is why a per-type scan alone would miss them.
@@ -117,6 +122,7 @@ export const CELL_TYPES = {
     params: {
       avatar: { disposition: DISPOSITION.FORM, label: 'type.profile.avatar.label', control: CONTROL.ASSET, hint: 'type.profile.avatar.hint' },
       chips: { disposition: DISPOSITION.FORM, label: 'type.profile.chips.label', control: CONTROL.TEXT, hint: 'type.profile.chips.hint' },
+      back: BACK,
     },
     // 🔴 `name` is DERIVED and it is the reason this whole mechanism exists. The name a visitor sees
     // is the FILE's frontmatter `title:`, not anything on this cell — so "改名字" had no field at
@@ -139,6 +145,7 @@ export const CELL_TYPES = {
       iconhost: { disposition: DISPOSITION.FORM, label: 'type.link.iconhost.label', control: CONTROL.URL, hint: '' },
       iconimg: { disposition: DISPOSITION.FORM, label: 'type.link.iconimg.label', control: CONTROL.ASSET, hint: 'type.link.iconimg.hint' },
       w: WIDTH,
+      back: BACK,
     },
     // text + address are TWO fields and ONE body (`[text](url)`). The editor composes them; nobody
     // is ever shown, or asked to type, the square brackets.
@@ -171,6 +178,7 @@ export const CELL_TYPES = {
       title: { disposition: DISPOSITION.FORM, label: 'type.feature.title.label', control: CONTROL.TEXT, hint: '' },
       cta: { disposition: DISPOSITION.FORM, label: 'type.feature.cta.label', control: CONTROL.TEXT, hint: 'type.feature.cta.hint' },
       w: WIDTH,
+      back: BACK,
     },
     form: [
       { source: SOURCE.PARAM, name: 'img' },
@@ -191,7 +199,7 @@ export const CELL_TYPES = {
     title: 'type.text.title',
     hint: 'type.text.hint',
     body: { label: 'type.text.body.label', control: CONTROL.AREA, hint: 'type.text.body.hint', rows: 6 },
-    params: {},
+    params: { back: BACK },
     form: [{ source: SOURCE.BODY }],
   },
 

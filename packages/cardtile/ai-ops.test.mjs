@@ -99,10 +99,22 @@ test('every type the renderer handles is in the definition, and nothing else is'
   assert.deepEqual(Object.keys(BLANKS).sort(), Object.keys(CELL_TYPES).sort(), 'BLANKS does not cover the types');
 });
 
+// `back` is read by ONE helper, backTarget(p, ctx), not by any case: a case that calls it reads
+// `back`, and so does every type in DOOR_TYPES, whose door renderCell adds around the case. Both are
+// taken from the renderer's source, so declaring `back` on a type that has neither fails (b) below.
+const BACK_HELPER = /const backTarget = \(p, ctx\) => \{[\s\S]*?\bp\.back\b/;
+const DOOR_TYPES = new Set([.../const DOOR_TYPES = new Set\(\[([^\]]*)\]\)/.exec(RENDER)?.[1].matchAll(/'(\w+)'/g) ?? []].map((m) => m[1]));
+
+test('`back` is read where it claims to be: backTarget, called by cases and by the door', () => {
+  assert.match(RENDER, BACK_HELPER, 'backTarget no longer reads p.back');
+  assert.ok(DOOR_TYPES.size > 0, 'DOOR_TYPES was not found in card-render: the scan below would measure nothing');
+});
+
 test('🔴 every param the renderer READS is declared — in both directions', () => {
   const universal = new Set(Object.keys(UNIVERSAL));
   for (const [type, src] of Object.entries(CASES)) {
     const read = paramsIn(src);
+    if (DOOR_TYPES.has(type) || /\bbackTarget\(p\b/.test(src)) read.add('back');
     for (const helper of DELEGATES[type] || []) for (const p of paramsIn(fnBody(helper))) read.add(p);
     const declared = new Set([...Object.keys(CELL_TYPES[type].params), ...universal]);
 

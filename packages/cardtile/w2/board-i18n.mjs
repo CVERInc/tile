@@ -43,12 +43,13 @@ export const BOARD_STRINGS_BY_KEY = {
   },
   // ── the drawer: the preview's chip into it, and the board's words for which tile opens it ──────
   //
-  // 🔴 The drawer keeps the word 「抽屜」 (CARD-VOCAB-ADDENDUM-2026-09-06). The THING you touch is a
-  // 牌; the LANE is a lane; the second-level card is a 抽屜. Three words, three meanings, no overlap.
+  // 🔴 The THING you touch is a 牌; the LANE is a lane; the second-level card is a 背面 (back side).
+  // Three words, three meanings, no overlap. It was 「抽屜」 (CARD-VOCAB-ADDENDUM-2026-09-06) until the
+  // drawer became the tile's other side and the lane heading became `## back:` (reef#2725, 2026-11-02).
   'board.opensDrawer': {
-    zh: '牽到抽屜', ja: '引き出しへつながる', en: 'Opens a drawer', ko: '서랍으로 이어져요',
-    'zh-Hans': '牵到抽屉', de: 'Öffnet eine Schublade', fr: 'Ouvre un tiroir',
-    es: 'Abre un cajón', pt: 'Abre uma gaveta',
+    zh: '翻到背面', ja: '裏返る', en: 'Turns over', ko: '뒷면으로 뒤집혀요',
+    'zh-Hans': '翻到背面', de: 'Dreht sich um', fr: 'Se retourne',
+    es: 'Se da la vuelta', pt: 'Vira',
   },
   // ── the drawer relation, said in WORDS (owner ruling 2026-09-24: "a view answers one question";
   // a one-to-one relation does not need a line, a word does). The dashed 牽線 lines are gone; the
@@ -66,13 +67,13 @@ export const BOARD_STRINGS_BY_KEY = {
   },
   // a link that names a drawer nobody made. Reported, not hidden — see board-bridge's drawerLinks.
   'board.danglingDrawer': {
-    zh: '這張牌指向一個不存在的抽屜', ja: 'このカードは存在しない引き出しを指しています',
-    en: 'This tile points at a drawer that does not exist', ko: '이 카드는 없는 서랍을 가리켜요',
-    'zh-Hans': '这张牌指向一个不存在的抽屉',
-    de: 'Diese Kachel zeigt auf eine Schublade, die es nicht gibt',
-    fr: 'Cette tuile pointe vers un tiroir qui n’existe pas',
-    es: 'Esta ficha apunta a un cajón que no existe',
-    pt: 'Esta peça aponta para uma gaveta que não existe',
+    zh: '這張牌指向一個不存在的背面', ja: 'このカードは存在しない裏面を指しています',
+    en: 'This tile turns over to a back side that does not exist', ko: '이 카드는 없는 뒷면을 가리켜요',
+    'zh-Hans': '这张牌指向一个不存在的背面',
+    de: 'Diese Kachel zeigt auf eine Rückseite, die es nicht gibt',
+    fr: 'Cette tuile pointe vers un verso qui n’existe pas',
+    es: 'Esta ficha apunta a un reverso que no existe',
+    pt: 'Esta peça aponta para um verso que não existe',
   },
   // ── HOST MODE: the save status beside 「存」 (feelreef embeds the editor on a real card) ──────
   // The Save button itself reuses the chrome's `pubSave`, already in all nine.
@@ -125,15 +126,15 @@ export const BOARD_STRINGS_BY_KEY = {
   // happens next). One line under each view's heading, and the picker's destination. `{front}` /
   // `{back}` are the chrome's own faceTabLabel / mdBack, so the sentence names what the screen shows.
   'board.tableHint': {
-    zh: '整張卡的每一張牌都在這裡。拖動可以換順序，點一下可以修改。「{front}」是訪客先看到的；其他欄是抽屜，由某張牌打開。',
-    ja: 'カードのタイルがすべてここに並びます。ドラッグで並べ替え、タップで編集。「{front}」は最初に見える面、ほかの列はタイルから開く引き出しです。',
-    en: 'Every tile on your card, in order. Drag to reorder; tap one to change it. “{front}” is what visitors see first; the other lanes are drawers a tile opens.',
-    ko: '카드의 모든 타일이 여기 있어요. 끌어서 순서를 바꾸고, 눌러서 고쳐요. 「{front}」은 방문자가 먼저 보는 곳, 다른 줄은 타일이 여는 서랍이에요.',
-    'zh-Hans': '整张卡的每一张牌都在这里。拖动可以换顺序，点一下可以修改。「{front}」是访客先看到的；其他栏是抽屉，由某张牌打开。',
-    de: 'Alle Kacheln Ihrer Karte, der Reihe nach. Ziehen zum Umsortieren, antippen zum Ändern. „{front}“ sehen Besucher zuerst; die anderen Spalten sind Schubladen, die eine Kachel öffnet.',
-    fr: 'Toutes les tuiles de votre carte, dans l’ordre. Glissez pour réordonner, touchez pour modifier. « {front} » est ce que les visiteurs voient d’abord ; les autres colonnes sont des tiroirs qu’une tuile ouvre.',
-    es: 'Todas las fichas de tu tarjeta, en orden. Arrastra para reordenar; toca una para cambiarla. «{front}» es lo que se ve primero; las demás columnas son cajones que abre una ficha.',
-    pt: 'Todas as peças do seu cartão, em ordem. Arraste para reordenar; toque em uma para mudá-la. “{front}” é o que as visitas veem primeiro; as outras colunas são gavetas que uma peça abre.',
+    zh: '整張卡的每一張牌都在這裡。拖動可以換順序，點一下可以修改。「{front}」是訪客先看到的；其他欄是背面，由某張牌翻過去。',
+    ja: 'カードのタイルがすべてここに並びます。ドラッグで並べ替え、タップで編集。「{front}」は最初に見える面、ほかの列はタイルの裏面です。',
+    en: 'Every tile on your card, in order. Drag to reorder; tap one to change it. “{front}” is what visitors see first; the other lanes are back sides a tile turns over to.',
+    ko: '카드의 모든 타일이 여기 있어요. 끌어서 순서를 바꾸고, 눌러서 고쳐요. 「{front}」은 방문자가 먼저 보는 곳, 다른 줄은 타일의 뒷면이에요.',
+    'zh-Hans': '整张卡的每一张牌都在这里。拖动可以换顺序，点一下可以修改。「{front}」是访客先看到的；其他栏是背面，由某张牌翻过去。',
+    de: 'Alle Kacheln Ihrer Karte, der Reihe nach. Ziehen zum Umsortieren, antippen zum Ändern. „{front}“ sehen Besucher zuerst; die anderen Spalten sind Rückseiten von Kacheln.',
+    fr: 'Toutes les tuiles de votre carte, dans l’ordre. Glissez pour réordonner, touchez pour modifier. « {front} » est ce que les visiteurs voient d’abord ; les autres colonnes sont les versos des tuiles.',
+    es: 'Todas las fichas de tu tarjeta, en orden. Arrastra para reordenar; toca una para cambiarla. «{front}» es lo que se ve primero; las demás columnas son los reversos de las fichas.',
+    pt: 'Todas as peças do seu cartão, em ordem. Arraste para reordenar; toque em uma para mudá-la. “{front}” é o que as visitas veem primeiro; as outras colunas são os versos das peças.',
   },
   'board.mdLead': {
     zh: '這是你整張卡片寫成文字的樣子。在這裡改字，卡片會跟著變；按「{back}」時會先檢查一遍，看不懂的地方不會套用。',
