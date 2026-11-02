@@ -28,6 +28,16 @@ export function bubbleSearchOn(meta = {}) {
   return !OFF.test(String(meta['inbox-bubble-search'] ?? 'on').trim());
 }
 
+// inboxBubbleStyle: the mount's inline style for `inbox-bubble-color` (opt-in, site-level).
+// `accent` points the coral's two public colour knobs at the theme's accent and its ink; the coral reads
+// them from its container (an open shadow root, so custom properties inherit; inbox-bubble.js `carry`).
+// Any other value — no key, `default`, empty, a typo — returns undefined, so Astro emits NO style
+// attribute and the mount stays byte-identical to a site that never heard of the key.
+export function inboxBubbleStyle(meta = {}) {
+  if (String(meta?.['inbox-bubble-color'] ?? '').trim().toLowerCase() !== 'accent') return undefined;
+  return '--reef-inbox-accent:var(--gd-accent);--reef-inbox-on-accent:var(--gd-accent-ink,#fff)';
+}
+
 export function inboxBubbleOn(meta = {}, pathname = '/', renderedBody = '') {
   if (renderedBody.includes('data-dynamic-coral="inbox-bubble"')) return false;
   const raw = String(meta['inbox-bubble'] ?? 'on').trim();

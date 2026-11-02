@@ -573,6 +573,8 @@ function buildHostileBlogFixture() {
   // `blog-category-base`/`blog-tag-base` with the term routes turned on, and `blog-search: true`
   // so search-index.json carries content under the magnifier's own switch (reef#2160: the primary
   // build now carries rows too, through the bubble's switch — see the reef#2160 checks below).
+  // It also opts into `inbox-bubble-color`, spelled with odd case and padding, so the built mount
+  // carries the accent style here while every primary-build mount stays without one.
   rmSync(join(HDIR, 'content'), { recursive: true, force: true });
   mkdirSync(join(HDIR, 'content'), { recursive: true });
   writeFileSync(join(HDIR, 'content', '_site.md'), `---
@@ -586,6 +588,7 @@ blog-tag-routes: true
 blog-category-base: javascript:void(0)
 blog-tag-base: javascript:void(0)
 blog-search: true
+inbox-bubble-color:  Accent
 ---
 `, 'utf8');
   writeFileSync(join(HDIR, 'content', 'home.md'), `---
@@ -2339,6 +2342,14 @@ const checks = [
   // site holds 3 base posts (+1 zh-TW translation, not a row) under `packages: lingo`.
   ['reef#2160 hostile-blog-site (posts, no `packages: blog`): the bubble mount carries data-search-index="/search-index.json"', () =>
     /<div data-dynamic-coral="inbox-bubble"[^>]* data-search-index="\/search-index\.json"[^>]*><\/div>/.test(hostileIndex)],
+  // `inbox-bubble-color: accent` (hostile fixture only): the mount points the coral's two knobs at
+  // the theme tokens, verbatim. The primary build sets no key, so no mount there carries a style.
+  ['inbox-bubble-color: accent: the built mount carries exactly the theme-accent style', () =>
+    occIn(hostileIndex, 'data-dynamic-coral="inbox-bubble"') === 1
+    && /<div data-dynamic-coral="inbox-bubble"[^>]* style="--reef-inbox-accent:var\(--gd-accent\);--reef-inbox-on-accent:var\(--gd-accent-ink,#fff\)"><\/div>/.test(hostileIndex)],
+  ['inbox-bubble-color unset (primary build): no bubble mount carries a style attribute', () =>
+    occIn(html, 'data-dynamic-coral="inbox-bubble"') === 1 && occIn(markers, 'data-dynamic-coral="inbox-bubble"') === 1
+    && !/<div data-dynamic-coral="inbox-bubble"[^>]*\sstyle=/.test(html + markers)],
   ['reef#2160 primary build (posts, no blog-search): the bubble mount carries data-search-index, and the magnifier is still off', () =>
     /<div data-dynamic-coral="inbox-bubble"[^>]* data-search-index="\/search-index\.json"[^>]*><\/div>/.test(html) && !html.includes('data-search-toggle')],
   ['reef#2160 primary build (no blog-search, bubble default on): search-index.json carries its 3 base posts, each with t/u/d', () => {
