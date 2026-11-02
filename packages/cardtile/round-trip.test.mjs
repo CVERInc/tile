@@ -299,3 +299,26 @@ test('🩸 the tile text no longer carries a #type hashtag', () => {
   assert.ok(!/#[^\s#]/.test(board.split('\n').filter((l) => l.startsWith('- [ ]')).join('\n')),
     'a tile line still carries a hashtag');
 });
+
+// A card the store accepts must be a card the parser can read. CARD_MAX_BYTES (25 MiB) is the only hard limit,
+// so the worst case for item COUNT is a ceiling-sized card of one-line text items: 877,516 of them. parseCard
+// once appended a lane with push(...cells), which passes every cell as an argument and overflowed the call
+// stack long before that (reef.cards capacity demo, 2026-11-02). Built here at the real ceiling, not a guess.
+test('a card at the byte ceiling made of one-line items parses and round-trips exactly', async () => {
+  const { CARD_MAX_BYTES, utf8Length } = await import('./card-core.js');
+  const head = '## grid\n\n';
+  const lines = [];
+  let bytes = head.length;
+  for (let i = 0; ; i++) {
+    const line = `- [ ] %% card: text %% ${i}\n`;
+    if (bytes + line.length > CARD_MAX_BYTES) break;   // ASCII only: characters = bytes
+    lines.push(line);
+    bytes += line.length;
+  }
+  const md = head + lines.join('');
+  assert.ok(utf8Length(md) <= CARD_MAX_BYTES, 'the fixture itself must fit under the ceiling');
+  assert.ok(lines.length > 800_000, `expected the ceiling to hold over 800k one-line items, built ${lines.length}`);
+  const model = parseCard(md);
+  assert.equal(model.cells.length, lines.length);
+  assert.equal(serializeCard(model), md);
+});

@@ -241,7 +241,9 @@ function parseCard(md) {
     const label = faceLane == null ? '' : String(col.title || '').trim();
     if (faceLane == null) faceLane = col.title;
     blocks.push({ label, start: cells.length, count: laneCells.length });
-    cells.push(...laneCells);
+    // one push per cell, not push(...laneCells): spreading a lane passes every cell as an argument and overflows
+    // the call stack around 10^5 cells, while a card under CARD_MAX_BYTES can hold ~877k one-line text cells.
+    for (const c of laneCells) cells.push(c);
   }
   if (!blocks.length) blocks.push({ label: '', start: 0, count: 0 });
   return {

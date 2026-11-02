@@ -19,6 +19,11 @@ const PRIVATE_LINK = ['CVERInc', 'reef'].join('/') + '#1'; // assembled so this 
 const made = [];
 process.on('exit', () => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 
+// Run from a git hook (pre-push runs this suite), git exports GIT_DIR and friends. Every `git init` / `git add` below and
+// the gate it spawns would inherit them and act on THAT repository instead of the throwaway one: from a submodule
+// checkout the init rewrote the parent repo's config to core.bare=true, which broke the checkout itself.
+for (const k of Object.keys(process.env)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|PREFIX|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE)$/.test(k)) delete process.env[k];
+
 function repo(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forbidden-terms-'));
   made.push(dir);
