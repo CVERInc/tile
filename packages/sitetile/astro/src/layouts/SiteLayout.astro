@@ -162,6 +162,7 @@ const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(
 // `;;` separates columns, `;` separates items, `Label=href` links (href omitted → a plain span,
 // e.g. "coming soon" labels). General (any site's columned footer); absent → the simple centered
 // footer below is untouched (an existing footer stays as-is).
+const footerTagline = String(meta['footer-tagline'] ?? '').trim();
 const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
 // Columns keep .rf-foot-col and add --<1-based position> plus --<ASCII heading slug>.
 // Empty, positional, and repeated slugs have only the positional modifier.
@@ -1384,7 +1385,9 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         {footerCols.length > 0 ? (
           <div class="rf-foot">
             <div class="rf-foot-brand">
+              {footerLogo && <a class="rf-footer-logo-link" href={localeHome} aria-label="Home"><img class="rf-footer-logo" src={footerLogo} alt="" width="44" height="44" /></a>}
               {footerBrand && <a class="rf-foot-wordmark" href={localeHome}>{footerBrand}</a>}
+              {footerTagline && <p class="rf-foot-tagline">{footerTagline}</p>}
               {(copyright || multilingual) && (
                 <p class="rf-foot-copy">
                   {copyright && <span>{copyright}</span>}

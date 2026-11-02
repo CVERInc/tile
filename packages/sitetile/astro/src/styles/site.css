@@ -2028,6 +2028,8 @@ body:not([data-theme-custom]) :where(.rf-logo, .rf-foot-wordmark) { font-family:
    so a born columned footer was bare markup (only a hand-rolled theme styled it). Base paints it neutrally now;
    simple/social footers keep .rf-footer-nav/.rf-footer-social above. */
 :where(body:not([data-theme-custom])) .rf-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap; }
+:where(body:not([data-theme-custom])) .rf-foot-brand .rf-footer-logo { display: block; width: 44px; height: 44px; object-fit: contain; margin: 0 0 0.5rem; }
+:where(body:not([data-theme-custom])) .rf-foot-tagline { color: var(--gd-muted); font-size: 0.85rem; margin: 0.5rem 0 0; }
 :where(body:not([data-theme-custom])) .rf-foot-wordmark { font-weight: 700; font-size: 1.15rem; color: var(--gd-text); text-decoration: none; }
 :where(body:not([data-theme-custom])) .rf-foot-copy { color: var(--gd-muted); font-size: 0.85rem; margin-top: 0.5rem; }
 :where(body:not([data-theme-custom])) .rf-foot-cols { display: flex; gap: clamp(1.5rem, 5vw, 3.5rem); flex-wrap: wrap; }
