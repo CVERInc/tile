@@ -293,7 +293,7 @@ console.log('\n6. ?handle= — loading a card by name\n');
   // the subject changes, and this one had: the specimen has its own count. So ask the FILE. It also
   // catches the failure the literal was reaching for — an exit that keeps only the first lane — which
   // a `>= 1` would not, and which is why the specimen now carries two.
-  const wantDrawers = (readCard('specimen-rich').match(/^## drawer:/gm) || []).length;
+  const wantDrawers = (readCard('specimen-rich').match(/^## (back|drawer):/gm) || []).length;
   if (wantDrawers < 2) fail(`the specimen has ${wantDrawers} drawer lane(s) — one cannot tell "the drawers came" from "the first drawer came"`);
   if (r.drawers !== wantDrawers) fail(`the .md exit carried ${r.drawers} drawer(s) (${r.drawerIds}) but the file has ${wantDrawers}`);
   // CONTROL: the guard's premise must hold — an HTML body must parse to NO cells, or "cells > 0"

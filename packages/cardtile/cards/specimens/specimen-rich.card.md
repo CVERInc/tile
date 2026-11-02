@@ -22,7 +22,7 @@ backdrop-dim: 41
 - [ ] %% card: embed kind=bubbles w=6 images=asset:sha256-d447bd1f3130ed26,asset:sha256-d447bd1f3130ed26 %% the speech-bubble pop
 
 
-## drawer: about | Specimen — about
+## back: about | Specimen — about
 
 - [ ] %% card: text %%
 	A drawer lane, so the drawer coral has a specimen at all.
@@ -35,7 +35,7 @@ backdrop-dim: 41
 - [ ] %% card: link w=6 %% [A link inside a drawer](https://example.com/in-drawer)
 
 
-## drawer: more | Specimen — a second drawer
+## back: more | Specimen — a second back
 
 - [ ] %% card: text %%
 	🚩 Added 2026-08-12, and the reason is worth keeping: a SECOND drawer is what tells "the drawers
