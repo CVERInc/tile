@@ -1,12 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { buildSite } from '../build/index.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
+const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
+const ASTRO = join(ENGINE, 'packages/sitetile/astro');
+if (!existsSync(join(ASTRO, 'node_modules'))) {
+  console.log('  · footer-cols END-TO-END SKIPPED — no packages/sitetile/astro/node_modules (run npm install there)');
+  process.exit(0);
+}
 const work = mkdtempSync(join(tmpdir(), 'tile-footer-cols-'));
 const ir = join(work, 'ir');
 const out = join(work, 'out');
@@ -17,6 +23,10 @@ page('home');
 page('columns', 'Company: About=/about ;; Help & Support!: FAQ=/faq ;; --Mixed__Case 42--: A=/a');
 page('cjk', '關於: A=/a');
 page('duplicates', 'Help: A=/a ;; HELP!: B=/b ;; Help: C=/c');
+page('numeric', '2: A=/a ;; 3: B=/b ;; 1: C=/c');
+page('same-position', '1: A=/a');
+page('absolute', 'About=https://x.example/about ; Help=/help');
+page('heading-absolute', 'Heading: A=https://x.example/a');
 const footer = (name) => {
   const html = readFileSync(join(out, name === 'home' ? 'index.html' : `${name}/index.html`), 'utf8');
   const match = html.match(/<footer\b[\s\S]*?<\/footer>/);
@@ -36,7 +46,20 @@ try {
   await test('only the first occurrence of a slug receives its name class', () => {
     assert.deepEqual(classes('duplicates'), ['rf-foot-col rf-foot-col--1 rf-foot-col--help', 'rf-foot-col rf-foot-col--2', 'rf-foot-col rf-foot-col--3']);
   });
-  await test('without footer-cols the footer matches the pre-change HTML byte for byte', () => {
+  await test('numeric headings never collide with positional classes or repeat tokens', () => {
+    assert.deepEqual(classes('numeric'), [1, 2, 3].map((n) => `rf-foot-col rf-foot-col--${n}`));
+    assert.deepEqual(classes('same-position'), ['rf-foot-col rf-foot-col--1']);
+  });
+  await test('URL colons do not create headings, while explicit headings still work', () => {
+    assert.deepEqual(classes('absolute'), ['rf-foot-col rf-foot-col--1']);
+    assert.doesNotMatch(footer('absolute'), /<h4\b/);
+    assert.match(footer('absolute'), /href="https:\/\/x\.example\/about"[^>]*>About<\/a>/);
+    assert.match(footer('absolute'), /href="\/help"[^>]*>Help<\/a>/);
+    assert.deepEqual(classes('heading-absolute'), ['rf-foot-col rf-foot-col--1 rf-foot-col--heading']);
+    assert.match(footer('heading-absolute'), /<h4[^>]*>Heading<\/h4>/);
+    assert.match(footer('heading-absolute'), /href="https:\/\/x\.example\/a"[^>]*>A<\/a>/);
+  });
+  await test('without footer-cols the footer matches the plain-footer fixture byte for byte', () => {
     assert.deepEqual(Buffer.from(footer('home')), readFileSync(join(here, 'fixtures/footer-without-cols.html')));
   });
 } finally {
