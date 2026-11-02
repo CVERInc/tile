@@ -42,7 +42,7 @@ try {
   const result = await buildSite({ irDir: ir, outDir: out, engineDir: fileURLToPath(new URL('../..', import.meta.url)), siteUrl: 'https://example.com' });
   assert.equal(result.code, 0, 'fixture build must succeed');
   await test('columned brand renders a home-linked logo before wordmark and tagline', () => {
-    assert.match(footer('brand'), /<div class="rf-foot-brand"> <a class="rf-footer-logo-link" href="\/" aria-label="Home"><img class="rf-footer-logo" src="\/logo.svg" alt="" width="44" height="44"><\/a> <a class="rf-foot-wordmark" href="\/">Example<\/a> <p class="rf-foot-tagline">Since 2013<\/p>/);
+    assert.match(footer('brand'), /<div class="rf-foot-brand"> <a class="rf-footer-logo-link" href="\/" aria-label="Home"><img class="rf-footer-logo" src="\/logo.svg" alt="" width="44" height="44"><\/a>\s*<a class="rf-foot-wordmark" href="\/">Example<\/a>\s*<p class="rf-foot-tagline">Since 2013<\/p>/);
   });
   await test('tagline is trimmed and escaped plain text', () => {
     assert.match(footer('escaped'), /<p class="rf-foot-tagline">&lt;b&gt;Since 2013&lt;\/b&gt; &amp; more<\/p>/);

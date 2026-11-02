@@ -221,6 +221,21 @@ In `_site.md`, `footer-cols:` puts columns in the footer:
 footer-cols: Company: About=/about ;; Help: FAQ=/faq
 ```
 
+The brand block can show a logo, a wordmark, and a short tagline:
+
+```yaml
+footer-logo: /logo.svg
+footer-brand: Example
+footer-tagline: Since 2013
+```
+
+`footer-logo:` links home and appears before the `footer-brand:` wordmark.
+It uses the same 44 × 44 image and empty alt text as the simple footer, with
+an accessible “Home” label on the link. `footer-tagline:` renders below the
+wordmark as plain text in `rf-foot-tagline`; HTML is escaped, surrounding
+whitespace is trimmed, and an empty value is omitted. The tagline applies only
+to the columned footer. Omitting these keys preserves existing footer HTML.
+
 `;;` separates columns; `;` separates items within a column. A column starts with
 `Heading:`. Items use `Label=href`; omit `=href` for plain text.
 

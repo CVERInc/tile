@@ -1385,9 +1385,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         {footerCols.length > 0 ? (
           <div class="rf-foot">
             <div class="rf-foot-brand">
-              {footerLogo && <a class="rf-footer-logo-link" href={localeHome} aria-label="Home"><img class="rf-footer-logo" src={footerLogo} alt="" width="44" height="44" /></a>}
-              {footerBrand && <a class="rf-foot-wordmark" href={localeHome}>{footerBrand}</a>}
-              {footerTagline && <p class="rf-foot-tagline">{footerTagline}</p>}
+              {footerLogo && <a class="rf-footer-logo-link" href={localeHome} aria-label="Home"><img class="rf-footer-logo" src={footerLogo} alt="" width="44" height="44" /></a>}{footerBrand && <a class="rf-foot-wordmark" href={localeHome}>{footerBrand}</a>}{footerTagline && <p class="rf-foot-tagline">{footerTagline}</p>}
               {(copyright || multilingual) && (
                 <p class="rf-foot-copy">
                   {copyright && <span>{copyright}</span>}
