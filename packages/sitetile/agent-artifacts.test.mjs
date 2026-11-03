@@ -39,6 +39,7 @@ const { canonicalPath } = await import(pathToFileURL(join(SRC, 'lib/sitemap.mjs'
 const {
   GENERATED_BY,
   LLMS_FULL_MAX_BYTES,
+  MARKDOWN_SCOPE,
   agentBundle,
   agentGate,
   assertNoAssetCollision,
@@ -285,10 +286,14 @@ test('the catalog states version, producer and only targets this build produced'
     robots: '/robots.txt',
     llms: '/llms.txt',
     llms_full: '/llms-full.txt',
-    markdown: { negotiation: true },
+    markdown: { negotiation: true, scope: MARKDOWN_SCOPE },
     sitemap: '/sitemap.xml',
     mcp: null,
   });
+  // reef#2874: the catalog says WHICH routes negotiate instead of implying every URL does — and it
+  // names the generated lists, which the post-build pass (agent-list-twins.mjs) now covers.
+  assert.match(MARKDOWN_SCOPE, /blog index/);
+  assert.match(MARKDOWN_SCOPE, /Search results and previews do not/);
   // No robots.txt in this site's assets → the catalog does not claim one.
   assert.equal(bundleFor('private').catalog.robots, null);
 });
