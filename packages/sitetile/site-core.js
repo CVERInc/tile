@@ -2605,6 +2605,8 @@ function heroHeadingless(s) {
 //   · `layout=…` — the param's label; non-empty → the columned hero.
 //   · otherwise the legacy hero, which never draws `logo=`.
 // `logo` is the `logo=` destination after `safeSrc` (null when absent or refused).
+// Takes the parsed params (or just `{ layers, layout, logo }` — Hero.astro passes those three by
+// name so the coral-params scan still sees them read there).
 function heroVariant(pm) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
   const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];

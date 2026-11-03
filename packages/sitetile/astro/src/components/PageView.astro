@@ -36,7 +36,8 @@ const blogPosts = String(site.meta.packages || '').includes('blog')
 const headMeta = site.meta.description
   ? site.meta
   : { ...site.meta, description: deriveDescription(site.sections) };
-// reef#2857: which section carries the page <h1> — the first one, or the first after a text-free hero.
+// reef#2857: which section carries the page <h1> — the first that writes a heading, when its type can
+// carry one; -1 = none (site-core pageH1Index).
 const h1At = pageH1Index(site.sections);
 ---
 <SiteLayout title={pageTitle} lang={pageLang} meta={headMeta} blogPosts={blogPosts} stamp={stamp}>
