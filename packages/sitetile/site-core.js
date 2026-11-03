@@ -2588,23 +2588,61 @@ function proseBodyHtml(body, ordered) {
 // `layout=` heroes (the legacy hero ignores it), so only there does a logo keep the h1 (an image
 // whose alt is the title — an empty alt there is a separate question, left as it is).
 // ONE predicate for both renderers (emit/hero.mjs, renderSection) and for the page h1 below.
+// 🩸 reef#2857 r2: it read the RAW params (`pm.layers` truthy) while the renderers draw from the
+// parsed layer list, so `layers=" | " logo=/logo.png` (zero layers → the legacy hero, which never
+// draws the logo) was judged "logo heading kept" and both renderers wrote <h1></h1>. It now reads
+// heroVariant — the selection the renderers themselves branch on — so the two cannot drift.
 function heroHeadingless(s) {
   if (!s || s.type !== 'hero' || String(s.title == null ? '' : s.title).trim()) return false;
-  const pm = parseParams(s.params);
-  if (!pm.layers && !pm.layout) return true;
-  const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
-  return !(logoRaw && safeSrc(logoRaw));
+  const v = heroVariant(parseParams(s.params));
+  return !(v.kind !== 'legacy' && v.logo);
 }
 
-// The index of the section that carries the page's <h1> (its title as h1; the rest are h2): the
-// first section — or, when the page opens with text-free heroes, the first section after them.
-// Both renderers read this (PageView → Section.astro `h1At`, renderSiteToHtml). A page whose
-// sections are all text-free heroes has no h1 owner (returns sections.length).
+// Which of the three hero shapes a hero's params select, with the normalized values each branch
+// draws from. The ONE place this is decided: renderSection's hero case, Hero.astro (→ emitHero's
+// `layerList` / `layout` / `logo`) and heroHeadingless all call it.
+//   · `layers=a|b` — the parsed, trimmed, non-empty list; any entry → the layered hero (it wins).
+//   · `layout=…` — the param's label; non-empty → the columned hero.
+//   · otherwise the legacy hero, which never draws `logo=`.
+// `logo` is the `logo=` destination after `safeSrc` (null when absent or refused).
+function heroVariant(pm) {
+  const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
+  const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
+  const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
+  const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+  const logo = logoRaw ? safeSrc(logoRaw) : null;
+  const kind = layerList.length ? 'layers' : layout ? 'layout' : 'legacy';
+  return { kind, layerList, layout, logo };
+}
+
+// The section types whose renderer can write the section's title as the page <h1>: the Astro
+// component reads the `hero` prop (Section.astro) and the string branch uses `H` (renderSection) —
+// plus `hero`, whose own heading is always an <h1>. gallery, carousel and cta hard-code <h2> in
+// both renderers; embed writes no title at all. Unknown types render as prose in both.
+const H1_TYPES = ['prose', 'hero', 'grid', 'people', 'collection', 'faq', 'timeline', 'social', 'tagcloud', 'links', 'form'];
+const renderedType = (s) => (KNOWN_TYPES.indexOf(s && s.type) >= 0 ? s.type : 'prose');
+function canCarryH1(s) { return H1_TYPES.indexOf(renderedType(s)) >= 0; }
+// Does this section put a heading element on the page at all? A hero unless text-free; embed never
+// (its title is not rendered); every other type exactly when it has a title (`s.title ? <hN>`).
+function sectionHasHeading(s) {
+  if (!s) return false;
+  const t = renderedType(s);
+  if (t === 'hero') return !heroHeadingless(s);
+  if (t === 'embed') return false;
+  return !!s.title;
+}
+
+// The index of the section that carries the page's <h1> (its title as h1; the rest are h2), or -1
+// for none. Both renderers read this (PageView → Section.astro `h1At`, renderSiteToHtml).
+// It is the FIRST section that writes a heading — sections with no heading (text-free heroes,
+// untitled sections, embeds) are passed over — provided that section's type can carry an h1
+// (canCarryH1). If it cannot (a titled gallery / carousel / cta), NO section gets the h1: promoting
+// a later section past a visible <h2> would put the page's headings out of document order. Such a
+// page has no h1, and the heading-structure ruler (reef#2860) tells its owner.
 function pageH1Index(sections) {
   const list = sections || [];
-  let i = 0;
-  while (i < list.length && heroHeadingless(list[i])) i += 1;
-  return i;
+  const i = list.findIndex(sectionHasHeading);
+  return i >= 0 && canCarryH1(list[i]) ? i : -1;
 }
 
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
@@ -2615,7 +2653,10 @@ function renderSection(s, hero, ctx) {
   // ten types whose Astro component reads `hero` follow (prose, grid, people, collection, faq,
   // timeline, social, tagcloud, links, and form once it has a branch); gallery, carousel, cta and
   // embed hard-code <h2> there, so they do here.
-  const H = hero && s.title ? 'h1' : 'h2';
+  // reef#2857 r2: `hero` arrives true only for pageH1Index's owner; canCarryH1 is the same type list
+  // it checks (and Section.astro checks), so a caller passing `hero` to an h2-only type gets h2 here
+  // just as the built page does.
+  const H = hero && s.title && canCarryH1(s) ? 'h1' : 'h2';
   const pm = parseParams(s.params);
   // `eyebrow="…"` → the small label every heading-bearing component writes as its section's first
   // `<p class="st-<coral>-eyebrow">` (faq: first in .st-faq-head). 🩸 tile-lab#52: seven of the
@@ -2641,11 +2682,10 @@ function renderSection(s, hero, ctx) {
       // hero. Mirrors Hero.astro's first branch (it wins over `layout`): an aria-hidden stage of
       // absolutely-stacked `.st-hero-layer` images (data-depth = index, back to front), then the
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
-      const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
-      const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
-      const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
-      const logo = logoRaw ? safeSrc(logoRaw) : null;
+      // heroVariant: the ONE variant selection (Hero.astro and heroHeadingless call it too, reef#2857 r2).
+      const variant = heroVariant(pm);
+      const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
       const h1Html = heroHeadingless(s) ? ''
         : logo
@@ -2669,14 +2709,14 @@ function renderSection(s, hero, ctx) {
       // `enter` (bare flag) mirrors Hero.astro: `data-enter` on the section and, with a bg, the
       // separate `.st-hero-bg` layer the theme animates (reef#2857: this branch had neither, so an
       // editor preview of an entrance hero lacked the layer the built page shows).
-      if (!pm.layout) {
+      if (variant.kind === 'legacy') {
         const enter = pm.enter != null;
         return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + (enter ? ' data-enter=""' : '') + style + '>' +
           (enter && bgOk ? '<div class="st-hero-bg" aria-hidden="true"' + style + '></div>' : '') +
           (heroHeadingless(s) ? '' : '<h1>' + inlineHtml(s.title) + '</h1>') +
           bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</section>';
       }
-      const layout = ' data-layout="' + escAttr(typeof pm.layout === 'object' ? pm.layout.label : pm.layout) + '"';
+      const layout = ' data-layout="' + escAttr(variant.layout) + '"';
       const hp = heroParts(s.body);
       const eyebrow = pm.eyebrow ? '<p class="st-hero-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
       // text column: eyebrow + h1 + lead prose + button row (or the legacy single `cta=` param).
@@ -3298,6 +3338,8 @@ export {
   safeHref, safeSrc,
   // reef#2857: the text-free hero predicate and the page-h1 owner both renderers share.
   heroHeadingless, pageH1Index,
+  // reef#2857 r2: the hero variant selection (Hero.astro) and the h1-capable type test (Section.astro).
+  heroVariant, canCarryH1,
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).

@@ -16,6 +16,7 @@ import Links from './sections/Links.astro';
 import Faq from './sections/Faq.astro';
 import Form from './sections/Form.astro';
 import People from './sections/People.astro';
+import { canCarryH1 } from '../../../site-core.js';
 
 const { section, index = 0, h1At = 0, lang, blogPosts = [], meta = {} } = Astro.props;
 const MAP = { hero: Hero, prose: Prose, grid: Grid, gallery: Gallery, carousel: Carousel, cta: Cta, embed: Embed, collection: Collection, timeline: Timeline, social: Social, tagcloud: Tagcloud, faq: Faq, form: Form, people: People, links: Links };
@@ -24,6 +25,8 @@ const Cmp = MAP[section.type] || Prose;
 // semantic/SEO), the rest stay <h2>. Components opt in by honouring the `hero` prop.
 // reef#2857: `h1At` (site-core pageH1Index, from PageView) moves that to the section after a
 // text-free hero, which emits no heading of its own. Absent → 0 (the blog index passes index ≥ 1).
-const hero = index === h1At;
+// reef#2857 r2: and only a type whose component reads `hero` (site-core canCarryH1, the same list
+// pageH1Index and the string render use) — gallery/carousel/cta/embed never take it.
+const hero = index === h1At && canCarryH1(section);
 ---
 <Cmp section={section} index={index} hero={hero} lang={lang} blogPosts={blogPosts} meta={meta} />

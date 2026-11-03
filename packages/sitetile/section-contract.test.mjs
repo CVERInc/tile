@@ -287,6 +287,52 @@ await test('🔴 string render: a page opening with a text-free hero takes its <
   assertBareFirstPage('string render', renderSiteToHtml(bareFirst));
 });
 
+// reef#2857 r2 (review of 2f7bdee): the three pages the review built. Each is checked in BOTH
+// renderers, as headings per section in document order.
+//   · layers=" | " parses to zero layers → the legacy hero, which never draws logo= → no heading,
+//     and Welcome is the page h1 (2f7bdee: <h1></h1> in the hero, Welcome <h2>).
+//   · a titled gallery right after the text-free hero cannot render an h1 → NO section gets one;
+//     Contact is not promoted past Portfolio's visible <h2> (2f7bdee: nobody had an h1 either, but
+//     pageH1Index named the gallery — the string render and Section.astro believed an h1 existed).
+//   · an untitled prose section writes no heading → passed over; Welcome is the page h1
+//     (2f7bdee: the untitled section took the slot and the page had no h1).
+const H1_PAGES = [
+  { slug: 'h1-empty-layers', md: '##\n%% sitetile: hero layers=" | " logo=/logo.png %%\nBand.\n\n## Welcome\nHello.\n',
+    want: [[], ['h1']], owner: 1 },
+  { slug: 'h1-gallery-first', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n## Portfolio\n%% sitetile: gallery %%\n### Work\n![One](/img/1.png)\n\n## Contact\nWrite.\n',
+    want: [[], ['h2', 'h3'], ['h2']], owner: -1 },
+  { slug: 'h1-untitled-prose', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n##\nNo title here.\n\n## Welcome\nHello.\n',
+    want: [[], [], ['h1']], owner: 2 },
+];
+const h1PageMd = (p) => `---\nsitetile-page: ${p.slug}\ntitle: ${p.slug}\nlang: en-US\n---\n\n${p.md}`;
+for (const p of H1_PAGES) p.site = parseSite(h1PageMd(p));
+function assertH1Page(where, p, html) {
+  const ids = p.site.sections.map((s) => s.id);
+  assert.equal(ids.length, p.want.length, `${p.slug}: the fixture parsed into ${ids.length} sections`);
+  const byId = sectionsById(html, where);
+  const got = ids.map((id) => { const sec = byId.get(id); assert.ok(sec, `${where}, ${p.slug}: no section ${id}`); return headings(sec).map((h) => h.tag); });
+  assert.deepEqual(got, p.want, `${where}, ${p.slug}: headings per section`);
+}
+for (const p of H1_PAGES) {
+  await test(`🔴 pageH1Index, ${p.slug}: owner ${p.owner}`, () => assert.equal(pageH1Index(p.site.sections), p.owner, p.slug));
+}
+await test('pageH1Index: embed / h2-only types / unknown type / logo hero / empty page', () => {
+  // embed writes no title at all → passed over like an untitled section
+  assert.equal(pageH1Index([{ type: 'embed', title: 'Video' }, { type: 'prose', title: 'P' }]), 1, 'embed');
+  for (const t of ['gallery', 'carousel', 'cta']) assert.equal(pageH1Index([{ type: t, title: 'T' }, { type: 'prose', title: 'P' }]), -1, t);
+  assert.equal(pageH1Index([{ type: 'nonsense', title: 'T' }]), 0, 'an unknown type renders as prose');
+  assert.equal(pageH1Index([{ type: 'hero', title: '', params: 'layout=split logo=/img/logo.png' }, { type: 'prose', title: 'P' }]), 0, 'a logo hero owns it');
+  assert.equal(pageH1Index([]), -1, 'empty page');
+});
+await test('🔴 heroHeadingless reads the variant the renderers draw (zero parsed layers = legacy)', () => {
+  const h = (params) => heroHeadingless({ type: 'hero', title: '', params });
+  assert.equal(h('layers=" | " logo=/img/logo.png'), true, 'blank layer list → legacy → no logo drawn');
+  assert.equal(h('layers=" | /a.png" logo=/img/logo.png'), false, 'CONTROL: one real layer → layered logo h1');
+});
+for (const p of H1_PAGES) {
+  await test(`🔴 string render, ${p.slug}: headings per section`, () => assertH1Page('string render', p, renderSiteToHtml(p.site)));
+}
+
 await test('CONTROL: class tokens are compared as a list — `a.b` and `a b` differ', () => {
   const one = parseHtml('<section id="x" class="a.b"><p></p></section>').kids[0];
   const two = parseHtml('<section id="x" class="a b"><p></p></section>').kids[0];
@@ -322,6 +368,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     writeFileSync(join(ir, 'zh-tw', 'home.md'), ZH_HOME_MD);
     writeFileSync(join(ir, 'zh-tw', 'contact.md'), ZH_CONTACT_MD);
     writeFileSync(join(ir, 'bare-hero.md'), BARE_FIRST_MD);
+    for (const p of H1_PAGES) writeFileSync(join(ir, `${p.slug}.md`), h1PageMd(p));
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const astroHtml = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
     const astroById = sectionsById(astroHtml, 'built page');
@@ -345,6 +392,9 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     await test('🔴 built page: a page opening with a text-free hero takes its <h1> from the next section', () => {
       assertBareFirstPage('built page', readFileSync(join(out, 'bare-hero', 'index.html'), 'utf8'));
     });
+    for (const p of H1_PAGES) {
+      await test(`🔴 built page, ${p.slug}: headings per section`, () => assertH1Page('built page', p, readFileSync(join(out, p.slug, 'index.html'), 'utf8')));
+    }
 
     const diffs = new Map();
     const SHOW = process.env.SECTION_CONTRACT_SHOW;

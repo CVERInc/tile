@@ -1,7 +1,7 @@
 ---
 // The markup is packages/emit/hero.mjs (tile-lab#52); this component reads the params and hands
 // their values over, with sitetile's own markdown renderers.
-import { parseParams, inlineHtml, bodyHtml, safeSrc } from '@sitetile';
+import { parseParams, inlineHtml, bodyHtml, safeSrc, heroVariant } from '@sitetile';
 import { emitHero } from '@emit/hero.mjs';
 const { section } = Astro.props;
 const pm = parseParams(section.params);
@@ -31,7 +31,10 @@ const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image var
 // way `layout=split` does, with zero new markup to learn. Params: `layout=bubble` (required to opt
 // in), `eyebrow="…"` (optional, same as split), CTA via a links-only paragraph in the body (or the
 // legacy `cta=` param, same fallback as split).
-const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
+// reef#2857 r2: `layout`, `layerList` and `logo` come from site-core's heroVariant — the one variant
+// selection the string render and heroHeadingless also read (see below).
+const variant = heroVariant(pm);
+const layout = variant.layout;
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 // `marquee="A|B|C"` — OPT-IN animated background word-marquee: one horizontally-scrolling row per
 // pipe-separated word, faint behind the hero content, alternating direction. General decorative
@@ -48,15 +51,13 @@ const enter = pm.enter != null;
 // depth-scaled rate on pointer-move + scroll (front moves more). `logo=/logo.png` renders the h1 as
 // an image (its text stays the alt → SEO/AX intact); `logo-pos=top|center|bottom` (default bottom)
 // places the title block over the art's negative space. General; absent → the legacy heroes above.
-const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
-const layerList = layersRaw ? String(layersRaw).split('|').map((s) => s.trim()).filter(Boolean) : [];
+const layerList = variant.layerList;   // parsed, trimmed, non-empty (heroVariant)
 const parallax = pm.parallax != null;
-const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
 // round 3 (Astro consumers, R2-P3-5): `logo=`/`layers=` params and `heroParts`' extracted image
 // are all author-controlled `src` destinations that reach a live `<img>` — site-core.js's own
 // `imgTag` gates every image src on `isSafeImageSrc`; `safeSrc` shares that ONE policy (here for
 // `logo=`, in emitHero for each layer and each extracted image). `null` degrades to no image.
-const logo = logoRaw ? safeSrc(logoRaw) : null;
+const logo = variant.logo;   // heroVariant: `logo=` after safeSrc
 const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
 ---
 <Fragment set:html={emitHero(section, { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta: pm.cta, bgOk }, { inline: inlineHtml, block: bodyHtml })} />
