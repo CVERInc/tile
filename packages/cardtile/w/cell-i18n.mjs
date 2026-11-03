@@ -493,6 +493,21 @@ export const CELL_STRINGS_BY_KEY = {
   // editor's screen — but they DO reach an agent: describe_card_grammar reads every param's label
   // and hint through this table, in English. They were Chinese literals in ai-ops.mjs, so an English
   // answer said `bleed` was 「整行」. Same rules as every other row: nine locales, the ban list.
+  'back.label': {
+    zh: '背面', ja: '裏面', en: 'Back side', ko: '뒷면',
+    'zh-Hans': '背面', de: 'Rückseite', fr: 'Verso', es: 'Reverso', pt: 'Verso',
+  },
+  'back.hint': {
+    zh: '寫 #id，點這格就翻到同名的背面。沒有那個背面就當作沒寫。',
+    ja: '#id を書くと、このタイルをタップしたとき同じ名前の裏面に返ります。その裏面がなければ書いていないのと同じです。',
+    en: 'Write #id and tapping this tile turns it over to the back side with that id. If there is no such back side, it is ignored.',
+    ko: '#id를 쓰면 이 타일을 눌렀을 때 같은 이름의 뒷면으로 뒤집혀요. 그런 뒷면이 없으면 안 쓴 것과 같아요.',
+    'zh-Hans': '写 #id，点这格就翻到同名的背面。没有那个背面就当作没写。',
+    de: 'Mit #id dreht sich diese Kachel beim Antippen zur Rückseite mit dieser ID. Gibt es sie nicht, wird es ignoriert.',
+    fr: 'Écrivez #id : toucher cette tuile la retourne sur le verso portant cet id. S’il n’existe pas, c’est ignoré.',
+    es: 'Escribe #id y, al tocar esta ficha, se da la vuelta al reverso con ese id. Si no existe, se ignora.',
+    pt: 'Escreva #id e, ao tocar nesta peça, ela vira para o verso com esse id. Se ele não existir, é ignorado.',
+  },
   'bleed.label': {
     zh: '獨佔一整行', ja: '1 行まるごと', en: 'Own full row', ko: '한 줄 전체 차지',
     'zh-Hans': '独占一整行', de: 'Eigene ganze Zeile', fr: 'Ligne entière à part',
