@@ -3,7 +3,9 @@
 // their values over, with sitetile's own markdown renderers.
 import { parseParams, inlineHtml, bodyHtml, safeSrc, heroVariant } from '@sitetile';
 import { emitHero } from '@emit/hero.mjs';
-const { section } = Astro.props;
+// reef#2869: `hero` (Section.astro: index === h1At, site-core pageH1Index) — only the page's h1
+// owner writes its heading as <h1>; emitHero writes <h2> anywhere else.
+const { section, hero } = Astro.props;
 const pm = parseParams(section.params);
 // round 4: `bg=` is an author-controlled background-image destination reaching a live CSS
 // `url()` with no gate — the same sink class as `logo=`/`layers=` below, gated the same way
@@ -62,6 +64,6 @@ const parallax = pm.parallax != null;
 const logo = variant.logo;   // heroVariant: `logo=` after safeSrc
 const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
 ---
-<Fragment set:html={emitHero(section, { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta: pm.cta, bgOk }, { inline: inlineHtml, block: bodyHtml })} />
+<Fragment set:html={emitHero(section, { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta: pm.cta, bgOk, owner: hero }, { inline: inlineHtml, block: bodyHtml })} />
 
 <script>import '../../../../../dynamic-corals/hero-parallax/hero-parallax-client.mjs';</script>
