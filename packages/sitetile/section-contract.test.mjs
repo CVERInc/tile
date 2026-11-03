@@ -221,9 +221,13 @@ function assertHeroHeadings(where, byId) {
     if (hs.length) emitted.push(`${title} ${hs.join('')}`);
   }
   assert.deepEqual(emitted, [], `${where}: text-free heroes emitted a heading`);
+  // reef#2869: every titled/logo hero in this fixture sits after `Lead` (the page's h1 owner), so
+  // its heading is an <h2> — a hero's title is the <h1> only when the hero IS pageH1Index's owner.
   for (const title of TITLED_HEROES) {
     const sec = byId.get(idOf(title));
-    assert.deepEqual(headings(sec).map((h) => h.tag), ['h1'], `${where}, ${title}: a titled/logo hero must keep exactly one <h1>`);
+    assert.deepEqual(headings(sec).map((h) => h.tag), ['h2'], `${where}, ${title}: a titled/logo hero that is not the page's h1 owner must write exactly one <h2>`);
+    // r2: …and it keeps the hero's type — site.css styles the title by `.st-hero-title`, at either level.
+    assert.ok(headings(sec)[0].cls.includes('st-hero-title'), `${where}, ${title}: the demoted hero heading lost class st-hero-title`);
   }
 }
 // The raw outer HTML of one hero <section> (a hero holds no nested <section>).
@@ -232,32 +236,60 @@ function rawSection(html, id) {
   if (at < 0) return null;
   return html.slice(at, html.indexOf('</section>', at) + '</section>'.length);
 }
-// Pinned from origin/main 6c84cea (before reef#2857): the logo heroes, byte for byte.
+// Pinned from origin/main 6c84cea (before reef#2857): the logo heroes, byte for byte — with ONE
+// edit, reef#2869 r2: the logo heading's class is `st-hero-logo st-hero-title` (was `st-hero-logo`),
+// the shared hero-title class site.css styles. Nothing else in these pins moved.
 const LOGO_PIN = {
   string: {
     "Hero split logo":
-      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\"><div class=\"st-hero-text\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1><p>Split logo hero.</p><div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div></div><div class=\"st-hero-art\"><img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"lazy\" decoding=\"async\"></div></section>",
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\"><div class=\"st-hero-text\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1><p>Split logo hero.</p><div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div></div><div class=\"st-hero-art\"><img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"lazy\" decoding=\"async\"></div></section>",
     "Hero layered":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1><p>Layered hero.</p></div></section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1><p>Layered hero.</p></div></section>",
     "Hero bare layered logo":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"\" loading=\"eager\" decoding=\"async\"></h1><p>Layered logo.</p></div></section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"\" loading=\"eager\" decoding=\"async\"></h1><p>Layered logo.</p></div></section>",
   },
   built: {
     "Hero split logo":
-      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\">  <div class=\"st-hero-text\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1> <p>Split logo hero.</p> <div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div> </div> <div class=\"st-hero-art\"> <img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"eager\" decoding=\"async\"> </div> </section>",
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\">  <div class=\"st-hero-text\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1> <p>Split logo hero.</p> <div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div> </div> <div class=\"st-hero-art\"> <img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"eager\" decoding=\"async\"> </div> </section>",
     "Hero layered":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1> <p>Layered hero.</p>  </div> </section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1> <p>Layered hero.</p>  </div> </section>",
     "Hero bare layered logo":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt loading=\"eager\" decoding=\"async\"></h1> <p>Layered logo.</p>  </div> </section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt loading=\"eager\" decoding=\"async\"></h1> <p>Layered logo.</p>  </div> </section>",
   },
 };
+// reef#2869: LOGO_PIN is what each logo hero writes as the page's h1 OWNER — so each one is also
+// rendered as the FIRST section of a page of its own (LOGO_OWNER_PAGES) and must match its pin byte
+// for byte, its section id aside. In the fixture page above, where none of them is the owner, the
+// pin's ONLY change is the heading element: `<h1 class="st-hero-logo">…</h1>` → `<h2 …>…</h2>`.
+const LOGO_OWNER_PAGES = LOGO_HEROES.map((t, k) => {
+  const c = CASES.find((x) => nameOf(x) === t);
+  const slug = `logo-owner-${k}`;
+  const md = `---\nsitetile-page: ${slug}\ntitle: ${slug}\nlang: en-US\n---\n\n##${c.title ? ' ' + c.title : ''}\n${c.marker}\n${c.body}\n\n## After\nMore.\n`;
+  return { t, slug, md, site: parseSite(md) };
+});
+const pinWithId = (pin, id) => pin.replace(/ id="[^"]*"/, ` id="${id}"`);
+const pinAsH2 = (pin) => {
+  const out = pin.replace('<h1 class="st-hero-logo st-hero-title">', '<h2 class="st-hero-logo st-hero-title">').replace('</h1>', '</h2>');
+  assert.ok(out !== pin && !out.includes('<h1') && !out.includes('</h1>'), 'pinAsH2: the pin holds exactly one logo <h1>');
+  return out;
+};
+function assertLogoOwnerPages(where, htmlOf, pins) {
+  for (const p of LOGO_OWNER_PAGES) {
+    assert.equal(pageH1Index(p.site.sections), 0, `${p.slug}: the logo hero is the page's h1 owner`);
+    const id = p.site.sections[0].id;
+    assert.equal(rawSection(htmlOf(p), id), pinWithId(pins[p.t], id), `${where}, ${p.t} as the page's h1 owner`);
+  }
+}
 const stringHtml = renderSiteToHtml(site);
 if (process.env.SECTION_CONTRACT_DUMP_LOGO) for (const t of LOGO_HEROES) console.log('PIN string', JSON.stringify(t), JSON.stringify(rawSection(stringHtml, idOf(t))));
-await test('🔴 string render: a text-free hero emits no heading (every variant); a titled/logo hero keeps exactly one <h1>', () => {
+await test('🔴 string render: a text-free hero emits no heading (every variant); a titled/logo hero that is not the owner writes one <h2>', () => {
   assertHeroHeadings('string render', stringById);
 });
-await test('CONTROL string render: the logo heroes are byte-identical to origin/main', () => {
-  for (const t of LOGO_HEROES) assert.equal(rawSection(stringHtml, idOf(t)), LOGO_PIN.string[t], `string render, ${t}`);
+await test('CONTROL string render: a logo hero that IS the page h1 owner is byte-identical to origin/main', () => {
+  assertLogoOwnerPages('string render', (p) => renderSiteToHtml(p.site), LOGO_PIN.string);
+});
+await test('🔴 string render: a logo hero that is not the owner differs from its pin only by <h1> → <h2>', () => {
+  for (const t of LOGO_HEROES) assert.equal(rawSection(stringHtml, idOf(t)), pinAsH2(LOGO_PIN.string[t]), `string render, ${t}`);
 });
 
 await test('heroHeadingless: whitespace counts as empty; a logo keeps the heading only where the variant draws it', () => {
@@ -303,6 +335,17 @@ const H1_PAGES = [
     want: [[], ['h2', 'h3'], ['h2']], owner: -1 },
   { slug: 'h1-untitled-prose', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n##\nNo title here.\n\n## Welcome\nHello.\n',
     want: [[], [], ['h1']], owner: 2 },
+  // reef#2869 (review of #2864): a titled hero that is not pageH1Index's owner writes <h2>, in all
+  // three variants. The review's page — text-free hero, titled gallery, titled hero — has NO h1
+  // (origin/main: the last hero wrote one). A titled hero mid-page was a second h1 on origin/main.
+  { slug: 'h1-review-gallery-hero', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n## Portfolio\n%% sitetile: gallery %%\n### Work\n![One](/img/1.png)\n\n## Studio\n%% sitetile: hero %%\nA titled hero.\n',
+    want: [[], ['h2', 'h3'], ['h2']], owner: -1, h1s: 0 },
+  { slug: 'h1-hero-middle', md: '## Lead\nFirst.\n\n## Legacy\n%% sitetile: hero cta="Go"→/go %%\nA hero.\n\n## Split\n%% sitetile: hero layout=split %%\nSplit.\n\n[Act](/act)\n\n## Layered\n%% sitetile: hero layers=/img/back.png|/img/front.png %%\nLayered.\n\n## Logo\n%% sitetile: hero layout=split logo=/img/logo.png %%\nLogo.\n\n## End\nBye.\n',
+    want: [['h1'], ['h2'], ['h2'], ['h2'], ['h2'], ['h2']], owner: 0, h1s: 1 },
+  // CONTROL: a page that OPENS with a titled hero — that hero is the owner and keeps its <h1>; a
+  // second titled hero further down is an <h2>.
+  { slug: 'h1-hero-first', md: '## Welcome\n%% sitetile: hero layout=split %%\nHi.\n\n[Act](/act)\n\n## Studio\n%% sitetile: hero %%\nSecond hero.\n\n## More\nText.\n',
+    want: [['h1'], ['h2'], ['h2']], owner: 0, h1s: 1 },
 ];
 const h1PageMd = (p) => `---\nsitetile-page: ${p.slug}\ntitle: ${p.slug}\nlang: en-US\n---\n\n${p.md}`;
 for (const p of H1_PAGES) p.site = parseSite(h1PageMd(p));
@@ -312,6 +355,20 @@ function assertH1Page(where, p, html) {
   const byId = sectionsById(html, where);
   const got = ids.map((id) => { const sec = byId.get(id); assert.ok(sec, `${where}, ${p.slug}: no section ${id}`); return headings(sec).map((h) => h.tag); });
   assert.deepEqual(got, p.want, `${where}, ${p.slug}: headings per section`);
+  // r2: every hero's title carries `.st-hero-title` whichever level it is (owner h1 or demoted h2).
+  for (const id of ids) {
+    const sec = byId.get(id);
+    if (!sec.cls.includes('st-hero')) continue;
+    const top = headings(sec)[0];
+    if (top) assert.ok(top.cls.includes('st-hero-title'), `${where}, ${p.slug}: hero ${id}'s <${top.tag}> has no class st-hero-title`);
+  }
+  // The whole page, not only the sections this fixture names: its <main> (the string render, a
+  // fragment, has none — the fragment is the page body).
+  if (p.h1s != null) {
+    const tree = parseHtml(html);
+    const scope = all(tree).find((n) => n.tag === 'main') || tree;
+    assert.equal(all(scope).filter((n) => n.tag === 'h1').length, p.h1s, `${where}, ${p.slug}: <h1> elements on the page`);
+  }
 }
 for (const p of H1_PAGES) {
   await test(`🔴 pageH1Index, ${p.slug}: owner ${p.owner}`, () => assert.equal(pageH1Index(p.site.sections), p.owner, p.slug));
@@ -373,6 +430,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     writeFileSync(join(ir, 'zh-tw', 'contact.md'), ZH_CONTACT_MD);
     writeFileSync(join(ir, 'bare-hero.md'), BARE_FIRST_MD);
     for (const p of H1_PAGES) writeFileSync(join(ir, `${p.slug}.md`), h1PageMd(p));
+    for (const p of LOGO_OWNER_PAGES) writeFileSync(join(ir, `${p.slug}.md`), p.md);
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const astroHtml = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
     const astroById = sectionsById(astroHtml, 'built page');
@@ -387,11 +445,14 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     if (process.env.SECTION_CONTRACT_DUMP_LOGO) for (const t of LOGO_HEROES) console.log('PIN built', JSON.stringify(t), JSON.stringify(rawSection(astroHtml, idOf(t))));
-    await test('🔴 built page: a text-free hero emits no heading (every variant); a titled/logo hero keeps exactly one <h1>', () => {
+    await test('🔴 built page: a text-free hero emits no heading (every variant); a titled/logo hero that is not the owner writes one <h2>', () => {
       assertHeroHeadings('built page', astroById);
     });
-    await test('CONTROL built page: the logo heroes are byte-identical to origin/main', () => {
-      for (const t of LOGO_HEROES) assert.equal(rawSection(astroHtml, idOf(t)), LOGO_PIN.built[t], `built page, ${t}`);
+    await test('CONTROL built page: a logo hero that IS the page h1 owner is byte-identical to origin/main', () => {
+      assertLogoOwnerPages('built page', (p) => readFileSync(join(out, p.slug, 'index.html'), 'utf8'), LOGO_PIN.built);
+    });
+    await test('🔴 built page: a logo hero that is not the owner differs from its pin only by <h1> → <h2>', () => {
+      for (const t of LOGO_HEROES) assert.equal(rawSection(astroHtml, idOf(t)), pinAsH2(LOGO_PIN.built[t]), `built page, ${t}`);
     });
     await test('🔴 built page: a page opening with a text-free hero takes its <h1> from the next section', () => {
       assertBareFirstPage('built page', readFileSync(join(out, 'bare-hero', 'index.html'), 'utf8'));

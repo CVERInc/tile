@@ -350,7 +350,7 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
 }
 /* Opt-out for a section that is deliberately edge-to-edge — the hero's own background (below) and
    the collection's belt (next rule). The exemption is for the OUTER box only: a full-bleed section
-   still insets its own inner content itself (.st-hero-overlay / .st-hero h1,p already do that). */
+   still insets its own inner content itself (.st-hero-overlay / .st-hero-title,p already do that). */
 
 /* collection — a HEAD on the page field, then a BELT that is a band: its background runs edge to
    edge while its cards stay inside an inner box (Collection.astro has carried that outer/inner
@@ -473,7 +473,15 @@ body[data-header="solid"] .rf-header { background: var(--gd-bg); }
   transition: background .18s, border-color .18s, transform .18s; }
 .st-hero-layered .st-hero-cta:hover { background: rgba(255,255,255,.15); border-color: #fff; transform: translateY(-1px); }
 @media (prefers-reduced-motion: reduce) { .st-hero-layer { transform: scale(1.02) !important; } }
-.st-hero h1 { font-size: clamp(2rem, 1.4rem + 3vw, 3.5rem); line-height: 1.1; margin: 0; max-width: 18ch; }
+/* The hero TITLE, at whichever level it is written (reef#2869 r2): only the page's h1 owner writes
+   it as <h1>, a hero further down writes <h2>, and both renderers stamp `.st-hero-title` on either.
+   🔴 The class arm is `:is(h1, h2):where(.st-hero-title)` = (0,1,1), the SAME specificity as the old
+   `.st-hero h1`, so inside this layer the owner <h1> resolves against every neighbour exactly as
+   before (a bare `.st-hero .st-hero-title` would be 0,2,0 and start beating base rules the h1 used to
+   lose to). A site theme lives in the later `reef.theme` layer and wins either way; it reaches the
+   demoted title only if it names `.st-hero-title` too (examples/lilac does). `.st-hero h1` stays for
+   pages built before the class existed. */
+.st-hero h1, .st-hero :is(h1, h2):where(.st-hero-title) { font-size: clamp(2rem, 1.4rem + 3vw, 3.5rem); line-height: 1.1; margin: 0; max-width: 18ch; }
 .st-hero p { margin: 0; max-width: 50ch; color: var(--gd-muted); }
 .st-hero-cta, .st-cta-btn {
   display: inline-block; margin-top: 0.5rem; padding: 0.7rem 1.4rem;
@@ -1965,7 +1973,7 @@ body:not([data-theme-custom]) {
   font-size: var(--gd-font-size, clamp(1rem, 0.95rem + 0.2vw, 1.0625rem));
   line-height: var(--gd-line, 1.65);
 }
-body:not([data-theme-custom]) .st-hero h1 { font-size: var(--gd-h1, clamp(2rem, 1.4rem + 3vw, 3.5rem)); }
+body:not([data-theme-custom]) .st-hero h1, body:not([data-theme-custom]) .st-hero :is(h1, h2):where(.st-hero-title) { font-size: var(--gd-h1, clamp(2rem, 1.4rem + 3vw, 3.5rem)); }
 body:not([data-theme-custom]) :where(.st-prose, .st-grid, .st-cta, .st-social) h2 { font-size: var(--gd-h2, clamp(1.5rem, 1.2rem + 1.2vw, 2rem)); }
 body:not([data-theme-custom]) .st-cell h3 { font-size: var(--gd-h3, 1.15rem); }
 body:not([data-theme-custom]) :where(h1, h2, h3, h4) {

@@ -202,10 +202,11 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       + '\n## Plain\n%% sitetile: hero logo-pos=top %%\n\nA hero with no layers.\n');
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const html = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
-    // Each layered hero's opening tag, in page order, with the `<h1>` that follows it — so a row is
-    // matched to ITS section by title and not by counting.
+    // Each layered hero's opening tag, in page order, with the heading that follows it — so a row is
+    // matched to ITS section by title and not by counting. reef#2869: only the first hero is the
+    // page's h1 owner (<h1>); every later one writes its title as <h2>.
     const sections = [...html.matchAll(/<section\b([^>]*\bst-hero-layered\b[^>]*)>([\s\S]*?)<\/section>/g)]
-      .map((m) => ({ tag: m[1], title: (/<h1[^>]*>([\s\S]*?)<\/h1>/.exec(m[2]) || [])[1], pos: (/\bdata-logo-pos="([^"]*)"/.exec(m[1]) || [])[1] }));
+      .map((m) => ({ tag: m[1], title: (/<h([12])[^>]*>([\s\S]*?)<\/h\1>/.exec(m[2]) || [])[2], pos: (/\bdata-logo-pos="([^"]*)"/.exec(m[1]) || [])[1] }));
     const byTitle = new Map(sections.map((s) => [s.title, s]));
     // The tag with the two things that legitimately differ between sections taken out.
     const shape = (s) => s.tag.replace(/\sid="[^"]*"/, '').replace(/\sdata-astro-[\w-]+(="[^"]*")?/g, '');

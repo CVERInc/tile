@@ -2619,7 +2619,7 @@ function heroVariant(pm) {
 
 // The section types whose renderer can write the section's title as the page <h1>: the Astro
 // component reads the `hero` prop (Section.astro) and the string branch uses `H` (renderSection) —
-// plus `hero`, whose own heading is always an <h1>. gallery, carousel and cta hard-code <h2> in
+// plus `hero`, whose heading is the <h1> as the owner and <h2> elsewhere (reef#2869). gallery, carousel and cta hard-code <h2> in
 // both renderers; embed writes no title at all. Unknown types render as prose in both.
 const H1_TYPES = ['prose', 'hero', 'grid', 'people', 'collection', 'faq', 'timeline', 'social', 'tagcloud', 'links', 'form'];
 const renderedType = (s) => (KNOWN_TYPES.indexOf(s && s.type) >= 0 ? s.type : 'prose');
@@ -2693,10 +2693,16 @@ function renderSection(s, hero, ctx) {
       const variant = heroVariant(pm);
       const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
+      // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
+      // pageH1Index); anywhere else <h2>, like every other h1-capable type. Not `H`: a logo hero's
+      // empty title still draws its image heading.
+      // reef#2869 r2: either level carries `st-hero-title`, the class site.css styles the hero title
+      // by, so a demoted <h2> keeps the hero's type (emit/hero.mjs writes the same class).
+      const HH = hero ? 'h1' : 'h2';
       const h1Html = heroHeadingless(s) ? ''
         : logo
-          ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
-          : '<h1>' + inlineHtml(s.title) + '</h1>';
+          ? '<' + HH + ' class="st-hero-logo st-hero-title"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
+          : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>';
       if (layerList.length) {
         const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
@@ -2719,7 +2725,7 @@ function renderSection(s, hero, ctx) {
         const enter = pm.enter != null;
         return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + (enter ? ' data-enter=""' : '') + style + '>' +
           (enter && bgOk ? '<div class="st-hero-bg" aria-hidden="true"' + style + '></div>' : '') +
-          (heroHeadingless(s) ? '' : '<h1>' + inlineHtml(s.title) + '</h1>') +
+          (heroHeadingless(s) ? '' : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>') +
           bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</section>';
       }
       const layout = ' data-layout="' + escAttr(variant.layout) + '"';
