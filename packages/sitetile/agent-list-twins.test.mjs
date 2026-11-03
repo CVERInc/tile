@@ -71,6 +71,25 @@ test('a list twin is the page title, one line per item (title, date, link), then
     /- \[a\]\(\/t\/a%20b\)\n\nPrevious page: \[\/t\/x\]\(\/t\/x\)\nNext page: /);
 });
 
+// tile#247 review P2-2: a per-post permalink may carry a paren. Unencoded, `)` ends the
+// destination early (an agent is pointed at /blog/a) and a lone `(` breaks the link.
+// encodeURIComponent leaves both unchanged, so they are encoded explicitly — items AND pager.
+test('🔴 a paren in a list destination is percent-encoded, in items and in the pager', () => {
+  assert.equal(listMarkdownBody({ items: [{ title: 'Post', href: '/blog/a)b' }], prev: '/blog/a)b', next: '/blog/a(b' }), [
+    '- [Post](/blog/a%29b)',
+    '',
+    'Previous page: [/blog/a)b](/blog/a%29b)',
+    'Next page: [/blog/a(b](/blog/a%28b)',
+  ].join('\n'));
+  assert.equal(listMarkdownBody({ items: [{ title: 'Post', href: '/blog/a(b' }] }), '- [Post](/blog/a%28b)');
+});
+
+test('ordinary destinations are unchanged byte for byte', () => {
+  for (const href of ['/devlog/newest', '/blog/2026/08/a-b_c.d~e/', '/t/%E4%B8%AD?x=1&y=2#top', 'https://fixture.example/p/']) {
+    assert.equal(listMarkdownBody({ items: [{ title: 't', href }], next: href }), `- [t](${href})\n\nNext page: [${href}](${href})`);
+  }
+});
+
 test('outside a gated build a view records nothing and renders no mark', () => {
   delete globalThis[MANIFEST];
   assert.equal(recordListTwin(BLOG), '');

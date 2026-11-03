@@ -49,7 +49,10 @@ export function documentMarkdown(doc, origin) {
 
 // A link target inside `(…)`: a space or a paren would end it early, so those (and only those) are
 // percent-encoded. Anything else is the href the HTML page links to, byte for byte.
-const escHref = (s) => String(s == null ? '' : s).replace(/[ ()]/g, (c) => encodeURIComponent(c));
+// 🔴 Spelled out, not encodeURIComponent: that leaves `(` and `)` unchanged (tile#247 review), so
+// `/blog/a)b` became `[…](/blog/a)b)` — a link to /blog/a.
+const HREF_ESCAPES = { ' ': '%20', '(': '%28', ')': '%29' };
+const escHref = (s) => String(s == null ? '' : s).replace(/[ ()]/g, (c) => HREF_ESCAPES[c]);
 
 /** A generated list page → its markdown body: the page's heading, then one line per item
  *  (`- [title](link) — date`, the date only when the item has one), then the neighbouring pages
