@@ -28,7 +28,7 @@
 // whatever opened the drawer. Those are refinements on content that is already reachable — which
 // is the difference between progressive enhancement and a dependency.
 //
-// WHAT STAYS BEHIND. Parsing `## drawer: <id> | <title>` is cardtile-md's model and stays in
+// WHAT STAYS BEHIND. Parsing `## back: <id> | <title>` (or the older `## drawer:`) is cardtile-md's model and stays in
 // card-core. The renderer emits panels and triggers; this coral makes them behave. Structure is the
 // substrate's, performance is the coral's.
 
@@ -73,10 +73,36 @@
       document.addEventListener('keydown', onKey, true);
     }
 
+    // where the back turns from: the tile that was tapped. The CSS turns it in place without this; with it, the
+    // back leaves the tile and returns to it. Measured on the click, before the hash changes and :target applies.
+    function launch(t, panel) {
+      var tile = t.closest('.st-cell') || t, r = tile.getBoundingClientRect();
+      if (!r.width) return;
+      var w = panel.offsetWidth || Math.min(440, window.innerWidth - 32);
+      panel.style.setProperty('--dc-fx', Math.round(r.left + r.width / 2 - window.innerWidth / 2) + 'px');
+      panel.style.setProperty('--dc-fy', Math.round(r.top + r.height / 2 - window.innerHeight / 2) + 'px');
+      panel.style.setProperty('--dc-fs', Math.max(.2, Math.min(1, r.width / w)).toFixed(3));
+    }
+    // a link that has a back AND goes somewhere opens its back first; the way out is added to that back
+    function wayOut(t, panel) {
+      var old = panel.querySelector('.dc-back-go');
+      if (old) old.remove();
+      var url = t.getAttribute('data-back-url');
+      if (!url) return;
+      var a = document.createElement('a');
+      a.className = 'dc-back-go'; a.href = url; a.target = '_blank'; a.rel = t.getAttribute('data-back-rel') || 'noopener noreferrer';
+      var host = url; try { host = new URL(url, location.href).host.replace(/^www\./, '') || url; } catch (e) {}
+      a.textContent = host + ' \u2197';
+      (panel.querySelector('.dc-drawer-body') || panel).appendChild(a);
+    }
+
     // remember what opened it, so focus can go home afterwards
     document.addEventListener('click', function (e) {
       var t = e.target.closest && e.target.closest('[data-drawer]');
-      if (t) opener = t;
+      if (!t) return;
+      opener = t;
+      var panel = panels[t.getAttribute('data-drawer')];
+      if (panel) { launch(t, panel); wayOut(t, panel); }
     }, true);
 
     function sync() {

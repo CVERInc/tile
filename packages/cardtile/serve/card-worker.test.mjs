@@ -277,6 +277,43 @@ test('drawer prose renders block markdown (paragraphs, bold, links) — not esca
   assert.match(html, /<a href="https:\/\/a\.example"[^>]*>link<\/a>/);
 });
 
+// reef#2725: writing back= on a cell gives it another side. A profile or text tile has no link of
+// its own, so it gets a door (an anchor over the whole tile) that opens the back; a link or feature
+// cell with a back keeps its URL on the back as a pill instead of losing it.
+const WITH_BACKS = ['---', 'card-page: x', 'title: X', '---', '', '## grid', '',
+  '- [ ] %% card: profile w=6 back=#about %% Hello',
+  '- [ ] %% card: text back=#about %% Has a [link](https://a.example) inside',
+  '- [ ] %% card: link w=3 back=#ig %% [Instagram](https://instagram.com/x)',
+  '- [ ] %% card: link w=3 back=#nope %% [YouTube](https://youtube.com/@x)',
+  '- [ ] %% card: text %% no back',
+  '', '## back: about | About', '',
+  '- [ ] %% card: text back=#ig %% inside a back',
+  '', '## back: ig', '', '- [ ] %% card: text %% drafts',
+].join('\n') + '\n';
+
+test('🔴 back=: profile and text tiles get a door to their back; tiles without one do not', () => {
+  const html = renderCardHTML(WITH_BACKS, { handle: 'x' });
+  const doors = html.match(/<a class="st-back-door" href="#[^"]*" data-drawer="[^"]*"/g) || [];
+  assert.deepEqual(doors.map((d) => /href="#([^"]*)"/.exec(d)[1]), ['about', 'about'], 'one door per back= tile on the face, none elsewhere');
+  assert.match(html, /<a class="st-back-door"[^>]*aria-label="About"/, 'the door is named after the back');
+  assert.match(html, /<a href="https:\/\/a\.example"[^>]*>link<\/a>/, 'a link inside a door tile still renders as a link');
+});
+
+test('🔴 back=: a link with a back opens the back and carries its URL there; a missing back leaves it a link', () => {
+  const html = renderCardHTML(WITH_BACKS, { handle: 'x' });
+  assert.match(html, /href="#ig"[^>]*data-back-url="https:\/\/instagram\.com\/x"/, 'the link opens its back and keeps its URL for the pill');
+  assert.ok(!/href="#ig"[^>]*target="_blank"/.test(html), 'opening a back never navigates away');
+  assert.match(html, /href="https:\/\/youtube\.com\/@x"[^>]*target="_blank"/, 'back=#nope names no lane: an ordinary link');
+  assert.ok(!html.includes('#nope'), 'an unknown back id is not rendered anywhere');
+});
+
+test('🔴 back= inside a back is ignored: a back is a leaf', () => {
+  const html = renderCardHTML(WITH_BACKS, { handle: 'x' });
+  const panel = /<div class="dc-drawer" id="about"[\s\S]*?(?=<div class="dc-drawer" id="ig")/.exec(html)[0];
+  assert.ok(!panel.includes('<a class="st-back-door"') && !panel.includes('href="#ig"'), 'no door or back link inside a back');
+  assert.ok(panel.includes('inside a back'), 'the tile itself still renders');
+});
+
 test('a card with no drawers ships no overlay markup or client', () => {
   const html = renderCardHTML(CARD, { handle: 'x' });
   assert.ok(!html.includes('dc-drawer-layer'), 'zero cost when unused');

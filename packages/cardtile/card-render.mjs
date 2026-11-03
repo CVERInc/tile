@@ -476,7 +476,33 @@ const dialect = (ctx) => ({
   cssUrl: (raw) => esc(cssAttrUrl(ctx, raw)),
 });
 
+// A cell's BACK: `back=#about` names the `## back: about` lane this cell turns over to (reef#2725, 2026-11-02).
+// Only a back that exists on this card counts, and never inside a back (depth 1, as for `#id` links).
+const backTarget = (p, ctx) => {
+  if (ctx.inDrawer || !ctx.backIds) return '';
+  const m = /^#(.+)$/.exec(String(p.back == null ? '' : p.back).trim());
+  if (!m) return '';
+  const id = m[1].trim().toLowerCase().replace(/\s+/g, '-');
+  return ctx.backIds.has(id) ? id : '';
+};
+// Cells that get a DOOR — a layer over the whole tile that opens its back. A link or a feature with a back
+// aims its own anchor at it instead (see those cases). A video, slides, pasted HTML or a social row get no
+// door: a tap on them already means play, swipe, whatever the HTML does, or one of their icons, and a door
+// would take that away. Their back still shows where a card turns over as a whole (the deck views).
+const DOOR_TYPES = new Set(['profile', 'text']);
 function renderCell(cell, place, ctx) {
+  const html = renderCellBody(cell, place, ctx);
+  const id = DOOR_TYPES.has(cell.type) ? backTarget(cell.params || {}, ctx) : '';
+  if (!html || !id) return html;
+  const at = html.indexOf('>') + 1;
+  const name = (ctx.backTitles && ctx.backTitles.get(id)) || id;
+  return html.slice(0, at) + `<a class="st-back-door" href="#${esc(id)}" data-drawer="${esc(id)}" aria-haspopup="dialog" aria-label="${esc(name)}"></a>` + html.slice(at);
+}
+// the link a cell with a back keeps: where it went, so the back can offer the way out (the drawer coral adds it)
+const backAnchor = (id, url, ctx) => anchorFor('#' + id, ctx)
+  + (url ? ` data-back-url="${esc(attrUrl(ctx, url))}" data-back-rel="${relFor(url, ctx)}"` : '');
+
+function renderCellBody(cell, place, ctx) {
   const p = cell.params || {};
   // `data-span` stays: card.css uses it for CONTENT decisions (a 2×2 tile hides its sub-label), and
   // it is what a reader of the markup expects to see. `data-w` is what LAYOUT reads — the width is
@@ -520,8 +546,9 @@ function renderCell(cell, place, ctx) {
       // The old form's hint said 「每張圖都要有去處」 to paper over it, which made a renderer
       // limitation into a rule for the author. It is not one: the destination is optional, and when
       // there is none the picture is simply not wrapped in a link.
-      const hasHref = !!String(p.href == null ? '' : p.href).trim();
-      const fa = hasHref ? anchorFor(p.href, ctx) : '';
+      const backId = backTarget(p, ctx);
+      const hasHref = !!String(p.href == null ? '' : p.href).trim() || !!backId;
+      const fa = backId ? backAnchor(backId, String(p.href == null ? '' : p.href).trim(), ctx) : hasHref ? anchorFor(p.href, ctx) : '';
       if (hasHref && !fa) return '';                 // a drawer target inside a drawer — refused, as before
       const cell = { attrs: size };
       // 🔴 An empty `img=` is not "a small picture", it is NO picture — and `<img src="">` is the
@@ -592,7 +619,8 @@ function renderCell(cell, place, ctx) {
         // address to derive one from).
         return gridCell({ cell: { attrs: size }, unset: true, arrow: arrowOf(ctx, 17), title: linkText || unset, sub: unset }, false, dialect(ctx));
       }
-      const a = anchorFor(url, ctx);
+      const backId = backTarget(p, ctx);
+      const a = backId ? backAnchor(backId, /^#/.test(url) ? '' : url, ctx) : anchorFor(url, ctx);
       if (!a) return '';
       const icon = linkIcon(p, url, ctx);
       return gridCell({ cell: { attrs: size }, anchor: a, icon, arrow: arrowOf(ctx, 17), title: linkText, sub: p.sub }, false, dialect(ctx));
@@ -690,6 +718,11 @@ function renderCell(cell, place, ctx) {
 // cardtile-native widget styling — carried WITH the renderer so a card needs no CSS beyond the
 // shared card stylesheet. Themed off the same --cp-* tokens.
 const NATIVE_CSS = [
+  // a door over a tile that turns over to its back: the whole tile is the target, the avatar and any link in it stay on top
+  '.st-card .st-cell:has(>.st-back-door){position:relative;cursor:pointer}',
+  '.st-card .st-back-door{position:absolute;inset:0;z-index:1;border-radius:inherit}',
+  '.st-card .st-cell:has(>.st-back-door) a:not(.st-back-door),.st-card .st-cell:has(>.st-back-door) .st-figure{position:relative;z-index:2}',
+  '.st-card .st-back-door:focus-visible{outline:2px solid var(--cp-accent);outline-offset:2px}',
   `.st-cell-icon-img{width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(255,255,255,.06)}`,
   // an author's own artwork on a row — 64px, `cover`, because it is a picture and not a mark.
   `.st-cell-icon-art{width:64px;height:64px;object-fit:cover;border-radius:10px;background:none}`,
@@ -1284,6 +1317,11 @@ export { linkOf, hostLabel, hostOf, iconDomains };
 
 export function renderGrid(model, ctx = {}) {
   ctx = { name: '', icons: {}, ...ctx };
+  if (!ctx.inDrawer) {
+    const ds = model.drawers || [];
+    ctx.backIds = new Set(ds.map((d) => d.id));
+    ctx.backTitles = new Map(ds.map((d) => [d.id, d.title || '']));
+  }
   const cols = model.cols;
   const parts = [];
 
