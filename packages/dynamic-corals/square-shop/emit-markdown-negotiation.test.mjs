@@ -553,6 +553,67 @@ test('a 304 revalidation carries no estimate (no body to count; the cache keeps 
 	assert.equal(res.headers.get('content-signal'), CITE_SIGNAL, 'the declaration still rides on the 304');
 });
 
+// A Range request for the twin (tile#247 review, P2-1): the asset server answers 206
+// with the slice it was asked for. That slice IS the body; dropping it left an empty
+// 206 still claiming `Content-Range: bytes 0-3/100`.
+function rangeEnv(slice, contentRange) {
+	const seen = [];
+	return {
+		seen,
+		env: { ASSETS: { fetch: async (req) => {
+			const url = new URL(req.url);
+			seen.push({ method: req.method, path: url.pathname, range: req.headers.get('range') || '' });
+			if (url.pathname.endsWith('.md')) {
+				return new Response(slice, { status: 206, headers: {
+					'content-type': 'text/plain; charset=utf-8', 'content-range': contentRange, 'accept-ranges': 'bytes', etag: MD_ETAG
+				} });
+			}
+			return new Response('HTML:' + url.pathname, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+		} } }
+	};
+}
+
+test('🔴 a ranged markdown request keeps its 206 body, status and Content-Range', async () => {
+	const { env, seen } = rangeEnv('# Bl', 'bytes 0-3/100');
+	const res = await signalled.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-3' }), env);
+	assert.equal(res.status, 206);
+	assert.equal(await res.text(), '# Bl');
+	assert.equal(res.headers.get('content-range'), 'bytes 0-3/100');
+	assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
+	assert.equal(varyList(res).includes('accept'), true);
+	assert.equal(res.headers.get('content-signal'), CITE_SIGNAL);
+	// A count of four bytes beside a 100-byte document would mislead: no estimate on a 206.
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+	assert.deepEqual(seen, [{ method: 'GET', path: '/about/index.md', range: 'bytes=0-3' }], 'Range still reaches the asset server');
+});
+
+test('🔴 a 206 slice that cuts a multibyte character is passed through byte for byte, not re-decoded', async () => {
+	const whole = new TextEncoder().encode(CJK_TWIN);
+	const cut = whole.findIndex((b) => b >= 0x80) + 1;   // one byte into the first multibyte character
+	assert.ok(cut > 0 && whole[cut] >= 0x80 && whole[cut] < 0xc0, 'control: the slice really ends mid-character');
+	const bytes = whole.slice(0, cut);
+	const { env } = rangeEnv(bytes, 'bytes 0-' + (cut - 1) + '/' + whole.length);
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-' + (cut - 1) }), env);
+	assert.equal(res.status, 206);
+	assert.deepEqual(new Uint8Array(await res.arrayBuffer()), bytes);
+});
+
+test('HEAD with Range: the 206 status and Content-Range, no body', async () => {
+	const { env } = rangeEnv('# Bl', 'bytes 0-3/100');
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-3' }, { method: 'HEAD' }), env);
+	assert.equal(res.status, 206);
+	assert.equal(res.headers.get('content-range'), 'bytes 0-3/100');
+	assert.equal(await res.text(), '');
+});
+
+test('a 204 from the asset server stays a bodiless 204 (a null-body status must not be given one)', async () => {
+	const env = { ASSETS: { fetch: async () => new Response(null, { status: 204 }) } };
+	const res = await worker.mod.default.fetch(get('/about/', MD), env);
+	assert.equal(res.status, 204);
+	assert.equal(await res.text(), '');
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+});
+
 test('🔴 a markdown response carries the site\'s own Content-Signal, ai-train=no for a site that refuses training', async () => {
 	const { env } = twinEnv();
 	const res = await signalled.mod.default.fetch(get('/about/', MD), env);

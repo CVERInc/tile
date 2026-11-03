@@ -2582,12 +2582,24 @@ async function negotiateMarkdown(request, env, markdown) {
 //     version always says `ai-train=yes`; this one says what the owner chose, because
 //     an agent fetching a page directly may never read robots.txt. Absent when the
 //     build baked none (an emitter invoked without --content-signal).
+//     Only on a 200: a 206 (a Range request — the caller's headers ride along) returns
+//     a slice, and "4 tokens" beside a 100-byte document would read as the document's
+//     cost, which is exactly what this header claims to be. So a 206 carries no estimate.
 const estTokens = (s) => Math.ceil(s.length / 4);
+// Statuses whose response MUST NOT carry a body (the Response constructor throws on one).
+const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
 
+// 🔴 Every body-bearing answer keeps its body (tile#247 review): a 206 is the slice the
+// caller asked for, with the asset server's own Content-Range; dropping it left an empty
+// 206 still claiming the original range. Only a 200 is read as text (to count it); any
+// other body is passed through as the raw stream, because decoding a slice that ends
+// mid-character would rewrite its bytes. Only HEAD and the null-body statuses go bodiless.
 async function markdownVariant(res, request, contentSignal) {
 	const text = res.status === 200 ? await res.text() : null;
+	const body = request.method === 'HEAD' || NULL_BODY_STATUS.has(res.status) ? null
+		: text !== null ? text : res.body;
 	const out = withVaryAccept(
-		new Response(request.method === 'HEAD' ? null : text, { status: res.status, statusText: res.statusText, headers: res.headers }),
+		new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }),
 		request, MARKDOWN_CONTENT_TYPE
 	);
 	if (text !== null) out.headers.set('x-markdown-tokens', String(estTokens(text)));
