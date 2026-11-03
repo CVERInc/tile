@@ -70,6 +70,11 @@ export const PUBLIC_CATALOG_PATHS = Object.freeze([
 // the same public page any visitor gets and goes to the Site Worker, never RSP.
 export const SITE_SHELL_PATH = '/';
 
+// The Site's public build stamp, which the platform's publish gate reads server-side (with
+// cf-worker) to tell whether publishing again would change what visitors see. Exact path, GET
+// only; it is the same public file any visitor gets and goes to the Site Worker, never RSP.
+export const SITE_STAMP_PATH = '/_reef/build.json';
+
 // What the capability stub lets a Site Worker read, GET only, exact paths.
 // The catalog paths are deliberately absent: they are rate-limited per visitor, and a
 // server-side hop does not carry the visitor's address, so a Site Worker reads them over its
@@ -140,11 +145,12 @@ function buildStub(ctx, host, entry) {
 }
 
 // Host-level guard shared by both entry paths. cf-worker marks a request made by a Worker over
-// a public hostname. Only the public catalog reads and the Site shell read may come in that way.
+// a public hostname. Only the public catalog reads, the Site shell read and the build stamp read
+// may come in that way.
 function workerOriginGuard(request, url) {
 	if (!request.headers.has('cf-worker')) return null;
 	if (request.method !== 'GET' ||
-		!(PUBLIC_CATALOG_PATHS.includes(url.pathname) || url.pathname === SITE_SHELL_PATH)) {
+		!(PUBLIC_CATALOG_PATHS.includes(url.pathname) || url.pathname === SITE_SHELL_PATH || url.pathname === SITE_STAMP_PATH)) {
 		return json({ error: 'worker_origin_forbidden' }, 403);
 	}
 	return null;

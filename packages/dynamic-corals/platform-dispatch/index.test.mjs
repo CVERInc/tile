@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
 	handleRequest, capabilityFetch, bypassResponse, matchesWorkerFirst,
-	PUBLIC_CATALOG_PATHS, STUB_READ_PATHS, SITE_SHELL_PATH
+	PUBLIC_CATALOG_PATHS, STUB_READ_PATHS, SITE_SHELL_PATH, SITE_STAMP_PATH
 } from './index.mjs';
 
 const HOST = 'shop.example.com';
@@ -122,6 +122,23 @@ test('cf-worker rule: only GET on public catalog paths pass; everything else 403
 	assert.equal(h.dispatchCalls.length, 0);
 	// Without the header the same paths are not subject to the rule.
 	assert.equal((await handleRequest(req('/api/cart'), h.env, h.ctx)).status, 201);
+});
+
+test('cf-worker rule: GET on the build stamp reaches the Site Worker, so the publish gate can read it', async () => {
+	const h = harness();
+	const w = { 'cf-worker': 'example.com' };
+	assert.equal(SITE_STAMP_PATH, '/_reef/build.json');
+	const res = await handleRequest(req(SITE_STAMP_PATH, { headers: w, redirect: 'manual' }), h.env, h.ctx);
+	assert.equal(res.status, 200);
+	assert.equal(await res.text(), 'site:site-a');
+	assert.equal(h.dispatchCalls.length, 1);
+	assert.equal(h.rspCalls.length, 0);
+	// Only GET on exactly the stamp path: other methods and neighbouring paths stay 403.
+	for (const [method, p] of [['HEAD', SITE_STAMP_PATH], ['POST', SITE_STAMP_PATH], ['GET', '/_reef/'], ['GET', '/_reef/build.json/x'], ['GET', '/_reef/other.json']]) {
+		const denied = await handleRequest(req(p, { method, headers: w }), h.env, h.ctx);
+		assert.equal(denied.status, 403, `${method} ${p}`);
+	}
+	assert.equal(h.dispatchCalls.length, 1);
 });
 
 test('cf-worker rule: GET on the Site shell (/) reaches the Site Worker, so a server-side <html lang> read gets the page', async () => {
