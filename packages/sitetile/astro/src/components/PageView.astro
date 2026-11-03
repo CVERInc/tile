@@ -7,7 +7,7 @@
 import SiteLayout from '../layouts/SiteLayout.astro';
 import Section from './Section.astro';
 import { allPosts, listedPosts, systemPageLang } from '../lib/blog.mjs';
-import { deriveDescription } from '../../../site-core.js';
+import { deriveDescription, pageH1Index } from '../../../site-core.js';
 
 // `stamp` (reef#2554, pages/[...path].astro): this page's own noindex: and sitemap listing, for
 // SiteLayout to stamp into the head and noindex-pass.mjs to read and remove after the build.
@@ -36,7 +36,10 @@ const blogPosts = String(site.meta.packages || '').includes('blog')
 const headMeta = site.meta.description
   ? site.meta
   : { ...site.meta, description: deriveDescription(site.sections) };
+// reef#2857: which section carries the page <h1> — the first that writes a heading, when its type can
+// carry one; -1 = none (site-core pageH1Index).
+const h1At = pageH1Index(site.sections);
 ---
 <SiteLayout title={pageTitle} lang={pageLang} meta={headMeta} blogPosts={blogPosts} stamp={stamp}>
-  {site.sections.map((s, i) => <Section section={s} index={i} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
+  {site.sections.map((s, i) => <Section section={s} index={i} h1At={h1At} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
 </SiteLayout>

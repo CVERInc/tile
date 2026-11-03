@@ -14,7 +14,8 @@ call the same function, so a section's markup exists once.
   contract `packages/sitetile/coral-params.test.mjs` guards: reef-mcp derives "which params each
   coral reads" by scanning the `.astro` files for `pm.<name>`, so a read moved in here would make
   that table call a live param inert.
-- **`ctx`** — render context: `{ hero }` (this is the page's first section → its title is `<h1>`),
+- **`ctx`** — render context: `{ hero }` (this section carries the page's `<h1>` → its title is `<h1>`: the
+  first section that writes a heading, when its type can carry an h1 — site-core `pageH1Index`, reef#2857),
   plus, from phase 2 on, the caller's markdown renderers (below) and whatever a section needs that
   only a host knows (Form's `index`).
 

@@ -12,7 +12,11 @@
 
   // The hero's own CONTENT block (logo / heading / lead) — the thing whose ink can collide with
   // the header's. Layered hero wraps it in .st-hero-overlay; the flat entrance hero's h1 stands in.
-  const content = hero.querySelector('.st-hero-overlay') || hero.querySelector('h1') || hero;
+  // reef#2857: a text-free hero writes no h1 — its first element that is not the `.st-hero-bg`
+  // picture layer stands in (its lead / CTA), and a hero with nothing but the picture collides with
+  // nothing. (Falling back to the hero itself put the "content" at the page top: solid from frame one.)
+  const content = hero.querySelector('.st-hero-overlay') || hero.querySelector('h1')
+    || Array.from(hero.children).find((c) => !c.classList.contains('st-hero-bg')) || null;
 
   let ticking = false;
   const apply = () => {
@@ -25,7 +29,7 @@
     // bottom-anchored logo already starts inside the header band. 2026-07-17, reported by the
     // maintainer from a wide-short window.
     const past = window.scrollY > Math.max(0, hero.offsetHeight - header.offsetHeight - 8);
-    const colliding = content.getBoundingClientRect().top < header.offsetHeight + 8;
+    const colliding = !!content && content.getBoundingClientRect().top < header.offsetHeight + 8;
     header.classList.toggle('is-solid', past || colliding);
   };
   const onScroll = () => {

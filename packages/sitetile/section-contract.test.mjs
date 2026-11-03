@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseSite, renderSiteToHtml } from './site-core.js';
+import { parseSite, renderSiteToHtml, heroHeadingless, pageH1Index } from './site-core.js';
 import { contentRelsOf } from './locale.mjs';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
 
@@ -109,6 +109,13 @@ const CASES = [
   { title: 'Hero split', marker: '%% sitetile: hero layout=split %%', body: 'Split hero.\n\n[Act](/act)\n\n![Art](/img/art.png)' },
   { title: 'Hero split logo', marker: '%% sitetile: hero layout=split logo=/img/logo.png %%', body: 'Split logo hero.\n\n[Act](/act)\n\n![Art](/img/art.png)' },
   { title: 'Hero layered', marker: '%% sitetile: hero layers=/img/back.png|/img/front.png logo=/img/logo.png %%', body: 'Layered hero.' },
+  // reef#2857: a text-free hero (no title, no `logo=`) — a full-bleed bg= picture band. It emits NO
+  // heading element at all (not an empty <h1>), in every variant; the logo one keeps its image h1.
+  { title: '', label: 'Hero bare legacy', marker: '%% sitetile: hero bg=/img/bg.png cta="Go"→/go %%', body: 'A text-free hero.' },
+  { title: '', label: 'Hero bare enter', marker: '%% sitetile: hero bg=/img/bg.png enter %%', body: 'Entrance hero.' },
+  { title: '', label: 'Hero bare split', marker: '%% sitetile: hero layout=split bg=/img/bg.png eyebrow="Hi" %%', body: 'Split.\n\n[Act](/act)\n\n![Art](/img/art.png)' },
+  { title: '', label: 'Hero bare layered', marker: '%% sitetile: hero layers=/img/back.png|/img/front.png %%', body: 'Layered.' },
+  { title: '', label: 'Hero bare layered logo', marker: '%% sitetile: hero layers=/img/back.png|/img/front.png logo=/img/logo.png %%', body: 'Layered logo.' },
   { title: 'Grid cells', marker: '%% sitetile: grid cols=3 %%',
     body: '### Plain\nBody one.\n\n### Linked →/internal\nBody two.\n\n### Labelled →/x "Read"\nBody three.\n\n### 🎉 Emoji\nBody four.\n\n### Badged [New]\nBody five.\n\n### External →https://example.com/e\nBody six.' },
   { title: '', label: 'Grid untitled', marker: '%% sitetile: grid cols=2 %%', body: '### Only\nBody.' },
@@ -174,7 +181,7 @@ const idOf = (title) => site.sections[CASES.findIndex((c) => nameOf(c) === title
 const stringById = sectionsById(renderSiteToHtml(site), 'string render');
 
 await test('the fixture parsed into the section types it was written as', () => {
-  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery',
+  const want = ['prose', 'prose', 'prose', 'prose', 'hero', 'hero', 'hero', 'hero', 'hero', 'hero', 'hero', 'hero', 'hero', 'grid', 'grid', 'collection', 'form', 'form', 'faq', 'prose', 'faq', 'grid', 'grid', 'gallery', 'timeline', 'cta', 'gallery',
     'embed', 'embed', 'people', 'people', 'social', 'social', 'tagcloud', 'links', 'links', 'faq', 'timeline', 'gallery',
     'carousel', 'carousel', 'carousel'];
   assert.deepEqual(site.sections.map((s) => s.type), want);
@@ -196,6 +203,139 @@ function assertNoPlayerInLinkedCell(where, byId) {
 await test('🔴 string render: a linked cell holds no YouTube player (no <a> inside its <a>)', () => {
   assertNoPlayerInLinkedCell('string render', stringById);
 });
+
+// ── reef#2857: a text-free hero emits no heading; a titled or logo hero is untouched ─────────
+// Checked against each renderer on its own: structure parity alone stays green when BOTH write the
+// empty <h1></h1> (which is exactly what origin/main did).
+const BARE_HEROES = ['Hero bare legacy', 'Hero bare enter', 'Hero bare split', 'Hero bare layered'];
+const TITLED_HEROES = ['Hero legacy', 'Hero split', 'Hero split logo', 'Hero layered', 'Hero bare layered logo'];
+const LOGO_HEROES = ['Hero split logo', 'Hero layered', 'Hero bare layered logo'];
+const headings = (n) => all(n).filter((k) => /^h[1-6]$/.test(k.tag));
+function assertHeroHeadings(where, byId) {
+  const emitted = [];
+  for (const title of BARE_HEROES) {
+    const sec = byId.get(idOf(title));
+    assert.ok(sec, `${where}: no section ${title}`);
+    assert.ok(sec.cls.includes('st-hero') && sec.cls.includes('st-full-bleed'), `${where}, ${title}: no longer a full-bleed hero`);
+    const hs = headings(sec).map((h) => `<${h.tag}>`);
+    if (hs.length) emitted.push(`${title} ${hs.join('')}`);
+  }
+  assert.deepEqual(emitted, [], `${where}: text-free heroes emitted a heading`);
+  for (const title of TITLED_HEROES) {
+    const sec = byId.get(idOf(title));
+    assert.deepEqual(headings(sec).map((h) => h.tag), ['h1'], `${where}, ${title}: a titled/logo hero must keep exactly one <h1>`);
+  }
+}
+// The raw outer HTML of one hero <section> (a hero holds no nested <section>).
+function rawSection(html, id) {
+  const at = html.search(new RegExp(`<section\\b[^>]*\\bid="${id}"`));
+  if (at < 0) return null;
+  return html.slice(at, html.indexOf('</section>', at) + '</section>'.length);
+}
+// Pinned from origin/main 6c84cea (before reef#2857): the logo heroes, byte for byte.
+const LOGO_PIN = {
+  string: {
+    "Hero split logo":
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\"><div class=\"st-hero-text\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1><p>Split logo hero.</p><div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div></div><div class=\"st-hero-art\"><img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"lazy\" decoding=\"async\"></div></section>",
+    "Hero layered":
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1><p>Layered hero.</p></div></section>",
+    "Hero bare layered logo":
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"\" loading=\"eager\" decoding=\"async\"></h1><p>Layered logo.</p></div></section>",
+  },
+  built: {
+    "Hero split logo":
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\">  <div class=\"st-hero-text\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1> <p>Split logo hero.</p> <div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div> </div> <div class=\"st-hero-art\"> <img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"eager\" decoding=\"async\"> </div> </section>",
+    "Hero layered":
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1> <p>Layered hero.</p>  </div> </section>",
+    "Hero bare layered logo":
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt loading=\"eager\" decoding=\"async\"></h1> <p>Layered logo.</p>  </div> </section>",
+  },
+};
+const stringHtml = renderSiteToHtml(site);
+if (process.env.SECTION_CONTRACT_DUMP_LOGO) for (const t of LOGO_HEROES) console.log('PIN string', JSON.stringify(t), JSON.stringify(rawSection(stringHtml, idOf(t))));
+await test('🔴 string render: a text-free hero emits no heading (every variant); a titled/logo hero keeps exactly one <h1>', () => {
+  assertHeroHeadings('string render', stringById);
+});
+await test('CONTROL string render: the logo heroes are byte-identical to origin/main', () => {
+  for (const t of LOGO_HEROES) assert.equal(rawSection(stringHtml, idOf(t)), LOGO_PIN.string[t], `string render, ${t}`);
+});
+
+await test('heroHeadingless: whitespace counts as empty; a logo keeps the heading only where the variant draws it', () => {
+  const h = (title, params) => heroHeadingless({ type: 'hero', title, params });
+  assert.equal(h(' \t ', 'bg=/img/bg.png'), true, 'whitespace title');
+  assert.equal(h('', 'bg=/img/bg.png logo=/img/logo.png'), true, 'legacy hero never draws logo= → no heading');
+  assert.equal(h('', 'layout=split logo=/img/logo.png'), false, 'layout= logo hero keeps its image h1');
+  assert.equal(h('', 'layers=/a.png logo=/img/logo.png'), false, 'layers= logo hero keeps its image h1');
+  assert.equal(h('', 'layers=/a.png logo=javascript:alert(1)'), true, 'a refused logo destination draws nothing');
+  assert.equal(h('Title', 'bg=/img/bg.png'), false, 'titled');
+  assert.equal(heroHeadingless({ type: 'prose', title: '' }), false, 'only heroes');
+  const ws = renderSiteToHtml(parseSite('---\nsitetile-page: home\ntitle: t\n---\n\n## Next\nx.\n'));
+  assert.match(ws, /<h1>Next<\/h1>/, 'CONTROL: a page with no hero keeps its first-section h1');
+  assert.equal(pageH1Index([{ type: 'hero', title: ' ', params: '' }, { type: 'hero', title: '', params: '' }, { type: 'prose', title: 'P' }]), 2);
+});
+
+// A page that OPENS with a text-free hero: the page's one <h1> is the next section's title.
+const BARE_FIRST_MD = '---\nsitetile-page: bare-hero\ntitle: Bare hero first\nlang: en-US\n---\n\n'
+  + '##\n%% sitetile: hero bg=/img/bg.png cta="Go"→/go %%\nPicture band.\n\n## Welcome\nThe first words.\n\n## Later\nMore.\n';
+const bareFirst = parseSite(BARE_FIRST_MD);
+function assertBareFirstPage(where, html) {
+  const hs = all(parseHtml(html)).filter((k) => k.tag === 'section' && k.attrs.id).map((s) => ({ id: s.attrs.id, h: headings(s).map((h) => h.tag) }));
+  const ids = bareFirst.sections.map((s) => s.id);
+  assert.deepEqual(hs.filter((x) => ids.includes(x.id)).map((x) => x.h), [[], ['h1'], ['h2']], `${where}: headings per section of a page opening with a text-free hero`);
+}
+await test('🔴 string render: a page opening with a text-free hero takes its <h1> from the next section', () => {
+  assertBareFirstPage('string render', renderSiteToHtml(bareFirst));
+});
+
+// reef#2857 r2 (review of 2f7bdee): the three pages the review built. Each is checked in BOTH
+// renderers, as headings per section in document order.
+//   · layers=" | " parses to zero layers → the legacy hero, which never draws logo= → no heading,
+//     and Welcome is the page h1 (2f7bdee: <h1></h1> in the hero, Welcome <h2>).
+//   · a titled gallery right after the text-free hero cannot render an h1 → NO section gets one;
+//     Contact is not promoted past Portfolio's visible <h2> (2f7bdee: nobody had an h1 either, but
+//     pageH1Index named the gallery — the string render and Section.astro believed an h1 existed).
+//   · an untitled prose section writes no heading → passed over; Welcome is the page h1
+//     (2f7bdee: the untitled section took the slot and the page had no h1).
+const H1_PAGES = [
+  { slug: 'h1-empty-layers', md: '##\n%% sitetile: hero layers=" | " logo=/logo.png %%\nBand.\n\n## Welcome\nHello.\n',
+    want: [[], ['h1']], owner: 1 },
+  { slug: 'h1-gallery-first', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n## Portfolio\n%% sitetile: gallery %%\n### Work\n![One](/img/1.png)\n\n## Contact\nWrite.\n',
+    want: [[], ['h2', 'h3'], ['h2']], owner: -1 },
+  { slug: 'h1-untitled-prose', md: '##\n%% sitetile: hero bg=/img/bg.png %%\nBand.\n\n##\nNo title here.\n\n## Welcome\nHello.\n',
+    want: [[], [], ['h1']], owner: 2 },
+];
+const h1PageMd = (p) => `---\nsitetile-page: ${p.slug}\ntitle: ${p.slug}\nlang: en-US\n---\n\n${p.md}`;
+for (const p of H1_PAGES) p.site = parseSite(h1PageMd(p));
+function assertH1Page(where, p, html) {
+  const ids = p.site.sections.map((s) => s.id);
+  assert.equal(ids.length, p.want.length, `${p.slug}: the fixture parsed into ${ids.length} sections`);
+  const byId = sectionsById(html, where);
+  const got = ids.map((id) => { const sec = byId.get(id); assert.ok(sec, `${where}, ${p.slug}: no section ${id}`); return headings(sec).map((h) => h.tag); });
+  assert.deepEqual(got, p.want, `${where}, ${p.slug}: headings per section`);
+}
+for (const p of H1_PAGES) {
+  await test(`🔴 pageH1Index, ${p.slug}: owner ${p.owner}`, () => assert.equal(pageH1Index(p.site.sections), p.owner, p.slug));
+}
+await test('pageH1Index: embed / h2-only types / unknown type / logo hero / empty page', () => {
+  // embed writes no title at all → passed over like an untitled section
+  const bare = { type: 'hero', title: '', params: 'bg=/img/a.jpg' };
+  assert.equal(pageH1Index([bare, { type: 'embed', title: 'Video' }, { type: 'prose', title: 'P' }]), 2, 'embed after a text-free hero');
+  for (const t of ['gallery', 'carousel', 'cta']) assert.equal(pageH1Index([bare, { type: t, title: 'T' }, { type: 'prose', title: 'P' }]), -1, t);
+  // CONTROL — a page that does not open with a text-free hero keeps the first section as owner (master).
+  assert.equal(pageH1Index([{ type: 'prose', title: '' }, { type: 'prose', title: 'P' }]), 0, 'no hero: untitled first section stays the owner');
+  for (const t of ['gallery', 'embed']) assert.equal(pageH1Index([{ type: t, title: 'T' }, { type: 'prose', title: 'P' }]), 0, `no hero: ${t} first stays the owner`);
+  assert.equal(pageH1Index([{ type: 'nonsense', title: 'T' }]), 0, 'an unknown type renders as prose');
+  assert.equal(pageH1Index([{ type: 'hero', title: '', params: 'layout=split logo=/img/logo.png' }, { type: 'prose', title: 'P' }]), 0, 'a logo hero owns it');
+  assert.equal(pageH1Index([]), 0, 'empty page');
+});
+await test('🔴 heroHeadingless reads the variant the renderers draw (zero parsed layers = legacy)', () => {
+  const h = (params) => heroHeadingless({ type: 'hero', title: '', params });
+  assert.equal(h('layers=" | " logo=/img/logo.png'), true, 'blank layer list → legacy → no logo drawn');
+  assert.equal(h('layers=" | /a.png" logo=/img/logo.png'), false, 'CONTROL: one real layer → layered logo h1');
+});
+for (const p of H1_PAGES) {
+  await test(`🔴 string render, ${p.slug}: headings per section`, () => assertH1Page('string render', p, renderSiteToHtml(p.site)));
+}
 
 await test('CONTROL: class tokens are compared as a list — `a.b` and `a b` differ', () => {
   const one = parseHtml('<section id="x" class="a.b"><p></p></section>').kids[0];
@@ -231,6 +371,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     mkdirSync(join(ir, 'zh-tw'), { recursive: true });
     writeFileSync(join(ir, 'zh-tw', 'home.md'), ZH_HOME_MD);
     writeFileSync(join(ir, 'zh-tw', 'contact.md'), ZH_CONTACT_MD);
+    writeFileSync(join(ir, 'bare-hero.md'), BARE_FIRST_MD);
+    for (const p of H1_PAGES) writeFileSync(join(ir, `${p.slug}.md`), h1PageMd(p));
     const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
     const astroHtml = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
     const astroById = sectionsById(astroHtml, 'built page');
@@ -243,6 +385,20 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     await test('🔴 built page: a linked cell holds no YouTube player (no <a> inside its <a>)', () => {
       assertNoPlayerInLinkedCell('built page', astroById);
     });
+
+    if (process.env.SECTION_CONTRACT_DUMP_LOGO) for (const t of LOGO_HEROES) console.log('PIN built', JSON.stringify(t), JSON.stringify(rawSection(astroHtml, idOf(t))));
+    await test('🔴 built page: a text-free hero emits no heading (every variant); a titled/logo hero keeps exactly one <h1>', () => {
+      assertHeroHeadings('built page', astroById);
+    });
+    await test('CONTROL built page: the logo heroes are byte-identical to origin/main', () => {
+      for (const t of LOGO_HEROES) assert.equal(rawSection(astroHtml, idOf(t)), LOGO_PIN.built[t], `built page, ${t}`);
+    });
+    await test('🔴 built page: a page opening with a text-free hero takes its <h1> from the next section', () => {
+      assertBareFirstPage('built page', readFileSync(join(out, 'bare-hero', 'index.html'), 'utf8'));
+    });
+    for (const p of H1_PAGES) {
+      await test(`🔴 built page, ${p.slug}: headings per section`, () => assertH1Page('built page', p, readFileSync(join(out, p.slug, 'index.html'), 'utf8')));
+    }
 
     const diffs = new Map();
     const SHOW = process.env.SECTION_CONTRACT_SHOW;

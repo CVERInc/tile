@@ -8,7 +8,7 @@
 // the host loads the coral script (sitetile: Hero.astro's <script> import).
 //
 // Markdown is the CALLER's dialect (tile-lab#52 ruling 2026-10-31): `ctx.inline` / `ctx.block`.
-import { ctaHtml, heroParts, linkButtonsHtml, safeSrc, cssUrlString } from '../sitetile/site-core.js';
+import { ctaHtml, heroParts, linkButtonsHtml, safeSrc, cssUrlString, heroHeadingless } from '../sitetile/site-core.js';
 import { attr, text, when } from './html.mjs';
 import { cellFrame } from './cell.mjs';
 
@@ -26,9 +26,14 @@ export function emitHero(section, params, ctx) {
   // the two characters a quoted CSS string treats specially (round 5, R4-P3-6).
   const style = bgOk ? `background-image:url("${cssUrlString(bgOk)}")` : undefined;
   const eyebrowP = () => when(eyebrow, () => '<p class="st-hero-eyebrow">' + ctx.inline(eyebrow) + '</p>');
-  const h1 = () => (logo
-    ? '<h1 class="st-hero-logo"><img' + attr('src', logo) + attr('alt', section.title) + ' loading="eager" decoding="async"></h1>'
-    : '<h1>' + ctx.inline(section.title) + '</h1>');
+  // reef#2857: a text-free hero (empty/whitespace title, no `logo=` in a variant that draws it)
+  // writes no heading element — see heroHeadingless in site-core.js, the one predicate both
+  // renderers and the page-h1 owner (pageH1Index) read.
+  const headingless = heroHeadingless(section);
+  const h1 = () => (headingless ? ''
+    : logo
+      ? '<h1 class="st-hero-logo"><img' + attr('src', logo) + attr('alt', section.title) + ' loading="eager" decoding="async"></h1>'
+      : '<h1>' + ctx.inline(section.title) + '</h1>');
   // `layers=` / `heroParts`' images are author-controlled `src` destinations: each one is gated by
   // `safeSrc` here (one call per image, in order), and a disallowed one renders nothing.
   const img = (cls, src, alt, extra) => {
@@ -63,7 +68,7 @@ export function emitHero(section, params, ctx) {
   }
   return '<section class="st-hero st-full-bleed"' + attr('id', section.id) + attr('data-media', media) + attr('data-enter', enter ? '' : undefined) + attr('style', style) + '> '
     + when(enter && bgOk, () => '<div class="st-hero-bg" aria-hidden="true"' + attr('style', style) + '></div>') + ' '
-    + '<h1>' + ctx.inline(section.title) + '</h1> ' + ctx.block(section.body) + ' ' + ctaHtml(cta, 'st-hero-cta')
+    + (headingless ? '' : '<h1>' + ctx.inline(section.title) + '</h1>') + ' ' + ctx.block(section.body) + ' ' + ctaHtml(cta, 'st-hero-cta')
     + ' </section>';
 }
 
