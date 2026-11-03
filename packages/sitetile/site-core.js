@@ -2641,8 +2641,12 @@ function sectionHasHeading(s) {
 // (canCarryH1). If it cannot (a titled gallery / carousel / cta), NO section gets the h1: promoting
 // a later section past a visible <h2> would put the page's headings out of document order. Such a
 // page has no h1, and the heading-structure ruler (reef#2860) tells its owner.
+// 🔴 Only a page that OPENS with a text-free hero moves its h1. Every other page keeps the first
+// section as the owner, as before this change: a no-hero page that opens with an untitled section
+// stays without an h1 rather than having a later section's title grow from <h2> to <h1> on rebuild.
 function pageH1Index(sections) {
   const list = sections || [];
+  if (!list.length || !(renderedType(list[0]) === 'hero' && heroHeadingless(list[0]))) return 0;
   const i = list.findIndex(sectionHasHeading);
   return i >= 0 && canCarryH1(list[i]) ? i : -1;
 }

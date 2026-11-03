@@ -318,11 +318,15 @@ for (const p of H1_PAGES) {
 }
 await test('pageH1Index: embed / h2-only types / unknown type / logo hero / empty page', () => {
   // embed writes no title at all → passed over like an untitled section
-  assert.equal(pageH1Index([{ type: 'embed', title: 'Video' }, { type: 'prose', title: 'P' }]), 1, 'embed');
-  for (const t of ['gallery', 'carousel', 'cta']) assert.equal(pageH1Index([{ type: t, title: 'T' }, { type: 'prose', title: 'P' }]), -1, t);
+  const bare = { type: 'hero', title: '', params: 'bg=/img/a.jpg' };
+  assert.equal(pageH1Index([bare, { type: 'embed', title: 'Video' }, { type: 'prose', title: 'P' }]), 2, 'embed after a text-free hero');
+  for (const t of ['gallery', 'carousel', 'cta']) assert.equal(pageH1Index([bare, { type: t, title: 'T' }, { type: 'prose', title: 'P' }]), -1, t);
+  // CONTROL — a page that does not open with a text-free hero keeps the first section as owner (master).
+  assert.equal(pageH1Index([{ type: 'prose', title: '' }, { type: 'prose', title: 'P' }]), 0, 'no hero: untitled first section stays the owner');
+  for (const t of ['gallery', 'embed']) assert.equal(pageH1Index([{ type: t, title: 'T' }, { type: 'prose', title: 'P' }]), 0, `no hero: ${t} first stays the owner`);
   assert.equal(pageH1Index([{ type: 'nonsense', title: 'T' }]), 0, 'an unknown type renders as prose');
   assert.equal(pageH1Index([{ type: 'hero', title: '', params: 'layout=split logo=/img/logo.png' }, { type: 'prose', title: 'P' }]), 0, 'a logo hero owns it');
-  assert.equal(pageH1Index([]), -1, 'empty page');
+  assert.equal(pageH1Index([]), 0, 'empty page');
 });
 await test('🔴 heroHeadingless reads the variant the renderers draw (zero parsed layers = legacy)', () => {
   const h = (params) => heroHeadingless({ type: 'hero', title: '', params });
