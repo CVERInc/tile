@@ -34,11 +34,13 @@ export function emitHero(section, params, ctx) {
   // reef#2869: the heading is the page's <h1> only when this hero IS its h1 owner (`owner`: the
   // `hero` prop Section.astro computes from site-core pageH1Index); anywhere else <h2>, as for every
   // other h1-capable type. The string render (renderSection) applies the same rule.
+  // Either level carries `st-hero-title` (r2): site.css styles the hero title by that class, so a
+  // demoted <h2> keeps the hero's type. renderSection writes the same class.
   const hTag = owner ? 'h1' : 'h2';
   const h1 = () => (headingless ? ''
     : logo
-      ? '<' + hTag + ' class="st-hero-logo"><img' + attr('src', logo) + attr('alt', section.title) + ' loading="eager" decoding="async"></' + hTag + '>'
-      : '<' + hTag + '>' + ctx.inline(section.title) + '</' + hTag + '>');
+      ? '<' + hTag + ' class="st-hero-logo st-hero-title"><img' + attr('src', logo) + attr('alt', section.title) + ' loading="eager" decoding="async"></' + hTag + '>'
+      : '<' + hTag + ' class="st-hero-title">' + ctx.inline(section.title) + '</' + hTag + '>');
   // `layers=` / `heroParts`' images are author-controlled `src` destinations: each one is gated by
   // `safeSrc` here (one call per image, in order), and a disallowed one renders nothing.
   const img = (cls, src, alt, extra) => {
@@ -73,7 +75,7 @@ export function emitHero(section, params, ctx) {
   }
   return '<section class="st-hero st-full-bleed"' + attr('id', section.id) + attr('data-media', media) + attr('data-enter', enter ? '' : undefined) + attr('style', style) + '> '
     + when(enter && bgOk, () => '<div class="st-hero-bg" aria-hidden="true"' + attr('style', style) + '></div>') + ' '
-    + (headingless ? '' : '<' + hTag + '>' + ctx.inline(section.title) + '</' + hTag + '>') + ' ' + ctx.block(section.body) + ' ' + ctaHtml(cta, 'st-hero-cta')
+    + (headingless ? '' : '<' + hTag + ' class="st-hero-title">' + ctx.inline(section.title) + '</' + hTag + '>') + ' ' + ctx.block(section.body) + ' ' + ctaHtml(cta, 'st-hero-cta')
     + ' </section>';
 }
 

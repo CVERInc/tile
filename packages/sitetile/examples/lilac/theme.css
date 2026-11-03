@@ -86,7 +86,8 @@ html .st-hero p.st-hero-eyebrow {
   text-transform: uppercase; letter-spacing: 2.5px; font-size: 12px; max-width: none;
   color: var(--gd-accent-deep); font-weight: 600; margin: 0 0 16px;
 }
-html .st-hero h1 {
+/* `.st-hero-title`: the hero title at either level (an h2 when the hero is not the page's h1 owner). */
+html .st-hero h1, html .st-hero :is(h1, h2):where(.st-hero-title) {
   color: var(--gd-text); max-width: none;
   font-size: clamp(38px, 6.4vw, 60px); font-weight: 700; line-height: 1.05;
   letter-spacing: -1px; margin-bottom: 18px;

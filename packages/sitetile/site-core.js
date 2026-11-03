@@ -2696,11 +2696,13 @@ function renderSection(s, hero, ctx) {
       // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
       // pageH1Index); anywhere else <h2>, like every other h1-capable type. Not `H`: a logo hero's
       // empty title still draws its image heading.
+      // reef#2869 r2: either level carries `st-hero-title`, the class site.css styles the hero title
+      // by, so a demoted <h2> keeps the hero's type (emit/hero.mjs writes the same class).
       const HH = hero ? 'h1' : 'h2';
       const h1Html = heroHeadingless(s) ? ''
         : logo
-          ? '<' + HH + ' class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
-          : '<' + HH + '>' + inlineHtml(s.title) + '</' + HH + '>';
+          ? '<' + HH + ' class="st-hero-logo st-hero-title"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
+          : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>';
       if (layerList.length) {
         const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
@@ -2723,7 +2725,7 @@ function renderSection(s, hero, ctx) {
         const enter = pm.enter != null;
         return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + (enter ? ' data-enter=""' : '') + style + '>' +
           (enter && bgOk ? '<div class="st-hero-bg" aria-hidden="true"' + style + '></div>' : '') +
-          (heroHeadingless(s) ? '' : '<' + HH + '>' + inlineHtml(s.title) + '</' + HH + '>') +
+          (heroHeadingless(s) ? '' : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>') +
           bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</section>';
       }
       const layout = ' data-layout="' + escAttr(variant.layout) + '"';

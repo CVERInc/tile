@@ -226,6 +226,8 @@ function assertHeroHeadings(where, byId) {
   for (const title of TITLED_HEROES) {
     const sec = byId.get(idOf(title));
     assert.deepEqual(headings(sec).map((h) => h.tag), ['h2'], `${where}, ${title}: a titled/logo hero that is not the page's h1 owner must write exactly one <h2>`);
+    // r2: …and it keeps the hero's type — site.css styles the title by `.st-hero-title`, at either level.
+    assert.ok(headings(sec)[0].cls.includes('st-hero-title'), `${where}, ${title}: the demoted hero heading lost class st-hero-title`);
   }
 }
 // The raw outer HTML of one hero <section> (a hero holds no nested <section>).
@@ -234,23 +236,25 @@ function rawSection(html, id) {
   if (at < 0) return null;
   return html.slice(at, html.indexOf('</section>', at) + '</section>'.length);
 }
-// Pinned from origin/main 6c84cea (before reef#2857): the logo heroes, byte for byte.
+// Pinned from origin/main 6c84cea (before reef#2857): the logo heroes, byte for byte — with ONE
+// edit, reef#2869 r2: the logo heading's class is `st-hero-logo st-hero-title` (was `st-hero-logo`),
+// the shared hero-title class site.css styles. Nothing else in these pins moved.
 const LOGO_PIN = {
   string: {
     "Hero split logo":
-      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\"><div class=\"st-hero-text\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1><p>Split logo hero.</p><div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div></div><div class=\"st-hero-art\"><img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"lazy\" decoding=\"async\"></div></section>",
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\"><div class=\"st-hero-text\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1><p>Split logo hero.</p><div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div></div><div class=\"st-hero-art\"><img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"lazy\" decoding=\"async\"></div></section>",
     "Hero layered":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1><p>Layered hero.</p></div></section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1><p>Layered hero.</p></div></section>",
     "Hero bare layered logo":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"\" loading=\"eager\" decoding=\"async\"></h1><p>Layered logo.</p></div></section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"><div class=\"st-hero-stage\" aria-hidden=\"true\"><img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"></div><div class=\"st-hero-text st-hero-overlay\"><h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"\" loading=\"eager\" decoding=\"async\"></h1><p>Layered logo.</p></div></section>",
   },
   built: {
     "Hero split logo":
-      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\">  <div class=\"st-hero-text\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1> <p>Split logo hero.</p> <div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div> </div> <div class=\"st-hero-art\"> <img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"eager\" decoding=\"async\"> </div> </section>",
+      "<section class=\"st-hero st-full-bleed\" id=\"s7-hero-split-logo\" data-media=\"avatar\" data-layout=\"split\">  <div class=\"st-hero-text\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero split logo\" loading=\"eager\" decoding=\"async\"></h1> <p>Split logo hero.</p> <div class=\"st-hero-btns\"><a class=\"st-hero-btn st-hero-btn-primary\" href=\"/act\">Act<span class=\"signet-arrow\" style=\"width:16px;height:16px;--signet-arrow-w:16px\" aria-hidden=\"true\"><span class=\"signet-arrow__tail\"></span><svg class=\"signet-arrow__head\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"10 6 16 12 10 18\"/></svg></span></a></div> </div> <div class=\"st-hero-art\"> <img class=\"st-img\" src=\"/img/art.png\" alt=\"Art\" loading=\"eager\" decoding=\"async\"> </div> </section>",
     "Hero layered":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1> <p>Layered hero.</p>  </div> </section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s8-hero-layered\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt=\"Hero layered\" loading=\"eager\" decoding=\"async\"></h1> <p>Layered hero.</p>  </div> </section>",
     "Hero bare layered logo":
-      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo\"><img src=\"/img/logo.png\" alt loading=\"eager\" decoding=\"async\"></h1> <p>Layered logo.</p>  </div> </section>",
+      "<section class=\"st-hero st-full-bleed st-hero-layered\" id=\"s13\" data-media=\"avatar\" data-logo-pos=\"bottom\"> <div class=\"st-hero-stage\" aria-hidden=\"true\"> <img class=\"st-hero-layer\" src=\"/img/back.png\" alt=\"\" data-depth=\"0\" loading=\"eager\" decoding=\"async\"><img class=\"st-hero-layer\" src=\"/img/front.png\" alt=\"\" data-depth=\"1\" loading=\"eager\" decoding=\"async\"> </div> <div class=\"st-hero-text st-hero-overlay\">  <h1 class=\"st-hero-logo st-hero-title\"><img src=\"/img/logo.png\" alt loading=\"eager\" decoding=\"async\"></h1> <p>Layered logo.</p>  </div> </section>",
   },
 };
 // reef#2869: LOGO_PIN is what each logo hero writes as the page's h1 OWNER — so each one is also
@@ -265,7 +269,7 @@ const LOGO_OWNER_PAGES = LOGO_HEROES.map((t, k) => {
 });
 const pinWithId = (pin, id) => pin.replace(/ id="[^"]*"/, ` id="${id}"`);
 const pinAsH2 = (pin) => {
-  const out = pin.replace('<h1 class="st-hero-logo">', '<h2 class="st-hero-logo">').replace('</h1>', '</h2>');
+  const out = pin.replace('<h1 class="st-hero-logo st-hero-title">', '<h2 class="st-hero-logo st-hero-title">').replace('</h1>', '</h2>');
   assert.ok(out !== pin && !out.includes('<h1') && !out.includes('</h1>'), 'pinAsH2: the pin holds exactly one logo <h1>');
   return out;
 };
@@ -351,6 +355,13 @@ function assertH1Page(where, p, html) {
   const byId = sectionsById(html, where);
   const got = ids.map((id) => { const sec = byId.get(id); assert.ok(sec, `${where}, ${p.slug}: no section ${id}`); return headings(sec).map((h) => h.tag); });
   assert.deepEqual(got, p.want, `${where}, ${p.slug}: headings per section`);
+  // r2: every hero's title carries `.st-hero-title` whichever level it is (owner h1 or demoted h2).
+  for (const id of ids) {
+    const sec = byId.get(id);
+    if (!sec.cls.includes('st-hero')) continue;
+    const top = headings(sec)[0];
+    if (top) assert.ok(top.cls.includes('st-hero-title'), `${where}, ${p.slug}: hero ${id}'s <${top.tag}> has no class st-hero-title`);
+  }
   // The whole page, not only the sections this fixture names: its <main> (the string render, a
   // fragment, has none — the fragment is the page body).
   if (p.h1s != null) {
