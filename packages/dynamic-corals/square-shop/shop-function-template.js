@@ -2555,7 +2555,10 @@ async function negotiateMarkdown(request, env, markdown) {
 	const asset = routes[normalizeVerdictPath(url.pathname)];
 	if (asset === undefined) return null;
 	if (!wantsMarkdown(request)) return withVaryAccept(await env.ASSETS.fetch(request), request);
-	const res = await env.ASSETS.fetch(new Request(url.origin + asset, request));
+	// Fetched as GET even for a HEAD (reef#2874): the token estimate below is a count
+	// of the twin's text, and a HEAD answer has none to count. The caller's other
+	// headers ride along unchanged, so a revalidation still revalidates.
+	const res = await env.ASSETS.fetch(new Request(url.origin + asset, { method: 'GET', headers: request.headers }));
 	// 🔴 304 IS AN ANSWER, not a missing twin. The twin fetch carries the caller's
 	// own headers, so a revalidation of the cached markdown arrives with the twin's
 	// `If-None-Match` and the asset server answers 304 — which is not `ok`. Reading
@@ -2563,7 +2566,33 @@ async function negotiateMarkdown(request, env, markdown) {
 	// an HTML 200 with no `Vary: Accept`: the exact cache crossover this branch
 	// exists to prevent, on the one request that revalidates a cached variant.
 	if (!res || (!res.ok && res.status !== 304)) return null;
-	return withVaryAccept(res, request, MARKDOWN_CONTENT_TYPE);
+	return markdownVariant(res, request, markdown.contentSignal);
+}
+
+// The markdown variant's own headers (reef#2874), the same two a Card's markdown
+// carries (cardtile's card-worker.mjs `markdown()`), names borrowed from Cloudflare's
+// Markdown for Agents rather than invented, so an agent learns what the document
+// costs BEFORE it spends the context on it:
+//   X-Markdown-Tokens — an ESTIMATE, chars/4 (the usual heuristic; the Card's
+//     `estTokens`), labelled as one rather than implying a tokeniser we do not run.
+//     Absent on a 304: there is no body to count, and a cache keeps the value it
+//     stored with the 200 (RFC 9111 §4.3.4 updates only the headers a 304 carries).
+//   Content-Signal — the site OWNER's `ai-usage` declaration, baked at build time
+//     from the same function that writes the line into robots.txt. Cloudflare's
+//     version always says `ai-train=yes`; this one says what the owner chose, because
+//     an agent fetching a page directly may never read robots.txt. Absent when the
+//     build baked none (an emitter invoked without --content-signal).
+const estTokens = (s) => Math.ceil(s.length / 4);
+
+async function markdownVariant(res, request, contentSignal) {
+	const text = res.status === 200 ? await res.text() : null;
+	const out = withVaryAccept(
+		new Response(request.method === 'HEAD' ? null : text, { status: res.status, statusText: res.statusText, headers: res.headers }),
+		request, MARKDOWN_CONTENT_TYPE
+	);
+	if (text !== null) out.headers.set('x-markdown-tokens', String(estTokens(text)));
+	if (contentSignal) out.headers.set('content-signal', contentSignal);
+	return out;
 }
 
 const siteWorker = {

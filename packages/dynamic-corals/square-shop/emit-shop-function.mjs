@@ -10,6 +10,7 @@
 //     [--api-contract <path to site-api-transport.contract.json>] \
 //     [--gated-manifest <path to renderer-generated private URL manifest>] \
 //     [--markdown-manifest <path to renderer-generated public route→markdown map>] \
+//     [--content-signal <the site's ai-usage Content-Signal, e.g. search=yes,ai-input=yes,ai-train=no>] \
 //     [--query-redirects <path to the site's IR _query-redirects.md>] \
 //     [--platform-origin <origin>] \
 //     [--canonical-host <host>] \
@@ -200,6 +201,24 @@ function loadMarkdownManifest(path, edgeRendered) {
 			dropped.join(', ') + ' (this worker answers them itself; ASSETS has no twin to negotiate)');
 	}
 	return Object.keys(routes).length > 0 ? { routes } : null;
+}
+
+// The site owner's `ai-usage` declaration as a Content-Signal value (reef#2874), carried on every
+// markdown response the worker negotiates. The build resolves it with the SAME function that writes
+// the `Content-Signal:` line into robots.txt (Reef's ai-usage.js) and hands over only the finished
+// value — this emitter owns no policy vocabulary and never maps a level name to a signal.
+// Validated as the grammar both sides spell (`key=value` pairs, comma-separated) because the value
+// becomes a response header: a malformed one is FATAL, never baked, never silently dropped — a
+// dropped signal would read to an agent as "no declaration", which is not what the owner said.
+// Absent flag ⇒ absent key ⇒ the same bytes as before the flag existed.
+const CONTENT_SIGNAL_RE = /^[a-z][a-z0-9-]*=[a-z0-9-]+(?:, ?[a-z][a-z0-9-]*=[a-z0-9-]+)*$/;
+function loadContentSignal(value) {
+	if (!value) return null;
+	const v = String(value).trim();
+	if (!CONTENT_SIGNAL_RE.test(v)) {
+		die('--content-signal: ' + JSON.stringify(value) + ' is not a Content-Signal value (comma-separated key=value pairs, e.g. search=yes,ai-input=yes,ai-train=no)');
+	}
+	return v;
 }
 
 // The site's query-string 301 table (reef#1882): `_query-redirects.md` from the site's IR, in the
@@ -496,6 +515,11 @@ const markdown = loadMarkdownManifest(arg('markdown-manifest'), {
 		...((loaded && loaded.transport.subscribeResult) ? [loaded.transport.subscribeResult.path] : [])
 	]
 });
+
+// Only a worker that negotiates markdown carries the signal: it is a header on the markdown variant,
+// and a site with no twins has no variant to put it on.
+const contentSignal = loadContentSignal(arg('content-signal'));
+if (markdown && contentSignal) markdown.contentSignal = contentSignal;
 
 const config = {
 	guildId,
