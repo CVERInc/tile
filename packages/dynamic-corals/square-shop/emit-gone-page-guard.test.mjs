@@ -111,3 +111,56 @@ test('a real ASSETS 404 reaches the visitor unchanged', async () => {
 	assert.equal(res.status, 404);
 	assert.equal(await res.text(), 'SITE-404-PAGE');
 });
+
+// ── the gone page answers with the site's own not-found page ────────────────────────────────────
+
+// ASSETS: the gone page is a preserved copy; every other path is the site's real miss, `missStatus`.
+function envWithSiteMiss({ missStatus = 404, missBody = 'SITE-404-PAGE', missThrows = false } = {}) {
+	const asked = [];
+	const env = {
+		ASSETS: { fetch: async (req) => {
+			const path = new URL(req.url).pathname;
+			asked.push(path);
+			if (path === '/gone-page/') {
+				return new Response('OLD-PAGE-BODY', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': PRESERVED, 'x-existing': '1' } });
+			}
+			if (missThrows) throw new Error('assets down');
+			return new Response(missBody, { status: missStatus, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=0, must-revalidate', 'x-site-miss': '1' } });
+		} },
+		[BINDING]: { fetch: async () => new Response('{}', { status: 200 }) }
+	};
+	return { env, asked };
+}
+
+test('gone page body: a preserved copy answers with the site\'s own not-found page, still 404 no-store', async () => {
+	const { env, asked } = envWithSiteMiss();
+	const res = await worker.fetch(get('/gone-page/'), env, {});
+	assert.equal(res.status, 404);
+	assert.equal(res.headers.get('cache-control'), 'no-store');
+	assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8');
+	assert.equal(res.headers.get('x-existing'), null, 'no header of the preserved copy travels with the 404');
+	assert.equal(res.headers.get('x-site-miss'), null, 'only the not-found body is taken, not its headers');
+	assert.equal(await res.text(), 'SITE-404-PAGE');
+	assert.equal(asked.length, 2, 'one extra ASSETS read, for the not-found page');
+	assert.notEqual(asked[1], '/gone-page/');
+});
+
+test('gone page body: HEAD stays a 404 with no body and reads no not-found page', async () => {
+	const { env, asked } = envWithSiteMiss();
+	const res = await worker.fetch(get('/gone-page/', { method: 'HEAD' }), env, {});
+	assert.equal(res.status, 404);
+	assert.equal(res.headers.get('cache-control'), 'no-store');
+	assert.equal(await res.text(), '');
+	assert.deepEqual(asked, ['/gone-page/']);
+});
+
+test('gone page body: no site not-found page (a 200 fallback) or a failed read keeps the plain-text 404', async () => {
+	for (const opts of [{ missStatus: 200, missBody: 'SITE-HOME' }, { missThrows: true }]) {
+		const { env } = envWithSiteMiss(opts);
+		const res = await worker.fetch(get('/gone-page/'), env, {});
+		assert.equal(res.status, 404, JSON.stringify(opts));
+		assert.equal(res.headers.get('cache-control'), 'no-store');
+		assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
+		assert.equal(await res.text(), 'Not found');
+	}
+});

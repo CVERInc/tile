@@ -2338,16 +2338,28 @@ function verdictBlockedResponse() {
 // and no page of the site is ever built with it, so seeing it means "gone".
 const PAGES_PRESERVED_COPY_CACHE_CONTROL = 'public, s-maxage=604800';
 
+// A path no deployment has ever served: ASSETS answers it with the site's own not-found page.
+const GONE_PAGE_PROBE_PATH = '/__sitetile-gone-page__/';
+
 // The one place a visitor's answer is checked, whichever branch produced it (the static
 // fall-through, the markdown-negotiated page, a verdict-allowed file). Anything else is
 // returned untouched (the same Response object); a preserved copy is answered as the
-// not-found it is, uncacheable like Pages' own 404. Shell-donor fetches are not visitor
-// answers (their bytes are only the chrome of a page this worker renders) and stay as they are.
-function withoutPreservedCopy(request, res) {
+// not-found it is, uncacheable like Pages' own 404, with the body the site gives every other
+// miss. Only a real 404 from ASSETS is that body; anything else (no 404 page, a failed fetch)
+// keeps the plain-text answer. Shell-donor fetches are not visitor answers (their bytes are only
+// the chrome of a page this worker renders) and stay as they are.
+async function withoutPreservedCopy(request, env, res) {
 	if (res && res.status === 200 && res.headers.get('cache-control') === PAGES_PRESERVED_COPY_CACHE_CONTROL) {
-		return new Response(request.method === 'HEAD' ? null : 'Not found', {
+		let page = null;
+		if (request.method !== 'HEAD') {
+			try {
+				const miss = await env.ASSETS.fetch(new Request(new URL(GONE_PAGE_PROBE_PATH, request.url).toString()));
+				if (miss && miss.status === 404) page = miss;
+			} catch (e) { page = null; }
+		}
+		return new Response(request.method === 'HEAD' ? null : (page ? page.body : 'Not found'), {
 			status: 404,
-			headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+			headers: { 'content-type': (page && page.headers.get('content-type')) || 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
 		});
 	}
 	return res;
@@ -2641,7 +2653,7 @@ const siteWorker = {
 
 export default {
 	async fetch(request, env, ctx) {
-		return withoutPreservedCopy(request, await siteWorker.fetch(request, env, ctx));
+		return withoutPreservedCopy(request, env, await siteWorker.fetch(request, env, ctx));
 	}
 };
 
