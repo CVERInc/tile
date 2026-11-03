@@ -322,3 +322,28 @@ test('a card at the byte ceiling made of one-line items parses and round-trips e
   assert.equal(model.cells.length, lines.length);
   assert.equal(serializeCard(model), md);
 });
+
+// A card's other side is a BACK lane: `## back: about`. It used to be `## drawer: about`, and every card written
+// before the rename still says that, so both are read and each keeps the word it was written with. Rewriting
+// `drawer` to `back` on an ordinary save would change a creator's file without their asking (reef#2725, 2026-11-02);
+// the old word leaves through one deliberate migration instead.
+test('🔴 a back lane is read as `back:` or `drawer:`, and a save keeps whichever word the file used', () => {
+  const face = '## grid\n\n- [ ] %% card: link %% [More](#about)\n- [ ] %% card: text back=#more %% Hi\n\n\n';
+  const old = face + '## drawer: about | About me\n\n- [ ] %% card: text %% one\n\n\n## drawer: more\n\n- [ ] %% card: text %% two\n';
+  const now = old.replace(/^## drawer:/gm, '## back:');
+  const mixed = face + '## drawer: about | About me\n\n- [ ] %% card: text %% one\n\n\n## back: more\n\n- [ ] %% card: text %% two\n';
+  for (const [label, md] of [['drawer', old], ['back', now], ['mixed', mixed]]) {
+    const m = parseCard(md);
+    assert.deepEqual(m.drawers.map((d) => [d.id, d.title, d.cells.length]), [['about', 'About me', 1], ['more', '', 1]],
+      label + ': the back lanes were not read as backs');
+    assert.equal(m.cells.length, 2, label + ': a back lane leaked into the face');
+    assert.equal(serializeCard(m), md, label + ': a save rewrote the lane headings');
+  }
+});
+
+test('a back lane added by an editor is written with the new word', () => {
+  const m = parseCard('## grid\n\n- [ ] %% card: text %% Hi\n\n\n## drawer: about\n\n- [ ] %% card: text %% one\n');
+  m.drawers.push({ id: 'more', title: 'More', cells: [] });
+  const heads = serializeCard(m).split('\n').filter((l) => l.startsWith('## '));
+  assert.deepEqual(heads, ['## grid', '## drawer: about', '## back: more | More']);
+});

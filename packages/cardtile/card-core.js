@@ -144,7 +144,7 @@ function cellToRaw(cell) {
   return '- [ ] ' + marker + body.split('\n').map((l) => '\n\t' + l).join('');
 }
 
-// A DRAWER lane: `## drawer: about` holds cells shown in an overlay over the card face, opened by a
+// A BACK lane (`## back: about`, formerly `## drawer: about`, see RE_DRAWER_LANE) holds cells shown in an overlay over the card face, opened by a
 // `[label](#about)` link. This is how a Card gains depth WITHOUT gaining pages:
 //   one markdown file · one store row · one URL (a #hash at most) · ONE LEVEL DEEP.
 // 🔴 Drawers are LEAVES: they cannot open other drawers and cannot nest (enforced at render). Without
@@ -191,13 +191,19 @@ const rasterCopyOwner = (id) => {
   return s.length > RASTER_COPY_SUFFIX.length && s.endsWith(RASTER_COPY_SUFFIX) ? s.slice(0, -RASTER_COPY_SUFFIX.length) : null;
 };
 
-const RE_DRAWER_LANE = /^drawer\s*:\s*(.+)$/i;
+// 🔴 A BACK is what the card shows when it turns over (reef#2725, 2026-11-02). It was called a DRAWER, after the
+// overlay it used to open as; the overlay became the card's other side, and a word that names the old picture
+// misleads every author and every agent that reads it. `## back: about` is the word now. `## drawer: about` is
+// still read, and a lane remembers which word it was written with (`spelled`) so serializing never rewrites
+// a file behind its author's back: the old word leaves through one deliberate migration, not through a save.
+// New lanes are written as `back`. The model keeps its `drawers` field for now; that name is internal.
+const RE_DRAWER_LANE = /^(back|drawer)\s*:\s*(.+)$/i;
 const splitDrawer = (title) => {
   const m = RE_DRAWER_LANE.exec(String(title || '').trim());
   if (!m) return null;
-  const bar = m[1].indexOf('|');
-  const id = (bar < 0 ? m[1] : m[1].slice(0, bar)).trim().toLowerCase().replace(/\s+/g, '-');
-  return { id, title: bar < 0 ? '' : m[1].slice(bar + 1).trim() };
+  const bar = m[2].indexOf('|');
+  const id = (bar < 0 ? m[2] : m[2].slice(0, bar)).trim().toLowerCase().replace(/\s+/g, '-');
+  return { id, title: bar < 0 ? '' : m[2].slice(bar + 1).trim(), spelled: m[1].toLowerCase() };
 };
 const drawerId = (title) => (splitDrawer(title) || {}).id ?? null;
 
@@ -236,7 +242,7 @@ function parseCard(md) {
     }
     const d = splitDrawer(col.title);
     const laneCells = col.tiles.map((t) => extractCell(t.text));
-    if (d) { drawers.push({ id: d.id, title: d.title, cells: laneCells }); continue; }
+    if (d) { drawers.push({ id: d.id, title: d.title, cells: laneCells, ...(d.spelled === 'drawer' ? { spelled: 'drawer' } : {}) }); continue; }
     // the first face lane names itself (`grid`) and shows no label; later lanes are titled sections
     const label = faceLane == null ? '' : String(col.title || '').trim();
     if (faceLane == null) faceLane = col.title;
@@ -275,7 +281,7 @@ function serializeCard(model) {
   const columns = blocks.map((b, i) =>
     laneOf(i === 0 ? (model.lane || DEFAULT_LANE) : (b.label || DEFAULT_LANE),
            cells.slice(b.start, b.start + b.count)));
-  for (const d of model.drawers || []) columns.push(laneOf('drawer: ' + d.id + (d.title ? ' | ' + d.title : ''), d.cells));
+  for (const d of model.drawers || []) columns.push(laneOf((d.spelled === 'drawer' ? 'drawer' : 'back') + ': ' + d.id + (d.title ? ' | ' + d.title : ''), d.cells));
   // the blobs go LAST, so a human opening the file reads the card before the bytes
   const assetIds = Object.keys(model.assets || {});
   if (assetIds.length) {
