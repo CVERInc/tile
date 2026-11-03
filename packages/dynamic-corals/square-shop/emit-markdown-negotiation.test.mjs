@@ -176,7 +176,9 @@ test('HEAD negotiates: markdown status and headers, no body', async () => {
 	assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
 	assert.equal(varyList(res).includes('accept'), true);
 	assert.equal(await res.text(), '');
-	assert.deepEqual(seenByAssets.map((a) => a.method + ' ' + a.path), ['HEAD /about/index.md']);
+	// reef#2874: the twin is fetched as GET even for a HEAD, because X-Markdown-Tokens
+	// counts its text — and the HEAD answer still carries no body.
+	assert.deepEqual(seenByAssets.map((a) => a.method + ' ' + a.path), ['GET /about/index.md']);
 });
 
 // ── the HTML side of the same URL ────────────────────────────────────────────
@@ -374,7 +376,8 @@ test('HEAD revalidation is a bodiless markdown 304 too', async () => {
 	assert.equal(res.status, 304);
 	assert.equal(varyList(res).includes('accept'), true);
 	assert.equal(await res.text(), '');
-	assert.deepEqual(seenByAssets.map((a) => a.method + ' ' + a.path), ['HEAD /about/index.md']);
+	// reef#2874: fetched as GET (see the HEAD test above); the conditional header still rides along.
+	assert.deepEqual(seenByAssets.map((a) => a.method + ' ' + a.path + ' ' + a.inm), ['GET /about/index.md ' + MD_ETAG]);
 });
 
 test('the HTML side revalidates exactly as before, and still carries Vary: Accept', async () => {
@@ -502,4 +505,145 @@ test('a storefront site whose only mapped routes are edge-rendered bakes no mapp
 	writeFileSync(onlyShop, JSON.stringify({ schemaVersion: 1, routes: [{ path: '/shop/', asset: '/shop/index.md' }] }));
 	const { out } = emitWithStderr([...STOREFRONT_ARGS, '--markdown-manifest', onlyShop]);
 	assert.equal(/"markdown":/.test(readFileSync(out, 'utf8')), false);
+});
+
+// ── reef#2874: the markdown variant's own headers ────────────────────────────
+// The same two a Card's markdown response carries (cardtile card-worker.mjs `markdown()`):
+// X-Markdown-Tokens (chars/4, an estimate) and — for a site — the OWNER's Content-Signal.
+
+const CITE_SIGNAL = 'search=yes,ai-input=yes,ai-train=no';
+const signalled = await emitWorker([...BASE_ARGS, '--markdown-manifest', mappingPath, '--content-signal', CITE_SIGNAL]);
+// A twin whose length is not a multiple of 4, in characters that are not one byte each, so the
+// estimate can only come out right by counting characters the way the Card does (`s.length / 4`).
+const CJK_TWIN = '---\ntitle: "部落格"\n---\n\n# 部落格\n\n- [第一篇](/blog/one) — 2026-11-03\n';
+function twinEnv(body = CJK_TWIN) {
+	const seen = [];
+	return {
+		seen,
+		env: { ASSETS: { fetch: async (req) => {
+			const url = new URL(req.url);
+			seen.push(req.method + ' ' + url.pathname);
+			if (url.pathname.endsWith('.md')) return new Response(body, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', etag: MD_ETAG } });
+			return new Response('HTML:' + url.pathname, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+		} } }
+	};
+}
+
+test('🔴 a markdown response carries X-Markdown-Tokens: chars/4, rounded up, of the body it serves', async () => {
+	const { env } = twinEnv();
+	const res = await worker.mod.default.fetch(get('/about/', MD), env);
+	assert.equal(await res.text(), CJK_TWIN);
+	assert.equal(res.headers.get('x-markdown-tokens'), String(Math.ceil(CJK_TWIN.length / 4)));
+	assert.notEqual(Math.ceil(CJK_TWIN.length / 4), Math.ceil(new TextEncoder().encode(CJK_TWIN).length / 4),
+		'control: a byte count would give a different number, so this pins the character count');
+});
+
+test('🔴 HEAD carries the same estimate and no body', async () => {
+	const { env } = twinEnv();
+	const res = await worker.mod.default.fetch(get('/about/', MD, { method: 'HEAD' }), env);
+	assert.equal(await res.text(), '');
+	assert.equal(res.headers.get('x-markdown-tokens'), String(Math.ceil(CJK_TWIN.length / 4)));
+});
+
+test('a 304 revalidation carries no estimate (no body to count; the cache keeps the stored one)', async () => {
+	const { env } = makeEnv({ etags: true });
+	const res = await signalled.mod.default.fetch(getWith('/about/', { accept: MD, 'if-none-match': MD_ETAG }), env);
+	assert.equal(res.status, 304);
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+	assert.equal(res.headers.get('content-signal'), CITE_SIGNAL, 'the declaration still rides on the 304');
+});
+
+// A Range request for the twin (tile#247 review, P2-1): the asset server answers 206
+// with the slice it was asked for. That slice IS the body; dropping it left an empty
+// 206 still claiming `Content-Range: bytes 0-3/100`.
+function rangeEnv(slice, contentRange) {
+	const seen = [];
+	return {
+		seen,
+		env: { ASSETS: { fetch: async (req) => {
+			const url = new URL(req.url);
+			seen.push({ method: req.method, path: url.pathname, range: req.headers.get('range') || '' });
+			if (url.pathname.endsWith('.md')) {
+				return new Response(slice, { status: 206, headers: {
+					'content-type': 'text/plain; charset=utf-8', 'content-range': contentRange, 'accept-ranges': 'bytes', etag: MD_ETAG
+				} });
+			}
+			return new Response('HTML:' + url.pathname, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+		} } }
+	};
+}
+
+test('🔴 a ranged markdown request keeps its 206 body, status and Content-Range', async () => {
+	const { env, seen } = rangeEnv('# Bl', 'bytes 0-3/100');
+	const res = await signalled.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-3' }), env);
+	assert.equal(res.status, 206);
+	assert.equal(await res.text(), '# Bl');
+	assert.equal(res.headers.get('content-range'), 'bytes 0-3/100');
+	assert.equal(res.headers.get('content-type'), 'text/markdown; charset=utf-8');
+	assert.equal(varyList(res).includes('accept'), true);
+	assert.equal(res.headers.get('content-signal'), CITE_SIGNAL);
+	// A count of four bytes beside a 100-byte document would mislead: no estimate on a 206.
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+	assert.deepEqual(seen, [{ method: 'GET', path: '/about/index.md', range: 'bytes=0-3' }], 'Range still reaches the asset server');
+});
+
+test('🔴 a 206 slice that cuts a multibyte character is passed through byte for byte, not re-decoded', async () => {
+	const whole = new TextEncoder().encode(CJK_TWIN);
+	const cut = whole.findIndex((b) => b >= 0x80) + 1;   // one byte into the first multibyte character
+	assert.ok(cut > 0 && whole[cut] >= 0x80 && whole[cut] < 0xc0, 'control: the slice really ends mid-character');
+	const bytes = whole.slice(0, cut);
+	const { env } = rangeEnv(bytes, 'bytes 0-' + (cut - 1) + '/' + whole.length);
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-' + (cut - 1) }), env);
+	assert.equal(res.status, 206);
+	assert.deepEqual(new Uint8Array(await res.arrayBuffer()), bytes);
+});
+
+test('HEAD with Range: the 206 status and Content-Range, no body', async () => {
+	const { env } = rangeEnv('# Bl', 'bytes 0-3/100');
+	const res = await worker.mod.default.fetch(getWith('/about/', { accept: MD, range: 'bytes=0-3' }, { method: 'HEAD' }), env);
+	assert.equal(res.status, 206);
+	assert.equal(res.headers.get('content-range'), 'bytes 0-3/100');
+	assert.equal(await res.text(), '');
+});
+
+test('a 204 from the asset server stays a bodiless 204 (a null-body status must not be given one)', async () => {
+	const env = { ASSETS: { fetch: async () => new Response(null, { status: 204 }) } };
+	const res = await worker.mod.default.fetch(get('/about/', MD), env);
+	assert.equal(res.status, 204);
+	assert.equal(await res.text(), '');
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+});
+
+test('🔴 a markdown response carries the site\'s own Content-Signal, ai-train=no for a site that refuses training', async () => {
+	const { env } = twinEnv();
+	const res = await signalled.mod.default.fetch(get('/about/', MD), env);
+	assert.equal(res.headers.get('content-signal'), CITE_SIGNAL);
+	assert.match(res.headers.get('content-signal'), /(^|,)ai-train=no(,|$)/);
+	const head = await signalled.mod.default.fetch(get('/', MD, { method: 'HEAD' }), twinEnv().env);
+	assert.equal(head.headers.get('content-signal'), CITE_SIGNAL);
+});
+
+test('the HTML variant of the same URL gains neither header', async () => {
+	const { env } = twinEnv();
+	const res = await signalled.mod.default.fetch(get('/about/', BROWSER), env);
+	assert.equal(await res.text(), 'HTML:/about/');
+	assert.equal(res.headers.get('x-markdown-tokens'), null);
+	assert.equal(res.headers.get('content-signal'), null);
+});
+
+test('no --content-signal ⇒ no header and no key; a signal with no markdown map bakes nothing', async () => {
+	const res = await worker.mod.default.fetch(get('/about/', MD), twinEnv().env);
+	assert.equal(res.headers.get('content-signal'), null);
+	assert.doesNotMatch(readFileSync(worker.path, 'utf8'), /contentSignal":/);
+	assert.match(readFileSync(signalled.path, 'utf8'), /"contentSignal":"search=yes,ai-input=yes,ai-train=no"/);
+	const bare = emitFile([...BASE_ARGS, '--content-signal', CITE_SIGNAL]);
+	assert.equal(readFileSync(bare, 'utf8'), readFileSync(noMapping.path, 'utf8'),
+		'no twins ⇒ no variant to put the header on ⇒ byte-identical to a flagless worker');
+});
+
+test('a malformed --content-signal is fatal and named, never baked as a header', () => {
+	for (const bad of ['ai-train', 'search=yes\r\nx-evil: 1', 'search=yes;ai-train=no']) {
+		const err = emitStderr([...BASE_ARGS, '--markdown-manifest', mappingPath, '--content-signal', bad]);
+		assert.ok(err && err.includes('--content-signal'), JSON.stringify(bad) + ' must be refused: ' + err);
+	}
 });

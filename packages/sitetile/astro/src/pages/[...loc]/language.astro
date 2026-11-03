@@ -18,6 +18,8 @@ import { toUrlLocale, label, languageCopy, rootLangMismatch, localesSourceOf } f
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
 // …and as a function of that theme: a part of this page the theme names is the owner's to lay out.
 import { chooserCss } from '../../packages/lingo/language-page-css.mjs';
+// reef#2874: this page's markdown twin — one line per edition it links, for the post-build pass.
+import { recordListTwin } from '../../../agent-list-twins.mjs';
 
 export function getStaticPaths() {
   // Discover the site's locale set + per-locale chrome from the HOME pages authored in content/.
@@ -73,9 +75,15 @@ const rows = locales.map((L) => {
     current: L === pageLocale,
   };
 });
+// reef#2874: the rows a reader can follow without the ?return= script — each edition's home. A row
+// with no home has no href and is hidden, so it has no line either.
+const twinMark = recordListTwin({
+  heading: copy.word,
+  items: rows.filter((r) => r.href).map((r) => ({ title: r.name, href: r.href })),
+});
 ---
 <SiteLayout title={copy.word} lang={pageLocale} meta={meta} alternates="all" routeCss={(themeCss) => chooserCss(languagePageCss, themeCss)}>
-  <section class="rf-lang-page">
+  <section class="rf-lang-page">{twinMark && <Fragment set:html={twinMark} />}
     <div class="rf-lang-head">
       <h1>{copy.word}</h1>
       <p>{copy.prompt}</p>

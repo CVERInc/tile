@@ -14,9 +14,12 @@ import { locale404Pages } from './locale-404.mjs';
 // reef#2554: noindex is decided over the files the build wrote — each page's robots meta and
 // sitemap.xml — after locale-404 has put every file where it will be served.
 import { noindexPass } from './noindex-pass.mjs';
+// reef#2874: the markdown twins of generated list routes (blog index, archives, their pages, the
+// language chooser), written over the files the build wrote and added to the worker's route map.
+import { agentListTwins } from './agent-list-twins.mjs';
 
 export default defineConfig({
-  integrations: [svgAttachmentHeaders(), locale404Pages(), noindexPass()],
+  integrations: [svgAttachmentHeaders(), locale404Pages(), noindexPass(), agentListTwins()],
   // Absolute-URL base for the site being rendered. Lingo emits ABSOLUTE hreflang/canonical
   // from this (a real <head> uses absolute URLs). Per-build overridable via SITE_URL so the ONE
   // renderer stays general across sites; the fallback is a placeholder, never a real host — a

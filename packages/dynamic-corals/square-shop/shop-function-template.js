@@ -2555,7 +2555,10 @@ async function negotiateMarkdown(request, env, markdown) {
 	const asset = routes[normalizeVerdictPath(url.pathname)];
 	if (asset === undefined) return null;
 	if (!wantsMarkdown(request)) return withVaryAccept(await env.ASSETS.fetch(request), request);
-	const res = await env.ASSETS.fetch(new Request(url.origin + asset, request));
+	// Fetched as GET even for a HEAD (reef#2874): the token estimate below is a count
+	// of the twin's text, and a HEAD answer has none to count. The caller's other
+	// headers ride along unchanged, so a revalidation still revalidates.
+	const res = await env.ASSETS.fetch(new Request(url.origin + asset, { method: 'GET', headers: request.headers }));
 	// 🔴 304 IS AN ANSWER, not a missing twin. The twin fetch carries the caller's
 	// own headers, so a revalidation of the cached markdown arrives with the twin's
 	// `If-None-Match` and the asset server answers 304 — which is not `ok`. Reading
@@ -2563,7 +2566,45 @@ async function negotiateMarkdown(request, env, markdown) {
 	// an HTML 200 with no `Vary: Accept`: the exact cache crossover this branch
 	// exists to prevent, on the one request that revalidates a cached variant.
 	if (!res || (!res.ok && res.status !== 304)) return null;
-	return withVaryAccept(res, request, MARKDOWN_CONTENT_TYPE);
+	return markdownVariant(res, request, markdown.contentSignal);
+}
+
+// The markdown variant's own headers (reef#2874), the same two a Card's markdown
+// carries (cardtile's card-worker.mjs `markdown()`), names borrowed from Cloudflare's
+// Markdown for Agents rather than invented, so an agent learns what the document
+// costs BEFORE it spends the context on it:
+//   X-Markdown-Tokens — an ESTIMATE, chars/4 (the usual heuristic; the Card's
+//     `estTokens`), labelled as one rather than implying a tokeniser we do not run.
+//     Absent on a 304: there is no body to count, and a cache keeps the value it
+//     stored with the 200 (RFC 9111 §4.3.4 updates only the headers a 304 carries).
+//   Content-Signal — the site OWNER's `ai-usage` declaration, baked at build time
+//     from the same function that writes the line into robots.txt. Cloudflare's
+//     version always says `ai-train=yes`; this one says what the owner chose, because
+//     an agent fetching a page directly may never read robots.txt. Absent when the
+//     build baked none (an emitter invoked without --content-signal).
+//     Only on a 200: a 206 (a Range request — the caller's headers ride along) returns
+//     a slice, and "4 tokens" beside a 100-byte document would read as the document's
+//     cost, which is exactly what this header claims to be. So a 206 carries no estimate.
+const estTokens = (s) => Math.ceil(s.length / 4);
+// Statuses whose response MUST NOT carry a body (the Response constructor throws on one).
+const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
+
+// 🔴 Every body-bearing answer keeps its body (tile#247 review): a 206 is the slice the
+// caller asked for, with the asset server's own Content-Range; dropping it left an empty
+// 206 still claiming the original range. Only a 200 is read as text (to count it); any
+// other body is passed through as the raw stream, because decoding a slice that ends
+// mid-character would rewrite its bytes. Only HEAD and the null-body statuses go bodiless.
+async function markdownVariant(res, request, contentSignal) {
+	const text = res.status === 200 ? await res.text() : null;
+	const body = request.method === 'HEAD' || NULL_BODY_STATUS.has(res.status) ? null
+		: text !== null ? text : res.body;
+	const out = withVaryAccept(
+		new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }),
+		request, MARKDOWN_CONTENT_TYPE
+	);
+	if (text !== null) out.headers.set('x-markdown-tokens', String(estTokens(text)));
+	if (contentSignal) out.headers.set('content-signal', contentSignal);
+	return out;
 }
 
 const siteWorker = {

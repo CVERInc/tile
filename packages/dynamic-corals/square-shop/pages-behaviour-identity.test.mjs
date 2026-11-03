@@ -11,6 +11,12 @@
 // on Pages re-enters the worker and is forwarded to the binding), exactly as at fa57bab, so the
 // served page, the global fetches and the binding calls are all identical for every case.
 //
+// A SECOND intentional difference (reef#2874): the markdown variant of a negotiated route now carries
+// X-Markdown-Tokens (chars/4 of its body, the Card's convention). That one header — and only on that
+// one case — is removed from the comparison after asserting its value; every other header, the
+// status and the body must still be identical. (No Content-Signal here: the fixture is emitted
+// without --content-signal, so that header must be absent, which the comparison proves.)
+//
 // A missing fixture file is a FAILURE, never a skip: this proof must run wherever the suite runs.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -135,6 +141,8 @@ const MISSING = [
 
 // The one case whose <head> is the product's own (see the header comment).
 const OWN_HEAD = new Set(['native product page']);
+// The cases whose response gains a header on purpose, with the value it must have (see the header).
+const ADDED_HEADERS = { 'markdown route': { 'x-markdown-tokens': String(Math.ceil('# About\n'.length / 4)) } };
 
 const baseFile = emit(baseRoot, 'base');
 const newFile = emit(path.resolve(here, '../../..'), 'new');
@@ -145,7 +153,11 @@ for (const [name, url, init, opts] of [...CASES.map(([n, u, i]) => [n, u, i, {}]
 		const after = await drive(newFile, url, init, opts);
 		t.diagnostic(`status=${after.status} body=${Buffer.from(after.body, 'base64').length}B binding=${after.bindingCalls.join(',') || '-'} global=${after.globalCalls.join(',') || '-'}`);
 		assert.equal(after.status, before.status, 'status');
-		assert.deepEqual(after.headers, before.headers, 'headers');
+		const added = ADDED_HEADERS[name] || {};
+		for (const [h, v] of Object.entries(added)) {
+			assert.deepEqual(after.headers.find(([k]) => k === h), [h, v], 'the intended ' + h);
+		}
+		assert.deepEqual(after.headers.filter(([k]) => !(k in added)), before.headers, 'headers');
 		if (OWN_HEAD.has(name)) {
 			const html = (b64) => Buffer.from(b64, 'base64').toString('utf8');
 			const headless = (b64) => html(b64).replace(/<head>[\s\S]*?<\/head>/, '<head></head>');

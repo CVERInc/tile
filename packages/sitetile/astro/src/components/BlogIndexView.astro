@@ -10,6 +10,8 @@ import Section from './Section.astro';
 import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
+// reef#2874: this page's markdown twin — what it lists, recorded for the post-build pass.
+import { recordListTwin } from '../../agent-list-twins.mjs';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
 
 // `stamp` (reef#2554, pages/[...path].astro): this page's own noindex: and sitemap listing, for
@@ -59,9 +61,17 @@ const homeCards = isHome
 const title = isHome
   ? (meta.title || meta['blog-title'] || 'Blog')
   : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
+// reef#2874: exactly the cards this page shows, and its pager neighbours. '' outside a gated build.
+// A root-mounted home shows no heading, so its twin is titled the way its <title> is.
+const twinMark = recordListTwin({
+  heading: isHome ? title : (meta['blog-title'] || 'Blog'),
+  items: pagePosts.map((p) => ({ title: p.title, href: postUrl(p, meta), date: p.date })),
+  prev: currentPage > 1 ? pageHref(currentPage - 1) : '',
+  next: currentPage < totalPages ? pageHref(currentPage + 1) : '',
+});
 ---
 <SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)} stamp={stamp}>
-  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
+  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>{twinMark && <Fragment set:html={twinMark} />}
     <div class="bl-main">
     {!isHome && (
     <header class="bl-head">

@@ -421,10 +421,18 @@ test('the emitted worker injects no headers of its own, outside one NAMED except
 	// Cut by NAME and fail if the name is gone, so this never quietly stops covering
 	// the file. Everything else — transport, verdict, shop, static — is still held to
 	// the original claim.
-	const at = text.indexOf('function withVaryAccept(');
-	assert.notEqual(at, -1, 'the exception must still be findable, or this test covers nothing');
-	const end = text.indexOf('\n}\n', at);
-	const rest = text.slice(0, at) + text.slice(end);
+	//
+	// reef#2874 widened the SAME exception, not a new one: the markdown variant also carries the
+	// headers a Card's markdown carries — X-Markdown-Tokens and the owner's Content-Signal — set in
+	// markdownVariant(), asserted in emit-markdown-negotiation.test.mjs. Each function is cut by
+	// name and must still be findable.
+	let rest = text;
+	for (const name of ['function withVaryAccept(', 'async function markdownVariant(']) {
+		const at = rest.indexOf(name);
+		assert.notEqual(at, -1, 'the exception ' + name + ' must still be findable, or this test covers nothing');
+		const end = rest.indexOf('\n}\n', at);
+		rest = rest.slice(0, at) + rest.slice(end);
+	}
 	assert.equal(/headers\.(set|append)\s*\(/.test(rest), false);
 });
 

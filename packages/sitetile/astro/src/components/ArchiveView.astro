@@ -24,6 +24,8 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 import { fmtDate, dateBadgeParts, buildIndexView, groupByArchive, listedPosts, postUrl, blogBase, blogSearchOn, tagHref, routedCategories, sidebarCopy, blogViewLang, indexDateLang } from '../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';
+// reef#2874: this page's markdown twin — what it lists, recorded for the post-build pass.
+import { recordListTwin } from '../../agent-list-twins.mjs';
 
 const { posts: postsIn, corpus: corpusIn, meta, title, heading, subhead, pageHref, pageNum = 1, alternates, stamp = null } = Astro.props;
 const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
@@ -48,9 +50,16 @@ const {
 const lang = indexDateLang(dateFormat, meta, blogViewLang(meta, viewFiles));
 const recentPosts = corpus.slice(0, 5);
 const archive = showSidebar ? groupByArchive(corpus) : [];
+// reef#2874: exactly the cards this page shows, and its pager neighbours. '' outside a gated build.
+const twinMark = recordListTwin({
+  heading,
+  items: pagePosts.map((p) => ({ title: p.title, href: postUrl(p, meta), date: p.date })),
+  prev: currentPage > 1 ? pageHref(currentPage - 1) : '',
+  next: currentPage < totalPages ? pageHref(currentPage + 1) : '',
+});
 ---
 <SiteLayout title={title} lang={blogViewLang(meta, viewFiles)} meta={meta} alternates={alternates} stamp={stamp}>
-  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>
+  <section class="bl-index" data-sidebar={showSidebar ? '' : undefined}>{twinMark && <Fragment set:html={twinMark} />}
     <div class="bl-main">
     <header class="bl-head">
       <h1>{heading}</h1>
