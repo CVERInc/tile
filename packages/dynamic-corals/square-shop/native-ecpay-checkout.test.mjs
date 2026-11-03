@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -383,6 +383,7 @@ test('the paper invoice asks for a name and an address and is sent as a print re
   const cashier = { action: 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { A: 'b' } };
   const b = await readyForSubmit(deliveryThen([HOME], () => ({ status: 200, body: { order_id: 'order-7', form_post: cashier } })), [HOME]);
   b.type('address', 'No. 1, Example Rd.');
+  b.type('postal', '106');
   await b.choose('inv', 'paper');
   assert.match(b.panel.innerHTML, /for="dc-ecpay-paperName">姓名<\/label>.*for="dc-ecpay-paperAddress">地址<\/label>/);
   await b.submit();
@@ -510,4 +511,51 @@ test('same-name rows that differ in fee stay separate choices', async () => {
   const b = browser(await productHtml(bowl), options([FAMI_B2C, { ...FAMI_C2C, fee_minor: 9000 }]));
   await b.press();
   assert.deepEqual(radiosOf(b.panel.innerHTML), ['FAMI', 'FAMIC2C']);
+});
+
+test('home delivery requires the postal code: the label does not call it optional and an empty one is refused before sending', async () => {
+  const b = await readyForSubmit(deliveryThen([HOME], () => ({ status: 200, body: { order_id: 'order-5', form_post: { action: 'https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { A: 'b' } } } })), [HOME]);
+  assert.doesNotMatch(b.panel.innerHTML, /選填/);
+  assert.match(b.panel.innerHTML, /郵遞區號/);
+  b.type('address', 'No. 1, Example Rd.');
+  await b.submit();
+  assert.match(b.panel.innerHTML, /id="dc-ecpay-postal-err">請輸入郵遞區號。/);
+  assert.equal(b.calls.filter((c) => c.url === '/api/v2/ecpay/checkout').length, 0, 'no checkout without a postal code');
+  b.type('postal', '!!');
+  await b.submit();
+  assert.match(b.panel.innerHTML, /id="dc-ecpay-postal-err">郵遞區號格式不對。/);
+  b.type('postal', '106');
+  await b.submit();
+  assert.equal(b.calls.filter((c) => c.url === '/api/v2/ecpay/checkout').length, 1);
+});
+
+test('no locale labels the postal code optional, and each has its own please-enter message', () => {
+  const src = readFileSync(path.join(here, 'shop-function-template.js'), 'utf8');
+  const labels = [...src.matchAll(/ postal: '([^']+)'/g)].map((m) => m[1]);
+  assert.equal(labels.length, 4);
+  for (const label of labels) assert.doesNotMatch(label, /optional|任意|選填|选填/, label);
+  const missing = [...src.matchAll(/errPostalMissing: '([^']+)'/g)].map((m) => m[1]);
+  assert.equal(missing.length, 4);
+});
+
+test('a Site that issues no e-invoice, said up front, never shows the invoice choice and sends no invoice', async () => {
+  const respond = async (u) => (u.startsWith('/api/v2/ecpay/logistics/delivery-options')
+    ? { status: 200, body: { ok: true, currency: 'TWD', options: [CVS], invoice_offered: false } }
+    : { status: 200, body: { order_id: 'order-6', form_post: { action: 'https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { A: 'b' } } } });
+  const b = await readyForSubmit(respond);
+  assert.doesNotMatch(b.panel.innerHTML, /電子發票/);
+  await b.submit();
+  const sent = b.calls.filter((c) => c.url === '/api/v2/ecpay/checkout');
+  assert.equal(sent.length, 1, 'one checkout, no refusal round trip');
+  assert.equal(sent[0].body.invoice, undefined);
+});
+
+test('an invoice_offered of true, or none at all, keeps the invoice choice', async () => {
+  for (const extra of [{ invoice_offered: true }, {}]) {
+    const respond = async (u) => (u.startsWith('/api/v2/ecpay/logistics/delivery-options')
+      ? { status: 200, body: { ok: true, currency: 'TWD', options: [CVS], ...extra } }
+      : { status: 500, body: null });
+    const b = await readyForSubmit(respond);
+    assert.match(b.panel.innerHTML, /<legend>電子發票<\/legend>/, JSON.stringify(extra));
+  }
 });
