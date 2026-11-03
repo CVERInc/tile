@@ -2581,6 +2581,32 @@ function proseBodyHtml(body, ordered) {
   return bodyHtml(body, { linkRows: 'st-prose' });
 }
 
+// reef#2857: a TEXT-FREE hero — empty (or whitespace-only) title, and no `logo=` image standing in
+// for the title — is a picture band (bg=, body, cta) and emits NO heading element at all. Before,
+// every hero wrote `<h1>title</h1>`, so a bg-only hero put an empty <h1></h1> on the page and the
+// author's real title ended up a second h1 or an h2. `logo=` only renders in the `layers=` and
+// `layout=` heroes (the legacy hero ignores it), so only there does a logo keep the h1 (an image
+// whose alt is the title — an empty alt there is a separate question, left as it is).
+// ONE predicate for both renderers (emit/hero.mjs, renderSection) and for the page h1 below.
+function heroHeadingless(s) {
+  if (!s || s.type !== 'hero' || String(s.title == null ? '' : s.title).trim()) return false;
+  const pm = parseParams(s.params);
+  if (!pm.layers && !pm.layout) return true;
+  const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
+  return !(logoRaw && safeSrc(logoRaw));
+}
+
+// The index of the section that carries the page's <h1> (its title as h1; the rest are h2): the
+// first section — or, when the page opens with text-free heroes, the first section after them.
+// Both renderers read this (PageView → Section.astro `h1At`, renderSiteToHtml). A page whose
+// sections are all text-free heroes has no h1 owner (returns sections.length).
+function pageH1Index(sections) {
+  const list = sections || [];
+  let i = 0;
+  while (i < list.length && heroHeadingless(list[i])) i += 1;
+  return i;
+}
+
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
 // today only the `action=inbox` form reads it: { lang, meta, path } (see renderSiteToHtml).
 function renderSection(s, hero, ctx) {
@@ -2620,9 +2646,11 @@ function renderSection(s, hero, ctx) {
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
       const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
       const logo = logoRaw ? safeSrc(logoRaw) : null;
-      const h1Html = logo
-        ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
-        : '<h1>' + inlineHtml(s.title) + '</h1>';
+      // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
+      const h1Html = heroHeadingless(s) ? ''
+        : logo
+          ? '<h1 class="st-hero-logo"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></h1>'
+          : '<h1>' + inlineHtml(s.title) + '</h1>';
       if (layerList.length) {
         const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
@@ -2638,8 +2666,14 @@ function renderSection(s, hero, ctx) {
       }
       // LEGACY (default) hero — unchanged: h1 + body + single `cta=` param. Live sites rely on this exact
       // DOM (the logo image stays a `.st-figure` via bodyHtml). New columned hero is OPT-IN via `layout`.
+      // `enter` (bare flag) mirrors Hero.astro: `data-enter` on the section and, with a bg, the
+      // separate `.st-hero-bg` layer the theme animates (reef#2857: this branch had neither, so an
+      // editor preview of an entrance hero lacked the layer the built page shows).
       if (!pm.layout) {
-        return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + style + '><h1>' + inlineHtml(s.title) + '</h1>' +
+        const enter = pm.enter != null;
+        return '<section class="st-hero st-full-bleed" data-media="' + media + '"' + (enter ? ' data-enter=""' : '') + style + '>' +
+          (enter && bgOk ? '<div class="st-hero-bg" aria-hidden="true"' + style + '></div>' : '') +
+          (heroHeadingless(s) ? '' : '<h1>' + inlineHtml(s.title) + '</h1>') +
           bodyHtml(s.body) + ctaHtml(pm.cta, 'st-hero-cta') + '</section>';
       }
       const layout = ' data-layout="' + escAttr(typeof pm.layout === 'object' ? pm.layout.label : pm.layout) + '"';
@@ -3149,7 +3183,8 @@ function renderSiteToHtml(site, opts) {
   const pathname = String(o.path || '/').split(/[?#]/)[0];
   const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
     contentRels: o.contentRels };
-  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === 0, { ...ctx, index: i }), s.id)).join('\n');
+  const h1At = pageH1Index(site.sections);
+  const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === h1At, { ...ctx, index: i }), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
   // All other values (or absent) fall through to the current single-column output.
   if (String((site.meta || {}).layout || '').trim() === 'sidebar') {
@@ -3261,6 +3296,8 @@ export {
   takeDropWarnings,
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
+  // reef#2857: the text-free hero predicate and the page-h1 owner both renderers share.
+  heroHeadingless, pageH1Index,
   // form coral `thanks=` — a stricter, site-internal-only sibling; see safeInternalPath's own comment.
   safeInternalPath,
   // the `action=inbox` form's inline script — Form.astro emits this same text (#1933 S4b).
