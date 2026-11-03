@@ -762,6 +762,7 @@ const canonicalHref = Astro.site ? new URL(Astro.url.pathname, Astro.site).href 
 const bubbleSiteId = String(process.env.SITE_ID || process.env.SITE_KEY || meta['site-key'] || '').trim();
 const platformOrigin = String(process.env.PLATFORM_ORIGIN || 'https://feelreef.com').replace(/\/+$/, '');
 const bubbleTitle = String(meta['site-title'] || meta.title || title || '').trim();
+const bubbleBrand = String(meta.brand || '').trim();
 // assistant-name: the owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
 // applied by the coral itself when this attribute is absent/empty). Single line — a raw multi-line
 // value would otherwise leak into the attribute and the coral's copy.
@@ -1480,7 +1481,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       </dc-dock>
     )}{bubbleOn && (
       <>
-        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleTitle} data-site-name={ogSiteName} data-assistant-name={assistantName || undefined} data-search-index={bubbleSearch ? '/search-index.json' : undefined} style={inboxBubbleStyle(meta)}></div>
+        <div data-dynamic-coral="inbox-bubble" data-kind="site" data-id={bubbleSiteId} data-kaito={bubbleKaito ? '1' : undefined} data-api-base={platformOrigin} data-title={bubbleBrand || bubbleTitle} data-site-name={bubbleBrand || ogSiteName} data-assistant-name={assistantName || undefined} data-search-index={bubbleSearch ? '/search-index.json' : undefined} style={inboxBubbleStyle(meta)}></div>
         {/* reef#1921: a loader in place of `<script src>` — it fetches the 159 KB coral (same URL,
             same host) only when the coral would draw something. See ../lib/inbox-bubble-loader.mjs. */}
         <script is:inline type="module" set:html={bubbleLoaderScript(`${platformOrigin}/corals/inbox-bubble/v0/inbox-bubble.js`, appbar ? APPBAR_CORAL_FLOOR : undefined)}></script>

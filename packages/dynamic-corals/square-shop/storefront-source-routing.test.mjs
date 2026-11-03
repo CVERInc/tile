@@ -54,6 +54,238 @@ const product = {
   commerce: { sku: 'tee-sku', product_id: 'p1', variant_id: 'catalog-variant', currency: 'USD', unit_price: 1900, tracked: true, available: 2, reserved: 0, status: 'IN_STOCK' },
 };
 
+// Fixed native facts and fresh Responses keep emitted-worker assertions deterministic.
+async function nativeHeadFixture(name, { shopPath = '/shop', siteName, donor = shell, item = product, status = 200, binding = true, payload, rspError = false } = {}) {
+  const { load } = emit(name, ['--site-id', 'site-meta',
+    ...(siteName === undefined ? [] : ['--name', siteName]),
+    '--shops', JSON.stringify([{ shopPath }]),
+    '--storefronts', JSON.stringify([{ path: shopPath, source: 'native' }])]);
+  const mod = await load();
+  const assets = [], projections = [];
+  const env = { ASSETS: { fetch: async request => {
+    assets.push(new URL(request.url).pathname);
+    return donor === null ? new Response('missing', { status: 404 }) : new Response(donor);
+  } } };
+  if (binding) env.RSP = { fetch: async request => {
+    projections.push(new URL(request.url));
+    if (rspError) throw new Error('projection unavailable');
+    return Response.json(payload === undefined ? { ok: true, source: 'native', item, items: [item] } : payload, { status });
+  } };
+  return { mod, env, assets, projections, shopPath };
+}
+async function storefrontHeadSnapshot(mod, request, env, ctx) {
+  const response = await mod.default.fetch(request, env, ctx);
+  return { response, status: response.status, headers: Object.fromEntries(response.headers), html: await response.text() };
+}
+const storefrontHeadHead = html => (html.match(/<head>([\s\S]*?)<\/head>/i) || [])[1];
+const nativeHeadHead = [
+  '<title>Reef Tee</title>',
+  '<meta name="description" content="Repo-backed copy">',
+  '<meta property="og:type" content="product">',
+  '<meta property="og:title" content="Reef Tee">',
+  '<meta property="og:description" content="Repo-backed copy">',
+  '<meta property="og:image" content="/tee.jpg">',
+  '<meta property="og:url" content="https://site.example/shop/reef-tee">',
+  '<meta name="twitter:card" content="summary_large_image">',
+  '<meta name="twitter:title" content="Reef Tee">',
+  '<meta name="twitter:description" content="Repo-backed copy">',
+  '<meta name="twitter:image" content="/tee.jpg">',
+  '<link rel="canonical" href="https://site.example/shop/reef-tee">'
+].join('\n');
+
+test('native product head: native detail replaces the complete donor head and preserves residual metadata', async () => {
+  const residual = '<meta name="robots" content="follow"><link rel="alternate" href="/ja/shop/">' +
+    '<script type="application/ld+json">{"@type":"WebSite","name":"Donor"}</script>';
+  const donor = shell.replace('<title>Donor</title>', '<title>Donor</title><meta name="description" content="Donor description">' +
+    '<meta property="og:type" content="website"><meta property="og:title" content="Donor OG"><meta property="og:site_name" content="Donor site">' +
+    '<meta property="og:description" content="Donor description"><meta property="og:image" content="/donor.jpg"><meta property="og:url" content="https://site.example/shop/">' +
+    '<meta name="twitter:card" content="summary"><meta name="twitter:title" content="Donor Twitter"><meta name="twitter:description" content="Donor description">' +
+    '<meta name="twitter:image" content="/donor.jpg"><link rel="canonical" href="https://site.example/shop/">' + residual);
+  const fixture = await nativeHeadFixture('meta-native-complete-head', { donor });
+  const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee?share=1'), fixture.env);
+  assert.equal(page.status, 200);
+  assert.equal(storefrontHeadHead(page.html), residual + nativeHeadHead + '\n');
+  assert.equal((page.html.match(/application\/ld\+json/g) || []).length, 1);
+  assert.doesNotMatch(page.html, /"@type":"(?:Product|Offer)"/);
+  assert.deepEqual(fixture.assets, ['/shop/']);
+  assert.equal(fixture.projections[0].searchParams.get('slug'), 'reef-tee');
+});
+
+test('native product head: native title follows the site-name rule and empty names retain donor bytes', async () => {
+  for (const [siteName, title] of [[undefined, 'Reef Tee'], ['Example Studio', 'Reef Tee — Example Studio']]) {
+    const fixture = await nativeHeadFixture('meta-native-title-' + (siteName ? 'named' : 'unnamed'), { siteName });
+    const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee'), fixture.env);
+    assert.match(page.html, new RegExp('<title>' + title + '</title>'));
+    assert.match(page.html, /<meta property="og:title" content="Reef Tee">/);
+    assert.match(page.html, /<meta name="twitter:title" content="Reef Tee">/);
+  }
+  const donor = shell.replace('<title>Donor</title>', '<title data-donor="kept"> Donor &amp; name </title>\n' +
+    '<meta name="description" content="Donor description"><meta property="og:title" content="Donor OG">\n' +
+    '<meta name="twitter:title" content="Donor Twitter"><link rel="canonical" href="https://site.example/shop/">');
+  for (const [index, name] of ['', ' \t\n ', undefined].entries()) {
+    const item = { ...product, copy: { ...product.copy, name } };
+    for (const siteName of [undefined, 'Example Studio']) {
+      const fixture = await nativeHeadFixture('meta-native-empty-name-' + index + '-' + (siteName ? 'named' : 'unnamed'), { donor, item, siteName });
+      const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee'), fixture.env);
+      assert.equal(page.status, 200);
+      assert.equal(storefrontHeadHead(page.html), storefrontHeadHead(donor), 'an empty mapped name keeps every donor head byte');
+      assert.match(page.html, /class="dc-native-buy" data-native-sku="tee-sku"/, 'the usable item still renders its native body');
+      assert.equal(page.headers['cache-control'], 'public, max-age=60, must-revalidate');
+    }
+  }
+});
+
+test('native product head: empty native description falls back to the product name in all three tags', async () => {
+  for (const [index, description_html] of ['', ' <p> </p>\n'].entries()) {
+    const item = { ...product, copy: { ...product.copy, description_html } };
+    const fixture = await nativeHeadFixture('meta-native-empty-description-' + index, { item });
+    const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee'), fixture.env);
+    const head = storefrontHeadHead(page.html);
+    assert.match(head, /<meta name="description" content="Reef Tee">/);
+    assert.match(head, /<meta property="og:description" content="Reef Tee">/);
+    assert.match(head, /<meta name="twitter:description" content="Reef Tee">/);
+    assert.doesNotMatch(head, /Repo-backed copy|Donor/);
+  }
+});
+
+test('native product head: native images use first nonempty media then image-ref and omit absent images', async () => {
+  for (const [name, media, image_ref, expected] of [
+    ['media', [null, { url: '' }, { url: '/first.jpg' }, { url: '/second.jpg' }], '/fallback.jpg', '/first.jpg'],
+    ['image-ref', [], '/fallback.jpg', '/fallback.jpg'],
+    ['no-media', undefined, '/fallback.jpg', '/fallback.jpg'],
+    ['absent', [], '', '']
+  ]) {
+    const item = { ...product, copy: { ...product.copy, media, image_ref } };
+    const fixture = await nativeHeadFixture('meta-native-image-' + name, { item });
+    const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee'), fixture.env);
+    const head = storefrontHeadHead(page.html);
+    if (expected) {
+      assert.equal(head.includes('<meta property="og:image" content="' + expected + '">'), true, name);
+      assert.equal(head.includes('<meta name="twitter:image" content="' + expected + '">'), true, name);
+      assert.match(head, /content="summary_large_image"/);
+      assert.equal(page.html.includes('<img class="st-img" src="' + expected + '"'), true);
+    } else {
+      assert.doesNotMatch(head, /(?:og|twitter):image/);
+      assert.match(head, /content="summary"/);
+      assert.doesNotMatch(page.html, /<img class="st-img"/);
+    }
+  }
+});
+
+test('native product head: escaping and localized custom shop canonicals use product facts and request origin', async () => {
+  const item = { ...product, slug: '布&"絹', copy: { ...product.copy,
+    name: '布 & "絹" <特製>', description_html: '<p>Soft & "silk"\'s</p><p>cloth</p>',
+    media: [{ url: 'https://images.example/cloth?a=1&label="silk"\'s' }] } };
+  for (const [index, shopPath] of ['/ja/store', '/custom/wares'].entries()) {
+    const fixture = await nativeHeadFixture('meta-native-escaped-' + index, { item, shopPath, siteName: 'Studio & "Craft"' });
+    const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://shop.example' + shopPath + '/' + encodeURIComponent(item.slug) + '?share=untrusted'), fixture.env);
+    const head = storefrontHeadHead(page.html);
+    const canonical = 'https://shop.example' + shopPath + '/布&amp;&quot;絹';
+    assert.match(head, /<title>布 &amp; &quot;絹&quot; &lt;特製&gt; — Studio &amp; &quot;Craft&quot;<\/title>/);
+    assert.match(head, /<meta property="og:title" content="布 &amp; &quot;絹&quot; &lt;特製&gt;">/);
+    assert.match(head, /<meta name="twitter:title" content="布 &amp; &quot;絹&quot; &lt;特製&gt;">/);
+    for (const tag of ['<meta name="description"', '<meta property="og:description"', '<meta name="twitter:description"']) {
+      assert.equal(head.includes(tag + ' content="Soft &amp; &quot;silk&quot;&#39;s cloth">'), true);
+    }
+    for (const tag of ['<meta property="og:image"', '<meta name="twitter:image"']) {
+      assert.equal(head.includes(tag + ' content="https://images.example/cloth?a=1&amp;label=&quot;silk&quot;&#39;s">'), true);
+    }
+    assert.equal(head.includes('<meta property="og:url" content="' + canonical + '">'), true);
+    assert.equal(head.includes('<link rel="canonical" href="' + canonical + '">'), true);
+    assert.doesNotMatch(head, /share=untrusted/);
+    assert.deepEqual(fixture.assets, [shopPath + '/']);
+  }
+});
+
+test('native product head: native body checkout cache failures and provider head bytes stay compatible', async () => {
+  const fixture = await nativeHeadFixture('meta-native-body-control');
+  const page = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop/reef-tee'), fixture.env);
+  assert.equal(page.html.slice(page.html.indexOf('<body>')), OLD_SHAPE_DETAIL.slice(OLD_SHAPE_DETAIL.indexOf('<body>')));
+  assert.equal(page.headers['cache-control'], 'public, max-age=60, must-revalidate');
+  assert.match(page.html, /class="dc-native-buy" data-native-sku="tee-sku"/);
+  const ui = driveNativeCheckout(page.html, async url => url === '/api/cart/items'
+    ? Response.json({ lines: [{ sku: 'tee-sku', qty: 1 }] }) : Response.json({ checkout_url: 'https://checkout.example/order' }));
+  await ui.click();
+  assert.deepEqual(ui.calls.map(call => call.url), ['/api/cart/items', '/api/checkout']);
+  for (const [name, options, status] of [
+    ['not-found', { status: 404 }, 404], ['unavailable', { status: 503 }, 503],
+    ['binding-error', { rspError: true }, 503], ['invalid-projection', { payload: null }, 503],
+    ['wrong-source', { payload: { ok: true, source: 'provider', item: product } }, 503],
+    ['missing-binding', { binding: false }, 503], ['missing-shell', { donor: null }, 503],
+    ['invalid-item', { item: {} }, 200]
+  ]) {
+    const failed = await nativeHeadFixture('meta-native-head-failure-' + name, options);
+    const result = await storefrontHeadSnapshot(failed.mod, new Request('https://site.example/shop/reef-tee'), failed.env);
+    assert.equal(result.status, status, name);
+    assert.equal(result.headers['cache-control'], 'public, max-age=60, must-revalidate', name);
+    if (options.donor !== null) assert.equal(storefrontHeadHead(result.html), '<title>Donor</title>', name);
+    assert.doesNotMatch(result.html, /class="dc-native-buy" data-native-sku=/, name);
+  }
+  const grid = await storefrontHeadSnapshot(fixture.mod, new Request('https://site.example/shop'), fixture.env);
+  assert.equal(storefrontHeadHead(grid.html), '<title>Donor</title>', 'the shop head is unchanged');
+  fixture.env.ASSETS.fetch = async () => { throw new Error('shell unavailable'); };
+  await assert.rejects(() => fixture.mod.default.fetch(new Request('https://site.example/shop/reef-tee'), fixture.env), /shell unavailable/);
+  const originalFetch = globalThis.fetch;
+  const originalCaches = globalThis.caches;
+  globalThis.caches = undefined;
+  try {
+    // Literal base heads pin provider ordering, escaping, whitespace and fallback bytes.
+    const products = [
+      [{ variation_id: 'tee-1', name: 'Reef Tee', slug: 'reef-tee', display_price: 19, currency: 'USD' },
+        `<title>Reef Tee — Example Studio</title>
+<meta name="description" content="Reef Tee">
+<meta property="og:type" content="product">
+<meta property="og:title" content="Reef Tee">
+<meta property="og:description" content="Reef Tee">
+<meta property="og:url" content="https://site.example/shop/reef-tee">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Reef Tee">
+<meta name="twitter:description" content="Reef Tee">
+<link rel="canonical" href="https://site.example/shop/reef-tee">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Reef Tee","description":"Reef Tee","image":[],"offers":[{"@type":"Offer","price":"19.00","priceCurrency":"USD","availability":"https://schema.org/InStock"}]}</script>`],
+      [{ title: '布 & "絹"', description: 'Soft & cloth\nSecond paragraph', images: ['/first.jpg', '/second.jpg'],
+        variants: [{ id: 'v1', price_minor: 1900, currency: 'USD', available: true }, { id: 'v2', price_minor: 2300, currency: 'USD', available: false }] },
+        String.raw`<title>布 &amp; &quot;絹&quot; — Example Studio</title>
+<meta name="description" content="Soft &amp; cloth
+Second paragraph">
+<meta property="og:type" content="product">
+<meta property="og:title" content="布 &amp; &quot;絹&quot;">
+<meta property="og:description" content="Soft &amp; cloth
+Second paragraph">
+<meta property="og:image" content="/first.jpg">
+<meta property="og:url" content="https://site.example/shop/reef-tee">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="布 &amp; &quot;絹&quot;">
+<meta name="twitter:description" content="Soft &amp; cloth
+Second paragraph">
+<meta name="twitter:image" content="/first.jpg">
+<link rel="canonical" href="https://site.example/shop/reef-tee">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"布 & \"絹\"","description":"Soft & cloth\nSecond paragraph","image":["/first.jpg","/second.jpg"],"offers":[{"@type":"Offer","price":"19.00","priceCurrency":"USD","availability":"https://schema.org/InStock"},{"@type":"Offer","price":"23.00","priceCurrency":"USD","availability":"https://schema.org/OutOfStock"}]}</script>`]
+    ];
+    for (const rail of ['square', 'stripe']) {
+      const { load } = emit('meta-provider-byte-control-' + rail, ['--site-id', 'site-meta', '--name', 'Example Studio',
+        '--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: rail }])]);
+      const candidate = await load();
+      const scope = String.raw`<script>(function(){const rail="${rail}",raw=window.fetch;if(!raw)return;window.fetch=function(input,init){let u;try{u=new URL(typeof input==='string'?input:input.url,window.location.href)}catch(e){return raw.apply(this,arguments)}if(u.origin!==window.location.origin||!/^\/api\/v2\/(?:shop|square)\//.test(u.pathname))return raw.apply(this,arguments);u.searchParams.set('payment_rail',rail);const next=Object.assign({},init||{});const headers=new Headers(next.headers||{});const method=(next.method||(input&&input.method)||'GET').toUpperCase();if(method!=='GET'&&method!=='HEAD'&&typeof next.body==='string'&&/application\/json/i.test(headers.get('content-type')||'')){try{next.body=JSON.stringify(Object.assign({},JSON.parse(next.body),{payment_rail:rail}))}catch(e){}}return raw.call(this,u.toString(),next)}})();</script>`;
+      for (const [item, expectedHead] of products) {
+        globalThis.fetch = async () => Response.json({ item });
+        for (const donor of [shell, null]) {
+          const env = { ASSETS: { fetch: async () => donor === null ? new Response('missing', { status: 404 }) : new Response(donor) } };
+          const request = () => new Request('https://site.example/shop/reef-tee?ignored=1');
+          const after = await storefrontHeadSnapshot(candidate, request(), env);
+          assert.equal(after.status, 200);
+          assert.equal(after.headers['cache-control'], 'public, max-age=60, must-revalidate');
+          assert.equal(storefrontHeadHead(after.html), expectedHead + (donor === null ? '' : scope + '\n'), rail);
+          assert.match(after.html, /"@type":"Product"/);
+        }
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.caches = originalCaches;
+  }
+});
+
 test('site and guild locators without a descriptor leave /shop to ASSETS', async () => {
   const { load } = emit('source-less', ['--site-id', 'site-a', '--guild', 'guild-a', '--shops', JSON.stringify([{ shopPath: '/shop' }])]);
   const mod = await load();
@@ -1099,7 +1331,7 @@ test('on a preview page other failures keep their own lines and the control stay
 // They are the no-preview baseline, updated when the failure line gained its error tone so that
 // success and failure stay distinguishable, and when the currency refusal joined the script.
 const OLD_SHAPE_GRID = "<!doctype html><html data-theme=\"reef\"><head><title>Donor</title></head><body><header>NAV</header><main>\n<section data-storefront-source=\"native\" class=\"dc-native-grid st-runtime\"><div class=\"st-cells\"><article class=\"st-cell st-native-card\"><a href=\"/shop/reef-tee\"><img class=\"st-img\" src=\"/tee.jpg\" alt=\"Reef Tee\"><h2>Reef Tee</h2><p>USD 19.00</p></a><button type=\"button\" class=\"dc-native-buy\" data-native-sku=\"tee-sku\">Buy now</button><p data-native-status role=\"status\" class=\"st-runtime-status\"></p></article></div></section><script>(function(){const C={\"error\":\"Unable to start checkout. Please try again.\",\"conflict\":\"A checkout is already in progress. Another one cannot be started right now.\",\"currencyRefused\":\"This item can't be paid for with this site's payment method.\",\"busy\":\"Processing…\",\"emailLabel\":\"Email for your order confirmation\",\"emailRequired\":\"Enter your email address to continue to payment.\",\"emailInvalid\":\"Please enter a valid email address.\",\"emailConflict\":\"This order is already linked to a different email address. Please enter the same address as before.\"};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}function post(fp){const a=fp.action,f=fp.fields;if(typeof a!=='string'||!a||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(a))return false;let u;try{u=new URL(a)}catch(e){return false}if(u.protocol!=='https:'||u.username||u.password||T.indexOf(u.origin)<0)return false;if(!f||typeof f!=='object'||Array.isArray(f))return false;const names=Object.keys(f);if(!names.length||names.length>64)return false;let total=0;for(let i=0;i<names.length;i++){const n=names[i],v=f[n];if(n.length>64||!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(n)||typeof v!=='string'||v.length>8192||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(v))return false;total+=n.length+v.length;if(total>32768)return false}if(!document.createElement)return false;const host=document.body||document.documentElement;if(!host||!host.appendChild)return false;const form=document.createElement('form');const submit=form.submit,add=form.appendChild,drop=form.remove;if(typeof submit!=='function'||typeof add!=='function')return false;for(let i=0;i<names.length;i++){if(names[i] in form||names[i].toLowerCase() in form)return false}form.method='POST';form.action=a;if(form.setAttribute)form.setAttribute('hidden','');for(let i=0;i<names.length;i++){const input=document.createElement('input');input.type='hidden';input.name=names[i];input.value=f[names[i]];add.call(form,input)}host.appendChild(form);let sent=false;try{submit.call(form);sent=true}catch(e){sent=false}finally{if(typeof drop==='function')drop.call(form);else if(host.removeChild)host.removeChild(form)}return sent}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;let conflict=false;let currencyRefused=false;let emailCode='';try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();const body=email?JSON.stringify(lang?{lang:lang,customer_email:email}:{customer_email:email}):lang?JSON.stringify({lang:lang}):null;const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused)button.disabled=false;if(status){status.textContent=emailMsg?emailMsg:currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>\n</main><footer>FOOT</footer></body></html>";
-const OLD_SHAPE_DETAIL = "<!doctype html><html data-theme=\"reef\"><head><title>Donor</title></head><body><header>NAV</header><main>\n<article data-storefront-source=\"native\" class=\"dc-native-product st-runtime st-native-detail\"><p><a href=\"/shop\">Shop</a></p><h1>Reef Tee</h1><img class=\"st-img\" src=\"/tee.jpg\" alt=\"Reef Tee\"><p>USD 19.00</p><p>Repo-backed copy</p><div class=\"st-native-actions\"><button type=\"button\" class=\"dc-native-buy\" data-native-sku=\"tee-sku\">Buy now</button><p data-native-status role=\"status\" class=\"st-runtime-status\"></p></div></article><script>(function(){const C={\"error\":\"Unable to start checkout. Please try again.\",\"conflict\":\"A checkout is already in progress. Another one cannot be started right now.\",\"currencyRefused\":\"This item can't be paid for with this site's payment method.\",\"busy\":\"Processing…\",\"emailLabel\":\"Email for your order confirmation\",\"emailRequired\":\"Enter your email address to continue to payment.\",\"emailInvalid\":\"Please enter a valid email address.\",\"emailConflict\":\"This order is already linked to a different email address. Please enter the same address as before.\"};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}function post(fp){const a=fp.action,f=fp.fields;if(typeof a!=='string'||!a||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(a))return false;let u;try{u=new URL(a)}catch(e){return false}if(u.protocol!=='https:'||u.username||u.password||T.indexOf(u.origin)<0)return false;if(!f||typeof f!=='object'||Array.isArray(f))return false;const names=Object.keys(f);if(!names.length||names.length>64)return false;let total=0;for(let i=0;i<names.length;i++){const n=names[i],v=f[n];if(n.length>64||!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(n)||typeof v!=='string'||v.length>8192||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(v))return false;total+=n.length+v.length;if(total>32768)return false}if(!document.createElement)return false;const host=document.body||document.documentElement;if(!host||!host.appendChild)return false;const form=document.createElement('form');const submit=form.submit,add=form.appendChild,drop=form.remove;if(typeof submit!=='function'||typeof add!=='function')return false;for(let i=0;i<names.length;i++){if(names[i] in form||names[i].toLowerCase() in form)return false}form.method='POST';form.action=a;if(form.setAttribute)form.setAttribute('hidden','');for(let i=0;i<names.length;i++){const input=document.createElement('input');input.type='hidden';input.name=names[i];input.value=f[names[i]];add.call(form,input)}host.appendChild(form);let sent=false;try{submit.call(form);sent=true}catch(e){sent=false}finally{if(typeof drop==='function')drop.call(form);else if(host.removeChild)host.removeChild(form)}return sent}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;let conflict=false;let currencyRefused=false;let emailCode='';try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();const body=email?JSON.stringify(lang?{lang:lang,customer_email:email}:{customer_email:email}):lang?JSON.stringify({lang:lang}):null;const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused)button.disabled=false;if(status){status.textContent=emailMsg?emailMsg:currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>\n</main><footer>FOOT</footer></body></html>";
+const OLD_SHAPE_DETAIL = "<!doctype html><html data-theme=\"reef\"><head><title>Reef Tee</title>\n<meta name=\"description\" content=\"Repo-backed copy\">\n<meta property=\"og:type\" content=\"product\">\n<meta property=\"og:title\" content=\"Reef Tee\">\n<meta property=\"og:description\" content=\"Repo-backed copy\">\n<meta property=\"og:image\" content=\"/tee.jpg\">\n<meta property=\"og:url\" content=\"https://site.example/shop/reef-tee\">\n<meta name=\"twitter:card\" content=\"summary_large_image\">\n<meta name=\"twitter:title\" content=\"Reef Tee\">\n<meta name=\"twitter:description\" content=\"Repo-backed copy\">\n<meta name=\"twitter:image\" content=\"/tee.jpg\">\n<link rel=\"canonical\" href=\"https://site.example/shop/reef-tee\">\n</head><body><header>NAV</header><main>\n<article data-storefront-source=\"native\" class=\"dc-native-product st-runtime st-native-detail\"><p><a href=\"/shop\">Shop</a></p><h1>Reef Tee</h1><img class=\"st-img\" src=\"/tee.jpg\" alt=\"Reef Tee\"><p>USD 19.00</p><p>Repo-backed copy</p><div class=\"st-native-actions\"><button type=\"button\" class=\"dc-native-buy\" data-native-sku=\"tee-sku\">Buy now</button><p data-native-status role=\"status\" class=\"st-runtime-status\"></p></div></article><script>(function(){const C={\"error\":\"Unable to start checkout. Please try again.\",\"conflict\":\"A checkout is already in progress. Another one cannot be started right now.\",\"currencyRefused\":\"This item can't be paid for with this site's payment method.\",\"busy\":\"Processing…\",\"emailLabel\":\"Email for your order confirmation\",\"emailRequired\":\"Enter your email address to continue to payment.\",\"emailInvalid\":\"Please enter a valid email address.\",\"emailConflict\":\"This order is already linked to a different email address. Please enter the same address as before.\"};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}function post(fp){const a=fp.action,f=fp.fields;if(typeof a!=='string'||!a||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(a))return false;let u;try{u=new URL(a)}catch(e){return false}if(u.protocol!=='https:'||u.username||u.password||T.indexOf(u.origin)<0)return false;if(!f||typeof f!=='object'||Array.isArray(f))return false;const names=Object.keys(f);if(!names.length||names.length>64)return false;let total=0;for(let i=0;i<names.length;i++){const n=names[i],v=f[n];if(n.length>64||!/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(n)||typeof v!=='string'||v.length>8192||/[\\u0000-\\u001f\\u007f-\\u009f]/.test(v))return false;total+=n.length+v.length;if(total>32768)return false}if(!document.createElement)return false;const host=document.body||document.documentElement;if(!host||!host.appendChild)return false;const form=document.createElement('form');const submit=form.submit,add=form.appendChild,drop=form.remove;if(typeof submit!=='function'||typeof add!=='function')return false;for(let i=0;i<names.length;i++){if(names[i] in form||names[i].toLowerCase() in form)return false}form.method='POST';form.action=a;if(form.setAttribute)form.setAttribute('hidden','');for(let i=0;i<names.length;i++){const input=document.createElement('input');input.type='hidden';input.name=names[i];input.value=f[names[i]];add.call(form,input)}host.appendChild(form);let sent=false;try{submit.call(form);sent=true}catch(e){sent=false}finally{if(typeof drop==='function')drop.call(form);else if(host.removeChild)host.removeChild(form)}return sent}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;let conflict=false;let currencyRefused=false;let emailCode='';try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();const body=email?JSON.stringify(lang?{lang:lang,customer_email:email}:{customer_email:email}):lang?JSON.stringify({lang:lang}):null;const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused)button.disabled=false;if(status){status.textContent=emailMsg?emailMsg:currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>\n</main><footer>FOOT</footer></body></html>";
 test('a projection body without preview_checkout renders exactly the pre-preview bytes', async () => {
   const grid = await serveNative('native-old-shape-grid', { shell, path: '/shop', projection: nativeOk(product) });
   const detail = await serveNative('native-old-shape-detail', { shell, path: '/shop/reef-tee', projection: nativeOk(product) });

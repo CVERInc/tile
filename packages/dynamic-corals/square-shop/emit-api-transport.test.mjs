@@ -130,6 +130,191 @@ function makeEnv({ rsp = null, assets = null, bindingName = BINDING } = {}) {
 }
 const echoRsp = () => new Response('RSP-OK', { status: 200 });
 
+test('buyer page trailing slash: transport stays literal private verdicts precede assets and product slash paths stay static', async () => {
+	const exact = ['/billing/success', '/billing/cancel', '/seam/island.js', '/seam/checkout-unavailable', '/seam/listing-filter.js', '/seam/wix-sidecart.css'];
+	const file = join(workDir, 'meta-transport.contract.json');
+	writeFileSync(file, JSON.stringify({ ...FIXTURE_CONTRACT, forward: [
+		...exact.map(value => ({ match: 'exact', value, methods: ['GET', 'HEAD'] })),
+		{ match: 'prefix', value: '/api/', methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] },
+		{ match: 'prefix', value: '/asset/', methods: ['GET', 'HEAD'] }
+	] }));
+	const { mod } = await emitWorker(['--site-id', 'site-meta', '--platform-origin', 'https://platform.example', '--api-contract', file]);
+	for (const path of exact) {
+		for (const method of ['GET', 'HEAD']) {
+			let forwarded;
+			const fixture = makeEnv({ rsp: (_record, request) => { forwarded = request; return new Response('FORWARDED'); } });
+			const request = new Request('https://s.example' + path + '?keep=1', { method, headers: { cookie: 'buyer=fixture', accept: 'text/markdown' } });
+			assert.equal(await (await mod.default.fetch(request, fixture.env)).text(), 'FORWARDED');
+			assert.equal(forwarded, request);
+			assert.equal(fixture.seenByRsp[0].path, path);
+			assert.equal(fixture.seenByRsp[0].search, '?keep=1');
+			assert.deepEqual(fixture.seenByAssets, []);
+			for (const miss of [path + '/', path + '//', path + 'x']) {
+				const staticFixture = makeEnv({ rsp: echoRsp });
+				const original = new Request('https://s.example' + miss + '?keep=1', { method });
+				assert.equal(await (await mod.default.fetch(original, staticFixture.env)).text(), 'STATIC:' + miss);
+				assert.deepEqual(staticFixture.seenByRsp, []);
+				assert.equal(staticFixture.seenByAssets[0].request, original);
+			}
+		}
+	}
+	for (const [prefix, methods] of [['/api/', ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']], ['/asset/', ['GET', 'HEAD']]]) {
+		for (const slash of ['', '/']) for (const method of methods) {
+			let forwarded;
+			const fixture = makeEnv({ rsp: (_record, request) => { forwarded = request; return new Response('FORWARDED'); } });
+			const pathname = prefix + 'thing' + slash;
+			const request = new Request('https://s.example' + pathname + '?keep=1', { method, headers: { 'x-fixture': 'retained' },
+				...(method === 'GET' || method === 'HEAD' ? {} : { body: 'fixture-body' }) });
+			assert.equal(await (await mod.default.fetch(request, fixture.env)).text(), 'FORWARDED');
+			assert.equal(forwarded, request);
+			assert.equal(fixture.seenByRsp[0].path, pathname);
+			assert.equal(fixture.seenByRsp[0].method, method);
+			assert.equal(fixture.seenByRsp[0].search, '?keep=1');
+			assert.equal(fixture.seenByRsp[0].headers.get('x-fixture'), 'retained');
+			assert.equal(fixture.seenByRsp[0].body, method === 'GET' || method === 'HEAD' ? '' : 'fixture-body');
+			assert.deepEqual(fixture.seenByAssets, []);
+		}
+	}
+	const fixture = makeEnv({ rsp: echoRsp });
+	assert.equal((await mod.default.fetch(new Request('https://s.example/__reef/inbox'), fixture.env)).status, 405);
+	const originalFetch = globalThis.fetch;
+	let relays = 0;
+	globalThis.fetch = async input => { relays++; assert.equal(String(input), 'https://platform.example/api/inbox'); return Response.json({ ok: true }); };
+	try {
+		const exactInbox = await mod.default.fetch(new Request('https://s.example/__reef/inbox', { method: 'POST', body: new URLSearchParams({ message: 'Fixture', return_to: '/contact' }) }), fixture.env);
+		assert.equal(exactInbox.status, 303);
+		assert.equal(relays, 1);
+		for (const method of ['GET', 'POST', 'HEAD']) {
+			const miss = await mod.default.fetch(new Request('https://s.example/__reef/inbox/', { method }), fixture.env);
+			assert.equal(await miss.text(), 'STATIC:/__reef/inbox/');
+		}
+		assert.equal(relays, 1, 'the slash variant never enters Inbox transport');
+	} finally { globalThis.fetch = originalFetch; }
+	for (const [method, path] of [['GET', '/api'], ['GET', '/asset'], ['POST', '/asset/thing/'], ['POST', '/billing/success/']]) {
+		const fixture = makeEnv({ rsp: echoRsp });
+		assert.equal(await (await mod.default.fetch(new Request('https://s.example' + path, { method }), fixture.env)).text(), 'STATIC:' + path);
+		assert.deepEqual(fixture.seenByRsp, []);
+	}
+	const old = makeEnv({ rsp: echoRsp });
+	assert.equal(await (await oldContractNative.mod.default.fetch(new Request('https://s.example/checkout/success/?order_id=ord-1'), old.env)).text(), 'STATIC:/checkout/success/');
+	assert.deepEqual(old.seenByRsp, [], 'an old contract gains no checkout forwarding alias');
+	{
+		const manifest = join(workDir, 'meta-private.verdict.json');
+		writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, paths: ['/shop/reef-tee', '/vault/post-1'] }));
+		const markdown = join(workDir, 'meta-public.markdown.json');
+		writeFileSync(markdown, JSON.stringify({ schemaVersion: 1, routes: [{ path: '/about', asset: '/about/index.md' }] }));
+		const { mod } = await emitWorker(['--site-id', 'site-meta', '--api-contract', fixturePath,
+			'--storefronts', JSON.stringify([{ path: '/shop', source: 'native' }]), '--gated-manifest', manifest, '--markdown-manifest', markdown]);
+		for (const canonical of ['/shop/reef-tee', '/vault/post-1']) {
+			const encoded = canonical.replaceAll('/', '%2F').replace(/^%2F/, '/');
+			for (const alias of [canonical, canonical + '/', canonical + '/index.html', encoded, encoded + '%2F']) {
+				for (const method of ['GET', 'HEAD']) {
+					for (const [state, answer, expectedStatus] of [
+						['allow', { allow: true }, 200], ['deny', { allow: false }, 404],
+						['not explicit', { allow: 'true' }, 404], ['missing allow', {}, 404],
+						['unusable', null, 502], ['unavailable', 'error', 502], ['missing binding', undefined, 503]
+					]) {
+						const events = [];
+						const request = new Request('https://s.example' + alias + '?keep=1', { method, headers: { cookie: 'buyer=fixture', accept: 'text/markdown' } });
+						const env = { ASSETS: { fetch: async original => {
+							events.push('assets');
+							assert.equal(original, request, 'allow preserves the original asset request');
+							return new Response('PRIVATE', { headers: { 'x-fixture': 'asset' } });
+						} } };
+						if (state !== 'missing binding') env[BINDING] = { fetch: async verdict => {
+							events.push('verdict');
+							const url = new URL(verdict.url);
+							assert.equal(url.pathname, '/seam/site-verdict-v2', 'no product projection runs first');
+							assert.equal(url.searchParams.get('path'), canonical);
+							assert.equal(verdict.method, 'GET');
+							assert.equal(verdict.headers.get('cookie'), 'buyer=fixture');
+							if (answer === 'error') throw new Error('unavailable');
+							return Response.json(answer);
+						} };
+						const response = await mod.default.fetch(request, env);
+						assert.equal(response.status, expectedStatus, state + ' ' + method + ' ' + alias);
+						if (state === 'allow') {
+							assert.deepEqual(events, ['verdict', 'assets']);
+							assert.equal(await response.text(), 'PRIVATE');
+							assert.equal(response.headers.get('x-fixture'), 'asset');
+						} else {
+							assert.deepEqual(events, state === 'missing binding' ? [] : ['verdict']);
+							assert.equal(response.headers.get('cache-control'), 'private, no-store');
+						}
+					}
+				}
+			}
+		}
+		for (const slash of ['', '/']) {
+			const paths = [];
+			const response = await mod.default.fetch(new Request('https://s.example/about' + slash + '?keep=1', { headers: { accept: 'text/markdown' } }), {
+				ASSETS: { fetch: async request => { paths.push(new URL(request.url).pathname); return new Response('PUBLIC MARKDOWN'); } },
+				[BINDING]: { fetch: async () => { throw new Error('public Markdown has no verdict'); } }
+			});
+			assert.equal(await response.text(), 'PUBLIC MARKDOWN');
+			assert.deepEqual(paths, ['/about/index.md']);
+			assert.equal(response.headers.get('content-type'), 'text/markdown; charset=utf-8');
+		}
+		const request = new Request('https://s.example/unknown/?keep=1');
+		let assetRequest;
+		await mod.default.fetch(request, { ASSETS: { fetch: async original => { assetRequest = original; return new Response('STATIC'); } } });
+		assert.equal(assetRequest, request, 'final ASSETS receives the original request');
+	}
+	// Public content under a shop path keeps the directory spelling served by ASSETS.
+	{
+		const shell = '<!doctype html><html><head><title>Content donor</title></head><body><main>CONTENT</main></body></html>';
+		const nativeItem = { slug: 'reef-tee', copy: { name: 'Reef Tee' },
+			commerce: { sku: 'tee-sku', currency: 'USD', unit_price: 1900, status: 'IN_STOCK' } };
+		async function shopAliasSnapshot(mod, request, env) {
+			const response = await mod.default.fetch(request, env);
+			return { status: response.status, headers: Object.fromEntries(response.headers), html: await response.text() };
+		}
+		const originalFetch = globalThis.fetch;
+		const originalCaches = globalThis.caches;
+		globalThis.caches = undefined;
+		try {
+			for (const source of ['native', 'provider']) for (const shopPath of ['/shop', '/ja/store']) {
+				const { mod } = await emitWorker(['--site-id', 'site-meta', '--api-contract', fixturePath,
+					'--shops', JSON.stringify([{ shopPath }]),
+					'--storefronts', JSON.stringify([{ path: shopPath, source, ...(source === 'provider' ? { provider: 'stripe' } : {}) }])]);
+				let projections = 0, providerCalls = 0;
+				const assets = [];
+				globalThis.fetch = async () => { providerCalls++; return Response.json({ item: { variation_id: 'v1', name: 'Reef Tee', display_price: 19, currency: 'USD' }, items: [] }); };
+				const env = {
+					ASSETS: { fetch: async request => { assets.push(request); return new Response(shell); } },
+					[BINDING]: { fetch: async () => { projections++; return Response.json({ ok: true, source: 'native', item: nativeItem, items: [nativeItem] }); } }
+				};
+				for (const path of [shopPath + '/reef-tee', shopPath, shopPath + '/']) {
+					const baseline = await shopAliasSnapshot(mod, new Request('https://site.example' + path + '?q=1'), env);
+					for (const method of ['POST', 'HEAD']) {
+						const page = await shopAliasSnapshot(mod, new Request('https://site.example' + path + '?q=1', { method }), env);
+						assert.deepEqual([page.status, page.headers, page.html], [baseline.status, baseline.headers, baseline.html], source + ' ' + method + ' ' + path);
+						assert.equal(page.status, 200, 'product/index deliberately have no new method guard');
+					}
+				}
+				const index = await shopAliasSnapshot(mod, new Request('https://site.example' + shopPath + '?q=1'), env);
+				const indexSlash = await shopAliasSnapshot(mod, new Request('https://site.example' + shopPath + '/?q=1'), env);
+				assert.deepEqual([indexSlash.status, indexSlash.headers, indexSlash.html], [index.status, index.headers, index.html]);
+				const before = [projections, providerCalls];
+				for (const path of [shopPath + '/reef-tee/', shopPath + '/content-page/', shopPath + '/reef-tee//', shopPath + '//reef-tee', shopPath + '/reef-tee/child', shopPath + 'x/reef-tee/', shopPath + '/reef-tee%ZZ']) {
+					for (const method of ['GET', 'POST', 'HEAD']) {
+						const request = new Request('https://site.example' + path + '?q=1', { method });
+						const page = await shopAliasSnapshot(mod, request, env);
+						assert.equal(page.status, 200);
+						assert.equal(page.html, shell, source + ' ' + method + ' ' + path);
+						assert.equal(assets.at(-1), request, 'the original request reaches ASSETS');
+						assert.equal(new URL(assets.at(-1).url).pathname, path);
+					}
+				}
+				assert.deepEqual([projections, providerCalls], before, 'misses perform no catalog reads');
+			}
+		} finally {
+			globalThis.fetch = originalFetch;
+			globalThis.caches = originalCaches;
+		}
+	}
+});
+
 // ── forwarding ───────────────────────────────────────────────────────────────
 
 test('a contract path enters the binding and never touches ASSETS', async () => {

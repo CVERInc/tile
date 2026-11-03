@@ -443,13 +443,17 @@ test('with siteOwnedBuyerPages present the early claim beats the forward rule', 
 
 test('only the contract-declared path AND method are claimed', async () => {
 	// a verb the entry does not declare, and a near miss beside the path
-	for (const [path, init] of [['/tiers', { method: 'POST' }], ['/tiers/', {}], ['/hub/gold', {}], ['/tiersx', {}]]) {
+	for (const [path, init] of [['/tiers', { method: 'POST' }], ['/hub/gold', {}], ['/tiersx', {}]]) {
 		const { env, seenByAssets } = makeEnv({ rsp: factsRsp({ '/zapi/tier-facts': PLANS }) });
 		const res = await claimed.default.fetch(get(path, init), env);
 		const html = await res.text();
 		assert.equal(html.includes('data-ejecta-membership'), false, path + ' must not be claimed');
 		assert.equal(seenByAssets.some((hit) => hit.path === '/'), false, path + ' must not ask for a shell');
 	}
+	const { env, seenByAssets } = makeEnv({ rsp: factsRsp({ '/zapi/tier-facts': PLANS }) });
+	const html = await (await claimed.default.fetch(get('/tiers/'), env)).text();
+	assert.equal(html.includes('data-ejecta-membership'), true, '/tiers/ must be claimed');
+	assert.equal(seenByAssets.some((hit) => hit.path === '/'), true, '/tiers/ must ask for a shell');
 });
 
 test('matchSiteOwnedBuyerPage answers null for an absent or empty route set', async () => {
@@ -457,6 +461,163 @@ test('matchSiteOwnedBuyerPage answers null for an absent or empty route set', as
 	assert.equal(claimed.matchSiteOwnedBuyerPage(get('/tiers'), []), null);
 	assert.equal(claimed.matchSiteOwnedBuyerPage(get('/tiers'), FIXTURE_CONTRACT.siteOwnedBuyerPages).kind, 'membership');
 	assert.equal(claimed.matchSiteOwnedBuyerPage(get('/hub'), FIXTURE_CONTRACT.siteOwnedBuyerPages).kind, 'account');
+});
+
+// The public contract paths and deliberately different fixture paths use the same kind boundary.
+async function buyerAliasWorker(realPaths) {
+	if (!realPaths) return { worker: claimed, account: '/hub', membership: '/tiers', accountFacts: '/zapi/hub-facts', membershipFacts: '/zapi/tier-facts' };
+	const pages = [
+		{ path: '/account', method: 'GET', kind: 'account', factsPath: '/api/account/surface' },
+		{ path: '/membership', method: 'GET', kind: 'membership', factsPath: '/api/membership/plans' }
+	];
+	const file = join(workDir, 'meta-buyer.contract.json');
+	writeFileSync(file, JSON.stringify({ ...FIXTURE_CONTRACT, siteOwnedBuyerPages: pages,
+		forward: pages.map((page) => ({ match: 'exact', value: page.path, methods: ['GET'] })) }));
+	return { worker: await emitWorker(['--site-id', 'site-meta', '--api-contract', file]),
+		account: pages[0].path, membership: pages[1].path, accountFacts: pages[0].factsPath, membershipFacts: pages[1].factsPath };
+}
+const buyerAliasHead = (html) => (html.match(/<head>([\s\S]*?)<\/head>/) || [])[1];
+async function buyerAliasSnapshot(worker, path, options) {
+	const fixture = makeEnv(options);
+	const response = await worker.default.fetch(get(path, { headers: { cookie: 'buyer=fixture' } }), fixture.env);
+	return { status: response.status, headers: Object.fromEntries(response.headers), html: await response.text(), fixture };
+}
+
+test('signed-out account noindex: signed-out declared Account adds only one robots tag and no canonical', async () => {
+	for (const realPaths of [false, true]) {
+		const { worker, account, accountFacts } = await buyerAliasWorker(realPaths);
+		const out = await buyerAliasSnapshot(worker, account, { rsp: factsRsp({ [accountFacts]: { signed_in: false, sections: [] } }) });
+		const inside = await buyerAliasSnapshot(worker, account, { rsp: factsRsp({ [accountFacts]: { signed_in: true, sections: ['profile'] } }) });
+		assert.equal(out.status, 200, account);
+		assert.equal(out.headers['cache-control'], 'private, no-store');
+		assert.equal(out.headers['content-type'], 'text/html; charset=utf-8');
+		assert.equal((out.html.match(/<meta name="robots" content="noindex">/g) || []).length, 1);
+		assert.equal(buyerAliasHead(out.html).replace('<meta name="robots" content="noindex">', ''), buyerAliasHead(inside.html));
+		assert.equal(out.html.includes('rel="canonical"'), false);
+		assert.equal(keepsShell(out.html), true);
+		assert.equal(out.html.includes('data-ejecta-account-state="logged-out"'), true);
+		assert.equal(out.html.includes('data-ejecta-slot="auth-request"'), true);
+		assert.equal(out.html.includes('src="/seam/island.js"'), true);
+		assert.equal(out.html.includes('data-ejecta-account-section='), false);
+	}
+	const donor = SHELL.replace('</head>', '<meta name="robots" content="follow"></head>');
+	const page = await buyerAliasSnapshot(claimed, '/hub', { shell: donor, rsp: factsRsp({ '/zapi/hub-facts': { signed_in: false } }) });
+	assert.equal((page.html.match(/name="robots"/g) || []).length, 2, 'existing donor robots survive; exactly one tag is added');
+	assert.equal(page.html.includes('<meta name="robots" content="follow">'), true);
+});
+
+test('signed-out account noindex: signed-in Account and Membership retain their head and sitemap transport', async () => {
+	for (const [path, factsPath, facts, title] of [
+		['/hub', '/zapi/hub-facts', { signed_in: true, sections: ['profile'] }, '帳戶'],
+		['/tiers', '/zapi/tier-facts', { ...PLANS, signed_in: false }, '會員方案']
+	]) {
+		const page = await buyerAliasSnapshot(claimed, path, { rsp: factsRsp({ [factsPath]: facts }) });
+		assert.equal(page.status, 200);
+		assert.equal(buyerAliasHead(page.html), `<title>${title}</title><script type="module" src="/seam/island.js"></script>\n`);
+		assert.equal(page.html.includes('name="robots"'), false);
+		assert.equal(page.html.includes('rel="canonical"'), false);
+	}
+	// Sitemap remains a static response, independent of Account facts or indexing metadata.
+	const sitemap = '<urlset><url><loc>https://s.example/account</loc></url></urlset>';
+	let factsReads = 0;
+	const response = new Response(sitemap, { headers: { 'content-type': 'application/xml', 'cache-control': 'public, max-age=3600' } });
+	const served = await claimed.default.fetch(get('/sitemap.xml'), {
+		ASSETS: { fetch: async (request) => { assert.equal(new URL(request.url).pathname, '/sitemap.xml'); return response; } },
+		[BINDING]: { fetch: async () => { factsReads++; throw new Error('no facts for sitemap'); } }
+	});
+	assert.equal(served, response);
+	assert.equal(await served.text(), sitemap);
+	assert.equal(factsReads, 0);
+});
+
+test('signed-out account noindex: missing error unusable facts and failed shells never infer signed out', async () => {
+	for (const [name, options, status] of [
+		['missing binding', { rsp: null }, MISSING_STATUS],
+		['error', { rsp: () => Response.json({ signed_in: false }, { status: 503 }) }, 503],
+		['refused', { rsp: () => Response.json({ signed_in: false }, { status: 404 }) }, 404],
+		['throw', { rsp: () => { throw new Error('down'); } }, 502],
+		['invalid JSON', { rsp: () => new Response('invalid') }, 502],
+		...[null, {}, [], { signed_in: 'false' }, { sections: [] }].map((facts) =>
+			[JSON.stringify(facts), { rsp: () => Response.json(facts) }, 502]),
+		['missing shell', { rsp: factsRsp({ '/zapi/hub-facts': { signed_in: false } }), shell: null }, 503],
+		['no main', { rsp: factsRsp({ '/zapi/hub-facts': { signed_in: false } }), shell: SHELL_NO_MAIN }, 503]
+	]) {
+		const page = await buyerAliasSnapshot(claimed, '/hub', options);
+		assert.equal(page.status, status, name);
+		assert.equal(page.headers['cache-control'], 'private, no-store', name);
+		assert.equal(page.html.includes('name="robots"'), false, name);
+		assert.equal(page.html.includes('rel="canonical"'), false, name);
+		assert.equal(page.html.includes('data-ejecta-slot="auth-request"'), false, name);
+		assert.equal(page.html.includes('data-ejecta-account-section='), false, name);
+		if (options.shell === null || options.shell === SHELL_NO_MAIN) {
+			assert.equal(page.headers['content-type'], 'text/plain; charset=utf-8', name);
+			assert.equal(page.html, 'Page unavailable', name);
+		} else {
+			assert.equal(keepsShell(page.html), true, name);
+		}
+	}
+});
+
+test('buyer page trailing slash: Account aliases preserve signed-out signed-in unavailable and refused responses', async () => {
+	for (const realPaths of [false, true]) {
+		const { worker, account, accountFacts } = await buyerAliasWorker(realPaths);
+		for (const [facts, status] of [[{ signed_in: false }, 200], [{ signed_in: true, sections: ['profile'] }, 200], [{}, 502]]) {
+			const options = { rsp: factsRsp({ [accountFacts]: facts }) };
+			const bare = await buyerAliasSnapshot(worker, account + '?view=profile', options);
+			const slash = await buyerAliasSnapshot(worker, account + '/?view=profile', options);
+			assert.deepEqual([slash.status, slash.headers, slash.html], [bare.status, bare.headers, bare.html], account);
+			assert.equal(slash.status, status);
+			assert.deepEqual(slash.fixture.seenByRsp.map((hit) => hit.path), [accountFacts]);
+			assert.deepEqual(slash.fixture.seenByAssets.map((hit) => hit.path), ['/']);
+		}
+		for (const options of [{ rsp: null }, { rsp: () => new Response('down', { status: 503 }) },
+			{ rsp: () => new Response('refused', { status: 404 }) }, { rsp: factsRsp({ [accountFacts]: { signed_in: false } }), shell: null }]) {
+			const bare = await buyerAliasSnapshot(worker, account + '?view=profile', options);
+			const slash = await buyerAliasSnapshot(worker, account + '/?view=profile', options);
+			assert.deepEqual([slash.status, slash.headers, slash.html], [bare.status, bare.headers, bare.html], account);
+			assert.notEqual(slash.status, 200);
+		}
+		for (const [path, method] of [[account, 'POST'], [account + '/', 'POST'], [account, 'HEAD'], [account + '/', 'HEAD'],
+			[account + '//', 'GET'], [account + 'x', 'GET'], [account + '/profile', 'GET']]) {
+			const fixture = makeEnv({ rsp: factsRsp({ [accountFacts]: { signed_in: false } }) });
+			const response = await worker.default.fetch(get(path, { method }), fixture.env);
+			assert.equal(await response.text(), 'STATIC:' + path, method + ' ' + path);
+			assert.equal(fixture.seenByAssets.some((hit) => hit.path === '/'), false);
+		}
+	}
+	const old = makeEnv({ rsp: () => new Response('LEGACY') });
+	assert.equal(await (await oldWorker.default.fetch(get('/hub/'), old.env)).text(), 'STATIC:/hub/');
+	assert.deepEqual(old.seenByRsp, []);
+});
+
+test('buyer page trailing slash: Membership aliases preserve available empty unavailable and method boundaries', async () => {
+	for (const realPaths of [false, true]) {
+		const { worker, membership, membershipFacts } = await buyerAliasWorker(realPaths);
+		for (const [options, status] of [
+			[{ rsp: factsRsp({ [membershipFacts]: PLANS }) }, 200],
+			[{ rsp: factsRsp({ [membershipFacts]: { state: 'empty', plans: [] } }) }, 200],
+			[{ rsp: factsRsp({ [membershipFacts]: {} }) }, 502],
+			[{ rsp: () => new Response('down', { status: 503 }) }, 503],
+			[{ rsp: () => new Response('refused', { status: 404 }) }, 404],
+			[{ rsp: null }, MISSING_STATUS]
+		]) {
+			const bare = await buyerAliasSnapshot(worker, membership + '?plan=gold', options);
+			const slash = await buyerAliasSnapshot(worker, membership + '/?plan=gold', options);
+			assert.deepEqual([slash.status, slash.headers, slash.html], [bare.status, bare.headers, bare.html], membership);
+			assert.equal(slash.status, status);
+			assert.equal(slash.html.includes('name="robots"'), false);
+		}
+		for (const [path, method] of [[membership, 'POST'], [membership + '/', 'POST'], [membership, 'HEAD'], [membership + '/', 'HEAD'],
+			[membership + '//', 'GET'], [membership + 'x', 'GET'], [membership + '/gold', 'GET']]) {
+			const fixture = makeEnv({ rsp: factsRsp({ [membershipFacts]: PLANS }) });
+			const response = await worker.default.fetch(get(path, { method }), fixture.env);
+			assert.equal(await response.text(), 'STATIC:' + path, method + ' ' + path);
+			assert.equal(fixture.seenByAssets.some((hit) => hit.path === '/'), false);
+		}
+	}
+	const old = makeEnv({ rsp: () => new Response('LEGACY') });
+	assert.equal(await (await oldWorker.default.fetch(get('/tiers/'), old.env)).text(), 'STATIC:/tiers/');
+	assert.deepEqual(old.seenByRsp, []);
 });
 
 // ── 5. the emitter refuses a contract it cannot serve ────────────────────────

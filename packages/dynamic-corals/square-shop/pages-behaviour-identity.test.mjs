@@ -5,9 +5,11 @@
 // Both are driven with one request set through one mock binding and one mock ASSETS, and every
 // response must match in status, headers and body.
 //
-// There are NO intentional differences: provider catalog reads stay the own-host fetch (which on
-// Pages re-enters the worker and is forwarded to the binding), exactly as at fa57bab, so the served
-// page, the global fetches and the binding calls are all identical for every case.
+// There is ONE intentional difference: the native product page's <head> now names the product
+// (its own title, canonical and og:url) instead of the donor shell's; everything outside that
+// <head>, and every other case, is identical. Provider catalog reads stay the own-host fetch (which
+// on Pages re-enters the worker and is forwarded to the binding), exactly as at fa57bab, so the
+// served page, the global fetches and the binding calls are all identical for every case.
 //
 // A missing fixture file is a FAILURE, never a skip: this proof must run wherever the suite runs.
 import assert from 'node:assert/strict';
@@ -131,6 +133,9 @@ const MISSING = [
 	['missing binding: native catalog page', '/shop'],
 ];
 
+// The one case whose <head> is the product's own (see the header comment).
+const OWN_HEAD = new Set(['native product page']);
+
 const baseFile = emit(baseRoot, 'base');
 const newFile = emit(path.resolve(here, '../../..'), 'new');
 
@@ -141,7 +146,12 @@ for (const [name, url, init, opts] of [...CASES.map(([n, u, i]) => [n, u, i, {}]
 		t.diagnostic(`status=${after.status} body=${Buffer.from(after.body, 'base64').length}B binding=${after.bindingCalls.join(',') || '-'} global=${after.globalCalls.join(',') || '-'}`);
 		assert.equal(after.status, before.status, 'status');
 		assert.deepEqual(after.headers, before.headers, 'headers');
-		assert.equal(after.body, before.body, 'body');
+		if (OWN_HEAD.has(name)) {
+			const html = (b64) => Buffer.from(b64, 'base64').toString('utf8');
+			const headless = (b64) => html(b64).replace(/<head>[\s\S]*?<\/head>/, '<head></head>');
+			assert.equal(headless(after.body), headless(before.body), 'body outside <head>');
+			assert.ok(html(after.body).includes(`<link rel="canonical" href="${SITE}/shop/tee">`), 'the product names its own canonical');
+		} else assert.equal(after.body, before.body, 'body');
 		assert.deepEqual(after.globalCalls, before.globalCalls, 'the same global fetches, catalog reads included');
 		assert.deepEqual(after.bindingCalls, before.bindingCalls, 'the same binding calls');
 	});

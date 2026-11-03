@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { COMPLETE_COPY, completionLocale, matchNativeCheckoutSuccess, matchShopComplete, renderCompletion, shouldClearCartForOutcome } from './shop-function-template.js';
 import { consumeCheckoutReturn } from './square-shop.js';
 
@@ -159,6 +164,80 @@ test('native checkout success fails closed when its site shell is unavailable', 
 		assert.doesNotMatch(body, /<!doctype|<html|<title>|We couldn't find this order|We can't confirm this order/);
 	} finally {
 		globalThis.fetch = originalFetch;
+	}
+});
+
+test('buyer page trailing slash: native checkout return aliases preserve localized composition failure and fallback', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'meta-checkout-return-'));
+	let emitted = 0;
+	async function workerFor(route, source = 'native') {
+		const contract = join(dir, 'contract-' + (++emitted) + '.json');
+		writeFileSync(contract, JSON.stringify({ bindingName: 'RSP', checkoutResult: route,
+			forward: [{ match: 'exact', value: route.path, methods: ['GET'] }],
+			verdictEndpoint: { version: 2, path: '/seam/site-verdict-v2', param: 'path' },
+			onBindingMissing: { status: 503, cacheControl: 'private, no-store' } }));
+		const out = join(dir, 'worker-' + emitted + '.mjs');
+		execFileSync('node', [new URL('./emit-shop-function.mjs', import.meta.url).pathname,
+			'--api-contract', contract, '--site-id', 'site-meta', '--api', 'https://api.example',
+			'--shops', JSON.stringify([{ shopPath: '/zh-tw/store', locale: 'zh-TW' }]),
+			'--storefronts', JSON.stringify([{ path: '/zh-tw/store', source, ...(source === 'provider' ? { provider: 'stripe' } : {}) }]), '--out', out], { stdio: 'pipe' });
+		return import(pathToFileURL(out).href);
+	}
+	const shell = '<!doctype html><html lang="zh-TW"><head><title>商店</title></head><body><header>NAV</header><main>GRID</main><footer>FOOT</footer></body></html>';
+	for (const route of [
+		{ path: '/checkout/success', method: 'GET', orderParam: 'order_id', outcomePath: '/api/v2/shop/checkout/outcome' },
+		{ path: '/orders/finished', method: 'GET', orderParam: 'order', outcomePath: '/api/order/outcome' }
+	]) {
+		const worker = await workerFor(route);
+		for (const missingShell of [false, true]) {
+			const snapshots = [];
+			for (const slash of ['', '/']) {
+				const paths = [];
+				let bindingCalls = 0;
+				const response = await worker.default.fetch(new Request('https://shop.example' + route.path + slash + '?' + route.orderParam + '=ord%2F1&ref=untrusted'), {
+					ASSETS: { fetch: async request => { paths.push(new URL(request.url).pathname); return missingShell ? new Response('missing', { status: 404 }) : new Response(shell); } },
+					RSP: { fetch: async () => { bindingCalls++; return new Response('FORWARDED'); } }
+				});
+				const html = await response.text();
+				snapshots.push([response.status, Object.fromEntries(response.headers), html]);
+				assert.equal(response.status, missingShell ? 503 : 200);
+				assert.equal(response.headers.get('cache-control'), 'private, no-store');
+				assert.deepEqual(paths, ['/zh-tw/store/']);
+				assert.equal(bindingCalls, 0);
+				if (!missingShell) {
+					assert.match(html, /正在確認您的付款/);
+					assert.match(html, /ref=ord%2F1/);
+					assert.match(html, /<meta name="robots" content="noindex">/);
+				} else assert.doesNotMatch(html, /<html/);
+			}
+			assert.deepEqual(snapshots[1], snapshots[0]);
+		}
+		const provider = await workerFor(route, 'provider');
+		for (const [mod, path, method, query, expected] of [
+			[worker, route.path, 'GET', '', 'FORWARDED'],
+			[worker, route.path + '/', 'GET', '', 'STATIC'],
+			[worker, route.path, 'GET', '?' + route.orderParam + '=%20', 'FORWARDED'],
+			[worker, route.path + '/', 'GET', '?' + route.orderParam + '=%20', 'STATIC'],
+			[provider, route.path, 'GET', '?' + route.orderParam + '=ord-1', 'FORWARDED'],
+			[provider, route.path + '/', 'GET', '?' + route.orderParam + '=ord-1', 'STATIC'],
+			...[route.path, route.path + '/'].flatMap(path => ['POST', 'HEAD'].map(method => [worker, path, method, '?' + route.orderParam + '=ord-1', 'STATIC'])),
+			...[route.path + '//', route.path + 'x'].map(path => [worker, path, 'GET', '?' + route.orderParam + '=ord-1', 'STATIC'])
+		]) {
+			const paths = [];
+			const response = await mod.default.fetch(new Request('https://shop.example' + path + query, { method }), {
+				ASSETS: { fetch: async request => { paths.push(new URL(request.url).pathname); return new Response('STATIC'); } },
+				RSP: { fetch: async request => { assert.equal(new URL(request.url).pathname, route.path); return new Response('FORWARDED'); } }
+			});
+			assert.equal(await response.text(), expected, method + ' ' + path + query);
+			assert.equal(paths.includes('/zh-tw/store/'), false);
+		}
+		// Existing configured completion aliases and locale fallback still answer alike.
+		for (const path of ['/zh-tw/store/complete', '/en/shop/complete']) {
+			const env = { ASSETS: { fetch: async () => new Response(shell) } };
+			const bare = await worker.default.fetch(new Request('https://shop.example' + path + '?ref=ref-1'), env);
+			const slash = await worker.default.fetch(new Request('https://shop.example' + path + '/?ref=ref-1'), env);
+			assert.deepEqual([slash.status, Object.fromEntries(slash.headers), await slash.text()], [bare.status, Object.fromEntries(bare.headers), await bare.text()]);
+		}
 	}
 });
 

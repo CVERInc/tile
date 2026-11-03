@@ -26,7 +26,7 @@ import { parse as parseHtml } from 'parse5';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync, readFileSync, readdirSync, rmSync, statSync, existsSync,
-  cpSync, mkdirSync, symlinkSync, writeFileSync,
+  cpSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -765,6 +765,92 @@ import SiteLayout from '../layouts/SiteLayout.astro';
   return DDIST;
 }
 
+// Separate content keeps placeholder/brand fixtures out of the existing smoke expectations.
+function buildBubbleNameFixture(brand) {
+  const dir = mkdtempSync(join(HERE, '..', '.smoke-bubble-name-'));
+  try {
+    cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
+    symlinkSync(join(HERE, 'node_modules'), join(dir, 'node_modules'), 'dir');
+    for (const folder of ['content', 'blog']) {
+      rmSync(join(dir, folder), { recursive: true, force: true });
+      mkdirSync(join(dir, folder), { recursive: true });
+    }
+    writeFileSync(join(dir, 'content/_site.md'), `---
+sitetile-page: _site
+title: Untitled site
+${brand ? 'brand: ' + brand + '\n' : ''}lang: en-US
+---
+`);
+    for (const [file, title] of [['home', 'Untitled site'], ['about', 'Example article']]) {
+      writeFileSync(join(dir, 'content', file + '.md'), `---
+sitetile-page: ${file === 'home' ? 'home' : 'page'}
+title: ${title}
+lang: en-US
+---
+
+## Fixture
+Fixture body.
+`);
+    }
+    writeFileSync(join(dir, 'content/hand.md'), `---
+sitetile-page: page
+title: Hand page
+lang: en-US
+---
+
+## Hand bubble
+%% sitetile: embed %%
+<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="hand-site" data-title="Hand title" data-site-name="Hand identity" data-api-base="https://platform.example"></div><script type="module" src="https://platform.example/corals/inbox-bubble/v0/inbox-bubble.js"></script>
+`);
+    for (const [file, title, meta] of [
+      ['fallback-meta', 'Fallback page', { title: 'Fallback site', 'site-title': 'OG fallback site', lang: 'en-US' }],
+      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }]
+    ]) {
+      writeFileSync(join(dir, 'src/pages', file + '.astro'), `---
+import SiteLayout from '../layouts/SiteLayout.astro';
+---
+<SiteLayout title=${JSON.stringify(title)} meta={${JSON.stringify(meta)}}><main>Fixture</main></SiteLayout>
+`);
+    }
+    const dist = join(dir, 'dist-bubble-name');
+    execFileSync('npx', ['astro', 'build', '--outDir', dist], {
+      cwd: dir, stdio: 'inherit',
+      env: { ...process.env, SITE_ID: 'bubble-name', PLATFORM_ORIGIN: 'https://platform.example', SITE_URL: 'https://example.com' },
+    });
+    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop'].map(page => [page, page + '/index.html'])]
+      .map(([key, file]) => [key, readFileSync(join(dist, file), 'utf8')]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const bubbleNamePages = buildBubbleNameFixture('Example Workshop');
+const bubbleNameNoBrandPages = buildBubbleNameFixture();
+const bubbleNameAttrs = page => (page.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*>/g) || []).map(tag =>
+  Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
+const bubbleNameHeader = page => ((page.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '').replace(/<[^>]*>/g, '').trim();
+// Exercise the existing consumers on the attributes emitted by the real build.
+const bubbleNameSource = readFileSync(new URL('../../dynamic-corals/inbox-bubble/inbox-bubble.js', import.meta.url), 'utf8');
+const bubbleNameResolveSource = bubbleNameSource.match(/export function resolveSiteName\(el, doc\) \{[\s\S]*?\n\}/)?.[0];
+const bubbleNameDialogSource = bubbleNameSource.match(/const askName =[^\n]*\n\tconst openLabel =[^\n]*\n\tconst panelLabel =[^\n]*/)?.[0];
+assert.ok(bubbleNameResolveSource && bubbleNameDialogSource, 'both existing bubble naming consumers must be exercised');
+const bubbleNameResolve = new Function('el', 'doc', 'location', bubbleNameResolveSource.replace('export ', '') + '\nreturn resolveSiteName(el, doc);');
+const bubbleNameDialog = new Function('el', 'copy', 'askOnly', bubbleNameDialogSource + '\nreturn panelLabel;');
+function bubbleNameNamesMatch(page, title, siteName) {
+  const attrs = bubbleNameAttrs(page);
+  assert.equal(attrs.length, 1);
+  assert.equal(attrs[0]['data-site-name'], siteName);
+  assert.equal(attrs[0]['data-title'], title);
+  const el = { getAttribute: name => attrs[0][name] || null };
+  assert.equal(bubbleNameResolve(el, { querySelector: () => ({ getAttribute: () => 'Other OG name' }) }, { hostname: 'fallback.example' }), siteName);
+  assert.equal(bubbleNameDialog(el, { ask: 'Ask…', title: 'Message' }, true), title);
+}
+function bubbleNameNamesFollowHeader(page) {
+  const header = bubbleNameHeader(page);
+  assert.ok(header, 'a rendered header is the comparison source');
+  bubbleNameNamesMatch(page, header, header);
+  return header;
+}
+
 console.log('▸ astro build → .smoke-hostile-blog/dist-hostile-blog/ (R4-P1-1: site-level blog-path/blog-url-pattern/category-tag-base poisoning)…');
 const HDIST = buildHostileBlogFixture();
 console.log('▸ astro build → .smoke-badge-collision/dist-badge-collision/ (round 1 review P2-1/P2-2: a real public/apple-touch-icon.png shadowing the route)…');
@@ -1190,7 +1276,7 @@ const checks = [
     && readFileSync(join(CDIST, '_headers'), 'utf8') === collisionHeaders],
   // -- born-on site inbox bubble: site/page resolution + legacy embed dedupe --
   ['inbox bubble: default on with the build site key, platform origin, page title, and site name', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress — one character, one piece of lead" data-site-name="Yamada Letterpress" data-search-index="\/search-index\.json"><\/div>\s*<script type="module">/.test(html)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress" data-site-name="Yamada Letterpress" data-search-index="\/search-index\.json"><\/div>\s*<script type="module">/.test(html)],
   // reef#1921: the page carries the loader, verbatim, and nothing that fetches the coral eagerly —
   // no <script src>, no modulepreload. The URL appears once, as the loader's argument.
   // 🩸 Not byte for byte: Vite re-prints the function the layout serialises (quotes, spacing), so the
@@ -1214,7 +1300,52 @@ const checks = [
   // auto-mounted (not hand-authored) bubble on, and its own title is deliberately unrelated to the
   // site's `brand:` — proving data-site-name tracks the SITE config, not whichever page renders it.
   ['inbox bubble: on a non-home page, data-site-name is the SITE\'s name, not that page\'s own title', () =>
-    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Marker coverage — hero variants \+ linked cells" data-site-name="Yamada Letterpress" data-assistant-name="小美" data-search-index="\/search-index\.json"><\/div>/.test(markers)],
+    /<div data-dynamic-coral="inbox-bubble" data-kind="site" data-id="smoke-site" data-api-base="https:\/\/feelreef\.com" data-title="Yamada Letterpress" data-site-name="Yamada Letterpress" data-assistant-name="小美" data-search-index="\/search-index\.json"><\/div>/.test(markers)],
+  ['bubble site name: built home placeholder title yields the header brand in both auto attributes', () => {
+    const page = bubbleNamePages.home;
+    assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
+    assert.ok(page.includes('<title>Untitled site</title>'));
+    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'), 'head precedence remains independent of the bubble');
+    const attrs = bubbleNameAttrs(page)[0];
+    assert.equal(attrs['data-id'], 'bubble-name');
+    assert.equal(attrs['data-api-base'], 'https://platform.example');
+    return true;
+  }],
+  ['bubble site name: non-home page site and brand names stay distinct while consumers follow the header', () => {
+    const page = bubbleNamePages.about;
+    assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
+    assert.ok(page.includes('<title>Example article</title>'));
+    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
+    assert.ok(!page.includes('<meta property="og:site_name" content="Example Workshop">'));
+    return true;
+  }],
+  ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {
+    for (const [key, header] of [['home', 'Untitled site'], ['about', 'Example article']]) {
+      const page = bubbleNameNoBrandPages[key];
+      assert.equal(bubbleNameHeader(page), header);
+      bubbleNameNamesMatch(page, 'Untitled site', 'Untitled site');
+      assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
+    }
+    for (const [key, header, name] of [['fallback-meta', 'Fallback site', 'OG fallback site'], ['fallback-prop', 'Fallback prop', 'OG fallback prop']]) {
+      const page = bubbleNameNoBrandPages[key];
+      assert.equal(bubbleNameHeader(page), header);
+      bubbleNameNamesMatch(page, name, name);
+      assert.ok(page.includes('<meta property="og:site_name" content="' + name + '">'));
+    }
+    for (const page of [bubbleNamePages.hand, bubbleNameNoBrandPages.hand]) {
+      const attrs = bubbleNameAttrs(page);
+      assert.equal(attrs.length, 1, 'the authored mount is not doubled');
+      assert.equal(attrs[0]['data-title'], 'Hand title');
+      assert.equal(attrs[0]['data-site-name'], 'Hand identity');
+      assert.equal(attrs[0]['data-id'], 'hand-site');
+      assert.equal(attrs[0]['data-api-base'], 'https://platform.example');
+      const el = { getAttribute: name => attrs[0][name] || null };
+      assert.equal(bubbleNameResolve(el, null, { hostname: 'fallback.example' }), 'Hand identity');
+      assert.equal(bubbleNameDialog(el, { ask: 'Ask…', title: 'Message' }, true), 'Hand title');
+      assert.equal(occIn(page, '/corals/inbox-bubble/v0/inbox-bubble.js'), 1);
+    }
+    return true;
+  }],
   // assistant-name: owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
   // applied by the coral itself). markers.md sets `assistant-name: 小美`; home.md does not, so the
   // attribute must be present on one build and wholly absent on the other.

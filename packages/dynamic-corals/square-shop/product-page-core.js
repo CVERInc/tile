@@ -167,24 +167,12 @@ function defaultLabels(l, locale) {
 	};
 }
 
-/**
- * @param product normalized Product { processor, id, slug, title, description, images[], variants[] }
- * @param config  { guildId, siteId, apiBase, shopPath='/shop', canonical, siteName, labels,
- *                  dynamicCoralCss } — dynamicCoralCss is the baked per-site mode (see
- *                  layerDynamicCoralCss above); absent means the legacy unlayered default
- * @returns { title, headMeta, bodyHtml }
- */
-export function renderProductPage(product, config) {
+// Native detail shares the provider head, but leaves Product JSON-LD for a later contract.
+// `p` is already normalized so the provider still normalizes its facts exactly once.
+export function renderProductHead(p, config, options) {
 	config = config || {};
-	const labels = defaultLabels(config.labels, config.locale);
-	const shopPath = config.shopPath || '/shop';
-	// Both item-detail shapes enter here as one — see normalizeProduct above.
-	const p = normalizeProduct(product);
 	const images = p.images;
 	const variants = p.variants;
-	const first = variants[0] || {};
-	const currency = first.currency || 'USD';
-	const locale = config.locale || 'en-US';
 	const heroImg = images[0] || '';
 	const desc = (p.description || '').trim();
 
@@ -217,8 +205,31 @@ export function renderProductPage(product, config) {
 		ogDesc ? `<meta name="twitter:description" content="${escAttr(ogDesc)}">` : '',
 		heroImg ? `<meta name="twitter:image" content="${escAttr(heroImg)}">` : '',
 		config.canonical ? `<link rel="canonical" href="${escAttr(config.canonical)}">` : '',
-		`<script type="application/ld+json">${jsonLd(schema)}</script>`
+		options && options.omitProductJsonLd ? '' : `<script type="application/ld+json">${jsonLd(schema)}</script>`
 	].filter(Boolean).join('\n');
+	return { title, headMeta };
+}
+
+/**
+ * @param product normalized Product { processor, id, slug, title, description, images[], variants[] }
+ * @param config  { guildId, siteId, apiBase, shopPath='/shop', canonical, siteName, labels,
+ *                  dynamicCoralCss } — dynamicCoralCss is the baked per-site mode (see
+ *                  layerDynamicCoralCss above); absent means the legacy unlayered default
+ * @returns { title, headMeta, bodyHtml }
+ */
+export function renderProductPage(product, config) {
+	config = config || {};
+	const labels = defaultLabels(config.labels, config.locale);
+	const shopPath = config.shopPath || '/shop';
+	// Both item-detail shapes enter here as one — see normalizeProduct above.
+	const p = normalizeProduct(product);
+	const images = p.images;
+	const variants = p.variants;
+	const first = variants[0] || {};
+	const currency = first.currency || 'USD';
+	const locale = config.locale || 'en-US';
+	const desc = (p.description || '').trim();
+	const { title, headMeta } = renderProductHead(p, config);
 
 	// ── body ──
 	const gallery = renderGallery(images, p.title || '');

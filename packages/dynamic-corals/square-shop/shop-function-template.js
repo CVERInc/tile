@@ -243,7 +243,7 @@ function matchNativeCheckoutSuccess(request, shops, route) {
 	if (!route || request.method !== route.method) return null;
 	let url;
 	try { url = new URL(request.url); } catch (e) { return null; }
-	if (url.pathname !== route.path || !(url.searchParams.get(route.orderParam) || '').trim()) return null;
+	if ((url.pathname !== route.path && url.pathname !== route.path + '/') || !(url.searchParams.get(route.orderParam) || '').trim()) return null;
 	const native = shops.filter(shop => shop.source === 'native');
 	return native.find(shop => shop.shopPath === '/shop') || native[0] || null;
 }
@@ -666,14 +666,14 @@ const BUYER_PAGE_COPY = {
 	'zh-CN': { gatePendingTitle: '访问权限准备中', gatePendingBody: '我们已收到你的付款。请稍后刷新这个页面。', gateReload: '刷新', gateRetryTitle: '目前无法确认你的访问权限', gateRetryBody: '请再试一次。', gateRetry: '再试一次', gateMembersTitle: '会员专属', gateMembersBody: '登录或加入后即可查看这个页面。', gateMembersSignedInBody: '当前登录的账号还没有这个页面的访问权限。如果你已经付款，网站确认你的会员资格后就能查看；还没加入的话，加入后即可查看。', membership: '会员方案', membershipEmpty: '目前没有可加入的会员方案。', unavailable: '目前无法显示这个页面，请稍后再试。', notFound: '找不到这个页面', subscribe: '加入', authState: '确认中…', account: '账户', signIn: '登录', signInIntro: '输入你的电子邮件，我们会寄一封登录链接给你。', email: '电子邮件', sendLink: '寄送登录链接', newEmail: '新的电子邮件', sendVerification: '寄送验证信', signOut: '退出登录', signOutError: '无法退出登录，请再试一次。', subscribeResultTitle: '订阅', subscribeThanks: '感谢您的订阅', subscribeActive: '您的订阅已生效。', subscribeConfirming: '正在确认您的付款，可能需要一点时间，完成后我们会以 email 通知您。', subscribeUnknown: '在这里无法确认这笔订阅', subscribeUnknownBody: '这一页会在订阅完成后显示。若您已订阅，请登录账户或查看订阅确认信来确认，或返回首页。', backHome: '返回首页', interval: { day: '每日', week: '每周', month: '每月', year: '每年' } }
 };
 
-// Exact path AND method, from the contract entry — the same posture the forward
-// rules take, so a verb the contract did not declare is not claimed here either.
+// The declared page or its single-slash alias, with only the declared method.
+// Transport keeps the original request and its own literal forwarding rules.
 function matchSiteOwnedBuyerPage(request, routes) {
 	if (!Array.isArray(routes) || routes.length === 0) return null;
 	let pathname;
 	try { pathname = new URL(request.url).pathname; } catch (e) { return null; }
 	for (const route of routes) {
-		if (route.path === pathname && route.method === request.method) return route;
+		if ((route.path === pathname || route.path + '/' === pathname) && route.method === request.method) return route;
 	}
 	return null;
 }
@@ -875,6 +875,7 @@ async function renderSiteOwnedBuyerPage(request, env, cfg, route, ctx) {
 		const title = routeRefused ? copy.notFound : (route.kind === 'account' ? copy.account : copy.membership);
 		const head = injectHead(stripDonorHead(shell),
 			`<title>${escHtml(title)}</title>` +
+			(route.kind === 'account' && facts.ok && facts.data.signed_in === false ? '<meta name="robots" content="noindex">' : '') +
 			'<script type="module" src="/seam/island.js"></script>');
 		const composed = replaceMain(head, bodyHtml);
 		// The donor had no <main> to compose into. Returning it unchanged would be a
@@ -922,7 +923,7 @@ function matchSubscribeResult(request, route) {
 	if (!route || request.method !== route.method) return null;
 	let url;
 	try { url = new URL(request.url); } catch (e) { return null; }
-	if (url.pathname === route.path) return route;
+	if (url.pathname === route.path || url.pathname === route.path + '/') return route;
 	const prefixed = url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/.*)$/);
 	if (!prefixed || prefixed[2] !== route.path) return null;
 	if (!(url.searchParams.get(route.sessionParam) || '').trim()) return null;
@@ -1081,8 +1082,7 @@ async function renderSubscribeResult(request, env, cfg, route, ctx) {
 			title = copy.subscribeResultTitle;
 		}
 		// noindex for the same reason renderCompletion sets it: this is one buyer's
-		// per-session payment result, not a page of the site. (/membership and
-		// /account are ordinary site pages, which is why they carry none.) There is
+		// per-session payment result, not a page of the site. There is
 		// no island slot on this page, so no island script is loaded either.
 		const head = injectHead(stripDonorHead(shell),
 			'<title>' + escHtml(title) + '</title><meta name="robots" content="noindex">');
@@ -1809,12 +1809,15 @@ function nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, previe
 	return `<script>(${nativeEcpayCheckoutClient.toString()})(${json},${launcher(NATIVE_ECPAY_PAY_ORIGINS)},${launcher(NATIVE_ECPAY_MAP_ORIGINS)},${completionFormatMoneySource()});</script>`;
 }
 
+function nativeProductDescription(item) {
+	return String((item.copy || {}).description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function nativeProductBody(item, shop, copy, locale, preview, cfg) {
 	const mapped = nativeCatalogItem(item);
 	// Same wrap as nativeUnavailable() above — nativeUnavailableBody() itself is untouched.
 	if (!mapped) return `<div class="st-runtime">${nativeUnavailableBody(copy)}</div>`;
-	const itemCopy = item.copy || {};
-	const description = String(itemCopy.description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+	const description = nativeProductDescription(item);
 	// Neither `dc-native-product`'s class attribute nor the price `<p>` is pinned by an exact string
 	// anywhere in the suite (storefront-source-routing.test.mjs only pins the Buy control, the
 	// unavailable/not-found bodies and the price paragraph's OWN bytes, not this article's class or
@@ -1876,7 +1879,18 @@ async function renderNativeProduct(request, env, cfg, match, ctx) {
 	// section floor keys off a LEADING `st-` class token this section deliberately keeps clear of.
 	if (projection.kind === 'not_found') return htmlResponse(replaceMain(shell, `<div class="st-runtime"><section data-storefront-source="native" data-storefront-state="not-found"><h1>${escHtml(copy.notFound)}</h1></section></div>`), 404);
 	if (projection.kind !== 'ok') return htmlResponse(nativeUnavailable(shell, copy), 503);
-	return htmlResponse(replaceMain(shell, nativeProductBody(projection.body.item, match.shop, copy, locale, nativePreviewCheckout(projection.body), cfg)));
+	const item = projection.body.item;
+	const mapped = nativeCatalogItem(item);
+	let head = shell;
+	if (mapped && String(mapped.name).trim()) {
+		// Keep the donor head for unnamed items and preserve the native body/checkout.
+		const shopUrl = origin + match.shop.shopPath;
+		const rendered = renderProductHead(normalizeProduct({ ...mapped,
+			description: nativeProductDescription(item)
+		}), { siteName: cfg.siteName, canonical: `${shopUrl}/${match.slug}` }, { omitProductJsonLd: true });
+		head = injectHead(stripDonorHead(shell), rendered.headMeta);
+	}
+	return htmlResponse(replaceMain(head, nativeProductBody(item, match.shop, copy, locale, nativePreviewCheckout(projection.body), cfg)));
 }
 
 // Resolve the selected provider's catalog list — same same-origin-first,

@@ -407,7 +407,6 @@ test('the binding-missing answer carries the contract\'s own cache-control', asy
 test('only the contract-declared path AND method are claimed', async () => {
 	for (const [path, init] of [
 		[PAGE, { method: 'POST' }],
-		[PAGE + '/', {}],
 		[PAGE + 'x', {}],
 		['/join', {}]
 	]) {
@@ -418,6 +417,61 @@ test('only the contract-declared path AND method are claimed', async () => {
 		assert.equal(html.includes('data-ejecta-subscribe-result'), false, label + ' must not be claimed');
 		assert.equal(seenByAssets.some((hit) => hit.path === '/'), false, label + ' must not ask for a shell');
 	}
+	const { env, seenByAssets } = makeEnv({ rsp: factsRsp({ [FACTS]: ACTIVE }) });
+	const html = await (await claimed.default.fetch(get(PAGE + '/?' + PARAM + '=cs_real'), env)).text();
+	assert.equal(html.includes('data-ejecta-subscribe-result'), true, 'GET ' + PAGE + '/ must be claimed');
+	assert.equal(seenByAssets.some((hit) => hit.path === '/'), true, 'GET ' + PAGE + '/ must ask for a shell');
+});
+
+test('buyer page trailing slash: subscribe result aliases preserve states query and declared route boundaries', async () => {
+	const realFile = join(workDir, 'meta-subscribe.contract.json');
+	const realRoute = { path: '/subscribe/success', method: 'GET', sessionParam: 'session_id', factsPath: '/api/subscribe/result' };
+	writeFileSync(realFile, JSON.stringify({ ...FIXTURE_CONTRACT, subscribeResult: realRoute,
+		forward: [{ match: 'exact', value: realRoute.path, methods: ['GET'] }] }));
+	const realWorker = await emitWorker(['--site-id', 'site-meta', '--api-contract', realFile]);
+	for (const [worker, route] of [[claimed, FIXTURE_CONTRACT.subscribeResult], [realWorker, realRoute]]) {
+		const query = '?' + route.sessionParam + '=cs_fixture&plan=untrusted';
+		for (const [options, suffix, status] of [
+			[{ rsp: factsRsp({ [route.factsPath]: ACTIVE }) }, query, 200],
+			[{ rsp: factsRsp({ [route.factsPath]: CONFIRMING }) }, query, 200],
+			[{ rsp: factsRsp({ [route.factsPath]: UNKNOWN }) }, query, 404],
+			[{ rsp: factsRsp({ [route.factsPath]: ACTIVE }) }, '?plan=untrusted', 404],
+			[{ rsp: factsRsp({ [route.factsPath]: ACTIVE }) }, '?' + route.sessionParam + '=%20', 404],
+			[{ rsp: () => new Response('down', { status: 503 }) }, query, 503],
+			[{ rsp: () => Response.json({ state: 'unexpected' }) }, query, 502],
+			[{ rsp: null }, query, MISSING_STATUS],
+			[{ rsp: factsRsp({ [route.factsPath]: ACTIVE }), shell: null }, query, 503],
+			[{ rsp: factsRsp({ [route.factsPath]: ACTIVE }), shell: SHELL_NO_MAIN }, query, 503]
+		]) {
+			const snapshots = [];
+			for (const slash of ['', '/']) {
+				const fixture = makeEnv(options);
+				const response = await worker.default.fetch(get(route.path + slash + suffix, { headers: { cookie: 'buyer=fixture' } }), fixture.env);
+				const html = await response.text();
+				snapshots.push([response.status, Object.fromEntries(response.headers), html]);
+				assert.equal(response.status, status, route.path + slash + suffix);
+				assert.equal(response.headers.get('cache-control'), 'private, no-store');
+				assert.equal(html.includes('rel="canonical"'), false);
+				if (status === 200) {
+					assert.equal(html.includes('data-ejecta-subscribe-result'), true);
+					assert.equal(fixture.seenByRsp[0].path, route.factsPath);
+					assert.equal(fixture.seenByRsp[0].search, '?' + route.sessionParam + '=cs_fixture');
+					assert.equal(fixture.seenByRsp[0].headers.get('cookie'), 'buyer=fixture');
+				}
+			}
+			assert.deepEqual(snapshots[1], snapshots[0], route.path + suffix);
+		}
+		for (const [path, method] of [[route.path, 'POST'], [route.path + '/', 'POST'], [route.path, 'HEAD'], [route.path + '/', 'HEAD'],
+			[route.path + '//', 'GET'], [route.path + 'x', 'GET'], [route.path + '/child', 'GET']]) {
+			const fixture = makeEnv({ rsp: factsRsp({ [route.factsPath]: ACTIVE }) });
+			const response = await worker.default.fetch(get(path + query, { method }), fixture.env);
+			assert.equal(await response.text(), 'STATIC:' + path, method + ' ' + path);
+			assert.equal(fixture.seenByAssets.some((hit) => hit.path === '/'), false);
+		}
+	}
+	const old = makeEnv({ rsp: () => new Response(RSP_PAGE) });
+	assert.equal(await (await oldWorker.default.fetch(get(PAGE + '/?' + PARAM + '=cs_fixture'), old.env)).text(), 'STATIC:' + PAGE + '/');
+	assert.deepEqual(old.seenByRsp, []);
 });
 
 test('matchSubscribeResult answers null for an absent route and honours the declared method', async () => {
