@@ -24,15 +24,20 @@ const routes = [
 
 // Execute each route's actual path generator, replacing only Astro's build-time glob input.
 // Parsing posts, site metadata, locale corpora, slug maps and pagination all stay real.
-const generators = routes.map((route) => {
+function loadRoute(route) {
   const source = readFileSync(new URL(`./astro/src/pages/${route}`, import.meta.url), 'utf8');
   const imports = source.match(/import \{ ([^}]+) \} from '[^']+\/lib\/blog\.mjs';/);
   const generator = source.match(/export (function getStaticPaths\(\) \{[\s\S]*?\n\})\n\nconst /);
   assert.ok(imports && generator, `cannot extract path generator: ${route}`);
   const run = new Function('blog', 'glob',
     `const { ${imports[1]} } = blog; return (${generator[1].replaceAll('import.meta.glob', 'glob')})();`);
-  return { route, run };
-});
+  const frontmatter = source.match(/\n(const \{[^\n]+ = Astro.props;[\s\S]*?)\n---/);
+  assert.ok(frontmatter, `cannot extract archive view: ${route}`);
+  const view = new Function('blog', 'Astro',
+    `const { ${imports[1]} } = blog; ${frontmatter[1]}; return { heading, subhead };`);
+  return { route, run, view };
+}
+const generators = routes.map(loadRoute);
 
 for (const name of names) {
   for (const mapped of [false, true]) {
@@ -100,3 +105,93 @@ test('__proto__ configuration is ordinary data and cannot change the map prototy
   assert.equal(map.ordinary, 'ok');
   assert.equal(map.toString, undefined);
 });
+
+
+for (const name of names) {
+  for (const surface of ['index', 'post']) {
+    test(`${name}: ${surface} tag cloud matches ordinary sizes`, () => {
+      const cloud = (tag) => {
+        const posts = blog.allPosts(Object.fromEntries(['alpha', 'alpha', 'beta', tag].map((t, i) =>
+          [`/s/blog/${i}.md`, `---\ntitle: Post ${i}\npubDate: 2024-01-01\ntags: [${t}]\n---\nBody.`])));
+        const meta = { 'blog-sidebar': true, 'blog-post-sidebar': 'right' };
+        const view = surface === 'index' ? blog.buildIndexView(posts, meta) : blog.buildPostSidebar(posts, meta);
+        assert.equal(view.archiveSidebar, true);
+        return { counts: view.tagCounts,
+          sizes: ['alpha', 'beta', tag].map((t) => blog.tagFontSize(view.tagCounts[t], view.tagCounts)) };
+      };
+      const ordinary = cloud('ordinary');
+      assert.deepEqual(ordinary.sizes, ['1.500em', '0.800em', '0.800em']);
+      const actual = cloud(name);
+      assert.deepEqual(actual.sizes, ordinary.sizes, `${name}: tag cloud sizes must match ordinary`);
+      assert.equal(Object.hasOwn(actual.counts, name), true);
+      assert.equal(actual.counts[name], 1);
+    });
+  }
+
+  test(`${name}: archive display-name map treats prototype names as data`, () => {
+    assert.equal(blog.kvMap('')[name], undefined);
+    const map = blog.kvMap(`${name}=Display name`);
+    assert.equal(Object.getPrototypeOf(map), null);
+    assert.equal(Object.hasOwn(map, name), true);
+    assert.equal(map[name], 'Display name');
+  });
+}
+
+test('parsing __proto__ leaves Object.prototype unchanged', () => {
+  const before = Object.getOwnPropertyDescriptors(Object.prototype);
+  const keys = Reflect.ownKeys(Object.prototype);
+  const x = ({}).x;
+  blog.tagSlugMap({ 'blog-tag-slugs': '__proto__=x' });
+  blog.kvMap('__proto__=x');
+  assert.deepEqual(Reflect.ownKeys(Object.prototype), keys, 'parsing must not add Object.prototype keys');
+  assert.deepEqual(Object.getOwnPropertyDescriptors(Object.prototype), before);
+  assert.equal(({}).x, x);
+});
+
+const archiveRoutes = [
+  'category/[slug]/index.astro',
+  'category/[slug]/page/[n].astro',
+  '[...loc]/category/[slug]/index.astro',
+  '[...loc]/category/[slug]/page/[n].astro',
+  'author/[slug]/index.astro',
+  'author/[slug]/page/[n].astro',
+];
+for (const route of archiveRoutes) {
+  const { run, view } = loadRoute(route);
+  for (const mapped of [false, true]) {
+    test(`constructor ${mapped ? 'mapped' : 'unmapped'}: archive heading in ${route}`, () => {
+      const meta = {
+        lang: 'en-US', locales: 'en-US, fr-FR',
+        'blog-category-routes': 'true', 'blog-author-routes': 'true', 'blog-page-size': '1',
+        ...(mapped ? { 'blog-category-names': 'constructor=Category name',
+          'blog-author-names': 'constructor=Author name' } : {}),
+      };
+      const markdown = '---\ntitle: Categorized post\npubDate: 2024-01-01\ncategories: [constructor]\nauthor: constructor\n---\nBody.';
+      const site = `---\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+      const glob = (pattern) => {
+        if (pattern.endsWith('blog/*/*.md')) return { '/s/blog/fr-fr/one.md': markdown, '/s/blog/fr-fr/two.md': markdown };
+        if (pattern.endsWith('blog/*.md')) return { '/s/blog/one.md': markdown, '/s/blog/two.md': markdown };
+        if (/content\/\*\*?\/?\*?\.md$/.test(pattern)) return { '/s/content/_site.md': site };
+        throw new Error(`unexpected glob: ${pattern}`);
+      };
+      const paths = run(blog, glob);
+      assert.deepEqual(paths.map((p) => p.params), [{
+        ...(route.startsWith('[...loc]') ? { loc: 'fr-fr' } : {}), slug: 'constructor',
+        ...(route.includes('/page/') ? { n: '2' } : {}),
+      }]);
+      assert.deepEqual(paths[0].props.posts[0].categories, ['constructor']);
+      assert.deepEqual(paths[0].props.posts[0].tags, ['constructor']);
+      const expected = mapped ? (route.startsWith('author/') ? 'Author name' : 'Category name') : 'constructor';
+      const result = view(blog, { props: paths[0].props });
+      assert.equal(result.heading, expected, 'archive heading must be the authored label or literal slug');
+      assert.ok(result.subhead.endsWith(expected));
+    });
+  }
+  test(`archive heading ignores inherited display names: ${route}`, () => {
+    const inherited = Object.create({ constructor: 'Inherited name' });
+    const result = view({ ...blog, kvMap: () => inherited }, {
+      props: { posts: [], meta: {}, slug: 'constructor', urlLoc: 'fr-fr', pageNum: 2 },
+    });
+    assert.equal(result.heading, 'constructor');
+  });
+}

@@ -62,7 +62,7 @@ export function getStaticPaths() {
 const { posts, meta, slug, urlLoc, alternates } = Astro.props;
 const base = `/${urlLoc}${categoryBase(meta)}`; // round 5 (R4-P1-1): gated
 const names = kvMap(meta['blog-category-names']);
-const heading = names[slug] || slug;
+const heading = Object.hasOwn(names, slug) ? names[slug] : slug;
 const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
