@@ -2443,7 +2443,9 @@ function notFoundReferrer(referer, host) {
 const PAGE_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml', 'cfm']);
 
 function pageLikePath(path) {
-	const last = path.slice(path.lastIndexOf('/') + 1);
+	let last = path.slice(path.lastIndexOf('/') + 1);
+	// The extension is read from the DECODED segment: `/manual%2Epdf` names the same file as `/manual.pdf`.
+	try { last = decodeURIComponent(last); } catch { /* a malformed escape: test the raw segment */ }
 	const dot = last.lastIndexOf('.');
 	return dot === -1 || PAGE_EXTENSIONS.has(last.slice(dot + 1).toLowerCase());
 }

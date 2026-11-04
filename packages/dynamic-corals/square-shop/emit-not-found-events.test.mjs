@@ -146,7 +146,12 @@ test('only page-like paths record: no extension, a trailing slash, or an old pag
 		['/archive.zip', 0],
 		['/sitemap.xml', 0],
 		['/robots-old.txt', 0],
-		['/.env', 0]
+		['/.env', 0],
+		['/manual%2Epdf', 0],
+		['/manual%2epdf', 0],
+		['/old/page%2Ephp', 1],
+		['/bad%E0%A4%A.pdf', 0],
+		['/bad%E0%A4%A', 1]
 	];
 	for (const [path, want] of cases) {
 		const { env, points } = envFor();
