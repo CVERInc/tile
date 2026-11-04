@@ -104,17 +104,25 @@ export function controlHtml(f, ctx) {
     // sha256 or a URL". `<input type="file" accept="image/*">` is what opens a phone's photo library;
     // the hidden input below is the value the form actually saves, so both routes (a file, a pasted
     // address) write to one place.
+    //
+    // 🔴 ONE SOURCE AT A TIME. The picker and the address box used to sit one under the other, which
+    // asks two questions at once ("pick a file — or paste an address?") before the person has said
+    // which they mean. Two tabs say it first; only the chosen one is on screen. The tab opens on the
+    // source the saved value came from: an address shows the address, anything else the picker.
+    // Switching tabs changes what is SHOWN, never the value — the last thing done is what is kept.
     case CONTROL.ASSET: {
-      const isAsset = /^asset:/.test(value);
+      const isUrl = !!value && !/^asset:/.test(value);
       const preview = value ? ctx.previewSrc(value) : '';
-      return `<div class="ctw-asset" data-for="${id}">`
+      const tab = (src, label, on) => `<button type="button" role="tab" class="ctw-asset-tab" data-src="${src}" aria-selected="${on}">${esc(label)}</button>`;
+      return `<div class="ctw-asset" data-for="${id}" data-src="${isUrl ? 'url' : 'file'}">`
         + `<div class="ctw-asset-shot">${preview ? `<img src="${esc(preview)}" alt="">` : ''}</div>`
-        + `<div class="ctw-asset-acts">`
+        + `<div class="ctw-asset-tabs" role="tablist">${tab('file', ctx.T.assetFromFile, !isUrl)}${tab('url', ctx.T.assetFromUrl, isUrl)}</div>`
+        + `<div class="ctw-asset-acts" data-pane="file"${isUrl ? ' hidden' : ''}>`
         + `<label class="ctw-btn ctw-asset-pick">${esc(value ? ctx.T.assetReplace : ctx.T.assetPick)}`
         + `<input type="file" accept="image/*" hidden id="${id}-file"></label>`
         + `</div>`
-        + `<label class="ctw-asset-orurl"><span>${esc(ctx.T.assetUrl)}</span>`
-        + `<input type="url" id="${id}-url" value="${esc(isAsset ? '' : value)}" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://…"></label>`
+        + `<div class="ctw-asset-orurl" data-pane="url"${isUrl ? '' : ' hidden'}>`
+        + `<input type="url" id="${id}-url" value="${esc(isUrl ? value : '')}" aria-label="${esc(ctx.T.assetUrl)}" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://…"></div>`
         + `<input type="hidden" id="${id}" value="${esc(value)}">`
         + `<em class="ctw-asset-err" id="${id}-err"></em></div>`;
     }

@@ -141,8 +141,11 @@ body {
 .ctw-asset-shot img { max-width: 100%; max-height: 8rem; border-radius: 10px; display: block; }
 .ctw-asset-acts { display: flex; gap: .4rem; }
 .ctw-asset-pick { display: inline-flex; align-items: center; justify-content: center; }
-.ctw-asset-orurl { display: grid; gap: .2rem; }
-.ctw-asset-orurl > span { font-size: .74rem; color: var(--ctw-dim); }
+.ctw-asset-orurl { display: grid; }
+.ctw-asset [hidden] { display: none; }
+.ctw-asset-tabs { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border: 1px solid var(--ctw-line); border-radius: 999px; }
+.ctw-asset-tab { border: 0; background: none; color: var(--ctw-dim); font: inherit; font-size: .8rem; font-weight: 600; padding: .3rem .9rem; border-radius: 999px; cursor: pointer; }
+.ctw-asset-tab[aria-selected="true"] { background: var(--ctw-go); color: #fff; }
 .ctw-asset-err { font-size: .76rem; color: var(--ctw-danger); font-style: normal; }
 .ctw-asset-err:empty { display: none; }
 
