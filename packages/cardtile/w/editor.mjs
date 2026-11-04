@@ -10,7 +10,7 @@
 //      model loses is the params it has no UI for, which is exactly the long tail a creator wrote by
 //      hand — and their card is their only copy.
 import {
-  parseCard, serializeCard, reorder, normalizeCell, setTitle, rasterCopyId,
+  parseCard, serializeCard, reorder, normalizeCell, setTitle,
 } from '../card-core.js';
 import { cardOrigin, cardUrlFor, renderCardHTML } from '../serve/card-worker.mjs';
 // 🔴 The forms are BUILT from the shared ai_ops definition, not from a copy of it. fields.mjs was
@@ -23,7 +23,8 @@ import { CELL_TYPES, blankCell, PALETTE, CONTROL, DISPOSITION } from '../ai-ops.
 // profile rename, which param a drawer choice owns) exist once, here, for both. `setToken`,
 // `removeToken`, `quoteParam`, `linkOf` and `hostLabel` moved WITH them — this file no longer
 // touches a param token or parses a link body itself, which is the point.
-import { esc, flatRows, formBodyHtml, composeCell } from './cell-form-core.mjs';
+import { esc, formBodyHtml, composeCell } from './cell-form-core.mjs';
+import { wireForm } from './cell-form-dom.mjs';
 import { whatIsWrong } from './md-guard.mjs';
 // 🔴 The tile definitions carry KEYS; the words live here, in nine locales. `ai-ops.mjs` is the
 // SHARED definition (MCP and GAIDO read it too) and must not import an editor surface, so the
@@ -554,67 +555,10 @@ function openCell(index) {
   el('modal-raw').value = cell.rawParams || '';
   el('modal').hidden = false;
   syncMoveButtons();
-  wireForm(def, cell);
+  wireForm(el('modal-body'), def, { T, previewSrc, stage: (id, a) => { pendingAssets[id] = a; } });
   el('modal-close').focus();
 }
 
-/** live wiring inside the open sheet: picture pickers, and rows that depend on another row's value */
-function wireForm(def, cell) {
-  for (const box of el('modal-body').querySelectorAll('.ctw-asset')) {
-    const id = box.dataset.for;               // "f-<name>" — the hidden input holding the saved value
-    const store = document.getElementById(id);
-    const file = document.getElementById(`${id}-file`);
-    const urlIn = document.getElementById(`${id}-url`);
-    const err = document.getElementById(`${id}-err`);
-    const shot = box.querySelector('.ctw-asset-shot');
-    const pickLabel = box.querySelector('.ctw-asset-pick');
-    const show = (value) => {
-      store.value = value;
-      const src = previewSrc(value);
-      shot.innerHTML = src ? `<img src="${esc(src)}" alt="">` : '';
-      pickLabel.firstChild.nodeValue = value ? T.assetReplace : T.assetPick;
-    };
-    file.addEventListener('change', async () => {
-      const f = file.files && file.files[0];
-      if (!f) return;
-      err.textContent = '';
-      try {
-        const asset = await encodeImage(f);
-        if (!asset) { err.textContent = T.assetTooBig; return; }
-        pendingAssets[asset.id] = { mime: asset.mime, b64: asset.b64 };
-        // the avatar's PNG copy for link previews and the home screen (reef#1092) — not needed when
-        // the avatar already IS a PNG, and a copy that fails to draw only costs the preview its face
-        if (id === 'f-avatar' && asset.mime !== 'image/png') {
-          const copy = await rasterCopy(f).catch(() => null);
-          if (copy) pendingAssets[rasterCopyId(asset.id)] = copy;
-        }
-        urlIn.value = '';
-        show(`asset:${asset.id}`);
-      } catch (e) {
-        // 🔴 SAY SO, in the field, and in the console for whoever is looking. A picture that silently
-        // does nothing is the same shape as the bug this whole picker replaces.
-        console.warn('[cardtile] that picture could not be read —', e && e.message);
-        err.textContent = T.assetUnreadable;
-      } finally {
-        file.value = '';
-      }
-    });
-    urlIn.addEventListener('input', () => { if (urlIn.value.trim()) show(urlIn.value.trim()); else show(''); });
-  }
-
-  // `showWhen: {target: ''}` — the address row exists only while "this opens: an address" is chosen
-  for (const row of flatRows(def)) {
-    if (!row.showWhen) continue;
-    const [dep, want] = Object.entries(row.showWhen)[0];
-    const depNode = document.getElementById(`f-${dep}`);
-    const target = el('modal-body').querySelector(`[data-field="${row.name}"]`);
-    if (!target) continue;
-    const sync = () => { target.hidden = !!depNode && String(depNode.value) !== String(want); };
-    if (depNode) depNode.addEventListener('change', sync);
-    sync();
-  }
-  void cell;
-}
 
 function closeModal() { el('modal').hidden = true; openIndex = null; pendingAssets = {}; }
 
@@ -708,72 +652,6 @@ function saveCell() {
   closeModal();
 }
 
-// ── pictures ─────────────────────────────────────────────────────────────────────────────────────
-//
-// A chosen file becomes bytes IN THE CARD (`## assets`), not an upload: that is what makes a Card one
-// portable file. Downscaled and re-encoded in the browser first — a phone camera's 4 MB original
-// would blow the 1.5 MB ingest budget on its own, and nobody needs 4032px on a 6-column grid.
-const ASSET_MAX_EDGE = 1600;
-const ASSET_MAX_BYTES = 1500 * 1024;
-const ASSET_QUALITIES = [0.82, 0.7, 0.55];
-
-async function encodeImage(file) {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, ASSET_MAX_EDGE / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bmp.width * scale));
-  canvas.height = Math.max(1, Math.round(bmp.height * scale));
-  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  if (bmp.close) bmp.close();
-  for (const q of ASSET_QUALITIES) {
-    // 🔴 `toBlob('image/webp')` does NOT fail on a browser without webp — it quietly hands back a
-    // PNG, which is several times larger and would fail the budget for the wrong reason. Read the
-    // type back and fall to jpeg deliberately rather than discovering it as a size problem.
-    let blob = await new Promise((ok) => canvas.toBlob(ok, 'image/webp', q));
-    if (!blob || blob.type !== 'image/webp') blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', q));
-    if (!blob) continue;
-    const buf = await blob.arrayBuffer();
-    if (buf.byteLength > ASSET_MAX_BYTES) continue;
-    const digest = await crypto.subtle.digest('SHA-256', buf);
-    const hex = [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
-    let bin = '';
-    const bytes = new Uint8Array(buf);
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    // content-addressed, same 16-hex shape every asset in a card already carries
-    return { id: `sha256-${hex.slice(0, 16)}`, mime: blob.type, b64: btoa(bin) };
-  }
-  return null;
-}
-
-// The avatar's RASTER COPY (reef#1092): a 256×256 PNG of the picture the person just chose, stored
-// beside the avatar as `<avatar id>.png` (card-core's rasterCopyId). It is what a link preview shows
-// (og:image) and what iOS puts on a home screen (apple-touch-icon) — both want a PNG, the avatar is
-// webp, and the Worker does not transcode. Drawn from the ORIGINAL file, not from the webp we just
-// made, so the copy is not a second generation of lossy compression.
-// Centre-cropped square (the avatar shows round, cropped the same way) on white: iOS fills a
-// transparent home-screen icon with black.
-// 🔴 A PNG straight off the canvas has no palette quantization, unlike the sharp path's: measured in
-// Chromium on two real avatars, 15,039 B and 40,942 B where sharp's is 2,589 B and 9,210 B. Still
-// 1–3% of ASSET_MAX_BYTES.
-const RASTER_COPY_EDGE = 256;
-
-async function rasterCopy(file) {
-  const bmp = await createImageBitmap(file);
-  const side = Math.min(bmp.width, bmp.height);
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = RASTER_COPY_EDGE;
-  const g = canvas.getContext('2d');
-  g.fillStyle = '#ffffff';
-  g.fillRect(0, 0, RASTER_COPY_EDGE, RASTER_COPY_EDGE);
-  g.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, RASTER_COPY_EDGE, RASTER_COPY_EDGE);
-  if (bmp.close) bmp.close();
-  const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
-  if (!blob || blob.type !== 'image/png') return null;
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return { mime: 'image/png', b64: btoa(bin) };
-}
 
 function deleteCell() {
   if (openIndex == null) return;
