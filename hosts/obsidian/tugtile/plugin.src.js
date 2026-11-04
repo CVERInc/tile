@@ -2583,7 +2583,7 @@ class TugtileSettingTab extends PluginSettingTab {
         if (tk === 'sep' || tk === 'rowbreak' || tk.fixed || tk.cat !== cat) return;
         const lbl = s.controlEl.createEl('label', { cls: 'tugtile-tool-chk' });
         const cb = lbl.createEl('input', { type: 'checkbox' });
-        cb.checked = et[tk.key] !== false;
+        cb.checked = toolOn(tk, et);   // the toolbar's own rule, so an optIn tool reads unchecked until asked for
         const glyph = lbl.createSpan({ cls: 'tugtile-tool-chk-i' });
         if (tk.icon) setIcon(glyph, tk.icon); else glyph.textContent = tk.g;   // Show the same icon the toolbar uses
         cb.onchange = async () => { et[tk.key] = cb.checked; await this.plugin.saveSettings(); };

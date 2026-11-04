@@ -6,7 +6,7 @@
 // Changes apply at once — there is no Save button on a Mac settings pane, and no "reload required".
 
 import "../Engine/obsidian-shim.js";
-import { EDITOR_TOOLS, EDITOR_MODES, t } from "../Engine/editor-core.js";
+import { EDITOR_TOOLS, EDITOR_MODES, toolOn, t } from "../Engine/editor-core.js";
 
 const send = (kind, payload) => {
   try { window.webkit.messageHandlers.marktile.postMessage(Object.assign({ kind }, payload || {})); } catch (e) {}
@@ -53,7 +53,7 @@ function render() {
   for (const [title, desc, filter] of GROUPS) {
     const { g } = section(t(title), t(desc));
     for (const tk of EDITOR_TOOLS.filter((x) => offered(x) && filter(x))) {
-      g.append(row(tk.icon, t(tk.tip), tools[tk.key] !== false, (cb) => { tools[tk.key] = cb.checked; save(); }));
+      g.append(row(tk.icon, t(tk.tip), toolOn(tk, tools), (cb) => { tools[tk.key] = cb.checked; save(); }));
     }
   }
 
