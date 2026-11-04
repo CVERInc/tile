@@ -1100,7 +1100,8 @@ export { blogInstalled, feedTitle, feedDescription } from './blog-tenancy.mjs';
 // helper) because Astro's getStaticPaths runs in an isolated scope that only sees imports.
 export function tagSlugMap(meta) {
   const raw = String((meta && meta['blog-tag-slugs']) || '').trim();
-  const out = {};
+  // Tag names are user data, including Object.prototype keys such as __proto__.
+  const out = Object.create(null);
   if (!raw) return out;
   for (const part of raw.split('|')) {
     const i = part.lastIndexOf('=');
@@ -1147,7 +1148,8 @@ export function tagHref(meta, tag, slugMap, catSet) {
   }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
-    const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
+    const map = slugMap || tagSlugMap(meta);
+    const slug = (Object.hasOwn(map, tag) && map[tag]) || tag;
     return `${urlLoc}${tagBase(meta)}/${slug}/`;
   }
   // Blogger's /search/label/<tag> route is not locale-scoped (a separate, older capability this

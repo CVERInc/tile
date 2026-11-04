@@ -73,7 +73,7 @@ export function tagUrls(postList, siteMetaObj = {}, slugMap = {}) {
   if (!on) return [];
   const base = safeBasePath(String(siteMetaObj['blog-tag-base'] || '/tag').replace(/\/$/, ''), '/tag');
   const seen = new Set();
-  for (const p of postList) for (const t of p.tags || []) if (t) seen.add(slugMap[t] || t);
+  for (const p of postList) for (const t of p.tags || []) if (t) seen.add((Object.hasOwn(slugMap, t) && slugMap[t]) || t);
   return [...seen].sort().map((slug) => `${base}/${encodeURI(slug)}/`);
 }
 
