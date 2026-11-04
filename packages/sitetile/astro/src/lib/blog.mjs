@@ -957,7 +957,7 @@ export function buildIndexView(allPostsIn, meta, pageNum = 1, corpusIn) {
 // Powers the tag-cloud weighting so a popular tag renders bigger — a real, harvested signal, not
 // an invented weight (the count is the number of posts carrying the tag).
 export function corpusTagCounts(posts) {
-  const c = {};
+  const c = Object.create(null);
   for (const p of posts) for (const t of p.tags) c[t] = (c[t] || 0) + 1;
   return c;
 }
@@ -1100,7 +1100,8 @@ export { blogInstalled, feedTitle, feedDescription } from './blog-tenancy.mjs';
 // helper) because Astro's getStaticPaths runs in an isolated scope that only sees imports.
 export function tagSlugMap(meta) {
   const raw = String((meta && meta['blog-tag-slugs']) || '').trim();
-  const out = {};
+  // Tag names are user data, including Object.prototype keys such as __proto__.
+  const out = Object.create(null);
   if (!raw) return out;
   for (const part of raw.split('|')) {
     const i = part.lastIndexOf('=');
@@ -1115,7 +1116,7 @@ export function tagSlugMap(meta) {
 // author archives to map a WP slug → its display name (blog-category-names / blog-author-names),
 // so /category/<wp-slug>/ can show its real display heading. lastIndexOf('=') so values may contain '='.
 export function kvMap(val) {
-  const out = {};
+  const out = Object.create(null);
   for (const part of String(val || '').split('|')) {
     const i = part.lastIndexOf('=');
     if (i < 0) continue;
@@ -1147,7 +1148,8 @@ export function tagHref(meta, tag, slugMap, catSet) {
   }
   const on = meta && meta['blog-tag-routes'] != null && String(meta['blog-tag-routes']) !== 'false';
   if (on) {
-    const slug = (slugMap || tagSlugMap(meta))[tag] || tag;
+    const map = slugMap || tagSlugMap(meta);
+    const slug = (Object.hasOwn(map, tag) && map[tag]) || tag;
     return `${urlLoc}${tagBase(meta)}/${slug}/`;
   }
   // Blogger's /search/label/<tag> route is not locale-scoped (a separate, older capability this
