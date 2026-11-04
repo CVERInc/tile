@@ -56,6 +56,16 @@ export function wireForm(root, def, { T, previewSrc, stage }) {
       }
     });
     urlIn.addEventListener('input', () => { if (urlIn.value.trim()) show(urlIn.value.trim()); else show(''); });
+    // the two tabs: which source is on screen. Never touches the value (see controlHtml).
+    for (const t of box.querySelectorAll('.ctw-asset-tab')) {
+      t.addEventListener('click', () => {
+        const src = t.dataset.src;
+        box.dataset.src = src;
+        for (const x of box.querySelectorAll('.ctw-asset-tab')) x.setAttribute('aria-selected', String(x === t));
+        for (const pane of box.querySelectorAll('[data-pane]')) pane.hidden = pane.dataset.pane !== src;
+        if (src === 'url') urlIn.focus();
+      });
+    }
   }
 
   // `showWhen: {target: ''}` — the address row exists only while "this opens: an address" is chosen

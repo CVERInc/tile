@@ -273,6 +273,10 @@ body {
 }
 .ctw-group, .ctw-pub-result { border-color: var(--carrier-border); border-radius: var(--console-radius-sm); background: var(--carrier-bg); }
 .ctw-err, .ctw-asset-err { color: var(--carrier-feedback-error); }
+.ctw-asset-tabs { border-color: var(--carrier-border); }
+.ctw-asset-tab { font-family: var(--font-body); font-weight: 700; color: var(--carrier-text-muted); }
+.ctw-asset-tab:hover:not([aria-selected="true"]) { color: var(--carrier-text); background: var(--btn-ghost-hover); }
+.ctw-asset-tab[aria-selected="true"] { background: var(--carrier-accent); color: var(--carrier-accent-ink); }
 .ctw-md-error { border-radius: var(--console-radius-sm); }
 .ctw-pick-btn { border-radius: var(--console-radius-sm); background: var(--btn-surface); border-color: var(--carrier-border); font-weight: 700; }
 .ctw-pick-btn:hover, .ctw-pick-btn:focus-visible { background: var(--console-tint); border-color: var(--carrier-accent); }
