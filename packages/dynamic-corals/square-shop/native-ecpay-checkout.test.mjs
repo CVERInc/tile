@@ -59,7 +59,7 @@ function ecpayScript(html) {
 
 // A just-enough browser: the panel's innerHTML is the rendered checkout; events are delivered to
 // the listeners the script registered, with targets shaped like the inputs it rendered.
-function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null, docLang = null } = {}) {
+function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, rail = null, docLang = null, ecpayRadio = null } = {}) {
   const calls = [];
   const forms = [];
   const store = { ...session };
@@ -69,7 +69,7 @@ function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', s
   const attrs = {};
   const button = Object.assign(listen(), {
     disabled: false, hidden: false, textContent: '立即購買', clicked: 0,
-    parentElement: { querySelector: (sel) => (sel === '[data-native-status]' ? status : sel === '[data-native-rail-choice]:checked' && rail ? { value: rail } : null) },
+    parentElement: { querySelector: (sel) => (sel === '[data-native-status]' ? status : sel === '[data-native-rail-choice]:checked' && rail ? { value: rail } : sel === '[data-native-rail-choice][value="ecpay"]' ? ecpayRadio : null) },
     getAttribute: (n) => (n in attrs ? attrs[n] : null), setAttribute: (n, v) => { attrs[n] = String(v); }, removeAttribute: (n) => { delete attrs[n]; },
     // Like HTMLElement.click(): the control's own listener runs first (a nested click() is a no-op),
     // then the event bubbles to the document-level native checkout script, recorded as `seen`.
@@ -226,6 +226,20 @@ test('the store map round trip: form to the ECPay map, draft kept without invoic
   assert.match(back.panel.innerHTML, /data-ecpay-field="name" value="Lin"/);
   assert.match(back.panel.innerHTML, /value="mobile" checked/);
   assert.match(back.panel.innerHTML, /data-ecpay-field="mobile" value=""/, 'the barcode is typed again, never kept');
+});
+
+test('back from the store map, the ECPay rail choice above the panel is checked again', async () => {
+  const html = await productHtml(bowl);
+  const draft = { 'dc-native-ecpay-draft:bowl-sku': JSON.stringify({ ship: CVS.sub_type, pay: 'card', inv: 'carrier_ecpay', v: { name: 'Lin', phone: '0912345678', email: 'buyer@example.com' } }) };
+  const ecpayRadio = { value: 'ecpay', checked: false };
+  const back = browser(html, options([CVS]), { href: 'https://site.example/shop/tea-bowl?store_ref=store-1', session: draft, ecpayRadio });
+  await back.settle(); await back.settle();
+  assert.equal(back.panel.hidden, false);
+  assert.equal(ecpayRadio.checked, true);
+  // No rail choice on the page (one rail only): the return path is unchanged.
+  const plain = browser(html, options([CVS]), { href: 'https://site.example/shop/tea-bowl?store_ref=store-1', session: draft });
+  await plain.settle(); await plain.settle();
+  assert.equal(plain.panel.hidden, false);
 });
 
 test('a store map form to any other origin is not launched', async () => {

@@ -1781,6 +1781,10 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 	if (returned) {
 		readDraft();
 		S.storeRef = returned;
+		// The panel below is ECPay's, so the rail choice above it reads ECPay again, not its default.
+		const holder = button.parentElement;
+		const ecpayChoice = holder && holder.querySelector ? holder.querySelector('[data-native-rail-choice][value="ecpay"]') : null;
+		if (ecpayChoice) ecpayChoice.checked = true;
 		try { const u = new URL(location.href); u.searchParams.delete('store_ref'); history.replaceState(history.state, '', u.pathname + u.search + u.hash); } catch (e) { /* the query stays */ }
 		open(true);
 	}
