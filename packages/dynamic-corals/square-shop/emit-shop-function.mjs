@@ -1,7 +1,7 @@
 // Emit a self-contained CF Pages advanced-mode _worker.js by concatenating the
 // render core + the worker template with baked config. Both source files are ES
-// modules with no imports, so concatenation yields one valid module; CF uses its
-// `export default { fetch }`, the named exports are inert.
+// modules with no imports. Assembly keeps their declarations, drops test-only named exports,
+// and leaves `export default { fetch }` as the sole workerd entrypoint.
 //
 // Usage:
 //   node emit-shop-function.mjs \
