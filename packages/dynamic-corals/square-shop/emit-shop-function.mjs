@@ -6,6 +6,7 @@
 // Usage:
 //   node emit-shop-function.mjs \
 //     [--site-id <siteId> --guild <guildId> --api <apiBase> --name <siteName> --shops '[…]'] \
+//     [--site-key <siteKey>]  ← the not-found sensor's index; absent ⇒ the worker records no misses \
 //     [--storefronts '[…]']  ← --api is REQUIRED once any storefront is declared \
 //     [--api-contract <path to site-api-transport.contract.json>] \
 //     [--gated-manifest <path to renderer-generated private URL manifest>] \
@@ -411,6 +412,18 @@ const loaded = contractPath ? loadApiTransport(contractPath) : null;
 
 const guildId = arg('guild');
 const siteId = arg('site-id');
+// The site's key, for the not-found sensor only (shop-function-template.js, NOT-FOUND EVENTS): it
+// is the Analytics Engine index each page miss is recorded under. Optional — absent ⇒ absent from
+// the config ⇒ the worker records nothing. Anything outside the platform's site-key grammar
+// (lowercase letters, digits and hyphens, 1–63 characters) is dropped to absent with a warning
+// rather than baked: a malformed key would only file misses under a key no reader asks for, and a
+// sensor must never fail a site's build.
+const SITE_KEY_SHAPE = /^[a-z0-9-]{1,63}$/;
+const siteKeyArg = arg('site-key');
+const siteKey = SITE_KEY_SHAPE.test(siteKeyArg) ? siteKeyArg : '';
+if (siteKeyArg && !siteKey) {
+	console.error('emit-shop-function: --site-key ' + JSON.stringify(siteKeyArg) + ' is not a site key; the not-found sensor stays off');
+}
 // Build-only input: never put signing keys in argv, logs, or provenance.
 const inboxForwardKey = (process.env.INBOX_FORWARD_SITE_KEY || '').trim();
 if (inboxForwardKey && !arg('out')) die('INBOX_FORWARD_SITE_KEY requires --out to keep the key out of stdout');
@@ -526,6 +539,8 @@ const config = {
 	// Omitted entirely when absent, so a guild-only site's baked config is the
 	// same bytes it was before site identity reached this emitter.
 	...(siteId ? { siteId } : {}),
+	// Same discipline: absent flag ⇒ absent key ⇒ the config bytes are unchanged.
+	...(siteKey ? { siteKey } : {}),
 	...(inboxForwardKey ? { inboxForwardKey } : {}),
 	// 🔴 A **SITE** coral — no Card can embed it. See ./README.md before concluding otherwise.
 	// 🔴 Belongs to the SHOP branch only. The forward/verdict branches never read

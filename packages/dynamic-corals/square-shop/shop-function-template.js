@@ -2369,6 +2369,108 @@ async function withoutPreservedCopy(request, env, res) {
 	return res;
 }
 
+// ─── NOT-FOUND EVENTS: ONE ANALYTICS ENGINE DATA POINT PER PAGE MISS ──────────────────────────
+// Which old URLs do people still arrive at and not find? The answer is only visible here: every
+// request of the site passes through this worker's default export, whichever branch answered it
+// (the static fall-through, a negotiated markdown page, a verdict-allowed file, a native product
+// `not_found`, a preserved copy turned into a 404 just above). So the default export, once the
+// response is final, records a page miss into an Analytics Engine dataset bound under this name.
+//
+// The binding is the deployment's, not this file's: a project bound to a dataset under
+// NOT_FOUND_EVENTS_BINDING records; a project without it (and every preview deployment, which is
+// not bound) records nothing. The site key comes from the emitter's --site-key; a worker emitted
+// without one records nothing. Either absence is a silent no-op.
+//
+// 🔴 This never changes the response. Nothing here reads the body, sets a header or awaits:
+// `writeDataPoint` returns immediately (no `await`, no `ctx.waitUntil`), and anything that throws
+// on the way (a binding that is not a dataset, a request URL that does not parse) is swallowed.
+//
+// What is recorded — a miss a person could fix with a redirect, nothing else:
+//   only status 404, only GET (HEAD carries no page), only a request whose Accept lists
+//   text/html itself with q > 0 (acceptsHtml, the same parser the gated refusal page uses: a
+//   browser navigation always lists it; an image/script/feed fetch, a bare `*/*` or `text/*`, or
+//   `text/html;q=0` does not), only a page-like path
+//   (pageLikePath below: an old page URL, not /manual.pdf that a browser navigated to), and never
+//   under /_astro/ (hashed build output, never an old URL) or /__reef/ (this worker's own routes).
+// Data point: index = the site key (Analytics Engine samples per index, so one busy site cannot
+// crowd a small one out); blobs, in this order:
+//   1 path  pathname only — never the query — cut to 512 characters
+//   2 host  the request's hostname (lets a reader drop preview hosts)
+//   3 ref   '' (no Referer, or one that does not parse), 'self' (same host: a broken link inside
+//           the site) or 'external' — never the referring URL nor its host: a Referer is whatever
+//           the client sends, so a stored host would let anyone mint unbounded blob values
+//   4 ua    'browser' or 'crawler' (crawlerUserAgent below)
+const NOT_FOUND_EVENTS_BINDING = 'NOT_FOUND_EVENTS';
+const NOT_FOUND_PATH_MAX = 512;
+// The baked site key, copied out of the config by siteWorker.fetch on every request (the config is
+// baked once, inside that function; a second copy here would double it). It is a constant of the
+// emitted worker, so every request writes the same value before the default export reads it.
+// '' — no --site-key, or a test that loads this template with an empty config — records nothing.
+let bakedSiteKey = '';
+
+// Case-insensitive User-Agent tokens of the crawlers that most often follow old links: the
+// tokens their operators document for their own crawlers (Google's "Googlebot", "AdsBot-Google",
+// "Google-InspectionTool", "Storebot-Google"; Microsoft's "bingbot"/"adidxbot"; Apple's
+// "Applebot"; "DuckDuckBot"; "YandexBot"; "Baiduspider"; and the AI and link-preview fetchers
+// "GPTBot", "ClaudeBot", "PerplexityBot", "CCBot", "Bytespider", "Amazonbot",
+// "facebookexternalhit", "Twitterbot", "Slackbot", "Discordbot", "LinkedInBot"). An empty
+// User-Agent is no browser either. This only splits the count — a crawler's miss means the old URL
+// is still in somebody's index — and is NOT a security control: a User-Agent is whatever the
+// client chose to send.
+const CRAWLER_UA_TOKENS = [
+	'googlebot', 'adsbot-google', 'google-inspectiontool', 'storebot-google', 'bingbot', 'adidxbot',
+	'applebot', 'duckduckbot', 'yandexbot', 'baiduspider', 'gptbot', 'claudebot', 'perplexitybot',
+	'ccbot', 'bytespider', 'amazonbot', 'facebookexternalhit', 'twitterbot', 'slackbot',
+	'discordbot', 'linkedinbot'
+];
+
+function crawlerUserAgent(ua) {
+	const lower = String(ua || '').toLowerCase();
+	return !lower || CRAWLER_UA_TOKENS.some((token) => lower.includes(token));
+}
+
+function notFoundReferrer(referer, host) {
+	if (!referer) return '';
+	let from = '';
+	try { from = new URL(referer).hostname; } catch (e) { return ''; }
+	return from === host ? 'self' : 'external';
+}
+
+// Extensions old sites served pages under. A last path segment with no extension (or a trailing
+// slash) is a page too; any other extension (pdf, jpg, zip, xml, txt …) is a file, and a missing
+// file is not the page miss this sensor counts, even when a browser navigated to it with an HTML
+// Accept header.
+const PAGE_EXTENSIONS = new Set(['html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'shtml', 'cfm']);
+
+function pageLikePath(path) {
+	let last = path.slice(path.lastIndexOf('/') + 1);
+	// The extension is read from the DECODED segment: `/manual%2Epdf` names the same file as `/manual.pdf`.
+	try { last = decodeURIComponent(last); } catch { /* a malformed escape: test the raw segment */ }
+	const dot = last.lastIndexOf('.');
+	return dot === -1 || PAGE_EXTENSIONS.has(last.slice(dot + 1).toLowerCase());
+}
+
+function recordNotFound(request, env, res, siteKey) {
+	try {
+		if (!res || res.status !== 404 || request.method !== 'GET') return;
+		if (typeof siteKey !== 'string' || !siteKey || !env || !env[NOT_FOUND_EVENTS_BINDING]) return;
+		if (!acceptsHtml(request)) return;
+		const url = new URL(request.url);
+		const path = url.pathname;
+		if (path.startsWith('/_astro/') || path.startsWith('/__reef/')) return;
+		if (!pageLikePath(path)) return;
+		env[NOT_FOUND_EVENTS_BINDING].writeDataPoint({
+			indexes: [siteKey],
+			blobs: [
+				path.slice(0, NOT_FOUND_PATH_MAX),
+				url.hostname,
+				notFoundReferrer(request.headers.get('referer'), url.hostname),
+				crawlerUserAgent(request.headers.get('user-agent')) ? 'crawler' : 'browser'
+			]
+		});
+	} catch (e) { /* a sensor never changes the answer */ }
+}
+
 // A renderer-generated private-post path: the BYTES are this site's own build output,
 // the PAYWALL is RSP's. The path is not inferred here; it entered this branch only because
 // the renderer put its exact canonical URL in the generated manifest.
@@ -2610,6 +2712,7 @@ async function markdownVariant(res, request, contentSignal) {
 const siteWorker = {
 	async fetch(request, env, ctx) {
 		const CFG = __SHOP_CONFIG__;
+		bakedSiteKey = typeof CFG.siteKey === 'string' ? CFG.siteKey : '';
 /*__CANONICAL_FETCH__*/		const shopDescriptors = CFG.shops || [];
 		const shops = shopDescriptors.slice().sort((a, b) => b.shopPath.length - a.shopPath.length);
 		let pathname = '';
@@ -2698,7 +2801,9 @@ const siteWorker = {
 
 export default {
 	async fetch(request, env, ctx) {
-		return withoutPreservedCopy(request, env, await siteWorker.fetch(request, env, ctx));
+		const res = await withoutPreservedCopy(request, env, await siteWorker.fetch(request, env, ctx));
+		recordNotFound(request, env, res, bakedSiteKey);
+		return res;
 	}
 };
 
@@ -2710,5 +2815,6 @@ export {
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
-	platformReader
+	platformReader,
+	NOT_FOUND_EVENTS_BINDING
 };
