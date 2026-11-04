@@ -1540,7 +1540,7 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		else {
 			if (!val('address')) err.address = L.errAddress;
 			if (!val('postal')) err.postal = L.errPostalMissing;
-			else if (!/^[0-9A-Za-z][0-9A-Za-z -]{1,9}$/.test(val('postal'))) err.postal = L.errPostal;
+			else if (!/^(?:[0-9]{3}|[0-9]{5}|[0-9]{6})$/.test(val('postal'))) err.postal = L.errPostal;
 		}
 		if (!val('name')) err.name = L.errName;
 		if (!val('phone')) err.phone = L.errPhone;

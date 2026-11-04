@@ -573,3 +573,27 @@ test('an invoice_offered of true, or none at all, keeps the invoice choice', asy
     assert.match(b.panel.innerHTML, /<legend>電子發票<\/legend>/, JSON.stringify(extra));
   }
 });
+
+test('home delivery takes a postal code of 3, 5 or 6 digits and refuses any other before sending', async () => {
+  const answer = () => ({ status: 200, body: { order_id: 'order-6', form_post: { action: 'https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5', fields: { A: 'b' } } } });
+  const b = await readyForSubmit(deliveryThen([HOME], answer), [HOME]);
+  b.type('address', 'No. 1, Example Rd.');
+  for (const postal of ['1', '12', '1000', '1000001', 'abc', '10A', '100 01', '100-01', '１００']) {
+    b.type('postal', postal);
+    await b.submit();
+    assert.match(b.panel.innerHTML, /id="dc-ecpay-postal-err">郵遞區號格式不對。/, postal);
+  }
+  assert.equal(b.calls.filter((c) => c.url === '/api/v2/ecpay/checkout').length, 0, 'no checkout with a malformed postal code');
+  b.type('postal', '');
+  await b.submit();
+  assert.match(b.panel.innerHTML, /id="dc-ecpay-postal-err">請輸入郵遞區號。/);
+  for (const postal of ['100', '10001', '100001']) {
+    const ok = await readyForSubmit(deliveryThen([HOME], answer), [HOME]);
+    ok.type('address', 'No. 1, Example Rd.');
+    ok.type('postal', postal);
+    await ok.submit();
+    const sent = ok.calls.filter((c) => c.url === '/api/v2/ecpay/checkout');
+    assert.equal(sent.length, 1, postal);
+    assert.equal(sent[0].body.logistics.postal_code, postal);
+  }
+});
