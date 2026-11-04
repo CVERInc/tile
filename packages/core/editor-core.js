@@ -16,7 +16,10 @@ const EDITOR_TOOLS = [
   { key: 'h1', g: 'H1', icon: 'heading-1', cat: 'format', tip: 'edH1' }, { key: 'h2', g: 'H2', icon: 'heading-2', cat: 'format', tip: 'edH2' }, { key: 'h3', g: 'H3', icon: 'heading-3', cat: 'format', tip: 'edH3' }, 'sep',
   { key: 'bold', g: 'B', icon: 'bold', cat: 'format', tip: 'edBold' }, { key: 'italic', g: 'I', icon: 'italic', cat: 'format', tip: 'edItalic' }, { key: 'strike', g: 'S', icon: 'strikethrough', cat: 'format', tip: 'edStrike' }, { key: 'clear', g: 'Tx', icon: 'remove-formatting', cat: 'format', tip: 'edClear' }, 'rowbreak',   // phone: wrap to a third toolbar row here (desktop treats it as a separator)
   // block tools (lists / quote / table) — split out of 'format' (which is now just headings + inline marks)
-  { key: 'bullet', g: '•', icon: 'list', cat: 'block', tip: 'edBullet' }, { key: 'number', g: '1.', icon: 'list-ordered', cat: 'block', tip: 'edNumber' }, { key: 'check', g: '☑', icon: 'list-checks', cat: 'block', tip: 'edCheck' }, { key: 'quote', g: '❝', icon: 'text-quote', cat: 'block', tip: 'edQuote' }, { key: 'table', g: '⊞', icon: 'table', cat: 'block', tip: 'edTable' }, 'sep',
+  { key: 'bullet', g: '•', icon: 'list', cat: 'block', tip: 'edBullet' }, { key: 'number', g: '1.', icon: 'list-ordered', cat: 'block', tip: 'edNumber' }, { key: 'check', g: '☑', icon: 'list-checks', cat: 'block', tip: 'edCheck' }, { key: 'quote', g: '❝', icon: 'text-quote', cat: 'block', tip: 'edQuote' }, { key: 'table', g: '⊞', icon: 'table', cat: 'block', tip: 'edTable' },
+  // optIn: shown only where the host turns it on (editorTools.rule === true), so the toolbars that never had it
+  // keep the row they have. A rule is `---` on its own block; the surfaces that render it are the ones that ask.
+  { key: 'rule', g: '—', icon: 'minus', cat: 'block', tip: 'edRule', optIn: true }, 'sep',
   { key: 'code', g: '</>', icon: 'code', cat: 'insert', tip: 'edCode' }, { key: 'link', g: '[[ ]]', icon: 'link', cat: 'insert', tip: 'edLink' },
   // image/video: capability lives in the core, NOT injected per-surface. Each host wires the platform seam via
   // opts.pickImage / opts.pickVideo (Obsidian: vault save / web: upload) — `needs` hides the button when unwired.
@@ -25,6 +28,10 @@ const EDITOR_TOOLS = [
 ];
 
 // Centered modal editor for cards: large centered card, darkened background, virtual keyboard adjusts modal container, saves changes on close
+// Whether a host shows a tool. A missing key means on, except for an optIn tool, which a host has to ask for.
+// The toolbar, the selection menu and every settings picker read this one rule, so a checkbox can never say
+// "on" for a button the toolbar does not draw.
+function toolOn(tk, en) { const v = (en || {})[tk.key]; return tk.optIn ? v === true : v !== false; }
 function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 //#cssmd-inline   (build replaces this line with packages/cssmd/cssmd.js — sans its ESM export footer and its duplicate escHtml — so markBoldItalic/markCode/mk live here; the inline marks below DELEGATE to that single shared source)
 // Synchronized syntax highlighter: renders raw markdown styling (bold, headings, lists, blockquotes, tags, links, dates).
@@ -332,6 +339,22 @@ function toggleWrap(v, s, e, pre, post) {
 // and character-destroying. So a marker that ends up at the head of the line gets escaped. The digit of an
 // ordered marker is NOT escapable in CommonMark ("\\1" is a literal backslash-one), so 1. escapes as "1\\." —
 // the delimiter, not the number.
+// A markdown link around the selection: `[words]()` with the caret between the parentheses, ready for the
+// address. With nothing selected, `[]()` with the caret between the brackets, ready for the words. For hosts
+// whose renderer reads `[text](url)` and not Obsidian's `[[ ]]` (host.linkSyntax === 'markdown').
+function markdownLink(v, s, e) {
+  const label = v.slice(s, e), caret = s === e ? s + 1 : s + label.length + 3;
+  return { text: v.slice(0, s) + '[' + label + ']()' + v.slice(e), start: caret, end: caret };
+}
+// A thematic break as a block of its own, after the caret's line: a blank line before it, because `---`
+// directly under a line of text is a setext heading underline (CommonMark 4.3), not a rule; and a blank line
+// after it, where the caret lands to keep writing.
+function insertRule(v, s) {
+  const nl = v.indexOf('\n', s), at = nl === -1 ? v.length : nl;
+  const before = v.slice(0, at).replace(/\n+$/, ''), after = v.slice(at).replace(/^\n+/, '');
+  const head = before ? before + '\n\n' : '', caret = head.length + 5;
+  return { text: head + '---\n\n' + after, start: caret, end: caret };
+}
 function escapeLeadingMarker(s) {
   const mo = /^([ \t]*)(\d+)([.)])([ \t])/.exec(s);
   if (mo) return mo[1] + mo[2] + '\\' + s.slice(mo[1].length + mo[2].length);
@@ -987,6 +1010,14 @@ function mountEditor(contentEl, opts, host) {
       const out = stripFormatting(v.slice(firstLs, blockEnd));
       applyEdit(v.slice(0, firstLs) + out + v.slice(blockEnd), firstLs, firstLs + out.length);
     };
+    // The link tool writes the syntax the host's renderer reads: Obsidian's `[[ ]]` by default, `[text](url)`
+    // for a host that says host.linkSyntax = 'markdown' (a page with no vault behind it has nothing to resolve a
+    // wikilink against).
+    const mdLinks = host.linkSyntax === 'markdown';
+    const linkRange = (r0) => {
+      if (!mdLinks) return wrap('[[', ']]', r0);
+      const r = markdownLink(getText(), r0.start, r0.end); applyEdit(r.text, r.start, r.end);
+    };
     const runs = {
       undo: () => { if (hi > 0) { hi--; restore(hist[hi]); } }, redo: () => { if (hi < hist.length - 1) { hi++; restore(hist[hi]); } },
       h1: () => setHeading('# '), h2: () => setHeading('## '), h3: () => setHeading('### '),
@@ -994,7 +1025,8 @@ function mountEditor(contentEl, opts, host) {
       clear: () => clearRange(sel().start, sel().end),
       bullet: () => setList('bullet'), number: () => setList('number'), check: () => setList('check'), quote: () => togglePre('> '),
       table: () => { const v = getText(), s = sel().start, ls = lineStartOf(v, s); const pre = (ls > 0 && v[ls - 1] !== '\n') ? '\n' : ''; const tbl = pre + '|  |  |\n| --- | --- |\n|  |  |\n'; applyEdit(v.slice(0, ls) + tbl + v.slice(ls), ls + pre.length + 2); },   // insert a starter 2×2 table; decorateTables grids it for in-place editing
-      code: () => wrap('`', '`'), link: () => wrap('[[', ']]'),
+      code: () => wrap('`', '`'), link: () => linkRange(sel()),
+      rule: () => { const r = insertRule(getText(), sel().start); applyEdit(r.text, r.start, r.end); },
       image: () => insertViaPick(opts.pickImage), video: () => insertViaPick(opts.pickVideo),
       date: () => insertTok(host.dateTrigger || '@'), time: () => insertTok(host.timeTrigger || '@@'),
     };
@@ -1005,7 +1037,7 @@ function mountEditor(contentEl, opts, host) {
     let pendingSep = false;
     EDITOR_TOOLS.forEach((tk) => {
       if (tk === 'sep' || tk === 'rowbreak') { pendingSep = true; return; }
-      if (en[tk.key] === false) return;   // honor per-button settings for ALL tools incl. search/undo/redo (so marktile can disable them); tugtile never sets these false → they stay on
+      if (!toolOn(tk, en)) return;   // honor per-button settings for ALL tools incl. search/undo/redo (so marktile can disable them); tugtile never sets these false → they stay on
       if (tk.needs && typeof opts[tk.needs] !== 'function') return;   // capability-gated tool (image/video): hide the button when the host didn't wire its hook → button exists IFF it works (no phantom)
       const target = tk.fixed ? tools : (twoRow ? tools2 : tools);   // fixed → bar; others → the second row on phone (the bar on desktop)
       if (pendingSep && target.childElementCount > 0) target.createDiv({ cls: 'tugtile-ed-sep' });   // separators (hidden in the compact phone rows) only between non-empty groups
@@ -1016,7 +1048,8 @@ function mountEditor(contentEl, opts, host) {
         setIcon(b.createSpan(), 'search');   // span child, not the button (iPad svg-in-button fix)
         bindTap(b, () => toggleFind());
       } else {
-        tbtn(tk.g, runs[tk.key], tk.icon, target, tk.tip);
+        // a markdown-link host's link tool makes a plain web link, not Obsidian's "Wikilink"
+        tbtn(tk.g, runs[tk.key], tk.icon, target, tk.key === 'link' && mdLinks ? 'edUrlLink' : tk.tip);
       }
     });
     // A wrapped toolbar puts its dividers wherever the text would break: a `|` can end up first on a row,
@@ -1140,26 +1173,35 @@ function mountEditor(contentEl, opts, host) {
       const menu = new Menu();
       // Options objects, so every icon is spelled `icon: 'bold'` at the call site — the one shape
       // shim-icons.test.cjs can read. Passed positionally it is a variable by the time it reaches setIcon().
-      const mark = (o) => menu.addItem((i) => {
+      // A tool the host turned off is off here too: the menu offering a mark the toolbar hides is a second
+      // toolbar with different rules.
+      const tools = host.plugin.settings.editorTools || {};
+      // Separators are owed, not drawn: one appears only between two groups that both kept an item.
+      let sepOwed = false, any = false;
+      const add = (fn) => { if (sepOwed && any) menu.addSeparator(); sepOwed = false; any = true; menu.addItem(fn); };
+      const sep = () => { sepOwed = true; };
+      const offered = (key) => { const tk = EDITOR_TOOLS.find((x) => x && x.key === key); return !tk || toolOn(tk, tools); };
+      const mark = (o) => offered(o.tool) && add((i) => {
         const on = !!wrapState(v, start, end, o.pre, o.post);
         i.setTitle(on ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => wrap(o.pre, o.post, { start, end }));
       });
-      mark({ key: 'edBold', text: '粗體', offKey: 'selUnbold', offText: '取消粗體', pre: '**', post: '**', icon: 'bold' });
-      mark({ key: 'edItalic', text: '斜體', offKey: 'selUnitalic', offText: '取消斜體', pre: '*', post: '*', icon: 'italic' });
-      mark({ key: 'edStrike', text: '刪除線', offKey: 'selUnstrike', offText: '取消刪除線', pre: '~~', post: '~~', icon: 'strikethrough' });
-      mark({ key: 'edCode', text: '行內碼', offKey: 'selUncode', offText: '取消行內碼', pre: '`', post: '`', icon: 'code' });
-      mark({ key: 'edLink', text: '連結', offKey: 'selUnlink', offText: '取消連結', pre: '[[', post: ']]', icon: 'link' });
-      menu.addSeparator();
+      mark({ tool: 'bold', key: 'edBold', text: '粗體', offKey: 'selUnbold', offText: '取消粗體', pre: '**', post: '**', icon: 'bold' });
+      mark({ tool: 'italic', key: 'edItalic', text: '斜體', offKey: 'selUnitalic', offText: '取消斜體', pre: '*', post: '*', icon: 'italic' });
+      mark({ tool: 'strike', key: 'edStrike', text: '刪除線', offKey: 'selUnstrike', offText: '取消刪除線', pre: '~~', post: '~~', icon: 'strikethrough' });
+      mark({ tool: 'code', key: 'edCode', text: '行內碼', offKey: 'selUncode', offText: '取消行內碼', pre: '`', post: '`', icon: 'code' });
+      if (!mdLinks) mark({ tool: 'link', key: 'edLink', text: '連結', offKey: 'selUnlink', offText: '取消連結', pre: '[[', post: ']]', icon: 'link' });
+      else if (offered('link')) add((i) => i.setTitle(T('edUrlLink', '連結')).setIcon('link').onClick(() => linkRange({ start, end })));
+      sep();
       // Line-level, so they read the caret line's marker rather than the selection's wrapping.
       const kind = (listMarker(v.slice(lineStartOf(v, start))) || {}).kind;
-      const listItem = (o) => menu.addItem((i) => {
+      const listItem = (o) => offered(o.kind) && add((i) => {
         i.setTitle(kind === o.kind ? T(o.offKey, o.offText) : T(o.key, o.text)).setIcon(o.icon).onClick(() => setList(o.kind, { start, end }));
       });
       listItem({ kind: 'bullet', key: 'edBullet', text: '項目符號清單', offKey: 'selUnbullet', offText: '取消項目符號清單', icon: 'list' });
       listItem({ kind: 'number', key: 'edNumber', text: '編號清單', offKey: 'selUnnumber', offText: '取消編號清單', icon: 'list-ordered' });
       listItem({ kind: 'check', key: 'edCheck', text: '待辦清單', offKey: 'selUncheck', offText: '取消待辦清單', icon: 'list-checks' });
-      menu.addSeparator();
-      menu.addItem((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => clearRange(start, end)));
+      sep();
+      if (offered('clear')) add((i) => i.setTitle(T('edClear', '清除格式')).setIcon('remove-formatting').onClick(() => clearRange(start, end)));
       return menu;
     };
     const openSelectionMenu = (atEvent, at) => {

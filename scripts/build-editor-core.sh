@@ -29,7 +29,7 @@ header = (
 # `t` is exported too: buildEditorCtl localises the mode NAME itself, but leaves the brand/aria strings to the
 # host. Without t() every external host hand-copies four languages' worth of strings and they drift on the first
 # wording change — the shared i18n is right here, so hand it over.
-footer = "\n\nexport { mountEditor, highlightMarkdown, highlightLineParts, listContinuation, renumberLists, tabEdit, tocHeadings, moveSection, escHtml, EDITOR_TOOLS, TileEditModal, decorateTables, decorateImages, wireToc, wireImagePaste, equipEditor, EDITOR_MODES, buildEditorCtl, saveVaultImage, pickVaultImage, videoEmbed, promptVideoEmbed, formatTables, isTableLine, parseTable, t };\n"
+footer = "\n\nexport { mountEditor, highlightMarkdown, highlightLineParts, listContinuation, renumberLists, tabEdit, tocHeadings, moveSection, escHtml, EDITOR_TOOLS, toolOn, TileEditModal, decorateTables, decorateImages, wireToc, wireImagePaste, equipEditor, EDITOR_MODES, buildEditorCtl, saveVaultImage, pickVaultImage, videoEmbed, promptVideoEmbed, formatTables, isTableLine, parseTable, t };\n"
 open(out, "w", encoding="utf-8").write(header + core + footer)
 print("emitted ->", out, ";", len(core), "bytes core ; i18n:", ",".join(tr))
 PY

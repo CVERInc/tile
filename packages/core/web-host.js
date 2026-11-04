@@ -7,4 +7,7 @@ export function makeWebHost(opts){ return {
   openLink: (opts && opts.openLink) || ((link) => {
     if (link.kind === 'url' || link.kind === 'image') window.open(link.target, '_blank', 'noopener');
   }),
+  // Which link the link tool writes: 'wiki' ([[ ]], the default) or 'markdown' ([text](url)) for a page whose
+  // renderer reads markdown links and has no vault to resolve a wikilink against.
+  linkSyntax: (opts && opts.linkSyntax) || 'wiki',
   plugin:{ settings:{ editorTools:{ date:false, time:false } } } }; }
