@@ -101,8 +101,8 @@ test('with rules, the only differences are the module, the glue and the baked ke
 	const withRules = (await emitWorker([...BASE_ARGS, '--query-redirects', FIXTURE_RULES])).bytes.toString('utf8');
 	assert.notEqual(plain, withRules);
 	// Strip the three additions from the rules worker and the plain one is what remains.
-	const moduleSource = readFileSync(join(here, '..', '..', 'sitetile', 'query-redirects.mjs'), 'utf8');
-	assert.ok(withRules.includes(moduleSource), 'the shared module is concatenated in, byte for byte');
+	const moduleSource = readFileSync(join(here, '..', '..', 'sitetile', 'query-redirects.mjs'), 'utf8').replace(/^export const /gm, 'const ');
+	assert.ok(withRules.includes(moduleSource), 'the shared module is concatenated with data exports hidden from workerd');
 	let stripped = withRules.replace(moduleSource + '\n', '');
 	const helpersAt = stripped.indexOf('function matchQueryRedirect(request, byPath) {');
 	const helpersEnd = stripped.indexOf('}\n\n', helpersAt) + 3;

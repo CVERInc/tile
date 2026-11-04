@@ -14,6 +14,8 @@
 // 🔴 Every fragment below is the emitter's previous inline text, byte for byte. Changing one changes
 // every Site's `_worker.js`.
 
+export { NOT_FOUND_EVENTS_BINDING } from './shop-function-template.js';
+
 export const SITE_CONFIG_SCHEMA_VERSION = 1;
 export const SITE_CONFIG_KIND = 'tile.square-shop.site-config';
 
@@ -73,6 +75,18 @@ function provenanceHeader(provenance) {
  * @param {object} parts.config                the baked per-Site config (the worker's CFG)
  * @returns {string} the `_worker.js` text
  */
+// Node tests import the template's data, but workerd accepts only callable named exports.
+// Keep function and class exports for emitted-worker tests; remove data exports at assembly.
+function workerEntrypointsOnly(source) {
+	return source
+		.replace(/^export (?=(?:const|let|var)\b)/gm, '')
+		.replace(/^export \{([^}]*)\};/gm, (_, names) => {
+			const data = new Set(['COMPLETE_COPY', 'YT_POSTER_PATH', 'NOT_FOUND_EVENTS_BINDING']);
+			const kept = names.split(',').map((name) => name.trim()).filter((name) => name && !data.has(name));
+			return 'export {\n\t' + kept.join(', ') + '\n};';
+		});
+}
+
 export function assembleWorker({ core, template, queryRedirectsRuntime, provenance, config }) {
 	if (typeof core !== 'string' || typeof template !== 'string') throw new TypeError('assembleWorker: core and template sources are required');
 	if (!provenance || typeof provenance.emitterCommit !== 'string') throw new TypeError('assembleWorker: provenance.emitterCommit is required');
@@ -91,8 +105,8 @@ export function assembleWorker({ core, template, queryRedirectsRuntime, provenan
 		.replace('/*__CANONICAL_FETCH__*/', () => canonical ? CANONICAL_FETCH : '')
 		.replace('/*__QUERY_REDIRECT_FETCH__*/', () => queryRedirects ? QUERY_REDIRECT_FETCH : '')
 		.replaceAll('__SHOP_CONFIG__', () => JSON.stringify(config));
-	const runtime = queryRedirects ? queryRedirectsRuntime + '\n' : '';
-	return provenanceHeader(provenance) + core + '\n' + runtime + body;
+	const runtime = queryRedirects ? workerEntrypointsOnly(queryRedirectsRuntime) + '\n' : '';
+	return provenanceHeader(provenance) + workerEntrypointsOnly(core) + '\n' + runtime + workerEntrypointsOnly(body);
 }
 
 /**

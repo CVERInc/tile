@@ -20,6 +20,11 @@ import { pagesRoutesInvokeWorker, runWorkerFirstInvokesWorker, probePaths } from
 const here = dirname(fileURLToPath(import.meta.url));
 const workDir = mkdtempSync(join(tmpdir(), 'worker-split-'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
+// The workerd fix intentionally changes only named export declarations. Compare the
+// old and new emitted workers after erasing that syntactic surface from both.
+const withoutNamedExports = (source) => source
+	.replace(/^export \{[^}]*\};?\s*$/gm, '')
+	.replace(/^export (?=(?:const|let|var|class|function)\b)/gm, '');
 
 // The reference emitter resolves its sources relative to itself, so it runs from a mirror of the
 // package layout holding the CURRENT shared sources.
@@ -88,26 +93,26 @@ function ok(emitter, args, env) {
 	return r;
 }
 
-test('golden: _worker.js is byte-identical to the pre-split emitter for identical inputs', () => {
+test('golden: _worker.js differs from the pre-split emitter only in named exports', () => {
 	for (const [name, args] of [['full', FULL], ['minimal', MINIMAL], ['bare', BARE]]) {
 		const golden = ok(REFERENCE, args).worker;
 		const now = ok(CURRENT, args).worker;
-		assert.equal(sha(now), sha(golden), name + ': _worker.js bytes moved');
-		assert.equal(now, golden);
+		assert.equal(sha(withoutNamedExports(now)), sha(withoutNamedExports(golden)), name + ': non-export worker bytes moved');
+		assert.equal(withoutNamedExports(now), withoutNamedExports(golden));
 	}
 	// With a (fake) inbox key baked, too — it is part of the config the split carries.
 	const env = { INBOX_FORWARD_SITE_KEY: 'test-only-not-a-secret' };
-	assert.equal(ok(CURRENT, FULL, env).worker, ok(REFERENCE, FULL, env).worker);
+	assert.equal(withoutNamedExports(ok(CURRENT, FULL, env).worker), withoutNamedExports(ok(REFERENCE, FULL, env).worker));
 	// stdout mode (no --out) as well.
 	const stdout = (emitter) => execFileSync('node', [emitter, ...FULL], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, INBOX_FORWARD_SITE_KEY: '' } });
-	assert.equal(stdout(CURRENT), stdout(REFERENCE));
+	assert.equal(withoutNamedExports(stdout(CURRENT)), withoutNamedExports(stdout(REFERENCE)));
 });
 
 test('golden holds with --split-out too, and the default call writes nothing but _worker.js', () => {
 	const golden = ok(REFERENCE, FULL).worker;
 	const split = join(workDir, 'split-golden');
 	const r = ok(CURRENT, [...FULL, '--split-out', split]);
-	assert.equal(r.worker, golden, '--split-out changed _worker.js');
+	assert.equal(withoutNamedExports(r.worker), withoutNamedExports(golden), '--split-out changed non-export worker bytes');
 	assert.deepEqual(readdirSync(r.dist), ['_worker.js'], '--split-out wrote into the Pages upload directory');
 	const flagless = ok(CURRENT, FULL);
 	assert.deepEqual(readdirSync(flagless.dist), ['_worker.js'], 'a default call must not write _routes.json or anything else');

@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import { NOT_FOUND_EVENTS_BINDING } from './shop-function-template.js';
+import { NOT_FOUND_EVENTS_BINDING } from './worker-assembly.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const emitter = join(here, 'emit-shop-function.mjs');
@@ -69,6 +69,25 @@ function get(path, { method = 'GET', accept = HTML, ua = BROWSER_UA, referer, ho
 	if (referer) headers.referer = referer;
 	return new Request('https://' + host + path, { method, headers });
 }
+
+test('emitted Pages and split workers export only workerd entrypoints', async () => {
+	const splitDir = mkdtempSync(join(tmpdir(), 'emit-not-found-split-'));
+	const rulesPath = join(workDir, '_query-redirects.md');
+	writeFileSync(rulesPath, '/?p=1 /blog/ 301\n');
+	const variants = [
+		['with site key', withKey],
+		['without site key', noKey],
+		['split output', emit(['--site-key', SITE_KEY, '--split-out', splitDir])],
+		['query redirects', emit(['--site-key', SITE_KEY, '--query-redirects', rulesPath])]
+	];
+	for (const [name, { out }] of variants) {
+		const namespace = await import(pathToFileURL(out).href);
+		assert.equal(typeof namespace.default, 'object', name + ': default must be an object');
+		assert.equal(typeof namespace.default.fetch, 'function', name + ': default.fetch must be a function');
+		const invalid = Object.keys(namespace).filter((key) => key !== 'default' && typeof namespace[key] !== 'function');
+		assert.deepEqual(invalid, [], name + ': non-entrypoint named exports');
+	}
+});
 
 test('the binding name is the one documented constant', () => {
 	assert.equal(NOT_FOUND_EVENTS_BINDING, 'NOT_FOUND_EVENTS');
