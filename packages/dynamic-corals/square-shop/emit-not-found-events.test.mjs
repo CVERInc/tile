@@ -34,9 +34,13 @@ function emit(args) {
 const withKey = emit(['--site-key', SITE_KEY]);
 const noKey = emit([]);
 const badKey = emit(['--site-key', 'Lantern_Bay']);
+// JavaScript's `$` without the m flag matches only at the end of input, so a trailing newline is
+// outside the grammar too; pinned so the next reader does not re-raise it.
+const newlineKey = emit(['--site-key', 'my-site\n']);
 const worker = (await import(pathToFileURL(withKey.out).href)).default;
 const workerNoKey = (await import(pathToFileURL(noKey.out).href)).default;
 const workerBadKey = (await import(pathToFileURL(badKey.out).href)).default;
+const workerNewlineKey = (await import(pathToFileURL(newlineKey.out).href)).default;
 
 const PRESERVED = 'public, s-maxage=604800';
 const HTML = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
@@ -77,10 +81,11 @@ test('a 404 GET for an HTML page writes exactly one point with the expected inde
 	assert.deepEqual(points, [{ indexes: [SITE_KEY], blobs: ['/old/2019/05/hello-world/', 'shop.example.com', '', 'browser'] }]);
 });
 
-test('ref is "self" for a same-host referrer and the referring HOST only otherwise', async () => {
+test('ref is "self" for a same-host referrer, "external" for any other host, never the host itself', async () => {
 	const cases = [
 		['https://shop.example.com/blog/?q=secret', 'self'],
-		['https://www.google.com/search?q=lantern+bay', 'www.google.com'],
+		['https://www.google.com/search?q=lantern+bay', 'external'],
+		['https://attacker-chosen-1234.example.net/', 'external'],
 		['not a url', '']
 	];
 	for (const [referer, want] of cases) {
@@ -104,6 +109,50 @@ test('ua is "crawler" for a documented crawler token or an empty User-Agent, "br
 		await worker.fetch(get('/missing/', { ua }), env, {});
 		assert.equal(points.length, 1, String(ua));
 		assert.equal(points[0].blobs[3], want, String(ua));
+	}
+});
+
+test('Accept: text/html listed with q > 0 records; q=0, a bare wildcard or an unparsable q does not', async () => {
+	const cases = [
+		['text/html', 1],
+		['text/html;q=0.5,application/json', 1],
+		['application/json, TEXT/HTML;level=1;q=0.001', 1],
+		[HTML, 1],
+		['text/html;q=0,application/json', 0],
+		['text/html; q=0.0, */*', 0],
+		['application/json, text/html;q=0', 0],
+		['*/*', 0],
+		['text/*', 0],
+		['text/html;q=abc', 0],
+		['text/htmlx', 0]
+	];
+	for (const [accept, want] of cases) {
+		const { env, points } = envFor();
+		await worker.fetch(get('/missing/', { accept }), env, {});
+		assert.equal(points.length, want, accept);
+	}
+});
+
+test('only page-like paths record: no extension, a trailing slash, or an old page extension', async () => {
+	const cases = [
+		['/2019/05/slug/', 1],
+		['/old/page.php', 1],
+		['/index.html', 1],
+		['/legacy/DEFAULT.ASPX', 1],
+		['/about-us', 1],
+		['/v1.2/notes/', 1],
+		['/manual.pdf', 0],
+		['/photo.jpg', 0],
+		['/archive.zip', 0],
+		['/sitemap.xml', 0],
+		['/robots-old.txt', 0],
+		['/.env', 0]
+	];
+	for (const [path, want] of cases) {
+		const { env, points } = envFor();
+		await worker.fetch(get(path), env, {});
+		assert.equal(points.length, want, path);
+		if (want) assert.equal(points[0].blobs[0], path);
 	}
 });
 
@@ -134,6 +183,7 @@ const ZERO = [
 	['a miss under /__reef/', () => get('/__reef/nothing-here'), worker, {}],
 	['no --site-key', () => get('/missing/'), workerNoKey, {}],
 	['a --site-key outside the grammar', () => get('/missing/'), workerBadKey, {}],
+	['a --site-key with a trailing newline', () => get('/missing/'), workerNewlineKey, {}],
 	['no binding', () => get('/missing/'), worker, { binding: 'none' }]
 ];
 for (const [name, req, w, opts] of ZERO) {
@@ -156,6 +206,29 @@ test('a throwing writeDataPoint does not change the response', async () => {
 		assert.equal(throwing.points.length, 1, 'the write was attempted');
 		assert.deepEqual(await snapshot(a), await snapshot(await worker.fetch(get(path), plain.env, {})), path);
 	}
+});
+
+test('a writeDataPoint that never settles does not hold a streaming 404 back', { timeout: 5000 }, async () => {
+	const chunks = ['<!doctype html>', '<title>Not found</title>', '<p>gone</p>'];
+	let calls = 0;
+	const env = {
+		ASSETS: { fetch: async () => {
+			let i = 0;
+			const body = new ReadableStream({
+				async pull(controller) {
+					await new Promise((r) => setTimeout(r, 5));
+					if (i < chunks.length) controller.enqueue(new TextEncoder().encode(chunks[i++]));
+					else controller.close();
+				}
+			});
+			return new Response(body, { status: 404, headers: { 'content-type': 'text/html' } });
+		} },
+		[NOT_FOUND_EVENTS_BINDING]: { writeDataPoint() { calls++; return new Promise(() => {}); } }
+	};
+	const res = await worker.fetch(get('/missing/'), env, {});
+	assert.equal(calls, 1, 'the write was attempted');
+	assert.equal(res.status, 404);
+	assert.equal(await res.text(), chunks.join(''));
 });
 
 test('response bytes and headers are identical with and without the binding, and the ASSETS response is passed on as the same object', async () => {
@@ -184,6 +257,8 @@ test('the key is baked into the config beside siteId only when given and valid; 
 	assert.equal('siteKey' in cfg(noKey.source), false);
 	assert.equal('siteKey' in cfg(badKey.source), false);
 	assert.match(badKey.stderr, /--site-key "Lantern_Bay" is not a site key/);
+	assert.equal('siteKey' in cfg(newlineKey.source), false);
+	assert.match(newlineKey.stderr, /--site-key "my-site\\n" is not a site key/);
 });
 
 test('apart from the key, the worker emitted with --site-key is the worker emitted without it', () => {
