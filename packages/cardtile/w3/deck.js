@@ -6,7 +6,7 @@
 //   window.__cardFront    the card file's frontmatter only (`views:`, `view:`, `back:`)
 //   window.__deckStrings  the visitor-facing words, in the card's own language (w3/deck-i18n.mjs)
 //   window.__deckRef      the card's handle, for the reef.cards link's ?ref= (absent: no ref)
-//   window.__pool         false when these Cards are out of the card pool (absent: in the pool)
+//   window.__pool         true when these Cards are in the card pool; absent, false or anything else: out
 // A page may instead carry a whole card file as its items (data-card-src, or window.__cardMd).
 (function(){
   // a page may carry its items as a card file instead of cells (data-card-src): fetch it, then boot with it
@@ -57,9 +57,10 @@
   // footer = two zones: the owner's © is a link to this card; the right-hand segment, whole, is the exchange link. No underline; hover = accent.
   // In the card pool (reef#2913): the PLATFORM's switch, never the file's. On, these Cards can be drawn at reef.cards and swim on
   // the home page, and in return the last card and the footer link to reef.cards; off, none of that. The editor's preview
-  // passes it as window.__pool; a page without it is in the pool (the default). The engine's own `powered-by` footer link
-  // is the same promise, so it folds into this switch and the file's key no longer decides anything.
-  const POOL=window.__pool!==false;
+  // passes it as window.__pool. Only `true` is in: a page without it (or with false, or any other value) is OUT, so an
+  // unknown or missing switch never opts a Card into the pool. The engine's own `powered-by` footer link is the same
+  // promise, so it folds into this switch and the file's key no longer decides anything.
+  const POOL=window.__pool===true;
   if(!OURS){ const fd=document.querySelector('footer.st-footer > div'); if(fd){ const own=fd.querySelector('span'); if(own&&fd.querySelector('a[href*="feelreef.com/signup"]')) while(own.nextSibling) own.nextSibling.remove(); if(own&&location.protocol!=='about:'){ const a=document.createElement('a'); a.href=location.pathname||'/'; a.innerHTML=own.innerHTML; own.replaceWith(a); } if(POOL) fd.insertAdjacentHTML('beforeend','&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://reef.cards/'+REFQ+'" target="_blank" rel="noopener noreferrer">reef.cards</a>'); } }
   if(mode!=='deck'&&mode!=='list'){ document.body.appendChild(seg);
     if(mdTexts.length){ virtualBrick(); return; }

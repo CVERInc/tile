@@ -1124,7 +1124,7 @@ test('every Card page carries the deck: its stylesheet in the head, the frontmat
   assert.equal(win.__cardFront, '---\nviews: stack list\n---\n', 'the deck gets the keys it reads — never the whole file, nor the rest of the frontmatter');
   assert.equal(win.__deckStrings.viewStack, '疊', 'the deck speaks the CARD\'s language');
   assert.equal(win.__deckRef, 'deckcard');
-  assert.equal('__pool' in win, false, '🔴 the live page leaves the pool switch absent (in the pool) — it is the platform\'s, never the file\'s');
+  assert.equal('__pool' in win, false, '🔴 the live page leaves the pool switch absent (out of the pool) — it is the platform\'s, never the file\'s');
   // the footer is still the renderer's: the deck folds it at runtime, the markup is unchanged
   assert.match(html, /<footer class="st-footer">/);
 });
