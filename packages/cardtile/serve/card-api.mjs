@@ -25,11 +25,12 @@ import { parseCard, serializeCard, CARD_MAX_BYTES, embedsOverCeiling } from '../
 import { cardDestinations } from './card-destinations.mjs';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
+import { handleVanity } from './card-vanity.mjs';
 
 const API_PREFIX = '/_api/';
 
 /** the same grammar the store keys on: a handle IS the KV key and the URL path segment. */
-const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const VALID_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** asset ids are content-addressed (`sha256-…`) but authors may name their own; keep it URL-safe. */
 const VALID_ASSET_ID = /^[A-Za-z0-9_.\-]{1,128}$/;
 
@@ -153,7 +154,10 @@ export const isCurrentGen = (metadata, gen) => String((metadata && metadata.gen)
  * neither the pointer nor the inverse was written. Accepted: `{ accepted: true }`, plus `cache:
  * 'pending'` when the KV pointer put failed (the object retries it; the bind stands), and for a
  * redirecting bind `redirect: 'published' | 'not_published'` (not: a newer bind holds the address, or
- * the host was taken meanwhile) and `redirect_cache: 'pending'` likewise.
+ * the host was taken meanwhile) and `redirect_cache: 'pending'` likewise. `take: false` (the vanity
+ * route) refuses a host another handle owns (`taken`, `held_by`), in the host's turn. A `redirect: false`
+ * bind turns off a redirect to this same host (CardLifetime /lost with its ticket), unless a newer
+ * acceptance answered its /point (`redirect: 'not_withdrawn'`).
  *
  * 🔴 r9 (codex r8): nothing public is written between /register and HostBindings' acceptance. The
  * binding key is not public (it is honoured only behind a pointer naming the handle); the inverse is,
@@ -164,8 +168,8 @@ const vanityBindPrefix = (handle) => `vanitybind:${handle}:`;
 export const vanityBindKey = (handle, gen, host) => `${vanityBindPrefix(handle)}${gen}:${host}`;
 export const vanityOfKey = (handle, gen) => `vanityof:${handle}:${gen}`;
 /** LEGACY inverse binding, read for generation 0 only. */
-const legacyVanityOfKey = (handle) => `vanityof:${handle}`;
-export async function bindVanity(env, handle, host, { redirect = true, gen: meant } = {}) {
+export const legacyVanityOfKey = (handle) => `vanityof:${handle}`;
+export async function bindVanity(env, handle, host, { redirect = true, gen: meant, take = true } = {}) {
   const store = env.CARDS, writer = hostWriter(env, host), life = lifetimeOf(env, handle);
   // the ticket BEFORE anything else: every bind that starts after this one is admitted later
   const admitted = await writer.fetch('https://host-bindings/admit', { method: 'POST', body: JSON.stringify({ handle, host }) });
@@ -183,7 +187,7 @@ export async function bindVanity(env, handle, host, { redirect = true, gen: mean
   // the binding key is not public: the renderer reaches it only through a pointer naming this handle
   await store.put(vanityBindKey(handle, gen, host), handle);
   const pointed = await writer.fetch('https://host-bindings/point', {
-    method: 'POST', body: JSON.stringify({ handle, gen, host, ticket }),
+    method: 'POST', body: JSON.stringify({ handle, gen, host, ticket, ...(take ? {} : { take: false }) }),
   });
   if (!pointed.ok) throw new Error(`HostBindings answered ${pointed.status} for ${host}`);
   // `owning`: the ticket of the acceptance that owns the host for this handle — this bind's own, or a
@@ -192,7 +196,17 @@ export async function bindVanity(env, handle, host, { redirect = true, gen: mean
   // 🔴 r9 rule A: the inverse (what canonical /<handle> 301s to) is published only AFTER the host's
   // object accepted, and by the handle's object, which keeps only the newest accepted bind's host. A
   // refused bind (expired, superseded) wrote nothing public, so the previous redirect stands.
-  if (point.conflict || !redirect) return { handle, host, gen, ...point };
+  if (point.conflict) return { handle, host, gen, ...point };
+  if (!redirect) {
+    // `redirect: false` on a host the card already redirects to turns the redirect off (the vanity
+    // route's PUT is declarative). Through the same rule as a loss: CardLifetime clears an inverse
+    // naming this host only if an OLDER acceptance wrote it, and refuses to publish one older than
+    // this ticket later. Only when this bind's own ticket landed: a no-op answered with a newer
+    // acceptance's ticket (r12) means a later bind decided, and its redirect is not this one's to undo.
+    if (owning !== ticket) return { handle, host, gen, ...point, redirect: 'not_withdrawn' };
+    await askLifetimeOrThrow(life, 'lost', { handle, host, gen, ticket });
+    return { handle, host, gen, ...point };
+  }
   const confirmed = await life.fetch('https://card-lifetime/confirm', {
     method: 'POST', body: JSON.stringify({ handle, host, gen, order, ticket: owning }),
   });
@@ -201,6 +215,60 @@ export async function bindVanity(env, handle, host, { redirect = true, gen: mean
   return { handle, host, gen, ...point, redirect: inverse.published ? 'published' : 'not_published',
     ...(inverse.cache === 'pending' ? { redirect_cache: 'pending' } : {}) };
 }
+
+/** one call to an object on a write path; anything but an answer throws (the route answers 503) */
+async function askLifetimeOrThrow(life, op, body) {
+  const res = await life.fetch(`https://card-lifetime/${op}`, { method: 'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`CardLifetime answered ${res.status} to ${op} of "${body.handle}"`);
+  return res.json();
+}
+
+/**
+ * releaseVanity(env, handle, host, { gen }): the one way to UNBIND a host from a handle (the vanity
+ * route's DELETE, and a PUT that moves the card to another host). The mirror of bindVanity, through the
+ * same two objects and in the order that keeps rule A's promise in reverse — the redirect goes before
+ * the host stops serving, so canonical /<handle> never 301s to a domain that no longer serves it:
+ *
+ *   1. `/admit` at HostBindings(host): a ticket. Every bind admitted later is newer than this release.
+ *   2. `/lost` at CardLifetime(handle) with that ticket: the inverse is cleared if it names this host
+ *      and an older acceptance wrote it, and no older acceptance of the host publishes it again. (The
+ *      same path as a loss — `lost` means "not published if older than this ticket".) `gen` is the
+ *      lifetime the caller read; another one makes this a no-op, as for a loss.
+ *   3. `/unbind` at HostBindings(host): the owner is cleared (and the KV pointer deleted) only if it is
+ *      this handle, the ticket is live, and no bind landed after the ticket; binds of this handle
+ *      admitted before the ticket are refused from now on (`released`).
+ *
+ * Nothing else is written. The `vanitybind:` key stays: honoured only behind a pointer naming this
+ * handle, which only a later bind of it rewrites (and that bind writes the key itself), and a DELETE of
+ * the card sweeps it, since the registration in CardLifetime is kept too. Deleting it from here would
+ * be a caller-side write racing a newer bind's put of the same key. Returns `{ released }` (whether the
+ * host was this handle's until now), or a conflict (`superseded`: a newer bind of this handle landed after step 1; `expired`).
+ * A crash after step 2 leaves the host serving with no redirect; the same call again finishes.
+ */
+export async function releaseVanity(env, handle, host, { gen } = {}) {
+  const writer = hostWriter(env, host), life = lifetimeOf(env, handle);
+  const admitted = await writer.fetch('https://host-bindings/admit', { method: 'POST', body: JSON.stringify({ handle, host }) });
+  if (!admitted.ok) throw new Error(`HostBindings answered ${admitted.status} for ${host}`);
+  const { ticket } = await admitted.json();
+  const current = gen != null ? String(gen) : (await askLifetimeOrThrow(life, 'current', { handle })).gen;
+  await askLifetimeOrThrow(life, 'lost', { handle, host, gen: current, ticket });
+  const unbound = await writer.fetch('https://host-bindings/unbind', { method: 'POST', body: JSON.stringify({ handle, host, ticket }) });
+  if (!unbound.ok) throw new Error(`HostBindings answered ${unbound.status} releasing ${host}`);
+  return { handle, host, ...(await unbound.json()) };
+}
+
+/**
+ * The vanity route's two reads of the objects (card-vanity.mjs). Unlike hostOwner they throw on any
+ * failure: the route answers 503 rather than mistake an unanswered object for "unbound".
+ *   hostOwnerOf(env, host)      → { handle | null, gen | null, adopted }   (HostBindings /owner)
+ *   lifetimeBinding(env, handle) → { gen, hosts, inverse | null, adopted } (CardLifetime /binding, read only)
+ */
+export async function hostOwnerOf(env, host) {
+  const res = await hostWriter(env, host).fetch('https://host-bindings/owner', { method: 'POST', body: JSON.stringify({ host }) });
+  if (!res.ok) throw new Error(`HostBindings answered ${res.status} for ${host}`);
+  return res.json();
+}
+export const lifetimeBinding = (env, handle) => askLifetimeOrThrow(lifetimeOf(env, handle), 'binding', { handle });
 
 /**
  * hostOwner(env, host): the handle the host's object names as owner, or null. For a reader whose KV
@@ -268,7 +336,8 @@ async function askLifetime(env, handle, op, body) {
  * Its storage is the truth for the host; the KV pointer is the cache readers use, and this object is
  * its only writer (r9: a write-through cache it reconciles, see rule B below). Storage key `host`:
  *   { seq, landed, owner: { handle, gen } | null, ended: { '<handle>:<gen>': ms },
- *     host, cache: 'written' | 'pending', losers: [{ handle, gen, ticket }], adopted: bool (r10) }
+ *     host, cache: 'written' | 'pending', losers: [{ handle, gen, ticket }], adopted: bool (r10),
+ *     released: { '<handle>': ticket } (the vanity route's releases, kept TICKET_TTL_MS) }
  *   POST /admit { handle, host }        → { ticket: seq = max(seq + 1, now) }, the bind's first step
  *   POST /point { handle, gen, host, ticket }
  *                                       refused (`expired`) if the ticket is TICKET_TTL_MS old;
@@ -279,9 +348,16 @@ async function askLifetime(env, handle, op, body) {
  *                                       otherwise owner = { handle, gen }, landed = ticket, the previous
  *                                       owner joins `losers` — that storage write IS the acceptance —
  *                                       then KV pointer = handle → { accepted, ticket, cache?: 'pending' }
+ *                                       Also refused (`superseded`) if a release of the handle took a
+ *                                       later ticket (`released`), and with `take: false` (`taken`,
+ *                                       `held_by`) if another handle owns the host
+ *   POST /unbind { handle, host, ticket } the release (releaseVanity): released[handle] = ticket; the
+ *                                       owner cleared and KV `vanity:<host>` deleted only if it is that
+ *                                       handle and nothing landed after the ticket → { released }
  *   POST /end   { handle, gens, host }  every (handle, gen) goes into `ended`; if the owner is one of
  *                                       them, owner = null and KV `vanity:<host>` is deleted
- *   POST /owner { host }                → { handle | null }: for a reader whose KV read missed (hostOwner)
+ *   POST /owner { host }                → { handle | null, gen, adopted }: for a reader whose KV read
+ *                                       missed (hostOwner), and the vanity route's reads
  * Every request (and the alarm) first puts a pending pointer from `owner` and tells each loser's
  * CardLifetime (`/lost`). It never reads KV. A Durable Object lets a second request in while the first awaits anything
  * outside it (every KV call is outside), so each request runs whole in this object's own queue.
@@ -346,15 +422,17 @@ export class HostBindings {
     const body = (await request.json().catch(() => null)) || {};
     const { handle, host, ticket } = body;
     const gens = op === '/end' ? body.gens : op === '/point' ? [body.gen] : ['-'];
-    if (!['/admit', '/point', '/end', '/owner'].includes(op) || (op !== '/owner' && !VALID_HANDLE.test(String(handle)))
+    if (!['/admit', '/point', '/unbind', '/end', '/owner'].includes(op) || (op !== '/owner' && !VALID_HANDLE.test(String(handle)))
       || typeof host !== 'string' || !host
       || !Array.isArray(gens) || !gens.length || gens.some((g) => typeof g !== 'string' || !g)
-      || (op === '/point' && !Number.isSafeInteger(ticket))) {
+      || ((op === '/point' || op === '/unbind') && !Number.isSafeInteger(ticket))
+      || (op === '/point' && body.take != null && typeof body.take !== 'boolean')) {
       return Response.json({ error: 'bad_request' }, { status: 400 });
     }
     if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
     return inTurn(this, op === '/admit' ? () => this.admit(host) : op === '/owner' ? () => this.owner(host)
-      : op === '/point' ? () => this.point(handle, gens[0], host, ticket) : () => this.end(handle, gens, host));
+      : op === '/point' ? () => this.point(handle, gens[0], host, ticket, body.take !== false)
+        : op === '/unbind' ? () => this.unbind(handle, host, ticket) : () => this.end(handle, gens, host));
   }
   /** the runtime's call when the retry alarm comes due */
   async alarm() { await inTurn(this, async () => { const s = await this.storage.get('host'); if (s) await this.flush(s); return {}; }); }
@@ -362,6 +440,8 @@ export class HostBindings {
   async load(host) {
     const s = (await this.storage.get('host')) || { seq: 0, landed: 0, owner: null, ended: {} }, now = Date.now();
     s.ended = Object.fromEntries(Object.entries(s.ended).filter(([, t]) => now - t < ENDED_KEEP_MS));
+    // a release's ticket is kept as long as a ticket lives: any bind older than it is expired by then
+    s.released = Object.fromEntries(Object.entries(s.released || {}).filter(([, t]) => now - t < TICKET_TTL_MS));
     s.host = host;
     s.cache = s.cache || 'written';
     s.losers = s.losers || [];
@@ -406,12 +486,27 @@ export class HostBindings {
   }
   async owner(host) {
     const s = await this.load(host);
-    return { handle: s.owner ? s.owner.handle : null };
+    // `gen` and `adopted` are for the vanity route's reads (card-vanity.mjs): which lifetime holds the
+    // host, and whether a legacy KV pointer is still the only record of an owner (see point)
+    return { handle: s.owner ? s.owner.handle : null, gen: s.owner ? s.owner.gen : null, adopted: !!s.adopted };
   }
-  async point(handle, gen, host, ticket) {
+  async point(handle, gen, host, ticket, take = true) {
     const s = await this.load(host);
     if (Date.now() - ticket >= TICKET_TTL_MS) return expired(host);
     if (s.ended[`${handle}:${gen}`] != null) return staleWrite(handle);
+    // a release of this handle here took its ticket after this bind did: the release stands
+    if (s.released[handle] != null && ticket < s.released[handle]) return superseded(host);
+    // `take: false` (the vanity route): another card's host is refused here, in the host's own turn,
+    // never by a check in the caller — and named, whatever the tickets say. A legacy pointer is adopted
+    // first (see below), so its handle is an owner here too.
+    if (!take) {
+      if (!s.adopted) {
+        if (!s.owner) s.owner = await this.adoptLegacy(host);
+        s.adopted = true;
+        await this.storage.put('host', s);
+      }
+      if (s.owner && s.owner.handle !== handle) return taken(host, s.owner.handle);
+    }
     // 🔴 r12: a same-owner no-op answers with the ticket of the acceptance that owns the host NOW, never
     // its own older one: its /confirm then can neither publish with nor write back a ticket a later
     // take has already passed (codex r11)
@@ -438,6 +533,34 @@ export class HostBindings {
   async adoptLegacy(host) {
     const legacy = await this.env.CARDS.get(vanityKey(host));
     return typeof legacy === 'string' && VALID_HANDLE.test(legacy) ? { handle: legacy, gen: GEN0 } : null;
+  }
+  /**
+   * The release (unbind) of `host` by `handle`, with a ticket from /admit. In this one turn:
+   *   - expired ticket → refused, nothing changes;
+   *   - `released[handle]` = ticket: a bind of this handle admitted before it is refused at /point
+   *     (`superseded`), so a PUT held across a DELETE never lands after it;
+   *   - the owner is this handle (any generation) and no bind landed after the ticket → owner = null,
+   *     the KV pointer deleted (rule B, write-through);
+   *   - the owner is this handle but a later bind of it landed → `superseded`, the owner stays;
+   *   - no owner, or another handle → nothing to release: `{ released: false }`.
+   * `ended` and `landed` are not touched: the lifetime goes on and may bind the host again, and a bind
+   * of ANOTHER handle admitted before this release is not this release's to refuse.
+   */
+  async unbind(handle, host, ticket) {
+    const s = await this.load(host);
+    if (Date.now() - ticket >= TICKET_TTL_MS) return expired(host);
+    // the same one-time adoption as point: a legacy pointer is an owner that can be released
+    if (!s.adopted) {
+      if (!s.owner) s.owner = await this.adoptLegacy(host);
+      s.adopted = true;
+    }
+    s.released[handle] = Math.max(s.released[handle] || 0, ticket);
+    const mine = !!s.owner && s.owner.handle === handle;
+    if (mine && ticket < s.landed) { await this.storage.put('host', s); return superseded(host); }
+    if (mine) { s.owner = null; s.cache = 'pending'; }
+    await this.storage.put('host', s); // THE release: from here the host is nobody's, whatever KV does next
+    if (mine) await this.flush(s);
+    return { released: mine, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
   async end(handle, gens, host) {
     // stamped no earlier than any ticket issued so far, so an entry is never older than a ticket it must refuse
@@ -479,6 +602,7 @@ export class HostBindings {
  *                                        OLDER acceptance wrote is cleared: its own if inverse.ticket <
  *                                        ticket (KV key deleted; in gen 0 written empty), and the bare one
  *   POST /current  { handle }            → { gen } (reads only: no flush, no write, no alarm — r15)
+ *   POST /binding  { handle }            → { gen, hosts, inverse, adopted } (reads only, like /current)
  *   POST /end      { handle, gen? }      refused (`stale_generation`) when `gen` is given and is not the
  *                                        current one (r4, DELETE's If-Generation; r15: before
  *                                        any write, its flush included); otherwise
@@ -542,7 +666,7 @@ export class CardLifetime {
     const { handle, host, gen, delivered, order, ticket } = body;
     const hostList = (v) => Array.isArray(v) && v.every((h) => typeof h === 'string' && h);
     const hostGen = typeof host === 'string' && host && typeof gen === 'string' && gen;
-    if (!['/register', '/confirm', '/lost', '/end', '/settle', '/current'].includes(op) || !VALID_HANDLE.test(String(handle))
+    if (!['/register', '/confirm', '/lost', '/end', '/settle', '/current', '/binding'].includes(op) || !VALID_HANDLE.test(String(handle))
       || (['/register', '/confirm', '/lost'].includes(op) && !hostGen)
       || (op === '/confirm' && !(Number.isSafeInteger(order) && Number.isSafeInteger(ticket)))
       || (op === '/lost' && !Number.isSafeInteger(ticket))
@@ -555,7 +679,8 @@ export class CardLifetime {
       : op === '/confirm' ? () => this.confirm(handle, host, gen, order, ticket)
         : op === '/lost' ? () => this.lost(handle, host, gen, ticket)
           : op === '/end' ? () => this.end(handle, gen)
-            : op === '/current' ? async () => ({ gen: (await this.read(handle)).gen }) : () => this.settle(handle, delivered));
+            : op === '/current' ? async () => ({ gen: (await this.read(handle)).gen })
+              : op === '/binding' ? () => this.binding(handle) : () => this.settle(handle, delivered));
   }
   /** the runtime's call when the retry alarm comes due */
   async alarm() {
@@ -720,6 +845,16 @@ export class CardLifetime {
     // between its chunks and its record) are private bytes too
     await this.sweepCards((g) => g === s.gen);
     return { ended, gen: s.gen, pending: s.pending };
+  }
+  /**
+   * The vanity route's read (card-vanity.mjs): the current generation, the hosts registered in it, and
+   * the host its inverse names. Reads only, like /current (r15): no flush, no adoption, no write. Before
+   * this object adopted a generation-0 legacy inverse, `adopted` is false and the caller reads the bare
+   * key itself, as the renderer does.
+   */
+  async binding(handle) {
+    const s = await this.read(handle);
+    return { gen: s.gen, hosts: s.hosts, inverse: s.inverse && s.inverse.host ? s.inverse.host : null, adopted: !!s.adopted };
   }
   async settle(handle, delivered) {
     const s = await this.load(handle);
@@ -1144,6 +1279,13 @@ const superseded = (host) => ({
   superseded: true,
   why: `${host} was bound again by a bind that started after this one. That later binding stands; bind again to take the domain.`,
 });
+/** a `take: false` bind of a host another handle owns: refused, the owner named (the route's `held_by`) */
+const taken = (host, holder) => ({
+  conflict: true,
+  taken: true,
+  held_by: holder,
+  why: `${host} is bound to another card. Nothing was pointed.`,
+});
 /** a bind whose ticket outlived TICKET_TTL_MS before its pointer write: refused whatever else holds */
 const expired = (host) => ({
   conflict: true,
@@ -1225,6 +1367,11 @@ async function authorize(request, env) {
   }
   return null;
 }
+
+/** a path segment, percent-decoded, or null when its escapes are broken (decodeURIComponent throws URIError) */
+const decodeSegment = (seg) => {
+  try { return decodeURIComponent(seg); } catch { return null; }
+};
 
 const readJson = async (request) => {
   try {
@@ -1377,6 +1524,9 @@ async function deleteCard(env, handle, meant = null) {
  *                                           card is still at <version>; every answer carries `fence`
  *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
+ *   GET    /_api/vanity/<handle>             —             the card's own domain: { host|null, redirect, … }
+ *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
+ *   DELETE /_api/vanity/<handle>             —             { expect?, host? } → release it
  */
 export async function handleApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;
@@ -1400,7 +1550,10 @@ export async function handleApi(request, env, url) {
     const handles = Array.isArray(body.handles) ? body.handles.slice(0, 200) : [];
     const out = [];
     for (const h of handles) {
-      const handle = String(h || '').trim().toLowerCase();
+      // 🔴 typeof first: String(x) calls x.toString, and JSON can deliver `{"toString":null}`, which
+      // makes String() throw. A non-string entry is skipped, like any other entry that is not a handle.
+      if (typeof h !== 'string') continue;
+      const handle = h.trim().toLowerCase();
       if (!VALID_HANDLE.test(handle)) continue;
       const row = await readCard(store, handle);
       if (!row) continue;
@@ -1422,7 +1575,7 @@ export async function handleApi(request, env, url) {
   // its pictures would be answering a different question than the one the agent asked.
   if (rest === 'preview' && method === 'POST') {
     const body = (await readJson(request)) || {};
-    const handle = String(body.handle || '').trim().toLowerCase();
+    const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(body.handle)}.` }, 400);
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
     const { md: currentMd, gen } = await liveCard(store, handle);
@@ -1452,13 +1605,27 @@ export async function handleApi(request, env, url) {
   const parked = /^try\/(.+)$/.exec(rest);
   if (parked) {
     if (method !== 'GET') return json({ error: 'A parked draft is read-only.' }, 405);
-    const id = decodeURIComponent(parked[1]);
-    if (!TRY_ID_RE.test(id)) return json({ error: 'Bad draft id.' }, 400);
+    const id = decodeSegment(parked[1]);
+    if (id === null || !TRY_ID_RE.test(id)) return json({ error: 'Bad draft id.' }, 400);
     const draft = await store.get(tryKey(id));
     if (draft == null) return json({ error: 'That draft has expired.' }, 404);
     return new Response(draft, {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' },
     });
+  }
+
+  // ── a creator's own domain (reef#1971) ────────────────────────────────────────────────────────
+  //
+  // Same bearer, same handle grammar; the route is card-vanity.mjs and every write goes through
+  // bindVanity / releaseVanity above. Error bodies are CODES (`{error: "vanity_taken"}`), not
+  // sentences: the caller is a tool that turns them into the owner's language.
+  const vanity = /^vanity\/([^/]+)$/.exec(rest);
+  if (vanity) {
+    const decoded = decodeSegment(vanity[1]);
+    const handle = decoded === null ? '' : decoded.toLowerCase();
+    if (!VALID_HANDLE.test(handle)) return json({ error: 'handle_invalid' }, 400);
+    const r = await handleVanity({ method, handle, env, readJson: () => readJson(request) });
+    return json(r.body, r.status);
   }
 
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
@@ -1541,17 +1708,20 @@ export async function handleApi(request, env, url) {
   // The read, the checks and the put run in the handle's object, against the card it holds (tile#209,
   // see CardLifetime.assetWrite); only the path is checked here. The answers are what they were.
   if (asset) {
-    const handle = decodeURIComponent(asset[1]).toLowerCase();
-    const id = decodeURIComponent(asset[2]);
+    const handle = (decodeSegment(asset[1]) ?? '').toLowerCase();
+    const id = decodeSegment(asset[2]) ?? '';
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(asset[1])}.` }, 400);
     if (!VALID_ASSET_ID.test(id)) return json({ error: `Bad asset id ${JSON.stringify(asset[2])}.` }, 400);
 
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
-      const b64 = String(body.base64 || '').replace(/\s+/g, '');
+      // typeof, never String(): see list_cards. A present but non-string value is refused, not coerced.
+      if (body.base64 != null && typeof body.base64 !== 'string') return json({ error: '`base64` is not base64.' }, 400);
+      if (body.mime != null && typeof body.mime !== 'string') return json({ error: '`mime` must be a string.' }, 400);
+      const b64 = (body.base64 || '').replace(/\s+/g, '');
       // the card (404), then the base64 (400), in that order as before — both in the object, which
       // holds the card (tile#209 r2): a KV read here could be a stale miss for a card that exists
-      return cardWrite(env, handle, 'asset', { kind: 'put', id, b64, mime: String(body.mime || 'image/webp') });
+      return cardWrite(env, handle, 'asset', { kind: 'put', id, b64, mime: body.mime || 'image/webp' });
     }
     if (method === 'DELETE') return cardWrite(env, handle, 'asset', { kind: 'delete', id });
     if (!(await readCard(store, handle))) return json({ error: `No card at "${handle}".` }, 404);
@@ -1559,7 +1729,7 @@ export async function handleApi(request, env, url) {
   }
 
   if (card) {
-    const handle = decodeURIComponent(card[1]).toLowerCase();
+    const handle = (decodeSegment(card[1]) ?? '').toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(card[1])}.` }, 400);
 
     // ── get_card ─────────────────────────────────────────────────────────────────────────────────
@@ -1588,7 +1758,11 @@ export async function handleApi(request, env, url) {
       // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard)
       const live = await liveCard(store, handle);
       const current = live.md == null ? null : { md: live.md, version: await cardVersion(live.md) };
-      const base = body.base_version == null ? null : String(body.base_version);
+      // typeof, never String(): see list_cards
+      if (body.base_version != null && typeof body.base_version !== 'string') {
+        return json({ error: '`base_version` must be a string — the version you read.' }, 400);
+      }
+      const base = body.base_version == null ? null : body.base_version;
 
       // 🔴 The lock is checked BEFORE Web Risk, so a conflicted save costs nothing and — more to the
       // point — cannot half-happen. r3 (codex r2 P2): it is checked by the handle's object, against
