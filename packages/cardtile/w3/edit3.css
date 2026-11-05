@@ -1,0 +1,233 @@
+/* The Card editor's own layout (w3/edit3.mjs): the bar, the row of tiles, the sheets' extras, Cards
+   options, the deck preview, the wall, and the overlays. Built on the engine's own pieces: the state
+   is the card's Markdown (card-core); the sheet a pencil opens is cell-form-core's, built from
+   CELL_TYPES, with cell-form-dom's pickers. Loads LAST, after the family editor's stylesheets.
+   One skin: the porch tokens the rest of feelreef wears (w3/porch-tokens.css). */
+:root{
+  --ch:min(62dvh,540px); --cw:calc(var(--ch)*343/480); --gap:52px;
+  --ink:var(--carrier-text); --dim:var(--carrier-text-muted); --line:var(--carrier-border); --accent:var(--carrier-accent);
+  --glass:color-mix(in srgb,#fff 62%,transparent);
+}
+*{box-sizing:border-box}
+html,body{margin:0!important;height:100%!important;overflow:hidden;background:var(--porch-ground)!important;background-attachment:fixed!important;color:var(--ink);font-family:var(--font-body)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ── the bar ── */
+header{position:relative;z-index:5;height:60px;display:flex;align-items:center;gap:10px;padding:0 max(16px,env(safe-area-inset-left))}
+/* the module lockup (the same lockup as feelreef's own): the coral on its disc, then the word. Two dresses, picked by
+   the GROUND under the bar, never by the OS — this bar is porch-ground in both schemes (porch-tokens.css: one
+   look), and a lockup that repaints by OS scheme repaints on a ground it never sees (BrandLockup, 2026-09-01).
+   light: growth coral on a white disc + the growth word. dark (data-ground="dark"): deep-sea disc + coral sunset.
+   The word's stops are fixed lengths measured on the "feelreef" wordmark (0 / 1.625em / 3.83em), so a short
+   word shows the start of the band; the padding is Young Serif's tail-f overhang (app.css --wordmark-tail-overhang). */
+.lockup{--lk:32px;display:flex;align-items:center;gap:calc(var(--lk) / 3);text-decoration:none;min-width:0;white-space:nowrap}
+.lk-mark{width:var(--lk);height:var(--lk);flex:0 0 auto}
+.lk-disc{fill:#fff}
+.lk-coral{stroke:url(#lk-grow)}
+.lockup b{font:400 calc(var(--lk) * 2 / 3)/1.1 var(--font-display);letter-spacing:-.01em;color:transparent;-webkit-background-clip:text;background-clip:text;
+  background-image:linear-gradient(90deg,#0e5e6b 0,#2b8f9c 1.625em,#f08a68 3.83em);padding-right:.2em;margin-right:-.2em}
+.lockup[data-ground="dark"] .lk-disc{fill:url(#lk-deep)}
+.lockup[data-ground="dark"] .lk-coral{stroke:url(#lk-sun)}
+.lockup[data-ground="dark"] b{background-image:linear-gradient(90deg,#f2795c 0,#ff9e6f 1.84em,#ffc48a 3.83em)}
+/* Lead on dark (reef#2908): the lead badge keeps its white disc, the word turns white — where the coral must read the same on every ground */
+.lockup[data-ground="dark"][data-dress="lead"] .lk-disc{fill:#fff}
+.lockup[data-ground="dark"][data-dress="lead"] .lk-coral{stroke:url(#lk-grow)}
+.lockup[data-ground="dark"][data-dress="lead"] b{background:none;color:#fff}
+header h1{margin:0;font:400 1.15rem/1.2 var(--font-display);color:var(--carrier-heading);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.icon-btn{flex:0 0 auto;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);background:var(--btn-surface);color:var(--ink);display:grid;place-items:center;cursor:pointer}
+.icon-btn:hover{border-color:var(--btn-border-hover);color:var(--carrier-link)}
+.icon-btn svg{width:18px;height:18px}
+#cardset{margin-left:auto}
+.modes button[hidden]{display:none}
+#preview{position:relative}
+.fab{position:absolute;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:6;display:flex;align-items:center;gap:8px;height:44px;padding:0 18px 0 14px;border-radius:999px;border:0;background:var(--accent);color:var(--carrier-accent-ink);font-weight:800;box-shadow:var(--carrier-shadow);cursor:pointer}
+.fab svg{width:16px;height:16px}
+.printed{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:18px;text-align:center;background:color-mix(in srgb,#fff 70%,transparent);cursor:default}
+.printed .bc-name{font:400 1.1rem/1.2 var(--font-display);color:var(--carrier-heading)}
+.printed .bc-qr{width:38%;aspect-ratio:1;border-radius:10px;background:repeating-conic-gradient(var(--carrier-heading) 0 25%,transparent 0 50%) 0 0/18% 18%;opacity:.55}
+.printed .pill{display:inline-flex;gap:6px;align-items:center;padding:8px 14px;border-radius:999px;background:var(--accent);color:var(--carrier-accent-ink);font-weight:800;font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.printed small{font-size:11.5px;color:var(--dim);line-height:1.4}
+.printed .ctw-btn{font-size:12px;padding:6px 12px}
+.slot-foot{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap;min-height:34px}
+.turnbtn,.sidebtn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1.5px solid var(--line);background:var(--btn-surface);color:var(--dim);font-size:12px;font-weight:800;cursor:pointer}
+.turnbtn:hover,.sidebtn:hover{border-color:var(--accent);color:var(--accent)}
+.turnbtn svg{width:14px;height:14px}
+.turnbtn.has{border-color:color-mix(in srgb,var(--accent) 55%,transparent);color:var(--accent)}
+.turnbtn.has::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.card.turning{animation:turn .32s ease}
+@keyframes turn{50%{transform:scaleX(.02)}}
+.optrow{display:grid;gap:6px;margin:0 0 16px}
+.optrow>span{font-weight:700;color:var(--carrier-heading)}
+.optrow p{margin:0;font-size:13px;color:var(--dim)}
+.card .dflt-tag{position:absolute;top:14px;left:14px;z-index:2;padding:4px 10px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:11.5px;font-weight:800;color:var(--dim);pointer-events:none}
+.card .dflt{position:absolute;left:50%;bottom:12px;translate:-50% 0;z-index:2;font-size:12px;padding:6px 12px;white-space:nowrap}
+.optrow .bc-mini{--cw:150px;--ch:210px;justify-self:start;cursor:default}
+.optrow .ctw-btn{justify-self:start;font-size:12px;padding:6px 12px}
+.optrow input{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.optsec{border-top:1px solid var(--line);margin-top:26px;padding-top:20px}
+.optsec:first-child{border-top:0;margin-top:0;padding-top:0}
+.optsec>h3{margin:0 0 14px;font-size:17px;font-weight:800;color:var(--carrier-heading)}
+.optsec .optrow>span,.optsec .ctw-field>span,.optsec .views>span{font-size:14px}
+.optsec>:last-child{margin-bottom:0}
+.optsec .ctw-field{margin-bottom:16px}
+.optrow .seg-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.optrow .addr{font-weight:700;color:var(--carrier-heading);overflow-wrap:anywhere}
+.optrow .addr small{font-weight:600;color:var(--dim)}
+.hd-change{display:grid;gap:8px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--btn-surface)}
+.hd-change label{display:grid;gap:4px;font-size:13px;font-weight:700;color:var(--dim)}
+.hd-change .warn{margin:0;font-size:13px;color:var(--carrier-heading)}
+.hd-change .err{margin:0;font-size:12.5px;color:#b3261e}
+.hd-change .acts{display:flex;gap:8px}
+.optrow .ctw-btn[disabled]{opacity:.45;cursor:default}
+.optlast{margin-top:30px}
+.modes{flex:0 0 auto;display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--btn-surface)}
+.modes button{border:0;background:none;padding:6px 14px;border-radius:999px;cursor:pointer;font-weight:700;color:var(--dim)}
+.modes button:hover:not([aria-pressed=true]){color:var(--ink);background:var(--btn-ghost-hover)}
+.modes button[aria-pressed=true]{background:var(--accent);color:var(--carrier-accent-ink)}
+
+/* the page is one column: the sandbox banner (when there is one), the bar, and the pane, which takes
+   what is left — the same height as 100dvh minus the bar when there is no banner */
+body{display:flex!important;flex-direction:column;height:100dvh!important}
+header{flex:0 0 60px}
+main{flex:1 1 auto;min-height:0}
+.sbx{flex:0 0 auto;display:flex;flex-wrap:nowrap;justify-content:flex-start;align-items:center;gap:8px;padding:4px max(12px,env(safe-area-inset-left));font-size:13px}
+.sbx[hidden]{display:none}
+#sandbox-banner-text,#sandbox-banner-status{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sbx .ctw-btn{min-height:36px;padding:4px 14px;font-size:13px}
+@media (max-width:600px){ .sbx .ctw-btn{padding:4px 10px;font-size:12px} .ctw-host-status{max-width:16ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} }
+main[hidden]{display:none!important}   /* #edit/#layout set display by id, which outranks [hidden] */
+
+/* ── the row: every tile in order, scrolled sideways. No scrollbar: the row says it goes on by fading at the edge,
+   and a mouse wheel turns into sideways scroll (see wireRow). ── */
+#edit{display:flex;flex-direction:column;justify-content:center}
+.row{display:flex;align-items:flex-start;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:12px 40px 28px;overscroll-behavior-x:contain}
+.row::-webkit-scrollbar{display:none}
+.row.more-l{-webkit-mask-image:linear-gradient(90deg,transparent,#000 56px);mask-image:linear-gradient(90deg,transparent,#000 56px)}
+.row.more-r{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 56px),transparent)}
+.row.more-l.more-r{-webkit-mask-image:linear-gradient(90deg,transparent,#000 56px,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(90deg,transparent,#000 56px,#000 calc(100% - 56px),transparent)}
+@media (hover:none){.row{scroll-snap-type:x proximity}.slot{scroll-snap-align:center}}
+.slot{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:10px}
+.num{font:700 13px/1 var(--font-body);color:var(--dim);height:18px;font-variant-numeric:tabular-nums}
+/* a pair is ONE tile: the frame holds its number and both faces, and is drawn behind them without
+   taking any room, so a paired tile sits exactly where a single one would */
+.pair{display:flex;align-items:center}
+.slot.paired{position:relative;isolation:isolate}
+.slot.paired::before{content:"";position:absolute;inset:-6px -12px -8px;z-index:-1;border:2px solid color-mix(in srgb,var(--accent) 55%,transparent);border-radius:calc(var(--cw)*.09);background:color-mix(in srgb,var(--accent) 5%,transparent);pointer-events:none}
+.gapbtn{position:relative}
+.ins{position:absolute;left:50%;top:calc(50% + 32px);transform:translateX(-50%);width:28px;height:28px;border-radius:999px;border:1.5px dashed color-mix(in srgb,var(--accent) 45%,transparent);background:var(--btn-surface);color:var(--accent);display:grid;place-items:center;cursor:pointer;opacity:.7}
+.ins:hover,.ins:focus-visible{opacity:1;border-style:solid;border-color:var(--accent)}
+.ins::after{content:"";position:absolute;inset:-6px}
+.ins svg{width:14px;height:14px}
+.prose-ed{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:200px;display:flex;flex-direction:column;background:#fff}
+.prose-ed:focus-within{border-color:var(--accent)}
+#modal-save:disabled{opacity:.4;cursor:default;filter:none}
+.side{display:flex;flex-direction:column;align-items:center;gap:6px}
+.side small{font-size:12px;font-weight:700;color:var(--dim)}
+.card{position:relative;width:var(--cw);height:var(--ch);border-radius:calc(var(--cw)*.07);overflow:hidden;background:transparent;box-shadow:var(--carrier-shadow);cursor:zoom-in}
+.card iframe{position:absolute;top:0;left:0;width:390px;height:546px;opacity:0;transition:opacity .15s;border:0;transform-origin:0 0;pointer-events:none}
+.pen{position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:999px;border:1px solid var(--line);display:grid;place-items:center;background:var(--glass);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:var(--ink);cursor:pointer;z-index:2}
+.pen:hover{color:var(--carrier-link);border-color:var(--btn-border-hover)}
+.pen::after{content:"";position:absolute;inset:-6px}
+.pen svg{width:15px;height:15px}
+.note{position:absolute;inset:auto 10px 10px 10px;padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:var(--glass);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:12px;font-weight:700;text-align:center;cursor:pointer;z-index:2}
+.new{width:var(--cw);height:var(--ch);border:2px dashed color-mix(in srgb,var(--accent) 35%,transparent);border-radius:calc(var(--cw)*.07);background:color-mix(in srgb,#fff 35%,transparent);display:grid;place-items:center;cursor:pointer;color:var(--accent)}
+.new:hover{border-color:var(--accent);background:color-mix(in srgb,#fff 60%,transparent)}
+.new svg{width:40px;height:40px}
+.gapbtn{flex:0 0 auto;width:var(--gap);align-self:stretch;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding-top:28px;position:relative}
+.pair .gapbtn{padding-top:0;width:52px}
+.chain,.swap{position:relative;width:36px;height:36px;border-radius:999px;display:grid;place-items:center;cursor:pointer}
+.chain{border:1.5px solid var(--line);background:var(--btn-surface);color:var(--dim)}
+.chain:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.chain.on{background:var(--accent);border-color:var(--accent);color:var(--carrier-accent-ink)}
+.chain:disabled{opacity:.45;cursor:default}
+.swap{border:1.5px solid color-mix(in srgb,var(--accent) 45%,transparent);background:var(--btn-surface);color:var(--accent)}
+.swap:hover{background:var(--accent);color:var(--carrier-accent-ink)}
+.chain::after,.swap::after{content:"";position:absolute;inset:-5px}
+.chain svg,.swap svg{width:16px;height:16px}
+.empty-hint{margin:0;color:var(--dim);font-weight:700}
+
+/* ── overlays: ONE way out, the same frosted button at the top left the deck uses ── */
+.glass-close{position:fixed;top:max(16px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left));z-index:60;width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);background:var(--glass);color:var(--accent);display:grid;place-items:center;cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.glass-close:hover{background:color-mix(in srgb,var(--accent) 14%,#fff)}
+.glass-close svg{width:18px;height:18px}
+.glass-close[hidden]{display:none}
+.ctw-modal{z-index:50}
+.ctw-modal-panel{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--accent) 30%,transparent) transparent}
+.ctw-modal-foot{justify-content:space-between}
+#modal-save{margin-left:auto}
+.mdsw{margin:0 0 8px;font-size:12px;padding:5px 12px}
+.ctw-modal-panel h2{margin-left:0!important}   /* the panel has no ✕ of its own to make room for */
+
+/* the card's own views, as three tiles: a view that is off cannot be the one that opens */
+.views{display:grid;gap:8px}
+.views>span{font-weight:700;color:var(--carrier-heading)}
+.vw-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.vw{position:relative;display:grid;justify-items:center;gap:4px;padding:12px 8px 10px;border:1.5px solid var(--line);border-radius:var(--console-radius-sm);background:var(--btn-surface);cursor:pointer;color:var(--dim)}
+.vw b{font:400 1.05rem/1 var(--font-display);color:var(--carrier-heading)}
+.vw small{font-size:11.5px}
+.vw[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,#fff);color:var(--ink)}
+.vw[aria-pressed=false] b{color:var(--dim)}
+.vw:disabled{cursor:default}
+.vw .tick{position:absolute;top:6px;right:6px;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center}
+.vw[aria-pressed=false] .tick svg{display:none}
+.vw[aria-pressed=true] .tick{background:var(--accent);border-color:var(--accent);color:#fff}
+.vw .tick svg{width:11px;height:11px}
+.open-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px}
+.open-row>span{font-size:13px;font-weight:700;color:var(--dim)}
+.side-seg{margin-bottom:14px}
+.open-seg{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--btn-surface)}
+.open-seg button{border:0;background:none;padding:5px 14px;border-radius:999px;cursor:pointer;font-weight:700;color:var(--dim)}
+.open-seg button[aria-pressed=true]{background:var(--accent);color:var(--carrier-accent-ink)}
+.open-seg button[hidden]{display:none}
+
+/* ── a tile up close; a pair turns over ── */
+.zoom{position:fixed;inset:0;z-index:40;background:rgba(12,58,68,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:grid;place-items:center;perspective:1400px}
+.zoom[hidden]{display:none}
+.zoom .flip{position:relative;width:min(390px,calc(100vw - 32px),calc((100dvh - 140px)*343/480));aspect-ratio:343/480;transition:transform .5s cubic-bezier(.3,.7,.2,1);transform-style:preserve-3d;cursor:pointer}
+.zoom .flip.over{transform:rotateY(180deg)}
+.zoom .face{position:absolute;inset:0;border-radius:7%/5%;overflow:hidden;backface-visibility:hidden;box-shadow:0 20px 60px rgba(12,58,68,.25)}
+.zoom .face.back{transform:rotateY(180deg)}
+.zoom .face iframe{pointer-events:none;position:absolute;top:0;left:0;width:390px;height:546px;border:0;transform-origin:0 0;opacity:0;transition:opacity .15s}
+.turn svg{width:20px;height:20px}
+.turn[hidden]{display:none}
+
+/* ── the deck preview and the wall ── */
+#preview iframe{width:100%;height:100%;border:0;display:block}
+#layout{display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 16px 16px;position:relative}
+/* the wall: the face as a visitor gets it, where tiles are moved and widened */
+#layout iframe{width:min(480px,100%);flex:1;min-height:0;border:1px solid var(--line);border-radius:var(--console-radius);background:#fff;box-shadow:var(--carrier-shadow)}
+.mdline{min-height:20px;font-size:13px;font-weight:700;color:var(--dim)}
+.mdline.bad{color:var(--carrier-feedback-error)}
+
+/* a deleted tile can come back: one line at the bottom, for a few seconds */
+.toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));translate:-50% 0;z-index:70;display:flex;align-items:center;gap:14px;padding:10px 10px 10px 18px;border-radius:999px;background:var(--carrier-heading);color:#fff;font-weight:700;font-size:14px;box-shadow:var(--carrier-shadow)}
+.toast button{border:0;border-radius:999px;padding:6px 14px;background:#fff;color:var(--carrier-heading);font-weight:800;cursor:pointer}
+.toast[hidden]{display:none}
+
+/* phone: two-and-a-bit tiles per screen; the controls keep their size, the tiles shrink */
+@media (max-width:600px){
+  :root{--cw:37vw;--ch:calc(var(--cw)*480/343);--gap:38px}
+  .row{padding:12px 16px 24px}
+  header{gap:6px;padding:0 12px}
+  .modes button{padding:6px 10px}
+  .pair .gapbtn{width:44px}
+}
+@media (max-width:420px){ .lockup b{display:none} .hd-main{padding:0 12px} }
+.hd-main{flex:0 0 auto;position:relative;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 16px 0 12px;border-radius:999px;border:0;background:var(--accent);color:var(--carrier-accent-ink);font:inherit;font-weight:800;cursor:pointer}
+.hd-main svg{width:16px;height:16px}
+.hd-main[disabled]{opacity:.45;cursor:default}
+.hd-main .dot{position:absolute;top:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:#ff8a68;box-shadow:0 0 0 2px var(--btn-surface)}
+/* the magnifier sits under the sheets (z 50): on a phone it was over the sheet's Done button */
+.seek{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:45;width:52px;height:52px;border-radius:50%;border:0;background:var(--accent);color:var(--carrier-accent-ink);box-shadow:var(--carrier-shadow);display:grid;place-items:center;cursor:pointer}
+.seek svg{width:22px;height:22px}
+.pal{position:fixed;inset:0;z-index:80;display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px;background:rgb(8 40 48 / .28)}
+.pal[hidden]{display:none}
+.pal-box{width:min(560px,100%);border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--carrier-shadow);overflow:hidden}
+.pal input{display:block;width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:16px 18px;border:0;border-bottom:1px solid var(--line);outline:none;background:transparent}
+.pal-say,.pal-ans{margin:0;padding:12px 18px;font-size:14px;line-height:1.5;color:var(--dim)}
+.pal-ans{padding-top:0;color:var(--carrier-heading)}
+.optrow .bk-acts{display:flex;gap:8px;flex-wrap:wrap}
+.optrow input[type=color]{width:48px;height:36px;padding:2px;border-radius:10px;cursor:pointer}
+/* host mode before the parent has handed a card over: nothing to look at, nothing to press */
+body[data-host-waiting] main{visibility:hidden}

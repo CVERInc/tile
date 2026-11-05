@@ -17,7 +17,6 @@ import { parseCard, serializeCard, setTitle, normalizeCell, cellToRaw } from '..
 import { renderCardHTML } from '../serve/card-worker.mjs';
 import { cellStrings } from './cell-i18n.mjs';
 import { LOCALE_KEYS } from './sandbox-i18n.mjs';
-import { drawerLinks } from '../w2/board-bridge.mjs';
 
 const card = (...cells) => ['---', 'card-page: try', 'title: 小美', 'lang: zh-TW', '---', '',
   '## cards', '', ...cells].join('\n') + '\n';
@@ -286,7 +285,7 @@ test('a change made in the raw text reaches the card, and only what was changed'
   assert.match(live(edited), /different words/);
 });
 
-// ── 「＋加一張牌」 (/try/edit2's one-row icon picker) ─────────────────────────────────────────────
+// ── the Card editor's one-row "add a tile" picker ─────────────────────────────────────────
 //
 // The picker offers the SEVEN types and nothing else, and pressing one puts a tile on the card. What
 // is asserted here is the step between those two facts: the type a person pressed becomes a
@@ -335,23 +334,3 @@ test('🔴 a blank tile carries the words of the locale it was added in, in all 
   assert.notEqual(zh, en, 'CONTROL: two locales gave the same blank — the resolution is not happening');
 });
 
-test('the drawer a tile opens is discovered from the cell, not from where it sits', () => {
-  // 🔴 The 牽線 `/try/edit2` draws is only as honest as this: it must read what the CELL says. A
-  // discovery that keyed off lane position would draw a line for a tile that happens to sit next to
-  // a drawer, and none for the one that actually opens it.
-  const md = card(
-    '- [ ] %% card: link w=6 %% [About](#about)',
-    '- [ ] %% card: link w=6 %% [Elsewhere](https://example.com/)',
-    '',
-    '## drawer: about | About', '',
-    '- [ ] %% card: text %% inside',
-  );
-  const model = parseCard(md);
-  const { links, dangling } = drawerLinks(model, { faceLabel: 'F' });
-  assert.deepEqual(links.map((l) => l.drawerId), ['about']);
-  assert.equal(links[0].fromLane, 'face:0', 'the opener was not located on the face');
-  assert.equal(links[0].drawerLane, 'drawer:about');
-  assert.deepEqual(dangling, []);
-  // CONTROL: the second tile sits in the same lane and opens nothing
-  assert.equal(links.length, 1, 'a plain external link was counted as a 牽線');
-});

@@ -414,7 +414,7 @@ export const CELL_STRINGS_BY_KEY = {
   },
 
   // ── the embed tile: the author's own HTML (reef#2725) ───────────────────────────────────────────
-  // 🔴 The ban list (w2/banned-words.mjs) forbids iframe / sandbox / srcdoc on screen, so the walled
+  // 🔴 The ban list (w3/banned-words.mjs) forbids iframe / sandbox / srcdoc on screen, so the walled
   // box is said in plain words. "HTML" is the name of what they paste, like "Markdown" names the file.
   'type.embed.title': {
     zh: '嵌入', ja: '埋め込み', en: 'Embed', ko: '임베드', 'zh-Hans': '嵌入',

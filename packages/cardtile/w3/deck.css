@@ -1,0 +1,591 @@
+/* deck.css — the Card page as a deck (stack / list / wall); deck.js adds the classes these rules key on.
+   ---- one stack on the table; every card flips; flip = open (veil + close) ---- */
+html.deck{overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;scrollbar-gutter:stable}   /* no overscroll-behavior: with it, WebKit swallows the wheel over empty areas (body) instead of scrolling the deck */
+html.deck.open,html.deck.fan{overflow:hidden}
+html.deck body{margin:0;overflow:visible}   /* the site CSS makes body its own (empty) scroll container; WebKit then swallows the wheel over empty areas instead of chaining to html */
+html.deck .deck-rail{position:relative;z-index:0;pointer-events:none}
+html.deck .deck-snap{height:100vh;height:100dvh;scroll-snap-align:start;scroll-snap-stop:normal}
+html.deck body,html.deck main.st-wrap,html.deck .st-card,html.deck .st-cells-wrap,html.deck .st-grid{margin:0;padding:0;gap:0}
+html.deck .st-grid > *:not(.st-cells-wrap){display:none}
+html.deck main.st-wrap{max-width:none}
+html.deck .st-card{background:transparent;box-shadow:none;border:0;max-width:none}
+html.deck .st-cells{display:block}
+html.deck .dc-drawer-layer{display:none}
+html.deck footer.st-footer{position:fixed;left:0;right:0;bottom:0;z-index:5;margin:0;padding:0 16px calc(env(safe-area-inset-bottom) + 14px);pointer-events:auto}
+html.deck.open footer.st-footer{opacity:0;transition:opacity .25s}
+
+/* table + veil */
+html.deck .deck-veil{position:fixed;inset:0;z-index:9;cursor:pointer;background:color-mix(in srgb,var(--cp-ground) 55%,transparent);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);opacity:0;visibility:hidden;transition:opacity .35s,visibility 0s .35s}
+html.deck.open .deck-veil{opacity:1;visibility:visible;transition:opacity .35s,visibility 0s 0s}
+html.deck .deck-table{position:fixed;inset:0;display:grid;place-items:center;padding:calc(env(safe-area-inset-top) + 56px) 16px calc(env(safe-area-inset-bottom) + 52px);perspective:1400px;pointer-events:none;z-index:10}
+html.deck{-webkit-text-size-adjust:100%;text-size-adjust:100%}   /* iOS inflates small text in wide blocks (the footer) unless told not to */
+html.deck .deck-stack{position:relative;width:min(88vw,calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 56px - 52px) * 3 / 4.2));aspect-ratio:3/4.2}
+/* the card is designed at 342px wide; on any other width the faces zoom so the content fits (landscape phone = 59%) */
+html.deck .deck-face > *{zoom:var(--deck-k,1)}
+html.deck .deck-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .5s cubic-bezier(.45,0,.55,1),opacity .4s,visibility 0s 0s;will-change:transform;pointer-events:auto;visibility:visible}
+html.deck .deck-face{position:absolute;inset:0;border-radius:28px;background:var(--cp-ground);border:1px solid var(--cp-line);backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;display:flex;flex-direction:column}
+html.deck .deck-front{transform:rotateY(0deg) translateZ(1px);padding:10px}
+html.deck .deck-back{transform:rotateY(180deg) translateZ(1px)}
+html.deck .deck-back-scroll{height:100%;overflow:auto;padding:26px 24px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+html.deck .deck-card.flipped{transform:rotateY(180deg) translateZ(2px)}
+html.deck .deck-card.flipping-open{animation:deck-pick .62s linear both;transition:none}
+html.deck .deck-card.flipping-close{animation:deck-put .56s linear forwards;transition:none}
+@keyframes deck-pick{0%{transform:rotateY(0) translateZ(0)}18%{transform:rotateY(22deg) translateZ(90px) translateY(-10px) rotateZ(-2deg)}50%{transform:rotateY(90deg) translateZ(150px) translateY(-18px) rotateZ(-2.5deg)}82%{transform:rotateY(162deg) translateZ(70px) translateY(-8px) rotateZ(1deg)}100%{transform:rotateY(180deg) translateZ(2px)}}
+@keyframes deck-put{0%{transform:rotateY(180deg) translateZ(2px)}18%{transform:rotateY(158deg) translateZ(90px) translateY(-10px) rotateZ(2deg)}50%{transform:rotateY(90deg) translateZ(150px) translateY(-18px) rotateZ(2.5deg)}82%{transform:rotateY(18deg) translateZ(70px) translateY(-8px) rotateZ(-1deg)}100%{transform:rotateY(0) translateZ(0)}}
+html.deck .flipping-open .deck-front{animation:deck-face-off .62s step-end both}
+html.deck .flipping-open .deck-back{animation:deck-face-on .62s step-end both}
+html.deck .flipping-close .deck-front{animation:deck-face-on .56s step-end both}
+html.deck .flipping-close .deck-back{animation:deck-face-off .56s step-end both}
+@keyframes deck-face-off{0%{visibility:visible}50%{visibility:hidden}100%{visibility:hidden}}
+@keyframes deck-face-on{0%{visibility:hidden}50%{visibility:visible}100%{visibility:visible}}
+/* faces swap at the half-turn (WebKit ignores backface-visibility inside this stack) */
+html.deck .deck-face{transition:visibility 0s linear .25s}
+html.deck .deck-back{visibility:hidden}
+html.deck .deck-card.flipped .deck-back{visibility:visible}
+html.deck .deck-card.flipped .deck-front{visibility:hidden}
+/* positions in the stack */
+html.deck .deck-card.is-top{transform:translateY(var(--peek,0px))}
+html.deck .deck-card.is-top.flipped{transform:rotateY(180deg) translateZ(2px)}
+html.deck .deck-card.is-next1{transform:translateY(8px) rotate(-2.5deg) scale(.985);pointer-events:none}
+html.deck .deck-card.is-next2{transform:translateY(16px) rotate(2deg) scale(.97);pointer-events:none}
+html.deck .deck-card.is-deep{transform:translateY(16px) rotate(2deg) scale(.95);opacity:0;pointer-events:none;visibility:hidden;transition:transform .5s cubic-bezier(.45,0,.55,1),opacity .4s,visibility 0s .4s}
+html.deck .deck-card.is-past{transform:translateY(-140%) rotate(-8deg);opacity:0;pointer-events:none;visibility:hidden;transition:transform .42s cubic-bezier(.45,0,.55,1),opacity .42s,visibility 0s .42s}
+/* depth of field: the held card is in focus, the rest of the pile falls out of focus with the table */
+/* the blur lives on the 2D content inside each face, not on the 3D card itself (Safari drops filters on
+   preserve-3d participants when a sibling's animation ends — the pile snapped back into focus) */
+/* shade: a 2D veil inside each face (no filter on 3D participants, Safari drops those), covers mat + content alike */
+html.deck.open .deck-card:not(.is-top){pointer-events:none}
+/* the layout switch belongs to the table: out of focus while a card is held */
+html.deck .deck-seg{transition:filter .45s,opacity .45s}
+html.deck.open .deck-seg{filter:blur(4px) brightness(.6);opacity:.5;pointer-events:none}
+html.deck .deck-stack.busy .deck-card{pointer-events:none}
+/* whole-card hover only on the top card, only when it can do something */
+html.deck .deck-card.is-top.can-flip{cursor:pointer}
+html.deck.open .deck-card.is-top{cursor:pointer}
+/* desktop: hovering the pile keeps the top card still; the next card peeks out to the right, the previous to the left. Each peek is a button. */
+@media (hover:hover){
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-next1{transform:translate(34px,8px) rotate(2deg) scale(.985)}
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-prev1{transform:translate(-34px,8px) rotate(-2deg) scale(.985);visibility:visible;opacity:1;transition:transform .5s cubic-bezier(.45,0,.55,1),opacity .4s,visibility 0s 0s}   /* fade in now; the deep rule's delayed visibility would pop it in late */
+}
+html.deck:not(.open):not(.fan) .deck-stack:hover .deck-edge{opacity:1}
+}
+html.deck .st-gal-cell:hover .st-gal-img,html.deck .st-gal-cell-bare:hover .st-gal-img{transform:none}
+html.deck .st-gal-cell:hover{transform:none;border-color:var(--cp-line);background:inherit;box-shadow:none}
+/* cell fills the front face */
+html.deck .deck-front > .st-cell{flex:1;margin:0;width:100%;min-height:0;border-radius:18px}
+html.deck .deck-front > .st-gal-cell .st-gal-link{width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none}
+html.deck .deck-front > .st-gal-cell .st-gal-img{width:100%;height:100%;object-fit:contain;display:block;transform:none}
+html.deck .deck-front > .st-hero{padding:28px 24px;justify-content:center;gap:22px;display:flex;flex-direction:column;align-items:center;text-align:center}
+html.deck .deck-front > .st-hero .st-figure,html.deck .deck-front > .st-hero #qr-holder{position:relative;width:140px;height:140px;margin:0 auto;flex:0 0 auto}
+html.deck .deck-front > .st-hero .cp-icon{width:140px;height:140px}
+html.deck .deck-front > .st-hero .st-hero-text{margin:0}
+html.deck .deck-front > .st-social{display:flex;flex-direction:column;justify-content:center;gap:14px;padding:28px}
+html.deck .deck-front > .st-social .st-social-btn{width:100%;justify-content:flex-start;gap:14px;padding:14px 18px;border-radius:14px;font-size:17px}
+html.deck .deck-front > .st-social .st-social-btn::after{content:attr(aria-label);font:500 17px -apple-system,"PingFang TC",system-ui,sans-serif;color:inherit}
+html.deck .deck-front > .st-social .st-social-btn svg{width:26px;height:26px;flex:0 0 auto}
+/* video: 16:9 thumbnail contained in the portrait card, title below; tap = player */
+html.deck .deck-front > .st-embed-video{display:flex;align-items:center;justify-content:center;padding:18px;aspect-ratio:auto;background:transparent}
+html.deck .deck-front > .st-embed-video .st-embed-video-btn{display:grid;grid-template-rows:auto auto;gap:14px;width:100%;height:auto;background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;position:static;overflow:visible}
+html.deck .deck-front > .st-embed-video .st-embed-video-poster{grid-area:1/1;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:14px;display:block;position:static}
+html.deck .deck-front > .st-embed-video .st-embed-video-play{grid-area:1/1;place-self:center;position:static;transform:none;inset:auto}
+html.deck .deck-front > .st-embed-video .st-embed-video-label{grid-area:2/1;position:static;background:none;text-shadow:none;color:var(--cp-ink);font:600 16px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif;text-align:center;padding:0}
+html.deck .deck-player{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--cp-ground) 70%,transparent);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+html.deck .deck-player iframe{width:min(96vw,calc(80vh * 16 / 9));aspect-ratio:16/9;border:0;border-radius:14px;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)}
+/* backs */
+html.deck .deck-back .dc-drawer-title{font-size:18px;margin:0 0 12px}
+html.deck .deck-back .st-card{box-shadow:none;border:0;padding:0;background:transparent}
+html.deck .deck-back .st-cells{display:block}
+html.deck .deck-back .st-cell{border:0;box-shadow:none;padding:0;margin:0 0 14px;font-size:14px}
+html.deck .deck-bcard{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-bcard img.av{width:72px;height:72px;cursor:pointer;border-radius:50%;object-fit:cover;border:2px solid var(--cp-line-hi)}
+html.deck .deck-bcard .nm{font-size:20px;font-weight:700}
+html.deck .deck-bcard .hd{color:var(--cp-accent-bright);font-weight:600}
+html.deck .deck-go{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;font:15px/1.55 -apple-system,"PingFang TC",system-ui,sans-serif;padding:8px}
+html.deck .deck-go a.btn{display:inline-flex;align-items:center;gap:8px;max-width:100%;background:var(--cp-accent);color:#fff;text-decoration:none;border-radius:999px;padding:12px 22px;font:600 15px/1.4 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere;text-align:center}
+html.deck .deck-go a.btn .arr{flex:none}
+/* chrome */
+html.deck .deck-bar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);pointer-events:none}
+html.deck .deck-bar > *{pointer-events:auto}
+html.deck .deck-close{display:none;position:fixed;top:1rem;left:1rem;z-index:402;width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);background:color-mix(in srgb,var(--cp-ground) 66%,transparent);color:var(--cp-accent);font-size:1.2rem;line-height:1;cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);transition:background .2s}
+html.deck .deck-close:hover{background:color-mix(in srgb,var(--cp-accent) 20%,transparent)}
+html.deck.open .deck-close{display:inline-flex}
+.deck-seg{display:inline-flex;border:1px solid var(--cp-line-hi,rgba(0,0,0,.2));border-radius:999px;overflow:hidden;background:var(--cp-surface,#fff)}
+.deck-seg button{border:0;background:transparent;color:var(--cp-muted,#666);width:40px;height:34px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.deck-seg button[aria-pressed="true"]{background:var(--cp-accent,#0556ff);color:#fff}
+.deck-seg svg{width:18px;height:18px}
+html:not(.deck) .deck-seg{position:fixed;top:12px;right:12px;z-index:50}
+@media (min-width:900px){html.deck .deck-bar{padding:18px 24px}}
+@media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-seg){transition:none!important;animation:none!important}}
+
+/* deal-in: the pile lands on the table once; the top card settles last */
+html.deck .deck-stack.dealing .deck-card{transition:none;transform:translateY(60vh);opacity:0}
+html.deck .deck-stack.dealt .deck-card{transition:transform .55s cubic-bezier(.2,.9,.3,1.05),opacity .35s}
+
+html.deck .deck-bcard .qr{position:relative;width:min(62%,220px);aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--cp-ground)}
+html.deck .deck-bcard .qr .qr-grid{width:100%!important;height:100%!important}
+html.deck .deck-bcard .qr .qr-av{position:absolute;left:50%;top:50%;width:22%;height:22%;transform:translate(-50%,-50%);border-radius:50%;object-fit:cover;border:3px solid var(--cp-ground);background:var(--cp-ground)}
+html.deck .deck-bcard .url{font-size:13px;color:var(--cp-muted);letter-spacing:.03em}
+
+/* edge-colour mat: the face behind a flat tile takes the tile's own edge colour */
+html.deck .deck-front.has-mat{background:var(--deck-mat)}
+
+/* the film: lies between the held card (z=2px at rest, higher in flight) and the pile (z=0) */
+html.deck .deck-shade{position:absolute;inset:-300%;transform:translateZ(.5px);background:color-mix(in srgb,var(--cp-ground) 62%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);opacity:0;visibility:hidden;transition:opacity .45s,visibility 0s .45s;pointer-events:none}
+html.deck.open .deck-shade{opacity:1;visibility:visible;transition:opacity .45s,visibility 0s 0s}
+
+/* the ground shadow: lies on the table under the held card; narrows as the card turns edge-on, grows and softens as it lifts */
+html.deck .deck-gshadow{position:absolute;inset:0;transform:translateZ(-.25px) translateY(22px);border-radius:28px;background:rgba(0,0,0,.5);filter:blur(30px);opacity:.4;pointer-events:none}   /* a dim on the table, not an object: lighter, softer, closer */
+
+/* reef's own card: front = the mark, like the printer's card at the end of a stack */
+html.deck .deck-reef{flex:1;display:grid;place-items:center;color:var(--cp-accent-bright);border-radius:18px}
+html.deck .deck-reef .mark{padding:6px;line-height:0}
+html.deck .deck-reef .wm{font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:.08em;color:var(--cp-muted)}
+
+html.deck .deck-back:focus{outline:none}
+html.deck.fan .deck-card{transition:transform .32s cubic-bezier(.2,.8,.3,1),opacity .25s,visibility 0s 0s;cursor:pointer}
+html.deck.fan .deck-card.fan-hot{transition-duration:.14s}
+html.deck.fan .deck-gshadow{opacity:0;transition:opacity .2s 0s}
+html.deck .deck-gshadow{transition:opacity .5s 0s}   /* arrives with the cards, not after them */
+html.deck .deck-card.travel{transition:none!important;visibility:visible!important;opacity:1!important;pointer-events:none}
+html.deck .deck-card.to-back-1{animation:deck-to-back-1 .3s cubic-bezier(.3,0,.6,1) both}
+html.deck .deck-card.to-back-2{animation:deck-to-back-2 .36s cubic-bezier(.4,0,.7,1) both}
+html.deck .deck-card.from-back-1{animation:deck-from-back-1 .36s cubic-bezier(.3,0,.6,1) both}
+html.deck .deck-card.from-back-2{animation:deck-from-back-2 .3s cubic-bezier(.3,0,.7,1) both}
+@keyframes deck-to-back-1{0%{transform:none}100%{transform:translateY(-98%) rotate(-4deg) scale(.88)}}
+@keyframes deck-to-back-2{0%{transform:translateY(-98%) rotate(-4deg) scale(.88)}100%{transform:translateY(16px) rotate(2deg) scale(.95)}}
+@keyframes deck-from-back-1{0%{transform:translateY(16px) rotate(2deg) scale(.95)}100%{transform:translateY(-98%) rotate(-4deg) scale(.88)}}
+@keyframes deck-from-back-2{0%{transform:translateY(-98%) rotate(-4deg) scale(.88)}100%{transform:none}}
+html.deck.fan .deck-card.fan-hot{transition-duration:.22s}
+
+/* shadow = height off the layer below. flat: pile and resting fan; lifted: fan-hot and the flip; flight: the two halves grow it then bring it back to flat at landing */
+html.deck{--deck-sh-flat:0 1px 2px rgba(0,0,0,.14);--deck-sh-lift:0 6px 16px rgba(0,0,0,.18);--deck-sh-fly:0 14px 28px rgba(0,0,0,.2)}
+html.deck .deck-face{box-shadow:var(--deck-sh-flat);transition:visibility 0s linear .25s,box-shadow .22s}
+html.deck .deck-card:is(.fan-hot,.flipped,.flipping-open,.flipping-close) .deck-face{box-shadow:var(--deck-sh-lift)}
+html.deck .deck-card.to-back-1 .deck-face{animation:deck-sh-up .3s cubic-bezier(.3,0,.6,1) both}
+html.deck .deck-card.to-back-2 .deck-face{animation:deck-sh-down .36s cubic-bezier(.4,0,.7,1) both}
+html.deck .deck-card.from-back-1 .deck-face{animation:deck-sh-up .36s cubic-bezier(.3,0,.6,1) both}
+html.deck .deck-card.from-back-2 .deck-face{animation:deck-sh-down .3s cubic-bezier(.3,0,.7,1) both}
+@keyframes deck-sh-up{0%{box-shadow:var(--deck-sh-flat)}100%{box-shadow:var(--deck-sh-fly)}}
+@keyframes deck-sh-down{0%{box-shadow:var(--deck-sh-fly)}100%{box-shadow:var(--deck-sh-flat)}}
+
+/* footer links: the quietest zone of the page — no accent, no weight; a faint underline is the only "this is a link" cue */
+footer.st-footer a{color:inherit!important;font-weight:inherit;text-decoration:none}
+footer.st-footer a:hover{color:var(--cp-accent)!important}
+.st-social-btn{text-decoration:none}
+/* the QR coral sizes #qr-holder inline to the 80px icon it found (81px); the deck shows the icon at 140px, so the holder must follow or the icon sits 30px right of centre */
+html.deck .deck-front > .st-hero #qr-holder{width:140px!important;height:140px!important;display:block!important;line-height:0}
+/* iOS: the toolbars collapse while you scroll, the viewport height changes, and a fixed inset:0 + cover backdrop re-fits (jumps) every time. Size it to the LARGE viewport so it never resizes. */
+.st-backdrop{inset:auto;top:0;left:0;width:100%;height:100vh;height:100lvh}
+
+/* ---- reef.cards: our own cards, and the sea they sit on ---- */
+html.deck .deck-ours{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:14px;padding:28px 26px;color:var(--cp-ink)}
+html.deck .deck-ours .mark{padding:0;line-height:0;color:var(--cp-accent)}
+html.deck .deck-ours .mark svg{width:72px;height:72px}
+html.deck .deck-ours h2{font:600 30px/1.15 var(--cp-serif);letter-spacing:.01em;margin:6px 0 0;color:var(--cp-ink)}
+html.deck .deck-ours p{font:16px/1.65 -apple-system,"PingFang TC",system-ui,sans-serif;margin:0;color:var(--cp-muted);max-width:22ch}
+html.deck .deck-ours .brand{font:600 34px/1 var(--cp-serif);letter-spacing:.01em;color:var(--cp-ink)}
+html.deck .deck-home{position:static;display:inline-flex;align-items:center;height:44px;padding:0 16px;border-radius:999px;border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);background:color-mix(in srgb,var(--cp-ground) 66%,transparent);color:var(--cp-accent);text-decoration:none;font:600 14px/1 -apple-system,"PingFang TC",system-ui,sans-serif;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+html[data-reef-home].deck .deck-close,html[data-reef-draw].deck .deck-close{position:static}
+.sea{position:fixed;top:0;left:0;width:100%;height:100vh;height:100lvh;z-index:0;pointer-events:none;background-image:linear-gradient(180deg,#0a1628 0%,#0d2847 25%,#0f3460 50%,#1a5276 75%,#1e6f8e 100%)}
+.sea .bubble{position:absolute;bottom:-20px;border-radius:50%;background:rgba(127,219,202,.12);box-shadow:0 0 6px rgba(127,219,202,.15);animation:sea-rise linear infinite}
+@keyframes sea-rise{0%{transform:translateY(0) scale(1);opacity:.7}100%{transform:translateY(-100vh) scale(.3);opacity:0}}
+
+/* reef.cards home: the cards that demonstrate themselves */
+html.deck .deck-front > .st-cell-tile .st-cell-link{pointer-events:none}
+html.deck .deck-addr .addr{font:600 30px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:-.01em;word-break:break-all}
+html.deck .deck-addr .addr .host{color:var(--cp-muted)}
+html.deck .deck-addr .addr .handle{color:var(--cp-accent)}
+html.deck .deck-front > .st-embed{display:grid;place-items:center;padding:28px}
+html.deck .st-embed .clock{font:600 64px/1 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:.02em;color:var(--cp-ink);font-variant-numeric:tabular-nums}
+html.deck .st-embed p{margin:14px 0 0;color:var(--cp-muted);font:16px/1.6 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-front > .st-cell-tile{display:grid;place-items:center;padding:28px}
+html.deck .deck-front > .st-cell-tile .st-cell-link{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;color:var(--cp-ink);text-decoration:none}
+html.deck .deck-front > .st-cell-tile .st-cell-icon{width:48px;height:48px}
+html.deck .deck-front > .st-cell-tile .st-cell-title{font:600 24px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-front > .st-cell-tile .st-cell-sub{color:var(--cp-muted);font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-front > .st-prose{display:flex;flex-direction:column;justify-content:center;padding:28px 30px;color:var(--cp-ink)}
+html.deck .deck-front > .st-prose h5{font:600 24px/1.25 var(--cp-serif);margin:0 0 10px}
+html.deck .deck-front > .st-prose p{font:16px/1.65 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted);margin:0}
+
+/* flip clock (embed demo) */
+html.deck .flipclock{display:flex;align-items:center;justify-content:center;gap:6px}
+html.deck .fc-group{display:flex;gap:4px}
+html.deck .fc-sep{font:800 34px/1 -apple-system,system-ui,sans-serif;color:var(--cp-muted);padding:0 2px;transform:translateY(-3px)}
+html.deck .fc-digit{--h:64px;position:relative;width:40px;height:var(--h);perspective:220px;border-radius:7px;background:#0b1a33;overflow:hidden;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+html.deck .fc-half,html.deck .fc-flap{position:absolute;left:0;width:100%;height:50%;overflow:hidden;background:#17305a}
+html.deck .fc-half span,html.deck .fc-flap span{position:absolute;left:0;width:100%;height:var(--h);display:flex;align-items:center;justify-content:center;font:800 36px/1 -apple-system,"Helvetica Neue",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+html.deck .fc-top,html.deck .fc-front{top:0;border-bottom:1px solid #07122a}
+html.deck .fc-top span,html.deck .fc-front span{top:0}
+html.deck .fc-bottom,html.deck .fc-back{bottom:0;background:#122a50}
+html.deck .fc-bottom span,html.deck .fc-back span{bottom:0}
+html.deck .fc-flap{z-index:3;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+html.deck .fc-front{transform-origin:bottom}
+html.deck .fc-back{transform-origin:top;transform:rotateX(90deg)}
+html.deck .fc-digit.fc-anim .fc-front{animation:fc-down .22s ease-in forwards}
+html.deck .fc-digit.fc-anim .fc-back{animation:fc-up .22s .22s ease-out forwards}
+@keyframes fc-down{to{transform:rotateX(-90deg);filter:brightness(.65)}}
+@keyframes fc-up{to{transform:rotateX(0deg)}}
+/* feature with heading + button over the picture */
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) .st-gal-link{position:relative;width:100%;height:100%;display:block;pointer-events:none}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img{width:100%;height:100%;object-fit:cover;border-radius:0}
+html.deck .st-gal-over{position:absolute;left:0;right:0;bottom:0;padding:26px 24px 28px;background:linear-gradient(180deg,transparent,rgba(5,15,35,.85));color:#fff;display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+html.deck .st-gal-title{font:600 26px/1.2 var(--cp-serif)}
+html.deck .st-gal-cta{display:inline-block;padding:10px 18px;border-radius:999px;background:var(--cp-accent);color:#fff;font:600 14px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare){padding:0;overflow:hidden}
+html.deck .deck-front > .st-embed{align-content:center;justify-items:center;gap:22px}
+html.deck .st-embed p{margin:0}
+
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img{object-position:center bottom}
+html.deck .deck-front > .st-slides{padding:28px;display:grid;place-items:center}
+html.deck .deck-front > .st-slides .st-carousel{width:min(100%,260px)}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare){display:block;position:relative}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) .st-gal-link{position:absolute;inset:0}
+html.deck .deck-front > .st-slides .st-carousel{width:260px;height:260px}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img{object-fit:contain;object-position:center 42%;background:#0f3460}
+
+/* home deck round 3 */
+html.deck .st-embed-title{font:600 24px/1.25 var(--cp-serif);color:var(--cp-ink);margin:0}
+html.deck .tldflip{display:flex;flex-direction:column;align-items:center;gap:10px}
+html.deck .tldflip .handle{font:600 30px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-accent)}
+html.deck .fc-digit.fc-wide{width:200px;--h:64px}
+html.deck .fc-digit.fc-wide .fc-half span,html.deck .fc-digit.fc-wide .fc-flap span{font-size:30px;letter-spacing:.01em}
+html.deck .deck-front > .st-form{display:flex;flex-direction:column;justify-content:center;padding:26px 26px}
+html.deck .reef-form{display:flex;flex-direction:column;gap:12px;color:var(--cp-ink)}
+html.deck .reef-form h2{font:600 26px/1.2 var(--cp-serif);margin:0 0 4px}
+html.deck .reef-form label{display:flex;flex-direction:column;gap:5px;font:500 12px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted)}
+html.deck .reef-form select,html.deck .reef-form input,html.deck .reef-form textarea{font:15px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);background:var(--cp-surface-2);border:1px solid var(--cp-line);border-radius:12px;padding:10px 12px;-webkit-appearance:none;appearance:none}
+html.deck .reef-form button{align-self:flex-start;margin-top:4px;padding:11px 20px;border:0;border-radius:999px;background:var(--cp-accent);color:#fff;font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .reef-form .done{display:none;margin:0;color:var(--cp-muted);font:14px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .reef-form.sent .done{display:block}
+html.deck .reef-form.sent button{display:none}
+html.deck .deck-front > .st-hero .cp-icon{border-radius:50%;object-fit:cover}   /* the avatar is a circle in every carrier; a brand mark is no exception */
+
+/* lucide anchors on our own text cards */
+html.deck .lucide{line-height:0;color:var(--cp-accent);margin-bottom:6px}
+html.deck .lucide svg{width:56px;height:56px}
+html.deck .deck-front > .st-prose .lucide,html.deck .deck-front > .st-form .lucide{align-self:flex-start}
+html.deck .deck-front > .st-embed .lucide{margin-bottom:0}
+html.deck .deck-front > .st-prose{text-align:left;align-items:flex-start}
+
+/* ---- mode-independent styles for our own cells (they must hold in the deck views AND on the wall) ---- */
+.st-cell .lucide{line-height:0;color:var(--cp-accent)}
+.st-cell .lucide svg{width:56px;height:56px}
+.st-cell.deck-ours{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:14px;padding:28px 26px;color:var(--cp-ink)}
+.st-cell.deck-ours h2{font:600 28px/1.15 var(--cp-serif);margin:6px 0 0;color:var(--cp-ink)}
+.st-cell.deck-ours p{font:16px/1.65 -apple-system,"PingFang TC",system-ui,sans-serif;margin:0;color:var(--cp-muted);max-width:22ch}
+.st-cell.deck-addr .addr{font:600 28px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:-.01em;word-break:break-all}
+.st-cell.deck-addr .addr .host{color:var(--cp-muted)}
+.st-cell.deck-addr .addr .handle{color:var(--cp-accent)}
+.st-cell.st-embed{display:grid;align-content:center;justify-items:center;gap:22px;padding:28px}
+.st-cell .st-embed-title{font:600 24px/1.25 var(--cp-serif);color:var(--cp-ink);margin:0}
+.st-cell .tldflip{display:flex;flex-direction:column;align-items:center;gap:10px}
+.st-cell .tldflip .handle{font:600 30px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-accent)}
+.st-cell .flipclock{display:flex;align-items:center;justify-content:center;gap:6px}
+.st-cell .fc-group{display:flex;gap:4px}
+.st-cell .fc-sep{font:800 34px/1 -apple-system,system-ui,sans-serif;color:var(--cp-muted);padding:0 2px;transform:translateY(-3px)}
+.st-cell .fc-digit{--h:64px;position:relative;width:40px;height:var(--h);perspective:220px;border-radius:7px;background:#0b1a33;overflow:hidden;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.st-cell .fc-digit.fc-wide{width:200px}
+.st-cell .fc-half,.st-cell .fc-flap{position:absolute;left:0;width:100%;height:50%;overflow:hidden;background:#17305a}
+.st-cell .fc-half span,.st-cell .fc-flap span{position:absolute;left:0;width:100%;height:var(--h);display:flex;align-items:center;justify-content:center;font:800 36px/1 -apple-system,"Helvetica Neue",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.st-cell .fc-digit.fc-wide .fc-half span,.st-cell .fc-digit.fc-wide .fc-flap span{font-size:30px}
+.st-cell .fc-top,.st-cell .fc-front{top:0;border-bottom:1px solid #07122a}
+.st-cell .fc-top span,.st-cell .fc-front span{top:0}
+.st-cell .fc-bottom,.st-cell .fc-back{bottom:0;background:#122a50}
+.st-cell .fc-bottom span,.st-cell .fc-back span{bottom:0}
+.st-cell .fc-flap{z-index:3;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.st-cell .fc-front{transform-origin:bottom}
+.st-cell .fc-back{transform-origin:top;transform:rotateX(90deg)}
+.st-cell .fc-digit.fc-anim .fc-front{animation:fc-down .22s ease-in forwards}
+.st-cell .fc-digit.fc-anim .fc-back{animation:fc-up .22s .22s ease-out forwards}
+.st-cell .st-embed p{margin:0;color:var(--cp-muted);font:16px/1.6 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell.st-prose{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;text-align:left;padding:28px 30px;color:var(--cp-ink)}
+.st-cell.st-prose h5{font:600 24px/1.25 var(--cp-serif);margin:0 0 10px;color:var(--cp-accent-bright)}
+.st-cell.st-prose p{font:16px/1.65 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted);margin:0}
+.st-cell.st-gal-cell:not(.st-gal-cell-bare){display:block;position:relative;padding:0;overflow:hidden;min-height:260px}
+.st-cell.st-gal-cell:not(.st-gal-cell-bare) .st-gal-link{position:absolute;inset:0;display:block}
+.st-cell.st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img{width:100%;height:100%;object-fit:contain;object-position:center 42%;background:#0f3460;border-radius:0}
+.st-cell .st-gal-over{position:absolute;left:0;right:0;bottom:0;padding:26px 24px 28px;background:linear-gradient(180deg,transparent,rgba(5,15,35,.85));color:#fff;display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.st-cell .st-gal-title{font:600 26px/1.2 var(--cp-serif)}
+.st-cell .st-gal-cta{display:inline-block;padding:10px 18px;border-radius:999px;background:var(--cp-accent);color:#fff;font:600 14px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell.st-form{display:flex;flex-direction:column;justify-content:center;padding:26px}
+.st-cell .reef-form{display:flex;flex-direction:column;gap:12px;color:var(--cp-ink);width:100%}
+.st-cell .reef-form h2{font:600 26px/1.2 var(--cp-serif);margin:0 0 4px}
+.st-cell .reef-form label{display:flex;flex-direction:column;gap:5px;font:500 12px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted)}
+.st-cell .reef-form select,.st-cell .reef-form input,.st-cell .reef-form textarea{font:15px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);background:var(--cp-surface-2);border:1px solid var(--cp-line);border-radius:12px;padding:10px 12px;-webkit-appearance:none;appearance:none;width:100%;box-sizing:border-box}
+.st-cell .reef-form textarea{resize:none;height:84px}
+.st-cell .reef-form button{align-self:flex-start;margin-top:4px;padding:11px 20px;border:0;border-radius:999px;background:var(--cp-accent);color:#fff;font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell .reef-form .done{display:none;margin:0;color:var(--cp-muted);font:14px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell .reef-form.sent .done{display:block}
+.st-cell .reef-form.sent button{display:none}
+.st-cell .reef-form-head{display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:6px}
+.st-cell .reef-form-head h2{margin:0}
+
+/* the address bar shape: globe + address in a capsule */
+.st-cell .urlbar{display:flex;align-items:center;gap:10px;width:100%;max-width:300px;padding:10px 14px;border-radius:999px;background:var(--cp-surface-2);border:1px solid var(--cp-line);box-sizing:border-box}
+.st-cell .urlbar .ub-globe{width:18px;height:18px;flex:none;color:var(--cp-muted)}
+.st-cell .urlbar .ub-text{display:flex;align-items:center;gap:0;min-width:0;font:500 17px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);white-space:nowrap;overflow:hidden}
+.st-cell .urlbar .host{color:var(--cp-muted)}
+.st-cell .urlbar .handle{color:var(--cp-ink)}
+.st-cell .urlbar .fc-digit.fc-wide{--h:30px;width:96px;height:30px;border-radius:6px;margin-left:2px;display:inline-block;vertical-align:middle}
+.st-cell .urlbar .fc-digit.fc-wide .fc-half span,.st-cell .urlbar .fc-digit.fc-wide .fc-flap span{font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell.deck-addr .addr{display:none}
+.st-cell .urlbar .tld{display:inline-block;color:var(--cp-accent)}
+.st-cell .urlbar .tld.swap{animation:tld-in .35s cubic-bezier(.2,.8,.3,1)}
+@keyframes tld-in{0%{opacity:0;transform:translateY(-60%)}100%{opacity:1;transform:none}}
+.st-cell .urlbar .ub-text{align-items:baseline}
+.st-cell .urlbar .tld{font:inherit;vertical-align:baseline}
+.st-cell .urlbar .handle{color:var(--cp-accent)}
+#reef-tld .handle{color:var(--cp-ink)}
+.st-cell .reef-form-head{display:flex;flex-direction:column;align-items:center;text-align:center;width:100%}
+.st-cell .reef-form-head .lucide{align-self:center}
+.st-cell .reef-form-head{display:flex;flex-direction:column;align-items:center;text-align:center;width:100%}
+.st-cell .reef-form-head .lucide{align-self:center}
+.st-cell .reef-form button{align-self:flex-end}
+html.deck .deck-front > .st-form .reef-form-head .lucide,.st-cell .reef-form-head .lucide{align-self:center}
+html.deck .reef-form button,.st-cell .reef-form button{align-self:flex-end}
+/* our open-it-up card: picture on top, title + button centred below (our deck rhythm; the feature coral itself keeps its poster layout) */
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare),.st-cell.st-gal-cell:not(.st-gal-cell-bare){display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 24px;gap:16px;min-height:0;overflow:visible}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) .st-gal-link,.st-cell.st-gal-cell:not(.st-gal-cell-bare) .st-gal-link{position:static;display:flex;flex-direction:column;align-items:center;gap:16px;width:100%}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img,.st-cell.st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img{width:100%;height:auto;max-height:260px;object-fit:contain;background:none;border-radius:0}
+.st-cell .st-gal-over{position:static;padding:0;background:none;align-items:center;text-align:center;gap:12px}
+html.deck .st-gal-over,.st-cell .st-gal-over{position:static;padding:0;background:none;align-items:center;text-align:center;gap:12px;width:100%}
+/* no widows: balance every short paragraph and heading on our cards */
+.st-cell.deck-ours p,.st-cell.deck-ours h2,.st-cell .st-embed p,.st-cell .reef-form h2,.st-cell .st-gal-title{text-wrap:balance}
+.st-cell .st-gal-sub{margin:0;font:15px/1.6 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted);max-width:26ch;text-wrap:balance}
+html.deck .deck-front > .st-gal-cell:not(.st-gal-cell-bare) .fan-btn,.st-cell.st-gal-cell:not(.st-gal-cell-bare) .fan-btn{position:static;display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;text-decoration:none;pointer-events:auto}
+.st-cell .fan-body{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%}
+.st-cell a.st-gal-cta{text-decoration:none;pointer-events:auto;cursor:pointer}
+html.deck .st-gal-link[hidden]{display:none!important}
+
+/* the hand in the left dock panel */
+.hand{padding:4px 2px;font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif;color:#111}
+.hand h3{margin:0 0 12px;font:600 18px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif}
+.hand-row{display:flex;gap:10px;justify-content:space-between}
+.hand-card{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;color:#111;font-size:13px;text-align:center}
+.hand-card img{width:64px;height:64px;border-radius:50%;object-fit:cover;background:#eee}
+.hand-again{margin-top:14px;padding:9px 16px;border:0;border-radius:999px;background:#ff6b4a;color:#fff;font:600 14px/1 -apple-system,"PingFang TC",system-ui,sans-serif}
+.hand-all{display:inline-block;margin:10px 0 0 10px;color:#ff6b4a;text-decoration:none;font-weight:600}
+
+/* the next / previous card is a button to itself: the exposed part of it is clickable, the rest is under the top card anyway */
+html.deck:not(.open):not(.fan) .deck-card.is-next1,html.deck:not(.open):not(.fan) .deck-card.is-prev1{pointer-events:auto;cursor:pointer}
+html.deck .deck-card.is-top.peeking{transition:none}
+/* hovering the peeked card itself: it comes out a little further (feedback + a glimpse of more) */
+@media (hover:hover){
+html.deck .deck-stack{--reveal:clamp(34px,min(40%,(100vw - 100%)/2 - 16px),260px)}   /* second notch: as far as the room on this screen allows, never off-screen */
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-next1.hovc{transform:translate(var(--reveal),8px) rotate(2deg) scale(.985)}
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-prev1.hovc{transform:translate(calc(-1 * var(--reveal)),8px) rotate(-2deg) scale(.985)}
+}
+
+/* change it in one sentence: the little conversation */
+.st-cell .say{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%}
+.st-cell .say-bubble{align-self:flex-end;max-width:85%;background:var(--cp-accent);color:#fff;border-radius:18px 18px 4px 18px;padding:9px 14px;font:15px/1.4 -apple-system,"PingFang TC",system-ui,sans-serif;min-height:1.4em;box-sizing:border-box}
+.st-cell .say-caret{display:inline-block;width:2px;height:1em;background:#fff;margin-left:2px;vertical-align:-2px;opacity:0}
+.st-cell .say.typing .say-caret{opacity:1;animation:say-blink .8s steps(1) infinite}
+@keyframes say-blink{50%{opacity:0}}
+.st-cell .mini{width:150px;padding:14px 12px;border-radius:16px;background:var(--cp-surface-2);border:1px solid var(--cp-line);display:flex;flex-direction:column;align-items:center;gap:8px;transition:transform .25s}
+.st-cell .say.did .mini{transform:scale(1.04)}
+.st-cell .mini-av{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:oklch(0.86 0.09 200);color:oklch(0.35 0.08 200);transition:background .3s,color .3s}
+.st-cell .mini-av[data-av="b"]{background:oklch(0.86 0.09 40);color:oklch(0.35 0.08 40)}
+.st-cell .mini-av svg{width:22px;height:22px}
+.st-cell .mini-name{font:600 13px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink)}
+.st-cell .mini-cells{display:flex;gap:6px;width:100%}
+.st-cell .mini-cell{flex:1;height:26px;border-radius:7px;background:var(--cp-line)}
+.st-cell .mini-clock{display:grid;place-items:center;font:700 11px/1 -apple-system,system-ui,sans-serif;color:var(--cp-ink);background:#0b1a33}
+.st-cell .mini-clock[hidden]{display:none}
+
+.st-cell .mini[data-theme="sunset"]{background:oklch(0.82 0.12 45);border-color:oklch(0.7 0.14 40)}
+.st-cell .mini[data-theme="sunset"] .mini-name{color:oklch(0.3 0.08 35)}
+.st-cell .mini[data-theme="sunset"] .mini-cell{background:oklch(0.72 0.12 40)}
+.st-cell .mini-count{display:grid;place-items:center;font:700 13px/1 -apple-system,system-ui,sans-serif;color:#fff;background:var(--cp-accent)}
+.st-cell .mini-count[hidden],.st-cell .mini-star[hidden]{display:none}
+.st-cell .mini-star{display:grid;place-items:center;font-size:16px;color:#ffd166;background:oklch(0.35 0.06 60)}
+.st-cell .mini-star:not([hidden])::before{content:"";}
+.st-cell .mini-star{animation:star-hop .9s cubic-bezier(.3,0,.2,1) infinite}
+@keyframes star-hop{0%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
+
+/* two languages, free */
+.st-cell .lingo{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%}
+.st-cell .lingo-tag{font:600 22px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-accent);min-height:1.3em}
+.st-cell .mini-line{font:13px/1.3 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-muted);text-align:center}
+.st-cell .lingo .mini{width:190px}
+
+/* ---- tester round 2 ---- */
+/* the top card follows a horizontal drag */
+html.deck .deck-card.is-top.dragging{transition:none;transform:translate(var(--dragx,0px),var(--peek,0px)) rotate(calc(var(--dragx,0px) / 40px * 1deg));cursor:grabbing}
+/* a flung card leaves sideways (to-back) / arrives from the side (from-back); --fdir: 1 = next (leaves left), -1 = previous */
+html.deck .deck-card.side.to-back-1{animation-name:deck-to-back-side-1}
+html.deck .deck-card.side.to-back-2{animation-name:deck-to-back-side-2}
+html.deck .deck-card.side.from-back-1{animation-name:deck-from-back-side-1}
+html.deck .deck-card.side.from-back-2{animation-name:deck-from-back-side-2}
+@keyframes deck-to-back-side-1{0%{transform:none}100%{transform:translateX(calc(var(--fdir,1) * -112%)) rotate(calc(var(--fdir,1) * -8deg)) scale(.92)}}
+@keyframes deck-to-back-side-2{0%{transform:translateX(calc(var(--fdir,1) * -112%)) rotate(calc(var(--fdir,1) * -8deg)) scale(.92)}100%{transform:translateY(16px) rotate(2deg) scale(.95)}}
+@keyframes deck-from-back-side-1{0%{transform:translateY(16px) rotate(2deg) scale(.95)}100%{transform:translateX(calc(var(--fdir,1) * 112%)) rotate(calc(var(--fdir,1) * 8deg)) scale(.92)}}
+@keyframes deck-from-back-side-2{0%{transform:translateX(calc(var(--fdir,1) * 112%)) rotate(calc(var(--fdir,1) * 8deg)) scale(.92)}100%{transform:none}}
+/* last card: the cyclic "next" never peeks, never answers */
+/* peeked cards do not rotate, so their corners are where they look */
+@media (hover:hover){
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-next1{transform:translate(34px,8px) scale(.985)}
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-prev1{transform:translate(-34px,8px) scale(.985)}
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-next1.hovc{transform:translate(var(--reveal),8px) scale(.985)}
+html.deck:not(.open):not(.fan) .deck-stack:not(.busy).hov .deck-card.is-prev1.hovc{transform:translate(calc(-1 * var(--reveal)),8px) scale(.985)}
+/* the table is tappable: say so with the cursor */
+html.deck:not(.open):not(.fan) body{cursor:pointer}
+html.deck .deck-card.is-top{cursor:grab}
+html.deck .deck-card.is-top.can-flip{cursor:pointer}
+}
+/* phones: one swipe = one card, and the pile is sized to the SMALL viewport so the address bar never resizes it */
+@media (hover:none){ html.deck .deck-snap{scroll-snap-stop:always} }   /* 🔴 why touch only: iOS Safari's address bar keeps growing and shrinking during a free scroll, and the deck jittered with it; stopping at every card is what keeps it still. Not a UX preference. On desktop a hard fling passing several cards is deliberate, and snap-stop would also stop End/Home/thumb-drag at the next card */
+html.deck{--cardw:min(88vw,calc((100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 76px - 72px) * 3 / 4.2))}   /* room above for the bar, below for the footer — both layouts share this */
+html.deck .deck-stack{width:var(--cardw)}
+
+/* ---- list: the same cards on one horizontal snap track; the wheel's vertical motion becomes sideways travel, fingers swipe ---- */
+/* list: the same vertical rail and scrollbar as stack; the row of cards slides sideways by the scroll position (--tx, set per scroll) */
+html.deck.list .deck-table{display:grid;justify-items:start;align-items:center;padding-left:calc((100vw - var(--cardw)) / 2);padding-right:0}
+html.deck.list .deck-stack{width:max-content;aspect-ratio:auto;display:flex;flex-direction:row;gap:18px;position:relative;left:var(--tx,0px);transform:none;transition:none;will-change:auto}   /* left, not transform: a transformed stack would be one stacking context and no card could rise above the veil */
+html.deck.list .deck-card{position:relative;inset:auto;width:var(--cardw);aspect-ratio:3/4.2;flex:none;opacity:1!important;visibility:visible!important;pointer-events:auto!important;cursor:pointer}
+html.deck.list .deck-card:not(.flipped):not(.flipping-open):not(.flipping-close){transform:none}
+html.deck.list .deck-card.flipped{transform:rotateY(180deg) translateZ(2px)}
+html.deck.swipe.list .deck-stack{touch-action:pan-y}
+html.deck.swipe:not(.list) .deck-card.is-top{touch-action:pan-y}   /* without it Chrome takes a sideways drag over as a page pan and sends pointercancel, so the card never follows the finger (seen in Chromium touch emulation; iOS Safari did not cancel, which is why it looked fine). Not yet tried on a real Android */   /* sideways touch moves go to deck.js (the row follows the finger); up/down stay native */
+html.deck.list .deck-gshadow{opacity:0;transition:opacity .2s 0s}   /* fades, not display:none — so it can fade back in when the pile returns */
+html.deck.list .deck-shade{position:absolute;inset:0;transform:none;z-index:10;pointer-events:none}
+html.deck.list.open .deck-shade{pointer-events:auto;cursor:pointer}
+
+/* the fan button: under the pile, above the footer; deck mode only */
+html.deck .deck-fanbtn{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 44px);transform:translateX(-50%);z-index:20;width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);background:color-mix(in srgb,var(--cp-ground) 66%,transparent);color:var(--cp-accent);display:grid;place-items:center;cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);transition:opacity .2s}
+html.deck .deck-fanbtn svg{width:22px;height:22px}
+html.deck.open .deck-fanbtn{opacity:0;pointer-events:none}
+html.deck.fan .deck-fanbtn{color:#fff;background:var(--cp-accent)}
+
+/* the deck button shows the fan state: filled while fanned */
+/* fanned: the button shows the destination — one card, the pile */
+html.deck.fan .deck-seg button[data-m="deck"] .ic-a{display:none}
+html.deck.fan .deck-seg button[data-m="deck"] .ic-b{display:inline-flex}
+/* list on a wide screen: two columns */
+
+/* list button: second state once you have left the first card — the mirrored icon means "back to the first" */
+.deck-seg button .ic-b{display:none}
+html.list-away .deck-seg button[data-m="list"] .ic-a{display:none}
+html.list-away .deck-seg button[data-m="list"] .ic-b{display:inline}
+.deck-seg button .ic-a,.deck-seg button .ic-b{display:inline-flex;line-height:0}
+.deck-seg button .ic-b{display:none}
+html.list-away .deck-seg button[data-m="list"] .ic-a{display:none}
+html.list-away .deck-seg button[data-m="list"] .ic-b{display:inline-flex}
+/* the open-it-up pill in list keeps its natural width */
+html.deck.list .st-cell a.st-gal-cta{width:auto;align-self:center}
+.deck-seg button[data-m="list"] .ic-b svg{transform:scaleX(-1)}   /* the big card on the LEFT = the first one, where the press takes you */
+
+/* ---- backs, to a product page's standard: a title, air, one voice ---- */
+html.deck .deck-back-scroll{padding:30px 28px;display:flex;flex-direction:column;justify-content:center;min-height:100%;box-sizing:border-box}
+html.deck .deck-back .dc-drawer-body{display:flex;flex-direction:column;justify-content:center;gap:14px;min-height:100%}
+html.deck .deck-back .dc-drawer-title{font:600 24px/1.25 var(--cp-serif);color:var(--cp-accent-bright);margin:0 0 4px;text-wrap:balance}
+html.deck .deck-back .dc-drawer-body > p{margin:0;font:17px/1.7 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);text-wrap:pretty}
+html.deck .deck-back .dc-drawer-body > p + p{margin-top:2px}
+html.deck .deck-back .dc-drawer-body > p.say-line{color:var(--cp-ink);padding:10px 14px;border-radius:14px;background:var(--cp-surface-2);border:1px solid var(--cp-line);font-size:16px}
+html.deck .deck-back pre.cardmd{margin:0;padding:16px 16px;border-radius:14px;background:#07122a;color:#cfe3ff;font:12.5px/1.6 ui-monospace,Menlo,monospace;white-space:pre;overflow:auto;max-height:100%;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+html.deck .deck-back pre.cardmd .k{color:#8fd3ff}
+html.deck .deck-back pre.cardmd .b{color:#ffb28a}
+/* ---- wall: cells flip in place ---- */
+.st-cell.brick-flippable{transform-style:preserve-3d;transition:transform .6s cubic-bezier(.3,.7,.3,1);cursor:pointer;perspective:none;overflow:visible!important}
+.st-cell.brick-flippable > .brick-front,.st-cell.brick-flippable > .brick-back{backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:inherit}
+.st-cell.brick-flippable > .brick-front{display:contents}
+.st-cell.brick-flippable > .brick-front > *{backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.st-cell.brick-flippable > .brick-back{position:absolute;inset:0;transform:rotateY(180deg);background:var(--cp-surface);border:1px solid var(--cp-line);border-radius:inherit;overflow:auto;padding:22px 22px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;color:var(--cp-ink);font:15px/1.6 -apple-system,"PingFang TC",system-ui,sans-serif}
+.st-cell.brick-flipped{transform:rotateY(180deg)}
+.st-cell.brick-flipped > .brick-front > *{visibility:hidden}
+.brick-back .dc-drawer-title{font:600 20px/1.25 var(--cp-serif);color:var(--cp-accent-bright);margin:0 0 10px}
+.brick-back .dc-drawer-body > p{margin:0 0 8px}
+.brick-back .deck-go{display:flex;align-items:center;justify-content:center;height:100%}
+.brick-back .deck-go a.btn{display:inline-flex;align-items:center;gap:8px;background:var(--cp-accent);color:#fff;text-decoration:none;border-radius:999px;padding:12px 22px;font:600 15px/1.4 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere;text-align:center}
+.brick-back pre.cardmd{margin:0;padding:12px;border-radius:10px;background:#07122a;color:#cfe3ff;font:11.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre;overflow:auto}
+.st-cells{perspective:1600px}
+.st-cell.brick-flippable > .brick-back{visibility:hidden;transition:visibility 0s .3s}
+.st-cell.brick-flipped > .brick-back{visibility:visible;transition:visibility 0s .3s}
+.brick-back,.brick-back .dc-drawer-title{text-align:left}
+
+/* link backs: the author's note above the default pill */
+html.deck .deck-go .note,.brick-back .deck-go .note{margin:0 0 6px;max-width:26ch;font:17px/1.7 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);text-wrap:pretty}
+.brick-back .deck-go{flex-direction:column;gap:14px;align-items:flex-start}
+.brick-back .deck-go .note{font-size:15px;line-height:1.6}
+/* code backs wrap; no sideways scrolling */
+html.deck .deck-back pre.cardmd,.brick-back pre.cardmd{white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}
+
+/* three views: formation demo */
+.st-cell .trio{display:flex;flex-direction:column;align-items:center;gap:18px;width:100%}
+.st-cell .trio-seg{display:inline-flex;border:1px solid var(--cp-line);border-radius:999px;overflow:hidden;background:var(--cp-surface-2)}
+.st-cell .trio-seg span{width:38px;height:30px;display:grid;place-items:center;color:var(--cp-muted)}
+.st-cell .trio-seg svg{width:16px;height:16px}
+.st-cell .trio-seg .s1{animation:trio-seg1 5.4s steps(1) infinite}.st-cell .trio-seg .s2{animation:trio-seg2 5.4s steps(1) infinite}.st-cell .trio-seg .s3{animation:trio-seg3 5.4s steps(1) infinite}
+@keyframes trio-seg1{0%,28%{background:var(--cp-accent);color:#fff}28.01%,94%{background:none;color:var(--cp-muted)}94.01%,100%{background:var(--cp-accent);color:#fff}}
+@keyframes trio-seg2{28.01%,61%{background:var(--cp-accent);color:#fff}0%,28%,61.01%,100%{background:none;color:var(--cp-muted)}}
+@keyframes trio-seg3{61.01%,94%{background:var(--cp-accent);color:#fff}0%,61%,94.01%,100%{background:none;color:var(--cp-muted)}}
+.st-cell .trio-stage{position:relative;width:200px;height:120px}
+.st-cell .tc{position:absolute;left:70px;top:10px;width:60px;height:84px;box-sizing:border-box;border-radius:9px;background:var(--cp-surface-2);border:1px solid var(--cp-line);box-shadow:0 2px 8px rgba(0,0,0,.25);animation:5.4s cubic-bezier(.3,.7,.3,1) infinite}
+.st-cell .tc::before{content:"";position:absolute;left:20%;right:20%;top:17%;height:10%;border-radius:999px;background:var(--cp-line)}
+.st-cell .tc::after{content:"";position:absolute;left:20%;right:34%;top:36%;height:8%;border-radius:999px;background:var(--cp-line);opacity:.7}
+.st-cell .tc1{animation-name:trio-c1;z-index:3}.st-cell .tc2{animation-name:trio-c2;z-index:2}.st-cell .tc3{animation-name:trio-c3;z-index:1}
+/* pile (0–33%) → row (33–66%) → wall (66–100%) */
+@keyframes trio-c1{0%,28%{transform:translate(0,0) rotate(0);width:60px;height:84px;left:70px;top:10px}33%,61%{transform:translate(-70px,0) scale(.9);width:60px;height:84px;left:70px;top:10px}66%,94%{transform:none;width:56px;height:56px;left:41px;top:6px}100%{transform:translate(0,0);width:60px;height:84px;left:70px;top:10px}}
+@keyframes trio-c2{0%,28%{transform:translate(0,6px) rotate(-2.5deg) scale(.985);width:60px;height:84px;left:70px;top:10px}33%,61%{transform:translate(0,0) scale(.9);width:60px;height:84px;left:70px;top:10px}66%,94%{transform:none;width:56px;height:56px;left:103px;top:6px}100%{transform:translate(0,6px) rotate(-2.5deg) scale(.985);width:60px;height:84px;left:70px;top:10px}}
+@keyframes trio-c3{0%,28%{transform:translate(0,12px) rotate(2deg) scale(.97);width:60px;height:84px;left:70px;top:10px}33%,61%{transform:translate(70px,0) scale(.9);width:60px;height:84px;left:70px;top:10px}66%,94%{transform:none;width:118px;height:40px;left:41px;top:68px}100%{transform:translate(0,12px) rotate(2deg) scale(.97);width:60px;height:84px;left:70px;top:10px}}   /* top in every frame: a property named in one keyframe only interpolates across the whole cycle */   /* the brick is a real resize: corners and content keep their shape */
+
+/* list: the open card rises above the veil; every other card sits behind it, like the pile */
+/* the table is fixed z10 and the veil fixed z9: in list the table must not outrank the veil, so each card is its own layer — the open one above the veil (z20), the rest below it (z1) */
+html.deck.list .deck-card{z-index:1}
+html.deck.list.open .deck-card{pointer-events:none}
+html.deck.list.open .deck-card.is-open{z-index:20;pointer-events:auto}
+html.deck .deck-back .dc-drawer-body > ol,.brick-back ol{margin:0 0 4px;padding-left:1.4em;font:17px/1.8 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink)}
+html.deck .deck-back .dc-drawer-body > ol li::marker{color:var(--cp-accent);font-weight:600}
+/* three-views back: the three lines are the three buttons */
+.lay{display:flex;flex-direction:column;gap:8px}
+.lay-btn{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:14px;border:1px solid var(--cp-line);background:var(--cp-surface-2);color:var(--cp-ink);font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif;text-align:left;cursor:pointer;-webkit-appearance:none;appearance:none}
+.lay-btn svg{width:22px;height:22px;flex:none;color:var(--cp-accent-bright)}
+.lay-btn b{display:inline-block;margin-right:8px;font-weight:700;color:var(--cp-accent-bright)}
+.lay-btn:hover{border-color:var(--cp-line-hi)}
+.brick-back .lay-btn{font-size:14px}
+/* the dice explains where it goes before it goes */
+.dice-panel{padding:18px 20px 20px;font:15px/1.6 -apple-system,"PingFang TC",system-ui,sans-serif;color:#1a1a1a}
+.dice-panel h3{margin:0 0 8px;font:600 18px/1.3 var(--cp-serif)}
+.dice-panel p{margin:0 0 8px}
+.dice-panel .dim{color:#6b6b6b;font-size:13px}
+.dice-panel .go{display:inline-block;margin-top:6px;padding:10px 16px;border-radius:999px;background:#ff6b4a;color:#fff;font-weight:600;text-decoration:none}
+/* draw page: say whose cards these are */
+html.deck .deck-where{margin-left:12px;color:var(--cp-muted);font:500 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;white-space:nowrap}
+@media (max-width:600px){html.deck .deck-where{display:none}}
+html.deck .deck-back .dc-drawer-body > p.brand-line,.brick-back p.brand-line{margin-top:18px;font:500 13px/1.6 var(--cp-serif);letter-spacing:.04em;color:var(--cp-muted)}
+/* referral deck: our mark leads, the referrer is a witness */
+.ref-hero .ref-mark{width:72px;height:72px;margin:0 auto 6px;display:block}
+html.deck .deck-ours.ref-hero h2,.st-cell.ref-hero h2{font:600 30px/1.15 var(--cp-serif)}
+.ref-hero .ref-line{display:block;text-align:center;color:var(--cp-ink)!important;max-width:none!important}.ref-hero .ref-line .nw{white-space:nowrap;display:inline-block}
+.ref-hero .ref-av{width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:-8px;margin-right:8px;border:1px solid var(--cp-line)}
+/* heart */
+.heart-panel{padding:16px 18px 18px;font:14px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif;color:#1a1a1a}
+.heart-acts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.heart-acts button{padding:8px 14px;border-radius:999px;border:1px solid #ddd;background:#fff;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;cursor:pointer;color:#1a1a1a}
+.heart-acts .heart-keep.on{background:#e0245e;border-color:#e0245e;color:#fff}
+.heart-note{flex-basis:100%;margin:2px 0 0;color:#6b6b6b;font-size:12px}
+.heart-panel h3{margin:0 0 8px;font:600 15px/1.3 -apple-system,"PingFang TC",system-ui,sans-serif}
+.heart-list{display:flex;flex-direction:column;gap:6px}
+.heart-item{display:flex;flex-direction:column;padding:10px 12px;border-radius:12px;background:#f4f4f2;color:#1a1a1a;text-decoration:none}
+.heart-item span{color:#6b6b6b;font-size:12px}
+/* a card is open: only the card and its close button stay in front; everything else steps back like the layout switch does */
+html.deck .deck-home,html.deck .deck-where,html.deck dc-dock{transition:filter .25s,opacity .25s}
+html.deck.open .deck-home,html.deck.open .deck-where,html.deck.open dc-dock{filter:blur(4px) brightness(.6);opacity:.5;pointer-events:none}
+/* our own default deck: thesis image, capacity list, download, ending try pill, tappable small QR */
+.deck-why .why-img{display:block;width:100%;max-width:300px;height:auto;margin:0 auto 18px}
+.dc-drawer-body .cap{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:10px;font-size:18px;font-weight:600}
+.dc-drawer-body .dl-btn{border:0;cursor:pointer}
+.dc-drawer-body .dl-btn,html.deck .deck-bcard a.try{display:inline-flex;align-items:center;gap:8px;background:var(--cp-accent);color:#fff;text-decoration:none;border-radius:999px;padding:12px 22px;font:600 15px/1.4 -apple-system,system-ui,sans-serif}
+html.deck .deck-bcard .qr{cursor:zoom-in}
+.dc-drawer-body .urlbar{display:flex;align-items:center;gap:10px;width:100%;max-width:300px;margin:18px 0 6px;padding:10px 14px;border-radius:999px;background:var(--cp-surface-2);border:1px solid var(--cp-line);box-sizing:border-box}
+.dc-drawer-body .urlbar .ub-globe{width:18px;height:18px;flex:none;color:var(--cp-muted)}
+.dc-drawer-body .urlbar .ub-text{display:flex;align-items:baseline;min-width:0;font:500 17px/1.2 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);white-space:nowrap;overflow:hidden}
+.dc-drawer-body .urlbar .host{color:var(--cp-muted)}
+/* wall over a card file (deck.js virtualBrick): only the rows on screen exist; the space is capped and mapped to rows */
+.st-cells.vb{display:block!important}
+.st-cells.vb .vb-cover{margin-bottom:24px;min-height:40vh}
+.vb-space{position:relative;overflow:hidden}
+.vb-win{position:absolute;left:0;right:0;top:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;will-change:transform}
+.vb-tile{height:var(--vb-tile,100px);display:flex;align-items:center;justify-content:center;border-radius:14px;background:var(--cp-surface,rgba(255,255,255,.06));border:1px solid var(--cp-line,rgba(255,255,255,.12));font:600 clamp(.8rem,2.2vw,1.25rem)/1 -apple-system,system-ui,sans-serif;color:var(--cp-ink,#fff);overflow:hidden}
+.vb-tile.vb-hit{background:var(--cp-accent,#ff6b4a);color:#fff}
+.vb-tile[hidden]{display:none}

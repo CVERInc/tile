@@ -16,18 +16,19 @@ const FAT = serializeCard({ ...parseCard(THIN), assets: {
 
 /** a bridge wired to recorders and a hand-cranked clock */
 function rig() {
-  const sent = []; const loads = []; const statuses = []; const timers = new Map(); let n = 0;
+  const sent = []; const loads = []; const proposals = []; const statuses = []; const timers = new Map(); let n = 0;
   const bridge = createHostBridge({
     host: HOST,
     post: (msg, origin) => sent.push({ msg, origin }),
     onLoad: (x) => loads.push(x),
+    onPropose: (x) => proposals.push(x),
     onStatus: (s, m) => statuses.push(m ? `${s}:${m}` : s),
     setTimer: (fn, ms) => { const id = ++n; timers.set(id, { fn, ms }); return id; },
     clearTimer: (id) => timers.delete(id),
   });
   const tick = () => { for (const [id, t] of [...timers]) { timers.delete(id); t.fn(); } };
   const from = (data, origin = HOST) => bridge.receive({ origin, data: { v: HOST_V, ...data } });
-  return { bridge, sent, loads, statuses, timers, tick, from };
+  return { bridge, sent, loads, proposals, statuses, timers, tick, from };
 }
 
 test('validHostOrigin: exact allowed origins only', () => {
@@ -203,4 +204,67 @@ test('a card:load after edits resets dirty and drops the pending change', () => 
   assert.deepEqual(r.sent, []);
   assert.equal(r.bridge.dirty, false);
   assert.equal(readsAsCard(THIN), true);
+});
+
+// ── additive v1: card:get-draft → card:draft, and card:propose ──────────────────────────────────────
+
+test('card:get-draft answers with the current draft and whether it differs from the saved card', () => {
+  const r = rig();
+  r.from({ type: 'card:get-draft' });
+  assert.deepEqual(r.sent.at(-1), { msg: { v: 1, type: 'card:draft', md: null, dirty: false }, origin: HOST }, 'before card:load there is no draft');
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  r.from({ type: 'card:get-draft' });
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:draft', md: THIN, dirty: false });
+  const edited = THIN.replace('a bio', 'a new bio');
+  r.bridge.changed(edited);
+  r.from({ type: 'card:get-draft' });
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:draft', md: edited, dirty: true }, 'the draft is answered at once, not after the debounce');
+  // CONTROL: from any other origin it is not ours, and nothing is sent
+  const before = r.sent.length;
+  assert.equal(r.from({ type: 'card:get-draft' }, 'https://evil.example'), false);
+  assert.equal(r.sent.length, before);
+});
+
+test('🔴 card:propose hands the editor a DRAFT — it is never saved by itself', () => {
+  const r = rig();
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  const proposal = THIN.replace('a bio', 'a proposed bio');
+  assert.equal(r.from({ type: 'card:propose', md: proposal }), true);
+  assert.deepEqual(r.proposals, [{ md: proposal }]);
+  assert.ok(!r.sent.some((s) => s.msg.type === 'card:save'), 'a proposal must never post card:save');
+  // the editor shows it and reports it like any edit: changed() → dirty → card:change after the debounce
+  r.bridge.changed(proposal);
+  assert.equal(r.bridge.dirty, true);
+  assert.equal(r.bridge.status, 'unsaved');
+  r.tick();
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:change', md: proposal, dirty: true });
+  assert.ok(!r.sent.some((s) => s.msg.type === 'card:save'), 'still not saved — the person presses Save');
+  // the person presses Save: THAT is when it goes to the parent
+  r.bridge.save();
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:save', md: proposal });
+});
+
+test('card:propose before a load, or with something that is not a card, is refused out loud', () => {
+  const r = rig();
+  r.from({ type: 'card:propose', md: THIN });
+  assert.equal(r.sent.at(-1).msg.type, 'card:propose-failed');
+  assert.equal(r.proposals.length, 0, 'no card is loaded: nothing to propose against');
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  r.from({ type: 'card:propose', md: 'just a sentence' });
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:propose-failed', message: 'That does not read as a card.' });
+  r.from({ type: 'card:propose', md: 42 });
+  assert.equal(r.sent.at(-1).msg.type, 'card:propose-failed');
+  assert.equal(r.proposals.length, 0);
+});
+
+test('card:change says dirty:false when the draft is back to what was saved', () => {
+  const r = rig();
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  r.bridge.changed(THIN.replace('a bio', 'x'));
+  r.tick();
+  assert.equal(r.sent.at(-1).msg.dirty, true);
+  r.bridge.changed(THIN);
+  r.tick();
+  assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:change', md: THIN, dirty: false });
+  assert.equal(r.bridge.savedMd, THIN);
 });

@@ -1,7 +1,7 @@
 /* feelreef's two faces, self-hosted the way reef does it (fontsource; see fonts/PROVENANCE.md).
    Latin + latin-ext only: everything else — CJK, Korean — falls through to the system stacks in
    --font-body / --font-display-cjk exactly as on feelreef.com. `swap`, so words never wait on a font.
-   `./fonts/` is rewritten to the Worker's immutable asset path by serve/gen-edit2-assets.mjs. */
+   `./fonts/` is rewritten to the Worker's immutable asset path by serve/gen-edit3-assets.mjs. */
 @font-face {
   font-family: 'Nunito Variable'; font-style: normal; font-display: swap; font-weight: 200 1000;
   src: url(./fonts/NunitoVariable-latin-ext.woff2) format('woff2-variations');

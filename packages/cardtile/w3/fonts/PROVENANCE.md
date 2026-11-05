@@ -10,7 +10,7 @@ The Card editor shell's two faces, the same files feelreef.com self-hosts. Copie
 | YoungSerif-latin.woff2 | @fontsource/young-serif@5.3.0 `files/young-serif-latin-400-normal.woff2` | 26992 | 6ba68b9927ad2a640d32cbea050ffc2b5d0ae6cbaa785afe470da9d6bf0ef39f |
 | YoungSerif-latin-ext.woff2 | @fontsource/young-serif@5.3.0 `files/young-serif-latin-ext-400-normal.woff2` | 17268 | 9e6eb8e5e38f9dcbab1ea58e2f30a4d6dfdb5b3bb602bfbff9305bca1d4060f6 |
 
-Total 118,976 bytes (≈159 KB as base64 inside `serve/edit2-assets.mjs`).
+Total 118,976 bytes (≈159 KB as base64 inside `serve/edit3-assets.mjs`).
 
 Licence: SIL Open Font License 1.1 — `OFL-Nunito.txt` (The Nunito Project Authors) and
 `OFL-YoungSerif.txt` (The Young Serif Project Authors), copied from each package's `LICENSE`.
