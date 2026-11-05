@@ -113,7 +113,8 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
+import { vanityHost } from './card-vanity.mjs';
 import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
@@ -144,7 +145,8 @@ const DRAWER_PATH = `/_coral/drawer-${DRAWER_VERSION}.js`;
 // segment, returns null, and the visitor gets the DIRECTORY page on the creator's own domain. That
 // was live for several minutes once — the plumbing was right and nothing pointed the apex at the
 // card. A missing key is now the same failure, so seeding is part of binding a domain, not an
-// afterthought: see lab/vanity-bindings.mjs.
+// afterthought. The keys are written by the objects behind `/_api/vanity/<handle>` (card-vanity.mjs,
+// CUSTOM-DOMAIN.md); before that route they were hand-written to the store.
 //
 // 🔴 And a binding belongs to one lifetime of the handle (reef#2618 r4, r5; card-api vanityKey).
 // `vanity:<host>` is only a pointer to a handle; the host serves that handle only while
@@ -512,11 +514,19 @@ const CARD_HEADERS = (env, handle, at, blank = false) => ({
   ...ROBOTS_HEADERS(env, handle, at, blank),
 });
 
-const html = (body, status = 200, env = null, handle = '', at = {}, blank = false) =>
+const html = (body, status = 200, env = null, handle = '', at = {}, blank = false, extra = {}) =>
   new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, at, blank) },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...CARD_HEADERS(env, handle, at, blank), ...extra },
   });
+
+// 🔴 `X-Card-Handle: <handle>` — on a creator's OWN domain, on the card it serves (the page and both
+// markdown exits), and nowhere else: never the canonical hosts, a 404, an icon or an unbound host.
+// reef's domain tool reads it as the proof that the domain answers as THIS card (a proxied CNAME hides
+// that from public DNS), including in the `redirect: false` state the probe runs in. The value is the
+// handle the binding resolved to, and only ever one inside the handle grammar (vanityHandle is checked
+// before it means anything), so a stored value can never make the header itself throw.
+const cardHandleHeader = (vanityHandle) => (vanityHandle && VALID_HANDLE.test(vanityHandle) ? { 'X-Card-Handle': vanityHandle } : {});
 
 // ── "no card here" (tile-lab#51) ─────────────────────────────────────────────────────────────────
 //
@@ -560,7 +570,7 @@ const notFound = (env, handle = '', at = {}) =>
 // heuristic) and are labelled as such rather than implying a tokeniser we do not run.
 const estTokens = (s) => Math.ceil(s.length / 4);
 
-const markdown = (body, { env, originalLength, alternate, handle, at, blank }) =>
+const markdown = (body, { env, originalLength, alternate, handle, at, blank, extra = {} }) =>
   new Response(body, {
     status: 200,
     headers: {
@@ -569,6 +579,7 @@ const markdown = (body, { env, originalLength, alternate, handle, at, blank }) =
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
       ...CARD_HEADERS(env, handle, at, blank),
+      ...extra,
     },
   });
 
@@ -679,9 +690,9 @@ async function reportedHandle(u, env) {
   }
   if (host === CARDS_HOST || host === CANON_HOST) return resolveHandle(host, u.pathname)?.handle ?? null;
   const store = env && env.CARDS;
-  if (!store) return null;
+  if (!store || !vanityHost(host)) return null;
   const pointer = await store.get(VANITY_KEY(host));
-  if (pointer == null) return null;
+  if (pointer == null || !VALID_HANDLE.test(pointer)) return null;
   const gen = await generationOf(store, pointer);
   return (await isBound(store, pointer, gen, host)) ? pointer : null;
 }
@@ -689,7 +700,10 @@ async function reportedHandle(u, env) {
 const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const reqHost = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    // 🔴 The domain asked for is the request URL's, never a `Host` header that disagrees with it. On
+    // Cloudflare the two are the same; but X-Card-Handle is a promise about WHICH domain serves which
+    // card, so its identity comes from one authority. (`hostname` is lowercase and port-free.)
+    const reqHost = url.hostname;
     // A route can be installed before cutover. Until the switch is on, this entire host is dark.
     if (reqHost === CARDS_HOST && !movedToCardsHost(env)) return NOT_RELAYED();
 
@@ -698,7 +712,16 @@ const router = {
     // it after resolveHandle would mean `<a-creator's-domain>/_api/card/<someone-else>` resolved the
     // vanity to the FIRST creator and then ignored it, which is not wrong so much as it is a second idea of what a
     // hostname means. One door, one host-independent path.
-    const api = await handleApi(request, env, url);
+    // Nothing thrown inside it leaves the Worker as an exception or as its own message (which can
+    // carry store or configuration detail): an API caller gets a plain 500 with a code.
+    let api;
+    try {
+      api = await handleApi(request, env, url);
+    } catch {
+      return new Response(JSON.stringify({ error: 'internal_error' }), {
+        status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
     if (api) return api;
 
     // reef#2725 — the old Card host redirects before any store read. Apex paths need a Card lookup
@@ -929,7 +952,9 @@ const router = {
     // (reef#2026: external marks are never stored on our side, and never swapped for a built-in one.)
     const icm = /^\/_icon\/([^/]+)\.ico$/.exec(url.pathname);
     if (icm) {
-      const domain = decodeURIComponent(icm[1]).toLowerCase();
+      // a malformed escape (`%`, `%zz`, a cut UTF-8 sequence) throws URIError: the same 400 as a bad domain
+      let domain;
+      try { domain = decodeURIComponent(icm[1]).toLowerCase(); } catch { return new Response('bad domain', { status: 400 }); }
       // 🔴 The card's markdown is creator-authored and this concatenates into a URL. Without the
       // guard, `/_icon/<anything>.ico` is an open proxy — same discipline as VIDEO_RE on /_yt/.
       if (!ICON_DOMAIN_RE.test(domain)) return new Response('bad domain', { status: 400 });
@@ -958,7 +983,7 @@ const router = {
     // 🔴 The two markdown exits are NOT one call with a default. A backup taken over the thin exit
     // is 99.7% missing on a real card, and what is missing is the pictures — the part nobody can
     // retype. A parameter with a default is a thing somebody forgets; two paths are not.
-    const host = (request.headers.get('host') || url.host || '').toLowerCase().replace(/:\d+$/, '');
+    const host = reqHost; // the URL's (see the top of fetch)
     const md = /^(.*)\.md$/.exec(url.pathname);
 
     // CARDS store: card:<handle>:<gen> → card.md (card-api genKey), plus the vanity bindings. Missing
@@ -970,10 +995,17 @@ const router = {
     // the canonical host can never be a vanity, and a vanity host is already where it belongs.
     // A binding from an ended lifetime is no binding: the host is then unbound (404 below), never the
     // next owner's card. The generation read here is the one the card is read under.
-    let pointer = host && host !== CANON_HOST && host !== CARDS_HOST ? await store.get(VANITY_KEY(host)) : null;
+    // 🔴 Only a host the vanity route could have bound is looked up (vanityHost): a hand-written key for
+    // saas.feelreef.com (the SaaS fallback origin every creator domain arrives through) or for an IP
+    // would otherwise turn platform plumbing into one creator's page. Our own hosts never look.
+    const bindable = !!host && !routesByPath(host) && !!vanityHost(host);
+    let pointer = bindable ? await store.get(VANITY_KEY(host)) : null;
     // 🔴 r9: `vanity:<host>` is HostBindings' write-through cache, so a MISS on a creator's domain may be
     // a put that failed after the bind was accepted: ask the host's object, once (card-api hostOwner)
-    if (pointer == null && host && !routesByPath(host)) pointer = await hostOwner(env, host);
+    if (pointer == null && bindable) pointer = await hostOwner(env, host);
+    // 🔴 a stored value outside the handle grammar is no binding (a hand-written key never went through
+    // the API): it would reach X-Card-Handle and the store keys built from it
+    if (pointer != null && !VALID_HANDLE.test(pointer)) pointer = null;
     const boundGen = pointer != null ? await generationOf(store, pointer) : null;
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
@@ -1058,7 +1090,9 @@ const router = {
     const wouldRedirect = !vanityHandle && !wantFat && !wantsMarkdown(request);
     // the inverse binding, likewise only from this lifetime (card-api vanityKey)
     const ownHost = wouldRedirect ? await boundHostOf(store, resolved.handle, gen) : null;
-    if (cardMd != null && ownHost && host !== ownHost) {
+    // the name is checked too: a hand-written inverse never went through the route's validator, and an
+    // invalid A-label throws inside Response.redirect while a hex-spelled IPv4 redirects to loopback
+    if (cardMd != null && ownHost && host !== ownHost && vanityHost(ownHost)) {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
@@ -1069,7 +1103,8 @@ const router = {
     const fatUrl = vanityHandle ? `https://${host}/index.md`
       : resolved.root ? `https://${host}/${ROOT_HANDLE}.md` : `${resolved.cardUrl}.md`;
 
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, at, blank });
+    const probe = cardHandleHeader(vanityHandle);
+    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, at, blank, extra: probe });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
@@ -1077,7 +1112,7 @@ const router = {
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
       const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, at, blank });
+      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, at, blank, extra: probe });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -1094,7 +1129,7 @@ const router = {
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
     const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos }), 200, env, resolved.handle, at, blank);
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos }), 200, env, resolved.handle, at, blank, probe);
   },
 };
 
