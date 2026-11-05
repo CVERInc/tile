@@ -1315,6 +1315,32 @@ export { mdInline as __mdInline, esc as __esc };
 // (reef#2015); these stay exported for the form, which has always read them from here.
 export { linkOf, hostLabel, hostOf, iconDomains };
 
+// ── The card pool (reef#2913) ───────────────────────────────────────────────────────────────────
+//
+// One PLATFORM switch: is this Card in the card pool? In, its page links back to reef.cards twice —
+// a footer link and a closing card after everything the author wrote. Out, neither.
+//
+// 🔴 Only `true` and `false` mean anything, and only from the CALLER. The value is never read from
+// card.md (renderCardHTML does not map any frontmatter key to it), nor from a query or a header —
+// the Worker's own call site is the only writer. Anything else — absent, `'on'`, `1`, a string a
+// frontmatter reader might hand over — is ABSENT, and absent is the page exactly as it was before
+// the pool existed (`powered-by` drives the old footer, no closing card). That keeps this inert
+// until the Worker passes a value.
+//
+// 🔴 The link is the bare origin. No `?ref=`: the pool is the platform's promise, not a referral the
+// author runs, so there is no handle to credit.
+export const POOL_URL = 'https://reef.cards/';
+export const poolOf = (ctx) => (ctx && (ctx.pool === true || ctx.pool === false) ? ctx.pool : undefined);
+// The reef mark, the same strokes the prototype's closing card draws. currentColor, so it takes the
+// accent from `.st-cell-icon` like every other tile's glyph.
+const POOL_GLYPH = '<svg class="st-cell-icon" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg>';
+// The closing card is an ordinary full-width link tile — the same classes a `link w=6` row renders,
+// so it carries the card's own surface, line, radius and hover, and NATIVE_CSS lays it out. It is
+// its own `.st-grid` section so the packer never sees it, and it has no `data-cell` (the editor maps
+// boxes back to the file by that; this box is not in the file) and no `data-coral-type`.
+// Self-contained: no fetched icon, no script, nothing outside this string.
+const POOL_CARD_HTML = `<section class="st-grid st-pool" data-pool="card"><div class="st-cells-wrap"><div class="st-cells"><div class="st-cell st-cell-tile st-pool-card" data-span="6x1" data-w="6"><a class="st-cell-link" href="${esc(POOL_URL)}" target="_blank" rel="${REL_OWN}"><div class="st-cell-head">${POOL_GLYPH}</div><div class="st-cell-body"><div class="st-cell-title">${esc('reef.cards')}</div></div></a></div></div></div></section>`;
+
 export function renderGrid(model, ctx = {}) {
   ctx = { name: '', icons: {}, ...ctx };
   if (!ctx.inDrawer) {
@@ -1402,6 +1428,8 @@ export function renderGrid(model, ctx = {}) {
   const marks = /^(mono|grey|gray|monochrome)$/.test(String(ctx.iconStyle || '').trim().toLowerCase())
     ? ' st-card-marks-mono' : '';
   const editCss = ctx.editIndex ? `<style>${EDIT_ONLY_CSS}</style>` : '';
+  // The card pool's closing card: last thing on the card, never inside a drawer.
+  if (!ctx.inDrawer && poolOf(ctx) === true) parts.push(POOL_CARD_HTML);
   return `<div class="st-card${skin}${head}${marks}"><style>${NATIVE_CSS}</style>${editCss}${parts.join('')}</div>`;
 }
 
@@ -1497,10 +1525,18 @@ export function renderPage(model, ctx = {}) {
   const year = new Date().getFullYear();
   const since = ctx.since && String(ctx.since).trim() ? `${esc(ctx.since)}–` : '';
   const owner = `<span>${esc(ctx.name)} &copy; ${since}${year}</span>`;
+  //
+  // 🔴 …unless the PLATFORM has said whether this Card is in the card pool (`ctx.pool`, see
+  // poolOf). Then that one switch decides the footer link and the closing card together, and
+  // `powered-by` decides nothing. Absent — today, until the Worker passes it — is the old footer.
+  const pool = poolOf(ctx);
   const ref = ctx.handle ? `?ref=${encodeURIComponent(ctx.handle)}` : '';
-  const powered = ctx.poweredBy
-    ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}">feelreef</a>`
-    : '';
+  const powered = pool === true
+    ? `&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${esc(POOL_URL)}" target="_blank" rel="${REL_OWN}">reef.cards</a>`
+    : pool === false ? ''
+      : ctx.poweredBy
+        ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}">feelreef</a>`
+        : '';
   const footer = `<footer class="st-footer"><div>${owner}${powered}</div></footer>`;
   // accent: ONE author-set hex derives the whole --cp-accent-* family (the same 12/25/35/72% ramp
   // the Python renderer derives per guild), so a card is themed by a single frontmatter field.

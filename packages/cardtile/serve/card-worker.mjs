@@ -13,7 +13,7 @@
 // The render path (resolveHandle → renderCardHTML) is pure and node-testable; the fetch handler is
 // the only edge-specific shell. One brain, two runtimes (same pattern as events-worker).
 import { parseCard, serializeCard } from '../card-core.js';
-import { renderPage } from '../card-render.mjs';
+import { renderPage, poolOf } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
@@ -346,12 +346,24 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  * served; `false` = the flat page (the editor's per-tile thumbnails); `{ view, pool }` = the editor's
  * preview of one view. An `editIndex` render (the editor's wall, where tiles are moved by hand) is
  * always flat — the deck would rearrange the very boxes it maps back to cells.
+ *
+ * The card pool (reef#2913) has two writers, and exactly one of them draws per page:
+ *   - `ctx.pool` true/false (the PLATFORM's switch, from this Worker's own call site; poolOf): the
+ *     renderer draws it — the closing reef.cards tile after the author's grid and the footer link
+ *     (true), or neither (false). The deck is then told `pool: false`, which to deck.js means "draw
+ *     no reef.cards card and no footer link of your own", so nothing is drawn twice. In stack and
+ *     list the renderer's closing tile is the last `.st-cell` on the page, so deck.js deals it as
+ *     the last card like any link tile; in wall it is the last block on the page.
+ *   - `ctx.pool` absent: today's page, byte for byte — the deck's own switch (`deck.pool`, the
+ *     editor's sandbox stand-in) passes through untouched, as it did before the renderer knew the pool.
+ * An editIndex render never carries the closing tile: that wall is the author's own boxes only.
  */
 export function renderCardHTML(cardMd, ctx = {}) {
-  const flat = renderFlat(cardMd, ctx);
+  const pool = ctx.editIndex ? undefined : poolOf(ctx);
+  const flat = renderFlat(cardMd, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
   if (ctx.deck === false || ctx.editIndex) return flat;
   const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
-  return withDeck(flat, cardMd, { view: deck.view, pool: deck.pool, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
+  return withDeck(flat, cardMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
 }
 
 function renderFlat(cardMd, ctx) {
@@ -378,6 +390,10 @@ function renderFlat(cardMd, ctx) {
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
     poweredBy: fm('powered-by') === 'on',   // opt-in referral credit; default off (see card-render)
+    // 🔴 CALLER-supplied, never authored: is this Card in the card pool (reef#2913)? Only the
+    // Worker's own call site may set it — no frontmatter key, query or header maps here. true/false
+    // overrides `powered-by` (card-render poolOf); anything else is absent = today's page.
+    pool: poolOf(ctx),
     radius: fm('radius'),                  // `radius: square` keeps a creator's square-corner look
     // `header: left` puts the avatar beside the text instead of above it. Centred is the DEFAULT
     // because 10/10 surveyed platforms centre it — but that evidence justifies a default, not the

@@ -12,7 +12,10 @@
 //             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs)
 //             window.__deckRef      the handle, for the reef.cards link's ?ref= (absent: no ref)
 //             window.__pool         only when the caller says so. The card pool is a PLATFORM switch,
-//                                   never a file key (reef#2913); absent = in the pool.
+//                                   never a file key (reef#2913); absent = in the pool. To deck.js,
+//                                   false means "draw no reef.cards card or footer link of your own":
+//                                   renderCardHTML also passes false when the PLATFORM's ctx.pool is
+//                                   set, because the renderer has then drawn them itself (or not).
 //           then deck.js itself (versioned, immutable — see DECK_JS_PATH)
 //
 // `view` is the editor's: it names the view it is showing, so the page opens on that one and the
