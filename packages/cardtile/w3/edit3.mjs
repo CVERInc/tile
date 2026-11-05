@@ -919,6 +919,8 @@ function show() {
   if (pane === 'layout') paintLayout(); else picked = null;
   if (pane === 'preview') {   // what a visitor gets in this view: the live page's own deck, opened on this view
     lsSet('reef-card-layout', null);   // the deck remembers a visitor's last pick; the editor names the view instead
+    // the sandbox always says its pool switch out loud (true unless set off): deck.js counts only `true` as in the
+    // pool, so a page that says nothing — host mode today, until the platform side exists — shows no reef.cards card
     el('deckframe').srcdoc = renderCardHTML(md, { handle, deck: { view, ...(SANDBOX ? { pool: poolOn() } : {}) } });
   }
 }

@@ -130,8 +130,8 @@ test('closing card: once per page — not repeated inside drawers, and absent fr
 });
 
 // ── the deck (w3/deck-page.mjs + w3/deck.js) on every Card page ───────────────────────────────
-// deck.js draws its OWN reef.cards closing card (stack / list) and footer link unless the page says
-// `window.__pool=false`. So when the platform's ctx.pool is set, the renderer is the one writer and
+// deck.js draws its OWN reef.cards closing card (stack / list) and footer link only when the page says
+// `window.__pool=true` (absent, false or anything else: out). So when the platform's ctx.pool is set, the renderer is the one writer and
 // the deck is told to draw nothing: in stack and list deck.js deals every `.st-cell` in <main> as a
 // card in document order, so the renderer's closing tile — the last one — is the deck's last card;
 // in wall the page is shown as it is and the tile is its last block. One closing card, one footer
@@ -176,7 +176,7 @@ for (const [name, extra] of VIEWS) {
   test(`deck (${name}): pool absent → no renderer pool, the deck's own switch untouched`, () => {
     const html = renderCardHTML(BACKS, { ...CTX, ...extra });
     assert.equal(has.closingCard(html), 0);
-    assert.ok(!bootOf(html).includes('__pool'), 'absent says nothing to the deck (deck.js: absent = its own default)');
+    assert.ok(!bootOf(html).includes('__pool'), 'absent says nothing to the deck (deck.js: absent = out of the pool)');
     // the editor's sandbox stand-in (deck.pool) still reaches the deck exactly as before
     if (extra.deck) {
       for (const p of [true, false]) {
@@ -237,4 +237,50 @@ test('injection: ?pool= and pool headers on a served card do nothing', async () 
       assert.equal(await res.text(), plain, `${k}: ${v}`);
     }
   }
+});
+
+// ── the deck's own decision (deck.js), on the boot config each view's page hands it ──────────
+// deck.js is a browser script and this suite has no DOM, so the deck's ONE pool decision is run here as
+// the committed deck states it: its single `const POOL=` statement, evaluated against the `window` the
+// page's boot script builds. The census around it pins that POOL is the only thing that reads
+// `__pool` and that both of the deck's reef.cards draws (footer link, closing card) are gated on it.
+// (The same nine cells counted in real Chromium are a lane receipt.)
+const { DECK_JS } = await import('./deck-assets.mjs');
+const deckCode = DECK_JS.split('\n').filter((l) => !/^\s*\/\//.test(l));
+const poolLines = deckCode.filter((l) => /^\s*const POOL=/.test(l));
+const deckInPool = (win) => new Function('window', `return ${/^\s*const POOL=(.*);\s*$/.exec(poolLines[0])[1]};`)(win);
+
+test('deck.js: one pool decision, the only reader of __pool, gating both of its reef.cards draws', () => {
+  assert.equal(poolLines.length, 1, 'exactly one `const POOL=` statement');
+  assert.deepEqual(deckCode.filter((l) => l.includes('__pool')), poolLines, 'nothing else in deck.js reads __pool');
+  const code = deckCode.join('\n');
+  assert.match(code, /if\(POOL\) fd\.insertAdjacentHTML\('beforeend','[^']*<a href="https:\/\/reef\.cards\/'\+REFQ\+'"/, 'the footer link is drawn only when POOL');
+  assert.match(code, /if\(!REF&&\(OURS\|\|POOL\)\) addCard\(reefFront,/, 'the closing card is drawn only when POOL (on a Card page, OURS is false)');
+});
+
+test('🔴 deck.js: only window.__pool === true is in the pool — absent, false and anything else are out', () => {
+  assert.equal(deckInPool({}), false, '🔴 a page that says nothing about the pool is OUT of it');
+  assert.equal(deckInPool({ __pool: true }), true);
+  for (const v of [false, undefined, null, 'true', 1, 'on', {}]) assert.equal(deckInPool({ __pool: v }), false, `__pool=${JSON.stringify(v)}`);
+});
+
+for (const view of ['stack', 'list', 'wall']) {
+  for (const [name, deck, inPool] of [['no __pool', { view }, false], ['__pool=true', { view, pool: true }, true], ['__pool=false', { view, pool: false }, false]]) {
+    test(`deck (${view}, ${name}): the deck ${inPool ? 'draws' : 'draws no'} closing card and footer link`, () => {
+      const html = renderCardHTML(BACKS, { ...CTX, deck });
+      const win = {}; new Function('window', bootOf(html))(win);
+      assert.equal('__pool' in win, 'pool' in deck, 'the boot config carries __pool only when the caller set it');
+      assert.equal(has.closingCard(html), 0, 'no renderer pool: ctx.pool is unset');
+      assert.equal(deckInPool(win), inPool);
+    });
+  }
+}
+
+test('🔴 the live page (no ctx.pool, no deck switch) is out of the pool: the deck draws nothing', () => {
+  const html = renderCardHTML(BACKS, CTX);
+  const win = {}; new Function('window', bootOf(html))(win);
+  assert.equal('__pool' in win, false);
+  assert.equal(deckInPool(win), false);
+  assert.equal(has.closingCard(html), 0);
+  assert.ok(!/reef\.cards/.test(footerOf(html)));
 });
