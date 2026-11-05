@@ -662,14 +662,9 @@ function editorHtml(localeKey, { host = '' } = {}) {
   const opts = JSON.stringify(host
     ? { host, sandbox: false, locale: localeKey, assets }
     : { sandbox: true, locale: localeKey, assets }).replace(/</g, '\\u003c');
-  // The banner text is written server-side into the markup, for the same reason a visitor without
-  // JavaScript still needs it: a visitor (or a crawler, or `curl`) who never runs the script must
-  // still be able to read that nothing here is kept online. The editor writes the same strings from
-  // the same table into the same elements, so the two can never disagree. Host mode has no banner.
-  const body = host ? EDIT3_BODY_HTML : EDIT3_BODY_HTML
-    .replace('<div class="ctw-sandbox-banner sbx" id="sandbox-banner" hidden>', '<div class="ctw-sandbox-banner sbx" id="sandbox-banner">')
-    .replace('<span id="sandbox-banner-text"></span>', `<span id="sandbox-banner-text">${escLite(persona.bannerText)}</span>`)
-    .replace('<span id="sandbox-banner-status"></span>', `<span id="sandbox-banner-status">${escLite(persona.bannerStatus)}</span>`);
+  // 🔴 Nothing is fixed on screen for the sandbox (no banner): Save, with no account behind it, is the door to
+  // the real thing, and the "kept in this browser" line lives at the top of Cards options.
+  const body = EDIT3_BODY_HTML;
   return `<!doctype html>
 <html lang="${persona.lang}"><head>
 <meta charset="utf-8">

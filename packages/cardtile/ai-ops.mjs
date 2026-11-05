@@ -237,6 +237,8 @@ export const CELL_TYPES = {
       kind: {
         disposition: DISPOSITION.FORM, label: 'type.slides.kind.label', control: CONTROL.SELECT,
         options: ['slider', 'bubbles'],
+        // what a person reads: the style's name, never the stored word
+        optionLabels: { slider: 'type.slides.kind.slider', bubbles: 'type.slides.kind.bubbles' },
         hint: 'type.slides.kind.hint',
       },
       images: { disposition: DISPOSITION.FORM, label: 'type.slides.images.label', control: CONTROL.TEXT, hint: 'type.slides.images.hint' },

@@ -708,11 +708,16 @@ test('sandbox: a trailing slash answers the same as the bare path', async () => 
   assert.equal(res.status, 200);
 });
 
-test('sandbox: the banner text is IN THE MARKUP (not only wired up by client JS) — curl must see it too', async () => {
+test('sandbox: nothing is fixed on screen — no banner ships (owner ruling 2026-11-05, review P06/P28)', async () => {
+  // The sandbox banner took a row of every screen to say one sentence. It is gone: Save, with no account behind
+  // it, opens the door to the real thing, and the "kept in this browser" line lives in Cards options.
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED);
   const body = await res.text();
-  assert.ok(!body.includes('id="sandbox-banner" hidden'), 'the banner must not ship hidden');
-  assert.match(body, /id="sandbox-banner-text">[^<]+</, 'the banner span must already have text in it');
+  // (the shared w/editor.css still styles the older internal editor's banner; what matters is the markup)
+  assert.doesNotMatch(body, /id="sandbox-banner/, 'the banner is back');
+  // the notice bars ship empty and hidden: they only appear when there is something to say
+  assert.match(body, /id="notice-top"[^>]*hidden/);
+  assert.match(body, /id="notice-bottom"[^>]*hidden/);
 });
 
 test('sandbox: locale comes from Accept-Language, one of the nine console locales the editor speaks', async () => {
@@ -947,13 +952,12 @@ test('🔴 the internal editor\'s OWN markup keeps its own name — the swap is 
 const optsOf = (body) => JSON.parse(/window\.__CARDTILE_W3_OPTS__ = (\{.*?\});/.exec(body)[1]);
 const ASSET_NAMES = ['editor-core.js', 'obsidian-shim.js', 'web-host.js', 'Sortable.min.js'];
 
-test('sandbox: the banner ships IN THE MARKUP, with the door and the way to start over', async () => {
+test('sandbox: Save\'s door and the leave-edit question ship in the markup', async () => {
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED);
   const body = await res.text();
-  assert.ok(!body.includes('id="sandbox-banner" hidden'), 'the banner must not ship hidden');
-  assert.match(body, /id="sandbox-banner-text">[^<]+</, 'the banner span must already have text in it');
-  assert.match(body, /id="sandbox-banner-status">[^<]+</, "the phone's one-line banner must ship too");
-  for (const id of ['publish', 'sandbox-reset']) assert.match(body, new RegExp(`id="${id}"`), `the banner has no #${id}`);
+  for (const id of ['doormodal', 'door-go', 'door-back', 'leavemodal', 'leave-save', 'leave-keep', 'leave-discard']) {
+    assert.match(body, new RegExp(`id="${id}"`), `the editor has no #${id}`);
+  }
 });
 
 test('sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards', async () => {
@@ -1188,8 +1192,8 @@ test('host mode: /edit?host=feelreef serves the editor with host opts, noindex, 
       assert.equal(res.headers.get('x-frame-options'), null, 'a page meant to be framed must not forbid it');
       const body = await res.text();
       { const { assets, ...o } = optsOf(body); assert.deepEqual(o, { host, sandbox: false, locale: 'ja' }); assert.deepEqual(Object.keys(assets).sort(), [...ASSET_NAMES].sort()); }
-      assert.ok(body.includes('id="sandbox-banner" hidden'), 'host mode ships the sandbox banner hidden');
-      assert.match(body, /id="host-status"/);
+      assert.doesNotMatch(body, /id="sandbox-banner/, 'no banner in either mode');
+      assert.match(body, /id="notice-top"/, 'the top notice is where host mode says what Save is doing');
       assert.match(body, /id="editbtn"/);
       // 🔴 host mode never ships the sandbox's "Try Card · feelreef" — before the parent hands over
       // a real card there is nothing to name yet, so the tab reads the bare product name.

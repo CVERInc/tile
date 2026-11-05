@@ -2,20 +2,18 @@
    sandbox visitor stands on our porch, so the shell wears feelreef.com/dashboard's look; the CARD
    keeps its own theme).
 
-   MIRRORED, NOT IMPORTED — tile never imports reef code. Every literal names the reef line it was
+   MIRRORED, NOT IMPORTED — tile never imports reef code. Every light literal names the reef line it was
    copied from (reef/apps/feelreef/…, as of 2026-09-24); w3/porch-tokens.test.mjs pins the ones that
    carry the look and, when the reef checkout is on the machine, diffs the rest against it live.
 
-   🔴 ONE LOOK, NO DARK COPY — ON PURPOSE. reef has no `prefers-color-scheme` copy of the carrier
-   block to mirror: app.css:468 「There is no second skin」 (product owner 2026-08-15: feelreef ships ONE
-   look) and reef's own one-look.test.ts forbids asking the OS about colour. The account dashboard
-   (the porch) is therefore the same pale sea-green in both OS schemes, and so is this shell. The
-   only dark-scheme carrier values reef has belong to `.console.owners-home` (console.css:441) —
-   the owner's home, which is the OTHER dashboard, not the porch. `color-scheme: light` below keeps
-   native controls (scrollbars, checkboxes, selects) from turning dark on a light ground.
-   prefers-contrast is honoured, as app.css does (accessibility, not taste). */
+   🔴 THE SHELL HAS A DARK THEME NOW (owner ruling 2026-11-05, review P12). reef's porch ships one look,
+   and the shell used to mirror that — but the CARD in the preview follows the visitor's scheme, so in
+   a dark OS a pale sea-green bar sat directly on a near-black card page, an 18:1 seam that read as a
+   page that had failed to load. The dark block below is this editor's OWN (reef has none to mirror);
+   it keeps the porch's hues and moves only lightness, so the two schemes are one look at two
+   brightnesses, and the dark shell meets a dark card softly. prefers-contrast is honoured, as app.css does. */
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
   /* type — app.css:101-106 */
   --font-body: 'Nunito Variable', Nunito, -apple-system, 'PingFang TC', 'Hiragino Sans', 'Microsoft JhengHei', 'Noto Sans CJK TC', sans-serif;
@@ -67,6 +65,53 @@
 
   /* the porch ground — routes/dashboard/+page.svelte:2217 (`.screen`) */
   --porch-ground: linear-gradient(180deg, #f1fbfb 0%, #e6f5f3 42%, #f4fcfa 100%);
+
+  /* the editor's own, derived from the above (not reef's): fields are white with a 3:1 edge; the notice is one
+     bar in one look (w3/notice.mjs); an off switch has a visible track */
+  --porch-field-bg: #ffffff;
+  --notice-bg: #0c3a44;
+  --notice-ink: #ffffff;
+  --notice-error-bg: #9f2a24;
+  --notice-error-ink: #ffffff;
+  --switch-off: #dfe6e7;
+}
+
+/* the editor's dark shell — its own, not a reef mirror (see the header). Same hues, darker ground; every pair
+   keeps its contrast: text ≥ 4.5:1 on the ground and on the panel, borders and controls ≥ 3:1. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --carrier-bg: rgba(18, 32, 36, 0.78);
+    --carrier-bg-solid: #121d20;
+    --carrier-text: #e2eef0;
+    --carrier-text-muted: #9cb3b8;
+    --carrier-heading: #eaf5f6;
+    --carrier-border: rgba(214, 238, 242, 0.14);
+    --carrier-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    --carrier-accent: #4cc0cc;
+    --carrier-accent-ink: #062126;
+    --carrier-input-bg: #0c1517;
+    --carrier-link: #6fd2dc;
+    --carrier-outline-border: #4cc0cc;
+    --carrier-feedback-success: #5fd393;
+    --carrier-feedback-error: #ff8f84;
+    --carrier-feedback-warning: #f0b45a;
+    --console-tint: color-mix(in srgb, var(--carrier-accent) 14%, transparent);
+    --btn-ink: #e2eef0;
+    --btn-secondary-ink: #6fd2dc;
+    --btn-surface: #182629;
+    --btn-border: #6f9096;
+    --btn-border-hover: #6fd2dc;
+    --btn-ghost-hover: rgba(111, 210, 220, 0.1);
+    --btn-danger-ink: #ff9b90;
+    --btn-danger-hover: rgba(255, 120, 110, 0.16);
+    --porch-ground: linear-gradient(180deg, #0f1a1d 0%, #0b1517 42%, #0e191c 100%);
+    --porch-field-bg: #0c1517;
+    --notice-bg: #1f4b53;
+    --notice-ink: #ffffff;
+    --notice-error-bg: #8c2620;
+    --notice-error-ink: #ffffff;
+    --switch-off: #2a3a3e;
+  }
 }
 
 /* app.css (the @media (prefers-contrast: more) block after 「There is no second skin」) */

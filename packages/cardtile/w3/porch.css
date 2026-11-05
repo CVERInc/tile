@@ -1,7 +1,7 @@
 /* The Card editor's shared chrome, LAYERED ON TOP of w/editor.css — never a copy of it. The sheet,
    the fields, the picture picker and the modal shell come from there, because the sheets are the
-   same sheets. What is here: the one-row kind picker, the Markdown box, the sandbox banner, the host
-   status line, and the porch skin those wear. The editor's own layout (the row, the bar, the views)
+   same sheets. What is here: the one-row kind picker, the Markdown box, and the porch skin those
+   wear (the notice that replaced the sandbox banner and the host status line is edit3.css's). The editor's own layout (the row, the bar, the views)
    is w3/edit3.css, which loads after the family stylesheets.
 
    🔴 RWD IS CORRECTNESS, not polish: at 390px the page never scrolls sideways and every target a
@@ -20,9 +20,8 @@
   text-align: start; padding: .6rem .75rem; font: inherit; font-size: .72rem;
   border: 1px solid var(--ctw-line); border-radius: 12px; background: transparent; color: var(--ctw-ink); cursor: pointer;
 }
-.ctw-pick-btn:hover, .ctw-pick-btn:focus-visible {
-  background: color-mix(in srgb, var(--ctw-go) 14%, transparent); border-color: var(--ctw-go);
-}
+.ctw-pick-btn:focus-visible { background: color-mix(in srgb, var(--ctw-go) 14%, transparent); border-color: var(--ctw-go); }
+@media (hover: hover) { .ctw-pick-btn:hover { background: color-mix(in srgb, var(--ctw-go) 14%, transparent); border-color: var(--ctw-go); } }
 .ctw-pick-ico { display: block; width: 24px; height: 24px; color: var(--ctw-go); grid-row: span 2; }
 .ctw-pick-ico svg { width: 100%; height: 100%; display: block; }
 .ctw-pick-name { text-align: start; line-height: 1.25; font-size: .85rem; }
@@ -36,19 +35,6 @@
   border: 1px solid var(--ctw-line); background: var(--ctw-bg); color: var(--ctw-ink);
 }
 
-/* ── the sandbox banner: one line; the long sentence on a wide screen, the short one on a phone ── */
-.ctw-sandbox-banner[hidden] { display: none; }
-.ctw-sandbox-banner .ctw-btn { min-height: 44px; flex: 0 0 auto; white-space: nowrap; }
-@media (max-width: 640px) {
-  #sandbox-banner-text { display: none; }
-  #sandbox-banner-status { display: inline; }
-}
-
-/* ── host mode: the save status beside Save. A refusal is the parent's own words, verbatim. ──── */
-.ctw-host-status { font: 600 13px/1.3 var(--font-body); color: var(--carrier-text-muted); max-width: 40ch; overflow-wrap: anywhere; }
-.ctw-host-status[hidden] { display: none; }
-.ctw-host-status[data-status="failed"] { color: var(--carrier-feedback-error); }
-
 /* ══ THE PORCH SKIN ═══════════════════════════════════════════════════════════════════════════════
    The editor wears feelreef.com/dashboard's look (w3/porch-tokens.css); the CARD keeps its own
    theme — nothing below reaches into an iframe. w/editor.css paints everything from six --ctw-*
@@ -60,7 +46,8 @@
   --ctw-ink: var(--carrier-text);
   --ctw-dim: var(--carrier-text-muted);
   --ctw-go: var(--carrier-accent);
-  --ctw-danger: var(--carrier-feedback-error);
+  /* 🔴 error WORDS use the danger ink (≥ 4.5:1 on every panel); the feedback red is 4.3:1 — too light for text */
+  --ctw-danger: var(--btn-danger-ink);
   accent-color: var(--carrier-accent);
 }
 body {
@@ -70,25 +57,27 @@ body {
 }
 ::selection { background: rgba(255, 122, 92, 0.25); }
 
-.ctw-sandbox-banner {
-  background: var(--console-tint); color: var(--carrier-heading);
-  border-bottom: 1px solid var(--carrier-border); font-weight: 700;
-}
-
-/* buttons — the dashboard's: 1.5px border, weight 800, pill, the press transform */
+/* buttons — weight 800, pill, the press transform. 🔴 A BUTTON NEVER LOOKS LIKE A FIELD (P32): fields are white
+   with an edge; a button is FILLED (the main one) or TINTED (the rest) — never white-with-an-outline. Every one is
+   at least 44px tall. A disabled button is an OUTLINE (dashed), never a faded fill. */
 .ctw-btn, .ctw-tab {
   font-family: var(--font-body); font-weight: var(--btn-weight);
-  border: 1.5px solid var(--carrier-outline-border); border-radius: var(--btn-radius-pill);
-  background: var(--btn-surface); color: var(--btn-ink);
-  transition: background .15s, border-color .15s, color .15s, transform 90ms ease;
+  min-height: 44px; padding: .45rem 1rem; display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  border: 1.5px solid transparent; border-radius: var(--btn-radius-pill);
+  background: color-mix(in srgb, var(--carrier-accent) 13%, var(--btn-surface)); color: var(--btn-secondary-ink);
+  transition: background .15s, border-color .15s, color .15s, transform 90ms ease; cursor: pointer;
 }
-.ctw-btn:not(.ctw-btn-go):hover, .ctw-tab:hover { background: var(--btn-ghost-hover); color: var(--btn-secondary-ink); }
 .ctw-btn-go { background: var(--carrier-accent); border-color: var(--carrier-accent); color: var(--carrier-accent-ink); }
-.ctw-btn-go:hover { filter: none; background: color-mix(in srgb, var(--carrier-accent) 86%, #000); }
 .ctw-btn-ghost { background: transparent; border-color: var(--carrier-outline-border); color: var(--carrier-link); }
-.ctw-btn-danger { background: transparent; color: var(--btn-danger-ink); border-color: color-mix(in srgb, var(--btn-danger-ink) 55%, transparent); }
-.ctw-btn-danger:not(.ctw-btn-go):hover { background: var(--btn-danger-hover); color: var(--btn-danger-ink); }
-.ctw-btn[disabled] { opacity: .55; }
+.ctw-btn-danger { background: color-mix(in srgb, var(--btn-danger-ink) 11%, var(--btn-surface)); color: var(--btn-danger-ink); }
+.ctw-btn[disabled], .ctw-btn:disabled {
+  background: transparent; border: 1.5px dashed var(--btn-border); color: var(--carrier-text-muted); cursor: default; opacity: 1;
+}
+@media (hover: hover) {
+  .ctw-btn:not(.ctw-btn-go):not(:disabled):hover, .ctw-tab:hover { background: color-mix(in srgb, var(--carrier-accent) 20%, var(--btn-surface)); }
+  .ctw-btn-go:not(:disabled):hover { filter: none; background: color-mix(in srgb, var(--carrier-accent) 86%, #000); }
+  .ctw-btn-danger:not(:disabled):hover { background: var(--btn-danger-hover); color: var(--btn-danger-ink); }
+}
 /* "the press answers before the server does" */
 .ctw-btn:active:not(:disabled), .ctw-tab:active, .ctw-pick-btn:active, .ctw-modal-close:active { transform: var(--porch-press); }
 @media (prefers-reduced-motion: reduce) {
@@ -106,21 +95,24 @@ body {
 }
 .ctw-modal-panel h2 { font-family: var(--font-display); font-weight: 400; color: var(--carrier-heading); font-size: 1.2rem; }
 .ctw-modal-close { border: 1.5px solid var(--carrier-border); background: var(--btn-surface); color: var(--carrier-text); corner-shape: round; }
-.ctw-modal-close:hover { border-color: var(--carrier-outline-border); color: var(--carrier-link); }
+@media (hover: hover) { .ctw-modal-close:hover { border-color: var(--carrier-outline-border); color: var(--carrier-link); } }
 .ctw-modal-foot { border-top-color: var(--carrier-border); }
 .ctw-field > span { font-weight: 700; color: var(--carrier-heading); }
+/* fields: white (the dark theme's own field ground) with an edge that reaches 3:1 */
 .ctw-field input[type=text], .ctw-field input[type=url], .ctw-field select, .ctw-field textarea,
 .ctw-md, .ctw-url {
-  background: var(--carrier-input-bg); border: 1px solid var(--carrier-border); border-radius: var(--console-radius-sm); color: var(--carrier-text);
+  background: var(--porch-field-bg); border: 1.5px solid var(--btn-border); border-radius: var(--console-radius-sm); color: var(--carrier-text);
+  min-height: 44px;
 }
 .ctw-group, .ctw-pub-result { border-color: var(--carrier-border); border-radius: var(--console-radius-sm); background: var(--carrier-bg); }
 .ctw-err, .ctw-asset-err { color: var(--carrier-feedback-error); }
 .ctw-asset-tabs { border-color: var(--carrier-border); }
-.ctw-asset-tab { font-family: var(--font-body); font-weight: 700; color: var(--carrier-text-muted); }
-.ctw-asset-tab:hover:not([aria-selected="true"]) { color: var(--carrier-text); background: var(--btn-ghost-hover); }
+.ctw-asset-tab { font-family: var(--font-body); font-weight: 700; color: var(--carrier-text-muted); min-height: 44px; min-width: 64px; }
+@media (hover: hover) { .ctw-asset-tab:hover:not([aria-selected="true"]) { color: var(--carrier-text); background: var(--btn-ghost-hover); } }
 .ctw-asset-tab[aria-selected="true"] { background: var(--carrier-accent); color: var(--carrier-accent-ink); }
 .ctw-pick-btn { border-radius: var(--console-radius-sm); background: var(--btn-surface); border-color: var(--carrier-border); font-weight: 700; }
-.ctw-pick-btn:hover, .ctw-pick-btn:focus-visible { background: var(--console-tint); border-color: var(--carrier-accent); }
+.ctw-pick-btn:focus-visible { background: var(--console-tint); border-color: var(--carrier-accent); }
+@media (hover: hover) { .ctw-pick-btn:hover { background: var(--console-tint); border-color: var(--carrier-accent); } }
 .ctw-pick-ico { color: var(--carrier-accent); }
 
 /* thin translucent scrollbars on the editor's own scrolling panes */

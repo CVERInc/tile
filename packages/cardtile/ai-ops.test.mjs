@@ -193,11 +193,11 @@ test('delete_asset declares expected_version beside handle and id (tile#209: the
 // no logo, and no QR (the QR is mounted on the profile's avatar). That was the agent reading us right.
 // These are the exact words reef-mcp's describe_card_grammar resolves (src/card-grammar.js:
 // `say(def.hint)` → purpose, `say(param.label)` / `say(param.hint)`, over cellStrings('en')).
-test('describe_card_grammar profile: a face OR a logo, and the QR lives here', async () => {
+test('describe_card_grammar profile: a face OR a logo, and tapping it shows the QR', async () => {
   const { cellStrings, text } = await import('./w/cell-i18n.mjs');
   const say = (k) => text(cellStrings('en'), k);
   const p = CELL_TYPES.profile;
-  assert.equal(say(p.hint), 'The top of the card: a face or a logo, the name, one line. The QR code lives here too.');
+  assert.equal(say(p.hint), 'The top of the card: a face or a logo, the name, one line. Add a face or a logo, and tapping it turns into your QR code.');
   assert.equal(say(p.params.avatar.label), 'Photo or logo');
   assert.equal(say(p.params.avatar.hint), "A person's photo, or a brand mark on a plain background.");
   // the person example stays; a brand-flavoured one sits beside it

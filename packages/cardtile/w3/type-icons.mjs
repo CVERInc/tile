@@ -12,8 +12,9 @@
 export const TYPE_ICONS = {
   // a person
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7v1"/>',
-  // a chain link
-  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  // a globe (Lucide `globe`) — where a link goes. NOT a chain: the chain (link-2 / unlink-2) is the row's
+  // control that pairs two tiles as front and back, and the two must never share a glyph (editor review P13)
+  link: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
   // a framed picture — the `feature` type IS "a picture with a caption"
   feature: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L3 21"/>',
   // prose

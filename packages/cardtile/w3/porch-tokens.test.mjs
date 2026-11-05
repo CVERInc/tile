@@ -7,9 +7,11 @@
 //      `--btn-*` literal is diffed against reef's live app.css and any difference is PRINTED, not
 //      failed — reef moving is news, not our breakage (and CI has no reef checkout).
 //
-// "Dark counterparts": reef has NONE for the porch — app.css 「There is no second skin」, one look,
-// enforced by reef's own one-look.test.ts. So the dark half of this test asserts the mirror did not
-// invent one: no `prefers-color-scheme` block, and `color-scheme: light`.
+// "Dark counterparts": reef has NONE for the porch — app.css 「There is no second skin」. The editor's
+// shell got its OWN dark theme on 2026-11-05 (owner ruling, review P12: the dark card preview met a
+// pale shell at an 18:1 seam). So the dark half of this test no longer asserts "no dark block"; it
+// asserts the dark block is the editor's own and keeps its contrast pairs — it can never be read as a
+// reef mirror (the soft live diff below compares the FIRST, light, declaration of each token only).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,10 +63,34 @@ test('porch tokens: the look-carrying light values match reef', () => {
   assert.deepEqual(drift, [], 'porch tokens drifted from reef:\n' + drift.join('\n'));
 });
 
-test('porch tokens: dark scheme is the SAME look (reef ships one skin — no invented dark copy)', () => {
+// WCAG relative luminance / contrast, for the pairs the dark shell must keep
+const lum = (hex) => { const n = hex.replace('#', ''); const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function darkTokens(css) {
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = bare.indexOf('prefers-color-scheme: dark');
+  assert.ok(at > 0, 'the editor shell has a dark block');
+  return rootTokens(bare.slice(at));
+}
+
+test('porch tokens: the dark shell is the editor\'s own, and every pair keeps its contrast', () => {
   const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.equal(/prefers-color-scheme/.test(bare), false, 'reef has no dark porch skin to mirror; a dark block here would be invented');
-  assert.match(bare, /color-scheme:\s*light/);
+  assert.match(bare, /color-scheme:\s*light dark/, 'native controls follow the scheme too');
+  const d = darkTokens(CSS);
+  const pairs = [
+    ['--carrier-text', '--carrier-bg-solid', 4.5], ['--carrier-text-muted', '--carrier-bg-solid', 4.5],
+    ['--carrier-heading', '--btn-surface', 4.5], ['--carrier-text-muted', '--btn-surface', 4.5],
+    ['--carrier-link', '--btn-surface', 4.5], ['--btn-danger-ink', '--carrier-bg-solid', 4.5],
+    ['--carrier-accent-ink', '--carrier-accent', 4.5], ['--notice-ink', '--notice-bg', 4.5], ['--notice-error-ink', '--notice-error-bg', 4.5],
+    ['--btn-border', '--carrier-bg-solid', 3], ['--carrier-accent', '--carrier-bg-solid', 3],
+  ];
+  const weak = pairs.filter(([a, b, min]) => contrast(d[a], d[b]) < min).map(([a, b, min]) => `${a} on ${b}: ${contrast(d[a], d[b]).toFixed(2)} < ${min}`);
+  assert.deepEqual(weak, []);
+  // the light shell's own additions keep theirs too (the error ink is the danger ink, ≥ 4.5:1 on the panel)
+  const l = rootTokens(CSS);
+  assert.ok(contrast(l['--btn-danger-ink'], l['--carrier-bg-solid']) >= 4.5);
+  assert.ok(contrast(l['--btn-border'], l['--porch-field-bg']) >= 3, 'a field\'s edge is visible');
+  assert.ok(contrast(l['--notice-ink'], l['--notice-error-bg']) >= 4.5);
 });
 
 test('porch tokens: soft live diff against the reef checkout (prints, never fails)', (t) => {
