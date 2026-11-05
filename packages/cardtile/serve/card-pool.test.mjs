@@ -79,15 +79,20 @@ test('absent: undefined, null, "on", "true", 1 and {} all render the same bytes 
   assert.equal(poolOf(undefined), undefined);
 });
 
-test('pool: true changes only the footer link and the appended closing card', () => {
-  // The rest of the page is untouched: strip the closing card and swap the footer back, and it is
-  // the powered-by-off page byte for byte.
+// a set pool also tells the deck to draw none of its own (see the deck tests below)
+const DECK_OFF = 'window.__pool=false;';
+const dropDeckOff = (h) => h.replace(DECK_OFF, '');
+
+test('pool: true changes only the footer link, the appended closing card and the deck switch', () => {
+  // The rest of the page is untouched: strip the closing card and the deck's switch and swap the
+  // footer back, and it is the powered-by-off page byte for byte.
   const off = renderCardHTML(POWERED.off, CTX);
   const on = renderCardHTML(POWERED.on, { ...CTX, pool: true });
-  const back = on.replace(POOL_SECTION, '').replace(footerOf(on), footerOf(off));
+  assert.ok(!off.includes('window.__pool'), 'setup: absent says nothing to the deck');
+  const back = dropDeckOff(on).replace(POOL_SECTION, '').replace(footerOf(on), footerOf(off));
   assert.equal(back, off);
-  // and pool:false is the powered-by-off page outright
-  assert.equal(renderCardHTML(POWERED.on, { ...CTX, pool: false }), off);
+  // and pool:false is the powered-by-off page plus the deck's switch
+  assert.equal(dropDeckOff(renderCardHTML(POWERED.on, { ...CTX, pool: false })), off);
 });
 
 test('closing card: last block inside the card, a reef.cards link tile, self-contained', () => {
@@ -122,6 +127,85 @@ test('closing card: once per page — not repeated inside drawers, and absent fr
   const direct = renderPage(model, { name: 'INKB', handle: 'inkbrush', poweredBy: true, pool: true });
   assert.ok(!/Powered by/.test(direct) && has.poolFooter(direct));
   assert.ok(!/Powered by/.test(renderPage(model, { name: 'INKB', handle: 'inkbrush', poweredBy: true, pool: false })));
+});
+
+// ── the deck (w3/deck-page.mjs + w3/deck.js) on every Card page ───────────────────────────────
+// deck.js draws its OWN reef.cards closing card (stack / list) and footer link unless the page says
+// `window.__pool=false`. So when the platform's ctx.pool is set, the renderer is the one writer and
+// the deck is told to draw nothing: in stack and list deck.js deals every `.st-cell` in <main> as a
+// card in document order, so the renderer's closing tile — the last one — is the deck's last card;
+// in wall the page is shown as it is and the tile is its last block. One closing card, one footer
+// link, per view. (A real-browser count of all nine pool × view cells is a lane receipt: the suite
+// has no DOM.)
+const BACKS = CARD.replace('[Shop](https://shop.example)', '[Shop](https://shop.example)\n- [ ] %% card: link w=2 h=2 back=#more %% [IG](https://instagram.com/x)')
+  + '\n## back: more\n\n- [ ] %% card: link w=6 h=1 %% [Inside](https://inside.example)\n';
+const bootOf = (h) => /<script>(window\.__cardFront=[\s\S]*?)<\/script>/.exec(h)?.[1] ?? '';
+const mainOf = (h) => /<main[\s\S]*?<\/main>/.exec(h)?.[0] ?? '';
+// the drawers' layer sits inside <main>, after the card; deck.js skips anything in a .dc-drawer
+const DRAWERS = '<div class="dc-drawer-layer"';
+const faceOf = (h) => mainOf(h).split(DRAWERS)[0];
+const drawersOf = (h) => mainOf(h).split(DRAWERS).slice(1).join(DRAWERS);
+const cellsInMain = (h) => [...faceOf(h).matchAll(/class="(st-cell(?: [^"]*)?)"/g)].map((m) => m[1]);
+const VIEWS = [['live page', {}], ['stack', { deck: { view: 'stack' } }], ['list', { deck: { view: 'list' } }], ['wall', { deck: { view: 'wall' } }]];
+
+for (const [name, extra] of VIEWS) {
+  test(`deck (${name}): pool true → one closing tile, last cell in <main>, one footer link, deck draws none`, () => {
+    for (const md of [BACKS, withFm(BACKS, 'powered-by: on')]) {
+      const html = renderCardHTML(md, { ...CTX, ...extra, pool: true });
+      assert.ok(/class="dc-drawer/.test(html) && /<script src="\/_deck\//.test(html), 'setup: a drawer and the deck are on the page');
+      assert.equal(has.closingCard(html), 1, 'exactly one closing tile');
+      assert.equal(has.closingCard(faceOf(html)), 1, 'and it is on the card face in <main>');
+      assert.ok(drawersOf(html).includes('Inside') && has.closingCard(drawersOf(html)) === 0, 'never inside a drawer');
+      const cells = cellsInMain(html);
+      assert.ok(cells.length > 2, 'setup: the author has cells');
+      assert.equal(cells.at(-1), 'st-cell st-cell-tile st-pool-card', 'the last cell deck.js deals is the closing tile');
+      assert.equal(cells.filter((c) => c.includes('st-pool-card')).length, 1);
+      assert.equal((footerOf(html).match(/href="https:\/\/reef\.cards\//g) || []).length, 1, 'one footer link');
+      assert.ok(bootOf(html).includes(DECK_OFF), 'deck.js is told to draw no closing card or footer link of its own');
+      assert.ok(!/window\.__pool=true/.test(html));
+    }
+  });
+
+  test(`deck (${name}): pool false → no closing tile, no footer link, deck draws none`, () => {
+    const html = renderCardHTML(withFm(BACKS, 'powered-by: on'), { ...CTX, ...extra, pool: false });
+    assert.equal(has.closingCard(html), 0);
+    assert.ok(!/reef\.cards/.test(footerOf(html)) && !/Powered by/.test(footerOf(html)));
+    assert.ok(bootOf(html).includes(DECK_OFF));
+  });
+
+  test(`deck (${name}): pool absent → no renderer pool, the deck's own switch untouched`, () => {
+    const html = renderCardHTML(BACKS, { ...CTX, ...extra });
+    assert.equal(has.closingCard(html), 0);
+    assert.ok(!bootOf(html).includes('__pool'), 'absent says nothing to the deck (deck.js: absent = its own default)');
+    // the editor's sandbox stand-in (deck.pool) still reaches the deck exactly as before
+    if (extra.deck) {
+      for (const p of [true, false]) {
+        const ed = renderCardHTML(BACKS, { ...CTX, deck: { ...extra.deck, pool: p } });
+        assert.ok(bootOf(ed).includes(`window.__pool=${p};`));
+        assert.equal(has.closingCard(ed), 0, 'deck.pool alone never draws the renderer tile');
+        assert.equal(ed.replace(`window.__pool=${p};`, ''), html);
+      }
+    }
+  });
+}
+
+test('deck: a set ctx.pool wins over the deck switch, so nothing is drawn twice', () => {
+  for (const p of [true, false]) {
+    const html = renderCardHTML(BACKS, { ...CTX, pool: true, deck: { view: 'stack', pool: p } });
+    assert.ok(bootOf(html).includes(DECK_OFF) && !/window\.__pool=true/.test(html));
+    assert.equal(has.closingCard(html), 1);
+  }
+});
+
+test('editor: the w3 renders that map boxes to cells never carry the closing tile', () => {
+  // editIndex (the layout wall) drops a ctx.pool outright: its page is the author's boxes only
+  const plain = renderCardHTML(BACKS, { ...CTX, editIndex: true });
+  for (const p of [true, false]) assert.equal(renderCardHTML(BACKS, { ...CTX, editIndex: true, pool: p }), plain);
+  assert.equal(has.closingCard(plain), 0);
+  // and where the tile does appear, nothing w3 reads to find a tile (data-cell, data-coral-type,
+  // [data-drawer-panel]) is on it or around it
+  const card = POOL_SECTION.exec(renderCardHTML(BACKS, { ...CTX, pool: true }))?.[0] ?? '';
+  assert.ok(card && !/data-cell|data-coral-type|data-drawer|data-noback/.test(card));
 });
 
 // ── one writer: the Worker's call site ────────────────────────────────────────────────────────

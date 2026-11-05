@@ -346,12 +346,24 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  * served; `false` = the flat page (the editor's per-tile thumbnails); `{ view, pool }` = the editor's
  * preview of one view. An `editIndex` render (the editor's wall, where tiles are moved by hand) is
  * always flat — the deck would rearrange the very boxes it maps back to cells.
+ *
+ * The card pool (reef#2913) has two writers, and exactly one of them draws per page:
+ *   - `ctx.pool` true/false (the PLATFORM's switch, from this Worker's own call site; poolOf): the
+ *     renderer draws it — the closing reef.cards tile after the author's grid and the footer link
+ *     (true), or neither (false). The deck is then told `pool: false`, which to deck.js means "draw
+ *     no reef.cards card and no footer link of your own", so nothing is drawn twice. In stack and
+ *     list the renderer's closing tile is the last `.st-cell` on the page, so deck.js deals it as
+ *     the last card like any link tile; in wall it is the last block on the page.
+ *   - `ctx.pool` absent: today's page, byte for byte — the deck's own switch (`deck.pool`, the
+ *     editor's sandbox stand-in) passes through untouched, as it did before the renderer knew the pool.
+ * An editIndex render never carries the closing tile: that wall is the author's own boxes only.
  */
 export function renderCardHTML(cardMd, ctx = {}) {
-  const flat = renderFlat(cardMd, ctx);
+  const pool = ctx.editIndex ? undefined : poolOf(ctx);
+  const flat = renderFlat(cardMd, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
   if (ctx.deck === false || ctx.editIndex) return flat;
   const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
-  return withDeck(flat, cardMd, { view: deck.view, pool: deck.pool, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
+  return withDeck(flat, cardMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
 }
 
 function renderFlat(cardMd, ctx) {
