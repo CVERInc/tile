@@ -158,40 +158,42 @@ const archiveRoutes = [
 ];
 for (const route of archiveRoutes) {
   const { run, view } = loadRoute(route);
-  for (const mapped of [false, true]) {
-    test(`constructor ${mapped ? 'mapped' : 'unmapped'}: archive heading in ${route}`, () => {
-      const meta = {
-        lang: 'en-US', locales: 'en-US, fr-FR',
-        'blog-category-routes': 'true', 'blog-author-routes': 'true', 'blog-page-size': '1',
-        ...(mapped ? { 'blog-category-names': 'constructor=Category name',
-          'blog-author-names': 'constructor=Author name' } : {}),
-      };
-      const markdown = '---\ntitle: Categorized post\npubDate: 2024-01-01\ncategories: [constructor]\nauthor: constructor\n---\nBody.';
-      const site = `---\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
-      const glob = (pattern) => {
-        if (pattern.endsWith('blog/*/*.md')) return { '/s/blog/fr-fr/one.md': markdown, '/s/blog/fr-fr/two.md': markdown };
-        if (pattern.endsWith('blog/*.md')) return { '/s/blog/one.md': markdown, '/s/blog/two.md': markdown };
-        if (/content\/\*\*?\/?\*?\.md$/.test(pattern)) return { '/s/content/_site.md': site };
-        throw new Error(`unexpected glob: ${pattern}`);
-      };
-      const paths = run(blog, glob);
-      assert.deepEqual(paths.map((p) => p.params), [{
-        ...(route.startsWith('[...loc]') ? { loc: 'fr-fr' } : {}), slug: 'constructor',
-        ...(route.includes('/page/') ? { n: '2' } : {}),
-      }]);
-      assert.deepEqual(paths[0].props.posts[0].categories, ['constructor']);
-      assert.deepEqual(paths[0].props.posts[0].tags, ['constructor']);
-      const expected = mapped ? (route.startsWith('author/') ? 'Author name' : 'Category name') : 'constructor';
-      const result = view(blog, { props: paths[0].props });
-      assert.equal(result.heading, expected, 'archive heading must be the authored label or literal slug');
-      assert.ok(result.subhead.endsWith(expected));
+  for (const name of names) {
+    for (const mapped of [false, true]) {
+      test(`${name} ${mapped ? 'mapped' : 'unmapped'}: archive heading in ${route}`, () => {
+        const meta = {
+          lang: 'en-US', locales: 'en-US, fr-FR',
+          'blog-category-routes': 'true', 'blog-author-routes': 'true', 'blog-page-size': '1',
+          ...(mapped ? { 'blog-category-names': `${name}=Category name`,
+            'blog-author-names': `${name}=Author name` } : {}),
+        };
+        const markdown = `---\ntitle: Categorized post\npubDate: 2024-01-01\ncategories: [${name}]\nauthor: ${name}\n---\nBody.`;
+        const site = `---\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+        const glob = (pattern) => {
+          if (pattern.endsWith('blog/*/*.md')) return { '/s/blog/fr-fr/one.md': markdown, '/s/blog/fr-fr/two.md': markdown };
+          if (pattern.endsWith('blog/*.md')) return { '/s/blog/one.md': markdown, '/s/blog/two.md': markdown };
+          if (/content\/\*\*?\/?\*?\.md$/.test(pattern)) return { '/s/content/_site.md': site };
+          throw new Error(`unexpected glob: ${pattern}`);
+        };
+        const paths = run(blog, glob);
+        assert.deepEqual(paths.map((p) => p.params), [{
+          ...(route.startsWith('[...loc]') ? { loc: 'fr-fr' } : {}), slug: name,
+          ...(route.includes('/page/') ? { n: '2' } : {}),
+        }]);
+        assert.deepEqual(paths[0].props.posts[0].categories, [name]);
+        assert.deepEqual(paths[0].props.posts[0].tags, [name]);
+        const expected = mapped ? (route.startsWith('author/') ? 'Author name' : 'Category name') : name;
+        const result = view(blog, { props: paths[0].props });
+        assert.equal(result.heading, expected, 'archive heading must be the authored label or literal slug');
+        assert.ok(result.subhead.endsWith(expected));
+      });
+    }
+    test(`${name}: archive heading ignores inherited display names: ${route}`, () => {
+      const inherited = Object.create({ [name]: 'Inherited name' });
+      const result = view({ ...blog, kvMap: () => inherited }, {
+        props: { posts: [], meta: {}, slug: name, urlLoc: 'fr-fr', pageNum: 2 },
+      });
+      assert.equal(result.heading, name);
     });
   }
-  test(`archive heading ignores inherited display names: ${route}`, () => {
-    const inherited = Object.create({ constructor: 'Inherited name' });
-    const result = view({ ...blog, kvMap: () => inherited }, {
-      props: { posts: [], meta: {}, slug: 'constructor', urlLoc: 'fr-fr', pageNum: 2 },
-    });
-    assert.equal(result.heading, 'constructor');
-  });
 }
