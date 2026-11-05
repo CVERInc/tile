@@ -356,6 +356,8 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  *     the last card like any link tile; in wall it is the last block on the page.
  *   - `ctx.pool` absent: today's page, byte for byte — the deck's own switch (`deck.pool`, the
  *     editor's sandbox stand-in) passes through untouched, as it did before the renderer knew the pool.
+ *     With no `deck.pool` either, the page says nothing about the pool and deck.js draws nothing:
+ *     only `true` is in, so an unknown switch never opts a Card in.
  * An editIndex render never carries the closing tile: that wall is the author's own boxes only.
  */
 export function renderCardHTML(cardMd, ctx = {}) {
