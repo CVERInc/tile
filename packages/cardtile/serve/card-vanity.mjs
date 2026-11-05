@@ -1,4 +1,4 @@
-// `/_api/vanity/<handle>` — a creator's own domain, bound to their card (CVERInc/reef#1971).
+// `/_api/vanity/<handle>` — a creator's own domain, bound to their card (reef#1971).
 //
 // The caller is reef-mcp's `connect_card_domain` (its `makeCardVanityClient`), behind the same bearer
 // as the rest of `/_api/`. This file is the route and nothing else: every write goes through the

@@ -1,6 +1,6 @@
 // `/_api/vanity/<handle>` on the lifetime-bound bindings.  run: node --test card-vanity.test.mjs
 //
-// The contract is reef-mcp's `makeCardVanityClient` (CVERInc/reef#1971). Every refusal here is paired
+// The contract is reef-mcp's `makeCardVanityClient` (reef#1971). Every refusal here is paired
 // with the legitimate call it must not be confused with, and the race and crash tests judge the
 // outcome on PUBLIC responses (the creator's domain, the canonical address), not on keys alone.
 import assert from 'node:assert/strict';
