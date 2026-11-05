@@ -40,6 +40,7 @@ export function getStaticPaths() {
 const { posts, meta, slug, alternates } = Astro.props;
 const base = categoryBase(meta); // round 5 (R4-P1-1): gated — see categoryBase's own comment
 const names = kvMap(meta['blog-category-names']);
+// Keep the own-property guard in case kvMap ever returns a plain object again.
 const heading = Object.hasOwn(names, slug) ? names[slug] : slug;
 const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
