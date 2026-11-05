@@ -48,6 +48,7 @@ export const FIXED = [
   ['href="#${uid}', 1, 'in-page #anchor of a slider dot'],
   ['href="#${uid}-${i}', 1, 'same slider dot: the second interpolation of one in-page #fragment value (round 6 judges every ${} in a value)'],
   ['href="https://feelreef.com/signup${ref}', 1, 'fixed host, handle-derived query only'],
+  ['href="${esc(POOL_URL)}', 2, 'the card pool (reef#2913): POOL_URL is a module constant (https://reef.cards/), footer link + closing card; no author or caller input'],
   ['src="${esc(ctx.qrScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(ctx.drawerScriptSrc)}', 1, 'caller-supplied script path, fixed by card-worker to a local path'],
   ['src="${esc(src)}', 1, 'IMG_ICON (author image registered at its call site)'],
