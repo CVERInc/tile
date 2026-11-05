@@ -18,8 +18,8 @@ import { cardOrigin, cardUrlFor, renderCardHTML } from '../serve/card-worker.mjs
 // and embed.origin/narrow/bg, and the form had never heard of any of them. One definition, and a
 // test (ai-ops.test.mjs) that it cannot drift from the renderer.
 import { CELL_TYPES, blankCell, PALETTE, CONTROL, DISPOSITION } from '../ai-ops.mjs';
-// 🔴 The seven typed sheets are PURE and SHARED — see cell-form-core.mjs's header. `w2/edit2.mjs`
-// (`/try/edit`) mounts the same rows over the tugtile board; the composition rules (a link's `[text](url)`, the
+// 🔴 The seven typed sheets are PURE and SHARED — see cell-form-core.mjs's header. `w3/edit3.mjs`
+// (`/try/edit`) mounts the same rows in the sheet a tile's pencil opens; the composition rules (a link's `[text](url)`, the
 // profile rename, which param a drawer choice owns) exist once, here, for both. `setToken`,
 // `removeToken`, `quoteParam`, `linkOf` and `hostLabel` moved WITH them — this file no longer
 // touches a param token or parses a link body itself, which is the point.
@@ -631,7 +631,7 @@ function saveCell() {
   };
 
   // the composition — a link's `[text](url)`, the profile rename, the param tokens — is
-  // cell-form-core's, shared verbatim with w2/edit2.mjs. This side owns the DOM and the errors.
+  // cell-form-core's, shared verbatim with w3/edit3.mjs. This side owns the DOM and the errors.
   const out = composeCell(cell, def, { read, visible }, formCtx());
   if (out.error) { fieldError(out.error.field, out.error.message); return; }
   const { rawParams, body, rename } = out;

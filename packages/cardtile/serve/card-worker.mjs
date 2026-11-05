@@ -114,10 +114,11 @@ async function relayAvatar(request, ctx, upstreamUrl) {
   return resp;
 }
 import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES } from './card-api.mjs';
-import { EDIT2_BODY_HTML, EDIT2_CSS, EDIT2_JS, TABLE_FILES, TABLE_I18N, FONT_FILES } from './edit2-assets.mjs';
-import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, chromeStrings } from '../w/sandbox-i18n.mjs';
-import { ENGINE_LOCALE_FILE, boardLocaleJson } from '../w2/board-i18n.mjs';
-import { validHostOrigin } from '../w2/host-bridge.mjs';
+import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
+import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
+import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
+import { validHostOrigin } from '../w3/host-bridge.mjs';
+import { withDeck, DECK_CSS_PATH, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
@@ -193,11 +194,13 @@ const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, ''
  *   /_api/…  never reaches here (handleApi answers first, on any host)
  *   /edit    host mode: the feelreef page that frames it pins this origin for postMessage, so it
  *            moves when that page does, not before
+ *   /try/edit/a/…  the editor's hashed files: host mode on this host imports them as modules, and a
+ *            module that redirects to another origin needs CORS it does not have
  */
 export function movedTo(host, url, method, env) {
   if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
   const p = url.pathname;
-  if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/`) return null;
+  if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/` || p.startsWith(EDITOR_ASSET_BASE)) return null;
   return `https://${CARDS_HOST}${p}${url.search}`;
 }
 // cacheable at the edge and in the browser; a day, so a correction does not wait a year to arrive
@@ -335,8 +338,23 @@ const unquote = (v) => (/^(['"]).*\1$/.test(v) ? v.slice(1, -1).trim() : v);
 const frontmatter = (cardMd, k) => unquote(new RegExp('^' + k + ':\\s*(.+)$', 'm').exec(cardMd)?.[1]?.trim() || '');
 const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim() || handle || '';
 
-/** renderCardHTML: (cardMd, {handle, cardUrl}) → HTML string. Pure — the shared brain. */
+/**
+ * renderCardHTML: (cardMd, {handle, cardUrl, deck?}) → HTML string. Pure — the shared brain.
+ *
+ * Every Card page is a DECK (w3/deck-page.mjs): one rule for every Card, so the editor's preview and
+ * the page a visitor gets are the same page. `ctx.deck` is the caller's: absent = the live page as
+ * served; `false` = the flat page (the editor's per-tile thumbnails); `{ view, pool }` = the editor's
+ * preview of one view. An `editIndex` render (the editor's wall, where tiles are moved by hand) is
+ * always flat — the deck would rearrange the very boxes it maps back to cells.
+ */
 export function renderCardHTML(cardMd, ctx = {}) {
+  const flat = renderFlat(cardMd, ctx);
+  if (ctx.deck === false || ctx.editIndex) return flat;
+  const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
+  return withDeck(flat, cardMd, { view: deck.view, pool: deck.pool, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
+}
+
+function renderFlat(cardMd, ctx) {
   const model = parseCard(cardMd);
   const name = cardName(cardMd, ctx.handle);
   const fm = (k) => frontmatter(cardMd, k);
@@ -561,21 +579,10 @@ const markdown = (body, { env, originalLength, alternate, handle, at, blank }) =
 /** does this client want markdown? `Accept: text/markdown` — the convention, not a query param. */
 const wantsMarkdown = (request) => /(^|,)\s*text\/markdown\b/.test(request.headers.get('accept') || '');
 
-// ── the public sandbox: card.feelreef.com/try/edit ─────────────────────────────────────────────
+// ── the Card editor: card.feelreef.com/try/edit (sandbox) and /edit?host= (host mode) ────────────────
 //
-// Originally rebuilt here (product owner, 2026-09) after the legacy `feelreef.com/card/try` route, then
-// REPLACED at this same path by owner ruling: the review of the tugtile-table rebuild staged beside
-// it as `/try/edit2` (REVIEW-card-edit2-rereview-2026-09-06.md) came back "四條 P1 全部在線上修好…
-// 判定：換上正式路徑" — put the rebuild on the official path. `/try/edit` now serves that experience;
-// its editing table is the ENGINE's own browser tugtile, served verbatim and driven through
-// `window.__load(md)`. See packages/cardtile/w2/edit2.mjs for what is inherited and what is new.
-//
-// The ORIGINAL palette-based editor that used to live at this path (`w/editor.mjs`, bundled by the
-// since-deleted gen-editor-assets.mjs) has no route left — `/try/edit2` below is the only thing that
-// used to point at it, and it now redirects here instead. `w/editor.mjs` and its shared pieces
-// (`cell-form-core.mjs`, `md-guard.mjs`) are kept: cardtile-w2 imports them directly, and
-// sandbox-i18n.test.mjs still gates the source file's own translation coverage. What is gone is the
-// BUNDLE and the HTTP door onto it, per the ruling's "no separate route kept alive".
+// One editor, two modes (packages/cardtile/w3/edit3.mjs, bundled into edit3-assets.mjs by
+// gen-edit3-assets.mjs). Nothing goes live until Save, and the draft lives in the visitor's browser.
 //
 // 🔴 A STATIC PATH, not a handle. `/try` is not a KV row — nothing is ever read from or written to
 // the CARDS store for this route, on purpose: RSP reserves the handle `try` (a real card can never
@@ -583,53 +590,31 @@ const wantsMarkdown = (request) => /(^|,)\s*text\/markdown\b/.test(request.heade
 // "try" has never been and must never be a key. Anyone visiting bare `card.feelreef.com/try` (no
 // `/edit`) gets the same no-card 404 every other never-registered handle gets (notFound).
 const SANDBOX_PATH = '/try/edit';
-// `/try/edit2` is the RETIRED path this used to be staged under while `/try/edit` still served the
-// old editor. It is kept as a 301 (not removed outright) so nothing that already linked to it
-// (bookmarks, the re-review's own notes, anything typed by hand) breaks.
+// `/try/edit2` is a RETIRED path an earlier editor was staged under. It is kept as a 301 (not removed
+// outright) so nothing that already linked to it (bookmarks, notes, anything typed by hand) breaks.
 const LEGACY_EDIT2_PATH = '/try/edit2';
+// The files the editor borrows as they ship (the family text editor, its web shim and host, the two
+// stylesheets it is mounted with, Sortable for the wall) and the porch faces, each under its own
+// content hash: `/try/edit/a/<hash>/<name>`, immutable. A hash that is not the current file's is a 404,
+// never the current file under an old name — an immutable answer has to be the bytes it names.
+const EDITOR_ASSET_RE = /^\/try\/edit\/a\/([0-9a-f]{12})\/([\w./-]+)$/;
+const EDITOR_ASSET_BASE = '/try/edit/a/';
+const ASSET_MIME = {
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.woff2': 'font/woff2',
+};
+const editorAssetUrl = (name) => `${EDITOR_ASSET_BASE}${BORROWED[name].hash}/${name}`;
 
 const escLite = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// the engine's table and its assets, under a locale-carrying prefix. The prefix is what makes the
-// locale reach the engine at all: its host resolves ITS locale from `navigator.language` and fetches
-// `./i18n/<that>.json` with no query string, so a visitor who asked for `?lang=ja` in a zh-TW
-// browser would otherwise get a Chinese board inside a Japanese page. Reading the locale off the
-// PATH means every asset request the host makes carries it.
-const SANDBOX_TABLE_RE = /^\/try\/edit\/t\/([A-Za-z-]+)\/(.*)$/;
-
-const TABLE_MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.woff2': 'font/woff2',
-};
-
-/** one file of the engine's web tugtile, or null. Never reads anything but the bundled table. */
-function tableAsset(localeKey, rel) {
-  const path = rel === '' ? 'index.html' : rel;
-  const i18n = /^i18n\/([A-Za-z-]+)\.json$/.exec(path);
-  if (i18n) {
-    // 🔴 EVERY one of the engine's four filenames answers, and every one answers with THIS
-    // visitor's language. The host picks the filename from the browser's own `navigator.language`;
-    // we have already decided the locale from the path. Serving "the file it asked for" would put
-    // the two in disagreement for exactly the visitors the `?lang=` override exists for.
-    const base = TABLE_I18N[ENGINE_LOCALE_FILE[localeKey] || 'en-US'] || TABLE_I18N['en-US'];
-    if (!base) return null;
-    return { body: JSON.stringify(boardLocaleJson(base, localeKey, chromeStrings(localeKey))), ext: '.json', immutable: false };
-  }
-  // the editor shell's own faces (the porch skin — w2/porch-fonts.css). Locale-free; binary.
-  if (path.startsWith('fonts/')) {
-    const b64 = FONT_FILES[path];
-    if (b64 == null) return null;
-    return { body: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), ext: '.woff2', immutable: true };
-  }
-  const body = TABLE_FILES[path];
-  if (body == null) return null;
-  const ext = path.slice(path.lastIndexOf('.'));
-  // the host's index.html is the only one that varies with the visitor (it does not, today — but it
-  // is the document, and a document that is cached for a year is a document that cannot be fixed)
-  return { body, ext, immutable: path !== 'index.html' };
+/** one borrowed file or face, or null. Never reads anything but the bundled module. */
+function editorAsset(hash, name) {
+  const font = FONT_FILES[name];
+  if (font && font.hash === hash) return { body: Uint8Array.from(atob(font.b64), (c) => c.charCodeAt(0)), ext: '.woff2' };
+  const f = BORROWED[name];
+  if (f && f.hash === hash) return { body: f.body, ext: name.slice(name.lastIndexOf('.')) };
+  return null;
 }
 
 // ── HOST MODE: card.feelreef.com/edit?host=<parent origin> ──────────────────────────────────────
@@ -637,7 +622,7 @@ function tableAsset(localeKey, rel) {
 // The same editor, embedded by feelreef's own page to edit a REAL card. Owner architecture: reef
 // decides WHO may edit (seats in its registry); this Worker owns storage and assembly; the browser
 // never holds a bearer. So this route serves a page with NO card in it and NO credential — the card
-// arrives from the parent over postMessage and goes back the same way (w2/host-bridge.mjs), and the
+// arrives from the parent over postMessage and goes back the same way (w3/host-bridge.mjs), and the
 // parent does the save through `save_card`. Like /try/edit it never touches the CARDS store.
 //
 // `?host=` must be one of the allowed parent origins (validHostOrigin); it is written into the
@@ -646,42 +631,36 @@ function tableAsset(localeKey, rel) {
 const HOST_EDIT_PATH = '/edit';
 
 /** the /try/edit page (or, with `host`, the /edit page), localised. Never touches the CARDS store. */
-function sandboxEditorHtml(localeKey, { host = '' } = {}) {
+function editorHtml(localeKey, { host = '' } = {}) {
   const persona = SANDBOX_LOCALES[localeKey] || SANDBOX_LOCALES.en;
-  const tableBase = `${SANDBOX_PATH}/t/${encodeURIComponent(localeKey)}/`;
+  const assets = Object.fromEntries(['editor-core.js', 'obsidian-shim.js', 'web-host.js', 'Sortable.min.js'].map((n) => [n, editorAssetUrl(n)]));
   const opts = JSON.stringify(host
-    ? { host, sandbox: false, locale: localeKey, tableBase }
-    : { sandbox: true, locale: localeKey, tableBase }).replace(/</g, '\\u003c');
+    ? { host, sandbox: false, locale: localeKey, assets }
+    : { sandbox: true, locale: localeKey, assets }).replace(/</g, '\\u003c');
   // The banner text is written server-side into the markup, for the same reason a visitor without
   // JavaScript still needs it: a visitor (or a crawler, or `curl`) who never runs the script must
-  // still be able to read "nothing here is saved". `boot()` overwrites the same elements with the
-  // same strings from the same table, so the two can never disagree.
-  const body = host ? EDIT2_BODY_HTML
-    .replace('<h1>cardtile-w2</h1>',
-      '<h1 class="ctw-brand"><a href="https://feelreef.com/" target="_top">feelreef</a><span>Card</span></h1>')
-    : EDIT2_BODY_HTML
-    .replace('<div class="ctw-sandbox-banner" id="sandbox-banner" hidden>', '<div class="ctw-sandbox-banner" id="sandbox-banner">')
+  // still be able to read that nothing here is kept online. The editor writes the same strings from
+  // the same table into the same elements, so the two can never disagree. Host mode has no banner.
+  const body = host ? EDIT3_BODY_HTML : EDIT3_BODY_HTML
+    .replace('<div class="ctw-sandbox-banner sbx" id="sandbox-banner" hidden>', '<div class="ctw-sandbox-banner sbx" id="sandbox-banner">')
     .replace('<span id="sandbox-banner-text"></span>', `<span id="sandbox-banner-text">${escLite(persona.bannerText)}</span>`)
-    .replace('<span id="sandbox-banner-status"></span>', `<span id="sandbox-banner-status">${escLite(persona.bannerStatus)}</span>`)
-    // …and the masthead. `cardtile-w2` is an internal codename; a visitor arriving from
-    // feelreef.com must read feelreef, and the link IS the way back. Swapped HERE, in the sandbox
-    // composition — the internal tool keeps its own name.
-    .replace('<h1>cardtile-w2</h1>',
-      '<h1 class="ctw-brand"><a href="https://feelreef.com/">feelreef</a><span>Card</span></h1>');
+    .replace('<span id="sandbox-banner-status"></span>', `<span id="sandbox-banner-status">${escLite(persona.bannerStatus)}</span>`);
   return `<!doctype html>
 <html lang="${persona.lang}"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${escLite(host ? persona.hostPageTitle : persona.pageTitle)}</title>
-<style>${EDIT2_CSS}</style>
+<style>${EDIT3_BASE_CSS}</style>
+<link rel="stylesheet" href="${editorAssetUrl('family.css')}">
+<link rel="stylesheet" href="${editorAssetUrl('modaltile.css')}">
+<style>${EDIT3_CSS}</style>
 </head>
 <body>
 ${body}
 <script>
-window.__CARDTILE_W2_OPTS__ = ${opts};
+window.__CARDTILE_W3_OPTS__ = ${opts};
 <\/script>
-<script>${EDIT2_JS}<\/script>
-<script>window.__cardtileW2Boot(window.__CARDTILE_W2_OPTS__);<\/script>
+<script type="module">${EDIT3_JS}<\/script>
 </body></html>`;
 }
 
@@ -782,33 +761,22 @@ const router = {
       });
     }
 
-    // The sandbox editor's own vendored Sortable.min.js — see canvasHtml()'s SORTABLE_SRC override
-    // ── the engine's table, under the locale it will be read in ──────────────────────────────────
-    const tbl = SANDBOX_TABLE_RE.exec(url.pathname);
-    if (tbl) {
-      const asset = tableAsset(primaryLocale(tbl[1]), tbl[2]);
-      if (!asset) return new Response('no such table asset', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    // ── the editor's borrowed files and faces, each under its content hash ────────────────────────
+    const ea = EDITOR_ASSET_RE.exec(url.pathname);
+    if (ea) {
+      const asset = editorAsset(ea[1], ea[2]);
+      if (!asset) return new Response('no such editor asset', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
       return new Response(asset.body, {
         headers: {
-          'Content-Type': TABLE_MIME[asset.ext] || 'application/octet-stream',
-          'Cache-Control': asset.immutable ? 'public, max-age=31536000, immutable' : 'no-store',
-          // never indexed, and framed only by our own editor page — which in host mode (/edit) is
-          // itself framed by feelreef. 🩸 This used to be `X-Frame-Options: SAMEORIGIN`, and that
-          // header judges the TOP page, so inside a feelreef page the board silently never loaded
-          // (measured 2026-09-24 from a localhost host page: 0 tiles, a cross-origin `__ready`
-          // error). CSP frame-ancestors lists every ancestor, so the chain feelreef → /edit → this
-          // is allowed and anything else is not. Same list as validHostOrigin (w2/host-bridge.mjs).
+          'Content-Type': ASSET_MIME[asset.ext] || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=31536000, immutable',
           'X-Robots-Tag': 'noindex, nofollow',
-          'Content-Security-Policy': "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*",
         },
       });
     }
 
-    // 🔴 THE RETIRED PATH. `/try/edit2` and `/try/edit2/` — and ONLY the bare page, never its
-    // `/t/<locale>/…` table assets, which nothing outside this page's own script ever links to — 301
-    // to the now-official `/try/edit`, carrying the query string across so a `?lang=` link still
-    // resolves the same locale on arrival. This is what makes "no separate route kept alive" true
-    // without breaking whatever already points at the old path.
+    // 🔴 THE RETIRED PATH. `/try/edit2` and `/try/edit2/` — the bare page only — 301 to `/try/edit`,
+    // carrying the query string across so a `?lang=` link still resolves the same locale on arrival.
     if (url.pathname === LEGACY_EDIT2_PATH || url.pathname === `${LEGACY_EDIT2_PATH}/`) {
       return Response.redirect(`${url.origin}${SANDBOX_PATH}${url.search}`, 301);
     }
@@ -825,7 +793,7 @@ const router = {
       }
       const locale = primaryLocale(params.get('lang') || params.get('locale')
         || localeFromAcceptLanguage(request.headers.get('accept-language')));
-      return new Response(sandboxEditorHtml(locale, { host }), {
+      return new Response(editorHtml(locale, { host }), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -850,7 +818,7 @@ const router = {
       // silently fall back to English for exactly the links this override exists to make work.
       const locale = primaryLocale(params.get('lang') || params.get('locale')
         || localeFromAcceptLanguage(request.headers.get('accept-language')));
-      return new Response(sandboxEditorHtml(locale), {
+      return new Response(editorHtml(locale), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -940,6 +908,11 @@ const router = {
     if (url.pathname === QR_PATH || url.pathname === DRAWER_PATH) {
       const body = url.pathname === QR_PATH ? QR_JS : DRAWER_JS;
       return new Response(body, { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+    }
+    // the deck every Card page carries (w3/deck-page.mjs) — same rule: versioned path, immutable, any host
+    if (url.pathname === DECK_JS_PATH || url.pathname === DECK_CSS_PATH) {
+      const js = url.pathname === DECK_JS_PATH;
+      return new Response(js ? DECK_JS : DECK_CSS, { headers: { 'Content-Type': js ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' } });
     }
 
     // 🔴 The video poster, proxied. This route is what makes condition 4 of the live-block rule TRUE

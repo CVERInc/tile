@@ -912,7 +912,7 @@ test('the api refuses a made-up draft id, and refuses to write through this rout
   assert.equal(written.status, 405);
 });
 
-// ── the masthead (Top-10 #5, §3.2) ──────────────────────────────────────────────────────────────
+// ── the masthead ─────────────────────────────────────────────────────────────────────────────────
 
 test('🔴 the served sandbox never shows a visitor the internal codename', async () => {
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED);
@@ -925,18 +925,16 @@ test('🔴 the served sandbox never shows a visitor the internal codename', asyn
   assert.doesNotMatch(body, /<title>[^<]*cardtile/i, 'the tab still says cardtile');
   // CONTROL: the strip above did not simply remove the whole page
   assert.ok(visible.length > 1500, `only ${visible.length} bytes of markup left to scan`);
-  assert.match(visible, /id="table"/, 'the strip removed the page itself');
+  assert.match(visible, /id="row"/, 'the strip removed the page itself');
 });
 
-test('the masthead names feelreef and Card, and the name is the way back', async () => {
-  const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED);
-  const body = await res.text();
-  assert.match(body, /<h1 class="ctw-brand"><a href="https:\/\/feelreef\.com\/">feelreef<\/a><span>Card<\/span><\/h1>/);
+test('the masthead is the feelreef lockup, and it is the way back', async () => {
+  const body = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED)).text();
+  assert.match(body, /<a class="lockup" id="lockup" href="https:\/\/feelreef\.com\/" aria-label="REEF with Cards">/);
 });
 
 test('🔴 the internal editor\'s OWN markup keeps its own name — the swap is a sandbox composition, not a file edit', () => {
-  // w/index.html has no route of its own any more (the sandbox it used to compose into was
-  // deleted with editor-assets.mjs), but it is still real, imported code — cell-form-core.mjs and
+  // w/index.html has no route of its own, but it is still real, imported code — cell-form-core.mjs and
   // md-guard.mjs were lifted out of the editor.mjs this markup belongs to, and sandbox-i18n.test.mjs
   // still gates this exact file's translation coverage. Its own identity string is part of that.
   const here = dirname(fileURLToPath(import.meta.url));
@@ -944,116 +942,80 @@ test('🔴 the internal editor\'s OWN markup keeps its own name — the swap is 
   assert.match(html, /<h1>cardtile-w<\/h1>/, 'w/index.html was edited to say something it never should on its own');
 });
 
-test('🔴 the tugtile-table editor\'s OWN markup, same rule: w2/index.html says cardtile-w2, the sandbox says feelreef', () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const html = readFileSync(join(here, '../w2/index.html'), 'utf8');
-  assert.match(html, /<h1>cardtile-w2<\/h1>/, 'w2/index.html was edited instead of the sandbox composition');
-});
+// ── the Card editor (w3) on /try/edit ────────────────────────────────────────────────────────────
 
-// ── the tugtile-table editor, now on the OFFICIAL path (/try/edit) ─────────────────────────────────
-//
-// Owner ruling 2026-09-06 (#32), re-reviewed and ruled "換上正式路徑" on 2026-09-06
-// (REVIEW-card-edit2-rereview-2026-09-06.md): the rebuild that was staged beside the original
-// `/try/edit` as `/try/edit2` replaces it at `/try/edit`. Same promises as before — resolves, never
-// indexed, never touches the store — plus the one this route added while it was still `/try/edit2`:
-// it also serves the ENGINE's browser tugtile as its editing table, and that table has to arrive
-// complete and in the visitor's language. `/try/edit2` itself is now a 301, tested below.
+const optsOf = (body) => JSON.parse(/window\.__CARDTILE_W3_OPTS__ = (\{.*?\});/.exec(body)[1]);
+const ASSET_NAMES = ['editor-core.js', 'obsidian-shim.js', 'web-host.js', 'Sortable.min.js'];
 
-test('sandbox: the banner ships IN THE MARKUP and the masthead is feelreef, not a codename', async () => {
+test('sandbox: the banner ships IN THE MARKUP, with the door and the way to start over', async () => {
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED);
   const body = await res.text();
   assert.ok(!body.includes('id="sandbox-banner" hidden'), 'the banner must not ship hidden');
   assert.match(body, /id="sandbox-banner-text">[^<]+</, 'the banner span must already have text in it');
   assert.match(body, /id="sandbox-banner-status">[^<]+</, "the phone's one-line banner must ship too");
-  assert.ok(!body.includes('<h1>cardtile-w2</h1>'), 'the internal codename reached a visitor');
-  assert.match(body, /ctw-brand[^>]*><a href="https:\/\/feelreef\.com\/">feelreef<\/a>/, 'no way back to feelreef');
+  for (const id of ['publish', 'sandbox-reset']) assert.match(body, new RegExp(`id="${id}"`), `the banner has no #${id}`);
 });
 
 test('sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards', async () => {
-  // 🔴 The CTA's own words are NOT asserted here, and that is deliberate. esbuild's default charset
-  // is ascii, so every CJK string in the bundle arrives as `\uXXXX` escapes — a `/把這張變成真的/`
-  // match would be red for a page that renders the button perfectly, and the one place it WOULD
-  // pass is a comment in the markup. The words are sandbox-i18n.test.mjs's subject, in all nine.
-  // What belongs here is the wiring: the sheet ships, and both halves of the walk are reachable.
+  // 🔴 The CTA's own words are NOT asserted here: esbuild's default charset is ascii, so every CJK
+  // string in the bundle arrives as `\uXXXX` escapes. The words are sandbox-i18n.test.mjs's subject,
+  // in all nine. What belongs here is the wiring: the sheet ships, and both halves of the walk are reachable.
   const body = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit?lang=zh-TW'), NEVER_TOUCHED)).text();
   for (const id of ['doormodal', 'door-title', 'door-note', 'door-go', 'door-back']) {
     assert.match(body, new RegExp(`id="${id}"`), `the sentence-before-the-door sheet is missing #${id}`);
   }
   assert.match(body, /\/try\/park/, 'the door does not park the card — the whole card would not travel');
-  // 🔴 The origin and the path are two literals in the bundle (`REAL_CARD_ORIGIN` + the path it is
-  // concatenated with), so they are asserted as two — a single joined pattern would be red for a
-  // page whose door works, which is the same mistake as matching the CTA above.
   assert.ok(body.includes('https://feelreef.com') && body.includes('/dashboard/cards'), 'the door leads nowhere');
 });
 
-test('sandbox: locale reaches BOTH the page and the table it mounts', async () => {
-  // 🔴 The expected words are the OWNER'S RULING (CARD-VOCAB-ADDENDUM-2026-09-06), written out here
-  // rather than computed from the table this test is checking — a test that asks the code what it
-  // says and then agrees is a test that can only ever pass.
-  for (const [al, lang, addTile] of [
-    ['ja,en;q=0.8', 'lang="ja-JP"', '＋タイルを追加'],
-    ['de-DE,de;q=0.9', 'lang="de-DE"', '+ Kachel hinzufügen'],
-    ['zh-TW', 'lang="zh-TW"', '＋加一張牌'],
-  ]) {
-    const page = await worker.fetch(
-      new Request('https://card.feelreef.com/try/edit', { headers: { 'accept-language': al } }), NEVER_TOUCHED);
-    const html = await page.text();
+test('sandbox: the page tells its module the locale, and where every borrowed file is', async () => {
+  for (const [al, lang, key] of [['ja,en;q=0.8', 'lang="ja-JP"', 'ja'], ['de-DE,de;q=0.9', 'lang="de-DE"', 'de'], ['zh-TW', 'lang="zh-TW"', 'zh']]) {
+    const html = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit', { headers: { 'accept-language': al } }), NEVER_TOUCHED)).text();
     assert.ok(html.includes(lang), `${al}: the page is not ${lang}`);
-    const locale = /"locale":"([^"]+)"/.exec(html)?.[1];
-    assert.ok(locale, `${al}: the page did not tell its own script which locale it is`);
-    assert.match(html, new RegExp(`/try/edit/t/${locale.replace('-', '-')}/`), `${al}: the table base does not carry the locale`);
-    // …and every one of the engine's four filenames answers in THAT locale, because the engine's
-    // host picks the filename from navigator.language and we have already decided the language.
-    for (const file of ['en-US', 'ja-JP', 'ko-KR', 'zh-TW']) {
-      const r = await worker.fetch(new Request(`https://card.feelreef.com/try/edit/t/${locale}/i18n/${file}.json`), NEVER_TOUCHED);
-      assert.equal(r.status, 200, `${al}: ${file}.json did not answer — the board would print raw i18n KEYS`);
-      const j = JSON.parse(await r.text());
-      assert.equal(j.addTileBtn, addTile, `${al}: the add-tile button is not in the visitor's language`);
-      // CONTROL: this is a MERGE, not a replacement — the engine's own strings are still in there
-      assert.ok(j.expandAllAction, `${al}: the engine's own strings were dropped from the merged JSON`);
-    }
+    const opts = optsOf(html);
+    assert.equal(opts.locale, key);
+    assert.equal(opts.sandbox, true);
+    assert.deepEqual(Object.keys(opts.assets).sort(), [...ASSET_NAMES].sort());
+    for (const u of Object.values(opts.assets)) assert.match(u, /^\/try\/edit\/a\/[0-9a-f]{12}\/[\w.-]+$/);
   }
 });
 
-test('sandbox: the engine table arrives COMPLETE — including the file the engine host does not ship', async () => {
-  // 🔴 `hosts/web/tugtile/index.html` imports `./board-core.js` and the engine's own directory has
-  // no such file (its build.sh copies tugtile.css, Sortable, i18n and editor-core, but the board
-  // model is generated into packages/tugtile/). A missing import here is a table that never loads,
-  // and the page above it would look merely slow.
-  const need = ['', 'board-core.js', 'icons.js', 'host.js', 'obsidian-shim.js', 'tugtile.css',
-    'Sortable.min.js', 'vendor/editor-core.js'];
-  for (const rel of need) {
-    const r = await worker.fetch(new Request(`https://card.feelreef.com/try/edit/t/ja/${rel}`), NEVER_TOUCHED);
-    assert.equal(r.status, 200, `the table is missing ${rel || 'index.html'}`);
-    const body = await r.text();
-    assert.ok(body.length > 200, `${rel || 'index.html'} came back empty`);
+test('sandbox: every borrowed file and face answers, immutable, as the repo ships it — a stale hash is a 404', async () => {
+  const html = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit'), NEVER_TOUCHED)).text();
+  const { BORROWED, FONT_FILES } = await import('./edit3-assets.mjs');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+  const FROM = { 'editor-core.js': 'hosts/web/modaltile/vendor/editor-core.js', 'obsidian-shim.js': 'packages/core/obsidian-shim.js',
+    'web-host.js': 'packages/core/web-host.js', 'family.css': 'styles.css', 'modaltile.css': 'hosts/web/modaltile/modaltile.css',
+    'Sortable.min.js': 'hosts/web/tugtile/Sortable.min.js' };
+  for (const [name, rel] of Object.entries(FROM)) {
+    // borrowed AS THEY SHIP: a change to the family's editor is a change here, never a fork
+    assert.equal(BORROWED[name].body, readFileSync(join(root, rel), 'utf8'), `${name} is not the repo's ${rel} — regenerate: node packages/cardtile/serve/gen-edit3-assets.mjs`);
+    const url = `/try/edit/a/${BORROWED[name].hash}/${name}`;
+    if (name.endsWith('.css')) assert.ok(html.includes(`href="${url}"`), `the page does not link ${name}`);
+    const r = await worker.fetch(new Request(`https://card.feelreef.com${url}`), NEVER_TOUCHED);
+    assert.equal(r.status, 200, url);
+    assert.match(r.headers.get('content-type') || '', name.endsWith('.css') ? /text\/css/ : /javascript/);
+    assert.match(r.headers.get('cache-control') || '', /immutable/);
+    assert.equal(await r.text(), BORROWED[name].body);
   }
-  const host = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/'), NEVER_TOUCHED)).text();
-  // the contract the parent page drives the table through
-  assert.match(host, /window\.__load/, 'the host no longer publishes __load');
-  assert.match(host, /window\.__ready/, 'the host no longer publishes __ready');
-  assert.match(host, /data-tid/, 'the host no longer stamps data-tid — the order could not be read back');
-  const core = await (await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/board-core.js'), NEVER_TOUCHED)).text();
-  assert.match(core, /export \{[^}]*parseFile/, 'board-core.js is not the board model');
-  // CONTROL: a path the table does not have is a 404, not an empty 200
-  const miss = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/nope.js'), NEVER_TOUCHED);
-  assert.equal(miss.status, 404);
+  for (const [path, { hash }] of Object.entries(FONT_FILES)) {
+    const r = await worker.fetch(new Request(`https://card.feelreef.com/try/edit/a/${hash}/${path}`), NEVER_TOUCHED);
+    assert.equal(r.status, 200, path);
+    assert.equal(r.headers.get('content-type'), 'font/woff2');
+    assert.ok((await r.arrayBuffer()).byteLength > 1000, `${path} came back empty`);
+  }
+  // CONTROL: a name it does not have, and a hash that is not the file's, are 404s — not the current bytes
+  for (const bad of ['/try/edit/a/000000000000/editor-core.js', `/try/edit/a/${BORROWED['editor-core.js'].hash}/nope.js`]) {
+    assert.equal((await worker.fetch(new Request(`https://card.feelreef.com${bad}`), NEVER_TOUCHED)).status, 404, bad);
+  }
 });
 
-test('sandbox: the table is same-origin-framed only, and its assets are immutable except the document', async () => {
-  const doc = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/'), NEVER_TOUCHED);
-  // 🩸 was `X-Frame-Options: SAMEORIGIN`; that header judges the TOP page, so under a feelreef host
-  // page (/edit) the board never loaded. CSP lists every ancestor instead; the list is validHostOrigin's.
-  assert.equal(doc.headers.get('x-frame-options'), null);
-  assert.equal(doc.headers.get('content-security-policy'), "frame-ancestors 'self' https://feelreef.com https://staging.feelreef.com http://localhost:*");
-  assert.match(doc.headers.get('cache-control') || '', /no-store/, 'the table document is cached for a year — it could never be fixed');
-  const css = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/tugtile.css'), NEVER_TOUCHED);
-  assert.match(css.headers.get('cache-control') || '', /immutable/);
+test('the old table route is gone — /try/edit/t/… is no longer special', async () => {
+  const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit/t/ja/'), { CARDS: { get: async () => null, getWithMetadata: async () => ({ value: null, metadata: null }) } });
+  assert.equal(res.status, 404);
 });
 
 // ── the retired path: /try/edit2 ─────────────────────────────────────────────────────────────────
-//
-// It used to be where this experience was staged; it is now nothing but a signpost.
 
 test('🔴 /try/edit2 is a permanent redirect to /try/edit — nothing that already links to it breaks', async () => {
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit2'), NEVER_TOUCHED);
@@ -1076,138 +1038,133 @@ test('🔴 CONTROL: /try/edit2 never touches the CARDS store, and never serves a
 });
 
 test('🔴 the retired table path is gone too — /try/edit2/t/… is not specially handled any more', async () => {
-  // It falls through to ordinary handle resolution, the same as any other unregistered path under
-  // `/try` — see the bare-`/try` test above. Proves the OLD table route was actually removed, not
-  // just shadowed by the new one still matching it.
   const res = await worker.fetch(new Request('https://card.feelreef.com/try/edit2/t/ja/'), { CARDS: { get: async () => null } });
   assert.equal(res.status, 404);
 });
 
-test('🔴 the committed /try/edit bundle is the one its sources produce', async () => {
-  // 🩸 THE GREEN THAT MEASURED A STALE ARTIFACT. `edit2-assets.mjs` is committed, so an edit to
-  // w2/ does nothing until the generator runs — and on 2026-09-06 the generator FAILED (a stray
-  // backtick closed a CSS template literal) inside a `&&` chain whose output was being tailed. The
-  // browser harness then drove the previous bundle and reported 315/315. Every check was honest and
-  // every one of them was about code that was no longer there.
-  //
+// ── the committed bundles are the ones their sources produce ─────────────────────────────────────
+
+test('🔴 the committed editor bundle is the one its sources produce', async () => {
   // 🔴 It hashes the INPUTS, not the output. A hash of the artifact only ever says "the file I
   // wrote is the file I wrote"; this asks the question a drift gate has — is the committed bundle
   // still what these sources make?
-  const { SOURCE_STAMP, SOURCE_FILES } = await import('./edit2-assets.mjs');
-  const { sourceStamp } = await import('./edit2-sources.mjs');
+  const { SOURCE_STAMP, SOURCE_FILES } = await import('./edit3-assets.mjs');
+  const { sourceStamp } = await import('./edit3-sources.mjs');
   assert.ok(SOURCE_STAMP, 'the generated bundle carries no source stamp — regenerate it');
   assert.equal(SOURCE_STAMP, sourceStamp(SOURCE_FILES),
-    'serve/edit2-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit2-assets.mjs');
+    'serve/edit3-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit3-assets.mjs');
   assert.match(SOURCE_STAMP, /^[0-9a-f]{16}$/);
-  // CONTROL: a stamp that reads nothing would agree with itself forever. This one has to actually
-  // open every file on the list — point it somewhere the files are not, and it must refuse rather
-  // than hand back a hash of an empty set.
-  assert.ok(SOURCE_FILES.length >= 10, 'the source list is suspiciously short');
+  assert.ok(SOURCE_FILES.length >= 20, 'the source list is suspiciously short');
   assert.throws(() => sourceStamp(SOURCE_FILES, '/tmp/there-is-no-cardtile-here'),
     /is missing/, 'the stamp does not actually read the sources it claims to hash');
 });
 
-test('🔴 #1929: the stale-bundle stamp covers every file the generator READ, not a hand-kept list', async () => {
-  // 🩸 The list was written by hand, so it was exactly as complete as the last person's memory:
-  // editing hosts/web/tugtile/vendor/editor-core.js (and icons.js, obsidian-shim.js, host.js,
-  // Sortable.min.js, i18n/*.json) left the bundle STALE and this gate green. The generator now records
-  // every file it opens (its own reads, plus esbuild's metafile for the JS it bundles) and ships that
-  // list inside the artifact; the stamp is over THAT list.
-  const assets = await import('./edit2-assets.mjs');
-  const { sourceStamp, isOwnOutput } = await import('./edit2-sources.mjs');
+test('🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list', async () => {
+  const assets = await import('./edit3-assets.mjs');
+  const { sourceStamp, isOwnOutput } = await import('./edit3-sources.mjs');
   const files = assets.SOURCE_FILES;
-  assert.ok(Array.isArray(files) && files.length > 20, 'the bundle carries no list of the files it was built from — regenerate it');
-  const has = (suffix) => files.some((f) => f.endsWith(suffix.replace(/^packages\//, '')));
-  // the engine's table, file by file — every one the ticket found un-hashed
-  for (const f of ['hosts/web/tugtile/vendor/editor-core.js', 'hosts/web/tugtile/icons.js', 'hosts/web/tugtile/obsidian-shim.js',
-    'hosts/web/tugtile/host.js', 'hosts/web/tugtile/Sortable.min.js', 'hosts/web/tugtile/index.html', 'packages/tugtile/board-core.js',
-  ]) assert.ok(has(f), `${f} is read into the bundle but is not on the stamped list`);
-  assert.ok(files.filter((f) => /hosts\/web\/tugtile\/i18n\/[\w-]+\.json$/.test(f)).length >= 4, 'the engine\'s i18n/*.json are not all on the stamped list');
-  // CONTROL: the stamp over the list is the committed one, and flipping ONE byte of ONE file the
-  // old list never named moves it (a stamp that cannot see editor-core.js is the bug itself).
-  assert.equal(sourceStamp(files), assets.SOURCE_STAMP, 'serve/edit2-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit2-assets.mjs');
+  const has = (suffix) => files.some((f) => f.endsWith(suffix));
+  for (const f of ['hosts/web/modaltile/vendor/editor-core.js', 'core/obsidian-shim.js', 'core/web-host.js', '../../../styles.css',
+    'hosts/web/modaltile/modaltile.css', 'hosts/web/tugtile/Sortable.min.js', 'w3/deck.js', 'w3/deck.css', 'w3/index.html',
+    'w3/edit3.css', 'w3/porch.css', 'w3/porch-tokens.css', 'w3/porch-fonts.css', 'w/editor.css',
+    'gen-edit3-assets.mjs', 'edit3-sources.mjs', 'deck-assets.mjs']) assert.ok(has(f), `${f} is read into the bundle but is not on the stamped list`);
+  // flipping ONE byte of ONE borrowed file moves it (a stamp that cannot see editor-core.js is the bug itself)
   const flipped = sourceStamp(files, undefined, (p) => {
     const b = Buffer.from(readFileSync(p));
-    if (p.endsWith('hosts/web/tugtile/vendor/editor-core.js')) b[0] ^= 1;
+    if (p.endsWith('hosts/web/modaltile/vendor/editor-core.js')) b[0] ^= 1;
     return b;
   });
   assert.notEqual(flipped, assets.SOURCE_STAMP, 'editing vendor/editor-core.js does not move the stamp');
   // INDEPENDENT of the generator and of esbuild (CI has neither): walk the relative-import graph from
   // the bundle's entry with a plain regex. Every local module it reaches must be on the list.
-  const root = new URL('../w2/edit2.mjs', import.meta.url);
-  const seen = new Set(); const todo = [fileURLToPath(root)];
+  const here = dirname(fileURLToPath(import.meta.url));
+  const seen = new Set(); const todo = [fileURLToPath(new URL('../w3/edit3.mjs', import.meta.url))];
   while (todo.length) {
     const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
-    if (isOwnOutput(f, dirname(fileURLToPath(import.meta.url)))) continue;   // the generator's own output (esbuild keeps none of it; the generator asserts that)
+    if (isOwnOutput(f, here)) continue;
     for (const m of readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g)) todo.push(join(dirname(f), m[1]));
   }
   assert.ok(seen.size > 10, 'the import walk found suspiciously few modules');
-  const listed = new Set(files.map((f) => join(dirname(fileURLToPath(import.meta.url)), f)));
-  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, dirname(fileURLToPath(import.meta.url))));
-  assert.deepEqual(missing, [], 'modules reachable by import from w2/edit2.mjs but not on the stamped list');
+  const listed = new Set(files.map((f) => join(here, f)));
+  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, here));
+  assert.deepEqual(missing, [], 'modules reachable by import from w3/edit3.mjs but not on the stamped list');
 });
 
-test('🔴 #1929 r1: the generator itself is stamped — changing how the bundle is ASSEMBLED makes it stale', async () => {
-  // codex review of tile#133, P1. SOURCE_FILES held what the generator READ, not the generator: change
-  // FONT_BASE, the HTML slicing or the CSS order in gen-edit2-assets.mjs and the committed artifact is
-  // no longer what it would emit, while every byte it reads is unchanged — stamp green, bundle stale.
-  const assets = await import('./edit2-assets.mjs');
-  const { sourceStamp } = await import('./edit2-sources.mjs');
-  for (const f of ['gen-edit2-assets.mjs', 'edit2-sources.mjs']) {
-    assert.ok(assets.SOURCE_FILES?.includes(f), `${f} decides what the bundle contains but is not on the stamped list`);
-  }
-  // the knife the reviewer asked for, by injection: flip one byte of the generator ⇒ the stamp moves
-  const flipped = sourceStamp(assets.SOURCE_FILES, undefined, (p) => {
-    const b = Buffer.from(readFileSync(p));
-    if (p.endsWith('/gen-edit2-assets.mjs')) b[0] ^= 1;
-    return b;
-  });
-  assert.notEqual(flipped, assets.SOURCE_STAMP, 'editing the generator does not move the stamp');
-});
-
-test('🔴 #1929 r1: the previous-output exclusion is an EXACT path, not a basename suffix', async () => {
-  // codex review P2. `endsWith('edit2-assets.mjs')` exempted any module with that tail from the
-  // stamped list and from the import walk. Only this generator's own output is circular.
-  const { isOwnOutput } = await import('./edit2-sources.mjs');
+test('🔴 the previous-output exclusion is an EXACT path, not a basename suffix', async () => {
+  const { isOwnOutput } = await import('./edit3-sources.mjs');
   const here = dirname(fileURLToPath(import.meta.url));
-  assert.equal(typeof isOwnOutput, 'function', 'isOwnOutput is missing');
-  assert.equal(isOwnOutput(join(here, 'edit2-assets.mjs'), here), true, 'CONTROL: the real output is excluded');
-  assert.equal(isOwnOutput(join(here, '../serve/./edit2-assets.mjs'), here), true, 'same file spelled differently is still the same file');
-  assert.equal(isOwnOutput(join(here, '../w2/edit2-assets.mjs'), here), false, 'same name, other directory');
-  assert.equal(isOwnOutput(join(here, 'other-edit2-assets.mjs'), here), false, 'same tail, other name');
+  assert.equal(isOwnOutput(join(here, 'edit3-assets.mjs'), here), true, 'CONTROL: the real output is excluded');
+  assert.equal(isOwnOutput(join(here, '../serve/./edit3-assets.mjs'), here), true, 'same file spelled differently is still the same file');
+  assert.equal(isOwnOutput(join(here, '../w3/edit3-assets.mjs'), here), false, 'same name, other directory');
+  assert.equal(isOwnOutput(join(here, 'other-edit3-assets.mjs'), here), false, 'same tail, other name');
+  assert.equal(isOwnOutput(join(here, 'deck-assets.mjs'), here), false, 'the deck module is a SOURCE of the editor bundle, stamped like one');
 });
 
-test('🔴 #1929 r1: signet is bound to the LOCKFILE version; a different installed version is a version message, not "bundle stale"', async () => {
-  // codex review P2. package.json says `latest`, the lockfile resolves one version, and corners.css is
-  // read from whatever is installed. The bytes may only be compared when the installed version is the
-  // one the bundle was generated against; otherwise the honest report is "different signet".
-  const { signetVerdict, signetLockVersion } = await import('./edit2-sources.mjs');
-  const assets = await import('./edit2-assets.mjs');
-  assert.equal(typeof signetVerdict, 'function', 'signetVerdict is missing');
-  const lock = signetLockVersion();
-  assert.match(lock, /^\d+\.\d+\.\d+/, 'the lockfile names no signet version');
-  assert.equal(assets.SIGNET_LOCK_VERSION, lock, `the bundle was generated against signet ${assets.SIGNET_LOCK_VERSION}, the lockfile now says ${lock} — regenerate`);
-  const base = { recordedVersion: '0.6.0', lockVersion: '0.6.0', recordedStamp: 'aaaa', installed: { version: '0.6.0', stamp: 'aaaa' } };
-  assert.equal(signetVerdict(base).status, 'ok');
-  assert.equal(signetVerdict({ ...base, installed: null }).status, 'skipped');
-  assert.equal(signetVerdict({ ...base, installed: { version: '0.6.0', stamp: 'bbbb' } }).status, 'bytes-differ', 'same version, other bytes: the one case that is the bundle\'s fault');
-  const other = signetVerdict({ ...base, installed: { version: '0.7.1', stamp: 'bbbb' } });
-  assert.equal(other.status, 'version-differs', 'a different installed version never reaches the bytes comparison');
-  assert.match(other.message, /signet 版本不同（0\.7\.1 vs 0\.6\.0）/);
-  assert.doesNotMatch(other.message, /stale|過期/);
-  assert.equal(signetVerdict({ ...base, lockVersion: '0.7.0' }).status, 'lock-moved', 'lockfile moved since generation');
-  // and the live check: where signet is installed at the lockfile's version, its bytes are the recorded ones
-  const { signetInstalled } = await import('./edit2-sources.mjs');
-  const v = signetVerdict({ recordedVersion: assets.SIGNET_LOCK_VERSION, lockVersion: lock, recordedStamp: assets.SIGNET_CORNERS_STAMP, installed: signetInstalled() });
-  if (v.status === 'skipped') console.log('    (partial: @cvernet/signet not installed — corners.css stamp check skipped)');
-  else if (v.status === 'version-differs') console.log('    (partial: ' + v.message + ' — corners.css bytes not compared)');
-  else assert.equal(v.status, 'ok', v.message);
+// ── the deck on every Card page ──────────────────────────────────────────────────────────────────
+
+test('🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte', async () => {
+  const { DECK_JS, DECK_CSS, DECK_VERSION } = await import('./deck-assets.mjs');
+  const w3 = join(dirname(fileURLToPath(import.meta.url)), '../w3');
+  assert.equal(DECK_JS, readFileSync(join(w3, 'deck.js'), 'utf8'), 'serve/deck-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit3-assets.mjs');
+  assert.equal(DECK_CSS, readFileSync(join(w3, 'deck.css'), 'utf8'), 'serve/deck-assets.mjs is STALE — run: node packages/cardtile/serve/gen-edit3-assets.mjs');
+  assert.match(DECK_VERSION, /^[0-9a-f]{12}$/);
+});
+
+test('every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js', async () => {
+  const { DECK_CSS_PATH, DECK_JS_PATH } = await import('../w3/deck-page.mjs');
+  const md = ['---', 'title: Deck Card', 'lang: zh-TW', 'views: stack list', '---', '', '## cards', '',
+    '- [ ] %% card: profile w=6 %% a bio'].join('\n') + '\n';
+  const html = renderCardHTML(md, { handle: 'deckcard', cardUrl: 'https://card.feelreef.com/deckcard' });
+  const head = html.slice(0, html.indexOf('</head>'));
+  assert.ok(head.includes(`<link rel="stylesheet" href="${DECK_CSS_PATH}">`), 'no deck stylesheet in the head');
+  assert.ok(html.includes(`<script src="${DECK_JS_PATH}"></script></body>`), 'deck.js is not the last thing in the body');
+  const boot = /<script>(window\.__cardFront=[^<]*)<\/script><script src=/.exec(html)?.[1];
+  assert.ok(boot, 'the deck is not handed its frontmatter');
+  const win = {}; new Function('window', boot)(win);
+  assert.equal(win.__cardFront, '---\nviews: stack list\n---\n', 'the deck gets the keys it reads — never the whole file, nor the rest of the frontmatter');
+  assert.equal(win.__deckStrings.viewStack, '疊', 'the deck speaks the CARD\'s language');
+  assert.equal(win.__deckRef, 'deckcard');
+  assert.equal('__pool' in win, false, '🔴 the live page leaves the pool switch absent (in the pool) — it is the platform\'s, never the file\'s');
+  // the footer is still the renderer's: the deck folds it at runtime, the markup is unchanged
+  assert.match(html, /<footer class="st-footer">/);
+});
+
+test('the deck stays off where the caller says so: the editor\'s tiles, and any editIndex render', () => {
+  const md = ['---', 'title: X', '---', '', '## cards', '', '- [ ] %% card: profile w=6 %% hi'].join('\n') + '\n';
+  for (const ctx of [{ deck: false }, { editIndex: true }]) {
+    const html = renderCardHTML(md, ctx);
+    assert.doesNotMatch(html, /\/_deck\//, JSON.stringify(ctx));
+    assert.doesNotMatch(html, /__cardFront/, JSON.stringify(ctx));
+  }
+  // and the editor's preview of one view: that view opens, the deck's own switch is hidden, the pool is as given
+  const prev = renderCardHTML(md, { deck: { view: 'list', pool: false } });
+  const boot = /<script>(window\.__cardFront=[^<]*)<\/script>/.exec(prev)[1];
+  const win = {}; new Function('window', boot)(win);
+  assert.equal(win.__cardFront, '---\nview: list\n---\n');
+  assert.equal(win.__pool, false);
+  assert.match(prev, /<style id="deck-view">\.deck-seg\{display:none!important\}<\/style>/);
+});
+
+test('/_deck/ serves the deck, immutable, on every host a Card answers on', async () => {
+  const { DECK_CSS_PATH, DECK_JS_PATH } = await import('../w3/deck-page.mjs');
+  const { DECK_JS, DECK_CSS } = await import('./deck-assets.mjs');
+  for (const host of ['card.feelreef.com', 'creator.example']) {
+    const js = await worker.fetch(new Request(`https://${host}${DECK_JS_PATH}`), NEVER_TOUCHED);
+    assert.equal(js.status, 200, host);
+    assert.match(js.headers.get('content-type'), /javascript/);
+    assert.match(js.headers.get('cache-control'), /immutable/);
+    assert.equal(await js.text(), DECK_JS);
+    const css = await worker.fetch(new Request(`https://${host}${DECK_CSS_PATH}`), NEVER_TOUCHED);
+    assert.equal(css.status, 200, host);
+    assert.match(css.headers.get('content-type'), /text\/css/);
+    assert.equal(await css.text(), DECK_CSS);
+  }
 });
 
 // ── HOST MODE: /edit?host=<parent origin> ───────────────────────────────────────────────────────
 //
 // feelreef embeds the editor on a REAL card. The page carries no card and no credential; the card
-// travels over postMessage (w2/host-bridge.test.mjs covers that logic). What a fetch() test can
+// travels over postMessage (w3/host-bridge.test.mjs covers that logic). What a fetch() test can
 // promise: the route resolves only for an allowed parent, it says so in the injected opts, and it
 // never touches the store — proven with a store whose EVERY method throws, bound where the Worker
 // actually looks for it (`env.CARDS`), and an env that records any other binding read.
@@ -1218,7 +1175,6 @@ function untouchableEnv() {
   const CARDS = { get: boom('get'), put: boom('put'), list: boom('list'), delete: boom('delete'), getWithMetadata: boom('getWithMetadata') };
   return { env: { CARDS }, touched };
 }
-const optsOf = (body) => JSON.parse(/window\.__CARDTILE_W2_OPTS__ = (\{.*?\});/.exec(body)[1]);
 
 test('host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS', async () => {
   for (const host of ['https://feelreef.com', 'https://staging.feelreef.com', 'http://localhost:5173']) {
@@ -1231,9 +1187,10 @@ test('host mode: /edit?host=feelreef serves the editor with host opts, noindex, 
       assert.equal(res.headers.get('content-security-policy'), `frame-ancestors ${host}`);
       assert.equal(res.headers.get('x-frame-options'), null, 'a page meant to be framed must not forbid it');
       const body = await res.text();
-      assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
+      { const { assets, ...o } = optsOf(body); assert.deepEqual(o, { host, sandbox: false, locale: 'ja' }); assert.deepEqual(Object.keys(assets).sort(), [...ASSET_NAMES].sort()); }
       assert.ok(body.includes('id="sandbox-banner" hidden'), 'host mode ships the sandbox banner hidden');
-      assert.match(body, /id="host-save"/);
+      assert.match(body, /id="host-status"/);
+      assert.match(body, /id="editbtn"/);
       // 🔴 host mode never ships the sandbox's "Try Card · feelreef" — before the parent hands over
       // a real card there is nothing to name yet, so the tab reads the bare product name.
       assert.match(body, /<title>Card · feelreef<\/title>/, 'host mode ships the placeholder title, not the sandbox\'s');
@@ -1251,7 +1208,7 @@ test('host mode: a missing or disallowed ?host= is a 400, and still never touche
     const res = await worker.fetch(new Request(`https://card.feelreef.com/edit${q}`), env);
     assert.equal(res.status, 400, q);
     assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
-    assert.doesNotMatch(await res.text(), /__CARDTILE_W2_OPTS__/);
+    assert.doesNotMatch(await res.text(), /__CARDTILE_W3_OPTS__/);
     assert.deepEqual(touched, [], q);
   }
 });
@@ -1968,16 +1925,25 @@ test('reef#2725 r2 ③: host-mode /edit serves on the old host in both positions
       assert.equal(res.headers.get('content-security-policy'), `frame-ancestors ${host}`);
       assert.equal(res.headers.get('location'), null);
       const body = await res.text();
-      assert.deepEqual(optsOf(body), { host, sandbox: false, locale: 'ja', tableBase: '/try/edit/t/ja/' });
+      { const { assets, ...o } = optsOf(body); assert.deepEqual(o, { host, sandbox: false, locale: 'ja' }); assert.deepEqual(Object.keys(assets).sort(), [...ASSET_NAMES].sort()); }
       assert.deepEqual(touched, []);
       if (origin === 'https://card.feelreef.com') oldHostPage ??= body;
       assert.equal(body, oldHostPage, 'the page does not depend on host or switch position');
     }
   }
-  // the table it loads is same-origin (`'self'`), so it moves with the page; the parent is named
-  const t = await worker.fetch(new Request('https://reef.cards/try/edit/t/ja/'), { ...untouchableEnv().env, ...ON });
-  assert.equal(t.status, 200);
-  assert.match(t.headers.get('content-security-policy'), /^frame-ancestors 'self' https:\/\/feelreef\.com /);
+  // the files it imports are named by root-relative URL, so they come from whichever host served the
+  // page — and on the OLD host after cutover they are answered there, not redirected: a module import
+  // that redirects to another origin would need CORS it does not have
+  const { BORROWED } = await import('./edit3-assets.mjs');
+  const path = `/try/edit/a/${BORROWED['editor-core.js'].hash}/editor-core.js`;
+  for (const origin of ['https://reef.cards', 'https://card.feelreef.com']) {
+    const a = await worker.fetch(new Request(`${origin}${path}`), { ...untouchableEnv().env, ...ON });
+    assert.equal(a.status, 200, origin);
+    assert.equal(a.headers.get('location'), null, origin);
+  }
+  // CONTROL: the sandbox page itself still moves to reef.cards with everything else
+  const moved = await worker.fetch(new Request('https://card.feelreef.com/try/edit'), { ...untouchableEnv().env, ...ON });
+  assert.equal(moved.status, 301);
 });
 
 // ── reef#2725 r3: what a link preview names follows the switch ──────────────────────────────────

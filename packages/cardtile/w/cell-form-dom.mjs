@@ -1,6 +1,6 @@
 // The Card cell FORM, live half — what happens inside an open sheet once it is on the page.
 //
-// 🔴 WHY THIS FILE EXISTS (2026-11-04). `w/editor.mjs` and `w2/edit2.mjs` each carried their own copy
+// 🔴 WHY THIS FILE EXISTS (2026-11-04). `w/editor.mjs` and the Card editor each carried their own copy
 // of the picture pickers (encodeImage, the avatar's rasterCopy, and the wiring that puts a chosen file
 // into the field), line for line the same apart from comments. A third surface was about to need them.
 // `cell-form-core.mjs` is the DOM-free half (the rows, composeCell); this is the half that touches the

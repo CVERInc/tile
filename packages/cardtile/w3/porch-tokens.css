@@ -3,7 +3,7 @@
    keeps its own theme).
 
    MIRRORED, NOT IMPORTED — tile never imports reef code. Every literal names the reef line it was
-   copied from (reef/apps/feelreef/…, as of 2026-09-24); w2/porch-tokens.test.mjs pins the ones that
+   copied from (reef/apps/feelreef/…, as of 2026-09-24); w3/porch-tokens.test.mjs pins the ones that
    carry the look and, when the reef checkout is on the machine, diffs the rest against it live.
 
    🔴 ONE LOOK, NO DARK COPY — ON PURPOSE. reef has no `prefers-color-scheme` copy of the carrier

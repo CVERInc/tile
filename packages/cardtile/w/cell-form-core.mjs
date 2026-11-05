@@ -1,8 +1,7 @@
 // The Card cell FORM — the seven typed sheets, as pure functions.
 //
-// 🔴 WHY THIS FILE EXISTS (2026-09-06). `w2/edit2.mjs` (the engine's web tugtile as the editing
-// table, now served at the official path `/try/edit`) puts the same seven sheets on top of the
-// board. There were exactly two ways to do that: copy `w/editor.mjs`'s form code, or lift it out. A
+// 🔴 WHY THIS FILE EXISTS (2026-09-06). A second editor needed the same seven sheets `w/editor.mjs`
+// has (today that editor is w3/edit3.mjs, served at `/try/edit`). There were exactly two ways to do that: copy `w/editor.mjs`'s form code, or lift it out. A
 // copy would have been the third implementation of "what a link cell's body looks like" in this
 // repo — and the FIRST one already shipped a bug where an edited link became a text cell whose body
 // was the raw markdown line (see card-core's normalizeCell note). The composition rules below are
@@ -19,7 +18,7 @@
 //
 // The two callers differ in where the sheet is mounted and how the picker looks, and in nothing
 // else: `w/editor.mjs` (the internal tool, no public route any more) renders these rows into its
-// own modal, `w2/edit2.mjs` (`/try/edit`) into the sheet beside the tugtile board.
+// own modal, `w3/edit3.mjs` (`/try/edit`) into the sheet a tile's pencil opens.
 import { CONTROL, SOURCE } from '../ai-ops.mjs';
 import { setToken, removeToken, quoteParam } from '../card-core.js';
 import { linkOf, hostLabel } from '../card-render.mjs';

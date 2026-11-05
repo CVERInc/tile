@@ -26,14 +26,14 @@ const MIME = {
 // looking like it rendered fine. So those paths go to the Worker's own handler; it is the same code
 // the edge runs, and this is the one place in the editor where a network fetch happens.
 // 🔴 …and `/try/*`, which is how the PUBLIC sandbox is reachable locally at all. `/try/edit` is
-// composed by the Worker out of a bundled asset (gen-edit2-assets.mjs), so serving this repo's
-// files cannot produce it — its editing table is the ENGINE's web tugtile, which the Worker serves
-// from that bundle because the engine's own copy is missing its generated `board-core.js`. The
+// composed by the Worker out of a bundled asset (gen-edit3-assets.mjs), so serving this repo's
+// files cannot produce it, and the files it borrows are served under `/try/edit/a/<hash>/`. The
 // retired `/try/edit2` path answers here too (as the same 301 the edge gives), for the same reason.
+// `/_deck/` is the deck every served card page loads (w3/deck-page.mjs).
 // Without this line the only way to look at the sandbox is to deploy it, which is the shape of
 // every bug that gets found by a customer.
 const { default: worker, canonicalHost, cardOrigin } = await import('../serve/card-worker.mjs');
-const EDGE = /^\/(_coral|_icon|_yt|try)\//;
+const EDGE = /^\/(_coral|_deck|_icon|_yt|try)\//;
 
 // 🔴 …and the card exits themselves (`/<handle>.md`, and Accept: text/markdown), backed by the repo
 // fixtures. Without this the editor's `?handle=` 404s in local dev, which is how the ORIGINAL bug

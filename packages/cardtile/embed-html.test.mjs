@@ -323,9 +323,11 @@ test('🔴 the iframe cannot reach the card\'s storage: opaque origin, no naviga
     assert.ok(!html.includes(token), `${token} appears on the page`);
   }
   assert.ok(!f.attrs.some(([n]) => n === 'allow' || n === 'src' || n === 'name'), 'the iframe carries a src/allow/name it should not');
-  // the editor's index attribute must not change the bytes the reader gets (card-render's promise)
+  // the editor's index attribute must not change the bytes the reader gets (card-render's promise) —
+  // compared on the flat page, under the deck layer every served page adds (w3/deck-page.mjs)
+  const flat = render(card('- [ ] %% card: embed w=6 %% <script>localStorage.x=1</script>'), { deck: false });
   const edit = render(card('- [ ] %% card: embed w=6 %% <script>localStorage.x=1</script>'), { editIndex: true });
-  assert.equal(edit.replace(/ data-cell="\d+"/g, '').replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''), html.replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''));
+  assert.equal(edit.replace(/ data-cell="\d+"/g, '').replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''), flat.replace(/<style>[^<]*st-cell-unset[^<]*<\/style>/, ''));
 });
 
 // r4: a square embed and the cells packed after it. Every cell is ONE row in the bento pack (`h` is
