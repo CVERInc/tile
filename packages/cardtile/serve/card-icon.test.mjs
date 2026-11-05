@@ -63,8 +63,9 @@ function png(u8) {
   const at = (x, y) => [...raw.subarray(y * (w * 4 + 1) + 1 + x * 4, y * (w * 4 + 1) + 1 + x * 4 + 4)];
   return { w, h, at };
 }
-// the ICON links; canonical (reef#1092, card-share.test.mjs) is a <link> too, and not this file's
-const links = (html) => (/<head>(.*?)<\/head>/s.exec(html)[1].match(/<link [^>]*>/g) || []).filter((l) => !/rel="canonical"/.test(l));
+// the ICON links; canonical (reef#1092, card-share.test.mjs) is a <link> too, and not this file's,
+// and so is the deck's stylesheet (w3/deck-page.mjs, card-worker.test.mjs)
+const links = (html) => (/<head>(.*?)<\/head>/s.exec(html)[1].match(/<link [^>]*>/g) || []).filter((l) => !/rel="canonical"|rel="stylesheet"/.test(l));
 
 // ── <head> ─────────────────────────────────────────────────────────────────────────────────────
 

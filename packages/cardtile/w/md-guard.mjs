@@ -1,6 +1,6 @@
 // "Is this text still a card?" — the gate on leaving Markdown mode.
 //
-// Lifted out of w/editor.mjs (2026-09-06) unchanged, because `/try/edit2` offers the same whole-page
+// Lifted out of w/editor.mjs (2026-09-06) unchanged, because the Card editor (w3) offers the same whole-page
 // Markdown mode over the same file and the guard is the reason that mode can be shown to a stranger
 // at all. Two copies of a validator is two ideas of what a broken card is.
 import { parseCard } from '../card-core.js';

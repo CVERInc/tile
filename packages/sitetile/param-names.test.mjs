@@ -30,7 +30,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseParams } from './site-core.js';
-import { EDIT2_JS } from '../cardtile/serve/edit2-assets.mjs';
+import { EDIT3_JS } from '../cardtile/serve/edit3-assets.mjs';
 import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,16 +49,16 @@ async function test(name, fn) {
 // its own text and compile that, so what runs below is the bundled copy and nothing else's.
 function bundledParseParams() {
   const head = 'function parseParams(raw) {';
-  const copies = EDIT2_JS.split(head).length - 1;
+  const copies = EDIT3_JS.split(head).length - 1;
   if (copies !== 1) throw new Error(`expected one parseParams in the Card editor bundle, found ${copies}`);
-  const from = EDIT2_JS.indexOf(head);
-  const end = EDIT2_JS.indexOf('\n  }\n', from);   // esbuild closes a top-level function at two spaces
+  const from = EDIT3_JS.indexOf(head);
+  const end = EDIT3_JS.indexOf('\n}\n', from);   // an ESM bundle closes a top-level function at column 0
   if (end < 0) throw new Error('the bundled parseParams has no end this test can find');
-  return new Function(`${EDIT2_JS.slice(from, end + 4)}\nreturn parseParams;`)();
+  return new Function(`${EDIT3_JS.slice(from, end + 2)}\nreturn parseParams;`)();
 }
 const COPIES = [
   ['site-core.js', parseParams],
-  ['the Card editor bundle (cardtile/serve/edit2-assets.mjs)', bundledParseParams()],
+  ['the Card editor bundle (cardtile/serve/edit3-assets.mjs)', bundledParseParams()],
 ];
 
 // ── ruler 1: the table ──────────────────────────────────────────────────────────────────────────

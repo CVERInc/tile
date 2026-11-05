@@ -64,7 +64,8 @@ per host.
   compiles the site's structured theme (`ir/_theme.md`) into the `theme.css` the build stages — see
   [Compile a theme](packages/build/README.md#compile-a-theme).
 - **`packages/cardtile`** — REEF with Card: a one-page Card as Markdown, its multi-tenant edge
-  worker, and two sandbox editors (`w/` a modal, `w2/` the tugtile board as an editing desktop).
+  worker, and two editors (`w/` the internal modal one, `w3/` the Card editor served at `/try/edit`
+  and inside the dashboard, with the deck every Card page carries).
   It imports `packages/tugtile`, `packages/sitetile` and `packages/cssmd` directly — the Card model
   is a projection of the board model, not a second one.
 - **`packages/dynamic-corals`** — edge-rendered widgets that install unmodified into a sitetile page

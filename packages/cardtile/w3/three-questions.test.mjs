@@ -2,12 +2,12 @@
 // happens next. These pin the sentences that answer them, in all nine locales, so a screen cannot
 // quietly lose its answer in one language.
 //
-//   node --test packages/cardtile/w2/three-questions.test.mjs
+//   node --test packages/cardtile/w3/three-questions.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CELL_STRINGS_BY_KEY } from '../w/cell-i18n.mjs';
 import { LOCALE_KEYS, CHROME_STRINGS, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
-import { BOARD_STRINGS_BY_KEY } from './board-i18n.mjs';
+import { EDIT3_STRINGS, EDIT3_KEYS, editStrings, fmt } from './edit3-i18n.mjs';
 import { CELL_TYPES, PALETTE, DISPOSITION } from '../ai-ops.mjs';
 
 const NINE = ['en', 'zh', 'ja', 'zh-Hans', 'ko', 'de', 'fr', 'es', 'pt'];
@@ -56,16 +56,20 @@ test('the Video sheet says which address it takes — an example in every locale
   }
 });
 
-test('the Board, Markdown and picker one-liners exist in all nine, with their slots', () => {
-  const need = { 'board.tableHint': ['{front}'], 'board.mdLead': ['{back}'], 'board.pickWhere': ['{lane}'], 'board.pickTitle': [] };
-  for (const [key, slots] of Object.entries(need)) {
-    assert.deepEqual(filled(BOARD_STRINGS_BY_KEY, key), [], key);
-    for (const l of NINE) for (const s of slots) assert.ok(BOARD_STRINGS_BY_KEY[key][l].includes(s), `${key}/${l} lacks ${s}`);
+test('the editor answers the three questions in full in English and Traditional Chinese, with their slots', () => {
+  // what is this (the row, Cards options), what can I do (add, turn over, pair), what happens next (Save)
+  for (const l of ['en', 'zh']) {
+    assert.deepEqual(EDIT3_KEYS.filter((k) => !(typeof EDIT3_STRINGS[l][k] === 'string' && EDIT3_STRINGS[l][k].trim())), [], l);
   }
-  // the slots are filled from strings that exist in all nine
+  const slots = { docTitle: ['{t}'], addBetween: ['{a}', '{b}'], replaced: ['{a}', '{b}'], badFile: ['{n}'], handleWarn: ['{o}'], typeOld: ['{o}'], handleDone: ['{h}'], palEcho: ['{q}'] };
   for (const l of NINE) {
-    assert.ok(CHROME_STRINGS[l].faceTabLabel && CHROME_STRINGS[l].mdBack, l);
+    const t = editStrings(l);
+    for (const [k, need] of Object.entries(slots)) for (const s of need) assert.ok(t[k].includes(s), `${k}/${l} lacks ${s}`);
+    // a locale's own strings never carry a slot the English does not
+    for (const [k, v] of Object.entries(EDIT3_STRINGS[l])) for (const m of v.matchAll(/\{\w+\}/g)) assert.ok(EDIT3_STRINGS.en[k].includes(m[0]), `${k}/${l} has ${m[0]}`);
   }
+  assert.equal(fmt('{a} of {b}', { a: 1, b: 2 }), '1 of 2');
+  assert.equal(fmt('{a} of {b}', { a: 1 }), '1 of {b}', 'a slot with no value is left as written');
 });
 
 test('the door says what happens next in all nine: sign in by email, and the card comes along', () => {
@@ -74,17 +78,6 @@ test('the door says what happens next in all nine: sign in by email, and the car
     for (const k of ['doorCta', 'doorNote', 'doorContinue', 'doorBack']) assert.ok(s[k]?.trim(), `${k}/${l}`);
     assert.match(s.doorNote, /e-?mail|correo|メール|이메일/i, l);
   }
-});
-
-test('🔴 the coach mark never covers the card: it sits in flow above the frame, at every width', async () => {
-  const { readFileSync } = await import('node:fs');
-  const css = readFileSync(new URL('./edit2.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const rules = [...css.matchAll(/([^{}]*\.ctw-coach[^{}]*)\{([^}]*)\}/g)].filter((m) => /\.ctw-coach\s*$/.test(m[1].trim().split(',').pop()));
-  assert.ok(rules.length >= 1, 'no .ctw-coach rule found — the check is reading nothing');
-  for (const m of rules) assert.doesNotMatch(m[2], /position:\s*(absolute|fixed)/, `overlaying rule: ${m[1].trim()}`);
-  assert.match(css, /\.ctw-w2-preview\s*\{\s*flex-direction:\s*column/);
-  // control: the old overlay would have been caught
-  assert.match('position: absolute; top: 14px', /position:\s*(absolute|fixed)/);
 });
 
 test('youtubeRef: what the share button gives a person → the id or channel code the card stores', async () => {
@@ -119,7 +112,7 @@ test('the Video sheet stores the id when a link is pasted (composeCell, end to e
   const { composeCell } = await import('../w/cell-form-core.mjs');
   const vals = { __body: '', yt: 'https://youtu.be/dQw4w9WgXcQ?si=x', channel: '', poster: '', w: '' };
   const io = { read: (n) => (n in vals ? vals[n] : null), visible: () => true };
-    // the def exactly as edit2.mjs builds it: FORM params become `fields`
+    // the def exactly as edit3.mjs builds it: FORM params become `fields`
   const v = CELL_TYPES.video;
   const def = { ...v, fields: Object.entries(v.params).filter(([, p]) => p.disposition === DISPOSITION.FORM).map(([name, p]) => ({ name, ...p })) };
   const out = composeCell({ type: 'video', rawParams: '', body: '' }, def, io, { T: {} });

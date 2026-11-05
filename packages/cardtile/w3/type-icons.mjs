@@ -1,4 +1,4 @@
-// One icon per Card cell type, for the one-row picker 「＋加一張牌」 opens.
+// One icon per Card cell type, for the one-row "add a tile" picker.
 //
 // 🔴 NEW, because the engine has none of these. `hosts/web/tugtile/icons.js` carries the authentic
 // Lucide bodies the plugin's own `setIcon` draws — undo, fold, search, the lane menu — and every

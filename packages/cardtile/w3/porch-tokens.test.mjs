@@ -1,4 +1,4 @@
-// The porch tokens (w2/porch-tokens.css) are a MIRROR of reef's feelreef app.css — tile never imports
+// The porch tokens (w3/porch-tokens.css) are a MIRROR of reef's feelreef app.css — tile never imports
 // reef code. Two checks, of two different strengths:
 //
 //   1. HARD: the values that carry the look are pinned to an inline table copied from reef
@@ -82,20 +82,18 @@ test('porch tokens: soft live diff against the reef checkout (prints, never fail
   t.diagnostic(`porch-tokens.css matches live reef app.css (${Object.keys(mine).length} tokens checked)`);
 });
 
-// Ruler #6 (2026-09-24): a press answers. Every button the shell's markup ships carries a class that
-// the press rule (`:active` → --porch-press) names; the in-card controls carry their own.
-test('every shell button has the :active press transform', () => {
-  const W2 = new URL('.', import.meta.url);
-  const css = fs.readFileSync(new URL('edit2.css', W2), 'utf8');
-  const html = fs.readFileSync(new URL('index.html', W2), 'utf8');
-  const js = fs.readFileSync(new URL('edit2.mjs', W2), 'utf8');
+// Ruler #6 (2026-09-24): a press answers. Every sheet button the editor's markup ships carries a class
+// that the press rule (`:active` → --porch-press) names.
+test('every sheet button has the :active press transform', () => {
+  const W3 = new URL('.', import.meta.url);
+  const css = fs.readFileSync(new URL('porch.css', W3), 'utf8');
+  const html = fs.readFileSync(new URL('index.html', W3), 'utf8');
   const press = css.match(/^(.*):active[^{]*\{ transform: var\(--porch-press\)/m);
   assert.ok(press, 'the press rule exists');
   const pressed = new Set([...press[0].matchAll(/\.(ctw-[\w-]+):active/g)].map((m) => m[1]));
-  const buttons = [...html.matchAll(/<button[^>]*class="([^"]*)"/g)].map((m) => m[1].split(/\s+/));
-  assert.ok(buttons.length > 10, 'sanity: the shell has its buttons');
+  const buttons = [...html.matchAll(/<button[^>]*class="([^"]*)"/g)].map((m) => m[1].split(/\s+/)).filter((cls) => cls.some((c) => c.startsWith('ctw-')));
+  assert.ok(buttons.length >= 5, 'sanity: the sheets have their buttons');
   for (const cls of buttons) assert.ok(cls.some((c) => pressed.has(c)), `no press on <button class="${cls.join(' ')}">`);
-  assert.match(js, /\.ct2-add:active,\.ct2-opens:active\{transform:/, 'the in-card add/opens buttons press too');
   // control: a button class nobody presses is caught
   assert.ok(!['ctw-unpressed'].some((c) => pressed.has(c)));
 });

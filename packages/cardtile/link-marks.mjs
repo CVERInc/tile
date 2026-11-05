@@ -8,7 +8,7 @@
 // published, and an override did nothing on the table at all. Two copies that agree today are two
 // copies; this file is the one, and both sides import it.
 //
-// Pure data: no markup here. card-render turns a mark into the card's <svg>/<img>, edit2 into the
+// Pure data: no markup here. card-render turns a mark into the card's <svg>/<img>, an editor into the
 // tile's — each side owns its own drawing, neither owns the decision.
 import { ICON_DOMAIN_RE } from './marks.mjs';
 

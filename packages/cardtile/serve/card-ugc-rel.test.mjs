@@ -154,7 +154,7 @@ const EXITS = [
   ['/_coral/qr', `${C}/_coral/qr-__QR__.js`],
   ['/_coral/drawer', `${C}/_coral/drawer-__DRAWER__.js`],
   ['/try/edit', `${C}/try/edit`],
-  ['/try/edit/t asset 404', `${C}/try/edit/t/en/nope.nope`, { expect: 404 }],
+  ['/try/edit/a asset 404', `${C}/try/edit/a/000000000000/nope.js`, { expect: 404 }],
   ['301 /try/edit2 -> /try/edit', `${C}/try/edit2`, { expect: 301 }],
   ['/edit without host 400', `${C}/edit`, { expect: 400 }],
   ['/_preview expired', `${C}/_preview/${'0'.repeat(32)}`],

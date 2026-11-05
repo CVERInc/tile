@@ -9,7 +9,7 @@ import { createHmac } from 'node:crypto';
 import worker from './card-worker.mjs';
 import * as R from './card-report.mjs';
 import { LOCALE_KEYS } from '../w/sandbox-i18n.mjs';
-import { scanBanned } from '../w2/banned-words.mjs';
+import { scanBanned } from '../w3/banned-words.mjs';
 
 const ON = { CARD_CANONICAL_HOST: 'reef.cards' };
 const CARD = ['---', 'title: Test Card', '---', '', '## grid', '', '- [ ] %% card: text %% hello', ''].join('\n');

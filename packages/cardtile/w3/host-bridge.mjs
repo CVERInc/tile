@@ -11,13 +11,23 @@
 //   iframe → parent  { type:'card:ready', v }
 //   parent → iframe  { type:'card:load', v, md, handle, cardUrl, locale?, version? }
 //   iframe → parent  { type:'card:load-failed', v, message }
-//   iframe → parent  { type:'card:change', v, md, dirty:true }     (debounced 150ms)
+//   iframe → parent  { type:'card:change', v, md, dirty }           (debounced 150ms; dirty = differs
+//                                                                    from what the parent last saved)
 //   iframe → parent  { type:'card:save', v, md }
 //   parent → iframe  { type:'card:saved', v, version } | { type:'card:save-failed', v, message }
 //
-// 🔴 `md` IS THE FAT CARD — exactly the editor's S.md, `## assets` lane included, byte-for-byte what
-// the sandbox parks. A picture chosen in a sheet is encoded into that lane by edit2.mjs's
-// encodeImage() → saveCell() (`m.assets = { ...m.assets, ...staged }` → serializeCard). NOTE for the
+// Additive in v1 (a parent that never sends them sees no difference):
+//   parent → iframe  { type:'card:get-draft', v }
+//   iframe → parent  { type:'card:draft', v, md, dirty }   md = the editor's current draft, or null
+//                                                          (and dirty false) before card:load
+//   parent → iframe  { type:'card:propose', v, md }
+//                    → the editor takes `md` as its DRAFT: shown, dirty, and never saved by itself —
+//                      the person presses Save. It is announced like any edit (card:change).
+//   iframe → parent  { type:'card:propose-failed', v, message }   before card:load, or not a card
+//
+// 🔴 `md` IS THE FAT CARD — exactly the editor's draft, `## assets` lane included, byte-for-byte what
+// the sandbox parks. A picture chosen in a sheet is staged by cell-form-dom's picker and written into
+// that lane when the sheet is done (edit3.mjs: `x.assets = { ...x.assets, ...pending }` → serializeCard). NOTE for the
 // parent: save_card's assembleSave() (card-save.mjs) DISCARDS an incoming lane and re-attaches only
 // the stored one, so the parent splits: put_asset for new ids, then save_card the thin card.
 // `splitCard()` below is that split, exported for whoever wants it; the bridge does not apply it.
@@ -73,7 +83,7 @@ export function readsAsCard(md) {
  *   'failed'  — the parent refused; `message` is its words, shown verbatim
  */
 export function createHostBridge({
-  host, post, onLoad, onStatus = () => {},
+  host, post, onLoad, onPropose = () => {}, onStatus = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout, debounceMs = CHANGE_DEBOUNCE_MS,
   readyEveryMs = READY_EVERY_MS, readyGiveUpMs = READY_GIVE_UP_MS,
 }) {
@@ -86,7 +96,7 @@ export function createHostBridge({
   function flushChange() {
     st.timer = null;
     if (st.current == null) return;
-    send({ type: 'card:change', md: st.current, dirty: true });
+    send({ type: 'card:change', md: st.current, dirty: dirty() });
   }
 
   return {
@@ -96,6 +106,8 @@ export function createHostBridge({
     get dirty() { return dirty(); },
 
     get gaveUp() { return st.gaveUp; },
+    /** what the parent last loaded or confirmed saved (null before card:load) */
+    get savedMd() { return st.savedMd; },
 
     /**
      * Announce `card:ready`, and KEEP announcing every readyEveryMs until the first card:load.
@@ -136,6 +148,20 @@ export function createHostBridge({
         st.savedMd = d.md;
         onLoad({ md: d.md, handle: typeof d.handle === 'string' ? d.handle : '', cardUrl: typeof d.cardUrl === 'string' ? d.cardUrl : '', locale: d.locale, version: d.version });
         setStatus('idle');
+        return true;
+      }
+      if (d.type === 'card:get-draft') {
+        send({ type: 'card:draft', md: st.loaded ? st.current : null, dirty: dirty() });
+        return true;
+      }
+      if (d.type === 'card:propose') {
+        if (!st.loaded) { send({ type: 'card:propose-failed', message: 'No card is loaded yet.' }); return true; }
+        if (!readsAsCard(d.md)) {
+          send({ type: 'card:propose-failed', message: typeof d.md === 'string' ? 'That does not read as a card.' : 'card:propose needs `md` as a string.' });
+          return true;
+        }
+        // the editor shows it and calls changed() — which is what tells the parent, like any edit
+        onPropose({ md: d.md });
         return true;
       }
       if (d.type === 'card:saved' || d.type === 'card:save-failed') {

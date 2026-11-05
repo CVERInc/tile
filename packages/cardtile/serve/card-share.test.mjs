@@ -14,7 +14,7 @@ import { parseCard, serializeCard, rasterCopyId, rasterCopyOwner } from '../card
 import { cardRaster, pngSize } from '../card-icon.mjs';
 import { describe, DESCRIPTION_MAX } from '../card-share.mjs';
 import { assembleSave, assetManifest, thinCard } from '../card-save.mjs';
-import { splitCard } from '../w2/host-bridge.mjs';
+import { splitCard } from '../w3/host-bridge.mjs';
 import { planBackfill } from '../assets/backfill-raster.mjs';
 import { encodePng } from '../../sitetile/icon-core.mjs';
 
